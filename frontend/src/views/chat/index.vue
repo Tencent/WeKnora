@@ -138,6 +138,7 @@
                     </div>
                 </div>
             </div>
+            <BrowserTaskPreview v-if="!embeddedMode && session_id" :key="session_id" :session-id="session_id" />
             <ChatQuestionMinimap v-if="!embeddedMode" :scroll-container="scrollContainer" :messages="messagesList"
                 @jump="jumpToQuestion" />
         </div>
@@ -216,6 +217,7 @@ import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachm
 import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
+import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
 import { collectSessionArtifacts } from '@/utils/sessionArtifacts';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 const referencesDrawer = provideChatReferencesDrawer();

@@ -135,6 +135,15 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 	}
 	if e.toolRegistry != nil {
 		opts.SelectedTools = e.toolRegistry.ListTools()
+		if _, err := e.toolRegistry.GetTool("local_browser"); err == nil {
+			metadata := make([]*skills.SkillMetadata, 0, len(opts.SkillsMetadata))
+			for _, item := range opts.SkillsMetadata {
+				if item != nil && item.Name != "browser" && item.Name != "browser-skill" {
+					metadata = append(metadata, item)
+				}
+			}
+			opts.SkillsMetadata = metadata
+		}
 		_, err := e.toolRegistry.GetTool(agenttools.ToolShellExec)
 		opts.ShellExecEnabled = err == nil
 	}

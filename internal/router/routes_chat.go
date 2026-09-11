@@ -65,6 +65,8 @@ func RegisterSessionRoutes(
 		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
 		sessions.POST("/:session_id/sandbox/terminal-ticket", handler.IssueSandboxTerminalTicket)
+		sessions.GET("/:id/local-browser", handler.BrowserSkillConnection)
+		sessions.POST("/:session_id/local-browser", handler.BrowserSkillConnection)
 		// Mid-run message injection: append a user message to the turn that is
 		// currently generating. Accepts even when no run is live (the client
 		// then falls back to a normal send), mirroring StopSession's ownership

@@ -1,0 +1,1964 @@
+diff --git a/apps/extension/src/entrypoints/background.ts b/apps/extension/src/entrypoints/background.ts
+index 72819fa..e66e659 100644
+--- a/apps/extension/src/entrypoints/background.ts
++++ b/apps/extension/src/entrypoints/background.ts
+@@ -1,7 +1,7 @@
+ import { i18n } from "@browser-skill/i18n";
+ import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
+ import { ConnectionController } from "@/lib/connection-controller";
+-import { watchDaemonPort } from "@/lib/daemon-port-preference";
++import { watchDaemonConnection } from "@/lib/daemon-connection-preference";
+ import { startHeartbeat } from "@/lib/heartbeat";
+ import {
+   getConnectionEnabled,
+@@ -24,6 +24,7 @@ import {
+ import { POPUP_PORT_NAME, type PopupInbound, type PopupOutbound } from "@/lib/popup-bridge";
+ import { recordFrameCoordinator } from "@/lib/recording/frame-coordinator";
+ import { attachSessionsLiveFlag } from "@/lib/sessions-live-flag";
++import { captureTaskPreview } from "@/lib/task-preview";
+ import { createDisconnectCleanup } from "@/session-manager/disconnect-cleanup";
+ import { attachSessionEventHandler } from "@/session-manager/event-handler";
+ import { isAgentControlledTab, SessionManager } from "@/session-manager/manager";
+@@ -44,28 +45,68 @@ import {
+ } from "@/tools/record";
+ import { chromeTabsApi } from "@/tools/shared";
+ import { chromeTabMutationApi } from "@/tools/tabs";
+-import { resolveDaemonWsUrl } from "@/transport/daemon-endpoint";
+ import { detectBrowserMeta } from "@/transport/handshake";
++import { watchRemoteAuthorization } from "@/transport/remote-authorization";
++import { type RemoteEndpoint, remoteSocket } from "@/transport/remote-endpoint";
+ import type { Transport } from "@/transport/transport";
+ import { WSTransport } from "@/transport/ws-transport";
+ 
+ export default defineBackground(() => {
+   const controller = new ConnectionController();
+-  const transport = new WSTransport({ url: __BSK_DAEMON_WS_URL__ });
+-  const sessions = new SessionManager();
++  let remoteEndpoint: RemoteEndpoint | null = null;
++  const transport = new WSTransport({
++    url: __BSK_DAEMON_WS_URL__,
++    webSocketFactory: (url) =>
++      remoteSocket(
++        url,
++        remoteEndpoint,
++        async (sessionId) => {
++          const task = sessions.get(sessionId);
++          if (!task) throw new Error("Browser task unavailable");
++          const tabId =
++            task.activeTabId !== undefined && isAgentControlledTab(task, task.activeTabId)
++              ? task.activeTabId
++              : [...task.agentCreatedTabs, ...task.borrowedTabs.keys()][0];
++          if (tabId === undefined || !isAgentControlledTab(task, tabId))
++            throw new Error("Task tab unavailable");
++          const tab = await chrome.tabs.get(tabId);
++          await chrome.tabs.update(tabId, { active: true });
++          await chrome.windows.update(tab.windowId, { focused: true });
++        },
++        (sessionId) => captureTaskPreview(sessions, cdp, sessionId),
++      ),
++  });
++  const sessions = new SessionManager({
++    taskTabs: () => remoteEndpoint !== null,
++    taskLabel: () => remoteEndpoint?.serviceName ?? "BrowserSkill",
++  });
+   const cdp = new ChromiumCdp(undefined, {
+     shouldAutoAcceptDialog: async (tabId) => {
+       const tab = await chrome.tabs.get(tabId);
+-      return sessions.findByWindowId(tab.windowId) !== null;
++      return (
++        (typeof tab.id === "number" && sessions.findByTabId(tab.id) !== null) ||
++        sessions.findByWindowId(tab.windowId) !== null
++      );
+     },
+   });
+   const sessionsLive = attachSessionsLiveFlag({ manager: sessions });
+   let overlayGeneration = 0;
+   const controlModes = new Map<string, OverlayMode>();
+ 
+-  const daemonPort = watchDaemonPort((port) => {
+-    const url = resolveDaemonWsUrl(port);
+-    void controller.reconfigureTransport(url, () => {
++  const remoteAuthorization = watchRemoteAuthorization();
++  const daemonPort = watchDaemonConnection((url, remote) => {
++    remoteAuthorization.changed();
++    // Token rotation for the same device must not interrupt a running task.
++    if (
++      remote?.deviceId &&
++      remoteEndpoint?.deviceId === remote.deviceId &&
++      remoteEndpoint.url === remote.url
++    ) {
++      remoteEndpoint = remote;
++      return;
++    }
++    void controller.reconfigureTransport(JSON.stringify([url, remote]), () => {
++      remoteEndpoint = remote;
+       transport.setUrl(url);
+     });
+   });
+@@ -104,8 +145,14 @@ export default defineBackground(() => {
+    */
+   function overlayStateForTab(tabId?: number, windowId?: number): OverlayAgentStateMessage {
+     if (typeof tabId === "number" && typeof windowId === "number") {
+-      const ctx = sessions.findByWindowId(windowId);
+-      if (ctx && isAgentControlledTab(ctx, tabId)) return overlayStateForWindow(windowId);
++      const ctx = sessions.findByTabId(tabId) ?? sessions.findByWindowId(windowId);
++      if (ctx && isAgentControlledTab(ctx, tabId))
++        return {
++          type: OVERLAY_AGENT_STATE,
++          sessionId: ctx.sessionId,
++          mode: controlModes.get(ctx.sessionId) ?? "control",
++          generation: overlayGeneration,
++        };
+     }
+     return {
+       type: OVERLAY_AGENT_STATE,
+@@ -165,7 +212,7 @@ export default defineBackground(() => {
+   }
+ 
+   function pushOverlayStateForAgentWindow(windowId: number): void {
+-    if (!sessions.findByWindowId(windowId)) return;
++    if (!sessions.list().some((ctx) => ctx.agentWindowId === windowId)) return;
+     void pushOverlayStateForWindow(windowId);
+   }
+   chrome.tabs.onActivated.addListener((activeInfo) => {
+@@ -181,11 +228,32 @@ export default defineBackground(() => {
+   // state; it never infers or mutates ownership from event ordering.
+   chrome.tabs.onCreated.addListener((tab) => {
+     if (typeof tab.windowId !== "number" || typeof tab.id !== "number") return;
+-    if (!sessions.findByWindowId(tab.windowId)) return;
++    if (!sessions.list().some((ctx) => ctx.agentWindowId === tab.windowId)) return;
+     void pushOverlayStateForTab(tab.id, tab.windowId);
+   });
++  chrome.tabs.onAttached.addListener((tabId, info) => {
++    const task = sessions.findByTabId(tabId);
++    if (task?.tabMode) void pushOverlayStateForTab(tabId, info.newWindowId);
++  });
+   chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
++    const task = sessions.findByTabId(tabId);
+     sessions.forgetClosedTab(tabId, { isWindowClosing: removeInfo.isWindowClosing });
++    if (task?.tabMode && !task.stopping && !task.agentCreatedTabs.size && !task.borrowedTabs.size) {
++      task.stopping = true;
++      void cdp
++        .detachSession(task.sessionId)
++        .then(() => sessions.stop(task.sessionId, { dropOnly: true }))
++        .then(() => {
++          onOverlaySessionStateChanged();
++          transport.send({
++            event: "session.window_closed",
++            payload: { session_id: task.sessionId, reason: "user_closed_window" },
++          });
++        })
++        .catch(() => {
++          /* Connection cleanup also drops the task if disconnected. */
++        });
++    }
+   });
+   // Re-sync the storage.session flag on SW startup so a previous SW's
+   // stale `true` does not keep waking us on every page load until the
+@@ -247,6 +315,7 @@ export default defineBackground(() => {
+           // Resolve i18n strings per-borrow so language switches take effect
+           // without re-creating the dispatcher.
+           notificationCopy: makeBorrowNotificationCopy(),
++          focusOnRequest: !remoteEndpoint,
+         },
+       }),
+     helpNotificationCopy: () => ({
+@@ -355,7 +424,7 @@ export default defineBackground(() => {
+ 
+     if (msg.kind === OVERLAY_MSG_WHO_AM_I) {
+       const windowId = sender.tab?.windowId;
+-      const ctx = typeof windowId === "number" ? sessions.findByWindowId(windowId) : null;
++      const ctx = sender.tab?.id !== undefined ? sessions.findByTabId(sender.tab.id) : null;
+       sendResponse({ sessionId: ctx?.sessionId ?? null });
+       return false;
+     }
+@@ -372,7 +441,11 @@ export default defineBackground(() => {
+     if (msg.kind === OVERLAY_MSG_INTERRUPT) {
+       const req = msg as OverlayInterruptRequest;
+       const ctx = sessions.get(req.sessionId);
+-      if (ctx) setControlMode(req.sessionId, "interrupting");
++      if (!ctx || sender.tab?.id === undefined || !isAgentControlledTab(ctx, sender.tab.id)) {
++        sendResponse({ ok: false, error: "Task tab is not authorized" });
++        return false;
++      }
++      setControlMode(req.sessionId, "interrupting");
+       void handleOverlayInterrupt(transport, req.sessionId).then((reply) => {
+         if (reply.ok && sessions.get(req.sessionId)) {
+           setControlMode(req.sessionId, "paused");
+diff --git a/apps/extension/src/entrypoints/popup/App.tsx b/apps/extension/src/entrypoints/popup/App.tsx
+index 29ee388..6f425b7 100644
+--- a/apps/extension/src/entrypoints/popup/App.tsx
++++ b/apps/extension/src/entrypoints/popup/App.tsx
+@@ -13,6 +13,7 @@ import { PROTOCOL_VERSION } from "@/transport/handshake";
+ import functionIconUrl from "../../../assets/function.svg";
+ import { ConnectionStatusIndicator } from "./connection-status-indicator";
+ import { POPUP_FEATURES, type PopupView } from "./features";
++import { RemoteConnection } from "./remote-connection";
+ import { Switch } from "./switch";
+ import { type PopupStatusState, useConnectionState } from "./use-connection-state";
+ import { useControlHintsHidden } from "./use-control-hints-hidden";
+@@ -54,6 +55,7 @@ export function App() {
+     dirty: daemonPortDirty,
+     error: daemonPortError,
+   } = useDaemonPort();
++  const [remoteConfigured, setRemoteConfigured] = useState(false);
+   const [view, setView] = useState<PopupView>("main");
+   const [copiedInstanceId, setCopiedInstanceId] = useState(false);
+   const [purposeDraft, setPurposeDraft] = useState("");
+@@ -275,9 +277,11 @@ export function App() {
+             </div>
+           </section>
+ 
++          <RemoteConnection onRemoteChange={setRemoteConfigured} />
+           <section
+             className="rounded-xl border border-border/80 bg-card/60 px-3 py-2.5"
+             data-slot="popup-daemon-port-card"
++            hidden={remoteConfigured}
+           >
+             <div className="flex items-center justify-between gap-2">
+               <span className="flex min-w-0 items-center gap-1">
+diff --git a/apps/extension/src/entrypoints/popup/remote-connection.tsx b/apps/extension/src/entrypoints/popup/remote-connection.tsx
+new file mode 100644
+index 0000000..c9085ec
+--- /dev/null
++++ b/apps/extension/src/entrypoints/popup/remote-connection.tsx
+@@ -0,0 +1,113 @@
++import { useTranslation } from "@browser-skill/i18n/react";
++import { Button, Input, Label } from "@browser-skill/ui";
++import { useEffect, useState } from "react";
++import {
++  parseRemoteEndpoint,
++  REMOTE_ENDPOINT_KEY,
++  readRemoteEndpoint,
++} from "@/transport/remote-endpoint";
++
++export function RemoteConnection({
++  onRemoteChange,
++}: {
++  onRemoteChange?: (remote: boolean) => void;
++}) {
++  const { t } = useTranslation("extension");
++  const [draft, setDraft] = useState("");
++  const [server, setServer] = useState<string | null>(null);
++  const [ready, setReady] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState(false);
++  useEffect(() => {
++    let alive = true;
++    let revision = 0;
++    const read = async () => {
++      const current = ++revision;
++      const values = await chrome.storage.local.get(REMOTE_ENDPOINT_KEY);
++      if (!alive || current !== revision) return;
++      const remote = readRemoteEndpoint(values[REMOTE_ENDPOINT_KEY]);
++      setServer(remote?.url ?? null);
++      onRemoteChange?.(remote !== null);
++      setReady(true);
++    };
++    const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
++      if (area === "local" && changes[REMOTE_ENDPOINT_KEY])
++        void read().catch(() => alive && setError(true));
++    };
++    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
++    chrome.storage.onChanged.addListener(changed);
++    void read().catch(() => {
++      if (alive) {
++        setError(true);
++        setReady(true);
++      }
++    });
++    return () => {
++      alive = false;
++      chrome.storage.onChanged.removeListener(changed);
++    };
++  }, [onRemoteChange]);
++  async function save(disconnect = false) {
++    if (busy) return;
++    setBusy(true);
++    setError(false);
++    try {
++      const reply = (await chrome.runtime.sendMessage({
++        kind: "bsk-remote-authorization",
++        pairing: disconnect ? null : draft,
++      })) as { url: string | null; error?: string };
++      if (reply.error) throw new Error(reply.error);
++      setServer(reply.url);
++      onRemoteChange?.(reply.url !== null);
++      setDraft("");
++    } catch {
++      setError(true);
++    } finally {
++      setBusy(false);
++    }
++  }
++  let destination = server;
++  try {
++    if (draft.trim()) destination = parseRemoteEndpoint(draft).url;
++  } catch {
++    /* Invalid drafts cannot be saved. */
++  }
++  return (
++    <details className="rounded-xl border border-border/80 bg-card/60 px-3 py-2.5">
++      <summary className="cursor-pointer text-sm font-medium">{t("popup.remoteTitle")}</summary>
++      <div className="mt-3 space-y-2">
++        <p className="break-all text-xs text-muted-foreground">
++          {destination ?? t("popup.remoteLocal")}
++        </p>
++        <Label htmlFor="remote-pairing">{t("popup.remotePairing")}</Label>
++        <Input
++          id="remote-pairing"
++          type="password"
++          autoComplete="off"
++          value={draft}
++          disabled={!ready || busy}
++          onChange={(e) => setDraft(e.target.value)}
++        />
++        <p className="text-xs text-muted-foreground">{t("popup.remoteHint")}</p>
++        <div className="flex gap-2">
++          <Button size="sm" disabled={!ready || busy || !draft.trim()} onClick={() => void save()}>
++            {t("popup.remoteSave")}
++          </Button>
++          <Button
++            size="sm"
++            variant="outline"
++            disabled={!ready || busy || (!server && !error)}
++            onClick={() => void save(true)}
++          >
++            {t("popup.remoteLocal")}
++          </Button>
++        </div>
++        {error && (
++          <p role="alert" className="text-xs text-destructive">
++            {t("popup.remoteError")}
++          </p>
++        )}
++      </div>
++    </details>
++  );
++}
+diff --git a/apps/extension/src/lib/__tests__/daemon-connection-preference.test.ts b/apps/extension/src/lib/__tests__/daemon-connection-preference.test.ts
+new file mode 100644
+index 0000000..5c61936
+--- /dev/null
++++ b/apps/extension/src/lib/__tests__/daemon-connection-preference.test.ts
+@@ -0,0 +1,50 @@
++import { afterEach, expect, it, vi } from "vitest";
++import { watchDaemonConnection } from "../daemon-connection-preference";
++
++afterEach(() => vi.unstubAllGlobals());
++it("a late startup read cannot overwrite newer credentials", async () => {
++  let changed: (values: unknown, area: string) => void = () => {};
++  const resolvers: Array<(value: unknown) => void> = [];
++  vi.stubGlobal("chrome", {
++    storage: {
++      local: { get: () => new Promise((resolve) => resolvers.push(resolve)) },
++      onChanged: {
++        addListener: (fn: typeof changed) => {
++          changed = fn;
++        },
++        removeListener: vi.fn(),
++      },
++    },
++  });
++  const callback = vi.fn();
++  const watch = watchDaemonConnection(callback);
++  changed({ bsk_remote_endpoint: {} }, "local");
++  const remote = { url: "wss://example.com/bsk", token: "a".repeat(43) };
++  resolvers[1]({ bsk_remote_endpoint: remote });
++  await Promise.resolve();
++  resolvers[0]({ bsk_daemon_port: 1234 });
++  await watch.ready;
++  expect(callback).toHaveBeenCalledTimes(1);
++  expect(callback).toHaveBeenCalledWith(remote.url, remote);
++  watch.dispose();
++});
++it("disposal prevents pending reads from configuring a connection", async () => {
++  let finish: (value: unknown) => void = () => {};
++  vi.stubGlobal("chrome", {
++    storage: {
++      local: {
++        get: () =>
++          new Promise((resolve) => {
++            finish = resolve;
++          }),
++      },
++      onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
++    },
++  });
++  const callback = vi.fn();
++  const watch = watchDaemonConnection(callback);
++  watch.dispose();
++  finish({});
++  await watch.ready;
++  expect(callback).not.toHaveBeenCalled();
++});
+diff --git a/apps/extension/src/lib/__tests__/task-preview.test.ts b/apps/extension/src/lib/__tests__/task-preview.test.ts
+new file mode 100644
+index 0000000..8130d15
+--- /dev/null
++++ b/apps/extension/src/lib/__tests__/task-preview.test.ts
+@@ -0,0 +1,80 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
++import type { SessionManager } from "@/session-manager/manager";
++import { captureTaskPreview } from "../task-preview";
++
++vi.mock("@/lib/capture-suppress-bridge", () => ({
++  withExtensionOverlayHidden: (_tab: number, run: () => unknown) => run(),
++}));
++afterEach(() => vi.unstubAllGlobals());
++function fixture() {
++  const task = { activeTabId: 5, agentCreatedTabs: new Set([5]), borrowedTabs: new Map() };
++  const manager = { get: () => task } as unknown as SessionManager;
++  const cdp = {
++    trackSessionTab: vi.fn(),
++    ensureAttached: vi.fn(async () => {}),
++    send: vi.fn(async (_tab, method) =>
++      method === "Page.getLayoutMetrics"
++        ? { cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 1280, clientHeight: 720 } }
++        : { data: btoa("jpeg") },
++    ),
++  } as unknown as ChromiumCdp;
++  const draw = vi.fn();
++  const close = vi.fn();
++  const sizes: number[] = [];
++  vi.stubGlobal("chrome", {
++    tabs: { get: vi.fn(async () => ({ id: 5, windowId: 10, title: "task" })) },
++  });
++  vi.stubGlobal(
++    "createImageBitmap",
++    vi.fn(async () => ({ width: 1280, height: 720, close })),
++  );
++  vi.stubGlobal(
++    "OffscreenCanvas",
++    class {
++      width: number;
++      height: number;
++      constructor(w: number, h: number) {
++        this.width = w;
++        this.height = h;
++        sizes.push(w, h);
++      }
++      getContext() {
++        return { drawImage: draw };
++      }
++      async convertToBlob() {
++        return new Blob(["thumbnail"]);
++      }
++    },
++  );
++  return { task, manager, cdp, sizes, close };
++}
++describe("independent task preview", () => {
++  it("coalesces captures and bounds the physical bitmap on HiDPI screens", async () => {
++    const f = fixture();
++    const first = captureTaskPreview(f.manager, f.cdp, "one");
++    expect(captureTaskPreview(f.manager, f.cdp, "one")).toBe(first);
++    const frame = await first;
++    expect(frame).toMatchObject({ tab_id: 5, format: "jpeg", image_base64: btoa("thumbnail") });
++    expect(f.sizes).toEqual([640, 360]);
++    expect(f.close).toHaveBeenCalled();
++    expect(f.cdp.send).toHaveBeenCalledWith(5, "Page.captureScreenshot", expect.anything());
++  });
++  it("does not capture an unowned active user tab", async () => {
++    const f = fixture();
++    f.task.agentCreatedTabs.clear();
++    await expect(captureTaskPreview(f.manager, f.cdp, "empty")).rejects.toThrow(
++      "Task tab unavailable",
++    );
++    expect(f.cdp.send).not.toHaveBeenCalled();
++  });
++  it("discards the result if authorization ends during capture", async () => {
++    const f = fixture();
++    vi.mocked(f.cdp.ensureAttached).mockImplementation(async () => {
++      f.task.agentCreatedTabs.clear();
++    });
++    await expect(captureTaskPreview(f.manager, f.cdp, "ended")).rejects.toThrow(
++      "Task ended during capture",
++    );
++  });
++});
+diff --git a/apps/extension/src/lib/daemon-connection-preference.ts b/apps/extension/src/lib/daemon-connection-preference.ts
+new file mode 100644
+index 0000000..f021fe8
+--- /dev/null
++++ b/apps/extension/src/lib/daemon-connection-preference.ts
+@@ -0,0 +1,39 @@
++import { normalizeDaemonPort, resolveDaemonWsUrl } from "@/transport/daemon-endpoint";
++import {
++  REMOTE_ENDPOINT_KEY,
++  type RemoteEndpoint,
++  readRemoteEndpoint,
++} from "@/transport/remote-endpoint";
++import { STORAGE_KEYS } from "./instance-id";
++
++/** Keep the port and remote credential in one snapshot. Invalid remote state never falls back locally. */
++export function watchDaemonConnection(
++  onChange: (url: string, remote: RemoteEndpoint | null) => void,
++) {
++  let disposed = false;
++  let revision = 0;
++  const read = async () => {
++    const current = ++revision;
++    const values = await chrome.storage.local.get([STORAGE_KEYS.DAEMON_PORT, REMOTE_ENDPOINT_KEY]);
++    if (disposed || revision !== current) return;
++    const remote = readRemoteEndpoint(values[REMOTE_ENDPOINT_KEY]);
++    onChange(
++      remote?.url ?? resolveDaemonWsUrl(normalizeDaemonPort(values[STORAGE_KEYS.DAEMON_PORT])),
++      remote,
++    );
++  };
++  const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
++    if (area === "local" && (changes[STORAGE_KEYS.DAEMON_PORT] || changes[REMOTE_ENDPOINT_KEY])) {
++      // Invalid writes are not supported; do not redirect the active connection to localhost.
++      void read().catch(() => console.error("[connection] invalid connection preference"));
++    }
++  };
++  chrome.storage.onChanged.addListener(changed);
++  return {
++    ready: read(),
++    dispose: () => {
++      disposed = true;
++      chrome.storage.onChanged.removeListener(changed);
++    },
++  };
++}
+diff --git a/apps/extension/src/lib/task-preview.ts b/apps/extension/src/lib/task-preview.ts
+new file mode 100644
+index 0000000..835fddd
+--- /dev/null
++++ b/apps/extension/src/lib/task-preview.ts
+@@ -0,0 +1,95 @@
++import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
++import { withExtensionOverlayHidden } from "@/lib/capture-suppress-bridge";
++import { isAgentControlledTab, type SessionManager } from "@/session-manager/manager";
++
++const captures = new Map<string, Promise<unknown>>();
++/** UI-only capture, outside the automation queue (including human-help waits).
++ * Captures only the task's concrete tab; never activates it or reads a user tab. */
++export function captureTaskPreview(
++  manager: SessionManager,
++  cdp: ChromiumCdp,
++  sessionId: string,
++): Promise<unknown> {
++  const pending = captures.get(sessionId);
++  if (pending) return pending;
++  const work = capture(manager, cdp, sessionId).finally(() => captures.delete(sessionId));
++  captures.set(sessionId, work);
++  return work;
++}
++async function capture(manager: SessionManager, cdp: ChromiumCdp, sessionId: string) {
++  const task = manager.get(sessionId);
++  if (!task) throw new Error("Task unavailable");
++  const tabId =
++    task.activeTabId !== undefined && isAgentControlledTab(task, task.activeTabId)
++      ? task.activeTabId
++      : [...task.agentCreatedTabs, ...task.borrowedTabs.keys()][0];
++  if (tabId === undefined || !isAgentControlledTab(task, tabId))
++    throw new Error("Task tab unavailable");
++  const tab = await chrome.tabs.get(tabId);
++  cdp.trackSessionTab(sessionId, tabId);
++  await cdp.ensureAttached(tabId);
++  const shot = await withExtensionOverlayHidden(
++    tabId,
++    async () => {
++      const metrics = await cdp.send<{
++        cssVisualViewport: {
++          pageX: number;
++          pageY: number;
++          clientWidth: number;
++          clientHeight: number;
++        };
++      }>(tabId, "Page.getLayoutMetrics", {});
++      const v = metrics.cssVisualViewport;
++      return cdp.send<{ data: string }>(tabId, "Page.captureScreenshot", {
++        format: "jpeg",
++        quality: 50,
++        fromSurface: true,
++        captureBeyondViewport: false,
++        clip: {
++          x: v.pageX,
++          y: v.pageY,
++          width: v.clientWidth,
++          height: v.clientHeight,
++          scale: Math.min(1, 640 / v.clientWidth),
++        },
++      });
++    },
++    (id, message) => chrome.tabs.sendMessage(id, message),
++  );
++  if (manager.get(sessionId) !== task || !isAgentControlledTab(task, tabId))
++    throw new Error("Task ended during capture");
++  // CDP clip.scale is expressed in CSS pixels; HiDPI displays can still
++  // return larger bitmaps. Bound the actual encoded image, not just the clip.
++  let data = shot.data;
++  const bitmap = await createImageBitmap(
++    new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: "image/jpeg" }),
++  );
++  try {
++    if (bitmap.width > 640) {
++      const canvas = new OffscreenCanvas(
++        640,
++        Math.max(1, Math.round((bitmap.height * 640) / bitmap.width)),
++      );
++      const context = canvas.getContext("2d");
++      if (!context) throw new Error("Preview canvas unavailable");
++      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
++      const jpeg = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.5 });
++      data = btoa(
++        Array.from(new Uint8Array(await jpeg.arrayBuffer()), (b) => String.fromCharCode(b)).join(
++          "",
++        ),
++      );
++    }
++  } finally {
++    bitmap.close();
++  }
++  if (manager.get(sessionId) !== task || !isAgentControlledTab(task, tabId))
++    throw new Error("Task ended during capture");
++  return {
++    image_base64: data,
++    format: "jpeg",
++    tab_id: tabId,
++    title: tab.title ?? "",
++    captured_at: new Date().toISOString(),
++  };
++}
+diff --git a/apps/extension/src/session-manager/__tests__/task-tabs.test.ts b/apps/extension/src/session-manager/__tests__/task-tabs.test.ts
+new file mode 100644
+index 0000000..568084f
+--- /dev/null
++++ b/apps/extension/src/session-manager/__tests__/task-tabs.test.ts
+@@ -0,0 +1,125 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { enforceAgentWindow, resolveTargetTab } from "@/tools/shared";
++import {
++  handleTabBorrow,
++  handleTabCreate,
++  handleTabList,
++  handleTabReturn,
++  handleTabSelect,
++} from "@/tools/tabs";
++import { SessionManager } from "../manager";
++
++describe("remote task tabs", () => {
++  let manager: SessionManager;
++  let tabs: Map<number, any>;
++  let api: any;
++  beforeEach(() => {
++    tabs = new Map([
++      [1, { id: 1, windowId: 10, active: true, index: 0, url: "https://chat.example" }],
++    ]);
++    let id = 10;
++    api = {
++      get: vi.fn(async (id: number) => {
++        if (!tabs.has(id)) throw new Error("missing");
++        return tabs.get(id);
++      }),
++      query: vi.fn(async () => [...tabs.values()]),
++      create: vi.fn(async (props: any) => {
++        const tab = { id: ++id, index: tabs.size, ...props };
++        tabs.set(tab.id, tab);
++        return tab;
++      }),
++      update: vi.fn(async (id: number, props: any) => Object.assign(tabs.get(id), props)),
++      remove: vi.fn(async (id: number) => {
++        tabs.delete(id);
++      }),
++      move: vi.fn(),
++      group: vi.fn(async () => 7),
++    };
++    vi.stubGlobal("chrome", {
++      tabs: api,
++      windows: {
++        getAll: vi.fn(async () => [{ id: 10, focused: true, type: "normal" }]),
++        remove: vi.fn(),
++      },
++      tabGroups: { update: vi.fn() },
++    });
++    manager = new SessionManager({ taskTabs: () => true, taskLabel: () => "WeKnora" });
++  });
++  afterEach(() => vi.unstubAllGlobals());
++  it("shares a host window, labels owned tabs, and never closes chat or another task", async () => {
++    const a = await manager.start("task-a"),
++      b = await manager.start("task-b");
++    expect(a.agentWindowId).toBe(b.agentWindowId);
++    expect(api.create).toHaveBeenCalledWith(
++      expect.objectContaining({ active: false, windowId: 10 }),
++    );
++    expect(chrome.tabGroups.update).toHaveBeenCalledWith(
++      7,
++      expect.objectContaining({ title: expect.stringContaining("WeKnora") }),
++    );
++    expect(manager.findByWindowId(10)).toBeNull();
++    expect(manager.findByTabId(a.activeTabId!)).toBe(a);
++    expect(await resolveTargetTab(manager, a, 1, api)).toMatchObject({ code: "permission_denied" });
++    expect(await resolveTargetTab(manager, a, b.activeTabId, api)).toMatchObject({
++      code: "not_found",
++    });
++    expect(enforceAgentWindow(a, { tabId: 1, windowId: 10 }, "click")).toMatchObject({
++      code: "permission_denied",
++    });
++    await manager.stop(a.sessionId);
++    expect(tabs.has(1)).toBe(true);
++    expect(tabs.has(b.activeTabId!)).toBe(true);
++    expect(chrome.windows.remove).not.toHaveBeenCalled();
++  });
++  it("selects task tabs logically without activating the user tab bar", async () => {
++    const task = await manager.start("task-a");
++    const made = await handleTabCreate(
++      manager,
++      { session_id: task.sessionId, url: "https://example.com" },
++      { tabs: api },
++    );
++    expect(made).toHaveProperty("tab_id");
++    await handleTabSelect(
++      manager,
++      { session_id: task.sessionId, tab_id: task.activeTabId! },
++      { tabs: api },
++    );
++    expect(api.update).not.toHaveBeenCalled();
++    const target = await resolveTargetTab(manager, task, undefined, api);
++    expect(target).toMatchObject({ tabId: task.activeTabId, active: false });
++    const listed = await handleTabList(manager, { session_id: task.sessionId, scope: "user" }, api);
++    expect(listed).toMatchObject({ tabs: [expect.objectContaining({ tab_id: 1, scope: "user" })] });
++  });
++  it("requires approval for an existing tab and returns it without moving it", async () => {
++    const task = await manager.start("task-a");
++    const deny = await handleTabBorrow(
++      manager,
++      { session_id: task.sessionId, tab_id: 1 },
++      { tabs: api, approveBorrow: async () => false },
++    );
++    expect(deny).toHaveProperty("code");
++    expect(task.borrowedTabs.has(1)).toBe(false);
++    const allowed = await handleTabBorrow(
++      manager,
++      { session_id: task.sessionId, tab_id: 1 },
++      { tabs: api, approveBorrow: async () => true },
++    );
++    expect(allowed).toHaveProperty("tab_id", 1);
++    expect(api.move).not.toHaveBeenCalled();
++    expect(api.update).not.toHaveBeenCalled();
++    expect(enforceAgentWindow(task, { tabId: 1, windowId: 10 }, "click")).toBeNull();
++    await handleTabReturn(
++      manager,
++      { session_id: task.sessionId, tab_id: 1 },
++      {
++        tabs: api,
++        agentOverlayReset: { resetAgentOverlays: async () => {} },
++        cdp: { releaseSessionTab: async () => {} },
++      },
++    );
++    expect(api.move).not.toHaveBeenCalled();
++    expect(task.borrowedTabs.has(1)).toBe(false);
++    expect(tabs.get(1).active).toBe(true);
++  });
++});
+diff --git a/apps/extension/src/session-manager/event-handler.ts b/apps/extension/src/session-manager/event-handler.ts
+index 5afe53c..7709ba3 100644
+--- a/apps/extension/src/session-manager/event-handler.ts
++++ b/apps/extension/src/session-manager/event-handler.ts
+@@ -49,45 +49,46 @@ export function attachSessionEventHandler(options: SessionEventHandlerOptions):
+   const events = options.windowEvents ?? chromeWindowEvents();
+ 
+   const onRemoved = (windowId: number): void => {
+-    const ctx = manager.findByWindowId(windowId);
+-    if (!ctx) return;
+-    const returnFailures = Array.from(ctx.borrowedTabs.keys()).map((tabId) => ({
+-      tab_id: tabId,
+-      code: "cdp_failed",
+-      message: "Agent Window was closed before borrowed tab could be returned",
+-    }));
+-    if (returnFailures.length > 0) {
+-      console.warn(
+-        `[bh] Agent Window ${windowId} closed with borrowed tabs that could not be returned`,
+-        returnFailures,
+-      );
+-    }
+-    const detach = options.cdp
+-      ? options.cdp.detachSession(ctx.sessionId).catch((err) => {
+-          console.debug("[bh] session-event cdp detach failed", err);
++    const affected = manager.list().filter((ctx) => !ctx.tabMode && ctx.agentWindowId === windowId);
++    for (const ctx of affected) {
++      const returnFailures = Array.from(ctx.borrowedTabs.keys()).map((tabId) => ({
++        tab_id: tabId,
++        code: "cdp_failed",
++        message: "Agent Window was closed before borrowed tab could be returned",
++      }));
++      if (returnFailures.length > 0) {
++        console.warn(
++          `[bh] Agent Window ${windowId} closed with borrowed tabs that could not be returned`,
++          returnFailures,
++        );
++      }
++      const detach = options.cdp
++        ? options.cdp.detachSession(ctx.sessionId).catch((err) => {
++            console.debug("[bh] session-event cdp detach failed", err);
++          })
++        : Promise.resolve();
++      void detach
++        .then(() => manager.stop(ctx.sessionId, { dropOnly: true }))
++        .then(() => {
++          onSessionsChanged?.();
++          const event: EventFrame = {
++            event: "session.window_closed",
++            payload: {
++              session_id: ctx.sessionId,
++              reason: "user_closed_window",
++              ...(returnFailures.length > 0 ? { return_failures: returnFailures } : {}),
++            },
++          };
++          try {
++            transport.send(event);
++          } catch (err) {
++            console.warn("[bh] could not push session.window_closed event", err);
++          }
+         })
+-      : Promise.resolve();
+-    void detach
+-      .then(() => manager.stop(ctx.sessionId, { dropOnly: true }))
+-      .then(() => {
+-        onSessionsChanged?.();
+-        const event: EventFrame = {
+-          event: "session.window_closed",
+-          payload: {
+-            session_id: ctx.sessionId,
+-            reason: "user_closed_window",
+-            ...(returnFailures.length > 0 ? { return_failures: returnFailures } : {}),
+-          },
+-        };
+-        try {
+-          transport.send(event);
+-        } catch (err) {
+-          console.warn("[bh] could not push session.window_closed event", err);
+-        }
+-      })
+-      .catch((err) => {
+-        console.warn("[bh] session-event handler failed", err);
+-      });
++        .catch((err) => {
++          console.warn("[bh] session-event handler failed", err);
++        });
++    }
+   };
+ 
+   events.addListener(onRemoved);
+diff --git a/apps/extension/src/session-manager/manager.ts b/apps/extension/src/session-manager/manager.ts
+index 97982e3..d312629 100644
+--- a/apps/extension/src/session-manager/manager.ts
++++ b/apps/extension/src/session-manager/manager.ts
+@@ -4,6 +4,11 @@ import { RefStore } from "./ref-store";
+ export interface SessionContext {
+   sessionId: string;
+   agentWindowId: number;
++  /** Remote tasks own tabs, never the shared host window. */
++  tabMode?: boolean;
++  stopping?: boolean;
++  activeTabId?: number;
++  taskGroupId?: number;
+   refStore: RefStore;
+   borrowedTabs: Map<number, BorrowedTab>;
+   /**
+@@ -24,6 +29,7 @@ export interface BorrowedTab {
+   tabId: number;
+   originalWindowId: number;
+   originalIndex: number;
++  stationary?: boolean;
+ }
+ 
+ export interface BorrowReservation {
+@@ -34,6 +40,8 @@ export interface BorrowReservation {
+ export interface SessionManagerOptions {
+   agentWindow?: AgentWindowApi;
+   now?: () => number;
++  taskTabs?: () => boolean;
++  taskLabel?: () => string;
+ }
+ 
+ /** Options for starting a session's Agent Window. */
+@@ -94,10 +102,14 @@ export class SessionManager {
+   private readonly borrowReservations = new Map<number, string>();
+   private readonly agentWindow: AgentWindowApi;
+   private readonly now: () => number;
++  private readonly taskTabs: () => boolean;
++  private readonly taskLabel: () => string;
+ 
+   constructor(options: SessionManagerOptions = {}) {
+     this.agentWindow = options.agentWindow ?? chromeAgentWindowApi;
+     this.now = options.now ?? Date.now;
++    this.taskTabs = options.taskTabs ?? (() => false);
++    this.taskLabel = options.taskLabel ?? (() => "BrowserSkill");
+   }
+ 
+   has(sessionId: string): boolean {
+@@ -113,6 +125,10 @@ export class SessionManager {
+     return id ? (this.sessions.get(id) ?? null) : null;
+   }
+ 
++  findByTabId(tabId: number): SessionContext | null {
++    return this.list().find((ctx) => isAgentControlledTab(ctx, tabId)) ?? null;
++  }
++
+   list(): SessionContext[] {
+     return Array.from(this.sessions.values());
+   }
+@@ -126,7 +142,7 @@ export class SessionManager {
+     this.borrowReservations.delete(tabId);
+     for (const ctx of this.sessions.values()) {
+       ctx.agentCreatedTabs.delete(tabId);
+-      if (!isWindowClosing) ctx.borrowedTabs.delete(tabId);
++      if (ctx.tabMode || !isWindowClosing) ctx.borrowedTabs.delete(tabId);
+     }
+   }
+ 
+@@ -198,6 +214,45 @@ export class SessionManager {
+     }
+     throwIfSessionStartAborted(opts.signal);
+ 
++    if (this.taskTabs()) {
++      const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
++      const host =
++        windows.find((w) => w.focused && !w.incognito) ?? windows.find((w) => !w.incognito);
++      if (host?.id === undefined)
++        throw new Error("Open a normal Chrome window before starting a browser task");
++      const home = await chrome.tabs.create({
++        windowId: host.id,
++        url: AGENT_WINDOW_HOME,
++        active: false,
++      });
++      if (home.id === undefined) throw new Error("Could not create task tab");
++      try {
++        throwIfSessionStartAborted(opts.signal);
++        const groupId = await chrome.tabs.group({ tabIds: [home.id] });
++        await chrome.tabGroups.update(groupId, {
++          title: `${this.taskLabel().slice(0, 48)} · ${sessionId.slice(-4)}`,
++          color: "green",
++          collapsed: false,
++        });
++        throwIfSessionStartAborted(opts.signal);
++        const ctx: SessionContext = {
++          sessionId,
++          agentWindowId: host.id,
++          tabMode: true,
++          activeTabId: home.id,
++          taskGroupId: groupId,
++          refStore: new RefStore(),
++          borrowedTabs: new Map(),
++          agentCreatedTabs: new Set([home.id]),
++          createdAtMs: this.now(),
++        };
++        this.sessions.set(sessionId, ctx);
++        return ctx;
++      } catch (err) {
++        await chrome.tabs.remove(home.id);
++        throw err;
++      }
++    }
+     let windowId: number | null = null;
+     try {
+       const { signal: _signal, ...createOptions } = opts;
+@@ -246,10 +301,21 @@ export class SessionManager {
+     const ctx = this.sessions.get(sessionId);
+     if (!ctx) return null;
+     if (!options.dropOnly) {
+-      await this.agentWindow.remove(ctx.agentWindowId);
++      ctx.stopping = true;
++      if (ctx.tabMode) {
++        // Never close the shared user window, even when queries/cleanup fail.
++        for (const tabId of ctx.agentCreatedTabs) {
++          try {
++            await chrome.tabs.get(tabId);
++          } catch {
++            continue;
++          }
++          await chrome.tabs.remove(tabId);
++        }
++      } else await this.agentWindow.remove(ctx.agentWindowId);
+     }
+     this.sessions.delete(sessionId);
+-    this.windowIndex.delete(ctx.agentWindowId);
++    if (!ctx.tabMode) this.windowIndex.delete(ctx.agentWindowId);
+     return ctx;
+   }
+ 
+diff --git a/apps/extension/src/tools/__tests__/human-loop.test.ts b/apps/extension/src/tools/__tests__/human-loop.test.ts
+index d695233..74c18db 100644
+--- a/apps/extension/src/tools/__tests__/human-loop.test.ts
++++ b/apps/extension/src/tools/__tests__/human-loop.test.ts
+@@ -86,6 +86,22 @@ describe("handleRequestHelp", () => {
+     vi.unstubAllGlobals();
+   });
+ 
++  it("remote task help never activates a tab or window", async () => {
++    const manager = fakeManager("abcd", 99, 5);
++    const ctx = {
++      ...manager.get("abcd")!,
++      tabMode: true,
++      activeTabId: 5,
++      agentCreatedTabs: new Set([5]),
++    };
++    manager.get = (id) => (id === "abcd" ? ctx : null);
++    const deps = baseDeps();
++    const result = await handleRequestHelp(manager, baseParams({ tab_id: 5 }), deps);
++    expect(result).toMatchObject({ outcome: "continued" });
++    expect(deps.windows.update).not.toHaveBeenCalled();
++    expect(deps.activateTab).not.toHaveBeenCalled();
++  });
++
+   it("rejects unknown session", async () => {
+     const res = await handleRequestHelp(
+       fakeManager("abcd", 99, 5),
+diff --git a/apps/extension/src/tools/borrow-confirmation.ts b/apps/extension/src/tools/borrow-confirmation.ts
+index b575084..066bd2f 100644
+--- a/apps/extension/src/tools/borrow-confirmation.ts
++++ b/apps/extension/src/tools/borrow-confirmation.ts
+@@ -89,6 +89,7 @@ export interface RequestBorrowConfirmationDeps {
+   /** Returns `true` when `windowId` belongs to *any* live session's Agent Window. */
+   isAgentWindowId?: (windowId: number) => boolean;
+   notificationCopy?: BorrowNotificationCopy;
++  focusOnRequest?: boolean;
+ }
+ 
+ export interface RequestBorrowConfirmationOptions {
+@@ -483,9 +484,10 @@ export async function requestBorrowConfirmation(
+     // Bring the user window to the front so the overlay is visible even
+     // when the Agent Window has stolen focus. This is fire-and-forget: if
+     // it fails the overlay / OS notification still give the user a path.
+-    void windowsApi.update(notificationAnchor.windowId, { focused: true }).catch((err) => {
+-      console.debug("[bsk borrow] proactive focus of user window failed", err);
+-    });
++    if (options.deps?.focusOnRequest !== false)
++      void windowsApi.update(notificationAnchor.windowId, { focused: true }).catch((err) => {
++        console.debug("[bsk borrow] proactive focus of user window failed", err);
++      });
+ 
+     // Surface the OS notification *before* messaging any candidate so the
+     // user has a parallel signal even if every content script is missing.
+diff --git a/apps/extension/src/tools/human-loop.ts b/apps/extension/src/tools/human-loop.ts
+index c50916e..ce8d829 100644
+--- a/apps/extension/src/tools/human-loop.ts
++++ b/apps/extension/src/tools/human-loop.ts
+@@ -331,7 +331,7 @@ async function findHelpForTab(
+     const windowId = tab.windowId;
+     if (typeof windowId !== "number") return null;
+     for (const help of activeHelpRequests.values()) {
+-      if (!help.settled && help.ctx.agentWindowId === windowId) return help;
++      if (!help.settled && !help.ctx.tabMode && help.ctx.agentWindowId === windowId) return help;
+     }
+   } catch {
+     return null;
+@@ -681,8 +681,10 @@ export async function handleRequestHelp(
+     { scrollIntoView: true },
+   );
+ 
+-  await deps.windows.update(target.windowId, { focused: true }).catch(() => {});
+-  await deps.activateTab(tabId).catch(() => {});
++  if (!ctx.tabMode) {
++    await deps.windows.update(target.windowId, { focused: true }).catch(() => {});
++    await deps.activateTab(tabId).catch(() => {});
++  }
+ 
+   const requestId = makeRequestId(tabId);
+   const notificationId = `bsk-help:${requestId}`;
+diff --git a/apps/extension/src/tools/observation.ts b/apps/extension/src/tools/observation.ts
+index ea99ddf..23ce19a 100644
+--- a/apps/extension/src/tools/observation.ts
++++ b/apps/extension/src/tools/observation.ts
+@@ -242,6 +242,16 @@ async function captureFullTabPng(
+   signal?: AbortSignal,
+ ): Promise<string | RpcError> {
+   if (signal?.aborted) return cancelled("screenshot");
++  if (ctx.tabMode) {
++    if (!deps.cdp) return { code: "unsupported", message: "Task tab preview requires CDP" };
++    deps.cdp.trackSessionTab?.(ctx.sessionId, target.tabId);
++    await deps.cdp.ensureAttachedToUrl?.(target.tabId, target.url);
++    const shot = await deps.cdp.send<{ data: string }>(target.tabId, "Page.captureScreenshot", {
++      format: "png",
++      fromSurface: true,
++    });
++    return shot.data;
++  }
+   try {
+     const dataUrl = await deps.captureApi.captureVisibleTab(target.windowId, { format: "png" });
+     if (signal?.aborted) return cancelled("screenshot");
+@@ -343,7 +353,7 @@ export async function handleScreenshot(
+     });
+   }
+ 
+-  if (!target.active) {
++  if (!target.active && !ctx.tabMode) {
+     return rpcError(
+       "invalid_params",
+       "tab_not_active",
+diff --git a/apps/extension/src/tools/session.ts b/apps/extension/src/tools/session.ts
+index b6fe38f..4c2d94b 100644
+--- a/apps/extension/src/tools/session.ts
++++ b/apps/extension/src/tools/session.ts
+@@ -281,6 +281,8 @@ export async function handleSessionStop(
+     return { code: "cancelled", message: "session_stop aborted before window close" };
+   }
+ 
++  ctx.stopping = true;
++
+   // Step 4: close every tab explicitly created by the agent, including the
+   // home tab. `tabsApi` is a
+   // TabMutationApi (remove only); `queryApi` is a separate read-only
+@@ -303,6 +305,13 @@ export async function handleSessionStop(
+     }
+   }
+ 
++  if (ctx.tabMode) {
++    // Finish closing explicitly owned tabs, surfacing failures. The shared
++    // host window and every user/other-task tab must always survive cleanup.
++    await manager.stop(params.session_id);
++    return result;
++  }
++
+   // Step 5: decide whether to release (keep) the window or close it.
+   let shouldRelease = false;
+   if (queryApi) {
+diff --git a/apps/extension/src/tools/shared.ts b/apps/extension/src/tools/shared.ts
+index 7ae9fda..096b21f 100644
+--- a/apps/extension/src/tools/shared.ts
++++ b/apps/extension/src/tools/shared.ts
+@@ -8,7 +8,11 @@
+ 
+ import type { CdpDebuggee, DialogCursor } from "@/browser-driver/chromium-cdp";
+ import type { CdpFrameGraph, CdpTarget } from "@/browser-driver/frame-graph";
+-import type { SessionContext, SessionManager } from "@/session-manager/manager";
++import {
++  isAgentControlledTab,
++  type SessionContext,
++  type SessionManager,
++} from "@/session-manager/manager";
+ import { normaliseRef } from "@/session-manager/ref-store";
+ import type { ConsoleResult, JavaScriptDialogInfo, RpcError } from "@/transport/types";
+ import { rpcError } from "./errors";
+@@ -180,6 +184,15 @@ export async function resolveTargetTab(
+   tabId: number | undefined,
+   api: ChromeTabsApi,
+ ): Promise<ResolvedTargetTab | RpcError> {
++  if (tabId === undefined && ctx.tabMode) {
++    const owned = [...ctx.agentCreatedTabs, ...ctx.borrowedTabs.keys()];
++    tabId =
++      ctx.activeTabId !== undefined && isAgentControlledTab(ctx, ctx.activeTabId)
++        ? ctx.activeTabId
++        : owned[0];
++    if (tabId === undefined)
++      return { code: "not_found", message: "No task tab remains; create a tab to continue" };
++  }
+   if (tabId !== undefined) {
+     if (!Number.isSafeInteger(tabId) || tabId <= 0) {
+       return {
+@@ -202,13 +215,18 @@ export async function resolveTargetTab(
+         message: `tab ${tabId} not found`,
+       };
+     }
+-    const owner = manager.findByWindowId(tab.windowId);
++    const owner = manager.findByTabId?.(tab.id) ?? manager.findByWindowId(tab.windowId);
+     if (owner && owner.sessionId !== ctx.sessionId) {
+       return {
+         code: "not_found",
+         message: `tab ${tabId} not found in session scope`,
+       };
+     }
++    if (ctx.tabMode && !isAgentControlledTab(ctx, tab.id))
++      return {
++        code: "permission_denied",
++        message: "Authorize this tab with tab_borrow before reading or operating it",
++      };
+     return { tabId: tab.id, windowId: tab.windowId, active: tab.active === true, url: tab.url };
+   }
+   const tabs = await api.query({ active: true, windowId: ctx.agentWindowId });
+@@ -318,6 +336,7 @@ export async function resolveCdpAccessibleTargetTab(
+ 
+   const tabs = await api.query({ windowId: ctx.agentWindowId });
+   for (const tab of tabs) {
++    if (ctx.tabMode && (tab.id === undefined || !isAgentControlledTab(ctx, tab.id))) continue;
+     const candidate = resolvedTargetFromChromeTab(tab, ctx.agentWindowId);
+     if (!candidate) continue;
+     if (!enforceCdpAccessibleTarget(candidate, toolName)) return candidate;
+@@ -338,7 +357,9 @@ export function enforceAgentWindow(
+   target: { tabId: number; windowId: number },
+   toolName: string,
+ ): RpcError | null {
+-  if (target.windowId !== ctx.agentWindowId) {
++  if (
++    ctx.tabMode ? !isAgentControlledTab(ctx, target.tabId) : target.windowId !== ctx.agentWindowId
++  ) {
+     return rpcError(
+       "permission_denied",
+       "agent_window_scope",
+@@ -358,6 +379,6 @@ export function enforceToolTargetScope(
+   effect: ToolEffect,
+   toolName: string,
+ ): RpcError | null {
+-  if (effect === "passive_read") return null;
++  if (effect === "passive_read" && !ctx.tabMode) return null;
+   return enforceAgentWindow(ctx, target, toolName);
+ }
+diff --git a/apps/extension/src/tools/tabs.ts b/apps/extension/src/tools/tabs.ts
+index feb9763..1b79c4c 100644
+--- a/apps/extension/src/tools/tabs.ts
++++ b/apps/extension/src/tools/tabs.ts
+@@ -246,7 +246,7 @@ export async function handleTabList(
+   // per-tab classification is O(1).
+   const otherAgentWindowIds = new Set<number>();
+   for (const s of manager.list()) {
+-    if (s.sessionId !== params.session_id) {
++    if (s.sessionId !== params.session_id && !s.tabMode) {
+       otherAgentWindowIds.add(s.agentWindowId);
+     }
+   }
+@@ -258,8 +258,16 @@ export async function handleTabList(
+   for (const t of allTabs) {
+     if (typeof t.id !== "number") continue;
+     const winId = typeof t.windowId === "number" ? t.windowId : -1;
++    const owner = manager.findByTabId?.(t.id);
++    if (owner && owner.sessionId !== ctx.sessionId) continue;
+     if (otherAgentWindowIds.has(winId)) continue;
+-    const tabScope: "user" | "agent" = winId === myAgentWindowId ? "agent" : "user";
++    const tabScope: "user" | "agent" = (
++      ctx.tabMode
++        ? ctx.agentCreatedTabs.has(t.id) || ctx.borrowedTabs.has(t.id)
++        : winId === myAgentWindowId
++    )
++      ? "agent"
++      : "user";
+     if (scope === "user" && tabScope !== "user") continue;
+     if (scope === "agent" && tabScope !== "agent") continue;
+     tabs.push({
+@@ -361,7 +369,7 @@ function buildCreateProps(
+   const createProps: chrome.tabs.CreateProperties = {
+     windowId: ctx.agentWindowId,
+     url: params.url ?? NEW_TAB_DEFAULT_URL,
+-    active: params.active ?? true,
++    active: ctx.tabMode ? false : (params.active ?? true),
+   };
+   if (params.index !== undefined) createProps.index = params.index;
+   return createProps;
+@@ -392,6 +400,15 @@ async function createTabAndCleanup(
+   // Claim the concrete id returned by Chrome. Ownership never depends on
+   // matching this request to an asynchronous onCreated event.
+   ctx.agentCreatedTabs.add(tab.id);
++  if (ctx.tabMode) {
++    ctx.activeTabId = tab.id;
++    try {
++      if (ctx.taskGroupId !== undefined)
++        await chrome.tabs.group({ tabIds: [tab.id], groupId: ctx.taskGroupId });
++    } catch {
++      /* Group may have been removed by the user; tab ownership still applies. */
++    }
++  }
+   if (aborted(deps.signal, "tab_create")) {
+     try {
+       await getTabsApi(deps).remove(tab.id);
+@@ -485,7 +502,11 @@ async function authoriseAgentTab(
+       `${toolName}: tab ${tabId} is borrowed by session ${otherBorrower}`,
+     );
+   }
+-  if (tab.windowId === ctx.agentWindowId) {
++  if (
++    ctx.tabMode
++      ? ctx.agentCreatedTabs.has(tabId) || ctx.borrowedTabs.has(tabId)
++      : tab.windowId === ctx.agentWindowId
++  ) {
+     return tab;
+   }
+   return rpcError(
+@@ -575,7 +596,8 @@ export async function handleTabSelect(
+     return { code: "cancelled", message: "tab_select aborted" };
+   }
+   try {
+-    await getTabsApi(deps).update(params.tab_id, { active: true });
++    if (ctx.tabMode) ctx.activeTabId = params.tab_id;
++    else await getTabsApi(deps).update(params.tab_id, { active: true });
+   } catch (err) {
+     return {
+       code: "protocol_error",
+@@ -638,14 +660,19 @@ async function validateBorrowTarget(
+   if (typeof tab.id !== "number" || typeof tab.windowId !== "number") {
+     return { code: "not_found", message: `tab ${tabId} not found` };
+   }
+-  if (tab.windowId === ctx.agentWindowId) {
++  if (ctx.tabMode ? ctx.agentCreatedTabs.has(tabId) : tab.windowId === ctx.agentWindowId) {
+     return {
+       code: "invalid_params",
+       message: `tab_borrow: tab ${tabId} already lives in the Agent Window`,
+     };
+   }
+   for (const s of manager.list()) {
+-    if (s.sessionId !== ctx.sessionId && s.agentWindowId === tab.windowId) {
++    if (
++      s.sessionId !== ctx.sessionId &&
++      (s.tabMode
++        ? s.agentCreatedTabs.has(tabId) || s.borrowedTabs.has(tabId)
++        : s.agentWindowId === tab.windowId)
++    ) {
+       return rpcError(
+         "permission_denied",
+         "agent_window_scope",
+@@ -754,6 +781,8 @@ async function executeBorrowCore(
+   );
+   if (approvalErr) return approvalErr;
+ 
++  if (p.ctx.tabMode) return { originalWindowId, originalIndex };
++
+   const moveErr = await moveTabForBorrow(
+     p.tabsApi,
+     p.tabId,
+@@ -816,6 +845,7 @@ export async function handleTabBorrow(
+ 
+     try {
+       reservation.commit({
++        ...(ctx.tabMode ? { stationary: true } : {}),
+         tabId: params.tab_id,
+         originalWindowId: coreResult.originalWindowId,
+         originalIndex: coreResult.originalIndex,
+@@ -829,7 +859,8 @@ export async function handleTabBorrow(
+     }
+     // Activate after commit so overlay/event observers see the tab as claimed.
+     try {
+-      await tabsApi.update(params.tab_id, { active: true });
++      if (ctx.tabMode) ctx.activeTabId = params.tab_id;
++      else await tabsApi.update(params.tab_id, { active: true });
+     } catch (err) {
+       console.debug("[bsk tab_borrow] activate after move failed", err);
+     }
+@@ -994,6 +1025,15 @@ export async function returnBorrowedTab(
+   const alreadyCancelled = aborted(deps.signal, "tab_return");
+   if (alreadyCancelled) return alreadyCancelled;
+ 
++  if (entry.stationary) {
++    await releaseReturnedTabState(ctx, tabId, deps);
++    return {
++      tabId,
++      toWindowId: entry.originalWindowId,
++      toIndex: entry.originalIndex,
++      fallback: false,
++    };
++  }
+   let targetWindowId = entry.originalWindowId;
+   let targetIndex = entry.originalIndex;
+   let fallback = false;
+diff --git a/apps/extension/src/tools/window.ts b/apps/extension/src/tools/window.ts
+index ccec54e..773d252 100755
+--- a/apps/extension/src/tools/window.ts
++++ b/apps/extension/src/tools/window.ts
+@@ -53,6 +53,8 @@ export async function handleWindowResize(
+   const ctxOrErr = lookupSession(manager, params, "window_resize");
+   if (isRpcError(ctxOrErr)) return ctxOrErr;
+   const ctx = ctxOrErr;
++  if (ctx.tabMode)
++    return { code: "unsupported", message: "Task tabs cannot resize the user window" };
+ 
+   const sizeOrErr = validateWindowSize(params.width, params.height);
+   if (isRpcError(sizeOrErr)) return sizeOrErr;
+diff --git a/apps/extension/src/transport/__tests__/remote-authorization.test.ts b/apps/extension/src/transport/__tests__/remote-authorization.test.ts
+new file mode 100644
+index 0000000..ac613dd
+--- /dev/null
++++ b/apps/extension/src/transport/__tests__/remote-authorization.test.ts
+@@ -0,0 +1,91 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import {
++  activateRemoteEndpoint,
++  renewRemoteAuthorization,
++  updateRemoteConnection,
++} from "../remote-authorization";
++import { REMOTE_ENDPOINT_KEY, type RemoteEndpoint } from "../remote-endpoint";
++
++let values: Record<string, unknown>;
++const endpoint: RemoteEndpoint = {
++  url: "wss://gateway.example/api/v1/local-browser/extension",
++  token: "a".repeat(43),
++  deviceId: "a".repeat(32),
++  expiresAt: "2099-01-01T00:00:00Z",
++  renewAfter: "2020-01-01T00:00:00Z",
++};
++const response = () =>
++  new Response(
++    JSON.stringify({
++      device_id: endpoint.deviceId,
++      expires_at: "2099-02-01T00:00:00Z",
++      renew_after: "2099-01-01T00:00:00Z",
++    }),
++    { status: 200 },
++  );
++beforeEach(() => {
++  values = { [REMOTE_ENDPOINT_KEY]: { ...endpoint } };
++  vi.stubGlobal("chrome", {
++    storage: {
++      local: {
++        get: vi.fn(async () => ({ ...values })),
++        set: vi.fn(async (next) => {
++          Object.assign(values, next);
++        }),
++      },
++    },
++  });
++  vi.stubGlobal(
++    "fetch",
++    vi.fn(async () => response()),
++  );
++});
++describe("durable remote authorization", () => {
++  it("exchanges a pairing link over HTTPS without putting credentials in the URL", async () => {
++    const result = await activateRemoteEndpoint({ url: endpoint.url, token: endpoint.token });
++    const [url, options] = vi.mocked(fetch).mock.calls[0];
++    expect(String(url)).toBe("https://gateway.example/api/v1/local-browser/extension/authorize");
++    expect(options?.redirect).toBe("error");
++    expect(options?.credentials).toBe("omit");
++    expect(options?.headers).toEqual(
++      expect.objectContaining({ Authorization: `Bearer ${endpoint.token}` }),
++    );
++    expect(result.token).not.toBe(endpoint.token);
++    expect(result.deviceId).toBe(endpoint.deviceId);
++    expect(JSON.parse(String(options?.body)).next_token).toBe(result.token);
++  });
++  it("retains the candidate after a lost response and retries the same rotation", async () => {
++    vi.mocked(fetch).mockRejectedValueOnce(new Error("connection lost"));
++    await expect(renewRemoteAuthorization()).rejects.toThrow("connection lost");
++    const pending = values[REMOTE_ENDPOINT_KEY] as RemoteEndpoint;
++    expect(pending.token).toBe(endpoint.token);
++    expect(pending.pendingToken).toHaveLength(43);
++    await renewRemoteAuthorization();
++    expect((values[REMOTE_ENDPOINT_KEY] as RemoteEndpoint).token).toBe(pending.pendingToken);
++    expect((values[REMOTE_ENDPOINT_KEY] as RemoteEndpoint).pendingToken).toBeUndefined();
++    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).next_token).toBe(
++      JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body)).next_token,
++    );
++  });
++  it("does not renew a current authorization", async () => {
++    values[REMOTE_ENDPOINT_KEY] = { ...endpoint, renewAfter: "2099-01-01T00:00:00Z" };
++    await renewRemoteAuthorization();
++    expect(fetch).not.toHaveBeenCalled();
++  });
++  it("serializes disconnect with rotation so an old response cannot restore credentials", async () => {
++    let resolve!: (value: Response) => void;
++    vi.mocked(fetch).mockImplementationOnce(
++      () =>
++        new Promise<Response>((r) => {
++          resolve = r;
++        }),
++    );
++    const renewing = renewRemoteAuthorization();
++    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
++    const disconnecting = updateRemoteConnection(null);
++    resolve(response());
++    await renewing;
++    await disconnecting;
++    expect(values[REMOTE_ENDPOINT_KEY]).toBeNull();
++  });
++});
+diff --git a/apps/extension/src/transport/__tests__/remote-endpoint.test.ts b/apps/extension/src/transport/__tests__/remote-endpoint.test.ts
+new file mode 100644
+index 0000000..3877ab1
+--- /dev/null
++++ b/apps/extension/src/transport/__tests__/remote-endpoint.test.ts
+@@ -0,0 +1,46 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { parseRemoteEndpoint, readRemoteEndpoint, remoteSocket } from "../remote-endpoint";
++
++const token = "a".repeat(43);
++afterEach(() => vi.unstubAllGlobals());
++describe("remote pairing boundary", () => {
++  it("strips the pairing credential from the network URL", () => {
++    expect(parseRemoteEndpoint(`wss://gateway.example/bsk#${token}`)).toEqual({
++      url: "wss://gateway.example/bsk",
++      token,
++    });
++  });
++  it.each([
++    `ws://example.com/bsk#${token}`,
++    `https://example.com/#${token}`,
++    `wss://user:pass@example.com/#${token}`,
++    `wss://example.com/?token=secret#${token}`,
++    "wss://example.com/#short",
++  ])("rejects unsafe pairing %s", (input) => {
++    expect(() => parseRemoteEndpoint(input)).toThrow();
++  });
++  it.each(["localhost", "127.0.0.1", "[::1]"])("permits local development on %s", (host) => {
++    expect(parseRemoteEndpoint(`ws://${host}:8080/bsk#${token}`).url).toBe(`ws://${host}:8080/bsk`);
++  });
++  it("does not turn a corrupt remote preference into a local connection", () => {
++    expect(readRemoteEndpoint(null)).toBeNull();
++    expect(() => readRemoteEndpoint({ url: "ws://public.example", token })).toThrow();
++  });
++  it("sends credentials only to the paired endpoint via the subprotocol", () => {
++    const calls: unknown[][] = [];
++    vi.stubGlobal(
++      "WebSocket",
++      class {
++        constructor(...args: unknown[]) {
++          calls.push(args);
++        }
++      },
++    );
++    const remote = parseRemoteEndpoint(`wss://gateway.example/bsk#${token}`);
++    remoteSocket(remote.url, remote);
++    remoteSocket("ws://localhost:52800", null);
++    expect(calls).toEqual([[remote.url, [`bsk-auth.${token}`]], ["ws://localhost:52800"]]);
++    expect(() => remoteSocket("wss://other.example/bsk", remote)).toThrow();
++    expect(calls).toHaveLength(2);
++  });
++});
+diff --git a/apps/extension/src/transport/remote-authorization.ts b/apps/extension/src/transport/remote-authorization.ts
+new file mode 100644
+index 0000000..438893d
+--- /dev/null
++++ b/apps/extension/src/transport/remote-authorization.ts
+@@ -0,0 +1,149 @@
++import {
++  parseRemoteEndpoint,
++  REMOTE_ENDPOINT_KEY,
++  type RemoteEndpoint,
++  readRemoteEndpoint,
++} from "./remote-endpoint";
++
++function newToken(): string {
++  const bytes = crypto.getRandomValues(new Uint8Array(32));
++  return btoa(String.fromCharCode(...bytes))
++    .replaceAll("+", "-")
++    .replaceAll("/", "_")
++    .replaceAll("=", "");
++}
++
++async function authorize(
++  endpoint: RemoteEndpoint,
++  action: "pair" | "renew",
++  nextToken: string,
++): Promise<RemoteEndpoint> {
++  const url = new URL(endpoint.url);
++  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
++  url.pathname = url.pathname.replace(/\/$/, "") + "/authorize";
++  const response = await fetch(url, {
++    method: "POST",
++    redirect: "error",
++    credentials: "omit",
++    cache: "no-store",
++    headers: { Authorization: `Bearer ${endpoint.token}`, "Content-Type": "application/json" },
++    body: JSON.stringify({ action, next_token: nextToken, label: "Chrome · BrowserSkill" }),
++    signal: AbortSignal.timeout(10000),
++  });
++  if (!response.ok) throw new Error("Browser authorization failed; reconnect or pair again");
++  const data = (await response.json()) as {
++    device_id: string;
++    service_name?: string;
++    expires_at: string;
++    renew_after: string;
++  };
++  if (
++    typeof data.device_id !== "string" ||
++    !data.device_id ||
++    !Number.isFinite(Date.parse(data.expires_at)) ||
++    !Number.isFinite(Date.parse(data.renew_after))
++  ) {
++    throw new Error("Invalid browser authorization response");
++  }
++  return {
++    url: endpoint.url,
++    token: nextToken,
++    deviceId: data.device_id,
++    serviceName:
++      typeof data.service_name === "string" ? data.service_name.slice(0, 48) : endpoint.serviceName,
++    expiresAt: data.expires_at,
++    renewAfter: data.renew_after,
++  };
++}
++
++export async function activateRemoteEndpoint(endpoint: RemoteEndpoint): Promise<RemoteEndpoint> {
++  return authorize(endpoint, "pair", newToken());
++}
++
++let writes: Promise<unknown> = Promise.resolve();
++function serialized<T>(action: () => Promise<T>): Promise<T> {
++  const result = writes.then(action, action);
++  writes = result.catch(() => undefined);
++  return result;
++}
++export function updateRemoteConnection(pairing: string | null): Promise<string | null> {
++  return serialized(async () => {
++    const endpoint =
++      pairing === null ? null : await activateRemoteEndpoint(parseRemoteEndpoint(pairing));
++    await chrome.storage.local.set({ [REMOTE_ENDPOINT_KEY]: endpoint });
++    return endpoint?.url ?? null;
++  });
++}
++let renewing = false;
++/** Persist the candidate before rotating. A lost HTTP response can be retried
++ * using the same old/new pair after service-worker or server restart. */
++export async function renewRemoteAuthorization(): Promise<void> {
++  if (renewing) return;
++  renewing = true;
++  try {
++    await serialized(renewRemote);
++  } finally {
++    renewing = false;
++  }
++}
++async function renewRemote(): Promise<void> {
++  {
++    const stored = await chrome.storage.local.get(REMOTE_ENDPOINT_KEY);
++    const endpoint = readRemoteEndpoint(stored[REMOTE_ENDPOINT_KEY]);
++    if (
++      !endpoint?.deviceId ||
++      !endpoint.renewAfter ||
++      (!endpoint.pendingToken && Date.now() < Date.parse(endpoint.renewAfter))
++    )
++      return;
++    const nextToken = endpoint.pendingToken ?? newToken();
++    const pending = { ...endpoint, pendingToken: nextToken };
++    await chrome.storage.local.set({ [REMOTE_ENDPOINT_KEY]: pending });
++    const updated = await authorize(endpoint, "renew", nextToken);
++    const latest = readRemoteEndpoint(
++      (await chrome.storage.local.get(REMOTE_ENDPOINT_KEY))[REMOTE_ENDPOINT_KEY],
++    );
++    // A settings change during the request must not resurrect an old connection.
++    if (
++      latest?.url === endpoint.url &&
++      latest.token === endpoint.token &&
++      latest.deviceId === endpoint.deviceId &&
++      latest.pendingToken === nextToken
++    ) {
++      await chrome.storage.local.set({ [REMOTE_ENDPOINT_KEY]: updated });
++    }
++  }
++}
++
++export function watchRemoteAuthorization() {
++  // Content scripts do not need the gateway credential.
++  void chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
++  chrome.runtime.onMessage.addListener((message, sender, reply) => {
++    if (message?.kind !== "bsk-remote-authorization") return false;
++    if (
++      sender.url !== chrome.runtime.getURL("popup.html") ||
++      sender.id !== chrome.runtime.id ||
++      (message.pairing !== null && typeof message.pairing !== "string")
++    ) {
++      reply({ error: "Invalid authorization request" });
++      return false;
++    }
++    void updateRemoteConnection(message.pairing).then(
++      (url) => reply({ url }),
++      () => reply({ error: "Unable to pair; copy a new pairing link and try again" }),
++    );
++    return true;
++  });
++  const run = () => {
++    void renewRemoteAuthorization().catch(() => {
++      /* Retry the same candidate on the next alarm; never log credentials. */
++    });
++  };
++  const listener = (alarm: chrome.alarms.Alarm) => {
++    if (alarm.name === "bsk-remote-authorization") run();
++  };
++  chrome.alarms.onAlarm.addListener(listener);
++  void chrome.alarms.create("bsk-remote-authorization", { periodInMinutes: 1 });
++  run();
++  return { changed: run, dispose: () => chrome.alarms.onAlarm.removeListener(listener) };
++}
+diff --git a/apps/extension/src/transport/remote-endpoint.ts b/apps/extension/src/transport/remote-endpoint.ts
+new file mode 100644
+index 0000000..c634809
+--- /dev/null
++++ b/apps/extension/src/transport/remote-endpoint.ts
+@@ -0,0 +1,105 @@
++/** A gateway issues a pairing URL; the fragment never becomes part of the request URL. */
++export interface RemoteEndpoint {
++  url: string;
++  token: string;
++  deviceId?: string;
++  serviceName?: string;
++  expiresAt?: string;
++  renewAfter?: string;
++  pendingToken?: string;
++}
++
++export const REMOTE_ENDPOINT_KEY = "bsk_remote_endpoint";
++export const REMOTE_AUTH_PROTOCOL_PREFIX = "bsk-auth.";
++
++export function parseRemoteEndpoint(input: string): RemoteEndpoint {
++  const url = new URL(input.trim());
++  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
++  if (url.protocol !== "wss:" && !(url.protocol === "ws:" && loopback)) {
++    throw new Error("Remote connections require WSS (WS is allowed only on loopback)");
++  }
++  if (url.username || url.password || url.search) {
++    throw new Error("Credentials and query parameters are not allowed in the server URL");
++  }
++  const token = url.hash.slice(1);
++  if (!/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
++    throw new Error("A pairing credential of 32–256 base64url characters is required");
++  }
++  url.hash = "";
++  return { url: url.toString(), token };
++}
++
++export function readRemoteEndpoint(value: unknown): RemoteEndpoint | null {
++  if (value === undefined || value === null) return null;
++  if (typeof value !== "object") throw new Error("Invalid stored remote connection");
++  const { url, token } = value as Partial<RemoteEndpoint>;
++  if (typeof url !== "string" || typeof token !== "string") {
++    throw new Error("Invalid stored remote connection");
++  }
++  const endpoint = parseRemoteEndpoint(`${url}#${token}`);
++  const extra = value as Partial<RemoteEndpoint>;
++  if (extra.deviceId !== undefined) {
++    if (
++      typeof extra.deviceId !== "string" ||
++      !/^[a-f0-9]{32}$/.test(extra.deviceId) ||
++      typeof extra.expiresAt !== "string" ||
++      typeof extra.renewAfter !== "string" ||
++      !Number.isFinite(Date.parse(extra.expiresAt)) ||
++      !Number.isFinite(Date.parse(extra.renewAfter))
++    )
++      throw new Error("Invalid stored device authorization");
++    endpoint.deviceId = extra.deviceId;
++    endpoint.expiresAt = extra.expiresAt;
++    endpoint.renewAfter = extra.renewAfter;
++  }
++  if (typeof extra.serviceName === "string") endpoint.serviceName = extra.serviceName.slice(0, 48);
++  if (extra.pendingToken !== undefined) {
++    if (typeof extra.pendingToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(extra.pendingToken))
++      throw new Error("Invalid pending device credential");
++    endpoint.pendingToken = extra.pendingToken;
++  }
++  return endpoint;
++}
++
++export function remoteSocket(
++  url: string,
++  endpoint: RemoteEndpoint | null,
++  focusWindow?: (sessionId: string) => Promise<void>,
++  preview?: (sessionId: string) => Promise<unknown>,
++): WebSocket {
++  // Never attach a remote credential to a different endpoint, including a local fallback.
++  if (endpoint && endpoint.url !== url) throw new Error("Remote endpoint changed");
++  const socket = endpoint
++    ? new WebSocket(url, [REMOTE_AUTH_PROTOCOL_PREFIX + endpoint.token])
++    : new WebSocket(url);
++  if (endpoint && focusWindow)
++    socket.addEventListener("message", (event) => {
++      let request: { id?: string; method?: string; params?: { session_id?: string } };
++      try {
++        request = JSON.parse(event.data);
++      } catch {
++        return;
++      }
++      if (request.method !== "gateway.task_focus" && request.method !== "gateway.task_preview")
++        return;
++      event.stopImmediatePropagation();
++      if (!request.id || !request.params?.session_id) return;
++      const work =
++        request.method === "gateway.task_preview"
++          ? preview
++            ? preview(request.params.session_id)
++            : Promise.reject(new Error("Preview unavailable"))
++          : focusWindow(request.params.session_id).then(() => ({ focused: true }));
++      void work.then(
++        (result) => {
++          if (socket.readyState === WebSocket.OPEN)
++            socket.send(JSON.stringify({ id: request.id, result }));
++        },
++        () => {
++          if (socket.readyState === WebSocket.OPEN)
++            socket.send(JSON.stringify({ id: request.id, error: { code: "window_unavailable" } }));
++        },
++      );
++    });
++  return socket;
++}
+diff --git a/apps/extension/wxt.config.ts b/apps/extension/wxt.config.ts
+index ff4fc53..4ae452c 100644
+--- a/apps/extension/wxt.config.ts
++++ b/apps/extension/wxt.config.ts
+@@ -34,6 +34,7 @@ export default defineConfig({
+       "idle",
+       "notifications",
+       "tabs",
++      "tabGroups",
+       "storage",
+       "webNavigation",
+       "windows",
+diff --git a/docs/remote-extension-connection.md b/docs/remote-extension-connection.md
+new file mode 100644
+index 0000000..18acd4e
+--- /dev/null
++++ b/docs/remote-extension-connection.md
+@@ -0,0 +1,117 @@
++# Connecting an extension through an authenticated gateway
++
++This opt-in extension mode addresses the browser-side connection portion of
++[issue #50](https://github.com/Tencent/BrowserSkill/issues/50). The default remains
++the local daemon and its configurable port. This does not expose the daemon to
++the internet or implement a remote CLI server.
++
++Open the extension popup, expand **Remote connection**, and paste a gateway-issued
++pairing link:
++
++```text
++wss://gateway.example/browser/extension#<base64url-credential>
++```
++
++The destination is shown before saving. Saving uses the existing connection
++controller: finish session cleanup and return borrowed tabs before switching the
++transport. If cleanup fails, the controller retains the failure rather than
++silently abandoning borrowed tabs. **Use local daemon** removes the remote
++preference and goes through the same cleanup path.
++
++## Gateway authorization contract
++
++This consumer patch adds a proposed HTTP exchange before the native handshake.
++Saving a pairing link sends POST to the WebSocket path plus `/authorize` (HTTPS
++for WSS), using `Authorization: Bearer <pairing-token>` and JSON
++`{ "action": "pair", "next_token": "<client-generated-256-bit-token>", "label": "Chrome · BrowserSkill" }`.
++The gateway atomically consumes the one-use pairing token and returns
++`device_id`, `expires_at` and `renew_after` (ISO date strings), plus an optional
++`service_name` used for the visible task-group label (up to 48 characters; defaults
++to BrowserSkill). It stores only a
++hash of the next token. HTTP redirects are rejected; cookies are omitted.
++
++The extension stores device metadata and its token in trusted extension-local
++storage. At renewal time it persists a candidate token, then uses the same
++endpoint with action `renew` and the current device token as Bearer authorization.
++The gateway must handle repeated old/new token pairs idempotently, allowing a
++lost response to be retried after restart. The consumer gateway uses a 5-minute
++pairing lifetime, 90-day device lifetime and renewal after 30 days. First-time
++activation response loss requires a new pairing link. Renewal of the same device
++does not tear down active sessions.
++
++## WebSocket contract
++
++- The extension strips the fragment before opening the WebSocket. It offers one
++  subprotocol, `bsk-auth.<credential>`. The credential must be 32–256 base64url
++  characters. A gateway must validate it before forwarding any browser traffic,
++  and select the offered subprotocol when accepting the WebSocket.
++- Non-loopback connections require WSS. Query parameters and URL userinfo are
++  rejected. Do not log WebSocket subprotocol headers: this is a bearer credential.
++- After upgrade, the first application frame remains `system.handshake`. Native
++  BrowserSkill automation RPC methods and payloads remain unchanged. Forward the native handshake and
++  frames to the authorized daemon connection without the credential subprotocol.
++- Authenticate and isolate each user's daemon/routing context. The BrowserSkill
++  compatibility handshake is not account authentication.
++- Expiry and revocation are gateway responsibilities; renewal follows the HTTP contract above. Close an existing
++  connection on revocation. Never replay commands on reconnect.
++- A token authorizes the server to create and operate background task tabs. Existing
++  user tabs still use BrowserSkill's original borrow confirmation and return flow.
++
++The stored remote endpoint uses `chrome.storage.local`, not sync storage. The
++popup displays the server URL, not the saved credential. A configured remote
++connection never silently falls back to localhost after a transport failure.
++
++For local gateway development only, `ws://127.0.0.1`, `ws://localhost`, and
++`ws://[::1]` are accepted. This exception does not allow plaintext LAN endpoints.
++
++## Validation
++
++The extension tests cover unsafe endpoint rejection, credential destination
++binding, out-of-order storage reads and disposal. Existing controller tests cover
++session teardown and reconnect generations. An integration consumer additionally
++tested a released v0.2.1 daemon and the built extension in isolated Chromium:
++popup pairing, session start, navigation, Chinese text input, click, snapshot,
++screenshot, pause/resume and session stop. The gateway is external to this patch.
++
++The subprotocol convention is proposed for upstream review; it is not an existing
++published BrowserSkill remote-auth standard.
++
++## Optional gateway UI messages
++
++The extension intercepts `gateway.task_focus` and `gateway.task_preview` before
++native transport dispatch. These are proposed optional gateway messages, not
++published native BrowserSkill RPCs. Both require an existing `session_id` from
++the authenticated gateway's own task mapping. Focus locates that task's current
++tab; it cannot start or resume a task or select an arbitrary browser tab.
++Preview is described below. A gateway should expose focus only as a user action.
++
++## Remote task tabs and preview
++
++Remote gateway sessions use background task tabs in an existing non-incognito
++Chrome window, grouped and labeled for the integration. The local-daemon mode
++retains dedicated Agent Windows. Tab groups are visual only: explicit created
++and borrowed tab IDs define ownership. A shared window is never a permission
++boundary for remote tasks; other sessions' tabs remain invisible and even passive
++page reads require an owned/borrowed tab. Existing tabs are borrowed in place
++after the original confirmation, then released without moving or closing them.
++Stopping a remote task closes only its created tabs, never the shared user window.
++
++Logical task-tab selection does not activate Chrome's visible tab. Remote human
++help and borrow requests preserve the original confirmation/notification UI but
++do not proactively focus a window. Explicit user notification clicks and the
++consumer's `gateway.task_focus` message can locate the task tab.
++
++The optional `gateway.task_preview` UI message captures the authorized task tab through
++CDP outside the automation queue. It returns a JPEG (`image_base64`, `format`,
++`tab_id`, `title`, `captured_at`); final bitmap width is limited to 640 pixels,
++including on HiDPI screens. Concurrent captures for the same task are coalesced.
++The gateway consumer should rate-limit, authenticate, and scope preview requests,
++and the viewer should stop requesting images while hidden. This is low-frame-rate
++preview, not a video streaming API. Both UI messages are optional gateway
++proposals and must not be represented as published native BrowserSkill RPCs.
++
++Validation includes task-tab ownership/cleanup, rejected unapproved reads,
++borrowing without moving user tabs, non-focusing human help, preview capture
++coalescing/HiDPI bounds, and an external integration test using the released
++v0.2.1 daemon plus headed Chromium. No cloud gateway implementation is shipped
++in this repository.
+diff --git a/packages/i18n/src/locales/en-US/extension.json b/packages/i18n/src/locales/en-US/extension.json
+index fe51cc8..b670293 100644
+--- a/packages/i18n/src/locales/en-US/extension.json
++++ b/packages/i18n/src/locales/en-US/extension.json
+@@ -66,7 +66,13 @@
+       "copied": "Copied",
+       "hintDisconnected": "Available when connected",
+       "promptTemplate": "Use BrowserSkill's `bsk` CLI to record the browser actions I'm about to demonstrate.\n\nSteps:\n1. Run: {{command}}\n2. Once you confirm it's started, I'll operate in the opened window myself.\n3. After I click Finish, read the written `./trace` bundle (`trace.json` + `states/`) and summarize what I did."
+-    }
++    },
++    "remoteTitle": "Remote connection",
++    "remoteLocal": "Use local daemon",
++    "remotePairing": "Pairing link",
++    "remoteHint": "Paste a pairing link from a trusted server. Saving switches connections and ends existing sessions. The server can operate Agent Windows; borrowing existing tabs still requires your confirmation.",
++    "remoteSave": "Connect",
++    "remoteError": "Could not save. Check the pairing link and storage access."
+   },
+   "controlOverlay": {
+     "status": "Agent controlling",
+diff --git a/packages/i18n/src/locales/ko-KR/extension.json b/packages/i18n/src/locales/ko-KR/extension.json
+index c6870bc..16c178e 100644
+--- a/packages/i18n/src/locales/ko-KR/extension.json
++++ b/packages/i18n/src/locales/ko-KR/extension.json
+@@ -66,7 +66,13 @@
+       "copied": "복사됨",
+       "hintDisconnected": "연결 후 사용할 수 있습니다",
+       "promptTemplate": "BrowserSkill의 `bsk` CLI를 사용해 지금부터 제가 수행할 브라우저 작업을 기록하세요.\n\n단계:\n1. 다음을 실행하세요: {{command}}\n2. 기록이 시작됐다고 알려주면, 열린 창에서 제가 직접 작업하겠습니다.\n3. 제가 완료를 누른 후 생성된 `./trace` 번들(`trace.json` + `states/`)을 읽고 제가 수행한 작업을 요약하세요."
+-    }
++    },
++    "remoteTitle": "원격 연결",
++    "remoteLocal": "로컬 데몬 사용",
++    "remotePairing": "페어링 링크",
++    "remoteHint": "신뢰하는 서버의 페어링 링크를 붙여 넣으세요. 저장하면 연결이 전환되고 기존 세션이 종료됩니다. 기존 탭을 빌리려면 여전히 확인이 필요합니다.",
++    "remoteSave": "연결",
++    "remoteError": "저장하지 못했습니다. 페어링 링크와 저장소 접근을 확인하세요."
+   },
+   "controlOverlay": {
+     "status": "에이전트가 제어 중",
+diff --git a/packages/i18n/src/locales/zh-CN/extension.json b/packages/i18n/src/locales/zh-CN/extension.json
+index 46c56fa..5ad7920 100644
+--- a/packages/i18n/src/locales/zh-CN/extension.json
++++ b/packages/i18n/src/locales/zh-CN/extension.json
+@@ -66,7 +66,13 @@
+       "copied": "已复制",
+       "hintDisconnected": "连接后可用",
+       "promptTemplate": "用 BrowserSkill 的 `bsk` CLI 录制我接下来的浏览器操作。\n\n步骤：\n1. 执行：{{command}}\n2. 你确认已开始后，我会在打开的窗口里自己操作。\n3. 我点“结束”后，读取写出的 `./trace` 目录包（`trace.json` + `states/`），总结我做了什么。"
+-    }
++    },
++    "remoteTitle": "远程连接",
++    "remoteLocal": "使用本机服务",
++    "remotePairing": "配对链接",
++    "remoteHint": "粘贴可信服务器提供的配对链接。保存后会切换连接并结束现有任务。服务器可操作 Agent Window；借用已有标签页仍需你确认。",
++    "remoteSave": "连接",
++    "remoteError": "保存失败，请检查配对链接及存储权限。"
+   },
+   "controlOverlay": {
+     "status": "Agent 正在控制",
