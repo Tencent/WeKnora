@@ -30,6 +30,7 @@ type weKnoraCloudAdapter struct {
 var (
 	_ invoke.ChatAdapter      = (*weKnoraCloudAdapter)(nil)
 	_ invoke.EmbeddingAdapter = (*weKnoraCloudAdapter)(nil)
+	_ invoke.RerankAdapter    = (*weKnoraCloudAdapter)(nil)
 )
 
 const (
@@ -120,11 +121,30 @@ type weKnoraCloudEmbedResponse struct {
 	} `json:"data"`
 }
 
-// Capabilities overrides the embedded declaration: both served shards.
+// Capabilities overrides the embedded declaration: all three served shards.
 func (a *weKnoraCloudAdapter) Capabilities() provider.Capabilities {
 	caps := a.openaiAdapter.Capabilities()
 	caps.Embedding = embeddingCapsFor(provider.ProviderWeKnoraCloud)
+	caps.Rerank = rerankCapsFor(provider.ProviderWeKnoraCloud)
 	return caps
+}
+
+// --- Rerank facet (P3, port of v1 rerank/weknoracloud.go) ---
+
+// BuildRerankRequest ports the signed /api/v1/rerank route ({model, query,
+// documents}; no truncation knobs on the v1 wire).
+func (a *weKnoraCloudAdapter) BuildRerankRequest(
+	ep invoke.Endpoint, model string, opts *invoke.RerankOptions,
+) (*invoke.Request, error) {
+	return buildWeKnoraCloudRerank(ep, model, opts)
+}
+
+// ParseRerankResponse maps the results array (tolerant score parsing shared
+// with the openai shape).
+func (a *weKnoraCloudAdapter) ParseRerankResponse(
+	status int, header http.Header, body []byte,
+) (*invoke.RerankResponse, error) {
+	return parseOpenAIRerank(status, header, body)
 }
 
 // BuildEmbeddingRequest ports v1 NewWeKnoraCloudEmbedder + BatchEmbed: the

@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,8 +53,30 @@ func endpoint(m *ModelConfig) Endpoint {
 	if m.ExtraConfig != nil {
 		ep.APIVersion = strings.TrimSpace(m.ExtraConfig["api_version"])
 		ep.ThinkingControl = foldThinkingControl(m.ExtraConfig)
+		// Rerank-only opt-in (vLLM semantics, issue #2143): NEVER sent unless
+		// explicitly configured — providers that honor it keep only the last
+		// N tokens of the templated rerank prompt.
+		ep.TruncatePromptTokens = foldTruncatePromptTokens(m.ExtraConfig)
 	}
 	return ep
+}
+
+// foldTruncatePromptTokens parses extra_config["truncate_prompt_tokens"];
+// invalid or non-positive values fold to 0 (= not sent). DRIFT vs v1
+// (recorded, P3 review finding 6): the v1 factory failed fast on invalid
+// values at construction; v2 silently omits the param and the rerank call
+// proceeds. The param is opt-in tuning, so an invalid value degrades to the
+// default behavior instead of failing the model.
+func foldTruncatePromptTokens(extra map[string]string) int {
+	raw := strings.TrimSpace(extra["truncate_prompt_tokens"])
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // foldThinkingControl normalizes extra_config.thinking_control into the
@@ -479,29 +502,45 @@ func embedWithFanOut(ctx context.Context, m *ModelConfig, opts *EmbeddingOptions
 }
 
 func embedOnce(ctx context.Context, m *ModelConfig, opts *EmbeddingOptions) (*EmbeddingResponse, error) {
-	return invokeFacet(ctx, m, ModelKindEmbedding, func(a Adapter, ep Endpoint) (*Request, error) {
-		return a.(EmbeddingAdapter).BuildEmbeddingRequest(ep, m.ModelName, opts)
-	}, func(a Adapter, r *RawResult) (*EmbeddingResponse, error) {
-		return a.(EmbeddingAdapter).ParseEmbeddingResponse(r.Status, r.Header, r.Body)
-	})
+	return invokeFacet(ctx, m, ModelKindEmbedding,
+		func(a Adapter) bool { _, ok := a.(EmbeddingAdapter); return ok },
+		func(a Adapter, ep Endpoint) (*Request, error) {
+			return a.(EmbeddingAdapter).BuildEmbeddingRequest(ep, m.ModelName, opts)
+		}, func(a Adapter, r *RawResult) (*EmbeddingResponse, error) {
+			return a.(EmbeddingAdapter).ParseEmbeddingResponse(r.Status, r.Header, r.Body)
+		})
 }
 
-// Rerank runs one rerank call.
+// Rerank runs one rerank call with the v1 decorator-stack equivalents
+// (langfuse generation + llm_debug record).
 func Rerank(ctx context.Context, m *ModelConfig, opts *RerankOptions) (*RerankResponse, error) {
-	return invokeFacet(ctx, m, ModelKindRerank, func(a Adapter, ep Endpoint) (*Request, error) {
-		return a.(RerankAdapter).BuildRerankRequest(ep, m.ModelName, opts)
-	}, func(a Adapter, r *RawResult) (*RerankResponse, error) {
-		return a.(RerankAdapter).ParseRerankResponse(r.Status, r.Header, r.Body)
-	})
+	start := time.Now()
+	gen := startRerankLangfuse(ctx, m, opts)
+	resp, err := invokeFacet(ctx, m, ModelKindRerank,
+		func(a Adapter) bool { _, ok := a.(RerankAdapter); return ok },
+		func(a Adapter, ep Endpoint) (*Request, error) {
+			return a.(RerankAdapter).BuildRerankRequest(ep, m.ModelName, opts)
+		}, func(a Adapter, r *RawResult) (*RerankResponse, error) {
+			return a.(RerankAdapter).ParseRerankResponse(r.Status, r.Header, r.Body)
+		})
+	gen.finishRerank(resp, opts, err)
+	logRerankDebug(ctx, m.ModelName, opts, resp, err, time.Since(start))
+	return resp, err
 }
 
-// Transcribe runs one ASR call.
+// Transcribe runs one ASR call with the v1 langfuse equivalent (v1 ASR had
+// no llm_debug wrapper).
 func Transcribe(ctx context.Context, m *ModelConfig, opts *ASROptions) (*ASRResponse, error) {
-	return invokeFacet(ctx, m, ModelKindASR, func(a Adapter, ep Endpoint) (*Request, error) {
-		return a.(ASRAdapter).BuildASRRequest(ep, m.ModelName, opts)
-	}, func(a Adapter, r *RawResult) (*ASRResponse, error) {
-		return a.(ASRAdapter).ParseASRResponse(r.Status, r.Header, r.Body)
-	})
+	gen := startASRLangfuse(ctx, m, opts)
+	resp, err := invokeFacet(ctx, m, ModelKindASR,
+		func(a Adapter) bool { _, ok := a.(ASRAdapter); return ok },
+		func(a Adapter, ep Endpoint) (*Request, error) {
+			return a.(ASRAdapter).BuildASRRequest(ep, m.ModelName, opts)
+		}, func(a Adapter, r *RawResult) (*ASRResponse, error) {
+			return a.(ASRAdapter).ParseASRResponse(r.Status, r.Header, r.Body)
+		})
+	gen.finishASR(resp, err)
+	return resp, err
 }
 
 // List lists remote models via the optional fifth facet.
@@ -536,12 +575,23 @@ func List(ctx context.Context, providerName string, opts *ListOptions) ([]Remote
 // types.
 func invokeFacet[R any](
 	ctx context.Context, m *ModelConfig, kind ModelKind,
+	facet func(Adapter) bool,
 	build func(Adapter, Endpoint) (*Request, error),
 	parse func(Adapter, *RawResult) (*R, error),
 ) (*R, error) {
 	a, err := resolveAdapter(m.Provider)
 	if err != nil {
 		return nil, err
+	}
+	// Dispatch lock #3 (design §6.2): the facet assertion is guarded — a
+	// registered adapter without this facet yields ErrUnsupportedType, never
+	// a panic (e.g. a rerank model record on a chat-only provider; P3 review
+	// finding 3).
+	if !facet(a) {
+		return nil, &ProviderError{
+			Kind:    ErrUnsupportedType,
+			Message: "provider " + m.Provider + " does not implement the " + string(kind) + " facet",
+		}
 	}
 	req, err := build(a, endpoint(m))
 	if err != nil {

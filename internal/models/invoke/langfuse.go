@@ -151,3 +151,199 @@ func truncateRunes(s string, maxRunes int) string {
 	}
 	return string(r[:maxRunes]) + "..."
 }
+
+// --- rerank + ASR generation observations (P3, ports of the v1
+// rerank/langfuse_wrapper.go and asr/langfuse_wrapper.go) ---
+
+const (
+	langfuseRerankPreviewDocs = 8
+	langfuseRerankMaxScores   = 50
+)
+
+// startRerankLangfuse opens the "rerank" generation (v1 input/metadata shape:
+// query + document previews, model_id/num_queries/total_chars/avg_doc_chars).
+func startRerankLangfuse(ctx context.Context, m *ModelConfig, opts *RerankOptions) *langfuseGen {
+	mgr := langfuse.GetManager()
+	if !mgr.Enabled() {
+		return &langfuseGen{ctx: ctx}
+	}
+	totalChars := len([]rune(opts.Query))
+	for _, doc := range opts.Documents {
+		totalChars += len([]rune(doc))
+	}
+	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
+		Name:  "rerank",
+		Model: m.ModelName,
+		Input: map[string]interface{}{
+			"query":             opts.Query,
+			"document_count":    len(opts.Documents),
+			"documents_preview": previewDocs(opts.Documents, langfuseRerankPreviewDocs),
+		},
+		Metadata: map[string]interface{}{
+			"model_id":      m.ModelID,
+			"num_queries":   1,
+			"total_chars":   totalChars,
+			"avg_doc_chars": avgDocChars(opts.Documents),
+		},
+	})
+	return &langfuseGen{ctx: genCtx, gen: gen}
+}
+
+// finishRerank closes the observation with the v1 output shape (summarized
+// top results + score stats + document previews) and the approximated token
+// usage (query + documents runes/4 — rerank vendors bill per 1K documents).
+func (g *langfuseGen) finishRerank(resp *RerankResponse, opts *RerankOptions, err error) {
+	if g.gen == nil {
+		return
+	}
+	output := map[string]interface{}{
+		"total_count": 0,
+		"score_stats": nil,
+	}
+	var usage *langfuse.TokenUsage
+	if resp != nil {
+		output["results"] = summarizeResults(resp.Results, opts.Documents, langfuseRerankMaxScores)
+		output["total_count"] = len(resp.Results)
+		output["score_stats"] = scoreStats(resp.Results)
+		if len(resp.Results) > langfuseRerankMaxScores {
+			output["truncated"] = len(resp.Results) - langfuseRerankMaxScores
+		}
+	}
+	usage = approxRerankUsage(opts.Query, opts.Documents)
+	g.gen.Finish(output, usage, err)
+}
+
+// approxRerankUsage estimates input tokens as rune_count/4+1 per text
+// (v1 approxRerankUsage).
+func approxRerankUsage(query string, documents []string) *langfuse.TokenUsage {
+	total := len([]rune(query))/4 + 1
+	for _, d := range documents {
+		total += len([]rune(d))/4 + 1
+	}
+	if total == 0 {
+		return nil
+	}
+	return &langfuse.TokenUsage{
+		Input: total,
+		Total: total,
+		Unit:  "TOKENS",
+	}
+}
+
+func avgDocChars(documents []string) int {
+	if len(documents) == 0 {
+		return 0
+	}
+	total := 0
+	for _, doc := range documents {
+		total += len([]rune(doc))
+	}
+	return total / len(documents)
+}
+
+func scoreStats(results []RerankResult) map[string]interface{} {
+	if len(results) == 0 {
+		return nil
+	}
+	minScore := results[0].Score
+	maxScore := results[0].Score
+	sum := 0.0
+	for _, r := range results {
+		if r.Score < minScore {
+			minScore = r.Score
+		}
+		if r.Score > maxScore {
+			maxScore = r.Score
+		}
+		sum += r.Score
+	}
+	return map[string]interface{}{
+		"min": minScore,
+		"max": maxScore,
+		"avg": sum / float64(len(results)),
+	}
+}
+
+func previewDocs(docs []string, n int) []map[string]interface{} {
+	if len(docs) < n {
+		n = len(docs)
+	}
+	out := make([]map[string]interface{}, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, map[string]interface{}{
+			"index":   i,
+			"preview": truncateRunes(docs[i], 160),
+			"length":  len([]rune(docs[i])),
+		})
+	}
+	return out
+}
+
+// summarizeResults previews the top n results; the document preview is
+// re-derived from the input documents by index (v1 used the vendor echo —
+// same content; P3 review finding 5 restores the v1 "preview" key).
+func summarizeResults(results []RerankResult, documents []string, n int) []map[string]interface{} {
+	if len(results) < n {
+		n = len(results)
+	}
+	out := make([]map[string]interface{}, 0, n)
+	for i := 0; i < n; i++ {
+		row := map[string]interface{}{
+			"rank":        i + 1,
+			"index":       results[i].Index,
+			"model_score": results[i].Score,
+		}
+		idx := results[i].Index
+		if idx >= 0 && idx < len(documents) {
+			row["preview"] = truncateRunes(documents[idx], 160)
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+// startASRLangfuse opens the "asr.transcribe" generation (v1 shape: file
+// name + audio size; audio bytes are never uploaded).
+func startASRLangfuse(ctx context.Context, m *ModelConfig, opts *ASROptions) *langfuseGen {
+	mgr := langfuse.GetManager()
+	if !mgr.Enabled() {
+		return &langfuseGen{ctx: ctx}
+	}
+	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
+		Name:  "asr.transcribe",
+		Model: m.ModelName,
+		Input: map[string]interface{}{
+			"file_name":  opts.FileName,
+			"audio_size": len(opts.Audio),
+		},
+		Metadata: map[string]interface{}{
+			"model_id":   m.ModelID,
+			"audio_size": len(opts.Audio),
+		},
+	})
+	return &langfuseGen{ctx: genCtx, gen: gen}
+}
+
+// finishASR closes the observation: text + segment count + duration from the
+// last segment end; ASR is billed per second, so the duration rides usage.
+func (g *langfuseGen) finishASR(resp *ASRResponse, err error) {
+	if g.gen == nil {
+		return
+	}
+	output := map[string]interface{}{}
+	var usage *langfuse.TokenUsage
+	if resp != nil {
+		output["text"] = resp.Text
+		output["segment_count"] = len(resp.Segments)
+		if n := len(resp.Segments); n > 0 {
+			seconds := int(resp.Segments[n-1].End + 0.5)
+			output["duration_seconds"] = resp.Segments[n-1].End
+			usage = &langfuse.TokenUsage{
+				Output: seconds,
+				Total:  seconds,
+				Unit:   "SECONDS",
+			}
+		}
+	}
+	g.gen.Finish(output, usage, err)
+}

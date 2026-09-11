@@ -299,3 +299,58 @@ func safeVecIdx(v []float32, i int) float32 {
 	}
 	return 0
 }
+
+// logRerankDebug ports the v1 rerank debug record (rerank/llm_debug.go)
+// byte-for-byte: CallType "Rerank", Query / Documents / Results sections.
+// The v1 Results section previewed the response-echoed document text; v2
+// responses carry (index, score) only, so the preview re-derives the same
+// text from the input documents by index (vendors echo the input back).
+func logRerankDebug(
+	ctx context.Context, model string,
+	opts *RerankOptions, resp *RerankResponse,
+	callErr error, dur time.Duration,
+) {
+	if !logger.LLMDebugEnabled() {
+		return
+	}
+
+	record := &logger.LLMCallRecord{
+		CallType: "Rerank",
+		Model:    model,
+		Duration: dur,
+	}
+
+	record.Sections = append(record.Sections, logger.RecordSection{
+		Title:   "Query",
+		Content: opts.Query,
+	})
+
+	var docBuf strings.Builder
+	fmt.Fprintf(&docBuf, "count=%d\n", len(opts.Documents))
+	for i, doc := range opts.Documents {
+		preview := strings.ReplaceAll(doc, "\n", "\\n")
+		preview = logger.TruncateRunes(preview, 200)
+		fmt.Fprintf(&docBuf, "[%d] (len=%d) %s\n", i, len([]rune(doc)), preview)
+	}
+	record.Sections = append(record.Sections, logger.RecordSection{Title: "Documents", Content: docBuf.String()})
+
+	if resp != nil {
+		var resBuf strings.Builder
+		fmt.Fprintf(&resBuf, "count=%d\n", len(resp.Results))
+		for _, r := range resp.Results {
+			docText := ""
+			if r.Index >= 0 && r.Index < len(opts.Documents) {
+				docText = opts.Documents[r.Index]
+			}
+			docPreview := strings.ReplaceAll(docText, "\n", "\\n")
+			docPreview = logger.TruncateRunes(docPreview, 200)
+			fmt.Fprintf(&resBuf, "  [%d] score=%.6f  %s\n", r.Index, r.Score, docPreview)
+		}
+		record.Sections = append(record.Sections, logger.RecordSection{Title: "Results", Content: resBuf.String()})
+	}
+
+	if callErr != nil {
+		record.Error = callErr.Error()
+	}
+	logger.LLMDebugLog(ctx, record)
+}

@@ -392,16 +392,28 @@ type RerankResponse struct {
 	Results []RerankResult
 }
 
-// ASROptions describes one transcription request.
+// ASROptions describes one transcription request. FileName carries the
+// upload's extension hint (v1 defaulted the multipart filename to
+// audio.mp3 when empty).
 type ASROptions struct {
 	Audio    []byte
+	FileName string
 	Format   string
 	Language string
 }
 
-// ASRResponse returns the transcribed text.
+// ASRResponse returns the transcribed text with its timestamped segments
+// (v1 TranscriptionResult semantics; verbose_json response_format).
 type ASRResponse struct {
-	Text string
+	Text     string
+	Segments []ASRSegment
+}
+
+// ASRSegment is one timestamped transcript segment.
+type ASRSegment struct {
+	Start float64
+	End   float64
+	Text  string
 }
 
 // ListOptions parameterizes remote model listing.
@@ -463,6 +475,9 @@ type Endpoint struct {
 	// "thinking_type"/"chat_template_kwargs"). Empty = the adapter's default
 	// thinking strategy applies.
 	ThinkingControl string
+	// TruncatePromptTokens carries the folded ExtraConfig["truncate_prompt_tokens"]
+	// rerank opt-in (vLLM semantics, issue #2143). Zero = not sent.
+	TruncatePromptTokens int
 }
 
 // Request is the adapter's "native call description" — adapters never touch

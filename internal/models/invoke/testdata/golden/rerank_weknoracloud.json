@@ -1,0 +1,27 @@
+{
+  "scenario": "rerank_weknoracloud",
+  "behavior": [
+    "POST {base}/api/v1/rerank; HMAC sign headers (masked); body {model,query,documents}"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/rerank",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Api-Key": "secret-1",
+        "X-Appid": "app-1",
+        "X-Nonce": "\u003cnonce\u003e",
+        "X-Request-Id": "\u003crequest-id\u003e",
+        "X-Signature": "\u003chmac-md5\u003e",
+        "X-Timestamp": "\u003cunix-seconds\u003e"
+      },
+      "body": {
+        "model": "wkc-rerank",
+        "query": "q",
+        "documents": [
+          "d1"
+        ]
+      }
+    }
+  ]
+}

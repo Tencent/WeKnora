@@ -1,0 +1,29 @@
+{
+  "scenario": "rerank_aliyun",
+  "behavior": [
+    "POST full-endpoint base; body {model,input:{query,documents},parameters:{return_documents:true,top_n:len(documents)}}"
+  ],
+  "requests": [
+    {
+      "path": "/",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gte-rerank",
+        "input": {
+          "query": "q",
+          "documents": [
+            "d1",
+            "d2"
+          ]
+        },
+        "parameters": {
+          "return_documents": true,
+          "top_n": 2
+        }
+      }
+    }
+  ]
+}

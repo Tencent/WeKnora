@@ -1,0 +1,26 @@
+{
+  "scenario": "rerank_nvidia",
+  "behavior": [
+    "body {model,query:{text},passages:[{text}]}; raw rankings[].logit is sigmoid-normalized before reaching callers (v1 normalizeNvidiaLogit)"
+  ],
+  "requests": [
+    {
+      "path": "/",
+      "headers": {
+        "Authorization": "Bearer nv-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "nvidia-rerank",
+        "query": {
+          "text": "q"
+        },
+        "passages": [
+          {
+            "text": "d1"
+          }
+        ]
+      }
+    }
+  ]
+}
