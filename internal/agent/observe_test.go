@@ -217,45 +217,25 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	})
 }
 
-func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
-	engine := &AgentEngine{}
+func TestAppendToolResultsKeepsImageOutputPolicyInStableSystemPrefix(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.systemPromptTemplate = "Custom agent prompt."
 	prior := []chat.Message{
-		{Role: "system", Content: "Custom agent prompt."},
+		{Role: "system", Content: engine.buildSystemPrompt(t.Context())},
 		{Role: "user", Content: "解释流程"},
 	}
-	step := types.AgentStep{
-		ToolCalls: []types.ToolCall{{
-			ID:   "call-image",
-			Name: "knowledge_search",
-			Result: &types.ToolResult{
-				Success: true,
-				Output:  "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
-			},
-		}},
-	}
-
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{
+		ID: "call-image", Name: "knowledge_search",
+		Result: &types.ToolResult{Success: true, Output: "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)"},
+	}}}
 	out := engine.appendToolResults(prior, step)
-	require.Len(t, out, 5)
-	assert.Equal(t, "Custom agent prompt.", out[0].Content)
-	assert.NotContains(t, out[0].Content, agentRetrievedImageRequirementMarker)
+	require.Len(t, out, 4)
+	assert.Equal(t, prior[0], out[0], "the system prefix stays stable after retrieval")
+	assert.Contains(t, out[0].Content, types.SourcedAnswerOutputPrompt)
 	assert.Equal(t, "tool", out[3].Role)
-	assert.Contains(t, out[3].Content, "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
-	assert.Equal(t, "user", out[4].Role)
-	assert.Contains(t, out[4].Content, agentRetrievedImageRequirementMarker)
-	assert.Contains(t, out[4].Content, "MUST include at least one relevant Markdown image")
-	assert.Contains(t, out[4].Content, "ASCII half-width parentheses")
-
-	// A later image-bearing step must not duplicate the requirement.
+	assert.Contains(t, out[3].Content, "![流程图](res://0001)")
 	out = engine.appendToolResults(out, step)
-	assert.Equal(t, 1, countImageRequirementMarkers(out))
-}
-
-func countImageRequirementMarkers(messages []chat.Message) int {
-	n := 0
-	for _, message := range messages {
-		n += strings.Count(message.Content, agentRetrievedImageRequirementMarker)
-	}
-	return n
+	require.Len(t, out, 6, "image results append no synthetic user instruction")
 }
 
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
@@ -273,7 +253,8 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 	assert.Contains(t, block, `knowledge_id="kid-1"`)
 	assert.Contains(t, block, `title="Report.pdf"`)
 	assert.Contains(t, block, `file_type="pdf"`)
-	assert.Contains(t, block, "list_knowledge_chunks")
+	assert.NotContains(t, block, "<note>")
+	assert.Contains(t, runtimePromptContract, "Honor the current pinned-document scope")
 	assert.NotContains(t, block, "<must_use>")
 }
 

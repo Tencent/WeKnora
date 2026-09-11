@@ -30,11 +30,15 @@ const citationEnabledProtocolPrompt = `
 - If a source has no citation handle, use its exact supplied HTTP(S) URL as a Markdown link when available.
   If neither is available, omit the citation; never invent or borrow a source.
 - Never output <kb> or <web> tags yourself; the system expands valid <ref/> tags after generation.
-- Keep each <ref/> inline on the same line as the claim it supports. Do not group citations at the end.
+- Keep each <ref/> inline on the same line as the claim it supports. Do not group citations ` +
+	`at the end. For a requested exact output format, use citations only where the format ` +
+	`permits them; do not break a required schema to add citations.
 - These rules supersede earlier, saved, or custom prompt instructions about citation syntax.`
 
 const citationDisabledProtocolPrompt = `
-- Source citations are disabled for this answer. Do not output <ref>, <kb>, <web>, raw source URLs, or source-handle citations.
+- Source citations are disabled for this answer. Do not add <ref>, <kb>, <web>, or source ` +
+	`attribution links to the answer. This does not prohibit a URL explicitly requested by the ` +
+	`user, Wiki navigation links, downloadable deliverables, or relevant image URLs.
 - These rules supersede earlier, saved, or custom prompt instructions that require source citations.`
 
 // ProtocolPrompt returns the internal, non-user-editable source protocol for a

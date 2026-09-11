@@ -78,9 +78,9 @@ func learningTestDB(t *testing.T, dialect string) *gorm.DB {
 	}
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.WikiPage{}, &types.Knowledge{}, &types.Chunk{}))
-	file := "../../../migrations/sqlite/000014_learning.up.sql"
+	file := "../../../migrations/sqlite/000015_learning.up.sql"
 	if dialect == "postgres" {
-		file = "../../../migrations/versioned/000093_learning.up.sql"
+		file = "../../../migrations/versioned/000094_learning.up.sql"
 	}
 	up, err := os.ReadFile(file)
 	require.NoError(t, err)

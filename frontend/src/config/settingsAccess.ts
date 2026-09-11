@@ -24,6 +24,7 @@ export const SETTINGS_SECTION_MIN_ROLE: Record<string, SettingsRoleKey> = {
   mcp: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
+  browserconnection: 'viewer',
   tenant: 'viewer',
   members: 'viewer',
   mymemory: 'viewer',

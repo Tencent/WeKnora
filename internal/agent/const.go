@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
+	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 )
@@ -52,7 +54,15 @@ const (
 	maxRepeatedResponseRounds = 2
 )
 
-func toolExecutionTimeout(toolName string) time.Duration {
+func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
+	if toolName == "local_browser" && len(arguments) > 0 {
+		var input struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal([]byte(arguments[0]), &input) == nil && browserskill.IsHumanStep(input.Method) {
+			return browserskill.HumanStepTimeout
+		}
+	}
 	if toolName == "shell_exec" {
 		return shellExecToolTimeout
 	}
