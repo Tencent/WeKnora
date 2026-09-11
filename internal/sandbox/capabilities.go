@@ -91,50 +91,6 @@ type SessionCapabilityProvider interface {
 	SessionFileStore() SessionFileStore
 }
 
-// SessionLiveFileType is the browser-facing entry kind under /workspace/output.
-// It is intentionally distinct from RemoteDirEntryType: the internal remote
-// listing uses "dir", while the live-files HTTP/JSON contract uses "directory".
-type SessionLiveFileType string
-
-const (
-	// SessionLiveFileTypeFile is a regular file under /workspace/output.
-	SessionLiveFileTypeFile SessionLiveFileType = "file"
-	// SessionLiveFileTypeDirectory is a folder the Files tab may open.
-	SessionLiveFileTypeDirectory SessionLiveFileType = "directory"
-	// SessionLiveFileTypeOther is a symlink or special node the UI cannot open.
-	SessionLiveFileTypeOther SessionLiveFileType = "other"
-)
-
-// SessionLiveFileEntry is one browser-safe entry under /workspace/output.
-// Path is always relative to that fixed root; provider absolute paths never
-// cross the application boundary.
-type SessionLiveFileEntry struct {
-	Name    string              `json:"name"`
-	Path    string              `json:"path"`
-	Type    SessionLiveFileType `json:"type"`
-	Size    int64               `json:"size"`
-	ModTime time.Time           `json:"mod_time"`
-}
-
-// SessionLiveFileManager exposes the small, security-hardened live-files
-// surface used by the browser. It is separate from SessionFileStore because
-// agent/attachment staging accepts broader absolute workspace paths, whereas
-// browser paths are relative to the fixed output root and must never follow a
-// symlink. SessionBoundManager implements this once for every remote provider.
-type SessionLiveFileManager interface {
-	ListSessionLiveFiles(ctx context.Context, sessionID, relativeDir string) ([]SessionLiveFileEntry, error)
-	ReadSessionLiveFile(ctx context.Context, sessionID, relativePath string) ([]byte, error)
-	WriteSessionLiveFile(ctx context.Context, sessionID, relativePath string, content []byte) error
-	RenameSessionLiveFile(ctx context.Context, sessionID, source, target string) error
-	RemoveSessionLiveFile(ctx context.Context, sessionID, relativePath string) error
-}
-
-// SessionLiveFileProvider advertises live-file support without widening the
-// long-standing Manager interface or forcing stateless backends to fake it.
-type SessionLiveFileProvider interface {
-	SessionLiveFileManager() SessionLiveFileManager
-}
-
 // SessionInstallShellExecutor runs install/maintenance shell commands, which
 // need the skills image root. It is a separate interface from
 // SessionShellExecutor so reaching outside /workspace is something a caller

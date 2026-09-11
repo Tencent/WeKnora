@@ -258,11 +258,6 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
-      intermediate_answer:
-        description: |-
-          IntermediateAnswer preserves a plain answer followed by a loop-end steer.
-          The canonical final answer is still stored in Message.Content.
-        type: boolean
       iteration:
         description: Iteration number (0-indexed)
         type: integer
@@ -283,13 +278,6 @@ definitions:
         description: Tools called in this step (Act phase)
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall'
-        type: array
-      user_messages_before:
-        description: |-
-          UserMessagesBefore records consumed steer rows in delivery order, before
-          this model response. Unlike timestamps, this remains unambiguous on replay.
-        items:
-          type: string
         type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.AnswerStrategy:
@@ -6455,30 +6443,6 @@ definitions:
     required:
     - query
     type: object
-  internal_handler_session.SteerMessageRequest:
-    properties:
-      channel:
-        type: string
-      delivery:
-        description: Delivery is "after" (default) or "inject". See the constants
-          above.
-        type: string
-      expected_assistant_message_id:
-        description: |-
-          Optional for older clients. New clients pin delivery to the run they see
-          and supply a stable ID so a consume event may precede the HTTP response.
-        type: string
-      mentioned_items:
-        items:
-          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
-        type: array
-      query:
-        type: string
-      steer_id:
-        type: string
-    required:
-    - query
-    type: object
   internal_handler_session.StopSessionRequest:
     properties:
       message_id:
@@ -6494,16 +6458,6 @@ definitions:
         items:
           type: string
         type: array
-    type: object
-  internal_handler_session.renameLiveFileRequest:
-    properties:
-      source:
-        type: string
-      target:
-        type: string
-    required:
-    - source
-    - target
     type: object
 info:
   contact:
@@ -11793,7 +11747,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前空间的所有MCP服务（含已保存工具目录数量）
+      description: 获取当前空间的所有MCP服务
       produces:
       - application/json
       responses:
@@ -12046,8 +12000,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要
-        Admin。
+      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
       parameters:
       - description: MCP服务ID
         in: path
@@ -14838,228 +14791,6 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
-  /sessions/{id}/sandbox/files:
-    delete:
-      description: 删除 /workspace/output 下的安全文件或已预校验的目录树。
-      parameters:
-      - description: 会话ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 相对路径
-        in: query
-        name: path
-        required: true
-        type: string
-      responses:
-        "204":
-          description: No Content
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: 删除会话沙箱输出条目
-      tags:
-      - 会话
-    get:
-      description: 返回固定输出根下的一层目录条目。路径为相对 POSIX 路径，空路径表示根。不会创建或唤醒已暂停的沙箱。
-      parameters:
-      - description: 会话ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 相对目录，空为输出根
-        in: query
-        name: path
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: 列出会话沙箱 /workspace/output 下一层文件
-      tags:
-      - 会话
-    patch:
-      consumes:
-      - application/json
-      description: 在 /workspace/output 内原子重命名，目标已存在则冲突。不会覆盖。
-      parameters:
-      - description: 会话ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 源路径与目标路径
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.renameLiveFileRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      summary: 重命名会话沙箱输出条目
-      tags:
-      - 会话
-  /sessions/{id}/sandbox/files/content:
-    get:
-      description: 以附件形式下载 /workspace/output 下的单个常规文件，上限 16 MiB。不会唤醒已暂停的沙箱。
-      parameters:
-      - description: 会话ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 相对文件路径
-        in: query
-        name: path
-        required: true
-        type: string
-      produces:
-      - application/octet-stream
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: file
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "413":
-          description: Request Entity Too Large
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 下载会话沙箱中的一个输出文件
-      tags:
-      - 会话
-  /sessions/{id}/steer:
-    get:
-      description: 刷新页面后用来恢复输入框上方的队列。没有正在运行的 turn 时返回空列表。
-      parameters:
-      - description: 会话 ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "503":
-          description: 活 turn 查询失败，可重试
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 列出当前运行中尚未消费的排队消息
-      tags:
-      - 问答
-  /sessions/{id}/steer/{steer_id}:
-    delete:
-      description: 从当前运行的排队列表里去掉一条，不再注入也不再作为 follow-up 发出。
-      parameters:
-      - description: 会话 ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 排队消息 ID
-        in: path
-        name: steer_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "503":
-          description: 活 turn 查询失败，可重试
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 删除一条排队中的消息
-      tags:
-      - 问答
   /sessions/{session_id}/artifacts:
     get:
       description: 返回本会话中所有 assistant 消息产生的技能产物元数据（不含 URL）
@@ -15185,140 +14916,6 @@ paths:
       summary: 置顶会话
       tags:
       - 会话
-  /sessions/{session_id}/sandbox/files:
-    post:
-      consumes:
-      - multipart/form-data
-      description: 以 multipart 写入一个新文件，不覆盖已有条目。字段 path 为相对路径，file 为文件本体，上限 16 MiB。
-      parameters:
-      - description: 会话ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 相对目标路径
-        in: formData
-        name: path
-        required: true
-        type: string
-      - description: 文件内容
-        in: formData
-        name: file
-        required: true
-        type: file
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "413":
-          description: Request Entity Too Large
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 上传文件到会话沙箱输出目录
-      tags:
-      - 会话
-  /sessions/{session_id}/steer:
-    post:
-      consumes:
-      - application/json
-      description: 向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。
-      parameters:
-      - description: 会话 ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 追加消息
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/internal_handler_session.SteerMessageRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: queued | new_run
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: 请求参数错误
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: 会话不存在
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "503":
-          description: 活 turn 查询失败，可重试
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 向运行中的对话追加消息
-      tags:
-      - 问答
-  /sessions/{session_id}/steer/{steer_id}/inject:
-    post:
-      description: 把一条 delivery=after 的排队消息改为 inject，运行中的 agent 会在下一轮边界读到它。
-      parameters:
-      - description: 会话 ID
-        in: path
-        name: session_id
-        required: true
-        type: string
-      - description: 排队消息 ID
-        in: path
-        name: steer_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: queued | new_run
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-        "503":
-          description: 活 turn 查询失败，可重试
-          schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
-      security:
-      - Bearer: []
-      - ApiKeyAuth: []
-      summary: 将排队消息改为立即注入
-      tags:
-      - 问答
   /sessions/{session_id}/stop:
     post:
       consumes:
