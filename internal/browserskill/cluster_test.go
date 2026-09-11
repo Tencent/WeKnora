@@ -87,6 +87,11 @@ func TestRequestsRouteToBrowserOwnerAcrossReplicas(t *testing.T) {
 	_, err = follower.Call(ctx, scope, "chat", "navigate", map[string]any{"url": "https://example.com"})
 	require.NoError(t, err)
 	require.Equal(t, status.SessionID, (<-fixture.calls)["session_id"])
+	_, err = follower.Call(ctx, scope, "chat", "click", map[string]any{"ref": "e99"})
+	var rpcErr *RPCError
+	require.ErrorAs(t, err, &rpcErr)
+	require.EqualError(t, err, "not_found: fixture ref missing")
+	require.JSONEq(t, `{"reason":"ref_not_found","effect_state":"none","tab_id":1}`, string(rpcErr.Data))
 	require.NoError(t, follower.Control(ctx, scope, "chat", "pause"))
 	require.True(t, owner.Status(scope, "chat").Paused)
 	require.NoError(t, follower.Focus(ctx, scope, "chat"))

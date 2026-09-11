@@ -86,6 +86,8 @@ type browserLifecycleManager struct {
 	*browserskill.Manager
 	params     map[string]any
 	callErr    error
+	response   json.RawMessage
+	calls      int
 	retained   []bool
 	cleanupErr error
 }
@@ -99,9 +101,16 @@ func (m *browserLifecycleManager) Control(context.Context, browserskill.Scope, s
 }
 
 func (m *browserLifecycleManager) Call(
-	_ context.Context, _ browserskill.Scope, _, _ string, params map[string]any,
+	_ context.Context, _ browserskill.Scope, _ string, method string, params map[string]any,
 ) (json.RawMessage, error) {
 	m.params = params
+	m.calls++
+	if m.response != nil {
+		return m.response, m.callErr
+	}
+	if method == "request_help" {
+		return json.RawMessage(`{"outcome":"continued"}`), m.callErr
+	}
 	return json.RawMessage(`{}`), m.callErr
 }
 

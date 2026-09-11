@@ -1,6 +1,6 @@
 <template>
-  <aside v-if="status.selected" class="browser-task-preview" :aria-label="t('localBrowser.preview')">
-    <div class="preview-heading"><BrowserIcon class="preview-browser-icon" width="20" height="20" /><strong>{{ t('localBrowser.local') }}</strong><span>{{ t(!status.connected ? 'localBrowser.offline' : status.paused ? 'localBrowser.paused' : status.needs_help ? 'localBrowser.needHelp' : status.task_id ? 'localBrowser.connected' : 'localBrowser.waiting') }}</span></div>
+  <aside v-if="status.selected" ref="previewElement" class="browser-task-preview" :class="{ 'is-dragging': dragging }" :style="positionStyle" :aria-label="t('localBrowser.preview')">
+    <div class="preview-heading" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="stopDrag" @pointercancel="stopDrag" @lostpointercapture="stopDrag"><BrowserIcon class="preview-browser-icon" width="20" height="20" /><strong>{{ t('localBrowser.local') }}</strong><span>{{ t(!status.connected ? 'localBrowser.offline' : status.paused ? 'localBrowser.paused' : status.needs_help ? 'localBrowser.needHelp' : status.task_id ? 'localBrowser.connected' : 'localBrowser.waiting') }}</span></div>
     <button class="preview-image" :disabled="!status.connected || !status.task_id || busy" :aria-label="t('localBrowser.locateWindow')" @click="act('focus')">
       <img v-if="preview" :src="preview" :alt="t('localBrowser.preview')" />
       <span v-else>{{ t(status.connected ? 'localBrowser.waiting' : 'localBrowser.reconnectShort') }}</span>
@@ -23,6 +23,9 @@ import { useI18n } from 'vue-i18n'
 import { get, post } from '@/utils/request'
 import { useUIStore } from '@/stores/ui'
 import BrowserIcon from '@/components/icons/BrowserIcon.vue'
+import { useFloatingPreviewDrag } from '@/composables/useFloatingPreviewDrag'
+const previewElement = ref<HTMLElement | null>(null)
+const { positionStyle, dragging, startDrag, moveDrag, stopDrag } = useFloatingPreviewDrag(previewElement)
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n(), uiStore = useUIStore()
 const status = ref({ enabled: false, selected: false, connected: false, paused: false, idle: false, needs_help: false, task_id: '' })
@@ -64,9 +67,9 @@ onMounted(() => { document.addEventListener('visibilitychange', onVisible); void
 onBeforeUnmount(() => { alive = false; document.removeEventListener('visibilitychange', onVisible); revision++; clearTimeout(timer); controller.abort(); preview.value = '' })
 </script>
 <style scoped>
-.browser-task-preview { position: absolute; right: 20px; bottom: 16px; width: 240px; max-width: calc(100% - 40px); z-index: 5; overflow: hidden; background: var(--td-bg-color-container); border: 1px solid var(--td-component-border); border-radius: 12px; box-shadow: 0 4px 20px #0000000d; }
+.browser-task-preview { position: absolute; right: 20px; bottom: 16px; width: 240px; max-width: calc(100% - 40px); max-height: calc(100% - 24px); box-sizing: border-box; z-index: 5; overflow: auto; background: var(--td-bg-color-container); border: 1px solid var(--td-component-border); border-radius: 12px; box-shadow: 0 4px 20px #0000000d; }
 .preview-browser-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
-.preview-heading { display: flex; align-items: center; gap: 7px; padding: 10px 12px; }.preview-heading strong { font-size: 12px; font-weight: 500; flex: 1; }.preview-heading span { color: var(--td-text-color-secondary); font-size: 11px; }
+.preview-heading { display: flex; align-items: center; gap: 7px; padding: 10px 12px; cursor: grab; touch-action: none; user-select: none; position: sticky; top: 0; z-index: 1; background: var(--td-bg-color-container); }.is-dragging .preview-heading { cursor: grabbing; }.preview-heading strong { font-size: 12px; font-weight: 500; flex: 1; }.preview-heading span { color: var(--td-text-color-secondary); font-size: 11px; }
 .preview-image { width: 100%; height: 126px; border: 0; border-block: 1px solid var(--td-component-border); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); display: grid; place-items: center; position: relative; cursor: pointer; padding: 0; font-size: 12px; }.preview-image:disabled { cursor: default; }.preview-image img { width: 100%; height: 100%; object-fit: contain; object-position: top; }.preview-image:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; }.locate { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 8px; padding: 4px 8px; border-radius: 5px; background: var(--td-bg-color-container); color: var(--td-text-color-primary); box-shadow: 0 1px 5px #00000014; }.preview-image:hover .locate { color: var(--td-brand-color); }
 .preview-sync, .preview-help, .preview-scope { font-size: 11px; line-height: 1.5; margin: 6px 12px; color: var(--td-text-color-secondary); }
 .preview-help { color: var(--td-brand-color); }
