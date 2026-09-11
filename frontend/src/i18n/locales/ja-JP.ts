@@ -5131,7 +5131,14 @@ export default {
     authTypeNone: 'なし／カスタムヘッダー',
     authTypeApiKey: 'APIキー／トークン',
     authTypeOAuth: 'OAuth 2.0（初回接続時に認可）',
+    oauthScopes: 'スコープ（任意、スペース区切り）',
+    oauthAuthorization: '認可状態',
+    oauthAuthorized: '認可済み',
     oauthRefreshable: 'トークンの有効期限が切れています。次回利用時に自動的に更新されます',
+    oauthUnauthorized: '未認可',
+    oauthAuthorize: '認可',
+    oauthReauthorize: '再認可',
+    oauthRevoke: '認可を取り消す',
     oauthAuthorizeHint: '「認可」をクリックすると現在の設定を保存してから認可を開始します（ユーザごとに個別に認可します）。',
     apiKeyHeader: 'ヘッダー名',
     apiKeyHeaderDesc: '未入力の場合はX-API-Keyが使われます。Bearerの場合はAuthorizationを指定し、下の値に「Bearer <token>」を入力してください。生トークンを使うサービスではAuthorizationに生トークンを設定します。',
@@ -5152,7 +5159,11 @@ export default {
       updated: 'MCPサービスを更新しました',
       createFailed: 'MCPサービスの作成に失敗しました',
       updateFailed: 'MCPサービスの更新に失敗しました',
-      oauthRequired: 'このサーバはOAuthが必要です。OAuth 2.0に切り替えました。保存してから「認可」をクリックしてください。'
+      oauthRequired: 'このサーバはOAuthが必要です。OAuth 2.0に切り替えました。保存してから「認可」をクリックしてください。',
+      authorized: '認可が完了しました',
+      authorizeFailed: '認可の開始に失敗しました',
+      revoked: '認可を取り消しました',
+      revokeFailed: '認可の取り消しに失敗しました'
     },
     customHeaders: {
       label: 'カスタムヘッダー（任意）',

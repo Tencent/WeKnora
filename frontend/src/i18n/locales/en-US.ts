@@ -5131,7 +5131,14 @@ export default {
     authTypeNone: 'None / Custom Header',
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0 (authorize on first connect)',
+    oauthScopes: 'Scopes (optional, space-separated)',
+    oauthAuthorization: 'Authorization Status',
+    oauthAuthorized: 'Authorized',
     oauthRefreshable: 'Token expired; it will refresh automatically on next use',
+    oauthUnauthorized: 'Unauthorized',
+    oauthAuthorize: 'Authorize',
+    oauthReauthorize: 'Re-authorize',
+    oauthRevoke: 'Revoke',
     oauthAuthorizeHint: 'Clicking "Authorize" saves the current config first, then starts authorization (each user authorizes individually).',
     apiKeyHeader: 'Header Name',
     apiKeyHeaderDesc: 'Defaults to X-API-Key. For Bearer, set Authorization and put "Bearer <token>" in the value below; for raw-token services use Authorization with the raw token.',
@@ -5152,7 +5159,11 @@ export default {
       updated: 'MCP service updated',
       createFailed: 'Failed to create MCP service',
       updateFailed: 'Failed to update MCP service',
-      oauthRequired: 'This server requires OAuth. Switched to OAuth 2.0 — save, then click "Authorize".'
+      oauthRequired: 'This server requires OAuth. Switched to OAuth 2.0 — save, then click "Authorize".',
+      authorized: 'Authorization succeeded',
+      authorizeFailed: 'Failed to start authorization',
+      revoked: 'Authorization revoked',
+      revokeFailed: 'Failed to revoke authorization'
     },
     customHeaders: {
       label: 'Custom Headers (optional)',
