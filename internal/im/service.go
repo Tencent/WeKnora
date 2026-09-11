@@ -2882,13 +2882,29 @@ loop:
 		answer = appendIMAuthNotice(answer, notice)
 	}
 
-	if err := streamer.FinalizeStream(ctx, msg, streamID, finalDisplay); err != nil {
-		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", err)
+	finalizeErr := streamer.FinalizeStream(ctx, msg, streamID, finalDisplay)
+	if finalizeErr != nil {
+		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", finalizeErr)
 	}
 
 	// End the stream
 	if err := streamer.EndStream(ctx, msg, streamID); err != nil {
 		logger.Warnf(ctx, "[IM] EndStream failed: %v", err)
+	}
+
+	// A long answer can outlive the platform's streaming channel (e.g. the WeCom
+	// stream expires after a few minutes), which makes the placeholder
+	// unreplaceable. Re-send the final answer as a plain message so it is not
+	// lost, mirroring the full-output path.
+	var fallbackErr error
+	if finalizeErr != nil {
+		fallbackErr = adapter.SendReply(imOutboundContext(ctx), msg, &ReplyMessage{
+			Content: finalDisplay,
+			IsFinal: true,
+		})
+		if fallbackErr != nil {
+			logger.Errorf(ctx, "[IM] FinalizeStream and plain-reply fallback both failed: %v", fallbackErr)
+		}
 	}
 
 	if answer == "" {
@@ -2901,7 +2917,12 @@ loop:
 		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
 	}
 
-	logger.Infof(ctx, "[IM] Stream reply sent: platform=%s user=%s answer_len=%d", msg.Platform, msg.UserID, len(answer))
+	if finalizeErr == nil || fallbackErr == nil {
+		logger.Infof(
+			ctx, "[IM] Stream reply sent: platform=%s user=%s answer_len=%d",
+			msg.Platform, msg.UserID, len(answer),
+		)
+	}
 	return nil
 }
 
