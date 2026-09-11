@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    searchInstructionsTitle: "ブラウザー検索の指示",
+    searchInstructionsDescription: "使用する検索エンジンと検索 URL を設定します。",
+    searchInstructionsHint: "保存後、次のリクエストから適用。空欄は既定値を使用します。",
+    searchInstructionsReset: "既定値に戻す",
+    searchInstructionsSaved: "保存しました",
+
     "sourceHint": "このターンはローカルブラウザでウェブページを調べ、操作します。ウェブ検索、ナレッジベース、他のツールと併用できます。",
     "pressKey": "キーを押す",
     "hoverPage": "要素にホバー",
@@ -5934,6 +5940,7 @@ export default {
       name: 'エージェントを識別しやすい名前を設定します',
       description: 'エージェントの目的と特徴を簡潔に説明します',
       systemPrompt: 'エージェントの動作と役割を定義するカスタムシステムプロンプト',
+      promptInheritance: "テンプレートの原文は更新に追従し、編集した内容はカスタムプロンプトとして保存されます。エージェントモードでは役割と作業要件を定義します。ツール権限と各ターンの情報源選択は別途制御されます。",
       leaveEmptyDefault: '（空欄の場合はシステムのデフォルトを使用）',
       contextTemplate: '検索した内容をモデルに渡す前の整形方法を定義します',
       model: 'エージェントが使用するLLMを選択します',

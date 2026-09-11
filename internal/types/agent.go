@@ -115,7 +115,7 @@ type AgentConfig struct {
 	SystemPromptWebEnabled  string        `json:"system_prompt_web_enabled,omitempty"`  // Deprecated: Custom prompt when web search is enabled
 	SystemPromptWebDisabled string        `json:"system_prompt_web_disabled,omitempty"` // Deprecated: Custom prompt when web search is disabled
 	UseCustomSystemPrompt   bool          `json:"use_custom_system_prompt"`             // Whether to use custom system prompt instead of default
-	LocalBrowserEnabled     bool          `json:"-"`                                    // Browser source
+	LocalBrowserEnabled     bool          `json:"-"`                                    // Per-turn local_browser capability gate and explicit source selection
 	WebSearchEnabled        bool          `json:"web_search_enabled"`                   // Whether web search tool is enabled
 	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
 	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)

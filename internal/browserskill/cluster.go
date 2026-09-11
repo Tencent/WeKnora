@@ -31,8 +31,9 @@ type (
 )
 
 type clusterResponse struct {
-	Data  json.RawMessage `json:"data,omitempty"`
-	Error string          `json:"error,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	Error    string          `json:"error,omitempty"`
+	RPCError *RPCError       `json:"rpc_error,omitempty"`
 }
 
 func signRPC(secret, timestamp string, body []byte) string {
@@ -147,6 +148,10 @@ func (m *Manager) route(
 	if json.NewDecoder(io.LimitReader(response.Body, maxFrame)).Decode(&result) != nil {
 		return nil, true, errors.New("invalid browser owner response")
 	}
+	if result.RPCError != nil {
+		result.RPCError.BoundDetails()
+		return nil, true, result.RPCError
+	}
 	if result.Error != "" {
 		return nil, true, errors.New(result.Error)
 	}
@@ -237,6 +242,9 @@ func (m *Manager) InternalHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		result.Error = err.Error()
+		if errors.As(err, &result.RPCError) {
+			result.RPCError.BoundDetails()
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)

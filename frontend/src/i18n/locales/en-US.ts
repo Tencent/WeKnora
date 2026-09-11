@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    searchInstructionsTitle: "Browser search instructions",
+    searchInstructionsDescription: "Set your preferred search engine and search URL.",
+    searchInstructionsHint: "Applies to your next request. Leave empty to use the default.",
+    searchInstructionsReset: "Restore default",
+    searchInstructionsSaved: "Saved",
+
     "sourceHint": "Use the local browser to look up and interact with pages this turn, alongside web search, knowledge bases and other tools.",
     "pressKey": "Press key",
     "hoverPage": "Hover over element",
@@ -5934,6 +5940,7 @@ export default {
       name: 'Set an easily identifiable name for the agent',
       description: 'Briefly describe the purpose and features of the agent',
       systemPrompt: 'Custom system prompt to define the agent behavior and role',
+      promptInheritance: "Unchanged template text follows template updates; edited text is saved as a custom prompt. In agent mode, this field defines the role and workflow; tool permissions and per-turn source selections are controlled separately.",
       leaveEmptyDefault: '(leave empty to use system default)',
       contextTemplate: 'Define how retrieved content is formatted before passing to the model',
       model: 'Select the LLM used by the agent',

@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    searchInstructionsTitle: "浏览器搜索指令",
+    searchInstructionsDescription: "设置你偏好的搜索引擎和搜索地址。",
+    searchInstructionsHint: "保存后下次请求生效，留空使用默认指令。",
+    searchInstructionsReset: "恢复默认",
+    searchInstructionsSaved: "已保存",
+
     "sourceHint": "本轮使用本机浏览器查询和操作网页，可与联网搜索、知识库及其他工具配合使用。",
     "pressKey": "按键",
     "hoverPage": "悬停元素",
@@ -1218,6 +1224,7 @@ export default {
       name: '为智能体设置一个易于识别的名称',
       description: '简要描述智能体的用途和特点',
       systemPrompt: '自定义系统提示词，定义智能体的行为和角色',
+      promptInheritance: "保持模板原文时将跟随模板更新；修改后按自定义内容保存。智能推理模式下，这里定义角色和工作要求，工具权限与本轮来源选择由系统单独控制。",
       leaveEmptyDefault: '（留空则使用系统默认）',
       contextTemplate: '定义如何将检索到的内容格式化后传递给模型',
       model: '选择智能体使用的大语言模型',

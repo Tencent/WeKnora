@@ -555,10 +555,7 @@ func (m *Manager) observe(d *device, data []byte) {
 type rpcReply struct {
 	ID     string          `json:"id"`
 	Result json.RawMessage `json:"result"`
-	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
+	Error  *RPCError       `json:"error"`
 }
 
 func rpc(ctx context.Context, d *device, method string, params any) (json.RawMessage, error) {
@@ -596,7 +593,8 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 		return nil, errors.New("invalid BrowserSkill response")
 	}
 	if reply.Error != nil {
-		return nil, fmt.Errorf("%s: %s", reply.Error.Code, reply.Error.Message)
+		reply.Error.BoundDetails()
+		return nil, reply.Error
 	}
 	return reply.Result, nil
 }

@@ -49,11 +49,22 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 		_, err = engine.Execute(ctx, "session", "message", "use my browser and other sources", nil)
 		require.NoError(t, err)
 		for _, name := range []string{
-			"local_browser", tools.ToolKnowledgeSearch, tools.ToolWebSearch, tools.ToolWebFetch, tools.ToolShellExec,
+			tools.ToolKnowledgeSearch, tools.ToolWebSearch, tools.ToolWebFetch, tools.ToolShellExec,
 		} {
 			require.Contains(t, model.lastToolNames, name)
 		}
-		offered = append(offered, model.lastToolNames)
+		if selected {
+			require.Contains(t, model.lastToolNames, "local_browser")
+		} else {
+			require.NotContains(t, model.lastToolNames, "local_browser")
+		}
+		var otherTools []string
+		for _, name := range model.lastToolNames {
+			if name != "local_browser" {
+				otherTools = append(otherTools, name)
+			}
+		}
+		offered = append(offered, otherTools)
 	}
 	require.ElementsMatch(t, offered[0], offered[1], "selecting the browser must not shrink other tool scopes")
 }
@@ -95,4 +106,30 @@ func TestBrowserSourceConfigPreservesOtherSelectionsAndResetsNextTurn(t *testing
 	require.True(t, cfg.WebSearchEnabled)
 	require.True(t, cfg.SkillsEnabled)
 	require.Equal(t, "all", cfg.MCPSelectionMode)
+}
+
+func TestAgentPromptReferencesReachBothRuntimePaths(t *testing.T) {
+	svc := &sessionService{cfg: &config.Config{PromptTemplates: &config.PromptTemplatesConfig{
+		AgentSystemPrompt: []config.PromptTemplate{{ID: "agent", Content: "Latest agent template"}},
+		SystemPrompt:      []config.PromptTemplate{{ID: "normal", Content: "Latest normal template"}},
+		ContextTemplate:   []config.PromptTemplate{{ID: "context", Content: "Latest {{contexts}}"}},
+	}}, webSearchProviderRepo: &sharedAgentWebSearchRepo{}}
+	a := &types.CustomAgent{TenantID: 1, Config: types.CustomAgentConfig{
+		AgentMode: types.AgentModeSmartReasoning, SystemPromptID: "agent", ContextTemplateID: "context",
+	}}
+	req := &types.QARequest{Session: &types.Session{ID: "session", TenantID: 1}, CustomAgent: a}
+	cfg, err := svc.buildAgentConfig(t.Context(), req, &types.Tenant{ID: 1}, 1)
+	require.NoError(t, err)
+	require.Equal(t, "Latest agent template", cfg.SystemPrompt)
+	require.True(t, cfg.UseCustomSystemPrompt)
+	require.Empty(t, a.Config.SystemPrompt)
+	a.Config.AgentMode = types.AgentModeQuickAnswer
+	a.Config.SystemPromptID = "normal"
+	cm := &types.ChatManage{}
+	svc.applyAgentOverridesToChatManage(t.Context(), a, cm)
+	require.Equal(t, "Latest normal template", cm.SummaryConfig.Prompt)
+	require.Equal(t, "Latest {{contexts}}", cm.SummaryConfig.ContextTemplate)
+	a.Config.SystemPrompt = "My custom prompt"
+	svc.applyAgentOverridesToChatManage(t.Context(), a, cm)
+	require.Equal(t, "My custom prompt", cm.SummaryConfig.Prompt)
 }

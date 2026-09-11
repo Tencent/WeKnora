@@ -102,6 +102,14 @@ func connectSharedFixture(
 				result = map[string]any{"returned_tab_ids": []int{}, "return_failures": []any{}}
 			case "tool.snapshot":
 				result = map[string]any{"text": scope.key(), "ref_count": 0, "tab_id": 1}
+			case "tool.click":
+				if f.send(map[string]any{"id": req.ID, "error": map[string]any{
+					"code": "not_found", "message": "fixture ref missing",
+					"data": map[string]any{"reason": "ref_not_found", "effect_state": "none", "tab_id": 1},
+				}}) != nil {
+					return
+				}
+				continue
 			case "tool.navigate":
 				f.calls <- req.Params
 				if req.Params["url"] == "https://slow.example" {

@@ -3376,8 +3376,8 @@ const getImgSrc = (url: string) => {
   }
 
   &.active {
-    background: rgba(16, 185, 129, 0.1);
-    color: #07C05F;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
   }
 
   .image-count {
@@ -3415,8 +3415,8 @@ const getImgSrc = (url: string) => {
   }
 
   &.active {
-    background: rgba(16, 185, 129, 0.1);
-    color: #07C05F;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
   }
 
   .attachment-count {
@@ -3491,10 +3491,10 @@ const getImgSrc = (url: string) => {
 
   &.active {
     color: var(--td-brand-color);
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--td-bg-color-secondarycontainer);
 
     &:hover {
-      background: rgba(16, 185, 129, 0.15);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 
@@ -3527,14 +3527,14 @@ const getImgSrc = (url: string) => {
   position: relative;
 
   &.active {
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--td-bg-color-secondarycontainer);
 
     .websearch-icon {
       color: var(--td-brand-color);
     }
 
     &:hover {
-      background: rgba(16, 185, 129, 0.15);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 
@@ -3561,7 +3561,7 @@ const getImgSrc = (url: string) => {
     }
 
     &.active:hover {
-      background: rgba(16, 185, 129, 0.1);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 }

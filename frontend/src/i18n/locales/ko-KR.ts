@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    searchInstructionsTitle: "브라우저 검색 지침",
+    searchInstructionsDescription: "선호하는 검색 엔진과 검색 URL을 설정합니다.",
+    searchInstructionsHint: "저장 후 다음 요청부터 적용됩니다. 비워 두면 기본값을 사용합니다.",
+    searchInstructionsReset: "기본값 복원",
+    searchInstructionsSaved: "저장됨",
+
     "sourceHint": "이번 요청에서 로컬 브라우저로 웹페이지를 조회하고 조작합니다. 웹 검색, 지식 베이스 및 다른 도구와 함께 사용할 수 있습니다.",
     "pressKey": "키 누르기",
     "hoverPage": "요소에 마우스 올리기",
@@ -1216,6 +1222,7 @@ export default {
       name: '에이전트를 쉽게 식별할 수 있는 이름을 설정하세요',
       description: '에이전트의 용도와 특징을 간단히 설명하세요',
       systemPrompt: '에이전트의 동작과 역할을 정의하는 사용자 정의 시스템 프롬프트',
+      promptInheritance: "템플릿 원문은 업데이트를 따르며, 수정한 내용은 사용자 지정 프롬프트로 저장됩니다. 에이전트 모드에서 역할과 작업 요구사항을 정의하며, 도구 권한과 각 요청의 소스 선택은 별도로 제어됩니다.",
       leaveEmptyDefault: '(비워두면 시스템 기본값 사용)',
       contextTemplate: '검색된 콘텐츠를 모델에 전달하기 전에 형식을 정의합니다',
       model: '에이전트가 사용할 대규모 언어 모델을 선택하세요',

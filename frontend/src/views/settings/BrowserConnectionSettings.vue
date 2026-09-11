@@ -92,6 +92,8 @@
         </div>
       </article>
 
+      <BrowserSearchPreferences />
+
       <section class="usage" :aria-label="t('localBrowser.usageTitle')">
         <h3>{{ t('localBrowser.usageTitle') }}</h3>
         <ol>
@@ -133,6 +135,7 @@ import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post, getDown } from '@/utils/request'
 import browserLogo from '@/assets/browserskill/logo.png'
+import BrowserSearchPreferences from './BrowserSearchPreferences.vue'
 interface Device { id: string; label: string; last_seen_at: string }
 interface Connection { enabled: boolean; connected: boolean; device?: Device; extension_available: boolean }
 const { t, locale } = useI18n()
