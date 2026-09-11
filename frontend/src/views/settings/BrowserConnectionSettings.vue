@@ -1,37 +1,132 @@
 <template>
-  <section class="browser-settings">
-    <header><h2>{{ t('localBrowser.settingsTitle') }}</h2><p>{{ t('localBrowser.settingsDescription') }}</p></header>
+  <div class="browser-settings">
+    <div class="section-header">
+      <h2>{{ t('localBrowser.settingsTitle') }}</h2>
+      <p class="section-description">{{ t('localBrowser.settingsDescription') }}</p>
+    </div>
+
     <p v-if="error || refreshError" class="error" role="alert">{{ error || refreshError }}</p>
-    <t-skeleton v-if="!loaded && !refreshError" animation="gradient" :row-col="[{ width: '100%', height: '112px', type: 'rect' }]" />
-    <p v-else-if="loaded && !status.enabled" class="hint">{{ t('localBrowser.unavailable') }}</p>
+    <t-skeleton v-if="!loaded && !refreshError" animation="gradient"
+      :row-col="[{ width: '100%', height: '132px', type: 'rect' }]" />
+    <p v-else-if="loaded && !status.enabled" class="empty-hint">{{ t('localBrowser.unavailable') }}</p>
+
     <template v-else-if="loaded">
       <article class="connection-card">
-        <div class="connection-heading">
-          <img :src="browserLogo" alt="BrowserSkill" width="44" height="44" />
-          <div class="product"><strong>BrowserSkill</strong><span>{{ t('localBrowser.productDescription') }}</span></div>
-          <span class="state" :class="{ online: status.connected }"><i />{{ t(status.connected ? 'localBrowser.connected' : status.device ? 'localBrowser.offline' : 'localBrowser.notPaired') }}</span>
+        <div class="product-row">
+          <img class="product-logo" :src="browserLogo" width="44" height="44" alt="BrowserSkill" />
+          <div class="product-copy">
+            <div class="product-heading">
+              <div class="product-name">
+                <strong>BrowserSkill</strong>
+                <a class="product-link" href="https://github.com/Tencent/BrowserSkill" target="_blank"
+                  rel="noopener noreferrer" aria-label="BrowserSkill">
+                  <t-icon name="jump" size="14px" />
+                </a>
+              </div>
+              <span class="status-pill" :class="{ online: status.connected, idle: !status.connected && status.device }">
+                <i />{{ t(status.connected ? 'localBrowser.connected' : status.device ? 'localBrowser.offline' : 'localBrowser.notPaired') }}
+              </span>
+            </div>
+            <p class="product-desc">{{ t('localBrowser.productDescription') }}</p>
+          </div>
         </div>
+
         <template v-if="status.device">
-          <div class="device-details"><strong>{{ status.device.label }}</strong><span>{{ t('localBrowser.lastSeen') }} {{ formatDate(status.device.last_seen_at) }}</span></div>
-          <p class="hint">{{ t(status.connected ? 'localBrowser.readyHint' : 'localBrowser.reconnectHint') }}</p>
-          <div class="device-actions"><t-button theme="default" variant="outline" size="small" :disabled="busy" @click="disconnect">{{ t('localBrowser.revoke') }}</t-button><t-button theme="default" variant="text" size="small" :disabled="busy" @click="pair">{{ t('localBrowser.replaceDevice') }}</t-button></div>
+          <div class="device-block">
+            <div class="device-meta">
+              <strong>{{ status.device.label }}</strong>
+              <span>{{ t('localBrowser.lastSeen') }} {{ formatDate(status.device.last_seen_at) }}</span>
+            </div>
+            <p v-if="!status.connected" class="device-hint">{{ t('localBrowser.reconnectHint') }}</p>
+            <div class="device-actions">
+              <t-popconfirm theme="warning" :content="t('localBrowser.revokeConfirm')"
+                :confirm-btn="{ content: t('localBrowser.revoke'), theme: 'danger' }"
+                :cancel-btn="{ content: t('common.cancel') }" placement="bottom" @confirm="disconnect">
+                <t-button theme="default" variant="outline" size="small" :disabled="busy">
+                  <template #icon><t-icon name="rollback" /></template>
+                  {{ t('localBrowser.revoke') }}
+                </t-button>
+              </t-popconfirm>
+              <t-button theme="default" variant="outline" size="small" :disabled="busy" @click="pair">
+                <template #icon><t-icon name="refresh" /></template>
+                {{ t('localBrowser.replaceDevice') }}
+              </t-button>
+            </div>
+          </div>
         </template>
-        <template v-else>
-          <ol class="setup-steps">
-            <li><span class="step">1</span><div><strong>{{ t('localBrowser.installExtension') }}</strong><p>{{ t('localBrowser.installHint') }}</p></div><t-button theme="default" variant="outline" size="small" :disabled="!status.extension_available || downloading" @click="download">{{ t('localBrowser.downloadExtension') }}</t-button></li>
-            <li><span class="step">2</span><div><strong>{{ t('localBrowser.pairBrowser') }}</strong><p>{{ t('localBrowser.pairHint') }}</p></div><t-button theme="primary" size="small" :disabled="busy" @click="pair">{{ t(copied ? 'localBrowser.copyAgain' : 'localBrowser.copyPairing') }}</t-button></li>
-          </ol>
-          <p v-if="!status.extension_available" class="hint package-hint">{{ t('localBrowser.packageUnavailable') }}</p>
-        </template>
+
+        <ol v-else class="setup-steps">
+          <li>
+            <span class="step-index">1</span>
+            <div class="step-copy">
+              <strong>{{ t('localBrowser.installExtension') }}</strong>
+              <p>{{ t('localBrowser.installHint') }}</p>
+            </div>
+            <t-button theme="default" variant="outline" size="small"
+              :disabled="!status.extension_available || downloading" @click="download">
+              <template #icon><t-icon name="download" /></template>
+              {{ t('localBrowser.downloadExtension') }}
+            </t-button>
+          </li>
+          <li>
+            <span class="step-index">2</span>
+            <div class="step-copy">
+              <strong>{{ t('localBrowser.pairBrowser') }}</strong>
+              <p>{{ t('localBrowser.pairHint') }}</p>
+            </div>
+            <t-button theme="primary" size="small" :disabled="busy" @click="pair">
+              <template #icon><t-icon name="file-copy" /></template>
+              {{ t(copied ? 'localBrowser.copyAgain' : 'localBrowser.copyPairing') }}
+            </t-button>
+          </li>
+        </ol>
+        <p v-if="!status.device && !status.extension_available" class="package-hint">
+          {{ t('localBrowser.packageUnavailable') }}
+        </p>
+
         <div v-if="pairing" class="pairing-feedback" role="status">
-          <t-icon name="check-circle" size="16px" /><span>{{ t(copyFallback ? 'localBrowser.manualCopy' : 'localBrowser.pairingReady') }}</span>
-          <input v-if="copyFallback" type="password" readonly :value="pairing" :aria-label="t('localBrowser.copyPairing')" @focus="($event.target as HTMLInputElement).select()" />
+          <t-icon name="check-circle-filled" size="16px" />
+          <span>{{ t(copyFallback ? 'localBrowser.manualCopy' : 'localBrowser.pairingReady') }}</span>
+          <input v-if="copyFallback" type="password" readonly :value="pairing"
+            :aria-label="t('localBrowser.copyPairing')" @focus="($event.target as HTMLInputElement).select()" />
         </div>
       </article>
-      <div class="usage-notes"><p><t-icon name="check-circle" />{{ t('localBrowser.connectionNote') }}</p><p><t-icon name="pause-circle" />{{ t('localBrowser.resumeNote') }}</p><p><t-icon name="secured" />{{ t('localBrowser.privacyNote') }}</p></div>
-      <details class="help"><summary>{{ t('localBrowser.installHelp') }}</summary><p>{{ t('localBrowser.installSteps') }}</p><a href="https://github.com/Tencent/BrowserSkill" target="_blank" rel="noopener noreferrer">BrowserSkill <t-icon name="jump" size="13px" /></a></details>
+
+      <section class="usage" :aria-label="t('localBrowser.usageTitle')">
+        <h3>{{ t('localBrowser.usageTitle') }}</h3>
+        <ol>
+          <li>
+            <span class="usage-index">1</span>
+            <div class="usage-copy">
+              <strong>{{ t('localBrowser.usageStep1Title') }}</strong>
+              <p>{{ t('localBrowser.usageStep1Text') }}</p>
+            </div>
+          </li>
+          <li>
+            <span class="usage-index">2</span>
+            <div class="usage-copy">
+              <strong>{{ t('localBrowser.usageStep2Title') }}</strong>
+              <p>{{ t('localBrowser.usageStep2Text') }}</p>
+            </div>
+          </li>
+          <li>
+            <span class="usage-index">3</span>
+            <div class="usage-copy">
+              <strong>{{ t('localBrowser.usageStep3Title') }}</strong>
+              <p>{{ t('localBrowser.usageStep3Text') }}</p>
+            </div>
+          </li>
+          <li>
+            <span class="usage-index">4</span>
+            <div class="usage-copy">
+              <strong>{{ t('localBrowser.usageStep4Title') }}</strong>
+              <p>{{ t('localBrowser.usageStep4Text') }}</p>
+            </div>
+          </li>
+        </ol>
+      </section>
     </template>
-  </section>
+  </div>
 </template>
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
@@ -100,18 +195,363 @@ async function download() {
 onMounted(() => { void refresh() })
 onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); clearPairing() })
 </script>
-<style scoped>
-.browser-settings { max-width: 800px; color: var(--td-text-color-primary); }
-header { margin-bottom: 24px; } h2 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
-header p, .hint { color: var(--td-text-color-secondary); font-size: 13px; line-height: 1.65; margin: 0; }
-.connection-card { border: 1px solid var(--td-component-border); border-radius: 12px; padding: 22px 24px; background: var(--td-bg-color-container); }
-.connection-heading { display: flex; align-items: center; gap: 12px; }
-.product { flex: 1; display: grid; gap: 5px; }.product strong { font-size: 16px; font-weight: 600; }.product span { font-size: 12px; color: var(--td-text-color-secondary); }
-.state { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--td-text-color-secondary); }.state i { width: 6px; height: 6px; border-radius: 50%; background: var(--td-text-color-placeholder); }.state.online { color: var(--td-success-color); }.state.online i { background: currentColor; }
-.setup-steps { list-style: none; margin: 22px 0 0; padding: 0; border-top: 1px solid var(--td-component-border); }.setup-steps li { display: flex; align-items: center; gap: 12px; padding-top: 20px; }.step { width: 24px; height: 24px; display: grid; place-items: center; background: var(--td-bg-color-secondarycontainer); border-radius: 50%; font-size: 12px; color: var(--td-text-color-secondary); flex-shrink: 0; }.setup-steps li div { flex: 1; }.setup-steps strong { font-size: 13px; font-weight: 500; }.setup-steps p { font-size: 12px; line-height: 1.6; color: var(--td-text-color-secondary); margin: 5px 0 0; }
-.device-details { margin: 22px 0 8px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }.device-details strong { font-size: 13px; font-weight: 500; }.device-details span { font-size: 12px; color: var(--td-text-color-placeholder); }.device-actions { display: flex; gap: 8px; margin-top: 18px; }
-.pairing-feedback { margin-top: 18px; padding: 10px 12px; background: var(--td-success-color-1); border-radius: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--td-text-color-primary); font-size: 12px; }.pairing-feedback :deep(.t-icon) { color: var(--td-success-color); } input { width: 100%; padding: 8px; border: 1px solid var(--td-component-border); border-radius: 5px; background: var(--td-bg-color-container); }
-.usage-notes { padding: 12px 2px 0; }.usage-notes p { display: flex; align-items: start; gap: 8px; margin: 12px 0; font-size: 12px; line-height: 1.65; color: var(--td-text-color-secondary); }.usage-notes :deep(.t-icon) { margin-top: 3px; flex-shrink: 0; }
-.help { margin-top: 18px; font-size: 12px; color: var(--td-text-color-secondary); }.help summary { cursor: pointer; width: fit-content; }.help p { line-height: 1.8; max-width: 66ch; }.help a { color: var(--td-brand-color); text-decoration: none; }.package-hint { margin-top: 12px; font-size: 12px; }.error { color: var(--td-error-color); font-size: 13px; }
-@media(max-width:600px){.connection-card { padding: 18px; }.setup-steps li { flex-wrap: wrap; }.setup-steps li :deep(.t-button) { margin-left: 36px; }.state { align-self: start; }}
+<style lang="less" scoped>
+.browser-settings {
+  width: 100%;
+}
+
+.section-header {
+  margin-bottom: 24px;
+
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+    margin: 0 0 8px 0;
+  }
+
+  .section-description {
+    font-size: 14px;
+    color: var(--td-text-color-secondary);
+    margin: 0;
+    line-height: 1.6;
+  }
+}
+
+.connection-card {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 12px;
+  padding: 20px;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.product-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.product-logo {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  object-fit: cover;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.08),
+    0 6px 16px rgba(234, 88, 12, 0.16);
+}
+
+.product-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.product-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.product-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+
+  strong {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 24px;
+    color: var(--td-text-color-primary);
+  }
+}
+
+.product-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-placeholder);
+  line-height: 1;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-text-color-primary);
+  }
+}
+
+.product-desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  flex-shrink: 0;
+
+  i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.55;
+  }
+
+  &.idle {
+    color: var(--td-warning-color);
+    background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
+  }
+
+  &.online {
+    color: var(--td-success-color);
+    background: color-mix(in srgb, var(--td-success-color) 12%, transparent);
+
+    i {
+      opacity: 1;
+    }
+  }
+}
+
+.device-block,
+.setup-steps {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--td-component-stroke);
+}
+
+.device-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+
+  strong {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  span {
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.device-hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--td-text-color-secondary);
+}
+
+.device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.connection-card :deep(.t-button--variant-outline.t-button--theme-default) {
+  &:hover,
+  &:focus-visible,
+  &:active {
+    color: var(--td-text-color-primary);
+    border-color: var(--td-component-border);
+    background-color: var(--td-bg-color-container-hover);
+  }
+}
+
+.setup-steps {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setup-steps li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.step-index {
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.step-copy {
+  flex: 1;
+  min-width: 0;
+
+  strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.package-hint,
+.empty-hint {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--td-text-color-secondary);
+}
+
+.pairing-feedback {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--td-success-color) 10%, transparent);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--td-text-color-primary);
+  font-size: 12px;
+  line-height: 1.55;
+
+  :deep(.t-icon) {
+    color: var(--td-success-color);
+  }
+
+  input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid var(--td-component-border);
+    border-radius: 6px;
+    background: var(--td-bg-color-container);
+  }
+}
+
+.usage {
+  margin-top: 28px;
+
+  h3 {
+    margin: 0 0 16px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    position: relative;
+    padding-bottom: 18px;
+
+    &:last-child {
+      padding-bottom: 0;
+    }
+
+    &:not(:last-child)::before {
+      content: '';
+      position: absolute;
+      left: 10px;
+      top: 22px;
+      bottom: 0;
+      width: 1px;
+      background: var(--td-component-stroke);
+    }
+  }
+}
+
+.usage-index {
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 1;
+}
+
+.usage-copy {
+  flex: 1;
+  min-width: 0;
+  padding-top: 1px;
+
+  strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  p {
+    margin: 4px 0 0;
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.error {
+  color: var(--td-error-color);
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+@media (max-width: 600px) {
+  .setup-steps li {
+    flex-wrap: wrap;
+  }
+
+  .setup-steps li :deep(.t-button) {
+    margin-left: 34px;
+  }
+
+  .status-pill {
+    margin-left: 0;
+  }
+
+  .product-heading {
+    flex-wrap: wrap;
+  }
+}
 </style>
