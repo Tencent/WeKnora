@@ -58,6 +58,8 @@ spec:
               value: "postgres"
             - name: DB_PORT
               value: "5432"
+            - name: DB_SSLMODE
+              value: {{ .Values.app.env.DB_SSLMODE | default "disable" | quote }}
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
