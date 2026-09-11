@@ -13,15 +13,25 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+type browserTaskManager interface {
+	GetStatus(context.Context, browserskill.Scope, string) (browserskill.Status, error)
+	Account(context.Context, browserskill.Scope) (browserskill.AccountStatus, error)
+	Control(context.Context, browserskill.Scope, string, string) error
+	Call(context.Context, browserskill.Scope, string, string, map[string]any) (json.RawMessage, error)
+	FinishTurn(context.Context, browserskill.Scope, string, bool) error
+}
+
 // BrowserSkillTool binds native browser commands to one member and conversation.
 type BrowserSkillTool struct {
 	BaseTool
-	manager    *browserskill.Manager
+	manager    browserTaskManager
 	scope      browserskill.Scope
 	session    string
 	prepare    sync.Once
 	prepareErr error
 	used       atomic.Bool
+	keepOpen   atomic.Bool
+	failed     atomic.Bool
 }
 
 // NewBrowserSkillTool creates a session-bound adapter to upstream RPC.
@@ -39,6 +49,12 @@ across server restarts; the extension reconnects automatically. The conversation
 users click it to locate their task tab or resume an interrupted task. Never tell users to open a
 browser drawer. If unpaired, ask the user to connect there. If paused or disconnected, ask the user to
 reconnect/resume; never bypass this through a sandbox browser or replay interrupted mutations.
+Task pages are temporary: successful turns automatically close task-created tabs and return borrowed
+user tabs without closing them. For a page the user wants left open, a deliverable, or an unfinished
+login/form workflow, set keep_open:true on a call. This retains the whole task for this turn. Do not
+retain routine search/source pages. request_help retains the task automatically; after the human step
+is resolved and no pages need to remain open, set keep_open:false on a subsequent call. Retention must
+be specified again in each later turn that needs it. Failed, paused or cancelled work keeps its pages.
 Put all arguments alongside method at the top level.
 Examples: navigate {url}, observe {}, snapshot {}, click {ref},
 fill {ref,value}, press {key}, tab_list {scope:"user"}, tab_create {url}, tab_select {tab_id}, tab_borrow
@@ -71,6 +87,7 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 		return nil, errors.New("local browser owner mismatch")
 	}
 	if err := t.ValidateArguments(args); err != nil {
+		t.failed.Store(true)
 		return &types.ToolResult{Success: false, Error: "Invalid browser arguments: " + err.Error()}, nil
 	}
 	var input map[string]any
@@ -79,11 +96,20 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 	method := input["method"].(string)
 	delete(input, "method")
+	if keep, supplied := input["keep_open"].(bool); supplied {
+		t.keepOpen.Store(keep)
+	}
+	delete(input, "keep_open")
+	if method == "request_help" {
+		t.keepOpen.Store(true)
+	}
 	status, err := t.manager.GetStatus(ctx, t.scope, t.session)
 	if err != nil {
+		t.failed.Store(true)
 		return &types.ToolResult{Success: false, Error: err.Error()}, nil
 	}
 	if !status.Connected {
+		t.failed.Store(true)
 		account, err := t.manager.Account(ctx, t.scope)
 		if err != nil {
 			return &types.ToolResult{
@@ -109,25 +135,28 @@ func (t *BrowserSkillTool) Execute(ctx context.Context, args json.RawMessage) (*
 	// call from the same turn; a new user turn can begin a new browser task.
 	t.prepare.Do(func() { t.prepareErr = t.manager.Control(ctx, t.scope, t.session, "select") })
 	if t.prepareErr != nil {
+		t.failed.Store(true)
 		return &types.ToolResult{Success: false, Error: t.prepareErr.Error()}, nil
 	}
 	t.used.Store(true)
 	result, err := t.manager.Call(ctx, t.scope, t.session, method, input)
 	if err != nil {
+		t.failed.Store(true)
 		return &types.ToolResult{Success: false, Error: err.Error(), Output: err.Error()}, nil
 	}
 	return &types.ToolResult{Success: true, Output: string(result)}, nil
 }
 
-// Cleanup releases Chrome's debugger at turn end while retaining the task tabs.
+// Cleanup reclaims successful temporary tasks; unfinished work retains its pages.
 // Execute can exit with a cancelled context; cleanup must still reach the extension.
 func (t *BrowserSkillTool) Cleanup(ctx context.Context) {
 	if !t.used.Swap(false) {
 		return
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 6*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	if err := t.manager.Idle(cleanupCtx, t.scope, t.session); err != nil {
-		logger.Warnf(cleanupCtx, "Failed to release local browser control: %v", err)
+	if err := t.manager.FinishTurn(cleanupCtx, t.scope, t.session,
+		t.keepOpen.Load() || t.failed.Load() || ctx.Err() != nil); err != nil {
+		logger.Warnf(cleanupCtx, "Failed to clean up local browser task: %v", err)
 	}
 }

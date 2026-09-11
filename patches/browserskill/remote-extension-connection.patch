@@ -1663,10 +1663,10 @@ index 0000000..3fbcce5
 +}
 diff --git a/apps/extension/src/session-manager/__tests__/task-popups.test.ts b/apps/extension/src/session-manager/__tests__/task-popups.test.ts
 new file mode 100644
-index 0000000..6905611
+index 0000000..ce40618
 --- /dev/null
 +++ b/apps/extension/src/session-manager/__tests__/task-popups.test.ts
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,135 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { SessionManager } from "../manager";
 +import { withTaskPopups } from "../task-popups";
@@ -1705,6 +1705,7 @@ index 0000000..6905611
 +        return Object.assign(tabs.get(id), props);
 +      }),
 +      group: vi.fn(async () => 7),
++      ungroup: vi.fn(async (id: number) => { tabs.get(id).groupId = -1; }),
 +      move: vi.fn(async (id: number, props: any) => Object.assign(tabs.get(id), props)),
 +      remove: vi.fn(async (id: number) => {
 +        tabs.delete(id);
@@ -1803,10 +1804,10 @@ index 0000000..6905611
 +});
 diff --git a/apps/extension/src/session-manager/__tests__/task-tabs.test.ts b/apps/extension/src/session-manager/__tests__/task-tabs.test.ts
 new file mode 100644
-index 0000000..cb9e6c3
+index 0000000..6b65d8a
 --- /dev/null
 +++ b/apps/extension/src/session-manager/__tests__/task-tabs.test.ts
-@@ -0,0 +1,167 @@
+@@ -0,0 +1,201 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { enforceAgentWindow, resolveTargetTab } from "@/tools/shared";
 +import {
@@ -1843,7 +1844,11 @@ index 0000000..cb9e6c3
 +        tabs.delete(id);
 +      }),
 +      move: vi.fn(),
-+      group: vi.fn(async () => 7),
++      group: vi.fn(async ({ tabIds }: { tabIds: number[] }) => {
++        for (const tabId of tabIds) tabs.get(tabId).groupId = 7;
++        return 7;
++      }),
++      ungroup: vi.fn(async (tabId: number) => { tabs.get(tabId).groupId = -1; }),
 +    };
 +    vi.stubGlobal("chrome", {
 +      tabs: api,
@@ -1862,6 +1867,8 @@ index 0000000..cb9e6c3
 +    const task = await manager.start("visible");
 +    expect(chrome.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: true }));
 +    expect(task).toMatchObject({ taskWindow: true, tabMode: true, agentWindowId: 20 });
++    expect(task.taskGroupId).toBeUndefined();
++    expect(api.group).not.toHaveBeenCalled();
 +    const home = task.activeTabId!;
 +    await handleTabCreate(manager, { session_id: task.sessionId }, { tabs: api });
 +    expect(api.create).toHaveBeenLastCalledWith(expect.objectContaining({ windowId: 20, active: true }));
@@ -1890,11 +1897,14 @@ index 0000000..cb9e6c3
 +  });
 +  it("cleans up only its own tab when visible-window startup fails", async () => {
 +    manager = new SessionManager({ taskTabs: () => true, taskWindow: () => true });
-+    api.group.mockImplementationOnce(async () => {
++    const controller = new AbortController();
++    chrome.windows.create = vi.fn(async () => {
++      const home = await api.create({ windowId: 20, active: true });
 +      tabs.set(99, { id: 99, windowId: 20 });
-+      throw new Error("group failed");
++      controller.abort();
++      return { id: 20, tabs: [home], focused: true, alwaysOnTop: false, incognito: false };
 +    });
-+    await expect(manager.start("failed")).rejects.toThrow("group failed");
++    await expect(manager.start("failed", { signal: controller.signal })).rejects.toThrow();
 +    expect([...tabs.keys()].sort()).toEqual([1, 99]);
 +    expect(chrome.windows.remove).not.toHaveBeenCalled();
 +  });
@@ -1922,6 +1932,31 @@ index 0000000..cb9e6c3
 +    expect(tabs.has(1)).toBe(true);
 +    expect(tabs.has(b.activeTabId!)).toBe(true);
 +    expect(chrome.windows.remove).not.toHaveBeenCalled();
++  });
++  it("ungroups owned tabs before closing and preserves user tabs in the same group", async () => {
++    const task = await manager.start("cleanup");
++    const owned = task.activeTabId!;
++    tabs.set(99, { id: 99, windowId: 10, groupId: task.taskGroupId });
++    await manager.stop(task.sessionId);
++    expect(api.ungroup).toHaveBeenCalledExactlyOnceWith(owned);
++    expect(api.ungroup.mock.invocationCallOrder[0]).toBeLessThan(api.remove.mock.invocationCallOrder[0]);
++    expect(tabs.get(99).groupId).toBe(7);
++    expect(tabs.has(1)).toBe(true);
++  });
++  it("ungroups the startup tab if labeling the group fails", async () => {
++    vi.mocked(chrome.tabGroups.update).mockRejectedValueOnce(new Error("label failed"));
++    await expect(manager.start("failed-label")).rejects.toThrow("label failed");
++    expect(api.ungroup).toHaveBeenCalledTimes(1);
++    expect([...tabs.keys()]).toEqual([1]);
++  });
++  it("keeps failed cleanup retryable instead of reporting the task stopped", async () => {
++    const task = await manager.start("retry");
++    api.ungroup.mockRejectedValueOnce(new Error("busy"));
++    await expect(manager.stop(task.sessionId)).rejects.toThrow("busy");
++    expect(manager.get(task.sessionId)).toBe(task);
++    expect(api.remove).not.toHaveBeenCalled();
++    await manager.stop(task.sessionId);
++    expect(manager.get(task.sessionId)).toBeNull();
 +  });
 +  it("selects task tabs logically without activating the user tab bar", async () => {
 +    const task = await manager.start("task-a");
@@ -2064,7 +2099,7 @@ index 5afe53c..7709ba3 100644
  
    events.addListener(onRemoved);
 diff --git a/apps/extension/src/session-manager/manager.ts b/apps/extension/src/session-manager/manager.ts
-index 97982e3..b5f496c 100644
+index 97982e3..f62e500 100644
 --- a/apps/extension/src/session-manager/manager.ts
 +++ b/apps/extension/src/session-manager/manager.ts
 @@ -4,6 +4,13 @@ import { RefStore } from "./ref-store";
@@ -2136,7 +2171,7 @@ index 97982e3..b5f496c 100644
      }
    }
  
-@@ -198,6 +219,73 @@ export class SessionManager {
+@@ -198,6 +219,78 @@ export class SessionManager {
      }
      throwIfSessionStartAborted(opts.signal);
  
@@ -2179,12 +2214,17 @@ index 97982e3..b5f496c 100644
 +      if (home.id === undefined) throw new Error("Could not create task tab");
 +      try {
 +        throwIfSessionStartAborted(opts.signal);
-+        const groupId = await chrome.tabs.group({ tabIds: [home.id] });
-+        await chrome.tabGroups.update(groupId, {
-+          title: this.taskLabel().slice(0, 48),
-+          color: "green",
-+          collapsed: false,
-+        });
++        // A dedicated window already groups the task visually. Avoid creating
++        // another Chrome group that can be auto-saved to the bookmarks bar.
++        let groupId: number | undefined;
++        if (!dedicated) {
++          groupId = await chrome.tabs.group({ tabIds: [home.id] });
++          await chrome.tabGroups.update(groupId, {
++            title: this.taskLabel().slice(0, 48),
++            color: "green",
++            collapsed: false,
++          });
++        }
 +        throwIfSessionStartAborted(opts.signal);
 +        const ctx: SessionContext = {
 +          sessionId,
@@ -2203,14 +2243,14 @@ index 97982e3..b5f496c 100644
 +      } catch (err) {
 +        // Only remove our tab: a user may have moved other tabs into the window
 +        // while startup was in progress. Chrome closes an empty window itself.
-+        await chrome.tabs.remove(home.id);
++        await this.closeTaskTab(home.id);
 +        throw err;
 +      }
 +    }
      let windowId: number | null = null;
      try {
        const { signal: _signal, ...createOptions } = opts;
-@@ -246,10 +334,21 @@ export class SessionManager {
+@@ -246,13 +339,35 @@ export class SessionManager {
      const ctx = this.sessions.get(sessionId);
      if (!ctx) return null;
      if (!options.dropOnly) {
@@ -2219,12 +2259,7 @@ index 97982e3..b5f496c 100644
 +      if (ctx.tabMode) {
 +        // Never close the shared user window, even when queries/cleanup fail.
 +        for (const tabId of ctx.agentCreatedTabs) {
-+          try {
-+            await chrome.tabs.get(tabId);
-+          } catch {
-+            continue;
-+          }
-+          await chrome.tabs.remove(tabId);
++          await this.closeTaskTab(tabId);
 +        }
 +      } else await this.agentWindow.remove(ctx.agentWindowId);
      }
@@ -2234,6 +2269,25 @@ index 97982e3..b5f496c 100644
      return ctx;
    }
  
++  private async closeTaskTab(tabId: number): Promise<void> {
++    let tab: chrome.tabs.Tab;
++    try {
++      tab = await chrome.tabs.get(tabId);
++    } catch {
++      return;
++    }
++    // Remove only owned tabs from their group before closing. Closing a
++    // saved group directly can keep it in Chrome's saved-group menu.
++    // Never ungroup the whole group: the user may have added their tabs.
++    if (tab.groupId !== undefined && tab.groupId >= 0) {
++      await chrome.tabs.ungroup(tabId);
++    }
++    await chrome.tabs.remove(tabId);
++  }
++
+   /**
+    * Best-effort cleanup of every live session (emergency brake / SW
+    * shutdown). Returns the set of `session_id`s that were removed.
 diff --git a/apps/extension/src/session-manager/task-popups.ts b/apps/extension/src/session-manager/task-popups.ts
 new file mode 100644
 index 0000000..c089468

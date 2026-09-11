@@ -51,6 +51,10 @@ const browserToolParameters = `{
         "request_help"
       ]
     },
+    "keep_open": {
+      "type": "boolean",
+      "description": "Keep this task open after the turn for a deliverable or human step. Default false."
+    },
     "debug_surfaces": {
       "type": "boolean"
     },
@@ -563,7 +567,7 @@ func (t *BrowserSkillTool) ValidateArguments(args json.RawMessage) error {
 		return fmt.Errorf("unsupported browser method %q", method)
 	}
 	for name := range input {
-		if name != "method" && !slices.Contains(rule.fields, name) {
+		if name != "method" && name != "keep_open" && !slices.Contains(rule.fields, name) {
 			return fmt.Errorf("%s does not accept argument %q", method, name)
 		}
 	}

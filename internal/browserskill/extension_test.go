@@ -294,7 +294,7 @@ func TestRealExtension(t *testing.T) {
 		}
 	}
 	taskID := m.Status(scope, "chat").SessionID
-	if err = m.Idle(ctx, scope, "chat"); err != nil {
+	if err = m.FinishTurn(ctx, scope, "chat", true); err != nil {
 		t.Fatal(err)
 	}
 	if status := m.Status(scope, "chat"); !status.Idle || status.SessionID != taskID {
@@ -376,20 +376,42 @@ func TestRealExtension(t *testing.T) {
 		}
 	}
 	checkBackground()
-	if err = m.Control(ctx, scope, "parallel", "stop"); err != nil {
+	if err = m.FinishTurn(ctx, scope, "parallel", false); err != nil {
 		t.Fatal(err)
 	}
-	if err = m.Control(ctx, scope, "chat", "stop"); err != nil {
+	if err = m.FinishTurn(ctx, scope, "chat", false); err != nil {
 		t.Fatal(err)
 	}
 	checkDetached()
-	_, _ = io.WriteString(input, "check-cleanup\n")
-	select {
-	case line := <-hostLines:
-		if line != `{"cleaned":true}` {
-			t.Fatalf("browser task leaked tabs: %s", line)
+	checkCleanup := func() {
+		t.Helper()
+		_, _ = io.WriteString(input, "check-cleanup\n")
+		select {
+		case line := <-hostLines:
+			if line != `{"cleaned":true}` {
+				t.Fatalf("browser task leaked tabs or groups: %s", line)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
 		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+	}
+	checkCleanup()
+	// Repeated successful turns must return to the original user tabs, with
+	// no live task groups left over. The next turn can start without Resume.
+	for round := range 3 {
+		t.Logf("automatic cleanup round %d", round+1)
+		if err = m.Control(ctx, scope, "chat", "select"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = call(ctx, scope, "chat", "tab_create", map[string]any{"url": fixture.URL}); err != nil {
+			t.Fatal(err)
+		}
+		if err = m.FinishTurn(ctx, scope, "chat", false); err != nil {
+			t.Fatal(err)
+		}
+		checkCleanup()
 	}
 }

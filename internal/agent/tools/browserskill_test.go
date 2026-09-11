@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/browserskill"
@@ -77,5 +78,87 @@ func TestBrowserFlatArgumentsPassRegistryValidation(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, result.Success)
 		require.Contains(t, result.Error, "Parameter validation failed")
+	}
+}
+
+// The fake captures the actual Execute -> Cleanup lifecycle without starting a browser.
+type browserLifecycleManager struct {
+	*browserskill.Manager
+	params     map[string]any
+	callErr    error
+	retained   []bool
+	cleanupErr error
+}
+
+func (m *browserLifecycleManager) GetStatus(context.Context, browserskill.Scope, string) (browserskill.Status, error) {
+	return browserskill.Status{Connected: true}, nil
+}
+
+func (m *browserLifecycleManager) Control(context.Context, browserskill.Scope, string, string) error {
+	return nil
+}
+
+func (m *browserLifecycleManager) Call(
+	_ context.Context, _ browserskill.Scope, _, _ string, params map[string]any,
+) (json.RawMessage, error) {
+	m.params = params
+	return json.RawMessage(`{}`), m.callErr
+}
+
+func (m *browserLifecycleManager) FinishTurn(ctx context.Context, _ browserskill.Scope, _ string, keep bool) error {
+	m.cleanupErr = ctx.Err()
+	m.retained = append(m.retained, keep)
+	return nil
+}
+
+func TestBrowserTurnRetention(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		calls              []string
+		cancel, fail, keep bool
+	}{
+		{name: "research closes", calls: []string{`{"method":"observe"}`}},
+		{
+			name: "requested open page", keep: true,
+			calls: []string{
+				`{"method":"navigate","url":"https://example.com","keep_open":true}`, `{"method":"observe"}`,
+			},
+		},
+		{name: "human handoff", calls: []string{`{"method":"request_help","prompt":"Please sign in"}`}, keep: true},
+		{
+			name: "resolved handoff",
+			calls: []string{
+				`{"method":"request_help","prompt":"Please sign in"}`,
+				`{"method":"observe","keep_open":false}`,
+			},
+		},
+		{name: "cancel preserves", calls: []string{`{"method":"observe"}`}, cancel: true, keep: true},
+		{name: "failure preserves", calls: []string{`{"method":"observe"}`}, fail: true, keep: true},
+		{name: "invalid followup preserves", calls: []string{`{"method":"observe"}`, `{"method":"click"}`}, keep: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+			ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			manager := &browserLifecycleManager{}
+			if tc.fail {
+				manager.callErr = errors.New("operation failed")
+			}
+			tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
+			tool.manager = manager
+			for _, raw := range tc.calls {
+				_, err := tool.Execute(ctx, json.RawMessage(raw))
+				require.NoError(t, err)
+			}
+			require.NotContains(t, manager.params, "keep_open")
+			if tc.cancel {
+				cancel()
+			}
+			tool.Cleanup(ctx)
+			tool.Cleanup(ctx)
+			require.Equal(t, []bool{tc.keep}, manager.retained)
+			require.NoError(t, manager.cleanupErr)
+		})
 	}
 }

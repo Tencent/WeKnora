@@ -148,3 +148,16 @@ func (m *Manager) Idle(ctx context.Context, s Scope, session string) error {
 	}
 	return nil
 }
+
+// FinishTurn releases debugging first. Completed research tasks then close;
+// retained or interrupted tasks stay available for user handoff. The browser
+// source preference lives in the client settings, independently of this task.
+func (m *Manager) FinishTurn(ctx context.Context, s Scope, session string, keepOpen bool) error {
+	if err := m.Idle(ctx, s, session); err != nil {
+		return err
+	}
+	if keepOpen {
+		return nil
+	}
+	return m.Control(ctx, s, session, "finish")
+}

@@ -68,8 +68,8 @@ try {
       process.stdout.write(JSON.stringify({detached:attached.length===0})+'\n');
     }
     if (command === 'check-cleanup') {
-      const ids = await worker.evaluate(async () => (await chrome.tabs.query({})).map(t=>t.id));
-      process.stdout.write(JSON.stringify({cleaned:ids.length===initial.tabIds.length && ids.every(id=>initial.tabIds.includes(id))})+'\n');
+      const state = await worker.evaluate(async () => ({ids:(await chrome.tabs.query({})).map(t=>t.id), groups:await chrome.tabGroups.query({})}));
+      process.stdout.write(JSON.stringify({cleaned:state.groups.length===0 && state.ids.length===initial.tabIds.length && state.ids.every(id=>initial.tabIds.includes(id))})+'\n');
     }
     if (command === 'remember-foreground') {
       const foreground = await worker.evaluate(async () => {
@@ -85,11 +85,10 @@ try {
         const valid = await worker.evaluate(async (original) => {
           const tabs = await chrome.tabs.query({});
           const groups = await chrome.tabGroups.query({});
-          const taskGroups = groups.filter(g => g.title?.startsWith('WeKnora'));
+          const taskWindows = [...new Set(tabs.filter(t => t.windowId !== original.windowId).map(t => t.windowId))];
           return tabs.find(t => t.id === original.tabId)?.active === true &&
-            taskGroups.length > 0 && taskGroups.every(g =>
-              g.windowId !== original.windowId &&
-              tabs.filter(t => t.windowId === g.windowId && t.active).length === 1);
+            groups.length === 0 && taskWindows.length > 0 && taskWindows.every(id =>
+              tabs.filter(t => t.windowId === id && t.active).length === 1);
         }, originalWindow);
         process.stdout.write(JSON.stringify({background:valid})+'\n');
         continue;

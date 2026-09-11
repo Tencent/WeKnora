@@ -58,6 +58,7 @@ func TestBrowserFlatSchemaCoversEveryMethod(t *testing.T) {
 func TestBrowserFlatArgumentsRejectBeforeDispatch(t *testing.T) {
 	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "chat")
 	for _, raw := range []string{
+		`{"method":"observe","keep_open":"true"}`,
 		`null`, `[]`, `{}`, `{"method":"unknown"}`,
 		`{"method":"navigate","params":{"url":"https://example.com"}}`,
 		`{"method":"navigate","url":"https://example.com","params":{}}`,

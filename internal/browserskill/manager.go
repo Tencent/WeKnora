@@ -773,6 +773,9 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 			return err
 		}
 	}
+	if d == nil && action == "finish" {
+		return nil
+	}
 	if d == nil && action == "stop" && m.store != nil {
 		return m.store.clearTask(ctx, s, session)
 	}
@@ -781,6 +784,15 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	d.mu.Lock()
 	t := d.tasks[session]
+	if action == "finish" {
+		// Automatic cleanup must not resume or discard interrupted work, nor
+		// interrupt a new command/start that raced with turn completion.
+		if t == nil || t.paused || t.starting || t.stopping || len(t.calls) > 0 || !t.idle {
+			d.mu.Unlock()
+			return nil
+		}
+		action = "stop"
+	}
 	if action == "auto_start" && (t == nil || !t.selected || t.paused || t.forgotten) {
 		d.mu.Unlock()
 		return errors.New("local browser is not selected or is paused; ask the user to resume")

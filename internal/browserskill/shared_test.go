@@ -431,3 +431,36 @@ func TestNavigationDefaultsToDocumentReadyAndPreservesExplicitWait(t *testing.T)
 		require.Equal(t, want, (<-f.calls)["wait_until"])
 	}
 }
+
+func TestFinishTurnClosesResearchButRetainsHandoffsAndPausedTasks(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	scope := Scope{1, "finish-user"}
+	connectSharedFixture(ctx, t, m, scope, "", "browser")
+	for _, tc := range []struct {
+		name         string
+		keep, paused bool
+	}{
+		{"research", false, false}, {"handoff", true, false}, {"paused", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, m.Control(ctx, scope, tc.name, "start"))
+			id := m.Status(scope, tc.name).SessionID
+			if tc.paused {
+				require.NoError(t, m.Control(ctx, scope, tc.name, "pause"))
+			}
+			require.NoError(t, m.FinishTurn(ctx, scope, tc.name, tc.keep))
+			status := m.Status(scope, tc.name)
+			if tc.keep || tc.paused {
+				require.Equal(t, id, status.SessionID)
+				require.True(t, status.Idle)
+				require.Equal(t, tc.paused, status.Paused)
+			} else {
+				require.Empty(t, status.SessionID)
+				require.NoError(t, m.Control(ctx, scope, tc.name, "select"))
+				_, err := m.Call(ctx, scope, tc.name, "snapshot", nil)
+				require.NoError(t, err)
+				require.NotEmpty(t, m.Status(scope, tc.name).SessionID)
+			}
+		})
+	}
+}
