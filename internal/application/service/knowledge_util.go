@@ -475,9 +475,14 @@ func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, p
 		return nil, fmt.Errorf("remote server returned status %d", resp.StatusCode)
 	}
 
-	// Reject oversized files early via Content-Length
+	// Reject oversized files early via Content-Length. Cap follows
+	// MAX_FILE_URL_SIZE_MB, or MAX_FILE_SIZE_MB when that is unset (#3171).
+	maxFileURLSize := secutils.GetMaxFileURLSize()
 	if contentLength := resp.ContentLength; contentLength > maxFileURLSize {
-		return nil, fmt.Errorf("file size %d bytes exceeds limit of %d bytes (10MB)", contentLength, maxFileURLSize)
+		return nil, fmt.Errorf(
+			"file size %d bytes exceeds limit of %d bytes (%dMB)",
+			contentLength, maxFileURLSize, secutils.GetMaxFileURLSizeMB(),
+		)
 	}
 
 	// Resolve fileName: payload > Content-Disposition > URL path
@@ -508,7 +513,10 @@ func downloadFileFromURL(ctx context.Context, fileURL string, payloadFileName, p
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 	if written > maxFileURLSize {
-		return nil, fmt.Errorf("file size exceeds limit of 10MB")
+		return nil, fmt.Errorf(
+			"file size exceeds limit of %dMB",
+			secutils.GetMaxFileURLSizeMB(),
+		)
 	}
 
 	contentBytes, err := os.ReadFile(tmpPath)

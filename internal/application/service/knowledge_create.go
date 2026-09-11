@@ -463,9 +463,6 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	return knowledge, nil
 }
 
-// maxFileURLSize is the maximum allowed file size for file URL import (10MB)
-const maxFileURLSize = 10 * 1024 * 1024
-
 // extractFileNameFromURL extracts the filename from a URL path
 func extractFileNameFromURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
