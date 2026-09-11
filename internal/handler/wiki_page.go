@@ -864,8 +864,22 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 		Types:           typesFilter,
 		Limit:           limit,
 	}
-	if h.memoryService != nil {
-		req.FamiliarKnowledgeIDs = h.memoryService.FamiliarKnowledgeIDs(c.Request.Context())
+	if h.memoryService != nil && h.memoryService.MemoryAvailable(c.Request.Context()) {
+		learningDocs, learningErr := h.memoryService.LearningDocuments(c.Request.Context(), wikiGraphMaxLimit)
+		if learningErr != nil {
+			// Learning is a personal overlay on an otherwise valid Wiki graph.
+			// Degrade to the ordinary graph if memory is unavailable rather than
+			// turning a private optional signal into a KB outage.
+			logger.Warnf(c.Request.Context(), "wiki learning evidence unavailable: %v", learningErr)
+			req.FamiliarKnowledgeIDs = h.memoryService.FamiliarKnowledgeIDs(c.Request.Context())
+		} else {
+			req.LearningDocuments = learningDocs
+			for _, doc := range learningDocs {
+				if doc != nil && doc.Hits >= types.MemoryDocAffinityMinHits {
+					req.FamiliarKnowledgeIDs = append(req.FamiliarKnowledgeIDs, doc.KnowledgeID)
+				}
+			}
+		}
 	}
 
 	graph, err := h.wikiService.GetGraph(c.Request.Context(), req)
