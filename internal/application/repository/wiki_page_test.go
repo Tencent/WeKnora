@@ -76,6 +76,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_page_revisions_page_version
     ON wiki_page_revisions (page_id, version);
 `
 
+// wikiPageIssuesTestDDL mirrors the production wiki_page_issues DDL for SQLite.
+const wikiPageIssuesTestDDL = `
+CREATE TABLE IF NOT EXISTS wiki_page_issues (
+    id                      VARCHAR(36) PRIMARY KEY,
+    tenant_id               INTEGER NOT NULL,
+    knowledge_base_id      VARCHAR(36) NOT NULL,
+    slug                    VARCHAR(255) NOT NULL,
+    issue_type              VARCHAR(50) NOT NULL,
+    description             TEXT NOT NULL,
+    suspected_knowledge_ids TEXT,
+    status                  VARCHAR(20) NOT NULL DEFAULT 'pending',
+    reported_by             VARCHAR(100) NOT NULL,
+    created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at              DATETIME
+);
+`
+
 // wikiFoldersTestDDL mirrors the production wiki_folders DDL for SQLite.
 const wikiFoldersTestDDL = `
 CREATE TABLE IF NOT EXISTS wiki_folders (
@@ -99,6 +117,7 @@ func setupWikiPagesTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(wikiPagesTestDDL).Error)
 	require.NoError(t, db.Exec(wikiFoldersTestDDL).Error)
+	require.NoError(t, db.Exec(wikiPageIssuesTestDDL).Error)
 	for _, stmt := range strings.Split(strings.TrimSpace(wikiPageRevisionsTestDDL), ";") {
 		if strings.TrimSpace(stmt) == "" {
 			continue
@@ -640,4 +659,102 @@ func TestDeleteRevisionsByPageOnlyTouchesThatPage(t *testing.T) {
 	// An empty id must not turn into a table-wide delete.
 	require.NoError(t, repo.DeleteRevisionsByPage(ctx, ""))
 	assert.Equal(t, int64(1), countWikiRevisions(t, db, bystander.ID))
+}
+
+func TestDeleteByKnowledgeBaseIDScopesSoftAndHardDeletes(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+
+	victim := makeWikiPage("kb-victim", "concept/victim", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	otherKB := makeWikiPage("kb-other", "concept/other", types.WikiPageTypeConcept, types.WikiPageStatusPublished)
+	otherTenant := makeWikiPage(
+		"kb-victim", "concept/other-tenant", types.WikiPageTypeConcept, types.WikiPageStatusPublished,
+	)
+	otherTenant.TenantID = 2
+	for _, p := range []*types.WikiPage{victim, otherKB, otherTenant} {
+		require.NoError(t, repo.Create(ctx, p))
+	}
+	require.NoError(t, db.Create(makeWikiRevision(victim, 1, types.WikiEditSourceUser)).Error)
+	require.NoError(t, db.Create(makeWikiRevision(otherKB, 1, types.WikiEditSourceUser)).Error)
+	require.NoError(t, db.Create(makeWikiRevision(otherTenant, 1, types.WikiEditSourceUser)).Error)
+
+	victimFolder := &types.WikiFolder{
+		ID: "f-victim", TenantID: 1, KnowledgeBaseID: "kb-victim",
+		Name: "victim", Path: "victim", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	otherFolder := &types.WikiFolder{
+		ID: "f-other", TenantID: 1, KnowledgeBaseID: "kb-other",
+		Name: "other", Path: "other", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, repo.CreateFolder(ctx, victimFolder))
+	require.NoError(t, repo.CreateFolder(ctx, otherFolder))
+
+	victimIssue := &types.WikiPageIssue{
+		ID: "i-victim", TenantID: 1, KnowledgeBaseID: "kb-victim",
+		Slug: victim.Slug, IssueType: "lint", Description: "victim",
+		ReportedBy: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	otherIssue := &types.WikiPageIssue{
+		ID: "i-other", TenantID: 1, KnowledgeBaseID: "kb-other",
+		Slug: otherKB.Slug, IssueType: "lint", Description: "other",
+		ReportedBy: "test", CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, repo.CreateIssue(ctx, victimIssue))
+	require.NoError(t, repo.CreateIssue(ctx, otherIssue))
+
+	// Empty kbID must not become a table-wide delete.
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, 1, ""))
+	require.NoError(t, repo.DeleteFoldersByKnowledgeBaseID(ctx, 1, ""))
+	require.NoError(t, repo.DeleteRevisionsByKnowledgeBaseID(ctx, 1, ""))
+	require.NoError(t, repo.DeleteIssuesByKnowledgeBaseID(ctx, 1, ""))
+	_, err := repo.GetBySlug(ctx, "kb-victim", victim.Slug)
+	require.NoError(t, err)
+
+	// Wrong tenant must not touch the victim tenant's rows.
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	require.NoError(t, repo.DeleteFoldersByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	require.NoError(t, repo.DeleteRevisionsByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	require.NoError(t, repo.DeleteIssuesByKnowledgeBaseID(ctx, 99, "kb-victim"))
+	_, err = repo.GetBySlug(ctx, "kb-victim", victim.Slug)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.DeleteByKnowledgeBaseID(ctx, 1, "kb-victim"))
+	require.NoError(t, repo.DeleteFoldersByKnowledgeBaseID(ctx, 1, "kb-victim"))
+	require.NoError(t, repo.DeleteRevisionsByKnowledgeBaseID(ctx, 1, "kb-victim"))
+	require.NoError(t, repo.DeleteIssuesByKnowledgeBaseID(ctx, 1, "kb-victim"))
+
+	_, err = repo.GetBySlug(ctx, "kb-victim", victim.Slug)
+	require.ErrorIs(t, err, ErrWikiPageNotFound)
+	_, err = repo.GetFolderByID(ctx, "kb-victim", "f-victim")
+	require.ErrorIs(t, err, ErrWikiFolderNotFound)
+	issues, err := repo.ListIssues(ctx, "kb-victim", "", "")
+	require.NoError(t, err)
+	assert.Empty(t, issues)
+	assert.Zero(t, countWikiRevisions(t, db, victim.ID))
+
+	// Soft-deleted rows remain when queried without the GORM deleted_at filter.
+	var pageCount, folderCount, issueCount int64
+	require.NoError(t, db.Unscoped().Model(&types.WikiPage{}).
+		Where("id = ?", victim.ID).Count(&pageCount).Error)
+	require.NoError(t, db.Unscoped().Model(&types.WikiFolder{}).
+		Where("id = ?", "f-victim").Count(&folderCount).Error)
+	require.NoError(t, db.Unscoped().Model(&types.WikiPageIssue{}).
+		Where("id = ?", "i-victim").Count(&issueCount).Error)
+	assert.Equal(t, int64(1), pageCount)
+	assert.Equal(t, int64(1), folderCount)
+	assert.Equal(t, int64(1), issueCount)
+
+	// Other KB and other tenant are untouched.
+	_, err = repo.GetBySlug(ctx, "kb-other", otherKB.Slug)
+	require.NoError(t, err)
+	_, err = repo.GetBySlug(ctx, "kb-victim", otherTenant.Slug)
+	require.NoError(t, err)
+	_, err = repo.GetFolderByID(ctx, "kb-other", "f-other")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, otherKB.ID))
+	assert.Equal(t, int64(1), countWikiRevisions(t, db, otherTenant.ID))
+	otherIssues, err := repo.ListIssues(ctx, "kb-other", "", "")
+	require.NoError(t, err)
+	require.Len(t, otherIssues, 1)
 }

@@ -51,6 +51,7 @@ type knowledgeBaseService struct {
 	dsScheduler     *datasource.Scheduler
 	audit           interfaces.AuditLogService
 	resourceCatalog interfaces.ResourceCatalog
+	wikiRepo        interfaces.WikiPageRepository
 }
 
 // NewKnowledgeBaseService creates a new knowledge base service
@@ -74,6 +75,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 	dsScheduler *datasource.Scheduler,
 	audit interfaces.AuditLogService,
 	resourceCatalog interfaces.ResourceCatalog,
+	wikiRepo interfaces.WikiPageRepository,
 ) interfaces.KnowledgeBaseService {
 	return &knowledgeBaseService{
 		repo:            repo,
@@ -96,6 +98,7 @@ func NewKnowledgeBaseService(repo interfaces.KnowledgeBaseRepository,
 		dsScheduler:     dsScheduler,
 		audit:           audit,
 		resourceCatalog: resourceCatalog,
+		wikiRepo:        wikiRepo,
 	}
 }
 
@@ -808,11 +811,11 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 
 // ProcessKBDelete handles async knowledge base deletion task
 // This method performs heavy cleanup operations: deleting embeddings, chunks, files, and graph data
-func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Task) error {
+func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Task) (err error) {
 	var payload types.KBDeletePayload
-	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
-		logger.Errorf(ctx, "Failed to unmarshal KB delete payload: %v", err)
-		return err
+	if unmarshalErr := json.Unmarshal(t.Payload(), &payload); unmarshalErr != nil {
+		logger.Errorf(ctx, "Failed to unmarshal KB delete payload: %v", unmarshalErr)
+		return unmarshalErr
 	}
 
 	tenantID := payload.TenantID
@@ -822,6 +825,24 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	// Set tenant context for downstream services
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	defer func() {
+		// Wiki rows are independent of the vector engine. Run this on every
+		// return path — including SkipRetry — with its own timeout so a slow
+		// Redis queue scan cannot starve the SQL deletes.
+		wikiCtx, cancelWiki := context.WithTimeout(context.WithoutCancel(ctx), kbTaskCleanupTimeout)
+		wikiErr := s.cleanupWikiForKnowledgeBase(wikiCtx, tenantID, kbID)
+		cancelWiki()
+		if wikiErr != nil {
+			logger.Warnf(ctx, "Failed to clean wiki data for KB %s: %v", kbID, wikiErr)
+			// SkipRetry would otherwise drop the task while wiki orphans
+			// remain. Promote the wiki error so asynq retries; a later
+			// attempt that succeeds at wiki cleanup can still SkipRetry.
+			if err == nil || errors.Is(err, asynq.SkipRetry) {
+				err = wikiErr
+			}
+		} else if err == nil {
+			logger.Infof(ctx, "KB delete task completed successfully, knowledge base ID: %s", kbID)
+		}
+
 		// Workers may enqueue downstream work while the delete task performs
 		// heavy storage cleanup. A detached, bounded final scrub runs on every
 		// return path, including retryable failures and cancellation.
@@ -969,8 +990,42 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		}
 	}
 
-	logger.Infof(ctx, "KB delete task completed successfully, knowledge base ID: %s", kbID)
+	logger.Infof(ctx, "KB resource cleanup finished, knowledge base ID: %s", kbID)
 	return nil
+}
+
+// cleanupWikiForKnowledgeBase removes wiki pages, folders, revisions, and
+// issues for a deleted knowledge base. Pages, folders, and issues are
+// soft-deleted (they carry DeletedAt); revisions are hard-deleted (no
+// deleted_at column — they are immutable snapshots).
+//
+// nil-safe for tests that construct knowledgeBaseService without wikiRepo.
+// Failures are returned so the KB delete task can retry; the caller logs.
+func (s *knowledgeBaseService) cleanupWikiForKnowledgeBase(
+	ctx context.Context, tenantID uint64, kbID string,
+) error {
+	if s.wikiRepo == nil || kbID == "" {
+		return nil
+	}
+	logger.Infof(ctx, "Cleaning up wiki data for knowledge base")
+	var errs error
+	if err := s.wikiRepo.DeleteByKnowledgeBaseID(ctx, tenantID, kbID); err != nil {
+		logger.Warnf(ctx, "Failed to delete wiki pages for KB %s: %v", kbID, err)
+		errs = errors.Join(errs, err)
+	}
+	if err := s.wikiRepo.DeleteFoldersByKnowledgeBaseID(ctx, tenantID, kbID); err != nil {
+		logger.Warnf(ctx, "Failed to delete wiki folders for KB %s: %v", kbID, err)
+		errs = errors.Join(errs, err)
+	}
+	if err := s.wikiRepo.DeleteRevisionsByKnowledgeBaseID(ctx, tenantID, kbID); err != nil {
+		logger.Warnf(ctx, "Failed to delete wiki revisions for KB %s: %v", kbID, err)
+		errs = errors.Join(errs, err)
+	}
+	if err := s.wikiRepo.DeleteIssuesByKnowledgeBaseID(ctx, tenantID, kbID); err != nil {
+		logger.Warnf(ctx, "Failed to delete wiki issues for KB %s: %v", kbID, err)
+		errs = errors.Join(errs, err)
+	}
+	return errs
 }
 
 // cancelTasksForKnowledgeBase removes queue work for a deleted KB when the
