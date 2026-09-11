@@ -177,12 +177,16 @@ instance.interceptors.response.use(
     // 处理 Nginx 413 Request Entity Too Large
     const ERR_ENTITY_TOO_LARGE = 413;
     if (error.response.status === ERR_ENTITY_TOO_LARGE) {
+      const requestUrl = String(error.config?.url || '')
       const skillUpload = isSkillBundleUploadUrl(error.config?.url)
+      const sandboxLiveFile = requestUrl.includes('/sandbox/files')
       return Promise.reject(withHttpStatus({
         status: ERR_ENTITY_TOO_LARGE,
         message: skillUpload
           ? i18n.global.t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
-          : i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
+          : sandboxLiveFile
+            ? i18n.global.t('chat.sandbox.filesTooLarge')
+            : i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
         success: false
       }, ERR_ENTITY_TOO_LARGE));
     }

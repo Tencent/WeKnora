@@ -47,7 +47,7 @@
 
       <div
         class="chat-sandbox-panel__body"
-        :class="{ 'is-flush': panel?.activeTab.value === 'artifacts' }"
+        :class="{ 'is-flush': panel?.activeTab.value === 'artifacts' || panel?.activeTab.value === 'files' }"
       >
         <ChatArtifactsPanel
           v-show="panel?.activeTab.value === 'artifacts'"
@@ -73,10 +73,13 @@
           <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '100%', type: 'rect' }]" />
         </div>
 
-        <div v-if="panel?.activeTab.value === 'desktop'" class="chat-sandbox-panel__placeholder">
-          <t-icon name="desktop" size="28px" />
-          <p>{{ t('chat.sandbox.desktopPlaceholder') }}</p>
-        </div>
+        <SandboxFilesPanel
+          v-show="panel?.activeTab.value === 'files'"
+          :key="sessionId"
+          class="chat-sandbox-panel__files"
+          :session-id="sessionId"
+          :active="panel?.activeTab.value === 'files'"
+        />
       </div>
     </aside>
   </Transition>
@@ -93,6 +96,7 @@ import {
 } from '@/composables/useChatSandboxPanel'
 import SandboxTerminal from '@/views/chat/components/SandboxTerminal.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
+import SandboxFilesPanel from '@/views/chat/components/SandboxFilesPanel.vue'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
 const props = withDefaults(
@@ -119,7 +123,7 @@ const panel = useChatSandboxPanel()
 const tabs = computed(() => [
   { id: 'artifacts' as SandboxPanelTab, icon: 'folder', label: t('chat.sandbox.tabArtifacts') },
   { id: 'terminal' as SandboxPanelTab, icon: 'terminal', label: t('chat.sandbox.tabTerminal') },
-  { id: 'desktop' as SandboxPanelTab, icon: 'desktop', label: t('chat.sandbox.tabDesktop') },
+  { id: 'files' as SandboxPanelTab, icon: 'folder-open', label: t('chat.sandbox.tabFiles') },
 ])
 
 // 终端实例惰性挂载（首次切到终端 tab 时），面板关闭即销毁（v-if），
@@ -334,7 +338,8 @@ function startResize(event: MouseEvent) {
 }
 
 .chat-sandbox-panel__terminal,
-.chat-sandbox-panel__artifacts {
+.chat-sandbox-panel__artifacts,
+.chat-sandbox-panel__files {
   flex: 1;
   min-height: 0;
   min-width: 0;

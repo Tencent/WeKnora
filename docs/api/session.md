@@ -18,6 +18,11 @@
 | POST   | `/sessions/:session_id/pin`                | 置顶会话                      |
 | DELETE | `/sessions/:id/pin`                        | 取消置顶会话                  |
 | GET    | `/sessions/continue-stream/:session_id`    | 继续未完成的流式响应          |
+| GET    | `/sessions/:id/sandbox/files`              | 列出沙箱 `/workspace/output` 一层目录 |
+| GET    | `/sessions/:id/sandbox/files/content`      | 下载沙箱输出文件（附件，≤16 MiB） |
+| POST   | `/sessions/:session_id/sandbox/files`      | 上传新文件到输出目录（不覆盖） |
+| PATCH  | `/sessions/:id/sandbox/files`              | 重命名输出条目（不覆盖） |
+| DELETE | `/sessions/:id/sandbox/files`              | 删除输出文件或安全目录树 |
 
 > **路由命名说明**：置顶接口的 POST 与 DELETE 使用了不同的路径参数名（POST 用 `:session_id`，DELETE 用 `:id`）。这是由于 gin 路由器为每个 HTTP 方法维护独立的 radix tree，且既有树中的通配符命名不同，必须保留以避免注册时的 `wildcard conflicts` panic。两者语义上都指会话 ID。
 
@@ -475,3 +480,61 @@ curl --location 'http://localhost:8080/api/v1/sessions/continue-stream/ceb9babb-
 **响应格式**:
 
 服务器端事件流（Server-Sent Events），事件结构与 `/knowledge-chat/:session_id`、`/agent-chat/:session_id` 返回结果一致。若该消息当前在流中已无事件返回 `404 No stream events found`；若消息记录不存在返回 `404 Incomplete message not found`。
+
+## GET `/sessions/:id/sandbox/files` - 列出沙箱实时输出文件
+
+列出当前会话已绑定沙箱中 `/workspace/output` 的**一层**目录。浏览器只传相对 POSIX 路径，空 `path` 表示输出根。该接口是 lookup-only：没有绑定返回 409，沙箱已暂停也返回 409（`session sandbox is paused`），**不会**创建或唤醒实例。
+
+目录条目的 `type` 为 `file`、`directory` 或 `other`（符号链接等不可操作节点）。单层最多 1024 条。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-fd584954304b/sandbox/files?path=reports' \
+--header 'X-API-Key: sk-xxxxx'
+```
+
+**查询参数**:
+
+| 字段   | 类型   | 必填 | 描述                         |
+| ------ | ------ | ---- | ---------------------------- |
+| `path` | string | 否   | 相对目录，空或省略表示输出根 |
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": [
+        {
+            "name": "result.txt",
+            "path": "reports/result.txt",
+            "type": "file",
+            "size": 24,
+            "mod_time": "2026-09-11T04:00:00Z"
+        }
+    ]
+}
+```
+
+## GET `/sessions/:id/sandbox/files/content` - 下载沙箱输出文件
+
+以 `Content-Disposition: attachment` 下载单个常规文件，上限 16 MiB。同样不会唤醒已暂停沙箱。
+
+**查询参数**: `path`（必填，相对文件路径）。
+
+## POST `/sessions/:session_id/sandbox/files` - 上传沙箱输出文件
+
+`multipart/form-data`：`path` 为相对目标路径，`file` 为文件本体。已存在则 409，超过 16 MiB 则 413。需要会话属主权限。
+
+## PATCH `/sessions/:id/sandbox/files` - 重命名沙箱输出条目
+
+```json
+{ "source": "reports/old.txt", "target": "reports/new.txt" }
+```
+
+目标已存在返回 409，不会覆盖。
+
+## DELETE `/sessions/:id/sandbox/files` - 删除沙箱输出条目
+
+查询参数 `path` 为相对路径。目录会在确认树内无符号链接/特殊节点后递归删除；树过深或条目过多返回 400。

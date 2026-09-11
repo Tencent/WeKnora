@@ -1,6 +1,6 @@
 import { inject, provide, ref, type InjectionKey, type Ref } from 'vue'
 
-export type SandboxPanelTab = 'artifacts' | 'terminal' | 'desktop'
+export type SandboxPanelTab = 'artifacts' | 'terminal' | 'files'
 
 export type ArtifactPanelFocus = {
   messageId: string
