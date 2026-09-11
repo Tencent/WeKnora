@@ -2,14 +2,14 @@
 
 ## Status and baseline
 
-- Phase: PR-01 design gate; no production code has been changed by this phase.
+- Status: implemented and validated in PR #3175; retained as the design record.
 - Source of truth: `Tencent/WeKnora` `upstream/main`.
 - Baseline SHA: `5db13a131e10e8ee2105211f665412ebc13bd98e`.
 - Baseline date: 2026-09-10 (Asia/Shanghai).
 - Scope: add Docker as the third implementation of the existing interactive session-terminal abstraction.
 - Out of scope: Files, terminal Audit, resource-limit redesign, ArtifactKind, Presentation Skill, a second terminal abstraction, a second WebSocket/ticket flow, and Docker-specific frontend terminal UI.
 
-The implementation must look like the existing E2B/Cube adapter family:
+The implementation follows the existing E2B/Cube adapter family:
 
 ```text
 RemoteTerminalManager
@@ -18,8 +18,6 @@ RemoteTerminalManager
   -> dockerTerminalSession
        -> pump / Output / PID / Write / Resize / Close
 ```
-
-Open PR review found `#3146 Feat/sandbox workbench` as the nearest competing Topic-2 work. At review time it changed 126 files (+15,480/-328), introduced a separate `CommandTerminal` and Workbench stack, had an empty PR template body, and was merge-dirty. It is useful only as evidence that command-budget and file-security concerns exist; it is not the architecture baseline for this PR. Open draft `#3168` concerns office skills/browser controls and is unrelated to Docker terminal implementation.
 
 ## A. Provider capability comparison
 
@@ -88,7 +86,7 @@ This keeps an active terminal ahead of the sweeper without making keystrokes tri
 
 ### Reconnect decision
 
-`DOCKER_REATTACH_SPIKE.md` records the real-daemon result: after the initial hijacked transport closes, the exec remains `Running=true`, but a second `ExecAttach` stream says `exec command ... is already running` and immediately reaches EOF. No command can be sent to the original PTY. Docker Engine therefore does not provide the `Connect(PID)` behavior exposed by E2B/Cube.
+The [Docker reattach spike](../poc/docker-terminal-reattach-spike.md) records the real-daemon result: after the initial hijacked transport closes, the exec remains `Running=true`, but a second `ExecAttach` stream says `exec command ... is already running` and immediately reaches EOF. No command can be sent to the original PTY. Docker Engine therefore does not provide the `Connect(PID)` behavior exposed by E2B/Cube.
 
 PR-01 must not map a new bash process to the old PID or report it as a successful reattach. The minimal capability correction is provider-neutral:
 
@@ -176,7 +174,7 @@ Record Engine API/version, OS/architecture, image digest/tag, exact command, and
 9. Record whether closing the second transport changes process state.
 10. Force-remove the isolated temporary container in cleanup.
 
-The outcome and raw observations go into `DOCKER_REATTACH_SPIKE.md`.
+The outcome and raw observations are recorded in the [Docker reattach spike](../poc/docker-terminal-reattach-spike.md).
 
 ### PR-01 real integration matrix
 

@@ -172,6 +172,10 @@ export function useSandboxTerminal(
     if (disposed || opening || ws) return
     const sid = sessionId.value
     if (!sid) return
+    // A socket that disappears before its ready frame may already have caused
+    // the server to create a non-reattachable Docker exec. Do not retry that
+    // ambiguous handshake automatically.
+    let readyReceived = false
 
     opening = true
     status.value = 'connecting'
@@ -229,7 +233,8 @@ export function useSandboxTerminal(
 
     ws.onmessage = (event) => {
       if (typeof event.data === 'string') {
-        handleControlFrame(event.data)
+        const frame = handleControlFrame(event.data)
+        if (frame?.type === 'ready') readyReceived = true
         return
       }
       const data =
@@ -262,13 +267,6 @@ export function useSandboxTerminal(
         }
         return
       }
-      // A provider without same-PTY reconnect would create a fresh shell on
-      // every automatic retry and strand the old exec. Stop here and let the
-      // existing Retry action explicitly start a new terminal.
-      if (!reattachable) {
-        status.value = 'error'
-        return
-      }
       if (
         status.value !== 'needs_provision'
         && status.value !== 'paused'
@@ -279,6 +277,10 @@ export function useSandboxTerminal(
         && status.value !== 'unauthorized'
       ) {
         status.value = 'error'
+        // Before ready, the provider capability is unknown and a terminal may
+        // already exist server-side. After ready, only providers that can
+        // recover the same PTY may retry without stranding the old shell.
+        if (!readyReceived || !reattachable) return
         scheduleReconnect()
       }
     }
@@ -288,12 +290,12 @@ export function useSandboxTerminal(
     }
   }
 
-  function handleControlFrame(raw: string) {
+  function handleControlFrame(raw: string): SandboxTerminalControlFrame | null {
     let frame: SandboxTerminalControlFrame
     try {
       frame = JSON.parse(raw)
     } catch {
-      return
+      return null
     }
     switch (frame.type) {
       case 'ready':
@@ -327,6 +329,7 @@ export function useSandboxTerminal(
       default:
         break
     }
+    return frame
   }
 
   function deliverOutput(data: Uint8Array) {

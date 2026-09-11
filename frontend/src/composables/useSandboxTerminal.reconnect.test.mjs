@@ -13,12 +13,25 @@ test('only reattach-capable providers persist and submit a PTY id', () => {
   )
 })
 
-test('non-reattachable transport loss does not auto-create another shell', () => {
+test('automatic reconnect requires ready from a reattach-capable provider', () => {
+  const openStart = source.indexOf('async function openSocket()')
+  const messageStart = source.indexOf('ws.onmessage =', openStart)
   const closeStart = source.indexOf('ws.onclose =')
   const closeEnd = source.indexOf('ws.onerror =', closeStart)
-  assert.ok(closeStart >= 0 && closeEnd > closeStart)
+  assert.ok(openStart >= 0 && messageStart > openStart)
+  assert.ok(closeStart > messageStart && closeEnd > closeStart)
+
+  const openSetup = source.slice(openStart, messageStart)
+  const messageHandler = source.slice(messageStart, closeStart)
   const closeHandler = source.slice(closeStart, closeEnd)
-  assert.match(closeHandler, /if \(!reattachable\)/)
+
+  assert.match(openSetup, /let readyReceived = false/)
+  assert.match(messageHandler, /frame\?\.type === 'ready'\) readyReceived = true/)
+  assert.match(closeHandler, /if \(!readyReceived \|\| !reattachable\) return/)
   assert.match(closeHandler, /status\.value = 'error'/)
-  assert.match(closeHandler, /return/)
+  assert.ok(
+    closeHandler.indexOf("status.value !== 'exited'")
+      < closeHandler.indexOf('if (!readyReceived || !reattachable) return'),
+    'terminal states must be preserved before reconnect eligibility is checked',
+  )
 })
