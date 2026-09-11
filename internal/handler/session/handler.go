@@ -47,10 +47,6 @@ type Handler struct {
 	// selected agent so the sandbox is created with the same config a
 	// conversation turn would use.
 	terminalService *service.SandboxTerminalService
-	// liveFilesService browses the current session sandbox's fixed
-	// /workspace/output root. The interface keeps handler authorization tests
-	// independent from provider setup.
-	liveFilesService sandboxLiveFilesService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -77,7 +73,6 @@ func NewHandler(
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
 	terminalService *service.SandboxTerminalService,
-	liveFilesService *service.SandboxLiveFilesService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -100,7 +95,6 @@ func NewHandler(
 		userService:          userService,
 		memberService:        memberService,
 		terminalService:      terminalService,
-		liveFilesService:     liveFilesService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

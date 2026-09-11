@@ -315,9 +315,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// the frontend terminal panel. First-use provisioning takes a sandbox
 	// config ID already resolved by the WebSocket handler (own or shared agent).
 	must(container.Provide(service.NewSandboxTerminalService))
-	// SandboxLiveFilesService exposes a symlink-safe browser view rooted at
-	// /workspace/output on the sandbox already pinned to a session.
-	must(container.Provide(service.NewSandboxLiveFilesService))
 
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
