@@ -119,7 +119,7 @@ func (m *Manager) route(
 	if err != nil {
 		return nil, false, err
 	}
-	forwardCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	forwardCtx, cancel := context.WithTimeout(ctx, clusterTimeout(operation, method))
 	defer cancel()
 	request, err := http.NewRequestWithContext(
 		forwardCtx,
@@ -212,7 +212,9 @@ func (m *Manager) InternalHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Signed internal RPC is executed locally, never forwarded a second time.
-	ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), localRPCKey{}, true), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(
+		context.WithValue(r.Context(), localRPCKey{}, true), clusterTimeout(input.Operation, input.Method),
+	)
 	defer cancel()
 	result := clusterResponse{}
 	switch input.Operation {

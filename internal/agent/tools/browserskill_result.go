@@ -28,9 +28,11 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 		Effect string `json:"effect_state"`
 	}
 	_ = json.Unmarshal(err.Data, &data)
-	if err.Code == "user_aborted" || err.Code == "cancelled" {
-		return "Stop browser actions. The operation was interrupted; wait for the user to resume. " +
-			"Do not replay it."
+	if err.Code == "user_aborted" || err.Code == "cancelled" || err.Code == "task_paused" || err.Code == "timeout" {
+		return "Stop browser actions. Ask the user to complete any manual step and click Continue operation " +
+			"in the conversation browser preview, then continue in the same conversation. " +
+			"A paused task does not require reconnection or pairing. The action may already have taken effect. " +
+			"Observe before acting; do not replay the interrupted action."
 	}
 	if data.Effect == "unknown" || data.Effect == "committed" {
 		return "The action may already have taken effect. Observe current state before deciding " +

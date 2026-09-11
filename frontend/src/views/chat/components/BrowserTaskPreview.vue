@@ -7,7 +7,7 @@
       <span v-if="status.connected && status.task_id" class="locate"><t-icon name="jump" size="13px" />{{ t('localBrowser.locateWindow') }}</span>
     </button>
     <p class="preview-sync" role="status">{{ t(!status.connected ? 'localBrowser.reconnectShort' : status.idle ? 'localBrowser.previewIdle' : previewStale ? 'localBrowser.previewStale' : preview ? 'localBrowser.previewLive' : 'localBrowser.previewLoading') }}</p>
-    <p v-if="status.needs_help" class="preview-help">{{ t('localBrowser.helpHint') }}</p>
+    <p v-if="status.needs_help" class="preview-help"><span v-if="status.help_prompt">{{ status.help_prompt }}<br /></span>{{ t('localBrowser.helpHint') }}</p>
     <p v-if="error" class="preview-error" role="alert">{{ error }}</p>
     <p class="preview-scope">{{ t('localBrowser.controlScope') }}</p>
     <div class="preview-actions">
@@ -28,7 +28,7 @@ const previewElement = ref<HTMLElement | null>(null)
 const { positionStyle, dragging, startDrag, moveDrag, stopDrag } = useFloatingPreviewDrag(previewElement)
 const props = defineProps<{ sessionId: string }>()
 const { t } = useI18n(), uiStore = useUIStore()
-const status = ref({ enabled: false, selected: false, connected: false, paused: false, idle: false, needs_help: false, task_id: '' })
+const status = ref({ enabled: false, selected: false, connected: false, paused: false, idle: false, needs_help: false, help_prompt: '', task_id: '' })
 const busy = ref(false), error = ref(''), preview = ref(''), previewStale = ref(false)
 let lastFrame = 0
 const endpoint = `/api/v1/sessions/${encodeURIComponent(props.sessionId)}/local-browser`

@@ -49,7 +49,7 @@ export default {
     "previewIdle": "Last preview retained",
     "previewLive": "Preview syncing",
     "previewLoading": "Fetching preview",
-    "helpHint": "Complete the verification or permission request. Click the preview to go there.",
+    "helpHint": "Open the browser from the preview, complete the requested step, then confirm completion in the browser help overlay.",
 
     "settingsTitle": "Browser connection",
     "settingsDescription": "Pair BrowserSkill with your local Chrome to operate real web pages from conversations.",

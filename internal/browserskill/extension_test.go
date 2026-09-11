@@ -239,6 +239,9 @@ func TestRealExtension(t *testing.T) {
 		case <-tick.C:
 		}
 	}
+	if m.Status(scope, "chat").HelpPrompt != "Integration test: no action required" {
+		t.Fatal("human-help prompt missing from preview status")
+	}
 	checkBackground()
 	if _, err = m.Preview(ctx, scope, "chat"); err != nil {
 		t.Fatal(err)
@@ -247,6 +250,42 @@ func TestRealExtension(t *testing.T) {
 	case <-helpDone:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+	if !m.Status(scope, "chat").Paused {
+		t.Fatal("timed-out human help must retain a paused task")
+	}
+	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	// Completing the real extension help overlay releases the same pending RPC.
+	go func() {
+		result, e := call(ctx, scope, "chat", "request_help", map[string]any{
+			"prompt": "Confirm this fixture step", "timeout_ms": 10000,
+		})
+		if e == nil && !strings.Contains(string(result), `"continued"`) {
+			e = fmt.Errorf("unexpected help outcome: %s", result)
+		}
+		helpDone <- e
+	}()
+	_, _ = io.WriteString(input, "complete-help\n")
+	select {
+	case line := <-hostLines:
+		if line != "complete-help-done" {
+			t.Fatalf("complete help: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case e := <-helpDone:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if m.Status(scope, "chat").Paused || m.Status(scope, "chat").NeedsHelp {
+		t.Fatal("completed help did not release automation")
 	}
 	checkBackground()
 	if err = m.Focus(ctx, scope, "chat"); err != nil {
@@ -330,6 +369,31 @@ func TestRealExtension(t *testing.T) {
 		t.Fatal("paused click accepted")
 	}
 	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.WriteString(input, "interrupt-window\n")
+	select {
+	case line := <-hostLines:
+		if line != "interrupt-window-done" {
+			t.Fatalf("window interruption: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	for !m.Status(scope, "chat").Paused {
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status(scope, "chat").SessionID != taskID {
+		t.Fatal("resume replaced the original session")
+	}
+	if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err != nil {
 		t.Fatal(err)
 	}
 	// Focus above intentionally changes the foreground. Compare subsequent
