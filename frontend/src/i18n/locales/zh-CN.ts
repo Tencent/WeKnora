@@ -49,7 +49,7 @@ export default {
     "previewIdle": "已保留最后画面",
     "previewLive": "画面同步中",
     "previewLoading": "正在获取画面",
-    "helpHint": "需要你完成验证或授权，点击预览前往。",
+    "helpHint": "点击预览前往浏览器，完成上述步骤后，在浏览器帮助提示中确认完成。",
 
     "settingsTitle": "浏览器连接",
     "settingsDescription": "通过 BrowserSkill 连接本机 Chrome，配对后即可在对话中操作真实网页。",

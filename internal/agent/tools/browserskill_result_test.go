@@ -67,6 +67,8 @@ func TestBrowserErrorRecoveryHints(t *testing.T) {
 		{"fill", "timeout", `{"reason":"fill_failed","effect_state":"unknown"}`, "may already have taken effect"},
 		{"press", "invalid_params", `{}`, "use fill"},
 		{"click", "user_aborted", `{"effect_state":"unknown"}`, "Stop browser actions"},
+		{"observe", "task_paused", `{}`, "does not require reconnection"},
+		{"request_help", "timeout", `{}`, "conversation browser preview"},
 	} {
 		t.Run(tc.code+tc.data, func(t *testing.T) {
 			err := &browserskill.RPCError{Code: tc.code, Message: "browser failure", Data: json.RawMessage(tc.data)}

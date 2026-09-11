@@ -54,6 +54,26 @@ try {
   process.stdout.write('ready\n');
   for await (const command of lines) {
     if (command === 'close') break;
+    if (command === 'complete-help' || command === 'interrupt-window') {
+      const selector = command === 'complete-help'
+        ? '[data-slot="help-request-banner"][data-display-mode="full"] [data-slot="help-continue-button"]'
+        : '[data-slot="control-overlay-stop-all"]';
+      // Click the actual extension overlay in an isolated fixture browser.
+      let clicked = false;
+      const deadline = Date.now() + 5000;
+      while (!clicked && Date.now() < deadline) {
+        for (const page of browser.pages().filter(page => page !== popup).reverse()) {
+          const button = page.locator(selector).first();
+          if (!await button.isVisible()) continue;
+          await button.click({timeout:5000});
+          clicked = true;
+          break;
+        }
+        if (!clicked) await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!clicked) throw new Error('Browser task overlay was not clickable');
+      process.stdout.write(command+'-done\n');
+    }
     if (command === 'check-detached') {
       // getTargets().attached includes Playwright's own debugger. Probe only
       // this extension's attachment without attaching or changing the page.

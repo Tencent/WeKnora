@@ -44,15 +44,17 @@ func (s Scope) valid() bool { return s.Tenant != 0 && s.User != "" }
 
 // Status describes the connection and current conversation task.
 type Status struct {
-	Idle      bool   `json:"idle"`
-	NeedsHelp bool   `json:"needs_help"`
-	Enabled   bool   `json:"enabled"`
-	Selected  bool   `json:"selected"`
-	Connected bool   `json:"connected"`
-	Paused    bool   `json:"paused"`
-	SessionID string `json:"task_id,omitempty"`
+	HelpPrompt string `json:"help_prompt,omitempty"`
+	Idle       bool   `json:"idle"`
+	NeedsHelp  bool   `json:"needs_help"`
+	Enabled    bool   `json:"enabled"`
+	Selected   bool   `json:"selected"`
+	Connected  bool   `json:"connected"`
+	Paused     bool   `json:"paused"`
+	SessionID  string `json:"task_id,omitempty"`
 }
 type task struct {
+	helpPrompt       string
 	commands         chan struct{}
 	helpCalls        int
 	previewAt        time.Time
@@ -147,6 +149,9 @@ func (m *Manager) Status(s Scope, session string) Status {
 		result.Idle = t.idle
 		result.SessionID = t.id
 		result.NeedsHelp = t.helpCalls > 0 && !t.paused
+		if result.NeedsHelp {
+			result.HelpPrompt = t.helpPrompt
+		}
 	}
 	return result
 }
@@ -436,7 +441,9 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if m.receiveUI(d, data) {
 					continue
 				}
-				m.observe(d, data)
+				if m.observe(d, data) {
+					continue
+				}
 			}
 			if !events {
 				d.writeMu.Lock()
@@ -524,7 +531,11 @@ func validExtensionOrigin(origin string) bool {
 	return true
 }
 
-func (m *Manager) observe(d *device, data []byte) {
+// observe consumes window interrupts at the gateway, which owns explicit pause
+// and resume. Forwarding them as well leaves a second, one-shot daemon marker
+// that passive resume snapshots cannot clear and rejects the next user-approved
+// action. pauseTask cancels active RPCs through the normal daemon cancel path.
+func (m *Manager) observe(d *device, data []byte) bool {
 	var e struct {
 		Event   string `json:"event"`
 		Payload struct {
@@ -532,10 +543,10 @@ func (m *Manager) observe(d *device, data []byte) {
 		} `json:"payload"`
 	}
 	if json.Unmarshal(data, &e) != nil {
-		return
+		return false
 	}
 	if e.Event != "session.user_interrupt" && e.Event != "session.window_closed" {
-		return
+		return false
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -550,6 +561,7 @@ func (m *Manager) observe(d *device, data []byte) {
 			}
 		}
 	}
+	return e.Event == "session.user_interrupt"
 }
 
 type rpcReply struct {
@@ -564,7 +576,11 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 		return nil, errors.New("BrowserSkill daemon unavailable")
 	}
 	defer func() { _ = conn.Close() }()
-	deadline := time.Now().Add(35 * time.Second)
+	timeout := 35 * time.Second
+	if IsHumanStep(strings.TrimPrefix(method, "tool.")) {
+		timeout = HumanStepTimeout
+	}
+	deadline := time.Now().Add(timeout)
 	if t, ok := ctx.Deadline(); ok {
 		deadline = t
 	}
@@ -670,9 +686,17 @@ func (m *Manager) Call(
 	defer func() { <-gate }()
 	d.mu.Lock()
 	t := d.tasks[session]
-	if t == nil || t != target || !t.selected || t.paused || d.conn == nil || !d.ready || time.Now().After(d.expires) {
+	if t == nil || t != target || !t.selected {
 		d.mu.Unlock()
-		return nil, errors.New("local browser is disconnected or paused; ask the user to connect or resume")
+		return nil, errors.New("local browser task ended; wait for a new user turn")
+	}
+	if d.conn == nil || !d.ready || time.Now().After(d.expires) {
+		d.mu.Unlock()
+		return nil, errors.New("local browser is offline; keep Chrome and the extension open for reconnection")
+	}
+	if t.paused {
+		d.mu.Unlock()
+		return nil, pausedError()
 	}
 	if t.id == "" {
 		d.mu.Unlock()
@@ -697,9 +721,10 @@ func (m *Manager) Call(
 		t.calls = map[uint64]context.CancelFunc{}
 	}
 	t.calls[callID] = cancel
-	helping := method == "request_help" || method == "tab_borrow"
+	helping := IsHumanStep(method)
 	if helping {
 		t.helpCalls++
+		t.helpPrompt, _ = params["prompt"].(string)
 	}
 	d.mu.Unlock()
 	defer func() {
@@ -708,6 +733,7 @@ func (m *Manager) Call(
 		delete(t.calls, callID)
 		if helping {
 			t.helpCalls--
+			t.helpPrompt = ""
 		}
 		d.mu.Unlock()
 	}()
@@ -726,7 +752,21 @@ func (m *Manager) Call(
 		}
 	}
 	clean["session_id"] = id
+	if helping {
+		// Keep all transports inside the same bounded human-wait budget.
+		clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+	}
 	result, err := rpc(callCtx, d, "tool."+method, clean)
+	if method == "request_help" && err == nil {
+		var help struct {
+			Outcome string `json:"outcome"`
+		}
+		if json.Unmarshal(result, &help) != nil || (help.Outcome != "continued" && help.Outcome != "completed") {
+			d.mu.Lock()
+			pauseTask(t)
+			d.mu.Unlock()
+		}
+	}
 	if sessionGone(err) {
 		d.mu.Lock()
 		if t.id == id {
@@ -735,15 +775,26 @@ func (m *Manager) Call(
 		}
 		d.mu.Unlock()
 	}
-	if err != nil &&
-		(strings.Contains(err.Error(), "user_aborted") ||
-			strings.Contains(err.Error(), "interrupted or timed out") ||
-			strings.Contains(err.Error(), "unfinished command")) {
+	if interruptedCommand(err) {
 		d.mu.Lock()
 		pauseTask(t)
 		d.mu.Unlock()
 	}
 	return result, err
+}
+
+func interruptedCommand(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rpcErr *RPCError
+	if errors.As(err, &rpcErr) &&
+		(rpcErr.Code == "timeout" || rpcErr.Code == "cancelled" || rpcErr.Code == "user_aborted") {
+		return true
+	}
+	return strings.Contains(err.Error(), "user_aborted") ||
+		strings.Contains(err.Error(), "interrupted or timed out") ||
+		strings.Contains(err.Error(), "unfinished command")
 }
 
 func sessionGone(err error) bool {

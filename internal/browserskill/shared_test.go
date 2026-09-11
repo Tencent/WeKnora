@@ -102,6 +102,9 @@ func connectSharedFixture(
 				result = map[string]any{"returned_tab_ids": []int{}, "return_failures": []any{}}
 			case "tool.snapshot":
 				result = map[string]any{"text": scope.key(), "ref_count": 0, "tab_id": 1}
+			case "tool.request_help":
+				f.calls <- req.Params
+				result = map[string]any{"outcome": req.Params["prompt"], "tab_id": 1}
 			case "tool.click":
 				if f.send(map[string]any{"id": req.ID, "error": map[string]any{
 					"code": "not_found", "message": "fixture ref missing",
@@ -386,6 +389,81 @@ func TestLivePreviewBypassesUnfinishedAutomation(t *testing.T) {
 		require.Error(t, err)
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+}
+
+func TestWindowInterruptResumesSameTask(t *testing.T) {
+	for _, running := range []bool{false, true} {
+		t.Run(fmt.Sprintf("running=%v", running), func(t *testing.T) {
+			m, ctx := sharedTestManager(t)
+			s := Scope{1, "interrupt-user"}
+			f := connectSharedFixture(ctx, t, m, s, "", "browser")
+			require.NoError(t, m.Control(ctx, s, "chat", "start"))
+			id := m.Status(s, "chat").SessionID
+			done := make(chan error, 1)
+			if running {
+				go func() {
+					_, err := m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://slow.example"})
+					done <- err
+				}()
+				select {
+				case <-f.calls:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			require.NoError(t, f.send(map[string]any{
+				"event": "session.user_interrupt", "payload": map[string]any{"session_id": id},
+			}))
+			require.Eventually(t, func() bool { return m.Status(s, "chat").Paused }, time.Second, time.Millisecond)
+			if running {
+				select {
+				case err := <-done:
+					require.Error(t, err)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			require.True(t, m.Status(s, "chat").Connected)
+			_, err := m.Call(ctx, s, "chat", "snapshot", nil)
+			require.ErrorContains(t, err, "paused")
+			require.NoError(t, m.Control(ctx, s, "chat", "resume"))
+			require.Equal(t, id, m.Status(s, "chat").SessionID)
+			_, err = m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://continued.example"})
+			require.NoError(t, err, "the first action after explicit resume must not consume a stale interrupt")
+		})
+	}
+}
+
+func TestHumanHelpOutcomeControlsPause(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "help-user"}
+	f := connectSharedFixture(ctx, t, m, s, "", "browser")
+	for _, outcome := range []string{"continued", "completed", "cancelled", "timed_out", "disabled"} {
+		t.Run(outcome, func(t *testing.T) {
+			require.NoError(t, m.Control(ctx, s, outcome, "start"))
+			_, err := m.Call(ctx, s, outcome, "request_help", map[string]any{"prompt": outcome})
+			require.NoError(t, err)
+			select {
+			case params := <-f.calls:
+				require.Equal(t, float64(300000), params["timeout_ms"])
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			paused := outcome != "continued" && outcome != "completed"
+			status := m.Status(s, outcome)
+			require.Equal(t, paused, status.Paused)
+			require.True(t, status.Connected)
+			require.False(t, status.NeedsHelp)
+			if paused {
+				_, err = m.Call(ctx, s, outcome, "snapshot", nil)
+				require.ErrorContains(t, err, "task_paused")
+				require.NoError(t, m.Control(ctx, s, outcome, "resume"))
+			}
+			_, err = m.Call(ctx, s, outcome, "navigate", map[string]any{"url": "https://continued.example"})
+			require.NoError(t, err)
+			<-f.calls
+		})
 	}
 }
 
