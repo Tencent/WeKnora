@@ -88,6 +88,8 @@ app:
   # Ref: https://github.com/Tencent/WeKnora/blob/main/docker-compose.yml
   env:
     GIN_MODE: release
+    # PostgreSQL: disable, require, verify-ca, verify-full (server TLS must be configured separately).
+    DB_SSLMODE: disable
     # -- Retrieval driver: postgres, elasticsearch_v7, elasticsearch_v8, qdrant
     RETRIEVE_DRIVER: postgres
     # -- Storage type: local, minio, cos, tos, s3

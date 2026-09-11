@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -300,13 +301,18 @@ func recoverFromDirtyState(ctx context.Context, m *migrate.Migrate, dirtyVersion
 
 // GetMigrationVersion returns the current migration version
 func GetMigrationVersion() (uint, bool, error) {
+	sslMode, err := config.PostgresSSLMode()
+	if err != nil {
+		return 0, false, err
+	}
 	dbURL := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		"postgres://%s:%s@%s:%s/%s?sslmode=%s",
 		os.Getenv("DB_USER"),
 		os.Getenv("DB_PASSWORD"),
 		os.Getenv("DB_HOST"),
 		os.Getenv("DB_PORT"),
 		os.Getenv("DB_NAME"),
+		sslMode,
 	)
 
 	migrationsPath := "file://migrations/versioned"

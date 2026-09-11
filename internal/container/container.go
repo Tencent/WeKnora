@@ -643,6 +643,10 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	var sqliteDBPath string
 	switch os.Getenv("DB_DRIVER") {
 	case "postgres":
+		sslMode, err := config.PostgresSSLMode()
+		if err != nil {
+			return nil, err
+		}
 		// DSN for GORM (key-value format)
 		gormDSN := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s TimeZone=UTC",
@@ -651,7 +655,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 			os.Getenv("DB_USER"),
 			os.Getenv("DB_PASSWORD"),
 			os.Getenv("DB_NAME"),
-			"disable",
+			sslMode,
 		)
 		dialector = postgres.Open(gormDSN)
 
@@ -669,12 +673,13 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Skip embedding: %s", skipEmbedding)
 
 		migrateDSN = fmt.Sprintf(
-			"postgres://%s:%s@%s:%s/%s?sslmode=disable&options=-c%%20app.skip_embedding=%s",
+			"postgres://%s:%s@%s:%s/%s?sslmode=%s&options=-c%%20app.skip_embedding=%s",
 			os.Getenv("DB_USER"),
 			encodedPassword, // Use encoded password
 			os.Getenv("DB_HOST"),
 			os.Getenv("DB_PORT"),
 			os.Getenv("DB_NAME"),
+			sslMode,
 			skipEmbedding,
 		)
 
