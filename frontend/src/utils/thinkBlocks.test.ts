@@ -67,3 +67,85 @@ test('hasThinkMarkup detects partial states', () => {
   assert.equal(hasThinkMarkup('abc</think>'), true)
   assert.equal(hasThinkMarkup('no tags'), false)
 })
+
+// --- code regions are literal (#3132): a long markdown answer that merely
+// mentions the tags must not get its head chopped into the thinking card ---
+
+test('think tags inside a fenced code block stay literal answer (#3132)', () => {
+  const raw = 'Before\n\n```xml\n<think>demo</think>\n```\n\nAfter'
+  const r = parseThinkBlocks(raw)
+  assert.equal(r.think, '')
+  assert.equal(r.thinking, false)
+  assert.equal(r.answer, raw)
+})
+
+test('real block before a fenced example is still parsed', () => {
+  const raw = '<think>meta reasoning</think>See the example:\n\n```xml\n<think>sample</think>\n```\n'
+  const r = parseThinkBlocks(raw)
+  assert.equal(r.think, 'meta reasoning')
+  assert.equal(r.thinking, false)
+  assert.equal(r.answer, 'See the example:\n\n```xml\n<think>sample</think>\n```\n')
+})
+
+test('unterminated fence consumes the rest and keeps tags literal', () => {
+  const r = parseThinkBlocks('answer so far\n```bash\n<think>never a block')
+  assert.equal(r.thinking, false)
+  assert.equal(r.think, '')
+  assert.equal(r.answer, 'answer so far\n```bash\n<think>never a block')
+})
+
+test('tilde fences are honoured', () => {
+  const raw = '~~~\n<think>x</think>\n~~~\ndone'
+  const r = parseThinkBlocks(raw)
+  assert.equal(r.thinking, false)
+  assert.equal(r.think, '')
+  assert.equal(r.answer, raw)
+})
+
+test('closing fence may be longer than the opening fence', () => {
+  const raw = '````md\n<think>a</think>\n`````\ntail'
+  const r = parseThinkBlocks(raw)
+  assert.equal(r.think, '')
+  assert.equal(r.answer, raw)
+})
+
+test('think tags inside an inline code span stay literal', () => {
+  const r = parseThinkBlocks('Wrap the tag as `<think>` like this.')
+  assert.equal(r.think, '')
+  assert.equal(r.thinking, false)
+  assert.equal(r.answer, 'Wrap the tag as `<think>` like this.')
+})
+
+test('first close tag ends the block even when the reasoning shows a fenced example', () => {
+  // A literal </think> inside a fence within the reasoning is indistinguishable
+  // from the real close; the first close wins and the rest stays answer text.
+  const r = parseThinkBlocks('<think>draft ```md\n<think>nested</think>\n```\nmore</think>final')
+  assert.equal(r.thinking, false)
+  assert.equal(r.think, 'draft ```md\n<think>nested')
+  assert.equal(r.answer, '\n```\nmore</think>final')
+})
+
+test('streaming growth: fence closing later lets the real block pop out', () => {
+  const r1 = parseThinkBlocks('```xml\n<think>doc sample')
+  assert.equal(r1.thinking, false)
+  assert.equal(r1.think, '')
+  const r2 = parseThinkBlocks('```xml\n<think>doc sample</think>\n```\n<think>real reasoning</think>Answer')
+  assert.equal(r2.thinking, false)
+  assert.equal(r2.think, 'real reasoning')
+  assert.equal(r2.answer, '```xml\n<think>doc sample</think>\n```\nAnswer')
+})
+
+test('unclosed inline span consumes the rest without inventing a block', () => {
+  const r = parseThinkBlocks('code `until the end <think>x')
+  assert.equal(r.thinking, false)
+  assert.equal(r.think, '')
+  assert.equal(r.answer, 'code `until the end <think>x')
+})
+
+test('indented fence (up to 3 spaces) is still a fence', () => {
+  const raw = 'text\n   ```\n<think>kept literal</think>\n   ```\nend'
+  const r = parseThinkBlocks(raw)
+  assert.equal(r.think, '')
+  assert.equal(r.thinking, false)
+  assert.equal(r.answer, raw)
+})
