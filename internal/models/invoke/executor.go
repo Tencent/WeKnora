@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/models/limiter"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -121,7 +120,7 @@ func (e *Executor) Do(ctx context.Context, key ModelKey, req *Request) (*RawResu
 	if _, ok := ctx.Deadline(); !ok {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
-	release := limiter.GateNamedN(ctx, key.ModelID, key.ModelName, key.ConcurrencyLimit)
+	release := GateNamedN(ctx, key.ModelID, key.ModelName, key.ConcurrencyLimit)
 
 	if req.Stream {
 		// Stream slots live beyond Do: release on reader EOF/Close instead of

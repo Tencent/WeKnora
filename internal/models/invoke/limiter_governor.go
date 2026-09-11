@@ -1,4 +1,4 @@
-package limiter
+package invoke
 
 import (
 	"context"
@@ -9,9 +9,9 @@ import (
 )
 
 // The concurrency governor is process-wide, shared by every model-client layer
-// that fronts a provider (chat, vlm). Keeping the singleton here — rather than
-// inside one client package — lets all of them gate against the same limiter
-// and per-model limit without importing each other. Wired once at startup (see
+// that fronts a provider (chat, vlm). Keeping the singleton in the invoke
+// package lets all of them gate against the same limiter and per-model limit
+// without importing each other. Wired once at startup (see
 // container.registerModelConcurrencyLimiter) via SetGovernor.
 var (
 	governorMu sync.RWMutex

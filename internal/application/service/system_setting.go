@@ -19,7 +19,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -284,8 +284,8 @@ var registry = map[string]settingSpec{
 	// model.max_concurrency is the DEFAULT per-model cap on concurrent
 	// background (ingestion/enrichment) LLM/embedding/VLM calls, keyed by
 	// model ID and shared across replicas. Read at every gated call via the
-	// limiter governor; a runtime bridge (applyModelMaxConcurrency) pushes UI
-	// edits into limiter.SetGlobalLimit so no restart is needed. Individual
+	// invoke governor; a runtime bridge (applyModelMaxConcurrency) pushes UI
+	// edits into invoke.SetGlobalLimit so no restart is needed. Individual
 	// models may override this via their own max_concurrency parameter.
 	// Mirrors WEKNORA_MODEL_MAX_CONCURRENCY (default 32). 0/negative disables
 	// the default cap.
@@ -539,7 +539,7 @@ func (s *systemSettingService) applySSRFWhitelist(ctx context.Context) {
 // after reload (peer's edit via pubsub).
 func (s *systemSettingService) applyModelMaxConcurrency(ctx context.Context) {
 	limit := int(s.GetInt(ctx, "model.max_concurrency", "WEKNORA_MODEL_MAX_CONCURRENCY", 32))
-	limiter.SetGlobalLimit(limit)
+	invoke.SetGlobalLimit(limit)
 	logger.Infof(ctx, "[system_settings] model.max_concurrency applied (limit=%d)", limit)
 }
 

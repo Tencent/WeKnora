@@ -83,7 +83,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	_ "github.com/Tencent/WeKnora/internal/models/invoke/adapters" // invoke adapter registration (§6.2)
-	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -581,7 +580,7 @@ func resolveModelMaxConcurrency(ss interfaces.SystemSettingService) int {
 // (the shared semaphore backend); Lite mode uses registerLiteModelConcurrencyLimiter.
 func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSettingService) {
 	limit := resolveModelMaxConcurrency(ss)
-	limiter.SetGovernor(limiter.NewRedisLimiter(rdb), limit)
+	invoke.SetGovernor(invoke.NewRedisLimiter(rdb), limit)
 	if limit <= 0 {
 		logger.Infof(context.Background(),
 			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
@@ -597,7 +596,7 @@ func registerModelConcurrencyLimiter(rdb *redis.Client, ss interfaces.SystemSett
 // the whole worker pool against one provider.
 func registerLiteModelConcurrencyLimiter(ss interfaces.SystemSettingService) {
 	limit := resolveModelMaxConcurrency(ss)
-	limiter.SetGovernor(limiter.NewLocalLimiter(), limit)
+	invoke.SetGovernor(invoke.NewLocalLimiter(), limit)
 	if limit <= 0 {
 		logger.Infof(context.Background(),
 			"[ModelLimiter] background concurrency governor DISABLED (model.max_concurrency<=0)")
