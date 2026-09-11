@@ -470,6 +470,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOutline: 'Outline',
     channelUpload: 'アップロード',
     channelManual: '手動作成',
     channelUrl: 'Web',
@@ -6289,7 +6290,8 @@ export default {
       yuque: 'Yuque',
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      outline: 'Outline',
     },
     connectorDesc: {
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
@@ -6300,7 +6302,8 @@ export default {
       yuque: 'Yuqueのナレッジベースからドキュメントを同期します',
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
-      gitlab: 'GitLabプロジェクトからファイルを同期します'
+      gitlab: 'GitLabプロジェクトからファイルを同期します',
+      outline: 'Outline のコレクションからドキュメントを同期（クラウド／セルフホスト）',
     },
     drive: {
       folderTokenLabel: 'Driveフォルダトークン',
@@ -6365,6 +6368,12 @@ export default {
     prereqStep3Brief_lark_drive: 'アプリの権限を設定',
     prereqStep3Desc_lark_drive: 'drive:drive:readonly、drive:export:readonly、docx:document:readonlyの権限を有効にします',
     prereqOpenConsole_yuque: 'Yuqueのトークン設定を開く',
+    prereqBarText_outline: '初めてですか？Outline トークンの設定手順を確認してください',
+    prereqStep1Brief_outline: 'Outline の API トークンを作成',
+    prereqStep1Desc_outline: 'Outline → Settings → API Tokens → New token。作成時に一度だけ表示されるのでその場でコピーしてください',
+    prereqStep2Brief_outline: '（任意）セルフホストの場合は Base URL を入力',
+    prereqStep2Desc_outline: 'クラウドの場合は空欄のままで構いません。セルフホストの場合はインスタンスの URL（例: https://docs.example.com）を入力します',
+    prereqOpenConsole_outline: 'Outline の API トークン設定を開く',
     prereqBarText_ima: '初めてですか？クリックしてTencent IMA OpenAPIの設定ガイドを表示',
     prereqStep1Brief_ima: 'IMAエージェントのOpenAPI利用を申請',
     prereqStep1Desc_ima: 'https://ima.qq.com/agent-interfaceにサインインし、OpenAPIの利用を申請します',
@@ -6397,7 +6406,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wikiスペース',
       docCategory: 'ドキュメントタグ',
-      book: 'Yuqueナレッジベース'
+      book: 'Yuqueナレッジベース',
+      collection: 'Outline コレクション'
     },
     neverSynced: '未同期',
     justNow: 'たった今',

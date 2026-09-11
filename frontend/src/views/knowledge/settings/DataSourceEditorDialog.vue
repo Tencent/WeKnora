@@ -633,6 +633,20 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
+  {
+    // Outline (getoutline.com). API token auth; base_url is only needed for a
+    // self-hosted instance and defaults to the public cloud when left empty.
+    type: 'outline',
+    available: true,
+    docUrl: 'https://www.getoutline.com/developers',
+    permissionDocUrl: 'https://www.getoutline.com/developers',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'api_token', labelKey: 'datasource.field.apiToken', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://app.getoutline.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
 ])
 
 
@@ -1180,6 +1194,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  collection: 'datasource.resourceType.collection',
 }
 
 function resourceTypeLabel(type: string): string {
