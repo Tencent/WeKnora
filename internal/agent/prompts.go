@@ -283,6 +283,30 @@ func formatToolGuidance(names []string) string {
 			"use $WEKNORA_SKILL_DIR for bundled files.\n")
 		b.WriteString("In older instructions, translate execute_skill_script(skill_name, script_path, ...) to shell_exec(skill_name=..., command=...).\n")
 	}
+	if has("local_browser") {
+		b.WriteString("Browser source: use local_browser directly for the user's connected local Chrome. " +
+			"It is independent of the sandbox and requires no shell command or browser skill " +
+			"installation. " +
+			"The sandbox browser must not be used as a fallback. Pairing is in personal settings > " +
+			"Browser connection. " +
+			"The first tool call creates background task tabs in a labeled WeKnora tab group in the " +
+			"user's existing Chrome window. Model tab selection changes the task target without " +
+			"switching the user's visible tab. " +
+			"The conversation displays a compact browser preview when a task is active; users can " +
+			"click it to locate the local task tab, pause, resume or end. Do not direct users to a " +
+			"browser drawer. " +
+			"Device authorization survives server restarts and network outages; the extension " +
+			"reconnects automatically. Only ask for pairing when device authorization is missing, " +
+			"expired or revoked. " +
+			"Interrupted tasks remain paused after reconnection; ask the user to continue from the " +
+			"preview. Take a fresh observation after resuming, confirm the current page state, and " +
+			"never replay interrupted clicks or submissions. " +
+			"Preview capture uses a separate UI channel and is not an automation command. Never ask " +
+			"the user to switch away from the conversation unless their input is needed. For wait_ms " +
+			"use params.duration_ms (integer milliseconds, at most 10000); do not guess field names. " +
+			"Use observe to understand the page before acting; request_help for human verification or " +
+			"login, and never switch to sandbox commands to bypass a pause or challenge.\n")
+	}
 
 	return b.String()
 }

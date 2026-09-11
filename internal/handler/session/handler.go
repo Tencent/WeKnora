@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -17,6 +18,7 @@ import (
 
 // Handler handles all HTTP requests related to conversation sessions
 type Handler struct {
+	browserSkill         *browserskill.Manager
 	messageService       interfaces.MessageService // Service for managing messages
 	suggestionService    interfaces.MessageSuggestionService
 	sessionService       interfaces.SessionService       // Service for managing sessions
@@ -77,8 +79,10 @@ func NewHandler(
 	memberService interfaces.TenantMemberService,
 	terminalService *service.SandboxTerminalService,
 	auditService interfaces.AuditLogService,
+	browserSkill *browserskill.Manager,
 ) *Handler {
 	return &Handler{
+		browserSkill:         browserSkill,
 		sessionService:       sessionService,
 		messageService:       messageService,
 		suggestionService:    suggestionService,
@@ -383,6 +387,8 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), []string{id})
+
 	// Return success message
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -467,6 +473,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
+		h.browserSkill.ForgetAll(browserSkillScope(ctx))
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "All sessions deleted successfully",
@@ -504,6 +511,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), sanitizedIDs)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Sessions deleted successfully",
