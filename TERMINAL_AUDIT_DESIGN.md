@@ -2,7 +2,7 @@
 
 ## Baseline and scope
 
-- Source of truth after final rebase: `upstream/main` at `8c2c97612784b7ef4fde5a23e31884b60b6b1116`.
+- Source of truth after latest-main sync: `upstream/main` at `7e53c3167164d68cfb6c2e897ddd3e755b4b5a45`.
 - Main already has the provider-neutral `RemoteTerminalManager` / `RemoteTerminalSession`, current terminal ticket, authenticated WebSocket bridge, xterm UI, pinned session binding, periodic auth recheck, idle disconnect, and native `AuditLog` service/repository/UI.
 - PR #3146 is open, merge-conflicting, and builds a separate `CommandTerminal`/Workbench audit stack. It remains analysis only and is not an architecture or code source for this PR.
 - PR-03 audits commands entered in the current interactive PTY only. It does not create a second terminal, ticket, socket, audit store, or frontend terminal.
@@ -62,10 +62,13 @@ The raw history value exists only long enough to decode and sanitize. Before enq
 - the history sequence prefix is removed;
 - control characters are normalized;
 - the command is capped to a bounded UTF-8 length;
-- sensitive environment assignments (`*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY`, credentials, private keys, and related names) are replaced with `[REDACTED]`;
-- sensitive CLI flag values (`--token`, `--password`, `--api-key`, `--client-secret`, and equivalents), Authorization/Bearer headers, and URL user-info passwords are redacted.
+- sensitive environment assignments are replaced with `[REDACTED]`. The name run around the keyword may be empty, so bare `PASSWORD=`, `TOKEN=`, and `SECRET=` redact exactly like `API_TOKEN=`; matching a name that merely *contains* a keyword is the safe direction for a scrubber;
+- sensitive CLI flag values redact when the keyword appears anywhere in the flag name, covering both `--password=` and prefixed forms such as `--http-password=` or `--db-token=`;
+- `Authorization:` values redact for **any** auth scheme, not just `bearer`/`basic`, plus `X-Api-Key`/`X-Auth-Token`-style headers and URL user-info passwords. Quoted values in those headers redact too.
 
 The raw command and marker token are never persisted or logged. Tests assert representative secret forms are absent from the serialized audit details.
+
+This is pattern-based scrubbing, not a shell parser, and it is deliberately documented rather than over-claimed. The shape it does not cover is a keyword assignment that appears *inside* a quoted payload whose value contains whitespace: in `curl --data "my_password=my secret value"` only the first word of the value redacts and the rest of the quoted text survives. Redaction also over-matches by design: a name that merely contains a keyword, and a quoted value that reads like one, are both scrubbed.
 
 ## Reconnect and provider behavior
 
@@ -105,7 +108,7 @@ No adapter-specific audit implementation is required.
 - audit queue bounds, immutable native row fields, writer cancellation/close, and storage-error isolation;
 - bridge tests prove markers never reach WebSocket output and valid commands reach the audit sink;
 - real Docker PTY integration verifies a successful command, failing command, Unicode/ANSI output, secret redaction, exit status, and clean terminal lifecycle;
-- gofmt, focused Go tests, frontend locale tests/type-check, real Docker integration, diff-scoped lint, `git diff --check`, self-review, latest-main rebase, and affected-test rerun.
+- gofmt, focused Go tests, frontend locale tests/type-check, real Docker integration, diff-scoped lint, `git diff --check`, self-review, latest-main sync, and affected-test rerun.
 
 ## Known limitation expressed honestly
 

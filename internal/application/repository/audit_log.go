@@ -79,7 +79,12 @@ func (r *auditLogRepository) List(
 			// CAST(... AS TEXT) works for PostgreSQL JSONB and the SQLite
 			// test store. The handler caps search length; parameters remain
 			// bound, never interpolated into SQL.
-			tx = tx.Where("LOWER(CAST(details AS TEXT)) LIKE ?", "%"+strings.ToLower(search)+"%")
+			pattern := strings.NewReplacer(
+				`\`, `\\`,
+				`%`, `\%`,
+				`_`, `\_`,
+			).Replace(strings.ToLower(search))
+			tx = tx.Where("LOWER(CAST(details AS TEXT)) LIKE ? ESCAPE '\\'", "%"+pattern+"%")
 		}
 		if q.UnscopedOnly {
 			tx = tx.Where("scope_type = ''")

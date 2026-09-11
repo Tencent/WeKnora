@@ -153,25 +153,36 @@ func longestTerminalAuditPrefixSuffix(data, prefix []byte) int {
 
 var (
 	terminalAuditHistoryPrefix = regexp.MustCompile(`^[\t ]*[0-9]+[\t ]+`)
-	terminalAuditEnvSecret     = regexp.MustCompile(
-		`(?i)(\b(?:export[\t ]+)?[A-Za-z_][A-Za-z0-9_]*` +
-			`(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential)` +
+	// The name-run before and after the keyword is allowed to be empty so a
+	// bare `PASSWORD=`, `TOKEN=`, or `SECRET=` is redacted too — not only
+	// prefixed forms like `API_TOKEN=`. Over-matching a name that merely
+	// contains a keyword is the safe direction for a scrubber.
+	terminalAuditEnvSecret = regexp.MustCompile(
+		`(?i)(\b(?:export[\t ]+)?[A-Za-z0-9_]*` +
+			`(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|` +
+			`access[_-]?key|private[_-]?key|credential)` +
 			`[A-Za-z0-9_]*[\t ]*=[\t ]*)("[^"]*"|'[^']*'|[^\t ;|&]+)`,
 	)
+	// Flag names may carry a prefix (`--http-password`, `--db-token`), so the
+	// keyword is matched anywhere in the flag name rather than at its start.
 	terminalAuditFlagSecret = regexp.MustCompile(
-		`(?i)((?:^|[\t ])--?` +
-			`(?:password|passwd|pwd|secret|token|api[_-]?key|` +
+		`(?i)((?:^|[\t \n])--?[A-Za-z0-9_-]*` +
+			`(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|` +
 			`access[_-]?key|private[_-]?key|client[_-]?secret|credential)` +
-			`(?:[=\t ]+))("[^"]*"|'[^']*'|[^\t ;|&]+)`,
+			`[A-Za-z0-9_-]*(?:[=\t ]+))("[^"]*"|'[^']*'|[^\t ;|&]+)`,
 	)
+	// Any scheme is redacted, not just bearer/basic: `Authorization: token
+	// <pat>` (GitHub) and `Authorization: ApiKey <key>` are equally secret.
 	terminalAuditAuthorization = regexp.MustCompile(
-		`(?i)(authorization[\t ]*:[\t ]*(?:bearer|basic)[\t ]+)([^"'\t ;|&]+)`,
+		`(?i)(authorization[\t ]*:[\t ]*(?:[A-Za-z][A-Za-z0-9._~+/-]*[\t ]+)?)` +
+			`("[^"]*"|'[^']*'|[^"'\t ;|&]+)`,
 	)
 	terminalAuditSecretHeader = regexp.MustCompile(
-		`(?i)((?:x-api-key|api-key|x-auth-token|x-access-token)[\t ]*:[\t ]*)([^"'\t ;|&]+)`,
+		`(?i)((?:x-api-key|api-key|x-auth-token|x-access-token)[\t ]*:[\t ]*)` +
+			`("[^"]*"|'[^']*'|[^"'\t ;|&]+)`,
 	)
 	terminalAuditUserPassword = regexp.MustCompile(
-		`(?i)((?:^|[\t ])(?:-u|--user|-p)(?:[=\t ]+)?)("[^"]*"|'[^']*'|[^\t ;|&]+)`,
+		`(?i)((?:^|[\t \n])(?:-u|--user|-p)(?:[=\t ]+)?)("[^"]*"|'[^']*'|[^\t ;|&]+)`,
 	)
 	terminalAuditBearer      = regexp.MustCompile(`(?i)(\bbearer[\t ]+)([A-Za-z0-9._~+/=-]+)`)
 	terminalAuditURLPassword = regexp.MustCompile(`(?i)(://[^:/@\s]+:)([^@\s"']+)(@)`)
@@ -233,6 +244,7 @@ type terminalAuditRecorder struct {
 	closed    bool
 	queue     chan terminalAuditRecord
 	done      chan struct{}
+	closeWait time.Duration
 	closeOnce sync.Once
 }
 
@@ -251,8 +263,9 @@ func newTerminalAuditRecorder(
 		ctx: ctx, cancel: cancel, audit: audit,
 		tenantID: tenantID, actorID: actorID, actorRole: actorRole,
 		sessionID: sessionID, backend: backend, ptyID: ptyID,
-		queue: make(chan terminalAuditRecord, terminalAuditQueueSize),
-		done:  make(chan struct{}),
+		queue:     make(chan terminalAuditRecord, terminalAuditQueueSize),
+		done:      make(chan struct{}),
+		closeWait: terminalAuditCloseTimeout,
 	}
 	go recorder.run()
 	return recorder
@@ -331,13 +344,17 @@ func (r *terminalAuditRecorder) Close() {
 		close(r.queue)
 		r.mu.Unlock()
 
-		timer := time.NewTimer(terminalAuditCloseTimeout)
+		wait := r.closeWait
+		if wait <= 0 {
+			wait = terminalAuditCloseTimeout
+		}
+		timer := time.NewTimer(wait)
 		defer timer.Stop()
 		select {
 		case <-r.done:
 		case <-timer.C:
 			r.cancel()
-			<-r.done
+			return
 		}
 		r.cancel()
 	})
