@@ -77,3 +77,8 @@ test('interactive prompt script does not export PS1 or PROMPT_COMMAND', () => {
   assert.doesNotMatch(prompt, /export PS1/)
   assert.doesNotMatch(prompt, /export PROMPT_COMMAND/)
 })
+
+test('interactive prompt helper preserves the preceding command exit status', () => {
+  assert.match(prompt, /local weknora_prompt_status=\$\?/)
+  assert.match(prompt, /return "\$weknora_prompt_status"/)
+})

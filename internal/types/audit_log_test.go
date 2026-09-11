@@ -43,6 +43,7 @@ func TestAuditAction_DotNamespaceConvention(t *testing.T) {
 		AuditActionSystemQueueTaskRunNow,
 		AuditActionSystemQueueTaskCancelled,
 		AuditActionSystemQueueArchivedPurged,
+		AuditActionSandboxTerminalCommand,
 	}
 	for _, a := range all {
 		s := string(a)
@@ -131,6 +132,7 @@ func TestAuditAction_NoCollisionsAcrossNamespaces(t *testing.T) {
 	register("AuditActionSystemQueueTaskRunNow", AuditActionSystemQueueTaskRunNow)
 	register("AuditActionSystemQueueTaskCancelled", AuditActionSystemQueueTaskCancelled)
 	register("AuditActionSystemQueueArchivedPurged", AuditActionSystemQueueArchivedPurged)
+	register("AuditActionSandboxTerminalCommand", AuditActionSandboxTerminalCommand)
 }
 
 // TestAuditAction_SystemNamespacePrefix pins the system.* actions

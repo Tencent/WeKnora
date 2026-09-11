@@ -6823,7 +6823,8 @@ export default {
     },
     audit: {
       tabLabel: '監査ログ',
-      description: 'このワークスペース内のメンバー変更とアクセス拒否をすべて記録します。新しい順に表示され、1分以内に繰り返された拒否はまとめられます。',
+      description: 'このワークスペースのセキュリティイベント、メンバー変更、秘匿化されたターミナルコマンドを新しい順に記録します。1分以内に繰り返された拒否はまとめられます。',
+      searchPlaceholder: 'コマンド詳細を検索',
       refresh: '更新',
       end: 'ログの末尾です。',
       empty: '監査イベントはまだありません。',
@@ -6848,7 +6849,8 @@ export default {
         'rbac.invitation_accepted': '招待承諾',
         'rbac.invitation_declined': '招待辞退',
         'rbac.invitation_revoked': '招待取り消し',
-        'rbac.invitation_expired': '招待期限切れ'
+        'rbac.invitation_expired': '招待期限切れ',
+        'sandbox.terminal_command': 'ターミナルコマンド完了'
       },
       outcome: {
         success: '成功',

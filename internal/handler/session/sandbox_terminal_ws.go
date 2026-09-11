@@ -211,6 +211,11 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 		Rows:      terminalSizeParam(c.Query("rows")),
 		AttachPID: terminalPIDParam(c.Query("pty_id")),
 	}
+	auditToken := ""
+	if h.auditService != nil {
+		auditToken = service.SandboxTerminalAuditToken(claims.TenantID, sessionID)
+		opts.Envs = terminalAuditEnvironment(auditToken)
+	}
 
 	// The connection outlives the HTTP exchange, so the terminal lifetime is
 	// governed by this derived context, cancelled in cleanup().
@@ -230,6 +235,16 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 
 	logger.Infof(ctx, "[sandbox-terminal] opened session=%s backend=%s pid=%d",
 		sessionID, terminal.Backend, terminal.Session.PID())
+	auditRecorder := newTerminalAuditRecorder(
+		ctx,
+		h.auditService,
+		claims.TenantID,
+		claims.UserID,
+		string(types.TenantRoleFromContext(ctx)),
+		sessionID,
+		terminal.Backend,
+		terminal.Session.PID(),
+	)
 
 	authClaims := *claims
 	bridge := &terminalBridge{
@@ -239,6 +254,12 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 		session:        sessionID,
 		terminal:       terminal,
 		idleDisconnect: terminal.IdleDisconnect,
+		auditRecorder:  auditRecorder,
+		auditFilter: newTerminalAuditMarkerFilter(auditToken, func(exitCode int, command string) {
+			if auditRecorder != nil {
+				auditRecorder.Record(exitCode, command)
+			}
+		}),
 		authCheck: func(checkCtx context.Context) error {
 			_, err := h.checkTerminalAuth(checkCtx, authClaims, false)
 			return err

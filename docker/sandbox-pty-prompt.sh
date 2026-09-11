@@ -17,7 +17,12 @@
 [ -n "${BASH_VERSION-}" ] || return 0
 
 weknora_set_pty_prompt() {
+	# PROMPT_COMMAND entries are chained with semicolons. Preserve the
+	# preceding command's status so later hooks (including terminal audit)
+	# still observe the real `$?` rather than this cosmetic assignment's 0.
+	local weknora_prompt_status=$?
 	PS1='\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\W\[\033[00m\]\$ '
+	return "$weknora_prompt_status"
 }
 
 weknora_set_pty_prompt

@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -45,6 +46,7 @@ type auditLogListResponse struct {
 // @Param        action    query  string  false  "按 action 精确过滤（如 rbac.member_added / rbac.access_denied）"
 // @Param        outcome   query  string  false  "按 outcome 精确过滤（success / denied）"
 // @Param        actor     query  string  false  "按 actor_user_id 精确过滤"
+// @Param        search    query  string  false  "在结构化审计详情中搜索（最长 128 字符）"
 // @Success      200  {object}  auditLogListResponse
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
@@ -81,6 +83,7 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 		Action:       types.AuditAction(c.Query("action")),
 		Outcome:      types.AuditOutcome(c.Query("outcome")),
 		ActorUserID:  c.Query("actor"),
+		Search:       boundedAuditSearch(c.Query("search")),
 		UnscopedOnly: true,
 	}
 
@@ -104,6 +107,15 @@ func (h *AuditLogHandler) ListTenantAuditLog(c *gin.Context) {
 		Data:       entries,
 		NextCursor: nextCursor,
 	})
+}
+
+func boundedAuditSearch(raw string) string {
+	value := strings.TrimSpace(raw)
+	runes := []rune(value)
+	if len(runes) <= 128 {
+		return value
+	}
+	return string(runes[:128])
 }
 
 // ListKnowledgeBaseActivity returns the durable activity projection for one

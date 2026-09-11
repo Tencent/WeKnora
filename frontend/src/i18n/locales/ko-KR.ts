@@ -130,7 +130,8 @@ export default {
     searchPlaceholder: '이름 또는 이메일로 검색',
     audit: {
       tabLabel: '감사 로그',
-      description: '이 워크스페이스의 멤버 변경 및 접근 거부 이벤트를 최신순으로 기록합니다. 1분 이내의 반복 거부는 자동으로 중복 제거됩니다.',
+      description: '이 워크스페이스의 보안 이벤트, 멤버 변경 및 비밀정보가 제거된 터미널 명령을 최신순으로 기록합니다. 1분 이내의 반복 거부는 자동으로 중복 제거됩니다.',
+      searchPlaceholder: '명령 세부정보 검색',
       refresh: '새로고침',
       end: '마지막 항목입니다.',
       empty: '감사 이벤트가 없습니다.',
@@ -158,7 +159,8 @@ export default {
         'rbac.invitation_accepted': '초대 수락',
         'rbac.invitation_declined': '초대 거절',
         'rbac.invitation_revoked': '초대 취소',
-        'rbac.invitation_expired': '초대 만료'
+        'rbac.invitation_expired': '초대 만료',
+        'sandbox.terminal_command': '터미널 명령 완료'
       },
       columns: {
         time: '시간',

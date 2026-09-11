@@ -387,11 +387,16 @@
       <div class="audit-drawer-inner audit-panel audit-panel--drawer">
         <div class="audit-header">
           <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
-          <t-button variant="text" size="small" class="audit-refresh-btn"
-            :loading="auditLoading" :disabled="auditLoading" @click="reloadAuditLog">
-            <template #icon><t-icon name="refresh" /></template>
-            {{ $t('tenantMember.audit.refresh') }}
-          </t-button>
+          <div class="audit-header-actions">
+            <t-input v-model="auditSearch" size="small" clearable class="audit-search"
+              :placeholder="$t('tenantMember.audit.searchPlaceholder')"
+              @enter="reloadAuditLog" @clear="reloadAuditLog" />
+            <t-button variant="text" size="small" class="audit-refresh-btn"
+              :loading="auditLoading" :disabled="auditLoading" @click="reloadAuditLog">
+              <template #icon><t-icon name="refresh" /></template>
+              {{ $t('tenantMember.audit.refresh') }}
+            </t-button>
+          </div>
         </div>
 
         <div class="audit-drawer-fill">
@@ -619,6 +624,8 @@ const auditDrawerVisible = ref(false)
 // frontend appends rows when the sentinel scrolls into view. When
 // `next_cursor` is 0, `auditHasMore` becomes false and loading stops.
 const auditEntries = ref<AuditLog[]>([])
+const auditSearch = ref('')
+const auditAppliedSearch = ref('')
 const auditLoading = ref(false)
 const auditError = ref('')
 const auditCursor = ref<number>(0) // 0 = "from the top"
@@ -1107,6 +1114,10 @@ function auditTargetDiff(row: AuditLog): string {
   if (row.action === 'rbac.invitation_sent' || row.action === 'rbac.invitation_revoked') {
     if (typeof d.role === 'string') return String(d.role)
   }
+  if (row.action === 'sandbox.terminal_command' && typeof d.command === 'string') {
+    const exitCode = typeof d.exit_code === 'number' ? ` (exit ${d.exit_code})` : ''
+    return `${d.command}${exitCode}`
+  }
   return ''
 }
 
@@ -1139,12 +1150,15 @@ async function loadAuditLog(reset: boolean) {
   if (auditLoading.value) return
   if (!reset && !auditHasMore.value) return
 
+  if (reset) auditAppliedSearch.value = auditSearch.value.trim()
+
   auditLoading.value = true
   auditError.value = ''
   try {
     const resp = await listAuditLog(activeTenantId.value, {
       after_id: reset ? undefined : auditCursor.value || undefined,
       limit: AUDIT_PAGE_SIZE,
+      search: auditAppliedSearch.value || undefined,
     })
     if (resp.success) {
       const rows = resp.data || []
@@ -2111,6 +2125,17 @@ watch(
   .audit-refresh-btn {
     flex-shrink: 0;
   }
+}
+
+.audit-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.audit-search {
+  width: 220px;
 }
 
 .audit-drawer-inner {

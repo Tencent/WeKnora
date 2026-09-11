@@ -47,6 +47,9 @@ type Handler struct {
 	// selected agent so the sandbox is created with the same config a
 	// conversation turn would use.
 	terminalService *service.SandboxTerminalService
+	// auditService receives sanitized commands emitted by the current
+	// interactive terminal's shell integration.
+	auditService interfaces.AuditLogService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -73,6 +76,7 @@ func NewHandler(
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
 	terminalService *service.SandboxTerminalService,
+	auditService interfaces.AuditLogService,
 ) *Handler {
 	return &Handler{
 		sessionService:       sessionService,
@@ -95,6 +99,7 @@ func NewHandler(
 		userService:          userService,
 		memberService:        memberService,
 		terminalService:      terminalService,
+		auditService:         auditService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
