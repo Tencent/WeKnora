@@ -3,6 +3,7 @@ package container
 import (
 	"testing"
 
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/dig"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -40,6 +41,7 @@ func TestRetrieveEngineRegistryWiring(t *testing.T) {
 	provide(func() *gorm.DB { return db })
 	provide(func() *config.Config { return &config.Config{} })
 	provide(func() interfaces.AuditLogService { return &fakeAuditSvc{} })
+	provide(func() *redis.Client { return nil })
 	provide(repository.NewVectorStoreRepository)
 	provide(NewEngineFactory)
 	provide(initRetrieveEngineRegistry)
