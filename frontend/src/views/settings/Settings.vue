@@ -53,6 +53,7 @@
                         <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2"
                           stroke-linecap="round" />
                       </svg>
+                      <BrowserIcon v-else-if="item.key === 'browserconnection'" class="nav-icon" width="17" height="17" />
                       <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
                       <t-icon v-else :name="item.icon" class="nav-icon" />
                       <span class="nav-label">{{ item.label }}</span>
@@ -192,6 +193,8 @@
                     <UserProfile />
                   </div>
 
+                  <div v-if="currentSection === 'browserconnection'" class="section"><BrowserConnectionSettings /></div>
+
                   <!-- 空间信息 -->
                   <div v-if="currentSection === 'tenant'" class="section">
                     <TenantInfo />
@@ -234,6 +237,8 @@ import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
+import BrowserConnectionSettings from './BrowserConnectionSettings.vue'
+import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 import ModelSettings from './ModelSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'
@@ -386,6 +391,7 @@ const navItems = computed(() => {
     { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
+    { key: 'browserconnection', icon: 'laptop', label: t('localBrowser.settingsTitle') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
     { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
@@ -412,7 +418,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile', 'mymemory', 'envvars']),
+      items: pickItems(['general', 'userprofile', 'browserconnection', 'mymemory', 'envvars']),
     },
     {
       key: 'workspace',

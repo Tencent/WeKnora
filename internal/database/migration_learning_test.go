@@ -13,9 +13,9 @@ func TestLearningSQLiteMigrationConstraintsAndRollback(t *testing.T) {
 	db, err := sql.Open("sqlite3", filepath.Join(t.TempDir(), "learning.db")+"?_foreign_keys=on")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	up, err := os.ReadFile("../../migrations/sqlite/000014_learning.up.sql")
+	up, err := os.ReadFile("../../migrations/sqlite/000015_learning.up.sql")
 	require.NoError(t, err)
-	down, err := os.ReadFile("../../migrations/sqlite/000014_learning.down.sql")
+	down, err := os.ReadFile("../../migrations/sqlite/000015_learning.down.sql")
 	require.NoError(t, err)
 	for range 2 {
 		_, err = db.Exec(string(up))

@@ -27,7 +27,7 @@ FAQ 接口分为两组：
 
 ## GET `/knowledge-bases/:id/faq/entries` - 获取 FAQ 条目列表
 
-支持分页、按标签过滤、关键字搜索与排序。
+支持分页、按标签、启用状态过滤、关键字搜索与排序。
 
 **查询参数**:
 
@@ -39,6 +39,7 @@ FAQ 接口分为两组：
 | keyword      | string | 否   | 关键字搜索                                                                                    |
 | search_field | string | 否   | 搜索字段：`standard_question` / `similar_questions` / `answers`，留空则全字段搜索              |
 | sort_order   | string | 否   | 排序方式，`asc` 表示按更新时间正序，默认按更新时间倒序                                          |
+| is_enabled   | bool   | 否   | 启用状态；`true` 仅返回已启用条目，`false` 仅返回未启用条目，不传时返回全部                      |
 
 **请求**:
 
@@ -49,6 +50,10 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/en
 
 # 仅搜索标准问
 curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/entries?keyword=密码&search_field=standard_question' \
+--header 'X-API-Key: sk-xxxxx'
+
+# 仅查看未启用条目
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/entries?is_enabled=false' \
 --header 'X-API-Key: sk-xxxxx'
 ```
 

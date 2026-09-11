@@ -122,7 +122,7 @@ func newFixture(t *testing.T) *fixture {
 	sqlDB.SetMaxOpenConns(8)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.WikiPage{}, &types.Knowledge{}, &types.Chunk{}))
-	migration, err := os.ReadFile("../../../../migrations/sqlite/000014_learning.up.sql")
+	migration, err := os.ReadFile("../../../../migrations/sqlite/000015_learning.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(migration)).Error)
 	kb := &types.KnowledgeBase{

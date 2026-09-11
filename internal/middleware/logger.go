@@ -44,7 +44,8 @@ func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
 // $1 捕获原始字段名（包括两侧引号），保持日志中的字段名不变，仅将值替换为 "***"。
 var sensitiveFieldRegex = regexp.MustCompile(
 	`(?i)("(?:new[_-]?password|old[_-]?password|password|passwd|ticket|token|access[_-]?token|` +
-		`refresh[_-]?token|id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
+		`refresh[_-]?token|next[_-]?token|device[_-]?token|pending[_-]?token|pairing[_-]?link|` +
+		`id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
 		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret|` +
 		`authorization[_-]?url|authorization[_-]?attempt)")\s*:\s*"[^"]*"`,
 )
@@ -170,10 +171,14 @@ func Logger() gin.HandlerFunc {
 			return
 		}
 
+		// Browser traffic contains credentials, page content and screenshots.
+		// Keep access metadata, but never read or buffer these request/response bodies.
+		browserTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
+			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string
 		privateLearning := strings.HasPrefix(path, "/api/v1/learning/") || path == "/api/v1/learning"
-		if !privateLearning &&
+		if !browserTraffic && !privateLearning &&
 			(c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
 			requestBody = readRequestBody(c)
 		}
@@ -184,9 +189,10 @@ func Logger() gin.HandlerFunc {
 			ResponseWriter: c.Writer,
 			body:           responseBody,
 		}
-		if !privateLearning {
+		if !browserTraffic && !privateLearning {
 			c.Writer = responseWriter
-		} else {
+		}
+		if privateLearning {
 			raw = "" // Never copy learner answers or export filters into access logs.
 		}
 

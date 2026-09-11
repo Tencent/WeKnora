@@ -1027,7 +1027,11 @@ func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) [
 	// forbids prior knowledge ("reply ONLY based on retrieved information"),
 	// which directly contradicts the fallback's purpose.
 	if strings.TrimSpace(promptContent) != "" {
-		messages = append(messages, chat.Message{Role: "system", Content: promptContent})
+		messages = append(messages, chat.Message{
+			Role: "system",
+			Content: promptContent + "\n\n" + types.SourceDataBoundaryPrompt +
+				"\n\n" + types.SourcedAnswerOutputPrompt,
+		})
 	}
 
 	messages = chatpipeline.AppendHistoryMessages(messages, chatManage.History)
