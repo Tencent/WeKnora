@@ -422,14 +422,19 @@ type ListOptions struct {
 	Credentials Credentials
 }
 
-// RemoteModel is one model discovered on the provider.
+// RemoteModel is one model discovered on the provider. The json contract is
+// the v1 remote-catalog wire (id/display_name/owned_by, design §5.10.1); the
+// richer fields are filled by adapters with vendor metadata (ollama /api/tags).
+// v1 also emitted an always-empty "meta" envelope — dropped, it was never
+// populated and the frontend reads ids only.
 type RemoteModel struct {
-	ID              string
-	DisplayName     string
-	ContextWindow   int
-	MaxOutputTokens int
-	Modalities      []string
-	ThinkingLevels  []string
+	ID              string   `json:"id"`
+	DisplayName     string   `json:"display_name,omitempty"`
+	OwnedBy         string   `json:"owned_by,omitempty"`
+	ContextWindow   int      `json:"context_window,omitempty"`
+	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
+	Modalities      []string `json:"modalities,omitempty"`
+	ThinkingLevels  []string `json:"thinking_levels,omitempty"`
 }
 
 // --- Call configuration (design §6.1 ModelConfig) ---

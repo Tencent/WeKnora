@@ -967,7 +967,10 @@ func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
 		}
 	}
 
-	models, err := catalog.ListRemoteModels(ctx, req.Provider, req.BaseURL, apiKey)
+	models, err := invoke.List(ctx, req.Provider, &invoke.ListOptions{
+		BaseURL:     req.BaseURL,
+		Credentials: invoke.Credentials{APIKey: apiKey},
+	})
 	if err != nil {
 		// Failure degrades, never blocks (design §5.10.2): the frontend
 		// switches to manual entry with the reason. Keys are never logged.

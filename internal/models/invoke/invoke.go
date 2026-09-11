@@ -543,33 +543,6 @@ func Transcribe(ctx context.Context, m *ModelConfig, opts *ASROptions) (*ASRResp
 	return resp, err
 }
 
-// List lists remote models via the optional fifth facet.
-func List(ctx context.Context, providerName string, opts *ListOptions) ([]RemoteModel, error) {
-	a, err := resolveAdapter(providerName)
-	if err != nil {
-		return nil, err
-	}
-	la, ok := a.(ListModelsAdapter)
-	if !ok {
-		return nil, &ProviderError{
-			Kind:    ErrUnsupportedType,
-			Message: "provider " + providerName + " does not implement model listing",
-		}
-	}
-	req, err := la.BuildListRequest(Endpoint{BaseURL: opts.BaseURL, Credentials: opts.Credentials})
-	if err != nil {
-		return nil, ClassifyError(err)
-	}
-	result, err := defaultExecutor.Do(ctx, ModelKey{
-		ModelID: providerName + ":list", ModelName: providerName, Kind: ModelKindChat,
-	}, req)
-	if err != nil {
-		return nil, err
-	}
-	models, err := la.ParseListResponse(result.Status, result.Header, result.Body)
-	return models, normalizeErr(err)
-}
-
 // invokeFacet is the shared Build→Execute→Parse pipeline for the simple
 // facets (embedding/rerank/ASR) which differ only in their option/response
 // types.

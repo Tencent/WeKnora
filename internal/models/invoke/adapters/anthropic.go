@@ -48,12 +48,18 @@ func newAnthropicAdapter() *AnthropicAdapter {
 // Provider returns the canonical provider name.
 func (a *AnthropicAdapter) Provider() string { return string(provider.ProviderAnthropic) }
 
-// Capabilities reports the provider's effective capabilities.
+// Capabilities reports the provider's effective capabilities, plus the
+// model-listing flag this adapter serves (BuildListRequest in list.go).
 func (a *AnthropicAdapter) Capabilities() provider.Capabilities {
 	if p, ok := provider.Get(provider.ProviderAnthropic); ok {
-		return p.Info().EffectiveCapabilities()
+		caps := p.Info().EffectiveCapabilities()
+		caps.Common.ModelListing = provider.ModelListingCaps{Supported: true}
+		return caps
 	}
-	return provider.Capabilities{Chat: &provider.ChatCaps{Thinking: a.thinkingCaps}}
+	return provider.Capabilities{
+		Common: provider.CommonCaps{ModelListing: provider.ModelListingCaps{Supported: true}},
+		Chat:   &provider.ChatCaps{Thinking: a.thinkingCaps},
+	}
 }
 
 // --- Wire types (field order pinned: golden request bodies are compared

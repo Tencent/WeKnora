@@ -70,10 +70,16 @@ var _ invoke.ChatAdapter = (*openaiAdapter)(nil)
 func (a *openaiAdapter) Provider() string { return string(a.name) }
 
 // Capabilities returns the trimmed adapter capability declaration: the Chat
-// shard only. Registration lock #2 (invoke.validateFacetCoverage) requires
-// shard set == facet set; embedding/rerank/ASR adapters arrive in P2/P3.
+// shard plus the model-listing flag this adapter serves (BuildListRequest in
+// list.go promotes to every composite here). azure_openai shares the struct;
+// its listing attempt fails at Build (deployment mode), so the flag reads
+// true family-wide but the azure probe degrades with an explicit reason —
+// v1 sent the doomed request and degraded on the 404 instead.
 func (a *openaiAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Chat: a.caps}
+	return provider.Capabilities{
+		Common: provider.CommonCaps{ModelListing: provider.ModelListingCaps{Supported: true}},
+		Chat:   a.caps,
+	}
 }
 
 // chatCapsFor resolves the provider-level Chat shard from the v1 capability
