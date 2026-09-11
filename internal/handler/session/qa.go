@@ -562,11 +562,20 @@ func (h *Handler) resolveAgent(
 		var err error
 		agent, err = h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
 		if err == nil && agent != nil {
-			effectiveTenantID = agent.TenantID
 			customAgent = agent
-			sharedAgentReadOnly = true
-			logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, effectiveTenantID=%d (retrieval scope)",
-				customAgent.ID, customAgent.Name, effectiveTenantID)
+			if agent.TenantID == currentTenantID {
+				// The selector named the caller's own workspace, so the share
+				// resolver handed back an own agent. Keep local semantics: run
+				// in the caller's tenant (effective 0 = context tenant) and stay
+				// writable, because an own agent is not a read-only share.
+				logger.Infof(ctx, "Using own agent selected by own-workspace id: ID=%s, Name=%s, AgentMode=%s",
+					customAgent.ID, customAgent.Name, customAgent.Config.AgentMode)
+			} else {
+				effectiveTenantID = agent.TenantID
+				sharedAgentReadOnly = true
+				logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, effectiveTenantID=%d (retrieval scope)",
+					customAgent.ID, customAgent.Name, effectiveTenantID)
+			}
 		}
 	}
 
