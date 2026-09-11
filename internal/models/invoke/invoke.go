@@ -336,8 +336,16 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 				continue
 			}
 			for _, sr := range mapStreamEvent(event) {
-				if event.Done != nil && pendingUsage != nil {
-					sr.Usage = pendingUsage.usageToTypes()
+				if event.Done != nil {
+					if pendingUsage != nil {
+						sr.Usage = pendingUsage.usageToTypes()
+					} else if event.Usage != nil {
+						// usage-in-Done seam (anticipated by the anthropic
+						// bridge's final event, activated for gemini P5-1):
+						// the terminator frame carries the final usage itself
+						// when no separate usage frame preceded it.
+						sr.Usage = event.Usage.usageToTypes()
+					}
 					pendingUsage = nil
 				}
 				observe(sr)

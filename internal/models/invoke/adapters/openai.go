@@ -394,7 +394,9 @@ var openAIFamilyProviders = []invoke.ProviderName{
 	invoke.ProviderModelScope,
 	invoke.ProviderQianfan,
 	invoke.ProviderQiniu,
-	invoke.ProviderGemini,
+	// gemini moved out in P5-1: the native generateContent adapter
+	// (gemini.go) replaces the openai-compat chat route; embedding stays on
+	// the same native pair via GeminiAdapter.
 	invoke.ProviderOpenRouter,
 	invoke.ProviderLiteLLM,
 	invoke.ProviderRequesty,
