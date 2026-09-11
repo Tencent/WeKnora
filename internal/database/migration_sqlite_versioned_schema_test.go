@@ -40,13 +40,13 @@ var versionedSQLiteColumns = map[string][]string{
 	"embed_channels":     {"allow_memory"},                   // 000060
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
 	"mcp_tool_approvals": {"enabled"},                        // 000091
-	"evaluation_tasks":   {"run_config", "usage"},            // 000018, 000021 SQLite
+	"evaluation_tasks":   {"run_config", "usage"},            // 000019, 000022 SQLite
 	"evaluation_model_calls": {
 		"pricing_configured", "currency", "estimated_cost", "model_type", "request_fingerprint",
-	}, // 000016, 000019, 000023 SQLite
+	}, // 000017, 000020, 000024 SQLite
 }
 
-const expectedSQLiteMigrationVersion = 23
+const expectedSQLiteMigrationVersion = 24
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
