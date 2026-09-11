@@ -91,6 +91,36 @@ type SessionCapabilityProvider interface {
 	SessionFileStore() SessionFileStore
 }
 
+// SessionLiveFileEntry is one browser-safe entry under /workspace/output.
+// Path is always relative to that fixed root; provider absolute paths never
+// cross the application boundary.
+type SessionLiveFileEntry struct {
+	Name    string             `json:"name"`
+	Path    string             `json:"path"`
+	Type    RemoteDirEntryType `json:"type"`
+	Size    int64              `json:"size"`
+	ModTime time.Time          `json:"mod_time"`
+}
+
+// SessionLiveFileManager exposes the small, security-hardened live-files
+// surface used by the browser. It is separate from SessionFileStore because
+// agent/attachment staging accepts broader absolute workspace paths, whereas
+// browser paths are relative to the fixed output root and must never follow a
+// symlink. SessionBoundManager implements this once for every remote provider.
+type SessionLiveFileManager interface {
+	ListSessionLiveFiles(ctx context.Context, sessionID, relativeDir string) ([]SessionLiveFileEntry, error)
+	ReadSessionLiveFile(ctx context.Context, sessionID, relativePath string) ([]byte, error)
+	WriteSessionLiveFile(ctx context.Context, sessionID, relativePath string, content []byte) error
+	RenameSessionLiveFile(ctx context.Context, sessionID, source, target string) error
+	RemoveSessionLiveFile(ctx context.Context, sessionID, relativePath string) error
+}
+
+// SessionLiveFileProvider advertises live-file support without widening the
+// long-standing Manager interface or forcing stateless backends to fake it.
+type SessionLiveFileProvider interface {
+	SessionLiveFileManager() SessionLiveFileManager
+}
+
 // SessionInstallShellExecutor runs install/maintenance shell commands, which
 // need the skills image root. It is a separate interface from
 // SessionShellExecutor so reaching outside /workspace is something a caller
