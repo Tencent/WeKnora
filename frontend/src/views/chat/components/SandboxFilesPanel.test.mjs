@@ -25,5 +25,9 @@ test('file panel exposes only the scoped browse workflow', () => {
   }
   assert.match(panel, /entry\.type !== 'other'/)
   assert.match(panel, /nextName\.includes\('\/'\)/)
+  assert.match(panel, /isDirectory\(/)
+  assert.match(panel, /type === 'dir'/)
+  assert.match(panel, /MAX_SANDBOX_LIVE_FILE_BYTES/)
+  assert.match(api, /MAX_SANDBOX_LIVE_FILE_BYTES/)
   assert.doesNotMatch(panel, /v-html|\/workspace\/output|desktop|editor/i)
 })

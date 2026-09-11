@@ -92,6 +92,9 @@ browser session id
 - Download responses use `private, no-store`, attachment disposition, an extension-derived safe content type, and `X-Content-Type-Options: nosniff`.
 - Upload/read maximum is 16 MiB of file bytes. Request-body overhead is bounded separately.
 - Names returned by the helper are relative to the fixed root; absolute provider paths never reach the browser.
+- Browser JSON uses `type=directory` (not the internal remote listing alias `dir`).
+- GET list/download and other live-file operations peek the bound sandbox state first. A paused, transitioning, or list-miss binding returns a conflict and does **not** Connect, so opening the Files tab cannot resume (and re-bill) an E2B/Cube/Docker instance.
+- Listings cap at 1024 entries; delete trees cap at 64 depth and 8192 entries.
 
 ## API
 
@@ -141,6 +144,8 @@ It does not duplicate `document-preview.vue`; v1 downloads rather than adding a 
 - `frontend/src/views/chat/components/SandboxFilesPanel.vue`: focused browser UI.
 - `frontend/src/components/chat/SandboxSidePanel.vue`, `frontend/src/composables/useChatSandboxPanel.ts`: replace Desktop tab/placeholder.
 - locale files: Files labels only.
+- `docs/api/session.md`, `docs/docs.go`, `docs/swagger.json`, `docs/swagger.yaml`: HTTP surface.
+- `client/session_sandbox_files.go`: official Go SDK helpers.
 
 No Docker/E2B/Cube adapter file should need production changes.
 

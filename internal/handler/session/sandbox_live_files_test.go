@@ -117,7 +117,7 @@ func TestListSandboxLiveFilesAuthorizesBeforeAccess(t *testing.T) {
 	files := &liveFilesServiceStub{
 		list: func(_ context.Context, _, _ string) ([]sandbox.SessionLiveFileEntry, error) {
 			return []sandbox.SessionLiveFileEntry{{
-				Name: "result.txt", Path: "reports/result.txt", Type: sandbox.RemoteEntryFile,
+				Name: "result.txt", Path: "reports/result.txt", Type: sandbox.SessionLiveFileTypeFile,
 			}}, nil
 		},
 	}
@@ -135,6 +135,33 @@ func TestListSandboxLiveFilesAuthorizesBeforeAccess(t *testing.T) {
 	body := recorder.Body.String()
 	if !strings.Contains(body, `"path":"reports/result.txt"`) || strings.Contains(body, `"Path"`) {
 		t.Fatalf("unexpected JSON shape: %s", body)
+	}
+}
+
+func TestListSandboxLiveFilesSerializesDirectoryType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sessions := &liveFileSessionServiceStub{}
+	files := &liveFilesServiceStub{
+		list: func(_ context.Context, _, _ string) ([]sandbox.SessionLiveFileEntry, error) {
+			return []sandbox.SessionLiveFileEntry{{
+				Name: "reports", Path: "reports", Type: sandbox.SessionLiveFileTypeDirectory,
+			}}, nil
+		},
+	}
+	h := &Handler{sessionService: sessions, liveFilesService: files}
+	c, recorder := liveFileTestContext(http.MethodGet, "/", "session-owned", nil)
+
+	h.ListSandboxLiveFiles(c)
+
+	if len(c.Errors) != 0 || recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d errors=%v", recorder.Code, c.Errors)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"type":"directory"`) {
+		t.Fatalf("directory type missing: %s", body)
+	}
+	if strings.Contains(body, `"type":"dir"`) {
+		t.Fatalf("internal dir alias leaked to browser JSON: %s", body)
 	}
 }
 
@@ -268,5 +295,45 @@ func TestSandboxLiveFilesMapsUnsafePathsWithoutLeakingDetail(t *testing.T) {
 	appErr, ok := c.Errors[0].Err.(*apperrors.AppError)
 	if !ok || appErr.HTTPCode != http.StatusBadRequest || strings.Contains(appErr.Message, "/etc") {
 		t.Fatalf("unsafe error leaked detail: %#v", appErr)
+	}
+}
+
+func TestSandboxLiveFilesMapsPausedWithoutConnecting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sessions := &liveFileSessionServiceStub{}
+	files := &liveFilesServiceStub{list: func(context.Context, string, string) ([]sandbox.SessionLiveFileEntry, error) {
+		return nil, sandbox.ErrSandboxPaused
+	}}
+	h := &Handler{sessionService: sessions, liveFilesService: files}
+	c, _ := liveFileTestContext(http.MethodGet, "/", "session-owned", nil)
+
+	h.ListSandboxLiveFiles(c)
+
+	if len(c.Errors) != 1 {
+		t.Fatalf("errors=%v want one paused error", c.Errors)
+	}
+	appErr, ok := c.Errors[0].Err.(*apperrors.AppError)
+	if !ok || appErr.HTTPCode != http.StatusConflict || appErr.Message != "session sandbox is paused" {
+		t.Fatalf("paused error=%#v", appErr)
+	}
+}
+
+func TestSandboxLiveFilesMapsTooManyEntries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sessions := &liveFileSessionServiceStub{}
+	files := &liveFilesServiceStub{list: func(context.Context, string, string) ([]sandbox.SessionLiveFileEntry, error) {
+		return nil, sandbox.ErrLiveFileTooMany
+	}}
+	h := &Handler{sessionService: sessions, liveFilesService: files}
+	c, _ := liveFileTestContext(http.MethodGet, "/", "session-owned", nil)
+
+	h.ListSandboxLiveFiles(c)
+
+	if len(c.Errors) != 1 {
+		t.Fatalf("errors=%v want one too-many error", c.Errors)
+	}
+	appErr, ok := c.Errors[0].Err.(*apperrors.AppError)
+	if !ok || appErr.HTTPCode != http.StatusBadRequest {
+		t.Fatalf("too-many error=%#v", appErr)
 	}
 }

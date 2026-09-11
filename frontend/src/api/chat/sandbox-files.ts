@@ -1,6 +1,6 @@
 import { del, get, getDown, patch, postUpload } from '@/utils/request'
 
-export type SandboxLiveFileType = 'file' | 'directory' | 'other'
+export type SandboxLiveFileType = 'file' | 'directory' | 'dir' | 'other'
 
 export interface SandboxLiveFileEntry {
   name: string
@@ -9,6 +9,8 @@ export interface SandboxLiveFileEntry {
   size: number
   mod_time: string
 }
+
+export const MAX_SANDBOX_LIVE_FILE_BYTES = 16 * 1024 * 1024
 
 interface SandboxLiveFileListResponse {
   success: boolean

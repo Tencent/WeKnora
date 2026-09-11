@@ -91,15 +91,29 @@ type SessionCapabilityProvider interface {
 	SessionFileStore() SessionFileStore
 }
 
+// SessionLiveFileType is the browser-facing entry kind under /workspace/output.
+// It is intentionally distinct from RemoteDirEntryType: the internal remote
+// listing uses "dir", while the live-files HTTP/JSON contract uses "directory".
+type SessionLiveFileType string
+
+const (
+	// SessionLiveFileTypeFile is a regular file under /workspace/output.
+	SessionLiveFileTypeFile SessionLiveFileType = "file"
+	// SessionLiveFileTypeDirectory is a folder the Files tab may open.
+	SessionLiveFileTypeDirectory SessionLiveFileType = "directory"
+	// SessionLiveFileTypeOther is a symlink or special node the UI cannot open.
+	SessionLiveFileTypeOther SessionLiveFileType = "other"
+)
+
 // SessionLiveFileEntry is one browser-safe entry under /workspace/output.
 // Path is always relative to that fixed root; provider absolute paths never
 // cross the application boundary.
 type SessionLiveFileEntry struct {
-	Name    string             `json:"name"`
-	Path    string             `json:"path"`
-	Type    RemoteDirEntryType `json:"type"`
-	Size    int64              `json:"size"`
-	ModTime time.Time          `json:"mod_time"`
+	Name    string              `json:"name"`
+	Path    string              `json:"path"`
+	Type    SessionLiveFileType `json:"type"`
+	Size    int64               `json:"size"`
+	ModTime time.Time           `json:"mod_time"`
 }
 
 // SessionLiveFileManager exposes the small, security-hardened live-files

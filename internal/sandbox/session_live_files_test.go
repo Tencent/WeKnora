@@ -2,8 +2,10 @@ package sandbox
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCleanSessionLivePath(t *testing.T) {
@@ -70,10 +72,58 @@ func TestLiveFileResponseErrorPreservesSentinel(t *testing.T) {
 		"conflict":  ErrLiveFileConflict,
 		"unsafe":    ErrLiveFileUnsafe,
 		"too_large": ErrLiveFileTooLarge,
+		"too_many":  ErrLiveFileTooMany,
 		"invalid":   ErrLiveFileInvalidPath,
 	} {
 		if err := liveFileResponseError(code, "safe detail"); !errors.Is(err, want) {
 			t.Fatalf("code %q: error=%v want sentinel %v", code, err, want)
 		}
+	}
+}
+
+func TestLiveFileEntryTypeUsesBrowserDirectoryContract(t *testing.T) {
+	t.Parallel()
+	if liveFileEntryType("directory") != SessionLiveFileTypeDirectory {
+		t.Fatalf("directory mapped to %q", liveFileEntryType("directory"))
+	}
+	if liveFileEntryType("file") != SessionLiveFileTypeFile {
+		t.Fatalf("file mapped to %q", liveFileEntryType("file"))
+	}
+}
+
+func TestLiveFileHelperLimitsMatchGoConstants(t *testing.T) {
+	t.Parallel()
+	if maxSessionLiveListEntries != 1024 || maxSessionLiveTreeDepth != 64 || maxSessionLiveTreeEntries != 8192 {
+		t.Fatalf("update helper strings when changing live-file caps")
+	}
+	checks := []string{
+		fmt.Sprintf("MAX_LIST_ENTRIES = %d", maxSessionLiveListEntries),
+		fmt.Sprintf("MAX_TREE_DEPTH = %d", maxSessionLiveTreeDepth),
+		fmt.Sprintf("MAX_TREE_ENTRIES = %d", maxSessionLiveTreeEntries),
+	}
+	for _, check := range checks {
+		if !strings.Contains(sessionLiveFileHelper, check) {
+			t.Fatalf("helper missing %q", check)
+		}
+	}
+}
+
+func TestListSessionLiveFilesRefusesPausedSandboxWithoutConnect(t *testing.T) {
+	ctx := terminalTestContext()
+	mgr, client := newSessionManagerTerminalTestHarness(t)
+
+	_, err := mgr.ExecShellCommand(ctx, "sess-1", "true", "", time.Second, nil)
+	if err != nil {
+		t.Fatalf("seed sandbox: %v", err)
+	}
+	pauseAllFakeSandboxes(t, client.fakeRemoteClient)
+	connectsBefore := fakeConnectCount(t, client.fakeRemoteClient)
+
+	_, err = mgr.ListSessionLiveFiles(ctx, "sess-1", "")
+	if !errors.Is(err, ErrSandboxPaused) {
+		t.Fatalf("error=%v want ErrSandboxPaused", err)
+	}
+	if got := fakeConnectCount(t, client.fakeRemoteClient); got != connectsBefore {
+		t.Fatalf("Connect count %d -> %d; listing must not resume a paused sandbox", connectsBefore, got)
 	}
 }

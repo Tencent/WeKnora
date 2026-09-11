@@ -31,7 +31,19 @@ type renameLiveFileRequest struct {
 	Target string `json:"target" binding:"required"`
 }
 
-// ListSandboxLiveFiles returns one live output directory level.
+// ListSandboxLiveFiles godoc
+// @Summary      列出会话沙箱 /workspace/output 下一层文件
+// @Description  返回固定输出根下的一层目录条目。路径为相对 POSIX 路径，空路径表示根。不会创建或唤醒已暂停的沙箱。
+// @Tags         会话
+// @Produce      json
+// @Param        id    path   string  true  "会话ID"
+// @Param        path  query  string  false "相对目录，空为输出根"
+// @Success      200   {object}  map[string]interface{}
+// @Failure      400   {object}  apperrors.AppError
+// @Failure      404   {object}  apperrors.AppError
+// @Failure      409   {object}  apperrors.AppError
+// @Security     Bearer
+// @Router       /sessions/{id}/sandbox/files [get]
 func (h *Handler) ListSandboxLiveFiles(c *gin.Context) {
 	sessionID, ok := h.authorizeLiveFilesSession(c, false)
 	if !ok {
@@ -45,7 +57,20 @@ func (h *Handler) ListSandboxLiveFiles(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": entries})
 }
 
-// DownloadSandboxLiveFile streams one live file as a non-cacheable attachment.
+// DownloadSandboxLiveFile godoc
+// @Summary      下载会话沙箱中的一个输出文件
+// @Description  以附件形式下载 /workspace/output 下的单个常规文件，上限 16 MiB。不会唤醒已暂停的沙箱。
+// @Tags         会话
+// @Produce      application/octet-stream
+// @Param        id    path   string  true  "会话ID"
+// @Param        path  query  string  true  "相对文件路径"
+// @Success      200   {file}    file
+// @Failure      400   {object}  apperrors.AppError
+// @Failure      404   {object}  apperrors.AppError
+// @Failure      409   {object}  apperrors.AppError
+// @Failure      413   {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /sessions/{id}/sandbox/files/content [get]
 func (h *Handler) DownloadSandboxLiveFile(c *gin.Context) {
 	sessionID, ok := h.authorizeLiveFilesSession(c, false)
 	if !ok {
@@ -64,7 +89,22 @@ func (h *Handler) DownloadSandboxLiveFile(c *gin.Context) {
 	c.Data(http.StatusOK, mimeTypeFor(name), content)
 }
 
-// UploadSandboxLiveFile writes one bounded multipart upload into the live output tree.
+// UploadSandboxLiveFile godoc
+// @Summary      上传文件到会话沙箱输出目录
+// @Description  以 multipart 写入一个新文件，不覆盖已有条目。字段 path 为相对路径，file 为文件本体，上限 16 MiB。
+// @Tags         会话
+// @Accept       multipart/form-data
+// @Produce      json
+// @Param        session_id  path      string  true  "会话ID"
+// @Param        path        formData  string  true  "相对目标路径"
+// @Param        file        formData  file    true  "文件内容"
+// @Success      201         {object}  map[string]interface{}
+// @Failure      400         {object}  apperrors.AppError
+// @Failure      404         {object}  apperrors.AppError
+// @Failure      409         {object}  apperrors.AppError
+// @Failure      413         {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /sessions/{session_id}/sandbox/files [post]
 func (h *Handler) UploadSandboxLiveFile(c *gin.Context) {
 	sessionID, ok := h.authorizeLiveFilesSession(c, true)
 	if !ok {
@@ -121,7 +161,20 @@ func (h *Handler) UploadSandboxLiveFile(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"success": true})
 }
 
-// RenameSandboxLiveFile moves one live-file entry within the fixed output tree.
+// RenameSandboxLiveFile godoc
+// @Summary      重命名会话沙箱输出条目
+// @Description  在 /workspace/output 内原子重命名，目标已存在则冲突。不会覆盖。
+// @Tags         会话
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                 true  "会话ID"
+// @Param        request  body      renameLiveFileRequest  true  "源路径与目标路径"
+// @Success      200      {object}  map[string]interface{}
+// @Failure      400      {object}  apperrors.AppError
+// @Failure      404      {object}  apperrors.AppError
+// @Failure      409      {object}  apperrors.AppError
+// @Security     Bearer
+// @Router       /sessions/{id}/sandbox/files [patch]
 func (h *Handler) RenameSandboxLiveFile(c *gin.Context) {
 	sessionID, ok := h.authorizeLiveFilesSession(c, true)
 	if !ok {
@@ -141,7 +194,18 @@ func (h *Handler) RenameSandboxLiveFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
-// DeleteSandboxLiveFile removes one live-file entry from the fixed output tree.
+// DeleteSandboxLiveFile godoc
+// @Summary      删除会话沙箱输出条目
+// @Description  删除 /workspace/output 下的安全文件或已预校验的目录树。
+// @Tags         会话
+// @Param        id    path   string  true  "会话ID"
+// @Param        path  query  string  true  "相对路径"
+// @Success      204   "No Content"
+// @Failure      400   {object}  apperrors.AppError
+// @Failure      404   {object}  apperrors.AppError
+// @Failure      409   {object}  apperrors.AppError
+// @Security     Bearer
+// @Router       /sessions/{id}/sandbox/files [delete]
 func (h *Handler) DeleteSandboxLiveFile(c *gin.Context) {
 	sessionID, ok := h.authorizeLiveFilesSession(c, true)
 	if !ok {
@@ -186,6 +250,8 @@ func (h *Handler) handleLiveFileError(c *gin.Context, sessionID string, err erro
 	switch {
 	case stderrors.Is(err, sandbox.ErrLiveFileInvalidPath), stderrors.Is(err, sandbox.ErrLiveFileUnsafe):
 		_ = c.Error(apperrors.NewBadRequestError("invalid or unsafe file path"))
+	case stderrors.Is(err, sandbox.ErrLiveFileTooMany):
+		_ = c.Error(apperrors.NewBadRequestError("directory is too large to list or delete"))
 	case stderrors.Is(err, sandbox.ErrLiveFileNotFound):
 		_ = c.Error(apperrors.NewNotFoundError("file not found"))
 	case stderrors.Is(err, sandbox.ErrLiveFileConflict):
@@ -194,8 +260,10 @@ func (h *Handler) handleLiveFileError(c *gin.Context, sessionID string, err erro
 		handleLiveFileTooLarge(c)
 	case stderrors.Is(err, sandbox.ErrNoLiveSessionSandbox):
 		_ = c.Error(apperrors.NewConflictError("session has no live sandbox"))
+	case stderrors.Is(err, sandbox.ErrSandboxPaused):
+		_ = c.Error(apperrors.NewConflictError("session sandbox is paused"))
 	case stderrors.Is(err, service.ErrLiveFilesUnsupported):
-		c.JSON(http.StatusNotImplemented, gin.H{"success": false, "message": "sandbox files are unsupported"})
+		_ = c.Error(apperrors.NewServiceUnavailableError("sandbox files are unsupported"))
 	default:
 		logger.Errorf(c.Request.Context(), "sandbox live-file operation failed: session=%s err=%v", sessionID, err)
 		_ = c.Error(apperrors.NewInternalServerError("sandbox file operation failed"))

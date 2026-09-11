@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -17,7 +18,12 @@ const (
 	// cap protects both the Go process and the sandbox helper.
 	MaxSessionLiveFileBytes = 16 << 20
 	maxSessionLivePathBytes = 1024
-	sessionLiveFileTimeout  = 45 * time.Second
+	// maxSessionLiveListEntries caps one directory listing so a huge output
+	// tree cannot inflate helper stdout into the API process.
+	maxSessionLiveListEntries = 1024
+	maxSessionLiveTreeDepth   = 64
+	maxSessionLiveTreeEntries = 8192
+	sessionLiveFileTimeout    = 45 * time.Second
 )
 
 var (
@@ -31,6 +37,8 @@ var (
 	ErrLiveFileUnsafe = errors.New("sandbox: unsafe live file node")
 	// ErrLiveFileTooLarge means a transfer exceeds MaxSessionLiveFileBytes.
 	ErrLiveFileTooLarge = errors.New("sandbox: live file is too large")
+	// ErrLiveFileTooMany means a listing or delete tree exceeds the entry/depth cap.
+	ErrLiveFileTooMany = errors.New("sandbox: live file tree is too large")
 )
 
 type liveFileRequest struct {
@@ -82,11 +90,19 @@ func (m *SessionBoundManager) ListSessionLiveFiles(
 	if err != nil {
 		return nil, err
 	}
+	if len(response.Entries) > maxSessionLiveListEntries {
+		return nil, ErrLiveFileTooMany
+	}
 	entries := make([]SessionLiveFileEntry, 0, len(response.Entries))
 	for _, entry := range response.Entries {
+		cleanPath, err := cleanSessionLivePath(entry.Path, false)
+		if err != nil || cleanPath != entry.Path || entry.Name == "" ||
+			strings.Contains(entry.Name, "/") || path.Base(entry.Path) != entry.Name {
+			return nil, ErrLiveFileUnsafe
+		}
 		entries = append(entries, SessionLiveFileEntry{
 			Name:    entry.Name,
-			Path:    entry.Path,
+			Path:    cleanPath,
 			Type:    liveFileEntryType(entry.Type),
 			Size:    entry.Size,
 			ModTime: time.Unix(0, entry.ModTimeNS).UTC(),
@@ -190,6 +206,18 @@ func (m *SessionBoundManager) runSessionLiveFileOperation(
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, errors.New("sandbox: session ID is required for live files")
 	}
+	// Peek before Connect: Docker/E2B/Cube Connect resumes a paused instance
+	// and can re-bill. Opening the Files tab is a GET and must not wake it.
+	state, bound, err := m.peekBoundSandboxState(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !bound {
+		return nil, ErrNoLiveSessionSandbox
+	}
+	if state != RemoteStateRunning {
+		return nil, ErrSandboxPaused
+	}
 	handle, ok, err := m.lookupSessionHandle(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -282,6 +310,8 @@ func liveFileResponseError(code, message string) error {
 		sentinel = ErrLiveFileUnsafe
 	case "too_large":
 		sentinel = ErrLiveFileTooLarge
+	case "too_many":
+		sentinel = ErrLiveFileTooMany
 	case "invalid":
 		sentinel = ErrLiveFileInvalidPath
 	default:
@@ -293,14 +323,14 @@ func liveFileResponseError(code, message string) error {
 	return fmt.Errorf("%w: %s", sentinel, strings.TrimSpace(message))
 }
 
-func liveFileEntryType(raw string) RemoteDirEntryType {
+func liveFileEntryType(raw string) SessionLiveFileType {
 	switch raw {
 	case "file":
-		return RemoteEntryFile
+		return SessionLiveFileTypeFile
 	case "directory":
-		return RemoteEntryDir
+		return SessionLiveFileTypeDirectory
 	default:
-		return RemoteEntryOther
+		return SessionLiveFileTypeOther
 	}
 }
 
@@ -317,6 +347,9 @@ import sys
 ROOT = "/workspace/output"
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+MAX_LIST_ENTRIES = 1024
+MAX_TREE_DEPTH = 64
+MAX_TREE_ENTRIES = 8192
 
 class LiveFileError(Exception):
     def __init__(self, code, message):
@@ -397,6 +430,8 @@ def list_entries(root_fd, relative):
     try:
         result = []
         for name in sorted(os.listdir(directory_fd)):
+            if len(result) >= MAX_LIST_ENTRIES:
+                fail("too_many", "directory listing exceeds the live-file entry limit")
             info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
             rel = name if not relative else relative + "/" + name
             result.append({
@@ -502,8 +537,15 @@ def rename_noreplace(root_fd, source, target):
         os.close(source_fd)
         os.close(target_fd)
 
-def validate_tree(directory_fd):
+def validate_tree(directory_fd, depth=0, remaining=None):
+    if remaining is None:
+        remaining = [MAX_TREE_ENTRIES]
+    if depth > MAX_TREE_DEPTH:
+        fail("too_many", "directory tree exceeds the live-file depth limit")
     for name in os.listdir(directory_fd):
+        remaining[0] -= 1
+        if remaining[0] < 0:
+            fail("too_many", "directory tree exceeds the live-file entry limit")
         info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
         kind = safe_kind(info)
         if kind == "other":
@@ -511,7 +553,7 @@ def validate_tree(directory_fd):
         if kind == "directory":
             child_fd = os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=directory_fd)
             try:
-                validate_tree(child_fd)
+                validate_tree(child_fd, depth + 1, remaining)
             finally:
                 os.close(child_fd)
 
@@ -575,6 +617,11 @@ except FileExistsError:
     print(json.dumps({"ok": False, "code": "conflict", "message": "destination already exists"}, separators=(",", ":")))
 except (NotADirectoryError, IsADirectoryError):
     print(json.dumps({"ok": False, "code": "unsafe", "message": "path type is not allowed"}, separators=(",", ":")))
+except RecursionError:
+    print(json.dumps(
+        {"ok": False, "code": "too_many", "message": "directory tree exceeds the live-file depth limit"},
+        separators=(",", ":"),
+    ))
 except OSError as exc:
     code = "unsafe" if exc.errno in (errno.ELOOP, errno.ENOTDIR, errno.EXDEV) else "internal"
     print(json.dumps({"ok": False, "code": code, "message": "filesystem operation failed"}, separators=(",", ":")))

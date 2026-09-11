@@ -565,8 +565,22 @@ print('ready')
 	if err != nil {
 		t.Fatalf("ListSessionLiveFiles: %v", err)
 	}
-	if len(entries) != 1 || entries[0].Path != "reports/result.txt" || entries[0].Type != RemoteEntryFile {
+	if len(entries) != 1 || entries[0].Path != "reports/result.txt" || entries[0].Type != SessionLiveFileTypeFile {
 		t.Fatalf("unexpected live-file entries: %#v", entries)
+	}
+	rootEntries, err := files.ListSessionLiveFiles(ctx, sessionID, "")
+	if err != nil {
+		t.Fatalf("ListSessionLiveFiles root: %v", err)
+	}
+	foundDir := false
+	for _, entry := range rootEntries {
+		if entry.Path == "reports" && entry.Type == SessionLiveFileTypeDirectory {
+			foundDir = true
+			break
+		}
+	}
+	if !foundDir {
+		t.Fatalf("root listing missing reports directory: %#v", rootEntries)
 	}
 	content, err := files.ReadSessionLiveFile(ctx, sessionID, "reports/result.txt")
 	if err != nil {

@@ -62,7 +62,7 @@
     <ul v-else class="sandbox-files__list">
       <li v-for="entry in entries" :key="entry.path" class="sandbox-files__row">
         <div v-if="renamingPath === entry.path" class="sandbox-files__edit">
-          <t-icon :name="entry.type === 'directory' ? 'folder' : 'file'" size="20px" />
+          <t-icon :name="isDirectory(entry) ? 'folder' : 'file'" size="20px" />
           <t-input
             v-model="renameName"
             size="small"
@@ -79,11 +79,11 @@
           :disabled="entry.type === 'other' || busy"
           @click="openEntry(entry)"
         >
-          <t-icon :name="entry.type === 'directory' ? 'folder' : 'file'" size="20px" />
+          <t-icon :name="isDirectory(entry) ? 'folder' : 'file'" size="20px" />
           <span class="sandbox-files__details">
             <span class="sandbox-files__name" :title="entry.name">{{ entry.name }}</span>
             <span class="sandbox-files__meta">
-              <span>{{ entry.type === 'directory' ? t('chat.sandbox.filesDirectory') : formatSize(entry.size) }}</span>
+              <span>{{ isDirectory(entry) ? t('chat.sandbox.filesDirectory') : formatSize(entry.size) }}</span>
               <span aria-hidden="true">·</span>
               <span>{{ formatDate(entry.mod_time) }}</span>
             </span>
@@ -164,6 +164,7 @@ import {
   listSandboxLiveFiles,
   renameSandboxLiveFile,
   uploadSandboxLiveFile,
+  MAX_SANDBOX_LIVE_FILE_BYTES,
   type SandboxLiveFileEntry,
 } from '@/api/chat/sandbox-files'
 import { formatFileSize } from '@/utils/files'
@@ -200,7 +201,7 @@ async function refresh() {
     const result = await listSandboxLiveFiles(props.sessionId, currentPath.value)
     if (sequence === requestSequence) entries.value = result
   } catch (error: any) {
-    if (sequence === requestSequence) errorMessage.value = error?.message || t('chat.sandbox.filesLoadFailed')
+    if (sequence === requestSequence) errorMessage.value = liveFileErrorMessage(error, 'chat.sandbox.filesLoadFailed')
   } finally {
     if (sequence === requestSequence) {
       loading.value = false
@@ -215,9 +216,22 @@ function openDirectory(relativePath: string) {
   void refresh()
 }
 
+function isDirectory(entry: SandboxLiveFileEntry) {
+  return entry.type === 'directory' || entry.type === 'dir'
+}
+
+function liveFileErrorMessage(error: any, fallbackKey: string) {
+  const status = error?.status ?? error?.$httpStatus
+  const message = typeof error?.message === 'string' ? error.message : ''
+  if (status === 413 || /16 MiB/i.test(message)) return t('chat.sandbox.filesTooLarge')
+  if (/paused/i.test(message)) return t('chat.sandbox.filesPaused')
+  if (/too large to list or delete/i.test(message)) return t('chat.sandbox.filesTooMany')
+  return message || t(fallbackKey)
+}
+
 function openEntry(entry: SandboxLiveFileEntry) {
   if (renamingPath.value === entry.path) return
-  if (entry.type === 'directory') openDirectory(entry.path)
+  if (isDirectory(entry)) openDirectory(entry.path)
   else if (entry.type === 'file') void download(entry)
 }
 
@@ -233,7 +247,7 @@ async function download(entry: SandboxLiveFileEntry) {
     anchor.remove()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('chat.sandbox.filesDownloadFailed'))
+    MessagePlugin.error(liveFileErrorMessage(error, 'chat.sandbox.filesDownloadFailed'))
   }
 }
 
@@ -244,11 +258,15 @@ async function handleUpload(event: Event) {
   mutating.value = true
   try {
     for (const file of files) {
+      if (file.size > MAX_SANDBOX_LIVE_FILE_BYTES) {
+        MessagePlugin.error(t('chat.sandbox.filesTooLarge'))
+        return
+      }
       await uploadSandboxLiveFile(props.sessionId, childPath(file.name), file)
     }
     MessagePlugin.success(t('chat.sandbox.filesUploadComplete'))
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('chat.sandbox.filesUploadFailed'))
+    MessagePlugin.error(liveFileErrorMessage(error, 'chat.sandbox.filesUploadFailed'))
   } finally {
     input.value = ''
     await refresh()
@@ -287,7 +305,7 @@ async function commitRename(entry: SandboxLiveFileEntry) {
     cancelRename()
     await refresh()
   } catch (error: any) {
-    MessagePlugin.error(error?.message || t('chat.sandbox.filesRenameFailed'))
+    MessagePlugin.error(liveFileErrorMessage(error, 'chat.sandbox.filesRenameFailed'))
   } finally {
     mutating.value = false
   }
@@ -307,7 +325,7 @@ function confirmDelete(entry: SandboxLiveFileEntry) {
         await deleteSandboxLiveFile(props.sessionId, entry.path)
         await refresh()
       } catch (error: any) {
-        MessagePlugin.error(error?.message || t('chat.sandbox.filesDeleteFailed'))
+        MessagePlugin.error(liveFileErrorMessage(error, 'chat.sandbox.filesDeleteFailed'))
       } finally {
         mutating.value = false
       }
