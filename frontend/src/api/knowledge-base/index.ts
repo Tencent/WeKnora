@@ -319,6 +319,10 @@ export function listKnowledgeFolders(kbId: string) {
   return get(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`);
 }
 
+export function deleteKnowledgeFolder(kbId: string, path: string) {
+  return del(`/api/v1/knowledge-bases/${kbId}/knowledge/folders`, { path });
+}
+
 /**
  * Re-file documents under `folderPath` ('' = knowledge base top level). Folders
  * are derived from the stored paths, so a path that does not exist yet is
