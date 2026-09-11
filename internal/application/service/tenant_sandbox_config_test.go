@@ -1501,6 +1501,29 @@ func TestCreateAcceptsDockerNamedSandboxBackend(t *testing.T) {
 	require.Equal(t, "docker", docker.SandboxType)
 }
 
+func TestSanitizeSandboxConfigValidatesDockerIdleTTL(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
+	t.Setenv("DOCKER_HOST", "unix:///tmp/weknora-docker.sock")
+
+	config := func(seconds int) *types.TenantSandboxConfig {
+		return &types.TenantSandboxConfig{
+			SandboxType: "docker",
+			Docker: &types.DockerSandboxConfig{
+				Image:          "weknora:test",
+				IdleTTLSeconds: seconds,
+			},
+		}
+	}
+
+	_, err := SanitizeSandboxConfig(config(59), nil)
+	require.Error(t, err, "the config save path must reject a short Docker idle TTL")
+	require.ErrorIs(t, err, sandbox.ErrInvalidDockerIdleTTL)
+	_, err = SanitizeSandboxConfig(config(60), nil)
+	require.NoError(t, err)
+}
+
 func TestCreateRejectsRemovedLocalBackend(t *testing.T) {
 	svc := newTestConfigService(t, &fakeConfigRepo{}, nil, stubAgentRepo{})
 

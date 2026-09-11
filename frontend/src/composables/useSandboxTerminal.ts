@@ -1,6 +1,11 @@
 import { onUnmounted, ref, type Ref } from 'vue'
 import { post } from '@/utils/request'
 import { readStoredPtyId, writeStoredPtyId } from '@/utils/sandboxPtyId'
+import {
+  appendTerminalPtyId,
+  decideTerminalReconnect,
+  terminalReadyPtyId,
+} from './sandboxTerminalReconnect'
 
 export type SandboxTerminalStatus =
   /** 查询到会话沙箱已暂停；唤醒需要用户确认。 */
@@ -195,9 +200,7 @@ export function useSandboxTerminal(
           query.set('agent_source_tenant_id', String(sourceTenant).trim())
         }
       }
-      if (reattachable && lastPid && lastPid > 0) {
-        query.set('pty_id', String(lastPid))
-      }
+      appendTerminalPtyId(query, reattachable, lastPid)
       if (pendingGeometry) {
         query.set('cols', String(pendingGeometry.cols))
         query.set('rows', String(pendingGeometry.rows))
@@ -267,22 +270,13 @@ export function useSandboxTerminal(
         }
         return
       }
-      if (
-        status.value !== 'needs_provision'
-        && status.value !== 'paused'
-        && status.value !== 'no_sandbox'
-        && status.value !== 'unsupported'
-        && status.value !== 'exited'
-        && status.value !== 'idle'
-        && status.value !== 'unauthorized'
-      ) {
-        status.value = 'error'
-        // Before ready, the provider capability is unknown and a terminal may
-        // already exist server-side. After ready, only providers that can
-        // recover the same PTY may retry without stranding the old shell.
-        if (!readyReceived || !reattachable) return
-        scheduleReconnect()
-      }
+      const decision = decideTerminalReconnect({
+        readyReceived,
+        reattachable,
+        status: status.value,
+      })
+      status.value = decision.status
+      if (decision.shouldReconnect) scheduleReconnect()
     }
 
     ws.onerror = () => {
@@ -301,9 +295,7 @@ export function useSandboxTerminal(
       case 'ready':
         status.value = 'ready'
         reattachable = frame.reattachable !== false
-        rememberPid(
-          reattachable && typeof frame.pty_id === 'number' ? frame.pty_id : null,
-        )
+        rememberPid(terminalReadyPtyId(reattachable, frame.pty_id))
         reconnectAttempt = 0
         // 创建意图到此为止。它只用来解释 SANDBOX_NOT_BOUND：连上之前是"还没
         // 有沙箱，要不要建"，连上之后再收到就一定是"沙箱被回收了"。不复位会

@@ -5447,6 +5447,7 @@ export default {
       dockerTlsCertPathHelp: 'WeKnora 所在主机上包含 ca.pem、cert.pem、key.pem 的目录。远程守护进程必填，证书不入库，由部署方挂载。',
       dockerIdleTtl: '空闲回收（秒）',
       dockerIdleTtlHelp: 'Docker 守护进程本身没有空闲超时。容器多久没有执行任何命令就会被 WeKnora 回收，会话继续时重建。留空按 1800 秒。',
+      dockerIdleTtlMinimum: '填写 0 使用内置默认值，或填写至少 60 秒。',
       dockerCpuLimit: 'CPU 核数上限',
       dockerCpuLimitHelp: '单个沙箱可用的 CPU 核数，0 使用内置默认。',
       dockerMemoryLimit: '内存上限（MB）',

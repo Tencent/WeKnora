@@ -1310,6 +1310,7 @@ export default {
       dockerTlsCertPathHelp: 'WeKnoraホスト上でca.pem、cert.pem、key.pemを格納しているディレクトリです。リモートデーモンでは必須です。証明書はデプロイ側でマウントされ、ここには保存されません。',
       dockerIdleTtl: 'アイドル回収（秒）',
       dockerIdleTtlHelp: 'Dockerデーモン自体にはアイドルタイムアウトがありません。この時間コマンドが実行されなかったコンテナはWeKnoraが回収し、セッションが続く場合は再作成します。空欄の場合は1800秒です。',
+      dockerIdleTtlMinimum: '0で組み込みのデフォルトを使用するか、60秒以上を入力してください。',
       dockerCpuLimit: 'CPUコア数の上限',
       dockerCpuLimitHelp: 'サンドボックス1つが使用できるCPUコア数です。0の場合は組み込みのデフォルトを使用します。',
       dockerMemoryLimit: 'メモリ上限（MB）',

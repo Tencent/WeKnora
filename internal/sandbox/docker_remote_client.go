@@ -152,6 +152,9 @@ func dockerSettingsFromConfig(cfg *Config) (dockerRuntimeSettings, error) {
 	if cfg == nil {
 		return dockerRuntimeSettings{}, errors.New("sandbox: docker client requires a config")
 	}
+	if err := ValidateDockerIdleTTL(cfg.DockerIdleTTL); err != nil {
+		return dockerRuntimeSettings{}, err
+	}
 	image := strings.TrimSpace(cfg.DockerImage)
 	if image == "" {
 		return dockerRuntimeSettings{}, errors.New("sandbox: docker backend requires an image")

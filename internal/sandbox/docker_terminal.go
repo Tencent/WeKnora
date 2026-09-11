@@ -100,9 +100,12 @@ func (c *DockerRemoteClient) OpenTerminal(
 	go session.watchContext()
 
 	if ttl := c.terminalIdleTTL(handle); ttl > 0 {
-		startTerminalTTLRefresh(terminalCtx, session.closedCh, ttl, func(refreshCtx context.Context) error {
-			return c.refreshActivity(refreshCtx, containerID, "terminal activity")
-		})
+		startTerminalTTLRefreshAfterInitialTouch(
+			terminalCtx, session.closedCh, ttl,
+			func(refreshCtx context.Context) error {
+				return c.refreshActivity(refreshCtx, containerID, "terminal activity")
+			},
+		)
 	}
 	return session, nil
 }

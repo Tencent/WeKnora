@@ -41,9 +41,9 @@ const dockerIntegrationTenantID = 1
 // the browser cannot influence the container identity under test.
 func TestDockerInteractiveTerminalIntegration(t *testing.T) {
 	cfg := dockerIntegrationConfig(t)
-	// Short enough to prove the low-frequency terminal heartbeat protects the
-	// container, while still allowing for one-second marker timestamp granularity.
-	cfg.DockerIdleTTL = 3 * time.Second
+	// The minimum production-valid value exercises the real 15-second refresh
+	// floor without weakening the configuration invariant for this test.
+	cfg.DockerIdleTTL = MinDockerIdleTTL
 	// The attached stream must remain usable well past this bound; only short
 	// Engine RPCs are allowed to inherit it.
 	cfg.DockerHTTPTimeout = 2 * time.Second
@@ -76,10 +76,6 @@ func TestDockerInteractiveTerminalIntegration(t *testing.T) {
 		defer cleanupCancel()
 		_ = client.Delete(cleanupCtx, handle.ID())
 	})
-
-	previousRefreshMin := terminalTTLRefreshMin
-	terminalTTLRefreshMin = 250 * time.Millisecond
-	t.Cleanup(func() { terminalTTLRefreshMin = previousRefreshMin })
 
 	terminal, err := client.OpenTerminal(ctx, handle, RemoteTerminalOptions{
 		Cols: 101,
@@ -126,12 +122,26 @@ func TestDockerInteractiveTerminalIntegration(t *testing.T) {
 	}
 	collector.waitContains(t, "CTRL_C_OK", 20*time.Second)
 
-	// No ordinary Exec occurs during this interval. The terminal heartbeat
-	// alone must keep the marker fresh enough that an explicit sweep preserves it.
-	time.Sleep(4 * time.Second)
+	// No ordinary Exec occurs while waiting. Observe the marker itself advance
+	// after the production heartbeat interval, then ask the real sweep decision
+	// path to keep the active terminal container.
 	summary, err := client.Get(ctx, handle.ID())
 	if err != nil {
 		t.Fatalf("Get before active-terminal idle check: %v", err)
+	}
+	initialActivity := client.sweeper.lastActivity(ctx, *summary)
+	refreshDeadline := time.Now().Add(terminalTTLRefreshInterval(cfg.DockerIdleTTL) + 10*time.Second)
+	var refreshedActivity time.Time
+	for time.Now().Before(refreshDeadline) {
+		refreshedActivity = client.sweeper.lastActivity(ctx, *summary)
+		if refreshedActivity.After(initialActivity) {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if !refreshedActivity.After(initialActivity) {
+		t.Fatalf("terminal heartbeat did not refresh activity marker: before=%s after=%s",
+			initialActivity, refreshedActivity)
 	}
 	if client.sweeper.isIdle(ctx, *summary) {
 		t.Fatal("idle sweeper classified the active terminal container as idle")

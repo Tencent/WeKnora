@@ -37,6 +37,8 @@ RemoteTerminalManager
 | errors | `normalizeE2BError` | `normalizeCubeError` | Every Engine failure is wrapped with `dockerError` and a terminal-specific operation name; invalid/mismatched handles use `dockerHandleID`/`dockerInvalidRequest` |
 | output shutdown | pump alone closes `out` | pump alone closes `out` | pump is the sole closer of `out`; all sends use `emitTerminalEvent`; `Close` only signals teardown and closes transport |
 
+Docker interactive terminal support requires `/bin/bash` in the configured image. The standard WeKnora sandbox image satisfies this contract. A custom image without `/bin/bash` may still support ordinary sandbox `Exec` operations, but interactive terminal availability is not guaranteed.
+
 ### Docker create and stream details
 
 The new adapter will validate the opaque handle with `dockerHandleID`; browser/API callers never supply a container ID. `SessionBoundManager.lookupSessionHandle` remains the only source of the handle, so the authoritative tenant/session binding remains the sandbox identity boundary.
@@ -78,11 +80,11 @@ Docker's idle sweeper reads `/var/lib/weknora-sandbox-activity`. Ordinary non-TT
 The terminal path will:
 
 1. Touch the marker as part of the trusted shell bootstrap before `exec bash`, avoiding a separate open-time Engine round trip.
-2. Start `startTerminalTTLRefresh` with the configured/effective Docker idle TTL.
+2. Start `startTerminalTTLRefreshAfterInitialTouch` with the configured/effective Docker idle TTL, so the first provider refresh waits for the normal interval.
 3. On each low-frequency refresh, execute one bounded provider-local marker refresh (expected to reuse the existing non-TTY `Exec(..., command=true)` path).
 4. Stop refresh immediately on `Close`, context cancellation, or shell exit.
 
-This keeps an active terminal ahead of the sweeper without making keystrokes trigger Docker API traffic. Real integration uses a shortened test TTL/refresh interval and asks the real sweeper decision path to confirm the terminal-only container is not idle after remaining open beyond its TTL.
+This keeps an active terminal ahead of the sweeper without making keystrokes trigger Docker API traffic. The minimum non-zero Docker idle TTL is 60 seconds, while the production refresh floor is 15 seconds; unit tests pin that every valid Docker TTL exceeds its refresh interval. Real integration observes the activity marker advance on the production interval and asks the real sweeper decision path to preserve the active terminal container.
 
 ### Reconnect decision
 

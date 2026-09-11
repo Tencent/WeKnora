@@ -102,6 +102,28 @@ const DefaultDockerHTTPTimeout = 30 * time.Second
 // lives until the host runs out of memory.
 const DefaultDockerIdleTTL = 30 * time.Minute
 
+// MinDockerIdleTTL keeps the shortest valid Docker reclamation window ahead
+// of the terminal heartbeat floor. Zero remains the only unset value and is
+// resolved to DefaultDockerIdleTTL.
+const MinDockerIdleTTL = time.Minute
+
+// ErrInvalidDockerIdleTTL lets API handlers classify a short TTL as bad input
+// without matching the validation message.
+var ErrInvalidDockerIdleTTL = errors.New("sandbox: invalid Docker idle TTL")
+
+// ValidateDockerIdleTTL enforces the Docker idle-lifecycle invariant at every
+// backend entry point, including callers that bypass workspace config storage.
+func ValidateDockerIdleTTL(ttl time.Duration) error {
+	if ttl == 0 || ttl >= MinDockerIdleTTL {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: must be zero (use default) or at least %s",
+		ErrInvalidDockerIdleTTL,
+		MinDockerIdleTTL,
+	)
+}
+
 // DefaultDockerMemoryLimit / DefaultDockerCPULimit / DefaultDockerPidsLimit are
 // the per-sandbox resource ceilings applied when a config names none. They are
 // deliberately larger than the stateless backend's old 256MB/1CPU: a session

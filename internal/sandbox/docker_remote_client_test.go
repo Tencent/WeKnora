@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1164,6 +1165,30 @@ func TestDockerSettingsCarryOutboundPolicy(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, settings.Endpoint.AllowPrivate)
+}
+
+func TestDockerSettingsValidateIdleTTL(t *testing.T) {
+	t.Parallel()
+	for _, seconds := range []int{0, 1, 15, 59, 60, 61, 1800} {
+		seconds := seconds
+		t.Run(strconv.Itoa(seconds), func(t *testing.T) {
+			settings, err := dockerSettingsFromConfig(&Config{
+				Type:          SandboxTypeDocker,
+				DockerImage:   "weknora/sandbox:test",
+				DockerIdleTTL: time.Duration(seconds) * time.Second,
+			})
+			if seconds > 0 && seconds < int(MinDockerIdleTTL/time.Second) {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if seconds == 0 {
+				require.Equal(t, DefaultDockerIdleTTL, settings.IdleTTL)
+			} else {
+				require.Equal(t, time.Duration(seconds)*time.Second, settings.IdleTTL)
+			}
+		})
+	}
 }
 
 func TestValidateDockerNetworkMode(t *testing.T) {

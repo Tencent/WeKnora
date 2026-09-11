@@ -45,6 +45,11 @@ func ResolveEffectiveConfig(
 	effective := *global
 	if tenantCfg == nil {
 		effective.Network = resolveNetworkPolicy(nil)
+		if effective.Type == SandboxTypeDocker {
+			if err := ValidateDockerIdleTTL(effective.DockerIdleTTL); err != nil {
+				return nil, err
+			}
+		}
 		return &effective, nil
 	}
 	// Keep the baseline's cross-cutting settings, drop everything provider
@@ -105,6 +110,9 @@ func ResolveEffectiveConfig(
 	}
 
 	if docker := tenantCfg.Docker; docker != nil {
+		if err := ValidateDockerIdleTTL(time.Duration(docker.IdleTTLSeconds) * time.Second); err != nil {
+			return nil, err
+		}
 		overrideString(&effective.DockerImage, docker.Image)
 		if err := ValidateDockerNetworkMode(docker.NetworkMode); err != nil {
 			return nil, err
