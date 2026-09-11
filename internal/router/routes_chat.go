@@ -65,6 +65,9 @@ func RegisterSessionRoutes(
 		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
 		sessions.POST("/:session_id/sandbox/terminal-ticket", handler.IssueSandboxTerminalTicket)
+		sessions.POST("/:session_id/sandbox/browser", handler.SandboxBrowserCommand)
+		sessions.POST("/:session_id/sandbox/browser-ticket", handler.IssueSandboxBrowserTicket)
+		sessions.GET("/:id/sandbox/browser/capabilities", handler.SandboxBrowserCapabilities)
 		// Mid-run message injection: append a user message to the turn that is
 		// currently generating. Accepts even when no run is live (the client
 		// then falls back to a normal send), mirroring StopSession's ownership
@@ -145,4 +148,5 @@ func RegisterChatRoutes(r *gin.RouterGroup, handler *session.Handler, g *rbacGua
 // /sessions/:id (gin requires identical wildcard names per tree).
 func RegisterSandboxTerminalRoutes(r *gin.Engine, sessionHandler *session.Handler) {
 	r.GET("/api/v1/sessions/:id/sandbox/terminal", sessionHandler.SandboxTerminalWS)
+	r.GET("/api/v1/sessions/:id/sandbox/browser/stream", sessionHandler.SandboxBrowserStream)
 }

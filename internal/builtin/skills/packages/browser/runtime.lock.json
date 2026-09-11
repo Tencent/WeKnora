@@ -1,0 +1,15 @@
+{
+  "version": "0.37.1",
+  "repository": "vercel-labs/agent-browser",
+  "commit": "72007a6788d863611b23bed0b59d0d659c638d8e",
+  "assets": {
+    "x86_64": {
+      "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-linux-musl-x64",
+      "sha256": "5318f2ed03a9fae04a9e1f8d274d1a0fd6bf7fd427f32a44224be11f2dc3a37d"
+    },
+    "aarch64": {
+      "url": "https://github.com/vercel-labs/agent-browser/releases/download/v0.37.1/agent-browser-linux-musl-arm64",
+      "sha256": "ab7afc4e74d1218d32bd12519474dbd6ed9bf32b3a905d7648e9d9400f50083d"
+    }
+  }
+}

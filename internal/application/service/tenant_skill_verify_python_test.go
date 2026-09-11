@@ -399,3 +399,45 @@ func runSkillPythonVerifier(
 	runErr := cmd.Run()
 	return stdout.String(), stderr.String(), runErr
 }
+
+func TestSkillPythonVerifierRejectsVersionDrift(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, requirement, lock string
+		wantError               bool
+	}{
+		{"exact drift", "weknora-pin==1.0\n", "", true},
+		{"compatible range", "weknora-pin>=1,<3\n", "", false},
+		{"matching pin", "weknora-pin==2.0\n", "", false},
+		{"transitive lock drift", "", "weknora-pin==1.0 \\\n    --hash=sha256:abcd\n", true},
+		{"inactive marker", "weknora-pin==1.0; extra == 'unused'\n", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeSkillTree(t, map[string]string{
+				"requirements.txt": tc.requirement, "requirements.lock": tc.lock,
+				"weknora_pin-2.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: weknora-pin\nVersion: 2.0\n",
+			})
+			cmd := exec.Command(python, "-", root)
+			cmd.Dir = root
+			cmd.Stdin = strings.NewReader(skillPythonVerifier)
+			output, err := cmd.CombinedOutput()
+			if tc.wantError {
+				require.Error(t, err)
+				require.Equal(t, 2, err.(*exec.ExitError).ExitCode())
+				require.Contains(t, string(output), "installed version is 2.0")
+			} else {
+				require.NoError(t, err, string(output))
+			}
+		})
+	}
+}
+
+func TestSkillPythonVerifierRejectsRewrittenLock(t *testing.T) {
+	root := writeSkillTree(t, map[string]string{"requirements.lock": "# weakened lock\n"})
+	bundle := &SkillBundle{Files: map[string][]byte{"requirements.lock": []byte("weknora-pin==1.0\n")}}
+	cmd := exec.Command("bash", "-c", skillPythonVerifyCommand(root, nil, nil, bundle))
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	require.Contains(t, string(output), "requirements.lock changed during installation")
+}

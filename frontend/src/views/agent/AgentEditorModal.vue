@@ -1353,7 +1353,7 @@
                         <p v-if="!hasSandboxSelected && sandboxConfigOptions.length > 1" class="desc empty-hint">
                           {{ $t('agent.editor.skillsNeedSandbox') }}
                         </p>
-                        <p v-else-if="hasSandboxSelected && skillCatalog.length === 0" class="desc empty-hint">
+                        <p v-else-if="hasSandboxSelected && catalogReady && catalogSkillRows.length === 0" class="desc empty-hint">
                           <span>{{ $t('agent.editor.noSkillsAvailable') }}</span>
                           <a
                             v-if="canInstallSkills"
@@ -1367,6 +1367,7 @@
                       </div>
                     </div>
 
+                    <t-loading v-if="skillsLoading && hasSandboxSelected" size="small" :text="$t('common.loading')" />
                     <div v-if="showCatalogSkillList" class="setting-row setting-row-vertical">
                       <div class="setting-control setting-control-full">
                         <t-checkbox-group
@@ -1407,7 +1408,10 @@
                                 <div class="skill-pick__title-row">
                                   <span class="skill-name" :title="skill.name">{{ skill.name }}</span>
                                   <span
-                                    v-if="!skill.selectable"
+                                    v-if="skill.preinstalled" class="skill-pick__hint"
+                                  >{{ $t('skillDiscovery.cardBuiltins') }}</span>
+                                  <span
+                                    v-else-if="!skill.selectable"
                                     class="skill-pick__hint"
                                     :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
                                   >
@@ -1862,6 +1866,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useOrganizationStore } from '@/stores/organization';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { buildCatalogSkillRows, type CatalogSkillRow } from '@/utils/skillAvailability';
+import type { SkillInfo } from '@/api/skill';
 import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
@@ -2080,29 +2086,16 @@ const canEnableSkills = computed(() =>
 );
 const canInstallSkills = computed(() => authStore.hasRole('admin'));
 
-type CatalogSkillRow = SkillCatalogItem & {
-  installed: boolean
-  selectable: boolean
-  installStatus: string
-  installEnabled: boolean
-}
-
-const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
-  const sandboxId = formData.value.config.sandbox_config_id || ''
-  return skillCatalog.value.map((item) => {
-    const inst = sandboxId
-      ? (item.installations || []).find((row) => row.sandbox_config_id === sandboxId)
-      : undefined
-    const installStatus = inst?.status || ''
-    const installEnabled = Boolean(inst?.enabled)
-    const installed = Boolean(inst) && installStatus !== 'removed'
-    const selectable = installStatus === 'ready' && installEnabled
-    return { ...item, installed, selectable, installStatus, installEnabled }
-  })
-})
+const usableSkills = ref<SkillInfo[]>([])
+const skillsLoading = ref(false)
+const skillsAvailabilityKnown = ref(false)
+const catalogSkillRows = computed(() => buildCatalogSkillRows(
+  skillCatalog.value, usableSkills.value, formData.value.config.sandbox_config_id || '',
+))
 
 const showCatalogSkillList = computed(() =>
   skillsSelectionMode.value !== 'none'
+  && !skillsLoading.value
   && hasSandboxSelected.value
   && catalogSkillRows.value.length > 0,
 )
@@ -2135,13 +2128,14 @@ const catalogSkillGroups = computed(() => {
 })
 
 function skillStatusHint(skill: CatalogSkillRow): string {
-  if (!skill.installed) return t('agent.editor.skillNotInstalled')
+  if (!skill.installed) return t(skillsAvailabilityKnown.value ? 'agent.editor.skillNotInstalled' : 'skillDiscovery.cardAvailabilityUnknown')
   if (skill.installStatus === 'installing') return t('settings.sandbox.skillStatusInstalling')
   if (skill.installStatus === 'failed') return t('settings.sandbox.skillStatusFailed')
   if (skill.installStatus === 'removing') return t('settings.sandbox.skillStatusRemoving')
   if (skill.installStatus === 'ready' && !skill.installEnabled) {
     return t('agent.editor.skillDisabledOnSandbox')
   }
+  if (skill.installStatus === 'ready') return t('skillDiscovery.cardNotInImage')
   return t('agent.editor.skillNotReady')
 }
 
@@ -2157,7 +2151,7 @@ function isSkillBusy(skill: CatalogSkillRow): boolean {
 }
 
 function canInstallSkillRow(skill: CatalogSkillRow): boolean {
-  if (!canInstallSkills.value || !hasSandboxSelected.value) return false
+  if (!canInstallSkills.value || !hasSandboxSelected.value || skill.selectable || !skill.id || skillsLoading.value) return false
   return !skill.installed || skill.installStatus === 'failed'
 }
 
@@ -2238,18 +2232,26 @@ function pruneSelectedSkills() {
   }
 }
 
+let skillSyncRevision = 0
 async function syncInstalledSkills(force = false) {
   autoBindSoleSandbox()
+  const revision = ++skillSyncRevision
   const configId = formData.value.config.sandbox_config_id || ''
-  await editorResources.ensureSkills(configId, force)
-  try {
-    await editorResources.ensureSkillCatalog(force)
-    skillCatalog.value = [...editorResources.skillCatalog]
-    catalogReady.value = true
-  } catch {
-    catalogReady.value = false
-  }
-  pruneSelectedSkills()
+  catalogReady.value = false
+  skillsLoading.value = true
+  usableSkills.value = []
+  const [available, catalogResult] = await Promise.all([
+    editorResources.ensureSkills(configId, force),
+    editorResources.ensureSkillCatalog(force).then(() => true).catch(() => false),
+  ])
+  if (revision !== skillSyncRevision || configId !== (formData.value.config.sandbox_config_id || '')) return
+  skillsLoading.value = false
+  skillsAvailabilityKnown.value = !!available && available.builtin_skills?.known !== false
+  usableSkills.value = available?.data || []
+  if (catalogResult) skillCatalog.value = [...editorResources.skillCatalog]
+  // A failed metadata read must not silently erase saved selections.
+  catalogReady.value = !!available && catalogResult
+  if (catalogReady.value && available?.builtin_skills?.known !== false) pruneSelectedSkills()
 }
 
 async function installCatalogToCurrent(skill: CatalogSkillRow) {

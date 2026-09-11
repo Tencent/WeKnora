@@ -1,0 +1,47 @@
+# Locked core office runtime. Build through scripts/build_sandbox_office.sh.
+ARG SANDBOX_BASE=weknora-sandbox:base
+FROM ${SANDBOX_BASE} AS core-dependencies
+USER root
+ENV UV_PYTHON_INSTALL_DIR=/opt/weknora/python \
+    MPLBACKEND=Agg \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_LINK_MODE=copy
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-writer libreoffice-calc libreoffice-impress poppler-utils \
+    fonts-noto-cjk fonts-liberation fonts-wqy-zenhei fontconfig \
+    && rm -rf /var/lib/apt/lists/*
+RUN uv python install 3.12.11
+# Some ARM VM hosts report unsupported OpenSSL CPU extensions.
+ENV OPENSSL_armcap=0
+COPY docker/install-builtin-skills.py /opt/weknora/install-builtin-skills.py
+COPY internal/builtin/skills/packages/docx/requirements.lock /opt/weknora/locks/core/docx.lock
+COPY internal/builtin/skills/packages/xlsx/requirements.lock /opt/weknora/locks/core/xlsx.lock
+COPY internal/builtin/skills/packages/pdf/requirements.lock /opt/weknora/locks/core/pdf.lock
+COPY internal/builtin/skills/packages/powerpoint/requirements.lock /opt/weknora/locks/core/powerpoint.lock
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python3 /opt/weknora/install-builtin-skills.py install --locks /opt/weknora/locks/core
+COPY internal/builtin/skills/packages/powerpoint/package*.json /opt/weknora/node-locks/powerpoint/
+RUN --mount=type=cache,target=/root/.npm \
+    python3 /opt/weknora/install-builtin-skills.py install-node --source /opt/weknora/node-locks/powerpoint
+
+FROM core-dependencies AS office-core
+COPY internal/builtin/skills/packages/docx /opt/weknora/builtin/skills/docx
+COPY internal/builtin/skills/packages/xlsx /opt/weknora/builtin/skills/xlsx
+COPY internal/builtin/skills/packages/pdf /opt/weknora/builtin/skills/pdf
+COPY internal/builtin/skills/packages/powerpoint /opt/weknora/builtin/skills/powerpoint
+ARG CORE_SKILLS_MANIFEST
+ARG BUILTIN_SKILLS_VERSION
+RUN python3 /opt/weknora/install-builtin-skills.py verify --manifest "$CORE_SKILLS_MANIFEST"
+LABEL org.weknora.skills.manifest=$CORE_SKILLS_MANIFEST \
+      com.weknora.sandbox.template="true" \
+      org.weknora.sandbox.profile="office-core" \
+      org.weknora.skills.version=$BUILTIN_SKILLS_VERSION
+WORKDIR /workspace
+
+FROM ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cube-base
+
+FROM office-core AS office-core-cube
+COPY --from=cube-base /usr/bin/envd /usr/bin/envd
+COPY --from=cube-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
+EXPOSE 49983
+ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]

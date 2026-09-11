@@ -73,6 +73,8 @@
           <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '100%', type: 'rect' }]" />
         </div>
 
+        <SandboxBrowser v-if="browserAvailable && panel?.activeTab.value === 'browser'" :key="sessionId" :session-id="sessionId"
+          :agent-id="agentId" :agent-source-tenant-id="agentSourceTenantId" />
         <div v-if="panel?.activeTab.value === 'desktop'" class="chat-sandbox-panel__placeholder">
           <t-icon name="desktop" size="28px" />
           <p>{{ t('chat.sandbox.desktopPlaceholder') }}</p>
@@ -84,6 +86,8 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { get } from '@/utils/request'
+import { useSandboxBrowserAvailability } from '@/composables/useSandboxBrowserAvailability'
 import { useI18n } from 'vue-i18n'
 import {
   useChatSandboxPanel,
@@ -92,6 +96,7 @@ import {
   type SandboxPanelTab,
 } from '@/composables/useChatSandboxPanel'
 import SandboxTerminal from '@/views/chat/components/SandboxTerminal.vue'
+import SandboxBrowser from '@/views/chat/components/SandboxBrowser.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
@@ -116,9 +121,26 @@ const props = withDefaults(
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
 
+const browserAvailable = useSandboxBrowserAvailability(
+  () => ({ sessionId: props.sessionId, agentId: props.agentId,
+    agentSourceTenantId: props.agentSourceTenantId, visible: !!panel?.visible.value,
+    refreshKey: [props.artifactsCollecting, panel?.activeTab.value] }),
+  async ({ sessionId, agentId, agentSourceTenantId }) => {
+    const response = await get<{ data: { available: boolean } }>(
+      `/api/v1/sessions/${encodeURIComponent(sessionId)}/sandbox/browser/capabilities`,
+      { params: { agent_id: agentId, agent_source_tenant_id: agentSourceTenantId || undefined } },
+    )
+    return response.data.available
+  },
+)
+watch([browserAvailable, () => panel?.activeTab.value], ([available]) => {
+  if (!available && panel?.activeTab.value === 'browser') panel.open('artifacts')
+}, { flush: 'sync' })
+
 const tabs = computed(() => [
   { id: 'artifacts' as SandboxPanelTab, icon: 'folder', label: t('chat.sandbox.tabArtifacts') },
   { id: 'terminal' as SandboxPanelTab, icon: 'terminal', label: t('chat.sandbox.tabTerminal') },
+  ...(browserAvailable.value ? [{ id: 'browser' as SandboxPanelTab, icon: 'internet', label: t('sandboxBrowser.title') }] : []),
   { id: 'desktop' as SandboxPanelTab, icon: 'desktop', label: t('chat.sandbox.tabDesktop') },
 ])
 

@@ -3,11 +3,14 @@ import type { ConfigSkillFileContent, ConfigSkillFileEntry } from "../system";
 
 // Skill信息
 export interface SkillInfo {
+  source?: "builtin";
+  version?: string;
   name: string;
   description: string;
 }
 
 export interface SkillCatalogInstall {
+	version?: string;
   skill_id: string;
   sandbox_config_id: string;
   sandbox_config_name?: string;
@@ -20,6 +23,7 @@ export interface SkillCatalogInstall {
 }
 
 export interface SkillCatalogItem {
+  builtin?: boolean;
   id: string;
   name: string;
   version?: string;
@@ -37,11 +41,18 @@ export interface SkillCatalogRegisterResult {
   description?: string;
 }
 
+export interface BuiltinSkillsSummary {
+  known: boolean;
+  version?: string;
+  skills: SkillInfo[];
+  unavailable: number;
+}
+
 // 获取当前沙箱配置上可执行的 Skills；未传 sandboxConfigId 或
 // skills_available 为 false 时，前端应隐藏/禁用 Skills 配置
-export function listSkills(sandboxConfigId?: string) {
-  return get<{ data: SkillInfo[]; skills_available?: boolean }>('/api/v1/skills', {
-    params: sandboxConfigId ? { sandbox_config_id: sandboxConfigId } : {},
+export function listSkills(sandboxConfigId?: string, sessionId?: string) {
+  return get<{ data: SkillInfo[]; skills_available?: boolean; builtin_skills?: BuiltinSkillsSummary }>('/api/v1/skills', {
+    params: { sandbox_config_id: sandboxConfigId || undefined, session_id: sessionId || undefined },
   });
 }
 
@@ -53,6 +64,12 @@ export function registerSkillCatalogFromSource(source: string) {
   return post<{ data: SkillCatalogRegisterResult }>('/api/v1/skills/catalog', { source }, {
     timeout: 2 * 60 * 1000,
   });
+}
+
+export function installSkillFromPrompt(prompt: string, sandboxConfigIds: string[]) {
+  return post<{ data: { installs: Record<string, string>; errors?: Record<string, string> } }>(
+    '/api/v1/skills/catalog/install-prompt', { prompt, sandbox_config_ids: sandboxConfigIds },
+  );
 }
 
 export function registerSkillCatalogFromFile(
@@ -85,4 +102,34 @@ export function getCatalogSkillFile(catalogId: string, path: string) {
   return get<{ data: ConfigSkillFileContent }>(`/api/v1/skills/catalog/${catalogId}/files/content`, {
     params: { path },
   });
+}
+
+export interface DiscoverySkill {
+	/** SHA-256 of the reproducible install archive, distinct from the file manifest digest. */
+	bundle_sha256?: string
+  runtime: 'sandbox' | 'publisher' | 'local_browser'
+  id: string
+  name: string
+  title: Record<string, string>
+  description: Record<string, string>
+  category: 'office' | 'analysis' | 'browser'
+  distribution: 'builtin' | 'community' | 'external_link'
+  install_source?: string
+  publisher: string
+  license: string
+  source_url: string
+  license_url: string
+  docs_url?: string
+  version?: string
+  digest?: string
+}
+
+export function listSkillDiscovery() {
+  return get<{ data: DiscoverySkill[] }>('/api/v1/skills/discovery')
+}
+
+export function registerBuiltinSkill(id: string, replaceExisting = false) {
+  return post<{ data: SkillCatalogRegisterResult }>(`/api/v1/skills/discovery/${encodeURIComponent(id)}/register`, {
+    replace_existing: replaceExisting,
+  })
 }

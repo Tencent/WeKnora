@@ -155,6 +155,7 @@ func (tr *installTranscript) Subscribe() {
 	}
 	tr.bus.On(event.EventAgentThought, tr.onThought)
 	tr.bus.On(event.EventAgentToolCall, tr.onToolCall)
+	tr.bus.On(event.EventAgentCommandOutput, tr.onInstallOutput)
 	tr.bus.On(event.EventAgentToolResult, tr.onToolResult)
 	tr.bus.On(event.EventAgentFinalAnswer, tr.onAnswer)
 	tr.bus.On(event.EventError, tr.onError)
@@ -559,4 +560,25 @@ func asymptoticInstallPercent(k int) int {
 		return 79
 	}
 	return p
+}
+
+func (tr *installTranscript) onInstallOutput(_ context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.CommandOutputData)
+	if !ok {
+		return nil
+	}
+	tr.mu.Lock()
+	closed := tr.closed
+	tr.mu.Unlock()
+	if closed {
+		return nil
+	}
+	tr.append(interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeInstallOutput, Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tool_call_id": data.ToolCallID, "command": data.Command,
+			"started_at": data.StartedAt, "output": data.Output, "done": data.Done,
+		},
+	})
+	return nil
 }

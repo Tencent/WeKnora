@@ -15,8 +15,10 @@ tmp_dir = "tmp"
   # 使用 full_bin 来设置环境变量（从父进程继承）
   full_bin = ""
   include_dir = []
-  include_ext = ["go", "tpl", "tmpl", "html", "yaml"]
-  include_file = []
+  # go:embed snapshots skill instructions, helpers, manifests and dependency locks.
+  include_ext = ["go", "tpl", "tmpl", "html", "yaml", "cjs", "js", "json", "lock", "md", "mplstyle", "png", "py", "svg", "txt"]
+  # Air matches extensions literally; extensionless licenses need explicit paths.
+  include_file = ["internal/builtin/skills/packages/browser/LICENSE", "internal/builtin/skills/packages/docx/LICENSE", "internal/builtin/skills/packages/exploratory-data-analysis/LICENSE", "internal/builtin/skills/packages/pdf/LICENSE", "internal/builtin/skills/packages/powerpoint/LICENSE", "internal/builtin/skills/packages/scientific-visualization/LICENSE", "internal/builtin/skills/packages/statistical-analysis/LICENSE", "internal/builtin/skills/packages/xlsx/LICENSE", "internal/builtin/skills/packages/xlsx/LICENSE-HERMES"]
   kill_delay = "2s"
   log = "build-errors.log"
   poll = false

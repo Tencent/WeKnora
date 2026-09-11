@@ -447,6 +447,7 @@ func TestSkillCatalogWriteRoutesRequireFullAccess(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPost, "/api/v1/skills/catalog"},
+		{http.MethodPost, "/api/v1/skills/catalog/install-prompt"},
 		{http.MethodPost, "/api/v1/skills/catalog/:id/install"},
 		{http.MethodGet, "/api/v1/skills/catalog/:id/files"},
 		{http.MethodGet, "/api/v1/skills/catalog/:id/files/content"},

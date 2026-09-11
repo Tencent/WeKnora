@@ -3,6 +3,7 @@ package skills
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
@@ -41,5 +42,10 @@ func (m *Manager) PrepareShellEnvironment(ctx context.Context, sessionID, skillN
 	// keep their original meaning and cannot consume the setup prefix.
 	prefix := sandbox.SkillCommandPath(dir)
 	wrapped := "export PATH=" + sandbox.ShellQuote(prefix) + ":\"$PATH\"; exec /bin/bash --noprofile --norc -c " + sandbox.ShellQuote(command)
+	if strings.HasPrefix(dir, sandbox.BuiltinSkillsImageRoot+"/") {
+		// Builtins promise a verified interpreter. A missing venv must not
+		// silently select the system Python (or another skill on PATH).
+		wrapped = sandbox.BuiltinSkillRuntimeGuard(dir) + wrapped
+	}
 	return wrapped, runtimeEnv, nil
 }

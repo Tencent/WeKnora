@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -240,6 +241,15 @@ func (s *TenantSkillService) ReinstallSkill(
 	if skill == nil {
 		return "", apperrors.NewNotFoundError("skill not found")
 	}
+	if prompt := pendingSkillPrompt(skill); prompt != "" {
+		if guidance := strings.TrimSpace(strings.Join(instructions, "\n")); guidance != "" {
+			prompt += "\n" + guidance
+		}
+		if len([]rune(prompt)) > 10000 {
+			return "", apperrors.NewBadRequestError("install instructions exceed 10000 characters")
+		}
+		return s.startPromptInstall(ctx, tenantID, configID, prompt, skill)
+	}
 	// The zip is owned by the catalog. An empty install BundleRef is not
 	// itself a failure — fall through to skillBundleArchive, which is what
 	// reports a definition whose files are actually gone.
@@ -258,6 +268,11 @@ func (s *TenantSkillService) ReinstallSkill(
 func (s *TenantSkillService) runInstall(
 	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle, instructions ...string,
 ) (err error) {
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name:     "skill.install",
+		Metadata: map[string]interface{}{"tenant_id": tenantID, "sandbox_config_id": configID, "skill_id": skillID},
+	})
+	defer func() { span.Finish(nil, nil, err) }()
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = types.WithSandboxTenantID(ctx, tenantID)
 
@@ -319,7 +334,7 @@ func (s *TenantSkillService) runInstall(
 	// It is deferred before it is stopped explicitly below, so a failure path
 	// still stops it ahead of the deferred failSkill.
 	stopHeartbeat := s.startInstallHeartbeat(ctx, tenantID, configID, skillID)
-	defer stopHeartbeat()
+	defer func() { stopHeartbeat() }()
 
 	// The name comes from SKILL.md and is already validated on parse, so a
 	// rejection here means the bundle was accepted by a looser rule than the
@@ -381,19 +396,33 @@ func (s *TenantSkillService) runInstall(
 	// the transcript as soon as the directory is ready, not after that copy.
 	transcript, prompt := s.beginInstallTranscript(ctx, tenantID, skillID, sess, mgr, skillDir, bundle, instructions...)
 
-	fileCount := 0
-	if bundle != nil {
-		fileCount = len(bundle.Files)
-	}
-	if fileCount > 0 {
-		logger.Infof(ctx, "[skill] seeding %d files for %s as one archive", fileCount, skillID)
-		s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
-			Percent: 28, Stage: "seeding",
-			Log: fmt.Sprintf("seeding %d files", fileCount),
-		})
-	}
-	if err := s.seedSkillFiles(ctx, mgr, sess.ID, skillDir, bundle); err != nil {
-		return err
+	defer func() { transcript.Finish(context.WithoutCancel(ctx), err) }()
+	if promptBundleRequest(bundle) != "" {
+		acquired, targetDir, acquireErr := s.acquirePromptSkill(
+			ctx, tenantID, configID, skillID, sess, mgr, skillDir, bundle, transcript, prompt, stopHeartbeat,
+		)
+		if acquireErr != nil {
+			return acquireErr
+		}
+		bundle, skillDir = acquired, targetDir
+		stopHeartbeat = s.startInstallHeartbeat(ctx, tenantID, configID, skillID)
+		prompt = buildInstallPrompt(skillDir, bundle, s.probeInstallTools(ctx, mgr, sess.ID))
+		transcript.RecordPrompt(prompt)
+	} else {
+		fileCount := 0
+		if bundle != nil {
+			fileCount = len(bundle.Files)
+		}
+		if fileCount > 0 {
+			logger.Infof(ctx, "[skill] seeding %d files for %s as one archive", fileCount, skillID)
+			s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
+				Percent: 28, Stage: "seeding",
+				Log: fmt.Sprintf("seeding %d files", fileCount),
+			})
+		}
+		if err := s.seedSkillFiles(ctx, mgr, sess.ID, skillDir, bundle); err != nil {
+			return err
+		}
 	}
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 35, Stage: "seeded"})
 
@@ -473,6 +502,7 @@ func (s *TenantSkillService) runInstall(
 	}); err != nil {
 		return err
 	}
+	builtinManifest := builtinSkillsForSnapshot(ctx, mgr, sess.ID)
 	ref, err := s.createSnapshot(ctx, mgr, sess.ID, snapshotName)
 	if err != nil {
 		return err
@@ -487,7 +517,9 @@ func (s *TenantSkillService) runInstall(
 	}
 
 	// 8. Switch the pointer. One DB write; everything after this is cleanup.
-	if err := s.switchImagePointer(ctx, tenantID, configID, ref.ID, generation, builtFingerprint); err != nil {
+	if err := s.switchImagePointer(
+		ctx, tenantID, configID, ref.ID, generation, builtFingerprint, builtinManifest,
+	); err != nil {
 		s.abandonSnapshot(cleanupBase, tenantID, mgr, installRowID, ref.ID)
 		return err
 	}
@@ -701,7 +733,11 @@ func (s *TenantSkillService) beginInstallTranscript(
 	sess *types.Session, mgr sandbox.Manager, skillDir string, bundle *SkillBundle, instructions ...string,
 ) (*installTranscript, string) {
 	assistantMessageID := uuid.NewString()
-	prompt := buildInstallPrompt(skillDir, bundle, s.probeInstallTools(ctx, mgr, sess.ID))
+	toolchain := s.probeInstallTools(ctx, mgr, sess.ID)
+	prompt := buildInstallPrompt(skillDir, bundle, toolchain)
+	if request := promptBundleRequest(bundle); request != "" {
+		prompt = buildPromptInstallPrompt(skillDir, request, toolchain)
+	}
 	if guidance := strings.TrimSpace(strings.Join(instructions, "\n")); guidance != "" {
 		prompt += "\n\nAdditional instructions from the installing administrator:\n" + guidance
 	}
@@ -763,6 +799,9 @@ type installerJob struct {
 func (s *TenantSkillService) installDependenciesAndVerify(
 	ctx context.Context, job installerJob,
 ) (err error) {
+	if handled, builtinErr := s.tryPreinstalledBuiltin(ctx, job); handled {
+		return builtinErr
+	}
 	run, err := s.openInstallerRun(ctx, job.tenantID, job.sess, job.skillDir, job.transcript)
 	if err != nil {
 		job.transcript.Finish(context.WithoutCancel(ctx), err)
@@ -802,8 +841,8 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 			"handing them back to the installer", job.skillID, gate.Language, len(gate.Problems))
 		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, SkillProgress{
 			Percent: 82, Stage: "repairing",
-			Log: fmt.Sprintf("%s verification found %d missing dependency/dependencies; "+
-				"asking the installer to add them", gate.Language, len(gate.Problems)),
+			Log: fmt.Sprintf("%s verification found %d dependency problem(s); "+
+				"asking the installer to restore the declared dependencies", gate.Language, len(gate.Problems)),
 		})
 		prompt = buildRepairPrompt(job.skillDir, gate)
 		if job.guidance != "" {
@@ -833,6 +872,7 @@ func (s *TenantSkillService) openInstallerRun(
 	sess *types.Session,
 	skillDir string,
 	transcript *installTranscript,
+	acquireSource ...bool,
 ) (*installerRun, error) {
 	if s.installerAgents == nil {
 		return nil, errors.New("custom agent service is not configured")
@@ -850,6 +890,10 @@ func (s *TenantSkillService) openInstallerRun(
 	}
 	agentConfig := installerAgentConfig(
 		installerAgentDefaults(ctx, tenantID), sess.SandboxConfigID, skillDir)
+	if len(acquireSource) > 0 && acquireSource[0] {
+		agentConfig.SystemPrompt = promptAcquisitionSystemPrompt
+		agentConfig.UseCustomSystemPrompt = true
+	}
 
 	chatModel, err := s.resolveInstallerModel(ctx, tenantID, record)
 	if err != nil {
@@ -973,7 +1017,9 @@ func buildRepairPrompt(skillDir string, gate *skillVerificationError) string {
 
 The %s check reported:
 %s
-Resolve the findings above. For missing packages, install them. For a missing or invalid runtime report,
+Resolve the findings above. For missing packages or incompatible installed versions, restore the declared versions.
+If requirements.lock exists, reinstall from that lock with --require-hashes; do not
+upgrade packages independently or erase their constraints. For a missing or invalid runtime report,
 assess prerequisites from SKILL.md and write the report. Never erase a prerequisite to pass the check.
 
 - Python packages go into %s/.venv (`+"`uv pip install`"+`, or
@@ -1546,6 +1592,7 @@ func (s *TenantSkillService) switchImagePointer(
 	snapshotID string,
 	generation int,
 	builtFingerprint string,
+	builtinManifest ...*types.BuiltinSkillsManifest,
 ) error {
 	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
 	if err != nil {
@@ -1569,9 +1616,14 @@ func (s *TenantSkillService) switchImagePointer(
 		)
 	}
 
+	var manifest *types.BuiltinSkillsManifest
+	if len(builtinManifest) > 0 {
+		manifest = builtinManifest[0]
+	}
 	// Only the SkillImage portion is touched; everything else in the entity is
 	// whatever the latest read says it is.
 	cfgEntity.Config.SkillImage = &types.SkillImageConfig{
+		BuiltinSkills:    manifest,
 		SnapshotID:       snapshotID,
 		Generation:       generation,
 		BuiltAt:          s.now(),
@@ -1780,39 +1832,45 @@ Hard requirements:
   WEKNORA_SESSION_INPUT_DIR: the sandbox injects those. Other WEKNORA_* names the skill reads
   (WEKNORA_API_KEY, WEKNORA_BASE_URL, WEKNORA_HOST, WEKNORA_TOKEN, WEKNORA_KB_ID) MUST be declared.
 
-On-demand / optional extras MUST be installed now. Every chat session starts
-from the image this install produces, and whatever a session installs dies with
-it, so an extra deferred to chat time is paid for again on every session and
-fails outright wherever the sandbox has no egress. Skills that ship
-scripts/install_deps.py or say "pip install when the user needs Word/PPT" will
-stall at chat time unless those packages are already in the venv.
+Dependency scope and versions:
 - Create the venv with pip present: `+"`uv venv --seed %s/.venv`"+` (or `+"`python3 -m venv`"+`).
-- Install requirements.txt / pyproject.toml with `+"`uv pip install`"+`.
-- Read SKILL.md and any on-demand installer for extra packages (python-docx,
-  python-pptx, …) and `+"`uv pip install`"+` every extra, not only the default set.
+- Read the package's SKILL.md runtime profile first. It defines the default supported
+  capabilities. UPSTREAM_SKILL.md and upstream examples do not expand that profile.
+- If requirements.lock exists, install exactly that lock with
+  `+"`uv pip install --python .venv/bin/python --require-hashes -r requirements.lock`"+`.
+  Do NOT upgrade or replace locked versions afterward. requirements.txt documents
+  direct dependencies; the lock also pins their transitive dependencies.
+- Otherwise install the declared requirements.txt / pyproject.toml dependencies.
+- Install optional extras only when the package's runtime profile or the user's
+  explicit installation instructions require them. Do not install every extra,
+  alternate engine or format dependency merely because upstream documentation lists it.
+- When an optional capability is excluded by the runtime profile, leave it excluded
+  and report that limitation. Do not alter manifests to hide a missing required dependency.
 %s
-- If an installer script needs --yes / --all / every extra flag, pass them.
+- Inspect on-demand installers before running them. Select only the required
+  capabilities; never pass --all just to include every optional dependency.
 %s
 Before you finish, PROVE the skill's imports resolve. Do not reason about it —
 run it. The server's own check cannot: it parses files without executing them,
 so it never learns whether an import would have worked. You have the real
 interpreter, so this is your job and yours only.
-- For each script the skill offers, run the import the way the skill would:
+- For each entry point required by the runtime profile, run the import the way the skill would:
   `+"`%s/.venv/bin/python -c 'import x'`"+`, or the script's own
   `+"`--help`"+` if it has one.
 - A failure here is usually one of two things. A missing distribution: install
   it. Or a module the skill ships that Python cannot find — then the script
   needs the directory on sys.path, and you fix the script with edit_skill_file
   rather than installing anything.
-- Do not declare success until every entry point imports cleanly.
+- Do not declare success until every required entry point imports cleanly.
 
 The server then checks what it can before the image is kept, so report what you
 did rather than whether it passed. It confirms every file parses with the
 interpreter that would run it, and that every distribution named in
-requirements.txt / pyproject.toml is installed in the venv. It never runs the
+requirements.txt / requirements.lock / pyproject.toml is installed in the venv
+at a compatible declared version, and that the original manifests were preserved. It never runs the
 skill's code and never judges an import.
-Lazy imports and install_deps.py extras are invisible to that check — you still
-have to install them.
+Verify required entry points for the runtime profile above. Lazy optional imports
+do not require installing excluded capabilities. Run the package smoke check when provided.
 
 %s
 
@@ -1837,7 +1895,7 @@ func formatOnDemandInstallers(bundle *SkillBundle) string {
 		quoted[i] = "`" + name + "`"
 	}
 	return "- This archive ships on-demand installer(s): " + strings.Join(quoted, ", ") +
-		". Run each one now with non-interactive flags covering every extra."
+		". Inspect their options and run only what the runtime profile requires."
 }
 
 func bundleOnDemandInstallers(bundle *SkillBundle) []string {

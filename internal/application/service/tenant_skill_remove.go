@@ -11,6 +11,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -58,6 +59,11 @@ func (s *TenantSkillService) RemoveSkill(
 func (s *TenantSkillService) runRemove(
 	ctx context.Context, tenantID uint64, configID, skillID string,
 ) (err error) {
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name:     "skill.remove",
+		Metadata: map[string]interface{}{"tenant_id": tenantID, "sandbox_config_id": configID, "skill_id": skillID},
+	})
+	defer func() { span.Finish(nil, nil, err) }()
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = types.WithSandboxTenantID(ctx, tenantID)
 
@@ -239,6 +245,7 @@ func (s *TenantSkillService) runRemove(
 	}); err != nil {
 		return err
 	}
+	builtinManifest := builtinSkillsForSnapshot(ctx, mgr, sess.ID)
 	ref, err := s.createSnapshot(ctx, mgr, sess.ID, snapshotName)
 	if err != nil {
 		return err
@@ -252,7 +259,9 @@ func (s *TenantSkillService) runRemove(
 		return err
 	}
 
-	if err := s.switchImagePointer(ctx, tenantID, configID, ref.ID, generation, builtFingerprint); err != nil {
+	if err := s.switchImagePointer(
+		ctx, tenantID, configID, ref.ID, generation, builtFingerprint, builtinManifest,
+	); err != nil {
 		s.abandonSnapshot(cleanupBase, tenantID, mgr, removeRowID, ref.ID)
 		return err
 	}

@@ -69,9 +69,8 @@ func RegisterUserFavoriteRoutes(r *gin.RouterGroup, h *handler.UserResourceFavor
 
 // RegisterSkillRoutes registers skill routes.
 //
-// PR 2 currently only exposes a read-only `ListSkills`; gated to
-// Viewer+. Future skill upload / enable endpoints must use Admin+ since
-// skills run sandboxed code on tenant resources.
+// Reads are Viewer+. Registration and installation require Admin+
+// because skills execute code inside tenant sandboxes.
 func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler, g *rbacGuards) {
 	skills := r.Group("/skills")
 	{
@@ -79,11 +78,15 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 		skills.GET("", g.Viewer(), skillHandler.ListSkills)
 		// Catalog reads are Viewer+ so the agent editor can show uninstalled skills.
 		skills.GET("/catalog", g.Viewer(), skillHandler.ListCatalog)
+		skills.GET("/discovery", g.Viewer(), skillHandler.ListDiscovery)
 	}
+	discoveryWrite := g.apiKeyGroup(r.Group("/skills/discovery"), apiKeyFullAccess())
+	discoveryWrite.POST("/:id/register", g.Admin(), skillHandler.RegisterBuiltin)
 	// Catalog writes bake into sandbox images; scoped API keys cannot hold them.
 	catalogWrite := g.apiKeyGroup(r.Group("/skills/catalog"), apiKeyFullAccess())
 	{
 		catalogWrite.POST("", g.Admin(), skillHandler.RegisterCatalog)
+		catalogWrite.POST("/install-prompt", g.Admin(), skillHandler.InstallPrompt)
 		catalogWrite.POST("/:id/install", g.Admin(), skillHandler.InstallCatalog)
 		catalogWrite.GET("/:id/files", g.Admin(), skillHandler.ListCatalogFiles)
 		catalogWrite.GET("/:id/files/content", g.Admin(), skillHandler.GetCatalogFile)

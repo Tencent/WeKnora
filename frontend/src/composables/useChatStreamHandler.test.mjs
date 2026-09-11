@@ -7,6 +7,28 @@ import { resetSteerTurnForReplay } from '../utils/steerStreamFork.ts'
 
 const source = readFileSync(new URL('./useChatStreamHandler.ts', import.meta.url), 'utf8')
 
+test('command output updates only its pending tool and cannot replace a final result', () => {
+  const start = source.indexOf("case 'command_output': {")
+  const block = source.slice(start, source.indexOf("case 'tool_result':", start))
+  const command = { type: 'tool_call', tool_name: 'shell_exec', tool_call_id: 'a', pending: true }
+  const other = { type: 'tool_call', tool_name: 'shell_exec', tool_call_id: 'b', pending: true }
+  const message = { agentEventStream: [command, other] }
+  const process = vm.runInNewContext(ts.transpile(`(dataPayload) => { switch ('command_output') { ${block} } }`), { message })
+  process({ tool_call_id: 'a', output: 'Reading CSV', done: false })
+  assert.equal(command.command_output.output, 'Reading CSV')
+  assert.equal(command.pending, true)
+  assert.equal(other.command_output, undefined)
+  process({ tool_call_id: 'missing', output: 'unmatched' })
+  assert.equal(message.agentEventStream.length, 2)
+  process({ tool_call_id: 'a', output: 'Finished', done: true })
+  process({ tool_call_id: 'a', output: 'late chunk', done: false })
+  assert.equal(command.command_output.output, 'Finished')
+  command.pending = false
+  command.output = 'Final tool result'
+  process({ tool_call_id: 'a', output: 'more late output', done: false })
+  assert.equal(command.output, 'Final tool result')
+})
+
 test('replaying agent_query binds the first segment and preserves distinct row IDs', () => {
   const messagesList = [
     { id: 'a', role: 'assistant', request_id: 'r', steerForked: true, is_completed: true },

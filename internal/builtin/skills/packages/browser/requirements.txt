@@ -1,0 +1,2 @@
+# WebSocket transport only; browser automation uses the native runtime.
+websocket-client==1.9.0

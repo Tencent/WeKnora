@@ -161,3 +161,18 @@ func TestOpenSessionTerminalListMissWithBindingIsPausedNotUnbound(t *testing.T) 
 	require.Equal(t, connectsBefore, fakeConnectCount(t, client.fakeRemoteClient),
 		"a bound sandbox missing from List must not be reported as unbound")
 }
+
+func TestCommandStreamDoesNotCreateOrResumeSandboxes(t *testing.T) {
+	ctx := terminalTestContext()
+	mgr, client := newSessionManagerTerminalTestHarness(t)
+	_, err := mgr.OpenSessionCommandStream(ctx, "missing", "true")
+	require.ErrorIs(t, err, ErrNoLiveSessionSandbox)
+	require.Zero(t, fakeCreateCount(t, client.fakeRemoteClient))
+	_, err = mgr.ExecShellCommand(ctx, "sess-1", "true", "", time.Second, nil)
+	require.NoError(t, err)
+	pauseAllFakeSandboxes(t, client.fakeRemoteClient)
+	connects := fakeConnectCount(t, client.fakeRemoteClient)
+	_, err = mgr.OpenSessionCommandStream(ctx, "sess-1", "true")
+	require.ErrorIs(t, err, ErrSandboxPaused)
+	require.Equal(t, connects, fakeConnectCount(t, client.fakeRemoteClient))
+}

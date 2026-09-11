@@ -230,3 +230,12 @@ print("\n".join(sys.argv[1:]))
 	require.NoError(t, err, string(output))
 	require.Equal(t, "--first\nvalue\n--third\n", string(output))
 }
+
+func TestBuiltinInterpreterNeverFallsBackToSystemPython(t *testing.T) {
+	dir := BuiltinSkillsImageRoot + "/pdf"
+	command, args := SkillInterpreterCommand(dir, dir+"/scripts/check.py")
+	require.Equal(t, "/bin/sh", command)
+	require.Contains(t, args[1], "builtin skill runtime missing")
+	require.Contains(t, args[1], dir+"/.venv/bin/python")
+	require.NotContains(t, args[1], "exec python3")
+}
