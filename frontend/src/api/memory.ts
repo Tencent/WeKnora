@@ -111,7 +111,24 @@ export function clearMemoryItems() {
 }
 
 export function exportMemoryItems() {
-  return get<{ success: boolean; total: number; data: MemoryItem[] }>('/api/v1/memory/export')
+  return get<MemoryExport>('/api/v1/memory/export')
+}
+
+export interface MemoryLearningProfileExport {
+  schema_version: number
+  knowledge_node: 'wiki_page'
+  evidence_kind: 'answer_source_use'
+  max_score_without_assessment: number
+  documents: MemoryDoc[]
+  documents_truncated: boolean
+}
+
+export interface MemoryExport {
+  success: boolean
+  total: number
+  truncated: boolean
+  data: MemoryItem[]
+  learning_profile: MemoryLearningProfileExport
 }
 
 /** Why a review changed nothing. Empty when it did change something. */
