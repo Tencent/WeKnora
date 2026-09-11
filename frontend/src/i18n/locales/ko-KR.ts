@@ -2087,7 +2087,14 @@ export default {
     authTypeNone: '없음 / 사용자 정의 헤더',
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0(최초 연결 시 인증)',
-    oauthRefreshable: 'Token expired; it will refresh automatically on next use',
+    oauthScopes: '스코프(선택, 공백으로 구분)',
+    oauthAuthorization: '인증 상태',
+    oauthAuthorized: '인증됨',
+    oauthRefreshable: '토큰이 만료되었습니다. 다음 사용 시 자동으로 갱신됩니다',
+    oauthUnauthorized: '미인증',
+    oauthAuthorize: '인증하기',
+    oauthReauthorize: '재인증',
+    oauthRevoke: '인증 해제',
     oauthAuthorizeHint: '「인증하기」를 클릭하면 현재 설정을 먼저 자동 저장한 후 인증을 시작합니다(사용자별 개별 인증).',
     apiKeyHeader: '요청 헤더 이름',
     apiKeyHeaderDesc: '비워 두면 기본값은 X-API-Key입니다. Bearer 방식은 Authorization을 입력하고 아래 비밀 값에 "Bearer <token>"을 작성하세요. 원시 토큰이 필요하면 Authorization에 토큰을 그대로 입력합니다.',
@@ -2126,7 +2133,11 @@ export default {
       updated: 'MCP 서비스가 업데이트되었습니다',
       createFailed: 'MCP 서비스 생성 실패',
       updateFailed: 'MCP 서비스 업데이트 실패',
-      oauthRequired: '이 서비스는 OAuth 인증이 필요하여 OAuth 2.0으로 자동 전환했습니다. 저장 후 「인증하기」를 클릭하세요.'
+      oauthRequired: '이 서비스는 OAuth 인증이 필요하여 OAuth 2.0으로 자동 전환했습니다. 저장 후 「인증하기」를 클릭하세요.',
+      authorized: '인증이 완료되었습니다',
+      authorizeFailed: '인증을 시작하지 못했습니다',
+      revoked: '인증이 해제되었습니다',
+      revokeFailed: '인증 해제에 실패했습니다'
     },
     rules: {
       nameRequired: '서비스 이름을 입력해주세요',

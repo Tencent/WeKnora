@@ -2087,7 +2087,14 @@ export default {
     authTypeNone: 'Нет / Свой заголовок',
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0 (авторизация при первом подключении)',
-    oauthRefreshable: 'Token expired; it will refresh automatically on next use',
+    oauthScopes: 'Области (необязательно, через пробел)',
+    oauthAuthorization: 'Статус авторизации',
+    oauthAuthorized: 'Авторизовано',
+    oauthRefreshable: 'Срок действия токена истёк; он будет автоматически обновлён при следующем использовании',
+    oauthUnauthorized: 'Не авторизовано',
+    oauthAuthorize: 'Авторизоваться',
+    oauthReauthorize: 'Авторизовать повторно',
+    oauthRevoke: 'Отозвать авторизацию',
     oauthAuthorizeHint: 'Нажатие «Авторизоваться» сначала сохранит текущую конфигурацию, затем запустит авторизацию (каждый пользователь авторизуется отдельно).',
     apiKeyHeader: 'Имя заголовка',
     apiKeyHeaderDesc: 'По умолчанию X-API-Key. Для Bearer укажите Authorization и впишите "Bearer <token>" в значение ниже; для «сырого» токена используйте Authorization и сам токен.',
@@ -2126,7 +2133,11 @@ export default {
       updated: 'Сервис MCP обновлён',
       createFailed: 'Не удалось создать сервис MCP',
       updateFailed: 'Не удалось обновить сервис MCP',
-      oauthRequired: 'Сервис требует OAuth. Переключено на OAuth 2.0 — сохраните и нажмите «Авторизоваться».'
+      oauthRequired: 'Сервис требует OAuth. Переключено на OAuth 2.0 — сохраните и нажмите «Авторизоваться».',
+      authorized: 'Авторизация выполнена',
+      authorizeFailed: 'Не удалось начать авторизацию',
+      revoked: 'Авторизация отозвана',
+      revokeFailed: 'Не удалось отозвать авторизацию'
     },
     rules: {
       nameRequired: 'Введите название сервиса',

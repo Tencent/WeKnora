@@ -2089,7 +2089,14 @@ export default {
     authTypeNone: '无 / 自定义 Header',
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0（首次连接授权）',
+    oauthScopes: 'Scopes（可选，空格分隔）',
+    oauthAuthorization: '授权状态',
+    oauthAuthorized: '已授权',
     oauthRefreshable: 'Token 已过期，将在下次使用时自动刷新',
+    oauthUnauthorized: '未授权',
+    oauthAuthorize: '去授权',
+    oauthReauthorize: '重新授权',
+    oauthRevoke: '撤销授权',
     oauthAuthorizeHint: '点击「去授权」会先自动保存当前配置，再发起授权（每个用户独立授权）。',
     apiKeyHeader: '请求头名称',
     apiKeyHeaderDesc: '留空默认 X-API-Key。Bearer 方式请填 Authorization，并在下方密钥值中写 “Bearer <token>”；需要裸 token 时填 Authorization 并直接填入 token。',
@@ -2128,7 +2135,11 @@ export default {
       updated: 'MCP 服务已更新',
       createFailed: '创建 MCP 服务失败',
       updateFailed: '更新 MCP 服务失败',
-      oauthRequired: '该服务需要 OAuth 授权，已自动切换为 OAuth 2.0，请保存后点击「去授权」。'
+      oauthRequired: '该服务需要 OAuth 授权，已自动切换为 OAuth 2.0，请保存后点击「去授权」。',
+      authorized: '授权成功',
+      authorizeFailed: '发起授权失败',
+      revoked: '已撤销授权',
+      revokeFailed: '撤销失败'
     },
     rules: {
       nameRequired: '请输入服务名称',
