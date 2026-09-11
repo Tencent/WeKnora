@@ -483,7 +483,8 @@ func providerInfoFor(name invoke.ProviderName) (invoke.ProviderInfo, bool) {
 }
 
 // ListProviders returns every provider's metadata in canonical (frontend)
-// order.
+// order. The ok check is a second line of defense behind the init fail-fast —
+// after init the table and the vocabulary are guaranteed 1:1.
 func ListProviders() []invoke.ProviderInfo {
 	result := make([]invoke.ProviderInfo, 0, len(providerInfos))
 	for _, name := range invoke.AllProviders() {

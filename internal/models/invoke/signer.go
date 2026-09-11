@@ -73,6 +73,11 @@ func md5Hex(s string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+// maxUnbiasedByte is the largest raw byte that maps uniformly onto
+// nonceChars via modulo (256 % 62 == 8, so bytes >= 248 would overweight the
+// first 8 characters — rejected and redrawn).
+const maxUnbiasedByte = byte(256 - 256%len(nonceChars))
+
 func generateNonce(length int) string {
 	// crypto/rand: the nonce feeds the signature input, so it must not be
 	// predictable (math/rand 遗留缺陷，审查 B-1 修正). crypto/rand.Read 在
@@ -80,6 +85,9 @@ func generateNonce(length int) string {
 	b := make([]byte, length)
 	_, _ = cryptorand.Read(b)
 	for i := range b {
+		for b[i] >= maxUnbiasedByte {
+			_, _ = cryptorand.Read(b[i : i+1])
+		}
 		b[i] = nonceChars[int(b[i])%len(nonceChars)]
 	}
 	return string(b)

@@ -85,7 +85,7 @@ func embedSpecFor(name invoke.ProviderName) openaiEmbedSpec {
 		}
 	case invoke.ProviderNvidia:
 		return openaiEmbedSpec{
-			defaultBaseURL: "https://integrate.api.nvidia.com/v1",
+			defaultBaseURL: invoke.NvidiaChatBaseURL,
 			encodingFormat: "float",
 			inputType:      "passage",
 		}

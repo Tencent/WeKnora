@@ -6,17 +6,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
-
-// allowLoopback whitelists loopback for one test so httptest stubs are
-// reachable through the executor's unified SSRF gate (invoke 包的
-// allowLoopbackSSRF 同款，跨包不可共享 unexported helper).
-func allowLoopback(t *testing.T) {
-	t.Helper()
-	secutils.SetSSRFWhitelistFromRaw("127.0.0.1")
-	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
-}
 
 // TestOpenAIListURL pins the version-segment handling (v1 catalog/remote.go
 // parity): bases that already carry a version path append /models; bare bases
@@ -28,6 +18,8 @@ func TestOpenAIListURL(t *testing.T) {
 		"https://generativelanguage.googleapis.com/v1beta":  "https://generativelanguage.googleapis.com/v1beta/models",
 		"http://localhost:8000":                             "http://localhost:8000/v1/models",
 		"https://openrouter.ai/api/v1":                      "https://openrouter.ai/api/v1/models",
+		// Unparsable URLs fall back to base+"/models" (v1 behavior).
+		"http://ex.com/%zz": "http://ex.com/%zz/models",
 	}
 	for base, want := range cases {
 		if got := openAIListURL(base); got != want {
@@ -41,6 +33,9 @@ func TestAnthropicListURL(t *testing.T) {
 		"https://api.anthropic.com":      "https://api.anthropic.com/v1/models",
 		"https://api.anthropic.com/v1":   "https://api.anthropic.com/v1/models",
 		"https://proxy.example.com/anth": "https://proxy.example.com/anth/v1/models",
+		// Unparsable URLs fall back to base+"/v1/models" — this is the one
+		// spot where the two protocol families diverge.
+		"http://ex.com/%zz": "http://ex.com/%zz/v1/models",
 	}
 	for base, want := range cases {
 		if got := anthropicListURL(base); got != want {
@@ -63,7 +58,7 @@ func TestAzureListRejected(t *testing.T) {
 // stub — allowlisted exactly like a private vLLM deployment, so the probe
 // inherits the deployment's SSRF policy rather than bypassing it.
 func TestListEntryLive(t *testing.T) {
-	allowLoopback(t)
+	allowLoopbackSSRF(t)
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -94,7 +89,7 @@ func TestListEntryLive(t *testing.T) {
 
 // TestListEntryAnthropicLive pins the anthropic-family headers end to end.
 func TestListEntryAnthropicLive(t *testing.T) {
-	allowLoopback(t)
+	allowLoopbackSSRF(t)
 	var gotKey, gotVersion string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("x-api-key")

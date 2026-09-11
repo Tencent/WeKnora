@@ -773,7 +773,7 @@ func modelTypeToFrontend(mt types.ModelType) string {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm)"
+// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"
 // @Success      200         {object}  map[string]interface{}  "厂商列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth

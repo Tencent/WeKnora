@@ -59,6 +59,14 @@ func TestListProvidersByModelType(t *testing.T) {
 			assert.Equal(t, name, providers[i].Name)
 		}
 	})
+
+	t.Run("unknown type yields a non-nil empty slice", func(t *testing.T) {
+		// handler/model.go passes arbitrary query strings through, so the
+		// empty path is production-reachable (?model_type=bogus).
+		providers := ListProvidersByModelType(types.ModelType("bogus"))
+		assert.NotNil(t, providers)
+		assert.Empty(t, providers)
+	})
 }
 
 // Capability-declaration sanity across the table (migrated from the v1

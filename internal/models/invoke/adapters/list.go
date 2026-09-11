@@ -24,8 +24,9 @@ var (
 
 // BuildListRequest ports v1 openAIListURL + Bearer auth. The openaiAdapter
 // methods promote to every embedding/rerank/ASR composite that embeds it, and
-// weKnoraCloudAdapter (signed endpoint → no auth header, rejected server-side
-// exactly like v1's empty Bearer).
+// weKnoraCloudAdapter (sign-type vendor: the listing probe carries neither the
+// Bearer header nor the body signature, so the server rejects it — same
+// degrade as v1's empty Bearer).
 func (a *openaiAdapter) BuildListRequest(ep invoke.Endpoint) (*invoke.Request, error) {
 	if a.spec.azure {
 		// Azure deployment mode has no OpenAI-shaped /models endpoint. v1 let

@@ -112,7 +112,7 @@ func specFor(name invoke.ProviderName) openaiVendorSpec {
 		// volcengineProvider: thinking via { "thinking": { "type": ... } }.
 		spec.thinking = thinkingTypeApply
 	case invoke.ProviderGeneric, invoke.ProviderNvidia, invoke.ProviderLiteLLM:
-		// generic/nvidia/liteLLMProvider: chat_template_kwargs.enable_thinking.
+		// generic/nvidia/LiteLLMProvider: chat_template_kwargs.enable_thinking.
 		spec.thinking = chatTemplateKwargsApply
 	}
 	return spec

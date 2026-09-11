@@ -202,7 +202,7 @@ func buildNvidiaRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOpti
 	// v1 posts to the base URL DIRECTLY (full endpoint …/reranking).
 	base := ep.BaseURL
 	if base == "" {
-		base = "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking"
+		base = invoke.NvidiaRerankBaseURL
 	}
 	passages := make([]nvidiaRerankDocument, 0, len(opts.Documents))
 	for _, doc := range opts.Documents {

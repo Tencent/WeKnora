@@ -70,6 +70,11 @@ func List(ctx context.Context, providerName string, opts *ListOptions) ([]Remote
 	}
 	// Probe timeout overrides the executor's per-kind default (Request.Timeout
 	// semantics, §6.3): the listing probe is a UI affordance, not a model call.
+	// NOTE (裁定 #20): the executor applies req.Timeout only when the outer ctx
+	// carries no deadline — if a per-request deadline is ever introduced
+	// upstream, the effective probe cap becomes min(deadline, 8s) and the env
+	// knob alone will not extend it. Current deployment: no per-request
+	// deadline (no http.Server timeouts, no Timeout middleware).
 	req.Timeout = probeTimeout()
 	result, err := defaultExecutor.Do(ctx, ModelKey{
 		ModelID: providerName + ":list", ModelName: providerName, Kind: ModelKindChat,

@@ -23,12 +23,11 @@ import (
 func allowLoopbackSSRF(t *testing.T) {
 	t.Helper()
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1,::1,localhost")
+	// ResetSSRFWhitelistForTest already invalidates the outbound validation
+	// cache (security.go), so no separate cache reset is needed here or in
+	// the cleanup.
 	secutils.ResetSSRFWhitelistForTest()
-	secutils.ResetSSRFOutboundValidationCacheForTest()
-	t.Cleanup(func() {
-		secutils.ResetSSRFWhitelistForTest()
-		secutils.ResetSSRFOutboundValidationCacheForTest()
-	})
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 }
 
 // fakeChatAdapter is a minimal ChatAdapter for entry/executor tests. It
