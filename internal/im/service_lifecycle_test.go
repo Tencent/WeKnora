@@ -2,7 +2,6 @@ package im
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -45,7 +44,7 @@ func (c *lifecycleFactoryCounters) factory() AdapterFactory {
 
 func newLifecycleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:im-lifecycle-%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open("file:im-lifecycle-"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -72,6 +71,25 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("create im_channels: %v", err)
 	}
 	return db
+}
+
+// TestNewLifecycleTestDBIsolatesTests guards the helper's database name: two
+// tests must never share one in-memory database, which used to happen when the
+// name was taken from the wall clock instead of the test name.
+func TestNewLifecycleTestDBIsolatesTests(t *testing.T) {
+	t.Run("first", func(t *testing.T) {
+		createLifecycleChannel(t, newLifecycleTestDB(t), "marker", "agent-1")
+	})
+	t.Run("second", func(t *testing.T) {
+		db := newLifecycleTestDB(t)
+		var count int64
+		if err := db.Table("im_channels").Count(&count).Error; err != nil {
+			t.Fatalf("count im_channels: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("im_channels has %d rows, want a fresh database", count)
+		}
+	})
 }
 
 func newLifecycleTestService(db *gorm.DB, redisClient *redis.Client, instanceID string) *Service {
