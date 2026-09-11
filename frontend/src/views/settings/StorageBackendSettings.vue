@@ -218,6 +218,14 @@
               <span class="form-desc form-desc--inline">{{ t('settings.storageBackend.useTempBucketDesc') }}</span>
             </div>
           </div>
+          <div v-if="form.provider === 'oss'" class="form-item">
+            <label class="form-label">{{ t('settings.storageBackend.signatureVersionLabel') }}</label>
+            <t-select v-model="form.config.signature_version" clearable>
+              <t-option :value="'v1'" :label="t('settings.storageBackend.signatureVersionV1')" />
+              <t-option :value="'v4'" :label="t('settings.storageBackend.signatureVersionV4')" />
+            </t-select>
+            <p class="form-desc">{{ t('settings.storageBackend.signatureVersionDesc') }}</p>
+          </div>
           <template v-if="['cos', 'tos'].includes(form.provider) || (form.provider === 'oss' && form.config.use_temp_bucket)">
             <div class="form-item">
               <label class="form-label">{{ t('settings.storageBackend.tempBucketLabel') }}</label>
@@ -264,7 +272,7 @@ const loading = ref(false), saving = ref(false), testing = ref(false), visible =
 const backends = ref<StorageBackend[]>([]), providers = ref<string[]>([]), defaultID = ref('')
 const editing = ref<StorageBackend | null>(null)
 const rawTestResult = ref<'ok' | 'error' | null>(null)
-const blankConfig = (): StorageBackendConfig => ({ mode: 'remote', endpoint: '', region: '', access_key_id: '', secret_access_key: '', bucket_name: '', path_prefix: '', use_ssl: true })
+const blankConfig = (): StorageBackendConfig => ({ mode: 'remote', endpoint: '', region: '', access_key_id: '', secret_access_key: '', bucket_name: '', path_prefix: '', use_ssl: true, signature_version: '' })
 const form = reactive<{ name: string; provider: string; config: StorageBackendConfig }>({ name: '', provider: 'local', config: blankConfig() })
 const needsEndpoint = computed(() => !['local', 'cos'].includes(form.provider) && !(form.provider === 'minio' && form.config.mode === 'docker'))
 const needsRegion = computed(() => !['local', 'minio'].includes(form.provider))

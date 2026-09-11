@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 )
 
 func TestParseOssFilePath(t *testing.T) {
@@ -98,6 +100,46 @@ func TestParseOssFilePath(t *testing.T) {
 	}
 }
 
+func TestParseOssSignatureVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{name: "empty defaults to v4", input: "", want: "v4"},
+		{name: "v4 explicit", input: "v4", want: "v4"},
+		{name: "v4 uppercase", input: "V4", want: "v4"},
+		{name: "v4 padded", input: " v4 ", want: "v4"},
+		{name: "v1", input: "v1", want: "v1"},
+		{name: "v1 uppercase", input: "V1", want: "v1"},
+		{name: "unsupported", input: "v2", wantErr: true},
+		{name: "garbage", input: "abc", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseOssSignatureVersion(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseOssSignatureVersion(%q) expected error, got %v", tt.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseOssSignatureVersion(%q) unexpected error: %v", tt.input, err)
+			}
+			want := oss.SignatureVersionV4
+			if tt.want == "v1" {
+				want = oss.SignatureVersionV1
+			}
+			if got != want {
+				t.Errorf("parseOssSignatureVersion(%q) = %v, want %v", tt.input, got, want)
+			}
+		})
+	}
+}
+
 func TestNewOSSClient(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -127,7 +169,7 @@ func TestNewOSSClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := newOSSClient(tt.endpoint, tt.region, tt.accessKey, tt.secretKey)
+			client, err := newOSSClient(tt.endpoint, tt.region, tt.accessKey, tt.secretKey, "")
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error but got nil")
@@ -146,8 +188,14 @@ func TestNewOSSClient(t *testing.T) {
 }
 
 func TestNewOSSClientRejectsUnsafeEndpoint(t *testing.T) {
-	if _, err := newOSSClient("http://127.0.0.1:9000", "cn-hangzhou", "ak", "sk"); err == nil {
+	if _, err := newOSSClient("http://127.0.0.1:9000", "cn-hangzhou", "ak", "sk", ""); err == nil {
 		t.Fatal("expected loopback OSS endpoint to be rejected")
+	}
+}
+
+func TestNewOSSClientRejectsUnsupportedSignatureVersion(t *testing.T) {
+	if _, err := newOSSClient("https://oss-cn-hangzhou.aliyuncs.com", "cn-hangzhou", "ak", "sk", "v2"); err == nil {
+		t.Fatal("expected unsupported OSS signature version to be rejected")
 	}
 }
 
@@ -162,6 +210,7 @@ func TestCheckOssConnectivity_InvalidEndpoint(t *testing.T) {
 		"invalid-access-key",
 		"invalid-secret-key",
 		"nonexistent-bucket",
+		"",
 	)
 
 	if err == nil {
@@ -175,6 +224,7 @@ func TestOssEnsureBucket_NonExistent(t *testing.T) {
 		"cn-hangzhou",
 		"test-invalid-key",
 		"test-invalid-secret",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("newOSSClient() error: %v", err)
@@ -193,6 +243,7 @@ func TestOssEnsureBucket_CreateFails(t *testing.T) {
 		"cn-hangzhou",
 		"test-invalid-key",
 		"test-invalid-secret",
+		"",
 	)
 	if err != nil {
 		t.Fatalf("newOSSClient() error: %v", err)
