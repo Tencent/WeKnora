@@ -6270,7 +6270,9 @@ export default {
     reset: 'リセット',
     download: '画像をダウンロード',
     close: '閉じる',
-    downloading: 'ダウンロード中...'
+    downloading: 'ダウンロード中...',
+    renderError: '図のレンダリングに失敗しました',
+    showSource: '図のソースを表示'
   },
   ollama: {
     unknown: '不明',

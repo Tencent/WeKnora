@@ -930,7 +930,9 @@ export default {
     reset: '초기화',
     download: '이미지 다운로드',
     close: '닫기',
-    downloading: '다운로드 중...'
+    downloading: '다운로드 중...',
+    renderError: '다이어그램을 렌더링하지 못했습니다',
+    showSource: '다이어그램 소스 보기'
   },
   faqManager: {
     import: {

@@ -155,6 +155,12 @@ const { displayed: typedAnswer } = useTypewriter(
   () => Boolean(props.session?.is_completed),
 )
 
+// The backend completion event can arrive while the typewriter still has
+// buffered text; a fence that is still being typed out is not yet a diagram.
+const answerFullyRendered = computed(() =>
+  Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length,
+)
+
 const renderedHTML = computed(() => {
   const text = typedAnswer.value
   if (!text.trim()) return ''
@@ -187,7 +193,7 @@ watch(renderedHTML, () => {
   nextTick(async () => {
     rebindCitations()
     await hydrateImages()
-    if (props.session?.is_completed) {
+    if (answerFullyRendered.value) {
       await renderMermaidDiagrams()
     }
   })
@@ -196,7 +202,7 @@ watch(renderedHTML, () => {
 onUpdated(() => {
   nextTick(async () => {
     await hydrateImages()
-    if (props.session?.is_completed) {
+    if (answerFullyRendered.value) {
       await renderMermaidDiagrams()
     }
   })

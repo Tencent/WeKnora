@@ -127,6 +127,24 @@ export function buildMermaidLoadingHtml(): string {
   </div>`;
 }
 
+/**
+ * Inner-content replacement for a diagram that failed to render. Used both
+ * standalone (swapped directly into an existing `.chat-mermaid-block__canvas`
+ * element, keeping its header/badge/expand-button chrome) and wrapped via
+ * buildMermaidBlockHtml (for the streaming loading-skeleton-to-error swap).
+ */
+export function buildMermaidErrorFragment(rawCode: string, message: string): string {
+  const errorLabel = escapeHtml(i18n.global.t('mermaid.renderError'));
+  const showSourceLabel = escapeHtml(i18n.global.t('mermaid.showSource'));
+  return `<div class="chat-mermaid-block__error">
+    <p class="chat-mermaid-block__error-message">${errorLabel}: ${escapeHtml(message)}</p>
+    <details class="chat-mermaid-block__error-source">
+      <summary>${showSourceLabel}</summary>
+      <pre class="chat-mermaid-block__error-code"><code>${escapeHtml(rawCode)}</code></pre>
+    </details>
+  </div>`;
+}
+
 async function handleCodeCopy(btn: HTMLButtonElement): Promise<void> {
   const code = btn.closest('.chat-code-block')?.querySelector('code')?.textContent ?? '';
   if (!code) return;

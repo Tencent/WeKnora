@@ -930,7 +930,9 @@ export default {
     reset: 'Сброс',
     download: 'Скачать изображение',
     close: 'Закрыть',
-    downloading: 'Загрузка...'
+    downloading: 'Загрузка...',
+    renderError: 'Не удалось отобразить диаграмму',
+    showSource: 'Показать исходный код диаграммы'
   },
   faqManager: {
     import: {
