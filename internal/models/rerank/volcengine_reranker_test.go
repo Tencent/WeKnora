@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -175,4 +177,13 @@ func TestVolcengineReranker_ScoreCountMismatch(t *testing.T) {
 	_, err := reranker.Rerank(t.Context(), "query", []string{"a", "b"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "score count mismatch")
+}
+
+// withRerankSSRFWhitelist was orphaned when the migrated vendors' tests were
+// deleted with them (P3 trim); the volcengine tests still need it.
+func withRerankSSRFWhitelist(t *testing.T, raw string) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", raw)
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 }

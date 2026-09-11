@@ -9,7 +9,6 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -681,50 +680,63 @@ func (s *modelService) newEmbedderForModel(ctx context.Context, model *types.Mod
 	), nil
 }
 
-// GetRerankModel retrieves and initializes a reranking model instance
-// Takes a model ID and returns a Reranker interface implementation
-func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error) {
+// GetRerankModel retrieves and initializes a reranking model instance.
+// P3 strangler branch: every vendor except lkeap (TC3) and volcengine (IAM)
+// rides invoke.Rerank through the shared constructor; those two keep the v1
+// SDK clients until the P5 signature adapters land (P1a trim convention).
+func (s *modelService) GetRerankModel(
+	ctx context.Context, modelID string,
+) (rerank.Reranker, error) {
 	// Get the model details
-	model, err := s.GetModelByID(ctx, modelId)
+	model, err := s.GetModelByID(ctx, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id": modelId,
+			"model_id": modelID,
 		})
 		return nil, err
 	}
 
 	logger.Infof(ctx, "Getting rerank model: %s, source: %s", model.Name, model.Source)
 
-	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
-
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":   model.ID,
-			"model_name": model.Name,
-		})
-		return nil, err
+	providerName := provider.ProviderName(model.Parameters.Provider)
+	if providerName == "" {
+		providerName = provider.DetectProvider(model.Parameters.BaseURL)
+	}
+	if providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+		appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
+		reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+		if err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"model_id":   model.ID,
+				"model_name": model.Name,
+			})
+			return nil, err
+		}
+		return reranker, nil
 	}
 
+	cfg, err := s.BuildModelConfig(ctx, model)
+	if err != nil {
+		return nil, err
+	}
 	logger.Info(ctx, "Rerank model initialized successfully")
-	return reranker, nil
+	return newInvokeReranker(cfg), nil
 }
 
-// Note: default model selection logic has been removed; models no longer
-// maintain a per-type default flag at the service layer.
-
 // GetASRModel retrieves and initializes an automatic speech recognition model instance.
-func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR, error) {
-	if modelId == "" {
+// P3: the asr package is gone — every vendor rides invoke.Transcribe through
+// the shared constructor.
+func (s *modelService) GetASRModel(ctx context.Context, modelID string) (interfaces.ASR, error) {
+	if modelID == "" {
 		return nil, errors.New("model ID cannot be empty")
 	}
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 
-	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	model, err := s.repo.GetByID(ctx, tenantID, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"model_id":  modelId,
+			"model_id":  modelID,
 			"tenant_id": tenantID,
 		})
 		return nil, err
@@ -736,7 +748,7 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 
 	logger.Infof(ctx, "Getting ASR model: %s, source: %s", model.Name, model.Source)
 
-	sttModel, err := asr.NewASR(asr.ConfigFromModel(model))
+	cfg, err := s.BuildModelConfig(ctx, model)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id":   model.ID,
@@ -745,7 +757,7 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 		return nil, err
 	}
 
-	return sttModel, nil
+	return newInvokeASR(cfg), nil
 }
 
 func formatModelInUseMessage(kbCount, agentCount int64, memory bool) string {

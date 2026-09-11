@@ -21,7 +21,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -1971,17 +1970,47 @@ func (h *InitializationHandler) checkChatModelConnection(
 	return true, "连接正常，模型可用"
 }
 
-// checkRerankModelConnection 使用 rerank 模块做一次最小化调用来测试连通性与鉴权。
-// 与生产路径共用 ConfigFromModel，所有字段（CustomHeaders 等）都透传。
+// checkRerankModelConnection 做一次最小化重排调用来测试连通性与鉴权。
+// P3 分支与生产路径 GetRerankModel 一致：lkeap/volcengine 走 v1 SDK 客户端
+// （P5 签名适配器未落地），其余厂商经 BuildModelConfig 走 invoke 入口。
 func (h *InitializationHandler) checkRerankModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
-	if err != nil {
-		return false, fmt.Sprintf("创建Reranker失败: %v", err)
+	providerName := provider.ProviderName(model.Parameters.Provider)
+	if providerName == "" {
+		providerName = provider.DetectProvider(model.Parameters.BaseURL)
 	}
-
-	results, err := reranker.Rerank(ctx, "ping", []string{"pong"})
+	var (
+		results []rerank.RankResult
+		err     error
+	)
+	if providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+		reranker, rerankErr := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+		if rerankErr != nil {
+			return false, fmt.Sprintf("创建Reranker失败: %v", rerankErr)
+		}
+		results, err = reranker.Rerank(ctx, "ping", []string{"pong"})
+	} else {
+		invokeCfg, cfgErr := h.modelService.BuildModelConfig(ctx, model)
+		if cfgErr != nil {
+			return false, fmt.Sprintf("创建Reranker失败: %v", cfgErr)
+		}
+		resp, rerankErr := invoke.Rerank(ctx, invokeCfg, &invoke.RerankOptions{
+			Query: "ping", Documents: []string{"pong"},
+		})
+		if rerankErr == nil && resp != nil {
+			for _, res := range resp.Results {
+				doc := ""
+				if res.Index >= 0 && res.Index < 1 {
+					doc = "pong"
+				}
+				results = append(results, rerank.RankResult{
+					Index: res.Index, Document: rerank.DocumentInfo{Text: doc}, RelevanceScore: res.Score,
+				})
+			}
+		}
+		err = rerankErr
+	}
 	if err != nil {
 		return false, fmt.Sprintf("重排测试失败: %v", err)
 	}
@@ -2093,7 +2122,8 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	// 用统一构造器生成测试用 *types.Model（ASR 不涉及 WeKnoraCloud 凭证），
 	// 发送一段极短的静默 WAV 音频验证 /v1/audio/transcriptions 端点可达。
 	model := h.buildTestModel(&req, types.ModelTypeASR, types.ModelSourceRemote)
-	asrInstance, err := asr.NewASR(asr.ConfigFromModel(model))
+	// P3: asr 包已删，临时表单模型经 BuildModelConfig 走 invoke.Transcribe。
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, model)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create ASR instance for check: %v", err)
 		c.JSON(http.StatusOK, gin.H{
@@ -2106,7 +2136,16 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		return
 	}
 
-	res, err := asrInstance.Transcribe(ctx, assets.ASRTestWAV, "asr_test.wav")
+	asrResp, err := invoke.Transcribe(ctx, invokeCfg, &invoke.ASROptions{
+		Audio: assets.ASRTestWAV, FileName: "asr_test.wav",
+	})
+	var res *interfaces.TranscriptionResult
+	if asrResp != nil {
+		res = &interfaces.TranscriptionResult{Text: asrResp.Text}
+		for _, seg := range asrResp.Segments {
+			res.Segments = append(res.Segments, interfaces.Segment{Start: seg.Start, End: seg.End, Text: seg.Text})
+		}
+	}
 	var text string
 	if res != nil {
 		text = res.Text

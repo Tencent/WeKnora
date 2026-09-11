@@ -130,6 +130,11 @@ type customHeaderSetter interface {
 	SetCustomHeaders(map[string]string)
 }
 
+// newReranker builds the two P5-deferred SDK rerankers only (P3 ruling:
+// lkeap TC3 and volcengine IAM are signature protocols — the invoke-backed
+// invokeReranker serves every other vendor, branched in
+// modelService.GetRerankModel). customHeaderSetter covers the migrated
+// vendors' custom-header injection, which the invoke entry now owns.
 func newReranker(config *RerankerConfig) (Reranker, error) {
 	// Use provider field if set, otherwise detect from URL using provider registry
 	providerName := provider.ProviderName(config.Provider)
@@ -142,22 +147,13 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		err      error
 	)
 	switch providerName {
-	case provider.ProviderAliyun:
-		reranker, err = NewAliyunReranker(config)
-	case provider.ProviderZhipu:
-		reranker, err = NewZhipuReranker(config)
-	case provider.ProviderJina:
-		reranker, err = NewJinaReranker(config)
-	case provider.ProviderNvidia:
-		reranker, err = NewNvidiaReranker(config)
-	case provider.ProviderWeKnoraCloud:
-		reranker, err = NewWeKnoraCloudReranker(config)
 	case provider.ProviderLKEAP:
 		reranker, err = NewLKEAPReranker(config)
 	case provider.ProviderVolcengine:
 		reranker, err = NewVolcengineReranker(config)
 	default:
-		reranker, err = NewOpenAIReranker(config)
+		return nil, fmt.Errorf(
+			"provider %s rerank must use the unified invoke path (modelService.GetRerankModel branch)", providerName)
 	}
 	if err != nil {
 		return nil, err

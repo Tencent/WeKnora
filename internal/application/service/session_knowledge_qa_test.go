@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	invoketest "github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
@@ -91,7 +90,7 @@ func (s *stubModelService) GetRerankModel(context.Context, string) (rerank.Reran
 	return nil, nil
 }
 
-func (s *stubModelService) GetASRModel(context.Context, string) (asr.ASR, error) {
+func (s *stubModelService) GetASRModel(context.Context, string) (interfaces.ASR, error) {
 	return nil, nil
 }
 

@@ -23,7 +23,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -3318,7 +3317,9 @@ func (s *installModelService) GetRerankModel(context.Context, string) (rerank.Re
 	return nil, nil
 }
 
-func (s *installModelService) GetASRModel(context.Context, string) (asr.ASR, error) { return nil, nil }
+func (s *installModelService) GetASRModel(context.Context, string) (interfaces.ASR, error) {
+	return nil, nil
+}
 
 func (s *installModelService) BuildModelConfig(_ context.Context, model *types.Model) (*invoke.ModelConfig, error) {
 	// 与生产 BuildModelConfig 对齐：ModelName 承载模型记录名（安装引擎用它

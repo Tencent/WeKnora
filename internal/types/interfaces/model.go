@@ -3,7 +3,6 @@ package interfaces
 import (
 	"context"
 
-	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -35,9 +34,9 @@ type ModelService interface {
 	// GetEmbeddingModelForTenant gets an embedding model for a specific tenant (for cross-tenant sharing)
 	GetEmbeddingModelForTenant(ctx context.Context, modelID string, tenantID uint64) (Embedder, error)
 	// GetRerankModel gets a rerank model
-	GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error)
+	GetRerankModel(ctx context.Context, modelID string) (rerank.Reranker, error)
 	// GetASRModel gets an automatic speech recognition model
-	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+	GetASRModel(ctx context.Context, modelID string) (ASR, error)
 
 	// BuildModelConfig assembles the unified invoke.ModelConfig from a model
 	// record through the single shared constructor (design §6.1/§6.8): the
