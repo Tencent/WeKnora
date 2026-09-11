@@ -58,10 +58,17 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		config.AzureModelMapperFunc = func(model string) string {
 			return model
 		}
+		hasExplicitAPIVersion := false
 		if chatConfig.ExtraConfig != nil {
 			if v, ok := chatConfig.ExtraConfig["api_version"]; ok {
 				config.APIVersion = v
+				hasExplicitAPIVersion = true
 			}
+		}
+		// GPT-5 / reasoning 模型需要足够新的 API 版本；DefaultAzureConfig
+		// 默认的 2023-05-15 不支持这些模型。用户显式指定时保留原值。
+		if !hasExplicitAPIVersion && provider.IsOpenAIReasoningOrGPT5Model(chatConfig.ModelName) {
+			config.APIVersion = "2025-04-01-preview"
 		}
 	} else {
 		config = openai.DefaultConfig(apiKey)
