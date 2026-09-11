@@ -628,6 +628,32 @@ class WeKnoraClient:
             params={"limit": limit},
         )
 
+    def wiki_graph(
+        self,
+        kb_id: str,
+        mode: str = "overview",
+        center: str = "",
+        depth: int = 1,
+        limit: int = 500,
+        page_types: str = "",
+    ) -> Dict:
+        """Fetch a slice of the wiki link graph (nodes + directed edges).
+
+        ``mode`` is ``overview`` (top-N by connectivity) or ``ego`` (BFS
+        neighborhood of ``center``). Depth is capped at 3 and limit at 2000
+        by the REST handler.
+        """
+        params: Dict[str, object] = {"mode": mode, "depth": depth, "limit": limit}
+        if center:
+            params["center"] = center
+        if page_types:
+            params["types"] = page_types
+        return self._request(
+            "GET",
+            f"/knowledgebase/{kb_id}/wiki/graph",
+            params=params,
+        )
+
 
 # Initialize MCP server instance (mcp 2.x high-level API).
 # MCPServer (formerly FastMCP) builds input schemas from function type hints
@@ -1049,6 +1075,43 @@ def wiki_index_view(kb_id: str, limit: int = 50) -> dict:
     summary, etc.).
     """
     return client.wiki_index_view(kb_id, limit)
+
+
+@mcp.tool()
+def wiki_graph(
+    kb_id: str,
+    mode: str = "overview",
+    center: str = "",
+    depth: int = 1,
+    limit: int = 500,
+    page_types: str = "",
+) -> dict:
+    """Get a slice of the wiki link graph (nodes + directed edges).
+
+    mode=overview returns the top-N most-connected pages. mode=ego returns
+    the BFS neighborhood of ``center`` (a page slug from wiki_search).
+    ``page_types`` is an optional comma-separated type allow-list (e.g.
+    ``entity,concept``). depth max 3, limit max 2000.
+
+    Typical flow: wiki_search → wiki_graph(mode="ego", center=slug) →
+    wiki_read_page.
+    """
+    if mode not in ("overview", "ego"):
+        raise ValueError("mode must be 'overview' or 'ego'")
+    if mode == "ego" and not center:
+        raise ValueError("center slug is required when mode='ego'")
+    # Match REST handler bounds so MCP callers get a clear error instead of
+    # a silent server-side clamp surprise in the response meta.
+    depth = max(1, min(int(depth), 3))
+    limit = max(1, min(int(limit), 2000))
+    return client.wiki_graph(
+        kb_id,
+        mode=mode,
+        center=center,
+        depth=depth,
+        limit=limit,
+        page_types=page_types,
+    )
 
 
 # ---------------------------------------------------------------------------
