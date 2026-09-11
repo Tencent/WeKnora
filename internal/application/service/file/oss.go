@@ -134,7 +134,10 @@ func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secr
 }
 
 // parseOssFilePath extracts bucket and object key from: oss://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/oss://{bucket}/{objectKey} paths are
+// accepted too (see storageBackendInnerPath, #3151).
 func parseOssFilePath(filePath string) (bucketName string, objectKey string, err error) {
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, ossScheme) {
 		return "", "", fmt.Errorf("invalid OSS file path: %s", filePath)
 	}

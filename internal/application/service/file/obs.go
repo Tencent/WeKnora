@@ -118,6 +118,10 @@ func (s *obsFileService) CheckConnectivity(ctx context.Context) error {
 }
 
 func (s *obsFileService) parseObsFilePath(filePath string) (string, error) {
+	// Canonical storage://<backend-id>/... paths must unwrap before prefix
+	// matching, otherwise the whole canonical form silently falls through to
+	// the raw passthrough below and is returned as the object key (#3151).
+	filePath = storageBackendInnerPath(filePath)
 	prefix := s.getPrifix()
 
 	if strings.HasPrefix(filePath, prefix) {
