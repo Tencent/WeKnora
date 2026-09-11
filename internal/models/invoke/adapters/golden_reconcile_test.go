@@ -319,7 +319,7 @@ func signAssertion(t *testing.T, g *reconcileServer, idx int, appID, appSecret s
 	require.Equal(t, appSecret, head.Get("X-Api-Key"))
 }
 
-// rfc3986EncodeForTest mirrors internal/models/utils rfc3986Encode.
+// rfc3986EncodeForTest mirrors internal/models/invoke rfc3986Encode.
 func rfc3986EncodeForTest(s string) string {
 	var buf strings.Builder
 	for _, r := range s {

@@ -1,4 +1,4 @@
-package utils
+package invoke
 
 import (
 	"bytes"
@@ -16,7 +16,9 @@ const (
 	nonceLength = 16
 )
 
-// Sign 按 WeKnoraCloud 参考实现生成请求头。
+// Sign 按 WeKnoraCloud 参考实现生成请求头（P4 自 models/utils 迁入：签名是
+// WeKnoraCloud 端点协议知识，与 weknoracloud 适配器同居调用核心包；docparser
+// 的 docreader 转发路径也复用同一签名）。
 // appID: 上游 APPID
 // apiKey: 上游 API Key（当前沿用 AppSecret 字段承载）
 // requestID: 每次请求唯一的 UUID 字符串

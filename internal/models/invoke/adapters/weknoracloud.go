@@ -14,7 +14,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
-	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
 	"github.com/sashabaranov/go-openai"
 )
@@ -62,9 +61,9 @@ func (a *weKnoraCloudAdapter) BuildChatRequest(
 		return nil, err
 	}
 	// v1 weKnoraCloudProvider.Auth (provider.go:93-99): sign over the final
-	// body bytes with AppID/AppSecret (modelutils.Sign).
+	// body bytes with AppID/AppSecret (invoke.Sign).
 	requestID := uuid.NewString()
-	for k, v := range modelutils.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(req.Body)) {
+	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(req.Body)) {
 		req.Header.Set(k, v)
 	}
 	// Signature/auth-critical headers the entry must not let user custom
@@ -175,7 +174,7 @@ func (a *weKnoraCloudAdapter) BuildEmbeddingRequest(
 	requestID := uuid.NewString()
 	header := http.Header{}
 	header.Set("Content-Type", "application/json")
-	for k, v := range modelutils.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(body)) {
+	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(body)) {
 		header.Set(k, v)
 	}
 	return &invoke.Request{

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 
-	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
@@ -234,7 +234,7 @@ func (p *WeKnoraCloudSignedDocumentReader) newSignedRequest(ctx context.Context,
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.ContentLength = int64(len(body))
-	for k, v := range utils.Sign(p.appID, p.apiKey, requestID, string(body)) {
+	for k, v := range invoke.Sign(p.appID, p.apiKey, requestID, string(body)) {
 		httpReq.Header.Set(k, v)
 	}
 	return httpReq, nil

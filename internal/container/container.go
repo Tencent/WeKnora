@@ -84,7 +84,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	_ "github.com/Tencent/WeKnora/internal/models/invoke/adapters" // invoke adapter registration (§6.2)
 	"github.com/Tencent/WeKnora/internal/models/limiter"
-	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/models/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/stream"

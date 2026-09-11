@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
-	modelsutils "github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -64,7 +64,7 @@ func (s *weKnoraCloudService) verifyCredentials(ctx context.Context, appID, appS
 	}
 
 	requestID := fmt.Sprintf("verify-%d", time.Now().UnixNano())
-	signHeaders := modelsutils.Sign(appID, appSecret, requestID, "{}")
+	signHeaders := invoke.Sign(appID, appSecret, requestID, "{}")
 	for k, v := range signHeaders {
 		req.Header.Set(k, v)
 	}

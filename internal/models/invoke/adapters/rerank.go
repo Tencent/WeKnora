@@ -26,7 +26,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/provider"
-	modelutils "github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
 )
 
@@ -286,7 +285,7 @@ func buildWeKnoraCloudRerank(ep invoke.Endpoint, model string, opts *invoke.Rera
 	requestID := uuid.NewString()
 	header := http.Header{}
 	header.Set("Content-Type", "application/json")
-	for k, v := range modelutils.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(data)) {
+	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(data)) {
 		header.Set(k, v)
 	}
 	return &invoke.Request{
