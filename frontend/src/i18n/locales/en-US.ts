@@ -4578,6 +4578,10 @@ export default {
           label: 'LiteLLM',
           description: 'Self-hosted proxy to 100+ providers (OpenAI, Anthropic, Gemini, Bedrock, etc.). Replace the placeholder URL; loopback hosts need SSRF_WHITELIST.'
         },
+        daoxe: {
+          label: 'Daoxe',
+          description: 'OpenAI-compatible gateway to hundreds of models (~25 upstream providers: GPT, Claude, Gemini, DeepSeek, Qwen, etc.).'
+        },
         requesty: {
           label: 'Requesty',
           description: 'openai/gpt-4o-mini, anthropic/claude-sonnet-4-5, etc.'

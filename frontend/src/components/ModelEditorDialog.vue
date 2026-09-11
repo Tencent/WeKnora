@@ -573,6 +573,17 @@ const fallbackProviderOptions = computed(() => [
     modelTypes: ['chat', 'embedding', 'vllm']
   },
   {
+    value: 'daoxe',
+    label: t('model.editor.providers.daoxe.label'),
+    defaultUrls: {
+      chat: 'https://api.daoxe.com/v1',
+      embedding: 'https://api.daoxe.com/v1',
+      vllm: 'https://api.daoxe.com/v1'
+    },
+    description: t('model.editor.providers.daoxe.description'),
+    modelTypes: ['chat', 'embedding', 'vllm']
+  },
+  {
     value: 'requesty',
     label: t('model.editor.providers.requesty.label'),
     defaultUrls: {
