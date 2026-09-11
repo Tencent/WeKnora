@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
-
-	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
 // Adapter contract (design §6.2): one facet per interface, three interlocking
@@ -17,7 +15,7 @@ import (
 //  3. dispatch: entry type assertions fall back to ErrUnsupportedType.
 type Adapter interface {
 	Provider() string
-	Capabilities() provider.Capabilities
+	Capabilities() Capabilities
 }
 
 // ChatAdapter serves the chat facet (VLM rides along via InputModalities).

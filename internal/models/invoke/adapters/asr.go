@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
 const asrDefaultBaseURL = "https://api.openai.com/v1"
@@ -112,12 +111,11 @@ func ParseASRResponse(_ int, _ http.Header, body []byte) (*invoke.ASRResponse, e
 
 // asrCapsFor resolves the provider-level ASR shard (nil when the catalog does
 // not serve ASR).
-func asrCapsFor(name provider.ProviderName) *provider.ASRCaps {
-	p, ok := provider.Get(name)
-	if !ok {
+func asrCapsFor(name invoke.ProviderName) *invoke.ASRCaps {
+	if _, ok := providerInfoFor(name); !ok {
 		return nil
 	}
-	caps := p.Info().EffectiveCapabilities()
+	caps := mustProviderInfo(name).EffectiveCapabilities()
 	return caps.ASR
 }
 
@@ -130,7 +128,7 @@ type openaiASREmbeddingAdapter struct {
 var _ invoke.ASRAdapter = (*openaiASREmbeddingAdapter)(nil)
 
 // Capabilities unions the three served shards.
-func (a *openaiASREmbeddingAdapter) Capabilities() provider.Capabilities {
+func (a *openaiASREmbeddingAdapter) Capabilities() invoke.Capabilities {
 	caps := a.openaiEmbeddingAdapter.Capabilities()
 	caps.ASR = asrCapsFor(a.name)
 	return caps
@@ -160,7 +158,7 @@ type openaiASRRerankAdapter struct {
 var _ invoke.ASRAdapter = (*openaiASRRerankAdapter)(nil)
 
 // Capabilities unions all four served shards.
-func (a *openaiASRRerankAdapter) Capabilities() provider.Capabilities {
+func (a *openaiASRRerankAdapter) Capabilities() invoke.Capabilities {
 	caps := a.openaiRerankAdapter.Capabilities()
 	caps.ASR = asrCapsFor(a.name)
 	return caps

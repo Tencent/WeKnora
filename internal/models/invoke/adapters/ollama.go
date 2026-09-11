@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
 // OllamaAdapter serves the chat, embedding and list facets for provider
@@ -40,20 +39,20 @@ func init() {
 func (a *OllamaAdapter) Provider() string { return "ollama" }
 
 // Capabilities reports the provider's effective capabilities.
-func (a *OllamaAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{
-		Common: provider.CommonCaps{
+func (a *OllamaAdapter) Capabilities() invoke.Capabilities {
+	return invoke.Capabilities{
+		Common: invoke.CommonCaps{
 			Streaming:      true,
 			HealthProbe:    true,
-			UsageReporting: provider.UsageFull,
-			ModelListing:   provider.ModelListingCaps{Supported: true}, // binds the ListModels facet
+			UsageReporting: invoke.UsageFull,
+			ModelListing:   invoke.ModelListingCaps{Supported: true}, // binds the ListModels facet
 		},
-		Chat: &provider.ChatCaps{
-			InputModalities: []provider.Modality{provider.ModalityText, provider.ModalityImage},
-			Protocol:        provider.ProtocolOllama,
+		Chat: &invoke.ChatCaps{
+			InputModalities: []invoke.Modality{invoke.ModalityText, invoke.ModalityImage},
+			Protocol:        invoke.ProtocolOllama,
 		},
-		Embedding:   &provider.EmbeddingCaps{},                                           // /api/embed facet (P2)
-		Credentials: []provider.CredentialFieldSpec{{Key: provider.CredentialKeyAPIKey}}, // optional (§6.8)
+		Embedding:   &invoke.EmbeddingCaps{},                                         // /api/embed facet (P2)
+		Credentials: []invoke.CredentialFieldSpec{{Key: invoke.CredentialKeyAPIKey}}, // optional (§6.8)
 	}
 }
 

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/google/uuid"
 	"github.com/sashabaranov/go-openai"
 )
@@ -39,14 +38,14 @@ const (
 
 func newWeKnoraCloudAdapter() *weKnoraCloudAdapter {
 	return &weKnoraCloudAdapter{openaiAdapter{
-		name: provider.ProviderWeKnoraCloud,
+		name: invoke.ProviderWeKnoraCloud,
 		spec: openaiVendorSpec{
 			// v1 weKnoraCloudProvider: ForceRawHTTP + multi-content downgrade.
 			forceRaw:  true,
 			sign:      true,
 			transform: transformWeKnoraCloudMessages,
 		},
-		caps: chatCapsFor(provider.ProviderWeKnoraCloud),
+		caps: chatCapsFor(invoke.ProviderWeKnoraCloud),
 	}}
 }
 
@@ -121,10 +120,10 @@ type weKnoraCloudEmbedResponse struct {
 }
 
 // Capabilities overrides the embedded declaration: all three served shards.
-func (a *weKnoraCloudAdapter) Capabilities() provider.Capabilities {
+func (a *weKnoraCloudAdapter) Capabilities() invoke.Capabilities {
 	caps := a.openaiAdapter.Capabilities()
-	caps.Embedding = embeddingCapsFor(provider.ProviderWeKnoraCloud)
-	caps.Rerank = rerankCapsFor(provider.ProviderWeKnoraCloud)
+	caps.Embedding = embeddingCapsFor(invoke.ProviderWeKnoraCloud)
+	caps.Rerank = rerankCapsFor(invoke.ProviderWeKnoraCloud)
 	return caps
 }
 
@@ -161,7 +160,7 @@ func (a *weKnoraCloudAdapter) BuildEmbeddingRequest(
 	}
 	base := strings.TrimRight(ep.BaseURL, "/")
 	if base == "" {
-		base = provider.WeKnoraCloudBaseURL
+		base = invoke.WeKnoraCloudBaseURL
 	}
 	reqBody := weKnoraCloudEmbedRequest{Model: model, Input: opts.Inputs}
 	if opts.SupportsDimensionOverride && opts.Dimensions > 0 {

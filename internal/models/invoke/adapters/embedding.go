@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
 // embeddingRequestTimeout mirrors the v1 fixed per-client timeout.
@@ -77,20 +76,20 @@ type openaiEmbedSpec struct {
 // embedSpecFor ports the v1 per-vendor constructor defaults. Native-shape
 // vendors (aliyun multimodal branch, volcengine, gemini) bypass this spec
 // entirely with their own build/parse.
-func embedSpecFor(name provider.ProviderName) openaiEmbedSpec {
+func embedSpecFor(name invoke.ProviderName) openaiEmbedSpec {
 	switch name {
-	case provider.ProviderZhipu:
+	case invoke.ProviderZhipu:
 		return openaiEmbedSpec{
-			defaultBaseURL: provider.ZhipuEmbeddingBaseURL,
+			defaultBaseURL: invoke.ZhipuEmbeddingBaseURL,
 			truncate511:    true,
 		}
-	case provider.ProviderNvidia:
+	case invoke.ProviderNvidia:
 		return openaiEmbedSpec{
 			defaultBaseURL: "https://integrate.api.nvidia.com/v1",
 			encodingFormat: "float",
 			inputType:      "passage",
 		}
-	case provider.ProviderAzureOpenAI:
+	case invoke.ProviderAzureOpenAI:
 		// azure's URL/auth differ (deployment path + api-key header); the
 		// defaultBaseURL stays empty — v1 REQUIRED a base URL there.
 		return openaiEmbedSpec{encodingFormat: "float"}
@@ -525,12 +524,11 @@ func parseGeminiEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingR
 
 // embeddingCapsFor resolves the provider-level Embedding shard from the v1
 // capability registry (nil when the catalog does not serve embedding).
-func embeddingCapsFor(name provider.ProviderName) *provider.EmbeddingCaps {
-	p, ok := provider.Get(name)
-	if !ok {
+func embeddingCapsFor(name invoke.ProviderName) *invoke.EmbeddingCaps {
+	if _, ok := providerInfoFor(name); !ok {
 		return nil
 	}
-	caps := p.Info().EffectiveCapabilities()
+	caps := mustProviderInfo(name).EffectiveCapabilities()
 	return caps.Embedding
 }
 
@@ -545,7 +543,7 @@ var _ invoke.EmbeddingAdapter = (*openaiEmbeddingAdapter)(nil)
 
 // Capabilities overrides the embedded adapter's declaration: both served
 // shards (registration lock #2 requires shard set == facet set).
-func (a *openaiEmbeddingAdapter) Capabilities() provider.Capabilities {
+func (a *openaiEmbeddingAdapter) Capabilities() invoke.Capabilities {
 	caps := a.openaiAdapter.Capabilities()
 	caps.Embedding = embeddingCapsFor(a.name)
 	return caps
@@ -559,13 +557,13 @@ func (a *openaiEmbeddingAdapter) embedBuildParse() (
 	func(status int, header http.Header, body []byte) (*invoke.EmbeddingResponse, error),
 ) {
 	switch a.name {
-	case provider.ProviderAzureOpenAI:
+	case invoke.ProviderAzureOpenAI:
 		return buildAzureEmbedding, parseOpenAIEmbeddingResponse
-	case provider.ProviderAliyun:
+	case invoke.ProviderAliyun:
 		return buildAliyunEmbedding, parseAliyunEmbedding
-	case provider.ProviderVolcengine:
+	case invoke.ProviderVolcengine:
 		return buildVolcengineEmbedding, parseVolcengineEmbedding
-	case provider.ProviderGemini:
+	case invoke.ProviderGemini:
 		return buildGeminiEmbedding, parseGeminiEmbedding
 	default:
 		spec := a.espec
@@ -606,7 +604,7 @@ func (a *volcengineEmbeddingAdapter) SingleInputPerRequest() bool { return true 
 // jinaEmbeddingAdapter serves the embedding-only vendor (no chat shard — v1
 // routed jina to the embedding factory only).
 type jinaEmbeddingAdapter struct {
-	name provider.ProviderName
+	name invoke.ProviderName
 }
 
 var _ invoke.EmbeddingAdapter = (*jinaEmbeddingAdapter)(nil)
@@ -615,8 +613,8 @@ var _ invoke.EmbeddingAdapter = (*jinaEmbeddingAdapter)(nil)
 func (a *jinaEmbeddingAdapter) Provider() string { return string(a.name) }
 
 // Capabilities reports the embedding-only shard.
-func (a *jinaEmbeddingAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Embedding: embeddingCapsFor(a.name)}
+func (a *jinaEmbeddingAdapter) Capabilities() invoke.Capabilities {
+	return invoke.Capabilities{Embedding: embeddingCapsFor(a.name)}
 }
 
 // BuildEmbeddingRequest builds the jina wire request.

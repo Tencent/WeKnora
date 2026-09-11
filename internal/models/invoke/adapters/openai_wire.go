@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -93,7 +92,7 @@ func convertOpenAIMessages(messages []invoke.Message) []openai.ChatCompletionMes
 // params map directly (zero = not sent), the completion budget collapses to
 // one wire field (completion_budget.go), then tools / tool_choice / format.
 func buildChatCompletionRequest(
-	name provider.ProviderName, model string, opts *invoke.ChatOptions, isStream bool,
+	name invoke.ProviderName, model string, opts *invoke.ChatOptions, isStream bool,
 ) openai.ChatCompletionRequest {
 	req := openai.ChatCompletionRequest{
 		Model:  model,
@@ -175,19 +174,19 @@ const (
 // wireCompletionTokenField ports v1 completion_budget.go:43-60: one internal
 // budget, exactly one outbound field. Default max_completion_tokens; legacy
 // max_tokens for the vendors whose docs use it.
-func wireCompletionTokenField(name provider.ProviderName, model string) completionTokenField {
-	if provider.IsOpenAIReasoningOrGPT5Model(model) {
+func wireCompletionTokenField(name invoke.ProviderName, model string) completionTokenField {
+	if invoke.IsOpenAIReasoningOrGPT5Model(model) {
 		return completionTokenFieldMaxCompletionTokens
 	}
 	switch name {
-	case provider.ProviderDeepSeek, // api-docs.deepseek.com: max_tokens only
-		provider.ProviderZhipu,       // open.bigmodel.cn: max_tokens only
-		provider.ProviderSiliconFlow, // docs.siliconflow.com schema
-		provider.ProviderMoonshot,    // Pi useMaxTokens
-		provider.ProviderNvidia,      // Pi useMaxTokens (NIM / vLLM)
-		provider.ProviderGeneric,     // self-hosted vLLM ignores the new field
-		provider.ProviderGPUStack,    // private vLLM-class runtime
-		provider.ProviderLKEAP:       // cloud.tencent.com max_tokens only
+	case invoke.ProviderDeepSeek, // api-docs.deepseek.com: max_tokens only
+		invoke.ProviderZhipu,       // open.bigmodel.cn: max_tokens only
+		invoke.ProviderSiliconFlow, // docs.siliconflow.com schema
+		invoke.ProviderMoonshot,    // Pi useMaxTokens
+		invoke.ProviderNvidia,      // Pi useMaxTokens (NIM / vLLM)
+		invoke.ProviderGeneric,     // self-hosted vLLM ignores the new field
+		invoke.ProviderGPUStack,    // private vLLM-class runtime
+		invoke.ProviderLKEAP:       // cloud.tencent.com max_tokens only
 		return completionTokenFieldMaxTokens
 	default:
 		return completionTokenFieldMaxCompletionTokens
@@ -353,11 +352,11 @@ type promptCachePolicy struct {
 // promptCachePolicyFor ports prompt_cache.go:196-209. NOTE: v1's session-ID
 // fallback (ctx SessionIDFromContext) stays caller-side — the adapter contract
 // receives the session id via ChatOptions.PromptCacheKey only.
-func promptCachePolicyFor(name provider.ProviderName, baseURL string) promptCachePolicy {
+func promptCachePolicyFor(name invoke.ProviderName, baseURL string) promptCachePolicy {
 	switch name {
-	case provider.ProviderOpenAI, provider.ProviderAzureOpenAI, provider.ProviderOpenRouter:
+	case invoke.ProviderOpenAI, invoke.ProviderAzureOpenAI, invoke.ProviderOpenRouter:
 		return promptCachePolicy{sendKey: true, sendAffinity: true}
-	case provider.ProviderAliyun:
+	case invoke.ProviderAliyun:
 		return promptCachePolicy{sendCacheControl: true}
 	}
 	if strings.Contains(baseURL, "api.openai.com") {

@@ -14,7 +14,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -554,7 +553,7 @@ func (s *ImageMultimodalService) resolveVLM(
 		cfg.Provider = "ollama"
 		cfg.BaseURL = legacyOllamaBaseURL(cfg.BaseURL)
 	} else {
-		cfg.Provider = string(provider.DetectProvider(cfg.BaseURL))
+		cfg.Provider = string(invoke.DetectProvider(cfg.BaseURL))
 	}
 	return cfg, vlmCfg, nil
 }

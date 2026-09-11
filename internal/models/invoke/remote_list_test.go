@@ -6,8 +6,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
 // listProbeAdapter is a minimal ListModelsAdapter fake for entry-level probe
@@ -20,9 +18,9 @@ type listProbeAdapter struct {
 
 func (a *listProbeAdapter) Provider() string { return "fake" }
 
-func (a *listProbeAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{
-		Common: provider.CommonCaps{ModelListing: provider.ModelListingCaps{Supported: true}},
+func (a *listProbeAdapter) Capabilities() Capabilities {
+	return Capabilities{
+		Common: CommonCaps{ModelListing: ModelListingCaps{Supported: true}},
 	}
 }
 

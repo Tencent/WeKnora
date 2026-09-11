@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
 const anthropicVersion = "2023-06-01"
@@ -24,7 +23,7 @@ const anthropicVersion = "2023-06-01"
 // ChatOptions.ThinkingLevel (§5.2); the provider-tier fallback comes from the
 // provider registry's ThinkingCaps.
 type AnthropicAdapter struct {
-	thinkingCaps provider.ThinkingCaps
+	thinkingCaps invoke.ThinkingCaps
 }
 
 var _ invoke.ChatAdapter = (*AnthropicAdapter)(nil)
@@ -36,9 +35,9 @@ func init() {
 }
 
 func newAnthropicAdapter() *AnthropicAdapter {
-	var caps provider.ThinkingCaps
-	if p, ok := provider.Get(provider.ProviderAnthropic); ok {
-		if chatCaps := p.Info().EffectiveCapabilities().Chat; chatCaps != nil {
+	var caps invoke.ThinkingCaps
+	if info, ok := providerInfoFor(invoke.ProviderAnthropic); ok {
+		if chatCaps := info.EffectiveCapabilities().Chat; chatCaps != nil {
 			caps = chatCaps.Thinking
 		}
 	}
@@ -46,19 +45,19 @@ func newAnthropicAdapter() *AnthropicAdapter {
 }
 
 // Provider returns the canonical provider name.
-func (a *AnthropicAdapter) Provider() string { return string(provider.ProviderAnthropic) }
+func (a *AnthropicAdapter) Provider() string { return string(invoke.ProviderAnthropic) }
 
 // Capabilities reports the provider's effective capabilities, plus the
 // model-listing flag this adapter serves (BuildListRequest in list.go).
-func (a *AnthropicAdapter) Capabilities() provider.Capabilities {
-	if p, ok := provider.Get(provider.ProviderAnthropic); ok {
-		caps := p.Info().EffectiveCapabilities()
-		caps.Common.ModelListing = provider.ModelListingCaps{Supported: true}
+func (a *AnthropicAdapter) Capabilities() invoke.Capabilities {
+	if info, ok := providerInfoFor(invoke.ProviderAnthropic); ok {
+		caps := info.EffectiveCapabilities()
+		caps.Common.ModelListing = invoke.ModelListingCaps{Supported: true}
 		return caps
 	}
-	return provider.Capabilities{
-		Common: provider.CommonCaps{ModelListing: provider.ModelListingCaps{Supported: true}},
-		Chat:   &provider.ChatCaps{Thinking: a.thinkingCaps},
+	return invoke.Capabilities{
+		Common: invoke.CommonCaps{ModelListing: invoke.ModelListingCaps{Supported: true}},
+		Chat:   &invoke.ChatCaps{Thinking: a.thinkingCaps},
 	}
 }
 
@@ -150,7 +149,7 @@ func (a *AnthropicAdapter) BuildChatRequest(
 	}
 	baseURL := strings.TrimRight(ep.BaseURL, "/")
 	if baseURL == "" {
-		baseURL = provider.AnthropicBaseURL
+		baseURL = invoke.AnthropicBaseURL
 	}
 
 	req := anthropicRequest{

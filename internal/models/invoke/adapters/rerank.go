@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/google/uuid"
 )
 
@@ -362,29 +361,28 @@ func parseAliyunRerank(_ int, _ http.Header, body []byte) (*invoke.RerankRespons
 	return &invoke.RerankResponse{Results: out}, nil
 }
 
-func rerankSpecFor(name provider.ProviderName) rerankSpec {
+func rerankSpecFor(name invoke.ProviderName) rerankSpec {
 	switch name {
-	case provider.ProviderJina:
+	case invoke.ProviderJina:
 		return rerankSpec{build: buildJinaRerank, parse: parseOpenAIRerank}
-	case provider.ProviderZhipu:
+	case invoke.ProviderZhipu:
 		return rerankSpec{build: buildZhipuRerank, parse: parseOpenAIRerank}
-	case provider.ProviderAliyun:
+	case invoke.ProviderAliyun:
 		return rerankSpec{build: buildAliyunRerank, parse: parseAliyunRerank}
-	case provider.ProviderNvidia:
+	case invoke.ProviderNvidia:
 		return rerankSpec{build: buildNvidiaRerank, parse: parseNvidiaRerank}
-	case provider.ProviderWeKnoraCloud:
+	case invoke.ProviderWeKnoraCloud:
 		return rerankSpec{build: buildWeKnoraCloudRerank, parse: parseOpenAIRerank}
 	default:
 		return rerankSpec{build: buildOpenAIRerank, parse: parseOpenAIRerank}
 	}
 }
 
-func rerankCapsFor(name provider.ProviderName) *provider.RerankCaps {
-	p, ok := provider.Get(name)
-	if !ok {
+func rerankCapsFor(name invoke.ProviderName) *invoke.RerankCaps {
+	if _, ok := providerInfoFor(name); !ok {
 		return nil
 	}
-	caps := p.Info().EffectiveCapabilities()
+	caps := mustProviderInfo(name).EffectiveCapabilities()
 	return caps.Rerank
 }
 
@@ -398,7 +396,7 @@ type openaiRerankAdapter struct {
 var _ invoke.RerankAdapter = (*openaiRerankAdapter)(nil)
 
 // Capabilities unions all three served shards.
-func (a *openaiRerankAdapter) Capabilities() provider.Capabilities {
+func (a *openaiRerankAdapter) Capabilities() invoke.Capabilities {
 	caps := a.openaiEmbeddingAdapter.Capabilities()
 	caps.Rerank = rerankCapsFor(a.name)
 	return caps
@@ -429,7 +427,7 @@ type openaiRerankOnlyAdapter struct {
 var _ invoke.RerankAdapter = (*openaiRerankOnlyAdapter)(nil)
 
 // Capabilities unions the chat and rerank shards.
-func (a *openaiRerankOnlyAdapter) Capabilities() provider.Capabilities {
+func (a *openaiRerankOnlyAdapter) Capabilities() invoke.Capabilities {
 	caps := a.openaiAdapter.Capabilities()
 	caps.Rerank = rerankCapsFor(a.name)
 	return caps
@@ -458,8 +456,8 @@ type jinaRerankAdapter struct {
 var _ invoke.RerankAdapter = (*jinaRerankAdapter)(nil)
 
 // Capabilities unions the embedding and rerank shards.
-func (a *jinaRerankAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{
+func (a *jinaRerankAdapter) Capabilities() invoke.Capabilities {
+	return invoke.Capabilities{
 		Embedding: embeddingCapsFor(a.name),
 		Rerank:    rerankCapsFor(a.name),
 	}

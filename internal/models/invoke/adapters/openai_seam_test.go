@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +29,7 @@ func TestThinkingControlOverride(t *testing.T) {
 }
 
 func TestAzureAPIVersionOverride(t *testing.T) {
-	a := &openaiAdapter{name: provider.ProviderAzureOpenAI, spec: openaiVendorSpec{azure: true}}
+	a := &openaiAdapter{name: invoke.ProviderAzureOpenAI, spec: openaiVendorSpec{azure: true}}
 
 	// Default when the entry folded no override.
 	assert.Contains(t,
@@ -43,7 +42,7 @@ func TestAzureAPIVersionOverride(t *testing.T) {
 }
 
 func newVolcengineAdapterForTest() *openaiAdapter {
-	return &openaiAdapter{name: provider.ProviderVolcengine, spec: specFor(provider.ProviderVolcengine)}
+	return &openaiAdapter{name: invoke.ProviderVolcengine, spec: specFor(invoke.ProviderVolcengine)}
 }
 
 // TestThinkingControlNoneSuppressesWireField: "none" (noThinking) must send
@@ -71,7 +70,7 @@ func TestThinkingControlOverrideForcesThinkingType(t *testing.T) {
 // TestParseChatResponseBackfillsCacheUsage (seam ③): deepseek hit/miss
 // counters land in the Usage cache detail fields.
 func TestParseChatResponseBackfillsCacheUsage(t *testing.T) {
-	a := &openaiAdapter{name: provider.ProviderDeepSeek, spec: openaiVendorSpec{forceRaw: true, shape: shapeDeepSeek}}
+	a := &openaiAdapter{name: invoke.ProviderDeepSeek, spec: openaiVendorSpec{forceRaw: true, shape: shapeDeepSeek}}
 	body := []byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
 		"usage":{"prompt_tokens":4096,"completion_tokens":10,"total_tokens":4106,
 		"prompt_cache_hit_tokens":3072,"prompt_cache_miss_tokens":1024}}`)

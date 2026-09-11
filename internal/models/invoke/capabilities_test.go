@@ -1,4 +1,4 @@
-package provider
+package invoke
 
 import (
 	"testing"
@@ -126,18 +126,3 @@ func TestCapabilitiesIsZero(t *testing.T) {
 // registered provider must yield a non-empty EffectiveCapabilities whose Chat
 // shard (when present) has a DefaultLevel inside SupportedLevels — the invariant
 // the frontend dropdown and the cross-vendor fallback both rely on.
-func TestRegisteredProvidersHaveUsableCapabilities(t *testing.T) {
-	for _, info := range List() {
-		caps := info.EffectiveCapabilities()
-		if caps.Chat == nil || !caps.Chat.Thinking.Supported {
-			continue
-		}
-		th := caps.Chat.Thinking
-		if th.DefaultLevel != "" {
-			assert.Contains(t, th.SupportedLevels, th.DefaultLevel,
-				"provider %s: DefaultLevel must be in SupportedLevels", info.Name)
-		}
-		assert.NotEmpty(t, th.SupportedLevels,
-			"provider %s: supported thinking must declare levels", info.Name)
-	}
-}

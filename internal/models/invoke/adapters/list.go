@@ -1,9 +1,10 @@
-// Remote model listing facet (design §6.2 fifth facet / §7.2): BuildListRequest
+// list.go — remote model listing facet (design §6.2 fifth facet / §7.2): BuildListRequest
 // derives the GET {base}/models call for the provider's protocol family and
 // ParseListResponse decodes the shared {data:[...]} envelope. The URL derivation
 // is a byte-for-byte port of v1 catalog/remote.go listRequestFor (P4 分派删除) —
 // parity pinned by list_test.go. The probe orchestration itself (SSRF gate,
 // probe timeout, result cap) lives in the invoke.List entry.
+
 package adapters
 
 import (

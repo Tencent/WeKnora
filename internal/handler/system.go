@@ -1717,7 +1717,7 @@ type RuntimeWorkerPool struct {
 type RuntimeQueuesResponse struct {
 	Available             bool                 `json:"available"`
 	UpstreamConcurrency   int                  `json:"upstream_concurrency"`
-	ParseConcurrency      int                  `json:"parse_concurrency"` // compatibility alias for upstream_concurrency
+	ParseConcurrency      int                  `json:"parse_concurrency"` // alias: upstream_concurrency
 	WikiConcurrency       int                  `json:"wiki_concurrency"`  // compatibility field
 	Pools                 []RuntimeWorkerPool  `json:"pools"`
 	Queues                []types.QueueStat    `json:"queues"`

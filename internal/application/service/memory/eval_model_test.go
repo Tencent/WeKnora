@@ -8,7 +8,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	_ "github.com/Tencent/WeKnora/internal/models/invoke/adapters"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 )
 
 // newEvalModelConfig builds a bare OpenAI-compatible invoke config from the
@@ -28,7 +27,7 @@ func newEvalModelConfig(modelID string) (*invoke.ModelConfig, error) {
 		return nil, errors.New("set WEKNORA_MEMORY_EVAL_BASE_URL (or OPENAI_BASE_URL)")
 	}
 	return &invoke.ModelConfig{
-		Provider:    string(provider.DetectProvider(baseURL)),
+		Provider:    string(invoke.DetectProvider(baseURL)),
 		ModelName:   modelID,
 		BaseURL:     baseURL,
 		Credentials: invoke.Credentials{APIKey: apiKey},

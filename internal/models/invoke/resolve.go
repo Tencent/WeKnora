@@ -1,9 +1,5 @@
 package invoke
 
-import (
-	"github.com/Tencent/WeKnora/internal/models/provider"
-)
-
 // ResolveThinkingLevel folds the thinking-level priority chain (design §5.2,
 // migrated from chat/thinking_level.go as the shared adapter helper):
 //
@@ -19,7 +15,7 @@ import (
 // user/catalog constrained the set) and within the provider's SupportedLevels
 // (platform governance). A level outside the bounds falls back to the next
 // tier. Returns "" when no tier yields a usable level.
-func ResolveThinkingLevel(callLevel, modelLevel string, selectedLevels []string, caps provider.ThinkingCaps) string {
+func ResolveThinkingLevel(callLevel, modelLevel string, selectedLevels []string, caps ThinkingCaps) string {
 	containsLevel := func(levels []string, want string) bool {
 		for _, l := range levels {
 			if l == want {
@@ -28,7 +24,7 @@ func ResolveThinkingLevel(callLevel, modelLevel string, selectedLevels []string,
 		}
 		return false
 	}
-	containsProviderLevel := func(levels []provider.Level, want string) bool {
+	containsProviderLevel := func(levels []Level, want string) bool {
 		for _, l := range levels {
 			if string(l) == want {
 				return true

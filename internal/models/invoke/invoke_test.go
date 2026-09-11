@@ -13,7 +13,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,8 +39,8 @@ type fakeChatAdapter struct {
 
 func (f fakeChatAdapter) Provider() string { return "fake" }
 
-func (f fakeChatAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Chat: &provider.ChatCaps{}}
+func (f fakeChatAdapter) Capabilities() Capabilities {
+	return Capabilities{Chat: &ChatCaps{}}
 }
 
 func (f fakeChatAdapter) BuildChatRequest(ep Endpoint, model string, opts *ChatOptions) (*Request, error) {
@@ -347,8 +346,8 @@ func TestListModelsOptionalFacet(t *testing.T) {
 // design §6.2).
 type mismatchAdapter struct{ fakeChatAdapter }
 
-func (m mismatchAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Chat: &provider.ChatCaps{}, Embedding: &provider.EmbeddingCaps{}}
+func (m mismatchAdapter) Capabilities() Capabilities {
+	return Capabilities{Chat: &ChatCaps{}, Embedding: &EmbeddingCaps{}}
 }
 
 func TestRegistryRejectsFacetCapabilityMismatch(t *testing.T) {

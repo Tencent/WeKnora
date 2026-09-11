@@ -11,7 +11,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/ollama"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -68,7 +67,7 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 	appID = params.AppID
 	appSecret = s.decryptAppSecret(params.AppSecret)
 
-	if provider.ProviderName(params.Provider) != provider.ProviderWeKnoraCloud {
+	if invoke.ProviderName(params.Provider) != invoke.ProviderWeKnoraCloud {
 		return
 	}
 	if appID != "" && appSecret != "" {
@@ -144,12 +143,12 @@ func (s *modelService) BuildModelConfig(ctx context.Context, model *types.Model)
 	applyLegacyLocalRecordMapping(model, cfg)
 	// Legacy records created before the provider field was mandatory carry an
 	// EMPTY Provider (custom vendors). v1 NewRemoteChat fell back to
-	// provider.DetectProvider(BaseURL) at dispatch with generic as the last
+	// invoke.DetectProvider(BaseURL) at dispatch with generic as the last
 	// resort (design §9: legacy generic records fold into the custom
 	// OpenAI-compatible fallback). The same detection runs here at the single
 	// construction point; stored rows stay untouched.
 	if cfg.Provider == "" {
-		cfg.Provider = string(provider.DetectProvider(cfg.BaseURL))
+		cfg.Provider = string(invoke.DetectProvider(cfg.BaseURL))
 	}
 	return cfg, nil
 }
@@ -698,11 +697,11 @@ func (s *modelService) GetRerankModel(
 
 	logger.Infof(ctx, "Getting rerank model: %s, source: %s", model.Name, model.Source)
 
-	providerName := provider.ProviderName(model.Parameters.Provider)
+	providerName := invoke.ProviderName(model.Parameters.Provider)
 	if providerName == "" {
-		providerName = provider.DetectProvider(model.Parameters.BaseURL)
+		providerName = invoke.DetectProvider(model.Parameters.BaseURL)
 	}
-	if providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+	if providerName == invoke.ProviderLKEAP || providerName == invoke.ProviderVolcengine {
 		appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 		reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
 		if err != nil {

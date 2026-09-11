@@ -1,4 +1,4 @@
-package provider
+package invoke
 
 import "github.com/Tencent/WeKnora/internal/types"
 

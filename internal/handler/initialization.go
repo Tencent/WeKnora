@@ -23,7 +23,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/ollama"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1976,15 +1975,15 @@ func (h *InitializationHandler) checkChatModelConnection(
 func (h *InitializationHandler) checkRerankModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	providerName := provider.ProviderName(model.Parameters.Provider)
+	providerName := invoke.ProviderName(model.Parameters.Provider)
 	if providerName == "" {
-		providerName = provider.DetectProvider(model.Parameters.BaseURL)
+		providerName = invoke.DetectProvider(model.Parameters.BaseURL)
 	}
 	var (
 		results []rerank.RankResult
 		err     error
 	)
-	if providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+	if providerName == invoke.ProviderLKEAP || providerName == invoke.ProviderVolcengine {
 		reranker, rerankErr := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
 		if rerankErr != nil {
 			return false, fmt.Sprintf("创建Reranker失败: %v", rerankErr)
@@ -2065,7 +2064,8 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
-	if providerName := provider.ProviderName(model.Parameters.Provider); providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+	providerName := invoke.ProviderName(model.Parameters.Provider)
+	if providerName == invoke.ProviderLKEAP || providerName == invoke.ProviderVolcengine {
 		appID = ""
 		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
 	}

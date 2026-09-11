@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/require"
 )
@@ -168,8 +167,8 @@ type fakeAdapter struct{ fake *Fake }
 
 func (a fakeAdapter) Provider() string { return "fake" }
 
-func (a fakeAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Chat: &provider.ChatCaps{}}
+func (a fakeAdapter) Capabilities() invoke.Capabilities {
+	return invoke.Capabilities{Chat: &invoke.ChatCaps{}}
 }
 
 func (a fakeAdapter) BuildChatRequest(

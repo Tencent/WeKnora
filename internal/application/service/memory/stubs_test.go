@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -309,8 +308,8 @@ type stubChatAdapter struct {
 
 func (a stubChatAdapter) Provider() string { return "memory-stub" }
 
-func (a stubChatAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Chat: &provider.ChatCaps{}}
+func (a stubChatAdapter) Capabilities() invoke.Capabilities {
+	return invoke.Capabilities{Chat: &invoke.ChatCaps{}}
 }
 
 func (a stubChatAdapter) BuildChatRequest(

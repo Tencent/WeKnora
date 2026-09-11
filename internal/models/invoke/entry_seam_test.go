@@ -14,7 +14,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,17 +23,17 @@ import (
 // the entry fold exercises the provider-default tier.
 type capsFakeAdapter struct {
 	fakeChatAdapter
-	caps provider.ThinkingCaps
+	caps ThinkingCaps
 }
 
-func (f capsFakeAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Chat: &provider.ChatCaps{Thinking: f.caps}}
+func (f capsFakeAdapter) Capabilities() Capabilities {
+	return Capabilities{Chat: &ChatCaps{Thinking: f.caps}}
 }
 
-func thinkingCaps(levels ...provider.Level) provider.ThinkingCaps {
-	return provider.ThinkingCaps{
+func thinkingCaps(levels ...Level) ThinkingCaps {
+	return ThinkingCaps{
 		Supported: true, CanDisable: true,
-		SupportedLevels: levels, DefaultLevel: provider.LevelMedium,
+		SupportedLevels: levels, DefaultLevel: LevelMedium,
 	}
 }
 
@@ -42,7 +41,7 @@ func thinkingCaps(levels ...provider.Level) provider.ThinkingCaps {
 // callLevel > model record (ThinkingLevel within SelectedLevels) > provider
 // DefaultLevel > none.
 func TestFoldChatOptionsTierChain(t *testing.T) {
-	caps := thinkingCaps(provider.LevelLow, provider.LevelMedium, provider.LevelHigh)
+	caps := thinkingCaps(LevelLow, LevelMedium, LevelHigh)
 	registerFake(t, capsFakeAdapter{caps: caps})
 	m := &ModelConfig{
 		Provider: "fake", ThinkingLevel: "low", SelectedLevels: []string{"low", "high"},

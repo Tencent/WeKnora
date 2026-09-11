@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/sashabaranov/go-openai"
 )
 
@@ -24,14 +23,14 @@ import (
 // One instance serves one provider name; v1's per-adapter Matches() predicates
 // become per-model branches inside shapeFor/thinkingFor.
 type openaiAdapter struct {
-	name provider.ProviderName
+	name invoke.ProviderName
 	// spec carries the v1 providerAdapter overrides for this vendor.
 	spec openaiVendorSpec
 	// caps is the Chat capability shard (trimmed: shards this adapter does not
 	// implement yet stay nil so registration lock #2 holds — embedding/rerank
 	// migrate in P2/P3 and the frontend DTO still comes from the provider
 	// package until the strangler switch completes).
-	caps *provider.ChatCaps
+	caps *invoke.ChatCaps
 	// OpenAIStreamBridge is the exported openai-shape default bridge, embedded
 	// so TranslateStreamEvent is promoted (seam ⑤, P1c: the former
 	// package-local port is deduped into invoke.OpenAIStreamBridge).
@@ -75,45 +74,44 @@ func (a *openaiAdapter) Provider() string { return string(a.name) }
 // its listing attempt fails at Build (deployment mode), so the flag reads
 // true family-wide but the azure probe degrades with an explicit reason —
 // v1 sent the doomed request and degraded on the 404 instead.
-func (a *openaiAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{
-		Common: provider.CommonCaps{ModelListing: provider.ModelListingCaps{Supported: true}},
+func (a *openaiAdapter) Capabilities() invoke.Capabilities {
+	return invoke.Capabilities{
+		Common: invoke.CommonCaps{ModelListing: invoke.ModelListingCaps{Supported: true}},
 		Chat:   a.caps,
 	}
 }
 
 // chatCapsFor resolves the provider-level Chat shard from the v1 capability
 // registry (nil when the provider does not serve chat).
-func chatCapsFor(name provider.ProviderName) *provider.ChatCaps {
-	p, ok := provider.Get(name)
-	if !ok {
+func chatCapsFor(name invoke.ProviderName) *invoke.ChatCaps {
+	if _, ok := providerInfoFor(name); !ok {
 		return nil
 	}
-	caps := p.Info().EffectiveCapabilities()
+	caps := mustProviderInfo(name).EffectiveCapabilities()
 	return caps.Chat
 }
 
 // specFor ports the v1 providerRegistry overrides (chat/provider.go:296-312).
-func specFor(name provider.ProviderName) openaiVendorSpec {
+func specFor(name invoke.ProviderName) openaiVendorSpec {
 	var spec openaiVendorSpec
 	switch name {
-	case provider.ProviderDeepSeek:
+	case invoke.ProviderDeepSeek:
 		// deepseekProvider: ForceRawHTTP (native prompt-cache hit/miss
 		// counters) + tool_choice strip (unsupported by DeepSeek).
 		spec.forceRaw = true
 		spec.shape = shapeDeepSeek
-	case provider.ProviderGemini:
+	case invoke.ProviderGemini:
 		// geminiProvider: ForceRawHTTP. Its tool thought-signature metadata
 		// injection has no channel in the neutral message model yet (§6.1) —
 		// signatures do not round-trip until that field lands (P5 native
 		// adapter supersedes this compatibility route anyway).
 		spec.forceRaw = true
-	case provider.ProviderAzureOpenAI:
+	case invoke.ProviderAzureOpenAI:
 		spec.azure = true
-	case provider.ProviderVolcengine:
+	case invoke.ProviderVolcengine:
 		// volcengineProvider: thinking via { "thinking": { "type": ... } }.
 		spec.thinking = thinkingTypeApply
-	case provider.ProviderGeneric, provider.ProviderNvidia, provider.ProviderLiteLLM:
+	case invoke.ProviderGeneric, invoke.ProviderNvidia, invoke.ProviderLiteLLM:
 		// generic/nvidia/liteLLMProvider: chat_template_kwargs.enable_thinking.
 		spec.thinking = chatTemplateKwargsApply
 	}
@@ -126,12 +124,12 @@ func specFor(name provider.ProviderName) openaiVendorSpec {
 // temperature=1.
 func (a *openaiAdapter) shapeFor(model string) func(*openai.ChatCompletionRequest, *invoke.ChatOptions) {
 	switch a.name {
-	case provider.ProviderOpenAI, provider.ProviderAzureOpenAI:
-		if provider.IsOpenAIReasoningOrGPT5Model(model) {
+	case invoke.ProviderOpenAI, invoke.ProviderAzureOpenAI:
+		if invoke.IsOpenAIReasoningOrGPT5Model(model) {
 			return shapeOpenAIReasoning
 		}
-	case provider.ProviderMoonshot:
-		if provider.IsMoonshotFixedTempModel(model) {
+	case invoke.ProviderMoonshot:
+		if invoke.IsMoonshotFixedTempModel(model) {
 			return shapeMoonshotFixedTemp
 		}
 	}
@@ -147,13 +145,13 @@ func (a *openaiAdapter) thinkingFor(
 		return a.spec.thinking
 	}
 	switch a.name {
-	case provider.ProviderAliyun:
+	case invoke.ProviderAliyun:
 		// qwenThinkingProvider: enable_thinking always sent, forced off
 		// non-stream (Qwen3 rejects thinking in non-stream mode).
-		if provider.IsQwenThinkingModel(model) {
+		if invoke.IsQwenThinkingModel(model) {
 			return enableThinkingApply
 		}
-	case provider.ProviderLKEAP:
+	case invoke.ProviderLKEAP:
 		// lkeapProvider: { "thinking": { "type": ... } } for DeepSeek V3.x
 		// only; R1 enables chain-of-thought by default and stays untouched.
 		if strings.Contains(strings.ToLower(model), "deepseek-v3") {
@@ -305,14 +303,14 @@ func (a *openaiAdapter) requestURL(ep invoke.Endpoint, model string) string {
 			apiVersion = azureAPIVersionDefault
 		}
 		return fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=%s", base, model, apiVersion)
-	case a.name == provider.ProviderWeKnoraCloud:
+	case a.name == invoke.ProviderWeKnoraCloud:
 		return base + "/api/v1/chat/completions"
 	}
 	if base == "" {
 		// v1 NewRemoteAPIChat: empty baseURL → SDK default (openai) or the
 		// DeepSeek official endpoint.
-		if a.name == provider.ProviderDeepSeek {
-			base = provider.DeepSeekBaseURL
+		if a.name == invoke.ProviderDeepSeek {
+			base = invoke.DeepSeekBaseURL
 		} else {
 			base = openAIDefaultBaseURL
 		}
@@ -382,34 +380,34 @@ func (a *openaiAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*i
 // registry dispatches by exact name, so every openai-family provider from the
 // catalog registers an instance (anthropic/ollama/weknoracloud excluded —
 // they have their own adapters).
-var openAIFamilyProviders = []provider.ProviderName{
-	provider.ProviderOpenAI,
-	provider.ProviderGeneric,
-	provider.ProviderAliyun,
-	provider.ProviderZhipu,
-	provider.ProviderVolcengine,
-	provider.ProviderHunyuan,
-	provider.ProviderSiliconFlow,
-	provider.ProviderDeepSeek,
-	provider.ProviderMiniMax,
-	provider.ProviderMoonshot,
-	provider.ProviderModelScope,
-	provider.ProviderQianfan,
-	provider.ProviderQiniu,
-	provider.ProviderGemini,
-	provider.ProviderOpenRouter,
-	provider.ProviderLiteLLM,
-	provider.ProviderRequesty,
-	provider.ProviderMimo,
-	provider.ProviderLongCat,
-	provider.ProviderLKEAP,
-	provider.ProviderGPUStack,
-	provider.ProviderNvidia,
-	provider.ProviderNovita,
-	provider.ProviderAzureOpenAI,
+var openAIFamilyProviders = []invoke.ProviderName{
+	invoke.ProviderOpenAI,
+	invoke.ProviderGeneric,
+	invoke.ProviderAliyun,
+	invoke.ProviderZhipu,
+	invoke.ProviderVolcengine,
+	invoke.ProviderHunyuan,
+	invoke.ProviderSiliconFlow,
+	invoke.ProviderDeepSeek,
+	invoke.ProviderMiniMax,
+	invoke.ProviderMoonshot,
+	invoke.ProviderModelScope,
+	invoke.ProviderQianfan,
+	invoke.ProviderQiniu,
+	invoke.ProviderGemini,
+	invoke.ProviderOpenRouter,
+	invoke.ProviderLiteLLM,
+	invoke.ProviderRequesty,
+	invoke.ProviderMimo,
+	invoke.ProviderLongCat,
+	invoke.ProviderLKEAP,
+	invoke.ProviderGPUStack,
+	invoke.ProviderNvidia,
+	invoke.ProviderNovita,
+	invoke.ProviderAzureOpenAI,
 	// Embedding-only vendor (P2): no chat facet; the init loop registers it
 	// through the jinaEmbeddingAdapter branch.
-	provider.ProviderJina,
+	invoke.ProviderJina,
 }
 
 func init() {
@@ -423,7 +421,7 @@ func init() {
 		// adapter caps = implemented facets; the frontend DTO still reads the
 		// provider package) and the service layer branches those two vendors
 		// to the v1 clients.
-		if name == provider.ProviderLKEAP || name == provider.ProviderVolcengine {
+		if name == invoke.ProviderLKEAP || name == invoke.ProviderVolcengine {
 			rcaps = nil
 		}
 		acaps := asrCapsFor(name)
@@ -450,7 +448,7 @@ func init() {
 			if err := invoke.Default.Register(adapter); err != nil {
 				panic(fmt.Sprintf("invoke/adapters: register openai-family adapter %s: %v", name, err))
 			}
-		case caps != nil && ecaps != nil && name == provider.ProviderVolcengine:
+		case caps != nil && ecaps != nil && name == invoke.ProviderVolcengine:
 			// Ark multimodal embedding is single-input-per-request — register
 			// the marked composite so the entry fans batches out per input.
 			adapter := &volcengineEmbeddingAdapter{openaiEmbeddingAdapter{

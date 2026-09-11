@@ -1,4 +1,4 @@
-package provider
+package invoke
 
 // Credentials spec tests (design v2 §6.8): provider-level declaration,
 // synthesis chain in EffectiveCapabilities, and JSON exposure through the

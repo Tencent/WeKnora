@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/panjf2000/ants/v2"
@@ -33,8 +32,8 @@ type emptyEmbedAdapter struct {
 
 func (a *emptyEmbedAdapter) Provider() string { return a.name }
 
-func (a *emptyEmbedAdapter) Capabilities() provider.Capabilities {
-	return provider.Capabilities{Embedding: &provider.EmbeddingCaps{}}
+func (a *emptyEmbedAdapter) Capabilities() invoke.Capabilities {
+	return invoke.Capabilities{Embedding: &invoke.EmbeddingCaps{}}
 }
 
 func (a *emptyEmbedAdapter) BuildEmbeddingRequest(

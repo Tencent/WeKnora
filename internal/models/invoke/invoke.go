@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -128,7 +127,7 @@ func foldChatOptions(m *ModelConfig, opts *ChatOptions) *ChatOptions {
 	if opts == nil {
 		return opts
 	}
-	var caps provider.ThinkingCaps
+	var caps ThinkingCaps
 	if a, err := resolveAdapter(m.Provider); err == nil {
 		if cc := a.Capabilities().Chat; cc != nil {
 			caps = cc.Thinking

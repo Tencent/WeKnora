@@ -15,7 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/invoke/adapters"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -739,13 +739,13 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 
 // ModelProviderDTO 模型厂商信息 DTO
 type ModelProviderDTO struct {
-	Value        string                      `json:"value"`                 // provider 标识符
-	Label        string                      `json:"label"`                 // 显示名称
-	Description  string                      `json:"description"`           // 描述
-	DefaultURLs  map[string]string           `json:"defaultUrls"`           // 按模型类型区分的默认 URL
-	ModelTypes   []string                    `json:"modelTypes"`            // 支持的模型类型
-	Capabilities provider.Capabilities       `json:"capabilities"`          // 能力声明分片（前端按 type 渲染）
-	ExtraFields  []provider.ExtraFieldConfig `json:"extraFields,omitempty"` // 动态配置字段
+	Value        string                    `json:"value"`                 // provider 标识符
+	Label        string                    `json:"label"`                 // 显示名称
+	Description  string                    `json:"description"`           // 描述
+	DefaultURLs  map[string]string         `json:"defaultUrls"`           // 按模型类型区分的默认 URL
+	ModelTypes   []string                  `json:"modelTypes"`            // 支持的模型类型
+	Capabilities invoke.Capabilities       `json:"capabilities"`          // 能力声明分片（前端按 type 渲染）
+	ExtraFields  []invoke.ExtraFieldConfig `json:"extraFields,omitempty"` // 动态配置字段
 }
 
 // modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
@@ -803,13 +803,14 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		backendModelType = types.ModelType(modelType)
 	}
 
-	var providers []provider.ProviderInfo
+	// 厂商元数据表在 adapters 包（P4：models/provider 注册表删除）。
+	var providers []invoke.ProviderInfo
 	if modelType != "" {
 		// 按模型类型过滤
-		providers = provider.ListByModelType(backendModelType)
+		providers = adapters.ListProviders(&backendModelType)
 	} else {
 		// 返回所有 provider
-		providers = provider.List()
+		providers = adapters.ListProviders(nil)
 	}
 
 	// 转换为 DTO
