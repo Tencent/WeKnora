@@ -82,6 +82,19 @@ func (i *Index) Read(ctx context.Context, videoID, generation string) ([]Record,
 // video's evidence knowledge IDs, then restores stable sentence timing from
 // the local manifest.
 func (i *Index) Search(ctx context.Context, videoID, generation, query string, limit int) ([]Record, error) {
+	return i.search(ctx, videoID, generation, query, nil, limit)
+}
+
+// SearchWithin performs the same hybrid search while restricting candidates
+// to an immutable evidence sentence whitelist selected by an upstream plan.
+func (i *Index) SearchWithin(ctx context.Context, videoID, generation, query string, evidenceIDs []string, limit int) ([]Record, error) {
+	if len(evidenceIDs) == 0 {
+		return nil, fmt.Errorf("evidence search whitelist is empty")
+	}
+	return i.search(ctx, videoID, generation, query, evidenceIDs, limit)
+}
+
+func (i *Index) search(ctx context.Context, videoID, generation, query string, evidenceIDs []string, limit int) ([]Record, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("evidence search query is required")
@@ -92,6 +105,29 @@ func (i *Index) Search(ctx context.Context, videoID, generation, query string, l
 	checkpoints, err := i.loadCheckpoints(ctx, videoID, generation)
 	if err != nil {
 		return nil, err
+	}
+	if len(evidenceIDs) > 0 {
+		allowed := make(map[string]struct{}, len(evidenceIDs))
+		for _, rawID := range evidenceIDs {
+			id := strings.TrimSpace(rawID)
+			if id == "" {
+				return nil, fmt.Errorf("evidence search whitelist contains an empty ID")
+			}
+			if _, duplicate := allowed[id]; duplicate {
+				return nil, fmt.Errorf("evidence search whitelist repeats %q", id)
+			}
+			allowed[id] = struct{}{}
+		}
+		filtered := make([]model.VideoTranscriptChunk, 0, len(allowed))
+		for _, checkpoint := range checkpoints {
+			if _, ok := allowed[strings.TrimSpace(checkpoint.EvidenceSentenceID)]; ok {
+				filtered = append(filtered, checkpoint)
+			}
+		}
+		if len(filtered) != len(allowed) {
+			return nil, fmt.Errorf("evidence search whitelist is not fully available")
+		}
+		checkpoints = filtered
 	}
 	if i.WeKnora == nil {
 		return nil, fmt.Errorf("evidence index WeKnora dependency is not configured")
@@ -132,18 +168,23 @@ func (i *Index) Search(ctx context.Context, videoID, generation, query string, l
 		if !ok {
 			return nil, fmt.Errorf("search result knowledge %q is outside video %q generation %q", knowledgeID, videoID, generation)
 		}
+		// Hybrid search can return several indexed chunks for one evidence
+		// document. Keep the first ranked hit; the manifest maps the document
+		// back to one immutable evidence sentence.
 		if _, exists := seen[knowledgeID]; exists {
-			return nil, fmt.Errorf("search returned duplicate evidence knowledge %q", knowledgeID)
+			continue
 		}
 		seen[knowledgeID] = struct{}{}
-		content := strings.TrimSpace(result.Content)
-		if content == "" {
-			return nil, fmt.Errorf("search result knowledge %q has empty content", knowledgeID)
+		// The search API returns indexed fragments, not a canonical evidence
+		// document. A fragment may happen to contain both "## 原文" and a
+		// partial metadata section, so checking its shape is not sufficient to
+		// decide whether it is complete. Search text only selects IDs; source
+		// text and timing must always come from the validated complete document.
+		content, parsed, readErr := i.readKnowledge(ctx, knowledgeID)
+		if readErr != nil {
+			return nil, fmt.Errorf("search result knowledge %q has no complete evidence document: %w", knowledgeID, readErr)
 		}
-		metadata, err := parseMetadata(content)
-		if err != nil {
-			return nil, fmt.Errorf("search result knowledge %q has invalid evidence metadata: %w", knowledgeID, err)
-		}
+		metadata := parsed
 		record, err := i.recordFromCheckpoint(checkpoint, content, metadata, checkpoint.ChunkIndex)
 		if err != nil {
 			return nil, err
@@ -151,6 +192,12 @@ func (i *Index) Search(ctx context.Context, videoID, generation, query string, l
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+func hasCompleteEvidenceDocument(content string) bool {
+	const marker = "## 原文"
+	index := strings.Index(content, marker)
+	return index >= 0 && strings.TrimSpace(content[index+len(marker):]) != ""
 }
 
 func (i *Index) loadCheckpoints(ctx context.Context, videoID, generation string) ([]model.VideoTranscriptChunk, error) {

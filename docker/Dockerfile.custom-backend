@@ -17,13 +17,21 @@ COPY go.mod go.sum ./
 # replace 指向未复制进镜像的 third_party/anydoc-go；如果只删 require，残留的
 # replace 仍会让 go mod download 校验不存在的本地模块目录。用 go mod edit
 # 同时删除 require 和 replace，保证独立镜像构建不依赖仓库中的第三方源码目录。
+ARG GO_MOD_DOWNLOAD_RETRIES=4
 RUN go mod edit \
       -droprequire=github.com/firecrawl/anydoc/go \
       -dropreplace=github.com/firecrawl/anydoc/go \
- && go mod download
+ && for attempt in $(seq 1 "$GO_MOD_DOWNLOAD_RETRIES"); do \
+      if timeout 180s go mod download; then exit 0; fi; \
+      if [ "$attempt" -lt "$GO_MOD_DOWNLOAD_RETRIES" ]; then sleep $((attempt * 5)); fi; \
+    done; \
+    echo "go mod download failed after ${GO_MOD_DOWNLOAD_RETRIES} attempts" >&2; \
+    exit 1
 
 COPY cmd/custom-backend ./cmd/custom-backend
 COPY cmd/vw-p5-reconcile ./cmd/vw-p5-reconcile
+COPY cmd/training-orchestration-preview ./cmd/training-orchestration-preview
+COPY internal/agent/token ./internal/agent/token
 COPY internal/custom ./internal/custom
 COPY internal/contentprovenance ./internal/contentprovenance
 COPY internal/wikiaudit ./internal/wikiaudit
@@ -40,9 +48,11 @@ COPY internal/utils ./internal/utils
 # P3 knowledge rules are read at runtime by the custom backend. Keep the
 # bundled skill copy in the image for deployments without the source checkout.
 COPY skills/preloaded ./skills/preloaded
+RUN chmod -R a+rX /src/skills/preloaded
 
 RUN go build -ldflags="-s -w" -o /out/custom-backend ./cmd/custom-backend \
- && go build -ldflags="-s -w" -o /out/vw-p5-reconcile ./cmd/vw-p5-reconcile
+ && go build -ldflags="-s -w" -o /out/vw-p5-reconcile ./cmd/vw-p5-reconcile \
+ && go build -ldflags="-s -w" -o /out/training-orchestration-preview ./cmd/training-orchestration-preview
 
 # ===== 阶段 2: 运行 =====
 # 选 3.19 而非 3.20：3.20 的 apk 对 libpulse/libflac 等音频包默认 --no-network，
@@ -53,6 +63,7 @@ RUN apk add --no-cache ca-certificates ffmpeg tini tzdata wget \
 WORKDIR /app
 COPY --from=builder /out/custom-backend /app/custom-backend
 COPY --from=builder /out/vw-p5-reconcile /app/vw-p5-reconcile
+COPY --from=builder /out/training-orchestration-preview /app/training-orchestration-preview
 COPY --from=builder /src/skills/preloaded /app/skills/preloaded
 COPY --from=builder /go/pkg/mod/github.com/yanyiwu/gojieba@v1.4.7/deps/cppjieba/dict /app/jieba-dict
 USER app

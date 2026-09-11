@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -150,6 +151,9 @@ func (e *Engine) Start(parent context.Context) {
 		} else if retired > 0 {
 			slog.Info("retired automatic draft jobs", "component", "content-worker", "job_count", retired)
 		}
+	}
+	if err := e.reconcileCompletedVideoStatuses(); err != nil {
+		slog.Warn("reconcile completed video statuses", "component", "content-worker", "error", err)
 	}
 	ctx, cancel := context.WithCancel(parent)
 	e.cancel = cancel
@@ -338,14 +342,78 @@ func (e *Engine) dispatch(ctx context.Context, job *model.VideoProcessingJob) {
 
 func (e *Engine) markSucceeded(job *model.VideoProcessingJob) {
 	now := time.Now().UTC()
-	e.db.Model(job).Updates(map[string]any{
+	if err := e.db.Model(job).Updates(map[string]any{
 		"status": "succeeded", "progress": 100, "completed_at": now,
 		"error_category": "", "error_code": "", "error_message": "",
-	})
+	}).Error; err != nil {
+		slog.Error("job completion update failed",
+			"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
+			"job_type", job.JobType, "error", err)
+		return
+	}
+	if err := e.reconcileVideoStatus(job.VideoID); err != nil {
+		slog.Warn("video status reconciliation failed",
+			"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
+			"job_type", job.JobType, "error", err)
+	}
 	slog.Info("job completed",
 		"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
 		"job_type", job.JobType, "transcript_generation", job.TranscriptGeneration,
 		"status", "succeeded", "attempt", job.AttemptCount)
+}
+
+// reconcileVideoStatus closes the gap between the content pipeline's artifact
+// state and the denormalized videos.status field. Enhancement jobs can finish
+// after assemble (or after an earlier enhancement failure), so relying on the
+// assemble callback alone can leave a fully usable video stuck in processing.
+func (e *Engine) reconcileVideoStatus(videoID string) error {
+	var video model.Video
+	if err := e.db.First(&video, "id = ?", videoID).Error; err != nil {
+		return err
+	}
+	if video.Status == model.VideoStatusFailed || !assembledVideoReady(video) {
+		return nil
+	}
+
+	query := e.db.Where("video_id = ? AND job_type = ? AND status = ?", videoID, "assemble", "succeeded")
+	if generation := strings.TrimSpace(video.TranscriptGeneration); generation != "" {
+		query = query.Where("transcript_generation IN ?", []string{"", generation})
+	}
+	var assemble model.VideoProcessingJob
+	if err := query.Order("updated_at DESC").First(&assemble).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	if video.Status == model.VideoStatusCompleted {
+		return nil
+	}
+	return e.db.Model(&model.Video{}).Where("id = ? AND status IN ?", videoID, []string{model.VideoStatusReady, model.VideoStatusProcessing}).
+		Update("status", model.VideoStatusCompleted).Error
+}
+
+func (e *Engine) reconcileCompletedVideoStatuses() error {
+	var videos []model.Video
+	if err := e.db.Where("status IN ?", []string{model.VideoStatusReady, model.VideoStatusProcessing}).
+		Where("TRIM(COALESCE(outline_wiki_page_id, '')) <> ''").
+		Where("TRIM(COALESCE(summary_wiki_page_id, '')) <> ''").
+		Where("TRIM(COALESCE(transcript_page_wiki_page_id, '')) <> ''").
+		Find(&videos).Error; err != nil {
+		return err
+	}
+	for _, video := range videos {
+		if err := e.reconcileVideoStatus(video.ID); err != nil {
+			return fmt.Errorf("video %s: %w", video.ID, err)
+		}
+	}
+	return nil
+}
+
+func assembledVideoReady(video model.Video) bool {
+	return strings.TrimSpace(video.OutlineWikiPageID) != "" &&
+		strings.TrimSpace(video.SummaryWikiPageID) != "" &&
+		strings.TrimSpace(video.TranscriptPageWikiPageID) != ""
 }
 
 func (e *Engine) markFailed(job *model.VideoProcessingJob, category, code, msg string, cause error) {

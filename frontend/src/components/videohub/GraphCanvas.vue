@@ -32,6 +32,17 @@ let themeObserver: MutationObserver | null = null
 function color(token: string) { return readThemeToken(token) }
 function render() {
   if (!chart) return
+  const links = new Map<string, { source: string; target: string; value: string; tooltip: { show: boolean }; lineStyle: { type: string; width: number; opacity: number; color: string } }>()
+  const addLink = (source: string, target: string, value: string, lineStyle: { type: string; width: number; opacity: number; color: string }) => {
+    const key = [source, target].sort().join('\u0000')
+    const existing = links.get(key)
+    if (existing) {
+      if (existing.value !== value && !existing.value.includes(value)) existing.value = `${existing.value} · ${value}`
+      if (existing.lineStyle.type === 'dashed' && lineStyle.type !== 'dashed') existing.lineStyle = lineStyle
+      return
+    }
+    links.set(key, { source, target, value, tooltip: { show: false }, lineStyle })
+  }
   chart.setOption({
     animationDurationUpdate: 300,
     tooltip: {
@@ -65,17 +76,14 @@ function render() {
           },
         }
       }),
-      links: [
-        ...props.edges.map(edge => {
+      links: (() => {
+        props.edges.forEach(edge => {
           const style = KNOWN_RELATION_TYPES[edge.type] ?? FALLBACK_RELATION_STYLE
-          return { source: edge.source, target: edge.target, value: getRelationTypeLabel(edge.type), tooltip: { show: false }, lineStyle: { type: style.lineStyle, width: Math.max(1.5, Math.min(style.width, 2)), opacity: Math.max(.68, style.opacity), color: color('--td-text-color-secondary') } }
+          addLink(edge.source, edge.target, getRelationTypeLabel(edge.type), { type: style.lineStyle, width: Math.max(1.5, Math.min(style.width, 2)), opacity: Math.max(.68, style.opacity), color: color('--td-text-color-secondary') })
         }),
-        ...(props.readingAssociations ?? []).filter(edge => edge.target_exists).map(edge => ({
-          source: edge.source, target: edge.target, value: '阅读关联',
-          tooltip: { show: false },
-          lineStyle: { type: 'dashed', width: 1.5, opacity: .58, color: color('--td-text-color-secondary') },
-        })),
-      ],
+        (props.readingAssociations ?? []).filter(edge => edge.target_exists).forEach(edge => addLink(edge.source, edge.target, '延伸关系', { type: 'dashed', width: 1.5, opacity: .58, color: color('--td-text-color-secondary') }))
+        return [...links.values()]
+      })(),
       lineStyle: { curveness: .06, color: color('--td-text-color-secondary'), opacity: .68 },
     }],
   }, true)

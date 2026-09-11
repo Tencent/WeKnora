@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -88,7 +90,7 @@ audit_status: aligned
 		},
 	}
 
-	plan, err := planWikiRepair(video, pages, scope)
+	plan, err := planWikiRepair(context.Background(), video, pages, scope, knowledge.RuleSemanticIdentityAdapter{})
 	require.NoError(t, err)
 	require.Len(t, plan.Actions, 4)
 	require.Equal(t, "normalize", actionBySlug(t, plan, "concept/feedback-loop").Action)
@@ -142,8 +144,11 @@ structure_fields:
 
 # 未验证`}
 
-	_, err := planWikiRepair(video, []weknora.WikiPage{page}, scope)
+	plan, err := planWikiRepair(context.Background(), video, []weknora.WikiPage{page}, scope, knowledge.RuleSemanticIdentityAdapter{})
 	require.ErrorContains(t, err, "no current-generation Wiki page has verifiable evidence")
+	require.Len(t, plan.Actions, 1)
+	require.Equal(t, "quarantine", plan.Actions[0].Action)
+	require.Contains(t, plan.Actions[0].Reason, "not in the active transcript")
 }
 
 func TestPlanWikiRepairMapsLegacyEvidenceIDToCurrentTranscript(t *testing.T) {
@@ -170,7 +175,7 @@ structure_fields:
 
 # 反馈闭环`}
 
-	plan, err := planWikiRepair(video, []weknora.WikiPage{page}, scope)
+	plan, err := planWikiRepair(context.Background(), video, []weknora.WikiPage{page}, scope, knowledge.RuleSemanticIdentityAdapter{})
 	require.NoError(t, err)
 	require.Len(t, plan.Actions, 1)
 	require.Equal(t, "normalize", plan.Actions[0].Action)
@@ -193,7 +198,7 @@ func TestPlanWikiRepairSemanticallySupersedesDuplicatePagesWithoutDeletingEviden
 		semanticRepairPage("page-agent-brain", "concept/agent-second-brain", "AI Agent 第二大脑（概念）", "brain-duplicate-2", "concept", "", "ev-brain-3", "接入 AI Agent 后，本地知识库升级为能够调用知识并执行工作的第二大脑。", map[string]string{"definition": "AI Agent 接入本地知识库后形成的可执行第二大脑", "components": "本地知识库、AI Agent 和方法模板", "mechanism": "读取知识、执行任务并回写经验"}),
 	}
 
-	plan, err := planWikiRepair(video, pages, scope)
+	plan, err := planWikiRepair(context.Background(), video, pages, scope, knowledge.RuleSemanticIdentityAdapter{})
 	require.NoError(t, err)
 	require.Len(t, plan.Actions, 5)
 	var normalized, superseded int
@@ -217,6 +222,148 @@ func TestPlanWikiRepairSemanticallySupersedesDuplicatePagesWithoutDeletingEviden
 	require.Contains(t, plan.IndexWrite.Content, "[[concept/second-brain|第二大脑]]")
 	require.NotContains(t, plan.IndexWrite.Content, "deepseek-entity")
 	require.NotContains(t, plan.IndexWrite.Content, "agent-second-brain")
+}
+
+func TestPlanWikiRepairUsesSemanticModelDecision(t *testing.T) {
+	video := model.Video{ID: "video-1", Title: "语义归一化", TranscriptGeneration: "generation-1"}
+	scope := wikiRepairScope{SourceDocumentID: "source-1", EvidenceIDs: map[string]struct{}{"ev-a": {}, "ev-b": {}}}
+	pages := []weknora.WikiPage{
+		semanticRepairPage("page-a", "concept/shared-a", "共享概念", "object-a", "concept", "", "ev-a", "用于验证语义身份的概念。", map[string]string{"definition": "语义身份测试概念", "mechanism": "比较定义与边界"}),
+		semanticRepairPage("page-b", "concept/shared-b", "共享概念（概念）", "object-b", "concept", "", "ev-b", "用于验证语义身份的概念。", map[string]string{"definition": "语义身份测试概念", "mechanism": "比较定义与边界"}),
+	}
+
+	for _, test := range []struct {
+		name              string
+		decision          string
+		expectedNormalize int
+		expectedArchived  int
+	}{
+		{name: "same object archives duplicate", decision: "same_object", expectedNormalize: 1, expectedArchived: 1},
+		{name: "different objects remain separate", decision: "different_object", expectedNormalize: 2, expectedArchived: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			adapter := semanticIdentityAdapterFunc(func(_ context.Context, _, _ knowledge.IdentityCandidate) (knowledge.SemanticIdentityAssessment, error) {
+				calls++
+				return knowledge.SemanticIdentityAssessment{
+					Decision: test.decision, Confidence: 0.95, Reason: "model compared identity-defining fields",
+				}, nil
+			})
+			plan, err := planWikiRepair(context.Background(), video, pages, scope, adapter)
+			require.NoError(t, err)
+			require.Equal(t, 1, calls)
+			require.Len(t, plan.SemanticDecisions, 1)
+			require.Equal(t, test.decision, plan.SemanticDecisions[0].Decision)
+			require.Equal(t, test.expectedNormalize, countWikiRepairActions(plan, "normalize"))
+			require.Equal(t, test.expectedArchived, countWikiRepairActions(plan, "quarantine"))
+		})
+	}
+}
+
+func TestPlanWikiRepairBlocksSemanticModelFailureWithoutArchivingCandidate(t *testing.T) {
+	video := model.Video{ID: "video-1", Title: "语义归一化", TranscriptGeneration: "generation-1"}
+	scope := wikiRepairScope{SourceDocumentID: "source-1", EvidenceIDs: map[string]struct{}{"ev-a": {}, "ev-b": {}}}
+	pages := []weknora.WikiPage{
+		semanticRepairPage("page-a", "concept/blocked-a", "阻断概念", "object-a", "concept", "", "ev-a", "用于验证失败关闭。", map[string]string{"definition": "失败关闭测试", "mechanism": "模型裁决"}),
+		semanticRepairPage("page-b", "concept/blocked-b", "阻断概念（概念）", "object-b", "concept", "", "ev-b", "用于验证失败关闭。", map[string]string{"definition": "失败关闭测试", "mechanism": "模型裁决"}),
+	}
+
+	for _, test := range []struct {
+		name       string
+		assessment knowledge.SemanticIdentityAssessment
+		err        error
+		decision   string
+	}{
+		{
+			name: "uncertain", assessment: knowledge.SemanticIdentityAssessment{
+				Decision: "uncertain", Confidence: 0.92, Reason: "scope cannot be verified", ConflictFields: []string{"scope"},
+			}, decision: "uncertain",
+		},
+		{name: "model error", err: errors.New("model unavailable"), decision: "error"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			adapter := semanticIdentityAdapterFunc(func(_ context.Context, _, _ knowledge.IdentityCandidate) (knowledge.SemanticIdentityAssessment, error) {
+				return test.assessment, test.err
+			})
+			plan, err := planWikiRepair(context.Background(), video, pages, scope, adapter)
+			require.ErrorIs(t, err, errSemanticIdentityReviewRequired)
+			require.Equal(t, 2, countWikiRepairActions(plan, "normalize"))
+			require.Equal(t, 0, countWikiRepairActions(plan, "quarantine"))
+			require.Len(t, plan.SemanticDecisions, 1)
+			require.Equal(t, test.decision, plan.SemanticDecisions[0].Decision)
+			for _, action := range plan.Actions {
+				require.Empty(t, action.CanonicalWikiPageID)
+				require.Empty(t, action.CanonicalKnowledgeObjectID)
+			}
+		})
+	}
+}
+
+func TestPlanWikiRepairBlocksCandidateMatchingMultipleCanonicalAnchors(t *testing.T) {
+	video := model.Video{ID: "video-1", Title: "语义归一化", TranscriptGeneration: "generation-1"}
+	scope := wikiRepairScope{SourceDocumentID: "source-1", EvidenceIDs: map[string]struct{}{"ev-a": {}, "ev-b": {}, "ev-c": {}}}
+	pages := []weknora.WikiPage{
+		semanticRepairPage("page-a", "concept/multiple-a", "同名概念", "object-a", "concept", "", "ev-a", "第一个规范候选。", map[string]string{"definition": "同名概念", "mechanism": "机制一"}),
+		semanticRepairPage("page-b", "concept/multiple-b", "同名概念", "object-b", "concept", "", "ev-b", "第二个规范候选。", map[string]string{"definition": "同名概念", "mechanism": "机制二"}),
+		semanticRepairPage("page-c", "concept/multiple-c", "同名概念", "object-c", "concept", "", "ev-c", "歧义候选。", map[string]string{"definition": "同名概念", "mechanism": "机制待确认"}),
+	}
+	adapter := semanticIdentityAdapterFunc(func(_ context.Context, left, right knowledge.IdentityCandidate) (knowledge.SemanticIdentityAssessment, error) {
+		decision := "same_object"
+		if left.KnowledgeObjectID == "object-a" && right.KnowledgeObjectID == "object-b" {
+			decision = "different_object"
+		}
+		return knowledge.SemanticIdentityAssessment{Decision: decision, Confidence: 0.96, Reason: "scripted identity decision"}, nil
+	})
+
+	plan, err := planWikiRepair(context.Background(), video, pages, scope, adapter)
+	require.ErrorIs(t, err, errSemanticIdentityReviewRequired)
+	require.Equal(t, 3, countWikiRepairActions(plan, "normalize"))
+	require.Equal(t, 0, countWikiRepairActions(plan, "quarantine"))
+	require.Condition(t, func() bool {
+		for _, decision := range plan.SemanticDecisions {
+			if decision.Decision == "multiple_anchor_match" && decision.CandidateWikiPageID == "page-c" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestPlanWikiRepairReusesExactObjectIDWithoutSemanticModel(t *testing.T) {
+	video := model.Video{ID: "video-1", Title: "语义归一化", TranscriptGeneration: "generation-1"}
+	scope := wikiRepairScope{SourceDocumentID: "source-1", EvidenceIDs: map[string]struct{}{"ev-a": {}, "ev-b": {}}}
+	pages := []weknora.WikiPage{
+		semanticRepairPage("page-a", "concept/exact-a", "相同对象", "shared-object", "concept", "", "ev-a", "相同身份。", map[string]string{"definition": "相同身份", "mechanism": "同一 ID"}),
+		semanticRepairPage("page-b", "concept/exact-b", "相同对象（概念）", "shared-object", "concept", "", "ev-b", "相同身份。", map[string]string{"definition": "相同身份", "mechanism": "同一 ID"}),
+	}
+
+	plan, err := planWikiRepair(context.Background(), video, pages, scope, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, countWikiRepairActions(plan, "normalize"))
+	require.Equal(t, 1, countWikiRepairActions(plan, "quarantine"))
+	require.Len(t, plan.SemanticDecisions, 1)
+	require.Equal(t, "same_object", plan.SemanticDecisions[0].Decision)
+	require.Equal(t, float64(1), plan.SemanticDecisions[0].Confidence)
+}
+
+type semanticIdentityAdapterFunc func(context.Context, knowledge.IdentityCandidate, knowledge.IdentityCandidate) (knowledge.SemanticIdentityAssessment, error)
+
+func (f semanticIdentityAdapterFunc) Compare(
+	ctx context.Context,
+	left knowledge.IdentityCandidate,
+	right knowledge.IdentityCandidate,
+) (knowledge.SemanticIdentityAssessment, error) {
+	return f(ctx, left, right)
+}
+
+func countWikiRepairActions(plan wikiRepairPlan, action string) int {
+	count := 0
+	for _, item := range plan.Actions {
+		if item.Action == action {
+			count++
+		}
+	}
+	return count
 }
 
 func semanticRepairPage(id, slug, title, objectID, primaryType, entitySubType, evidenceID, core string, fields map[string]string) weknora.WikiPage {

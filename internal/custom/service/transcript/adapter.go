@@ -286,7 +286,8 @@ func buildInputChapters(input RawInput, provider string, paragraphs []rawParagra
 		}
 		seenParagraph[strings.TrimSpace(source.ID)]++
 		usedParagraph[paragraphID] = struct{}{}
-		converted := InputParagraph{ParagraphID: paragraphID, Index: len(chapter.Paragraphs), SpeakerID: strings.TrimSpace(source.SpeakerID)}
+		paragraphSpeakerID := evidenceSpeakerID(source.SpeakerID)
+		converted := InputParagraph{ParagraphID: paragraphID, Index: len(chapter.Paragraphs), SpeakerID: paragraphSpeakerID}
 		for sentenceIndex, sourceSentence := range source.Sentences {
 			text := strings.TrimSpace(sourceSentence.Text)
 			if text == "" {
@@ -314,7 +315,7 @@ func buildInputChapters(input RawInput, provider string, paragraphs []rawParagra
 			evidenceSentence, err := evidence.BuildSentence(evidence.Input{
 				VideoID: input.VideoID, TranscriptGeneration: input.TranscriptGeneration,
 				Ordinal: ordinal, SourceSentenceID: sourceID, Text: text,
-				SpeakerID: adapterFirstNonEmpty(sourceSentence.SpeakerID, source.SpeakerID),
+				SpeakerID: paragraphSpeakerID,
 				StartMs:   sourceSentence.StartMs, EndMs: sourceSentence.EndMs,
 			})
 			if err != nil {
@@ -334,6 +335,14 @@ func buildInputChapters(input RawInput, provider string, paragraphs []rawParagra
 		return nil, fmt.Errorf("transcript payload contains no non-empty timed sentences")
 	}
 	return []InputChapter{chapter}, nil
+}
+
+func evidenceSpeakerID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "0"
+	}
+	return value
 }
 
 // mergeShortParagraphs flattens provider paragraphs into an ordered stream,

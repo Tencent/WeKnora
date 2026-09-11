@@ -1,10 +1,18 @@
 package transcript
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
+	"github.com/Tencent/WeKnora/internal/custom/config"
+	"github.com/Tencent/WeKnora/internal/custom/model"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func TestEffectiveEndSecondsRoundsUpLastTimedChunk(t *testing.T) {
@@ -105,5 +113,50 @@ func TestSelectTimedKnowledgeChunksRejectsGaps(t *testing.T) {
 	}
 	if _, _, err := selectTimedKnowledgeChunks(chunks, "knowledge-1"); err == nil {
 		t.Fatal("expected non-contiguous chunk error")
+	}
+}
+
+func TestReadEvidenceOnlyFetchesRequestedKnowledge(t *testing.T) {
+	requestedKnowledge := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		const prefix = "/api/v1/chunks/"
+		if !strings.HasPrefix(request.URL.Path, prefix) {
+			http.NotFound(writer, request)
+			return
+		}
+		knowledgeID := strings.TrimPrefix(request.URL.Path, prefix)
+		requestedKnowledge = append(requestedKnowledge, knowledgeID)
+		content := "## 视频定位信息\n\n```json\n{\"start_ms\":1000,\"end_ms\":2000,\"evidence_sentence_id\":\"ev-2\",\"transcript_generation\":\"generation-1\"}\n```\n\n## 原文\n\n只读证据"
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"success": true, "data": []weknora.KnowledgeChunk{{KnowledgeID: knowledgeID, ChunkIndex: 0, Content: content}},
+			"total": 1, "page_size": 100,
+		})
+	}))
+	defer server.Close()
+
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "reader.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.VideoTranscriptChunk{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create([]model.VideoTranscriptChunk{
+		{VideoID: "video-1", Generation: "generation-1", Revision: 1, ChunkIndex: 0, EvidenceSentenceID: "ev-1", KnowledgeID: "knowledge-1", Status: "completed", StartMs: 0, EndMs: 900, ContentHash: "hash-1"},
+		{VideoID: "video-1", Generation: "generation-1", Revision: 1, ChunkIndex: 1, EvidenceSentenceID: "ev-2", KnowledgeID: "knowledge-2", Status: "completed", StartMs: 1000, EndMs: 2000, ContentHash: "hash-2"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	reader := NewReader(db, weknora.New(config.WeKnoraConfig{BaseURL: server.URL}))
+	chunks, err := reader.ReadEvidence(t.Context(), "video-1", "generation-1", []string{"ev-2"})
+	if err != nil {
+		t.Fatalf("ReadEvidence returned error: %v", err)
+	}
+	if len(chunks) != 1 || chunks[0].EvidenceSentenceID != "ev-2" || OriginalText(chunks[0].Content) != "只读证据" {
+		t.Fatalf("unexpected evidence result: %#v", chunks)
+	}
+	if len(requestedKnowledge) != 1 || requestedKnowledge[0] != "knowledge-2" {
+		t.Fatalf("ReadEvidence fetched unrequested knowledge: %#v", requestedKnowledge)
 	}
 }

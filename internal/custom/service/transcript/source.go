@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/wikiaudit"
 )
@@ -365,6 +366,91 @@ func sourceDocumentMatches(content, videoID, generation string, durationSeconds 
 	}
 	actualHash := fmt.Sprintf("%x", sha256.Sum256([]byte(documentJSON)))
 	return actualHash == expectedHash
+}
+
+// legacySourceDocumentEquivalent recognizes the only historical source
+// document drift that is safe to repair in place: unknown speakers were
+// serialized as an empty value when the source document was created, while
+// the active evidence manifest now uses the canonical "0" fallback. Every
+// other source field, including text, timing and source IDs, must match.
+func legacySourceDocumentEquivalent(legacy, current FullVideoDocument) bool {
+	if legacy.SchemaVersion != current.SchemaVersion ||
+		legacy.VideoID != current.VideoID ||
+		legacy.TranscriptGeneration != current.TranscriptGeneration ||
+		legacy.Title != current.Title ||
+		legacy.DurationSeconds != current.DurationSeconds ||
+		legacy.ContinuousText != current.ContinuousText ||
+		len(legacy.Chapters) != len(current.Chapters) {
+		return false
+	}
+	for chapterIndex := range current.Chapters {
+		oldChapter, newChapter := legacy.Chapters[chapterIndex], current.Chapters[chapterIndex]
+		if oldChapter.Index != newChapter.Index ||
+			oldChapter.Title != newChapter.Title ||
+			oldChapter.StartMs != newChapter.StartMs ||
+			oldChapter.EndMs != newChapter.EndMs ||
+			oldChapter.ContinuousText != newChapter.ContinuousText ||
+			len(oldChapter.Paragraphs) != len(newChapter.Paragraphs) {
+			return false
+		}
+		for paragraphIndex := range newChapter.Paragraphs {
+			oldParagraph, newParagraph := oldChapter.Paragraphs[paragraphIndex], newChapter.Paragraphs[paragraphIndex]
+			if strings.TrimSpace(oldParagraph.SpeakerID) != "" || evidenceSpeakerID(newParagraph.SpeakerID) != "0" ||
+				oldParagraph.ParagraphID != newParagraph.ParagraphID ||
+				oldParagraph.Index != newParagraph.Index ||
+				oldParagraph.Text != newParagraph.Text ||
+				oldParagraph.StartMs != newParagraph.StartMs ||
+				oldParagraph.EndMs != newParagraph.EndMs ||
+				len(oldParagraph.TimeMarks) != len(newParagraph.TimeMarks) ||
+				len(oldParagraph.SourceSentenceIDs) != len(newParagraph.SourceSentenceIDs) ||
+				len(oldParagraph.EvidenceSentenceIDs) != len(newParagraph.EvidenceSentenceIDs) {
+				return false
+			}
+			for index := range newParagraph.TimeMarks {
+				oldMark, newMark := oldParagraph.TimeMarks[index], newParagraph.TimeMarks[index]
+				if oldParagraph.SourceSentenceIDs[index] != newParagraph.SourceSentenceIDs[index] ||
+					oldParagraph.EvidenceSentenceIDs[index] != oldMark.EvidenceSentenceID ||
+					newParagraph.EvidenceSentenceIDs[index] != newMark.EvidenceSentenceID ||
+					oldMark.SourceSentenceID != newMark.SourceSentenceID ||
+					oldMark.Text != newMark.Text ||
+					oldMark.StartMs != newMark.StartMs ||
+					oldMark.EndMs != newMark.EndMs {
+					return false
+				}
+				legacyEvidence, legacyErr := evidence.BuildSentence(evidence.Input{
+					VideoID: legacy.VideoID, TranscriptGeneration: legacy.TranscriptGeneration,
+					Ordinal:          evidenceOrdinal(legacy, chapterIndex, paragraphIndex, index),
+					SourceSentenceID: oldMark.SourceSentenceID, Text: oldMark.Text,
+					SpeakerID: "", StartMs: oldMark.StartMs, EndMs: oldMark.EndMs,
+				})
+				currentEvidence, currentErr := evidence.BuildSentence(evidence.Input{
+					VideoID: current.VideoID, TranscriptGeneration: current.TranscriptGeneration,
+					Ordinal:          evidenceOrdinal(current, chapterIndex, paragraphIndex, index),
+					SourceSentenceID: newMark.SourceSentenceID, Text: newMark.Text,
+					SpeakerID: "0", StartMs: newMark.StartMs, EndMs: newMark.EndMs,
+				})
+				if legacyErr != nil || currentErr != nil ||
+					oldMark.EvidenceSentenceID != legacyEvidence.ID ||
+					newMark.EvidenceSentenceID != currentEvidence.ID {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func evidenceOrdinal(doc FullVideoDocument, chapterIndex, paragraphIndex, markIndex int) int {
+	ordinal := 0
+	for chapter := 0; chapter < chapterIndex; chapter++ {
+		for _, paragraph := range doc.Chapters[chapter].Paragraphs {
+			ordinal += len(paragraph.TimeMarks)
+		}
+	}
+	for paragraph := 0; paragraph < paragraphIndex; paragraph++ {
+		ordinal += len(doc.Chapters[chapterIndex].Paragraphs[paragraph].TimeMarks)
+	}
+	return ordinal + markIndex
 }
 
 func SourceContent(doc FullVideoDocument, documentJSON, hash string) string {

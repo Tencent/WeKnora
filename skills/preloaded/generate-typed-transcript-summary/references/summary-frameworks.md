@@ -130,6 +130,20 @@
     "reason": "内容包含明确的学习目标、步骤和应用要求",
     "evidenceChunkIds": ["转写分块 ID"]
   },
+  "orchestrationProfile": {
+    "schemaVersion": 1,
+    "primaryTopic": "MCP 的概念与使用",
+    "topicUnits": [
+      {
+        "title": "MCP 基础概念",
+        "abstract": "说明 MCP 解决的问题、核心角色和适用范围。",
+        "contentForms": ["concept_cognition"],
+        "learningOutcomes": ["能够说明 MCP 的核心作用"],
+        "summaryBlockIds": ["block-training-content-system-1"],
+        "evidenceChunkIds": ["转写分块 ID"]
+      }
+    ]
+  },
   "sections": [
     {
       "id": "learning-goals-audience-prerequisites",

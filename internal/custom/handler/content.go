@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +90,7 @@ func wikiAnchor(page weknora.WikiPage, knowledgeType knowledge.KnowledgeType, so
 	timestamp, seconds := wikiAnchorTimeline(timestampSource)
 	return knowledge.AnchorItem{
 		ID: page.ID, Slug: page.Slug,
-		Title:                firstNonEmpty(frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), firstMarkdownHeading(page.Content), page.Title, page.Slug),
+		Title:                knowledge.CanonicalKnowledgeTitle(firstNonEmpty(frontmatterString(frontmatter, "title"), frontmatterString(frontmatter, "canonical_name"), firstMarkdownHeading(page.Content), page.Title, page.Slug)),
 		Type:                 knowledgeType,
 		PrimaryType:          knowledgeType,
 		KnowledgeObjectID:    frontmatterString(frontmatter, "knowledge_object_id"),
@@ -578,8 +579,23 @@ type RelatedKnowledgeResp struct {
 	UpdatedAt    time.Time                                          `json:"updated_at"`
 	VideoID      string                                             `json:"video_id"`
 	KBID         string                                             `json:"kb_id"`
-	Anchors      map[knowledge.KnowledgeType][]knowledge.AnchorItem `json:"anchors"`     // 5 类型分组
-	CrossVideo   []knowledge.AnchorItem                             `json:"cross_video"` // 跨视频边（CP-T008 后续接 Neo4j）
+	Anchors      map[knowledge.KnowledgeType][]knowledge.AnchorItem `json:"anchors"` // 5 类型分组
+	CrossVideo   []RelatedCrossVideoItem                            `json:"cross_video"`
+}
+
+type RelatedCrossVideoItem struct {
+	ID                  string                  `json:"id"`
+	AnchorID            string                  `json:"anchor_id"`
+	Type                knowledge.KnowledgeType `json:"type"`
+	Title               string                  `json:"title"`
+	KnowledgeContent    string                  `json:"knowledge_content"`
+	RelationType        string                  `json:"relation_type"`
+	RelationDescription string                  `json:"relation_description"`
+	VideoID             string                  `json:"video_id"`
+	VideoTitle          string                  `json:"video_title"`
+	VideoType           string                  `json:"video_type,omitempty"`
+	Timestamp           string                  `json:"timestamp,omitempty"`
+	Seconds             int                     `json:"seconds,omitempty"`
 }
 
 func isKnowledgeBaseWikiPage(page *weknora.WikiPage, videoID string) bool {
@@ -663,6 +679,11 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 	}
 
 	anchors := make([]knowledge.AnchorItem, 0, len(pages))
+	crossCandidates := make([]struct {
+		page         weknora.WikiPage
+		anchor       knowledge.AnchorItem
+		contribution knowledge.EvidenceContribution
+	}, 0)
 	for _, p := range pages {
 		if p.ID == knowledgeBasePage.ID {
 			continue
@@ -670,11 +691,19 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 		frontmatter := p.ParsedFrontmatter()
 		fmType := knowledgeObjectType(frontmatter)
 		knowledgeObjectID := frontmatterString(frontmatter, "knowledge_object_id")
-		pageGeneration := frontmatterString(frontmatter, "transcript_generation")
 		auditStatus := strings.ToLower(frontmatterString(frontmatter, "audit_status"))
-		if knowledgeObjectID == "" ||
-			pageGeneration != strings.TrimSpace(video.TranscriptGeneration) ||
-			auditStatus != "passed" {
+		if knowledgeObjectID == "" || auditStatus != "passed" {
+			continue
+		}
+		contributions, contributionErr := knowledge.ParseEvidenceContributions(p.Content)
+		if contributionErr != nil {
+			continue
+		}
+		if len(contributions) == 0 {
+			contributions = legacyReadContribution(frontmatter)
+		}
+		currentContribution, contributionOK := contributionForVideoGeneration(contributions, video.ID, video.TranscriptGeneration)
+		if !contributionOK {
 			continue
 		}
 		subType, _ := frontmatter["entity_sub_type"].(string)
@@ -686,15 +715,28 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 			continue
 		}
 		anchor := wikiAnchor(p, mappedType, "skill")
+		anchor.EvidenceIDs = append([]string(nil), currentContribution.EvidenceIDs...)
+		anchor.TranscriptGeneration = currentContribution.TranscriptGeneration
+		anchor.TimeRange = currentContribution.TimeRange
 		applyEvidenceTimeline(&anchor, *video, byEvidence, byIndex)
 		anchor.EntitySubType = subType
 		anchor.SourceVideoTitle = video.Title
+		for _, contribution := range contributions {
+			if contribution.VideoID != video.ID && strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+				anchor.RelatedVideoIDs = append(anchor.RelatedVideoIDs, contribution.VideoID)
+			}
+		}
+		anchor.RelatedVideoIDs = uniqueSortedStrings(anchor.RelatedVideoIDs)
 		anchors = append(anchors, anchor)
+		crossCandidates = append(crossCandidates, struct {
+			page         weknora.WikiPage
+			anchor       knowledge.AnchorItem
+			contribution knowledge.EvidenceContribution
+		}{page: p, anchor: anchor, contribution: currentContribution})
 	}
 
 	merged := knowledge.MergeAnchors(anchors, nil)
-
-	// 跨视频边（CP-T008 后续接 Neo4j；本版本返回空）
+	crossVideo := h.relatedCrossVideoItems(ctx, video.ID, crossCandidates)
 	c.JSON(http.StatusOK, RelatedKnowledgeResp{
 		Status:     "completed",
 		Stage:      "graph",
@@ -702,8 +744,123 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 		VideoID:    video.ID,
 		KBID:       h.KBID,
 		Anchors:    merged,
-		CrossVideo: []knowledge.AnchorItem{},
+		CrossVideo: crossVideo,
 	})
+}
+
+func contributionForVideoGeneration(contributions []knowledge.EvidenceContribution, videoID, generation string) (knowledge.EvidenceContribution, bool) {
+	for _, contribution := range contributions {
+		if contribution.VideoID == strings.TrimSpace(videoID) && contribution.TranscriptGeneration == strings.TrimSpace(generation) &&
+			strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") && len(contribution.EvidenceIDs) > 0 {
+			return contribution, true
+		}
+	}
+	return knowledge.EvidenceContribution{}, false
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func (h *ContentHandler) relatedCrossVideoItems(ctx context.Context, currentVideoID string, candidates []struct {
+	page         weknora.WikiPage
+	anchor       knowledge.AnchorItem
+	contribution knowledge.EvidenceContribution
+}) []RelatedCrossVideoItem {
+	videoIDs := make([]string, 0)
+	seenVideoIDs := map[string]struct{}{}
+	for _, candidate := range candidates {
+		contributions, err := knowledge.ParseEvidenceContributions(candidate.page.Content)
+		if err != nil {
+			continue
+		}
+		for _, contribution := range contributions {
+			if contribution.VideoID == currentVideoID || !strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") || len(contribution.EvidenceIDs) == 0 {
+				continue
+			}
+			if _, exists := seenVideoIDs[contribution.VideoID]; !exists {
+				seenVideoIDs[contribution.VideoID] = struct{}{}
+				videoIDs = append(videoIDs, contribution.VideoID)
+			}
+		}
+	}
+	if len(videoIDs) == 0 {
+		return []RelatedCrossVideoItem{}
+	}
+	sort.Strings(videoIDs)
+	var videos []model.Video
+	if err := h.DB.WithContext(ctx).Where("id IN ?", videoIDs).Find(&videos).Error; err != nil {
+		return []RelatedCrossVideoItem{}
+	}
+	videoByID := make(map[string]model.Video, len(videos))
+	for _, item := range videos {
+		videoByID[item.ID] = item
+	}
+	result := make([]RelatedCrossVideoItem, 0)
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		contributions, err := knowledge.ParseEvidenceContributions(candidate.page.Content)
+		if err != nil {
+			continue
+		}
+		for _, contribution := range contributions {
+			if contribution.VideoID == currentVideoID || !strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+				continue
+			}
+			target, exists := videoByID[contribution.VideoID]
+			if !exists || target.TranscriptGeneration != contribution.TranscriptGeneration {
+				continue
+			}
+			key := candidate.page.ID + "\x00" + contribution.VideoID + "\x00" + contribution.TranscriptGeneration
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			_, byIndex, err := currentEvidenceChunkIndexes(ctx, h.DB, target)
+			if err != nil {
+				continue
+			}
+			var chunk *model.VideoTranscriptChunk
+			for _, evidenceID := range contribution.EvidenceIDs {
+				for _, item := range byIndex {
+					if item.KnowledgeID == evidenceID || item.EvidenceSentenceID == evidenceID {
+						copy := item
+						chunk = &copy
+						break
+					}
+				}
+				if chunk != nil {
+					break
+				}
+			}
+			if chunk == nil {
+				continue
+			}
+			result = append(result, RelatedCrossVideoItem{
+				ID:       candidate.page.ID + ":shared_object:" + contribution.VideoID,
+				AnchorID: candidate.page.ID, Type: candidate.anchor.Type, Title: candidate.anchor.Title,
+				KnowledgeContent: candidate.anchor.Title, RelationType: "related_to",
+				RelationDescription: "同一规范知识对象在其他视频中出现", VideoID: target.ID, VideoTitle: target.Title,
+				VideoType: target.VideoType, Timestamp: formatGraphTimestamp(chunk.StartMs / 1000), Seconds: chunk.StartMs / 1000,
+			})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result
 }
 
 // WikiPageResp 单页 Wiki 响应（CP-T009）

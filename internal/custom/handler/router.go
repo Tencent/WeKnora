@@ -35,8 +35,9 @@ type Deps struct {
 	KnowledgeWeKnora *weknora.Client
 	// WeKnora is retained as a read-only compatibility alias for the evidence
 	// adapter. Wiki and Agent routes never use this field.
-	WeKnora *weknora.Client
-	Graph   knowledgegraph.Store
+	WeKnora               *weknora.Client
+	Graph                 knowledgegraph.Store
+	TrainingOrchestration TrainingOrchestrationAPI
 }
 
 // NewRouter 构建自研后端路由。
@@ -84,9 +85,10 @@ func BuildRouterForDeps(deps *Deps) *gin.Engine {
 		deps.EvidenceWeKnora = nil
 		deps.KnowledgeWeKnora = nil
 		deps.WeKnora = nil
-		deps.Wiki = nil
-		deps.Graph = nil
-	}
+			deps.Wiki = nil
+			deps.Graph = nil
+			deps.TrainingOrchestration = nil
+		}
 	return buildRouter(deps)
 }
 
@@ -298,6 +300,10 @@ func buildRouter(deps *Deps) *gin.Engine {
 	api.GET("/graph", graphHandler.Get)
 	api.GET("/graph/cross-video", graphHandler.CrossVideo)
 	api.GET("/graph/wiki-pages/:wikiPageID", graphHandler.Detail)
+	trainingHandler := NewTrainingOrchestrationHandler(deps.TrainingOrchestration)
+	api.POST("/training-orchestration/generate", trainingHandler.Generate)
+	api.GET("/training-orchestration/jobs/:id", trainingHandler.Job)
+	api.GET("/training-orchestration/current", trainingHandler.Current)
 
 	if deps.Wiki != nil {
 		ch := NewContentHandler(deps.DB, deps.Wiki, roles.Knowledge)

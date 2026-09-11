@@ -41,6 +41,8 @@ type directContentLLM interface {
 	PromptVersion() string
 }
 
+var errDiscardSummaryResult = errors.New("discard summary result")
+
 func NewDirectContentHandler(db *gorm.DB, client *llm.Client, wk *weknora.Client, wiki *weknora.WikiClient, orchestrator *skill.Orchestrator, jobType string) *DirectContentHandler {
 	knowledgeKBID := ""
 	if orchestrator != nil {
@@ -209,13 +211,23 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 				continue
 			}
 			summary.NormalizeEvidenceChunkIDs(&document, chunks)
+			if h.Job == skill.JobSummary {
+				if err := summary.NormalizeOrchestrationProfileReferences(&document, knownChunkIDs); err != nil {
+					validationErr = fmt.Errorf("normalize %s orchestration profile: %w", h.Job, err)
+					continue
+				}
+			}
 			expectedVideoType := video.VideoType
 			if h.Job == skill.JobSummary {
 				// The first summary is routed from the transcript itself. The upload
 				// type is only a weak hint and must not lock the framework.
 				expectedVideoType = ""
 			}
-			if err := summary.Validate(document, expectedVideoType, knownChunkIDs); err != nil {
+			validateSummary := summary.Validate
+			if h.Job == skill.JobSummary && job.ResultStage != "draft" {
+				validateSummary = summary.ValidateGenerated
+			}
+			if err := validateSummary(document, expectedVideoType, knownChunkIDs); err != nil {
 				validationErr = fmt.Errorf("validate %s output: %w", h.Job, err)
 				continue
 			}
@@ -234,7 +246,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 					validationErr = fmt.Errorf("bind %s knowledge references: %w", h.Job, err)
 					continue
 				}
-				if err := h.validateEnhancedSummary(ctx, video, document); err != nil {
+				if err := h.validateEnhancedSummary(ctx, video, &document); err != nil {
 					validationErr = fmt.Errorf("validate %s structure: %w", h.Job, err)
 					continue
 				}
@@ -252,6 +264,14 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		}
 		pageTitle = video.Title + "_知识总结"
 		pageBody = string(canonical)
+	}
+	if h.Job == skill.JobSummary || h.Job == skill.JobSummaryEnhance {
+		if err := h.ensureSummaryWriteIsCurrent(ctx, video.ID, generation, skill.IsExplicitSummaryRegeneration(job.InputPayload)); err != nil {
+			if errors.Is(err, errDiscardSummaryResult) {
+				return nil
+			}
+			return err
+		}
 	}
 	pageSlug := contract.WriteSlug(video.ID)
 	if job.ResultStage == "draft" {
@@ -536,7 +556,27 @@ func (h *DirectContentHandler) persistDraftReference(ctx context.Context, videoI
 	return nil
 }
 
-func (h *DirectContentHandler) validateEnhancedSummary(ctx context.Context, video *model.Video, enhanced summary.Document) error {
+func (h *DirectContentHandler) ensureSummaryWriteIsCurrent(ctx context.Context, videoID, generation string, explicitRegeneration bool) error {
+	var current model.Video
+	if err := h.DB.WithContext(ctx).Select("id", "transcript_generation").First(&current, "id = ?", videoID).Error; err != nil {
+		return fmt.Errorf("recheck summary transcript generation: %w", err)
+	}
+	if strings.TrimSpace(current.TranscriptGeneration) != strings.TrimSpace(generation) {
+		return fmt.Errorf("%w for video %s: transcript generation changed", errDiscardSummaryResult, videoID)
+	}
+	if !explicitRegeneration {
+		protected, err := h.Orchestrator.IsSummaryUserEditProtected(ctx, videoID)
+		if err != nil {
+			return fmt.Errorf("recheck summary user edit protection: %w", err)
+		}
+		if protected {
+			return fmt.Errorf("%w for video %s: summary is user edited", errDiscardSummaryResult, videoID)
+		}
+	}
+	return nil
+}
+
+func (h *DirectContentHandler) validateEnhancedSummary(ctx context.Context, video *model.Video, enhanced *summary.Document) error {
 	if strings.TrimSpace(video.SummaryWikiPageID) == "" {
 		return fmt.Errorf("base summary page is missing")
 	}
@@ -554,7 +594,10 @@ func (h *DirectContentHandler) validateEnhancedSummary(ctx context.Context, vide
 	if err := summary.Validate(base, video.VideoType, nil); err != nil {
 		return fmt.Errorf("validate base summary: %w", err)
 	}
-	return summary.ValidateEnhancement(base, enhanced)
+	if err := summary.PreserveOrchestrationProfile(&base, enhanced); err != nil {
+		return err
+	}
+	return summary.ValidateEnhancement(base, *enhanced)
 }
 
 // readContentChunks keeps the two-stage exception narrow: outline and summary
@@ -884,13 +927,13 @@ func summaryPrompt(videoType string, enhancement bool) string {
 	for _, candidate := range frameworks {
 		if videoType != "" {
 			for _, section := range candidate.sections {
-				sectionShape = append(sectionShape, fmt.Sprintf(`{"id":%q,"title":%q,"blocks":[{"id":"block-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`, section.ID, section.Title))
+				sectionShape = append(sectionShape, fmt.Sprintf(`{"id":%q,"title":%q,"blocks":[{"id":"block-%s-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`, section.ID, section.Title, section.ID))
 			}
 		}
 		frameworkDescriptions = append(frameworkDescriptions, fmt.Sprintf("%s=%s", candidate.videoType, frameworkIdentity(candidate.sections)))
 	}
 	if videoType == "" {
-		sectionShape = append(sectionShape, `{"id":"选中类型的章节ID","title":"选中类型的标准标题","blocks":[{"id":"block-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`)
+		sectionShape = append(sectionShape, `{"id":"选中类型的章节ID","title":"选中类型的标准标题","blocks":[{"id":"block-选中类型的章节ID-1","kind":"paragraph","text":"本节内容","evidenceChunkIds":["转写分块ID"]}]}`)
 	}
 	mode := "生成"
 	if enhancement {
@@ -901,13 +944,15 @@ func summaryPrompt(videoType string, enhancement bool) string {
 		videoTypeContract = fmt.Sprintf(`"videoType":%q`, videoType)
 	}
 	classificationContract := `"classification":{"confidence":0.91,"reason":"基于转写的简短判型理由","evidenceChunkIds":["判型证据分块ID"]}`
-	return fmt.Sprintf("任务：%s类型化智能总结。只返回一个 JSON 对象，不要输出 Markdown、代码围栏、解释文字、HTML 或 XML。\n"+
+	orchestrationContract := `"orchestrationProfile":{"schemaVersion":1,"primaryTopic":"当前转写支持的主主题","topicUnits":[{"title":"主题单元","abstract":"基于转写的主题摘要","contentForms":["concept_cognition"],"learningOutcomes":["可观察的学习结果"],"summaryBlockIds":["正文 block ID"],"evidenceChunkIds":["转写分块ID"]}]}`
+	return fmt.Sprintf("任务：%s类型化智能总结，并在同一次模型调用中生成编排卡片。只返回一个 JSON 对象，不要输出 Markdown、代码围栏、解释文字、HTML 或 XML。\n"+
 		"先依据完整转写判断主类型，再匹配模板。候选类型及固定章节 ID、标题：%s。确定 videoType 后，sections 必须逐项复制该类型的完整固定章节，禁止混用其他类型章节。\n"+
-		"JSON 契约：必须返回 {\"schemaVersion\":%d,%s,%s,\"sections\":[%s]}。sections 必须严格按选中类型的标题和顺序输出：%s。\n"+
+		"JSON 契约：必须返回 {\"schemaVersion\":%d,%s,%s,%s,\"sections\":[%s]}。sections 必须严格按选中类型的标题和顺序输出：%s。\n"+
 		"每个 section 必须包含 blocks 数组。有可靠原文证据时才生成 block；block.kind 只能是 paragraph 或 bullet，block.text 必须是可直接展示的纯文本，不得包含 Markdown 标记；每个非空 block 必须提供 evidenceChunkIds，且只能引用给定转写分块 ID。一个 block 可以引用多个分块。knowledge_refs 与 evidence_refs 由系统在保存前生成，不要自行编造或输出。\n"+
+		"orchestrationProfile 是正式总结同次生成的有界路由卡片，必须存在且 schemaVersion 为 1；只允许 1 至 5 个 topicUnits。primaryTopic、title、abstract、learningOutcomes 只能来自当前转写，不能补充常识或推断。contentForms 只能使用 skill_method、tool_operation、concept_cognition、case_analysis、humanities_reflection、process_standard；每个单元必须至少包含一个 contentForms、learningOutcomes、summaryBlockIds 和 evidenceChunkIds。summaryBlockIds 必须引用本 JSON sections 中真实存在且全局唯一的 block ID；evidenceChunkIds 必须是这些 summaryBlockIds 对应正文 block 的 evidenceChunkIds 去重后的子集，禁止引用其他分块。所有 topicUnits 的 abstract 合计目标为 300 至 500 个汉字，最多 500 个汉字；没有可靠主题依据时不要伪造，返回空卡片会被程序拒绝。\n"+
 		"选择 training 时，以“培训内容体系”为主干，按讲师真实授课顺序详细还原知识；背景引入、理论讲解、案例分析、实操演示、互动问答只是常见顺序，不得强行补齐。保留原文出现的案例细节和工具使用说明；原文金句必须逐字引用，不得改写成讲师引语；方法必须写清原文明示的步骤和判断标准。固定培训章节必须全部保留，原文没有可靠依据的章节必须输出 blocks:[]，不得创建“未提及”“信息不足”“无”等占位内容，不得使用常识、推测或知识增强信息补齐原文不存在的事实。\n"+
 		"不得删除、合并或改名章节。非培训类型的缺失内容按对应模板规则处理。判型置信度低于 0.75 时必须选择 general；会议判型至少引用两段不同位置的转写分块。%s%s\n",
-		mode, strings.Join(frameworkDescriptions, "；"), summary.SchemaVersion, videoTypeContract, classificationContract, strings.Join(sectionShape, ","), strings.Join(frameworkDescriptions, "；"), meetingSummaryInstruction(videoType), enhancementInstruction(enhancement))
+		mode, strings.Join(frameworkDescriptions, "；"), summary.SchemaVersion, videoTypeContract, classificationContract, orchestrationContract, strings.Join(sectionShape, ","), strings.Join(frameworkDescriptions, "；"), meetingSummaryInstruction(videoType), enhancementInstruction(enhancement))
 }
 
 func meetingSummaryInstruction(videoType string) string {
@@ -935,7 +980,7 @@ func frameworkIdentity(framework []summary.FrameworkSection) string {
 
 func enhancementInstruction(enhancement bool) string {
 	if enhancement {
-		return "仅补充知识底座和转写共同证明的内容，并保持所有 section 的 id、title 和顺序不变。"
+		return "仅补充知识底座和转写共同证明的内容，并保持所有 section 的 id、title 和顺序不变；orchestrationProfile 是基础总结的不可变卡片，必须原样保留，不得新增、删除、改名或改动任何主题、block 和证据引用。"
 	}
 	return "明确区分原文观点、忠实概括、跨段归纳和分析推断。"
 }

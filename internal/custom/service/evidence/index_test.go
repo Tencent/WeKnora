@@ -86,7 +86,7 @@ func TestIndexSearchScopesResultsAndRestoresSentenceMapping(t *testing.T) {
 	if err := db.Create(&model.VideoTranscriptChunk{VideoID: videoID, Generation: generation, Revision: 1, ChunkIndex: 0, KnowledgeID: "k-1", EvidenceSentenceID: "evs:v1:first", SourceSegmentID: "s1", SpeakerID: "speaker-a", StartMs: 100, EndMs: 1200, ContentHash: "hash-1", Status: "completed"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	client := testEvidenceClient(t, nil, []weknora.SearchResult{{ID: "result-1", KnowledgeID: "k-1", Content: content}})
+	client := testEvidenceClient(t, map[string]string{"k-1": content}, []weknora.SearchResult{{ID: "result-1", KnowledgeID: "k-1", Content: "索引命中片段"}})
 	records, err := NewIndex(db, client).Search(context.Background(), videoID, generation, "命中", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestIndexSearchRejectsResultOutsideManifest(t *testing.T) {
 	}
 }
 
-func TestIndexSearchRejectsDuplicateOrMissingEvidenceMetadata(t *testing.T) {
+func TestIndexSearchDeduplicatesFragmentsAndRequiresCompleteEvidence(t *testing.T) {
 	db := testEvidenceDB(t)
 	if err := db.Create(&model.Video{ID: "video-1", Title: "视频", TranscriptGeneration: "generation-1"}).Error; err != nil {
 		t.Fatal(err)
@@ -132,19 +132,79 @@ func TestIndexSearchRejectsDuplicateOrMissingEvidenceMetadata(t *testing.T) {
 	if err := db.Create(&model.VideoTranscriptChunk{VideoID: "video-1", Generation: "generation-1", Revision: 1, ChunkIndex: 0, KnowledgeID: "k-1", EvidenceSentenceID: "evs:v1:first", SourceSegmentID: "s1", StartMs: 0, EndMs: 1000, ContentHash: "hash", Status: "completed"}).Error; err != nil {
 		t.Fatal(err)
 	}
-	t.Run("duplicate", func(t *testing.T) {
+	t.Run("duplicate fragments", func(t *testing.T) {
 		content := evidenceContent("evs:v1:first", "s1", "", "generation-1", 0, 1000, "原文")
-		client := testEvidenceClient(t, nil, []weknora.SearchResult{{KnowledgeID: "k-1", Content: content}, {KnowledgeID: "k-1", Content: content}})
-		if _, err := NewIndex(db, client).Search(context.Background(), "video-1", "generation-1", "词", 5); err == nil {
-			t.Fatal("expected duplicate search result to be rejected")
+		client := testEvidenceClient(t, map[string]string{"k-1": content}, []weknora.SearchResult{{KnowledgeID: "k-1", Content: content}, {KnowledgeID: "k-1", Content: content}})
+		records, err := NewIndex(db, client).Search(context.Background(), "video-1", "generation-1", "词", 5)
+		if err != nil {
+			t.Fatalf("duplicate fragments should be deduplicated: %v", err)
+		}
+		if len(records) != 1 || records[0].EvidenceSentenceID != "evs:v1:first" {
+			t.Fatalf("unexpected deduplicated records: %#v", records)
 		}
 	})
 	t.Run("missing metadata", func(t *testing.T) {
 		client := testEvidenceClient(t, nil, []weknora.SearchResult{{KnowledgeID: "k-1", Content: "只有原文，没有定位"}})
 		if _, err := NewIndex(db, client).Search(context.Background(), "video-1", "generation-1", "词", 5); err == nil {
-			t.Fatal("expected missing metadata to be rejected")
+			t.Fatal("expected missing complete evidence document to be rejected")
 		}
 	})
+}
+
+func TestIndexSearchUsesCompleteDocumentWhenSearchReturnsFragments(t *testing.T) {
+	db := testEvidenceDB(t)
+	videoID, generation := "video-fragments", "generation-fragments"
+	if err := db.Create(&model.Video{ID: videoID, Title: "视频", TranscriptGeneration: generation}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.VideoTranscriptChunk{
+		VideoID: videoID, Generation: generation, Revision: 1, ChunkIndex: 0,
+		KnowledgeID: "knowledge-fragments", EvidenceSentenceID: "evs:v1:fragments",
+		SourceSegmentID: "s-fragments", StartMs: 100, EndMs: 1200, ContentHash: "hash", Status: "completed",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	full := evidenceContent("evs:v1:fragments", "s-fragments", "", generation, 100, 1200, "完整证据原文")
+	client := testEvidenceClient(t, map[string]string{"knowledge-fragments": full}, []weknora.SearchResult{
+		{KnowledgeID: "knowledge-fragments", Content: "命中的索引分片"},
+		{KnowledgeID: "knowledge-fragments", Content: "另一个索引分片"},
+	})
+	records, err := NewIndex(db, client).Search(context.Background(), videoID, generation, "证据", 5)
+	if err != nil {
+		t.Fatalf("Search should recover the complete source document: %v", err)
+	}
+	if len(records) != 1 || records[0].Text != "完整证据原文" || records[0].StartMs != 100 || records[0].EndMs != 1200 {
+		t.Fatalf("unexpected fragment-backed record: %#v", records)
+	}
+}
+
+func TestIndexSearchDoesNotTrustFragmentThatLooksComplete(t *testing.T) {
+	db := testEvidenceDB(t)
+	videoID, generation := "video-fragment-marker", "generation-fragment-marker"
+	if err := db.Create(&model.Video{ID: videoID, Title: "视频", TranscriptGeneration: generation}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.VideoTranscriptChunk{
+		VideoID: videoID, Generation: generation, Revision: 1, ChunkIndex: 0,
+		KnowledgeID: "knowledge-fragment-marker", EvidenceSentenceID: "evs:v1:marker",
+		SourceSegmentID: "s-marker", StartMs: 100, EndMs: 1200, ContentHash: "hash", Status: "completed",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	full := evidenceContent("evs:v1:marker", "s-marker", "", generation, 100, 1200, "完整证据")
+	// This fragment contains the source marker but is not a complete evidence
+	// document. The index must reload the canonical document instead of
+	// parsing this fragment as if it were complete.
+	client := testEvidenceClient(t, map[string]string{"knowledge-fragment-marker": full}, []weknora.SearchResult{
+		{KnowledgeID: "knowledge-fragment-marker", Content: "## 原文\n\n残缺索引片段"},
+	})
+	records, err := NewIndex(db, client).Search(context.Background(), videoID, generation, "证据", 5)
+	if err != nil {
+		t.Fatalf("Search should reload the canonical evidence document: %v", err)
+	}
+	if len(records) != 1 || records[0].Text != "完整证据" || records[0].StartMs != 100 || records[0].EndMs != 1200 {
+		t.Fatalf("unexpected canonical record: %#v", records)
+	}
 }
 
 func TestIndexSearchUsesFixedEvidenceKnowledgeBase(t *testing.T) {
@@ -163,6 +223,15 @@ func TestIndexSearchUsesFixedEvidenceKnowledgeBase(t *testing.T) {
 
 	seenPath := ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/knowledge-bases/evidence-kb/hybrid-search" {
+			if r.URL.Path == "/api/v1/chunks/evidence-1" {
+				content := evidenceContent("evs:v1:routing", "s1", "", generation, 0, 1000, "原文")
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": []weknora.KnowledgeChunk{{ID: "chunk-evidence-1", KnowledgeID: "evidence-1", Content: content, ChunkIndex: 0}}, "total": 1})
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
 		seenPath = r.URL.Path
 		content := evidenceContent("evs:v1:routing", "s1", "", generation, 0, 1000, "原文")
 		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": []weknora.SearchResult{{KnowledgeID: "evidence-1", Content: content}}})
@@ -175,6 +244,50 @@ func TestIndexSearchUsesFixedEvidenceKnowledgeBase(t *testing.T) {
 	}
 	if seenPath != "/api/v1/knowledge-bases/evidence-kb/hybrid-search" {
 		t.Fatalf("search path = %q, want evidence KB", seenPath)
+	}
+}
+
+func TestIndexSearchWithinRestrictsCandidatesToEvidenceWhitelist(t *testing.T) {
+	db := testEvidenceDB(t)
+	videoID, generation := "video-scoped", "generation-scoped"
+	if err := db.Create(&model.Video{ID: videoID, Title: "视频", TranscriptGeneration: generation}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create([]model.VideoTranscriptChunk{
+		{VideoID: videoID, Generation: generation, Revision: 1, ChunkIndex: 0, KnowledgeID: "knowledge-1", EvidenceSentenceID: "ev-1", SourceSegmentID: "s1", StartMs: 0, EndMs: 1000, ContentHash: "hash-1", Status: "completed"},
+		{VideoID: videoID, Generation: generation, Revision: 1, ChunkIndex: 1, KnowledgeID: "knowledge-2", EvidenceSentenceID: "ev-2", SourceSegmentID: "s2", StartMs: 1000, EndMs: 2000, ContentHash: "hash-2", Status: "completed"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var params weknora.SearchParams
+		if r.URL.Path == "/api/v1/knowledge-bases/evidence-kb/hybrid-search" {
+			if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+				t.Fatal(err)
+			}
+			if len(params.KnowledgeIDs) != 1 || params.KnowledgeIDs[0] != "knowledge-2" {
+				t.Fatalf("search escaped evidence whitelist: %#v", params.KnowledgeIDs)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": []weknora.SearchResult{{KnowledgeID: "knowledge-2", Content: "命中索引片段"}}})
+			return
+		}
+		if r.URL.Path == "/api/v1/chunks/knowledge-2" {
+			content := evidenceContent("ev-2", "s2", "", generation, 1000, 2000, "命中证据")
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": []weknora.KnowledgeChunk{{ID: "chunk-knowledge-2", KnowledgeID: "knowledge-2", Content: content, ChunkIndex: 0}}, "total": 1})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := weknora.New(config.WeKnoraConfig{BaseURL: server.URL, KBID: "evidence-kb"})
+	records, err := NewIndex(db, client).SearchWithin(t.Context(), videoID, generation, "复盘", []string{"ev-2"}, 5)
+	if err != nil {
+		t.Fatalf("SearchWithin returned error: %v", err)
+	}
+	if len(records) != 1 || records[0].EvidenceSentenceID != "ev-2" || records[0].Text != "命中证据" {
+		t.Fatalf("unexpected scoped retrieval result: %#v", records)
 	}
 }
 

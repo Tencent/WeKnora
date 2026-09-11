@@ -134,6 +134,8 @@ func (a *AgentClient) TriggerSkill(
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	eventType := ""
+	productionGraph := productionJob != nil && strings.EqualFold(strings.TrimSpace(productionJob.JobType), "graph")
+	sawAuditedWikiWrite := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -147,6 +149,9 @@ func (a *AgentClient) TriggerSkill(
 		if strings.HasPrefix(line, "data:") {
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if data == "[DONE]" {
+				if productionGraph {
+					return fmt.Errorf("agent chat production graph stream ended without a verified completion event")
+				}
 				return nil
 			}
 			// 检测 complete / terminal error 事件。非终止工具错误留给
@@ -155,7 +160,25 @@ func (a *AgentClient) TriggerSkill(
 			if err := json.Unmarshal([]byte(data), &evt); err == nil {
 				responseType, _ := evt["response_type"].(string)
 				done, _ := evt["done"].(bool)
+				if responseType == "tool_result" && isAuditedWikiWrite(evt) {
+					sawAuditedWikiWrite = true
+				}
 				if responseType == "complete" && done {
+					completion := eventPayload(evt)
+					outcome, _ := completion["outcome"].(string)
+					if outcome == "failed" {
+						reason, _ := completion["failure_reason"].(string)
+						if reason == "" {
+							reason = "unknown"
+						}
+						return fmt.Errorf("agent chat failed: %s", reason)
+					}
+					if productionGraph && intValue(completion["total_steps"]) <= 0 {
+						return fmt.Errorf("agent chat production graph completed without valid agent steps")
+					}
+					if productionGraph && !sawAuditedWikiWrite {
+						return fmt.Errorf("agent chat production graph completed without an audited wiki_write_page")
+					}
 					return nil
 				}
 				if responseType == "error" && done {
@@ -178,6 +201,34 @@ func (a *AgentClient) TriggerSkill(
 		return err
 	}
 	return fmt.Errorf("agent chat stream ended before a terminal event")
+}
+
+func isAuditedWikiWrite(evt map[string]any) bool {
+	data := eventPayload(evt)
+	toolName, _ := data["tool_name"].(string)
+	success, _ := data["success"].(bool)
+	productionSource, _ := data["production_source"].(map[string]any)
+	producer, _ := productionSource["page_producer"].(string)
+	eventID, _ := productionSource["event_id"].(string)
+	return strings.TrimSpace(toolName) == "wiki_write_page" && success &&
+		strings.TrimSpace(producer) == "extract_video_knowledge_v2" && strings.TrimSpace(eventID) != ""
+}
+
+func eventPayload(evt map[string]any) map[string]any {
+	if data, ok := evt["data"].(map[string]any); ok {
+		return data
+	}
+	return evt
+}
+
+func intValue(value any) int {
+	if number, ok := value.(float64); ok {
+		return int(number)
+	}
+	if number, ok := value.(int); ok {
+		return number
+	}
+	return 0
 }
 
 func (a *AgentClient) setHeaders(req *http.Request) {

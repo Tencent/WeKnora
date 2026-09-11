@@ -532,6 +532,112 @@ func TestSummaryEnhancementFailureDoesNotFailVideo(t *testing.T) {
 	}
 }
 
+func TestEnhancementSuccessMarksAssembledVideoCompleted(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	video := model.Video{
+		ID:                       uuid.NewString(),
+		Title:                    "video",
+		Status:                   model.VideoStatusProcessing,
+		FileURL:                  "https://cdn/video.mp4",
+		TranscriptGeneration:     "generation-1",
+		OutlineWikiPageID:        "outline-page",
+		SummaryWikiPageID:        "summary-page",
+		TranscriptPageWikiPageID: "transcript-page",
+		KnowledgeBaseWikiPageID:  "knowledge-page",
+	}
+	job := model.VideoProcessingJob{
+		ID:                   uuid.NewString(),
+		VideoID:              video.ID,
+		JobType:              "graph",
+		TranscriptGeneration: video.TranscriptGeneration,
+		Status:               "running",
+		AttemptCount:         1,
+		MaxAttempts:          1,
+		IdempotencyKey:       "graph:" + video.ID,
+	}
+	assemble := model.VideoProcessingJob{
+		ID:                   uuid.NewString(),
+		VideoID:              video.ID,
+		JobType:              "assemble",
+		TranscriptGeneration: video.TranscriptGeneration,
+		Status:               "succeeded",
+		AttemptCount:         1,
+		MaxAttempts:          3,
+		IdempotencyKey:       "assemble:" + video.ID,
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&[]model.VideoProcessingJob{job, assemble}).Error; err != nil {
+		t.Fatalf("create jobs: %v", err)
+	}
+
+	engine := NewEngine(db, &config.WorkerConfig{}, &stubHandler{jobType: "graph"})
+	engine.dispatch(context.Background(), &job)
+
+	var got model.Video
+	if err := db.First(&got, "id = ?", video.ID).Error; err != nil {
+		t.Fatalf("load video: %v", err)
+	}
+	if got.Status != model.VideoStatusCompleted {
+		t.Fatalf("video status = %q, want %q", got.Status, model.VideoStatusCompleted)
+	}
+}
+
+func TestReconcileCompletedVideoStatusesRepairsExistingRows(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Video{}, &model.VideoProcessingJob{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	video := model.Video{
+		ID:                       uuid.NewString(),
+		Title:                    "video",
+		Status:                   model.VideoStatusProcessing,
+		TranscriptGeneration:     "generation-1",
+		OutlineWikiPageID:        "outline-page",
+		SummaryWikiPageID:        "summary-page",
+		TranscriptPageWikiPageID: "transcript-page",
+	}
+	assemble := model.VideoProcessingJob{
+		ID:                   uuid.NewString(),
+		VideoID:              video.ID,
+		JobType:              "assemble",
+		TranscriptGeneration: video.TranscriptGeneration,
+		Status:               "succeeded",
+		IdempotencyKey:       "assemble:" + video.ID,
+	}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatalf("create video: %v", err)
+	}
+	if err := db.Create(&assemble).Error; err != nil {
+		t.Fatalf("create assemble job: %v", err)
+	}
+
+	engine := NewEngine(db, &config.WorkerConfig{})
+	if err := engine.reconcileCompletedVideoStatuses(); err != nil {
+		t.Fatalf("reconcile statuses: %v", err)
+	}
+
+	var got model.Video
+	if err := db.First(&got, "id = ?", video.ID).Error; err != nil {
+		t.Fatalf("load video: %v", err)
+	}
+	if got.Status != model.VideoStatusCompleted {
+		t.Fatalf("video status = %q, want %q", got.Status, model.VideoStatusCompleted)
+	}
+}
+
 func TestDeterministicExternalFileErrorDoesNotRetry(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
@@ -575,6 +681,7 @@ func TestClassifyProcessingError(t *testing.T) {
 		{name: "timeout", err: context.DeadlineExceeded, category: "timeout", code: "llm_deadline_exceeded"},
 		{name: "stream connection closed", err: &llmclient.ConnectionClosedError{Err: errors.New("EOF")}, category: "external_task", code: "llm_connection_closed"},
 		{name: "stream incomplete", err: &llmclient.IncompleteOutputError{Reason: "missing completion marker"}, category: "response_parse", code: "llm_stream_incomplete"},
+		{name: "invalid structured output", err: &llmclient.InvalidOutputError{Reason: "invalid JSON syntax"}, category: "response_parse", code: "llm_output_invalid"},
 		{name: "stream idle timeout", err: &llmclient.StreamTimeoutError{Phase: "idle"}, category: "timeout", code: "llm_stream_idle_timeout"},
 		{name: "summary contract", err: errors.New("validate summary output: section count mismatch"), category: "response_parse", code: "summary_contract_invalid"},
 		{name: "configuration", err: errors.New("听悟 client 未配置"), category: "configuration_auth", code: "configuration_missing"},

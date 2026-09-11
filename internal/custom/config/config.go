@@ -23,6 +23,7 @@ type Config struct {
 	MPS                   MPSConfig
 	TranscriptionProvider string
 	LLM                   LLMConfig
+	Training              TrainingConfig
 	Worker                WorkerConfig
 }
 
@@ -178,6 +179,27 @@ type LLMConfig struct {
 	MaxTokens      int
 }
 
+type TrainingConfig struct {
+	OwnerScopeID                    string
+	OutputKnowledgeBaseID           string
+	StageFourEnabled                bool
+	PromptVersion                   string
+	MaxInputTokens                  int
+	PlanningMaxInputTokens          int
+	PlanningMergeMaxInputTokens     int
+	PlanningMaxVideosPerBatch       int
+	PlanningMaxMergeItems           int
+	ClusterGenerationMaxInputTokens int
+	UnitMergeMaxInputTokens         int
+	RelationMaxInputTokens          int
+	RelationBatchMaxInputTokens     int
+	RequestTimeoutSeconds           int
+	MaxConcurrentCalls              int
+	MaxRecursionDepth               int
+	MaxTotalCalls                   int
+	TimeoutSeconds                  int
+}
+
 // WorkerConfig Worker 引擎配置（轮询周期 / 重试上限 / 处理池）
 type WorkerConfig struct {
 	PollIntervalSeconds    int  // 扫描周期（秒）
@@ -301,6 +323,26 @@ func Load() *Config {
 			PromptVersion:  getEnv("CUSTOM_LLM_PROMPT_VERSION", "direct-content-v3"),
 			TimeoutSeconds: getEnvInt("CUSTOM_LLM_TIMEOUT_SECONDS", 180),
 			MaxTokens:      getEnvInt("CUSTOM_LLM_MAX_TOKENS", 8192),
+		},
+		Training: TrainingConfig{
+			OwnerScopeID:                    getEnv("CUSTOM_TRAINING_OWNER_SCOPE_ID", "single-account-local"),
+			OutputKnowledgeBaseID:           getEnv("CUSTOM_TRAINING_OUTPUT_KB_ID", getEnv("WEKNORA_KNOWLEDGE_KB_ID", "")),
+			StageFourEnabled:                getEnvBool("CUSTOM_TRAINING_STAGE_FOUR_ENABLED", true),
+			PromptVersion:                   getEnv("CUSTOM_TRAINING_PROMPT_VERSION", "training-orchestration-v3"),
+			MaxInputTokens:                  getEnvInt("CUSTOM_TRAINING_MAX_INPUT_TOKENS", 0),
+			PlanningMaxInputTokens:          getEnvInt("CUSTOM_TRAINING_PLANNING_MAX_INPUT_TOKENS", 450000),
+			PlanningMergeMaxInputTokens:     getEnvInt("CUSTOM_TRAINING_PLANNING_MERGE_MAX_INPUT_TOKENS", 35000),
+			PlanningMaxVideosPerBatch:       getEnvInt("CUSTOM_TRAINING_PLANNING_MAX_VIDEOS_PER_BATCH", 5),
+			PlanningMaxMergeItems:           getEnvInt("CUSTOM_TRAINING_PLANNING_MAX_MERGE_ITEMS", 20),
+			ClusterGenerationMaxInputTokens: getEnvInt("CUSTOM_TRAINING_CLUSTER_GENERATION_MAX_INPUT_TOKENS", 120000),
+			UnitMergeMaxInputTokens:         getEnvInt("CUSTOM_TRAINING_UNIT_MERGE_MAX_INPUT_TOKENS", 0),
+			RelationMaxInputTokens:          getEnvInt("CUSTOM_TRAINING_RELATION_MAX_INPUT_TOKENS", 60000),
+			RelationBatchMaxInputTokens:     getEnvInt("CUSTOM_TRAINING_RELATION_BATCH_MAX_INPUT_TOKENS", 30000),
+			RequestTimeoutSeconds:           getEnvInt("CUSTOM_TRAINING_REQUEST_TIMEOUT_SECONDS", 180),
+			MaxConcurrentCalls:              getEnvInt("CUSTOM_TRAINING_MAX_CONCURRENT_CALLS", 1),
+			MaxRecursionDepth:               getEnvInt("CUSTOM_TRAINING_MAX_RECURSION_DEPTH", 8),
+			MaxTotalCalls:                   getEnvInt("CUSTOM_TRAINING_MAX_TOTAL_CALLS", 256),
+			TimeoutSeconds:                  getEnvInt("CUSTOM_TRAINING_TIMEOUT_SECONDS", 1200),
 		},
 		Worker: WorkerConfig{
 			PollIntervalSeconds:    getEnvInt("CUSTOM_WORKER_POLL_INTERVAL", 1),

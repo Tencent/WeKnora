@@ -57,11 +57,45 @@ def main():
         print("用法：audit_typed_summary.py PROFILE.json SUMMARY.md", file=sys.stderr)
         return 2
     profile = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    text = Path(sys.argv[2]).read_text(encoding="utf-8")
+    summary_path = Path(sys.argv[2])
+    text = summary_path.read_text(encoding="utf-8")
     primary_type = profile.get("primary_type", "general")
     expected = TEMPLATES.get(primary_type, TEMPLATES["general"])
-    headings = re.findall(r"^## (.+?)\s*$", text, flags=re.M)
     errors = []
+    if summary_path.suffix.lower() == ".json":
+        try:
+            summary = json.loads(text)
+        except json.JSONDecodeError as error:
+            print("未通过\n- 总结不是合法 JSON：%s" % error)
+            return 1
+        headings = [section.get("title") for section in summary.get("sections", [])]
+        profile_card = summary.get("orchestrationProfile")
+        if not isinstance(profile_card, dict):
+            errors.append("缺少 orchestrationProfile")
+        else:
+            units = profile_card.get("topicUnits")
+            if profile_card.get("schemaVersion") != 1 or not isinstance(units, list) or not 1 <= len(units) <= 5:
+                errors.append("orchestrationProfile 版本或主题单元数量不合法")
+            else:
+                blocks = {block.get("id"): block for section in summary.get("sections", []) for block in section.get("blocks", [])}
+                block_ids = set(blocks)
+                allowed_forms = {"skill_method", "tool_operation", "concept_cognition", "case_analysis", "humanities_reflection", "process_standard"}
+                abstract_size = 0
+                for index, unit in enumerate(units, start=1):
+                    abstract_size += len(unit.get("abstract", ""))
+                    if not unit.get("title") or not unit.get("abstract") or not unit.get("learningOutcomes"):
+                        errors.append(f"主题单元 {index} 缺少必填字段")
+                    if not set(unit.get("contentForms", [])) <= allowed_forms:
+                        errors.append(f"主题单元 {index} 包含未知 contentForms")
+                    if not set(unit.get("summaryBlockIds", [])) <= block_ids:
+                        errors.append(f"主题单元 {index} 引用了不存在的 summaryBlockId")
+                    block_evidence = {evidence_id for block_id in unit.get("summaryBlockIds", []) for evidence_id in blocks.get(block_id, {}).get("evidenceChunkIds", [])}
+                    if not set(unit.get("evidenceChunkIds", [])) <= block_evidence:
+                        errors.append(f"主题单元 {index} 的证据未闭合到正文 block")
+                if abstract_size > 500:
+                    errors.append("主题摘要总量超过 500 个汉字")
+    else:
+        headings = re.findall(r"^## (.+?)\s*$", text, flags=re.M)
     if headings != expected:
         errors.append(f"二级标题不符合 {primary_type} 模板")
         errors.append(f"期望：{expected}")

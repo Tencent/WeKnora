@@ -21,7 +21,7 @@ test('graph page exposes a URL-addressable scene view without blocking on graph 
 
   assert.match(source, /import SceneView from '@\/components\/videohub\/SceneView\.vue'/)
   assert.match(source, /route\.query\.view === 'scene'/)
-  assert.match(source, /<SceneView v-else-if="activeView === 'scene'" ref="sceneViewRef" \/>/)
+  assert.match(source, /<SceneView v-else-if="activeView === 'scene'" ref="sceneViewRef" @select-wiki="selectGraphNode" @select-video="openVideo" \/>/)
   assert.match(source, /activeView === 'knowledge' && !payload/)
 })
 
@@ -59,8 +59,89 @@ test('scene relation lines open only the relation type and summary', () => {
   assert.match(scene, /v-if="activeRelation"/)
   assert.match(scene, /relationTypeLabels\[activeRelation\.relationType\]/)
   assert.match(scene, /activeRelation\.summary/)
-  assert.match(scene, /function selectCluster\(key: string\) \{ selectedCluster\.value = key; selectedRelation\.value = null;/)
+  assert.match(scene, /function selectCluster\(key: string\) \{[\s\S]*?selectedCluster\.value = key[\s\S]*?selectedRelation\.value = null/)
   assert.doesNotMatch(scene, /关系依据|起点主题簇|终点主题簇/)
+  assert.doesNotMatch(scene, /项目会议|meetingTopics|meeting-layout/)
+  assert.match(scene, /id="topic-edge-arrow"/)
+  assert.match(scene, /isDirectedRelation\(edge\.relationType\)/)
+  assert.match(scene, /\.topic-edge\.is-complementary \.topic-edge__line \{ stroke-dasharray: 8 6; \}/)
+  assert.match(scene, /\.topic-edge\.is-contrast \.topic-edge__line \{ stroke-dasharray: 2 5; \}/)
+  assert.match(scene, /\.topic-network \{[^}]*min-width: 720px;/)
+  assert.match(scene, /@media \(max-width: 1050px\) \{ \.training-layout \{ grid-template-columns: 1fr; \}/)
+})
+
+test('scene view consumes every user-facing training orchestration field group', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
+  const api = readFileSync(join(here, '../../api/videohub/trainingOrchestration.ts'), 'utf8')
+
+  for (const label of ['培训主题', '培训视频', '引用知识', '学习时长', '上次生成']) {
+    assert.match(scene, new RegExp(label))
+  }
+  for (const field of ['scanned_videos', 'qualified_videos', 'selected_videos', 'not_selected_videos', 'skipped_videos']) {
+    assert.match(scene, new RegExp(field))
+  }
+  assert.match(scene, /topic_source_counts/)
+  assert.match(scene, /not_selected_reason_counts/)
+  assert.match(scene, /skipped_reason_counts/)
+  assert.match(scene, /units: cluster\.member_topics\.length/)
+  assert.match(scene, /cluster\.units \}\} 个单元 · \{\{ cluster\.videos \}\} 个视频/)
+  assert.match(scene, /String\(unit\.sequence\)\.padStart\(2, '0'\)/)
+  assert.match(scene, /你将解决/)
+  assert.match(scene, /学完可以/)
+  assert.match(scene, /selectedClusterRelations/)
+  assert.match(scene, /edge\.connectedToSelection/)
+  assert.match(scene, /routeTrainingEdge\(sourceCenter, targetCenter, obstacleCenters/)
+  assert.match(scene, /@focus="previewRelation\(edge\.key\)"/)
+  assert.match(scene, /relationPreview\.summary/)
+  assert.match(scene, /<title>\{\{ relationTypeLabels\[edge\.relationType\] \}\}：\{\{ edge\.summary \}\}<\/title>/)
+  assert.match(scene, /fetchVideoOptions/)
+  assert.match(scene, /videoTitle\(ref\.video_id\)/)
+  assert.match(scene, /formatTimeRange\(ref\.start_ms, ref\.end_ms\)/)
+  assert.match(api, /not_selected_reason_counts: Record<TrainingNotSelectedReason, number>/)
+  assert.match(api, /skipped_reason_counts: Record<TrainingSkipReason, number>/)
+  assert.match(api, /topic_source_counts: Record<TrainingTopicSource, number>/)
+  assert.match(api, /assertSupportedTrainingProjection\(projection\)/)
+})
+
+test('meeting todos expose source evidence and a timestamped video jump', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const meeting = readFileSync(join(here, '../../components/videohub/MeetingSceneView.vue'), 'utf8')
+
+  assert.match(meeting, /原文证据 · \{\{ todo\.timeRange \}\}/)
+  assert.match(meeting, /todo\.evidenceQuote/)
+  assert.match(meeting, /@click="openTodoEvidence\(todo\)"/)
+  assert.match(meeting, /emit\('selectVideo', todo\.videoId, todo\.seconds\)/)
+})
+
+test('scene view loads and refreshes the real training orchestration API without fixtures', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
+  const api = readFileSync(join(here, '../../api/videohub/trainingOrchestration.ts'), 'utf8')
+
+  assert.match(scene, /fetchCurrentTrainingProjection/)
+  assert.match(scene, /generateTrainingProjection/)
+  assert.match(scene, /fetchTrainingJob/)
+  assert.match(scene, /while \(job\.status === 'queued' \|\| job\.status === 'running'\)/)
+  assert.match(scene, /@click="emit\('selectWiki'/)
+  assert.match(scene, /@click="emit\('selectVideo'/)
+  assert.doesNotMatch(scene, /const trainingClusters = \[/)
+  assert.doesNotMatch(scene, /ai-learning/)
+  assert.match(api, /\/api\/custom\/training-orchestration\/current/)
+  assert.match(api, /\/api\/custom\/training-orchestration\/generate/)
+})
+
+test('local video pages never switch to offline fixture data', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const sources = [
+    readFileSync(join(here, '../../api/videohub/knowledgeGraph.ts'), 'utf8'),
+    readFileSync(join(here, '../../api/videohub/relatedKnowledge.ts'), 'utf8'),
+    readFileSync(join(here, 'VideoDetail.vue'), 'utf8'),
+    readFileSync(join(here, '../../components/videohub/RelatedKnowledge.vue'), 'utf8'),
+  ]
+  for (const source of sources) {
+    assert.doesNotMatch(source, /fixtures\/aiLearningEval|isAiLearningEvalFixtureEnabled|fixture=ai-learning/)
+  }
 })
 
 test('graph page uses backend filtering and page-id detail/cross-video contracts', () => {
@@ -145,6 +226,9 @@ test('graph controls keep stable height and dense labels do not overlap', () => 
   assert.match(canvas, /focus:\s*'adjacency'/)
   assert.match(canvas, /blurScope:\s*'coordinateSystem'/)
   assert.match(canvas, /TooltipComponent/)
+  assert.match(canvas, /const links = new Map<string, /)
+  assert.match(canvas, /const key = \[source, target\]\.sort\(\)\.join/)
+  assert.match(canvas, /if \(existing\.lineStyle\.type === 'dashed' && lineStyle\.type !== 'dashed'\)/)
   assert.match(canvas, /tooltip:\s*\{\s*show:\s*true,\s*formatter:\s*node\.label/)
   assert.match(canvas, /color:\s*color\('--td-text-color-secondary'\)/)
   assert.match(canvas, /background:\s*rgba\(232,239,236,\.42\)/)

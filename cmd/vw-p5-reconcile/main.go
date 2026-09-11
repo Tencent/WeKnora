@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	customllm "github.com/Tencent/WeKnora/internal/custom/client/llm"
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
@@ -31,27 +32,29 @@ type invalidObject struct {
 }
 
 type reconciliationReport struct {
-	Mode                  string             `json:"mode"`
-	Status                string             `json:"status"`
-	VideoID               string             `json:"video_id"`
-	TranscriptGeneration  string             `json:"transcript_generation"`
-	KnowledgeBaseID       string             `json:"knowledge_base_id"`
-	StoredIndexPageID     string             `json:"stored_index_page_id,omitempty"`
-	CurrentIndexPageID    string             `json:"current_index_page_id,omitempty"`
-	IndexValid            bool               `json:"index_valid"`
-	ValidObjectCount      int                `json:"valid_object_count"`
-	FormalRelationCount   int                `json:"formal_relation_count"`
-	RelationGatePassed    bool               `json:"relation_gate_passed"`
-	InvalidObjects        []invalidObject    `json:"invalid_objects"`
-	NeedsRepair           bool               `json:"needs_repair"`
-	ProposedActions       []string           `json:"proposed_actions"`
-	Applied               bool               `json:"applied"`
-	GraphJobID            string             `json:"graph_job_id,omitempty"`
-	GraphJobPreviousState string             `json:"graph_job_previous_state,omitempty"`
-	WikiPagesPreserved    bool               `json:"wiki_pages_preserved"`
-	WikiRepairActions     []wikiRepairAction `json:"wiki_repair_actions,omitempty"`
-	NormalizedPageCount   int                `json:"normalized_page_count,omitempty"`
-	QuarantinedPageCount  int                `json:"quarantined_page_count,omitempty"`
+	Mode                  string                 `json:"mode"`
+	Status                string                 `json:"status"`
+	VideoID               string                 `json:"video_id"`
+	TranscriptGeneration  string                 `json:"transcript_generation"`
+	KnowledgeBaseID       string                 `json:"knowledge_base_id"`
+	StoredIndexPageID     string                 `json:"stored_index_page_id,omitempty"`
+	CurrentIndexPageID    string                 `json:"current_index_page_id,omitempty"`
+	IndexValid            bool                   `json:"index_valid"`
+	ValidObjectCount      int                    `json:"valid_object_count"`
+	FormalRelationCount   int                    `json:"formal_relation_count"`
+	RelationGatePassed    bool                   `json:"relation_gate_passed"`
+	InvalidObjects        []invalidObject        `json:"invalid_objects"`
+	NeedsRepair           bool                   `json:"needs_repair"`
+	ProposedActions       []string               `json:"proposed_actions"`
+	Applied               bool                   `json:"applied"`
+	GraphJobID            string                 `json:"graph_job_id,omitempty"`
+	GraphJobPreviousState string                 `json:"graph_job_previous_state,omitempty"`
+	WikiPagesPreserved    bool                   `json:"wiki_pages_preserved"`
+	WikiRepairActions     []wikiRepairAction     `json:"wiki_repair_actions,omitempty"`
+	NormalizedPageCount   int                    `json:"normalized_page_count,omitempty"`
+	QuarantinedPageCount  int                    `json:"quarantined_page_count,omitempty"`
+	BlockingReasons       []string               `json:"blocking_reasons,omitempty"`
+	SemanticDecisions     []wikiSemanticDecision `json:"semantic_identity_decisions,omitempty"`
 }
 
 func main() {
@@ -73,7 +76,7 @@ func main() {
 	if err != nil {
 		fatalf("open business database: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	var video model.Video
@@ -94,15 +97,42 @@ func main() {
 	if *normalizeWiki {
 		scope, err := loadWikiRepairScope(ctx, db, knowledgeReader, roles.Knowledge, video)
 		if err != nil {
-			fatalf("load Wiki repair scope: %v", err)
+			if *apply {
+				fatalf("load Wiki repair scope: %v", err)
+			}
+			report.Mode = "dry-run-normalize-wiki"
+			report.Status = "blocked"
+			report.NeedsRepair = true
+			report.BlockingReasons = append(report.BlockingReasons, "load Wiki repair scope: "+err.Error())
+			report.ProposedActions = append([]string{"repair_transcript_source"}, report.ProposedActions...)
+			if err := writeReport(report, strings.TrimSpace(*reportPath)); err != nil {
+				fatalf("write report: %v", err)
+			}
+			return
 		}
-		plan, err := planWikiRepair(video, pages, scope)
-		if err != nil {
+		semanticAdapter := knowledge.NewCompletionModelSemanticIdentityAdapter(customllm.NewClient(cfg.LLM))
+		plan, err := planWikiRepair(ctx, video, pages, scope, semanticAdapter)
+		planBlocked := errors.Is(err, errNoVerifiableWikiPages) || errors.Is(err, errSemanticIdentityReviewRequired)
+		if err != nil && !planBlocked {
 			fatalf("plan Wiki normalization: %v", err)
 		}
 		attachWikiRepairPlan(&report, plan)
 		report.Mode = "dry-run-normalize-wiki"
-		report.ProposedActions = append([]string{"normalize_valid_wiki_pages", "semantically_supersede_duplicate_pages", "quarantine_unverified_wiki_pages", "rebuild_video_index"}, report.ProposedActions...)
+		if planBlocked {
+			report.Status = "blocked"
+			report.NeedsRepair = true
+			report.BlockingReasons = append(report.BlockingReasons, err.Error())
+			action := "review_semantic_identity_decisions"
+			if errors.Is(err, errNoVerifiableWikiPages) {
+				action = "review_unverifiable_wiki_pages"
+			}
+			report.ProposedActions = append([]string{action}, report.ProposedActions...)
+			if *apply {
+				fatalf("plan Wiki normalization: %v", err)
+			}
+		} else {
+			report.ProposedActions = append([]string{"normalize_valid_wiki_pages", "semantically_supersede_duplicate_pages", "quarantine_unverified_wiki_pages", "rebuild_video_index"}, report.ProposedActions...)
+		}
 		if *apply {
 			if err := ensureGraphJobIdle(ctx, db, video); err != nil {
 				fatalf("apply Wiki normalization: %v", err)

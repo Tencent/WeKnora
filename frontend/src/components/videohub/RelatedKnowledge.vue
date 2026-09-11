@@ -1,6 +1,5 @@
 <template>
   <div class="related-knowledge">
-    <div v-if="isOfflineEval" class="related-knowledge__fixture" role="status"><t-icon name="file-paste" /><span><strong>离线测评数据</strong> · 14 个 Wiki 页面，未写入 WeKnora</span></div>
     <div v-if="loading" class="related-knowledge__state"><t-loading text="正在加载关联知识" /></div>
     <t-alert v-else-if="error" class="related-knowledge__state" theme="error" :message="error">
       <template #operation><t-button size="small" variant="outline" @click="load(video.id)">刷新</t-button></template>
@@ -33,20 +32,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import './filterTabs.css'
 import KnowledgeAnchorCard from './KnowledgeAnchorCard.vue'
 import RelationOverviewCard from './RelationOverviewCard.vue'
 import { KNOWLEDGE_TYPES, KNOWLEDGE_TYPE_STYLES } from './knowledgeTypeStyles'
 import type { ContentState, CrossVideoKnowledgeItem, CurrentKnowledgeAnchor, KnowledgeType, RelationOverview, VideoData } from '@/types/videohub'
-import { isAiLearningEvalFixtureEnabled } from '@/api/videohub/fixtures/aiLearningEval'
 
 const props = defineProps<{ video: VideoData; contentState: ContentState<{ videoId: string; overview: RelationOverview | null; anchors: CurrentKnowledgeAnchor[]; crossVideoItems: CrossVideoKnowledgeItem[] }> }>()
 const emit = defineEmits<{ seek: [seconds: number]; reload: []; selectVideoById: [videoId: string, seconds: number] }>()
 const selectedType = ref<KnowledgeType | 'all'>('all')
 const expandedAnchorId = ref<string | null>(null)
 const anchorList = ref<HTMLElement | null>(null)
-const isOfflineEval = isAiLearningEvalFixtureEnabled()
 const loading = computed(() => props.contentState.status === 'loading')
 const error = computed(() => props.contentState.status === 'error' ? props.contentState.error || '关联知识加载失败' : '')
 const notGenerated = computed(() => props.contentState.status === 'not_generated')
@@ -73,15 +70,10 @@ function load(_videoId?: string) {
   selectedType.value = 'all'
   emit('reload')
 }
-watch(anchors, value => {
-  if (isOfflineEval && value.length && !expandedAnchorId.value) expandedAnchorId.value = value[0].id
-}, { immediate: true })
 </script>
 
 <style scoped>
 .related-knowledge { display: grid; gap: 14px; height: min(760px, calc(100vh - 150px)); min-height: 0; padding: 16px 4px 96px 0; overflow: hidden; }
-.related-knowledge__fixture { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--td-brand-color) 18%, transparent); border-radius: var(--td-radius-medium); background: color-mix(in srgb, var(--td-brand-color-light) 36%, transparent); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
-.related-knowledge__fixture strong { color: var(--td-brand-color); font-weight: 600; }
 .related-knowledge__state, .related-knowledge > :deep(.t-empty) { min-height: 320px; display: grid; place-items: center; }
 .related-knowledge__anchors { min-height: 0; overflow-y: auto; padding-right: 10px; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--td-text-color-secondary) 28%, transparent) transparent; }
 .related-knowledge__relation-empty { margin: 0; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }

@@ -2,6 +2,7 @@ package summary
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -172,6 +173,253 @@ func TestValidateEnhancementRejectsChangedEvidenceAnchor(t *testing.T) {
 	}
 }
 
+func TestValidateOrchestrationProfileAcceptsBoundedReferences(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "training", Classification: validClassification("training"), Sections: make([]Section, 0, len(frameworks["training"]))}
+	for index, section := range frameworks["training"] {
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: fmt.Sprintf("block-%d", index+1), Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}}}})
+	}
+	document.OrchestrationProfile = &OrchestrationProfile{
+		SchemaVersion: 1,
+		PrimaryTopic:  "MCP 基础与使用",
+		TopicUnits: []OrchestrationTopicUnit{{
+			Title: "基础概念", Abstract: "说明核心角色和适用范围", ContentForms: []string{"concept_cognition"},
+			LearningOutcomes: []string{"能够说明核心作用"}, SummaryBlockIDs: []string{"block-1"}, EvidenceChunkIDs: []string{"chunk-1"},
+		}},
+	}
+	if err := Validate(document, "training", map[string]struct{}{"chunk-1": {}}); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+}
+
+func TestValidateGeneratedRequiresOrchestrationProfile(t *testing.T) {
+	document := emptyFrameworkDocument(SchemaVersion, "general", frameworks["general"])
+	document.Classification = validClassification("general")
+	if err := ValidateGenerated(document, "general", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("ValidateGenerated accepted a missing orchestration profile")
+	}
+	document.OrchestrationProfile = &OrchestrationProfile{
+		SchemaVersion: 1, PrimaryTopic: "主题",
+		TopicUnits: []OrchestrationTopicUnit{{
+			Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"},
+			LearningOutcomes: []string{"结果"}, SummaryBlockIDs: []string{}, EvidenceChunkIDs: []string{},
+		}},
+	}
+	// The profile remains subject to the normal completeness checks; this
+	// assertion only verifies the missing-profile gate above.
+	if err := ValidateGenerated(document, "general", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("ValidateGenerated accepted an incomplete orchestration profile")
+	}
+}
+
+func TestNormalizeOrchestrationProfileReferencesProjectsEvidenceFromBlocks(t *testing.T) {
+	document := Document{
+		SchemaVersion: SchemaVersion,
+		VideoType:     "general",
+		Sections: []Section{
+			{ID: "positioning-problem", Title: "一、定位与问题", Blocks: []Block{{
+				ID: "block-1", Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1", "chunk-2"},
+			}}},
+		},
+		OrchestrationProfile: &OrchestrationProfile{
+			SchemaVersion: OrchestrationProfileSchemaVersion, PrimaryTopic: "主题",
+			TopicUnits: []OrchestrationTopicUnit{{
+				Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"},
+				LearningOutcomes: []string{"结果"}, SummaryBlockIDs: []string{"block-1"},
+				EvidenceChunkIDs: []string{"chunk-1", "chunk-not-in-block"},
+				EvidenceRefs:     []EvidenceRef{{ChunkID: "chunk-1", EvidenceSentenceID: "evs:old", StartMs: 1, EndMs: 2}},
+			}},
+		},
+	}
+	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}, "chunk-2": {}, "chunk-not-in-block": {}}); err != nil {
+		t.Fatalf("NormalizeOrchestrationProfileReferences returned error: %v", err)
+	}
+	unit := document.OrchestrationProfile.TopicUnits[0]
+	if len(unit.EvidenceChunkIDs) != 1 || unit.EvidenceChunkIDs[0] != "chunk-1" {
+		t.Fatalf("unexpected normalized evidence IDs: %#v", unit.EvidenceChunkIDs)
+	}
+	if unit.EvidenceRefs != nil {
+		t.Fatalf("expected evidence refs to be deferred to ResolveEvidence: %#v", unit.EvidenceRefs)
+	}
+}
+
+func TestNormalizeOrchestrationProfileReferencesClosesMeetingEvidenceMismatch(t *testing.T) {
+	sections := make([]Section, 0, len(frameworks["meeting"]))
+	for index, frameworkSection := range frameworks["meeting"] {
+		section := Section{ID: frameworkSection.ID, Title: frameworkSection.Title}
+		if index == 0 {
+			section.Blocks = []Block{{
+				ID: "block-meeting-summary-1", Kind: BlockKindParagraph, Text: "会议形成了共识。",
+				EvidenceChunkIDs: []string{"chunk-1"},
+			}}
+		}
+		sections = append(sections, section)
+	}
+	document := Document{
+		SchemaVersion: SchemaVersion, VideoType: "meeting", Sections: sections,
+		Classification: &Classification{Confidence: 0.91, Reason: "会议形成了明确共识", EvidenceChunkIDs: []string{"chunk-1", "chunk-2"}},
+		OrchestrationProfile: &OrchestrationProfile{
+			SchemaVersion: OrchestrationProfileSchemaVersion, PrimaryTopic: "会议共识",
+			TopicUnits: []OrchestrationTopicUnit{{
+				Title: "共识", Abstract: "会议形成了共识", ContentForms: []string{"concept_cognition"},
+				LearningOutcomes: []string{"能够说明会议共识"}, SummaryBlockIDs: []string{"block-meeting-summary-1"},
+				// chunk-2 is valid transcript evidence but is not attached to the
+				// selected block, matching the production failure shape.
+				EvidenceChunkIDs: []string{"chunk-1", "chunk-2"},
+			}},
+		},
+	}
+
+	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}, "chunk-2": {}}); err != nil {
+		t.Fatalf("NormalizeOrchestrationProfileReferences returned error: %v", err)
+	}
+	if err := ValidateGenerated(document, "meeting", map[string]struct{}{"chunk-1": {}, "chunk-2": {}}); err != nil {
+		t.Fatalf("normalized meeting summary was rejected: %v", err)
+	}
+	if got := document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs; len(got) != 1 || got[0] != "chunk-1" {
+		t.Fatalf("unexpected normalized meeting evidence IDs: %#v", got)
+	}
+}
+
+func TestNormalizeOrchestrationProfileReferencesFailsClosed(t *testing.T) {
+	document := Document{
+		Sections: []Section{{ID: "positioning-problem", Title: "一、定位与问题", Blocks: []Block{{
+			ID: "block-1", EvidenceChunkIDs: []string{"chunk-1"},
+		}}}},
+		OrchestrationProfile: &OrchestrationProfile{TopicUnits: []OrchestrationTopicUnit{
+			{SummaryBlockIDs: []string{"unknown-block"}, EvidenceChunkIDs: []string{"chunk-1"}},
+		}},
+	}
+	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}}); err == nil || !strings.Contains(err.Error(), "unknown summary block") {
+		t.Fatalf("expected unknown block error, got %v", err)
+	}
+
+	document.OrchestrationProfile.TopicUnits[0].SummaryBlockIDs = []string{"block-1"}
+	document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs = []string{"chunk-not-in-block"}
+	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}, "chunk-not-in-block": {}}); err == nil || !strings.Contains(err.Error(), "no evidence") {
+		t.Fatalf("expected empty projected evidence error, got %v", err)
+	}
+
+	document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs = []string{"unknown-chunk"}
+	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}}); err == nil || !strings.Contains(err.Error(), "unknown evidence chunk") {
+		t.Fatalf("expected unknown evidence error, got %v", err)
+	}
+}
+
+func TestResolveEvidencePopulatesOrchestrationEvidenceRefs(t *testing.T) {
+	document := Document{
+		SchemaVersion: SchemaVersion, VideoType: "general",
+		Sections: []Section{{ID: "positioning-problem", Title: "一、定位与问题", Blocks: []Block{{ID: "block-1", Kind: BlockKindParagraph, Text: "观点", EvidenceChunkIDs: []string{"chunk-1"}}}}},
+		OrchestrationProfile: &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "主题", TopicUnits: []OrchestrationTopicUnit{{
+			Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"},
+			SummaryBlockIDs: []string{"block-1"}, EvidenceChunkIDs: []string{"chunk-1"},
+		}}},
+	}
+	for _, section := range frameworks["general"][1:] {
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title})
+	}
+	if err := ResolveEvidence(&document, []transcript.Chunk{{ID: "chunk-1", EvidenceSentenceID: "evs:v1:one", StartMs: 100, EndMs: 1200, Content: "## 原文\n\n观点"}}); err != nil {
+		t.Fatalf("ResolveEvidence returned error: %v", err)
+	}
+	refs := document.OrchestrationProfile.TopicUnits[0].EvidenceRefs
+	if len(refs) != 1 || refs[0].EvidenceSentenceID != "evs:v1:one" || refs[0].StartMs != 100 || refs[0].EndMs != 1200 {
+		t.Fatalf("unexpected orchestration evidence refs: %+v", refs)
+	}
+}
+
+func TestValidateOrchestrationProfileRejectsUnknownReferences(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "training", Classification: validClassification("training"), Sections: make([]Section, 0, len(frameworks["training"]))}
+	for _, section := range frameworks["training"] {
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: section.ID, Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}}}})
+	}
+	document.OrchestrationProfile = &OrchestrationProfile{
+		SchemaVersion: 1, PrimaryTopic: "主题", TopicUnits: []OrchestrationTopicUnit{{
+			Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"},
+			SummaryBlockIDs: []string{"unknown-block"}, EvidenceChunkIDs: []string{"unknown-chunk"},
+		}},
+	}
+	if err := Validate(document, "training", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("Validate accepted orchestration profile references outside the summary")
+	}
+}
+
+func TestValidateOrchestrationProfileRejectsAmbiguousReferences(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "training", Classification: validClassification("training"), Sections: make([]Section, 0, len(frameworks["training"]))}
+	for _, section := range frameworks["training"] {
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: section.ID, Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}}}})
+	}
+	document.OrchestrationProfile = &OrchestrationProfile{
+		SchemaVersion: 1, PrimaryTopic: "主题", TopicUnits: []OrchestrationTopicUnit{
+			{Title: "单元一", Abstract: "摘要一", ContentForms: []string{"concept_cognition", "concept_cognition"}, LearningOutcomes: []string{"结果"}, SummaryBlockIDs: []string{"training-content-system"}, EvidenceChunkIDs: []string{"chunk-1"}},
+		},
+	}
+	if err := Validate(document, "training", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("Validate accepted duplicate content form")
+	}
+
+	document.OrchestrationProfile.TopicUnits[0].ContentForms = []string{"concept_cognition"}
+	document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs = []string{"unknown-chunk"}
+	if err := Validate(document, "training", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("Validate accepted evidence not owned by summary blocks")
+	}
+}
+
+func TestValidateOrchestrationProfileRejectsDuplicateSummaryBlockIDs(t *testing.T) {
+	document := Document{SchemaVersion: SchemaVersion, VideoType: "training", Classification: validClassification("training"), Sections: make([]Section, 0, len(frameworks["training"]))}
+	for _, section := range frameworks["training"] {
+		document.Sections = append(document.Sections, Section{ID: section.ID, Title: section.Title, Blocks: []Block{{ID: "same-block", Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: []string{"chunk-1"}}}})
+	}
+	document.OrchestrationProfile = &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "主题", TopicUnits: []OrchestrationTopicUnit{{
+		Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"}, SummaryBlockIDs: []string{"same-block"}, EvidenceChunkIDs: []string{"chunk-1"},
+	}}}
+	if err := Validate(document, "training", map[string]struct{}{"chunk-1": {}}); err == nil {
+		t.Fatal("Validate accepted duplicate summary block IDs")
+	}
+}
+
+func TestValidateEnhancementPreservesOrchestrationProfile(t *testing.T) {
+	base := Document{SchemaVersion: 1, VideoType: "general", Sections: []Section{{ID: "s1", Title: "一", Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "初版", EvidenceChunkIDs: []string{"c1"}}}}}}
+	base.OrchestrationProfile = &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "原主题", TopicUnits: []OrchestrationTopicUnit{{Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"}, SummaryBlockIDs: []string{"b1"}, EvidenceChunkIDs: []string{"c1"}}}}
+	enhanced := base
+	enhanced.Sections = []Section{{ID: "s1", Title: "一", Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "增强正文", EvidenceChunkIDs: []string{"c1"}, KnowledgeRefs: []string{"wiki-1"}}}}}
+	if err := ValidateEnhancement(base, enhanced); err != nil {
+		t.Fatalf("ValidateEnhancement rejected unchanged orchestration profile: %v", err)
+	}
+}
+
+func TestValidateEnhancementRejectsChangedOrchestrationProfile(t *testing.T) {
+	base := Document{
+		SchemaVersion: 1,
+		VideoType:     "general",
+		Sections: []Section{{
+			ID: "s1", Title: "一",
+			Blocks: []Block{{ID: "b1", Kind: BlockKindParagraph, Text: "初版", EvidenceChunkIDs: []string{"c1"}}},
+		}},
+	}
+	base.OrchestrationProfile = &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "原主题", TopicUnits: []OrchestrationTopicUnit{{Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"}, SummaryBlockIDs: []string{"b1"}, EvidenceChunkIDs: []string{"c1"}}}}
+	enhanced := base
+	enhanced.OrchestrationProfile = &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "新主题", TopicUnits: base.OrchestrationProfile.TopicUnits}
+	if err := ValidateEnhancement(base, enhanced); err == nil {
+		t.Fatal("ValidateEnhancement accepted changed orchestration profile")
+	}
+}
+
+func TestPreserveOrchestrationProfileRestoresResolvedEvidenceRefs(t *testing.T) {
+	base := Document{OrchestrationProfile: &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "主题", TopicUnits: []OrchestrationTopicUnit{{
+		Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"},
+		SummaryBlockIDs: []string{"b1"}, EvidenceChunkIDs: []string{"c1"}, EvidenceRefs: []EvidenceRef{{ChunkID: "c1", EvidenceSentenceID: "evs:1", StartMs: 1, EndMs: 2}},
+	}}}}
+	enhanced := Document{OrchestrationProfile: &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "主题", TopicUnits: []OrchestrationTopicUnit{{
+		Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"},
+		SummaryBlockIDs: []string{"b1"}, EvidenceChunkIDs: []string{"c1"},
+	}}}}
+	if err := PreserveOrchestrationProfile(&base, &enhanced); err != nil {
+		t.Fatalf("PreserveOrchestrationProfile returned error: %v", err)
+	}
+	if len(enhanced.OrchestrationProfile.TopicUnits[0].EvidenceRefs) != 1 {
+		t.Fatalf("resolved evidence refs were not restored: %+v", enhanced.OrchestrationProfile)
+	}
+}
+
 func TestParseAcceptsCamelCaseDoubleReferenceAliases(t *testing.T) {
 	parsed, err := Parse(`{"schemaVersion":1,"videoType":"general","sections":[{"id":"positioning-problem","title":"一、定位与问题","blocks":[{"id":"block-1","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"],"knowledgeRefs":["wiki-1"],"evidenceRefs":[{"chunk_id":"chunk-1","evidence_sentence_id":"evs:v1:one","start_ms":100,"end_ms":1200}],"evidence":[{"chunkId":"chunk-1","evidenceSentenceId":"evs:v1:one","startSeconds":0.1,"endSeconds":1.2,"timestamp":"00:00–00:01","transcriptSnippet":"原文"}]}]},{"id":"claims-reasoning","title":"二、主张与论证","blocks":[{"id":"block-2","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"evidence-cases","title":"三、证据与案例","blocks":[{"id":"block-3","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"limitations-counterarguments","title":"四、限定与反方","blocks":[{"id":"block-4","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]},{"id":"impact-recommendations","title":"五、影响与建议","blocks":[{"id":"block-5","kind":"paragraph","text":"内容","evidenceChunkIds":["chunk-1"]}]}]}`)
 	if err != nil {
@@ -319,9 +567,13 @@ func TestNormalizeEvidenceChunkIDsAcceptsPromptAliases(t *testing.T) {
 	document := Document{
 		SchemaVersion: SchemaVersion,
 		VideoType:     "general",
+		OrchestrationProfile: &OrchestrationProfile{SchemaVersion: 1, PrimaryTopic: "主题", TopicUnits: []OrchestrationTopicUnit{{
+			Title: "单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"结果"},
+			SummaryBlockIDs: []string{"block-1"}, EvidenceChunkIDs: []string{"chunk-1|000004"},
+		}}},
 		Sections: []Section{{
 			ID: "positioning-problem", Title: "一、定位与问题",
-			Blocks: []Block{{EvidenceChunkIDs: []string{"chunk-1|000004", "unknown|000004"}}},
+			Blocks: []Block{{ID: "block-1", EvidenceChunkIDs: []string{"chunk-1|000004", "unknown|000004"}}},
 		}},
 	}
 	NormalizeEvidenceChunkIDs(&document, []transcript.Chunk{{ID: "chunk-1", Index: 4}})
@@ -330,6 +582,9 @@ func TestNormalizeEvidenceChunkIDsAcceptsPromptAliases(t *testing.T) {
 	}
 	if got := document.Sections[0].Blocks[0].EvidenceChunkIDs[1]; got != "unknown|000004" {
 		t.Fatalf("unknown evidence chunk ID should remain unchanged, got %q", got)
+	}
+	if got := document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs[0]; got != "chunk-1" {
+		t.Fatalf("profile evidence chunk ID = %q", got)
 	}
 }
 

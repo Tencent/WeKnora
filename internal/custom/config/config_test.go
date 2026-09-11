@@ -60,6 +60,68 @@ func TestLoadReadsDirectContentLLMConfig(t *testing.T) {
 	}
 }
 
+func TestLoadReadsTrainingGovernanceConfig(t *testing.T) {
+	t.Setenv("CUSTOM_TRAINING_STAGE_FOUR_ENABLED", "false")
+	t.Setenv("CUSTOM_TRAINING_PLANNING_MAX_INPUT_TOKENS", "400000")
+	t.Setenv("CUSTOM_TRAINING_PLANNING_MERGE_MAX_INPUT_TOKENS", "24000")
+	t.Setenv("CUSTOM_TRAINING_PLANNING_MAX_VIDEOS_PER_BATCH", "4")
+	t.Setenv("CUSTOM_TRAINING_PLANNING_MAX_MERGE_ITEMS", "18")
+	t.Setenv("CUSTOM_TRAINING_CLUSTER_GENERATION_MAX_INPUT_TOKENS", "90000")
+	t.Setenv("CUSTOM_TRAINING_UNIT_MERGE_MAX_INPUT_TOKENS", "16000")
+	t.Setenv("CUSTOM_TRAINING_RELATION_MAX_INPUT_TOKENS", "50000")
+	t.Setenv("CUSTOM_TRAINING_RELATION_BATCH_MAX_INPUT_TOKENS", "20000")
+	t.Setenv("CUSTOM_TRAINING_REQUEST_TIMEOUT_SECONDS", "45")
+	t.Setenv("CUSTOM_TRAINING_MAX_CONCURRENT_CALLS", "3")
+	t.Setenv("CUSTOM_TRAINING_MAX_RECURSION_DEPTH", "6")
+	t.Setenv("CUSTOM_TRAINING_MAX_TOTAL_CALLS", "80")
+
+	cfg := Load()
+	got := cfg.Training
+	if got.StageFourEnabled || got.PlanningMaxInputTokens != 400000 ||
+		got.PlanningMergeMaxInputTokens != 24000 ||
+		got.PlanningMaxVideosPerBatch != 4 ||
+		got.PlanningMaxMergeItems != 18 ||
+		got.ClusterGenerationMaxInputTokens != 90000 ||
+		got.UnitMergeMaxInputTokens != 16000 ||
+		got.RelationMaxInputTokens != 50000 ||
+		got.RelationBatchMaxInputTokens != 20000 ||
+		got.RequestTimeoutSeconds != 45 ||
+		got.MaxConcurrentCalls != 3 ||
+		got.MaxRecursionDepth != 6 ||
+		got.MaxTotalCalls != 80 {
+		t.Fatalf("unexpected training governance config: %+v", got)
+	}
+}
+
+func TestLoadUsesTrainingPromptVersionV3ByDefault(t *testing.T) {
+	t.Setenv("CUSTOM_TRAINING_PROMPT_VERSION", "")
+
+	cfg := Load()
+	if cfg.Training.PromptVersion != "training-orchestration-v3" {
+		t.Fatalf("Training.PromptVersion = %q, want training-orchestration-v3", cfg.Training.PromptVersion)
+	}
+}
+
+func TestLoadReadsTrainingOutputKnowledgeBaseID(t *testing.T) {
+	t.Setenv("WEKNORA_KNOWLEDGE_KB_ID", "source-kb")
+	t.Setenv("CUSTOM_TRAINING_OUTPUT_KB_ID", "training-output-kb")
+
+	cfg := Load()
+	if cfg.Training.OutputKnowledgeBaseID != "training-output-kb" {
+		t.Fatalf("Training.OutputKnowledgeBaseID = %q, want training-output-kb", cfg.Training.OutputKnowledgeBaseID)
+	}
+}
+
+func TestLoadTrainingOutputKnowledgeBaseIDFallsBackToKnowledgeRole(t *testing.T) {
+	t.Setenv("WEKNORA_KNOWLEDGE_KB_ID", "source-kb")
+	t.Setenv("CUSTOM_TRAINING_OUTPUT_KB_ID", "")
+
+	cfg := Load()
+	if cfg.Training.OutputKnowledgeBaseID != "source-kb" {
+		t.Fatalf("Training.OutputKnowledgeBaseID = %q, want source-kb", cfg.Training.OutputKnowledgeBaseID)
+	}
+}
+
 func TestLoadReadsContentPipelineAuditSecret(t *testing.T) {
 	t.Setenv("CONTENT_PIPELINE_AUDIT_SECRET", "server-only-secret")
 

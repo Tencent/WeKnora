@@ -5,7 +5,7 @@ WORKDIR /app
 
 # 通过构建参数接收敏感信息
 ARG GOPRIVATE_ARG
-ARG GOPROXY_ARG
+ARG GOPROXY_ARG=https://goproxy.cn,direct
 ARG GOSUMDB_ARG=off
 ARG APK_MIRROR_ARG
 
@@ -18,17 +18,29 @@ ENV GOSUMDB=${GOSUMDB_ARG}
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
+    printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries && \
     apt-get update && \
     apt-get install -y git build-essential libsqlite3-dev curl
 
 # Install migrate tool
-RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+RUN for attempt in 1 2 3 4; do \
+        if timeout 180s go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest; then exit 0; fi; \
+        if [ "$attempt" -lt 4 ]; then sleep $((attempt * 5)); fi; \
+    done; \
+    echo 'migrate installation failed after 4 attempts' >&2; \
+    exit 1
 
 # Copy go mod files. go.mod replace-points anydoc at ./third_party/anydoc-go,
 # so that module's go.mod must exist before `go mod download`.
 COPY go.mod go.sum ./
 COPY third_party/anydoc-go/go.mod third_party/anydoc-go/go.mod
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    for attempt in 1 2 3 4; do \
+        if timeout 180s go mod download; then exit 0; fi; \
+        if [ "$attempt" -lt 4 ]; then sleep $((attempt * 5)); fi; \
+    done; \
+    echo 'go mod download failed after 4 attempts' >&2; \
+    exit 1
 COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
 COPY . .
@@ -80,7 +92,8 @@ ARG APK_MIRROR_ARG
 RUN useradd -m -s /bin/bash appuser
 
 # First, install ca-certificates without mirror to ensure HTTPS works
-RUN apt-get update && \
+RUN printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries && \
+    apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 

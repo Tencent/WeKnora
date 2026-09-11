@@ -134,6 +134,7 @@ build_app_image() {
     get_version_info
     
     docker build \
+        --network host \
         --platform $PLATFORM \
         --build-arg GOPRIVATE_ARG=${GOPRIVATE:-""} \
         --build-arg GOPROXY_ARG=${GOPROXY:-"https://goproxy.cn,direct"} \

@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
@@ -45,6 +48,35 @@ func (g *processingSourceGateway) GetKnowledge(context.Context, string) (weknora
 	return weknora.ManualKnowledgeResult{
 		ID: "backfilled-source", KnowledgeBaseID: "knowledge-kb", ParseStatus: "completed",
 	}, nil
+}
+
+type legacyProcessingSourceGateway struct {
+	legacy  weknora.ManualKnowledgeResult
+	created []weknora.ManualKnowledgeInput
+	updated []weknora.ManualKnowledgeInput
+}
+
+func (g *legacyProcessingSourceGateway) FindManualKnowledgeByTitle(context.Context, string, string) (*weknora.ManualKnowledgeResult, error) {
+	return nil, nil
+}
+
+func (g *legacyProcessingSourceGateway) CreateManualKnowledge(_ context.Context, kbID string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+	g.created = append(g.created, input)
+	return weknora.ManualKnowledgeResult{
+		ID: "repaired-source", KnowledgeBaseID: kbID, Title: input.Title, Content: input.Content, ParseStatus: "completed",
+	}, nil
+}
+
+func (g *legacyProcessingSourceGateway) UpdateManualKnowledge(_ context.Context, id string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+	g.updated = append(g.updated, input)
+	g.legacy = weknora.ManualKnowledgeResult{
+		ID: id, KnowledgeBaseID: g.legacy.KnowledgeBaseID, Title: input.Title, Content: input.Content, ParseStatus: "completed",
+	}
+	return g.legacy, nil
+}
+
+func (g *legacyProcessingSourceGateway) GetKnowledge(context.Context, string) (weknora.ManualKnowledgeResult, error) {
+	return g.legacy, nil
 }
 
 func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
@@ -337,6 +369,75 @@ func TestRetryGraphBackfillsMissingFullDocumentFromSuccessfulIndex(t *testing.T)
 	require.Equal(t, "backfilled-source", payload["transcript_source_knowledge_id"])
 	_, hasLegacyChunks := payload["transcript_knowledge_ids"]
 	require.False(t, hasLegacyChunks)
+}
+
+func TestRetryGraphRepairsLegacyUnknownSpeakerSourceBinding(t *testing.T) {
+	db := openTestVideoDB(t)
+	require.NoError(t, db.AutoMigrate(&model.VideoTranscriptSource{}))
+	video := model.Video{
+		ID: uuid.NewString(), Title: "legacy speaker graph retry", DurationSeconds: 2,
+		Status: model.VideoStatusProcessing, TranscriptGeneration: "generation-current",
+	}
+	require.NoError(t, db.Create(&video).Error)
+	indexJob := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "index", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "succeeded", IdempotencyKey: "index:" + video.ID,
+		ResultPayload: `{"paragraphs":[{"paragraph_id":"paragraph-1","sentences":[{"sentence_id":"sentence-1","text":"历史原文","start_ms":100,"end_ms":1200}]}],"language":"zh"}`,
+	}
+	require.NoError(t, db.Create(&indexJob).Error)
+	graphJob := model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "graph", TranscriptGeneration: video.TranscriptGeneration,
+		Status: "failed", InputPayload: `{"transcript_chunk_count":1,"transcript_knowledge_ids":["legacy-chunk"]}`,
+		IdempotencyKey: "graph:" + video.ID + ":" + video.TranscriptGeneration,
+	}
+	require.NoError(t, db.Create(&graphJob).Error)
+
+	legacyEvidence, err := evidence.BuildSentence(evidence.Input{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Ordinal: 0,
+		SourceSentenceID: "sentence-1", Text: "历史原文", SpeakerID: "", StartMs: 100, EndMs: 1200,
+	})
+	require.NoError(t, err)
+	legacyDoc, err := transcriptservice.Build(transcriptservice.Input{
+		VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, Title: video.Title, DurationSeconds: video.DurationSeconds,
+		Chapters: []transcriptservice.InputChapter{{Index: 0, Title: video.Title, Paragraphs: []transcriptservice.InputParagraph{{
+			ParagraphID: "paragraph-1", Index: 0, Sentences: []transcriptservice.InputSentence{{
+				SourceSentenceID: "sentence-1", EvidenceSentenceID: legacyEvidence.ID,
+				Text: "历史原文", StartMs: 100, EndMs: 1200,
+			}},
+		}}}},
+	})
+	require.NoError(t, err)
+	legacyJSON, err := legacyDoc.JSON()
+	require.NoError(t, err)
+	legacyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(legacyJSON)))
+	gateway := &legacyProcessingSourceGateway{legacy: weknora.ManualKnowledgeResult{
+		ID: "legacy-source", KnowledgeBaseID: "knowledge-kb", Title: transcriptservice.SourceTitle(video.Title),
+		Content: transcriptservice.SourceContent(legacyDoc, legacyJSON, legacyHash), ParseStatus: "completed",
+	}}
+	require.NoError(t, db.Create(&model.VideoTranscriptSource{
+		ID: "legacy-binding", VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration,
+		KnowledgeBaseID: "knowledge-kb", KnowledgeID: "legacy-source", ContentHash: legacyHash, Status: transcriptservice.SourceStatusCreated,
+	}).Error)
+	writer := &transcriptservice.SourceWriter{DB: db, Gateway: gateway, KBID: "knowledge-kb"}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: video.ID}, {Key: "jobType", Value: "graph"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/custom/videos/"+video.ID+"/processing-jobs/graph/retry", nil)
+	NewProcessingHandler(db, ProcessingDependencies{KBID: "knowledge-kb", SourceWriter: writer}).Retry(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Empty(t, gateway.created)
+	require.Len(t, gateway.updated, 1)
+	var binding model.VideoTranscriptSource
+	require.NoError(t, db.First(&binding, "id = ?", "legacy-binding").Error)
+	require.Equal(t, "legacy-source", binding.KnowledgeID)
+	require.NotEqual(t, legacyHash, binding.ContentHash)
+	var retried model.VideoProcessingJob
+	require.NoError(t, db.First(&retried, "id = ?", graphJob.ID).Error)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(retried.InputPayload), &payload))
+	require.Equal(t, "legacy-source", payload["transcript_source_knowledge_id"])
 }
 
 func TestRetrySuccessfulTranscriptionCreatesNewJob(t *testing.T) {

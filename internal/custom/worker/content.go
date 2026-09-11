@@ -73,7 +73,7 @@ func skillQueryWithInput(video *model.Video, contract skill.JobContract, jobType
 	query += fmt.Sprintf("业务视频 ID：%s 仅用于产物归属。视频标题：%s。", video.ID, video.Title)
 	if jobType == skill.JobGraph {
 		query += fmt.Sprintf(
-			"当前知识对象提交外壳版本为 %s。开始处理前必须通过 read_skill 完整读取 SKILL.md、references/type-frameworks.md、references/wiki-schema.md 和 references/audit-rules.md；组装输出前再完整读取 references/output-examples.md。file_path 必须包含 references/ 目录。V2 Skill 只负责五类候选、复合对象拆解、规范标题建议和当前视频当前代次的一组 evidence_contribution；不得自行决定最终知识对象 ID、Wiki 页面 ID 或规范 slug。只把通过审计的候选提交给 wiki_write_page，候选身份只是提案；必须实际调用 wiki_write_page，最终报告不能代替 wiki_write_page 工具调用。写入前从完整源文档的 evidence_sentence_ids 数组逐字复制真实证据 ID，禁止使用 ev-001、c1、段落号或其他自造编号；chunk_refs 只使用读取工具返回的 chunk_id。语义不确定或冲突时停止该候选并记录 review_required，但必须继续处理其他候选，不得换 slug 绕过。写入后必须使用工具返回的 knowledge_object_id、wiki_page_id、规范标题和 slug 完成回读、关系补写和视频索引；至少一次成功写入并回读后才可生成视频索引和最终报告。证据贡献的源文档只能是 %s，source_document_id 与 source_refs 的唯一值必须原样使用该 ID，证据正文仍只保存在证据知识库。图谱理解必须使用连续语义窗口，五类对象和关系都绑定最小充分证据。最后写入视频索引页：slug 严格使用 %q，page_type 使用 index，frontmatter 使用 type: %s、source_video_id: %s、source_document_id: %s、source_refs: [%s]、transcript_generation: %s、title: %s 和 audit_status: aligned；索引页不得包含 id、knowledge_object_id 或 primary_type；索引只引用工具已返回并回读的规范页面。不得使用示例、占位内容或 mock 数据。",
+			"当前知识对象提交外壳版本为 %s。开始处理前必须通过 read_skill 完整读取 SKILL.md、references/type-frameworks.md、references/wiki-schema.md 和 references/audit-rules.md；组装输出前再完整读取 references/output-examples.md。file_path 必须包含 references/ 目录。V2 Skill 只负责五类候选、复合对象拆解、规范标题建议和当前视频当前代次的一组 evidence_contribution；不得自行决定最终知识对象 ID、Wiki 页面 ID 或规范 slug。只把通过审计的候选提交给 wiki_write_page，候选身份只是提案；必须实际调用 wiki_write_page，最终报告不能代替 wiki_write_page 工具调用。写入前从完整源文档的 evidence_sentence_ids 数组逐字复制真实证据 ID，禁止使用 ev-001、c1、段落号或其他自造编号；chunk_refs 只使用读取工具返回的 chunk_id。语义不确定或冲突时停止该候选并记录 review_required，但必须继续处理其他候选，不得换 slug 绕过。写入后必须使用工具返回的 knowledge_object_id、wiki_page_id、规范标题和 slug 完成回读、关系补写和视频索引；至少一次成功写入并回读后才可生成视频索引和最终报告。关系阶段是硬性完成门禁：当本视频通过审计的规范对象超过 1 个且存在有当前证据支持的允许配对时，绝不能以 relations: []、related_content: []、正文双链或最终报告代替正式关系；必须在全部对象首次写入并回读后，逐条使用 wiki_write_page 完整覆盖需要补写的对象，提交非空 relations，每条都必须含 relation_id、relation_type、target_object_id、target_wiki_page_id、evidence_ids、time_range、confidence，目标身份只能使用工具返回并回读确认的值。关系补写完成后再次回读并确认至少一条 accepted formal relation，之后才能写视频索引和最终报告；若确认没有任何有证据支持的允许配对，必须返回 review_required 并停止，不得宣称完成。证据贡献的源文档只能是 %s，source_document_id 与 source_refs 的唯一值必须原样使用该 ID，证据正文仍只保存在证据知识库。图谱理解必须使用连续语义窗口，五类对象和关系都绑定最小充分证据。最后写入视频索引页：slug 严格使用 %q，page_type 使用 index，frontmatter 使用 type: %s、source_video_id: %s、source_document_id: %s、source_refs: [%s]、transcript_generation: %s、title: %s 和 audit_status: aligned；索引页不得包含 id、knowledge_object_id 或 primary_type；索引只引用工具已返回并回读的规范页面。不得使用示例、占位内容或 mock 数据。",
 			customknowledge.WikiObjectContractVersion, strings.TrimSpace(sourceKnowledgeID), contract.WriteSlug(video.ID), contract.ArtifactType, video.ID, strings.TrimSpace(sourceKnowledgeID), strings.TrimSpace(sourceKnowledgeID), video.TranscriptGeneration, strings.TrimSpace(video.Title)+"_知识底座",
 		)
 	} else {
@@ -409,6 +409,12 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if err != nil {
 		return wrapWikiArtifactWaitError(contract.ArtifactType, err)
 	}
+	// Graph completion is recorded by GraphHandler only after the rebuildable
+	// projection succeeds. Recording it here could publish a passed audit and
+	// enqueue downstream work while Neo4j is unavailable.
+	if jobType == skill.JobGraph {
+		return nil
+	}
 
 	// 回写 wiki_page_id；基础内容齐备时由编排器调度组装
 	var oerr error
@@ -477,7 +483,7 @@ func (h *BaseSkillHandler) repairP3KnowledgeOnce(
 		return fmt.Errorf("create graph contract repair session: %w", err)
 	}
 	repairQuery := query + " 本轮生成的候选 Wiki 页面未通过后端契约校验。校验结果：" + diagnostics +
-		"。只修复当前视频、当前转写代次的页面；逐页读取现有内容后使用 wiki_write_page 完整覆盖，确保 frontmatter.core_content 为非空的一句话概括，每次调用必须显式提供 slug、title、summary、content、page_type、source_refs 六个必填参数，禁止使用 wiki_replace_text，禁止追加第二段 frontmatter。修复后再次读取并确认对象页与视频索引页均满足原契约。"
+		"。只修复当前视频、当前转写代次的页面；逐页读取现有内容后使用 wiki_write_page 完整覆盖，确保 frontmatter.core_content 为非空的一句话概括，每次调用必须显式提供 slug、title、summary、content、page_type、source_refs 六个必填参数，禁止使用 wiki_replace_text，禁止追加第二段 frontmatter。若校验结果涉及正式关系缺失或关系写入失败，关系阶段是本轮硬性完成门禁：必须完整读取 references/relation-contract.json，重新读取本视频全部规范对象，使用工具返回并回读确认的规范对象 ID 和 Wiki 页面 ID，逐条用 wiki_write_page 完整覆盖需要补写的对象并提交非空 relations；每条关系必须包含 relation_id、relation_type、target_object_id、target_wiki_page_id、evidence_ids、time_range、confidence，且证据必须来自当前视频当前转写代次。不得以 relations: []、related_content: []、正文双链或最终报告代替正式关系；关系补写后必须再次回读并确认至少一条 accepted formal relation，之后才能更新视频索引并结束本轮。修复后再次读取并确认对象页、正式关系与视频索引页均满足原契约。"
 	contract, ok := skill.Contract(skill.JobGraph)
 	if !ok {
 		return fmt.Errorf("unknown graph skill contract")
@@ -936,6 +942,9 @@ func (h *GraphHandler) JobType() string { return skill.JobGraph }
 //  3. 回写 knowledge_base_wiki_page_id，不触发 outline/summary。
 
 func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	if h.Graph == nil {
+		return fmt.Errorf("graph_projection:unavailable: knowledge graph projection is not configured")
+	}
 	if h.Orchestrator == nil || h.Orchestrator.Wiki == nil {
 		return fmt.Errorf("native Wiki graph reconciliation is not configured")
 	}
@@ -949,11 +958,11 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if artifacts, err := h.findP3Knowledge(ctx, video.ID, generation, title); err != nil {
 		return err
 	} else if artifacts != nil && artifacts.Index != nil {
-		if _, _, err := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobGraph, artifacts.Index.ID); err != nil {
-			return fmt.Errorf("record existing P3 knowledge: %w", err)
-		}
 		if err := h.projectP3Knowledge(ctx, video.ID, artifacts.Index); err != nil {
 			return err
+		}
+		if _, _, err := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobGraph, artifacts.Index.ID); err != nil {
+			return fmt.Errorf("record existing P3 knowledge: %w", err)
 		}
 		slog.Info("P3 knowledge already reconciled",
 			"video_id", video.ID, "job_id", job.ID,
@@ -962,10 +971,6 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	}
 
 	if err := h.BaseSkillHandler.run(ctx, job, video, skill.JobGraph); err != nil {
-		return err
-	}
-	index, err := h.recordedP3KnowledgeIndex(ctx, video.ID, generation, title)
-	if err != nil {
 		return err
 	}
 	artifacts, invalidObjects, err := h.inspectP3Knowledge(ctx, video.ID, generation, title)
@@ -979,11 +984,11 @@ func (h *GraphHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 		}
 		return fmt.Errorf("P3 knowledge object validation failed: %s", diagnostics)
 	}
-	if artifacts.Index.ID != index.ID {
-		return fmt.Errorf("P3 knowledge object validation failed: recorded index does not match the validated video index")
-	}
-	if err := h.projectP3Knowledge(ctx, video.ID, index); err != nil {
+	if err := h.projectP3Knowledge(ctx, video.ID, artifacts.Index); err != nil {
 		return err
+	}
+	if _, _, err := h.Orchestrator.AfterSkillCompleteWithID(ctx, video.ID, skill.JobGraph, artifacts.Index.ID); err != nil {
+		return fmt.Errorf("record projected P3 knowledge: %w", err)
 	}
 	slog.Info("P3 knowledge extracted",
 		"video_id", video.ID, "job_id", job.ID, "page_producer", "extract-video-knowledge")
@@ -1013,13 +1018,15 @@ func (h *GraphHandler) recordedP3KnowledgeIndex(ctx context.Context, videoID, ge
 
 func (h *GraphHandler) projectP3Knowledge(ctx context.Context, videoID string, indexPage *weknora.WikiPage) error {
 	if h.Graph == nil {
-		return nil
+		return fmt.Errorf("graph_projection:unavailable: knowledge graph projection is not configured")
 	}
-	var current model.Video
-	if err := h.DB.WithContext(ctx).First(&current, "id = ?", videoID).Error; err != nil {
-		return fmt.Errorf("project P3 knowledge: reload video: %w", err)
+	if strings.TrimSpace(videoID) == "" || indexPage == nil || strings.TrimSpace(indexPage.ID) == "" {
+		return fmt.Errorf("project P3 knowledge: video and index page identity are required")
 	}
-	if err := h.Graph.ProjectVideo(ctx, &current, indexPage); err != nil {
+	// Canonical nodes can be shared by several videos. Rebuilding the
+	// projection from Wiki prevents a per-video delete from detaching another
+	// video's scoped relation from the same canonical node.
+	if err := h.Graph.ProjectKnowledgeBase(ctx); err != nil {
 		return fmt.Errorf("project P3 knowledge: %w", err)
 	}
 	return nil

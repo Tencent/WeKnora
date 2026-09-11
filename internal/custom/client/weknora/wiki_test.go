@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,25 @@ func TestGetPageByIDResolvesUUIDThroughSlugRoute(t *testing.T) {
 	require.Equal(t, "page-1", page.ID)
 	require.Equal(t, "outline/video-1", page.Slug)
 	require.Equal(t, "# Outline", page.Content)
+}
+
+func TestWikiPageBelongsToVideoUsesCanonicalEvidenceContributions(t *testing.T) {
+	page := WikiPage{ID: "canonical", PageType: "index", Content: `---
+source_video_id: video-1
+evidence_contributions:
+  - video_id: video-1
+    quality_status: passed
+  - video_id: video-2
+    quality_status: passed
+---
+# 规范对象`}
+	if !wikiPageBelongsToVideo(page, "video-2", nil) {
+		t.Fatal("canonical page should belong to video-2 through its passed contribution")
+	}
+	page.Content = strings.Replace(page.Content, "video-2\n    quality_status: passed", "video-2\n    quality_status: rejected", 1)
+	if wikiPageBelongsToVideo(page, "video-2", nil) {
+		t.Fatal("rejected contribution must not establish video ownership")
+	}
 }
 
 func TestGetPageByIDFindsUUIDOnLaterPage(t *testing.T) {

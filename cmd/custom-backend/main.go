@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
+	"github.com/Tencent/WeKnora/internal/custom/service/trainingorchestration"
 	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
 	"github.com/Tencent/WeKnora/internal/custom/worker"
 )
@@ -71,6 +73,7 @@ func main() {
 	var evidenceWeKnoraCli *weknora.Client
 	var knowledgeWeKnoraCli *weknora.Client
 	var wikiClient *weknora.WikiClient
+	var trainingWikiClient *weknora.WikiClient
 	var agentClient *weknora.AgentClient
 	if kbRoutingErr != nil {
 		// Do not construct empty/ambiguous clients. The routing error is fed
@@ -83,6 +86,11 @@ func main() {
 		evidenceWeKnoraCli = weknora.New(evidenceWeKnoraCfg)
 		knowledgeWeKnoraCli = weknora.New(knowledgeWeKnoraCfg)
 		wikiClient = weknora.NewWikiClient(knowledgeWeKnoraCfg)
+		trainingOutputKBID := strings.TrimSpace(cfg.Training.OutputKnowledgeBaseID)
+		if trainingOutputKBID == "" {
+			trainingOutputKBID = roles.Knowledge
+		}
+		trainingWikiClient = weknora.NewWikiClient(cfg.WeKnora.ForKnowledgeBase(trainingOutputKBID))
 		agentClient = weknora.NewAgentClient(knowledgeWeKnoraCfg)
 	}
 	llmCli := llm.NewClient(cfg.LLM)
@@ -209,9 +217,102 @@ func main() {
 	}
 
 	// HTTP 服务
+	var trainingService *trainingorchestration.Service
+	if kbRoutingErr == nil && minioCli != nil && wikiClient != nil && trainingWikiClient != nil && evidenceWeKnoraCli != nil && knowledgeWeKnoraCli != nil {
+		collector := &trainingorchestration.Collector{
+			DB: db, Wiki: wikiClient, SourceReader: knowledgeWeKnoraCli,
+			TranscriptReader: transcriptservice.NewReader(db, evidenceWeKnoraCli),
+			VideoAccess:      trainingorchestration.NewVideoAccessReader(minioCli),
+			KnowledgeBaseID:  roles.Knowledge, OwnerScopeID: cfg.Training.OwnerScopeID,
+		}
+		trainingGate := trainingorchestration.NewCompletionGate(trainingorchestration.CompletionGateConfig{
+			RequestTimeout:      time.Duration(cfg.Training.RequestTimeoutSeconds) * time.Second,
+			MaxConcurrent:       cfg.Training.MaxConcurrentCalls,
+			MaxTotalCalls:       cfg.Training.MaxTotalCalls,
+			MaxTotalInputTokens: cfg.Training.MaxInputTokens,
+		})
+		stageFourPlanner := &trainingorchestration.StageOnePlanner{
+			LLM:  llmCli,
+			Gate: trainingGate,
+			Config: trainingorchestration.PlannerConfig{
+				MaxInputTokens:      cfg.Training.PlanningMaxInputTokens,
+				MergeMaxInputTokens: cfg.Training.PlanningMergeMaxInputTokens,
+				MaxVideosPerBatch:   cfg.Training.PlanningMaxVideosPerBatch,
+				MaxMergeItems:       cfg.Training.PlanningMaxMergeItems,
+			},
+			PromptVersion: cfg.Training.PromptVersion,
+		}
+		stageFourMaterializer := &trainingorchestration.Materializer{
+			Wiki:            wikiClient,
+			Evidence:        transcriptservice.NewReader(db, evidenceWeKnoraCli),
+			KnowledgeBaseID: roles.Knowledge,
+		}
+		stageFourMaterialRetriever := &trainingorchestration.QueryMaterialRetriever{
+			Evidence: transcriptservice.NewReader(db, evidenceWeKnoraCli),
+		}
+		stageFourClusterGenerator := &trainingorchestration.ClusterGenerator{
+			LLM:            llmCli,
+			Gate:           trainingGate,
+			MaxInputTokens: cfg.Training.ClusterGenerationMaxInputTokens,
+			PromptVersion:  cfg.Training.PromptVersion,
+		}
+		stageFourRelationGenerator := &trainingorchestration.RelationGenerator{
+			LLM:                 llmCli,
+			Gate:                trainingGate,
+			MaxInputTokens:      cfg.Training.RelationMaxInputTokens,
+			BatchMaxInputTokens: cfg.Training.RelationBatchMaxInputTokens,
+		}
+		stageFourAssembler := &trainingorchestration.ProjectionAssembler{
+			Fingerprint: func(snapshot trainingorchestration.CatalogSnapshot) (string, error) {
+				return trainingorchestration.CatalogFingerprint(snapshot, llmCli.Model(), cfg.Training.PromptVersion)
+			},
+		}
+		stageFourRunner := &trainingorchestration.StageFourOrchestrator{
+			Planner:           stageFourPlanner,
+			Materializer:      stageFourMaterializer,
+			MaterialRetriever: stageFourMaterialRetriever,
+			ClusterGenerator:  stageFourClusterGenerator,
+			RelationGenerator: stageFourRelationGenerator,
+			SnapshotReader:    collector,
+			Assembler:         stageFourAssembler,
+			Gate:              trainingGate,
+			MaxRecursionDepth: cfg.Training.MaxRecursionDepth,
+			TaskTimeout:       time.Duration(cfg.Training.TimeoutSeconds) * time.Second,
+			Config: trainingorchestration.StageFourOrchestrationConfig{
+				PlanningMaxInputTokens:          cfg.Training.PlanningMaxInputTokens,
+				PlanningMergeMaxInputTokens:     cfg.Training.PlanningMergeMaxInputTokens,
+				PlanningMaxVideosPerBatch:       cfg.Training.PlanningMaxVideosPerBatch,
+				PlanningMaxMergeItems:           cfg.Training.PlanningMaxMergeItems,
+				ClusterGenerationMaxInputTokens: cfg.Training.ClusterGenerationMaxInputTokens,
+				RelationMaxInputTokens:          cfg.Training.RelationMaxInputTokens,
+				RelationBatchMaxInputTokens:     cfg.Training.RelationBatchMaxInputTokens,
+				RequestTimeout:                  time.Duration(cfg.Training.RequestTimeoutSeconds) * time.Second,
+				MaxConcurrentCalls:              cfg.Training.MaxConcurrentCalls,
+				MaxTotalCalls:                   cfg.Training.MaxTotalCalls,
+				MaxTotalInputTokens:             cfg.Training.MaxInputTokens,
+			},
+		}
+		trainingService = &trainingorchestration.Service{
+			DB: db, Collector: collector,
+			Generator: &trainingorchestration.Generator{LLM: llmCli, Gate: trainingGate, MaxInputTokens: cfg.Training.MaxInputTokens, PromptVersion: cfg.Training.PromptVersion},
+			Wiki:      trainingWikiClient, KnowledgeBaseID: func() string {
+				if value := strings.TrimSpace(cfg.Training.OutputKnowledgeBaseID); value != "" {
+					return value
+				}
+				return roles.Knowledge
+			}(), OwnerScopeID: cfg.Training.OwnerScopeID,
+			Model: cfg.LLM.Model, PromptVersion: cfg.Training.PromptVersion,
+			RunTimeout: time.Duration(cfg.Training.TimeoutSeconds) * time.Second, CompletionGate: trainingGate,
+		}
+		if cfg.Training.StageFourEnabled {
+			trainingService.CatalogCollector = collector
+			trainingService.StageFour = stageFourRunner
+		}
+	}
 	routerDeps := &handler.Deps{
 		DB: db, Cfg: cfg, MinIO: minioCli, Wiki: wikiClient,
 		EvidenceWeKnora: evidenceWeKnoraCli, KnowledgeWeKnora: knowledgeWeKnoraCli, Graph: wikiGraph,
+		TrainingOrchestration: trainingService,
 	}
 	router := handler.BuildRouterForDeps(routerDeps)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -269,6 +370,8 @@ func autoMigrateLocalDB(db *gorm.DB) error {
 		&model.ChatSourceAudit{},
 		&model.WikiRelationAudit{},
 		&model.WikiIdentityAudit{},
+		&model.TrainingOrchestrationJob{},
+		&model.TrainingOrchestrationCurrent{},
 	)
 }
 

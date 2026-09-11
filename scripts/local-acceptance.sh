@@ -70,6 +70,30 @@ container_is_healthy() {
     [ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$1" 2>/dev/null || true)" = healthy ]
 }
 
+container_env_value() {
+    local container="$1"
+    local key="$2"
+    docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$container" 2>/dev/null \
+        | awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+mps_runtime_config_ready() {
+    local provider key
+    provider="$(container_env_value "$BACKEND_CONTAINER" CUSTOM_TRANSCRIPTION_PROVIDER)"
+    [ "$provider" = "tencent_mps" ] || return 0
+    for key in \
+        TENCENTCLOUD_SECRET_ID \
+        TENCENTCLOUD_SECRET_KEY \
+        TENCENTCLOUD_MPS_INPUT_BUCKET \
+        TENCENTCLOUD_MPS_OUTPUT_BUCKET; do
+        [ -n "$(container_env_value "$BACKEND_CONTAINER" "$key")" ] || return 1
+    done
+}
+
+assert_mps_runtime_config() {
+    mps_runtime_config_ready || die '腾讯云 MPS 运行配置未进入 custom-backend，已停止验收启动'
+}
+
 ensure_official_container() {
     local container="$1"
     local service="$2"
@@ -128,6 +152,7 @@ start_backend() {
     wait_for_container_health WeKnora-docreader 90 || die '官方 docreader 未就绪'
     wait_for_container_http WeKnora-app http://127.0.0.1:8080/health 90 || die '官方 WeKnora app 未就绪'
     compose up -d --build custom-backend
+    assert_mps_runtime_config
 }
 
 pid_is_running() {
@@ -256,6 +281,13 @@ status() {
         printf 'custom-backend: healthy\n'
     else
         printf 'custom-backend: unavailable\n'
+    fi
+    if container_exists "$BACKEND_CONTAINER" && [ "$(container_env_value "$BACKEND_CONTAINER" CUSTOM_TRANSCRIPTION_PROVIDER)" = "tencent_mps" ]; then
+        if mps_runtime_config_ready; then
+            printf 'tencent-mps: ready\n'
+        else
+            printf 'tencent-mps: missing runtime configuration\n'
+        fi
     fi
 }
 

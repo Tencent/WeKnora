@@ -26,12 +26,23 @@ knowledge_object_id: object-passed
 type: concept
 primary_type: concept
 information_nature: 概念
-source_video_id: video-1
-transcript_generation: generation-1
+source_video_id: video-2
+transcript_generation: generation-2
 audit_status: passed
 classification_confidence: 0.9
-evidence_ids: [chunk-1]
-source_refs: [chunk-1]
+evidence_ids: [chunk-1, chunk-2]
+source_refs: [source-1, source-2]
+evidence_contributions:
+  - video_id: video-1
+    source_document_id: source-1
+    transcript_generation: generation-1
+    evidence_ids: [chunk-1]
+    quality_status: passed
+  - video_id: video-2
+    source_document_id: source-2
+    transcript_generation: generation-2
+    evidence_ids: [chunk-2]
+    quality_status: passed
 structure_fields:
   definition: 可检索概念
   mechanism: 通过机制说明
@@ -83,5 +94,8 @@ structure_fields:
 	}
 	if len(payload.Data) != 1 || payload.Data[0].WikiPageID != "page-passed" {
 		t.Fatalf("results = %#v", payload.Data)
+	}
+	if payload.Data[0].SourceVideoID != videoID || payload.Data[0].TranscriptGeneration != "generation-1" || len(payload.Data[0].EvidenceIDs) != 1 || payload.Data[0].EvidenceIDs[0] != "chunk-1" {
+		t.Fatalf("scoped canonical result = %#v", payload.Data[0])
 	}
 }

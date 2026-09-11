@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,6 +18,9 @@ import (
 )
 
 const legacyDraftType = "legacy_draft"
+
+var errNoVerifiableWikiPages = errors.New("no current-generation Wiki page has verifiable evidence")
+var errSemanticIdentityReviewRequired = errors.New("semantic identity review is required before Wiki normalization")
 
 type wikiRepairScope struct {
 	SourceDocumentID string
@@ -38,8 +42,18 @@ type wikiRepairAction struct {
 }
 
 type wikiRepairPlan struct {
-	Actions    []wikiRepairAction
-	IndexWrite weknora.WikiPageWrite
+	Actions           []wikiRepairAction
+	IndexWrite        weknora.WikiPageWrite
+	SemanticDecisions []wikiSemanticDecision
+}
+
+type wikiSemanticDecision struct {
+	AnchorWikiPageID    string   `json:"anchor_wiki_page_id"`
+	CandidateWikiPageID string   `json:"candidate_wiki_page_id"`
+	Decision            string   `json:"decision"`
+	Confidence          float64  `json:"confidence,omitempty"`
+	Reason              string   `json:"reason"`
+	ConflictFields      []string `json:"conflict_fields,omitempty"`
 }
 
 func loadWikiRepairScope(ctx context.Context, db *gorm.DB, reader *weknora.Client, knowledgeBaseID string, video model.Video) (wikiRepairScope, error) {
@@ -110,7 +124,13 @@ func loadWikiRepairScope(ctx context.Context, db *gorm.DB, reader *weknora.Clien
 	}, nil
 }
 
-func planWikiRepair(video model.Video, pages []weknora.WikiPage, scope wikiRepairScope) (wikiRepairPlan, error) {
+func planWikiRepair(
+	ctx context.Context,
+	video model.Video,
+	pages []weknora.WikiPage,
+	scope wikiRepairScope,
+	semanticAdapter knowledge.SemanticIdentityAdapter,
+) (wikiRepairPlan, error) {
 	plan := wikiRepairPlan{Actions: make([]wikiRepairAction, 0)}
 	for _, page := range pages {
 		if !rawPageBelongsToGeneration(page, video) || !isKnowledgeNamespace(page.Slug) {
@@ -148,36 +168,7 @@ func planWikiRepair(video model.Video, pages []weknora.WikiPage, scope wikiRepai
 		semanticCandidates = append(semanticCandidates, identityCandidateFromRepair(validation, action.page.Aliases))
 		actionIndexes = append(actionIndexes, actionIndex)
 	}
-	for _, group := range knowledge.GroupSemanticIdentities(semanticCandidates) {
-		if len(group) < 2 {
-			continue
-		}
-		winner := group[0]
-		for _, candidateIndex := range group[1:] {
-			left, right := semanticCandidates[candidateIndex], semanticCandidates[winner]
-			if knowledge.CanonicalIdentityLess(left, right) ||
-				(!knowledge.CanonicalIdentityLess(right, left) && plan.Actions[actionIndexes[candidateIndex]].WikiPageID < plan.Actions[actionIndexes[winner]].WikiPageID) {
-				winner = candidateIndex
-			}
-		}
-		winnerAction := plan.Actions[actionIndexes[winner]]
-		winnerIdentity := semanticCandidates[winner]
-		for _, candidateIndex := range group {
-			if candidateIndex == winner {
-				continue
-			}
-			actionIndex := actionIndexes[candidateIndex]
-			action := &plan.Actions[actionIndex]
-			action.Action = "quarantine"
-			action.Reason = fmt.Sprintf("semantic duplicate of Wiki page %s", winnerAction.WikiPageID)
-			action.CanonicalWikiPageID = winnerAction.WikiPageID
-			action.CanonicalKnowledgeObjectID = winnerIdentity.KnowledgeObjectID
-			action.write = quarantineWikiPageWithCanonical(
-				action.page, video, action.Reason, winnerAction.WikiPageID, winnerIdentity.KnowledgeObjectID,
-			)
-			action.type_ = ""
-		}
-	}
+	reviewRequired := adjudicateWikiSemanticIdentities(ctx, video, &plan, semanticCandidates, actionIndexes, semanticAdapter)
 	valid := make([]wikiRepairAction, 0, len(plan.Actions))
 	for _, action := range plan.Actions {
 		if action.Action == "normalize" {
@@ -185,10 +176,139 @@ func planWikiRepair(video model.Video, pages []weknora.WikiPage, scope wikiRepai
 		}
 	}
 	if len(valid) == 0 {
-		return wikiRepairPlan{}, fmt.Errorf("no current-generation Wiki page has verifiable evidence")
+		return plan, errNoVerifiableWikiPages
 	}
 	plan.IndexWrite = buildVideoIndexWrite(video, scope.SourceDocumentID, valid)
+	if reviewRequired {
+		return plan, errSemanticIdentityReviewRequired
+	}
 	return plan, nil
+}
+
+func adjudicateWikiSemanticIdentities(
+	ctx context.Context,
+	video model.Video,
+	plan *wikiRepairPlan,
+	candidates []knowledge.IdentityCandidate,
+	actionIndexes []int,
+	semanticAdapter knowledge.SemanticIdentityAdapter,
+) bool {
+	order := make([]int, len(candidates))
+	for index := range candidates {
+		order[index] = index
+	}
+	sort.Slice(order, func(i, j int) bool {
+		left, right := candidates[order[i]], candidates[order[j]]
+		if knowledge.CanonicalIdentityLess(left, right) {
+			return true
+		}
+		if knowledge.CanonicalIdentityLess(right, left) {
+			return false
+		}
+		return plan.Actions[actionIndexes[order[i]]].WikiPageID < plan.Actions[actionIndexes[order[j]]].WikiPageID
+	})
+
+	anchors := make([]int, 0, len(candidates))
+	reviewRequired := false
+	for _, candidateIndex := range order {
+		candidate := candidates[candidateIndex]
+		candidateAction := &plan.Actions[actionIndexes[candidateIndex]]
+		matchingAnchors := make([]int, 0, 1)
+		candidateBlocked := false
+		for _, anchorIndex := range anchors {
+			anchor := candidates[anchorIndex]
+			if !knowledge.IdentityRecall(anchor, candidate) {
+				continue
+			}
+			anchorAction := plan.Actions[actionIndexes[anchorIndex]]
+			assessment, err := compareWikiSemanticIdentity(ctx, semanticAdapter, anchor, candidate)
+			decision := wikiSemanticDecision{
+				AnchorWikiPageID:    anchorAction.WikiPageID,
+				CandidateWikiPageID: candidateAction.WikiPageID,
+			}
+			if err != nil {
+				decision.Decision = "error"
+				decision.Reason = err.Error()
+				candidateBlocked = true
+			} else {
+				decision.Decision = assessment.Decision
+				decision.Confidence = assessment.Confidence
+				decision.Reason = assessment.Reason
+				decision.ConflictFields = append([]string(nil), assessment.ConflictFields...)
+				switch assessment.Decision {
+				case "same_object":
+					matchingAnchors = append(matchingAnchors, anchorIndex)
+				case "different_object":
+				case "uncertain":
+					candidateBlocked = true
+				default:
+					decision.Decision = "error"
+					decision.Reason = fmt.Sprintf("unsupported semantic identity decision %q", assessment.Decision)
+					candidateBlocked = true
+				}
+			}
+			plan.SemanticDecisions = append(plan.SemanticDecisions, decision)
+		}
+
+		if len(matchingAnchors) > 1 {
+			anchorPageIDs := make([]string, 0, len(matchingAnchors))
+			for _, anchorIndex := range matchingAnchors {
+				anchorPageIDs = append(anchorPageIDs, plan.Actions[actionIndexes[anchorIndex]].WikiPageID)
+			}
+			plan.SemanticDecisions = append(plan.SemanticDecisions, wikiSemanticDecision{
+				AnchorWikiPageID:    strings.Join(anchorPageIDs, ","),
+				CandidateWikiPageID: candidateAction.WikiPageID,
+				Decision:            "multiple_anchor_match",
+				Reason:              "candidate matched more than one canonical anchor",
+			})
+			candidateBlocked = true
+		}
+		if candidateBlocked {
+			reviewRequired = true
+			continue
+		}
+		if len(matchingAnchors) == 0 {
+			anchors = append(anchors, candidateIndex)
+			continue
+		}
+
+		anchorIndex := matchingAnchors[0]
+		anchorAction := plan.Actions[actionIndexes[anchorIndex]]
+		anchorIdentity := candidates[anchorIndex]
+		candidateAction.Action = "quarantine"
+		candidateAction.Reason = fmt.Sprintf("semantic duplicate of Wiki page %s", anchorAction.WikiPageID)
+		candidateAction.CanonicalWikiPageID = anchorAction.WikiPageID
+		candidateAction.CanonicalKnowledgeObjectID = anchorIdentity.KnowledgeObjectID
+		candidateAction.write = quarantineWikiPageWithCanonical(
+			candidateAction.page,
+			video,
+			candidateAction.Reason,
+			anchorAction.WikiPageID,
+			anchorIdentity.KnowledgeObjectID,
+		)
+		candidateAction.type_ = ""
+	}
+	return reviewRequired
+}
+
+func compareWikiSemanticIdentity(
+	ctx context.Context,
+	adapter knowledge.SemanticIdentityAdapter,
+	anchor knowledge.IdentityCandidate,
+	candidate knowledge.IdentityCandidate,
+) (knowledge.SemanticIdentityAssessment, error) {
+	anchorID := strings.TrimSpace(anchor.KnowledgeObjectID)
+	if anchorID != "" && anchorID == strings.TrimSpace(candidate.KnowledgeObjectID) {
+		return knowledge.SemanticIdentityAssessment{
+			Decision:   "same_object",
+			Confidence: 1,
+			Reason:     "knowledge_object_id is identical",
+		}, nil
+	}
+	if adapter == nil {
+		return knowledge.SemanticIdentityAssessment{}, fmt.Errorf("semantic identity model is not configured")
+	}
+	return adapter.Compare(ctx, anchor, candidate)
 }
 
 func identityCandidateFromRepair(validation knowledge.WikiObjectValidation, aliases []string) knowledge.IdentityCandidate {
@@ -270,6 +390,10 @@ func normalizeWikiObject(
 		return weknora.WikiPageWrite{}, "", fmt.Errorf("page has no reusable core summary")
 	}
 
+	canonicalTitle := knowledge.CanonicalKnowledgeTitle(page.Title)
+	if canonicalTitle == "" {
+		return weknora.WikiPageWrite{}, "", fmt.Errorf("page title is only a knowledge type decoration")
+	}
 	canonical := map[string]any{
 		"page_type":                 "index",
 		"knowledge_object_id":       objectID,
@@ -277,7 +401,7 @@ func normalizeWikiObject(
 		"primary_type":              string(primaryType),
 		"source_video_id":           video.ID,
 		"transcript_generation":     video.TranscriptGeneration,
-		"title":                     strings.TrimSpace(page.Title),
+		"title":                     canonicalTitle,
 		"summary":                   summary,
 		"core_content":              summary,
 		"information_nature":        repairInformationNature(primaryType, entitySubType),
@@ -295,6 +419,7 @@ func normalizeWikiObject(
 			canonical[key] = value
 		}
 	}
+	body = rewriteRepairHeading(body, canonicalTitle)
 	content, err := renderRepairContent(canonical, body)
 	if err != nil {
 		return weknora.WikiPageWrite{}, "", err
@@ -303,7 +428,7 @@ func normalizeWikiObject(
 		return weknora.WikiPageWrite{}, "", fmt.Errorf("normalized page still fails contract: %w", err)
 	}
 	return weknora.WikiPageWrite{
-		Slug: page.Slug, Title: page.Title, PageType: "index", Status: "published",
+		Slug: page.Slug, Title: canonicalTitle, PageType: "index", Status: "published",
 		Content: content, Summary: summary, SourceRefs: page.SourceRefs, ChunkRefs: page.ChunkRefs, Version: page.Version,
 	}, primaryType, nil
 }
@@ -531,6 +656,7 @@ func ensureGraphJobIdle(ctx context.Context, db *gorm.DB, video model.Video) err
 
 func attachWikiRepairPlan(report *reconciliationReport, plan wikiRepairPlan) {
 	report.WikiRepairActions = append([]wikiRepairAction(nil), plan.Actions...)
+	report.SemanticDecisions = append([]wikiSemanticDecision(nil), plan.SemanticDecisions...)
 	for _, action := range plan.Actions {
 		if action.Action == "normalize" {
 			report.NormalizedPageCount++
@@ -604,6 +730,17 @@ func renderRepairContent(frontmatter map[string]any, body string) (string, error
 		return "", fmt.Errorf("marshal normalized frontmatter: %w", err)
 	}
 	return "---\n" + strings.TrimSpace(string(header)) + "\n---\n\n" + strings.TrimSpace(body) + "\n", nil
+}
+
+func rewriteRepairHeading(body, title string) string {
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	for index, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "# ") {
+			lines[index] = "# " + title
+			break
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func repairString(value any) string {

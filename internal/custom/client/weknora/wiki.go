@@ -429,6 +429,10 @@ func (w *WikiClient) ListByVideoOwned(ctx context.Context, kbID, videoID, pageTy
 
 func wikiPageBelongsToVideo(page WikiPage, videoID string, knowledgeBasePage *WikiPage) bool {
 	frontmatter := page.ParsedFrontmatter()
+	if evidenceContributionsContainVideo(frontmatter["evidence_contributions"], videoID) ||
+		evidenceContributionContainsVideo(frontmatter["evidence_contribution"], videoID) {
+		return true
+	}
 	if sourceVideoID, ok := frontmatter["source_video_id"].(string); ok && strings.TrimSpace(sourceVideoID) != "" {
 		return strings.TrimSpace(sourceVideoID) == strings.TrimSpace(videoID)
 	}
@@ -447,6 +451,38 @@ func wikiPageBelongsToVideo(page WikiPage, videoID string, knowledgeBasePage *Wi
 	return isKnowledgePageType(page.PageType) &&
 		strings.TrimSpace(page.Content) != "" &&
 		strings.Contains(page.Content, videoID)
+}
+
+// evidenceContributionsContainVideo recognizes canonical pages whose primary
+// legacy source points at another video. The page is still owned by every
+// video represented by a passed contribution.
+func evidenceContributionsContainVideo(raw any, videoID string) bool {
+	items, ok := raw.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if evidenceContributionContainsVideo(item, videoID) {
+			return true
+		}
+	}
+	return false
+}
+
+func evidenceContributionContainsVideo(raw any, videoID string) bool {
+	values, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	contributionVideo, _ := values["video_id"].(string)
+	if strings.TrimSpace(contributionVideo) == "" {
+		contributionVideo, _ = values["source_video_id"].(string)
+	}
+	quality, _ := values["quality_status"].(string)
+	if strings.TrimSpace(quality) == "" {
+		quality = "passed"
+	}
+	return strings.TrimSpace(contributionVideo) == strings.TrimSpace(videoID) && strings.EqualFold(strings.TrimSpace(quality), "passed")
 }
 
 func isKnowledgePageType(pageType string) bool {

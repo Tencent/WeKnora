@@ -67,45 +67,139 @@ func (r *Reader) Read(ctx context.Context, videoID, generation string) ([]Chunk,
 
 	chunks := make([]Chunk, 0, len(checkpoints))
 	for index, checkpoint := range checkpoints {
-		if checkpoint.ChunkIndex != index || checkpoint.Status != "completed" || strings.TrimSpace(checkpoint.KnowledgeID) == "" {
+		if checkpoint.ChunkIndex != index {
 			return nil, fmt.Errorf("transcript chunk manifest is incomplete at index %d", index)
 		}
-		knowledgeChunks, err := r.WeKnora.ListKnowledgeChunks(ctx, checkpoint.KnowledgeID)
+		chunk, err := r.readCheckpoint(ctx, videoID, generation, checkpoint, index)
 		if err != nil {
-			return nil, fmt.Errorf("read transcript chunk %d: %w", index, err)
+			return nil, err
 		}
-		content, metadata, err := selectTimedKnowledgeChunks(knowledgeChunks, checkpoint.KnowledgeID)
-		if err != nil {
-			return nil, fmt.Errorf("transcript chunk %d has invalid timing metadata: %w", index, err)
+		chunks = append(chunks, chunk)
+	}
+	return chunks, nil
+}
+
+// ReadEvidence reads only the requested immutable evidence sentences. It is
+// the stage-four materialization seam; callers must provide an explicit
+// whitelist and never receive the rest of the transcript by accident.
+func (r *Reader) ReadEvidence(ctx context.Context, videoID, generation string, evidenceIDs []string) ([]Chunk, error) {
+	if r.DB == nil || r.WeKnora == nil {
+		return nil, fmt.Errorf("transcript reader dependencies are not configured")
+	}
+	videoID = strings.TrimSpace(videoID)
+	generation = strings.TrimSpace(generation)
+	if videoID == "" || generation == "" {
+		return nil, fmt.Errorf("video id and transcript generation are required")
+	}
+	if len(evidenceIDs) == 0 {
+		return nil, fmt.Errorf("evidence whitelist is empty")
+	}
+	normalizedIDs := make([]string, 0, len(evidenceIDs))
+	seenIDs := make(map[string]struct{}, len(evidenceIDs))
+	for _, rawID := range evidenceIDs {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return nil, fmt.Errorf("evidence whitelist contains an empty ID")
 		}
+		if _, duplicate := seenIDs[id]; duplicate {
+			return nil, fmt.Errorf("evidence whitelist repeats %q", id)
+		}
+		seenIDs[id] = struct{}{}
+		normalizedIDs = append(normalizedIDs, id)
+	}
+
+	var checkpoints []model.VideoTranscriptChunk
+	if err := r.DB.WithContext(ctx).
+		Where("video_id = ? AND generation = ? AND evidence_sentence_id IN ?", videoID, generation, normalizedIDs).
+		Order("chunk_index ASC").Find(&checkpoints).Error; err != nil {
+		return nil, fmt.Errorf("load requested transcript checkpoints: %w", err)
+	}
+	if len(checkpoints) != len(normalizedIDs) {
+		return nil, fmt.Errorf("requested transcript evidence is not fully available")
+	}
+
+	chunks := make([]Chunk, 0, len(checkpoints))
+	seenCheckpointIDs := make(map[string]struct{}, len(checkpoints))
+	for index, checkpoint := range checkpoints {
 		evidenceID := strings.TrimSpace(checkpoint.EvidenceSentenceID)
-		if evidenceID == "" {
-			// Legacy checkpoints predate P1. Derive their ID from the immutable
-			// stored source fields so the active generation remains readable while
-			// the next re-index persists the new column.
-			sentence, buildErr := evidence.BuildSentence(evidence.Input{
-				VideoID: videoID, TranscriptGeneration: generation, Ordinal: index,
-				SourceSentenceID: metadata.SourceSentenceID, Text: OriginalText(content),
-				SpeakerID: metadata.SpeakerID, StartMs: metadata.StartMs, EndMs: metadata.EndMs,
-			})
-			if buildErr != nil {
-				return nil, fmt.Errorf("transcript chunk %d has no immutable evidence sentence ID: %w", index, buildErr)
-			}
-			evidenceID = sentence.ID
+		if _, duplicate := seenCheckpointIDs[evidenceID]; duplicate {
+			return nil, fmt.Errorf("requested transcript evidence repeats %q", evidenceID)
 		}
-		if metadata.EvidenceSentenceID != "" && metadata.EvidenceSentenceID != evidenceID {
-			return nil, fmt.Errorf("transcript chunk %d evidence sentence ID does not match stored mapping", index)
+		seenCheckpointIDs[evidenceID] = struct{}{}
+		chunk, err := r.readCheckpoint(ctx, videoID, generation, checkpoint, index)
+		if err != nil {
+			return nil, err
 		}
-		if metadata.TranscriptGeneration != "" && metadata.TranscriptGeneration != generation {
-			return nil, fmt.Errorf("transcript chunk %d transcript generation does not match active generation", index)
+		chunks = append(chunks, chunk)
+	}
+	for _, id := range normalizedIDs {
+		if _, ok := seenCheckpointIDs[id]; !ok {
+			return nil, fmt.Errorf("requested transcript evidence %q was not returned", id)
 		}
+	}
+	return chunks, nil
+}
+
+// SearchEvidence performs hybrid retrieval only within the caller's immutable
+// evidence whitelist and returns source records with stable timing metadata.
+func (r *Reader) SearchEvidence(ctx context.Context, videoID, generation, query string, evidenceIDs []string, limit int) ([]Chunk, error) {
+	if r == nil || r.DB == nil || r.WeKnora == nil {
+		return nil, fmt.Errorf("transcript reader dependencies are not configured")
+	}
+	records, err := evidence.NewIndex(r.DB, r.WeKnora).SearchWithin(ctx, videoID, generation, query, evidenceIDs, limit)
+	if err != nil {
+		return nil, err
+	}
+	chunks := make([]Chunk, 0, len(records))
+	for _, record := range records {
 		chunks = append(chunks, Chunk{
-			ID: checkpoint.KnowledgeID, EvidenceSentenceID: evidenceID,
-			SourceSentenceID: firstNonEmpty(checkpoint.SourceSegmentID, metadata.SourceSentenceID), SpeakerID: firstNonEmpty(checkpoint.SpeakerID, metadata.SpeakerID),
-			Index: index, Content: content, StartMs: metadata.StartMs, EndMs: metadata.EndMs,
+			ID: record.KnowledgeID, EvidenceSentenceID: record.EvidenceSentenceID,
+			SourceSentenceID: record.SourceSentenceID, SpeakerID: record.SpeakerID,
+			Index: record.ChunkIndex, Content: record.Text,
+			StartMs: record.StartMs, EndMs: record.EndMs,
 		})
 	}
 	return chunks, nil
+}
+
+func (r *Reader) readCheckpoint(ctx context.Context, videoID, generation string, checkpoint model.VideoTranscriptChunk, index int) (Chunk, error) {
+	if checkpoint.Status != "completed" || strings.TrimSpace(checkpoint.KnowledgeID) == "" {
+		return Chunk{}, fmt.Errorf("transcript chunk manifest is incomplete at index %d", index)
+	}
+	knowledgeChunks, err := r.WeKnora.ListKnowledgeChunks(ctx, checkpoint.KnowledgeID)
+	if err != nil {
+		return Chunk{}, fmt.Errorf("read transcript chunk %d: %w", index, err)
+	}
+	content, metadata, err := selectTimedKnowledgeChunks(knowledgeChunks, checkpoint.KnowledgeID)
+	if err != nil {
+		return Chunk{}, fmt.Errorf("transcript chunk %d has invalid timing metadata: %w", index, err)
+	}
+	evidenceID := strings.TrimSpace(checkpoint.EvidenceSentenceID)
+	if evidenceID == "" {
+		// Legacy checkpoints predate P1. Derive their ID from the immutable
+		// stored source fields so the active generation remains readable while
+		// the next re-index persists the new column.
+		sentence, buildErr := evidence.BuildSentence(evidence.Input{
+			VideoID: videoID, TranscriptGeneration: generation, Ordinal: index,
+			SourceSentenceID: metadata.SourceSentenceID, Text: OriginalText(content),
+			SpeakerID: metadata.SpeakerID, StartMs: metadata.StartMs, EndMs: metadata.EndMs,
+		})
+		if buildErr != nil {
+			return Chunk{}, fmt.Errorf("transcript chunk %d has no immutable evidence sentence ID: %w", index, buildErr)
+		}
+		evidenceID = sentence.ID
+	}
+	if metadata.EvidenceSentenceID != "" && metadata.EvidenceSentenceID != evidenceID {
+		return Chunk{}, fmt.Errorf("transcript chunk %d evidence sentence ID does not match stored mapping", index)
+	}
+	if metadata.TranscriptGeneration != "" && metadata.TranscriptGeneration != generation {
+		return Chunk{}, fmt.Errorf("transcript chunk %d transcript generation does not match active generation", index)
+	}
+	return Chunk{
+		ID: checkpoint.KnowledgeID, EvidenceSentenceID: evidenceID,
+		SourceSentenceID: firstNonEmpty(checkpoint.SourceSegmentID, metadata.SourceSentenceID), SpeakerID: firstNonEmpty(checkpoint.SpeakerID, metadata.SpeakerID),
+		Index: checkpoint.ChunkIndex, Content: content, StartMs: metadata.StartMs, EndMs: metadata.EndMs,
+	}, nil
 }
 
 func firstNonEmpty(values ...string) string {

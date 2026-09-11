@@ -6,8 +6,47 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/custom/service/chunk"
 	"github.com/Tencent/WeKnora/internal/custom/service/evidence"
+	"github.com/Tencent/WeKnora/internal/custom/service/subtitle"
 )
+
+func TestBuildFromJSONMatchesChunkEvidenceForUnknownSpeaker(t *testing.T) {
+	paragraphs := []subtitle.TranscriptParagraph{{
+		ParagraphID: "paragraph-1",
+		Sentences: []subtitle.TranscriptSentence{{
+			SentenceID: "sentence-1", Text: "未知说话人的一句话", StartMs: 100, EndMs: 900,
+		}},
+	}}
+	payload, err := json.Marshal(map[string]any{"paragraphs": paragraphs})
+	if err != nil {
+		t.Fatalf("marshal transcript payload: %v", err)
+	}
+	doc, err := BuildFromJSON(RawInput{
+		VideoID: "video-1", TranscriptGeneration: "generation-1", Title: "课程标题",
+		DurationSeconds: 2, Provider: "tingwu",
+		Payload: payload,
+	})
+	if err != nil {
+		t.Fatalf("BuildFromJSON returned error: %v", err)
+	}
+	chunks := chunk.NewSplitter().Split(chunk.SplitInputs{VideoID: "video-1", Paragraphs: paragraphs})
+	if len(chunks) != 1 {
+		t.Fatalf("chunk count = %d, want 1", len(chunks))
+	}
+	chunkSentence, err := evidence.BuildSentence(evidence.Input{
+		VideoID: "video-1", TranscriptGeneration: "generation-1", Ordinal: 0,
+		SourceSentenceID: chunks[0].Metadata.SentenceID, Text: chunks[0].Content,
+		SpeakerID: chunks[0].Metadata.SpeakerID, StartMs: chunks[0].Metadata.StartMs, EndMs: chunks[0].Metadata.EndMs,
+	})
+	if err != nil {
+		t.Fatalf("build chunk evidence sentence: %v", err)
+	}
+	paragraph := doc.Chapters[0].Paragraphs[0]
+	if paragraph.SpeakerID != "0" || paragraph.TimeMarks[0].EvidenceSentenceID != chunkSentence.ID {
+		t.Fatalf("source evidence identity diverged from chunk manifest: speaker=%q evidence=%q want=%q", paragraph.SpeakerID, paragraph.TimeMarks[0].EvidenceSentenceID, chunkSentence.ID)
+	}
+}
 
 func TestBuildFromJSONMapsMPSResultEnvelope(t *testing.T) {
 	doc, err := BuildFromJSON(RawInput{

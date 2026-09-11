@@ -468,6 +468,19 @@ func (h *IndexHandler) Run(ctx context.Context, job *model.VideoProcessingJob, v
 	if err != nil {
 		return fmt.Errorf("build transcript source document: %w", err)
 	}
+	sourceManifest := make([]transcriptservice.EvidenceManifestItem, 0, len(prepared))
+	for _, item := range prepared {
+		sourceManifest = append(sourceManifest, transcriptservice.EvidenceManifestItem{
+			EvidenceSentenceID: item.EvidenceSentenceID,
+			SourceSentenceID:   item.SourceSegmentID,
+			SpeakerID:          item.SpeakerID,
+			StartMs:            item.StartMs,
+			EndMs:              item.EndMs,
+		})
+	}
+	if err := transcriptservice.ValidateSourceEvidenceManifest(document, sourceManifest); err != nil {
+		return fmt.Errorf("validate transcript source evidence manifest: %w", err)
+	}
 	source, err := h.SourceWriter.Ensure(ctx, transcriptservice.SourceInput{Document: document, TaskID: job.ID})
 	if err != nil {
 		return fmt.Errorf("create transcript source document: %w", err)

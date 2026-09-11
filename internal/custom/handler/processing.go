@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -286,16 +287,19 @@ func (h *ProcessingHandler) ensureGraphTranscriptSource(ctx context.Context, vid
 		"video_id = ? AND transcript_generation = ? AND knowledge_base_id = ?",
 		video.ID, generation, knowledgeBaseID,
 	).First(&source).Error
+	sourceExists := err == nil
 	if err == nil {
 		if source.Status != transcriptservice.SourceStatusCreated || strings.TrimSpace(source.KnowledgeID) == "" {
 			return fmt.Errorf("transcript_source_validation:source_binding_invalid")
 		}
-		return nil
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return fmt.Errorf("load transcript source binding: %w", err)
 	}
-	if h.SourceWriter == nil {
+	if sourceExists && h.SourceWriter == nil {
+		return nil
+	}
+	if !sourceExists && h.SourceWriter == nil {
 		return fmt.Errorf("transcript_source_backfill:source_writer_missing")
 	}
 
@@ -305,6 +309,9 @@ func (h *ProcessingHandler) ensureGraphTranscriptSource(ctx context.Context, vid
 		Where("TRIM(COALESCE(result_payload, '')) <> ''").
 		Order("updated_at DESC").First(&indexJob).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if sourceExists {
+				return nil
+			}
 			return fmt.Errorf("transcript_source_backfill:index_result_missing")
 		}
 		return fmt.Errorf("load successful index result for source backfill: %w", err)
@@ -315,6 +322,14 @@ func (h *ProcessingHandler) ensureGraphTranscriptSource(ctx context.Context, vid
 	})
 	if err != nil {
 		return fmt.Errorf("transcript_source_backfill:build_full_document: %w", err)
+	}
+	documentJSON, err := document.JSON()
+	if err != nil {
+		return fmt.Errorf("transcript_source_backfill:validate_full_document: %w", err)
+	}
+	expectedHash := fmt.Sprintf("%x", sha256.Sum256([]byte(documentJSON)))
+	if sourceExists && source.ContentHash == expectedHash {
+		return nil
 	}
 	result, err := h.SourceWriter.Ensure(ctx, transcriptservice.SourceInput{
 		Document: document, TaskID: indexJob.ID + ":graph-retry-source-backfill",

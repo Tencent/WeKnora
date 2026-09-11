@@ -23,3 +23,21 @@ func TestSplitAssignsDeterministicSourceSentenceIDWhenProviderOmitsOne(t *testin
 		t.Fatalf("unexpected fallback sentence IDs: %q, %q", results[0].Metadata.SentenceID, results[1].Metadata.SentenceID)
 	}
 }
+
+func TestSplitNormalizesUnknownSpeakerID(t *testing.T) {
+	results := NewSplitter().Split(SplitInputs{
+		VideoID: "video-1",
+		Paragraphs: []subtitle.TranscriptParagraph{{
+			SpeakerID: " \t ",
+			Sentences: []subtitle.TranscriptSentence{{
+				SentenceID: "sentence-1", Text: "未知说话人的一句话", StartMs: 100, EndMs: 900,
+			}},
+		}},
+	})
+	if len(results) != 1 {
+		t.Fatalf("split returned %d results, want 1", len(results))
+	}
+	if results[0].Metadata.SpeakerID != "0" {
+		t.Fatalf("speaker ID = %q, want unknown-speaker fallback", results[0].Metadata.SpeakerID)
+	}
+}

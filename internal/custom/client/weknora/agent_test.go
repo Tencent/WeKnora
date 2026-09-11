@@ -92,7 +92,8 @@ func TestTriggerSkillSignsProductionProvenance(t *testing.T) {
 			[]string{"kb-1"}, []string{"knowledge-1"},
 		))
 		writer.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(writer, "data: {\"response_type\":\"complete\",\"done\":true}\n\n")
+		_, _ = io.WriteString(writer, "data: {\"response_type\":\"tool_result\",\"done\":false,\"data\":{\"tool_name\":\"wiki_write_page\",\"success\":true,\"production_source\":{\"page_producer\":\"extract_video_knowledge_v2\",\"event_id\":\"event-1\"}}}\n\n")
+		_, _ = io.WriteString(writer, "data: {\"response_type\":\"complete\",\"done\":true,\"data\":{\"outcome\":\"succeeded\",\"total_steps\":1}}\n\n")
 	}))
 	defer server.Close()
 
@@ -104,6 +105,74 @@ func TestTriggerSkillSignsProductionProvenance(t *testing.T) {
 		&contentprovenance.Job{TaskID: "job-1", VideoID: "video-1", TranscriptGeneration: "generation-1", JobType: "graph"},
 	)
 	require.NoError(t, err)
+}
+
+func TestTriggerSkillRejectsProductionGraphWithoutAuditedWikiWrite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, "data: {\"response_type\":\"complete\",\"done\":true,\"data\":{\"outcome\":\"succeeded\",\"total_steps\":1}}\n\n")
+	}))
+	defer server.Close()
+
+	client := NewAgentClient(config.WeKnoraConfig{
+		BaseURL: server.URL, KBID: "kb-1", ContentPipelineAuditSecret: agentTestAuditSecret,
+	})
+	err := client.TriggerSkill(
+		context.Background(), "session-1", "agent-1", "extract-video-knowledge", "query", []string{"knowledge-1"},
+		&contentprovenance.Job{TaskID: "job-1", VideoID: "video-1", TranscriptGeneration: "generation-1", JobType: "graph"},
+	)
+	require.EqualError(t, err, "agent chat production graph completed without an audited wiki_write_page")
+}
+
+func TestTriggerSkillAcceptsProductionGraphWithAuditedWikiWrite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, "data: {\"response_type\":\"tool_result\",\"done\":false,\"data\":{\"tool_name\":\"wiki_write_page\",\"success\":true,\"production_source\":{\"page_producer\":\"extract_video_knowledge_v2\",\"event_id\":\"event-1\"}}}\n\n")
+		_, _ = io.WriteString(writer, "data: {\"response_type\":\"complete\",\"done\":true,\"data\":{\"outcome\":\"succeeded\",\"total_steps\":1}}\n\n")
+	}))
+	defer server.Close()
+
+	client := NewAgentClient(config.WeKnoraConfig{
+		BaseURL: server.URL, KBID: "kb-1", ContentPipelineAuditSecret: agentTestAuditSecret,
+	})
+	require.NoError(t, client.TriggerSkill(
+		context.Background(), "session-1", "agent-1", "extract-video-knowledge", "query", []string{"knowledge-1"},
+		&contentprovenance.Job{TaskID: "job-1", VideoID: "video-1", TranscriptGeneration: "generation-1", JobType: "graph"},
+	))
+}
+
+func TestTriggerSkillReadsProductionFailureFromStreamData(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, "data: {\"response_type\":\"complete\",\"done\":true,\"data\":{\"outcome\":\"failed\",\"failure_reason\":\"empty_response\",\"total_steps\":0}}\n\n")
+	}))
+	defer server.Close()
+
+	client := NewAgentClient(config.WeKnoraConfig{
+		BaseURL: server.URL, KBID: "kb-1", ContentPipelineAuditSecret: agentTestAuditSecret,
+	})
+	err := client.TriggerSkill(
+		context.Background(), "session-1", "agent-1", "extract-video-knowledge", "query", []string{"knowledge-1"},
+		&contentprovenance.Job{TaskID: "job-1", VideoID: "video-1", TranscriptGeneration: "generation-1", JobType: "graph"},
+	)
+	require.EqualError(t, err, "agent chat failed: empty_response")
+}
+
+func TestTriggerSkillRejectsProductionGraphDoneWithoutVerifiedCompletion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(writer, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	client := NewAgentClient(config.WeKnoraConfig{
+		BaseURL: server.URL, KBID: "kb-1", ContentPipelineAuditSecret: agentTestAuditSecret,
+	})
+	err := client.TriggerSkill(
+		context.Background(), "session-1", "agent-1", "extract-video-knowledge", "query", []string{"knowledge-1"},
+		&contentprovenance.Job{TaskID: "job-1", VideoID: "video-1", TranscriptGeneration: "generation-1", JobType: "graph"},
+	)
+	require.EqualError(t, err, "agent chat production graph stream ended without a verified completion event")
 }
 
 func TestTriggerSkillFailsClosedWhenProductionSecretIsMissing(t *testing.T) {

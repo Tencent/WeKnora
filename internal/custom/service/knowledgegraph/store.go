@@ -69,7 +69,7 @@ func ValidateSemanticIdentityCompletion(videoID, generation string, pages []wekn
 
 func validateSemanticIdentityAudits(audits []IdentityAudit) error {
 	for _, audit := range audits {
-		if audit.Decision != string(knowledge.IdentityReuse) && audit.Decision != string(knowledge.IdentityConflict) {
+		if audit.Decision != string(knowledge.IdentityConflict) {
 			continue
 		}
 		return fmt.Errorf(
@@ -562,8 +562,6 @@ func buildProjection(video *model.Video, pages []weknora.WikiPage) ([]wikiObject
 
 func buildKnowledgeBaseProjection(pages []weknora.WikiPage, activeScopes ...map[string]string) ([]wikiObject, []relation) {
 	objects := make([]wikiObject, 0, len(pages))
-	objectByID := make(map[string]wikiObject, len(pages))
-	objectByPageID := make(map[string]wikiObject, len(pages))
 	for _, page := range pages {
 		preferredVideoID, preferredGeneration := "", ""
 		if len(activeScopes) > 0 {
@@ -589,6 +587,11 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage, activeScopes ...map[
 			}
 		}
 		objects = append(objects, object)
+	}
+	objects, redirectedPages, redirectedObjects := collapseSemanticReuseObjects(objects)
+	objectByID := make(map[string]wikiObject, len(objects))
+	objectByPageID := make(map[string]wikiObject, len(objects))
+	for _, object := range objects {
 		objectByID[object.KnowledgeObjectID] = object
 		objectByPageID[object.WikiPageID] = object
 	}
@@ -597,6 +600,14 @@ func buildKnowledgeBaseProjection(pages []weknora.WikiPage, activeScopes ...map[
 	seen := make(map[string]struct{})
 	for _, source := range objects {
 		for _, rel := range source.Relations {
+			if canonical, ok := redirectedObjects[rel.TargetObjectID]; ok {
+				rel.TargetObjectID = canonical.KnowledgeObjectID
+				rel.TargetWikiPageID = canonical.WikiPageID
+			}
+			if canonical, ok := redirectedPages[rel.TargetWikiPageID]; ok {
+				rel.TargetObjectID = canonical.KnowledgeObjectID
+				rel.TargetWikiPageID = canonical.WikiPageID
+			}
 			target, ok := objectByID[rel.TargetObjectID]
 			if !ok || target.WikiPageID != rel.TargetWikiPageID {
 				target, ok = objectByPageID[rel.TargetWikiPageID]
@@ -823,17 +834,14 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 			objects = append(objects, object)
 		}
 	}
-	objectByID := make(map[string]wikiObject, len(objects))
-	for _, object := range objects {
-		if previous, exists := objectByID[object.KnowledgeObjectID]; exists {
-			return nil, nil, nil, nil, fmt.Errorf(
-				"knowledge object %s is duplicated by Wiki pages %s and %s",
-				object.KnowledgeObjectID, previous.WikiPageID, object.WikiPageID,
-			)
-		}
-		objectByID[object.KnowledgeObjectID] = object
-	}
 	identityAudits := classifyIdentityPairs(video, objects)
+	objects, redirectedPages, redirectedObjects := collapseSemanticReuseObjects(objects)
+	objectByID := make(map[string]wikiObject, len(objects))
+	objectByPageID := make(map[string]wikiObject, len(objects))
+	for _, object := range objects {
+		objectByID[object.KnowledgeObjectID] = object
+		objectByPageID[object.WikiPageID] = object
+	}
 	edges := make([]relation, 0)
 	audits := make([]RelationAudit, 0)
 	for _, object := range objects {
@@ -853,8 +861,21 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 				TargetObjectID: rel.TargetObjectID, TargetWikiPageID: rel.TargetWikiPageID,
 				EvidenceIDs: append([]string(nil), rel.EvidenceIDs...), Confidence: rel.Confidence,
 			}
+			if canonical, ok := redirectedObjects[rel.TargetObjectID]; ok {
+				rel.TargetObjectID = canonical.KnowledgeObjectID
+				rel.TargetWikiPageID = canonical.WikiPageID
+			}
+			if canonical, ok := redirectedPages[rel.TargetWikiPageID]; ok {
+				rel.TargetObjectID = canonical.KnowledgeObjectID
+				rel.TargetWikiPageID = canonical.WikiPageID
+			}
+			audit.TargetObjectID = rel.TargetObjectID
+			audit.TargetWikiPageID = rel.TargetWikiPageID
 			target, exists := objectByID[rel.TargetObjectID]
-			if !exists || target.WikiPageID != rel.TargetWikiPageID || pageByID[target.WikiPageID].ID == "" {
+			if !exists || target.WikiPageID != rel.TargetWikiPageID {
+				target, exists = objectByPageID[rel.TargetWikiPageID]
+			}
+			if !exists || target.WikiPageID == object.WikiPageID || pageByID[target.WikiPageID].ID == "" {
 				audit.Status, audit.Reason = "target_not_found", "target object ID and Wiki page ID do not resolve to the same current object"
 				audits = append(audits, audit)
 				continue
@@ -892,6 +913,57 @@ func buildProjectionWithAudit(video *model.Video, pages []weknora.WikiPage) ([]w
 		}
 	}
 	return objects, edges, audits, identityAudits, nil
+}
+
+func collapseSemanticReuseObjects(objects []wikiObject) ([]wikiObject, map[string]wikiObject, map[string]wikiObject) {
+	if len(objects) < 2 {
+		return objects, nil, nil
+	}
+	candidates := make([]knowledge.IdentityCandidate, 0, len(objects))
+	for _, object := range objects {
+		candidates = append(candidates, object.identityCandidate())
+	}
+	groups := knowledge.GroupSemanticIdentities(candidates)
+	excluded := make(map[int]struct{})
+	relationsByAnchor := make(map[int][]relation)
+	redirectedPages := make(map[string]wikiObject)
+	redirectedObjects := make(map[string]wikiObject)
+	for _, group := range groups {
+		if len(group) < 2 {
+			continue
+		}
+		anchor := group[0]
+		for _, index := range group[1:] {
+			if knowledge.CanonicalIdentityLess(candidates[index], candidates[anchor]) {
+				anchor = index
+			}
+		}
+		relations := append([]relation(nil), objects[anchor].Relations...)
+		for _, index := range group {
+			if index == anchor {
+				continue
+			}
+			excluded[index] = struct{}{}
+			relations = append(relations, objects[index].Relations...)
+			redirectedPages[objects[index].WikiPageID] = objects[anchor]
+			redirectedObjects[objects[index].KnowledgeObjectID] = objects[anchor]
+		}
+		relationsByAnchor[anchor] = relations
+	}
+	if len(excluded) == 0 {
+		return objects, nil, nil
+	}
+	collapsed := make([]wikiObject, 0, len(objects)-len(excluded))
+	for index, object := range objects {
+		if _, ok := excluded[index]; ok {
+			continue
+		}
+		if relations, ok := relationsByAnchor[index]; ok {
+			object.Relations = relations
+		}
+		collapsed = append(collapsed, object)
+	}
+	return collapsed, redirectedPages, redirectedObjects
 }
 
 func relationAllowedForKnowledgeTypes(relationType string, source, target knowledge.KnowledgeType) bool {

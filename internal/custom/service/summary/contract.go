@@ -6,13 +6,16 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
 const (
-	SchemaVersion       = 2
-	legacySchemaVersion = 1
+	SchemaVersion                     = 2
+	legacySchemaVersion               = 1
+	OrchestrationProfileSchemaVersion = 1
+	maxOrchestrationProfileBytes      = 16000
 )
 
 type BlockKind string
@@ -85,20 +88,40 @@ type Classification struct {
 	EvidenceChunkIDs []string `json:"evidenceChunkIds"`
 }
 
+// OrchestrationProfile is the bounded routing projection used by the
+// cross-video training workflow. The full summary remains the source of truth.
+type OrchestrationProfile struct {
+	SchemaVersion int                      `json:"schemaVersion"`
+	PrimaryTopic  string                   `json:"primaryTopic"`
+	TopicUnits    []OrchestrationTopicUnit `json:"topicUnits"`
+}
+
+type OrchestrationTopicUnit struct {
+	Title            string        `json:"title"`
+	Abstract         string        `json:"abstract"`
+	ContentForms     []string      `json:"contentForms"`
+	LearningOutcomes []string      `json:"learningOutcomes"`
+	SummaryBlockIDs  []string      `json:"summaryBlockIds"`
+	EvidenceChunkIDs []string      `json:"evidenceChunkIds"`
+	EvidenceRefs     []EvidenceRef `json:"evidenceRefs,omitempty"`
+}
+
 type Document struct {
-	SchemaVersion  int             `json:"schemaVersion"`
-	VideoType      string          `json:"videoType"`
-	Classification *Classification `json:"classification,omitempty"`
-	Sections       []Section       `json:"sections"`
+	SchemaVersion        int                   `json:"schemaVersion"`
+	VideoType            string                `json:"videoType"`
+	Classification       *Classification       `json:"classification,omitempty"`
+	OrchestrationProfile *OrchestrationProfile `json:"orchestrationProfile,omitempty"`
+	Sections             []Section             `json:"sections"`
 }
 
 func (document *Document) UnmarshalJSON(data []byte) error {
 	var payload struct {
-		SchemaVersion       *int            `json:"schemaVersion"`
-		LegacySchemaVersion *int            `json:"schema_version"`
-		VideoType           string          `json:"videoType"`
-		Classification      *Classification `json:"classification"`
-		Sections            []Section       `json:"sections"`
+		SchemaVersion        *int                  `json:"schemaVersion"`
+		LegacySchemaVersion  *int                  `json:"schema_version"`
+		VideoType            string                `json:"videoType"`
+		Classification       *Classification       `json:"classification"`
+		OrchestrationProfile *OrchestrationProfile `json:"orchestrationProfile"`
+		Sections             []Section             `json:"sections"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return err
@@ -116,6 +139,7 @@ func (document *Document) UnmarshalJSON(data []byte) error {
 	}
 	document.VideoType = payload.VideoType
 	document.Classification = payload.Classification
+	document.OrchestrationProfile = payload.OrchestrationProfile
 	document.Sections = payload.Sections
 	return nil
 }
@@ -226,6 +250,21 @@ func NormalizeEvidenceChunkIDs(document *Document, chunks []transcript.Chunk) {
 			}
 		}
 	}
+	if document.OrchestrationProfile != nil {
+		for unitIndex := range document.OrchestrationProfile.TopicUnits {
+			unit := &document.OrchestrationProfile.TopicUnits[unitIndex]
+			for evidenceIndex, chunkID := range unit.EvidenceChunkIDs {
+				if normalized, ok := aliases[chunkID]; ok {
+					unit.EvidenceChunkIDs[evidenceIndex] = normalized
+				}
+			}
+			for evidenceIndex := range unit.EvidenceRefs {
+				if normalized, ok := aliases[unit.EvidenceRefs[evidenceIndex].ChunkID]; ok {
+					unit.EvidenceRefs[evidenceIndex].ChunkID = normalized
+				}
+			}
+		}
+	}
 	for sectionIndex := range document.Sections {
 		section := &document.Sections[sectionIndex]
 		for blockIndex := range section.Blocks {
@@ -279,6 +318,9 @@ func ValidateStored(document Document, expectedVideoType string) error {
 	}
 	requireClassification := document.SchemaVersion == SchemaVersion
 	if err := validateDocument(document, expectedVideoType, nil, framework, requireClassification); err != nil {
+		return err
+	}
+	if err := ValidateOrchestrationProfile(document, nil); err != nil {
 		return err
 	}
 	for _, section := range document.Sections {
@@ -341,6 +383,9 @@ func ValidateEnhancement(base, enhanced Document) error {
 	if len(base.Sections) != len(enhanced.Sections) {
 		return fmt.Errorf("summary enhancement changed section count")
 	}
+	if !sameOrchestrationProfile(base.OrchestrationProfile, enhanced.OrchestrationProfile) {
+		return fmt.Errorf("summary enhancement changed orchestration profile")
+	}
 	for sectionIndex, baseSection := range base.Sections {
 		current := enhanced.Sections[sectionIndex]
 		if baseSection.ID != current.ID || baseSection.Title != current.Title {
@@ -360,6 +405,29 @@ func ValidateEnhancement(base, enhanced Document) error {
 		}
 	}
 	return nil
+}
+
+// PreserveOrchestrationProfile carries the confirmed routing card through an
+// enhancement response. The model may omit the program-generated evidence
+// refs or repeat the card without those refs, but it may not change the card's
+// semantic fields.
+func PreserveOrchestrationProfile(base, enhanced *Document) error {
+	if base == nil || enhanced == nil || base.OrchestrationProfile == nil {
+		return nil
+	}
+	if enhanced.OrchestrationProfile == nil {
+		enhanced.OrchestrationProfile = base.OrchestrationProfile
+		return nil
+	}
+	if sameOrchestrationProfile(base.OrchestrationProfile, enhanced.OrchestrationProfile) {
+		enhanced.OrchestrationProfile = base.OrchestrationProfile
+		return nil
+	}
+	if sameOrchestrationProfileWithoutEvidenceRefs(base.OrchestrationProfile, enhanced.OrchestrationProfile) {
+		enhanced.OrchestrationProfile = base.OrchestrationProfile
+		return nil
+	}
+	return fmt.Errorf("summary enhancement changed orchestration profile")
 }
 
 func sameStringSet(left, right []string) bool {
@@ -387,7 +455,282 @@ func Validate(document Document, expectedVideoType string, knownChunkIDs map[str
 	if !ok {
 		return fmt.Errorf("unsupported video type: %s", document.VideoType)
 	}
-	return validateDocument(document, expectedVideoType, knownChunkIDs, framework, true)
+	if err := validateDocument(document, expectedVideoType, knownChunkIDs, framework, true); err != nil {
+		return err
+	}
+	return ValidateOrchestrationProfile(document, knownChunkIDs)
+}
+
+// ValidateGenerated applies the stricter contract used for a newly generated
+// formal summary. Historical summaries intentionally continue to accept a
+// missing orchestration profile through ValidateStored.
+func ValidateGenerated(document Document, expectedVideoType string, knownChunkIDs map[string]struct{}) error {
+	if err := Validate(document, expectedVideoType, knownChunkIDs); err != nil {
+		return err
+	}
+	if document.OrchestrationProfile == nil {
+		return fmt.Errorf("generated summary orchestration profile is required")
+	}
+	return nil
+}
+
+// NormalizeOrchestrationProfileReferences makes the profile's evidence
+// references a deterministic projection of the summary blocks selected by the
+// model. The model is allowed to choose the blocks and their evidence, but it
+// must not create a second, independently inconsistent evidence list. Unknown
+// blocks and units without any evidence after projection remain hard errors.
+func NormalizeOrchestrationProfileReferences(document *Document, knownChunkIDs map[string]struct{}) error {
+	if document == nil || document.OrchestrationProfile == nil {
+		return nil
+	}
+	blockEvidence := make(map[string]map[string]struct{})
+	for _, section := range document.Sections {
+		for _, block := range section.Blocks {
+			blockID := strings.TrimSpace(block.ID)
+			if blockID == "" {
+				continue
+			}
+			evidence := make(map[string]struct{}, len(block.EvidenceChunkIDs))
+			for _, chunkID := range block.EvidenceChunkIDs {
+				if chunkID = strings.TrimSpace(chunkID); chunkID != "" {
+					evidence[chunkID] = struct{}{}
+				}
+			}
+			blockEvidence[blockID] = evidence
+		}
+	}
+	for unitIndex := range document.OrchestrationProfile.TopicUnits {
+		unit := &document.OrchestrationProfile.TopicUnits[unitIndex]
+		selectedEvidence := make(map[string]struct{})
+		for _, blockID := range unit.SummaryBlockIDs {
+			blockID = strings.TrimSpace(blockID)
+			evidence, ok := blockEvidence[blockID]
+			if !ok {
+				return fmt.Errorf("orchestration profile topic unit %d references unknown summary block %q", unitIndex+1, blockID)
+			}
+			for chunkID := range evidence {
+				selectedEvidence[chunkID] = struct{}{}
+			}
+		}
+		normalized := make([]string, 0, len(unit.EvidenceChunkIDs))
+		seen := make(map[string]struct{}, len(unit.EvidenceChunkIDs))
+		for _, chunkID := range unit.EvidenceChunkIDs {
+			chunkID = strings.TrimSpace(chunkID)
+			if knownChunkIDs != nil {
+				if _, ok := knownChunkIDs[chunkID]; !ok {
+					return fmt.Errorf("orchestration profile topic unit %d references unknown evidence chunk %q", unitIndex+1, chunkID)
+				}
+			}
+			if _, ok := selectedEvidence[chunkID]; !ok {
+				continue
+			}
+			if _, duplicate := seen[chunkID]; duplicate {
+				continue
+			}
+			seen[chunkID] = struct{}{}
+			normalized = append(normalized, chunkID)
+		}
+		if len(normalized) == 0 {
+			return fmt.Errorf("orchestration profile topic unit %d has no evidence in its summary blocks", unitIndex+1)
+		}
+		unit.EvidenceChunkIDs = normalized
+		// Evidence refs are resolved from the canonical transcript chunks after
+		// all model output has passed validation.
+		unit.EvidenceRefs = nil
+	}
+	return nil
+}
+
+var allowedOrchestrationContentForms = map[string]struct{}{
+	"skill_method": {}, "tool_operation": {}, "concept_cognition": {},
+	"case_analysis": {}, "humanities_reflection": {}, "process_standard": {},
+}
+
+// ValidateOrchestrationProfile validates the optional bounded routing card.
+// Missing profiles remain valid for historical summaries.
+func ValidateOrchestrationProfile(document Document, knownChunkIDs map[string]struct{}) error {
+	profile := document.OrchestrationProfile
+	if profile == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(profile)
+	if err != nil {
+		return fmt.Errorf("encode orchestration profile: %w", err)
+	}
+	if len(encoded) > maxOrchestrationProfileBytes {
+		return fmt.Errorf("orchestration profile exceeds %d bytes", maxOrchestrationProfileBytes)
+	}
+	if profile.SchemaVersion != OrchestrationProfileSchemaVersion {
+		return fmt.Errorf("unsupported orchestration profile schema version: %d", profile.SchemaVersion)
+	}
+	if strings.TrimSpace(profile.PrimaryTopic) == "" {
+		return fmt.Errorf("orchestration profile primary topic is required")
+	}
+	if utf8.RuneCountInString(strings.TrimSpace(profile.PrimaryTopic)) > 120 {
+		return fmt.Errorf("orchestration profile primary topic is too long")
+	}
+	if len(profile.TopicUnits) < 1 || len(profile.TopicUnits) > 5 {
+		return fmt.Errorf("orchestration profile topic unit count must be between 1 and 5")
+	}
+	blockIDs := make(map[string]struct{})
+	blockEvidenceIDs := make(map[string]map[string]struct{})
+	for _, section := range document.Sections {
+		for _, block := range section.Blocks {
+			blockID := strings.TrimSpace(block.ID)
+			if blockID == "" {
+				return fmt.Errorf("summary contains a block with an empty ID")
+			}
+			if _, duplicate := blockIDs[blockID]; duplicate {
+				return fmt.Errorf("summary contains duplicate block ID %q", blockID)
+			}
+			blockIDs[blockID] = struct{}{}
+			evidenceIDs := make(map[string]struct{}, len(block.EvidenceChunkIDs))
+			for _, chunkID := range block.EvidenceChunkIDs {
+				chunkID = strings.TrimSpace(chunkID)
+				if chunkID != "" {
+					evidenceIDs[chunkID] = struct{}{}
+				}
+			}
+			blockEvidenceIDs[blockID] = evidenceIDs
+		}
+	}
+	seenTitles := make(map[string]struct{}, len(profile.TopicUnits))
+	seenProfileBlocks := make(map[string]struct{})
+	seenProfileEvidence := make(map[string]struct{})
+	totalAbstractRunes := 0
+	for index, unit := range profile.TopicUnits {
+		if strings.TrimSpace(unit.Title) == "" || strings.TrimSpace(unit.Abstract) == "" {
+			return fmt.Errorf("orchestration profile topic unit %d requires title and abstract", index+1)
+		}
+		if utf8.RuneCountInString(strings.TrimSpace(unit.Title)) > 80 {
+			return fmt.Errorf("orchestration profile topic unit %d title is too long", index+1)
+		}
+		if utf8.RuneCountInString(strings.TrimSpace(unit.Abstract)) > 500 {
+			return fmt.Errorf("orchestration profile topic unit %d abstract is too long", index+1)
+		}
+		title := strings.TrimSpace(unit.Title)
+		if _, duplicate := seenTitles[title]; duplicate {
+			return fmt.Errorf("orchestration profile topic unit %d duplicates title %q", index+1, title)
+		}
+		seenTitles[title] = struct{}{}
+		if len(unit.ContentForms) == 0 || len(unit.LearningOutcomes) == 0 || len(unit.SummaryBlockIDs) == 0 || len(unit.EvidenceChunkIDs) == 0 {
+			return fmt.Errorf("orchestration profile topic unit %d is incomplete", index+1)
+		}
+		seenForms := make(map[string]struct{}, len(unit.ContentForms))
+		for _, form := range unit.ContentForms {
+			form = strings.TrimSpace(form)
+			if form == "" {
+				return fmt.Errorf("orchestration profile topic unit %d has an empty content form", index+1)
+			}
+			if _, duplicate := seenForms[form]; duplicate {
+				return fmt.Errorf("orchestration profile topic unit %d duplicates content form %q", index+1, form)
+			}
+			seenForms[form] = struct{}{}
+			if _, ok := allowedOrchestrationContentForms[form]; !ok {
+				return fmt.Errorf("orchestration profile topic unit %d has unsupported content form %q", index+1, form)
+			}
+		}
+		seenOutcomes := make(map[string]struct{}, len(unit.LearningOutcomes))
+		for _, outcome := range unit.LearningOutcomes {
+			outcome = strings.TrimSpace(outcome)
+			if outcome == "" {
+				return fmt.Errorf("orchestration profile topic unit %d has an empty learning outcome", index+1)
+			}
+			if _, duplicate := seenOutcomes[outcome]; duplicate {
+				return fmt.Errorf("orchestration profile topic unit %d duplicates learning outcome %q", index+1, outcome)
+			}
+			seenOutcomes[outcome] = struct{}{}
+		}
+		unitBlocks := make(map[string]struct{}, len(unit.SummaryBlockIDs))
+		for _, blockID := range unit.SummaryBlockIDs {
+			blockID = strings.TrimSpace(blockID)
+			if blockID == "" {
+				return fmt.Errorf("orchestration profile topic unit %d has empty summary block ID", index+1)
+			}
+			if _, duplicate := unitBlocks[blockID]; duplicate {
+				return fmt.Errorf("orchestration profile topic unit %d duplicates summary block %q", index+1, blockID)
+			}
+			unitBlocks[blockID] = struct{}{}
+			if _, duplicate := seenProfileBlocks[blockID]; duplicate {
+				return fmt.Errorf("orchestration profile reuses summary block %q across topic units", blockID)
+			}
+			seenProfileBlocks[blockID] = struct{}{}
+			if _, ok := blockIDs[blockID]; !ok {
+				return fmt.Errorf("orchestration profile topic unit %d references unknown summary block %q", index+1, blockID)
+			}
+		}
+		seenEvidence := make(map[string]struct{}, len(unit.EvidenceChunkIDs))
+		for _, chunkID := range unit.EvidenceChunkIDs {
+			chunkID = strings.TrimSpace(chunkID)
+			if chunkID == "" {
+				return fmt.Errorf("orchestration profile topic unit %d has empty evidence chunk ID", index+1)
+			}
+			if _, duplicate := seenEvidence[chunkID]; duplicate {
+				return fmt.Errorf("orchestration profile topic unit %d duplicates evidence chunk %q", index+1, chunkID)
+			}
+			seenEvidence[chunkID] = struct{}{}
+			if _, duplicate := seenProfileEvidence[chunkID]; duplicate {
+				return fmt.Errorf("orchestration profile reuses evidence chunk %q across topic units", chunkID)
+			}
+			seenProfileEvidence[chunkID] = struct{}{}
+			belongsToUnitBlock := false
+			for blockID := range unitBlocks {
+				if _, ok := blockEvidenceIDs[blockID][chunkID]; ok {
+					belongsToUnitBlock = true
+					break
+				}
+			}
+			if !belongsToUnitBlock {
+				return fmt.Errorf("orchestration profile topic unit %d evidence chunk %q is not referenced by its summary blocks", index+1, chunkID)
+			}
+			if knownChunkIDs != nil {
+				if _, ok := knownChunkIDs[chunkID]; !ok {
+					return fmt.Errorf("orchestration profile topic unit %d references unknown evidence chunk %q", index+1, chunkID)
+				}
+			}
+		}
+		totalAbstractRunes += utf8.RuneCountInString(unit.Abstract)
+		if len(unit.EvidenceRefs) > 0 {
+			if len(unit.EvidenceRefs) != len(unit.EvidenceChunkIDs) {
+				return fmt.Errorf("orchestration profile topic unit %d has mismatched evidence refs", index+1)
+			}
+			for refIndex, ref := range unit.EvidenceRefs {
+				if strings.TrimSpace(ref.ChunkID) == "" || strings.TrimSpace(ref.EvidenceSentenceID) == "" || ref.StartMs < 0 || ref.EndMs <= ref.StartMs || ref.ChunkID != unit.EvidenceChunkIDs[refIndex] {
+					return fmt.Errorf("orchestration profile topic unit %d has invalid evidence ref %d", index+1, refIndex+1)
+				}
+				if knownChunkIDs != nil {
+					if _, ok := knownChunkIDs[ref.ChunkID]; !ok {
+						return fmt.Errorf("orchestration profile topic unit %d evidence ref %d references unknown chunk %q", index+1, refIndex+1, ref.ChunkID)
+					}
+				}
+			}
+		}
+	}
+	if totalAbstractRunes > 500 {
+		return fmt.Errorf("orchestration profile abstracts exceed 500 characters")
+	}
+	return nil
+}
+
+func sameOrchestrationProfile(left, right *OrchestrationProfile) bool {
+	leftJSON, _ := json.Marshal(left)
+	rightJSON, _ := json.Marshal(right)
+	return string(leftJSON) == string(rightJSON)
+}
+
+func sameOrchestrationProfileWithoutEvidenceRefs(left, right *OrchestrationProfile) bool {
+	clone := func(profile *OrchestrationProfile) *OrchestrationProfile {
+		if profile == nil {
+			return nil
+		}
+		copy := *profile
+		copy.TopicUnits = append([]OrchestrationTopicUnit(nil), profile.TopicUnits...)
+		for index := range copy.TopicUnits {
+			copy.TopicUnits[index].EvidenceRefs = nil
+		}
+		return &copy
+	}
+	return sameOrchestrationProfile(clone(left), clone(right))
 }
 
 func validateDocument(document Document, expectedVideoType string, knownChunkIDs map[string]struct{}, framework []FrameworkSection, requireClassification bool) error {
@@ -529,6 +872,22 @@ func ResolveEvidence(document *Document, chunks []transcript.Chunk) error {
 					TranscriptSnippet: transcript.OriginalText(chunk.Content),
 				})
 				block.EvidenceRefs = append(block.EvidenceRefs, EvidenceRef{
+					ChunkID: chunk.ID, EvidenceSentenceID: chunk.EvidenceSentenceID,
+					StartMs: chunk.StartMs, EndMs: chunk.EndMs,
+				})
+			}
+		}
+	}
+	if document.OrchestrationProfile != nil {
+		for unitIndex := range document.OrchestrationProfile.TopicUnits {
+			unit := &document.OrchestrationProfile.TopicUnits[unitIndex]
+			unit.EvidenceRefs = make([]EvidenceRef, 0, len(unit.EvidenceChunkIDs))
+			for _, chunkID := range unit.EvidenceChunkIDs {
+				chunk, exists := chunkByID[chunkID]
+				if !exists || strings.TrimSpace(chunk.EvidenceSentenceID) == "" {
+					return fmt.Errorf("resolve orchestration evidence chunk %q", chunkID)
+				}
+				unit.EvidenceRefs = append(unit.EvidenceRefs, EvidenceRef{
 					ChunkID: chunk.ID, EvidenceSentenceID: chunk.EvidenceSentenceID,
 					StartMs: chunk.StartMs, EndMs: chunk.EndMs,
 				})

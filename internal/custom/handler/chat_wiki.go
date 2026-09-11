@@ -92,6 +92,14 @@ func (h *ChatWikiHandler) Search(c *gin.Context) {
 		if len(types) > 0 && !containsKnowledgeType(types, validation.KnowledgeType) {
 			continue
 		}
+		evidenceIDs := validation.EvidenceIDs
+		if expectedVideoID != "" {
+			contribution, ok := contributionForVideoGeneration(validation.EvidenceContributions, expectedVideoID, expectedGeneration)
+			if !ok {
+				continue
+			}
+			evidenceIDs = append([]string(nil), contribution.EvidenceIDs...)
+		}
 		score := wikiSearchScore(query, page, validation.Title, validation.StructureFields)
 		if score == 0 {
 			continue
@@ -105,7 +113,7 @@ func (h *ChatWikiHandler) Search(c *gin.Context) {
 			WikiPageID: page.ID, KnowledgeObjectID: validation.KnowledgeObjectID,
 			KnowledgeType: validation.KnowledgeType, Title: validation.Title, Summary: summary,
 			Content: stripWikiFrontmatter(page.Content), SourceVideoID: validation.SourceVideoID,
-			TranscriptGeneration: validation.TranscriptGeneration, EvidenceIDs: validation.EvidenceIDs,
+			TranscriptGeneration: validation.TranscriptGeneration, EvidenceIDs: evidenceIDs,
 			ClassificationConfidence: validation.ClassificationConfidence,
 		}, score: score})
 	}

@@ -33,11 +33,18 @@ func ClassifyProcessingError(err error) (string, string) {
 	if errors.As(err, &incompleteOutput) && incompleteOutput.IncompleteOutput() {
 		return ErrorCategoryResponseParse, "llm_stream_incomplete"
 	}
+	var invalidOutput interface{ InvalidOutput() bool }
+	if errors.As(err, &invalidOutput) && invalidOutput.InvalidOutput() {
+		return ErrorCategoryResponseParse, "llm_output_invalid"
+	}
 	var streamTimeout interface{ StreamTimeoutPhase() string }
 	if errors.As(err, &streamTimeout) {
 		return ErrorCategoryTimeout, "llm_stream_" + streamTimeout.StreamTimeoutPhase() + "_timeout"
 	}
 	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "graph_projection:unavailable") {
+		return ErrorCategoryConfigurationAuth, "graph_projection_unavailable"
+	}
 	if containsAny(message, "p3 knowledge object validation failed", "knowledge object content contract", "knowledge object relation contract") {
 		return ErrorCategoryWikiArtifact, "content_contract_failed"
 	}

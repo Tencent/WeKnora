@@ -52,7 +52,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, shouldShowRelatedKnowledgeTab, type VideoContentModule, type VideoContentState } from '@/api/videohub'
-import { isAiLearningEvalFixtureEnabled } from '@/api/videohub/fixtures/aiLearningEval'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -63,7 +62,6 @@ import ProcessingStatus from '@/components/videohub/ProcessingStatus.vue'
 
 const route = useRoute()
 const router = useRouter()
-const isOfflineEval = isAiLearningEvalFixtureEnabled()
 const player = ref<InstanceType<typeof VideoPlayer> | null>(null)
 const page = ref<HTMLElement | null>(null)
 const layout = ref<HTMLElement | null>(null)
@@ -73,7 +71,7 @@ const video = ref<VideoData | null>(null)
 const videoOptions = ref<Array<{ label: string; value: string }>>([])
 const selectedVideoId = ref('')
 const currentSeconds = ref(0)
-const activeTab = ref(isOfflineEval ? 'related' : 'summary')
+const activeTab = ref('summary')
 const loading = ref(true)
 const error = ref('')
 const content = ref<VideoContentState>(createLoadingContentState())
@@ -136,7 +134,7 @@ function observeLeftElement(element: HTMLElement | null) {
 async function loadVideo(id: string) {
   const sequence = ++loadSequence
   contentSequence++
-  loading.value = true; error.value = ''; currentSeconds.value = 0; activeTab.value = isOfflineEval ? 'related' : 'summary'
+  loading.value = true; error.value = ''; currentSeconds.value = 0; activeTab.value = 'summary'
   try {
     const nextVideo = await fetchVideoDetail(id)
     if (sequence !== loadSequence) return

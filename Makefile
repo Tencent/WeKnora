@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend acceptance-up acceptance-down acceptance-restart acceptance-status acceptance-logs docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc sync-extract-video-knowledge-v2 check-extract-video-knowledge-v2
+.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend acceptance-up acceptance-down acceptance-restart acceptance-status acceptance-logs acceptance-training-preview docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc sync-extract-video-knowledge-v2 check-extract-video-knowledge-v2
 
 # Show help
 help:
@@ -69,6 +69,7 @@ help:
 	@echo "  acceptance-down     停止服务并保留数据卷"
 	@echo "  acceptance-status   查看本地验收状态"
 	@echo "  acceptance-logs     查看 custom-backend 日志"
+	@echo "  acceptance-training-preview  在 acceptance 容器内运行隔离真实生成预览"
 	@echo ""
 	@echo "Lite 模式（零外部依赖）:"
 	@echo "  build-lite        构建 Lite 版本（先构建前端到 web/，再构建 Go；SKIP_FRONTEND=1 跳过前端）"
@@ -126,7 +127,7 @@ docker-build-app:
 	@echo "获取版本信息..."
 	@eval $$(./scripts/get_version.sh env); \
 	./scripts/get_version.sh info; \
-	docker build --platform $(PLATFORM) \
+		docker build --network=host --platform $(PLATFORM) \
 		--build-arg VERSION_ARG="$$VERSION" \
 		--build-arg COMMIT_ID_ARG="$$COMMIT_ID" \
 		--build-arg BUILD_TIME_ARG="$$BUILD_TIME" \
@@ -377,6 +378,9 @@ acceptance-status:
 acceptance-logs:
 	./scripts/local-acceptance.sh logs
 
+acceptance-training-preview:
+	./scripts/run-training-orchestration-preview.sh "$(PREVIEW_OUTPUT)" "$(PREVIEW_LOG)"
+
 
 
 # =====================================================================
@@ -395,4 +399,4 @@ custom-test:
 	go test ./internal/custom/...
 
 custom-image:
-	docker build -f docker/Dockerfile.custom-backend -t weknora/custom-backend:dev .
+	docker build --network=host -f docker/Dockerfile.custom-backend -t weknora/custom-backend:dev .

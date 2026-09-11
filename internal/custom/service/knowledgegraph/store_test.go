@@ -698,16 +698,89 @@ structure_fields:
 	}
 }
 
-func TestValidateSemanticIdentityCompletionRejectsMeaningDuplicates(t *testing.T) {
+func TestValidateSemanticIdentityCompletionFoldsMeaningDuplicatesWithoutDeletingWiki(t *testing.T) {
 	video := &model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}
 	pages := []weknora.WikiPage{
 		semanticIdentityTestPage("10000000-0000-4000-8000-000000000001", "concept/second-brain", "第二大脑", "second-brain", "第二大脑是可调用知识并执行工作的系统。"),
 		semanticIdentityTestPage("10000000-0000-4000-8000-000000000002", "concept/second-brain-v2", "第二大脑（概念）", "second-brain-v2", "第二大脑是由 AI Agent 调用知识并执行工作的系统。"),
 	}
 
-	if err := ValidateSemanticIdentityCompletion(video.ID, video.TranscriptGeneration, pages); err == nil || !strings.Contains(err.Error(), "semantic identity") {
-		t.Fatalf("semantic duplicates must block completion, got %v", err)
+	if err := ValidateSemanticIdentityCompletion(video.ID, video.TranscriptGeneration, pages); err != nil {
+		t.Fatalf("historical semantic duplicates should be folded instead of blocking completion: %v", err)
 	}
+	objects, _, _, identityAudits, err := buildProjectionWithAudit(video, pages)
+	if err != nil {
+		t.Fatalf("buildProjectionWithAudit returned error: %v", err)
+	}
+	if len(objects) != 1 {
+		t.Fatalf("objects = %d, want folded canonical object", len(objects))
+	}
+	if len(identityAudits) != 1 || identityAudits[0].Decision != string(knowledge.IdentityReuse) {
+		t.Fatalf("identity audits = %#v, want auditable reuse decision", identityAudits)
+	}
+}
+
+func TestValidateSemanticIdentityCompletionStillRejectsTypeConflicts(t *testing.T) {
+	video := &model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}
+	entity := semanticIdentityTestPage("10000000-0000-4000-8000-000000000003", "entity/second-brain", "第二大脑", "second-brain-product", "第二大脑是可调用知识并执行工作的系统。")
+	entity.Content = strings.NewReplacer(
+		"type: concept", "type: entity",
+		"primary_type: concept", "primary_type: entity",
+		"information_nature: 概念", "information_nature: 产品",
+		"structure_fields:\n  definition: 把静态档案库升级为可执行的知识系统\n  components: 本地知识库、AI Agent 和方法模板\n  mechanism: AI Agent 调用知识、执行方法并回写经验",
+		"entity_sub_type: product\nstructure_fields:\n  product_type: 知识管理产品\n  core_function: 调用知识并执行工作",
+	).Replace(entity.Content)
+	pages := []weknora.WikiPage{
+		semanticIdentityTestPage("10000000-0000-4000-8000-000000000001", "concept/second-brain", "第二大脑", "second-brain", "第二大脑是可调用知识并执行工作的系统。"),
+		entity,
+	}
+
+	if err := ValidateSemanticIdentityCompletion(video.ID, video.TranscriptGeneration, pages); err == nil || !strings.Contains(err.Error(), "semantic identity") {
+		t.Fatalf("semantic type conflicts must still block completion, got %v", err)
+	}
+}
+
+func TestBuildProjectionRedirectsDuplicateRelationTargetToCanonicalPage(t *testing.T) {
+	video := &model.Video{ID: "video-1", TranscriptGeneration: "generation-1"}
+	canonical := semanticIdentityTestPage("10000000-0000-4000-8000-000000000001", "concept/think-act-observe", "思考行动观察", "think-act-observe", "思考行动观察是 AI Agent 执行任务的核心循环。")
+	duplicate := semanticIdentityTestPage("10000000-0000-4000-8000-000000000002", "concept/ai-agent-think-act-observe", "AI Agent 思考行动观察循环", "ai-agent-think-act-observe", "AI Agent 通过思考、行动、观察循环完成任务。")
+	source := weknora.WikiPage{
+		ID: "20000000-0000-4000-8000-000000000001", Slug: "methodology/agent-workflow", Title: "Agent 工作法", PageType: "index",
+		Content: `---
+knowledge_object_id: agent-workflow
+type: methodology
+primary_type: methodology
+source_video_id: video-1
+transcript_generation: generation-1
+audit_status: passed
+information_nature: 方法论
+classification_confidence: 0.9
+evidence_ids: [ev-2]
+source_refs: [doc-1]
+core_content: Agent 工作法解释思考行动观察循环如何落地。
+structure_fields:
+  input: 用户目标和约束
+  steps: 拆解、行动、观察、调整
+relations:
+  - relation_id: relation-1
+    relation_type: explains
+    target_object_id: ai-agent-think-act-observe
+    target_wiki_page_id: 10000000-0000-4000-8000-000000000002
+    evidence_ids: [ev-2]
+    confidence: 0.9
+---
+# Agent 工作法
+
+一句话概述：Agent 工作法解释思考行动观察循环如何落地。`,
+	}
+
+	objects, edges, err := buildProjection(video, []weknora.WikiPage{source, duplicate, canonical})
+	require.NoError(t, err)
+	require.Len(t, objects, 2)
+	require.Len(t, edges, 1)
+	require.Equal(t, "20000000-0000-4000-8000-000000000001", edges[0].SourceWikiPageID)
+	require.Equal(t, "10000000-0000-4000-8000-000000000001", edges[0].TargetWikiPageID)
+	require.Equal(t, "think-act-observe", edges[0].TargetObjectID)
 }
 
 func semanticIdentityTestPage(id, slug, title, objectID, core string) weknora.WikiPage {

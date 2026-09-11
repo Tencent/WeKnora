@@ -8,6 +8,8 @@ workspace_dir="$(cd "${repo_dir}/.." && pwd)"
 source_dir="${workspace_dir}/skill/extract-video-knowledge-v2"
 target_dir="${repo_dir}/skills/preloaded/extract-video-knowledge"
 target_parent="$(dirname "${target_dir}")"
+contract_source="${source_dir}/references/relation-contract.json"
+contract_target="${repo_dir}/internal/custom/service/knowledge/relation-contract.json"
 
 case "${sync_mode}" in
   --check|--write) ;;
@@ -17,7 +19,7 @@ case "${sync_mode}" in
     ;;
 esac
 
-if [[ ! -f "${source_dir}/SKILL.md" || ! -f "${source_dir}/agents/openai.yaml" ]]; then
+if [[ ! -f "${source_dir}/SKILL.md" || ! -f "${source_dir}/agents/openai.yaml" || ! -f "${contract_source}" ]]; then
   echo "V2 source skill is incomplete: ${source_dir}" >&2
   exit 1
 fi
@@ -47,6 +49,7 @@ perl -0pi -e 's/^name: extract-video-knowledge-v2$/name: extract-video-knowledge
 perl -0pi -e 's/\$extract-video-knowledge-v2/\$extract-video-knowledge/g' "${staging_dir}/agents/openai.yaml"
 
 if [[ "${sync_mode}" == "--write" ]]; then
+  cp "${contract_source}" "${contract_target}"
   backup_dir="$(mktemp -d "${target_parent}/.extract-video-knowledge-backup.XXXXXX")"
   rmdir "${backup_dir}"
   if [[ -e "${target_dir}" ]]; then
@@ -62,6 +65,10 @@ if [[ "${sync_mode}" == "--write" ]]; then
   [[ -z "${backup_dir}" || ! -e "${backup_dir}" ]] || rm -rf "${backup_dir}"
   backup_dir=""
 else
+  if ! cmp -s "${contract_source}" "${contract_target}"; then
+    echo "runtime relation contract is not synchronized from V2 source" >&2
+    exit 1
+  fi
   if ! diff -ru "${staging_dir}" "${target_dir}"; then
     echo "runtime skill is not synchronized from V2 source" >&2
     exit 1

@@ -43,8 +43,8 @@ description: 先依据当前完整转写判断内容主类型，再按人物访�
 
 ### 三、输出
 
-7. LLM 只能返回结构化 JSON：`schemaVersion`、`videoType`、`classification`、`sections`。`videoType` 必须是依据转写选出的主类型；`classification` 至少包含 `confidence`、`reason` 和 `evidenceChunkIds`。`sections` 必须严格遵循对应框架的标题和顺序；每个 block 必须是纯文本，并提供 `evidenceChunkIds`。
-8. 后端根据真实转写分块回填原文、起止时间和时间戳，校验通过后将带 `evidence` 的规范化 JSON 保存为 WeKnora 内容页。页面 frontmatter 必须含 `type: typed_summary`、`source_video_id` 与 `transcript_generation`。
+7. LLM 只能返回结构化 JSON：`schemaVersion`、`videoType`、`classification`、`orchestrationProfile`、`sections`。`videoType` 必须是依据转写选出的主类型；`classification` 至少包含 `confidence`、`reason` 和 `evidenceChunkIds`。正式总结的 `orchestrationProfile` 必须包含 `schemaVersion: 1`、`primaryTopic` 和 1 至 5 个 `topicUnits`；每个单元必须包含 `title`、`abstract`、`contentForms`、`learningOutcomes`、`summaryBlockIds`、`evidenceChunkIds`。`contentForms` 只能使用 `skill_method`、`tool_operation`、`concept_cognition`、`case_analysis`、`humanities_reflection`、`process_standard`。摘要总量目标为 300 至 500 个汉字，上限 500；主题块和证据只能引用同一份 JSON 中真实存在的 block 与给定转写分块 ID。
+8. 后端根据真实转写分块回填原文、起止时间和时间戳，校验通过后将带 `evidence` 的规范化 JSON 保存为 WeKnora 内容页。页面 frontmatter 必须含 `type: typed_summary`、`source_video_id` 与 `transcript_generation`。知识增强阶段不得改变基础总结的编排卡片；模型漏返回时由后端原样继承，模型改动时拒绝发布。
 
 ### 四、审计
 
