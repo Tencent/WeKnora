@@ -48,7 +48,9 @@ func TestPrivateAccessLogSkipsBrowserAndLearningPayloads(t *testing.T) {
 				test.method, test.path+"?token=private-query&filter=scope-filter", body,
 			)
 			request.Header.Set("Content-Type", "application/json")
-			request = request.WithContext(context.WithValue(request.Context(), types.LoggerContextKey, logrus.NewEntry(log)))
+			request = request.WithContext(
+				context.WithValue(request.Context(), types.LoggerContextKey, logrus.NewEntry(log)),
+			)
 			response := httptest.NewRecorder()
 			engine.ServeHTTP(response, request)
 			require.Equal(t, 200, response.Code)
