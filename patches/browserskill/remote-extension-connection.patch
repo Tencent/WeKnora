@@ -1009,14 +1009,14 @@ index 0000000..c9085ec
 +}
 diff --git a/apps/extension/src/entrypoints/popup/task-window-mode.test.tsx b/apps/extension/src/entrypoints/popup/task-window-mode.test.tsx
 new file mode 100644
-index 0000000..f53da36
+index 0000000..bfcf50e
 --- /dev/null
 +++ b/apps/extension/src/entrypoints/popup/task-window-mode.test.tsx
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,55 @@
 +import { i18n } from "@browser-skill/i18n";
 +import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 +import { afterEach, beforeEach, expect, it, vi } from "vitest";
-+import { TASK_WINDOW_KEY, getTaskWindowEnabled } from "@/lib/task-window-preference";
++import { getTaskWindowEnabled, TASK_WINDOW_KEY } from "@/lib/task-window-preference";
 +import { TaskWindowMode } from "./task-window-mode";
 +
 +let data: Record<string, unknown>;
@@ -1033,44 +1033,54 @@ index 0000000..f53da36
 +  cleanup();
 +  vi.unstubAllGlobals();
 +});
-+it("defaults to tabs and persists the selection across popup remounts", async () => {
++it("defaults to a separate window and preserves an explicit tab preference across popup remounts", async () => {
 +  const view = render(<TaskWindowMode />);
 +  const select = screen.getByRole("combobox") as HTMLSelectElement;
 +  await waitFor(() => expect(select.disabled).toBe(false));
-+  expect(select.value).toBe("tabs");
-+  fireEvent.change(select, { target: { value: "window" } });
-+  await waitFor(() => expect(select.value).toBe("window"));
-+  expect(await getTaskWindowEnabled()).toBe(true);
-+  expect(write).toHaveBeenCalledWith({ [TASK_WINDOW_KEY]: true });
++  expect(select.value).toBe("window");
++  fireEvent.change(select, { target: { value: "tabs" } });
++  await waitFor(() => expect(select.value).toBe("tabs"));
++  expect(await getTaskWindowEnabled()).toBe(false);
++  expect(write).toHaveBeenCalledWith({ [TASK_WINDOW_KEY]: false });
 +  view.unmount();
 +  render(<TaskWindowMode />);
 +  await waitFor(() =>
-+    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("window"),
++    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("tabs"),
 +  );
 +});
-+it("retains the saved mode and exposes a failed write", async () => {
++it("retains the default mode and exposes a failed write", async () => {
 +  render(<TaskWindowMode />);
 +  const select = screen.getByRole("combobox") as HTMLSelectElement;
 +  await waitFor(() => expect(select.disabled).toBe(false));
 +  write.mockRejectedValueOnce(new Error("storage unavailable"));
-+  fireEvent.change(select, { target: { value: "window" } });
++  fireEvent.change(select, { target: { value: "tabs" } });
 +  await screen.findByRole("alert");
-+  expect(select.value).toBe("tabs");
-+  expect(await getTaskWindowEnabled()).toBe(false);
++  expect(select.value).toBe("window");
++  expect(await getTaskWindowEnabled()).toBe(true);
++});
++
++it("loads an explicitly saved separate-window preference", async () => {
++  data[TASK_WINDOW_KEY] = true;
++  render(<TaskWindowMode />);
++  const select = screen.getByRole("combobox") as HTMLSelectElement;
++  await waitFor(() => expect(select.disabled).toBe(false));
++  expect(select.value).toBe("window");
++  expect(await getTaskWindowEnabled()).toBe(true);
++  expect(write).not.toHaveBeenCalled();
 +});
 diff --git a/apps/extension/src/entrypoints/popup/task-window-mode.tsx b/apps/extension/src/entrypoints/popup/task-window-mode.tsx
 new file mode 100644
-index 0000000..c2b969f
+index 0000000..7894c9b
 --- /dev/null
 +++ b/apps/extension/src/entrypoints/popup/task-window-mode.tsx
 @@ -0,0 +1,62 @@
-+import { useEffect, useState } from "react";
 +import { useTranslation } from "@browser-skill/i18n/react";
++import { useEffect, useState } from "react";
 +import { getTaskWindowEnabled, setTaskWindowEnabled } from "@/lib/task-window-preference";
 +
 +export function TaskWindowMode() {
 +  const { t } = useTranslation("extension");
-+  const [enabled, setEnabled] = useState(false);
++  const [enabled, setEnabled] = useState(true);
 +  const [loaded, setLoaded] = useState(false);
 +  const [saving, setSaving] = useState(false);
 +  const [error, setError] = useState(false);
@@ -1114,8 +1124,8 @@ index 0000000..c2b969f
 +        onChange={(event) => void update(event.target.value === "window")}
 +        className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
 +      >
-+        <option value="tabs">{t("popup.taskWindowTabs")}</option>
 +        <option value="window">{t("popup.taskWindowVisible")}</option>
++        <option value="tabs">{t("popup.taskWindowTabs")}</option>
 +      </select>
 +      <p className="mt-2 text-xs leading-snug text-muted-foreground">{t("popup.taskWindowHint")}</p>
 +      {error && (
@@ -1646,7 +1656,7 @@ index 0000000..8f8331d
 +}
 diff --git a/apps/extension/src/lib/task-window-preference.ts b/apps/extension/src/lib/task-window-preference.ts
 new file mode 100644
-index 0000000..3fbcce5
+index 0000000..09a4eef
 --- /dev/null
 +++ b/apps/extension/src/lib/task-window-preference.ts
 @@ -0,0 +1,11 @@
@@ -1655,7 +1665,7 @@ index 0000000..3fbcce5
 +/** Read when a new remote task starts; existing tasks keep their original mode. */
 +export async function getTaskWindowEnabled(): Promise<boolean> {
 +  const stored = await chrome.storage.local.get(TASK_WINDOW_KEY);
-+  return stored[TASK_WINDOW_KEY] === true;
++  return stored[TASK_WINDOW_KEY] !== false;
 +}
 +
 +export async function setTaskWindowEnabled(enabled: boolean): Promise<void> {
@@ -3552,7 +3562,7 @@ index 0000000..f279d80
 +control. Session stop uses the same preview fence. The gateway retains the last
 +preview while idle rather than causing background screenshots to reattach CDP.
 diff --git a/packages/i18n/src/locales/en-US/extension.json b/packages/i18n/src/locales/en-US/extension.json
-index fe51cc8..2a74984 100644
+index fe51cc8..8af2c72 100644
 --- a/packages/i18n/src/locales/en-US/extension.json
 +++ b/packages/i18n/src/locales/en-US/extension.json
 @@ -23,6 +23,11 @@
@@ -3560,8 +3570,8 @@ index fe51cc8..2a74984 100644
      },
      "connectionToggleTitle": "BrowserSkill connection",
 +    "taskWindowTitle": "Task display",
-+    "taskWindowTabs": "Background tab group (default)",
-+    "taskWindowVisible": "Separate window (keep visible)",
++    "taskWindowTabs": "Background tab group",
++    "taskWindowVisible": "Separate window (default, keep visible)",
 +    "taskWindowHint": "Applies to the next new task. A separate window opens in front; later tab changes stay within it. Keep it alongside chat: covering or minimizing it may still slow reads.",
 +    "taskWindowError": "Could not load or save this setting. Reopen the extension and try again.",
      "controlHintsToggleTitle": "Control hints",
@@ -3583,7 +3593,7 @@ index fe51cc8..2a74984 100644
    "controlOverlay": {
      "status": "Agent controlling",
 diff --git a/packages/i18n/src/locales/ko-KR/extension.json b/packages/i18n/src/locales/ko-KR/extension.json
-index c6870bc..ea2e0db 100644
+index c6870bc..5c7ac30 100644
 --- a/packages/i18n/src/locales/ko-KR/extension.json
 +++ b/packages/i18n/src/locales/ko-KR/extension.json
 @@ -23,6 +23,11 @@
@@ -3591,8 +3601,8 @@ index c6870bc..ea2e0db 100644
      },
      "connectionToggleTitle": "BrowserSkill 연결",
 +    "taskWindowTitle": "작업 표시 방식",
-+    "taskWindowTabs": "백그라운드 탭 그룹 (기본값)",
-+    "taskWindowVisible": "별도 창 (보이도록 유지)",
++    "taskWindowTabs": "백그라운드 탭 그룹",
++    "taskWindowVisible": "별도 창 (기본값, 보이도록 유지)",
 +    "taskWindowHint": "다음 새 작업부터 적용됩니다. 별도 창이 앞으로 열리고 이후에는 작업 창 안의 탭만 전환합니다. 채팅 창 옆에 두세요. 완전히 가리거나 최소화하면 여전히 느려질 수 있습니다.",
 +    "taskWindowError": "설정을 읽거나 저장하지 못했습니다. 확장 프로그램을 다시 열고 재시도하세요.",
      "controlHintsToggleTitle": "제어 표시",
@@ -3614,7 +3624,7 @@ index c6870bc..ea2e0db 100644
    "controlOverlay": {
      "status": "에이전트가 제어 중",
 diff --git a/packages/i18n/src/locales/zh-CN/extension.json b/packages/i18n/src/locales/zh-CN/extension.json
-index 46c56fa..1a2210a 100644
+index 46c56fa..201dde0 100644
 --- a/packages/i18n/src/locales/zh-CN/extension.json
 +++ b/packages/i18n/src/locales/zh-CN/extension.json
 @@ -23,6 +23,11 @@
@@ -3622,8 +3632,8 @@ index 46c56fa..1a2210a 100644
      },
      "connectionToggleTitle": "BrowserSkill 连接",
 +    "taskWindowTitle": "任务打开方式",
-+    "taskWindowTabs": "后台标签组（默认）",
-+    "taskWindowVisible": "独立窗口（保持可见）",
++    "taskWindowTabs": "后台标签组",
++    "taskWindowVisible": "独立窗口（默认，保持可见）",
 +    "taskWindowHint": "下一个新任务生效。独立窗口会打开到前台，之后仅切换窗口内的任务标签。请与聊天窗口并排放置；完全遮挡或最小化仍可能变慢。",
 +    "taskWindowError": "设置读写失败，请重新打开扩展后再试。",
      "controlHintsToggleTitle": "控制提示",

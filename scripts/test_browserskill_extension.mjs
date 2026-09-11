@@ -25,7 +25,7 @@ try {
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
   const worker = browser.serviceWorkers()[0] ?? await browser.waitForEvent('serviceworker');
-  const taskWindow = process.env.BROWSERSKILL_TEST_TASK_WINDOW === '1';
+  const taskWindow = process.env.BROWSERSKILL_TEST_TASK_WINDOW !== '0';
   const popup = await browser.newPage();
   await popup.goto(new URL('popup.html', worker.url()).href);
   await popup.locator('details summary').click();
@@ -33,8 +33,13 @@ try {
   await popup.locator('details button').first().click();
   await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('details [role=alert]'));
   if (await popup.locator('details [role=alert]').count()) throw new Error('Extension authorization failed before browser tests');
-  if (taskWindow) {
-    await popup.locator('#bsk-task-window-mode').selectOption('window');
+  if (!taskWindow) {
+    await popup.locator('#bsk-task-window-mode').selectOption('tabs');
+    await popup.waitForFunction(() => {
+      const select = document.querySelector('#bsk-task-window-mode');
+      return select?.value === 'tabs' && !select.disabled;
+    });
+  } else {
     await popup.waitForFunction(() => {
       const select = document.querySelector('#bsk-task-window-mode');
       return select?.value === 'window' && !select.disabled;
