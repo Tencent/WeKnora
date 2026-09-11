@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 const (
@@ -34,7 +35,9 @@ func serializeConversation(messages []chat.Message) string {
 		case "system":
 			continue
 		case "user":
-			if content := truncate(msg.Content, textMaxChars); content != "" {
+			content := strings.ReplaceAll(msg.Content, ">"+types.IMImageAvailablePrompt+"</image>",
+				">"+types.IMImageUnavailablePrompt+"</image>")
+			if content = truncate(content, textMaxChars); content != "" {
 				parts = append(parts, "[User]: "+content)
 			}
 		case "assistant":
@@ -113,7 +116,9 @@ func rawArchive(messages []chat.Message) string {
 		msg := &messages[i]
 		switch msg.Role {
 		case "user":
-			fmt.Fprintf(&sb, "- User: %s\n", truncate(msg.Content, 500))
+			content := strings.ReplaceAll(msg.Content, ">"+types.IMImageAvailablePrompt+"</image>",
+				">"+types.IMImageUnavailablePrompt+"</image>")
+			fmt.Fprintf(&sb, "- User: %s\n", truncate(content, 500))
 		case "assistant":
 			if calls := serializeToolCalls(msg.ToolCalls); calls != "" {
 				fmt.Fprintf(&sb, "- Assistant [%s]: %s\n", calls, truncate(msg.Content, 500))

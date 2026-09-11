@@ -1127,7 +1127,7 @@ LongConnClient ══WebSocket══▶ wss://openws.work.weixin.qq.com
 
 ### 飞书 (Feishu) 与 Lark
 
-统一适配器同时支持 Webhook 和 WebSocket 模式，且原生实现 `StreamSender` 和 `FileDownloader` 接口。
+统一适配器同时支持 Webhook 和 WebSocket 模式，且原生实现 `StreamSender`、`FileDownloader` 和 `MessageReader` 接口。
 
 #### 双云共用一套适配器
 
@@ -1179,16 +1179,23 @@ imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark))
 | 适配器调用 | 用途 | 所需权限（满足其一即可） |
 |---|---|---|
 | `POST /auth/v3/tenant_access_token/internal` | 换取 tenant access token | 无需权限（凭 App ID / Secret） |
+| `GET /bot/v3/info` | 缓存本机器人 `open_id`，用于群聊提及校验 | 需要启用机器人能力 |
+| `GET /im/v1/messages/{id}` | 补取引用消息与合并转发快照 | `im:message` 或 `im:message:readonly`；群消息还受 `im:message.group_msg` 及消息可见性限制 |
 | `POST /im/v1/messages/{id}/reply` | 回复消息（主路径） | `im:message`、`im:message:send_as_bot` 或 `im:message:send` |
 | `POST /im/v1/messages` | 发送消息（回复失败时降级） | 同上 |
 | `GET /im/v1/messages/{id}/resources/{key}` | 下载用户发来的文件 / 图片 | `im:message` 或 `im:message:readonly` |
 | `POST /im/v1/images` | 上传图片以取得 `image_key` | `im:resource` 或 `im:resource:upload` |
-| `POST /cardkit/v1/cards`<br>`PUT /cardkit/v1/cards/{id}/elements/{eid}/content`<br>`PATCH /cardkit/v1/cards/{id}/settings` | 流式卡片（仅流式输出模式需要） | `cardkit:card:write` |
+| `POST /cardkit/v1/cards`<br>`PUT /cardkit/v1/cards/{id}/elements/{eid}/content`<br>`PATCH /cardkit/v1/cards/{id}/settings` | 流式回复及完整输出的进度卡片 | `cardkit:card:write` |
 | 订阅事件 `im.message.receive_v1`（单聊） | 接收私聊消息 | `im:message.p2p_msg` 或 `im:message.p2p_msg:readonly` |
 | 订阅事件 `im.message.receive_v1`（群聊 @） | 接收群内 @机器人 消息 | `im:message.group_at_msg` 或 `im:message.group_at_msg:readonly` |
 
-因此 IM 功能全开（私聊 + 群聊 @ + 文件 + 图片 + 流式卡片）最少需要 5 类权限：收私聊、收群 @、
-发消息、读写资源、写卡片。若关闭流式输出（输出模式选「完整输出」），`cardkit:card:write` 可省略。
+完整输出与消息补取还需注意：
+
+- **进度卡片：** 完整输出模式也使用 CardKit 显示处理中状态；创建失败时降级为普通最终回复。
+- **消息可见性：** 补取群内引用和转发消息前，需在对应云的控制台确认群消息读取权限与发布状态。消息 ID 本身不授予读取权限；接口拒绝时，最终回复会说明该分支缺失。
+
+接口详情见[获取消息内容](https://open.feishu.cn/document/server-docs/im-v1/message/get)与
+[获取机器人信息](https://open.feishu.cn/document/client-docs/bot-v3/obtain-bot-info)。
 
 #### Webhook 模式
 
@@ -1203,12 +1210,64 @@ imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark))
 
 - **加密方案：** AES-256-CBC，Key 为 `SHA-256(encrypt_key)`，IV 为密文前 16 字节
 - **事件过滤：** 仅处理 `im.message.receive_v1` 事件，忽略其他事件类型
-- **消息类型：** `text`（文本）、`file`（文件）、`image`（图片）、`post`（富文本，提取标题 + 结构化内容）
-- **群消息处理：** 自动去除 `@_user_xxx` 提及前缀
+- **消息类型：** `text`（文本）、`file`（文件）、`image`（图片）、多图 `post`（富文本）、`merge_forward`（合并转发），以及这些消息的 `parent_id` 引用
+- **群消息处理：** 仅在当前正文真实 @ 本机器人时触发；引用或转发内容中的 @ 不触发。解析时移除本机器人提及，保留其他成员提及
 
 #### WebSocket 模式
 
 通过飞书官方 SDK (`github.com/larksuite/oapi-sdk-go`) 建立长连接，事件推送与 Webhook 等价，无需公网域名，内置自动重连。
+
+#### 多图、引用与合并转发
+
+Webhook 与 WebSocket 共用消息解析和群聊提及校验。`post` 保留标题、图文位置和全部图片，
+纯图片消息同样进入材料接收流程。
+
+**处理流程：**
+
+1. **校验输入**：当前标题与正文合计最多 4096 个 Unicode 码点，命令消息也按完整解析正文校验。超限时在材料准备和 QA 前拒绝，并提示缩短输入或改用附件、引用；引用、转发和附件文本另计额度。
+2. **显示进度**：队列 Worker 开始准备材料时显示处理中卡片，最终结果替换同一条进度回复。
+3. **识别请求**：标题与正文为空（或只有本机器人提及）时直接接收材料；非空时由配置的问题理解模型分类，不可用时回退到回答模型。分类器仅判断当前标题与正文，不接收历史、引用、图片或附件，也不改变问题改写配置。
+4. **生成回复**：有当前请求时，读完材料后统一交给一次 QA；空输入、无请求的材料说明（如“这是上线截图”）或分类失败时，只返回可读取材料的数量和补问引导，用户可引用原始材料消息补充问题。
+
+独立的当前请求即使带引号或重复，仍按请求处理；明确作为日志、原消息、他人原话或提示词样例提供的命令，仍属于材料。
+
+**展开与资源归属：**
+
+- **顺序与深度：** 按原顺序深度优先展开：当前正文与附件 → `parent_id` 引用和转发子项 → 后续兄弟消息。当前深度为 0，每经过一个引用关系或转发层级加 1；深度 10 可纳入，深度 11 停止该分支。
+- **引用关系：** 沿 `parent_id` 追溯，不以 `root_id` 替代。不支持的中间正文标记缺失，已取得的合法引用仍可继续；机器人有权读取时，可补取快照外或其他会话中的消息，并保留消息与会话来源。
+- **资源归属：** `upper_message_id` 仅表示转发展示层级，下载使用本次读取的最外层容器 ID 与对应资源 key。同一原消息出现在不同容器中时，按各自读取上下文处理，key 不混用。
+- **读取复用：** 单轮复用原始读取结果，但每次仍按当前路径检查深度和循环；较浅路径可继续展开此前超限的引用。
+
+**单轮额度：** 以下为 WeKnora 服务端材料准备的默认限制，并非飞书平台限制。
+
+| 额度 | 单轮上限与计量方式 |
+|---|---|
+| 消息 | 50 个消息快照，按读取上下文 + 消息 ID 去重，包含当前消息和转发容器 |
+| 附件 | 图片与文件合计 10 个，按资源归属上下文 + key 去重 |
+| 下载 | 实际收到的资源内容合计 32 MiB；传输失败已收字节不退还，缓存复用不重复计量 |
+| 补充文本 | 引用、转发正文与附件解析文本合计 32 KiB，按 UTF-8 字节裁剪；当前问题完整保留 |
+| 准备时间 | 当前请求判断、补取、下载和解析共用 60 秒，不含后续 QA |
+| 单个资源 | 沿用附件 32 MiB、直接原图输入 8 MiB 上限 |
+
+- **额度耗尽：** 各项额度跨层、跨分支累计，耗尽后仅停止消耗该额度的操作；例如附件数量达到上限后，仍可读取后续正文。准备超时才停止整轮准备。
+- **部分可用：** 保留已读取的内容，将不可读、不支持、循环和截断说明合并到同一份最终回复。
+- **下载完整性：** 恰好达到剩余额度时，根据已知内容长度或 HTTP EOF 确认完整性；结束检查不额外读取资源内容字节。无法确认结束边界时，仅保留 TXT、Text、Markdown 的已取得文字并说明完整性未确认，不用于原图输入或自动入库。
+
+**模型输入与图片：**
+
+- **任务来源：** 当前请求决定任务，引用和附件中的历史命令仅作参考。启用问题改写时，引用材料进入问题理解；关闭改写且没有图片时，按当前问题检索，引用材料用于最终回答。
+- **视觉能力：** 同时检查模型配置与 Chat 适配器的传图能力，并标记原图是否实际传入。原图不可用时保留已有 OCR 文字，不能据此推断颜色、布局或画面；仅有元数据不计为可读取内容。
+- **VLM 路径：** 纯聊天与 Agent 的文字模型可复用现有视觉问题理解阶段，将配置的 VLM 返回的图片描述用于回答。WeKnoraCloud 当前 Chat 适配器会移除图片，需使用其他已配置且能传图的 VLM，或按 OCR 文字限制回答范围。
+- **图片拒收：** 视觉理解调用不以纯文本重试生成图片描述；回答模型降级为纯文本重试时，撤销附件的原图可用声明，并说明原图未能读取。
+- **Agent 上下文：** 达到轮数上限或从已有工具结果合成最终答案时，继续传入本轮原图，执行结束后释放引用。压缩摘要与当前输入合并时保留当前图片；纯文本摘要及失败归档撤销原图可用声明。
+- **检索兜底：** 知识检索无结果时，仍基于本轮可用材料回答，并限制依赖缺失材料的结论。无引用或附件的纯文字 `post` 沿用既有固定兜底，当前问题本身不计为补充材料。
+
+**会话记录与入库：** 当前消息直接上传的附件沿用渠道保存设置，引用和转发附件不自动入库。
+会话记录保存本轮实际纳入的正文、附件解析文本、来源及缺失说明，不新增原图历史持久化。
+
+**验收：** 提交或上线前，使用实际用户客户端分别验证 Webhook 与 WebSocket：用户创建的嵌套转发、
+跨会话引用可读／不可读、先发材料再引用补问，以及配置模型的请求分类、多图比较与 OCR 降级。
+代码测试覆盖解析、额度、层数和 Worker 链路；平台权限与真实模型行为仍需端到端验收。
 
 #### 流式回复 (CardKit v1)
 
@@ -1251,7 +1310,9 @@ EndStream:
 | 文件 | 职责 |
 |------|------|
 | `internal/im/feishu/region.go` | `Region` 定义（飞书 / Lark 的域名、平台标识、日志前缀、本地化文案） |
-| `internal/im/feishu/adapter.go` | 事件解析、CardKit 流式实现、Token 缓存、AES 解密、Think 块转换、文件下载 |
+| `internal/im/feishu/adapter.go` | Webhook、CardKit 流式实现、Token 缓存、AES 解密、Think 块转换、文件下载 |
+| `internal/im/feishu/message.go` | 共用正文解析、群聊提及校验、机器人身份获取与消息补取 |
+| `internal/im/material.go` | Worker 材料展开、额度计量、来源记录与接收确认 |
 | `internal/im/feishu/longconn.go` | WebSocket 长连接（封装飞书 SDK）、事件分发 |
 | `internal/im/feishu/factory.go` | 按 `Region` 构造适配器与长连接客户端 |
 
@@ -1700,7 +1761,7 @@ QA 管道 ──chunk──chunk──chunk──▶ EventBus
 | `qaTimeout` | 120s | QA 管道最大执行时间 |
 | `dedupTTL` | 5 min | 消息去重 ID 保留时长 |
 | `dedupCleanupInterval` | 1 min | 去重清理周期 |
-| `maxContentLength` | 4096 | 消息最大长度 (rune)，超出截断 |
+| `maxContentLength` | 4096 | 消息最大长度 (rune)；飞书、Lark 超限拒绝，其余渠道截断 |
 | `streamFlushInterval` | 300ms | 流式内容批量刷新间隔 |
 | `defaultMaxQueueSize` | 50 | QA 队列最大容量 |
 | `defaultMaxPerUser` | 3 | 单用户最大排队请求数 |

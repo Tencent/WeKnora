@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -42,6 +43,19 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			"any missing evidence. Use the user's requested language and format. Do not claim that an " +
 			"unperformed action succeeded.",
 	})
+	// Split-turn compaction can remove the original user image message.
+	finalMessage := &messages[len(messages)-1]
+	for _, image := range e.materialImages {
+		if !slices.ContainsFunc(conversation, func(message chat.Message) bool {
+			return slices.Contains(message.Images, image)
+		}) {
+			finalMessage.Images = append(finalMessage.Images, image)
+		}
+	}
+	if len(finalMessage.Images) > 0 {
+		finalMessage.Content += "\n\nAdditional original images from the current Feishu request are attached here; " +
+			"earlier text-only summaries did not include these originals."
+	}
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")

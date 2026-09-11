@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // resolveImageURLForLLM converts stored image paths to a format that LLM APIs can consume.
@@ -94,12 +97,24 @@ func isMultimodalNotSupportedError(err error) bool {
 		(strings.Contains(msg, "not support") || strings.Contains(msg, "unsupported") || strings.Contains(msg, "400"))
 }
 
-// stripImagesFromMessages returns a copy of messages with all image data removed.
-func stripImagesFromMessages(messages []Message) []Message {
+var imImageAvailableTag = regexp.MustCompile(`<image index="\d+">` +
+	regexp.QuoteMeta(types.IMImageAvailablePrompt) + `</image>`)
+
+const imImageOmissionNotice = "本轮原图未能被模型读取，依赖原图的部分无法完成。\n\n"
+
+// stripImagesFromMessages also invalidates Feishu's per-attachment image markers.
+// The boolean reports whether any material availability markers were invalidated.
+func stripImagesFromMessages(messages []Message) ([]Message, bool) {
 	cleaned := make([]Message, len(messages))
+	omittedMaterials := false
 	for i, msg := range messages {
 		cleaned[i] = msg
 		cleaned[i].Images = nil
+		if imImageAvailableTag.MatchString(msg.Content) {
+			cleaned[i].Content = imImageAvailableTag.ReplaceAllString(msg.Content,
+				"<note>"+types.IMImageUnavailablePrompt+"</note>")
+			omittedMaterials = true
+		}
 	}
-	return cleaned
+	return cleaned, omittedMaterials
 }

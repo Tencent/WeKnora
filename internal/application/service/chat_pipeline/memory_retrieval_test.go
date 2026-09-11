@@ -53,7 +53,7 @@ func TestWhoIsAskingReachesTheQueryRewriter(t *testing.T) {
 	chatManage := &types.ChatManage{}
 	chatManage.Query = "分割怎么调参"
 
-	_, userPrompt := plugin.buildPrompts(t.Context(), chatManage, nil)
+	_, userPrompt := plugin.buildPrompts(t.Context(), chatManage, nil, 0)
 
 	require.Contains(t, userPrompt, "在做医学影像的后端",
 		"the same question means different things to different people, and only "+
@@ -80,7 +80,7 @@ func TestQueryRewriterIsUnchangedWithoutMemory(t *testing.T) {
 	chatManage := &types.ChatManage{}
 	chatManage.Query = "分割怎么调参"
 
-	_, userPrompt := plugin.buildPrompts(t.Context(), chatManage, nil)
+	_, userPrompt := plugin.buildPrompts(t.Context(), chatManage, nil, 0)
 	require.NotContains(t, userPrompt, "asker_background")
 	require.Empty(t, chatManage.UsedMemories)
 }

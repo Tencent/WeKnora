@@ -927,3 +927,96 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 		"a decoder may hold a short suffix until Done to rule out a split model handle")
 	assert.Equal(t, "final answer", state.FinalAnswer)
 }
+
+func TestFeishuOriginalImagesSurviveAgentFinalSynthesis(t *testing.T) {
+	for _, material := range []bool{false, true} {
+		model := &mockChat{responses: []mockResponse{
+			{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "tool_calls",
+				ToolCalls: []types.LLMToolCall{{
+					ID: "call-1", Type: "function", Function: types.FunctionCall{Name: "count", Arguments: `{}`},
+				}},
+			}}},
+			{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer, Content: "final answer", Done: true, FinishReason: "stop",
+			}}},
+		}}
+		engine := newTestEngine(t, model, withMaxIterations(1))
+		engine.toolRegistry = agenttools.NewToolRegistry()
+		engine.toolRegistry.RegisterTool(newCountingTool("count"))
+		query := "比较这两张图片"
+		if material {
+			query += (types.MessageAttachments{
+				{IsImage: true, ImageIndex: 1, SourceMessageID: "source-A"},
+				{IsImage: true, ImageIndex: 2, SourceMessageID: "source-B"},
+			}).BuildPrompt(2)
+		} else {
+			query += "\n" + types.IMImageAvailablePrompt // Plain text is not a generated attachment marker.
+		}
+		images := []string{"image-A", "image-B"}
+		state, err := engine.Execute(t.Context(), "session", "answer", query, nil, images)
+		require.NoError(t, err)
+		require.Equal(t, "final answer", state.FinalAnswer)
+		require.Len(t, model.calls, 2, "one tool round followed by final synthesis")
+		var synthesisImages []string
+		for _, message := range model.calls[1] {
+			synthesisImages = append(synthesisImages, message.Images...)
+		}
+		require.Equal(t, images, synthesisImages, "the live transcript must retain its images without duplication")
+		require.Empty(t, engine.materialImages, "originals must be released when the turn ends")
+	}
+}
+
+func TestFeishuFinalSynthesisRestoresCompactedOriginals(t *testing.T) {
+	for _, retained := range [][]string{nil, {"image-A"}} {
+		model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+			{ResponseType: types.ResponseTypeAnswer, Content: "completed", Done: true},
+		}}}}
+		engine := newTestEngine(t, model)
+		engine.materialImages = []string{"image-A", "image-B"}
+		messages := []chat.Message{
+			{Role: "system", Content: "runtime policy"},
+			{Role: "user", Content: "text-only summary", Images: retained},
+		}
+		require.NoError(t, engine.streamFinalAnswerToEventBus(
+			t.Context(), "compare images", &types.AgentState{}, "session", messages,
+		))
+		require.Len(t, model.calls, 1)
+		var images []string
+		for _, message := range model.calls[0] {
+			images = append(images, message.Images...)
+		}
+		require.Equal(t, engine.materialImages, images)
+		require.Equal(t, retained, messages[1].Images, "synthesis must not mutate the live transcript")
+	}
+}
+
+func TestFeishuImagesSurviveCompactedHistoryMerging(t *testing.T) {
+	for _, material := range []bool{false, true} {
+		content := "比较图片"
+		if material {
+			content += (types.MessageAttachments{{
+				IsImage: true, ImageIndex: 1, SourceMessageID: "source",
+			}}).BuildPrompt(1)
+		}
+		images := []string{"current-image"}
+		messages := []chat.Message{
+			{Role: "system", Content: "system"},
+			{Role: "user", Content: "old question"},
+			{Role: "assistant", Content: "old answer"},
+			{Role: "user", Content: content, Images: images},
+		}
+		compacted := compaction.Apply(messages, &compaction.Preparation{FirstKeptIdx: 3}, "old history")
+		result := agenttools.SanitizeMessages(compacted)
+		require.Len(t, result, 2)
+		require.Contains(t, result[1].Content, content)
+		if material {
+			require.Equal(t, images, result[1].Images)
+			require.Contains(t, result[1].Content, "source")
+		} else {
+			require.Empty(t, result[1].Images, "non-material merging must retain its existing behavior")
+		}
+		require.Empty(t, compacted[1].Images, "sanitizing must not modify the stored summary")
+		require.Equal(t, images, messages[3].Images)
+	}
+}

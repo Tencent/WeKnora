@@ -189,7 +189,7 @@ func TestPrepareIMAttachmentsDetectsImageMIMEFromContent(t *testing.T) {
 	attachments, imageURLs, _, err := (&Service{}).prepareIMAttachments(context.Background(), &IncomingMessage{
 		MessageType: MessageTypeImage,
 		FileName:    "platform-image.png",
-	}, adapter)
+	}, adapter, nil)
 	if err != nil {
 		t.Fatalf("prepareIMAttachments() error = %v", err)
 	}

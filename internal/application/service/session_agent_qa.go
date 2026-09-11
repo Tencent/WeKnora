@@ -100,6 +100,9 @@ func (s *sessionService) AgentQA(
 	if effectiveModelID != "" {
 		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
 			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
+			if req.RewriteContext != "" {
+				agentModelSupportsVision = agentModelSupportsVision && chat.SupportsIMChatImages(modelInfo)
+			}
 			modelContextWindow = modelInfo.Parameters.ContextWindow
 		}
 	}
@@ -237,6 +240,7 @@ func (s *sessionService) AgentQA(
 		engine.SetSteerSink(req.SteerSink)
 	}
 
+	s.understandIMImages(ctx, req, effectiveModelID, agentModelSupportsVision)
 	agentQuery := req.Query
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {
@@ -253,7 +257,7 @@ func (s *sessionService) AgentQA(
 	// can see uploaded files. Mirrors the behavior of the KnowledgeQA pipeline
 	// (see chat_pipeline/into_chat_message.go).
 	if len(req.Attachments) > 0 {
-		agentQuery += req.Attachments.BuildPrompt()
+		agentQuery += req.Attachments.BuildPrompt(len(agentImageURLs))
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
 	}
 	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments); manifest != "" {

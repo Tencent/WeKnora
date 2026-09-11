@@ -34,6 +34,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
 // Compile-time checks for the optional IM capabilities implemented by Adapter.
@@ -63,6 +64,9 @@ type Adapter struct {
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
+
+	botMu     sync.Mutex
+	botOpenID string
 }
 
 // NewAdapter creates a new adapter for the given region (RegionFeishu or RegionLark).
@@ -265,13 +269,15 @@ type feishuEvent struct {
 }
 
 type feishuMessage struct {
-	MessageID   string `json:"message_id"`
-	RootID      string `json:"root_id"`
-	ParentID    string `json:"parent_id"`
-	MessageType string `json:"message_type"`
-	ChatType    string `json:"chat_type"`
-	ChatID      string `json:"chat_id"`
-	Content     string `json:"content"`
+	MessageID   string                 `json:"message_id"`
+	RootID      string                 `json:"root_id"`
+	ParentID    string                 `json:"parent_id"`
+	MessageType string                 `json:"message_type"`
+	ChatType    string                 `json:"chat_type"`
+	ChatID      string                 `json:"chat_id"`
+	Content     string                 `json:"content"`
+	CreateTime  string                 `json:"create_time"`
+	Mentions    []*larkim.MentionEvent `json:"mentions"`
 }
 
 type feishuSender struct {
@@ -332,160 +338,13 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 		threadID = msg.MessageID
 	}
 
-	// Determine chat type
-	chatType := im.ChatTypeDirect
-	chatID := ""
-	if msg.ChatType == "group" {
-		chatType = im.ChatTypeGroup
-		chatID = msg.ChatID
-	}
-
-	// Get sender info
-	openID := ""
+	senderID := ""
 	if eventBody.Event.Sender != nil && eventBody.Event.Sender.SenderID != nil {
-		openID = eventBody.Event.Sender.SenderID.OpenID
+		senderID = eventBody.Event.Sender.SenderID.OpenID
 	}
-
 	switch msg.MessageType {
-	case "text":
-		// Parse text content
-		var textContent struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal([]byte(msg.Content), &textContent); err != nil {
-			return nil, fmt.Errorf("unmarshal text content: %w", err)
-		}
-
-		// Strip @bot mention from group messages
-		content := textContent.Text
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
-
-		return &im.IncomingMessage{
-			Platform:    a.region.Platform,
-			MessageType: im.MessageTypeText,
-			UserID:      openID,
-			ChatID:      chatID,
-			ChatType:    chatType,
-			Content:     strings.TrimSpace(content),
-			MessageID:   msg.MessageID,
-			ThreadID:    threadID,
-		}, nil
-
-	case "file":
-		var fileContent struct {
-			FileKey  string `json:"file_key"`
-			FileName string `json:"file_name"`
-		}
-		if err := json.Unmarshal([]byte(msg.Content), &fileContent); err != nil {
-			return nil, fmt.Errorf("unmarshal file content: %w", err)
-		}
-		if fileContent.FileKey == "" {
-			return nil, nil
-		}
-		return &im.IncomingMessage{
-			Platform:    a.region.Platform,
-			MessageType: im.MessageTypeFile,
-			UserID:      openID,
-			ChatID:      chatID,
-			ChatType:    chatType,
-			MessageID:   msg.MessageID,
-			ThreadID:    threadID,
-			FileKey:     fileContent.FileKey,
-			FileName:    fileContent.FileName,
-		}, nil
-
-	case "image":
-		var imageContent struct {
-			ImageKey string `json:"image_key"`
-		}
-		if err := json.Unmarshal([]byte(msg.Content), &imageContent); err != nil {
-			return nil, fmt.Errorf("unmarshal image content: %w", err)
-		}
-		if imageContent.ImageKey == "" {
-			return nil, nil
-		}
-		return &im.IncomingMessage{
-			Platform:    a.region.Platform,
-			MessageType: im.MessageTypeImage,
-			UserID:      openID,
-			ChatID:      chatID,
-			ChatType:    chatType,
-			MessageID:   msg.MessageID,
-			ThreadID:    threadID,
-			FileKey:     imageContent.ImageKey,
-			FileName:    imageContent.ImageKey + ".png",
-		}, nil
-
-	case "post":
-		// Rich text: extract plain text for QA
-		var postContent struct {
-			Title   string              `json:"title"`
-			Content [][]json.RawMessage `json:"content"`
-		}
-		if err := json.Unmarshal([]byte(msg.Content), &postContent); err != nil {
-			return nil, fmt.Errorf("unmarshal post content: %w", err)
-		}
-
-		var textParts []string
-		if postContent.Title != "" {
-			textParts = append(textParts, postContent.Title)
-		}
-		for _, line := range postContent.Content {
-			var lineText strings.Builder
-			for _, elem := range line {
-				var tag struct {
-					Tag  string `json:"tag"`
-					Text string `json:"text"`
-				}
-				if err := json.Unmarshal(elem, &tag); err != nil {
-					continue
-				}
-				switch tag.Tag {
-				case "text", "a":
-					lineText.WriteString(tag.Text)
-				}
-			}
-			if t := strings.TrimSpace(lineText.String()); t != "" {
-				textParts = append(textParts, t)
-			}
-		}
-
-		content := strings.Join(textParts, "\n")
-		if chatType == im.ChatTypeGroup {
-			for strings.HasPrefix(content, "@_user_") {
-				idx := strings.Index(content, " ")
-				if idx >= 0 {
-					content = content[idx+1:]
-				} else {
-					break
-				}
-			}
-		}
-		content = strings.TrimSpace(content)
-		if content == "" {
-			return nil, nil
-		}
-
-		return &im.IncomingMessage{
-			Platform:    a.region.Platform,
-			MessageType: im.MessageTypeText,
-			UserID:      openID,
-			ChatID:      chatID,
-			ChatType:    chatType,
-			Content:     content,
-			MessageID:   msg.MessageID,
-			ThreadID:    threadID,
-		}, nil
-
+	case "text", "file", "image", "post", "merge_forward":
+		return a.parseIncoming(c.Request.Context(), msg, senderID, threadID)
 	default:
 		logger.Infof(c.Request.Context(), "[%s] Ignoring unsupported message type: %s", a.region.Label, msg.MessageType)
 		return nil, nil
@@ -695,6 +554,10 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 		resp.Body.Close()
 		return nil, "", fmt.Errorf("download file failed: status=%d", resp.StatusCode)
 	}
+	// The worker passes a resource-specific message copy. Preserve the HTTP
+	// length so an exact round-budget boundary can be distinguished from a
+	// response that was cut short by the bounded reader.
+	msg.FileSize = resp.ContentLength
 
 	// Use the original file name from the message, or extract from Content-Disposition
 	fileName := msg.FileName
