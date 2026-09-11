@@ -109,6 +109,34 @@ func (t *MCPTool) Parameters() json.RawMessage {
 	}`)
 }
 
+// serviceCallTimeout returns the MCP service's configured per-call timeout
+// (advanced_config.timeout, in seconds), or 0 when unset or not positive.
+func (t *MCPTool) serviceCallTimeout() time.Duration {
+	if t.service == nil || t.service.AdvancedConfig == nil || t.service.AdvancedConfig.Timeout <= 0 {
+		return 0
+	}
+	return time.Duration(t.service.AdvancedConfig.Timeout) * time.Second
+}
+
+// callToolTimeout returns the timeout governing the actual MCP CallTool window.
+// The agent engine derives the per-tool budget from a blanket 60s
+// (toolExecutionTimeout in internal/agent), while the service-level
+// advanced_config.timeout was only honored by the transport layers — a service
+// configured with a longer timeout still had every call cancelled at 60s (#3135).
+// The service timeout therefore extends the engine window when it is longer; it
+// never shortens it, so services without an explicit (longer) timeout keep
+// today's behavior and shorter values stay enforced where they already apply
+// (the HTTP transport timeout in internal/mcp/client.go).
+func (t *MCPTool) callToolTimeout(engineTimeout time.Duration) time.Duration {
+	if engineTimeout <= 0 {
+		engineTimeout = 60 * time.Second
+	}
+	if st := t.serviceCallTimeout(); st > engineTimeout {
+		return st
+	}
+	return engineTimeout
+}
+
 // Execute executes the MCP tool
 func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	logger.GetLogger(ctx).Infof("Executing MCP tool: %s from service: %s", t.mcpTool.Name, t.service.Name)
@@ -201,12 +229,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				// Approval may have consumed most/all of the per-tool exec budget set by the
 				// agent engine (act.go). Re-derive a fresh tool-exec ctx from ApprovalCtx so
 				// the actual MCP CallTool gets a full timeout window. (issue #1173 follow-up)
+				// callToolTimeout honors the service's advanced_config.timeout (#3135).
 				if meta.ApprovalCtx != nil {
-					freshTimeout := meta.ExecTimeout
-					if freshTimeout <= 0 {
-						freshTimeout = 60 * time.Second
-					}
-					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, freshTimeout)
+					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
 					defer freshCancel()
 					ctx = freshCtx
 				}
@@ -220,6 +245,20 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	toolCallID := ""
 	if meta != nil {
 		toolCallID = meta.ToolCallID
+	}
+
+	// The service's advanced_config.timeout must govern the actual CallTool window
+	// (#3135): the agent engine derives the per-tool ctx from a blanket 60s budget
+	// (toolExecutionTimeout in internal/agent), so calls on services configured
+	// with a longer timeout were silently cancelled mid-flight even though the
+	// transport layers honor the value. Re-derive the window from ApprovalCtx —
+	// the round-level parent without the per-tool deadline. Skipped on the
+	// post-approval path, which already re-derived its window above and whose
+	// swapped ctx no longer carries the exec meta.
+	if meta != nil && meta.ApprovalCtx != nil {
+		callCtx, callCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
+		defer callCancel()
+		ctx = callCtx
 	}
 
 	connectAndCall := func(callCtx context.Context) (*mcp.CallToolResult, error) {
