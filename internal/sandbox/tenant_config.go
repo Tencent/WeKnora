@@ -122,7 +122,21 @@ func ResolveEffectiveConfig(
 		if docker.PidsLimit > 0 {
 			effective.DockerPidsLimit = int64(docker.PidsLimit)
 		}
+		if err := overrideOptionalLimitSeconds(
+			&effective.DockerCPUTimeLimit,
+			docker.CPUTimeLimitSeconds,
+			"docker.cpu_time_limit_seconds",
+		); err != nil {
+			return nil, err
+		}
 		overrideSeconds(&effective.DockerIdleTTL, docker.IdleTTLSeconds)
+		if err := overrideOptionalLimitSeconds(
+			&effective.DockerHardLifetime,
+			docker.HardLifetimeSeconds,
+			"docker.hard_lifetime_seconds",
+		); err != nil {
+			return nil, err
+		}
 		overrideSeconds(&effective.DockerHTTPTimeout, docker.HTTPTimeoutSec)
 	}
 
@@ -204,7 +218,9 @@ func clearProviderFields(cfg *Config) {
 	cfg.DockerCPULimit = 0
 	cfg.DockerMemoryBytes = 0
 	cfg.DockerPidsLimit = 0
+	cfg.DockerCPUTimeLimit = 0
 	cfg.DockerIdleTTL = 0
+	cfg.DockerHardLifetime = 0
 	cfg.DockerHTTPTimeout = 0
 	cfg.CubeAPIURL = ""
 	cfg.CubeProxyURL = ""
@@ -290,6 +306,25 @@ func overrideSeconds(dst *time.Duration, seconds int) {
 	if seconds > 0 {
 		*dst = time.Duration(seconds) * time.Second
 	}
+}
+
+// ErrInvalidSandboxLimit marks a stored hard-limit value the runtime cannot
+// represent. API handlers classify it as bad input rather than an internal
+// provider failure.
+var ErrInvalidSandboxLimit = errors.New("sandbox: invalid hard limit")
+
+func overrideOptionalLimitSeconds(dst *time.Duration, seconds int, field string) error {
+	if seconds < 0 {
+		return fmt.Errorf("%w: %s must be zero or positive", ErrInvalidSandboxLimit, field)
+	}
+	const maxDurationSeconds = int64((1<<63 - 1) / int64(time.Second))
+	if int64(seconds) > maxDurationSeconds {
+		return fmt.Errorf("%w: %s is too large", ErrInvalidSandboxLimit, field)
+	}
+	if seconds > 0 {
+		*dst = time.Duration(seconds) * time.Second
+	}
+	return nil
 }
 
 // resolveNetworkPolicy turns the stored, admin-facing policy into the

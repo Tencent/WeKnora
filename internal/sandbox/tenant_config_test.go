@@ -313,6 +313,8 @@ func TestResolveEffectiveConfigDoesNotInheritNetworkFromBaseline(t *testing.T) {
 // either, or a cube config would silently answer with e2b coordinates.
 func TestResolveEffectiveConfigClearsInactiveProviderBaseline(t *testing.T) {
 	global := globalTestConfig() // global is e2b, with e2b credentials set
+	global.DockerCPUTimeLimit = 90 * time.Second
+	global.DockerHardLifetime = time.Hour
 
 	got, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
 		SandboxType: "cube",
@@ -328,6 +330,8 @@ func TestResolveEffectiveConfigClearsInactiveProviderBaseline(t *testing.T) {
 	require.Equal(t, "https://203.0.113.20", got.CubeAPIURL)
 	require.Empty(t, got.E2BAPIKey, "the baseline's e2b credentials must not ride along")
 	require.Empty(t, got.E2BTemplate)
+	require.Zero(t, got.DockerCPUTimeLimit)
+	require.Zero(t, got.DockerHardLifetime)
 }
 
 func TestResolveEffectiveConfigRejectsIncompleteCube(t *testing.T) {
@@ -478,6 +482,50 @@ func TestResolveEffectiveConfigRejectsDockerHostNetwork(t *testing.T) {
 		},
 	}, DefaultConfig())
 	require.Error(t, err)
+}
+
+func TestResolveEffectiveConfigProjectsDockerHardLimits(t *testing.T) {
+	effective, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:               "weknora:test",
+			Host:                "unix:///tmp/docker.sock",
+			CPUTimeLimitSeconds: 90,
+			HardLifetimeSeconds: 3600,
+		},
+	}, DefaultConfig())
+
+	require.NoError(t, err)
+	require.Equal(t, 90*time.Second, effective.DockerCPUTimeLimit)
+	require.Equal(t, time.Hour, effective.DockerHardLifetime)
+}
+
+func TestResolveEffectiveConfigKeepsDockerHardLimitsDisabledByDefault(t *testing.T) {
+	effective, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image: "weknora:test",
+			Host:  "unix:///tmp/docker.sock",
+		},
+	}, DefaultConfig())
+
+	require.NoError(t, err)
+	require.Zero(t, effective.DockerCPUTimeLimit)
+	require.Zero(t, effective.DockerHardLifetime)
+}
+
+func TestResolveEffectiveConfigRejectsNegativeDockerHardLimit(t *testing.T) {
+	_, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+		SandboxType: "docker",
+		Docker: &types.DockerSandboxConfig{
+			Image:               "weknora:test",
+			Host:                "unix:///tmp/docker.sock",
+			CPUTimeLimitSeconds: -1,
+		},
+	}, DefaultConfig())
+
+	require.ErrorIs(t, err, ErrInvalidSandboxLimit)
+	require.ErrorContains(t, err, "docker.cpu_time_limit_seconds")
 }
 
 // A blank host must come out of config resolution already pointing at the

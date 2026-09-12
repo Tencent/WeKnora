@@ -401,10 +401,20 @@
                 <t-input-number v-model="docker.idle_ttl_seconds" :min="0" theme="column"
                   placeholder="1800" />
               </t-form-item>
+              <t-form-item :label="$t('settings.sandbox.dockerHardLifetime')"
+                :tips="$t('settings.sandbox.dockerHardLifetimeHelp')">
+                <t-input-number v-model="docker.hard_lifetime_seconds" :min="0" theme="column"
+                  placeholder="0" />
+              </t-form-item>
               <t-form-item :label="$t('settings.sandbox.dockerCpuLimit')"
                 :tips="$t('settings.sandbox.dockerCpuLimitHelp')">
                 <t-input-number v-model="docker.cpu_limit" :min="0" :step="0.5" theme="column"
                   placeholder="2" />
+              </t-form-item>
+              <t-form-item :label="$t('settings.sandbox.dockerCpuTimeLimit')"
+                :tips="$t('settings.sandbox.dockerCpuTimeLimitHelp')">
+                <t-input-number v-model="docker.cpu_time_limit_seconds" :min="0" theme="column"
+                  placeholder="0" />
               </t-form-item>
               <t-form-item :label="$t('settings.sandbox.dockerMemoryLimit')"
                 :tips="$t('settings.sandbox.dockerMemoryLimitHelp')">

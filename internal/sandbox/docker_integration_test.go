@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 
@@ -269,6 +270,186 @@ time.sleep(60)
 			t.Fatalf("PID 1 left %s zombie(s) unreaped: %#v", got, zombies)
 		}
 	})
+}
+
+// Hard-limit acceptance uses real cgroup accounting and real container
+// removal. A mock cannot prove that an OOM signal is observable after the
+// allocating exec dies, that CPU usage comes from the daemon, or that removing
+// the container actually takes every child process with it.
+func TestDockerHardLimitsIntegration(t *testing.T) {
+	base := dockerIntegrationConfig(t)
+	tests := []struct {
+		name   string
+		reason string
+		apply  func(*Config)
+		script string
+	}{
+		{
+			name:   "MemoryOOM",
+			reason: dockerLimitReasonMemoryOOM,
+			apply: func(cfg *Config) {
+				cfg.DockerMemoryBytes = 64 * 1024 * 1024
+			},
+			script: `
+import time
+payload = bytearray(512 * 1024 * 1024)
+time.sleep(60)
+`,
+		},
+		{
+			name:   "CPUTime",
+			reason: dockerLimitReasonCPUTime,
+			apply: func(cfg *Config) {
+				cfg.DockerCPULimit = 1
+				cfg.DockerCPUTimeLimit = time.Second
+			},
+			script: `
+while True:
+    pass
+`,
+		},
+		{
+			name:   "HardWallTimeWhileActive",
+			reason: dockerLimitReasonWallTime,
+			apply: func(cfg *Config) {
+				cfg.DockerHardLifetime = 5 * time.Second
+			},
+			script: `
+import time
+while True:
+    time.sleep(0.05)
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := *base
+			tt.apply(&cfg)
+			settings, err := dockerSettingsFromConfig(&cfg)
+			if err != nil {
+				t.Fatalf("docker settings: %v", err)
+			}
+			api, err := sharedDockerEngineClients.get(settings.Endpoint)
+			if err != nil {
+				t.Fatalf("docker client: %v", err)
+			}
+			adapter := newDockerRemoteClientWithAPI(
+				withDockerRPCTimeout(api, settings.HTTPTimeout), settings,
+			)
+			registry := newDockerLimitWatcherRegistry(200 * time.Millisecond)
+			events := make(chan dockerLimitTermination, 1)
+			registry.onTermination = func(event dockerLimitTermination) { events <- event }
+			adapter.limitWatchers = registry
+
+			store := NewMemorySessionSandboxBindingStore()
+			manager, err := NewSessionBoundManager(SessionBoundManagerConfig{
+				Config:          &cfg,
+				Client:          adapter,
+				Store:           store,
+				Checker:         PermissiveSessionExistenceChecker{},
+				ConfigID:        "docker-hard-limits",
+				SkipHealthProbe: true,
+			})
+			if err != nil {
+				t.Fatalf("NewSessionBoundManager: %v", err)
+			}
+
+			ctx, cancel := context.WithTimeout(
+				types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+				2*time.Minute,
+			)
+			defer cancel()
+			sessionID := fmt.Sprintf("docker-hard-%s-%d", tt.name, time.Now().UnixNano())
+			t.Cleanup(func() {
+				cleanupCtx, cleanupCancel := context.WithTimeout(
+					types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+					time.Minute,
+				)
+				defer cleanupCancel()
+				_ = manager.DestroySession(cleanupCtx, sessionID)
+			})
+
+			type execution struct {
+				result *ExecuteResult
+				err    error
+			}
+			execDone := make(chan execution, 1)
+			go func() {
+				result, runErr := manager.Execute(ctx, &ExecuteConfig{
+					Script:         "hard-limit.py",
+					ScriptContent:  tt.script,
+					SessionID:      sessionID,
+					Timeout:        time.Minute,
+					SkipValidation: true,
+					Env:            map[string]string{skillOutputEnvVar: SessionOutputRoot},
+				})
+				execDone <- execution{result: result, err: runErr}
+			}()
+
+			var (
+				event         dockerLimitTermination
+				earlyFinished *execution
+			)
+			deadline := time.NewTimer(30 * time.Second)
+			defer deadline.Stop()
+			for event.ContainerID == "" {
+				select {
+				case event = <-events:
+				case finished := <-execDone:
+					earlyFinished = &finished
+					execDone = nil
+				case <-deadline.C:
+					t.Fatalf("hard-limit watcher did not remove the container; execution=%#v",
+						earlyFinished)
+				}
+			}
+			if event.Reason != tt.reason {
+				t.Fatalf("termination reason=%q, want %q", event.Reason, tt.reason)
+			}
+			t.Logf("terminated container=%s reason=%s observed=%s limit=%s",
+				event.ContainerID, event.Reason, event.Observed, event.Limit)
+
+			if _, err := api.ContainerInspect(
+				ctx, event.ContainerID, client.ContainerInspectOptions{},
+			); !cerrdefs.IsNotFound(err) {
+				t.Fatalf("terminated container still exists: %v", err)
+			}
+			if earlyFinished != nil {
+				t.Logf("limited execution finished result=%#v err=%v",
+					earlyFinished.result, earlyFinished.err)
+			} else {
+				select {
+				case finished := <-execDone:
+					t.Logf("limited execution finished result=%#v err=%v", finished.result, finished.err)
+				case <-time.After(15 * time.Second):
+					t.Fatal("removed container left its exec call blocked")
+				}
+			}
+
+			// The binding still names the provider-reaped container. The normal
+			// lifecycle must classify that as replaceable and create exactly one
+			// fresh sandbox rather than leaving the session permanently broken.
+			replacement, err := manager.Execute(ctx, &ExecuteConfig{
+				Script:         "replacement.py",
+				ScriptContent:  `print("replacement-ok")`,
+				SessionID:      sessionID,
+				Timeout:        30 * time.Second,
+				SkipValidation: true,
+				Env:            map[string]string{skillOutputEnvVar: SessionOutputRoot},
+			})
+			if err != nil || replacement == nil || !replacement.IsSuccess() ||
+				!strings.Contains(replacement.Stdout, "replacement-ok") {
+				t.Fatalf("session did not replace the terminated sandbox: %v %#v", err, replacement)
+			}
+			summaries, err := adapter.List(ctx, RemoteListFilter{Metadata: map[string]string{
+				remoteMetadataSessionID: sessionID,
+			}})
+			if err != nil || len(summaries) != 1 || summaries[0].ID == event.ContainerID {
+				t.Fatalf("replacement left an orphan or reused the removed container: %v %#v", err, summaries)
+			}
+		})
+	}
 }
 
 // The idle sweeper reclaims a container by the mtime of its activity marker,
