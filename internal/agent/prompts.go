@@ -127,7 +127,28 @@ func AvailablePlaceholders() []PlaceholderDefinition {
 	return result
 }
 
-// formatKnowledgeBaseList formats knowledge base information as XML for the prompt
+// Catalog budget for formatKnowledgeBaseList. Each full-detail entry costs
+// ~1.2KB, so a tenant binding hundreds of knowledge bases to one agent would
+// otherwise render a catalog larger than the model's context window before
+// the conversation even starts — the runtime_context block is injected into
+// the first user message of every turn and compaction must not cut it.
+const (
+	// kbCatalogFullDetailChars is the character budget for full-detail
+	// entries (header + description + recent documents). Beyond it, the
+	// remaining knowledge bases degrade to single-line entries that keep
+	// their routing ids at roughly a tenth of the cost.
+	kbCatalogFullDetailChars = 20_000
+	// kbCatalogHardCeilingChars is the hard ceiling for the whole catalog.
+	// Single-line entries are cheap but not free; past this the tail is
+	// omitted entirely with a note. Retrieval still covers omitted bases
+	// whenever the model does not narrow the scope with knowledge_base_ids.
+	kbCatalogHardCeilingChars = 128_000
+)
+
+// formatKnowledgeBaseList formats knowledge base information as XML for the
+// prompt. Entries render in full detail until kbCatalogFullDetailChars is
+// exhausted, degrade to id-preserving single lines under
+// kbCatalogHardCeilingChars, and are then omitted with an explanatory note.
 func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	if len(kbInfos) == 0 {
 		return "<knowledge_bases />"
@@ -135,46 +156,71 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 
 	var b strings.Builder
 	b.WriteString("<knowledge_bases>\n")
+	catalogStart := b.Len()
+	omitted := 0
 	for _, kb := range kbInfos {
 		if kb == nil {
 			continue
 		}
-		kbType := kb.Type
-		if kbType == "" {
-			kbType = "document"
+		catalogChars := b.Len() - catalogStart
+		if catalogChars >= kbCatalogHardCeilingChars {
+			omitted++
+			continue
 		}
-		fmt.Fprintf(&b, "<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\" capabilities=\"%s\">\n",
-			escapeXMLAttr(kb.ID), escapeXMLAttr(formatDocSummary(kb.Name, 160)), escapeXMLAttr(kbType), kb.DocCount,
-			escapeXMLAttr(strings.Join(kb.Capabilities, ",")))
-		if kb.Description != "" {
-			fmt.Fprintf(&b, "<description>%s</description>\n", escapeXMLAttr(formatDocSummary(kb.Description, 240)))
-		}
-		if len(kb.RecentDocs) > 0 {
-			b.WriteString("<recent_documents>\n")
-			for j, doc := range kb.RecentDocs {
-				if j >= 2 {
-					break
-				}
-				name := doc.Title
-				if kbType == "faq" {
-					name = doc.FAQStandardQuestion
-				}
-				if name == "" {
-					name = doc.FileName
-				}
-				fmt.Fprintf(&b,
-					"<document knowledge_id=\"%s\" chunk_id=\"%s\" type=\"%s\"><name>%s</name></document>\n",
-					escapeXMLAttr(doc.KnowledgeID),
-					escapeXMLAttr(doc.ChunkID),
-					escapeXMLAttr(doc.Type),
-					escapeXMLAttr(formatDocSummary(name, 160)))
+		if catalogChars >= kbCatalogFullDetailChars {
+			kbType := kb.Type
+			if kbType == "" {
+				kbType = "document"
 			}
-			b.WriteString("</recent_documents>\n")
+			fmt.Fprintf(&b, "<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\" />\n",
+				escapeXMLAttr(kb.ID), escapeXMLAttr(formatDocSummary(kb.Name, 160)), escapeXMLAttr(kbType), kb.DocCount)
+			continue
 		}
-		b.WriteString("</knowledge_base>\n")
+		writeKnowledgeBaseDetail(&b, kb)
+	}
+	if omitted > 0 {
+		fmt.Fprintf(&b, "<note>%d further knowledge bases are omitted to bound this catalog's size; "+
+			"searches without an explicit knowledge_base_ids scope still cover them.</note>\n", omitted)
 	}
 	b.WriteString("</knowledge_bases>")
 	return b.String()
+}
+
+// writeKnowledgeBaseDetail renders one full-detail <knowledge_base> entry.
+func writeKnowledgeBaseDetail(b *strings.Builder, kb *KnowledgeBaseInfo) {
+	kbType := kb.Type
+	if kbType == "" {
+		kbType = "document"
+	}
+	fmt.Fprintf(b, "<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\" capabilities=\"%s\">\n",
+		escapeXMLAttr(kb.ID), escapeXMLAttr(formatDocSummary(kb.Name, 160)), escapeXMLAttr(kbType), kb.DocCount,
+		escapeXMLAttr(strings.Join(kb.Capabilities, ",")))
+	if kb.Description != "" {
+		fmt.Fprintf(b, "<description>%s</description>\n", escapeXMLAttr(formatDocSummary(kb.Description, 240)))
+	}
+	if len(kb.RecentDocs) > 0 {
+		b.WriteString("<recent_documents>\n")
+		for j, doc := range kb.RecentDocs {
+			if j >= 2 {
+				break
+			}
+			name := doc.Title
+			if kbType == "faq" {
+				name = doc.FAQStandardQuestion
+			}
+			if name == "" {
+				name = doc.FileName
+			}
+			fmt.Fprintf(b,
+				"<document knowledge_id=\"%s\" chunk_id=\"%s\" type=\"%s\"><name>%s</name></document>\n",
+				escapeXMLAttr(doc.KnowledgeID),
+				escapeXMLAttr(doc.ChunkID),
+				escapeXMLAttr(doc.Type),
+				escapeXMLAttr(formatDocSummary(name, 160)))
+		}
+		b.WriteString("</recent_documents>\n")
+	}
+	b.WriteString("</knowledge_base>\n")
 }
 
 // renderPromptPlaceholders renders placeholders in the prompt template.
