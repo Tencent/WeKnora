@@ -3308,8 +3308,8 @@ export default {
         label: '應用到所有現有空間',
         tooltip: '儲存的值預設只對之後新建的空間生效；點擊此按鈕將當前值同步寫入所有現有空間。',
         confirmBtn: '應用',
-        confirmBody: '將把所有現有空間的存儲配額覆蓋為 {value} GB。如有空間被運維單獨調整過的配額，也會一併被覆蓋。是否繼續？',
-        success: '已將 {count} 個空間的存儲配額更新為 {gb} GB',
+        confirmBody: '將把所有現有空間的存儲配額覆蓋為 {value} {unit}。如有空間被運維單獨調整過的配額，也會一併被覆蓋。是否繼續？',
+        success: '已將 {count} 個空間的存儲配額更新為 {value} {unit}',
         failed: '應用到所有空間失敗'
       },
       passwordReset: {
@@ -3456,6 +3456,7 @@ export default {
           max_owned_per_user: '每個非超管使用者透過自助建立可擁有的最大空間數。每次建立空間時實時讀取，修改後立即生效。0 表示使用內建預設值 10；負數表示完全關閉限制（不建議在公開部署使用）。',
           self_service_creation_enabled: '是否允許非超管使用者主動建立空間。關閉後，普通使用者只能透過邀請加入已有空間；跨空間超管仍可建立。修改後立即生效。',
           default_storage_quota_gb: '新建空間時預設分配的存儲配額（GB），包含向量、原文、文字、索引等。僅在建立時讀取，修改後只對之後新建的空間生效，不會回寫已存在的空間。0 或負數表示使用內建預設值 10GB。',
+          default_storage_quota_mb: '包括註冊自動建立的個人空間。正數優先於 GB 設定；0 或負數沿用 GB 設定。每個設定按資料庫、環境變數、內建預設值的順序讀取，僅影響之後新建的空間。',
           auto_create_api_key: '為新空間自動生成 full_access API Key，並在建立回應中返回明文 token。僅用於相容依賴舊行為的集成；預設關閉，建議透過 API Key 管理顯式建立。',
           auto_accept_invitation: '開啟後，空間管理員透過電子信箱邀請已註冊使用者時，對方會立即成為成員，不再經過收件匣確認。關閉時保持「發出邀請 → 被邀請人確認」流程。修改後立即生效。'
         },
@@ -3487,6 +3488,7 @@ export default {
           max_owned_per_user: '每使用者最大空間數',
           self_service_creation_enabled: '允許使用者自助建立空間',
           default_storage_quota_gb: '新空間預設存儲配額 (GB)',
+          default_storage_quota_mb: '新空間預設存儲配額 (MB)',
           auto_create_api_key: '建立空間時自動生成 API Key',
           auto_accept_invitation: '邀請已註冊使用者時自動加入'
         },
