@@ -23,10 +23,10 @@ import (
 //go:embed tenant_skill_verify.py
 var skillPythonVerifier string
 
-// skillVerifyRepairableExit is the exit code a verification pass uses when
-// every problem it found is a dependency missing from this image. It separates
-// "another installer round can fix this" from "the bundle has to change", which
-// is the only distinction that decides what the install flow does next.
+// skillVerifyRepairableExit is the checker's code when every problem is a
+// missing declared dependency. The install path no longer branches on it:
+// any non-zero exit refuses the snapshot. Sessions can still recover a
+// missing package at chat time.
 const skillVerifyRepairableExit = 2
 
 // skillTreeVerifyDirExit is the exit code the tree check uses when the skill
@@ -39,15 +39,12 @@ const skillTreeVerifyDirExit = 3
 // install. Notes travel on stdout so a non-zero exit stays unambiguous.
 const skillVerifyNotePrefix = "note: "
 
-// skillVerificationError is what the gate said, kept structured because it is
-// also the brief for a repair round. The gate is the only authority on what has
-// to resolve in this image, so handing back its own lines is what keeps the
-// installer from deriving "what this skill needs" a second time.
+// skillVerificationError is what the gate said. Findings stay structured so
+// the install failure names each one rather than collapsing them into a
+// generic "verification failed".
 type skillVerificationError struct {
 	// Language names the pass that failed, as the operator sees it.
 	Language string
-	// Repairable is true when installing a package would satisfy every line.
-	Repairable bool
 	// Problems are the checker's own lines, one per finding.
 	Problems []string
 	// Summary describes the command result itself, and is the only thing worth
@@ -262,10 +259,9 @@ func (s *TenantSkillService) execVerify(
 	notes := verificationNotes(res.Stdout)
 	if res.ExitCode != 0 {
 		return notes, &skillVerificationError{
-			Language:   label,
-			Repairable: res.ExitCode == skillVerifyRepairableExit,
-			Problems:   verificationProblems(res.Stderr),
-			Summary:    describeExecFailure(res),
+			Language: label,
+			Problems: verificationProblems(res.Stderr),
+			Summary:  describeExecFailure(res),
 		}
 	}
 	return notes, nil
@@ -284,8 +280,7 @@ func verificationNotes(stdout string) []string {
 }
 
 // verificationProblems splits a failed pass's stderr into its findings. Blank
-// lines are dropped; everything else is the checker's own wording, which is
-// what a repair round is given.
+// lines are dropped; everything else is the checker's own wording.
 func verificationProblems(stderr string) []string {
 	var problems []string
 	for _, line := range strings.Split(stderr, "\n") {
@@ -346,8 +341,9 @@ func skillPythonVerifyCommand(skillDir string, entry, auxiliary []string, bundle
 // declares runtime dependencies, checks each one resolves. `node --check` is
 // parse-only: it never runs the module body.
 //
-// A declared dependency that is missing exits with the repairable code: it is
-// the one thing here another installer round can still put in place.
+// A declared dependency that is missing exits with the missing-dependency
+// code so the failure is distinguishable from a syntax error. Either way the
+// snapshot is refused.
 func skillNodeVerifyCommand(skillDir string, scripts, deps []string) string {
 	parts := make([]string, 0, 2)
 	if len(deps) > 0 {

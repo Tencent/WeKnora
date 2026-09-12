@@ -31,8 +31,10 @@ Findings are graded, because rejecting an install is expensive.
     exit 0  the image may be kept
     exit 1  a problem that stops installation: a syntax error, an unreadable
             file, or a dependency manifest changed from the original bundle
-    exit 2  every problem is a missing or incompatible dependency, so handing
-            these lines back to the installer is worth a round
+    exit 2  every problem is a missing or incompatible declared dependency
+
+Either non-zero exit refuses the snapshot. A later session can still install a
+missing package; this check does not start another installer round.
 
 Files named after --optional are checked identically, but their findings are
 notes: nothing the skill offers loads a test or an example, and a bundled
@@ -72,9 +74,9 @@ optional_set = set(optional_scripts)
 problems = []
 notes = []
 
-# Whether any problem is something installing a package cannot fix. It decides
-# the exit code, which is how the caller knows if another installer round could
-# help or if the bundle itself has to change.
+# Whether any problem is a syntax error, unreadable file, or rewritten
+# manifest rather than a missing declared package. Both refuse the snapshot;
+# the exit code only classifies the finding.
 unrepairable = False
 
 

@@ -1592,65 +1592,26 @@ func TestRunInstallKeepsOldImageWhenVerificationFails(t *testing.T) {
 	require.NotEmpty(t, skill.Error)
 }
 
-// The failure this closes: the installer derives what to install from SKILL.md
-// prose, and the gate derives what must resolve from the imports every file
-// executes. Those disagree on any skill whose library modules import something
-// its documentation never names — the official office toolkit imports
-// defusedxml and lxml at module level and mentions neither — so the install
-// died with the answer already in hand, and a retry replayed the same prompt to
-// the same effect. The gate's own lines are the repair round's brief.
-func TestRunInstallHandsVerificationFindingsBackToTheInstaller(t *testing.T) {
+// Missing declared packages used to buy a second billed installer round.
+// Import checking is gone, and a later session can install the same package,
+// so verification now fails the run after the one turn the installer already had.
+func TestRunInstallDoesNotRetryWhenDeclaredPackagesAreMissing(t *testing.T) {
 	fx := newInstallFixture(t)
-	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit, 0}
-	fx.loadCheckStderr = "scripts/office/validators/base.py imports defusedxml, " +
-		"which is not available in this image\n" +
-		"scripts/recalc.py imports openpyxl, which is not available in this image"
+	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit}
+	fx.loadCheckStderr = "requirements.txt declares pandas but it is not installed in /opt/skills/pdf-tools/.venv"
 
-	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
+	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
 
-	require.Len(t, fx.agentPrompts, 2, "a fixable failure must reach the installer again")
-	repair := fx.agentPrompts[1]
-	require.Contains(t, repair, "imports defusedxml",
-		"the repair round is driven by the gate's own findings, not by a second guess")
-	require.Contains(t, repair, "imports openpyxl")
-	require.Contains(t, repair, installSkillDir+"/.venv",
-		"the round has to be told where the packages belong")
-	require.Contains(t, repair, "Do NOT edit",
-		"a repair must not be allowed to edit the tree into passing")
-
-	require.Equal(t, 2, fx.loadCheckPasses, "the repair has to be verified, not trusted")
-	require.Contains(t, fx.events, "create-snapshot")
-	require.NotNil(t, fx.configRepo.saved, "a repaired install must reach the image pointer")
-
-	skill, _ := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
-	require.Equal(t, types.SkillStatusReady, skill.Status)
-	require.Empty(t, skill.Error)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "declares pandas",
+		"the failure must name what the gate found, not just that it failed")
+	require.Len(t, fx.agentPrompts, 1, "a missing package must not buy another installer round")
+	require.Equal(t, 1, fx.loadCheckPasses)
+	require.NotContains(t, fx.events, "create-snapshot")
+	require.Nil(t, fx.configRepo.saved)
 }
 
-// A repair round writes into the tree a verification pass just looked at, and
-// under the default root account it reaches it directly: modes left behind by
-// an earlier pass do not stop root, and the tree is never handed to another
-// account. What a repair round needs is a second agent turn and a second
-// verification — not a permission fix-up.
-func TestRunInstallRepairsWithoutReopeningTheTree(t *testing.T) {
-	fx := newInstallFixture(t)
-	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit, 0}
-
-	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
-
-	require.Equal(t, 2, fx.loadCheckPasses, "the repair has to be verified, not trusted")
-	require.Equal(t, -1, indexOfCommandContaining(fx.commands, "chmod -R u+rwX,go+rX "),
-		"root writes through whatever modes a verification pass leaves behind")
-	for _, command := range fx.commands {
-		require.NotContains(t, command, "chown",
-			"the tree is built, repaired and verified by one account; there is nothing to re-own")
-	}
-}
-
-// Installing a package cannot fix a file that does not parse, and the bundle
-// has to change instead. Spending another agent round on it would only delay
-// the same failure by minutes.
-func TestRunInstallDoesNotRetryAFailureInstallingCannotFix(t *testing.T) {
+func TestRunInstallDoesNotRetryASyntaxError(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.loadCheckExitCodes = []int{1}
 	fx.loadCheckStderr = "scripts/extract.py has a syntax error on line 1: invalid syntax"
@@ -1659,26 +1620,8 @@ func TestRunInstallDoesNotRetryAFailureInstallingCannotFix(t *testing.T) {
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "syntax error")
-	require.Len(t, fx.agentPrompts, 1, "an unfixable finding must not buy another round")
+	require.Len(t, fx.agentPrompts, 1)
 	require.Equal(t, 1, fx.loadCheckPasses)
-}
-
-// The loop is bounded. An installer that cannot satisfy the gate in one repair
-// is not going to satisfy it in ten, and a skill install must not become an
-// open-ended retry against a billed sandbox.
-func TestRunInstallStopsAfterOneRepairRound(t *testing.T) {
-	fx := newInstallFixture(t)
-	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit}
-
-	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
-
-	require.Error(t, err)
-	require.ErrorContains(t, err, "imports pandas",
-		"the failure must name what the gate found, not just that it failed")
-	require.Len(t, fx.agentPrompts, skillInstallVerifyRounds)
-	require.Equal(t, skillInstallVerifyRounds, fx.loadCheckPasses)
-	require.NotContains(t, fx.events, "create-snapshot")
-	require.Nil(t, fx.configRepo.saved)
 }
 
 func TestRunInstallDeletesTheSnapshotWhenSwitchFails(t *testing.T) {
@@ -1941,10 +1884,9 @@ type installFixture struct {
 	fingerprint string
 	// loadCheck* drive the per-language script verification pass, which is the
 	// last gate before the snapshot. exitCodes is consumed one entry per python
-	// pass and its last entry repeats, so a test about a single round writes one
-	// value and a test about the repair round writes two. Exit 2 is the
-	// checker's "everything I found is a missing dependency", which is what
-	// earns another installer round.
+	// pass and its last entry repeats, so a test about a failing pass writes
+	// one value. Exit 2 means every finding is a missing declared dependency;
+	// the install path treats any non-zero exit the same.
 	loadCheckExitCodes []int
 	loadCheckStdout    string
 	loadCheckStderr    string
@@ -1963,8 +1905,6 @@ type installFixture struct {
 	loadCheckOpts sandbox.ShellExecOptions
 	agentErr      error
 	// agentPrompts is every prompt the installer engine was handed, in order.
-	// A repair round is a second entry, and what it says is the whole point of
-	// having one.
 	agentPrompts []string
 	// beforeExecute runs at the moment the engine would start, so a test can
 	// observe the state an attaching console would see mid-install.
@@ -2027,8 +1967,8 @@ func newInstallFixture(t *testing.T) *installFixture {
 
 	fx := &installFixture{t: t}
 	fx.fingerprint = sandbox.SkillImageFingerprint("e2b", "key-1", "https://e2b.example")
-	// The checker's own wording for a missing dependency, so a test reading the
-	// repair prompt sees what a real run would put in it.
+	// The checker's own wording for a missing dependency, so a test reading
+	// the verification failure sees what a real run would put in it.
 	fx.loadCheckStderr = "scripts/extract.py imports pandas, " +
 		"which is not available in this image"
 	fx.bundle = &SkillBundle{
