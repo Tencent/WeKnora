@@ -18,6 +18,7 @@ registry.Register("baidu", infra_web_search.NewBaiduProvider)
 registry.Register("searxng", infra_web_search.NewSearxngProvider)
 registry.Register("keenable", infra_web_search.NewKeenableProvider)
 registry.Register("zhipu", infra_web_search.NewZhipuProvider)
+registry.Register("zhipu_prime", infra_web_search.NewZhipuPrimeProvider)
 registry.Register("metaso", infra_web_search.NewMetasoProvider)
 registry.Register("exa", infra_web_search.NewExaProvider)
 registry.Register("bocha", infra_web_search.NewBochaProvider)
@@ -35,12 +36,19 @@ registry.Register("brave", infra_web_search.NewBraveProvider)
 | SearXNG | `searxng.go` | 否 | 租户自填 `base_url`（自托管实例） | 唯一允许自定义地址的引擎，需过 SSRF 校验 |
 | Keenable | `keenable.go` | 可选 | `https://api.keenable.ai`（硬编码） | 无 Key 走公共限速端点，有 Key 解除限制 |
 | 智谱搜索 | `zhipu.go` | 是 | `https://open.bigmodel.cn/api/paas/v4/web_search`（硬编码），默认引擎 `search_std` | |
+| 智谱 GLM Coding Plan | `zhipu_prime.go` | 是（套餐 API Key） | `https://open.bigmodel.cn/api/mcp/web_search_prime/mcp` | 复用套餐搜索额度，独立 MCP 会话 |
 | 秘塔 Metaso | `metaso.go` | 是 | `https://metaso.cn/api/v1/search` | extra_config.scope 选择资源范围，默认 webpage |
 | Exa | `exa.go` | 是 | `https://api.exa.ai/search` | 默认 highlights，可用 extra_config.include_text 获取正文 |
 | 博查 Bocha | `bocha.go` | 是 | `https://api.bochaai.com/v1/web-search` | extra_config.freshness、summary |
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
 
-在「设置 → 网络搜索」选择提供商、填写 API Key 并测试，然后在智能体中选择该配置。当前注册 13 个引擎；实际结果数仍受智能体最大结果数约束。
+在「设置 → 网络搜索」选择提供商、填写 API Key 并测试，然后在智能体中选择该配置。当前注册 14 个引擎；实际结果数仍受智能体最大结果数约束。
+
+已订阅 GLM Coding Plan 的用户可选择 **Zhipu GLM Coding Plan**（`zhipu_prime`），使用套餐页面获取的 Key。
+团队额度需要团队套餐 Key，详见[智谱官方接入说明](https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server)。
+此选项通过项目已有 MCP 客户端调用套餐搜索工具，无需在「MCP服务」中另建配置；现有「Zhipu AI」仍走常规 REST API。
+Key 沿用搜索提供方的加密与凭证管理。`zhipu_prime` 暂不提供单独的代理配置或 REST 搜索引擎选项，
+单次搜索超时 30 秒，结果数默认 10、最多 50。上游出错时直接返回错误，不回退到常规 REST API。
 
 | 提供商附加配置 | 值 |
 | --- | --- |
