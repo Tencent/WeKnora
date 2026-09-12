@@ -1,9 +1,10 @@
 package adapters
 
 // rerank.go — P3 strangler: the rerank facet (design §6.2). Behavior ports of
-// v1 internal/models/rerank/*: the OpenAI-shape fallback (openai/generic/
-// siliconflow/qianfan/gpustack/azure), the per-vendor wire deltas (jina,
-// zhipu, nvidia, aliyun DashScope) and the signed weknoracloud route.
+// v1 internal/models/rerank/*: the generic fallback (openai/generic/
+// siliconflow/qianfan/gpustack/azure — the de-facto Cohere-style /rerank
+// shape; OpenAI itself serves no rerank endpoint), the per-vendor wire deltas
+// (jina, zhipu, nvidia, aliyun DashScope) and the signed weknoracloud route.
 // LKEAP (Tencent TC3) and volcengine (IAM AK/SK) stay on their v1 SDK
 // clients for now — signature protocols are P5-class native work (task
 // ruling 2026-09-10); this file covers every non-signed vendor.
@@ -30,10 +31,10 @@ import (
 
 const weKnoraCloudRerankTimeout = 60 * time.Second
 
-// openAIRerankRequest mirrors the v1 fallback wire shape; field order tracks
+// genericRerankRequest mirrors the v1 fallback wire shape; field order tracks
 // the v1 struct for golden parity. additional_data was never populated by v1
 // and stays out.
-type openAIRerankRequest struct {
+type genericRerankRequest struct {
 	Model                string   `json:"model"`
 	Query                string   `json:"query"`
 	Documents            []string `json:"documents"`
@@ -115,15 +116,16 @@ func buildRerankRequestShared(
 	}, nil
 }
 
-// --- openai-shape fallback (openai, generic, azure_openai, siliconflow,
-// qianfan, gpustack — every rerank-shard provider without a bespoke shape) ---
+// --- generic (Cohere-style) fallback (openai, generic, azure_openai,
+// siliconflow, qianfan, gpustack — every rerank-shard provider without a
+// bespoke shape) ---
 
-func buildOpenAIRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
+func buildGenericRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
 	base := ep.BaseURL
 	if base == "" {
 		base = "https://api.openai.com/v1"
 	}
-	body := openAIRerankRequest{
+	body := genericRerankRequest{
 		Model:                model,
 		Query:                opts.Query,
 		Documents:            opts.Documents,
@@ -306,7 +308,10 @@ type rerankSpec struct {
 	parse func(status int, header http.Header, body []byte) (*invoke.RerankResponse, error)
 }
 
-func parseOpenAIRerank(_ int, _ http.Header, body []byte) (*invoke.RerankResponse, error) {
+// parseResultsEnvelopeRerank reads the top-level results[] envelope. The name
+// describes what is shared, not one vendor: the generic fallback and the
+// bespoke jina/zhipu/weknoracloud shapes all get the same response body.
+func parseResultsEnvelopeRerank(_ int, _ http.Header, body []byte) (*invoke.RerankResponse, error) {
 	results, err := parseRankResults(body, "results")
 	if err != nil {
 		return nil, err
@@ -364,17 +369,17 @@ func parseAliyunRerank(_ int, _ http.Header, body []byte) (*invoke.RerankRespons
 func rerankSpecFor(name invoke.ProviderName) rerankSpec {
 	switch name {
 	case invoke.ProviderJina:
-		return rerankSpec{build: buildJinaRerank, parse: parseOpenAIRerank}
+		return rerankSpec{build: buildJinaRerank, parse: parseResultsEnvelopeRerank}
 	case invoke.ProviderZhipu:
-		return rerankSpec{build: buildZhipuRerank, parse: parseOpenAIRerank}
+		return rerankSpec{build: buildZhipuRerank, parse: parseResultsEnvelopeRerank}
 	case invoke.ProviderAliyun:
 		return rerankSpec{build: buildAliyunRerank, parse: parseAliyunRerank}
 	case invoke.ProviderNvidia:
 		return rerankSpec{build: buildNvidiaRerank, parse: parseNvidiaRerank}
 	case invoke.ProviderWeKnoraCloud:
-		return rerankSpec{build: buildWeKnoraCloudRerank, parse: parseOpenAIRerank}
+		return rerankSpec{build: buildWeKnoraCloudRerank, parse: parseResultsEnvelopeRerank}
 	default:
-		return rerankSpec{build: buildOpenAIRerank, parse: parseOpenAIRerank}
+		return rerankSpec{build: buildGenericRerank, parse: parseResultsEnvelopeRerank}
 	}
 }
 

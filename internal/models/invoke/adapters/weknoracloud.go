@@ -137,12 +137,12 @@ func (a *weKnoraCloudAdapter) BuildRerankRequest(
 	return buildWeKnoraCloudRerank(ep, model, opts)
 }
 
-// ParseRerankResponse maps the results array (tolerant score parsing shared
-// with the openai shape).
+// ParseRerankResponse maps the results array (envelope shared with the
+// generic fallback shape).
 func (a *weKnoraCloudAdapter) ParseRerankResponse(
 	status int, header http.Header, body []byte,
 ) (*invoke.RerankResponse, error) {
-	return parseOpenAIRerank(status, header, body)
+	return parseResultsEnvelopeRerank(status, header, body)
 }
 
 // BuildEmbeddingRequest ports v1 NewWeKnoraCloudEmbedder + BatchEmbed: the

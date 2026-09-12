@@ -3,10 +3,11 @@ package adapters
 // embedding.go — P2 strangler: the embedding facet (design §6.2). Behavior
 // ports of v1 internal/models/embedding/*: the OpenAI-compatible fallback
 // (openai/zhipu + every dual-facet family vendor), the per-vendor wire deltas
-// (azure deployment URL + api-key, nvidia input_type, jina truncate boolean),
+// (azure deployment URL + api-key, nvidia input_type, jina truncate boolean)
 // and the native shapes (aliyun DashScope multimodal, volcengine Ark
-// multimodal, gemini batchEmbedContents). ollama (/api/embed) and weknoracloud
-// (HMAC) live in their own adapter files.
+// multimodal). Vendors with a dedicated adapter file keep their wire there —
+// ollama (/api/embed), weknoracloud (HMAC) and, since the P5-1 compat
+// rewrite, gemini (batchEmbedContents in gemini.go).
 //
 // Cross-vendor v1 conventions preserved here:
 //   - timeout: every v1 embedding client used a fixed 60s http.Client.Timeout,
@@ -434,94 +435,6 @@ func parseVolcengineEmbedding(_ int, _ http.Header, body []byte) (*invoke.Embedd
 	return &invoke.EmbeddingResponse{Vectors: [][]float32{resp.Data.Embedding}}, nil
 }
 
-// --- gemini: native batchEmbedContents (the v1 embedder was already native;
-// ported in P2, not deferred to the P5 generateContent work). ---
-
-type geminiBatchEmbedRequest struct {
-	Requests []geminiEmbedRequest `json:"requests"`
-}
-
-type geminiEmbedRequest struct {
-	Model                string        `json:"model"`
-	Content              geminiContent `json:"content"`
-	TaskType             string        `json:"taskType,omitempty"`
-	OutputDimensionality int           `json:"output_dimensionality,omitempty"`
-}
-
-type geminiContent struct {
-	Parts []geminiPart `json:"parts"`
-}
-
-type geminiPart struct {
-	Text string `json:"text"`
-}
-
-type geminiBatchEmbedResponse struct {
-	Embeddings []struct {
-		Values []float32 `json:"values"`
-	} `json:"embeddings"`
-}
-
-func buildGeminiEmbedding(ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions) (*invoke.Request, error) {
-	if model == "" {
-		return nil, fmt.Errorf("model name is required")
-	}
-	apiKey := strings.TrimSpace(ep.Credentials.APIKey)
-	if apiKey == "" {
-		return nil, fmt.Errorf("gemini provider: API key is required")
-	}
-	model = strings.TrimPrefix(model, "models/")
-	base := ep.BaseURL
-	if base == "" {
-		base = invoke.GeminiBaseURL
-	}
-	base = strings.TrimRight(base, "/")
-	base = strings.TrimSuffix(base, "/openai")
-
-	requests := make([]geminiEmbedRequest, 0, len(opts.Inputs))
-	for _, text := range opts.Inputs {
-		req := geminiEmbedRequest{
-			Model: "models/" + model,
-			Content: geminiContent{Parts: []geminiPart{
-				{Text: text},
-			}},
-		}
-		if opts.SupportsDimensionOverride && opts.Dimensions > 0 {
-			req.OutputDimensionality = opts.Dimensions
-		}
-		requests = append(requests, req)
-	}
-	data, err := json.Marshal(geminiBatchEmbedRequest{Requests: requests})
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-	header := http.Header{}
-	header.Set("Content-Type", "application/json")
-	header.Set("X-Goog-Api-Key", apiKey)
-	return &invoke.Request{
-		Method:  http.MethodPost,
-		URL:     fmt.Sprintf("%s/models/%s:batchEmbedContents", base, model),
-		Header:  header,
-		Body:    data,
-		Timeout: embeddingRequestTimeout,
-	}, nil
-}
-
-func parseGeminiEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingResponse, error) {
-	var resp geminiBatchEmbedResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
-	}
-	// (v1 also failed fast on a count mismatch inside the client; the
-	// caller-side pooler count check covers the same anomaly, so the adapter
-	// maps whatever came back.)
-	embeddings := make([][]float32, 0, len(resp.Embeddings))
-	for _, emb := range resp.Embeddings {
-		embeddings = append(embeddings, emb.Values)
-	}
-	return &invoke.EmbeddingResponse{Vectors: embeddings}, nil
-}
-
 // --- composites ---
 
 // embeddingCapsFor resolves the provider-level Embedding shard from the v1
@@ -552,8 +465,8 @@ func (a *openaiEmbeddingAdapter) Capabilities() invoke.Capabilities {
 }
 
 // embedBuildParse resolves this vendor's build/parse pair: the native shapes
-// (azure URL/auth, aliyun dual-path, volcengine multimodal, gemini native)
-// take over completely; everything else rides the shared openai shape.
+// (azure URL/auth, aliyun dual-path, volcengine multimodal) take over
+// completely; everything else rides the shared openai shape.
 func (a *openaiEmbeddingAdapter) embedBuildParse() (
 	func(ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions) (*invoke.Request, error),
 	func(status int, header http.Header, body []byte) (*invoke.EmbeddingResponse, error),

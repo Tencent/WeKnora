@@ -14,6 +14,8 @@
 package adapters
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -136,18 +138,103 @@ func geminiEffortVocab(level string) string {
 	return "medium"
 }
 
-// --- embedding facet: the P2 native batchEmbedContents pair, verbatim ---
+// --- embedding facet: native batchEmbedContents (P2 port, homed here since
+// the compat rewrite gave gemini a dedicated file) — NO OpenAI-protocol
+// surface; the wire is unchanged since P2 (golden embedding_gemini pins it) ---
 
-// BuildEmbeddingRequest delegates to the P2 native pair — Gemini embedding
-// has NO OpenAI-protocol surface; the wire is unchanged since P2 (golden
-// embedding_gemini keeps pinning it).
+type geminiBatchEmbedRequest struct {
+	Requests []geminiEmbedRequest `json:"requests"`
+}
+
+type geminiEmbedRequest struct {
+	Model                string        `json:"model"`
+	Content              geminiContent `json:"content"`
+	TaskType             string        `json:"taskType,omitempty"`
+	OutputDimensionality int           `json:"output_dimensionality,omitempty"`
+}
+
+type geminiContent struct {
+	Parts []geminiPart `json:"parts"`
+}
+
+type geminiPart struct {
+	Text string `json:"text"`
+}
+
+type geminiBatchEmbedResponse struct {
+	Embeddings []struct {
+		Values []float32 `json:"values"`
+	} `json:"embeddings"`
+}
+
+func buildGeminiEmbedding(ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions) (*invoke.Request, error) {
+	if model == "" {
+		return nil, fmt.Errorf("model name is required")
+	}
+	apiKey := strings.TrimSpace(ep.Credentials.APIKey)
+	if apiKey == "" {
+		return nil, fmt.Errorf("gemini provider: API key is required")
+	}
+	model = strings.TrimPrefix(model, "models/")
+	base := ep.BaseURL
+	if base == "" {
+		base = invoke.GeminiBaseURL
+	}
+	base = strings.TrimRight(base, "/")
+	base = strings.TrimSuffix(base, "/openai")
+
+	requests := make([]geminiEmbedRequest, 0, len(opts.Inputs))
+	for _, text := range opts.Inputs {
+		req := geminiEmbedRequest{
+			Model: "models/" + model,
+			Content: geminiContent{Parts: []geminiPart{
+				{Text: text},
+			}},
+		}
+		if opts.SupportsDimensionOverride && opts.Dimensions > 0 {
+			req.OutputDimensionality = opts.Dimensions
+		}
+		requests = append(requests, req)
+	}
+	data, err := json.Marshal(geminiBatchEmbedRequest{Requests: requests})
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	header := http.Header{}
+	header.Set("Content-Type", "application/json")
+	header.Set("X-Goog-Api-Key", apiKey)
+	return &invoke.Request{
+		Method:  http.MethodPost,
+		URL:     fmt.Sprintf("%s/models/%s:batchEmbedContents", base, model),
+		Header:  header,
+		Body:    data,
+		Timeout: embeddingRequestTimeout,
+	}, nil
+}
+
+func parseGeminiEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingResponse, error) {
+	var resp geminiBatchEmbedResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
+	}
+	// (v1 also failed fast on a count mismatch inside the client; the
+	// caller-side pooler count check covers the same anomaly, so the adapter
+	// maps whatever came back.)
+	embeddings := make([][]float32, 0, len(resp.Embeddings))
+	for _, emb := range resp.Embeddings {
+		embeddings = append(embeddings, emb.Values)
+	}
+	return &invoke.EmbeddingResponse{Vectors: embeddings}, nil
+}
+
+// BuildEmbeddingRequest serves the native pair above.
 func (a *GeminiAdapter) BuildEmbeddingRequest(
 	ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions,
 ) (*invoke.Request, error) {
 	return buildGeminiEmbedding(ep, model, opts)
 }
 
-// ParseEmbeddingResponse delegates to the P2 native pair.
+// ParseEmbeddingResponse serves the native pair above.
 func (a *GeminiAdapter) ParseEmbeddingResponse(
 	status int, header http.Header, body []byte,
 ) (*invoke.EmbeddingResponse, error) {
