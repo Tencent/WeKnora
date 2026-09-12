@@ -1,12 +1,15 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -28,13 +31,41 @@ import (
 // access — that lookup answers "is the caller the creator of THIS
 // resource", not "does the caller's tenant have access").
 type ChunkHandler struct {
-	service   interfaces.ChunkService
-	kgService interfaces.KnowledgeService
+	service         interfaces.ChunkService
+	kgService       interfaces.KnowledgeService
+	fileService     interfaces.FileService
+	storageResolver interfaces.StorageBackendResolver
 }
 
 // NewChunkHandler creates a new chunk handler.
-func NewChunkHandler(service interfaces.ChunkService, kgService interfaces.KnowledgeService) *ChunkHandler {
-	return &ChunkHandler{service: service, kgService: kgService}
+func NewChunkHandler(
+	service interfaces.ChunkService,
+	kgService interfaces.KnowledgeService,
+	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
+) *ChunkHandler {
+	return &ChunkHandler{
+		service:         service,
+		kgService:       kgService,
+		fileService:     fileService,
+		storageResolver: storageResolver,
+	}
+}
+
+// resolveResourceRewriter builds the storage-reference rewriter for one
+// response. The default handle mode keeps the existing resource:// contract;
+// public mode returns directly loadable URLs for clients such as DSH that
+// cannot attach WeKnora credentials to an image request.
+func (h *ChunkHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Rewriter, error) {
+	ctx := c.Request.Context()
+	mode, err := storageurl.ResolveMode(ctx, c.Query(storageurl.QueryParam))
+	if err != nil {
+		if stderrors.Is(err, storageurl.ErrPublicModeForbidden) {
+			return nil, errors.NewForbiddenError(err.Error())
+		}
+		return nil, errors.NewBadRequestError(err.Error())
+	}
+	return storageurl.NewRequestRewriter(ctx, mode, h.fileService, h.storageResolver), nil
 }
 
 // GetChunkByIDOnly godoc
@@ -91,6 +122,7 @@ func (h *ChunkHandler) GetChunkByIDOnly(c *gin.Context) {
 // @Param        knowledge_id  path      string  true   "知识ID"
 // @Param        page          query     int     false  "页码"  default(1)
 // @Param        page_size     query     int     false  "每页数量"  default(10)
+// @Param        resource_urls query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
 // @Success      200           {object}  map[string]interface{}  "分块列表"
 // @Failure      400           {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -104,6 +136,13 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 	if knowledgeID == "" {
 		logger.Error(ctx, "Knowledge ID is empty")
 		c.Error(errors.NewBadRequestError("Knowledge ID cannot be empty"))
+		return
+	}
+
+	rewriter, err := h.resolveResourceRewriter(c)
+	if err != nil {
+		logger.Warnf(ctx, "Rejected resource URL mode: %v", err)
+		_ = c.Error(err)
 		return
 	}
 
@@ -142,6 +181,13 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		return
 	}
 
+	// Image OCR/caption rows are stored as children of the returned text rows.
+	// Enrich them here, at the API boundary, so document readers receive the
+	// same image metadata as the internal list_knowledge_chunks tool without
+	// widening the service method (and every existing caller) to extra queries.
+	h.enrichImageInfo(ctx, result.Data)
+	h.rewriteChunkResources(ctx, rewriter, result.Data)
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":   true,
 		"data":      result.Data,
@@ -149,6 +195,58 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		"page":      result.Page,
 		"page_size": result.PageSize,
 	})
+}
+
+// enrichImageInfo lazily merges image metadata from image child chunks into
+// the text chunks returned by the public endpoint.
+func (h *ChunkHandler) enrichImageInfo(ctx context.Context, data interface{}) {
+	chunks, ok := data.([]*types.Chunk)
+	if !ok || len(chunks) == 0 || h.service == nil || h.service.GetRepository() == nil {
+		return
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok {
+		return
+	}
+	chunkIDs := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		if chunk != nil && chunk.ImageInfo == "" {
+			chunkIDs = append(chunkIDs, chunk.ID)
+		}
+	}
+	if len(chunkIDs) == 0 {
+		return
+	}
+	infoMap := searchutil.CollectImageInfoByChunkIDs(ctx, h.service.GetRepository(), tenantID, chunkIDs)
+	for _, chunk := range chunks {
+		if chunk != nil && chunk.ImageInfo == "" {
+			if imageInfo, exists := infoMap[chunk.ID]; exists {
+				chunk.ImageInfo = imageInfo
+			}
+		}
+	}
+}
+
+// rewriteChunkResources rewrites both Markdown content and the JSON-encoded
+// image_info payload. Rewriter.String handles provider:// and resource://
+// references inside either representation and is a no-op in handle mode.
+func (h *ChunkHandler) rewriteChunkResources(
+	ctx context.Context, rewriter *storageurl.Rewriter, data interface{},
+) {
+	if rewriter == nil || !rewriter.Enabled() {
+		return
+	}
+	chunks, ok := data.([]*types.Chunk)
+	if !ok {
+		return
+	}
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		chunk.Content = rewriter.String(ctx, chunk.Content)
+		chunk.ImageInfo = rewriter.String(ctx, chunk.ImageInfo)
+	}
 }
 
 // UpdateChunkRequest defines the request structure for updating a chunk
