@@ -28,14 +28,20 @@ func BenchmarkModelStatisticsScale(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				defer sqlDB.Close()
+				defer func() { _ = sqlDB.Close() }()
 				sqlDB.SetMaxOpenConns(concurrency)
-				if err = db.AutoMigrate(&types.ModelCallRecord{}, &types.ModelPriceVersion{}, &types.EmbeddingCacheLookupRecord{}); err != nil {
+				err = db.AutoMigrate(
+					&types.ModelCallRecord{},
+					&types.ModelPriceVersion{},
+					&types.EmbeddingCacheLookupRecord{},
+				)
+				if err != nil {
 					b.Fatal(err)
 				}
 				now := time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
 				query := `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<?)
-     INSERT INTO model_call_records(id,tenant_id,model_id,model_snapshot,purpose,operation,started_at,duration_ms,status,created_at,updated_at)
+     INSERT INTO model_call_records(id,tenant_id,model_id,model_snapshot,purpose,operation,
+       started_at,duration_ms,status,created_at,updated_at)
      SELECT CAST(n AS TEXT),7,'scale-fixture','{}','general','chat',?,n%1000,'success',?,? FROM seq`
 				if err = db.Exec(query, rows, now.Add(-time.Hour), now, now).Error; err != nil {
 					b.Fatal(err)
@@ -56,11 +62,23 @@ func BenchmarkModelStatisticsScale(b *testing.B) {
 							defer cancel()
 							statistics, err := repo.QueryModelUsage(
 								ctx,
-								types.ModelUsageQuery{TenantID: 7, From: now.Add(-24 * time.Hour), To: now},
+								types.ModelUsageQuery{
+									TenantID: 7,
+									From:     now.Add(-24 * time.Hour),
+									To:       now,
+								},
 							)
-							if err == nil &&
-								(len(statistics) != 1 || statistics[0].CallCount != int64(rows) || statistics[0].Latency.ReportedCalls != int64(rows) || statistics[0].Latency.P50Ms == nil || *statistics[0].Latency.P50Ms != 499.5) {
-								err = fmt.Errorf("count or exact median mismatch")
+							if err == nil {
+								invalid := len(statistics) != 1
+								if !invalid {
+									row := statistics[0]
+									invalid = row.CallCount != int64(rows) ||
+										row.Latency.ReportedCalls != int64(rows) ||
+										row.Latency.P50Ms == nil || *row.Latency.P50Ms != 499.5
+								}
+								if invalid {
+									err = fmt.Errorf("count or exact median mismatch")
+								}
 							}
 							results <- err
 						}()
