@@ -682,13 +682,18 @@ type WikiGraphRequest struct {
 	// from. Pages whose source_refs intersect the set are marked Familiar so
 	// the existing Wiki graph can light them up without cloning a second graph.
 	FamiliarKnowledgeIDs []string
+	// LearningDocuments are the caller's observable document-use counters.
+	// They are request-only personal context and are never persisted on Wiki
+	// pages. The graph projects them onto page source_refs.
+	LearningDocuments []*MemoryDocView
 }
 
 // WikiGraphData represents the link graph structure for visualization.
 type WikiGraphData struct {
-	Nodes []WikiGraphNode `json:"nodes"`
-	Edges []WikiGraphEdge `json:"edges"`
-	Meta  WikiGraphMeta   `json:"meta"`
+	Nodes           []WikiGraphNode              `json:"nodes"`
+	Edges           []WikiGraphEdge              `json:"edges"`
+	Recommendations []WikiLearningRecommendation `json:"recommendations,omitempty"`
+	Meta            WikiGraphMeta                `json:"meta"`
 }
 
 // WikiGraphMeta describes how the returned subgraph relates to the full
@@ -703,6 +708,10 @@ type WikiGraphMeta struct {
 	Depth     int    `json:"depth,omitempty"`  // populated in ego mode
 	// FamiliarCount is how many returned nodes are lit up for this person.
 	FamiliarCount int `json:"familiar_count,omitempty"`
+	// LearningEvidenceCount is the number of returned nodes backed by at
+	// least one observed source use. UnseenCount makes blind spots explicit.
+	LearningEvidenceCount int `json:"learning_evidence_count,omitempty"`
+	UnseenCount           int `json:"unseen_count,omitempty"`
 }
 
 // WikiGraphNode represents a node in the wiki link graph
@@ -716,6 +725,40 @@ type WikiGraphNode struct {
 	// keeps citing in answers. It is a personal overlay, not a property of
 	// the page: two people looking at the same wiki see different highlights.
 	Familiar bool `json:"familiar,omitempty"`
+	// Learning is an explainable proxy derived from source-use counters. It is
+	// deliberately capped below 100 because retrieval history alone cannot
+	// prove that a person has mastered the material.
+	Learning *WikiNodeLearning `json:"learning,omitempty"`
+	// SourceKnowledgeIDs is handler-only context used to load exactly the
+	// personal evidence needed by this returned graph slice.
+	SourceKnowledgeIDs []string `json:"-"`
+}
+
+const (
+	WikiLearningStateUnseen    = "unseen"
+	WikiLearningStateExploring = "exploring"
+	WikiLearningStateFamiliar  = "familiar"
+)
+
+// WikiNodeLearning explains exactly why a node receives its learning state.
+// No prompt, answer content, or LLM-generated judgement is involved.
+type WikiNodeLearning struct {
+	State          string     `json:"state"`
+	MasteryScore   int        `json:"mastery_score"`
+	EvidenceKind   string     `json:"evidence_kind"`
+	EvidenceCount  int        `json:"evidence_count"`
+	SourceCount    int        `json:"source_count"`
+	LastEvidenceAt *time.Time `json:"last_evidence_at,omitempty"`
+}
+
+// WikiLearningRecommendation is an unlearned graph neighbor suggested as the
+// next page. KnownNeighborCount and LinkCount make its ranking auditable.
+type WikiLearningRecommendation struct {
+	Slug               string `json:"slug"`
+	Title              string `json:"title"`
+	PageType           string `json:"page_type"`
+	KnownNeighborCount int    `json:"known_neighbor_count"`
+	LinkCount          int    `json:"link_count"`
 }
 
 // WikiGraphEdge represents a directed edge in the wiki link graph

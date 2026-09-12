@@ -612,6 +612,14 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 			familiarSet[id] = struct{}{}
 		}
 	}
+	learningEnabled := req.LearningDocuments != nil
+	learningByKnowledgeID := make(map[string]*types.MemoryDocView, len(req.LearningDocuments))
+	for _, doc := range req.LearningDocuments {
+		if doc == nil || strings.TrimSpace(doc.KnowledgeID) == "" || doc.Hits <= 0 {
+			continue
+		}
+		learningByKnowledgeID[doc.KnowledgeID] = doc
+	}
 
 	pageBySlug := make(map[string]*types.WikiPage, len(pages))
 	linkCount := make(map[string]int, len(pages))
@@ -666,12 +674,22 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	nodes := make([]types.WikiGraphNode, 0, len(selected))
 	for slug := range selected {
 		p := pageBySlug[slug]
+		learning := wikiPageLearning(p, learningByKnowledgeID, learningEnabled)
+		familiar := p.BuiltFrom(familiarSet)
+		if learningEnabled {
+			// A document-level citation is direct evidence for its summary
+			// node only. Lighting every concept generated from that document
+			// would turn one answer into a false claim of broad familiarity.
+			familiar = learning != nil && learning.State == types.WikiLearningStateFamiliar
+		}
 		nodes = append(nodes, types.WikiGraphNode{
-			Slug:      p.Slug,
-			Title:     p.Title,
-			PageType:  p.PageType,
-			LinkCount: linkCount[slug],
-			Familiar:  p.BuiltFrom(familiarSet),
+			Slug:               p.Slug,
+			Title:              p.Title,
+			PageType:           p.PageType,
+			LinkCount:          linkCount[slug],
+			Familiar:           familiar,
+			Learning:           learning,
+			SourceKnowledgeIDs: p.SourceKnowledgeIDs(),
 		})
 	}
 	// Deterministic node ordering — the map iteration above is random.
@@ -724,6 +742,13 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		if n.Familiar {
 			meta.FamiliarCount++
 		}
+		if n.Learning != nil {
+			if n.Learning.EvidenceCount > 0 {
+				meta.LearningEvidenceCount++
+			} else {
+				meta.UnseenCount++
+			}
+		}
 	}
 	if mode == types.WikiGraphModeEgo {
 		meta.Center = req.Center
@@ -734,10 +759,142 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	}
 
 	return &types.WikiGraphData{
-		Nodes: nodes,
-		Edges: edges,
-		Meta:  meta,
+		Nodes:           nodes,
+		Edges:           edges,
+		Recommendations: wikiLearningRecommendations(nodes, edges, learningEnabled, 5),
+		Meta:            meta,
 	}, nil
+}
+
+// wikiPageLearning maps document-use evidence onto one Wiki page. The score is
+// a conservative proxy, not an exam grade: one use starts at 20 and each of the
+// next four uses adds 15, capped at 80. Retrieval history can therefore show a
+// stable habit but can never claim complete mastery without an assessed task.
+func wikiPageLearning(
+	page *types.WikiPage,
+	evidence map[string]*types.MemoryDocView,
+	enabled bool,
+) *types.WikiNodeLearning {
+	if !enabled || page == nil {
+		return nil
+	}
+	// Answer references identify source documents, not the individual concepts
+	// generated from those documents. The document summary is therefore the
+	// only Wiki node that can honestly receive this evidence. Other node types
+	// remain explicit blind spots until a future assessment supplies a
+	// concept-level signal.
+	if page.PageType != types.WikiPageTypeSummary {
+		return &types.WikiNodeLearning{
+			State:        types.WikiLearningStateUnseen,
+			EvidenceKind: "answer_source_use",
+		}
+	}
+	seenSources := make(map[string]struct{})
+	hits := 0
+	matchedSources := 0
+	var lastUsed time.Time
+	for _, knowledgeID := range page.SourceKnowledgeIDs() {
+		if _, duplicate := seenSources[knowledgeID]; duplicate {
+			continue
+		}
+		seenSources[knowledgeID] = struct{}{}
+		doc := evidence[knowledgeID]
+		if doc == nil || doc.Hits <= 0 {
+			continue
+		}
+		matchedSources++
+		hits += doc.Hits
+		if doc.LastUsedAt.After(lastUsed) {
+			lastUsed = doc.LastUsedAt
+		}
+	}
+	state := types.WikiLearningStateUnseen
+	score := 0
+	if hits > 0 {
+		state = types.WikiLearningStateExploring
+		score = 20 + min(hits-1, 4)*15
+	}
+	if hits >= types.MemoryDocAffinityMinHits {
+		state = types.WikiLearningStateFamiliar
+	}
+	learning := &types.WikiNodeLearning{
+		State:         state,
+		MasteryScore:  score,
+		EvidenceKind:  "answer_source_use",
+		EvidenceCount: hits,
+		SourceCount:   matchedSources,
+	}
+	if !lastUsed.IsZero() {
+		learning.LastEvidenceAt = &lastUsed
+	}
+	return learning
+}
+
+// wikiLearningRecommendations ranks unseen/exploring pages adjacent to a
+// familiar page. More familiar neighbors win, then graph connectivity, then a
+// stable slug tie-break. This makes the recommendation reproducible and easy
+// to explain in the UI.
+func wikiLearningRecommendations(
+	nodes []types.WikiGraphNode,
+	edges []types.WikiGraphEdge,
+	enabled bool,
+	limit int,
+) []types.WikiLearningRecommendation {
+	if !enabled || limit <= 0 {
+		return nil
+	}
+	bySlug := make(map[string]types.WikiGraphNode, len(nodes))
+	known := make(map[string]struct{})
+	for _, node := range nodes {
+		bySlug[node.Slug] = node
+		if node.Learning != nil && node.Learning.State == types.WikiLearningStateFamiliar {
+			known[node.Slug] = struct{}{}
+		}
+	}
+	knownNeighbors := make(map[string]map[string]struct{})
+	addKnownNeighbor := func(candidate, knownSlug string) {
+		if knownNeighbors[candidate] == nil {
+			knownNeighbors[candidate] = make(map[string]struct{})
+		}
+		knownNeighbors[candidate][knownSlug] = struct{}{}
+	}
+	for _, edge := range edges {
+		_, sourceKnown := known[edge.Source]
+		_, targetKnown := known[edge.Target]
+		if sourceKnown && !targetKnown {
+			addKnownNeighbor(edge.Target, edge.Source)
+		}
+		if targetKnown && !sourceKnown {
+			addKnownNeighbor(edge.Source, edge.Target)
+		}
+	}
+	recommendations := make([]types.WikiLearningRecommendation, 0, len(knownNeighbors))
+	for slug, neighbors := range knownNeighbors {
+		node, ok := bySlug[slug]
+		if !ok || node.Learning == nil || node.Learning.State == types.WikiLearningStateFamiliar {
+			continue
+		}
+		recommendations = append(recommendations, types.WikiLearningRecommendation{
+			Slug:               node.Slug,
+			Title:              node.Title,
+			PageType:           node.PageType,
+			KnownNeighborCount: len(neighbors),
+			LinkCount:          node.LinkCount,
+		})
+	}
+	sort.Slice(recommendations, func(i, j int) bool {
+		if recommendations[i].KnownNeighborCount != recommendations[j].KnownNeighborCount {
+			return recommendations[i].KnownNeighborCount > recommendations[j].KnownNeighborCount
+		}
+		if recommendations[i].LinkCount != recommendations[j].LinkCount {
+			return recommendations[i].LinkCount > recommendations[j].LinkCount
+		}
+		return recommendations[i].Slug < recommendations[j].Slug
+	})
+	if len(recommendations) > limit {
+		recommendations = recommendations[:limit]
+	}
+	return recommendations
 }
 
 // bfsEgoSlugs computes the undirected BFS neighborhood of `center` up to

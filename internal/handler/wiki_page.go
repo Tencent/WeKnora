@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -864,14 +865,53 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 		Types:           typesFilter,
 		Limit:           limit,
 	}
-	if h.memoryService != nil {
-		req.FamiliarKnowledgeIDs = h.memoryService.FamiliarKnowledgeIDs(c.Request.Context())
-	}
+	learningAvailable := h.memoryService != nil && h.memoryService.LearningAvailable(c.Request.Context())
 
 	graph, err := h.wikiService.GetGraph(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	if learningAvailable {
+		knowledgeIDSet := make(map[string]struct{})
+		for _, node := range graph.Nodes {
+			for _, knowledgeID := range node.SourceKnowledgeIDs {
+				if knowledgeID = strings.TrimSpace(knowledgeID); knowledgeID != "" {
+					knowledgeIDSet[knowledgeID] = struct{}{}
+				}
+			}
+		}
+		knowledgeIDs := make([]string, 0, len(knowledgeIDSet))
+		for knowledgeID := range knowledgeIDSet {
+			knowledgeIDs = append(knowledgeIDs, knowledgeID)
+		}
+		sort.Strings(knowledgeIDs)
+		learningDocs := make([]*types.MemoryDocView, 0)
+		var learningErr error
+		if len(knowledgeIDs) > 0 {
+			learningDocs, learningErr = h.memoryService.LearningDocuments(
+				c.Request.Context(), kbID, knowledgeIDs, 0,
+			)
+		}
+		if learningErr != nil {
+			// Learning is a personal overlay on an otherwise valid Wiki graph.
+			// Degrade to the ordinary graph if memory is unavailable rather than
+			// turning a private optional signal into a KB outage.
+			logger.Warnf(c.Request.Context(), "wiki learning evidence unavailable: %v", learningErr)
+		} else {
+			req.LearningDocuments = learningDocs
+			for _, doc := range learningDocs {
+				if doc != nil && doc.Hits >= types.MemoryDocAffinityMinHits {
+					req.FamiliarKnowledgeIDs = append(req.FamiliarKnowledgeIDs, doc.KnowledgeID)
+				}
+			}
+			graph, err = h.wikiService.GetGraph(c.Request.Context(), req)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, graph)

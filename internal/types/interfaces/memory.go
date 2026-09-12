@@ -155,8 +155,11 @@ type MemoryRepository interface {
 	BumpDocAffinity(ctx context.Context, scope MemoryScope, docs []types.MemoryDocAffinity) error
 	// DocAffinity returns this person's affinity for the given documents.
 	DocAffinity(ctx context.Context, scope MemoryScope, knowledgeIDs []string) (map[string]int, error)
-	// TopDocAffinity returns the documents this person relies on most.
-	TopDocAffinity(ctx context.Context, scope MemoryScope, limit int) ([]*types.MemoryDocAffinity, error)
+	// TopDocAffinity returns the documents this person relies on most. A
+	// knowledgeBaseID restricts the query before the result limit is applied.
+	TopDocAffinity(
+		ctx context.Context, scope MemoryScope, knowledgeBaseID string, knowledgeIDs []string, limit int,
+	) ([]*types.MemoryDocAffinity, error)
 	// DocAffinityByID returns one affinity row inside the scope, or (nil, nil)
 	// when it is absent.
 	DocAffinityByID(ctx context.Context, scope MemoryScope, id string) (*types.MemoryDocAffinity, error)
@@ -246,6 +249,10 @@ type MemoryService interface {
 	// has to be settled before anything is built rather than after it is
 	// called.
 	MemoryAvailable(ctx context.Context) bool
+	// LearningAvailable reports whether citation evidence is both readable and
+	// being recorded. The Wiki learning overlay must not appear when retrieval
+	// conditioning, its evidence source, is disabled.
+	LearningAvailable(ctx context.Context) bool
 	// RetrievalContextFor returns what memory contributes to retrieval. Like
 	// Recall it makes no model call and degrades to an empty value.
 	RetrievalContextFor(ctx context.Context) RetrievalContext
@@ -286,6 +293,13 @@ type MemoryService interface {
 	// source documents this person actually works from. Empty on any failure
 	// so callers can use it unconditionally.
 	FamiliarKnowledgeIDs(ctx context.Context) []string
+	// LearningDocuments returns every document-use signal for the caller,
+	// including one-off uses that have not crossed the "familiar" threshold.
+	// The Wiki learning overlay uses these objective counters as evidence; it
+	// never asks an LLM to invent a mastery score.
+	LearningDocuments(
+		ctx context.Context, knowledgeBaseID string, knowledgeIDs []string, limit int,
+	) ([]*types.MemoryDocView, error)
 	// CreateItem adds a memory typed by the user in the memory manager.
 	CreateItem(ctx context.Context, kind, content string, importance int) (*types.MemoryItem, error)
 	// ConfirmItem accepts a memory the system inferred, so it starts being used.

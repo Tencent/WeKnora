@@ -79,9 +79,31 @@ type MemoryConsolidationResult struct {
 
 // MemoryExport is the JSON snapshot from GET /memory/export.
 type MemoryExport struct {
-	Total     int64         `json:"total"`
-	Truncated bool          `json:"truncated"`
-	Items     []*MemoryItem `json:"data"`
+	Total           int64                  `json:"total"`
+	Truncated       bool                   `json:"truncated"`
+	Items           []*MemoryItem          `json:"data"`
+	LearningProfile *MemoryLearningProfile `json:"learning_profile,omitempty"`
+}
+
+// MemoryLearningProfile is the auditable citation-evidence snapshot included
+// in memory exports. It is intentionally separate from inferred memories.
+type MemoryLearningProfile struct {
+	SchemaVersion             int                       `json:"schema_version"`
+	KnowledgeNode             string                    `json:"knowledge_node"`
+	EvidenceKind              string                    `json:"evidence_kind"`
+	MaxScoreWithoutAssessment int                       `json:"max_score_without_assessment"`
+	Documents                 []*MemoryLearningDocument `json:"documents"`
+	DocumentsTruncated        bool                      `json:"documents_truncated"`
+}
+
+// MemoryLearningDocument describes one source document cited in answers.
+type MemoryLearningDocument struct {
+	ID              string    `json:"id"`
+	KnowledgeID     string    `json:"knowledge_id"`
+	KnowledgeBaseID string    `json:"knowledge_base_id"`
+	Title           string    `json:"title"`
+	Hits            int       `json:"hits"`
+	LastUsedAt      time.Time `json:"last_used_at"`
 }
 
 type memorySettingsResponse struct {

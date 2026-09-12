@@ -47,7 +47,15 @@
         </div>
 
         <!-- Legend Overlay -->
-        <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
+        <div v-if="graphReady" class="wiki-graph-legend"
+          :class="{ 'legend-shifted': graphDrawerVisible, 'legend-collapsed': graphLegendCollapsed }">
+          <button type="button" class="legend-collapse-action" @click="graphLegendCollapsed = !graphLegendCollapsed">
+            <t-icon :name="graphLegendCollapsed ? 'chevron-left' : 'chevron-right'" />
+            <span>{{ $t(graphLegendCollapsed
+              ? 'knowledgeEditor.wikiBrowser.expandLegend'
+              : 'knowledgeEditor.wikiBrowser.collapseLegend') }}</span>
+          </button>
+          <template v-if="!graphLegendCollapsed">
           <div class="legend-items">
             <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
               @click="toggleGraphFilterType('summary')">
@@ -77,6 +85,14 @@
             <div v-if="graphFamiliarCount > 0" class="legend-item">
               <span class="legend-familiar-ring"></span>
               {{ $t('knowledgeEditor.wikiBrowser.legendFamiliar') }}
+            </div>
+            <div v-if="graphLearningCounts.exploring > 0" class="legend-item">
+              <span class="legend-learning-ring legend-learning-ring--exploring"></span>
+              {{ $t('knowledgeEditor.wikiBrowser.learningExploring') }}
+            </div>
+            <div v-if="graphLearningCounts.unseen > 0" class="legend-item">
+              <span class="legend-learning-ring legend-learning-ring--unseen"></span>
+              {{ $t('knowledgeEditor.wikiBrowser.learningUnseen') }}
             </div>
           </div>
           <div class="legend-divider"></div>
@@ -115,6 +131,27 @@
               </div>
             </div>
           </template>
+          <div v-if="graphLearningAvailable" class="wiki-learning-card">
+            <div class="learning-card-title">
+              <t-icon name="education" />
+              {{ $t('knowledgeEditor.wikiBrowser.learningTitle') }}
+            </div>
+            <div class="learning-card-summary">
+              {{ $t('knowledgeEditor.wikiBrowser.learningSummary', graphLearningCounts) }}
+            </div>
+            <div class="learning-card-note">
+              {{ $t('knowledgeEditor.wikiBrowser.learningEvidenceNote') }}
+            </div>
+            <template v-if="graphLearningRecommendations.length > 0">
+              <div class="learning-card-subtitle">{{ $t('knowledgeEditor.wikiBrowser.learningNext') }}</div>
+              <button v-for="item in graphLearningRecommendations" :key="item.slug" type="button"
+                class="learning-recommendation" @click="openGraphDrawer(item.slug)">
+                <span>{{ item.title }}</span>
+                <small>{{ $t('knowledgeEditor.wikiBrowser.learningReason', { count: item.known_neighbor_count }) }}</small>
+              </button>
+            </template>
+          </div>
+          </template>
         </div>
 
         <div v-if="!graphReady" class="wiki-reader-empty wiki-graph-empty">
@@ -139,6 +176,14 @@
                 ver:
                   graphDrawerPage.version
               }) }}</span>
+              <t-tag v-if="graphDrawerLearning" size="small"
+                :theme="graphDrawerLearning.state === 'familiar' ? 'success' : graphDrawerLearning.state === 'exploring' ? 'warning' : 'default'"
+                variant="light">
+                {{ graphDrawerLearningStateLabel }}
+              </t-tag>
+              <t-tag v-if="graphDrawerLearning" size="small" theme="warning" variant="light-outline">
+                {{ $t('knowledgeEditor.wikiBrowser.learningNodeScore', { score: graphDrawerLearning.mastery_score }) }}
+              </t-tag>
               <t-button v-if="graphMode === 'ego' && graphCenter !== graphDrawerPage.slug" size="small"
                 variant="outline" theme="default" style="margin-left: auto;" :disabled="!graphDrawerCanBloom"
                 @click="loadBloomNeighbors(graphDrawerPage.slug)">
@@ -150,6 +195,12 @@
                 @click="loadEgoGraph(graphDrawerPage.slug)">
                 {{ $t('knowledgeEditor.wikiBrowser.expandNeighbors') }}
               </t-button>
+            </div>
+            <div v-if="graphDrawerLearning" class="wiki-drawer-learning-evidence">
+              {{ $t('knowledgeEditor.wikiBrowser.learningNodeEvidence', {
+                count: graphDrawerLearning.evidence_count,
+                sources: graphDrawerLearning.source_count,
+              }) }}
             </div>
             <div v-if="graphDrawerNeighborHint" class="wiki-drawer-neighbor-hint" style="margin-bottom: 16px;">
               {{ graphDrawerNeighborHint }}
@@ -993,6 +1044,7 @@ const loading = ref(false)
 const graphLoading = ref(false)
 const graphReady = ref(false)
 const showArrows = ref(true)
+const graphLegendCollapsed = ref(false)
 
 // Graph filtering
 const graphFilterTypes = ref<Set<string>>(new Set(['summary', 'entity', 'concept', 'synthesis', 'comparison', 'index']))
@@ -1296,6 +1348,19 @@ const graphDrawerContent = computed(() => {
   return renderMarkdown(graphDrawerPage.value.content)
 })
 
+const graphDrawerLearning = computed(() => {
+  const slug = graphDrawerPage.value?.slug
+  if (!slug) return null
+  return graphData.value?.nodes.find((node) => node.slug === slug)?.learning || null
+})
+
+const graphDrawerLearningStateLabel = computed(() => {
+  const state = graphDrawerLearning.value?.state
+  if (state === 'familiar') return t('knowledgeEditor.wikiBrowser.learningFamiliar')
+  if (state === 'exploring') return t('knowledgeEditor.wikiBrowser.learningExploring')
+  return t('knowledgeEditor.wikiBrowser.learningUnseen')
+})
+
 // graphDrawerNeighborStatus describes, for the currently open drawer page,
 // how the canvas relates to the KB-wide neighborhood of the node. The
 // accounting is subtler than a simple "shown vs link_count" because three
@@ -1433,6 +1498,17 @@ const graphFrontierCount = computed(() => {
 })
 
 const graphFamiliarCount = computed(() => graphData.value?.meta?.familiar_count || 0)
+const graphLearningAvailable = computed(() => graphData.value?.nodes.some((node) => !!node.learning) || false)
+const graphLearningCounts = computed(() => {
+  const counts = { familiar: 0, exploring: 0, unseen: 0 }
+  for (const node of graphData.value?.nodes || []) {
+    if (node.learning?.state === 'familiar') counts.familiar += 1
+    else if (node.learning?.state === 'exploring') counts.exploring += 1
+    else if (node.learning?.state === 'unseen') counts.unseen += 1
+  }
+  return counts
+})
+const graphLearningRecommendations = computed(() => graphData.value?.recommendations?.slice(0, 3) || [])
 
 // graphStatusCard drives the little summary panel below the legend.
 //
@@ -3335,8 +3411,13 @@ function mergeGraphData(
     if (!existing) {
       nodeBySlug.set(n.slug, n)
       bloomGenerations.set(n.slug, gen)
-    } else if (n.familiar) {
-      existing.familiar = true
+    } else {
+      // The latest server slice is authoritative for personal evidence. In
+      // particular, opt-out or deletion must clear stale rings left by an
+      // earlier bloom instead of merging learning state monotonically.
+      existing.familiar = Boolean(n.familiar)
+      if (n.learning) existing.learning = n.learning
+      else delete existing.learning
     }
   }
   const edgeKey = (e: { source: string; target: string }) => `${e.source}→${e.target}`
@@ -3352,9 +3433,12 @@ function mergeGraphData(
   }
   const nodes = Array.from(nodeBySlug.values())
   const familiarCount = nodes.filter((n) => n.familiar).length
+  const evidenceCount = nodes.filter((n) => (n.learning?.evidence_count || 0) > 0).length
+  const unseenCount = nodes.filter((n) => n.learning?.state === 'unseen').length
   return {
     nodes,
     edges,
+    recommendations: incoming.recommendations || base.recommendations,
     meta: {
       // Meta from the latest ego response describes the most recent
       // bloom, but we keep the overview denominator so the truncation
@@ -3362,6 +3446,8 @@ function mergeGraphData(
       ...incoming.meta,
       returned: nodes.length,
       familiar_count: familiarCount || undefined,
+      learning_evidence_count: evidenceCount || undefined,
+      unseen_count: unseenCount || undefined,
     },
   }
 }
@@ -3712,6 +3798,8 @@ interface GNode {
   slug: string; title: string; type: string
   linkCount: number; pinned: boolean
   familiar: boolean
+  learningState: 'unseen' | 'exploring' | 'familiar' | ''
+  masteryScore: number
 }
 
 // Persistent graph state so it survives re-renders
@@ -3864,6 +3952,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       slug: n.slug, title: n.title, type: n.page_type,
       linkCount: n.link_count || 0, pinned,
       familiar: !!n.familiar,
+      learningState: n.learning?.state || '',
+      masteryScore: n.learning?.mastery_score || 0,
     }
     nodeMap.set(n.slug, node)
     return node
@@ -4019,6 +4109,27 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       familiarRing.style.opacity = '0.9'
       familiarRing.classList.add('node-familiar-ring')
       g.appendChild(familiarRing)
+    } else if (n.learningState === 'exploring') {
+      const exploringRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+      exploringRing.setAttribute('r', String(r + 7))
+      exploringRing.setAttribute('fill', 'none')
+      exploringRing.setAttribute('stroke', '#e37318')
+      exploringRing.setAttribute('stroke-width', '2')
+      exploringRing.setAttribute('stroke-dasharray', '4 2')
+      exploringRing.setAttribute('pointer-events', 'none')
+      exploringRing.style.opacity = '0.9'
+      exploringRing.classList.add('node-learning-ring')
+      g.appendChild(exploringRing)
+    } else if (n.learningState === 'unseen') {
+      const unseenRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+      unseenRing.setAttribute('r', String(r + 7))
+      unseenRing.setAttribute('fill', 'none')
+      unseenRing.setAttribute('stroke', 'var(--td-text-color-placeholder)')
+      unseenRing.setAttribute('stroke-width', '1.5')
+      unseenRing.setAttribute('pointer-events', 'none')
+      unseenRing.style.opacity = '0.45'
+      unseenRing.classList.add('node-learning-ring')
+      g.appendChild(unseenRing)
     }
 
     // Pulse ring for selected state
@@ -6214,6 +6325,11 @@ onUnmounted(() => {
   position: absolute;
   top: 16px;
   right: 16px;
+  box-sizing: border-box;
+  max-height: calc(100% - 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
@@ -6225,6 +6341,32 @@ onUnmounted(() => {
   z-index: 10;
   opacity: 0.95;
   transition: right 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+}
+
+.wiki-graph-legend.legend-collapsed {
+  padding: 6px 8px;
+  gap: 0;
+}
+
+.legend-collapse-action {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-brand-color);
+  }
 }
 
 .wiki-graph-legend.legend-shifted {
@@ -6277,6 +6419,25 @@ onUnmounted(() => {
   box-sizing: border-box;
   border: 2px solid #0052d9;
   background: transparent;
+}
+
+.legend-learning-ring {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  background: transparent;
+
+  &--exploring {
+    border: 2px dashed #e37318;
+  }
+
+  &--unseen {
+    border: 2px solid var(--td-text-color-placeholder);
+    opacity: 0.55;
+  }
 }
 
 .legend-divider {
@@ -6369,11 +6530,75 @@ onUnmounted(() => {
   }
 }
 
+.wiki-learning-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 240px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--td-component-stroke);
+
+  .learning-card-title,
+  .learning-card-subtitle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  .learning-card-summary {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--td-text-color-primary);
+  }
+
+  .learning-card-note {
+    font-size: 10px;
+    line-height: 14px;
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.learning-recommendation {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--td-bg-color-container-hover);
+  color: var(--td-text-color-primary);
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  small {
+    color: var(--td-text-color-placeholder);
+  }
+}
+
 .wiki-drawer-neighbor-hint {
   font-size: 12px;
   line-height: 16px;
   color: var(--td-text-color-secondary);
   user-select: none;
+}
+
+.wiki-drawer-learning-evidence {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--td-warning-color-light);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .legend-action-icon {
