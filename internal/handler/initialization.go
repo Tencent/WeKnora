@@ -294,7 +294,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 
 	// 处理多模态模型配置
-	kb.VLMConfig = types.VLMConfig{}
+	// An absent field means "no change". This endpoint is also used to patch a
+	// single field, and wiping VLM/ASR because the caller did not resend them
+	// loses configuration silently: the endpoint still answers 200, so the loss
+	// only surfaces on a later GET. A caller that wants multimodal off sends
+	// vlm_config with enabled=false.
+	if req.VLMConfig != nil || req.Multimodal.Enabled {
+		kb.VLMConfig = types.VLMConfig{}
+	}
 	if req.VLMConfig != nil && req.Multimodal.Enabled && req.VLMConfig.ModelID != "" {
 		vllmModel, err := h.modelService.GetModelByID(ctx, req.VLMConfig.ModelID)
 		if err != nil || vllmModel == nil {
@@ -308,8 +315,10 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.VLMConfig.ModelID = ""
 	}
 
-	// 处理ASR语音识别配置
-	kb.ASRConfig = types.ASRConfig{}
+	// 处理ASR语音识别配置 (same "absent means no change" rule as VLM above)
+	if req.ASRConfig != nil {
+		kb.ASRConfig = types.ASRConfig{}
+	}
 	if req.ASRConfig != nil && req.ASRConfig.Enabled && req.ASRConfig.ModelID != "" {
 		asrModel, err := h.modelService.GetModelByID(ctx, req.ASRConfig.ModelID)
 		if err != nil || asrModel == nil {
@@ -331,8 +340,15 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	if len(req.DocumentSplitting.Separators) > 0 {
 		kb.ChunkingConfig.Separators = req.DocumentSplitting.Separators
 	}
-	kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
-	kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
+	// Both were assigned unconditionally, so a payload that omitted them reset
+	// the parser rules to nil and parent-child chunking to false. Only apply what
+	// the caller actually sent. EnableParentChild is a plain bool and carries no
+	// presence information, so it follows the rules field: the UI sends the two
+	// together.
+	if req.DocumentSplitting.ParserEngineRules != nil {
+		kb.ChunkingConfig.ParserEngineRules = req.DocumentSplitting.ParserEngineRules
+		kb.ChunkingConfig.EnableParentChild = req.DocumentSplitting.EnableParentChild
+	}
 	if req.DocumentSplitting.ParentChunkSize > 0 {
 		kb.ChunkingConfig.ParentChunkSize = req.DocumentSplitting.ParentChunkSize
 	}
