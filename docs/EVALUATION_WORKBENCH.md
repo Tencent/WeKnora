@@ -94,3 +94,29 @@ Dataset sources and licenses are under `dataset/parser-benchmark/`. Downloading 
 Engineering checks identify the tested commit, tree, binary, dataset, metric versions, and denominator. A source update does not establish new Apple M4 measurements, live provider results, human ratings, or cloud invoices. Observed evaluation sets retain their observed status. Quality and cache comparisons must identify their actual sample cohort and provider accounting coverage.
 
 The platform layout has an upstream minimum width of 600 CSS pixels. Desktop and tablet layouts are supported; narrow phone screens can scroll horizontally.
+
+## Interface examples
+
+The workbench displays frozen run identities, retrieval and answer metrics, accounting coverage, and export controls. This example uses a loopback synthetic provider and local fixture prices; displayed quality scores and amounts are not live-provider quality or billing evidence.
+
+![Evaluation run overview](images/evaluation-workbench/overview.png)
+
+The overview keeps dataset identity and metric versions alongside each result. The example contains 20 synthetic questions and records a full source commit.
+
+The model panel reads call counts, cache observations, latency percentiles and currency-separated cost totals from the database. Model and time filters select the query scope.
+
+![Database-backed model usage](images/evaluation-workbench/model-usage.png)
+
+These screenshots were captured from source `d1fedd6dfac0953823417076878132128b443f2c` with synthetic data. The frontend source is unchanged in this contribution's subsequent statistics-reader update.
+
+## Statistics scale verification
+
+The statistics reader streams database rows and retains numeric latency samples for exact percentile calculation. Its numeric storage still grows with the selected row count; a 366-day time interval does not cap that count. Run the isolated SQLite scale benchmark without provider credentials:
+
+```sh
+GOMAXPROCS=2 GOMEMLIMIT=2GiB go test -tags sqlite_fts5 \
+  ./internal/application/repository -run '^$' \
+  -bench BenchmarkModelStatisticsScale -benchtime=1x -count=1
+```
+
+The benchmark checks 10,000, 100,000 and 1,000,000 rows, with one and four simultaneous queries at the largest size. Database preparation is outside the measured interval. Reported allocation is cumulative bytes per request, not peak resident memory; elapsed time is for a complete concurrent batch. Local observations do not establish a universal production capacity limit.
