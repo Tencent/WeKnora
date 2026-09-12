@@ -133,11 +133,14 @@ func TestAzureEmbeddingRequiresBaseURL(t *testing.T) {
 
 // aliyun text branch: an empty base URL defaults to the compatible-mode
 // endpoint (v1 factory behavior).
-func TestAliyunTextEmbeddingDefaultsToCompatibleMode(t *testing.T) {
+// aliyun text branch: an empty base URL defaults to the NATIVE text-embedding
+// endpoint (2026-09-12 native ruling — the compatible-mode openai shape is
+// retired).
+func TestAliyunTextEmbeddingDefaultsToNative(t *testing.T) {
 	req, err := buildAliyunEmbedding(invoke.Endpoint{Credentials: invoke.Credentials{APIKey: "k"}},
 		"text-embedding-v4", &invoke.EmbeddingOptions{Inputs: []string{"x"}})
 	require.NoError(t, err)
-	require.Equal(t, "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings", req.URL)
+	require.Equal(t, "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding", req.URL)
 }
 
 // aliyun multimodal base URL: trailing slash trimmed before path join, and a

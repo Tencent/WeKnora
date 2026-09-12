@@ -200,11 +200,11 @@ func (a *openaiEmbeddingAdapter) embedBuildParse() (
 	switch a.name {
 	case invoke.ProviderAzureOpenAI:
 		return buildAzureEmbedding, parseOpenAIEmbeddingResponse
-	case invoke.ProviderAliyun:
-		return buildAliyunEmbedding, parseAliyunEmbedding
 	case invoke.ProviderVolcengine:
 		return buildVolcengineEmbedding, parseVolcengineEmbedding
 	// gemini left this dispatch in P5-1: GeminiAdapter owns the native pair.
+	// aliyun left it in the 2026-09-12 native ruling: AliyunAdapter serves
+	// the DashScope-native pair directly (aliyun.go).
 	default:
 		spec := a.espec
 		return func(ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions) (*invoke.Request, error) {

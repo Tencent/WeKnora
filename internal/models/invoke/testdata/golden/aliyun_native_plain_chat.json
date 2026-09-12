@@ -1,0 +1,54 @@
+{
+  "scenario": "aliyun_native_plain_chat",
+  "behavior": [
+    "native DashScope envelope on text-generation; qwen2.5 (non-hybrid) sends NO enable_thinking",
+    "cache_control breakpoints are GONE on the native wire — DashScope context cache is server-side implicit, CacheRetention=long sends nothing"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/services/aigc/text-generation/generation",
+      "headers": {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "qwen2.5-72b-instruct",
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are a chemistry expert."
+            },
+            {
+              "role": "user",
+              "content": "Ethanol properties?"
+            }
+          ]
+        },
+        "parameters": {
+          "result_format": "message",
+          "max_completion_tokens": 64
+        }
+      }
+    }
+  ],
+  "response": {
+    "request_id": "req-plain",
+    "output": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "Ethanol is a short-chain alcohol."
+          }
+        }
+      ]
+    },
+    "usage": {
+      "input_tokens": 14,
+      "output_tokens": 9,
+      "total_tokens": 23
+    }
+  }
+}

@@ -139,12 +139,6 @@ func (a *openaiAdapter) thinkingFor(
 		return a.spec.thinking
 	}
 	switch a.name {
-	case invoke.ProviderAliyun:
-		// qwenThinkingProvider: enable_thinking always sent, forced off
-		// non-stream (Qwen3 rejects thinking in non-stream mode).
-		if invoke.IsQwenThinkingModel(model) {
-			return enableThinkingApply
-		}
 	case invoke.ProviderLKEAP:
 		// lkeapProvider: { "thinking": { "type": ... } } for DeepSeek V3.x
 		// only; R1 enables chain-of-thought by default and stays untouched.
@@ -377,7 +371,8 @@ func (a *openaiAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*i
 var openAIFamilyProviders = []invoke.ProviderName{
 	invoke.ProviderOpenAI,
 	invoke.ProviderGeneric,
-	invoke.ProviderAliyun,
+	// aliyun moved out in the 2026-09-12 native ruling: the DashScope adapter
+	// (aliyun.go) replaces the compatible-mode chat/embedding route.
 	invoke.ProviderZhipu,
 	invoke.ProviderVolcengine,
 	invoke.ProviderHunyuan,

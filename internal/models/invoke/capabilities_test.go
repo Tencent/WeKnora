@@ -16,7 +16,8 @@ func TestProtocolFor(t *testing.T) {
 	// OpenAI-compatible family is the default for everything else.
 	assert.Equal(t, ProtocolOpenAIChat, protocolFor(ProviderOpenAI))
 	assert.Equal(t, ProtocolOpenAIChat, protocolFor(ProviderGeneric))
-	assert.Equal(t, ProtocolOpenAIChat, protocolFor(ProviderAliyun))
+	// aliyun speaks the NATIVE DashScope protocol (2026-09-12 ruling).
+	assert.Equal(t, ProtocolDashScope, protocolFor(ProviderAliyun))
 }
 
 func TestThinkingCapsFor(t *testing.T) {

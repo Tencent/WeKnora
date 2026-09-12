@@ -105,15 +105,23 @@ func TestReconcileVolcengineThinkingField(t *testing.T) {
 	assertRequestsMatchGolden(t, "volcengine_thinking_field", g)
 }
 
-// 场景 18：Aliyun Qwen thinking 模型 enable_thinking 钉死。
+// 场景 18：Aliyun Qwen thinking 模型——原生 DashScope wire，enable_thinking 钉死
+// （2026-09-12 原生裁定：非流式即使 Thinking=true 也钉 false，流式 Thinking=nil
+// 仍 alwaysSend false；无 [DONE]，末帧 finish_reason+usage 收流）。
 func TestReconcileAliyunQwenThinkingPin(t *testing.T) {
 	allowLoopbackSSRF(t)
 	streamLines := []string{
-		"data: " + openaiChunk("chatcmpl-qwen", `{"content":"你好"}`), "",
-		"data: " + openaiChunk("chatcmpl-qwen", `{"content":"","finish_reason":"stop"}`), "",
-		"data: [DONE]", "",
+		`data: {"request_id":"req-1","output":{"choices":[{"finish_reason":null,` +
+			`"message":{"role":"assistant","content":"你好","reasoning_content":""}}]}}`, "",
+		`data: {"request_id":"req-1","output":{"choices":[{"finish_reason":"stop",` +
+			`"message":{"role":"assistant","content":""}}]},` +
+			`"usage":{"input_tokens":22,"output_tokens":3,"total_tokens":25}}`, "",
 	}
-	handler, _ := sequencingHandler(jsonHandler(200, goldenOpenAIPlainResponse), sseHandler(streamLines...))
+	handler, _ := sequencingHandler(
+		jsonHandler(200, `{"request_id":"req-1","output":{"choices":[{"finish_reason":"stop",`+
+			`"message":{"role":"assistant","content":"你好"}}]},`+
+			`"usage":{"input_tokens":22,"output_tokens":3,"total_tokens":25}}`),
+		sseHandler(streamLines...))
 	g := newReconcileServer(t, handler)
 	m := newGoldenModelConfig(t, g.Server.URL, "aliyun", "qwen3-max", nil)
 
@@ -129,13 +137,17 @@ func TestReconcileAliyunQwenThinkingPin(t *testing.T) {
 	})
 	require.NoError(t, err)
 	drainStream(t, ch)
-	assertRequestsMatchGolden(t, "aliyun_qwen_thinking_pin", g)
+	assertRequestsMatchGolden(t, "aliyun_native_thinking_pin", g)
 }
 
-// 场景 19：Aliyun cache_control 断点（system + 最后一条会话消息，long TTL）。
-func TestReconcileAliyunCacheControlBreakpoints(t *testing.T) {
+// 场景 19：Aliyun 原生 plain chat——非 qwen3 模型不发 enable_thinking；
+// cache_control 断点随 compatible-mode 路线退役（原生上下文缓存为服务端隐式，
+// CacheRetention=long 不再往 body 塞任何标记）。
+func TestReconcileAliyunNativePlainChat(t *testing.T) {
 	allowLoopbackSSRF(t)
-	g := newReconcileServer(t, jsonHandler(200, goldenOpenAIPlainResponse))
+	g := newReconcileServer(t, jsonHandler(200, `{"request_id":"req-plain","output":{"choices":[`+
+		`{"finish_reason":"stop","message":{"role":"assistant","content":"Ethanol is a short-chain alcohol."}}]},`+
+		`"usage":{"input_tokens":14,"output_tokens":9,"total_tokens":23}}`))
 	m := newGoldenModelConfig(t, g.Server.URL, "aliyun", "qwen2.5-72b-instruct", nil)
 
 	_, err := invoke.Chat(context.Background(), m, &invoke.ChatOptions{
@@ -146,7 +158,7 @@ func TestReconcileAliyunCacheControlBreakpoints(t *testing.T) {
 		CacheRetention:      invoke.CacheRetentionLong,
 	})
 	require.NoError(t, err)
-	assertRequestsMatchGolden(t, "aliyun_cache_control_breakpoints", g)
+	assertRequestsMatchGolden(t, "aliyun_native_plain_chat", g)
 }
 
 // 场景 20：Zhipu（max_tokens wire 字段；baseProvider 行为）。

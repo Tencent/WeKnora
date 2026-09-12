@@ -1,21 +1,745 @@
 package adapters
 
-// aliyun.go — the aliyun DashScope vendor deltas. Chat rides the openai
-// family funnel; text embedding rides the shared openai shape through the
-// OFFICIAL compatible-mode endpoint; multimodal embedding and rerank are
-// native DashScope shapes. (v1 routed text-vs-multimodal at the factory from
-// the model name — the branch lives in buildAliyunEmbedding now.)
+// aliyun.go — the aliyun (阿里云百炼/DashScope) vendor adapter. 2026-09-12
+// user ruling: aliyun speaks the vendor's OWN interface — the native
+// DashScope generation wire — not the OpenAI-compatible mode (the native
+// side of 裁定 #31: compatibility routes are for vendors whose own protocol
+// IS OpenAI-shaped; DashScope has a first-class native one).
+//
+// Wire map (all paths under the DashScope root):
+//   - chat (text):      POST /api/v1/services/aigc/text-generation/generation
+//   - chat (vision):    POST /api/v1/services/aigc/multimodal-generation/generation
+//                       (native content parts [{"image":...},{"text":...}] —
+//                       NOT the OpenAI image_url shape)
+//   - embedding (text): POST /api/v1/services/embeddings/text-embedding/text-embedding
+//   - embedding (VL):   POST /api/v1/services/embeddings/multimodal-embedding/multimodal-embedding
+//   - rerank:           POST /api/v1/services/rerank/text-rerank/text-rerank
+//   - listing:          GET  /api/v1/models?capabilities=TG
+//
+// Streaming sets the X-DashScope-SSE: enable header and
+// parameters.incremental_output=true. There is NO [DONE] sentinel: the final
+// frame carries finish_reason (+usage) and closes the stream, so the bridge
+// emits the Done event itself on that frame.
+//
+// Deliberate deltas vs the compatible-mode era:
+//   - no cache_control breakpoints in the body: DashScope's context cache is
+//     server-side implicit; the compat convention has no native equivalent.
+//   - frequency_penalty is not part of the native schema and is dropped.
+//   - ThinkingControl override tokens: only "none" and "enable_thinking"
+//     map; anything else falls back to the model-conditional default (the
+//     compat wrapper shapes don't exist on the native wire).
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
 
-// --- embedding: dual-path (openai-shape text / DashScope-native multimodal) ---
+// --- adapter + registration ---
+
+// AliyunAdapter serves aliyun over the native DashScope wire: chat (text +
+// vision), embedding (text + multimodal), rerank, and the native catalog
+// listing.
+type AliyunAdapter struct {
+	name invoke.ProviderName
+}
+
+// compile-time lock #1 (design §6.2).
+var (
+	_ invoke.ChatAdapter       = (*AliyunAdapter)(nil)
+	_ invoke.EmbeddingAdapter  = (*AliyunAdapter)(nil)
+	_ invoke.RerankAdapter     = (*AliyunAdapter)(nil)
+	_ invoke.ListModelsAdapter = (*AliyunAdapter)(nil)
+)
+
+func init() {
+	if err := invoke.Default.Register(newAliyunAdapter()); err != nil {
+		panic(err) // three-lock #2 fail fast
+	}
+}
+
+func newAliyunAdapter() *AliyunAdapter {
+	return &AliyunAdapter{name: invoke.ProviderAliyun}
+}
+
+// Provider returns the canonical provider name.
+func (a *AliyunAdapter) Provider() string { return string(a.name) }
+
+// Capabilities reports the served shards (chat/embedding/rerank/listing).
+// Registration lock #2: shard set == facet set.
+func (a *AliyunAdapter) Capabilities() invoke.Capabilities {
+	caps := invoke.Capabilities{
+		Common: invoke.CommonCaps{ModelListing: invoke.ModelListingCaps{Supported: true}},
+		Chat:   chatCapsFor(a.name),
+	}
+	if info, ok := providerInfoFor(a.name); ok {
+		eff := info.EffectiveCapabilities()
+		caps.Embedding = eff.Embedding
+		caps.Rerank = eff.Rerank
+	}
+	return caps
+}
+
+// aliyunNativeBaseURL normalizes any stored base onto the DashScope root:
+// empty → the official root; a compatible-mode base (the pre-native default,
+// still on existing records) is cut back to the root; an /api/v1 suffix (the
+// SDK-style base) is trimmed so path joining doesn't double it.
+func aliyunNativeBaseURL(base string) string {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if base == "" {
+		return invoke.AliyunBaseURL
+	}
+	if idx := strings.Index(base, "/compatible-mode"); idx != -1 {
+		base = base[:idx]
+	}
+	return strings.TrimSuffix(base, "/api/v1")
+}
+
+// --- chat: the native generation wire ---
+
+const (
+	aliyunTextGenerationPath       = "/api/v1/services/aigc/text-generation/generation"
+	aliyunMultimodalGenerationPath = "/api/v1/services/aigc/multimodal-generation/generation"
+)
+
+// aliyunPart is one native content part: {"text": ...} or {"image": ...}.
+type aliyunPart struct {
+	Text  string `json:"text,omitempty"`
+	Image string `json:"image,omitempty"`
+}
+
+type aliyunFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// aliyunToolCall mirrors the native tool_call object (OpenAI-shaped on the
+// wire; index is response/stream-side, omitted on history replay).
+type aliyunToolCall struct {
+	ID       string             `json:"id,omitempty"`
+	Index    int                `json:"index,omitempty"`
+	Type     string             `json:"type,omitempty"`
+	Function aliyunFunctionCall `json:"function"`
+}
+
+// aliyunMessage is one native input message. Content is a plain string on
+// the text path and a part array on the vision path (DashScope content
+// rules) — `any` keeps both in one struct.
+type aliyunMessage struct {
+	Role             string           `json:"role"`
+	Content          any              `json:"content"`
+	ToolCalls        []aliyunToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+}
+
+type aliyunResponseFormat struct {
+	Type string `json:"type"`
+}
+
+type aliyunFunctionDef struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters,omitempty"`
+}
+
+type aliyunToolDef struct {
+	Type     string             `json:"type"`
+	Function *aliyunFunctionDef `json:"function"`
+}
+
+type aliyunToolChoiceFunction struct {
+	Name string `json:"name"`
+}
+
+type aliyunToolChoice struct {
+	Type     string                   `json:"type"`
+	Function aliyunToolChoiceFunction `json:"function"`
+}
+
+// aliyunParameters is the native parameters object. DashScope validates
+// strictly, so every field is omitted unless the platform decided it.
+type aliyunParameters struct {
+	ResultFormat        string                `json:"result_format,omitempty"`
+	IncrementalOutput   bool                  `json:"incremental_output,omitempty"`
+	MaxCompletionTokens int                   `json:"max_completion_tokens,omitempty"`
+	MaxTokens           int                   `json:"max_tokens,omitempty"`
+	Temperature         float64               `json:"temperature,omitempty"`
+	TopP                float64               `json:"top_p,omitempty"`
+	PresencePenalty     float64               `json:"presence_penalty,omitempty"`
+	Seed                int                   `json:"seed,omitempty"`
+	EnableThinking      *bool                 `json:"enable_thinking,omitempty"`
+	ResponseFormat      *aliyunResponseFormat `json:"response_format,omitempty"`
+	Tools               []aliyunToolDef       `json:"tools,omitempty"`
+	ToolChoice          any                   `json:"tool_choice,omitempty"`
+	ParallelToolCalls   *bool                 `json:"parallel_tool_calls,omitempty"`
+}
+
+type aliyunInput struct {
+	Messages []aliyunMessage `json:"messages"`
+}
+
+// aliyunGenerationRequest is the native envelope: model + input +
+// parameters — NOT the OpenAI flat shape.
+type aliyunGenerationRequest struct {
+	Model      string            `json:"model"`
+	Input      aliyunInput       `json:"input"`
+	Parameters *aliyunParameters `json:"parameters"`
+}
+
+// convertAliyunMessages maps the neutral messages onto the native content
+// rules. The text path degrades single-text messages to plain strings and
+// uses part arrays only for multi-part text; the vision path uses part
+// arrays with {"image": ...} refs (pure-text messages stay strings).
+// Assistant reasoning_content replays for strict multi-turn exactly as the
+// openai funnel replays it (qwen3.8 preserve_thinking requires it intact).
+func convertAliyunMessages(messages []invoke.Message, vision bool) []aliyunMessage {
+	out := make([]aliyunMessage, 0, len(messages))
+	for _, msg := range messages {
+		m := aliyunMessage{Role: string(msg.Role)}
+		if len(msg.ToolCalls) > 0 {
+			m.ToolCalls = make([]aliyunToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				m.ToolCalls = append(m.ToolCalls, aliyunToolCall{
+					ID:       tc.ID,
+					Type:     tc.Type,
+					Function: aliyunFunctionCall{Name: tc.Function.Name, Arguments: tc.Function.Arguments},
+				})
+			}
+		}
+		if msg.Role == "tool" {
+			m.ToolCallID = msg.ToolCallID
+		}
+		if msg.Role == "assistant" {
+			m.ReasoningContent = msg.ReasoningContent
+		}
+		m.Content = aliyunMessageContent(msg, vision)
+		out = append(out, m)
+	}
+	return out
+}
+
+// aliyunMessageContent encodes one message's parts per the path rules.
+func aliyunMessageContent(msg invoke.Message, vision bool) any {
+	if vision {
+		parts := make([]aliyunPart, 0, len(msg.Content))
+		for _, p := range msg.Content {
+			if p.Image != nil {
+				parts = append(parts, aliyunPart{Image: p.Image.URL})
+				continue
+			}
+			parts = append(parts, aliyunPart{Text: p.Text})
+		}
+		if len(parts) == 1 && parts[0].Image == "" {
+			// Pure-text messages (system prompts, tool results) accept plain
+			// strings everywhere on the vision path.
+			return parts[0].Text
+		}
+		return parts
+	}
+	texts := make([]string, 0, len(msg.Content))
+	for _, p := range msg.Content {
+		texts = append(texts, p.Text)
+	}
+	switch len(texts) {
+	case 1:
+		return texts[0]
+	case 0:
+		return ""
+	default:
+		parts := make([]aliyunPart, 0, len(texts))
+		for _, t := range texts {
+			parts = append(parts, aliyunPart{Text: t})
+		}
+		return parts
+	}
+}
+
+// applyAliyunThinking ports the qwenThinkingProvider semantics onto the
+// native parameters object: hybrid models (qwen3 family) carry
+// enable_thinking on EVERY request — pinned false on non-stream calls
+// (Qwen3 rejects thinking in non-stream mode), the platform decision on
+// streams. ThinkingControl override tokens: "none" suppresses the field,
+// "enable_thinking" forces the strategy on any model; anything else falls
+// back to the model-conditional default (documented delta above).
+func applyAliyunThinking(
+	params *aliyunParameters, control string, model string, opts *invoke.ChatOptions, isStream bool,
+) {
+	apply := invoke.IsQwenThinkingModel(model)
+	switch control {
+	case "none":
+		return
+	case "enable_thinking":
+		apply = true
+	}
+	if !apply {
+		return
+	}
+	thinking := false
+	if opts != nil && opts.Thinking != nil {
+		thinking = *opts.Thinking
+	}
+	if !isStream {
+		thinking = false
+	}
+	params.EnableThinking = &thinking
+}
+
+// appendAliyunSchemaHint appends the structured-output hint to the last
+// message (same semantics as the openai funnel's json_object hint).
+func appendAliyunSchemaHint(msg *aliyunMessage, schema string) {
+	hint := fmt.Sprintf("\nUse this JSON schema: %s", schema)
+	if s, ok := msg.Content.(string); ok {
+		msg.Content = s + hint
+		return
+	}
+	if parts, ok := msg.Content.([]aliyunPart); ok && len(parts) > 0 {
+		parts[len(parts)-1].Text += hint
+	}
+}
+
+// BuildChatRequest builds the native generation call. The vision branch
+// (any image part) targets multimodal-generation with native content parts
+// and the universal max_tokens budget (tools/response_format are not vision
+// features); the text branch targets text-generation. Streaming rides the
+// X-DashScope-SSE header — there is no parameters.stream on the HTTP path.
+func (a *AliyunAdapter) BuildChatRequest(
+	ep invoke.Endpoint, model string, opts *invoke.ChatOptions,
+) (*invoke.Request, error) {
+	isStream := opts != nil && opts.Stream
+	vision := opts != nil && invoke.HasImages(opts.Messages)
+
+	params := &aliyunParameters{ResultFormat: "message"}
+	if opts != nil {
+		params.Temperature = opts.Temperature
+		if opts.TopP > 0 {
+			params.TopP = opts.TopP
+		}
+		if opts.PresencePenalty > 0 {
+			params.PresencePenalty = opts.PresencePenalty
+		}
+		if opts.Seed != 0 {
+			params.Seed = opts.Seed
+		}
+		// 完成预算（平台单一字段 MaxCompletionTokens → DashScope 同名参数；
+		// 视觉分支走通用的 max_tokens）。
+		if opts.MaxCompletionTokens > 0 {
+			if vision {
+				params.MaxTokens = opts.MaxCompletionTokens
+			} else {
+				params.MaxCompletionTokens = opts.MaxCompletionTokens
+			}
+		}
+		if len(opts.Tools) > 0 && !vision {
+			params.Tools = make([]aliyunToolDef, 0, len(opts.Tools))
+			for _, tool := range opts.Tools {
+				params.Tools = append(params.Tools, aliyunToolDef{
+					Type: "function",
+					Function: &aliyunFunctionDef{
+						Name:        tool.Name,
+						Description: tool.Description,
+						Parameters:  tool.Parameters,
+					},
+				})
+			}
+			if opts.ParallelToolCalls != nil {
+				params.ParallelToolCalls = opts.ParallelToolCalls
+			}
+			if opts.ToolChoice != "" {
+				switch opts.ToolChoice {
+				case "none", "required", "auto":
+					params.ToolChoice = opts.ToolChoice
+				default:
+					params.ToolChoice = aliyunToolChoice{
+						Type:     "function",
+						Function: aliyunToolChoiceFunction{Name: opts.ToolChoice},
+					}
+				}
+			}
+		}
+		if len(opts.Format) > 0 && !vision {
+			params.ResponseFormat = &aliyunResponseFormat{Type: "json_object"}
+		}
+		applyAliyunThinking(params, ep.ThinkingControl, model, opts, isStream)
+	}
+	if isStream {
+		params.IncrementalOutput = true
+	}
+
+	msgs := convertAliyunMessages(opts.Messages, vision)
+	if opts != nil && len(opts.Format) > 0 && !vision && len(msgs) > 0 {
+		appendAliyunSchemaHint(&msgs[len(msgs)-1], string(opts.Format))
+	}
+
+	data, err := json.Marshal(aliyunGenerationRequest{
+		Model:      model,
+		Input:      aliyunInput{Messages: msgs},
+		Parameters: params,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	header.Set("Authorization", "Bearer "+ep.Credentials.APIKey)
+	path := aliyunTextGenerationPath
+	if vision {
+		path = aliyunMultimodalGenerationPath
+	}
+	if isStream {
+		header.Set("X-DashScope-SSE", "enable")
+		header.Set("Accept", "text/event-stream")
+	}
+	return &invoke.Request{
+		Method: http.MethodPost,
+		URL:    aliyunNativeBaseURL(ep.BaseURL) + path,
+		Header: header,
+		Body:   data,
+		Stream: isStream,
+	}, nil
+}
+
+// --- chat parse: native response objects ---
+
+type aliyunUsage struct {
+	InputTokens       int `json:"input_tokens"`
+	OutputTokens      int `json:"output_tokens"`
+	TotalTokens       int `json:"total_tokens"`
+	InputTokensDetail struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
+}
+
+func (u *aliyunUsage) usage() invoke.Usage {
+	out := invoke.Usage{
+		PromptTokens:     u.InputTokens,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      u.TotalTokens,
+	}
+	if u.InputTokensDetail.CachedTokens > 0 {
+		out.CacheReadTokens = u.InputTokensDetail.CachedTokens
+		out.CacheReported = true
+	}
+	return out
+}
+
+type aliyunResponseMessage struct {
+	Content          json.RawMessage  `json:"content"`
+	ReasoningContent string           `json:"reasoning_content"`
+	ToolCalls        []aliyunToolCall `json:"tool_calls"`
+}
+
+// aliyunContentText decodes message content: a plain string on the text
+// path or a part array on the vision path (text parts joined).
+func aliyunContentText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var parts []aliyunPart
+	if err := json.Unmarshal(raw, &parts); err == nil {
+		var b strings.Builder
+		for _, p := range parts {
+			b.WriteString(p.Text)
+		}
+		return b.String()
+	}
+	return ""
+}
+
+// ParseChatResponse decodes the native message-format response: first
+// choice, reasoning_content (the multi-turn replay channel — the compat
+// parse dropped it), tool calls, and the input/output/total_tokens usage
+// (cached_tokens folds into the prompt-cache detail).
+func (a *AliyunAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*invoke.ChatResponse, error) {
+	var resp struct {
+		Output struct {
+			Choices []struct {
+				FinishReason string                `json:"finish_reason"`
+				Message      aliyunResponseMessage `json:"message"`
+			} `json:"choices"`
+		} `json:"output"`
+		Usage *aliyunUsage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, invoke.ClassifyError(fmt.Errorf("decode response: %w", err))
+	}
+	if len(resp.Output.Choices) == 0 {
+		return nil, invoke.ClassifyError(fmt.Errorf("no response from API"))
+	}
+	choice := resp.Output.Choices[0]
+	out := &invoke.ChatResponse{
+		Content:          aliyunContentText(choice.Message.Content),
+		FinishReason:     choice.FinishReason,
+		ReasoningContent: choice.Message.ReasoningContent,
+	}
+	if resp.Usage != nil {
+		out.Usage = resp.Usage.usage()
+	}
+	if len(choice.Message.ToolCalls) > 0 {
+		out.ToolCalls = make([]invoke.ToolCall, 0, len(choice.Message.ToolCalls))
+		for _, tc := range choice.Message.ToolCalls {
+			out.ToolCalls = append(out.ToolCalls, invoke.ToolCall{
+				ID:       tc.ID,
+				Type:     tc.Type,
+				Function: invoke.FunctionCall{Name: tc.Function.Name, Arguments: tc.Function.Arguments},
+			})
+		}
+	}
+	return out, nil
+}
+
+// --- chat stream: the DashScope SSE bridge ---
+// Native SSE frames are complete response objects (result_format=message +
+// incremental_output=true): each frame's message fields ARE the deltas, the
+// final frame carries finish_reason + usage, and there is no [DONE]
+// sentinel — the bridge emits Done itself on the finish frame (usage rides
+// the same event; the entry's usage-in-Done seam carries it through).
+
+type aliyunStreamFrame struct {
+	Output struct {
+		Choices []struct {
+			FinishReason string                `json:"finish_reason"`
+			Message      aliyunResponseMessage `json:"message"`
+		} `json:"choices"`
+	} `json:"output"`
+	Usage *aliyunUsage `json:"usage"`
+}
+
+const (
+	stateAliyunFinish    = "aliyun.finish_reason"
+	stateAliyunUsage     = "aliyun.usage"
+	stateAliyunToolCalls = "aliyun.tool_calls"
+)
+
+// aliyunToolAssembler resolves the per-stream tool-call assembly (adapter-
+// local mirror of invoke's unexported helper).
+func aliyunToolAssembler(state *invoke.StreamBridgeState) *invoke.ToolCallAssembler {
+	v, ok := state.Get(stateAliyunToolCalls)
+	if !ok {
+		return nil
+	}
+	a, _ := v.(*invoke.ToolCallAssembler)
+	return a
+}
+
+// TranslateStreamEvent implements the DashScope native bridge.
+func (a *AliyunAdapter) TranslateStreamEvent(
+	state *invoke.StreamBridgeState, chunk invoke.StreamChunk,
+) (*invoke.StreamEvent, error) {
+	if chunk.Event == "done" {
+		// No native sentinel; tolerate proxies that inject one — flush the
+		// accumulated finish state (mirrors the openai bridge semantics).
+		return aliyunFlushDone(state), nil
+	}
+	var f aliyunStreamFrame
+	if err := decodeChunk(chunk.Data, &f); err != nil {
+		return nil, err
+	}
+	if f.Usage != nil {
+		state.Set(stateAliyunUsage, f.Usage.usage())
+	}
+	if len(f.Output.Choices) == 0 {
+		// Usage-only frame (some models report usage ahead of the choices
+		// terminator).
+		if f.Usage != nil {
+			u := f.Usage.usage()
+			return &invoke.StreamEvent{Kind: invoke.StreamKindUsage, Usage: &u}, nil
+		}
+		return nil, nil
+	}
+	choice := f.Output.Choices[0]
+	if choice.FinishReason != "" {
+		state.Set(stateAliyunFinish, choice.FinishReason)
+		return aliyunFlushDone(state), nil
+	}
+	d := choice.Message
+	if d.ReasoningContent != "" {
+		return &invoke.StreamEvent{
+			Kind:  invoke.StreamKindThinking,
+			Delta: &invoke.ContentDelta{Text: d.ReasoningContent},
+		}, nil
+	}
+	if len(d.ToolCalls) > 0 {
+		assembler := aliyunToolAssembler(state)
+		if assembler == nil {
+			assembler = invoke.NewToolCallAssembler()
+			state.Set(stateAliyunToolCalls, assembler)
+		}
+		out := make([]invoke.ToolCallDelta, 0, len(d.ToolCalls))
+		for _, tc := range d.ToolCalls {
+			delta := invoke.ToolCallDelta{
+				Index: tc.Index, ID: tc.ID, Type: tc.Type,
+				Name: tc.Function.Name, Arguments: tc.Function.Arguments,
+			}
+			assembler.Add(delta)
+			out = append(out, delta)
+		}
+		return &invoke.StreamEvent{Kind: invoke.StreamKindToolCall, ToolCallDelta: &out[0]}, nil
+	}
+	if text := aliyunContentText(d.Content); text != "" {
+		return &invoke.StreamEvent{
+			Kind:  invoke.StreamKindAnswer,
+			Delta: &invoke.ContentDelta{Text: text},
+		}, nil
+	}
+	return nil, nil
+}
+
+// aliyunFlushDone emits the terminating Done event from the accumulated
+// state (finish reason + assembled tool calls + last observed usage).
+func aliyunFlushDone(state *invoke.StreamBridgeState) *invoke.StreamEvent {
+	finish, _ := state.Get(stateAliyunFinish)
+	reason, _ := finish.(string)
+	var calls []invoke.ToolCall
+	if a := aliyunToolAssembler(state); a != nil {
+		calls = a.Calls()
+	}
+	ev := &invoke.StreamEvent{
+		Kind: invoke.StreamKindAnswer,
+		Done: &invoke.FinishInfo{FinishReason: reason, ToolCalls: calls},
+	}
+	if raw, ok := state.Get(stateAliyunUsage); ok {
+		if u, ok := raw.(invoke.Usage); ok {
+			usage := u
+			ev.Usage = &usage
+		}
+	}
+	return ev
+}
+
+// --- listing: the native catalog facet ---
+
+const aliyunModelListPath = "/api/v1/models"
+
+// BuildListRequest targets the native model catalog with the
+// text-generation capability filter (the compatible-mode /models endpoint
+// is gone with the compat route). Single page — the probe caps the result
+// list anyway.
+func (a *AliyunAdapter) BuildListRequest(ep invoke.Endpoint) (*invoke.Request, error) {
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	header.Set("Authorization", "Bearer "+ep.Credentials.APIKey)
+	q := url.Values{}
+	q.Set("capabilities", "TG")
+	q.Set("page_no", "1")
+	q.Set("page_size", "100")
+	return &invoke.Request{
+		Method: http.MethodGet,
+		URL:    aliyunNativeBaseURL(ep.BaseURL) + aliyunModelListPath + "?" + q.Encode(),
+		Header: header,
+	}, nil
+}
+
+// ParseListResponse decodes the DashScope catalog envelope
+// (output.models[], context metadata from model_info).
+func (a *AliyunAdapter) ParseListResponse(_ int, _ http.Header, body []byte) ([]invoke.RemoteModel, error) {
+	var parsed struct {
+		Output struct {
+			Models []struct {
+				Model     string `json:"model"`
+				Name      string `json:"name"`
+				ModelInfo struct {
+					ContextWindow   int `json:"context_window"`
+					MaxOutputTokens int `json:"max_output_tokens"`
+				} `json:"model_info"`
+			} `json:"models"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
+	}
+	out := make([]invoke.RemoteModel, 0, len(parsed.Output.Models))
+	for _, m := range parsed.Output.Models {
+		if m.Model == "" {
+			continue
+		}
+		out = append(out, invoke.RemoteModel{
+			ID:              m.Model,
+			DisplayName:     m.Name,
+			ContextWindow:   m.ModelInfo.ContextWindow,
+			MaxOutputTokens: m.ModelInfo.MaxOutputTokens,
+		})
+	}
+	return out, nil
+}
+
+// --- embedding: native text-embedding (multimodal branch unchanged) ---
+
+// BuildEmbeddingRequest dispatches the native dual-path builder (text
+// models → text-embedding; vision-named models → multimodal-embedding).
+func (a *AliyunAdapter) BuildEmbeddingRequest(
+	ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions,
+) (*invoke.Request, error) {
+	return buildAliyunEmbedding(ep, model, opts)
+}
+
+// ParseEmbeddingResponse parses the native output.embeddings envelope.
+func (a *AliyunAdapter) ParseEmbeddingResponse(
+	status int, header http.Header, body []byte,
+) (*invoke.EmbeddingResponse, error) {
+	return parseAliyunEmbedding(status, header, body)
+}
+
+const aliyunTextEmbeddingPath = "/api/v1/services/embeddings/text-embedding/text-embedding"
+
+type aliyunTextEmbedInput struct {
+	Texts []string `json:"texts"`
+}
+
+type aliyunTextEmbedParams struct {
+	Dimension int `json:"dimension,omitempty"`
+}
+
+type aliyunTextEmbedRequest struct {
+	Model      string                 `json:"model"`
+	Input      aliyunTextEmbedInput   `json:"input"`
+	Parameters *aliyunTextEmbedParams `json:"parameters,omitempty"`
+}
+
+// buildAliyunEmbedding serves the native text-embedding endpoint
+// ({model, input:{texts}, parameters:{dimension}}); vision-named models
+// branch to the native multimodal endpoint. v1 rode the compatible-mode
+// openai shape for text — the 2026-09-12 native ruling moves it onto the
+// vendor's own wire. The 60s v1 timeout posture is kept.
+func buildAliyunEmbedding(ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions) (*invoke.Request, error) {
+	if model == "" {
+		return nil, fmt.Errorf("model name is required")
+	}
+	if isMultimodalEmbeddingModel(model) {
+		return buildAliyunMultimodalEmbedding(ep, model, opts)
+	}
+	reqBody := aliyunTextEmbedRequest{
+		Model: model,
+		Input: aliyunTextEmbedInput{Texts: opts.Inputs},
+	}
+	if opts.SupportsDimensionOverride && opts.Dimensions > 0 {
+		reqBody.Parameters = &aliyunTextEmbedParams{Dimension: opts.Dimensions}
+	}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	header := http.Header{}
+	header.Set("Content-Type", "application/json")
+	header.Set("Authorization", "Bearer "+ep.Credentials.APIKey)
+	return &invoke.Request{
+		Method:  http.MethodPost,
+		URL:     aliyunNativeBaseURL(ep.BaseURL) + aliyunTextEmbeddingPath,
+		Header:  header,
+		Body:    data,
+		Timeout: embeddingRequestTimeout,
+	}, nil
+}
+
+// --- embedding (vision): the native multimodal endpoint (P2 port) ---
 
 const aliyunMultimodalEmbeddingPath = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding"
 
@@ -51,40 +775,14 @@ func isMultimodalEmbeddingModel(model string) bool {
 	return strings.Contains(lower, "vision") || strings.Contains(lower, "multimodal")
 }
 
-func buildAliyunEmbedding(ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions) (*invoke.Request, error) {
-	if model == "" {
-		return nil, fmt.Errorf("model name is required")
-	}
-	if isMultimodalEmbeddingModel(model) {
-		return buildAliyunMultimodalEmbedding(ep, model, opts)
-	}
-	// v1 text path: force the compatible-mode endpoint unless the record URL
-	// already points at it.
-	base := ep.BaseURL
-	if base == "" || !strings.Contains(base, "/compatible-mode/") {
-		base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-	}
-	spec := openaiEmbedSpec{defaultBaseURL: base, encodingFormat: "float", truncate511: true}
-	return buildOpenAIShapeEmbedding(spec, ep, model, opts)
-}
-
 func buildAliyunMultimodalEmbedding(
 	ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions,
 ) (*invoke.Request, error) {
 	// v1 multimodal path: default to the DashScope root and strip any
 	// compatible-mode suffix the user pointed at the text endpoint with
 	// (trailing slash trimmed first — v1 aliyun.go constructor; P2 review
-	// finding 6).
-	base := ep.BaseURL
-	if base == "" {
-		base = "https://dashscope.aliyuncs.com"
-	} else {
-		base = strings.TrimRight(base, "/")
-		if strings.Contains(base, "/compatible-mode/") {
-			base = strings.Replace(base, "/compatible-mode/v1", "", 1)
-			base = strings.Replace(base, "/compatible-mode", "", 1)
-		}
-	}
+	// finding 6). aliyunNativeBaseURL keeps the same stripping.
+	base := aliyunNativeBaseURL(ep.BaseURL)
 	contents := make([]aliyunEmbedContent, 0, len(opts.Inputs))
 	for _, text := range opts.Inputs {
 		contents = append(contents, aliyunEmbedContent{Text: text})
@@ -112,14 +810,14 @@ func buildAliyunMultimodalEmbedding(
 	}, nil
 }
 
+// parseAliyunEmbedding places vectors by text_index (DashScope may return
+// them out of order), sized by the returned count — the caller-side pooler
+// validates the count against the inputs (v1 batchEmbedder did the same).
 func parseAliyunEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingResponse, error) {
 	var resp aliyunEmbedResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
 	}
-	// v1: place by text_index (DashScope may return vectors out of order),
-	// sized by the returned count — the caller-side pooler validates the
-	// count against the inputs (v1 batchEmbedder did the same).
 	embeddings := make([][]float32, len(resp.Output.Embeddings))
 	for _, emb := range resp.Output.Embeddings {
 		if emb.TextIndex >= 0 && emb.TextIndex < len(embeddings) {
@@ -129,8 +827,7 @@ func parseAliyunEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingR
 	return &invoke.EmbeddingResponse{Vectors: embeddings}, nil
 }
 
-// --- rerank (native DashScope; the v1 base URL default is the FULL endpoint,
-// not a host prefix) ---
+// --- rerank: the native DashScope wire (P3 port, always was native) ---
 
 type aliyunRerankRequest struct {
 	Model      string             `json:"model"`
@@ -186,4 +883,18 @@ func parseAliyunRerank(_ int, _ http.Header, body []byte) (*invoke.RerankRespons
 		out = append(out, invoke.RerankResult{Index: r.Index, Score: r.Score})
 	}
 	return &invoke.RerankResponse{Results: out}, nil
+}
+
+// BuildRerankRequest serves the native DashScope rerank wire.
+func (a *AliyunAdapter) BuildRerankRequest(
+	ep invoke.Endpoint, model string, opts *invoke.RerankOptions,
+) (*invoke.Request, error) {
+	return buildAliyunRerank(ep, model, opts)
+}
+
+// ParseRerankResponse serves the native DashScope rerank envelope.
+func (a *AliyunAdapter) ParseRerankResponse(
+	status int, header http.Header, body []byte,
+) (*invoke.RerankResponse, error) {
+	return parseAliyunRerank(status, header, body)
 }

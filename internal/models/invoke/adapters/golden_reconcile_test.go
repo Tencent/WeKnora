@@ -78,6 +78,7 @@ var goldenHeaderAllowlist = map[string]bool{
 	"Accept":             true,
 	"X-Appid":            true,
 	"X-Session-Affinity": true,
+	"X-Dashscope-Sse":    true, // DashScope native streaming (aliyun.go)
 }
 
 var goldenHeaderMask = map[string]string{

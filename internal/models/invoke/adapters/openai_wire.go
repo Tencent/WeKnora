@@ -356,8 +356,9 @@ func promptCachePolicyFor(name invoke.ProviderName, baseURL string) promptCacheP
 	switch name {
 	case invoke.ProviderOpenAI, invoke.ProviderAzureOpenAI, invoke.ProviderOpenRouter:
 		return promptCachePolicy{sendKey: true, sendAffinity: true}
-	case invoke.ProviderAliyun:
-		return promptCachePolicy{sendCacheControl: true}
+		// aliyun left the family with the 2026-09-12 native ruling: DashScope's
+		// native context cache is server-side implicit — the compatible-mode
+		// cache_control breakpoint convention has no native-wire equivalent.
 	}
 	if strings.Contains(baseURL, "api.openai.com") {
 		return promptCachePolicy{sendKey: true, sendAffinity: true}

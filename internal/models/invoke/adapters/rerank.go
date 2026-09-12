@@ -153,8 +153,6 @@ func rerankSpecFor(name invoke.ProviderName) rerankSpec {
 		return rerankSpec{build: buildJinaRerank, parse: parseResultsEnvelopeRerank}
 	case invoke.ProviderZhipu:
 		return rerankSpec{build: buildZhipuRerank, parse: parseResultsEnvelopeRerank}
-	case invoke.ProviderAliyun:
-		return rerankSpec{build: buildAliyunRerank, parse: parseAliyunRerank}
 	case invoke.ProviderNvidia:
 		return rerankSpec{build: buildNvidiaRerank, parse: parseNvidiaRerank}
 	case invoke.ProviderWeKnoraCloud:

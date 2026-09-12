@@ -124,6 +124,12 @@ type ToolCallAssembler struct {
 	byIndex map[int]*ToolCall
 }
 
+// NewToolCallAssembler creates an assembler for adapters outside this
+// package (the DashScope native bridge assembles tool_call frames too).
+func NewToolCallAssembler() *ToolCallAssembler {
+	return &ToolCallAssembler{byIndex: make(map[int]*ToolCall)}
+}
+
 // Add merges one delta into the assembly.
 func (a *ToolCallAssembler) Add(d ToolCallDelta) {
 	tc, ok := a.byIndex[d.Index]

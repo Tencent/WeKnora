@@ -36,6 +36,9 @@ const (
 	ProtocolAnthropicMessages ProtocolFamily = "anthropic_messages"
 	ProtocolGoogleGenai       ProtocolFamily = "google_genai"
 	ProtocolOllama            ProtocolFamily = "ollama"
+	// ProtocolDashScope is Alibaba DashScope's native generation wire
+	// ({model, input, parameters} envelope, X-DashScope-SSE streaming).
+	ProtocolDashScope ProtocolFamily = "dashscope"
 )
 
 // UsageReporting describes how completely a provider returns token usage.
@@ -181,6 +184,10 @@ func protocolFor(name ProviderName) ProtocolFamily {
 	switch name {
 	case ProviderAnthropic:
 		return ProtocolAnthropicMessages
+	case ProviderAliyun:
+		// 2026-09-12 裁定：阿里云走原生 DashScope 接口（厂商自有协议），
+		// 不再借道 compatible-mode。
+		return ProtocolDashScope
 	default:
 		// gemini 亦落此处：走官方 OpenAI 兼容层（裁定 #31），wire 即 OpenAI Chat 形态。
 		return ProtocolOpenAIChat

@@ -121,10 +121,12 @@ func TestReconcileAzureEmbedding(t *testing.T) {
 	assertRequestsMatchGolden(t, "embedding_azure", g)
 }
 
-// 场景 E7：aliyun 文本模型——compatible-mode URL 保留（openai 形）。
+// 场景 E7：aliyun 文本模型——原生 text-embedding 端点（2026-09-12 原生裁定）；
+// 兼容模式时代的 record base 被适配器归一回 DashScope 根。
 func TestReconcileAliyunTextEmbedding(t *testing.T) {
 	allowLoopbackSSRF(t)
-	g := newReconcileServer(t, jsonHandler(200, embeddingOKResponse))
+	g := newReconcileServer(t, jsonHandler(200, `{"output":{"embeddings":[`+
+		`{"embedding":[0.1,0.2,0.3],"text_index":0},{"embedding":[0.4,0.5,0.6],"text_index":1}]}}`))
 	m := newEmbedGoldenConfig(t, g.Server.URL+"/compatible-mode/v1", "aliyun", "text-embedding-v4",
 		func(c *invoke.ModelConfig) { c.Credentials.APIKey = "sk-key" })
 

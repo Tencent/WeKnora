@@ -20,10 +20,10 @@ var providerInfos = map[invoke.ProviderName]invoke.ProviderInfo{
 		DisplayName: "阿里云 DashScope",
 		Description: "qwen-plus, tongyi-embedding-vision-plus, qwen3-rerank, etc.",
 		DefaultURLs: map[types.ModelType]string{
-			types.ModelTypeKnowledgeQA: invoke.AliyunChatBaseURL,
-			types.ModelTypeEmbedding:   invoke.AliyunChatBaseURL,
+			types.ModelTypeKnowledgeQA: invoke.AliyunBaseURL,
+			types.ModelTypeEmbedding:   invoke.AliyunBaseURL,
 			types.ModelTypeRerank:      invoke.AliyunRerankBaseURL,
-			types.ModelTypeVLLM:        invoke.AliyunChatBaseURL,
+			types.ModelTypeVLLM:        invoke.AliyunBaseURL,
 		},
 		ModelTypes: []types.ModelType{
 			types.ModelTypeKnowledgeQA,

@@ -112,7 +112,13 @@ const (
 	// AnthropicBaseURL is the Anthropic Messages API base.
 	AnthropicBaseURL = "https://api.anthropic.com/v1"
 
-	AliyunChatBaseURL   = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	// AliyunBaseURL is the native DashScope root (2026-09-12 ruling: aliyun
+	// speaks the vendor's own interface, not the OpenAI-compatible mode).
+	// Legacy records carrying the old compatible-mode base are normalized by
+	// the adapter (aliyunNativeBaseURL).
+	AliyunBaseURL = "https://dashscope.aliyuncs.com"
+	// AliyunRerankBaseURL is the FULL native rerank endpoint (the aliyun
+	// rerank wire posts to the base URL directly, not a host prefix).
 	AliyunRerankBaseURL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
 
 	DeepSeekBaseURL = "https://api.deepseek.com/v1"
