@@ -45,6 +45,19 @@
         </button>
       </div>
 
+      <div v-if="workbenchEnabled" class="chat-sandbox-panel__workbench">
+        <t-button
+          id="sandbox-workbench-toggle"
+          variant="outline"
+          size="small"
+          :disabled="!sessionId"
+          @click="emit('open-workbench')"
+        >
+          <template #icon><t-icon name="app" /></template>
+          {{ t('workbench.open') }}
+        </t-button>
+      </div>
+
       <div
         class="chat-sandbox-panel__body"
         :class="{ 'is-flush': panel?.activeTab.value === 'artifacts' }"
@@ -106,6 +119,7 @@ const props = withDefaults(
     shifted?: boolean
     artifacts?: SessionArtifactItem[]
     artifactsCollecting?: boolean
+    workbenchEnabled?: boolean
   }>(),
   {
     artifacts: () => [],
@@ -113,6 +127,7 @@ const props = withDefaults(
   },
 )
 
+const emit = defineEmits<{ 'open-workbench': [] }>()
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
 
@@ -331,6 +346,14 @@ function startResize(event: MouseEvent) {
   &.is-flush {
     padding: 0;
   }
+}
+
+.chat-sandbox-panel__workbench {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
 }
 
 .chat-sandbox-panel__terminal,

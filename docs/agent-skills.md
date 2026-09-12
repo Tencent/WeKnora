@@ -14,6 +14,8 @@ Agent Skills 是一种让 Agent 通过阅读"使用说明书"来学习新能力�
 - **沙箱执行**：脚本在隔离环境中安全执行
 - **灵活配置**：支持多目录、白名单过滤
 
+会话沙箱的受限命令终端、文件管理和产物预览见 [Sandbox Workbench](sandbox-workbench.md)。
+
 ## 设计理念
 
 ### Progressive Disclosure（渐进式披露）

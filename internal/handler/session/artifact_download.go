@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	appservice "github.com/Tencent/WeKnora/internal/application/service"
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
@@ -37,7 +38,10 @@ func paramSessionID(c *gin.Context) string {
 // @Tags         会话
 // @Produce      json
 // @Param        session_id  path  string  true  "会话ID"
+// @Param        cursor      query string  false "上一页返回的不透明游标"
+// @Param        limit       query int     false "消息页大小，1-100，默认50"
 // @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  errors.AppError
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
 // @Router       /sessions/{session_id}/artifacts [get]
@@ -50,7 +54,7 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessionID := secutils.SanitizeForLog(paramSessionID(c))
 	if sessionID == "" {
-		c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
+		_ = c.Error(errors.NewBadRequestError(errors.ErrInvalidSessionID.Error()))
 		return
 	}
 
@@ -58,37 +62,65 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 	// unknown / non-owned sessions matches the rest of the session routes.
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
-	artifacts, err := h.messageService.GetSessionArtifacts(ctx, sessionID)
+	limit := 50
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			_ = c.Error(errors.NewBadRequestError("limit must be between 1 and 100"))
+			return
+		}
+		limit = parsed
+	}
+
+	page, err := h.messageService.ListSessionArtifactMessages(
+		ctx,
+		sessionID,
+		strings.TrimSpace(c.Query("cursor")),
+		limit,
+	)
 	if err != nil {
+		if stderrors.Is(err, appservice.ErrInvalidArtifactCursor) {
+			_ = c.Error(errors.NewBadRequestError("invalid artifact cursor"))
+			return
+		}
 		logger.Errorf(ctx, "list session artifacts failed: session=%s err=%v", sessionID, err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError("failed to list session artifacts"))
+		return
+	}
+	if page == nil {
+		_ = c.Error(errors.NewInternalServerError("failed to list session artifacts"))
 		return
 	}
 
-	items := make([]artifactListItem, 0, len(artifacts))
-	for i, a := range artifacts {
-		items = append(items, artifactListItem{
-			Index:      i,
-			Handle:     artifactHandle(a),
-			FileName:   a.FileName,
-			FileType:   a.FileType,
-			FileSize:   a.FileSize,
-			SourcePath: a.SourcePath,
-			ModTime:    a.ModTime,
-			CreatedAt:  a.CreatedAt,
-		})
+	// Preserve message-local download identity. A flattened artifact slice
+	// cannot identify which message owns index zero of a later reply.
+	items := make([]artifactListItem, 0)
+	for _, message := range page.Messages {
+		if len(message.Artifacts) == 0 {
+			continue
+		}
+		for index, a := range message.Artifacts {
+			items = append(items, artifactListItem{
+				Index: len(items), MessageID: message.MessageID, ArtifactIndex: index,
+				Handle: artifactHandle(a), FileName: a.FileName, FileType: a.FileType,
+				Kind: a.DisplayKind(), FileSize: a.FileSize, SourcePath: a.SourcePath,
+				ModTime: a.ModTime, CreatedAt: a.CreatedAt,
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    items,
+		"success":     true,
+		"data":        items,
+		"next_cursor": page.NextCursor,
+		"has_more":    page.HasMore,
 	})
 }
 
@@ -105,36 +137,39 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 	sessionID := secutils.SanitizeForLog(paramSessionID(c))
 	messageID := secutils.SanitizeForLog(c.Param("message_id"))
 	if sessionID == "" || messageID == "" {
-		c.Error(errors.NewBadRequestError("session_id and message_id are required"))
+		_ = c.Error(errors.NewBadRequestError("session_id and message_id are required"))
 		return
 	}
 
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
 	msg, err := h.messageService.GetMessage(ctx, sessionID, messageID)
 	if err != nil || msg == nil {
-		c.Error(errors.NewNotFoundError("message not found"))
+		_ = c.Error(errors.NewNotFoundError("message not found"))
 		return
 	}
 
 	items := make([]artifactListItem, 0, len(msg.Artifacts))
 	for i, a := range msg.Artifacts {
 		items = append(items, artifactListItem{
-			Index:      i,
-			Handle:     artifactHandle(a),
-			FileName:   a.FileName,
-			FileType:   a.FileType,
-			FileSize:   a.FileSize,
-			SourcePath: a.SourcePath,
-			ModTime:    a.ModTime,
-			CreatedAt:  a.CreatedAt,
+			Index:         i,
+			MessageID:     messageID,
+			ArtifactIndex: i,
+			Kind:          a.DisplayKind(),
+			Handle:        artifactHandle(a),
+			FileName:      a.FileName,
+			FileType:      a.FileType,
+			FileSize:      a.FileSize,
+			SourcePath:    a.SourcePath,
+			ModTime:       a.ModTime,
+			CreatedAt:     a.CreatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -156,12 +191,12 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 	messageID := secutils.SanitizeForLog(c.Param("message_id"))
 	indexParam := c.Param("index")
 	if sessionID == "" || messageID == "" || indexParam == "" {
-		c.Error(errors.NewBadRequestError("session_id, message_id and index are required"))
+		_ = c.Error(errors.NewBadRequestError("session_id, message_id and index are required"))
 		return
 	}
 	index, err := strconv.Atoi(indexParam)
 	if err != nil || index < 0 {
-		c.Error(errors.NewBadRequestError("invalid artifact index"))
+		_ = c.Error(errors.NewBadRequestError("invalid artifact index"))
 		return
 	}
 
@@ -170,16 +205,16 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 	// both "not found" and "forbidden" without leaking existence.
 	if _, err := h.sessionService.GetSession(ctx, sessionID); err != nil {
 		if stderrors.Is(err, errors.ErrSessionNotFound) {
-			c.Error(errors.NewNotFoundError(err.Error()))
+			_ = c.Error(errors.NewNotFoundError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 
 	msg, err := h.messageService.GetMessage(ctx, sessionID, messageID)
 	if err != nil || msg == nil {
-		c.Error(errors.NewNotFoundError("message not found"))
+		_ = c.Error(errors.NewNotFoundError("message not found"))
 		return
 	}
 	if index >= len(msg.Artifacts) {
@@ -193,7 +228,7 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 	}
 
 	if h.fileService == nil {
-		c.Error(errors.NewInternalServerError("file service unavailable"))
+		_ = c.Error(errors.NewInternalServerError("file service unavailable"))
 		return
 	}
 	file, err := access.ResolveMessageArtifact(ctx, msg, index, h.agentShareService, h.resourceCatalog,
@@ -263,7 +298,10 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 // body references and what an authorizing proxy resolves — while the physical
 // bucket/key stays server side.
 type artifactListItem struct {
-	Index int `json:"index"`
+	Index         int                `json:"index"`
+	MessageID     string             `json:"message_id"`
+	ArtifactIndex int                `json:"artifact_index"`
+	Kind          types.ArtifactKind `json:"kind"`
 	// Handle is the artifact's `resource://<handle>` reference, matching the
 	// destinations in the message body. Empty when the deployment runs without
 	// a resource catalog, in which case the body references files by name.

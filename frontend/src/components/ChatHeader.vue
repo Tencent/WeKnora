@@ -1,5 +1,5 @@
 <template>
-  <header class="chat-header" :class="{ 'is-editing': titleEditing, 'is-docked': hasReferencesPanel }">
+  <header class="chat-header" :class="{ 'is-editing': titleEditing, 'is-docked': hasReferencesPanel, 'is-workbench-docked': workbenchVisible }">
     <form
       v-if="titleEditing"
       class="chat-header__edit"
@@ -141,6 +141,7 @@ type MenuMode = 'menu' | 'clear' | 'delete'
 const props = defineProps<{
   session: ChatHeaderSession | null
   hasReferencesPanel?: boolean
+  workbenchVisible?: boolean
 }>()
 
 const { t } = useI18n()
@@ -396,6 +397,23 @@ function handleMenuClick(data: { value: string }): void {
         max-width: none;
         padding: 8px 12px;
       }
+    }
+  }
+
+  @media (min-width: 1200px) {
+    &.is-workbench-docked {
+      position: relative;
+      top: auto;
+      left: auto;
+      align-self: stretch;
+      flex-shrink: 0;
+      width: 100%;
+      max-width: none;
+      padding: 10px 12px;
+      border-radius: 0;
+      border-bottom: 1px solid var(--td-component-stroke);
+      background: var(--td-bg-color-container);
+      backdrop-filter: none;
     }
   }
 }

@@ -149,6 +149,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTenantMemberRepository))
 	must(container.Provide(repository.NewTenantInvitationRepository))
 	must(container.Provide(repository.NewAuditLogRepository))
+	must(container.Provide(repository.NewWorkbenchAuthorizationRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
 	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
@@ -307,6 +308,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	logger.Debugf(ctx, "[Container] Registering session service...")
 	must(container.Provide(service.NewSessionService))
+	must(container.Provide(service.NewWorkbenchService))
 	must(container.Provide(service.NewTenantSkillService))
 	// The member-facing half of env vars is its own service because its
 	// authority is different in kind: it derives the identity from the context
@@ -419,6 +421,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
+	must(container.Provide(handler.NewWorkbenchHandler))
 	must(container.Provide(func(
 		s *service.TenantSkillService, streams interfaces.StreamManager,
 	) *handler.SandboxSkillHandler {

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -16,6 +18,15 @@ import (
 
 // regThinkIndex matches <think>...</think> blocks for stripping from KB index content.
 var regThinkIndex = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+// ErrInvalidArtifactCursor identifies malformed opaque cursors supplied to the
+// session artifact list endpoint.
+var ErrInvalidArtifactCursor = errors.New("invalid artifact cursor")
+
+type artifactCursorPayload struct {
+	CreatedAt time.Time `json:"created_at"`
+	MessageID string    `json:"message_id"`
+}
 
 // messageService implements the MessageService interface for managing messaging operations
 // It handles creating, retrieving, updating, and deleting messages within sessions.
@@ -520,6 +531,74 @@ func (s *messageService) GetSessionArtifacts(
 		return types.MessageArtifacts{}, nil
 	}
 	return s.messageRepo.GetSessionArtifacts(ctx, sessionID)
+}
+
+// ListSessionArtifactMessages returns the light message projections consumed by
+// the artifact drawer. The cursor is opaque to callers and encodes the stable
+// (created_at, message_id) keyset position.
+func (s *messageService) ListSessionArtifactMessages(
+	ctx context.Context, sessionID, cursor string, limit int,
+) (*types.SessionArtifactPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	decoded, err := decodeArtifactCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	rows, hasMore, err := s.messageRepo.ListSessionArtifactMessages(
+		ctx, sessionID, decoded, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	page := &types.SessionArtifactPage{
+		Messages: rows,
+		HasMore:  hasMore,
+	}
+	if hasMore && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		page.NextCursor = encodeArtifactCursor(types.SessionArtifactCursor{
+			CreatedAt: last.CreatedAt,
+			MessageID: last.MessageID,
+		})
+	}
+	return page, nil
+}
+
+func decodeArtifactCursor(cursor string) (*types.SessionArtifactCursor, error) {
+	if cursor == "" {
+		return nil, nil
+	}
+	if len(cursor) > 1024 {
+		return nil, fmt.Errorf("%w: cursor too long", ErrInvalidArtifactCursor)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid encoding", ErrInvalidArtifactCursor)
+	}
+	var payload artifactCursorPayload
+	if err := json.Unmarshal(raw, &payload); err != nil ||
+		payload.CreatedAt.IsZero() || payload.MessageID == "" || len(payload.MessageID) > 128 {
+		return nil, fmt.Errorf("%w: invalid payload", ErrInvalidArtifactCursor)
+	}
+	return &types.SessionArtifactCursor{
+		CreatedAt: payload.CreatedAt.UTC(),
+		MessageID: payload.MessageID,
+	}, nil
+}
+
+func encodeArtifactCursor(cursor types.SessionArtifactCursor) string {
+	raw, _ := json.Marshal(artifactCursorPayload{
+		CreatedAt: cursor.CreatedAt.UTC(),
+		MessageID: cursor.MessageID,
+	})
+	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

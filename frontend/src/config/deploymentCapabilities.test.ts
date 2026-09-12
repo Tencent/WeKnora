@@ -70,3 +70,9 @@ test('docker sandbox stays hidden unless the deployment explicitly enables it', 
     true,
   )
 })
+
+test('workbench stays hidden until the backend explicitly enables it', () => {
+  assert.equal(isDeploymentCapabilitySupported({}, 'sandbox.workbench'), false)
+  assert.equal(isDeploymentCapabilitySupported({ 'sandbox.workbench': { supported: false } }, 'sandbox.workbench'), false)
+  assert.equal(isDeploymentCapabilitySupported({ 'sandbox.workbench': { supported: true } }, 'sandbox.workbench'), true)
+})

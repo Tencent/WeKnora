@@ -62,7 +62,7 @@
                     </template>
                 </t-button>
                 <div class="artifact-drawer-header-icon">
-                    <t-icon :name="getFileIcon(previewItem.file_name)" />
+                    <t-icon :name="resolveArtifactPreview(previewItem).icon" />
                 </div>
                 <div class="artifact-drawer-header-title" :title="previewItem.file_name">{{ previewItem.file_name }}</div>
                 <t-button
@@ -78,7 +78,19 @@
                         <t-icon name="download" size="16px" />
                     </template>
                 </t-button>
-                <div ref="previewActions" class="artifact-preview-actions" />
+                <t-button
+                    v-if="restrictedPreview"
+                    class="artifact-close"
+                    variant="text"
+                    shape="square"
+                    size="small"
+                    :title="$t('common.close')"
+                    :aria-label="$t('common.close')"
+                    @click="handleClose({ trigger: 'close-btn' })"
+                >
+                    <template #icon><t-icon name="close" size="16px" /></template>
+                </t-button>
+                <div v-else ref="previewActions" class="artifact-preview-actions" />
             </div>
             <div v-else class="artifact-drawer-header">
                 <div class="artifact-drawer-header-icon">
@@ -88,7 +100,19 @@
             </div>
         </template>
         <div v-if="previewItem" class="artifact-preview-body">
+            <WorkbenchDocumentPreview
+                v-if="restrictedPreview"
+                :session-id="sessionId"
+                :message-id="messageId"
+                :artifact-index="previewItem.index"
+                :file-type="previewFileType"
+                :file-name="previewItem.file_name"
+                :active="internalVisible"
+                :request-signal="requestSignal"
+                :max-preview-bytes="maxPreviewBytes"
+            />
             <DocumentPreview
+                v-else
                 :toolbar-target="previewActions"
                 :session-id="sessionId"
                 :message-id="messageId"
@@ -96,6 +120,7 @@
                 :file-type="previewFileType"
                 :file-name="previewItem.file_name"
                 :active="internalVisible"
+                :request-signal="requestSignal"
                 fill-height
             />
         </div>
@@ -115,7 +140,7 @@
                 @click="openPreview(item)"
             >
                 <span class="artifact-icon">
-                    <t-icon :name="getFileIcon(item.file_name)" />
+                    <t-icon :name="resolveArtifactPreview(item).icon" />
                 </span>
                 <div class="artifact-body">
                     <div class="artifact-name" :title="item.file_name">{{ item.file_name }}</div>
@@ -179,9 +204,9 @@ import { computed, onMounted, onUnmounted, ref, watch, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact, listMessageArtifacts, type ArtifactMeta } from '@/api/chat'
-import { getFileIcon } from '@/utils/files'
-import { resolveFilePreviewExt } from '@/utils/filePreview'
+import { resolveArtifactPreview } from '@/utils/artifactPreview'
 import DocumentPreview from '@/components/document-preview.vue'
+import WorkbenchDocumentPreview from '@/components/WorkbenchDocumentPreview.vue'
 
 const LIST_WIDTH = 440
 const PREVIEW_WIDTH_KEY = 'weknora-chat-artifact-preview-width'
@@ -199,6 +224,9 @@ const props = defineProps<{
      * where the user already picked the file.
      */
     previewIndex?: number | null
+    restrictedPreview?: boolean
+    requestSignal?: AbortSignal
+    maxPreviewBytes?: number
 }>()
 
 const emit = defineEmits<{
@@ -244,11 +272,13 @@ const items = computed<ArtifactMeta[]>(() => {
 const previewFileType = computed(() => {
     const item = previewItem.value
     if (!item) return ''
-    return resolveFilePreviewExt(item.file_name, item.file_type)
+    return resolveArtifactPreview(item, props.restrictedPreview).ext
 })
 
 const drawerSize = computed(() => (
-    previewItem.value ? `${previewWidth.value}px` : `${LIST_WIDTH}px`
+    props.restrictedPreview
+        ? `min(100vw, ${previewItem.value ? previewWidth.value : LIST_WIDTH}px)`
+        : previewItem.value ? `${previewWidth.value}px` : `${LIST_WIDTH}px`
 ))
 
 function previewMaxWidth() {
@@ -339,6 +369,7 @@ watch(
             loading.value = false
         }
     },
+    { immediate: true },
 )
 
 // Clicking a second inline card while the drawer is already open should swap
@@ -405,7 +436,8 @@ async function handleDownload(item: ArtifactMeta) {
     }
     downloading[item.index] = true
     try {
-        const blob = await downloadArtifact(props.sessionId, props.messageId, item.index)
+        const blob = await downloadArtifact(props.sessionId, props.messageId, item.index, { signal: props.requestSignal })
+        if (props.requestSignal?.aborted) return
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
@@ -415,6 +447,7 @@ async function handleDownload(item: ArtifactMeta) {
         document.body.removeChild(a)
         setTimeout(() => URL.revokeObjectURL(url), 1000)
     } catch (err) {
+        if (props.requestSignal?.aborted) return
         console.error('[ChatArtifactsDrawer] download failed:', err)
         MessagePlugin.error(t('agent.artifactDrawer.downloadFailed'))
     } finally {

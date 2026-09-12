@@ -34,6 +34,8 @@ const { t } = useI18n();
 
 const props = defineProps<{
   sourceBlob?: Blob;
+  sourceKey?: string;
+  requestSignal?: AbortSignal;
   knowledgeId?: string;
   sessionId?: string;
   attachmentId?: string;
@@ -66,6 +68,7 @@ const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
+let previewGeneration = 0;
 
 const isFullscreen = ref(false);
 const previewRoot = ref<HTMLElement | null>(null);
@@ -238,7 +241,7 @@ function decodeCSVBlob(arrayBuffer: ArrayBuffer): string {
   return new TextDecoder('gbk').decode(bytes);
 }
 
-async function renderExcel(blob: Blob, fileType?: string) {
+async function renderExcel(blob: Blob, fileType?: string): Promise<string> {
   const XLSX = await import('xlsx');
   const arrayBuffer = await blob.arrayBuffer();
 
@@ -260,12 +263,14 @@ async function renderExcel(blob: Blob, fileType?: string) {
     const sheetHtml = XLSX.utils.sheet_to_html(sheet, { id: `sheet-${sheetIdx}` });
     html += `<div class="excel-sheet">`;
     if (workbook.SheetNames.length > 1) {
-      html += `<div class="excel-sheet-name">${name}</div>`;
+      const label = document.createElement('div');
+      label.textContent = name;
+      html += `<div class="excel-sheet-name">${label.innerHTML}</div>`;
     }
     html += sheetHtml;
     html += `</div>`;
   });
-  excelHtml.value = sanitizeHTML(html);
+  return sanitizeHTML(html);
 }
 
 async function renderText(blob: Blob, fileType: string) {
@@ -306,6 +311,7 @@ function onImageLoad(e: Event) {
 
 function getPreviewSourceKey(): string {
   if (props.sourceBlob) {
+    if (props.sourceKey) return `resource-blob:${props.sourceKey}`;
     return `resource-blob:${props.fileName}:${props.fileType}:${props.sourceBlob.size}:${props.sourceBlob.type}`;
   }
   if (props.knowledgeId) return `knowledge:${props.knowledgeId}`;
@@ -342,7 +348,7 @@ async function fetchPreviewBlob(): Promise<Blob> {
     Number.isInteger(props.artifactIndex) &&
     (props.artifactIndex as number) >= 0
   ) {
-    return downloadArtifact(props.sessionId, props.messageId, props.artifactIndex as number);
+    return downloadArtifact(props.sessionId, props.messageId, props.artifactIndex as number, { signal: props.requestSignal });
   }
   throw new Error('Missing preview source');
 }
@@ -372,6 +378,7 @@ async function loadPreview() {
   if (loadedForId === sourceKey) return;
 
   cleanup();
+  const generation = previewGeneration;
   loading.value = true;
   error.value = '';
   htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
@@ -381,6 +388,7 @@ async function loadPreview() {
 
   try {
     const rawBlob = await fetchPreviewBlob();
+    if (generation !== previewGeneration) return;
     let kind = resolvePreviewKind(ft);
     if (kind === 'unsupported') {
       const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
@@ -400,6 +408,7 @@ async function loadPreview() {
 
     loading.value = false;
     await nextTick();
+    if (generation !== previewGeneration) return;
 
     switch (kind) {
       case 'pdf':
@@ -411,7 +420,9 @@ async function loadPreview() {
       }
       case 'html': {
         if (allowsHtmlScriptPreview()) {
-          const previewHtml = buildHtmlPreview(await blob.text());
+          const html = await blob.text();
+          if (generation !== previewGeneration || props.requestSignal?.aborted) return;
+          const previewHtml = buildHtmlPreview(html);
           blobUrl.value = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html;charset=utf-8' }));
         }
         await renderText(blob, ft || 'html');
@@ -422,7 +433,8 @@ async function loadPreview() {
         break;
       }
       case 'excel': {
-        await renderExcel(blob, ft);
+        const html = await renderExcel(blob, ft);
+        if (generation === previewGeneration) excelHtml.value = html;
         break;
       }
       case 'text': {
@@ -435,7 +447,7 @@ async function loadPreview() {
       }
       case 'pptx': {
         const prepared = await preparePptxPreview(await blob.arrayBuffer());
-        if (getPreviewSourceKey() !== sourceKey || !props.active) return;
+        if (generation !== previewGeneration || props.requestSignal?.aborted || getPreviewSourceKey() !== sourceKey || !props.active) return;
         pptxSlideCount = prepared.slideCount;
         pptxData.value = prepared.data;
         break;
@@ -446,14 +458,16 @@ async function loadPreview() {
       }
     }
   } catch (err: any) {
+    if (generation !== previewGeneration || props.requestSignal?.aborted) return;
     console.error('Document preview failed:', err);
     error.value = err?.message || t('preview.loadFailed');
   } finally {
-    loading.value = false;
+    if (generation === previewGeneration) loading.value = false;
   }
 }
 
 function cleanup() {
+  previewGeneration++;
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = '';
@@ -475,7 +489,7 @@ function cleanup() {
 }
 
 watch(
-  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId, props.messageId, props.artifactIndex, props.sourceBlob, props.fileName, props.fileType],
+  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId, props.messageId, props.artifactIndex, props.sourceBlob, props.sourceKey, props.fileName, props.fileType],
   ([active]) => {
     if (active && getPreviewSourceKey()) {
       loadPreview();

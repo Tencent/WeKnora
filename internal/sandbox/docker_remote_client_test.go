@@ -624,6 +624,43 @@ func TestDockerClientConnectUnpausesPausedContainer(t *testing.T) {
 	require.Empty(t, engine.started)
 }
 
+func TestDockerClientConnectRefreshesActivityBeforeStartingSweep(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.inspect["container-1"] = container.InspectResponse{
+		ID:     "container-1",
+		State:  &container.State{Status: "running"},
+		Config: &container.Config{},
+	}
+	docker := newTestDockerClient(t, engine)
+	docker.sweeper = newDockerIdleSweeper(docker, time.Minute)
+
+	// Keep this test deterministic: claimSweep runs synchronously and sees a
+	// recent sweep, so no background fake-engine access starts after Connect.
+	key := docker.settings.Endpoint.key()
+	dockerSweepThrottle.mu.Lock()
+	previous, hadPrevious := dockerSweepThrottle.last[key]
+	dockerSweepThrottle.last[key] = time.Now()
+	dockerSweepThrottle.mu.Unlock()
+	t.Cleanup(func() {
+		dockerSweepThrottle.mu.Lock()
+		defer dockerSweepThrottle.mu.Unlock()
+		if hadPrevious {
+			dockerSweepThrottle.last[key] = previous
+		} else {
+			delete(dockerSweepThrottle.last, key)
+		}
+	})
+
+	_, err := docker.Connect(
+		context.Background(),
+		RemoteConnectRequest{SandboxID: "container-1"},
+	)
+	require.NoError(t, err)
+	require.Len(t, engine.execOptions, 1)
+	require.Contains(t, engine.execOptions[0].Cmd[2], "touch "+dockerActivityMarker)
+	require.Equal(t, []string{"weknora-exec", "true"}, engine.execOptions[0].Cmd[3:])
+}
+
 // A missing container must classify as NotFound so the lifecycle rebinds the
 // session instead of failing every execution forever.
 func TestDockerClientConnectMissingContainerIsReplaceable(t *testing.T) {

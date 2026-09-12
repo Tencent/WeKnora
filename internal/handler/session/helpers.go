@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/skills"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -306,6 +308,19 @@ func (h *Handler) setupStreamHandler(
 	assistantMessage *types.Message,
 	eventBus *event.EventBus,
 ) *AgentStreamHandler {
+	if h.artifactCollector != nil {
+		baseline, err := h.artifactCollector.CaptureTurnBaseline(
+			ctx, sessionID, skills.ArtifactOutputDir(),
+		)
+		if err != nil {
+			logger.Warnf(ctx,
+				"artifact baseline capture failed session=%s message=%s: %v",
+				sessionID, assistantMessageID, err,
+			)
+		} else {
+			ctx = service.WithArtifactTurnBaseline(ctx, baseline)
+		}
+	}
 	streamHandler := NewAgentStreamHandler(
 		ctx, sessionID, assistantMessageID, requestID, tenantID, receivedAt,
 		assistantMessage, h.streamManager, eventBus, h.artifactCollector,

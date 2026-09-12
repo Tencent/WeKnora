@@ -5,11 +5,17 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      - "examples/skills/presentation-builder/**"
+      - "internal/sandbox/workbench_files.py"
+      - "internal/sandbox/workbench_files_test.py"
       - "scripts/build_frontend_dist.sh"
       - ".github/workflows/frontend.yml"
   pull_request:
     paths:
       - "frontend/**"
+      - "examples/skills/presentation-builder/**"
+      - "internal/sandbox/workbench_files.py"
+      - "internal/sandbox/workbench_files_test.py"
       - "scripts/build_frontend_dist.sh"
       - ".github/workflows/frontend.yml"
   workflow_dispatch:
@@ -42,11 +48,54 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
       - name: Run tests
         run: npm test
+
+      - name: Install presentation builder dependencies
+        run: python -m pip install -r "$GITHUB_WORKSPACE/examples/skills/presentation-builder/requirements.txt"
+
+      - name: Run Python security and builder tests
+        run: |
+          python -B -m unittest discover \
+            -s "$GITHUB_WORKSPACE/examples/skills/presentation-builder/tests" -v
+          python -B -I "$GITHUB_WORKSPACE/internal/sandbox/workbench_files_test.py"
+
+      - name: Install browser runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate workbench preview fixtures
+        run: |
+          sudo mkdir -p /workspace/output
+          sudo chown "$(id -u):$(id -g)" /workspace /workspace/output
+          rm -f /workspace/output/agent-workbench-demo.pptx
+          python "$GITHUB_WORKSPACE/examples/skills/presentation-builder/scripts/build_presentation.py" \
+            --input "$GITHUB_WORKSPACE/examples/skills/presentation-builder/assets/sample.json" \
+            --output agent-workbench-demo.pptx
+          mkdir -p "$RUNNER_TEMP/workbench-preview"
+          cp /workspace/output/agent-workbench-demo.pptx "$RUNNER_TEMP/workbench-preview/"
+          printf '%s\n' '<h1>Workbench report</h1><p>CI-generated isolated preview fixture.</p>' \
+            > "$RUNNER_TEMP/workbench-preview/workbench-report.html"
+          printf '%s\n' 'Backend,Status' 'Docker,Ready' 'E2B,Ready' \
+            > "$RUNNER_TEMP/workbench-preview/backend-summary.csv"
+
+      - name: Run workbench browser security checks
+        run: |
+          npm run dev -- --host 127.0.0.1 > /tmp/weknora-vite.log 2>&1 &
+          vite_pid=$!
+          trap 'kill "$vite_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:5173/ >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:5173/ >/dev/null
+          PREVIEW_ARTIFACT_DIR="$RUNNER_TEMP/workbench-preview" npm run test:workbench-browser
 
       - name: Type-check
         run: npm run type-check
