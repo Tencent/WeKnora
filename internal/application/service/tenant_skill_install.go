@@ -45,17 +45,6 @@ const (
 	// files. Writing each file with MakeDir+WriteFile is two round trips per
 	// entry, which is why a 50-file skill crawled through "seeding 12/56".
 	skillSeedArchivePath = sandbox.SkillsImageRoot + "/.weknora-seed.tar"
-
-	// skillInstallVerifyRounds bounds the installer conversation.
-	//
-	// The first round works from SKILL.md. A second is driven by the gate's own
-	// findings, and exists because those are two different descriptions of what
-	// a skill needs: the official office toolkit imports defusedxml and lxml at
-	// module level while its SKILL.md names neither, so an installer working
-	// from prose alone cannot know to install them. One round of reconciliation
-	// closes that gap; more would only be a retry loop over an answer that is
-	// not going to change.
-	skillInstallVerifyRounds = 2
 )
 
 // InstallSkill validates an uploaded archive, records it, and kicks off the
@@ -325,7 +314,7 @@ func (s *TenantSkillService) runInstall(
 	// It is deferred before it is stopped explicitly below, so a failure path
 	// still stops it ahead of the deferred failSkill.
 	stopHeartbeat := s.startInstallHeartbeat(ctx, tenantID, configID, skillID)
-	defer stopHeartbeat()
+	defer func() { stopHeartbeat() }()
 
 	// The name comes from SKILL.md and is already validated on parse, so a
 	// rejection here means the bundle was accepted by a looser rule than the
@@ -752,20 +741,12 @@ type installerJob struct {
 	bundle     *SkillBundle
 }
 
-// installDependenciesAndVerify runs the installer conversation and the gate as
-// one decision.
-//
-// They used to be two, and that is what let a working skill be rejected: the
-// installer derived what to install from SKILL.md prose while the gate derived
-// what must resolve from the imports every file executes. Those disagree on any
-// skill whose library modules import something its documentation never names,
-// and the install died with the answer already in hand. The gate is the only
-// authority here, so its own findings become the next round's instruction, and
-// nothing in this path derives that list a second time.
-//
-// A failure the gate marked unrepairable — a syntax error, a file the execution
-// user cannot read — ends the run immediately. Another round cannot change it,
-// and the bundle has to change instead.
+// installDependenciesAndVerify runs one installer turn, then the server's
+// gate. A second billed round used to exist because the gate judged imports
+// the SKILL.md never named; that check is gone, and the remaining failures
+// are either unfixable (syntax, missing files) or the same missing packages
+// a later session can install. Another agent turn will not make either more
+// likely.
 func (s *TenantSkillService) installDependenciesAndVerify(
 	ctx context.Context, job installerJob,
 ) (err error) {
@@ -779,49 +760,23 @@ func (s *TenantSkillService) installDependenciesAndVerify(
 	// what someone will want to read.
 	defer func() { job.transcript.Finish(context.WithoutCancel(ctx), err) }()
 
-	prompt := job.prompt
-	for round := 1; ; round++ {
-		if err = run.round(ctx, prompt); err != nil {
-			return err
-		}
-		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID,
-			SkillProgress{Percent: 80, Stage: "agent_done"})
-		// The agent's part of this round is over: mute the asymptotic activity
-		// progress so verification and any repair round — which publish their
-		// own stage anchors (80 / 82) — cannot be dragged back below them by
-		// the next round's tool calls.
-		job.transcript.muteActivityProgress()
-
-		notes, verifyErr := s.verifySkill(ctx, job.mgr, job.sess.ID, job.skillDir, job.bundle)
-		s.reportVerificationNotes(ctx, job, notes)
-		if verifyErr == nil {
-			return nil
-		}
-
-		var gate *skillVerificationError
-		if round >= skillInstallVerifyRounds || !errors.As(verifyErr, &gate) || !gate.Repairable {
-			err = verifyErr
-			return err
-		}
-
-		logger.Infof(ctx, "[skill] %s failed %s verification with %d fixable finding(s); "+
-			"handing them back to the installer", job.skillID, gate.Language, len(gate.Problems))
-		s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, SkillProgress{
-			Percent: 82, Stage: "repairing",
-			Log: fmt.Sprintf("%s verification found %d missing dependency/dependencies; "+
-				"asking the installer to add them", gate.Language, len(gate.Problems)),
-		})
-		prompt = buildRepairPrompt(job.skillDir, gate)
-		if job.guidance != "" {
-			prompt += "\n\nAdministrator instructions (preserve during repair):\n" + job.guidance
-		}
-		job.transcript.RecordPrompt(prompt)
+	if err = run.round(ctx, job.prompt); err != nil {
+		return err
 	}
+	s.publishProgress(ctx, job.tenantID, job.configID, job.skillID,
+		SkillProgress{Percent: 80, Stage: "agent_done"})
+	// The agent phase is over. Mute the asymptotic bar so verification cannot
+	// be dragged back below the 80 anchor by a stray tool event.
+	job.transcript.muteActivityProgress()
+
+	var notes []string
+	notes, err = s.verifySkill(ctx, job.mgr, job.sess.ID, job.skillDir, job.bundle)
+	s.reportVerificationNotes(ctx, job, notes)
+	return err
 }
 
-// installerRun is one installer conversation, held open across rounds. A repair
-// has to reach the same root shell, in the same sandbox, and be readable in the
-// same transcript as the install it is repairing.
+// installerRun is one installer conversation. Administrator guidance arriving
+// before the agent stops is injected as a continuation of the same turn.
 type installerRun struct {
 	engine     interfaces.AgentEngine
 	transcript *installTranscript
@@ -876,13 +831,8 @@ func (s *TenantSkillService) openInstallerRun(
 	return run, nil
 }
 
-// round runs one installer turn.
-//
-// No conversation history is replayed. The engine is stateless across turns, so
-// a repair round could be handed the first round's transcript — but what the
-// gate reported is both shorter and more exact than anything that could be
-// inferred from it, and re-reading the round that already missed a dependency
-// is not what makes the next one find it.
+// round runs the installer turn, continuing only when administrator guidance
+// arrived at a natural stop and has not yet been applied.
 func (r *installerRun) round(ctx context.Context, prompt string) error {
 	if r.steer != nil {
 		if err := r.steer.service.withInstallSteerLock(ctx, r.sessionID, func(ctx context.Context) error {
@@ -905,7 +855,7 @@ func (r *installerRun) round(ctx context.Context, prompt string) error {
 	for continuation := 0; ; continuation++ {
 		input := prompt
 		if r.steer != nil && len(r.steer.guidance) > 0 {
-			input += "\n\nAdministrator guidance already received (preserve during repair):\n" +
+			input += "\n\nAdministrator guidance already received:\n" +
 				strings.Join(r.steer.guidance, "\n\n")
 		}
 		if continuation > 0 {
@@ -959,40 +909,6 @@ func (s *TenantSkillService) reportVerificationNotes(
 	s.publishProgress(ctx, job.tenantID, job.configID, job.skillID, SkillProgress{
 		Percent: 80, Stage: "verify_note", Log: strings.Join(notes, "\n"),
 	})
-}
-
-// buildRepairPrompt turns the gate's own findings into the next round's brief.
-//
-// It carries no analysis of its own, deliberately: the gate is the only
-// authority on what has to resolve in this image, and a second description
-// written here could disagree with it. Every repairable finding names a
-// distribution one of the skill's manifests declares and pip did not land, so
-// the brief is short — install what the lines name, change nothing else.
-func buildRepairPrompt(skillDir string, gate *skillVerificationError) string {
-	var findings strings.Builder
-	for _, problem := range gate.Problems {
-		findings.WriteString("- ")
-		findings.WriteString(problem)
-		findings.WriteString("\n")
-	}
-	return fmt.Sprintf(`Verification of the skill you just installed failed. Fix only this and stop.
-
-The %s check reported:
-%s
-Resolve the findings above. For missing packages, install them. For a missing or invalid runtime report,
-assess prerequisites from SKILL.md and write the report. Never erase a prerequisite to pass the check.
-
-- Python packages go into %s/.venv (`+"`uv pip install`"+`, or
-  %s/.venv/bin/python -m pip install). Node packages go under %s/node_modules.
-- Do NOT edit SKILL.md, requirements.txt, pyproject.toml or package.json to
-  make the check pass. Those files are what read_skill serves, so weakening a
-  declaration here makes the installed skill differ from what everyone else
-  sees — and the dependency would still be missing at run time.
-- If a package genuinely cannot be installed in this image, say so plainly in
-  your summary rather than working around it.
-
-The same verification runs again as soon as you finish.
-`+"\n"+skillInstallRuntimeInstructions, gate.Language, findings.String(), skillDir, skillDir, skillDir)
 }
 
 // skillCacheBudgetMB caps the package download caches one image carries into
@@ -1786,39 +1702,45 @@ Hard requirements:
   WEKNORA_SESSION_INPUT_DIR: the sandbox injects those. Other WEKNORA_* names the skill reads
   (WEKNORA_API_KEY, WEKNORA_BASE_URL, WEKNORA_HOST, WEKNORA_TOKEN, WEKNORA_KB_ID) MUST be declared.
 
-On-demand / optional extras MUST be installed now. Every chat session starts
-from the image this install produces, and whatever a session installs dies with
-it, so an extra deferred to chat time is paid for again on every session and
-fails outright wherever the sandbox has no egress. Skills that ship
-scripts/install_deps.py or say "pip install when the user needs Word/PPT" will
-stall at chat time unless those packages are already in the venv.
+Dependency scope and versions:
 - Create the venv with pip present: `+"`uv venv --seed %s/.venv`"+` (or `+"`python3 -m venv`"+`).
-- Install requirements.txt / pyproject.toml with `+"`uv pip install`"+`.
-- Read SKILL.md and any on-demand installer for extra packages (python-docx,
-  python-pptx, …) and `+"`uv pip install`"+` every extra, not only the default set.
+- Read the package's SKILL.md runtime profile first. It defines the default supported
+  capabilities. UPSTREAM_SKILL.md and upstream examples do not expand that profile.
+- If requirements.lock exists, install exactly that lock with
+  `+"`uv pip install --python .venv/bin/python --require-hashes -r requirements.lock`"+`.
+  Do NOT upgrade or replace locked versions afterward. requirements.txt documents
+  direct dependencies; the lock also pins their transitive dependencies.
+- Otherwise install the declared requirements.txt / pyproject.toml dependencies.
+- Install optional extras only when the package's runtime profile or the user's
+  explicit installation instructions require them. Do not install every extra,
+  alternate engine or format dependency merely because upstream documentation lists it.
+- When an optional capability is excluded by the runtime profile, leave it excluded
+  and report that limitation. Do not alter manifests to hide a missing required dependency.
 %s
-- If an installer script needs --yes / --all / every extra flag, pass them.
+- Inspect on-demand installers before running them. Select only the required
+  capabilities; never pass --all just to include every optional dependency.
 %s
 Before you finish, PROVE the skill's imports resolve. Do not reason about it —
 run it. The server's own check cannot: it parses files without executing them,
 so it never learns whether an import would have worked. You have the real
 interpreter, so this is your job and yours only.
-- For each script the skill offers, run the import the way the skill would:
+- For each entry point required by the runtime profile, run the import the way the skill would:
   `+"`%s/.venv/bin/python -c 'import x'`"+`, or the script's own
   `+"`--help`"+` if it has one.
 - A failure here is usually one of two things. A missing distribution: install
   it. Or a module the skill ships that Python cannot find — then the script
   needs the directory on sys.path, and you fix the script with edit_skill_file
   rather than installing anything.
-- Do not declare success until every entry point imports cleanly.
+- Do not declare success until every required entry point imports cleanly.
 
 The server then checks what it can before the image is kept, so report what you
 did rather than whether it passed. It confirms every file parses with the
 interpreter that would run it, and that every distribution named in
-requirements.txt / pyproject.toml is installed in the venv. It never runs the
+requirements.txt / requirements.lock / pyproject.toml is installed in the venv
+at a compatible declared version, and that the original manifests were preserved. It never runs the
 skill's code and never judges an import.
-Lazy imports and install_deps.py extras are invisible to that check — you still
-have to install them.
+Verify required entry points for the runtime profile above. Lazy optional imports
+do not require installing excluded capabilities. Run the package smoke check when provided.
 
 %s
 
@@ -1843,7 +1765,7 @@ func formatOnDemandInstallers(bundle *SkillBundle) string {
 		quoted[i] = "`" + name + "`"
 	}
 	return "- This archive ships on-demand installer(s): " + strings.Join(quoted, ", ") +
-		". Run each one now with non-interactive flags covering every extra."
+		". Inspect their options and run only what the runtime profile requires."
 }
 
 func bundleOnDemandInstallers(bundle *SkillBundle) []string {
