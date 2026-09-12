@@ -16,6 +16,19 @@ const (
 	stateToolCalls    = "openai.tool_calls"
 )
 
+// StreamStateToolCalls is the shared per-stream key under which every bridge
+// stores its ToolCallAssembler: the entry's interrupted-stream recovery reads
+// this key so partially assembled calls still reach the client (v1
+// buildOrderedToolCalls semantics). Native bridges (DashScope) MUST store
+// under it — a private key makes interrupt recovery silently lose the calls.
+const StreamStateToolCalls = stateToolCalls
+
+// ToolCallAssemblerFrom resolves the shared per-stream assembler (entry
+// interrupt path + external native bridges).
+func ToolCallAssemblerFrom(state *StreamBridgeState) *ToolCallAssembler {
+	return toolAssembler(state)
+}
+
 // OpenAIStreamBridge is the exported default TranslateStreamEvent for
 // OpenAI-compatible wire format (seam ⑤, P1c): SSE data frames carrying
 // chat.completion.chunk JSON, terminated by the [DONE] sentinel (which the

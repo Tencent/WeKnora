@@ -3,8 +3,9 @@ package adapters
 // aliyun_test.go — native DashScope wire tests (2026-09-12 native ruling).
 // The golden reconcile suite (golden_vendor_reconcile_test.go /
 // golden_embedding_reconcile_test.go) pins the wire bytes; this file covers
-// the seams those scenarios don't reach: base normalization, the vision
-// branch, response/stream parsing, and the native catalog facet.
+// the seams those scenarios don't reach: base normalization, budget-field
+// strategy, the vision/tools gates, response/stream parsing (including the
+// finish-frame tail fragment), and the native catalog facet.
 
 import (
 	"encoding/json"
@@ -26,10 +27,44 @@ func TestAliyunNativeBaseURL(t *testing.T) {
 		// SDK 风格 base 不允许路径翻倍。
 		{"https://dashscope.aliyuncs.com/api/v1", "https://dashscope.aliyuncs.com"},
 		{"https://dashscope-intl.aliyuncs.com/compatible-mode/v1/", "https://dashscope-intl.aliyuncs.com"},
+		// 剥离只发生在 URL path 段——host 里含子串的主机必须原样通过，
+		// 否则带 Bearer key 的请求会被重定向到错误主机（审查 P0 回归）。
+		{"https://compatible-mode.example.com", "https://compatible-mode.example.com"},
+		{"https://compatible-mode.example.com/compatible-mode/v1", "https://compatible-mode.example.com"},
+		{
+			"https://dashscope.aliyuncs.com/compatible-mode.example.com",
+			"https://dashscope.aliyuncs.com/compatible-mode.example.com",
+		},
 	}
 	for _, c := range cases {
 		require.Equal(t, c.want, aliyunNativeBaseURL(c.in), "base %q", c.in)
 	}
+}
+
+// 完成预算策略：思考模型（新一代）发 max_completion_tokens，其余发 max_tokens。
+func TestAliyunBudgetFieldStrategy(t *testing.T) {
+	a := newAliyunAdapter()
+	build := func(model string) (maxCompletion, maxTokens int) {
+		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, &invoke.ChatOptions{
+			Messages:            []invoke.Message{invoke.TextMessage("user", "hi")},
+			MaxCompletionTokens: 64,
+		})
+		require.NoError(t, err)
+		var body struct {
+			Parameters struct {
+				MaxCompletionTokens int `json:"max_completion_tokens"`
+				MaxTokens           int `json:"max_tokens"`
+			} `json:"parameters"`
+		}
+		require.NoError(t, json.Unmarshal(req.Body, &body))
+		return body.Parameters.MaxCompletionTokens, body.Parameters.MaxTokens
+	}
+	mc, mt := build("qwen3-max")
+	require.Equal(t, 64, mc)
+	require.Equal(t, 0, mt)
+	mc, mt = build("qwen2.5-72b-instruct")
+	require.Equal(t, 64, mt, "老模型对 max_completion_tokens 会 400/静默忽略")
+	require.Equal(t, 0, mc)
 }
 
 func TestAliyunBuildChatRequestTextShape(t *testing.T) {
@@ -46,25 +81,37 @@ func TestAliyunBuildChatRequestTextShape(t *testing.T) {
 	require.Equal(t, "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation", req.URL)
 	require.False(t, req.Stream)
 	require.Equal(t, "Bearer sk", req.Header.Get("Authorization"))
+	require.Equal(t, "application/json", req.Header.Get("Accept"))
 	require.Equal(t, "", req.Header.Get("X-DashScope-SSE"), "non-stream carries no SSE header")
 
-	var body map[string]any
+	var body struct {
+		Model string `json:"model"`
+		Input struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		} `json:"input"`
+		Parameters struct {
+			ResultFormat        string  `json:"result_format"`
+			MaxCompletionTokens int     `json:"max_completion_tokens"`
+			Temperature         float64 `json:"temperature"`
+			EnableThinking      *bool   `json:"enable_thinking"`
+		} `json:"parameters"`
+	}
 	require.NoError(t, json.Unmarshal(req.Body, &body))
-	require.Equal(t, "qwen-plus", body["model"])
-	input := body["input"].(map[string]any)
-	msgs := input["messages"].([]any)
-	require.Len(t, msgs, 2)
-	require.Equal(t, "be terse", msgs[0].(map[string]any)["content"], "text path degrades to plain strings")
-	params := body["parameters"].(map[string]any)
-	require.Equal(t, "message", params["result_format"])
-	require.Equal(t, float64(32), params["max_completion_tokens"])
-	require.Equal(t, float64(0.7), params["temperature"])
+	require.Equal(t, "qwen-plus", body.Model)
+	require.Len(t, body.Input.Messages, 2)
+	require.Equal(t, "be terse", body.Input.Messages[0].Content, "text path degrades to plain strings")
+	require.Equal(t, "message", body.Parameters.ResultFormat)
+	require.Equal(t, 32, body.Parameters.MaxCompletionTokens)
+	require.Equal(t, 0.7, body.Parameters.Temperature)
 	// qwen-plus 在 IsQwenThinkingModel 谓词内（qwen3/plus/max/turbo 前缀）：
 	// 非流式钉 false（Qwen3 系非流式拒绝 thinking）。
-	require.NotNil(t, params["enable_thinking"])
-	require.Equal(t, false, params["enable_thinking"])
-	require.NotContains(t, body, "cache_control")
-	require.NotContains(t, params, "frequency_penalty", "native schema 无此字段")
+	require.NotNil(t, body.Parameters.EnableThinking)
+	require.False(t, *body.Parameters.EnableThinking)
+	require.NotContains(t, string(req.Body), "cache_control")
+	require.NotContains(t, string(req.Body), "frequency_penalty", "native schema 无此字段")
 }
 
 func TestAliyunBuildChatRequestStreamHeadersAndIncremental(t *testing.T) {
@@ -111,6 +158,71 @@ func TestAliyunThinkingPinFalseOnNonStream(t *testing.T) {
 	require.False(t, *body.Parameters.EnableThinking, "Qwen3 非流式拒绝 thinking，钉 false")
 }
 
+// tools 门控按模型名（qwen-vl/qwen-audio 排除），不按是否带图——文档的官方
+// tools 示例就是在 multimodal-generation 端点上跑 qwen3.8-max。
+func TestAliyunToolsGateByModelFamily(t *testing.T) {
+	a := newAliyunAdapter()
+	tools := []invoke.ToolDef{{Name: "get_weather", Description: "查天气"}}
+	build := func(model string, images bool) (*invoke.Request, error) {
+		msgs := []invoke.Message{invoke.TextMessage("user", "天气如何")}
+		if images {
+			msgs = []invoke.Message{{
+				Role: "user",
+				Content: []invoke.Part{
+					{Image: &invoke.ImageRef{URL: "https://example.com/pic.jpg"}},
+					{Text: "图里天气如何？"},
+				},
+			}}
+		}
+		return a.BuildChatRequest(invoke.Endpoint{}, model, &invoke.ChatOptions{
+			Messages:   msgs,
+			Tools:      tools,
+			ToolChoice: "get_weather",
+		})
+	}
+	assertTools := func(t *testing.T, req *invoke.Request, want bool) {
+		t.Helper()
+		var body struct {
+			Parameters struct {
+				Tools []json.RawMessage `json:"tools"`
+			} `json:"parameters"`
+		}
+		require.NoError(t, json.Unmarshal(req.Body, &body))
+		if want {
+			require.Len(t, body.Parameters.Tools, 1)
+		} else {
+			require.Empty(t, body.Parameters.Tools)
+		}
+	}
+
+	req, err := build("qwen-plus", false)
+	require.NoError(t, err)
+	assertTools(t, req, true)
+	// 具名函数 tool_choice 走对象形态。
+	var body struct {
+		Parameters struct {
+			ToolChoice struct {
+				Type     string `json:"type"`
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tool_choice"`
+		} `json:"parameters"`
+	}
+	require.NoError(t, json.Unmarshal(req.Body, &body))
+	require.Equal(t, "function", body.Parameters.ToolChoice.Type)
+	require.Equal(t, "get_weather", body.Parameters.ToolChoice.Function.Name)
+
+	req, err = build("qwen3.8-max", true) // 视觉分支 + 新一代：tools 保留
+	require.NoError(t, err)
+	require.Equal(t, aliyunMultimodalGenerationPath, req.URL[len(req.URL)-len(aliyunMultimodalGenerationPath):])
+	assertTools(t, req, true)
+
+	req, err = build("qwen-vl-max", true) // qwen-vl 系：无 tools
+	require.NoError(t, err)
+	assertTools(t, req, false)
+}
+
 func TestAliyunBuildChatRequestVisionBranch(t *testing.T) {
 	a := newAliyunAdapter()
 	req, err := a.BuildChatRequest(invoke.Endpoint{}, "qwen-vl-max", &invoke.ChatOptions{
@@ -155,7 +267,7 @@ func TestAliyunParseChatResponse(t *testing.T) {
 		`"tool_calls":[{"id":"call_1","type":"function","index":0,` +
 		`"function":{"name":"get_weather","arguments":"{\"city\":\"hangzhou\"}"}}]}}]},` +
 		`"usage":{"input_tokens":30,"output_tokens":12,"total_tokens":42,` +
-		`"input_tokens_details":{"cached_tokens":8}}}`
+		`"prompt_tokens_details":{"cached_tokens":8}}}`
 	resp, err := a.ParseChatResponse(200, nil, []byte(body))
 	require.NoError(t, err)
 	require.Equal(t, "", resp.Content)
@@ -166,7 +278,7 @@ func TestAliyunParseChatResponse(t *testing.T) {
 	require.Equal(t, 30, resp.Usage.PromptTokens)
 	require.Equal(t, 12, resp.Usage.CompletionTokens)
 	require.Equal(t, 42, resp.Usage.TotalTokens)
-	require.Equal(t, 8, resp.Usage.CacheReadTokens, "cached_tokens 并入 prompt-cache 细节")
+	require.Equal(t, 8, resp.Usage.CacheReadTokens, "cached_tokens（prompt_tokens_details）并入 prompt-cache 细节")
 	require.True(t, resp.Usage.CacheReported)
 }
 
@@ -203,26 +315,69 @@ func TestAliyunTranslateStreamEventSequence(t *testing.T) {
 	require.Equal(t, 2, ev.Usage.CompletionTokens)
 }
 
-func TestAliyunTranslateStreamEventToolCalls(t *testing.T) {
+// 末帧同时携带最后一段增量（官方 incremental_output 语义：尾片段与
+// finish_reason 同帧）——必须折入 Done.Delta，否则每条流式回答丢尾巴。
+func TestAliyunFinishFrameCarriesTailFragment(t *testing.T) {
 	a := newAliyunAdapter()
 	state := invoke.NewStreamBridgeState()
 
 	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":null,"message":{"role":"assistant",` +
-			`"tool_calls":[{"index":0,"id":"call_1","type":"function",` +
-			`"function":{"name":"get_weather","arguments":"{}"}}]}}]}}`)})
+			`"content":"I like apple"}}]}}`)})
 	require.NoError(t, err)
-	require.Equal(t, invoke.StreamKindToolCall, ev.Kind)
-	require.Equal(t, "get_weather", ev.ToolCallDelta.Name)
+	require.Equal(t, "I like apple", ev.Delta.Text)
 
 	ev, err = a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+		`{"output":{"choices":[{"finish_reason":"stop","message":{"role":"assistant",` +
+			`"content":"."}}]},"usage":{"input_tokens":4,"output_tokens":4,"total_tokens":8}}`)})
+	require.NoError(t, err)
+	require.NotNil(t, ev.Done)
+	require.Equal(t, "stop", ev.Done.FinishReason)
+	require.NotNil(t, ev.Delta, "末帧尾片段必须随 Done 事件透出")
+	require.Equal(t, ".", ev.Delta.Text)
+	require.NotNil(t, ev.Usage)
+}
+
+// 末帧携带完整 tool_calls 时先喂共享装配器——终结 Done 带全量调用，且
+// 装配器存共享键（入口中断恢复读的就是它）。
+func TestAliyunFinishFrameToolCallsRideSharedAssembler(t *testing.T) {
+	a := newAliyunAdapter()
+	state := invoke.NewStreamBridgeState()
+
+	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant",` +
-			`"content":""}}]},"usage":{"input_tokens":9,"output_tokens":4,"total_tokens":13}}`)})
+			`"content":"","tool_calls":[{"index":0,"id":"call_1","type":"function",` +
+			`"function":{"name":"get_weather","arguments":"{}"}}]}}]}}`)})
 	require.NoError(t, err)
 	require.NotNil(t, ev.Done)
 	require.Equal(t, "tool_calls", ev.Done.FinishReason)
 	require.Len(t, ev.Done.ToolCalls, 1)
 	require.Equal(t, "call_1", ev.Done.ToolCalls[0].ID)
+	require.NotNil(t, invoke.ToolCallAssemblerFrom(state), "共享键必须可见（入口中断恢复依赖）")
+}
+
+// usage-only 帧（choices 空）→ StreamKindUsage，入口挂 pendingUsage。
+func TestAliyunUsageOnlyFrame(t *testing.T) {
+	a := newAliyunAdapter()
+	state := invoke.NewStreamBridgeState()
+	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+		`{"output":{"choices":[]},"usage":{"input_tokens":9,"output_tokens":3,"total_tokens":12}}`)})
+	require.NoError(t, err)
+	require.Equal(t, invoke.StreamKindUsage, ev.Kind)
+	require.Equal(t, 9, ev.Usage.PromptTokens)
+}
+
+// 裸 [DONE]（代理注入、无 SSE event 名）容忍并冲刷。
+func TestAliyunBareDoneSentinel(t *testing.T) {
+	a := newAliyunAdapter()
+	state := invoke.NewStreamBridgeState()
+	_, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+		`{"output":{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":""}}]}}`)})
+	require.NoError(t, err)
+	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte("[DONE]")})
+	require.NoError(t, err)
+	require.NotNil(t, ev.Done)
+	require.Equal(t, "stop", ev.Done.FinishReason)
 }
 
 func TestAliyunListFacet(t *testing.T) {

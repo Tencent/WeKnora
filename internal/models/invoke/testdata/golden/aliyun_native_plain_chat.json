@@ -2,14 +2,16 @@
   "scenario": "aliyun_native_plain_chat",
   "behavior": [
     "native DashScope envelope on text-generation; qwen2.5 (non-hybrid) sends NO enable_thinking",
-    "cache_control breakpoints are GONE on the native wire — DashScope context cache is server-side implicit, CacheRetention=long sends nothing"
+    "cache_control breakpoints are GONE on the native wire — DashScope context cache is server-side implicit, CacheRetention=long sends nothing",
+    "non-thinking legacy models carry the universally-supported max_tokens budget (max_completion_tokens is new-generation only)"
   ],
   "requests": [
     {
       "path": "/api/v1/services/aigc/text-generation/generation",
       "headers": {
         "Authorization": "Bearer test-key",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Accept": "application/json"
       },
       "body": {
         "model": "qwen2.5-72b-instruct",
@@ -27,7 +29,7 @@
         },
         "parameters": {
           "result_format": "message",
-          "max_completion_tokens": 64
+          "max_tokens": 64
         }
       }
     }

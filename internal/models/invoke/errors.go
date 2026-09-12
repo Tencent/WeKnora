@@ -133,9 +133,17 @@ func extractErrorMessage(body string) string {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
+		// DashScope 原生错误信封是顶层的 {code, message, request_id}（各家
+		// 原生协议常见形态），error.message 缺位时回落顶层的 message。
+		Message string `json:"message"`
 	}
-	if err := json.Unmarshal([]byte(body), &envelope); err == nil && envelope.Error.Message != "" {
-		return envelope.Error.Message
+	if err := json.Unmarshal([]byte(body), &envelope); err == nil {
+		if envelope.Error.Message != "" {
+			return envelope.Error.Message
+		}
+		if envelope.Message != "" {
+			return envelope.Message
+		}
 	}
 	return body
 }

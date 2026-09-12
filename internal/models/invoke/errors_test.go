@@ -29,6 +29,19 @@ func TestClassifyStatusBodyRawBodyKeepsSnippet(t *testing.T) {
 	assert.Equal(t, "rate limit exceeded", pe.Message)
 }
 
+func TestClassifyStatusBodyTopLevelMessageFallback(t *testing.T) {
+	// DashScope 原生错误信封：顶层 {code, message, request_id}，无 error 包装。
+	pe := ClassifyStatusBody(http.StatusBadRequest,
+		`{"code":"InvalidParameter","message":"The specified parameter is not valid.","request_id":"r-123"}`)
+	assert.Equal(t, ErrProviderUpstream, pe.Kind)
+	assert.Equal(t, http.StatusBadRequest, pe.Status)
+	assert.Equal(t, "The specified parameter is not valid.", pe.Message)
+	// error.message 优先于顶层 message（OpenAI 形信封不受影响）。
+	pe = ClassifyStatusBody(http.StatusBadRequest,
+		`{"error":{"message":"inner"},"message":"outer"}`)
+	assert.Equal(t, "inner", pe.Message)
+}
+
 func TestClassifyStatusBodyEnvelopeStillClassifiesOnBody(t *testing.T) {
 	// Classification patterns still run on the FULL body even when the
 	// surfaced message is extracted.

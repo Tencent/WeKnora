@@ -30,6 +30,7 @@ package adapters
 //     compat wrapper shapes don't exist on the native wire).
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -85,18 +86,28 @@ func (a *AliyunAdapter) Capabilities() invoke.Capabilities {
 }
 
 // aliyunNativeBaseURL normalizes any stored base onto the DashScope root:
-// empty → the official root; a compatible-mode base (the pre-native default,
+// empty → the official root; a compatible-mode PATH (the pre-native default,
 // still on existing records) is cut back to the root; an /api/v1 suffix (the
-// SDK-style base) is trimmed so path joining doesn't double it.
+// SDK-style base) is trimmed so path joining doesn't double it. The strip
+// runs ONLY on the URL path (url.Parse) — a host that merely CONTAINS the
+// substring (e.g. https://compatible-mode.example.com) passes through
+// untouched; a naive whole-URL strip would redirect the request (and its
+// Bearer key) to a bogus host.
 func aliyunNativeBaseURL(base string) string {
 	base = strings.TrimRight(strings.TrimSpace(base), "/")
 	if base == "" {
 		return invoke.AliyunBaseURL
 	}
-	if idx := strings.Index(base, "/compatible-mode"); idx != -1 {
-		base = base[:idx]
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" {
+		return base // 不动原始输入，交给执行层的 URL/SSRF 校验报错
 	}
-	return strings.TrimSuffix(base, "/api/v1")
+	path := u.Path
+	if path == "/compatible-mode" || strings.HasPrefix(path, "/compatible-mode/") {
+		path = "/"
+	}
+	u.Path = strings.TrimSuffix(path, "/api/v1")
+	return strings.TrimRight(u.String(), "/")
 }
 
 // --- chat: the native generation wire ---
@@ -224,6 +235,8 @@ func convertAliyunMessages(messages []invoke.Message, vision bool) []aliyunMessa
 }
 
 // aliyunMessageContent encodes one message's parts per the path rules.
+// Empty text parts are skipped — a part with both fields empty serializes
+// to {} and DashScope's strict validation rejects it.
 func aliyunMessageContent(msg invoke.Message, vision bool) any {
 	if vision {
 		parts := make([]aliyunPart, 0, len(msg.Content))
@@ -232,18 +245,27 @@ func aliyunMessageContent(msg invoke.Message, vision bool) any {
 				parts = append(parts, aliyunPart{Image: p.Image.URL})
 				continue
 			}
+			if p.Text == "" {
+				continue
+			}
 			parts = append(parts, aliyunPart{Text: p.Text})
 		}
-		if len(parts) == 1 && parts[0].Image == "" {
+		switch {
+		case len(parts) == 0:
+			return ""
+		case len(parts) == 1 && parts[0].Image == "":
 			// Pure-text messages (system prompts, tool results) accept plain
 			// strings everywhere on the vision path.
 			return parts[0].Text
+		default:
+			return parts
 		}
-		return parts
 	}
 	texts := make([]string, 0, len(msg.Content))
 	for _, p := range msg.Content {
-		texts = append(texts, p.Text)
+		if p.Text != "" {
+			texts = append(texts, p.Text)
+		}
 	}
 	switch len(texts) {
 	case 1:
@@ -302,10 +324,20 @@ func appendAliyunSchemaHint(msg *aliyunMessage, schema string) {
 	}
 }
 
+// aliyunSupportsTools reports whether the model family accepts function
+// calling. Per the generation doc, tools 适用于除 qwen-vl / qwen-audio 系列
+// 外的全部模型 — including vision-capable NEW-generation models driven
+// through the multimodal-generation endpoint (the official tools example
+// runs qwen3.8-max there), so the gate is by model NAME, not by whether the
+// request carries images.
+func aliyunSupportsTools(model string) bool {
+	lower := strings.ToLower(model)
+	return !strings.Contains(lower, "qwen-vl") && !strings.Contains(lower, "qwen-audio")
+}
+
 // BuildChatRequest builds the native generation call. The vision branch
-// (any image part) targets multimodal-generation with native content parts
-// and the universal max_tokens budget (tools/response_format are not vision
-// features); the text branch targets text-generation. Streaming rides the
+// (any image part) targets multimodal-generation with native content parts;
+// the text branch targets text-generation. Streaming rides the
 // X-DashScope-SSE header — there is no parameters.stream on the HTTP path.
 func (a *AliyunAdapter) BuildChatRequest(
 	ep invoke.Endpoint, model string, opts *invoke.ChatOptions,
@@ -314,7 +346,9 @@ func (a *AliyunAdapter) BuildChatRequest(
 	vision := opts != nil && invoke.HasImages(opts.Messages)
 
 	params := &aliyunParameters{ResultFormat: "message"}
+	var messages []invoke.Message
 	if opts != nil {
+		messages = opts.Messages
 		params.Temperature = opts.Temperature
 		if opts.TopP > 0 {
 			params.TopP = opts.TopP
@@ -325,16 +359,19 @@ func (a *AliyunAdapter) BuildChatRequest(
 		if opts.Seed != 0 {
 			params.Seed = opts.Seed
 		}
-		// 完成预算（平台单一字段 MaxCompletionTokens → DashScope 同名参数；
-		// 视觉分支走通用的 max_tokens）。
+		// 完成预算（平台单一字段 MaxCompletionTokens）：思考模型（qwen3/plus/
+		// max/turbo 前缀——均为文档标注支持 max_completion_tokens 的新一代）
+		// 发同名参数；其余文本模型与视觉分支发全量支持的 max_tokens（原生
+		// 严格校验下，老模型对 max_completion_tokens 会 400 或静默忽略）。
 		if opts.MaxCompletionTokens > 0 {
-			if vision {
+			switch {
+			case vision, !invoke.IsQwenThinkingModel(model):
 				params.MaxTokens = opts.MaxCompletionTokens
-			} else {
+			default:
 				params.MaxCompletionTokens = opts.MaxCompletionTokens
 			}
 		}
-		if len(opts.Tools) > 0 && !vision {
+		if len(opts.Tools) > 0 && aliyunSupportsTools(model) {
 			params.Tools = make([]aliyunToolDef, 0, len(opts.Tools))
 			for _, tool := range opts.Tools {
 				params.Tools = append(params.Tools, aliyunToolDef{
@@ -370,7 +407,7 @@ func (a *AliyunAdapter) BuildChatRequest(
 		params.IncrementalOutput = true
 	}
 
-	msgs := convertAliyunMessages(opts.Messages, vision)
+	msgs := convertAliyunMessages(messages, vision)
 	if opts != nil && len(opts.Format) > 0 && !vision && len(msgs) > 0 {
 		appendAliyunSchemaHint(&msgs[len(msgs)-1], string(opts.Format))
 	}
@@ -393,6 +430,8 @@ func (a *AliyunAdapter) BuildChatRequest(
 	if isStream {
 		header.Set("X-DashScope-SSE", "enable")
 		header.Set("Accept", "text/event-stream")
+	} else {
+		header.Set("Accept", "application/json")
 	}
 	return &invoke.Request{
 		Method: http.MethodPost,
@@ -406,12 +445,14 @@ func (a *AliyunAdapter) BuildChatRequest(
 // --- chat parse: native response objects ---
 
 type aliyunUsage struct {
-	InputTokens       int `json:"input_tokens"`
-	OutputTokens      int `json:"output_tokens"`
-	TotalTokens       int `json:"total_tokens"`
-	InputTokensDetail struct {
+	InputTokens         int `json:"input_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	PromptTokensDetails struct {
+		// cached_tokens（命中 Cache 的 Token 数）挂在 prompt_tokens_details
+		// 下——input_tokens_details 里是 text/image/video_tokens 细分。
 		CachedTokens int `json:"cached_tokens"`
-	} `json:"input_tokens_details"`
+	} `json:"prompt_tokens_details"`
 }
 
 func (u *aliyunUsage) usage() invoke.Usage {
@@ -420,8 +461,8 @@ func (u *aliyunUsage) usage() invoke.Usage {
 		CompletionTokens: u.OutputTokens,
 		TotalTokens:      u.TotalTokens,
 	}
-	if u.InputTokensDetail.CachedTokens > 0 {
-		out.CacheReadTokens = u.InputTokensDetail.CachedTokens
+	if u.PromptTokensDetails.CachedTokens > 0 {
+		out.CacheReadTokens = u.PromptTokensDetails.CachedTokens
 		out.CacheReported = true
 	}
 	return out
@@ -514,30 +555,25 @@ type aliyunStreamFrame struct {
 }
 
 const (
-	stateAliyunFinish    = "aliyun.finish_reason"
-	stateAliyunUsage     = "aliyun.usage"
-	stateAliyunToolCalls = "aliyun.tool_calls"
+	stateAliyunFinish = "aliyun.finish_reason"
+	stateAliyunUsage  = "aliyun.usage"
 )
 
-// aliyunToolAssembler resolves the per-stream tool-call assembly (adapter-
-// local mirror of invoke's unexported helper).
-func aliyunToolAssembler(state *invoke.StreamBridgeState) *invoke.ToolCallAssembler {
-	v, ok := state.Get(stateAliyunToolCalls)
-	if !ok {
-		return nil
-	}
-	a, _ := v.(*invoke.ToolCallAssembler)
-	return a
+// isAliyunDoneSentinel tolerates proxies that inject a bare "data:[DONE]"
+// frame (no SSE event name) into the native stream — same posture as the
+// openai bridge's isDoneSentinel.
+func isAliyunDoneSentinel(data []byte) bool {
+	return string(bytes.TrimSpace(data)) == "[DONE]"
 }
 
 // TranslateStreamEvent implements the DashScope native bridge.
 func (a *AliyunAdapter) TranslateStreamEvent(
 	state *invoke.StreamBridgeState, chunk invoke.StreamChunk,
 ) (*invoke.StreamEvent, error) {
-	if chunk.Event == "done" {
+	if chunk.Event == "done" || isAliyunDoneSentinel(chunk.Data) {
 		// No native sentinel; tolerate proxies that inject one — flush the
 		// accumulated finish state (mirrors the openai bridge semantics).
-		return aliyunFlushDone(state), nil
+		return aliyunFlushDone(state, nil), nil
 	}
 	var f aliyunStreamFrame
 	if err := decodeChunk(chunk.Data, &f); err != nil {
@@ -558,7 +594,7 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 	choice := f.Output.Choices[0]
 	if choice.FinishReason != "" {
 		state.Set(stateAliyunFinish, choice.FinishReason)
-		return aliyunFlushDone(state), nil
+		return aliyunFlushDone(state, &choice.Message), nil
 	}
 	d := choice.Message
 	if d.ReasoningContent != "" {
@@ -568,10 +604,10 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 		}, nil
 	}
 	if len(d.ToolCalls) > 0 {
-		assembler := aliyunToolAssembler(state)
+		assembler := invoke.ToolCallAssemblerFrom(state)
 		if assembler == nil {
 			assembler = invoke.NewToolCallAssembler()
-			state.Set(stateAliyunToolCalls, assembler)
+			state.Set(invoke.StreamStateToolCalls, assembler)
 		}
 		out := make([]invoke.ToolCallDelta, 0, len(d.ToolCalls))
 		for _, tc := range d.ToolCalls {
@@ -594,17 +630,43 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 }
 
 // aliyunFlushDone emits the terminating Done event from the accumulated
-// state (finish reason + assembled tool calls + last observed usage).
-func aliyunFlushDone(state *invoke.StreamBridgeState) *invoke.StreamEvent {
+// state (finish reason + assembled tool calls + last observed usage). tail
+// is the finish frame's message when one arrived: under incremental_output
+// the LAST content fragment rides the SAME frame as finish_reason, so it is
+// folded into the Done event's Delta (the entry emits it before the
+// terminator — mapStreamEvent's Done+Delta seam). A reasoning tail has no
+// entry mapping (Thinking+Done) and is dropped — qwq-class models emit
+// reasoning strictly before the content frames. Tool calls arriving on the
+// finish frame are fed to the shared assembler first so the terminator
+// carries them complete.
+func aliyunFlushDone(state *invoke.StreamBridgeState, tail *aliyunResponseMessage) *invoke.StreamEvent {
 	finish, _ := state.Get(stateAliyunFinish)
 	reason, _ := finish.(string)
+	if tail != nil && len(tail.ToolCalls) > 0 {
+		assembler := invoke.ToolCallAssemblerFrom(state)
+		if assembler == nil {
+			assembler = invoke.NewToolCallAssembler()
+			state.Set(invoke.StreamStateToolCalls, assembler)
+		}
+		for _, tc := range tail.ToolCalls {
+			assembler.Add(invoke.ToolCallDelta{
+				Index: tc.Index, ID: tc.ID, Type: tc.Type,
+				Name: tc.Function.Name, Arguments: tc.Function.Arguments,
+			})
+		}
+	}
 	var calls []invoke.ToolCall
-	if a := aliyunToolAssembler(state); a != nil {
-		calls = a.Calls()
+	if assembler := invoke.ToolCallAssemblerFrom(state); assembler != nil {
+		calls = assembler.Calls()
 	}
 	ev := &invoke.StreamEvent{
 		Kind: invoke.StreamKindAnswer,
 		Done: &invoke.FinishInfo{FinishReason: reason, ToolCalls: calls},
+	}
+	if tail != nil {
+		if text := aliyunContentText(tail.Content); text != "" {
+			ev.Delta = &invoke.ContentDelta{Text: text}
+		}
 	}
 	if raw, ok := state.Get(stateAliyunUsage); ok {
 		if u, ok := raw.(invoke.Usage); ok {
