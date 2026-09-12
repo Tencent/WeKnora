@@ -152,6 +152,9 @@ func dockerSettingsFromConfig(cfg *Config) (dockerRuntimeSettings, error) {
 	if cfg == nil {
 		return dockerRuntimeSettings{}, errors.New("sandbox: docker client requires a config")
 	}
+	if err := ValidateDockerIdleTTL(cfg.DockerIdleTTL); err != nil {
+		return dockerRuntimeSettings{}, err
+	}
 	image := strings.TrimSpace(cfg.DockerImage)
 	if image == "" {
 		return dockerRuntimeSettings{}, errors.New("sandbox: docker backend requires an image")
@@ -230,6 +233,10 @@ func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// filesystem-only (no memory) and lives on this daemon.
 		SupportsSnapshots: true,
 		SupportsVolumes:   false,
+		// Docker exec supports a native TTY stream, but POST /exec/{id}/start
+		// cannot attach a second transport while that exec is running.
+		SupportsTerminals:         true,
+		SupportsTerminalReconnect: false,
 	}
 }
 
@@ -417,6 +424,31 @@ func (c *DockerRemoteClient) Connect(
 		id:       inspected.Container.ID,
 		metadata: dockerSandboxMetadata(labels),
 	}, nil
+}
+
+const dockerActivityRefreshTimeout = 5 * time.Second
+
+// refreshActivity performs one bounded no-op through the ordinary exec path,
+// whose trusted wrapper touches dockerActivityMarker. Terminal sessions call
+// it at a low frequency; keystrokes never call the Engine API.
+func (c *DockerRemoteClient) refreshActivity(ctx context.Context, id, op string) error {
+	result, err := c.Exec(ctx, &dockerSandboxHandle{id: id}, RemoteExecRequest{
+		Command: "true",
+		User:    DefaultSandboxExecUser,
+		Timeout: dockerActivityRefreshTimeout,
+	})
+	if err != nil {
+		return dockerError(op, err)
+	}
+	if result == nil || result.Killed || result.ExitCode != 0 {
+		return &RemoteError{
+			Kind:     RemoteErrorKindInternal,
+			Provider: SandboxTypeDocker,
+			Op:       op,
+			Message:  "activity marker refresh failed",
+		}
+	}
+	return nil
 }
 
 // dockerStartReadyTimeout bounds how long Create/Connect/Exec wait for PID 1

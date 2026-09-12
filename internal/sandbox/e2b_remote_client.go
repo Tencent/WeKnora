@@ -173,7 +173,8 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// it would let a workspace configure a mount that never appears.
 		SupportsVolumes: false,
 		// envd exposes an interactive PTY service that go-e2b wraps.
-		SupportsTerminals: true,
+		SupportsTerminals:         true,
+		SupportsTerminalReconnect: true,
 	}
 }
 

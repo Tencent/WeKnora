@@ -53,6 +53,7 @@ type dockerEngineAPI interface {
 	) (client.ExecCreateResult, error)
 	ExecAttach(ctx context.Context, execID string, options client.ExecAttachOptions) (client.ExecAttachResult, error)
 	ExecInspect(ctx context.Context, execID string, options client.ExecInspectOptions) (client.ExecInspectResult, error)
+	ExecResize(ctx context.Context, execID string, options client.ExecResizeOptions) (client.ExecResizeResult, error)
 
 	// ContainerStatPath is the one archive endpoint this adapter uses, and only
 	// against the activity marker's fixed path. The copy endpoints are
@@ -100,6 +101,28 @@ const DefaultDockerHTTPTimeout = 30 * time.Second
 // is the only thing standing between an abandoned session and a container that
 // lives until the host runs out of memory.
 const DefaultDockerIdleTTL = 30 * time.Minute
+
+// MinDockerIdleTTL keeps the shortest valid Docker reclamation window ahead
+// of the terminal heartbeat floor. Zero remains the only unset value and is
+// resolved to DefaultDockerIdleTTL.
+const MinDockerIdleTTL = time.Minute
+
+// ErrInvalidDockerIdleTTL lets API handlers classify a short TTL as bad input
+// without matching the validation message.
+var ErrInvalidDockerIdleTTL = errors.New("sandbox: invalid Docker idle TTL")
+
+// ValidateDockerIdleTTL enforces the Docker idle-lifecycle invariant at every
+// backend entry point, including callers that bypass workspace config storage.
+func ValidateDockerIdleTTL(ttl time.Duration) error {
+	if ttl == 0 || ttl >= MinDockerIdleTTL {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: must be zero (use default) or at least %s",
+		ErrInvalidDockerIdleTTL,
+		MinDockerIdleTTL,
+	)
+}
 
 // DefaultDockerMemoryLimit / DefaultDockerCPULimit / DefaultDockerPidsLimit are
 // the per-sandbox resource ceilings applied when a config names none. They are

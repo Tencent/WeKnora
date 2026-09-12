@@ -397,9 +397,10 @@
             -->
             <template v-if="backend === 'docker'">
               <t-form-item :label="$t('settings.sandbox.dockerIdleTtl')"
-                :tips="$t('settings.sandbox.dockerIdleTtlHelp')">
+                :status="fieldStatus('idle_ttl_seconds')"
+                :tips="fieldTip('idle_ttl_seconds') || $t('settings.sandbox.dockerIdleTtlHelp')">
                 <t-input-number v-model="docker.idle_ttl_seconds" :min="0" theme="column"
-                  placeholder="1800" />
+                  placeholder="1800" @change="onFieldInput('idle_ttl_seconds')" />
               </t-form-item>
               <t-form-item :label="$t('settings.sandbox.dockerCpuLimit')"
                 :tips="$t('settings.sandbox.dockerCpuLimitHelp')">
@@ -1103,6 +1104,10 @@ function validateRequiredFields(includeTemplate = true): boolean {
     if (typeof value !== 'string' || value.trim() === '') {
       errors[field] = t('settings.sandbox.fieldRequired')
     }
+  }
+  const idleTTL = Number(values.idle_ttl_seconds || 0)
+  if (backend.value === 'docker' && idleTTL > 0 && idleTTL < 60) {
+    errors.idle_ttl_seconds = t('settings.sandbox.dockerIdleTtlMinimum')
   }
   fieldErrors.value = errors
   return Object.keys(errors).length === 0

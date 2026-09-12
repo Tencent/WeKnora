@@ -68,10 +68,6 @@ func TestCubeOpenTerminalStreamSurvivesHTTPClientTimeout(t *testing.T) {
 }
 
 func TestCubeOpenTerminalRefreshesSandboxTTL(t *testing.T) {
-	prevMin := terminalTTLRefreshMin
-	terminalTTLRefreshMin = 40 * time.Millisecond
-	t.Cleanup(func() { terminalTTLRefreshMin = prevMin })
-
 	mock := newCubeMockServer(t)
 	mock.ptyHoldAfterStart = time.Second
 	client := pooledCubeClient(t, mock, 5*time.Second)

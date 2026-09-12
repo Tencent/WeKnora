@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -494,6 +495,42 @@ func TestResolveEffectiveConfigDetectsLocalDockerHostWhenBlank(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "unix:///tmp/from-env.sock", effective.DockerHost)
+}
+
+func TestResolveEffectiveConfigValidatesDockerIdleTTL(t *testing.T) {
+	t.Setenv("DOCKER_HOST", "unix:///tmp/weknora-docker.sock")
+	for _, seconds := range []int{0, 1, 15, 59, 60, 61, 1800} {
+		seconds := seconds
+		t.Run(strconv.Itoa(seconds), func(t *testing.T) {
+			effective, err := ResolveEffectiveConfig(&types.TenantSandboxConfig{
+				SandboxType: "docker",
+				Docker: &types.DockerSandboxConfig{
+					Image:          "weknora:test",
+					IdleTTLSeconds: seconds,
+				},
+			}, DefaultConfig())
+			if seconds > 0 && seconds < int(MinDockerIdleTTL/time.Second) {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if seconds == 0 {
+				require.Equal(t, DefaultDockerIdleTTL, effective.DockerIdleTTL)
+			} else {
+				require.Equal(t, time.Duration(seconds)*time.Second, effective.DockerIdleTTL)
+			}
+		})
+	}
+}
+
+func TestResolveEffectiveConfigRejectsShortGlobalDockerIdleTTL(t *testing.T) {
+	global := DefaultConfig()
+	global.Type = SandboxTypeDocker
+	global.DockerIdleTTL = 59 * time.Second
+
+	_, err := ResolveEffectiveConfig(nil, global)
+
+	require.ErrorIs(t, err, ErrInvalidDockerIdleTTL)
 }
 
 func TestResolveEffectiveConfigMapsDockerNoneToDeniedEgress(t *testing.T) {

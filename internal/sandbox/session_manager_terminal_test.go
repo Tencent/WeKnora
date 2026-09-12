@@ -28,6 +28,18 @@ func newSessionManagerTerminalTestHarness(t *testing.T) (*SessionBoundManager, *
 	return mgr, client
 }
 
+func TestSessionTerminalManagerReportsProviderReconnectCapability(t *testing.T) {
+	mgr, client := newSessionManagerTerminalTestHarness(t)
+	require.False(t, mgr.SupportsTerminalReconnect())
+
+	client.capabilities.SupportsTerminalReconnect = true
+	require.True(t, mgr.SupportsTerminalReconnect())
+
+	client.capabilities.SupportsTerminals = false
+	require.False(t, mgr.SupportsTerminalReconnect(),
+		"reconnect cannot be advertised when terminals themselves are unavailable")
+}
+
 func terminalTestContext() context.Context {
 	return context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
 }

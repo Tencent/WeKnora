@@ -23,6 +23,10 @@ import (
 type SessionTerminal struct {
 	Session sandbox.RemoteTerminalSession
 	Backend string
+	// Reattachable reports whether a later WebSocket can resume this exact
+	// provider PTY. Docker exec streams are deliberately false: reconnecting
+	// the container is not the same as reconnecting a running exec.
+	Reattachable bool
 	// IdleDisconnect is how long the bridge should wait without PTY
 	// activity before closing the socket. Always a positive duration.
 	IdleDisconnect time.Duration
@@ -229,6 +233,7 @@ func (s *SandboxTerminalService) openOnManager(
 	return &SessionTerminal{
 		Session:        session,
 		Backend:        string(mgr.GetType()),
+		Reattachable:   terminal.SupportsTerminalReconnect(),
 		IdleDisconnect: terminalIdleDisconnectFromManager(mgr),
 	}, nil
 }

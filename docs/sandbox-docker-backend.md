@@ -120,7 +120,7 @@ archive 接口里只剩 `HEAD` 还在用，且仅用于读固定路径的活跃�
 | 镜像 | 必填。会话容器都从它创建，等价于其它后端的 template ID |
 | Docker 守护进程地址 | 留空跟随本机 `docker` CLI（`DOCKER_HOST` 或当前 `docker context`），因此 Colima / Docker Desktop 不必手填 socket。远程填 `tcp://host:2376`，**必须**同时填 TLS 证书目录；私网地址要打开「允许访问私网集群地址」 |
 | TLS 证书目录 | 远程 daemon 必填。WeKnora 主机上包含 `ca.pem`/`cert.pem`/`key.pem` 的目录，证书不入库 |
-| 空闲回收 | 容器多久没执行任何命令就回收。留空 1800 秒 |
+| 空闲回收 | 容器多久没执行任何命令就回收。`0` 或留空使用默认 1800 秒；非零值至少 60 秒 |
 | CPU / 内存 / 进程数上限 | 单个沙箱的资源上限。留空 2 核 / 2048 MB / 512 进程 |
 | 网络模式 | 只接受 `bridge`（默认）与 `none`（完全禁止出网）。`host`、`container:` 以及自定义网络名一律拒绝：常见部署通过挂载的 `docker.sock` 连 daemon，填上部署自身的 compose 网络就会让沙箱与 Postgres / Redis 同网 |
 
@@ -129,7 +129,9 @@ archive 接口里只剩 `HEAD` 还在用，且仅用于读固定路径的活跃�
 重解析到 169.254.169.254 的情况也拦得住。unix socket 不经过这一层。
 
 镜像要求：可按名执行的 `root` 账号、可写的 `/workspace`、
-GNU `find`（`-printf`）与 coreutils `timeout`。标准镜像另保留 uid 1000 的 `user` 账号，
+GNU `find`（`-printf`）与 coreutils `timeout`。交互式终端还要求镜像提供 `/bin/bash`；
+标准 WeKnora 沙箱镜像满足该要求。缺少 `/bin/bash` 的自定义镜像仍可能支持普通 `Exec`，
+但不保证能打开交互式终端。标准镜像另保留 uid 1000 的 `user` 账号，
 并将工作区属主设为该账号以兼容显式选择 `user` 的工具；默认 root 执行不依赖这个属主。`docker/Dockerfile.sandbox` 产出的标准镜像满足这些，
 Debian 系基础镜像天然带 find 和 timeout。
 

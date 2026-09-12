@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,201 @@ import (
 )
 
 const dockerIntegrationTenantID = 1
+
+// TestDockerInteractiveTerminalIntegration exercises the Docker Engine TTY
+// path against a real daemon. It intentionally uses the adapter directly so
+// the browser cannot influence the container identity under test.
+func TestDockerInteractiveTerminalIntegration(t *testing.T) {
+	cfg := dockerIntegrationConfig(t)
+	// The minimum production-valid value exercises the real 15-second refresh
+	// floor without weakening the configuration invariant for this test.
+	cfg.DockerIdleTTL = MinDockerIdleTTL
+	// The attached stream must remain usable well past this bound; only short
+	// Engine RPCs are allowed to inherit it.
+	cfg.DockerHTTPTimeout = 2 * time.Second
+	client, err := NewDockerRemoteClient(cfg)
+	if err != nil {
+		t.Fatalf("build docker client: %v", err)
+	}
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer probeCancel()
+	if err := client.Health(probeCtx); err != nil {
+		t.Skipf("docker daemon unreachable: %v", err)
+	}
+
+	caps := client.Capabilities()
+	if !caps.SupportsTerminals || caps.SupportsTerminalReconnect {
+		t.Fatalf("unexpected Docker terminal capabilities: %#v", caps)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	handle, err := client.Create(ctx, RemoteCreateRequest{
+		TemplateID: cfg.DockerImage,
+		Metadata:   map[string]string{"weknora.test": "interactive-terminal"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		_ = client.Delete(cleanupCtx, handle.ID())
+	})
+
+	terminal, err := client.OpenTerminal(ctx, handle, RemoteTerminalOptions{
+		Cols: 101,
+		Rows: 37,
+		Cwd:  SessionWorkspaceRoot,
+		Envs: map[string]string{"WEKNORA_TERMINAL_IT": "ready"},
+	})
+	if err != nil {
+		t.Fatalf("OpenTerminal: %v", err)
+	}
+	t.Cleanup(func() { _ = terminal.Close() })
+	if terminal.PID() != 0 {
+		t.Fatalf("Docker terminal PID = %d, want 0 (not reattachable)", terminal.PID())
+	}
+
+	collector := newDockerTerminalCollector(terminal.Output())
+	if err := terminal.Write(ctx, []byte("printf '\\033[32mANSI-UNICODE:你好🙂\\033[0m\\n'\n")); err != nil {
+		t.Fatalf("write ANSI/Unicode probe: %v", err)
+	}
+	collector.waitContains(t, "ANSI-UNICODE:你好🙂", 20*time.Second)
+
+	if err := terminal.Write(ctx, []byte("printf 'ENV:%s CWD:%s USER:%s\\n' \"$WEKNORA_TERMINAL_IT\" \"$PWD\" \"$(id -un)\"\n")); err != nil {
+		t.Fatalf("write cwd/env probe: %v", err)
+	}
+	collector.waitContains(t, "ENV:ready CWD:"+SessionWorkspaceRoot+" USER:"+DefaultSandboxExecUser, 20*time.Second)
+
+	if err := terminal.Resize(ctx, 123, 41); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+	if err := terminal.Write(ctx, []byte("printf 'SIZE:%s\\n' \"$(stty size)\"\n")); err != nil {
+		t.Fatalf("write size probe: %v", err)
+	}
+	collector.waitContains(t, "SIZE:41 123", 20*time.Second)
+
+	if err := terminal.Write(ctx, []byte("sleep 30\n")); err != nil {
+		t.Fatalf("start Ctrl-C probe: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if err := terminal.Write(ctx, []byte{0x03}); err != nil {
+		t.Fatalf("send Ctrl-C: %v", err)
+	}
+	if err := terminal.Write(ctx, []byte("printf 'CTRL_C_OK\\n'\n")); err != nil {
+		t.Fatalf("write after Ctrl-C: %v", err)
+	}
+	collector.waitContains(t, "CTRL_C_OK", 20*time.Second)
+
+	// No ordinary Exec occurs while waiting. Observe the marker itself advance
+	// after the production heartbeat interval, then ask the real sweep decision
+	// path to keep the active terminal container.
+	summary, err := client.Get(ctx, handle.ID())
+	if err != nil {
+		t.Fatalf("Get before active-terminal idle check: %v", err)
+	}
+	initialActivity := client.sweeper.lastActivity(ctx, *summary)
+	refreshDeadline := time.Now().Add(terminalTTLRefreshInterval(cfg.DockerIdleTTL) + 10*time.Second)
+	var refreshedActivity time.Time
+	for time.Now().Before(refreshDeadline) {
+		refreshedActivity = client.sweeper.lastActivity(ctx, *summary)
+		if refreshedActivity.After(initialActivity) {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if !refreshedActivity.After(initialActivity) {
+		t.Fatalf("terminal heartbeat did not refresh activity marker: before=%s after=%s",
+			initialActivity, refreshedActivity)
+	}
+	if client.sweeper.isIdle(ctx, *summary) {
+		t.Fatal("idle sweeper classified the active terminal container as idle")
+	}
+
+	if err := terminal.Write(ctx, []byte("exit 23\n")); err != nil {
+		t.Fatalf("exit terminal: %v", err)
+	}
+	exit := collector.waitExit(t, 20*time.Second)
+	if exit.ExitCode != 23 || exit.Err != nil {
+		t.Fatalf("terminal exit = %#v, want code 23 without error", exit)
+	}
+	collector.waitClosed(t, 10*time.Second)
+	t.Logf("real Docker terminal PASS: raw ANSI/Unicode, stdin, Ctrl-C, resize, exit=%d, active-idle=false",
+		exit.ExitCode)
+}
+
+type dockerTerminalCollector struct {
+	mu     sync.Mutex
+	output bytes.Buffer
+	exits  chan RemoteTerminalEvent
+	closed chan struct{}
+}
+
+func newDockerTerminalCollector(events <-chan RemoteTerminalEvent) *dockerTerminalCollector {
+	c := &dockerTerminalCollector{
+		exits:  make(chan RemoteTerminalEvent, 4),
+		closed: make(chan struct{}),
+	}
+	go func() {
+		defer close(c.closed)
+		for event := range events {
+			if len(event.Data) > 0 {
+				c.mu.Lock()
+				_, _ = c.output.Write(event.Data)
+				c.mu.Unlock()
+			}
+			if event.Exited || event.Err != nil {
+				c.exits <- event
+			}
+		}
+	}()
+	return c
+}
+
+func (c *dockerTerminalCollector) waitContains(t *testing.T, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		got := c.output.String()
+		c.mu.Unlock()
+		if strings.Contains(got, want) {
+			return
+		}
+		select {
+		case event := <-c.exits:
+			t.Fatalf("terminal ended before output %q: %#v; output=%q", want, event, got)
+		case <-c.closed:
+			t.Fatalf("terminal output closed before %q; output=%q", want, got)
+		case <-time.After(25 * time.Millisecond):
+		}
+	}
+	c.mu.Lock()
+	got := c.output.String()
+	c.mu.Unlock()
+	t.Fatalf("timed out waiting for %q; output=%q", want, got)
+}
+
+func (c *dockerTerminalCollector) waitExit(t *testing.T, timeout time.Duration) RemoteTerminalEvent {
+	t.Helper()
+	select {
+	case event := <-c.exits:
+		return event
+	case <-time.After(timeout):
+		t.Fatal("timed out waiting for terminal exit")
+		return RemoteTerminalEvent{}
+	}
+}
+
+func (c *dockerTerminalCollector) waitClosed(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-c.closed:
+	case <-time.After(timeout):
+		t.Fatal("terminal Output did not close")
+	}
+}
 
 func dockerIntegrationConfig(t *testing.T) *Config {
 	t.Helper()
