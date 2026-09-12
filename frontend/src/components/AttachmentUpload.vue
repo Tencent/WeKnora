@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
-import { MAX_FILE_SIZE_MB } from '@/utils';
+import { MAX_FILE_SIZE_MB, CHAT_ATTACHMENT_EXTRA_EXTENSIONS } from '@/utils';
 import { getParserEngines } from '@/api/system';
 import {
   deleteTemporaryAttachment,
@@ -57,6 +57,9 @@ const supportedTypes = ref([
 	'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
   // Audio
   '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac',
+  // Deploy-time extra extensions (WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS):
+  // uploaded as raw files for skills / MCP tools; the backend skips parsing.
+  ...CHAT_ATTACHMENT_EXTRA_EXTENSIONS,
 ]);
 
 onMounted(async () => {

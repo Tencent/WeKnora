@@ -6,4 +6,8 @@ window.__RUNTIME_CONFIG__ = {
   EMBED_BASE_URL: '',
   // Optional: default UI locale for first-time visitors (zh-CN | en-US | ru-RU | ko-KR | ja-JP)
   DEFAULT_LOCALE: '',
+  // Optional: extra chat attachment extensions, comma-separated (e.g. '.msg,.seq,.ab1').
+  // Mirrors WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS; uploaded files skip parsing
+  // and are staged into the agent sandbox for skills / MCP tools.
+  CHAT_ATTACHMENT_EXTRA_EXTENSIONS: '',
 };

@@ -93,6 +93,52 @@ var temporaryTextExtensions = map[string]struct{}{
 	".md": {}, ".markdown": {}, ".txt": {}, ".csv": {}, ".json": {}, ".xml": {}, ".yaml": {}, ".yml": {}, ".log": {},
 }
 
+// chatAttachmentExtraExtensionsEnv lists comma-separated file extensions chat
+// attachments accept beyond the built-in whitelist (e.g. ".msg,.seq,.ab1").
+// Extensions configured here have no parser: the raw bytes are stored and
+// staged into the agent sandbox's session input directory, where skills and
+// MCP tools read them directly, so no parse task is scheduled.
+const chatAttachmentExtraExtensionsEnv = "WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS"
+
+// temporaryDocumentBlockedExtensions is the hard deny-list that no extra
+// configuration can override. Attachments land in agent sandboxes, so formats
+// a platform can execute directly (binaries, double-click launchers and
+// scripts) stay rejected even when an operator lists them. The frontend
+// filters the same set in parseChatAttachmentExtraExtensions (utils/index.ts).
+var temporaryDocumentBlockedExtensions = map[string]struct{}{
+	".exe": {}, ".dll": {}, ".so": {}, ".dylib": {}, ".msi": {},
+	".com": {}, ".scr": {}, ".bat": {}, ".cmd": {}, ".jar": {},
+	".ps1": {}, ".vbs": {}, ".hta": {},
+}
+
+// chatAttachmentExtraExtensions parses WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS
+// into a normalized extension set (lowercase, leading dot, deny-listed entries
+// dropped). Returns nil when unset or effectively empty.
+func chatAttachmentExtraExtensions() map[string]struct{} {
+	raw := strings.TrimSpace(os.Getenv(chatAttachmentExtraExtensionsEnv))
+	if raw == "" {
+		return nil
+	}
+	out := make(map[string]struct{})
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.ToLower(strings.TrimSpace(entry))
+		if entry == "" {
+			continue
+		}
+		if !strings.HasPrefix(entry, ".") {
+			entry = "." + entry
+		}
+		if _, blocked := temporaryDocumentBlockedExtensions[entry]; blocked {
+			continue
+		}
+		out[entry] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 type temporaryDocumentService struct {
 	repo            interfaces.TemporaryDocumentRepository
 	fileService     interfaces.FileService
@@ -154,7 +200,8 @@ func (s *temporaryDocumentService) Create(
 	if resourceTenantID == 0 {
 		resourceTenantID = tenantID
 	}
-	if !s.supportsExtension(ctx, resourceTenantID, ext) {
+	supported, passthrough := s.extensionSupport(ctx, resourceTenantID, ext)
+	if !supported {
 		return nil, fmt.Errorf("unsupported file type: %s", ext)
 	}
 	maxSize := secutils.GetMaxFileSizeMB() * 1024 * 1024
@@ -195,6 +242,22 @@ func (s *temporaryDocumentService) Create(
 			return nil, fmt.Errorf("bind attachment resource: %w", err)
 		}
 	}
+	if passthrough {
+		// Extra-configured extensions have no parser: store the raw bytes and
+		// mark the document ready immediately. The agent sandbox stages the
+		// original file into the session input directory for skills / MCP
+		// tools, so no parse task is scheduled.
+		metadataJSON, _ := json.Marshal(map[string]string{"parser": "passthrough"})
+		if err := s.repo.MarkReady(ctx, tenantID, document.ID, "",
+			types.JSON("[]"), types.JSON("[]"), types.JSON(metadataJSON), 0, 0, time.Now()); err != nil {
+			_ = s.repo.MarkFailed(ctx, tenantID, document.ID, "failed to finalize passthrough attachment")
+			document.Status = types.TemporaryDocumentStatusFailed
+			document.ErrorMessage = "failed to finalize passthrough attachment"
+			return document, fmt.Errorf("finalize passthrough attachment: %w", err)
+		}
+		document.Status = types.TemporaryDocumentStatusReady
+		return document, nil
+	}
 	payload, _ := json.Marshal(types.TemporaryDocumentTaskPayload{TenantID: tenantID, DocumentID: document.ID})
 	queue, _ := types.QueueForTaskType(types.TypeTemporaryDocumentProcess)
 	if _, err := s.taskEnqueuer.Enqueue(
@@ -209,16 +272,35 @@ func (s *temporaryDocumentService) Create(
 	return document, nil
 }
 
-func (s *temporaryDocumentService) supportsExtension(ctx context.Context, tenantID uint64, ext string) bool {
+// extensionSupport classifies an extension in one engine lookup: supported
+// says whether the upload is accepted, passthrough says the file is stored raw
+// for the agent sandbox instead of being parsed. Built-in and parser-engine
+// extensions always parse; an extra-configured extension only passthroughs
+// when no parser engine declares it.
+func (s *temporaryDocumentService) extensionSupport(ctx context.Context, tenantID uint64, ext string) (supported, passthrough bool) {
 	if _, ok := temporaryDocumentExtensions[ext]; ok {
-		return true
+		return true, false
 	}
+	if _, ok := chatAttachmentExtraExtensions()[ext]; !ok {
+		return s.engineSupportsExtension(ctx, tenantID, ext), false
+	}
+	if s.engineSupportsExtension(ctx, tenantID, ext) {
+		return true, false
+	}
+	return true, true
+}
+
+// engineSupportsExtension reports whether an available parser engine declares
+// the extension in its FileTypes.
+func (s *temporaryDocumentService) engineSupportsExtension(ctx context.Context, tenantID uint64, ext string) bool {
 	if s.documentReader == nil {
 		return false
 	}
 	var overrides map[string]string
-	if tenant, err := s.tenantService.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
-		overrides = tenant.ParserEngineConfig.ToOverridesMap()
+	if s.tenantService != nil {
+		if tenant, err := s.tenantService.GetTenantByID(ctx, tenantID); err == nil && tenant != nil {
+			overrides = tenant.ParserEngineConfig.ToOverridesMap()
+		}
 	}
 	engines, err := s.documentReader.ListEngines(ctx, overrides)
 	if err != nil {
