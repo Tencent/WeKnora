@@ -332,46 +332,47 @@ const formatCosts = (costs: ModelCostTotal[]) => costs?.length
 .usage-toolbar, .pricing-section__heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .usage-toolbar { margin-bottom: 12px; flex-wrap: wrap; align-items: flex-end; }
 .usage-model-filter { flex: 1; min-width: 180px; }
-.usage-field { display: grid; gap: 6px; min-width: 0; color: var(--td-text-color-secondary); font-size: '12px'px; }
+.usage-field { display: grid; gap: 6px; min-width: 0; color: var(--td-text-color-secondary); font-size: 12px; }
 .usage-field input, .usage-field select { box-sizing: border-box; width: 100%; min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--td-component-border); border-radius: 6px; color: var(--td-text-color-primary); background: var(--td-bg-color-container); font: inherit; }
 .usage-field input:focus-visible, .usage-field select:focus-visible, summary:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
 .usage-range { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.usage-hint { margin: 10px 0 18px; color: var(--td-text-color-secondary); font-size: '12px'px; }
-.usage-error { padding: 10px 12px; border-radius: 6px; color: var(--td-error-color); background: var(--td-error-color-1); font-size: '12px'px; }
+.usage-hint { margin: 10px 0 18px; color: var(--td-text-color-secondary); font-size: 12px; }
+.usage-error { padding: 10px 12px; border-radius: 6px; color: var(--td-error-color); background: var(--td-error-color-1); font-size: 12px; }
 .usage-empty { padding: 44px 0; }
 .usage-list { display: grid; gap: 14px; }
 .usage-card { border: 1px solid var(--td-component-border); border-radius: 16px; padding: 22px; background: var(--td-bg-color-container); box-shadow: 0 6px 24px rgba(16, 46, 36, .035); animation: usage-enter .45s cubic-bezier(.22, 1, .36, 1) both; }
-.usage-card__header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
-.usage-card__header h4, .pricing-section h4 { margin: 0; font-size: '15px'px; }
-.usage-card__header span, .pricing-section p, .cache-grid p { color: var(--td-text-color-secondary); font-size: '12px'px; margin: 4px 0 0; }
+.usage-card__header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.usage-card__header h4, .pricing-section h4 { margin: 0; font-size: 15px; }
+.usage-card__header span, .pricing-section p, .cache-grid p { color: var(--td-text-color-secondary); font-size: 12px; margin: 4px 0 0; }
+.usage-card__header > div { min-width: 0; }
 .usage-card__header h4 { overflow-wrap: anywhere; }
 .usage-card__cost { display: grid; gap: 4px; text-align: right; }
-.usage-card__cost strong { color: var(--td-brand-color); font-size: '22px'px; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
-.usage-card__cost small { font-size: '11px'px; color: var(--td-text-color-secondary); }
+.usage-card__cost strong { overflow-wrap: anywhere; color: var(--td-brand-color); font-size: 22px; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.usage-card__cost small { font-size: 11px; color: var(--td-text-color-secondary); }
 .usage-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
-.usage-metrics div, .cache-grid section { padding: 10px 12px; border-radius: 8px; background: var(--td-bg-color-secondarycontainer); }
-.usage-metrics span { display: block; color: var(--td-text-color-secondary); font-size: '12px'px; }
-.usage-metrics strong { display: block; margin-top: 5px; font-size: '20px'px; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.usage-metrics div, .cache-grid section { min-width: 0; overflow-wrap: anywhere; padding: 10px 12px; border-radius: 8px; background: var(--td-bg-color-secondarycontainer); }
+.usage-metrics span { display: block; color: var(--td-text-color-secondary); font-size: 12px; }
+.usage-metrics strong { display: block; margin-top: 5px; font-size: 20px; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
 .cache-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-.cache-grid h5 { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; font-size: '12px'px; color: var(--td-text-color-secondary); }
-.cache-grid strong { font-size: '20px'px; }
+.cache-grid h5 { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; font-size: 12px; color: var(--td-text-color-secondary); }
+.cache-grid strong { font-size: 20px; }
 .cache-grid progress { display: block; width: 100%; height: 6px; margin-top: 10px; accent-color: var(--td-brand-color); }
 .pricing-section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--td-component-stroke); }
-.pricing-section summary { cursor: pointer; font-weight: 600; font-size: '14px'px; }
+.pricing-section summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 .pricing-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
 .pricing-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
 .price-history { margin-top: 12px; border-top: 1px solid var(--td-component-stroke); }
-.price-version { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: '12px'px; border-bottom: 1px solid var(--td-component-stroke); }
-.call-status { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 16px 0 0; padding: 0; font-size: '12px'px; }
+.price-version { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 12px; border-bottom: 1px solid var(--td-component-stroke); }
+.call-status { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 16px 0 0; padding: 0; font-size: 12px; }
 .call-status > div { display: flex; gap: 7px; }
 .call-status dt { color: var(--td-text-color-secondary); }
 .call-status dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: 600; }
 .cache-pricing-fields { margin: 22px 0 0; padding: 16px; border: 1px solid var(--td-component-stroke); border-radius: 10px; }
-.cache-pricing-fields legend { padding: 0 6px; font-size: '13px'px; font-weight: 600; }
+.cache-pricing-fields legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
 .cache-price-history { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); flex-basis: 100%; gap: 10px; margin: 0; color: var(--td-text-color-secondary); }
 .cache-price-history dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; color: var(--td-text-color-primary); }
 @media (max-width: 540px) { .usage-card { padding: 16px; } .cache-price-history { grid-template-columns: 1fr; } }
-.usage-empty, .usage-loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 120px; color: var(--td-text-color-secondary); font-size: '13px'px; }
+.usage-empty, .usage-loading { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 120px; color: var(--td-text-color-secondary); font-size: 13px; }
 .usage-empty { flex-direction: column; }
 .icon-spinning { animation: icon-spin 1s linear infinite; }
 @keyframes icon-spin { to { transform: rotate(360deg); } }
@@ -385,8 +386,8 @@ const formatCosts = (costs: ModelCostTotal[]) => costs?.length
 .model-usage-drawer .t-drawer__content-wrapper { max-width: 100vw; }
 .model-usage-drawer { --td-brand-color: #087b59; --td-brand-color-1: #e9f5ef; }
 .model-usage-drawer .setting-drawer__header-block { padding: 6px 0; }
-.model-usage-drawer .setting-drawer__title { font-size: '25px'px; letter-spacing: -.04em; }
+.model-usage-drawer .setting-drawer__title { font-size: 25px; letter-spacing: -.04em; }
 .model-usage-drawer .setting-drawer__header-icon { background: #e9f5ef; color: #087b59; }
-@media (max-width: 540px) { .model-usage-drawer .setting-drawer__title { font-size: '20px'px; } }
+@media (max-width: 540px) { .model-usage-drawer .setting-drawer__title { font-size: 20px; } }
 @media (prefers-reduced-motion: reduce) { .model-usage-drawer .t-drawer__content-wrapper, .model-usage-drawer .t-drawer__mask { transition: none !important; animation: none !important; } }
 </style>

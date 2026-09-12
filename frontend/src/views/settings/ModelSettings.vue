@@ -880,12 +880,15 @@ onMounted(() => {
 
 .section-header__top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
 }
 
+.section-header__top > div:first-child { flex: 1 1 240px; min-width: 0; }
 .section-header__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.section-header__actions :deep(.t-button) { flex-shrink: 0; }
 
 .model-test-trigger {
   --td-bg-color-container-hover: transparent;
@@ -970,7 +973,7 @@ onMounted(() => {
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 12px;
 
   .model-card--add {
