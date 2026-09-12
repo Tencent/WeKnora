@@ -55,6 +55,9 @@ export interface ListAuditLogParams {
   action?: AuditAction
   outcome?: AuditOutcome
   actor?: string
+  // Case-insensitive match against structured audit details, including
+  // sanitized interactive-terminal commands.
+  search?: string
 }
 
 /**
@@ -75,6 +78,7 @@ export async function listAuditLog(
   if (params.action) qs.append('action', params.action)
   if (params.outcome) qs.append('outcome', params.outcome)
   if (params.actor) qs.append('actor', params.actor)
+  if (params.search) qs.append('search', params.search)
   const tail = qs.toString()
   const url = `/api/v1/tenants/${tenantId}/audit-log${tail ? '?' + tail : ''}`
   return (await get(url)) as unknown as ListAuditLogResponse

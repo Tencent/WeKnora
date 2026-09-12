@@ -21,6 +21,7 @@ const TENANT_MEMBER_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
   'rbac.invitation_declined': 'Invitation declined',
   'rbac.invitation_revoked': 'Invitation revoked',
   'rbac.invitation_expired': 'Invitation expired',
+  'sandbox.terminal_command': 'Terminal command completed',
 }
 
 const SYSTEM_GLOBAL_AUDIT_ACTION_LABELS_EN: Record<string, string> = {

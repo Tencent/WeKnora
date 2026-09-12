@@ -6942,7 +6942,8 @@ export default {
     },
     audit: {
       tabLabel: 'Audit log',
-      description: 'Records every membership change and access denial in this workspace. Newest first. Repeated denials within a minute are deduplicated.',
+      description: 'Records workspace security events, membership changes, and sanitized terminal commands. Newest first. Repeated denials within a minute are deduplicated.',
+      searchPlaceholder: 'Search command details',
       refresh: 'Refresh',
       end: 'End of log.',
       empty: 'No audit events yet.',
@@ -6967,7 +6968,8 @@ export default {
         'rbac.invitation_accepted': 'Invitation accepted',
         'rbac.invitation_declined': 'Invitation declined',
         'rbac.invitation_revoked': 'Invitation revoked',
-        'rbac.invitation_expired': 'Invitation expired'
+        'rbac.invitation_expired': 'Invitation expired',
+        'sandbox.terminal_command': 'Terminal command completed'
       },
       outcome: {
         success: 'Success',

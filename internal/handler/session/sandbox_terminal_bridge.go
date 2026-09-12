@@ -37,6 +37,11 @@ type terminalBridge struct {
 	// this one capability, and holding the handler would give it the whole
 	// dependency graph (and make watchAuth untestable).
 	authCheck func(context.Context) error
+	// auditFilter removes authenticated shell-integration markers from the
+	// provider stream. auditRecorder persists the sanitized commands without
+	// blocking raw PTY forwarding.
+	auditFilter   *terminalAuditMarkerFilter
+	auditRecorder *terminalAuditRecorder
 
 	// writeMu serialises writes: the output pump streams PTY bytes while
 	// control frames (ready/error/exited) come from the pump goroutines.
@@ -78,6 +83,9 @@ func (b *terminalBridge) run() {
 	b.pumpInput()
 	b.teardownWith("client_disconnected")
 	<-done
+	if b.auditRecorder != nil {
+		b.auditRecorder.Close()
+	}
 }
 
 // sendControl writes one JSON control frame. Safe for concurrent use.
@@ -108,6 +116,7 @@ func (b *terminalBridge) pumpOutput(done chan struct{}) {
 	for event := range b.terminal.Session.Output() {
 		switch {
 		case event.Err != nil:
+			b.flushTerminalAuditOutput()
 			logger.Warnf(b.ctx, "[sandbox-terminal] stream error session=%s: %v",
 				b.session, event.Err)
 			b.sendControl(terminalControlFrame{
@@ -118,24 +127,45 @@ func (b *terminalBridge) pumpOutput(done chan struct{}) {
 			b.teardownWith("stream_error")
 			return
 		case event.Exited:
+			b.flushTerminalAuditOutput()
 			code := event.ExitCode
 			b.sendControl(terminalControlFrame{Type: "exited", ExitCode: &code})
 			b.teardownWith("shell_exited")
 			return
 		case len(event.Data) > 0:
 			b.touchActivity()
-			b.writeMu.Lock()
-			_ = b.conn.SetWriteDeadline(time.Now().Add(terminalWriteTimeout))
-			if err := b.conn.WriteMessage(websocket.BinaryMessage, event.Data); err != nil {
-				b.writeMu.Unlock()
-				logger.Debugf(b.ctx, "[sandbox-terminal] output write failed session=%s: %v",
-					b.session, err)
-				b.teardownWith("output_write_failed")
+			data := event.Data
+			if b.auditFilter != nil {
+				data = b.auditFilter.Consume(data)
+			}
+			if !b.writeTerminalOutput(data) {
 				return
 			}
-			b.writeMu.Unlock()
 		}
 	}
+	b.flushTerminalAuditOutput()
+}
+
+func (b *terminalBridge) flushTerminalAuditOutput() {
+	if b.auditFilter != nil {
+		b.writeTerminalOutput(b.auditFilter.Flush())
+	}
+}
+
+func (b *terminalBridge) writeTerminalOutput(data []byte) bool {
+	if len(data) == 0 {
+		return true
+	}
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
+	_ = b.conn.SetWriteDeadline(time.Now().Add(terminalWriteTimeout))
+	if err := b.conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
+		logger.Debugf(b.ctx, "[sandbox-terminal] output write failed session=%s: %v",
+			b.session, err)
+		b.teardownWith("output_write_failed")
+		return false
+	}
+	return true
 }
 
 // pumpInput reads browser frames until the connection dies: binary frames
