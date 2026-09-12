@@ -4038,6 +4038,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   for (const n of graphNodes) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
+    g.dataset.slug = n.slug
 
     const r = nodeRadius(n)
 

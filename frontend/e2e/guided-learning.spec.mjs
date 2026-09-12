@@ -512,6 +512,33 @@ for (const [name, viewport] of [['desktop', DESKTOP], ['mobile', MOBILE]]) test(
   });
 });
 
+test('desktop: graph selection remains the active learning page after switching to Wiki', async () => {
+  await scenario('desktop-graph-to-wiki', 'learner_a', DESKTOP, async app => {
+    await openWiki(app, '', 'graph');
+    await ensureEnabled(app);
+    await waitUntil(app, async () =>
+      (await app.page.locator('.wiki-graph-canvas title').allTextContents())
+        .some(title => title.split('\n')[0] === TITLES[1]), 'target graph node');
+    await click(app, app.page.locator(`.wiki-graph-canvas g[data-slug="${SLUGS[1]}"]`), 'graph-target');
+    await waitUntil(app, async () =>
+      new URL(app.page.url()).searchParams.get('slug') === SLUGS[1], 'graph slug route');
+    const drawer = app.page.locator('.wiki-graph-drawer');
+    await drawer.locator('.t-drawer__header').filter({ hasText: TITLES[1] }).waitFor();
+    await snapshot(app, 'before-close-graph-drawer');
+    await app.page.keyboard.press('Escape');
+    await drawer.waitFor({ state: 'hidden' });
+    await click(app, app.page.locator('.breadcrumb-tab').filter({ hasText: 'Wiki' }).first(), 'wiki-tab');
+    await waitUntil(app, async () =>
+      (await app.page.locator('.wiki-reader-title').innerText()).trim() === TITLES[1], 'matching Wiki reader');
+    const route = new URL(app.page.url());
+    check(app, route.searchParams.get('tab') === 'wiki' && route.searchParams.get('slug') === SLUGS[1],
+      'Graph selection keeps the same slug when entering the Wiki reader');
+    check(app, await app.page.locator('.learning-practice').count() === 1,
+      'Learning panel remains scoped to the selected page');
+    await shot(app, 'selected-page');
+  });
+});
+
 test('real incomplete evidence: rejection/disabled controls, no answers or forced completion', async t => {
   await scenario('real-evidence-gate', 'learner_a', DESKTOP, async app => {
     await openWiki(app); await ensureEnabled(app);
