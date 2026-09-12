@@ -39,7 +39,8 @@ func TestTenantMessageReadsKeepForwardOwnershipAndParentMetadata(t *testing.T) {
 				{"message_id":"original","upper_message_id":"inner","parent_id":"outside",
 				 "chat_id":"source_chat","create_time":"123456","sender":{"id":"ou_author"},"msg_type":"post",
 				 "body":{"content":"{\"content\":[[{\"tag\":\"text\",\"text\":\"A\"},`+
-				`{\"tag\":\"img\",\"image_key\":\"image_from_outer\"},{\"tag\":\"text\",\"text\":\"B\"}]]}"}},
+				`{\"tag\":\"img\",\"image_key\":\"image_from_outer\"},{\"tag\":\"text\",\"text\":\"B\"},`+
+				`{\"tag\":\"a\",\"text\":\"plan\",\"href\":\"https://example.com/?v=1&literal=&amp;&q=%2f#part\"}]]}"}},
 				{"message_id":"card","upper_message_id":"outer","parent_id":"original",
 				 "msg_type":"interactive","body":{"content":"{}"}},
 				{"message_id":"broken","upper_message_id":"outer","parent_id":"original",
@@ -81,6 +82,13 @@ func TestTenantMessageReadsKeepForwardOwnershipAndParentMetadata(t *testing.T) {
 		items[4].Unavailable == "" ||
 		items[4].ParentID != "original" {
 		t.Fatal("empty card or malformed body lost legal parent metadata")
+	}
+	var text strings.Builder
+	for _, part := range items[2].Parts {
+		text.WriteString(part.Text)
+	}
+	if text.String() != "ABplan（https://example.com/?v=1&literal=&amp;&q=%2f#part）\n" {
+		t.Fatalf("message read lost the link or its position: %q", text.String())
 	}
 	part := items[2].Parts[1]
 	resource := &im.IncomingMessage{
@@ -166,6 +174,129 @@ func TestCurrentMaterialTextMatchesValidatedQuery(t *testing.T) {
 	}
 	if msg.Content != "question" || text.String() != msg.Content {
 		t.Fatal("material kept unbounded whitespace excluded from current-input validation")
+	}
+}
+
+func TestPostLinksPreserveURLInCurrentTextAndMaterials(t *testing.T) {
+	const address = "https://example.com/im-link-check?case=LINK-POST-8461&v=1#details"
+	const question = "请不要打开网页，只返回“查看方案”对应的完整链接地址；如果没有收到地址，请明确说明。"
+	key, id, name := "@_user_2", "ou_other", "Alice"
+	mentions := []*larkim.MentionEvent{{Key: &key, Id: &larkim.UserId{OpenId: &id}, Name: &name}}
+	for _, tc := range []struct {
+		name     string
+		elements []postElement
+		want     string
+	}{
+		{"live baseline", []postElement{{Tag: "a", Text: "查看方案", Href: address}}, "查看方案（" + address + "）"},
+		{"same label", []postElement{{Tag: "a", Text: address, Href: address}}, address},
+		{"no label", []postElement{{Tag: "a", Href: address}}, address},
+		{"no address", []postElement{{Tag: "a", Text: "查看方案"}}, "查看方案"},
+		{"empty", []postElement{{Tag: "a"}}, ""},
+		{
+			"raw address",
+			[]postElement{{
+				Tag: "a", Text: "原值", Href: "https://example.com/(Plan)?q=%26%2f&literal=&amp;&owner=@_user_2#片段",
+			}},
+			"原值（https://example.com/(Plan)?q=%26%2f&literal=&amp;&owner=@_user_2#片段）",
+		},
+		{
+			"label changed before deduplication",
+			[]postElement{{
+				Tag: "a", Text: "https://example.com/@_user_2", Href: "https://example.com/@_user_2",
+			}},
+			"https://example.com/@Alice（https://example.com/@_user_2）",
+		},
+		{"repeated labels and targets", []postElement{
+			{Tag: "text", Text: "先看 "},
+			{Tag: "a", Text: "方案", Href: "https://example.com/a"},
+			{Tag: "text", Text: "，再看 "},
+			{Tag: "a", Text: "方案", Href: "https://example.com/b"},
+			{Tag: "text", Text: "，重复 "},
+			{Tag: "a", Text: "方案", Href: "https://example.com/a"},
+		}, "先看 方案（https://example.com/a），再看 方案（https://example.com/b），重复 方案（https://example.com/a）"},
+	} {
+		for _, region := range []Region{RegionFeishu, RegionLark} {
+			for _, format := range []string{"content", "content_v2", "both", "locale"} {
+				t.Run(tc.name+"/"+string(region.Platform)+"/"+format, func(t *testing.T) {
+					rows := [][]postElement{tc.elements, {{Tag: "text", Text: question}}}
+					body := postBody{Title: "INK-POST-8461", Content: rows}
+					if format == "content_v2" || format == "both" {
+						body.ContentV2 = rows
+						body.Content = nil
+						if format == "both" {
+							body.Content = rows
+						}
+					}
+					var payload any = body
+					if format == "locale" {
+						payload = map[string]postBody{"zh_cn": body}
+					}
+					raw, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					a := &Adapter{region: region}
+					msg, err := a.parseIncoming(t.Context(), &feishuMessage{
+						MessageType: "post", Content: string(raw), Mentions: mentions,
+					}, "sender", "")
+					if err != nil || msg == nil || msg.Material == nil {
+						t.Fatalf("post missing: msg=%+v err=%v", msg, err)
+					}
+					want := "INK-POST-8461\n" + tc.want + "\n" + question
+					var materialText strings.Builder
+					for _, part := range msg.Material.Parts {
+						materialText.WriteString(part.Text)
+					}
+					if msg.Content != want || materialText.String() != want {
+						t.Fatalf("link content lost or changed: query=%q material=%q want=%q",
+							msg.Content, materialText.String(), want)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestPostLinkTargetsDoNotAuthorizeMentionsOrAlterCommands(t *testing.T) {
+	key, bot := "@_user_1", "ou_bot"
+	const target = "https://example.com/@_user_1?command=/clear"
+	for _, label := range []string{"", "查看方案", "/stop later"} {
+		for _, realMention := range []bool{false, true} {
+			row := []postElement{{Tag: "a", Text: label, Href: target}}
+			if realMention {
+				row = append([]postElement{{Tag: "at", UserID: bot}}, row...)
+			}
+			raw, err := json.Marshal(postBody{Content: [][]postElement{row}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a := &Adapter{region: RegionFeishu, botOpenID: bot}
+			msg, err := a.parseIncoming(t.Context(), &feishuMessage{
+				MessageType: "post", ChatType: "group", Content: string(raw),
+				Mentions: []*larkim.MentionEvent{{Key: &key, Id: &larkim.UserId{OpenId: &bot}}},
+			}, "sender", "")
+			if err != nil || (msg != nil) != realMention {
+				t.Fatalf("URL changed group authorization: label=%q mention=%t msg=%+v err=%v",
+					label, realMention, msg, err)
+			}
+			if msg == nil {
+				continue
+			}
+			var materialText strings.Builder
+			for _, part := range msg.Material.Parts {
+				materialText.WriteString(part.Text)
+			}
+			if !strings.Contains(materialText.String(), target) {
+				t.Fatal("URL was replaced as a mention")
+			}
+			if label == "/stop later" {
+				if msg.Content != label || msg.SkipCommand {
+					t.Fatalf("URL changed the current command: %+v", msg)
+				}
+			} else if msg.Content != materialText.String() || msg.SkipCommand {
+				t.Fatal("non-command query differs from its validated material text")
+			}
+		}
 	}
 }
 

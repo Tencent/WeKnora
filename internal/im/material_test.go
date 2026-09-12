@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"reflect"
@@ -1057,6 +1058,84 @@ func TestPlainPostDoesNotInventSupplementalMaterials(t *testing.T) {
 	}
 }
 
+func TestPostLinkWorkerPreservesCurrentAndReferencedURLs(t *testing.T) {
+	const address = "https://example.com/?v=1&literal=&amp;&q=%2f#part"
+	const linkText = "查看方案（" + address + "）"
+	for _, source := range []string{"current", "reference", "forward"} {
+		t.Run(source, func(t *testing.T) {
+			a := newMaterialTestAdapter()
+			sessions := &materialSessionService{order: a.order}
+			messages := &materialMessageService{}
+			service := &Service{
+				sessionService: sessions, messageService: messages, streamManager: &fullOutputStreamManager{},
+			}
+			query := "请返回方案的完整地址，不要打开网页。"
+			root := materialText("current", query)
+			post := materialText("post", linkText)
+			post.Type = "post"
+			switch source {
+			case "current":
+				query = linkText + "\n" + query
+				root = materialText("current", query)
+				root.Type = "post"
+			case "reference":
+				root.ParentID = "post"
+				a.messages["post"] = []*MessageMaterial{post}
+			case "forward":
+				root.ParentID = "forward"
+				post.UpperMessageID, post.ResourceMessageID = "forward", "forward"
+				a.messages["forward"] = []*MessageMaterial{{MessageID: "forward", Type: "merge_forward"}, post}
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			service.executeQARequest(&qaRequest{
+				ctx: ctx, cancel: cancel, msg: &IncomingMessage{Content: query, Material: root},
+				session: &types.Session{ID: "session"}, adapter: a,
+				channel: &IMChannel{OutputMode: "full"}, userKey: "user",
+			})
+			if sessions.req == nil || sessions.inspection == nil || sessions.req.Query != query ||
+				sessions.inspection.Query != query || sessions.inspection.QuotedContext != "" {
+				t.Fatal("link handling changed the current task or classified reference content")
+			}
+			wantStored := query
+			if source == "current" {
+				if sessions.req.QuotedContext != "" || sessions.req.RewriteContext != "" {
+					t.Fatal("plain post link was treated as supplemental material")
+				}
+			} else {
+				wantStored = "查看方案（https://example.com/?v=1&amp;literal=&amp;amp;&amp;q=%2f#part）"
+				if !strings.Contains(sessions.req.QuotedContext, wantStored) ||
+					!strings.Contains(html.UnescapeString(sessions.req.QuotedContext), linkText) ||
+					sessions.req.RewriteContext != sessions.req.QuotedContext {
+					t.Fatal("reference URL lost its value or existing escaping")
+				}
+			}
+			if len(messages.messages) != 2 || !strings.Contains(messages.messages[0].Content, wantStored) ||
+				!messages.messages[1].IsCompleted || len(a.downloads) != 0 ||
+				strings.Count(strings.Join(a.order.snapshot(), ","), "qa") != 1 {
+				t.Fatal("link lost its saved content, caused a download or changed the QA lifecycle")
+			}
+		})
+	}
+}
+
+func TestPostLinksShareReferenceTextBudget(t *testing.T) {
+	const link = "方案（https://example.com/?v=1&v=2#details）"
+	for _, extra := range []int{0, 1} {
+		a := newMaterialTestAdapter()
+		root := materialText("current", "CURRENT-QUESTION")
+		root.ParentID = "post"
+		a.messages["post"] = []*MessageMaterial{{MessageID: "post", Type: "post", Parts: []MaterialPart{
+			{Text: strings.Repeat("x", maxIMAttachmentContentBytes-len(link)+extra)}, {Text: link},
+		}}}
+		prepared := (&Service{}).prepareIMMaterials(t.Context(), &IncomingMessage{Material: root}, a)
+		if strings.Contains(prepared.context.String(), html.EscapeString(link)) != (extra == 0) ||
+			(len(prepared.warnings) > 0) != (extra > 0) ||
+			!strings.Contains(prepared.context.String(), "CURRENT-QUESTION") {
+			t.Fatal("link bypassed the shared budget or displaced the current question")
+		}
+	}
+}
+
 // WeCom EndStream can deliver the buffered final answer after FinalizeStream
 // failed. A new plain reply would then duplicate that answer.
 type materialRecoveryAdapter struct {
@@ -1185,10 +1264,15 @@ func TestFeishuCurrentInputLengthBoundary(t *testing.T) {
 					channels:    map[string]*channelState{"channel": {Adapter: a, Channel: &IMChannel{}}},
 					cmdRegistry: NewCommandRegistry(), rateLimiter: limiter, rateLimitMax: 1,
 				}
-				content := strings.Repeat("中", size)
+				const link = "查看方案（https://example.com/?v=1&literal=&amp;#part）"
+				padding := strings.Repeat("中", size-utf8.RuneCountInString(link))
+				content := padding + link
 				msg := &IncomingMessage{
 					Platform: platform, UserID: "user", Content: content,
-					Material: materialText("current", content),
+					Material: &MessageMaterial{
+						MessageID: "current", Type: "post",
+						Parts: []MaterialPart{{Text: padding}, {Text: link}},
+					},
 				}
 				if err := service.HandleMessage(t.Context(), msg, "channel"); err != nil {
 					t.Fatal(err)

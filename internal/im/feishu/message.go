@@ -140,7 +140,7 @@ func parseMaterialBody(
 			material.Parts = append(material.Parts, im.MaterialPart{Text: value})
 		}
 	}
-	appendVisibleText := func(value string) {
+	appendVisibleText := func(value string) string {
 		value = mentionPlaceholder.ReplaceAllStringFunc(value, func(key string) string {
 			for _, mention := range mentions {
 				if mention.key != key {
@@ -158,10 +158,11 @@ func parseMaterialBody(
 			return key
 		})
 		appendPart(value)
+		return value
 	}
-	appendText := func(value string) {
+	appendText := func(value string) string {
 		commandText.WriteString(value)
-		appendVisibleText(value)
+		return appendVisibleText(value)
 	}
 	switch material.Type {
 	case "text":
@@ -240,10 +241,15 @@ func parseMaterialBody(
 				case "md", "code_block":
 					appendVisibleText(element.Text)
 				case "a":
-					if element.Text == "" {
-						appendVisibleText(element.Href)
-					} else {
-						appendText(element.Text)
+					label := appendText(element.Text)
+					// URLs are data, never commands or mention placeholders. Deduplicate
+					// against the rendered label, which mention replacement may change.
+					if element.Href != "" && element.Href != label {
+						if label == "" {
+							appendPart(element.Href)
+						} else {
+							appendPart("（" + element.Href + "）")
+						}
 					}
 				case "at":
 					id := element.UserID
