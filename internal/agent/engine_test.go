@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -14,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -988,6 +993,81 @@ func TestFeishuFinalSynthesisRestoresCompactedOriginals(t *testing.T) {
 		}
 		require.Equal(t, engine.materialImages, images)
 		require.Equal(t, retained, messages[1].Images, "synthesis must not mutate the live transcript")
+	}
+}
+
+func TestFeishuFinalSynthesisImageRejectionAfterCompaction(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	images := []string{"data:image/png;base64,YQ==", "data:image/png;base64,Yg=="}
+	for _, retained := range []int{0, 1} {
+		for _, rejectImages := range []bool{false, true} {
+			t.Run(fmt.Sprintf("retained=%d/reject=%t", retained, rejectImages), func(t *testing.T) {
+				var calls atomic.Int32
+				requests := make(chan string, 2)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					body, _ := io.ReadAll(r.Body)
+					requests <- string(body)
+					if calls.Add(1) == 1 && rejectImages {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = io.WriteString(w,
+							`{"error":{"message":"image unsupported","type":"invalid_request_error"}}`)
+						return
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},"+
+						"\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+				}))
+				defer server.Close()
+				model, err := chat.NewRemoteAPIChat(&chat.ChatConfig{
+					BaseURL: server.URL, ModelName: "test-model", APIKey: "test-key",
+				})
+				require.NoError(t, err)
+				engine := newTestEngine(t, model)
+				engine.materialImages = images
+				attachments := types.MessageAttachments{
+					{IsImage: true, ImageIndex: 1}, {IsImage: true, ImageIndex: 2},
+				}
+				conversation := compaction.Apply([]chat.Message{
+					{Role: "system", Content: "runtime policy"},
+					{Role: "user", Content: "compare images" + attachments.BuildPrompt(2), Images: images},
+				}, &compaction.Preparation{FirstKeptIdx: 2, IsSplitTurn: true}, "text-only summary")
+				if retained > 0 {
+					conversation = append(conversation, chat.Message{
+						Role: "user", Content: attachments[:retained].BuildPrompt(retained), Images: images[:retained],
+					})
+				}
+				var emitted strings.Builder
+				engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+					emitted.WriteString(evt.Data.(event.AgentFinalAnswerData).Content)
+					return nil
+				})
+				state := &types.AgentState{}
+				require.NoError(t, engine.streamFinalAnswerToEventBus(
+					t.Context(), "compare images", state, "session", conversation,
+				))
+				first := <-requests
+				for _, image := range images {
+					require.Equal(t, 1, strings.Count(first, image), "originals must be sent once")
+				}
+				if rejectImages {
+					require.EqualValues(t, 2, calls.Load())
+					retry := <-requests
+					require.NotContains(t, retry, "image_url")
+					require.NotContains(t, retry, types.IMImageAvailablePrompt)
+					require.NotContains(t, retry, "original images from the current Feishu request are attached")
+					require.Contains(t, retry, types.IMImageUnavailablePrompt)
+					require.Contains(t, state.FinalAnswer, "本轮原图未能被模型读取")
+					require.True(t, strings.HasSuffix(state.FinalAnswer, "answer"))
+				} else {
+					require.EqualValues(t, 1, calls.Load())
+					require.Equal(t, "answer", state.FinalAnswer)
+				}
+				require.Equal(t, state.FinalAnswer, emitted.String())
+				require.Empty(t, conversation[1].Images, "the stored summary must remain text-only")
+			})
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -45,16 +46,15 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	})
 	// Split-turn compaction can remove the original user image message.
 	finalMessage := &messages[len(messages)-1]
-	for _, image := range e.materialImages {
+	for index, image := range e.materialImages {
 		if !slices.ContainsFunc(conversation, func(message chat.Message) bool {
 			return slices.Contains(message.Images, image)
 		}) {
 			finalMessage.Images = append(finalMessage.Images, image)
+			// Use the marker that text-only retries invalidate along with the image.
+			finalMessage.Content += fmt.Sprintf("\n<image index=\"%d\">%s</image>",
+				index+1, types.IMImageAvailablePrompt)
 		}
-	}
-	if len(finalMessage.Images) > 0 {
-		finalMessage.Content += "\n\nAdditional original images from the current Feishu request are attached here; " +
-			"earlier text-only summaries did not include these originals."
 	}
 
 	// Generate a single ID for this entire final answer stream
