@@ -87,6 +87,7 @@ export function getMcpToolDisplayType(toolName?: string): 'mcp_discovery' | 'mcp
 }
 
 export function mcpToolResultOutput(event: { tool_name?: string; output?: string; error?: string }): string | undefined {
+  if (!getMcpToolDisplayType(event.tool_name)) return event.output
   return event.output || event.error
 }
 
