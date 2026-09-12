@@ -58,6 +58,8 @@ rag=json.loads((p/'rag/manifest.json').read_text())
 fault=json.loads((p/'fault/fault-results.json').read_text())
 assert gold['commit']==commit and gold['regression']['passed']
 assert rag['status']==fault['status']=='passed'
+assert rag['source_commit']==commit
+assert all(case['detail']['experiment']['code']['commit_id']==commit for case in fault['cases'])
 assert rag['paid_provider_requests']==fault['paid_provider_requests']==0
 assert [r['attempts'].get('embedding',0) for r in rag['rounds']]==[25,0]
 assert all(r['attempts']['chat']==20 for r in rag['rounds'])

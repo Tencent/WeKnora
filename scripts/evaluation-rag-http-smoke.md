@@ -39,3 +39,5 @@ flowchart LR
 供应商的向量使用固定字符二元组散列，回答使用题目的固定参考答案。用量和人民币价格均为测试定义。生成指标验证计算与存储链路，检索指标描述此固定向量夹具的结果；这些数值不构成真实供应商质量、性能或费用结论。全部模型请求均发送到回环地址，API 密钥为代码内的占位字符串。服务进程使用新生成的认证密钥和显式环境配置，输出记录遮蔽登录凭据。
 
 SQLite 索引清理在同一事务内删除向量、全文索引和元数据。全文索引为空时执行 `delete-all`，使相同语料完整重建具有相同的 BM25（Best Matching 25，最佳匹配 25）统计。存在其他知识库全文记录时保留全部剩余记录；部分删除时的累计统计遵循 SQLite 的 contentless-delete 语义。本回归核验独立数据库中的完整语料重建。
+
+The default build requires a clean committed checkout and explicitly embeds its full commit and product version. Each persisted experiment must report that same commit. An explicitly supplied `--server-binary` must embed a full source commit; unidentifiable binaries fail the regression. Controlled mutation evidence must separately preserve the exact patch and source hashes.

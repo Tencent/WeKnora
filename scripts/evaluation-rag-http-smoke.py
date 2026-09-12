@@ -166,11 +166,21 @@ class Regression:
         self.corpus = json.loads(raw)
         assert len(self.corpus['questions']) == 20 and len(self.corpus['passages']) == 24
         self.binary = args.server_binary.resolve() if args.server_binary else self.output / 'weknora-server'
+        source_commit = None
         if not args.server_binary:
-            subprocess.run(['go', 'build', '-tags', 'sqlite_fts5', '-o', str(self.binary), './cmd/server'],
-                           cwd=ROOT, check=True, timeout=900)
+            source_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
+            assert re.fullmatch(r'[0-9a-f]{40}', source_commit), 'A full source commit is required'
+            assert not subprocess.check_output(
+                ['git', 'status', '--porcelain', '--untracked-files=no'], cwd=ROOT, text=True).strip(), (
+                    'Build the regression server from a clean committed checkout')
+            version = (ROOT / 'VERSION').read_text().strip()
+            assert re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', version)
+            flags = ('-X github.com/Tencent/WeKnora/internal/buildinfo.CommitID=' + source_commit +
+                     ' -X github.com/Tencent/WeKnora/internal/buildinfo.Version=' + version)
+            subprocess.run(['go', 'build', '-tags', 'sqlite_fts5', '-ldflags', flags,
+                            '-o', str(self.binary), './cmd/server'], cwd=ROOT, check=True, timeout=900)
         assert self.binary.is_file()
-        self.manifest = {'mode': 'offline-fixture', 'corpus_sha256': digest(raw), 'question_count': 20,
+        self.manifest = {'mode': 'offline-fixture', 'source_commit': source_commit, 'corpus_sha256': digest(raw), 'question_count': 20,
                          'passage_count': 24, 'server_sha256': digest(self.binary.read_bytes()),
                          'script_sha256': digest(Path(__file__).read_bytes()), 'embedding_dimension': DIMENSION,
                          'chunking': {'strategy': 'dataset_passage', 'one_passage_per_chunk': True},
@@ -305,6 +315,11 @@ class Regression:
         dump(self.output / f'round-{number}-detail.json', detail)
         assert detail['task']['status'] == 2, detail['task']
         assert detail['task']['finished'] == detail['task']['total'] == 20
+        runtime_commit = detail['experiment']['code']['commit_id']
+        assert re.fullmatch(r'[0-9a-f]{40}', runtime_commit), 'Runtime experiment source identity is missing'
+        if self.manifest['source_commit'] is not None:
+            assert runtime_commit == self.manifest['source_commit'], 'Runtime source differs from build checkout'
+        self.manifest['source_commit'] = runtime_commit
         assert detail['experiment']['configuration']['chunking'] == self.manifest['chunking']
         questions, _ = self.request('question results', 'GET',
             f'/api/v1/evaluation/tasks/{task_id}/questions?page_size=500')
