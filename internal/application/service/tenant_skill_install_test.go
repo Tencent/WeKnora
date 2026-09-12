@@ -612,7 +612,10 @@ func TestBuildInstallPromptAsksForADeclarationWithoutValues(t *testing.T) {
 		"a value the model invents would be stored as the workspace credential")
 	require.Contains(t, prompt, "WEKNORA_API_KEY",
 		"the installer must be told credential names are declarable, or it writes {\"env\":[]}")
-	require.Contains(t, prompt, "On-demand / optional extras MUST be installed now")
+	require.Contains(t, prompt, "install exactly that lock")
+	require.Contains(t, prompt, "Do NOT upgrade or replace locked versions afterward")
+	require.Contains(t, prompt, "Install optional extras only when")
+	require.NotContains(t, prompt, "On-demand / optional extras MUST be installed now")
 	require.Contains(t, prompt, "uv venv --seed")
 	require.Contains(t, prompt, "install_deps.py")
 	require.Contains(t, prompt, "write_skill_file",
