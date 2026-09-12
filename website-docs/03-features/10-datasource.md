@@ -22,7 +22,7 @@
 
 ## 选择连接器
 
-飞书、Lark、Notion 和语雀用于同步协作文档，GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
+飞书、Lark、Notion、语雀和 Outline 用于同步协作文档，GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
 
 ## 检查变更与失败
 
@@ -34,19 +34,19 @@
 
 #### 连接器能力对比
 
-| | Feishu / Lark | Notion | Yuque（语雀） | RSS / Atom |
-| --- | --- | --- | --- | --- |
-| 源码目录 | `internal/datasource/connector/feishu/` | `connector/notion/` | `connector/yuque/` | `connector/rss/` |
-| 类型标识 | `feishu` / `lark` | `notion` | `yuque` | `rss` |
-| 认证方式 | 企业自建应用 `app_id` + `app_secret`（tenant_access_token） | Internal Integration Token（`api_key`） | 个人/团队 Token（`api_token`，`X-Auth-Token` 头） | 无认证或自定义请求头（`auth_headers`） |
-| 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings |
-| 资源模型 | Wiki 空间 → 节点树（懒加载，`spaceID:nodeToken` 复合 ID） | 页面/数据库全量树（一次返回带 parent 关系） | 知识库（book/repo）扁平列表 | 每个 feed URL 一个资源（扁平） |
-| 内容格式 | 导出 API → `.docx`/`.xlsx` 文件；drive 文件原样下载 | Block → Markdown；数据库转 Markdown 表格；附件下载 | `body` Markdown 原文（`.md`） | Readability 全文抽取 → HTML→Markdown |
-| 增量机制 | 按内容 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 |
-| 删除检测 | 支持（游标中有、当前树没有 → `IsDeleted`；部分列举失败时跳过删除检测） | 支持（区分"源端已删"与"用户取消勾选"，后者不报删除） | 支持 | 不支持（feed 天然滚动淘汰旧条目） |
-| 流式可恢复同步 | 是（`StreamingConnector`，每 50 节点或 30 秒 checkpoint） | 否 | 否 | 否 |
-| 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — |
-| 部分失败 | 单文档失败生成带错误 metadata 的占位条目，继续同步 | 单页失败记日志跳过 | 单文档失败生成占位条目 | 单 feed 失败 → `PartialFetchError`；全部失败才算 fail |
+| | Feishu / Lark | Notion | Yuque（语雀） | RSS / Atom | Outline |
+| --- | --- | --- | --- | --- | --- |
+| 源码目录 | `internal/datasource/connector/feishu/` | `connector/notion/` | `connector/yuque/` | `connector/rss/` | `connector/outline/` |
+| 类型标识 | `feishu` / `lark` | `notion` | `yuque` | `rss` | `outline` |
+| 认证方式 | 企业自建应用 `app_id` + `app_secret`（tenant_access_token） | Internal Integration Token（`api_key`） | 个人/团队 Token（`api_token`，`X-Auth-Token` 头） | 无认证或自定义请求头（`auth_headers`） | API Token（`api_token`，`Authorization: Bearer` 头） |
+| 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings | `api_token`、`base_url`（私有化部署必填，公有云留空） |
+| 资源模型 | Wiki 空间 → 节点树（懒加载，`spaceID:nodeToken` 复合 ID） | 页面/数据库全量树（一次返回带 parent 关系） | 知识库（book/repo）扁平列表 | 每个 feed URL 一个资源（扁平） | 集合（collection）扁平列表；集合内嵌套文档一并同步 |
+| 内容格式 | 导出 API → `.docx`/`.xlsx` 文件；drive 文件原样下载 | Block → Markdown；数据库转 Markdown 表格；附件下载 | `body` Markdown 原文（`.md`） | Readability 全文抽取 → HTML→Markdown | `documents.list` 直接返回 `text` Markdown 原文；附件图片转 base64 data URI 内联 |
+| 增量机制 | 按内容 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 | 按文档 `revision` 比对（cursor: `CollectionDocRevisions`） |
+| 删除检测 | 支持（游标中有、当前树没有 → `IsDeleted`；部分列举失败时跳过删除检测） | 支持（区分"源端已删"与"用户取消勾选"，后者不报删除） | 支持 | 不支持（feed 天然滚动淘汰旧条目） | 支持（游标中有、当前列表没有 → `IsDeleted`；回收站与归档文档同样不在列表中） |
+| 流式可恢复同步 | 是（`StreamingConnector`，每 50 节点或 30 秒 checkpoint） | 否 | 否 | 否 | 否 |
+| 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试一次 |
+| 部分失败 | 单文档失败生成带错误 metadata 的占位条目，继续同步 | 单页失败记日志跳过 | 单文档失败生成占位条目 | 单 feed 失败 → `PartialFetchError`；全部失败才算 fail | 单张图片下载失败保留原链接并告警，文档正文照常入库 |
 
 #### Feishu / Lark（`connector/feishu/`）
 
@@ -101,6 +101,20 @@
 - **资源列举**：`GET /api/v2/user` 判断 token 身份——`type=="Group"` 为团队 token，直接列团队 repo；否则列个人 repo + 已加入 group 的 repo（用户未加入任何 group 时语雀返回 404，按空处理）。输出扁平的 `book` 资源列表，按 ExternalID 稳定排序。
 - **抓取**（`walk`，全量/增量共用）：`ListBookDocs` 列文档 → 过滤 `type != "Doc"`（跳过 Sheet/Thread/Board/Table）与 `status != "1"`（跳过草稿）→ 每次 `GetDocDetail` 之间 sleep 300ms 规避限流 → `format` 为 `markdown`/`lake` 时取 `body` Markdown 原文入库（其他格式如 html 防御性跳过并记 `skip_reason`）。
 - **增量逻辑**：游标 `yuqueCursor.BookDocTimes`（`bookID → docID → content_updated_at`），一致则跳过。删除检测：游标里有、当前列表没有 → `IsDeleted`。
+
+#### Outline（`connector/outline/`）
+
+Outline（getoutline.com，支持公有云与私有化部署）以集合（collection）为同步单位，集合内的嵌套文档一并同步。
+
+- **认证**：`Authorization: Bearer <api_token>`，令牌在 Outline 的 Settings → API Tokens 创建。所有 RPC 端点均为 POST JSON。私有化部署需填写 `base_url`，该值经 `ValidateConnectorBaseURL` 做 SSRF 校验。
+- **资源列举**：`POST /api/collections.list` 返回扁平集合列表，无层级，因此 `ResolveResourceAncestors` 返回空。
+- **内容抓取**：`POST /api/documents.list` 的响应里已包含每篇文档的完整 Markdown（`text` 字段），所以一轮分页既完成列举也完成取文，无需逐篇调用 `documents.info`。
+- **图片**：这是本连接器与其他连接器差别最大的一处。Outline 的附件地址 `/api/attachments.redirect?id=<uuid>` **需要 API Token** 才能访问，而入库侧的 `ImageResolver.ResolveRemoteImages` 是**匿名**下载 http(s) 图片的（不带鉴权头），因此把原链接直接透传过去必然 401，图片静默丢失。连接器改为：用 Token 下载附件，转成 `data:image/...;base64,...` 内联进 Markdown，交给 `ResolveDataURIImages` 落存储并改写为 `resource://<handle>`。选择内联而非把图片拆成独立知识条目，是为了让图片继续通过 `parent_chunk_id` 归属于原文档——这正是飞书连接器放弃 blocks 拆分路径、默认改走导出 `.docx` 的原因（见 `connector/feishu/core/shared.go` 中 `FEISHU_DOCX_PARSE_MODE` 的注释）。
+- **图片相关约束**：单篇最多内联 30 张（对齐 `ImageResolver.maxRemoteImages`），单张上限 9MB（低于 `maxRemoteImageSize` 的 10MB），超限或下载失败的图片保留原链接并打告警，不会删除正文。仅当目标知识库启用了多模态（`DataSourceConfig.MultimodalEnabled`）时才下载图片——未启用时图片无法入库，下载只会白白膨胀上传体积。另外，重写出的 Markdown 必须是 `![alt](data:...)` 且 data URI 后不能再跟 `"title"`：`imgMarkdownDataURI` 会把右括号前的内容全部当作 payload，残留的标题会让 base64 解码失败、图片被丢弃，因此 Outline 的链接标题被提升为 alt 文本。
+- **增量逻辑**：游标 `outlineCursor.CollectionDocRevisions`（`collectionID → documentID → revision`）。Outline 的 `revision` 只在正文或标题变更时递增，比 `updatedAt` 更贴近"内容是否变了"。删除检测：游标里有、当前列表没有 → `IsDeleted`；回收站与归档中的文档同样不出现在列表里，因此两种情况都能覆盖。
+- **跳过的内容**：模板（`templateId` 非空）、已删除与已归档文档。
+- **文本清理**：Outline 序列化空段落/硬换行时会留下整行只有 `\` 或字面量 `
+` 的噪声（在一个 1123 篇文档的实例上测得 687 行与 1463 个 token，分布在 15 个集合中的 13 个）。连接器只在**整行仅由这些 token 组成**时删除该行，并跳过 fenced code block 内部，因此行内的合法转义（`\[`、`\]`、`\*`）与代码示例不受影响。标题层级与正文结构保持原样，不做任何美化改写。
 
 #### RSS / Atom（`connector/rss/`）
 

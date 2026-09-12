@@ -586,6 +586,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOutline: 'Outline',
     channelUpload: 'Upload',
     channelManual: 'Manual',
     channelUrl: 'Web',
@@ -6408,7 +6409,8 @@ export default {
       yuque: 'Yuque',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      outline: 'Outline',
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -6419,7 +6421,8 @@ export default {
       yuque: 'Sync documents from Yuque knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      gitlab: 'Sync files from GitLab projects'
+      gitlab: 'Sync files from GitLab projects',
+      outline: 'Sync documents from Outline collections (cloud or self-hosted)',
     },
     drive: {
       folderTokenLabel: 'Drive folder token',
@@ -6484,6 +6487,12 @@ export default {
     prereqStep3Brief_lark_drive: 'Configure app permissions',
     prereqStep3Desc_lark_drive: 'Enable drive:drive:readonly, drive:export:readonly, docx:document:readonly permissions',
     prereqOpenConsole_yuque: 'Open Yuque Token settings',
+    prereqBarText_outline: 'First time? Click to see the Outline token setup guide',
+    prereqStep1Brief_outline: 'Create an Outline API token',
+    prereqStep1Desc_outline: 'Open Outline -> Settings -> API Tokens -> New token, and copy it once: it is shown only at creation',
+    prereqStep2Brief_outline: '(Optional) Enter the Base URL for a self-hosted instance',
+    prereqStep2Desc_outline: 'Leave empty for the public cloud; for a self-hosted instance enter its origin, e.g. https://docs.example.com',
+    prereqOpenConsole_outline: 'Open Outline API token settings',
     prereqBarText_ima: 'First time? Click to see the Tencent IMA OpenAPI setup guide',
     prereqStep1Brief_ima: 'Enable IMA agent OpenAPI access',
     prereqStep1Desc_ima: 'Sign in to https://ima.qq.com/agent-interface and apply for OpenAPI access',
@@ -6516,7 +6525,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
-      book: 'Yuque Book'
+      book: 'Yuque Book',
+      collection: 'Outline Collection'
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',

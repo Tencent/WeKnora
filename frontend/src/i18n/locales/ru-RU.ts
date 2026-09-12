@@ -764,6 +764,12 @@ export default {
     prereqStep3Brief_yuque: '(Опционально) Для Enterprise укажите Base URL',
     prereqStep3Desc_yuque: 'Пользователям публичного облака указывать не нужно. Для Yuque Enterprise или приватного развёртывания укажите корпоративный домен',
     prereqOpenConsole_yuque: 'Перейти к настройкам Yuque Token',
+    prereqBarText_outline: 'Первый раз? Откройте инструкцию по настройке токена Outline',
+    prereqStep1Brief_outline: 'Создайте API-токен Outline',
+    prereqStep1Desc_outline: 'Outline → Settings → API Tokens → New token. Токен показывается только при создании — скопируйте его сразу',
+    prereqStep2Brief_outline: '(Необязательно) Укажите Base URL для self-hosted',
+    prereqStep2Desc_outline: 'Для облака оставьте пустым; для self-hosted укажите адрес экземпляра, например https://docs.example.com',
+    prereqOpenConsole_outline: 'Открыть настройки API-токенов Outline',
     prereqBarText_ima: 'В первый раз? Нажмите, чтобы увидеть руководство по настройке Tencent IMA OpenAPI',
     prereqStep1Brief_ima: 'Включите доступ к IMA agent OpenAPI',
     prereqStep1Desc_ima: 'Войдите на https://ima.qq.com/agent-interface и подайте заявку на доступ к OpenAPI',
@@ -818,7 +824,8 @@ export default {
     resourceType: {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
-      book: 'База знаний Yuque'
+      book: 'База знаний Yuque',
+      collection: 'Коллекция Outline'
     },
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
@@ -850,7 +857,8 @@ export default {
       yuque: 'Синхронизация документов из баз знаний Yuque',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
-      gitlab: 'Синхронизация файлов из проектов GitLab'
+      gitlab: 'Синхронизация файлов из проектов GitLab',
+      outline: 'Синхронизация документов из коллекций Outline (облако или self-hosted)',
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -861,7 +869,8 @@ export default {
       yuque: 'Yuque (Юйцюэ)',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      outline: 'Outline',
     },
     logDetail: {
       startTime: 'Время начала',
@@ -6552,6 +6561,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOutline: 'Outline',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',
