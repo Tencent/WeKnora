@@ -278,6 +278,12 @@ type Config struct {
 	DockerMemoryBytes int64
 	DockerPidsLimit   int64
 
+	// DockerCPUTimeLimit is a cumulative CPU-time budget for the whole
+	// container. DockerHardLifetime is an activity-independent wall-clock
+	// deadline. Zero disables the corresponding hard limit.
+	DockerCPUTimeLimit time.Duration
+	DockerHardLifetime time.Duration
+
 	// DockerNetworkMode is the Docker network every sandbox joins: "bridge" or
 	// "none". host, container: and named networks are rejected (see
 	// ValidateDockerNetworkMode). Empty means "bridge"; skills that install
@@ -414,6 +420,14 @@ func ValidateConfig(config *Config) error {
 
 	if config.MaxCPU < 0 {
 		return errors.New("CPU limit cannot be negative")
+	}
+
+	if config.DockerCPUTimeLimit < 0 {
+		return errors.New("docker CPU time limit cannot be negative")
+	}
+
+	if config.DockerHardLifetime < 0 {
+		return errors.New("docker hard lifetime cannot be negative")
 	}
 
 	return nil

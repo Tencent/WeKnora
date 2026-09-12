@@ -751,8 +751,12 @@ type DockerSandboxConfig struct {
 	TLSCertPath string `json:"tls_cert_path,omitempty"`
 
 	// CPULimit is the number of CPU cores one sandbox may use. 0 uses the
-	// built-in default.
+	// built-in default. This throttles CPU capacity; it is not a time budget.
 	CPULimit float64 `json:"cpu_limit,omitempty"`
+
+	// CPUTimeLimitSeconds is the cumulative CPU time a container may consume
+	// before WeKnora force-removes it. 0 disables this hard limit.
+	CPUTimeLimitSeconds int `json:"cpu_time_limit_seconds,omitempty"`
 
 	// MemoryLimitMB caps one sandbox's memory. 0 uses the built-in default.
 	MemoryLimitMB int `json:"memory_limit_mb,omitempty"`
@@ -776,6 +780,11 @@ type DockerSandboxConfig struct {
 	// is reclaimed. The daemon has no idle timeout of its own, so this is what
 	// stops an abandoned session from pinning host memory indefinitely.
 	IdleTTLSeconds int `json:"idle_ttl_seconds,omitempty"`
+
+	// HardLifetimeSeconds is the maximum age of a container regardless of
+	// activity. Unlike the idle TTL, reaching it always removes the sandbox.
+	// 0 disables this hard limit.
+	HardLifetimeSeconds int `json:"hard_lifetime_seconds,omitempty"`
 
 	// HTTPTimeoutSec bounds each Engine API call. 0 uses the built-in default.
 	HTTPTimeoutSec int `json:"http_timeout_sec,omitempty"`

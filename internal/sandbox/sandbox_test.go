@@ -59,6 +59,22 @@ func TestValidateConfig(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "negative docker CPU time limit",
+			config: &Config{
+				Type:               SandboxTypeDocker,
+				DockerCPUTimeLimit: -time.Second,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative docker hard lifetime",
+			config: &Config{
+				Type:               SandboxTypeDocker,
+				DockerHardLifetime: -time.Second,
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {

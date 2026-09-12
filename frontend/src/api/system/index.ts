@@ -788,11 +788,13 @@ export interface SandboxDockerConfig {
   host?: string
   tls_cert_path?: string
   cpu_limit?: number
+  cpu_time_limit_seconds?: number
   memory_limit_mb?: number
   pids_limit?: number
   network_mode?: string
   runtime?: string
   idle_ttl_seconds?: number
+  hard_lifetime_seconds?: number
   http_timeout_sec?: number
 }
 
