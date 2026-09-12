@@ -69,6 +69,46 @@ func TestEvaluationStoragePersistsAcrossInstances(t *testing.T) {
 	require.Equal(t, 1.0, loaded.Metric.RetrievalMetrics.Recall)
 }
 
+func TestEvaluationStorageReconcilesWorkersLostOnRestart(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "evaluation-recovery.db")), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&evaluationRecord{}, &evaluationModelCallRecord{}))
+	storage := newEvaluationStorage(db)
+	startedAt := time.Date(2026, time.September, 12, 8, 0, 0, 0, time.UTC)
+	for _, item := range []struct {
+		id     string
+		status types.EvaluationStatue
+	}{
+		{id: "pending", status: types.EvaluationStatuePending},
+		{id: "running", status: types.EvaluationStatueRunning},
+		{id: "complete", status: types.EvaluationStatueSuccess},
+	} {
+		require.NoError(t, storage.register(context.Background(), &types.EvaluationDetail{
+			Task: &types.EvaluationTask{
+				ID: item.id, TenantID: 7, DatasetID: "dataset",
+				StartTime: startedAt, Status: item.status,
+			},
+			Params: &types.ChatManage{},
+		}))
+	}
+
+	finishedAt := startedAt.Add(90 * time.Second)
+	recovered, err := storage.reconcileInterrupted(context.Background(), finishedAt)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, recovered)
+	for _, id := range []string{"pending", "running"} {
+		loaded, loadErr := storage.get(context.Background(), id)
+		require.NoError(t, loadErr)
+		require.Equal(t, types.EvaluationStatueFailed, loaded.Task.Status)
+		require.Equal(t, evaluationInterruptedMessage, loaded.Task.ErrMsg)
+		require.Equal(t, &finishedAt, loaded.Task.EndTime)
+		require.EqualValues(t, 90_000, loaded.Task.DurationMS)
+	}
+	complete, err := storage.get(context.Background(), "complete")
+	require.NoError(t, err)
+	require.Equal(t, types.EvaluationStatueSuccess, complete.Task.Status)
+}
+
 func TestModelUsagePreservesCostsForMultipleModels(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "model-usage.db")), &gorm.Config{})
 	require.NoError(t, err)

@@ -52,6 +52,12 @@ func NewEvaluationService(
 	modelService interfaces.ModelService,
 	db *gorm.DB,
 ) interfaces.EvaluationService {
+	storage := newEvaluationStorage(db)
+	if recovered, err := storage.reconcileInterrupted(context.Background(), time.Now().UTC()); err != nil {
+		logger.Errorf(context.Background(), "Failed to reconcile interrupted evaluations: %v", err)
+	} else if recovered > 0 {
+		logger.Infof(context.Background(), "Marked %d interrupted evaluations as failed", recovered)
+	}
 	return &EvaluationService{
 		config:               config,
 		dataset:              dataset,
@@ -59,7 +65,7 @@ func NewEvaluationService(
 		knowledgeService:     knowledgeService,
 		sessionService:       sessionService,
 		modelService:         modelService,
-		evaluationStorage:    newEvaluationStorage(db),
+		evaluationStorage:    storage,
 	}
 }
 
@@ -203,6 +209,43 @@ func (e *evaluationStorage) update(
 		return err
 	}
 	return e.db.WithContext(ctx).Save(record).Error
+}
+
+const evaluationInterruptedMessage = "evaluation interrupted by application restart"
+
+// reconcileInterrupted closes durable tasks whose in-process worker was lost
+// when the previous server stopped. Evaluation workers are not replayable, so
+// reporting an explicit failure is safer than leaving an endless pending row.
+func (e *evaluationStorage) reconcileInterrupted(ctx context.Context, finishedAt time.Time) (int64, error) {
+	if e == nil || e.db == nil {
+		return 0, nil
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	var records []evaluationRecord
+	if err := e.db.WithContext(ctx).
+		Where("status IN ?", []types.EvaluationStatue{
+			types.EvaluationStatuePending, types.EvaluationStatueRunning,
+		}).Find(&records).Error; err != nil {
+		return 0, err
+	}
+	for i := range records {
+		durationMS := finishedAt.Sub(records[i].StartedAt).Milliseconds()
+		if durationMS < 0 {
+			durationMS = 0
+		}
+		if err := e.db.WithContext(ctx).Model(&evaluationRecord{}).
+			Where("id = ? AND status IN ?", records[i].ID, []types.EvaluationStatue{
+				types.EvaluationStatuePending, types.EvaluationStatueRunning,
+			}).Updates(map[string]interface{}{
+			"status": types.EvaluationStatueFailed, "err_msg": evaluationInterruptedMessage,
+			"finished_at": finishedAt, "duration_ms": durationMS,
+		}).Error; err != nil {
+			return int64(i), err
+		}
+	}
+	return int64(len(records)), nil
 }
 
 func evaluationDetailToRecord(detail *types.EvaluationDetail) (*evaluationRecord, error) {
@@ -899,12 +942,26 @@ func snapshotEvaluationModel(role string, model *types.Model) types.EvaluationMo
 		Dimensions           int               `json:"dimensions"`
 		TruncatePromptTokens int               `json:"truncate_prompt_tokens"`
 		InterfaceType        string            `json:"interface_type"`
+		BaseURL              string            `json:"base_url"`
+		ParameterSize        string            `json:"parameter_size"`
+		ExtraConfig          map[string]string `json:"extra_config,omitempty"`
+		SupportsVision       bool              `json:"supports_vision"`
+		ContextWindow        int               `json:"context_window"`
+		MaxOutputTokens      int               `json:"max_output_tokens"`
+		MaxConcurrency       int               `json:"max_concurrency"`
 	}{
 		Name: model.Name, Type: model.Type, Source: model.Source,
 		Provider:             model.Parameters.Provider,
 		Dimensions:           model.Parameters.EmbeddingParameters.Dimension,
 		TruncatePromptTokens: model.Parameters.EmbeddingParameters.TruncatePromptTokens,
 		InterfaceType:        model.Parameters.InterfaceType,
+		BaseURL:              model.Parameters.BaseURL,
+		ParameterSize:        model.Parameters.ParameterSize,
+		ExtraConfig:          nonSecretEvaluationModelConfig(model.Parameters.ExtraConfig),
+		SupportsVision:       model.Parameters.SupportsVision,
+		ContextWindow:        model.Parameters.ContextWindow,
+		MaxOutputTokens:      model.Parameters.MaxOutputTokens,
+		MaxConcurrency:       model.Parameters.MaxConcurrency,
 	}
 	encoded, _ := json.Marshal(config)
 	return types.EvaluationModelSnapshot{
@@ -913,6 +970,24 @@ func snapshotEvaluationModel(role string, model *types.Model) types.EvaluationMo
 		Dimensions:        model.Parameters.EmbeddingParameters.Dimension,
 		ConfigFingerprint: fmt.Sprintf("sha256:%x", sha256.Sum256(encoded)), UpdatedAt: model.UpdatedAt,
 	}
+}
+
+func nonSecretEvaluationModelConfig(config map[string]string) map[string]string {
+	filtered := make(map[string]string, len(config))
+	for key, value := range config {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		compact := strings.NewReplacer("_", "", "-", "", ".", "").Replace(normalized)
+		if strings.Contains(normalized, "secret") || strings.Contains(normalized, "password") ||
+			strings.Contains(normalized, "token") || strings.Contains(normalized, "credential") ||
+			strings.Contains(compact, "apikey") || strings.Contains(normalized, "authorization") {
+			continue
+		}
+		filtered[key] = value
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 func evaluationCodeVersion() string {

@@ -73,10 +73,10 @@ func (p *EmbeddingCachePersistence) Stop() {
 
 func (p *EmbeddingCachePersistence) Get(
 	ctx context.Context, keys []string, now time.Time,
-) (map[string][]float32, error) {
+) (map[string]embedding.PersistentCacheEntry, error) {
 	tenantID, ok := types.TenantIDFromContext(ctx)
 	if !ok || tenantID == 0 || len(keys) == 0 {
-		return map[string][]float32{}, nil
+		return map[string]embedding.PersistentCacheEntry{}, nil
 	}
 	var records []embeddingCacheRecord
 	if err := p.db.WithContext(ctx).
@@ -84,13 +84,15 @@ func (p *EmbeddingCachePersistence) Get(
 		Find(&records).Error; err != nil {
 		return nil, err
 	}
-	result := make(map[string][]float32, len(records))
+	result := make(map[string]embedding.PersistentCacheEntry, len(records))
 	for _, record := range records {
 		vector, err := decodeEmbeddingVector(record.Vector)
 		if err != nil {
 			continue
 		}
-		result[record.CacheKey] = vector
+		result[record.CacheKey] = embedding.PersistentCacheEntry{
+			Vector: vector, ExpiresAt: record.ExpiresAt,
+		}
 	}
 	return result, nil
 }

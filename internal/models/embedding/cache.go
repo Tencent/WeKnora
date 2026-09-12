@@ -37,8 +37,13 @@ type embeddingCacheEntry struct {
 
 // PersistentCache stores only tenant-scoped hash keys and vectors; raw input
 // text is never exposed to the backend.
+type PersistentCacheEntry struct {
+	Vector    []float32
+	ExpiresAt time.Time
+}
+
 type PersistentCache interface {
-	Get(ctx context.Context, keys []string, now time.Time) (map[string][]float32, error)
+	Get(ctx context.Context, keys []string, now time.Time) (map[string]PersistentCacheEntry, error)
 	Put(ctx context.Context, modelID string, vectors map[string][]float32, expiresAt time.Time) error
 }
 
@@ -144,10 +149,10 @@ func (c *cachedEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 	if backend := c.persistentBackend(ctx); backend != nil {
 		vectors, err := backend.Get(ctx, []string{key}, c.now())
 		if err == nil {
-			if vector, ok := vectors[key]; ok {
-				c.store.put(key, vector, c.now().Add(c.options.ttl), c.options.maxEntries)
+			if entry, ok := vectors[key]; ok {
+				c.store.put(key, entry.Vector, entry.ExpiresAt, c.options.maxEntries)
 				c.observeCache(ctx, 1, 1, 0, 0)
-				return cloneVector(vector), nil
+				return cloneVector(entry.Vector), nil
 			}
 		}
 	}
@@ -220,15 +225,15 @@ func (c *cachedEmbedder) batchEmbed(
 		if persisted, err := backend.Get(ctx, keys, now); err == nil && len(persisted) > 0 {
 			remaining := misses[:0]
 			for _, item := range misses {
-				vector, ok := persisted[item.key]
+				entry, ok := persisted[item.key]
 				if !ok {
 					remaining = append(remaining, item)
 					continue
 				}
-				c.store.put(item.key, vector, now.Add(c.options.ttl), c.options.maxEntries)
+				c.store.put(item.key, entry.Vector, entry.ExpiresAt, c.options.maxEntries)
 				hitCount += len(item.indices)
 				for _, resultIndex := range item.indices {
-					results[resultIndex] = cloneVector(vector)
+					results[resultIndex] = cloneVector(entry.Vector)
 				}
 			}
 			misses = remaining
@@ -280,7 +285,13 @@ func (c *cachedEmbedder) observeCache(
 
 func (c *cachedEmbedder) key(ctx context.Context, text string) string {
 	tenantID, _ := types.TenantIDFromContext(ctx)
-	digest := sha256.Sum256([]byte(strconv.FormatUint(tenantID, 10) + "\x00" + c.namespace + "\x00" + text))
+	mode := "passage"
+	if isQuery, _ := ctx.Value(types.EmbedQueryContextKey).(bool); isQuery {
+		mode = "query"
+	}
+	digest := sha256.Sum256([]byte(
+		strconv.FormatUint(tenantID, 10) + "\x00" + c.namespace + "\x00" + mode + "\x00" + text,
+	))
 	return hex.EncodeToString(digest[:])
 }
 

@@ -19,8 +19,9 @@ type cacheTestEmbedder struct {
 }
 
 type cacheTestPersistentBackend struct {
-	mu      sync.Mutex
-	vectors map[string][]float32
+	mu        sync.Mutex
+	vectors   map[string][]float32
+	expiresAt map[string]time.Time
 }
 
 type cacheObservationCollector struct {
@@ -34,32 +35,40 @@ func (c *cacheObservationCollector) ObserveEmbeddingCache(observation types.Embe
 }
 
 func (b *cacheTestPersistentBackend) Get(
-	_ context.Context, keys []string, _ time.Time,
-) (map[string][]float32, error) {
+	_ context.Context, keys []string, now time.Time,
+) (map[string]PersistentCacheEntry, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	result := make(map[string][]float32)
+	result := make(map[string]PersistentCacheEntry)
 	for _, key := range keys {
-		if vector, ok := b.vectors[key]; ok {
-			result[key] = cloneVector(vector)
+		if vector, ok := b.vectors[key]; ok && now.Before(b.expiresAt[key]) {
+			result[key] = PersistentCacheEntry{
+				Vector: cloneVector(vector), ExpiresAt: b.expiresAt[key],
+			}
 		}
 	}
 	return result, nil
 }
 
 func (b *cacheTestPersistentBackend) Put(
-	_ context.Context, _ string, vectors map[string][]float32, _ time.Time,
+	_ context.Context, _ string, vectors map[string][]float32, expiresAt time.Time,
 ) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.expiresAt == nil {
+		b.expiresAt = make(map[string]time.Time)
+	}
 	for key, vector := range vectors {
 		b.vectors[key] = cloneVector(vector)
+		b.expiresAt[key] = expiresAt
 	}
 	return nil
 }
 
 func TestCachedEmbedderReusesPersistentTenantEntryAcrossInstances(t *testing.T) {
-	backend := &cacheTestPersistentBackend{vectors: make(map[string][]float32)}
+	backend := &cacheTestPersistentBackend{
+		vectors: make(map[string][]float32), expiresAt: make(map[string]time.Time),
+	}
 	SetPersistentCache(backend)
 	t.Cleanup(func() { SetPersistentCache(nil) })
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(11))
@@ -81,6 +90,44 @@ func TestCachedEmbedderReusesPersistentTenantEntryAcrossInstances(t *testing.T) 
 	_, err = second.Embed(otherTenant, "same text")
 	require.NoError(t, err)
 	require.Equal(t, 1, secondInner.embedCalls)
+}
+
+func TestCachedEmbedderSeparatesQueryAndPassageKeys(t *testing.T) {
+	inner := &cacheTestEmbedder{modelID: t.Name()}
+	cached := newTestCachedEmbedder(inner)
+	passageCtx := context.Background()
+	queryCtx := context.WithValue(passageCtx, types.EmbedQueryContextKey, true)
+
+	_, err := cached.Embed(passageCtx, "same text")
+	require.NoError(t, err)
+	_, err = cached.Embed(queryCtx, "same text")
+	require.NoError(t, err)
+	_, err = cached.Embed(passageCtx, "same text")
+	require.NoError(t, err)
+	require.Equal(t, 2, inner.embedCalls)
+}
+
+func TestCachedEmbedderPreservesPersistentExpiry(t *testing.T) {
+	now := time.Date(2026, time.September, 12, 8, 0, 0, 0, time.UTC)
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(11))
+	inner := &cacheTestEmbedder{modelID: t.Name()}
+	cached := newTestCachedEmbedder(inner)
+	cached.now = func() time.Time { return now }
+	key := cached.key(ctx, "expires soon")
+	backend := &cacheTestPersistentBackend{
+		vectors:   map[string][]float32{key: cacheTestVector("persisted")},
+		expiresAt: map[string]time.Time{key: now.Add(time.Minute)},
+	}
+	SetPersistentCache(backend)
+	t.Cleanup(func() { SetPersistentCache(nil) })
+
+	_, err := cached.Embed(ctx, "expires soon")
+	require.NoError(t, err)
+	require.Zero(t, inner.embedCalls)
+	now = now.Add(2 * time.Minute)
+	_, err = cached.Embed(ctx, "expires soon")
+	require.NoError(t, err)
+	require.Equal(t, 1, inner.embedCalls)
 }
 
 func (e *cacheTestEmbedder) Embed(_ context.Context, text string) ([]float32, error) {

@@ -29,7 +29,11 @@ func TestSnapshotEvaluationModelExcludesCredentials(t *testing.T) {
 		Type: types.ModelTypeEmbedding, Source: types.ModelSourceRemote, UpdatedAt: updatedAt,
 		Parameters: types.ModelParameters{
 			APIKey: "secret-one", AppSecret: "secret-two", Provider: "openai",
-			CustomHeaders:       map[string]string{"Authorization": "secret-three"},
+			CustomHeaders: map[string]string{"Authorization": "secret-three"},
+			BaseURL:       "https://deployment-a.example/v1",
+			ExtraConfig: map[string]string{
+				"thinking_control": "enabled", "access_token": "secret-four",
+			},
 			EmbeddingParameters: types.EmbeddingParameters{Dimension: 1024, TruncatePromptTokens: 512},
 		},
 	}
@@ -43,4 +47,19 @@ func TestSnapshotEvaluationModelExcludesCredentials(t *testing.T) {
 	require.Equal(t, "embedding", first.Role)
 	require.Equal(t, 1024, first.Dimensions)
 	require.NotContains(t, first.ConfigFingerprint, "secret")
+
+	model.Parameters.BaseURL = "https://deployment-b.example/v1"
+	baseURLChanged := snapshotEvaluationModel("embedding", model)
+	require.NotEqual(t, first.ConfigFingerprint, baseURLChanged.ConfigFingerprint)
+	model.Parameters.BaseURL = "https://deployment-a.example/v1"
+	model.Parameters.ExtraConfig["thinking_control"] = "disabled"
+	extraConfigChanged := snapshotEvaluationModel("embedding", model)
+	require.NotEqual(t, first.ConfigFingerprint, extraConfigChanged.ConfigFingerprint)
+	model.Parameters.ExtraConfig["thinking_control"] = "enabled"
+	model.Parameters.ExtraConfig["access_token"] = "different-secret"
+	secretChanged := snapshotEvaluationModel("embedding", model)
+	require.Equal(t, first.ConfigFingerprint, secretChanged.ConfigFingerprint)
+	model.Parameters.ExtraConfig["apiKey"] = "different-again"
+	camelCaseSecretChanged := snapshotEvaluationModel("embedding", model)
+	require.Equal(t, first.ConfigFingerprint, camelCaseSecretChanged.ConfigFingerprint)
 }
