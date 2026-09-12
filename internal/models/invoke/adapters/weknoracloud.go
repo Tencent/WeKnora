@@ -145,6 +145,51 @@ func (a *weKnoraCloudAdapter) ParseRerankResponse(
 	return parseResultsEnvelopeRerank(status, header, body)
 }
 
+// --- rerank wire (v1 rerank/weknoracloud.go) ---
+
+const weKnoraCloudRerankTimeout = 60 * time.Second
+
+type weKnoraCloudRerankRequest struct {
+	Model     string   `json:"model"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+}
+
+func buildWeKnoraCloudRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
+	if ep.Credentials.AppID == "" {
+		return nil, fmt.Errorf("WeKnoraCloud reranker: AppID is required")
+	}
+	if ep.Credentials.AppSecret == "" {
+		return nil, fmt.Errorf("WeKnoraCloud reranker: AppSecret is required")
+	}
+	base := strings.TrimRight(ep.BaseURL, "/")
+	body := weKnoraCloudRerankRequest{
+		Model:     model,
+		Query:     opts.Query,
+		Documents: opts.Documents,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("weknoracloud reranker: marshal: %w", err)
+	}
+	requestID := uuid.NewString()
+	header := http.Header{}
+	header.Set("Content-Type", "application/json")
+	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(data)) {
+		header.Set(k, v)
+	}
+	return &invoke.Request{
+		Method:  http.MethodPost,
+		URL:     base + "/api/v1/rerank",
+		Header:  header,
+		Body:    data,
+		Timeout: weKnoraCloudRerankTimeout,
+		ProtectedHeaders: []string{
+			"X-Appid", "X-Api-Key", "X-Request-Id", "X-Timestamp", "X-Nonce", "X-Signature",
+		},
+	}, nil
+}
+
 // BuildEmbeddingRequest ports v1 NewWeKnoraCloudEmbedder + BatchEmbed: the
 // signed /api/v1/embeddings route. The wire model name is the config-level
 // remote_model_name override when set (the shared constructor folds it into

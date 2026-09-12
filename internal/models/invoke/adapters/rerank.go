@@ -1,13 +1,14 @@
 package adapters
 
-// rerank.go — P3 strangler: the rerank facet (design §6.2). Behavior ports of
-// v1 internal/models/rerank/*: the generic fallback (openai/generic/
-// siliconflow/qianfan/gpustack/azure — the de-facto Cohere-style /rerank
-// shape; OpenAI itself serves no rerank endpoint), the per-vendor wire deltas
-// (jina, zhipu, nvidia, aliyun DashScope) and the signed weknoracloud route.
-// LKEAP (Tencent TC3) and volcengine (IAM AK/SK) stay on their v1 SDK
-// clients for now — signature protocols are P5-class native work (task
-// ruling 2026-09-10); this file covers every non-signed vendor.
+// rerank.go — P3 strangler: the rerank facet (design §6.2). This file holds
+// the family machinery: the generic (Cohere-style) fallback shape
+// (openai/generic/siliconflow/qianfan/gpustack/azure — OpenAI itself serves
+// no rerank endpoint), the tolerant result parsing, the shared request
+// helper, and the composite adapters. Bespoke vendor wire lives in each
+// vendor's file — jina.go, zhipu.go, nvidia.go, aliyun.go, weknoracloud.go
+// (HMAC). LKEAP (Tencent TC3) and volcengine (IAM AK/SK) stay on their v1
+// SDK clients for now — signature protocols are P5-class native work (task
+// ruling 2026-09-10).
 //
 // Cross-vendor v1 conventions preserved here:
 //   - every v1 rerank client (except weknoracloud 60s / volcengine 30s) used
@@ -20,16 +21,10 @@ package adapters
 import (
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
-	"github.com/google/uuid"
 )
-
-const weKnoraCloudRerankTimeout = 60 * time.Second
 
 // genericRerankRequest mirrors the v1 fallback wire shape; field order tracks
 // the v1 struct for golden parity. additional_data was never populated by v1
@@ -134,173 +129,6 @@ func buildGenericRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOpt
 	return buildRerankRequestShared(base, ep, body, "/rerank")
 }
 
-// --- jina ---
-
-type jinaRerankRequest struct {
-	Model           string   `json:"model"`
-	Query           string   `json:"query"`
-	Documents       []string `json:"documents"`
-	TopN            int      `json:"top_n,omitempty"`
-	ReturnDocuments bool     `json:"return_documents,omitempty"`
-}
-
-func buildJinaRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
-	base := ep.BaseURL
-	if base == "" {
-		base = "https://api.jina.ai/v1"
-	}
-	body := jinaRerankRequest{
-		Model:           model,
-		Query:           opts.Query,
-		Documents:       opts.Documents,
-		ReturnDocuments: true, // v1 constant; top_n never set (0 → omitted)
-	}
-	return buildRerankRequestShared(base, ep, body, "/rerank")
-}
-
-// --- zhipu ---
-
-type zhipuRerankRequest struct {
-	Model           string   `json:"model"`
-	Query           string   `json:"query"`
-	Documents       []string `json:"documents"`
-	TopN            int      `json:"top_n,omitempty"`
-	ReturnDocuments bool     `json:"return_documents,omitempty"`
-	ReturnRawScores bool     `json:"return_raw_scores,omitempty"`
-}
-
-func buildZhipuRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
-	// v1 posts to the base URL DIRECTLY — the default base is the FULL
-	// endpoint (…/v4/rerank), not a host prefix.
-	base := ep.BaseURL
-	if base == "" {
-		base = "https://open.bigmodel.cn/api/paas/v4/rerank"
-	}
-	body := zhipuRerankRequest{
-		Model:           model,
-		Query:           opts.Query,
-		Documents:       opts.Documents,
-		TopN:            0, // v1: return all documents
-		ReturnDocuments: true,
-		ReturnRawScores: false,
-	}
-	return buildRerankRequestShared(base, ep, body, "")
-}
-
-// --- nvidia (query and passages are {text} objects; scores are logits under
-// "rankings") ---
-
-type nvidiaRerankDocument struct {
-	Text string `json:"text"`
-}
-
-type nvidiaRerankRequest struct {
-	Model    string                 `json:"model"`
-	Query    nvidiaRerankDocument   `json:"query"`
-	Passages []nvidiaRerankDocument `json:"passages"`
-}
-
-func buildNvidiaRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
-	// v1 posts to the base URL DIRECTLY (full endpoint …/reranking).
-	base := ep.BaseURL
-	if base == "" {
-		base = invoke.NvidiaRerankBaseURL
-	}
-	passages := make([]nvidiaRerankDocument, 0, len(opts.Documents))
-	for _, doc := range opts.Documents {
-		passages = append(passages, nvidiaRerankDocument{Text: doc})
-	}
-	body := nvidiaRerankRequest{
-		Model:    model,
-		Query:    nvidiaRerankDocument{Text: opts.Query},
-		Passages: passages,
-	}
-	return buildRerankRequestShared(base, ep, body, "")
-}
-
-// --- aliyun DashScope (the v1 base URL default is the FULL endpoint, not a
-// host prefix) ---
-
-type aliyunRerankRequest struct {
-	Model      string             `json:"model"`
-	Input      aliyunRerankInput  `json:"input"`
-	Parameters aliyunRerankParams `json:"parameters"`
-}
-
-type aliyunRerankInput struct {
-	Query     string   `json:"query"`
-	Documents []string `json:"documents"`
-}
-
-type aliyunRerankParams struct {
-	ReturnDocuments bool `json:"return_documents"`
-	TopN            int  `json:"top_n"`
-}
-
-const aliyunRerankEndpoint = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-
-func buildAliyunRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
-	base := ep.BaseURL
-	if base == "" {
-		base = aliyunRerankEndpoint
-	}
-	body := aliyunRerankRequest{
-		Model: model,
-		Input: aliyunRerankInput{
-			Query:     opts.Query,
-			Documents: opts.Documents,
-		},
-		Parameters: aliyunRerankParams{
-			ReturnDocuments: true,
-			TopN:            len(opts.Documents), // v1: return all documents
-		},
-	}
-	return buildRerankRequestShared(base, ep, body, "")
-}
-
-// --- weknoracloud (HMAC-signed /api/v1/rerank) ---
-
-type weKnoraCloudRerankRequest struct {
-	Model     string   `json:"model"`
-	Query     string   `json:"query"`
-	Documents []string `json:"documents"`
-}
-
-func buildWeKnoraCloudRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
-	if ep.Credentials.AppID == "" {
-		return nil, fmt.Errorf("WeKnoraCloud reranker: AppID is required")
-	}
-	if ep.Credentials.AppSecret == "" {
-		return nil, fmt.Errorf("WeKnoraCloud reranker: AppSecret is required")
-	}
-	base := strings.TrimRight(ep.BaseURL, "/")
-	body := weKnoraCloudRerankRequest{
-		Model:     model,
-		Query:     opts.Query,
-		Documents: opts.Documents,
-	}
-	data, err := json.Marshal(body)
-	if err != nil {
-		return nil, fmt.Errorf("weknoracloud reranker: marshal: %w", err)
-	}
-	requestID := uuid.NewString()
-	header := http.Header{}
-	header.Set("Content-Type", "application/json")
-	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(data)) {
-		header.Set(k, v)
-	}
-	return &invoke.Request{
-		Method:  http.MethodPost,
-		URL:     base + "/api/v1/rerank",
-		Header:  header,
-		Body:    data,
-		Timeout: weKnoraCloudRerankTimeout,
-		ProtectedHeaders: []string{
-			"X-Appid", "X-Api-Key", "X-Request-Id", "X-Timestamp", "X-Nonce", "X-Signature",
-		},
-	}, nil
-}
-
 // --- vendor spec + composites ---
 
 type rerankSpec struct {
@@ -317,53 +145,6 @@ func parseResultsEnvelopeRerank(_ int, _ http.Header, body []byte) (*invoke.Rera
 		return nil, err
 	}
 	return &invoke.RerankResponse{Results: results}, nil
-}
-
-// parseNvidiaRerank reads the rankings[] envelope and normalizes the raw
-// logit into a probability exactly as the v1 client did
-// (normalizeNvidiaLogit — downstream callers filter on 0-1 thresholds, so a
-// raw logit would break every threshold config; P3 review finding 1).
-func parseNvidiaRerank(_ int, _ http.Header, body []byte) (*invoke.RerankResponse, error) {
-	var resp struct {
-		Rankings []rankResultWire `json:"rankings"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
-	}
-	out := make([]invoke.RerankResult, 0, len(resp.Rankings))
-	for _, r := range resp.Rankings {
-		out = append(out, invoke.RerankResult{Index: r.Index, Score: sigmoid(r.Score)})
-	}
-	return &invoke.RerankResponse{Results: out}, nil
-}
-
-// sigmoid is the numerically-stable v1 normalizeNvidiaLogit (nvidia
-// reranker): raw reranker logit → (0,1) probability.
-func sigmoid(logit float64) float64 {
-	if logit >= 0 {
-		return 1 / (1 + math.Exp(-logit))
-	}
-	expLogit := math.Exp(logit)
-	return expLogit / (1 + expLogit)
-}
-
-// parseAliyunRerank unwraps the DashScope envelope: results live under
-// output.results (v1 AliyunRerankResponse), NOT at the top level — a
-// top-level parse silently returns zero results (P3 review finding 2).
-func parseAliyunRerank(_ int, _ http.Header, body []byte) (*invoke.RerankResponse, error) {
-	var resp struct {
-		Output struct {
-			Results []rankResultWire `json:"results"`
-		} `json:"output"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
-	}
-	out := make([]invoke.RerankResult, 0, len(resp.Output.Results))
-	for _, r := range resp.Output.Results {
-		out = append(out, invoke.RerankResult{Index: r.Index, Score: r.Score})
-	}
-	return &invoke.RerankResponse{Results: out}, nil
 }
 
 func rerankSpecFor(name invoke.ProviderName) rerankSpec {
@@ -447,36 +228,6 @@ func (a *openaiRerankOnlyAdapter) BuildRerankRequest(
 
 // ParseRerankResponse dispatches to the vendor parse.
 func (a *openaiRerankOnlyAdapter) ParseRerankResponse(
-	status int, header http.Header, body []byte,
-) (*invoke.RerankResponse, error) {
-	return a.rspec.parse(status, header, body)
-}
-
-// jinaRerankAdapter adds the rerank facet to the embedding-only jina adapter.
-type jinaRerankAdapter struct {
-	jinaEmbeddingAdapter
-	rspec rerankSpec
-}
-
-var _ invoke.RerankAdapter = (*jinaRerankAdapter)(nil)
-
-// Capabilities unions the embedding and rerank shards.
-func (a *jinaRerankAdapter) Capabilities() invoke.Capabilities {
-	return invoke.Capabilities{
-		Embedding: embeddingCapsFor(a.name),
-		Rerank:    rerankCapsFor(a.name),
-	}
-}
-
-// BuildRerankRequest dispatches to the vendor build.
-func (a *jinaRerankAdapter) BuildRerankRequest(
-	ep invoke.Endpoint, model string, opts *invoke.RerankOptions,
-) (*invoke.Request, error) {
-	return a.rspec.build(ep, model, opts)
-}
-
-// ParseRerankResponse dispatches to the vendor parse.
-func (a *jinaRerankAdapter) ParseRerankResponse(
 	status int, header http.Header, body []byte,
 ) (*invoke.RerankResponse, error) {
 	return a.rspec.parse(status, header, body)
