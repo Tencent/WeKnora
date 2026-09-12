@@ -491,8 +491,9 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 	must := make([]*qdrant.Condition, 0)
 	mustNot := make([]*qdrant.Condition, 0)
 
-	// Only retrieve enabled chunks
-	must = append(must, qdrant.NewMatchBool(fieldIsEnabled, true))
+	if !params.IncludeDisabled {
+		must = append(must, qdrant.NewMatchBool(fieldIsEnabled, true))
+	}
 
 	// KnowledgeBaseIDs and KnowledgeIDs use AND logic
 	// - If only KnowledgeBaseIDs: search entire knowledge bases

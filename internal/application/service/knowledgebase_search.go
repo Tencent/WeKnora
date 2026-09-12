@@ -243,6 +243,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 			"keyword_threshold":      params.KeywordThreshold,
 			"disable_vector_match":   params.DisableVectorMatch,
 			"disable_keywords_match": params.DisableKeywordsMatch,
+			"include_disabled":       params.IncludeDisabled,
 			"group_count":            len(groups),
 		},
 		Metadata: map[string]interface{}{
@@ -297,7 +298,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
 	}
 
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment, params.IncludeDisabled)
 }
 
 // normalizedMatchCount resolves the effective primary-match cap for a search.
@@ -436,6 +437,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 				KnowledgeIDs:     params.KnowledgeIDs,
 				TagIDs:           params.TagIDs,
 				KnowledgeType:    knowledgeType,
+				IncludeDisabled:  params.IncludeDisabled,
 			})
 		}
 
@@ -464,6 +466,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 			RetrieverType:    types.KeywordsRetrieverType,
 			KnowledgeIDs:     params.KnowledgeIDs,
 			TagIDs:           params.TagIDs,
+			IncludeDisabled:  params.IncludeDisabled,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}

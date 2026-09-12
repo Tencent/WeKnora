@@ -41,9 +41,7 @@ func fromParams(p types.RetrieveParams) *retrieveFilters {
 		TagIDs:              p.TagIDs,
 		ExcludeChunkIDs:     p.ExcludeChunkIDs,
 		ExcludeKnowledgeIDs: p.ExcludeKnowledgeIDs,
-		// IncludeDisabled stays false — set explicitly by admin callers
-		// only. Driver receives this from a typed field, not from
-		// AdditionalParams, so the contract is checked at compile time.
+		IncludeDisabled:     p.IncludeDisabled,
 	}
 }
 

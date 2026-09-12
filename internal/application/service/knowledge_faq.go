@@ -1006,6 +1006,7 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 					DisableKeywordsMatch: true,
 					TagIDs:               firstPriorityTagUUIDs,
 					OnlyRecommended:      req.OnlyRecommended,
+					IncludeDisabled:      req.IncludeDisabled,
 				}
 				firstResults, firstErr = s.kbService.HybridSearch(ctx, kbID, firstParams)
 			}()
@@ -1022,6 +1023,7 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 					DisableKeywordsMatch: true,
 					TagIDs:               secondPriorityTagUUIDs,
 					OnlyRecommended:      req.OnlyRecommended,
+					IncludeDisabled:      req.IncludeDisabled,
 				}
 				secondResults, secondErr = s.kbService.HybridSearch(ctx, kbID, secondParams)
 			}()
@@ -1058,6 +1060,7 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 			VectorThreshold:      req.VectorThreshold,
 			MatchCount:           req.MatchCount,
 			DisableKeywordsMatch: true,
+			IncludeDisabled:      req.IncludeDisabled,
 		}
 		var err error
 		searchResults, err = s.kbService.HybridSearch(ctx, kbID, searchParams)
@@ -1119,7 +1122,7 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 		if chunk.ChunkType != types.ChunkTypeFAQ {
 			continue
 		}
-		if !chunk.IsEnabled {
+		if !req.IncludeDisabled && !chunk.IsEnabled {
 			continue
 		}
 

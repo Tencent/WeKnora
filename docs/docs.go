@@ -4851,7 +4851,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "使用混合搜索在FAQ中搜索，支持两级优先级标签召回：first_priority_tag_ids优先级最高，second_priority_tag_ids次之",
+                "description": "使用向量搜索在FAQ中搜索，支持两级优先级标签召回；include_disabled仅供管理场景显式包含停用条目",
                 "consumes": [
                     "application/json"
                 ],
@@ -18895,6 +18895,10 @@ const docTemplate = `{
                     "items": {
                         "type": "integer"
                     }
+                },
+                "include_disabled": {
+                    "description": "是否同时返回停用条目，仅用于FAQ管理搜索",
+                    "type": "boolean"
                 },
                 "match_count": {
                     "type": "integer"

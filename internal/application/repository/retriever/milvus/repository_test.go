@@ -3,10 +3,24 @@ package milvus
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBaseFilterIncludesDisabledOnlyWhenRequested(t *testing.T) {
+	repo := &milvusRepository{}
+
+	defaultFilter, _, err := repo.getBaseFilterForQuery(types.RetrieveParams{})
+	require.NoError(t, err)
+	require.Contains(t, defaultFilter, fieldIsEnabled)
+
+	adminFilter, _, err := repo.getBaseFilterForQuery(types.RetrieveParams{IncludeDisabled: true})
+	require.NoError(t, err)
+	require.False(t, strings.Contains(adminFilter, fieldIsEnabled))
+}
 
 func TestUpdateChunkEnabledStatusInCollectionSkipsEmptyChunkIDs(t *testing.T) {
 	repo := &milvusRepository{}

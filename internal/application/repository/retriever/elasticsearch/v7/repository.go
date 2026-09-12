@@ -526,13 +526,14 @@ func (e *elasticsearchRepository) getBaseConds(params typesLocal.RetrieveParams)
 
 	// Build MUST_NOT conditions (negative filters)
 	mustNot := make([]map[string]interface{}, 0)
-	// Exclude disabled chunks (is_enabled = false)
-	// Note: Historical data without is_enabled field will be included (not matching must_not)
-	mustNot = append(mustNot, map[string]interface{}{
-		"term": map[string]interface{}{
-			"is_enabled": false,
-		},
-	})
+	// Historical data without is_enabled remains enabled by default.
+	if !params.IncludeDisabled {
+		mustNot = append(mustNot, map[string]interface{}{
+			"term": map[string]interface{}{
+				"is_enabled": false,
+			},
+		})
+	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		mustNot = append(mustNot, map[string]interface{}{
 			"terms": map[string]interface{}{

@@ -632,11 +632,13 @@ func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (s
 			Value:    params.ExcludeChunkIDs,
 		})
 	}
-	filters = append(filters, &universalFilterCondition{
-		Field:    fieldIsEnabled,
-		Operator: operatorEqual,
-		Value:    true,
-	})
+	if !params.IncludeDisabled {
+		filters = append(filters, &universalFilterCondition{
+			Field:    fieldIsEnabled,
+			Operator: operatorEqual,
+			Value:    true,
+		})
+	}
 	if len(filters) == 0 {
 		return "", nil, nil
 	}

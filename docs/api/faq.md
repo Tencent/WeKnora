@@ -416,9 +416,9 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/k
 { "success": true }
 ```
 
-## POST `/knowledge-bases/:id/faq/search` - FAQ 混合搜索
+## POST `/knowledge-bases/:id/faq/search` - FAQ 向量搜索
 
-向量 + 关键字混合检索，支持两级优先级标签召回。
+使用 FAQ 向量索引进行语义检索，支持两级优先级标签召回。默认仅搜索启用条目；管理场景可以显式包含停用条目，不影响聊天、Agent 或知识库问答的召回规则。
 
 **请求体（`types.FAQSearchRequest`）**:
 
@@ -430,6 +430,7 @@ curl --location --request DELETE 'http://localhost:8080/api/v1/knowledge-bases/k
 | first_priority_tag_ids  | `int64[]` | 否   | 第一优先级标签 `seq_id` 列表（最高优先召回范围）                                     |
 | second_priority_tag_ids | `int64[]` | 否   | 第二优先级标签 `seq_id` 列表                                                        |
 | only_recommended        | boolean   | 否   | 是否仅返回 `is_recommended=true` 的条目                                              |
+| include_disabled        | boolean   | 否   | 是否同时返回停用条目，默认 `false`；仅作用于此 FAQ 管理搜索接口                      |
 
 **请求**:
 
@@ -442,7 +443,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/faq/se
     "vector_threshold": 0.5,
     "match_count": 10,
     "first_priority_tag_ids": [12],
-    "only_recommended": false
+    "only_recommended": false,
+    "include_disabled": true
 }'
 ```
 
