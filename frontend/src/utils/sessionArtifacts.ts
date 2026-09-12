@@ -1,9 +1,50 @@
 import type { ArtifactMeta } from '@/api/chat'
 import { persistedAssistantId } from './steerStreamFork'
+import { isKnownPreviewableExt, resolveFilePreviewExt } from './filePreview'
 
 /** Artifact metadata plus the assistant message that owns the download index. */
 export type SessionArtifactItem = ArtifactMeta & {
   messageId: string
+}
+
+export type ArtifactKind = ArtifactMeta['kind']
+
+const PREVIEW_EXT_BY_KIND: Record<Exclude<ArtifactKind, 'file'>, string> = {
+  presentation: 'pptx',
+  web_page: 'html',
+  spreadsheet: 'csv',
+}
+
+/**
+ * Resolve the semantic projection for history created before kind was
+ * exposed. The backend remains authoritative whenever it supplied a known
+ * value; the extension fallback is compatibility-only.
+ */
+export function resolveArtifactKind(
+  fileName: string,
+  fileType?: string,
+  kind?: string,
+): ArtifactKind {
+  if (kind === 'presentation' || kind === 'web_page' || kind === 'spreadsheet' || kind === 'file') {
+    return kind
+  }
+  const ext = resolveFilePreviewExt(fileName, fileType)
+  if (ext === 'pptx') return 'presentation'
+  if (ext === 'html' || ext === 'htm') return 'web_page'
+  if (ext === 'csv' || ext === 'tsv' || ext === 'xlsx') return 'spreadsheet'
+  return 'file'
+}
+
+/** Preserve a concrete previewable extension, using kind only as a fallback. */
+export function resolveArtifactPreviewExt(
+  artifact: Pick<ArtifactMeta, 'file_name' | 'file_type'> & Partial<Pick<ArtifactMeta, 'kind'>>,
+): string {
+  const ext = resolveFilePreviewExt(artifact.file_name, artifact.file_type)
+  if (isKnownPreviewableExt(ext)) return ext
+  if (artifact.kind === 'presentation' || artifact.kind === 'web_page' || artifact.kind === 'spreadsheet') {
+    return PREVIEW_EXT_BY_KIND[artifact.kind]
+  }
+  return ext
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -38,6 +79,11 @@ export function collectSessionArtifacts(messages: unknown): SessionArtifactItem[
         ...(art as unknown as ArtifactMeta),
         index,
         messageId,
+        kind: resolveArtifactKind(
+          String(art.file_name || ''),
+          typeof art.file_type === 'string' ? art.file_type : undefined,
+          typeof art.kind === 'string' ? art.kind : undefined,
+        ),
       })
     }
   }
