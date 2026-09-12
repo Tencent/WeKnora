@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { before, test } from 'node:test'
+import { readFileSync } from 'node:fs'
+import { findDuplicateLocaleProperties } from './localeSourceAudit.ts'
 
 import { findAuditActionDefaultRegistryMismatches } from './auditActionLocaleDefaults.ts'
 import { REGISTERED_AUDIT_ACTION_ENTRIES, KB_ACTIVITY_DETAIL_VALUES, KB_ACTIVITY_I18N_ROOTS, KB_ACTIVITY_OUTCOMES } from './auditActionRegistry.ts'
@@ -19,6 +21,26 @@ import {
 } from './localeKeyAudit.ts'
 
 const REFERENCE_LOCALE: LocaleName = 'en-US'
+
+test('locale source objects contain no duplicate properties before evaluation', () => {
+  const failures = Object.keys(LOCALE_BUNDLES).flatMap(name =>
+    findDuplicateLocaleProperties(readFileSync(new URL(`./locales/${name}.ts`, import.meta.url), 'utf8'))
+      .map(item => `${name}: ${item.path} at lines ${item.firstLine} and ${item.duplicateLine}`),
+  )
+  assert.deepEqual(failures, [], failures.join('\n'))
+})
+
+test('source audit detects duplicate nested, quoted and literal computed keys with both lines', () => {
+  assert.deepEqual(findDuplicateLocaleProperties(`export default {
+  modelSettings: { usage: { title: 'references' },
+    ['usage']: { title: 'cost' } },
+  rows: [{ a: 1, 'a': 2 }],
+  other: { usage: 'distinct object' }
+}`), [
+    { path: 'modelSettings.usage', firstLine: 2, duplicateLine: 3 },
+    { path: 'rows[0].a', firstLine: 4, duplicateLine: 4 },
+  ])
+})
 
 let localeKeysByName: Record<LocaleName, Set<string>>
 let referencedKeys: Set<string>

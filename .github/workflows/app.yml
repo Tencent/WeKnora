@@ -17,8 +17,11 @@ on:
       - "Makefile"
       - "config/**"
       - "migrations/**"
+      - "scripts/migrate.sh"
+      - "scripts/check-migrate-secret-output.sh"
       - "skills/preloaded/**"
       - "testdata/**"
+      - "dataset/**"
       - "docker/Dockerfile.app"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
@@ -40,8 +43,11 @@ on:
       - "Makefile"
       - "config/**"
       - "migrations/**"
+      - "scripts/migrate.sh"
+      - "scripts/check-migrate-secret-output.sh"
       - "skills/preloaded/**"
       - "testdata/**"
+      - "dataset/**"
       - "docker/Dockerfile.app"
       - "LICENSE"
       - "THIRD_PARTY_NOTICES.md"
@@ -62,6 +68,7 @@ permissions:
 
 env:
   GO_VERSION: "1.26"
+  CGO_ENABLED: "1"
   GOPROXY: https://proxy.golang.org,direct
   # Keep tests independent of a developer machine's custom log template.
   LOG_FORMAT: ""
@@ -82,6 +89,10 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
           # v6 defaults to go.mod for the cache key (more stable than go.sum).
+
+      - name: Check migration credential logging
+        shell: bash
+        run: bash scripts/check-migrate-secret-output.sh
 
       - name: Download modules
         run: go mod download
@@ -117,8 +128,89 @@ jobs:
         shell: bash
         run: |
           mapfile -t pkgs < <(go list ./... | grep -v '/docreader/')
-          go vet "${pkgs[@]}"
-          go test "${pkgs[@]}"
+          go vet -tags sqlite_fts5 "${pkgs[@]}"
+          go test -tags sqlite_fts5 "${pkgs[@]}"
 
       - name: Build server
-        run: go build ./cmd/server
+        run: go build -tags sqlite_fts5 ./cmd/server
+
+  postgres-contracts:
+    name: PostgreSQL evaluation contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: paradedb/paradedb:v0.22.2-pg17
+        env:
+          POSTGRES_USER: evaluation
+          POSTGRES_PASSWORD: evaluation-test-only
+          POSTGRES_DB: weknora_x03_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U evaluation -d weknora_x03_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CGO_ENABLED: "1"
+      REQUIRE_POSTGRES_TESTS: "1"
+      TEST_POSTGRES_DSN: postgres://evaluation:evaluation-test-only@localhost:5432/weknora_x03_ci?sslmode=disable
+      TEST_POSTGRES_MIGRATION_DSN: postgres://evaluation:evaluation-test-only@localhost:5432/weknora_x03_ci?sslmode=disable
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run database contracts and reject skipped tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/database-contracts
+          go test -json -count=1 -timeout=10m ./internal/application/repository -run Postgres > artifacts/database-contracts/repository.jsonl
+          go test -tags sqlite_fts5 -json -count=1 -timeout=15m ./internal/database ./cmd/migrate-runner > artifacts/database-contracts/migrations.jsonl
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          events = [json.loads(line)
+                    for path in Path('artifacts/database-contracts').glob('*.jsonl')
+                    for line in path.read_text().splitlines() if line.strip()]
+          required = {
+              'TestEvaluationTaskRepositoryPostgresContract',
+              'TestEvaluationDatasetRepositoryPostgresContract',
+              'TestModelPriceOverlapIsSerializedAcrossPostgresConnections',
+              'TestPostgresMigrationsCreateAndRoundTripEvaluationSchema',
+              'TestSQLiteEvaluationMigrationsRoundTrip',
+              'TestMigrationBridgeSourceMatrix',
+              'TestMigrationBridgeRejectsUnknownAndPartial',
+              'TestMigrationBridgeResumeCommittedPhases',
+              'TestMigrationBridgeReadOnlyAndStartupGate',
+              'TestMigrationBridgeRequiresBackupIdentity',
+              'TestMigrationBridgeCrossProcessLock',
+              'TestMigrationBridgeAppendOnlyUpgrade',
+              'TestMigrationBridgeSQLRollbackAndRecovery',
+              'TestMigrationBridgeDatabaseWideLock',
+              'TestSQLiteRuntimeRetrieverRestartAndSkillSchema',
+              'TestSQLiteUnversionedRuntimeIsRejected',
+              'TestPostgresIndexJSONSemanticComparison',
+              'TestMigrationCommandExplicitTargetAndSecrets',
+              'TestMigrationCommandSQLiteLifecycle',
+          }
+          passed = {event.get('Test') for event in events if event['Action'] == 'pass'}
+          rejected = [event for event in events if event['Action'] in {'skip', 'fail'}]
+          if rejected or required - passed:
+              raise SystemExit(f'Database contract gate failed: skipped/failed={rejected}, missing={sorted(required - passed)}')
+          print(f'Database contracts passed: {len(passed - {None})} tests, zero skips')
+          PY
+
+      - name: Upload database contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-contracts-${{ github.run_id }}
+          path: artifacts/database-contracts/
+          if-no-files-found: warn

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -119,7 +121,7 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 
 	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, fmt.Sprintf("%s/rerank", r.baseURL), query, documents))
 
-	resp, err := r.client.Do(req)
+	resp, err := call.DoJSON(r.client, req, "rerank")
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -151,3 +153,6 @@ func (r *OpenAIReranker) GetModelName() string {
 func (r *OpenAIReranker) GetModelID() string {
 	return r.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (r *OpenAIReranker) RequestAccountingSupported() bool { return true }

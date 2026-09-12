@@ -103,6 +103,10 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		if opts.TopP > 0 {
 			chatReq.Options["top_p"] = opts.TopP
 		}
+		// 显式提供的 seed 真实下发到 Ollama options。
+		if OptionsSeedProvided(opts) {
+			chatReq.Options["seed"] = opts.Seed
+		}
 		if budget := opts.CompletionBudget(); budget > 0 {
 			chatReq.Options["num_predict"] = budget
 		}
@@ -138,6 +142,7 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 	var responseContent string
 	var toolCalls []types.LLMToolCall
 	var promptTokens, completionTokens int
+	var usageReported bool
 
 	// 使用 Ollama 客户端发送请求
 	err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
@@ -149,9 +154,10 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 		toolCalls = c.toolCallTo(resp.Message.ToolCalls)
 
 		// 获取token计数
-		if resp.EvalCount > 0 {
+		if resp.Done || resp.EvalCount > 0 || resp.PromptEvalCount > 0 {
+			usageReported = true
 			promptTokens = resp.PromptEvalCount
-			completionTokens = resp.EvalCount - promptTokens
+			completionTokens = resp.EvalCount
 		}
 
 		return nil
@@ -161,6 +167,7 @@ func (c *OllamaChat) Chat(ctx context.Context, messages []Message, opts *ChatOpt
 	}
 
 	usage := types.TokenUsage{
+		UsageReported:    usageReported,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		TotalTokens:      promptTokens + completionTokens,
@@ -203,25 +210,25 @@ func (c *OllamaChat) ChatStream(
 		err := c.ollamaService.Chat(ctx, chatReq, func(resp ollamaapi.ChatResponse) error {
 			// 发送思考内容（支持 Qwen3、DeepSeek 等推理模型）
 			if resp.Message.Thinking != "" {
-				thinking.emit(streamChan, resp.Message.Thinking)
+				thinking.emit(ctx, streamChan, resp.Message.Thinking)
 			}
 
 			if resp.Message.Content != "" {
 				// 思考阶段结束后，发送思考完成事件
-				thinking.finish(streamChan)
-				streamChan <- types.StreamResponse{
+				thinking.finish(ctx, streamChan)
+				emitStream(ctx, streamChan, types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Content:      resp.Message.Content,
 					Done:         false,
-				}
+				})
 			}
 
 			if len(resp.Message.ToolCalls) > 0 {
-				streamChan <- types.StreamResponse{
+				emitStream(ctx, streamChan, types.StreamResponse{
 					ResponseType: types.ResponseTypeToolCall,
 					ToolCalls:    c.toolCallTo(resp.Message.ToolCalls),
 					Done:         false,
-				}
+				})
 
 				// Ollama returns tool calls as complete objects (not incremental deltas).
 				// Log this so we can trace non-streaming thought delivery.
@@ -239,7 +246,7 @@ func (c *OllamaChat) ChatStream(
 					switch tc.Function.Name {
 					case "thinking":
 						if thought, ok := argsMap["thought"].(string); ok && thought != "" {
-							streamChan <- types.StreamResponse{
+							emitStream(ctx, streamChan, types.StreamResponse{
 								ResponseType: types.ResponseTypeThinking,
 								Content:      thought,
 								Done:         false,
@@ -247,7 +254,7 @@ func (c *OllamaChat) ChatStream(
 									"source":       "thinking_tool",
 									"tool_call_id": tooli2s(tc.Function.Index),
 								},
-							}
+							})
 						}
 					}
 				}
@@ -257,6 +264,7 @@ func (c *OllamaChat) ChatStream(
 				var usage *types.TokenUsage
 				if resp.PromptEvalCount > 0 || resp.EvalCount > 0 {
 					usage = &types.TokenUsage{
+						UsageReported:    true,
 						PromptTokens:     resp.PromptEvalCount,
 						CompletionTokens: resp.EvalCount,
 						TotalTokens:      resp.PromptEvalCount + resp.EvalCount,
@@ -264,11 +272,11 @@ func (c *OllamaChat) ChatStream(
 					usage.MarkPromptCacheUnsupported()
 				}
 				logUsage(ctx, c.modelName, usage)
-				streamChan <- types.StreamResponse{
+				emitStream(ctx, streamChan, types.StreamResponse{
 					ResponseType: types.ResponseTypeAnswer,
 					Done:         true,
 					Usage:        usage,
-				}
+				})
 			}
 
 			return nil
@@ -276,11 +284,11 @@ func (c *OllamaChat) ChatStream(
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("流式聊天请求失败: %v", err)
 			// 发送错误响应
-			streamChan <- types.StreamResponse{
+			emitStream(ctx, streamChan, types.StreamResponse{
 				ResponseType: types.ResponseTypeError,
 				Content:      err.Error(),
 				Done:         true,
-			}
+			})
 		}
 	}()
 

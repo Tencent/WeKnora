@@ -64,6 +64,7 @@ import (
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
+	"github.com/Tencent/WeKnora/internal/evaluation/metricregistry"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -81,10 +82,13 @@ import (
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/modelcache"
+	"github.com/Tencent/WeKnora/internal/modelobs"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
+	"github.com/Tencent/WeKnora/internal/modelstats"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/stream"
@@ -181,6 +185,29 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMemoryRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
+	must(container.Provide(repository.NewEvaluationTaskRepository))
+	must(container.Provide(repository.NewEvaluationDatasetRepository))
+	must(container.Provide(func(db *gorm.DB) interfaces.EvaluationQuestionResultRepository {
+		return repository.NewEvaluationQuestionResultRepository(db)
+	}))
+	must(container.Provide(func(db *gorm.DB) interfaces.EvaluationHumanRatingRepository {
+		return repository.NewEvaluationHumanRatingRepository(db)
+	}))
+	must(container.Provide(func(db *gorm.DB) modelobs.Store {
+		return repository.NewModelObservabilityRepository(db)
+	}))
+	must(container.Provide(func(db *gorm.DB) modelobs.EvaluationCostStore {
+		return repository.NewModelObservabilityRepository(db)
+	}))
+	must(container.Provide(modelobs.NewRecorder))
+	must(container.Provide(func(db *gorm.DB) modelcache.Store {
+		return repository.NewEmbeddingCacheRepository(db)
+	}))
+	must(container.Provide(modelcache.NewCoordinator))
+	must(container.Provide(func(db *gorm.DB) modelstats.Store {
+		return repository.NewModelStatisticsRepository(db)
+	}))
+	must(container.Provide(modelstats.NewService))
 
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
@@ -214,9 +241,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewChunkService))
 	must(container.Provide(service.NewKnowledgeTagService))
 	must(container.Provide(embedding.NewBatchEmbedder))
-	must(container.Provide(service.NewModelService))
+	must(container.Provide(service.NewModelServiceWithObservabilityAndCache))
 	must(container.Provide(service.NewDatasetService))
-	must(container.Provide(service.NewEvaluationService))
+	must(container.Provide(service.NewEvaluationDatasetRegistryService))
+	must(container.Provide(metricregistry.NewDefaultRegistry))
+	must(container.Provide(service.NewEvaluationServiceWithRegistry))
+	must(container.Provide(service.NewEvaluationTaskRecoveryRunner))
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
 	must(container.Provide(func(
@@ -372,6 +402,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(startDataSourceScheduler))
 	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
+	must(container.Invoke(registerBuiltinEvaluationDataset))
+	must(container.Invoke(startEvaluationTaskRecovery))
+	must(container.Invoke(startEvaluationTaskRetention))
+	must(container.Invoke(startEmbeddingCacheCleaner))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
 	must(container.Provide(service.NewHousekeepingService))
 	must(container.Invoke(startHousekeepingService))
@@ -418,6 +452,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
+	must(container.Provide(handler.NewModelStatisticsHandler))
 	must(container.Provide(handler.NewSandboxConfigHandler))
 	must(container.Provide(func(
 		s *service.TenantSkillService, streams interfaces.StreamManager,
@@ -426,6 +461,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Provide(handler.NewMeEnvVarHandler))
 	must(container.Provide(handler.NewEvaluationHandler))
+	must(container.Provide(handler.NewEvaluationDatasetHandler))
+	must(container.Provide(handler.NewEvaluationQuestionHandler))
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
 	must(container.Provide(handler.NewSystemHandler))
@@ -467,6 +504,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 
 	// Router configuration
 	logger.Debugf(ctx, "[Container] Registering router and starting task server...")
+	must(container.Provide(router.NewHealthChecker))
 	must(container.Provide(router.NewRouter))
 	if redisAvailable {
 		must(container.Invoke(router.RunAsynqServer))
@@ -744,28 +782,21 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		}
 	}
 
-	// Run database migrations automatically (optional, can be disabled via env var)
-	// To disable auto-migration, set AUTO_MIGRATE=false
-	// To enable auto-recovery from dirty state, set AUTO_RECOVER_DIRTY=true
+	// Both migration chains must satisfy their verified structure profiles before
+	// any application initialization can write configuration or start background work.
+	migrationOpts := database.MigrationOptions{
+		AutoRecoverDirty: os.Getenv("AUTO_RECOVER_DIRTY") == "true",
+		SQLiteDBPath:     sqliteDBPath,
+		BackupID:         os.Getenv("MIGRATION_BACKUP_ID"),
+	}
+	if err := database.PrepareDatabaseSchema(context.Background(), migrateDSN, migrationOpts,
+		os.Getenv("AUTO_MIGRATE") != "false"); err != nil {
+		if sqlDB, closeErr := db.DB(); closeErr == nil {
+			_ = sqlDB.Close()
+		}
+		return nil, fmt.Errorf("database schema is not ready: %w", err)
+	}
 	if os.Getenv("AUTO_MIGRATE") != "false" {
-		logger.Infof(context.Background(), "Running database migrations...")
-
-		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
-		migrationOpts := database.MigrationOptions{
-			AutoRecoverDirty: autoRecover,
-			SQLiteDBPath:     sqliteDBPath,
-		}
-
-		// Run base migrations (all versioned migrations including embeddings)
-		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
-		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
-			// Log warning but don't fail startup - migrations might be handled externally
-			logger.Warnf(context.Background(), "Database migration failed: %v", err)
-			logger.Warnf(
-				context.Background(),
-				"Continuing with application startup. Please run migrations manually if needed.",
-			)
-		}
 
 		// Post-migration: resolve __pending_env__ storage provider markers for historical KBs.
 		// The SQL migration marks KBs that have documents but no provider with "__pending_env__";
@@ -1807,6 +1838,68 @@ func startAuditLogRetention(
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
 		runner.Stop()
+		return nil
+	})
+}
+
+// startEvaluationTaskRecovery starts the expired-task scan loop and registers
+// its graceful shutdown callback.
+func startEvaluationTaskRecovery(
+	runner *service.EvaluationTaskRecoveryRunner,
+	cleaner interfaces.ResourceCleaner,
+) {
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("EvaluationTaskRecoveryRunner", func() error {
+		runner.Stop()
+		return nil
+	})
+}
+
+// registerBuiltinEvaluationDataset imports the embedded, artifact-pinned
+// Parquet samples before task recovery can resume evaluation workers.
+func registerBuiltinEvaluationDataset(
+	registry interfaces.EvaluationDatasetRegistryService,
+) error {
+	registration, err := service.BuiltinEvaluationDatasetRegistration()
+	if err != nil {
+		return err
+	}
+	_, err = registry.RegisterBuiltinDataset(context.Background(), registration)
+	return err
+}
+
+// startEvaluationTaskRetention validates the retention configuration and
+// starts the bounded cleanup schedule. A negative retention_days fails
+// container startup; zero disables the runner.
+func startEvaluationTaskRetention(
+	cfg *config.Config,
+	evaluationTaskRepository interfaces.EvaluationTaskRepository,
+	cleaner interfaces.ResourceCleaner,
+) error {
+	days, enabled, err := config.EvaluationRetentionDays(cfg)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return nil
+	}
+	runner := service.NewEvaluationTaskRetentionRunner(evaluationTaskRepository, days)
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("EvaluationTaskRetentionRunner", func() error {
+		runner.Stop()
+		return nil
+	})
+	return nil
+}
+
+// startEmbeddingCacheCleaner starts bounded expiry cleanup and joins application shutdown.
+func startEmbeddingCacheCleaner(
+	coordinator *modelcache.Coordinator,
+	cleaner interfaces.ResourceCleaner,
+) {
+	coordinator.StartCleaner(context.Background())
+	cleaner.RegisterWithName("EmbeddingCacheCleaner", func() error {
+		coordinator.StopCleaner()
 		return nil
 	})
 }

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -125,7 +127,7 @@ func (r *AliyunReranker) Rerank(ctx context.Context, query string, documents []s
 
 	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, r.baseURL, query, documents))
 
-	resp, err := r.client.Do(req)
+	resp, err := call.DoJSON(r.client, req, "rerank")
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -170,3 +172,6 @@ func (r *AliyunReranker) GetModelName() string {
 func (r *AliyunReranker) GetModelID() string {
 	return r.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (r *AliyunReranker) RequestAccountingSupported() bool { return true }

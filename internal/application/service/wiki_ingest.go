@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelobs"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -2566,14 +2567,12 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 	ctx = types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
 
 	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
-	requestJSON, _ := json.Marshal(struct {
-		Messages []chat.Message    `json:"messages"`
-		Options  *chat.ChatOptions `json:"options"`
-	}{Messages: messages, Options: opts})
-	requestKey := chat.BuildPromptCacheKey(
-		tenantID, chatModel.GetModelID(), "wiki_exact_request",
-		chat.FingerprintPromptPrefix(string(requestJSON)),
-	)
+	fingerprint := ""
+	if identified, ok := chatModel.(interface{ BehaviorFingerprint() string }); ok {
+		fingerprint = identified.BehaviorFingerprint()
+	}
+	requestKey := chat.EffectiveRequestKey(ctx, tenantID, chatModel.GetModelID(), fingerprint, messages, opts)
+	requestKey = modelobs.SharingScope(ctx) + "\x00" + requestKey
 
 	execute := func() (interface{}, error) {
 		releaseWarmup := func() {}
@@ -2596,6 +2595,9 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 				callErr = errors.New("LLM returned nil response")
 			}
 			lastErr = callErr
+			if errors.Is(callErr, types.ErrModelAccounting) {
+				return "", callErr
+			}
 
 			if !isTransientLLMError(ctx, callErr) {
 				return "", fmt.Errorf("LLM call failed: %w", callErr)
@@ -2730,6 +2732,9 @@ var rateLimitErrorIndicators = []string{
 }
 
 func isTransientLLMError(ctx context.Context, err error) bool {
+	if errors.Is(err, types.ErrModelAccounting) {
+		return false
+	}
 	if err == nil {
 		return false
 	}

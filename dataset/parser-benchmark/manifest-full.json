@@ -1,0 +1,4406 @@
+{
+  "schema_version": 1,
+  "name": "WeKnora topic3 public parser benchmark",
+  "split": "full",
+  "seed": "weknora-topic3-parser-v1",
+  "is_official_leaderboard_run": false,
+  "selection": "Frozen seeded hash order, round-robin language/category/layout strata; 80 OmniDocBench + 20 olmOCR-bench; smoke prefix 6+2.",
+  "sources": [
+    {
+      "name": "OmniDocBench",
+      "dataset": "https://huggingface.co/datasets/opendatalab/OmniDocBench",
+      "revision": "aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec",
+      "code": "https://github.com/opendatalab/OmniDocBench",
+      "code_revision": "193627ae9e97d89188468ed1ee3b7a856ff76044",
+      "annotation_sha256": "a45cd84b04ad8b793e775089640e6b681209abea33ead54c1828ddca35fae496",
+      "usage": "research_only; original document copyrights remain with owners",
+      "license_url": "https://github.com/opendatalab/OmniDocBench/blob/193627ae9e97d89188468ed1ee3b7a856ff76044/README.md#copyright-statement"
+    },
+    {
+      "name": "olmOCR-bench",
+      "dataset": "https://huggingface.co/datasets/allenai/olmOCR-bench",
+      "revision": "54a96a6fb6a2bd3b297e59869491db4d3625b711",
+      "code": "https://github.com/allenai/olmocr",
+      "code_revision": "f7cfe4c22098b154c76b6ec950d1c0a464eecf8d",
+      "usage": "Follow dataset card and original document rights; sampled original PDFs are not committed",
+      "license_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/blob/54a96a6fb6a2bd3b297e59869491db4d3625b711/README.md"
+    }
+  ],
+  "samples": [
+    {
+      "id": "omni-e18bd3f8e3304ce3",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_llm-raw-scihub-o.O-j.1365-2818.2003.01210.x.pdf_7.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_llm-raw-scihub-o.O-j.1365-2818.2003.01210.x.pdf_7.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-e18bd3f8e3304ce3.pdf",
+      "sha256": "4a4cb4bc28c125182236ce1f77188f7f9f8179003ad81694a8d5b97b1c08835c",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-e18bd3f8e3304ce3.jpg",
+      "image_sha256": "9d2b76f971a648a3a1a76128c04d36152997fbd5495f848d41a62682aee14578",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1653,
+        "height_pixels": 2173,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "academic_literature",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "figure": 1,
+        "figure_caption": 1,
+        "text_block": 4,
+        "page_number": 1,
+        "header": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-e18bd3f8e3304ce3.json",
+        "sha256": "7545103b5ab3d8ddfad83e0fe0ee9079ed52fcf51eaa668347dec7fe518a6129"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-9af59323757fcdae",
+      "source": "OmniDocBench",
+      "source_sample_id": "eastmoney_df74f4c5f5f8c96ec2c051d34ea5c51686a45b2f1822b2d94982f84c81d25aa3.pdf_17.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/eastmoney_df74f4c5f5f8c96ec2c051d34ea5c51686a45b2f1822b2d94982f84c81d25aa3.pdf_17.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-9af59323757fcdae.pdf",
+      "sha256": "85cfd73817c4b067090215b5097f46bc7c0762dd9a41baedc0680e2a1b5d56d0",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-9af59323757fcdae.jpg",
+      "image_sha256": "a1939658db7d933054503d4253f4b70c73bdaceaf9753ba1b17f886b99fa26ee",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "research_report",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "research_report",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [
+          "table_horizontal",
+          "table_omission_line",
+          "table_span"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 4,
+        "text_block": 7,
+        "table_caption": 1,
+        "table": 1,
+        "abandon": 1,
+        "header": 2,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-9af59323757fcdae.json",
+        "sha256": "e2730f766ccf94812db0f5f41910c7a9dbd8ce1544e057e9598819e8c3953669"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-f33a00ae580e6f9f",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-aae359c6-5e6e-4e18-9187-2e9d55b6e9bd.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-aae359c6-5e6e-4e18-9187-2e9d55b6e9bd.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-f33a00ae580e6f9f.pdf",
+      "sha256": "b1288ab3fc5638038a09bc16deaef7dfbf9c4f56c76b714ab02493e79e21cac4",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-f33a00ae580e6f9f.png",
+      "image_sha256": "b85d6edb6c8c7f45aa3e76e773b5fa439298364853fbb873305cbd6ff9544e65",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "book",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "equation_hard"
+      },
+      "element_counts": {
+        "text_block": 7,
+        "equation_isolated": 1,
+        "figure": 2,
+        "header": 1,
+        "page_number": 1,
+        "figure_caption": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-f33a00ae580e6f9f.json",
+        "sha256": "a639a9267ca5b0ea5254871797029ea3bc7c13917b2dbadee7ac49e96f0b7e38"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-1e5fdcdbacc47a49",
+      "source": "OmniDocBench",
+      "source_sample_id": "newspaper_fe2c8b45b2a086cd75984640bb3080e1_1.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/newspaper_fe2c8b45b2a086cd75984640bb3080e1_1.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-1e5fdcdbacc47a49.pdf",
+      "sha256": "e3f96719ed6643a27f9af123f3e6a66133b64888cf67149676de5ffc32142f06",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-1e5fdcdbacc47a49.jpg",
+      "image_sha256": "762bb191e90d2bc04ac0ca2d477f79bc15efd7fae20c4a8f35adbd96f6b19db8",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2754,
+        "height_pixels": 3939,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "newspaper",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "newspaper",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 15,
+        "text_block": 51,
+        "figure": 1,
+        "figure_caption": 1,
+        "figure_footnote": 1,
+        "header": 1,
+        "abandon": 1,
+        "footer": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-1e5fdcdbacc47a49.json",
+        "sha256": "9372915007abcec5b3b27cac89a1538951d2e6e41c74e18cc33c99acc465b6b1"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-8739ae8d4f502788",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_1840.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_1840.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-8739ae8d4f502788.pdf",
+      "sha256": "edde64ca28971957a9a0aa992eab8b28b39dafa7b02fd22c68c6cfa0ba010ac2",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-8739ae8d4f502788.jpg",
+      "image_sha256": "0bb8a364e165b0ebdd2d30ddd2f6d8a54b4cdc7aa7115344f07431097dbe1588",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "colorful_textbook",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "en_ch_mixed",
+        "layout": "single_column",
+        "special_issue": [
+          "watermark"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 6,
+        "text_block": 9
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-8739ae8d4f502788.json",
+        "sha256": "771c2546f4fe714c1b5dc0a5914f08214c39a52041450b39ee8c527b3da11d68"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-cf26a536e0ac7219",
+      "source": "OmniDocBench",
+      "source_sample_id": "notes_1ba14cb325bc448f7201b20502ecf2b5_100.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/notes_1ba14cb325bc448f7201b20502ecf2b5_100.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-cf26a536e0ac7219.pdf",
+      "sha256": "c74a3f3f10f031330997c0418b3fd309c5be5d94756894b9df73d93410a78449",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-cf26a536e0ac7219.jpg",
+      "image_sha256": "3d21f198f30031ac93c57714d3709e0570eed21fbc4a4540695d24542ed5a202",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1434,
+        "height_pixels": 2026,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "note",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "note",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 10,
+        "title": 2,
+        "header": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-cf26a536e0ac7219.json",
+        "sha256": "ae1da1d848827641f53695979ee5b84bb15089c95ce266cc01789456cb29bb1b"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-b37396b7ab41ca9a",
+      "source": "olmOCR-bench",
+      "source_sample_id": "multi_column/0208fbb5d6b646f972f4702428ad2cede5c5_page_2_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/multi_column/0208fbb5d6b646f972f4702428ad2cede5c5_page_2_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-b37396b7ab41ca9a.pdf",
+      "sha256": "d21c04e59c040c1d0042d571da89ceb5b46cae37d8b20ad69386903288a08ed1",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 4553
+      },
+      "language": "english",
+      "category": "multi_column",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-b37396b7ab41ca9a.json",
+        "sha256": "3a8427de6ab05d107d7e68153b6626f5dd3609863fe8b9563efbd15d4a747282",
+        "test_count": 5
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-5eccf8f44171af5f",
+      "source": "olmOCR-bench",
+      "source_sample_id": "tables/a769f9a3716e8fa8215b953319db4af98ad8_pg2.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/tables/a769f9a3716e8fa8215b953319db4af98ad8_pg2.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-5eccf8f44171af5f.pdf",
+      "sha256": "952c5ee9d5abdc7e8ebf9885f5f4d9d6cf7fbb675385b4f279afe55d0181d285",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 5400
+      },
+      "language": "english",
+      "category": "table_tests",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-5eccf8f44171af5f.json",
+        "sha256": "18e31a77c1ff17744172a51c18ea9f8abd9346ca03ece92838fc7d011b5fa7ef",
+        "test_count": 11
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-7ffa0010b03c68c0",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-4c92c2ac-d7f7-43a5-b323-f242f31ddbf8.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-4c92c2ac-d7f7-43a5-b323-f242f31ddbf8.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-7ffa0010b03c68c0.pdf",
+      "sha256": "e626f2b1fd0754ecb2318e1d243d3b157ae7f2c4c5c8309902feefffd60bfc86",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-7ffa0010b03c68c0.png",
+      "image_sha256": "f654cccee066220496049d056c40c27bda9a333e7c7f26118af31bf1d50d5abe",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2667,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "PPT2PDF",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "en_ch_mixed",
+        "layout": "other_layout",
+        "special_issue": [],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "title": 4,
+        "text_block": 6,
+        "footer": 6,
+        "figure": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-7ffa0010b03c68c0.json",
+        "sha256": "99149a91ad397f1e2cc35b04dbad1ce2a4833081943463d763465e60018305da"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-f570356c3fad954f",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaopptmerge_yanbaoPPT_5945.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaopptmerge_yanbaoPPT_5945.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-f570356c3fad954f.pdf",
+      "sha256": "05c4b37f2cee17a12d1cda47a40146563f84fedf08695e7bf00f54e6af20b3b7",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-f570356c3fad954f.jpg",
+      "image_sha256": "b5ab88bb3cb78a8f0ae0a2a206113de31c729ac9b4dcf6b857b11bc89e88370b",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "PPT2PDF",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "en_ch_mixed",
+        "layout": "single_column",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "text_block": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-f570356c3fad954f.json",
+        "sha256": "d264207972ad4c4c595fff0c5b3df0ddd3ff500ebc99f2ceef5a88780e2aaaeb"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-05d1ba5fb9214d56",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-0b011030-84e4-49e3-adfb-437c96b9947d.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-0b011030-84e4-49e3-adfb-437c96b9947d.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-05d1ba5fb9214d56.pdf",
+      "sha256": "e7e3bb30600baab3bf0b7a873788cbcce492d09c7e9dada14a2b58135b385191",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-05d1ba5fb9214d56.png",
+      "image_sha256": "34c1fe20597fd1f6a59eca845e70ab4c11ddccd33d01265ad6365996f1335b5e",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1378,
+        "height_pixels": 1969,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "academic_literature",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "en_ch_mixed",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "text_block": 2,
+        "title": 1,
+        "reference": 4,
+        "header": 2,
+        "footer": 1,
+        "list_group": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-05d1ba5fb9214d56.json",
+        "sha256": "7b94e8a5e69ef2b20fa89cc1ae8d6c12a6aba75ec184f26015fbce506b07d8f0"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-0630ab945156be7b",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_f832cad1f46c067198e9df95ae7b150213f16805037c1a5725e72245010d3e97.pdf_3.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_f832cad1f46c067198e9df95ae7b150213f16805037c1a5725e72245010d3e97.pdf_3.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-0630ab945156be7b.pdf",
+      "sha256": "1b3098cc39f4279c1c4c041d672bc0703954c0ed32aae8ab6350d2f251ecf88a",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-0630ab945156be7b.jpg",
+      "image_sha256": "679499fe2834673ac54bc8767fe67cddf1f8ee54863f4cbe54aea6f3e52737ee",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "book",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "en_ch_mixed",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 7,
+        "text_block": 7,
+        "header": 1,
+        "abandon": 1,
+        "page_number": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-0630ab945156be7b.json",
+        "sha256": "22b322343d159f414dcee2224c87e04b20fe1b3352b88f04b8efb654f7f3871e"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-b3ca4aa12d015981",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-422d6037-0834-47e5-932a-408286b37ec5.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-422d6037-0834-47e5-932a-408286b37ec5.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-b3ca4aa12d015981.pdf",
+      "sha256": "f7e85714c7827d25c86694f0fbaf2c83b58a99a0e06668d809a83275b6c2466a",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-b3ca4aa12d015981.png",
+      "image_sha256": "d2d33da187c750ff554bb9b2b680427384cd52202bf2dfdb37f8744a39d6b086",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1323,
+        "height_pixels": 1898,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "book",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "en_ch_mixed",
+        "layout": "other_layout",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "header": 5,
+        "footer": 3,
+        "title": 4,
+        "figure": 1,
+        "text_block": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-b3ca4aa12d015981.json",
+        "sha256": "cf9ef9fc85f8e930892e3646fcb46cfd7e838a83d474df824831de44e05d70b4"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-99afbb09df47e6a8",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-773aa2c0-3413-41d0-b019-a573da251455.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-773aa2c0-3413-41d0-b019-a573da251455.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-99afbb09df47e6a8.pdf",
+      "sha256": "8147a62c4ebd77acc1a7f167c5c4b797bdad2f5ef73b3bd32cdfa854e7cd12bc",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-99afbb09df47e6a8.png",
+      "image_sha256": "803ff9930f57dc9789f6ab513c41f2555375ef27f1852f333f2c2118d91755ba",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "book",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "en_ch_mixed",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "figure": 1,
+        "figure_caption": 1,
+        "title": 1,
+        "text_block": 2,
+        "equation_isolated": 1,
+        "footer": 5,
+        "page_number": 1,
+        "header": 3
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-99afbb09df47e6a8.json",
+        "sha256": "704820e60bb57d147d7c9b39c209c1d54caf6b4b072c713794521accf8c1d48e"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-60fbfd020b387a92",
+      "source": "OmniDocBench",
+      "source_sample_id": "color_textbook_zhonggaokao_小学_13.人教新起点英语（4-5年级）_人教新起点四年级英语下册_课本_人教新起点英语4B电子课本_page_087.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/color_textbook_zhonggaokao_%E5%B0%8F%E5%AD%A6_13.%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E8%8B%B1%E8%AF%AD%EF%BC%884-5%E5%B9%B4%E7%BA%A7%EF%BC%89_%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E5%9B%9B%E5%B9%B4%E7%BA%A7%E8%8B%B1%E8%AF%AD%E4%B8%8B%E5%86%8C_%E8%AF%BE%E6%9C%AC_%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E8%8B%B1%E8%AF%AD4B%E7%94%B5%E5%AD%90%E8%AF%BE%E6%9C%AC_page_087.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-60fbfd020b387a92.pdf",
+      "sha256": "c06c1232cc24d187cba0a2b8c1a8e46fb231587964cff4dad6a4b6143f4e36f5",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-60fbfd020b387a92.png",
+      "image_sha256": "6ed1d10fd0fd7c0501519964c17f48f07d0e0fb3854ad27c96155881e87c7438",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1653,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "colorful_textbook",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "en_ch_mixed",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 8,
+        "text_block": 9,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-60fbfd020b387a92.json",
+        "sha256": "053d2cadc1d92eb74e2e7b303eb9568a16f714079ff7c01f1d39437f6f80576e"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-71f0cd5d5bc5b065",
+      "source": "OmniDocBench",
+      "source_sample_id": "color_textbook_zhonggaokao_小学_KET听说读写逐项突破_KET听说读写逐项突破之轻松搞定KET写作25分 【10讲 褚连一】_第08讲第八课写作Part8训练_第八课写作Part8训练_page_003.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/color_textbook_zhonggaokao_%E5%B0%8F%E5%AD%A6_KET%E5%90%AC%E8%AF%B4%E8%AF%BB%E5%86%99%E9%80%90%E9%A1%B9%E7%AA%81%E7%A0%B4_KET%E5%90%AC%E8%AF%B4%E8%AF%BB%E5%86%99%E9%80%90%E9%A1%B9%E7%AA%81%E7%A0%B4%E4%B9%8B%E8%BD%BB%E6%9D%BE%E6%90%9E%E5%AE%9AKET%E5%86%99%E4%BD%9C25%E5%88%86%20%E3%80%9010%E8%AE%B2%20%E8%A4%9A%E8%BF%9E%E4%B8%80%E3%80%91_%E7%AC%AC08%E8%AE%B2%E7%AC%AC%E5%85%AB%E8%AF%BE%E5%86%99%E4%BD%9CPart8%E8%AE%AD%E7%BB%83_%E7%AC%AC%E5%85%AB%E8%AF%BE%E5%86%99%E4%BD%9CPart8%E8%AE%AD%E7%BB%83_page_003.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-71f0cd5d5bc5b065.pdf",
+      "sha256": "08f2ae446e57fc88a1fc42cd67a156c12e3b7a01f88d92c18aea44d317e88a2b",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-71f0cd5d5bc5b065.png",
+      "image_sha256": "7f2e48d375247f3b18fafd715abffa2ec3f7973ee4c653e3348eef4d10bb0f2b",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2339,
+        "height_pixels": 1654,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "colorful_textbook",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "en_ch_mixed",
+        "layout": "double_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 10,
+        "figure": 1,
+        "header": 4,
+        "text_mask": 4,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-71f0cd5d5bc5b065.json",
+        "sha256": "212ea1ed5f3b864b0ffbfdb19d69120f3c16470cee265669d39b4fa5bf5fca0d"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-92c39625e94d4bf4",
+      "source": "OmniDocBench",
+      "source_sample_id": "color_textbook_教材全解1+1二年级上册英语上海牛津版_page_067.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/color_textbook_%E6%95%99%E6%9D%90%E5%85%A8%E8%A7%A31%2B1%E4%BA%8C%E5%B9%B4%E7%BA%A7%E4%B8%8A%E5%86%8C%E8%8B%B1%E8%AF%AD%E4%B8%8A%E6%B5%B7%E7%89%9B%E6%B4%A5%E7%89%88_page_067.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-92c39625e94d4bf4.pdf",
+      "sha256": "9b978f951ca4994d687dc7a3591a6e49cbaf3f928de8f85fe46c6f2edd1feba6",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-92c39625e94d4bf4.png",
+      "image_sha256": "8e5971f59e54975956239af6ca034deea74e186841b212c3be016ee5b7fb8836",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1334,
+        "height_pixels": 1884,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "colorful_textbook",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "en_ch_mixed",
+        "layout": "other_layout",
+        "special_issue": [
+          "table_full_line",
+          "table_with_img",
+          "table_horizontal"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 9,
+        "figure": 1,
+        "text_block": 6,
+        "table_mask": 1,
+        "page_number": 1,
+        "text_mask": 4,
+        "header": 1,
+        "footer": 1,
+        "abandon": 4
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-92c39625e94d4bf4.json",
+        "sha256": "f6b612e4856abdcf21211effd0f9580afdf7facb6ea9dcc5673be71fdfdf821d"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-064a9d00d7606530",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-83a26c96-4318-4587-9fba-877fd6fe5414.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-83a26c96-4318-4587-9fba-877fd6fe5414.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-064a9d00d7606530.pdf",
+      "sha256": "64552332f2f7ce90a9c14fe6321f1325f373644bfaf9c93551422af9c46a580f",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-064a9d00d7606530.png",
+      "image_sha256": "c881af90452e6b541530df2ff42fe8d955abddc6269d40ef28307dad3c02969b",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1134,
+        "height_pixels": 1543,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "colorful_textbook",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "en_ch_mixed",
+        "layout": "single_column",
+        "special_issue": [
+          "with_watermark"
+        ],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "title": 4,
+        "text_block": 19,
+        "header": 2,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-064a9d00d7606530.json",
+        "sha256": "30a5f862e4b936660b288f8f1ae17613a489083fb0f9e9d726b8dcb09a2a1cd9"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-0d19c70b3af01e9e",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_467.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_467.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-0d19c70b3af01e9e.pdf",
+      "sha256": "eead9f285955e4f29d0f12e6f9be975381e707affd19838ddb1f378e4c4b3db1",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-0d19c70b3af01e9e.jpg",
+      "image_sha256": "13621527ed3066e3b7b2b62ca01eb45bf178cd40bc3045d7d65179ed68fd3195",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 4167,
+        "height_pixels": 5894,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "exam_paper",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "en_ch_mixed",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "table_full_line",
+          "table_horizontal",
+          "fuzzy_scan"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 10,
+        "title": 2,
+        "table_caption": 1,
+        "table": 1,
+        "header": 1,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-0d19c70b3af01e9e.json",
+        "sha256": "4ae9c4514ffd81e40c7a543047db85bb6cd96dcdb763a295e7041678ff9a301e"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-53210aec0d383720",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_482.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_482.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-53210aec0d383720.pdf",
+      "sha256": "ca4f610156238f3f29c1341b5f5c68fcccb19df44e45a5fb13316177615a487e",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-53210aec0d383720.jpg",
+      "image_sha256": "8d2e4aee29045e394abda327a3a9b3bbb5f139dd8492cd2aa5c7f8ddd42cfa32",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2667,
+        "height_pixels": 1866,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "exam_paper",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "en_ch_mixed",
+        "layout": "double_column",
+        "special_issue": [
+          "watermark",
+          "table_horizontal",
+          "table_full_line"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 10,
+        "text_block": 17,
+        "table": 1,
+        "figure": 4,
+        "header": 2,
+        "abandon": 2,
+        "page_number": 2,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-53210aec0d383720.json",
+        "sha256": "1e3ff34192d8fca9e86d8520fd65e9a8a6f77d2cee789a8ad8c082fe8cdd543c"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-e5129f588213280c",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_2374.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_2374.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-e5129f588213280c.pdf",
+      "sha256": "659b7dd9ca3d4c9619f45e315a2b61cb7a746a96c3326e10e993df9a7961f89c",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-e5129f588213280c.jpg",
+      "image_sha256": "31c09cf4de5235d13fb5aae5f10ec1ecab1e4452909c01776e5b59857be12567",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 11112,
+        "height_pixels": 7925,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "exam_paper",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "en_ch_mixed",
+        "layout": "other_layout",
+        "special_issue": [
+          "watermark"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 6,
+        "text_block": 11,
+        "abandon": 2,
+        "header": 1,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-e5129f588213280c.json",
+        "sha256": "ad7abf0fca57d7b2cab5fdfb92d99aacc6ce30fe07f9044289fec76dbb82e1c4"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-8c4aacf9c12841c4",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_1478.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_1478.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-8c4aacf9c12841c4.pdf",
+      "sha256": "872e7b2067218f58316b5a4e96a4494d49789e6d0bb19c00752e8aefbfb28d7d",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-8c4aacf9c12841c4.jpg",
+      "image_sha256": "e5d429335dc4327d7596aba17e2c002156df0f078d7c6a361d61cd28b4ffb079",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 2831,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "exam_paper",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "en_ch_mixed",
+        "layout": "single_column",
+        "special_issue": [
+          "watermark",
+          "table_full_line",
+          "table_horizontal"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 5,
+        "text_block": 5,
+        "table": 1,
+        "header": 1,
+        "abandon": 1,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-8c4aacf9c12841c4.json",
+        "sha256": "0e45a7c96a82ab2818ae029a9ed1a47699f1b53d13aa7ba443c5b9708b765734"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-a507709787440fac",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_769.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_769.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-a507709787440fac.pdf",
+      "sha256": "b977dfa350e8429657c79edcc542a7be5fff434c61531e025aa17cc93a0322a1",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-a507709787440fac.jpg",
+      "image_sha256": "cec952c9584d10191629bc1da53b1f06d9e972ada2361d6e18a32bf42a6d3f9d",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1334,
+        "height_pixels": 952,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "exam_paper",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "en_ch_mixed",
+        "layout": "three_column",
+        "special_issue": [
+          "watermark"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 10,
+        "text_block": 16,
+        "figure": 16,
+        "abandon": 4,
+        "header": 2,
+        "text_mask": 4,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-a507709787440fac.json",
+        "sha256": "62b9296e90f82fa8f93ada819c90f6dc8aa8b48bd5820cdf9d6bdf35ae4c40bc"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-0dbd39632cc79f2a",
+      "source": "OmniDocBench",
+      "source_sample_id": "notes_f7f010b78016aeebd76e56d9283eb67f_48.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/notes_f7f010b78016aeebd76e56d9283eb67f_48.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-0dbd39632cc79f2a.pdf",
+      "sha256": "b150cc5d89423606c22428bb8b3eb99a78d47d7bb29e6b30aaa445fe640ad565",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-0dbd39632cc79f2a.jpg",
+      "image_sha256": "077176395d2d668b947b544d21e1766e1d586aeba0e8ecdac95ac7c6c1792c72",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1434,
+        "height_pixels": 2026,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "en_ch_mixed",
+      "category": "note",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "note",
+        "language": "en_ch_mixed",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 16,
+        "title": 1,
+        "header": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-0dbd39632cc79f2a.json",
+        "sha256": "1d9f45a800ba0ed82f972e0b477f32a16794ceb04745b7cab1a8fc1808d5a22f"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-fdf076396d71add1",
+      "source": "OmniDocBench",
+      "source_sample_id": "PPT_CalculusReview_page_002.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/PPT_CalculusReview_page_002.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-fdf076396d71add1.pdf",
+      "sha256": "0823777b78d7861be5724cb54cf6271c74132f0d809bc9527d32148fef5de602",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-fdf076396d71add1.png",
+      "image_sha256": "2c6fad07b405c19a7c2622d041babf18a7e585a00272aa70e9dde73201b87088",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "PPT2PDF",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "english",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "text_block": 1,
+        "figure": 1,
+        "text_mask": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-fdf076396d71add1.json",
+        "sha256": "54c66e16250648162877fb77e97a6d17bda42bfeabde630f711dd013c44e0d06"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-3f305d6f3536a837",
+      "source": "OmniDocBench",
+      "source_sample_id": "PPT_lay_linalg5_01_05_page_004.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/PPT_lay_linalg5_01_05_page_004.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-3f305d6f3536a837.pdf",
+      "sha256": "ca5886e2734b256636858367270609e65b9a2795f53c687a761f577d82f7e70b",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-3f305d6f3536a837.png",
+      "image_sha256": "2b019e0b2d18e100766858397cc8383d595cc321ad3e3ea48a4229d79661665e",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "PPT2PDF",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "equation_isolated": 2,
+        "text_block": 3,
+        "page_number": 1,
+        "footer": 1,
+        "header": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-3f305d6f3536a837.json",
+        "sha256": "1532cdbfe7e8204009da35009d9ee81e795288b760f10be1c3ebbc3df0698b38"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-498cf759a0cb98c7",
+      "source": "OmniDocBench",
+      "source_sample_id": "PPT_english-studies-s6-on-the-road-resource-3_page_005.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/PPT_english-studies-s6-on-the-road-resource-3_page_005.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-498cf759a0cb98c7.pdf",
+      "sha256": "5076d6fbc1028bfdb6ebe6835760b810c8a63391227cad1658f8c3a3fa193eeb",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-498cf759a0cb98c7.png",
+      "image_sha256": "2ca511bc6e9a707b810bbbc894d9432f8ffe167a4ef7dd633915104e01172670",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "PPT2PDF",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "text_block": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-498cf759a0cb98c7.json",
+        "sha256": "38a59805aca3077447184b61b1f37f09f5ada502bcc21942e1d45235152f319b"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-ff26b32f70f21687",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_llm-raw-scihub-o.O-ceat.200600410.pdf_8.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_llm-raw-scihub-o.O-ceat.200600410.pdf_8.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-ff26b32f70f21687.pdf",
+      "sha256": "c292b625dc8e18cc89a60803d46216ad25d2ef588824db26211dfb2df3fc1c51",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-ff26b32f70f21687.jpg",
+      "image_sha256": "0977e1ebe5f2105c6961b95ee7fc5b4a8f8eb1ab0a5e8e9b33ac4f8e99f2a46c",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1653,
+        "height_pixels": 2206,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "academic_literature",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "english",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "table_fewer_line",
+          "table_horizontal",
+          "table_span",
+          "table_with_formula"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "figure": 1,
+        "figure_caption": 1,
+        "text_block": 5,
+        "table_caption": 2,
+        "table": 2,
+        "page_number": 1,
+        "header": 2,
+        "footer": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-ff26b32f70f21687.json",
+        "sha256": "8db0e978904f0992ced38f5316f4b4c76250fb664a3951aa847be69be4e17c09"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-a8d4366b6d7f7975",
+      "source": "OmniDocBench",
+      "source_sample_id": "scihub_j.1528-1167.2008.01552.x.pdf_3.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/scihub_j.1528-1167.2008.01552.x.pdf_3.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-a8d4366b6d7f7975.pdf",
+      "sha256": "5c972e9d887ac00caa279ac481c9734edb4cf1c426a0b62da5ce648f6b63cc8a",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-a8d4366b6d7f7975.jpg",
+      "image_sha256": "0e030589f920c1d3580a9ace99b3dd8632cfc564f029b46bc376921c7e7f0f34",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1650,
+        "height_pixels": 2175,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "academic_literature",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "english",
+        "layout": "double_column",
+        "special_issue": [
+          "table_omission_line",
+          "table_veritical",
+          "table_span",
+          "table_with_formula"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "table": 1,
+        "title": 3,
+        "text_block": 6,
+        "page_number": 1,
+        "header": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-a8d4366b6d7f7975.json",
+        "sha256": "d428567aa626bd74f5e0ee33916534e66bcbdf3c9932a1edda1527ee636edf67"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-973f1686e4dce325",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_llm-raw-scihub-o.O-hup.777.pdf_7.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_llm-raw-scihub-o.O-hup.777.pdf_7.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-973f1686e4dce325.pdf",
+      "sha256": "bd1cffe82d3c72d0b920e5fa681a491a50250fdac09e6f45f87bf792f226524c",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-973f1686e4dce325.jpg",
+      "image_sha256": "e334e4f823c20f95d0edf976f798cd899cae9327fa2d38c7f1ca77bb03c1b5f1",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1575,
+        "height_pixels": 2048,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "academic_literature",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "table_fewer_line",
+          "table_horizontal",
+          "table_span"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "table_caption": 1,
+        "table": 1,
+        "table_footnote": 1,
+        "text_block": 3,
+        "page_number": 1,
+        "header": 1,
+        "page_footnote": 1,
+        "footer": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-973f1686e4dce325.json",
+        "sha256": "22c0267ba78ad21d9d8bbcc8a59bb3386aad301808d78c88bcb38ff43eaac276"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-2d7742050ece5a87",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-e721a819-6dbf-453a-a7ad-857c24f9aa3e.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-e721a819-6dbf-453a-a7ad-857c24f9aa3e.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-2d7742050ece5a87.pdf",
+      "sha256": "ca438bb68b51ca50aec3f1d1be5503a432622d6969827323361c16241681e432",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-2d7742050ece5a87.png",
+      "image_sha256": "185a251461a9616d11381897068c2b2a23db742a0eec992fd6a8d708237e0103",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "academic_literature",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "equation_hard"
+      },
+      "element_counts": {
+        "text_block": 7,
+        "equation_isolated": 10,
+        "header": 1,
+        "page_number": 1,
+        "equation_semantic": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-2d7742050ece5a87.json",
+        "sha256": "aec992d19d40387fc4a032fe1226c26ed0540240c4670843440f8ce7eb9321d6"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-5b0636ee741c7509",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_llm-raw-the-eye-o.O-1995_2418.pdf_1.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_llm-raw-the-eye-o.O-1995_2418.pdf_1.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-5b0636ee741c7509.pdf",
+      "sha256": "51bba7e3c3a3e790b0336a138f08799c80eb64fb4bd40a62e75faa3087d156e4",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-5b0636ee741c7509.jpg",
+      "image_sha256": "2e55d95a912e722deec07720955000a860e99d1fdaa6e2138c7e290066391635",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "academic_literature",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "english",
+        "layout": "three_column",
+        "special_issue": [
+          "table_omission_line",
+          "table_horizontal"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 20,
+        "table": 1,
+        "title": 2,
+        "page_number": 1,
+        "header": 1,
+        "page_footnote": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-5b0636ee741c7509.json",
+        "sha256": "7895ac595d5c4f80d73ccd26de566709581d013db2c9f23829681134eca610d2"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-51a9d3be705b0fa1",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_ey-how-covid-19-has-triggered-a-sprint-toward-smarter-health-care.pdf_5.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_ey-how-covid-19-has-triggered-a-sprint-toward-smarter-health-care.pdf_5.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-51a9d3be705b0fa1.pdf",
+      "sha256": "17b6de7d483236833b4badf446e1406695a08b206851061f089b9f322d604974",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-51a9d3be705b0fa1.jpg",
+      "image_sha256": "ffffb9b595c2ad033763ad6149e5f3370dc4d27553a662548fd7b36ab6dd2472",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "book",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "english",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "text_block": 3,
+        "figure_caption": 5,
+        "figure": 4,
+        "figure_footnote": 1,
+        "page_footnote": 1,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-51a9d3be705b0fa1.json",
+        "sha256": "990c55e2ee487a44a9e676425d779e9a4ca64638bfa18693011c1251c2801330"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-b01fe5dd87246f38",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_ey-financial-sustainability-whitepaper.pdf_17.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_ey-financial-sustainability-whitepaper.pdf_17.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-b01fe5dd87246f38.pdf",
+      "sha256": "b31a0c8870f38e86aab8c0d5baaaaea2441aa855fb7eea3a0b5ebe7eecb3325e",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-b01fe5dd87246f38.jpg",
+      "image_sha256": "d0bc55702ede58db5ba5e5545fd6b0018ec7d6f7107da3d873dd580ea09e5546",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "book",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "english",
+        "layout": "double_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 2,
+        "text_block": 10,
+        "abandon": 2,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-b01fe5dd87246f38.json",
+        "sha256": "62554afeb41ebab09614f1bc3d2290645e8f9730a73355c4bebaa98e7f633685"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-dd9f040b3b7484fb",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_socialsci-74973.pdf_31.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_socialsci-74973.pdf_31.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-dd9f040b3b7484fb.pdf",
+      "sha256": "f26934d140b8901560a41b8c9fbcefa5bacd3423451d1acba463d3e7c7b1281f",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-dd9f040b3b7484fb.jpg",
+      "image_sha256": "3170389d681aed1aeb91e5a8ee90f55901357ade940bf6a02ad253c9d9dae8e1",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "book",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "table_horizontal",
+          "table_fewer_line"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 3,
+        "text_block": 6,
+        "table_caption": 3,
+        "table": 3,
+        "abandon": 2,
+        "header": 1,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-dd9f040b3b7484fb.json",
+        "sha256": "0bd060ce9418da46fc3934faaa00bfbc896a1efa11492195136c1d403fcda6ff"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-6e2050037846098b",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-617783f8-bbd6-4faf-bca6-a05222c29314.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-617783f8-bbd6-4faf-bca6-a05222c29314.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-6e2050037846098b.pdf",
+      "sha256": "583a4bbc0a58850e392818869833de10aedaafe394c24129b24785dbfe227d9b",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-6e2050037846098b.png",
+      "image_sha256": "446e9d4e617c25530962e3514fd752ecbe36557ba4337fbea9ab5dd2d6e749fc",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "book",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "equation_hard"
+      },
+      "element_counts": {
+        "text_block": 7,
+        "equation_isolated": 20,
+        "header": 1,
+        "page_number": 1,
+        "equation_semantic": 3
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-6e2050037846098b.json",
+        "sha256": "624b8d0f7647de25daf812bb6a612dfb8b649df56fe1f5f95f38c1462778067c"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-9e17916c1016dde9",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_0071908e787f90267682e19ef093bb18dda6e1c1614534c445ddd62c425b3a94.pdf_44.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_0071908e787f90267682e19ef093bb18dda6e1c1614534c445ddd62c425b3a94.pdf_44.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-9e17916c1016dde9.pdf",
+      "sha256": "1f2f1987b24b0ae85d38890bdc37bba41f3367b320ac0c7abe0dd36daa5b70b9",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-9e17916c1016dde9.jpg",
+      "image_sha256": "1959d163426bfe7952496de8fc86645c8f81f7920a32f8fa329f109b7ba93ed5",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "book",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "english",
+        "layout": "three_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 11,
+        "title": 3,
+        "figure": 3,
+        "figure_caption": 3,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-9e17916c1016dde9.json",
+        "sha256": "3e658d863a546f570c34ce4528bd2520637aa6dff7aa2d31831421c33862d259"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-5f439f25e08573b9",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_enbook-zlib-o.O-17761417.pdf_894.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_enbook-zlib-o.O-17761417.pdf_894.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-5f439f25e08573b9.pdf",
+      "sha256": "4cc01e52f7ebf2d6fa8e660ed1532a3aff0455747b437be06e6e18c4ce9aed12",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-5f439f25e08573b9.jpg",
+      "image_sha256": "773607dd170f33938af7553596036ba26e7b9800a51bcc1d9c6e111525cc3131",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2175,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "colorful_textbook",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "english",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "table_fewer_line",
+          "table_horizontal",
+          "colorful_backgroud",
+          "table_span"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 2,
+        "text_block": 3,
+        "table_caption": 1,
+        "table": 1,
+        "table_footnote": 1,
+        "page_number": 1,
+        "header": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-5f439f25e08573b9.json",
+        "sha256": "56e52b6c21c8138946fcf2f0a4ed8535645766ce303ef7aabd6dd8dbcc11a1d2"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-d1f0a03cb4dd9077",
+      "source": "OmniDocBench",
+      "source_sample_id": "color_textbook_zhonggaokao_小学_13.人教新起点英语（4-5年级）_人教新起点五年级英语下册_课本_人教新起点英语5B电子课本_page_046.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/color_textbook_zhonggaokao_%E5%B0%8F%E5%AD%A6_13.%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E8%8B%B1%E8%AF%AD%EF%BC%884-5%E5%B9%B4%E7%BA%A7%EF%BC%89_%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E4%BA%94%E5%B9%B4%E7%BA%A7%E8%8B%B1%E8%AF%AD%E4%B8%8B%E5%86%8C_%E8%AF%BE%E6%9C%AC_%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E8%8B%B1%E8%AF%AD5B%E7%94%B5%E5%AD%90%E8%AF%BE%E6%9C%AC_page_046.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-d1f0a03cb4dd9077.pdf",
+      "sha256": "4d24a7679921c76a9798132501667d733ffe1d5be361740e71dbad5a559579b1",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-d1f0a03cb4dd9077.png",
+      "image_sha256": "0a00e0562cd745b62603b5f1aa2c47c990550834e5f40ec6684ad88913d3d182",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1653,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "colorful_textbook",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "english",
+        "layout": "double_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "figure": 1,
+        "text_mask": 20,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-d1f0a03cb4dd9077.json",
+        "sha256": "1818de435016e2ea6a6cd0f02bdfa6915c0f38c35497dc4ee5a6779735c9ffa8"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-c7622c8f30592261",
+      "source": "OmniDocBench",
+      "source_sample_id": "color_textbook_zhonggaokao_小学_13.人教新起点英语（4-5年级）_人教新起点五年级英语上册_课本_人教新起点英语5A电子课本_page_056.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/color_textbook_zhonggaokao_%E5%B0%8F%E5%AD%A6_13.%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E8%8B%B1%E8%AF%AD%EF%BC%884-5%E5%B9%B4%E7%BA%A7%EF%BC%89_%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E4%BA%94%E5%B9%B4%E7%BA%A7%E8%8B%B1%E8%AF%AD%E4%B8%8A%E5%86%8C_%E8%AF%BE%E6%9C%AC_%E4%BA%BA%E6%95%99%E6%96%B0%E8%B5%B7%E7%82%B9%E8%8B%B1%E8%AF%AD5A%E7%94%B5%E5%AD%90%E8%AF%BE%E6%9C%AC_page_056.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-c7622c8f30592261.pdf",
+      "sha256": "a7fa9fb0cdb3ac2a401f741bd6e37d30a075fa20b888295f060a777159f30b28",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-c7622c8f30592261.png",
+      "image_sha256": "d4e28a2d7bd0b2609679746932ec04b8ce690bc3fc31c911a05aa74caebd8bf4",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1653,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "colorful_textbook",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "table_full_line",
+          "table_horizontal"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 4,
+        "figure": 2,
+        "figure_caption": 1,
+        "text_block": 4,
+        "table": 1,
+        "text_mask": 3,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-c7622c8f30592261.json",
+        "sha256": "24cd4067e055937893660ad33375eecd78e8f498b2649499ef4deefc41484c86"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-8f108f4e14796d06",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_2198.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_2198.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-8f108f4e14796d06.pdf",
+      "sha256": "fa97bd6d51487fa8abba96f8898e03941e8dd79671c1203385899a87c3609594",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-8f108f4e14796d06.jpg",
+      "image_sha256": "ca4499b5ac7b13e39611c6d45566075f0f163585a62b8c4c42b320e10b53e8b8",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1457,
+        "height_pixels": 2049,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "colorful_textbook",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 4,
+        "figure": 6,
+        "figure_caption": 6,
+        "text_block": 8,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-8f108f4e14796d06.json",
+        "sha256": "fef43aa0bc4f7b9e4347117ba0c666ff1fa7cb0884d9771a58c0d678d65b5ca4"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-32e5bafb46304cc6",
+      "source": "OmniDocBench",
+      "source_sample_id": "exam_paper_en-file-putnam-archive_1993_Problems_1993_page_001.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/exam_paper_en-file-putnam-archive_1993_Problems_1993_page_001.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-32e5bafb46304cc6.pdf",
+      "sha256": "296e7aaf90ce26f776b28069598c2752a5f13caa292f66aa43b883a5d3cd91a8",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-32e5bafb46304cc6.png",
+      "image_sha256": "e505ff738b039510bd6ba62a141ab1ad8bccde828d2ce2132421cc4b93dcafae",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "exam_paper",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "english",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 2,
+        "text_block": 16,
+        "equation_isolated": 6
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-32e5bafb46304cc6.json",
+        "sha256": "29bc8ed1f65ba75ca1f5ca3e8fd2f6382be912a2c22e3da5a97d4334061e557c"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-5ac81d8e009837d3",
+      "source": "OmniDocBench",
+      "source_sample_id": "exam_paper_en-file-putnam-archive_1995_Solutions_1995s_page_002.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/exam_paper_en-file-putnam-archive_1995_Solutions_1995s_page_002.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-5ac81d8e009837d3.pdf",
+      "sha256": "7ebb243cb31146053ac5ede6d0f95bc524d81e15c10df46417de7495f254761c",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-5ac81d8e009837d3.png",
+      "image_sha256": "efd4c8aed9c70d40e5e5928c1190265c1b9d7e6ed441f05ceaf2f9a9c1be2b3d",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "exam_paper",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "english",
+        "layout": "double_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 16,
+        "equation_isolated": 5,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-5ac81d8e009837d3.json",
+        "sha256": "4fed367ef674b4b39c1a317ef8caf9ac3f42e0d2113918855b3d44b8868827c1"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-e9708d6076c6ce02",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_3375.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_3375.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-e9708d6076c6ce02.pdf",
+      "sha256": "3f6ed8bdbd4fb39d0f018f676c6b7d3391d5ca9810127f1ce20ca1efd9b9a227",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-e9708d6076c6ce02.jpg",
+      "image_sha256": "b1fbce9804e130975aa5a9c26c133e3dc141c0fd99926cc1d37bddd2fad94d2e",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1859,
+        "height_pixels": 2449,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "exam_paper",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "watermark"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 7,
+        "title": 2,
+        "abandon": 1,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-e9708d6076c6ce02.json",
+        "sha256": "3239640bb351ffa42bf65d7266636f0a3ac54d00ec239ce4b48d39628f1c1a90"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-b82392d306c0c55a",
+      "source": "OmniDocBench",
+      "source_sample_id": "exam_paper_2004-2019上海高考英语听力原文和答案_page_002.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/exam_paper_2004-2019%E4%B8%8A%E6%B5%B7%E9%AB%98%E8%80%83%E8%8B%B1%E8%AF%AD%E5%90%AC%E5%8A%9B%E5%8E%9F%E6%96%87%E5%92%8C%E7%AD%94%E6%A1%88_page_002.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-b82392d306c0c55a.pdf",
+      "sha256": "182b1d0147b272a6d4a1f0f9d4e9e095a18676155208ccc2f95fb3df097b944d",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-b82392d306c0c55a.png",
+      "image_sha256": "31c0d2828a3fddb21654a622f915c132251b39eaeb9aa58fc884f30b95e6acfa",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 6800,
+        "height_pixels": 9067,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "exam_paper",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 9,
+        "title": 5,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-b82392d306c0c55a.json",
+        "sha256": "2f2cde43174701827a349c3bebbaf5bad9902ef767ff3f68b821ea74f5384c89"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-a95694f0a86a7b05",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_yanbaoPPT_5627.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_yanbaoPPT_5627.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-a95694f0a86a7b05.pdf",
+      "sha256": "66a34c21748ad2c58bfecbb403e0676b09ea721f1f35ae15c8f61fd9c583294b",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-a95694f0a86a7b05.jpg",
+      "image_sha256": "28b7489faa828a68e3fa5fb13509cf83b2125c8bf64f7d07634ae93011589ea9",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "magazine",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "english",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 6,
+        "text_block": 5
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-a95694f0a86a7b05.json",
+        "sha256": "c90587ac2e9d9068fbaa7c25bb6b55995aba7d557bd51ec7729c9be42eccba9f"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-fc6125f03e20e314",
+      "source": "OmniDocBench",
+      "source_sample_id": "magazine_TheEconomist.2023.12.09_page_082.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/magazine_TheEconomist.2023.12.09_page_082.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-fc6125f03e20e314.pdf",
+      "sha256": "e1e41f25a41f87113e32fe7a8c70b3db69b36178e9f002ef578f72f675688dab",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-fc6125f03e20e314.png",
+      "image_sha256": "b35255d3b2c19e3c3b8ff991cb9eccdc9e9ea1d1f9cffe4a33bd102f0e8f91f5",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1022,
+        "height_pixels": 1344,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "magazine",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "english",
+        "layout": "double_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "figure": 1,
+        "figure_caption": 1,
+        "title": 1,
+        "text_block": 13,
+        "header": 2,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-fc6125f03e20e314.json",
+        "sha256": "fbe7a586b4c189a5a55e0c99cccc6d93d58ceec5a1825641be48b1bdb2025dc0"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-cf56196060a6e0b8",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_llm-raw-the-eye-o.O-Dragon%20Magazine%20-%20030.pdf_5.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_llm-raw-the-eye-o.O-Dragon%2520Magazine%2520-%2520030.pdf_5.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-cf56196060a6e0b8.pdf",
+      "sha256": "e3d6bd5cfa786157136def770f94b733ada633e3ff71afd7ff92b113ea3952eb",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-cf56196060a6e0b8.jpg",
+      "image_sha256": "6f3ef81180834ddb3f93c581a17e72991c51213040694bb6743cb7f8597e3c35",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1678,
+        "height_pixels": 2159,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "magazine",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "figure": 3,
+        "title": 3,
+        "text_block": 11,
+        "header": 2,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-cf56196060a6e0b8.json",
+        "sha256": "babee5b6ac2d64cb140074aa9df8d26c23888afa0f207bf11e58110c9741ab8e"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-57281ce0b0de97ee",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_enbook-zlib-o.O-22206811.pdf_5.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_enbook-zlib-o.O-22206811.pdf_5.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-57281ce0b0de97ee.pdf",
+      "sha256": "3cb99fabff912f1e3609923d0deb9ac5d10aee4316836ec5e295c8a69c406cc4",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-57281ce0b0de97ee.jpg",
+      "image_sha256": "63c792afb9810e29f428dcadba9d2c58dadd69185fa7ab9e11822893da12d9ca",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "magazine",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "figure_caption": 5,
+        "figure": 5,
+        "text_block": 5,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-57281ce0b0de97ee.json",
+        "sha256": "1743d7421d4ba072e8924996bf3de7470575f78ecb54337198528759750a7100"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-7ed0c00a521c23bd",
+      "source": "OmniDocBench",
+      "source_sample_id": "magazine_TheEconomist.2023.12.02_page_031.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/magazine_TheEconomist.2023.12.02_page_031.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-7ed0c00a521c23bd.pdf",
+      "sha256": "b53072b339963d5a1e59756ceb91e88771d29858b9c50624a2965c25ab8091f4",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-7ed0c00a521c23bd.png",
+      "image_sha256": "37ab3d001ad36a1caf0ccc4c2730bbd8768050dd9e388372098e5f16e7369125",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 5000,
+        "height_pixels": 6567,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "magazine",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "english",
+        "layout": "three_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 14,
+        "title": 8,
+        "figure": 1,
+        "figure_caption": 1,
+        "header": 2,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-7ed0c00a521c23bd.json",
+        "sha256": "8b96ac275ec12122f355330e42deec66ff31a7699de7bd99e3124e64419b77b1"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-4f9c6144ae529a15",
+      "source": "OmniDocBench",
+      "source_sample_id": "newspaper_USAToday-2025-01-08@magazinesclubnew_page_021.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/newspaper_USAToday-2025-01-08%40magazinesclubnew_page_021.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-4f9c6144ae529a15.pdf",
+      "sha256": "df383655a2d8bc9497e04f2db2582d3d491b11ba7e82622fbb12eaceb4e5002d",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-4f9c6144ae529a15.png",
+      "image_sha256": "15538dd8b944e984d9469618420793fec217264a932068536efbf63fa154864c",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2200,
+        "height_pixels": 4250,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "newspaper",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "newspaper",
+        "language": "english",
+        "layout": "other_layout",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 10,
+        "figure": 5,
+        "figure_caption": 5,
+        "text_block": 30,
+        "header": 5,
+        "text_mask": 1,
+        "page_footnote": 1,
+        "abandon": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-4f9c6144ae529a15.json",
+        "sha256": "158fa2fa06c233438c7c9a9c43134761f9e351a587c5aaab2fe040234d6ed8fd"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-9cf90be50f121d43",
+      "source": "OmniDocBench",
+      "source_sample_id": "newspaper_2a6b4fa088699701a6fa9ccecfb5c25d_4.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/newspaper_2a6b4fa088699701a6fa9ccecfb5c25d_4.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-9cf90be50f121d43.pdf",
+      "sha256": "22b089770b71ecada6f0c22727bba0fb91f057cfe9795a5633ef83fd32b3033f",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-9cf90be50f121d43.jpg",
+      "image_sha256": "00627d236c89d48af0beec70b9dc1b3a116d7e49b5073cc80e1871558086add8",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "newspaper",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "newspaper",
+        "language": "english",
+        "layout": "three_column",
+        "special_issue": [],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 16,
+        "title": 1,
+        "header": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-9cf90be50f121d43.json",
+        "sha256": "a18ba0927bc42183f5ed57eff7f2cea4b29b43643eb571747dd6ffadbe8bb95e"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-ce11a17c4f9447d9",
+      "source": "OmniDocBench",
+      "source_sample_id": "notes_f7f010b78016aeebd76e56d9283eb67f_5.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/notes_f7f010b78016aeebd76e56d9283eb67f_5.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-ce11a17c4f9447d9.pdf",
+      "sha256": "6593e2b0528528a3952374c5274032a9680c1ac6c10724141b186b44e7a4976e",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-ce11a17c4f9447d9.jpg",
+      "image_sha256": "b37e9159dcdce003d40f16374260448fb3d9f3ce5e4f66b2b487eb1528d61ad6",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1432,
+        "height_pixels": 2024,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "note",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "note",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "header": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-ce11a17c4f9447d9.json",
+        "sha256": "0ddec808845f878d84f46922cc0cdb7f391869494613bf41280f2b12c118de5f"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-b2dbf2b054e6a637",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-458ab820-615f-42fe-af33-3a8fb15ad691.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-458ab820-615f-42fe-af33-3a8fb15ad691.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-b2dbf2b054e6a637.pdf",
+      "sha256": "9bd0f7def6d00dd65cd25a1f01a9c15c529a67fcbc3222430a8d6a2d8710d996",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-b2dbf2b054e6a637.png",
+      "image_sha256": "4ee0c19b89398647e93a49fc5b478d4b099c342c764936acd5db0b5b0b8e8d87",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1653,
+        "height_pixels": 2206,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "english",
+      "category": "research_report",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "research_report",
+        "language": "english",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "table_hard"
+      },
+      "element_counts": {
+        "table_caption": 1,
+        "table": 1,
+        "footer": 2,
+        "abandon": 1,
+        "header": 3,
+        "figure": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-b2dbf2b054e6a637.json",
+        "sha256": "a700388dad028e5e1db00eced3a1189f7aab0135d61a50c465057dc00129a958"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-8633ce595ec5c7dc",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-0b772bee-71ec-4d4a-a406-d7691b1a6e86.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-0b772bee-71ec-4d4a-a406-d7691b1a6e86.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-8633ce595ec5c7dc.pdf",
+      "sha256": "910fdad5e49a735dc692ebf49c2264ac10499c104d678f8ab99fa8ad7bd4aff3",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-8633ce595ec5c7dc.png",
+      "image_sha256": "eed0dce4809c134fffdcc8da2c1810d1e178269e3bf7c8cd3701cc73a8cacff2",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1536,
+        "height_pixels": 2048,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "other",
+      "category": "magazine",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "other",
+        "layout": "other_layout",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "title": 3,
+        "text_block": 15,
+        "figure": 4,
+        "footer": 4
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-8633ce595ec5c7dc.json",
+        "sha256": "f3c0ab682a19561b5773b9950d072dd4460733fa42ade15469028f26a0c7ef05"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-15026d697fcd7bc8",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_7d1e64f512712a29658dd6c775c5120c90dda9a50698b42b953882a8a8020dbb.pdf_57.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_7d1e64f512712a29658dd6c775c5120c90dda9a50698b42b953882a8a8020dbb.pdf_57.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-15026d697fcd7bc8.pdf",
+      "sha256": "3cb8166da97f58b1451a1f41f67ccdb617b6866c81ee963fdec75abb971d639f",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-15026d697fcd7bc8.jpg",
+      "image_sha256": "e67e2f8bcb126c3041d94fbf29e709285851d9b8c3b4872c06950e7b29e62228",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2667,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "PPT2PDF",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "simplified_chinese",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 5,
+        "text_block": 9,
+        "figure": 1,
+        "abandon": 3,
+        "header": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-15026d697fcd7bc8.json",
+        "sha256": "ebfde3d127416646f8373feaae00bd92952b40496b9ae3392ab564b5433bfe28"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-ec3e22c2e19897ea",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaopptmerge_yanbaoPPT_1090.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaopptmerge_yanbaoPPT_1090.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-ec3e22c2e19897ea.pdf",
+      "sha256": "befd171b47e8be70c8850c3deb53ff1ef60348c7100a3c99db010733af66c16d",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-ec3e22c2e19897ea.jpg",
+      "image_sha256": "cee4fefbafbff11baca88b3164734b0f9f1bbbb3b16fe585dd5155905d558015",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 1250,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "PPT2PDF",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "simplified_chinese",
+        "layout": "double_column",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 1,
+        "figure": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-ec3e22c2e19897ea.json",
+        "sha256": "83caca0d293891af623d0e69b8a7cb5664a3c5b1fc65b80460f4cc9aa1292eed"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-2a9a8c3699832af3",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaopptmerge_yanbaoPPT_1825.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaopptmerge_yanbaoPPT_1825.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-2a9a8c3699832af3.pdf",
+      "sha256": "b18be476dd2a0e79b595fbf6be6a8089cc26271a9a9df6876a891160b208b0fd",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-2a9a8c3699832af3.jpg",
+      "image_sha256": "0e3db2d7db65ce741df7a4b4deb3c770486cf5b1fdf562f965be7c3288020c0f",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "PPT2PDF",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 3,
+        "text_block": 3,
+        "figure": 4
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-2a9a8c3699832af3.json",
+        "sha256": "4e9cc77fa03c9cb1c58707ffa1bd56570a8d0857c26e09007ccfb7f77e658cf6"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-e10ec0d3a1f48464",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaopptmerge_yanbaoPPT_1685.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaopptmerge_yanbaoPPT_1685.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-e10ec0d3a1f48464.pdf",
+      "sha256": "89f442d4a16e057e7c0086a09d703cc791cfc3d0a18ca277f7b77774bddd1aa6",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-e10ec0d3a1f48464.jpg",
+      "image_sha256": "a8b7c369ace454b443ad6b581ddca6b82deeb41a6689e370ccf6fe339a3ea1a2",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 2000,
+        "height_pixels": 1500,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "PPT2PDF",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "PPT2PDF",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "text_block": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-e10ec0d3a1f48464.json",
+        "sha256": "89d4da3a718643ab011b57fa24d085f0c2b3681cf0ee78dd96932a7728ce2c3f"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-14c6a4472f5f5620",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-dd5b0a99-4cc6-4fa9-ab63-a277947735b1.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-dd5b0a99-4cc6-4fa9-ab63-a277947735b1.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-14c6a4472f5f5620.pdf",
+      "sha256": "e280e2f37de1c7216b0ba5e49a0f8de5d95a9cd090bcb133b56f522182fdfc6d",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-14c6a4472f5f5620.png",
+      "image_sha256": "972ab75a8b114570ccd3ed7209ed981eb8de70f6efc014a0ef5920effde42aca",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "academic_literature",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [],
+        "subset": "table_hard"
+      },
+      "element_counts": {
+        "table_caption": 1,
+        "table": 1,
+        "title": 6,
+        "text_block": 6,
+        "page_number": 1,
+        "header": 2,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-14c6a4472f5f5620.json",
+        "sha256": "c7bec231669a6f9b8f53f7ceb19550a823ada98c1a2f556a31906b887262089e"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-126af60a27abe8bd",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-1f03d0f2-1166-4b9b-9609-94bf8bfd29b2.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-1f03d0f2-1166-4b9b-9609-94bf8bfd29b2.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-126af60a27abe8bd.pdf",
+      "sha256": "d596612918a2db81bf40909a36410b13fe002f7d6f3be754958aa7f9aebc505f",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-126af60a27abe8bd.png",
+      "image_sha256": "84935f2747c3aae7c7b78d147a902003b52f4865818063875aabdba7de290d9f",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1457,
+        "height_pixels": 2047,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "academic_literature",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "academic_literature",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [],
+        "subset": "table_hard"
+      },
+      "element_counts": {
+        "text_block": 2,
+        "title": 1,
+        "table_caption": 1,
+        "table": 1,
+        "page_number": 1,
+        "header": 1,
+        "page_footnote": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-126af60a27abe8bd.json",
+        "sha256": "0626b977e4947ab6679a828fe2fb1d96c21a583bdb5d3ede08f1e708bff7a3c1"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-fcbd87d51da24bd3",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_a6b1184da1f8167144544b92fff11726f5218e5ca106c86dc00436c14725d7b9.pdf_5.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_a6b1184da1f8167144544b92fff11726f5218e5ca106c86dc00436c14725d7b9.pdf_5.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-fcbd87d51da24bd3.pdf",
+      "sha256": "7a2a029cafb7576c6cb1318c2dba2e520b86c2a029f2e0554ea2e67f282463e0",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-fcbd87d51da24bd3.jpg",
+      "image_sha256": "f34cb56d4d4c7afd06651ab676737de94ed92ca72b0dde413eb867a32fe336fe",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "book",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "simplified_chinese",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 2,
+        "text_block": 5,
+        "header": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-fcbd87d51da24bd3.json",
+        "sha256": "69a6af4b8c783ec9562ed7df8b10c43757ea728da66c04241319cc72644cf56c"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-011097ea20d89218",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_f197117877bfd892faf3c89f14c35ae92c3150ec7affb49dd51d8f8ce202604a.pdf_22.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_f197117877bfd892faf3c89f14c35ae92c3150ec7affb49dd51d8f8ce202604a.pdf_22.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-011097ea20d89218.pdf",
+      "sha256": "66d013e9161c3b81588e390d2fa16b82980907682d8f77c4a3d55f21ae120341",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-011097ea20d89218.jpg",
+      "image_sha256": "1c3643fdde43d30df3e7fb07e02c403dcb5c90157527579707821e778acf15a6",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "book",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "simplified_chinese",
+        "layout": "double_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 5,
+        "title": 1,
+        "figure_caption": 1,
+        "figure_footnote": 2,
+        "figure": 1,
+        "header": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-011097ea20d89218.json",
+        "sha256": "fffa1895361bd56d974060132b415bd8104fd448798d9d55a07c3f3c462c51b7"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-b9d00e8fb4ef2a4a",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-6788acda-bfb0-479c-bc2a-9b471ec2cc33.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-6788acda-bfb0-479c-bc2a-9b471ec2cc33.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-b9d00e8fb4ef2a4a.pdf",
+      "sha256": "46fbdf0f09d0d3d0d222d8a055116ae50bddc2674afc5d5e4d94e19b8bf3966e",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-b9d00e8fb4ef2a4a.png",
+      "image_sha256": "9efeef314c352afaf077bf56547e9743d93e496dadbed3011f3998b033dbbc74",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1653,
+        "height_pixels": 2337,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "book",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [
+          "with_watermark"
+        ],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "text_block": 13,
+        "title": 1,
+        "figure": 2,
+        "figure_caption": 1,
+        "equation_isolated": 3,
+        "header": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-b9d00e8fb4ef2a4a.json",
+        "sha256": "06a6549dc4d7d95296d34228f7e1224a5fc486d90f2e947c77fff8e44a161d9b"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-fd9a7ca31218c008",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_dianzishu_zhongwenzaixian-o.O-63684502.pdf_263.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_dianzishu_zhongwenzaixian-o.O-63684502.pdf_263.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-fd9a7ca31218c008.pdf",
+      "sha256": "0870eb39faa4c41e862d943b2cf24f7d713d803003fae8e94bbd4ed58874c7e2",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-fd9a7ca31218c008.jpg",
+      "image_sha256": "b6735466eac7257e7accf6a020ea80f2432ca70b1c293daf65b73b0c16c9c2df",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1456,
+        "height_pixels": 1850,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "book",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [
+          "table_horizontal",
+          "table_omission_line"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 3,
+        "table_caption": 2,
+        "table": 2,
+        "title": 1,
+        "header": 1,
+        "abandon": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-fd9a7ca31218c008.json",
+        "sha256": "08b1312baf68d9a5d8404913927a2f588c9ef627e7d8a1a5a4bd131cdcb9d057"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-a5fb6f95ce5a4a22",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_0ef01b835238626f3589faa671abdfb832f2b98987eadad53cb2e35699dcc039.pdf_13.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_0ef01b835238626f3589faa671abdfb832f2b98987eadad53cb2e35699dcc039.pdf_13.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-a5fb6f95ce5a4a22.pdf",
+      "sha256": "89f2dfd9197b14dad5acf01b52e2a34a88fe1a418a2d54cc3a2f63cf8a644503",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-a5fb6f95ce5a4a22.jpg",
+      "image_sha256": "93b5f1572df18f48125561548ce31dc8b7b235681410e1f036001bf428ba99eb",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "book",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "book",
+        "language": "simplified_chinese",
+        "layout": "three_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 3,
+        "text_block": 9,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-a5fb6f95ce5a4a22.json",
+        "sha256": "c218bf7be397df66222a2d061af2402a14129198cb60dcb0fa1d433337bc792d"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-75d5823dfd5708a7",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_2623.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_2623.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-75d5823dfd5708a7.pdf",
+      "sha256": "efe6ae25cc7f6b3490dbb76cf8d0c972e08903424ef7e4c208fa08502179d34e",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-75d5823dfd5708a7.jpg",
+      "image_sha256": "a18fb70a02c503cba77ff6c7367c4e67c4203cf9fcaa9bf07b518217b7baac82",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1334,
+        "height_pixels": 2040,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "colorful_textbook",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "simplified_chinese",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "table_full_line",
+          "table_horizontal",
+          "table_span"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 4,
+        "text_block": 10,
+        "figure_caption": 4,
+        "figure": 4,
+        "table_caption": 1,
+        "header": 2,
+        "table_mask": 1,
+        "page_number": 1,
+        "abandon": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-75d5823dfd5708a7.json",
+        "sha256": "0a14a89fcf6ae28fba1ad1a530ed9bff11a34f95d9589721336077d08b05a31c"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-82b2d379d9e53d27",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_3428.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_3428.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-82b2d379d9e53d27.pdf",
+      "sha256": "86111857966e722e602ea3fb6bdd90838f06f2979446f930d387348c75fe5879",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-82b2d379d9e53d27.jpg",
+      "image_sha256": "f87060c14f87b4c7a418910fad29862039edd6b1fa0620bef6a43b3aad58c92a",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 5556,
+        "height_pixels": 8217,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "colorful_textbook",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "simplified_chinese",
+        "layout": "double_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 10,
+        "title": 2,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-82b2d379d9e53d27.json",
+        "sha256": "da9ac945b585841360d7a2394f4ce4c1f3304ba7062b371f63d077b22758a06a"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-c8cc1b5fe6334a93",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-0c8b5994-685d-4b1b-816a-74f43aff8a53.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-0c8b5994-685d-4b1b-816a-74f43aff8a53.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-c8cc1b5fe6334a93.pdf",
+      "sha256": "9932e2b6dbb80fa7c542ba27d5c35bfe7ca4bb4149b9c7b7512b17d804fcbc9f",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-c8cc1b5fe6334a93.png",
+      "image_sha256": "9e0db7f5610fc75f5689b5e34975abb29ea3cd5ddaec57a734b47819523826c0",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "colorful_textbook",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [],
+        "subset": "equation_hard"
+      },
+      "element_counts": {
+        "title": 3,
+        "text_block": 11,
+        "chart_mask": 2,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-c8cc1b5fe6334a93.json",
+        "sha256": "2882a973bb9c7f76a4bc9b52a57f7088a23c03f1da55c4b423765cd213e6cb93"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-75b6f056287b4ab3",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_1041.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_1041.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-75b6f056287b4ab3.pdf",
+      "sha256": "64da77082ecb2a835ae7cd07971e771fce5e303a4bdc396a764b61df598ad2b4",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-75b6f056287b4ab3.jpg",
+      "image_sha256": "1270f050e3a596c764e5e124758f178c2e4e55507576155202ba08a496f1bdfa",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1701,
+        "height_pixels": 2292,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "colorful_textbook",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [
+          "table_full_line",
+          "table_horizontal",
+          "table_with_formula",
+          "table_with_img"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "abandon": 1,
+        "table_mask": 1,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-75b6f056287b4ab3.json",
+        "sha256": "3dca8acfcd00ef1ce58ceb849d1518cb4e7157e9f11c3a0464886fd8a964cdca"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-ee79ecf19345f0d0",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_2263.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_2263.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-ee79ecf19345f0d0.pdf",
+      "sha256": "409491b11d9d6db9925560034091d0cd4739664fa532786ae14f174b3a1acde9",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-ee79ecf19345f0d0.jpg",
+      "image_sha256": "d691b4dffa70d5030007d4598fa073683d6f06fb299f9daafbaa05548d936647",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 11112,
+        "height_pixels": 7925,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "colorful_textbook",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "colorful_textbook",
+        "language": "simplified_chinese",
+        "layout": "three_column",
+        "special_issue": [
+          "watermark"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 9,
+        "title": 6,
+        "figure": 2,
+        "header": 1,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-ee79ecf19345f0d0.json",
+        "sha256": "c7cc805785015cbde06a7dcbf3591071248f077e45451b1ebee3b4ca534dfa49"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-92b83947159fe7ce",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_625.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_625.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-92b83947159fe7ce.pdf",
+      "sha256": "f32693a4fa541560909a9d4f3056f1f14197a832910399a911b652b78db5cf72",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-92b83947159fe7ce.jpg",
+      "image_sha256": "d27fcc6aa85b2f9c819e715b1f32bf38f5dc4b541f4a40ce1e1a4ac3712e6fd0",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1334,
+        "height_pixels": 1872,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "exam_paper",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "simplified_chinese",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "table_full_line",
+          "table_horizontal"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 3,
+        "text_block": 18,
+        "table": 2,
+        "figure": 1,
+        "figure_caption": 1,
+        "header": 2,
+        "abandon": 2,
+        "table_mask": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-92b83947159fe7ce.json",
+        "sha256": "ff27700dc154fbc465daa69c4e11897f2dfca751147f5b4ae19a3c18b24e75b4"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-2c0a083b9bb9d973",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_2360.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_2360.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-2c0a083b9bb9d973.pdf",
+      "sha256": "2b249ca11ab4c76a77eb665ccbe8bfc2a086160477af0a9a0042b11800cc91c8",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-2c0a083b9bb9d973.jpg",
+      "image_sha256": "872bbb80b4ced94022450dd3154e48dbbb309dbbdfc06395c2773f94c562d9a8",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1334,
+        "height_pixels": 962,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "exam_paper",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "simplified_chinese",
+        "layout": "double_column",
+        "special_issue": [
+          "table_horizontal",
+          "table_full_line",
+          "fuzzy_scan"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "text_block": 13,
+        "table": 3,
+        "figure": 2,
+        "header": 1,
+        "footer": 2
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-2c0a083b9bb9d973.json",
+        "sha256": "7d1cac087a71281e11a8a83310dc1285d9155d46cf22a3b4b82f150bd4ca4b4c"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-fac77b92b0b0275c",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_1198.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_1198.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-fac77b92b0b0275c.pdf",
+      "sha256": "ca9081246b97f66073e122191939dc6c31c947c04cf51b899aea17a9cfbfb4c4",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-fac77b92b0b0275c.jpg",
+      "image_sha256": "0e603f65c03f7eb6856482d4096679db05a6a05ebc224a7c0f4fffefbe897ec4",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "exam_paper",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 12,
+        "equation_isolated": 2,
+        "title": 1,
+        "figure": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-fac77b92b0b0275c.json",
+        "sha256": "0927461236a5ae8f3914c5a871987b0dbf338f32ecc693b2066d1d419c5e9667"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-2129232d4482599e",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_101.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_101.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-2129232d4482599e.pdf",
+      "sha256": "04f5e5b4b4a99201ca95b0aeed2abc3244bdea363610521c1bf6971e24150252",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-2129232d4482599e.jpg",
+      "image_sha256": "8357eca5e0760d1f6478fd8e83b0f26fe9db68b0d7b8eb891a2fa6f658b7e656",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1504,
+        "height_pixels": 2095,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "exam_paper",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [
+          "watermark",
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "text_block": 6,
+        "title": 1,
+        "figure": 1,
+        "header": 3,
+        "abandon": 2,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-2129232d4482599e.json",
+        "sha256": "80c8406f96a46f0d5d402f0874c43bf82d4c561391218b3f2830c8fc0337d1c8"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-98b456dd74229752",
+      "source": "OmniDocBench",
+      "source_sample_id": "jiaocaineedrop_jiaocai_needrop_en_2604.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/jiaocaineedrop_jiaocai_needrop_en_2604.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-98b456dd74229752.pdf",
+      "sha256": "3f85ea69bc3a5ad7814e018ea6a0e5842a9b0aef873a5cfb22b51f9ece8fc3a8",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-98b456dd74229752.jpg",
+      "image_sha256": "d0f87c71999e2e9439d8d66bda2886955800bb3adfcbe5bdd575a575c4651d6e",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1334,
+        "height_pixels": 1883,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "exam_paper",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "exam_paper",
+        "language": "simplified_chinese",
+        "layout": "three_column",
+        "special_issue": [
+          "watermark"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "figure": 2,
+        "title": 2,
+        "text_block": 9,
+        "header": 2,
+        "page_number": 1,
+        "footer": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-98b456dd74229752.json",
+        "sha256": "70896fe0fd047668b4e52fca80910fbaed58512c46cc4216e81771ee87342e6d"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-7bdd5a919112374d",
+      "source": "OmniDocBench",
+      "source_sample_id": "page-8e2f7ce3-83c4-4977-b6dc-278394c4bd64.png",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/page-8e2f7ce3-83c4-4977-b6dc-278394c4bd64.png",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-7bdd5a919112374d.pdf",
+      "sha256": "042717ef2489955ad0e41f967ab437eb86af793cc6ddb0ad42cee43a283780f7",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-7bdd5a919112374d.png",
+      "image_sha256": "8de82882bab67331ab537ece2c3c16e2661b5308c27753b9772a3343349542b3",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 777,
+        "height_pixels": 1139,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "historical_document",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "historical_document",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [
+          "geometric_deformation"
+        ],
+        "subset": "layout_hard"
+      },
+      "element_counts": {
+        "title": 2,
+        "text_block": 30,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-7bdd5a919112374d.json",
+        "sha256": "d431bc17ec8c7a970377506db05528eafbf1473bafbac6164379a5533337a610"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-17795b8b93082fbf",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_decf70a006d6f8f66725ead2f27b248a911016d258a236cefcdd26c6aff1d463.pdf_40.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_decf70a006d6f8f66725ead2f27b248a911016d258a236cefcdd26c6aff1d463.pdf_40.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-17795b8b93082fbf.pdf",
+      "sha256": "607805a137d175acabd558a9a2036befdf4e95417d7d9a20d7e7f937018d8427",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-17795b8b93082fbf.jpg",
+      "image_sha256": "94dded6af673af0684d7fcc288ed073bd37b5b3021a63e8d63cd5c4667eb87e5",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1700,
+        "height_pixels": 2200,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "magazine",
+      "layout": "1andmore_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "simplified_chinese",
+        "layout": "1andmore_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 3,
+        "text_block": 8,
+        "abandon": 1,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-17795b8b93082fbf.json",
+        "sha256": "90402860ac2c6c555dae82ad5e378a8b4a9423d4108ced0d21156a086c821941"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-fb1b12b405fe81ee",
+      "source": "OmniDocBench",
+      "source_sample_id": "docstructbench_dianzishu_zhongwenzaixian-o.O-61510863.pdf_73.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/docstructbench_dianzishu_zhongwenzaixian-o.O-61510863.pdf_73.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-fb1b12b405fe81ee.pdf",
+      "sha256": "491394dc9db84d3367c1c3e90e46c6b84b4009c2782db0ea3cd3550862295d68",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-fb1b12b405fe81ee.jpg",
+      "image_sha256": "cee5dfe5832d25aaf999a07ccee36b931340ae088152a0dee79ad05e33aedc54",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1338,
+        "height_pixels": 1930,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "magazine",
+      "layout": "double_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "simplified_chinese",
+        "layout": "double_column",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "figure": 2,
+        "figure_footnote": 2,
+        "title": 3,
+        "text_block": 4,
+        "abandon": 5,
+        "header": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-fb1b12b405fe81ee.json",
+        "sha256": "8aebe6de799dd138100f8cda18feb6624da51394d0cfed42fd180e20fa2d353a"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-2f51bf8c416bc64a",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_323ab38d3b3b9a44837779e3c7b4a2f7088d9e0eb6c966d4d596faf6c01011a6.pdf_2.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_323ab38d3b3b9a44837779e3c7b4a2f7088d9e0eb6c966d4d596faf6c01011a6.pdf_2.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-2f51bf8c416bc64a.pdf",
+      "sha256": "15075a20ff2fe2db5425ced1cc72e586242d10a943c33b57f4d39cf941cc249c",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-2f51bf8c416bc64a.jpg",
+      "image_sha256": "291236345ed095ea57c912f234c09c84dd07d1ea965184f48ae1ea08ace19d9c",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "magazine",
+      "layout": "other_layout",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "simplified_chinese",
+        "layout": "other_layout",
+        "special_issue": [
+          "colorful_backgroud"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "figure": 1,
+        "footer": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-2f51bf8c416bc64a.json",
+        "sha256": "1c7db7085512752caac48b7218bd971031530b96d7d701713d3a5f0e37bbc20d"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-a785642ddf42a2b3",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_bc193526614fd5857f7b5254e67bced76222cf3396b01e516303b92609a20075.pdf_14.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_bc193526614fd5857f7b5254e67bced76222cf3396b01e516303b92609a20075.pdf_14.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-a785642ddf42a2b3.pdf",
+      "sha256": "b4ea8483386c922499ee1de232f0154412b4d277d20e3a7170c5b2d8da270068",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-a785642ddf42a2b3.jpg",
+      "image_sha256": "9c5655a8d5ea96a6e67996982011a47e43d775acf155b13d46598219b296a024",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1500,
+        "height_pixels": 2167,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "magazine",
+      "layout": "single_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "simplified_chinese",
+        "layout": "single_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "text_block": 3
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-a785642ddf42a2b3.json",
+        "sha256": "6e25559b4cd8e47d3c335e61c22440a31593f13c46a28f979ef2c98a7827e0ba"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "omni-c07dbd39b4c65f3f",
+      "source": "OmniDocBench",
+      "source_sample_id": "yanbaor2_9be04f6bcbe2c6afc83f0751eb05e361872f9673ccd4bec49cf844c66f34bff0.pdf_19.jpg",
+      "source_url": "https://huggingface.co/datasets/opendatalab/OmniDocBench/resolve/aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec/images/yanbaor2_9be04f6bcbe2c6afc83f0751eb05e361872f9673ccd4bec49cf844c66f34bff0.pdf_19.jpg",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/omni-c07dbd39b4c65f3f.pdf",
+      "sha256": "d513bc7c5b9068383552c7c10fe1797f9cc6be0c35aced1a92f922bc807b2682",
+      "image_path": "artifacts/parser-benchmark/data/images/omni-c07dbd39b4c65f3f.jpg",
+      "image_sha256": "f7257ef0e07abc48ea0aaca2c24a1df2dbd61c1daafa3b74e86cd1baf97eb5ba",
+      "input_kind": "image_wrapped_pdf",
+      "input_details": {
+        "width_pixels": 1654,
+        "height_pixels": 2339,
+        "wrapper_dpi": 200,
+        "text_layer_characters": 0,
+        "has_text_layer": false,
+        "pages": 1
+      },
+      "language": "simplified_chinese",
+      "category": "magazine",
+      "layout": "three_column",
+      "page_attributes": {
+        "data_source": "magazine",
+        "language": "simplified_chinese",
+        "layout": "three_column",
+        "special_issue": [
+          "None"
+        ],
+        "subset": "v1.5"
+      },
+      "element_counts": {
+        "title": 1,
+        "figure": 1,
+        "figure_caption": 1,
+        "text_block": 10,
+        "header": 1,
+        "page_number": 1
+      },
+      "reference": {
+        "format": "omnidocbench_page",
+        "path": "artifacts/parser-benchmark/data/references/omni-c07dbd39b4c65f3f.json",
+        "sha256": "fbce089c62a63b710a43fb8a33fa7cfe6a8be0ab7263bf339bf9252867e9c568"
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-181e6d4f9276a3bb",
+      "source": "olmOCR-bench",
+      "source_sample_id": "arxiv_math/2503.05399_pg6.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/arxiv_math/2503.05399_pg6.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-181e6d4f9276a3bb.pdf",
+      "sha256": "a8800d3bcf04f345340f6274b06f62bf25fb609221ce47a25000d88efd93e45d",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 2083
+      },
+      "language": "english",
+      "category": "arxiv_math",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-181e6d4f9276a3bb.json",
+        "sha256": "bd8208c430a2b340c074e5167327ceee23ebe3a8238083930216d23eb3f59f2a",
+        "test_count": 3
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-bcfc401a06778fdd",
+      "source": "olmOCR-bench",
+      "source_sample_id": "headers_footers/fe8d3e95cdff195bec4dec4416d8315cce6ff669_page_16.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/headers_footers/fe8d3e95cdff195bec4dec4416d8315cce6ff669_page_16.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-bcfc401a06778fdd.pdf",
+      "sha256": "dfd694a894a3a623f1f74fa43903f1e640697e2c86833db1ec9f4a5892aa5a58",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 2073
+      },
+      "language": "english",
+      "category": "headers_footers",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-bcfc401a06778fdd.json",
+        "sha256": "95df783a4555e202b3aa8cf89d0a2bbf86bfd2445e33ffad1cfad06bf576fad9",
+        "test_count": 2
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-6aa83274f870e598",
+      "source": "olmOCR-bench",
+      "source_sample_id": "long_tiny_text/20_pg48_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/long_tiny_text/20_pg48_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-6aa83274f870e598.pdf",
+      "sha256": "db058c76975f8b319331098dea71d9d1ba8d0680c52211b8caf29f6e9b06ce2c",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 5855
+      },
+      "language": "english",
+      "category": "long_tiny_text",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-6aa83274f870e598.json",
+        "sha256": "50a5b43f016969820974dd442bc7e2668965f8a179d96e8c5cb6a6e0f48f5635",
+        "test_count": 6
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-9322dad385fe332c",
+      "source": "olmOCR-bench",
+      "source_sample_id": "multi_column/00f6c2eea6b51fb1bf637b5f8a850588d7e2_page_8_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/multi_column/00f6c2eea6b51fb1bf637b5f8a850588d7e2_page_8_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-9322dad385fe332c.pdf",
+      "sha256": "814142dc6492b5c8ff8e12cf9079c33098a51f920397dbba65144bf0800c0e50",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 5184
+      },
+      "language": "english",
+      "category": "multi_column",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-9322dad385fe332c.json",
+        "sha256": "81e794dd70b1ad1a3c5222b0cf5f9cbd142fcddaf80488600c925e20d2640a62",
+        "test_count": 3
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-927b06801c66168b",
+      "source": "olmOCR-bench",
+      "source_sample_id": "old_scans/55.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/old_scans/55.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-927b06801c66168b.pdf",
+      "sha256": "10bd6dc2ab673b24a6fafeff71ad1303b0abd316dde6aba2dd1caad23e196757",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": false,
+        "text_layer_characters": 0
+      },
+      "language": "english",
+      "category": "old_scans",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-927b06801c66168b.json",
+        "sha256": "b15497b522e30863564352185fe6ae2b53517fa63fd936fecaf8bd8e680a1b29",
+        "test_count": 3
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-c927a4e48c288a6d",
+      "source": "olmOCR-bench",
+      "source_sample_id": "old_scans_math/4_pg281.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/old_scans_math/4_pg281.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-c927a4e48c288a6d.pdf",
+      "sha256": "696452c1b767f2faf3720ffa2959441696ba107c967e018fd4bbd4108c93f7c2",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 1678
+      },
+      "language": "english",
+      "category": "old_scans_math",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-c927a4e48c288a6d.json",
+        "sha256": "842f4b355ab9a4c28d27b7dc010c97c5f9a48250162d922f433c29f201e76aa4",
+        "test_count": 6
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-db5bdbb8bbdb7e2c",
+      "source": "olmOCR-bench",
+      "source_sample_id": "tables/a779784b6a7552404135b376ed1fbf517ea1_pg4_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/tables/a779784b6a7552404135b376ed1fbf517ea1_pg4_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-db5bdbb8bbdb7e2c.pdf",
+      "sha256": "39a3adc1f1d5dc4ec4083bf3c2e496d35b04d32169348b1c88e040804a7b7fab",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 2949
+      },
+      "language": "english",
+      "category": "table_tests",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-db5bdbb8bbdb7e2c.json",
+        "sha256": "6a24219233c5e2306bb98a28bd22b835e2b8d23aa35443273b5850a46d384783",
+        "test_count": 3
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-d4f9c3dc59a077f1",
+      "source": "olmOCR-bench",
+      "source_sample_id": "arxiv_math/2503.07924_pg3.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/arxiv_math/2503.07924_pg3.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-d4f9c3dc59a077f1.pdf",
+      "sha256": "087170870b95570971a0c7ab612f5670c44a190d75c955f81b741e5d779ef7c7",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 4040
+      },
+      "language": "english",
+      "category": "arxiv_math",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-d4f9c3dc59a077f1.json",
+        "sha256": "6bfc2a7c37883a11b8936281c6b40faf5d804d39579dd2a2f683c82749855e5c",
+        "test_count": 8
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-37b171f199727c0d",
+      "source": "olmOCR-bench",
+      "source_sample_id": "headers_footers/038704b29be26b6d45233e5e11218273d372957e_page_2.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/headers_footers/038704b29be26b6d45233e5e11218273d372957e_page_2.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-37b171f199727c0d.pdf",
+      "sha256": "ef7b8c6275d5d04d2b9b811b33c4825737c563e84972f64be9f9334a8bc3c174",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 2882
+      },
+      "language": "english",
+      "category": "headers_footers",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-37b171f199727c0d.json",
+        "sha256": "6ebed1a2c8c937a29970482b40c725b8855f002ed16b30c6a15b5c264fde89d8",
+        "test_count": 2
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-6e189b2301018b8c",
+      "source": "olmOCR-bench",
+      "source_sample_id": "long_tiny_text/20_pg35_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/long_tiny_text/20_pg35_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-6e189b2301018b8c.pdf",
+      "sha256": "67baffc46a18289b7cb97d9dd87ebf349dbc2f1b72b1fe5325bafe9b15c5562b",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 7449
+      },
+      "language": "english",
+      "category": "long_tiny_text",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-6e189b2301018b8c.json",
+        "sha256": "8fcb20aaa308aa33a07ee0b53a7798b7d4999729f6501f978fc1d50810694e9b",
+        "test_count": 7
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-0c26566ffdc6d328",
+      "source": "olmOCR-bench",
+      "source_sample_id": "multi_column/03b953c18a4f7d2bbe390940dec839395cdd_page_30_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/multi_column/03b953c18a4f7d2bbe390940dec839395cdd_page_30_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-0c26566ffdc6d328.pdf",
+      "sha256": "9ce9dd630b6ca772019c4f2fd4552b7bb014e3e2008c28dc15335ec0aea25540",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 5298
+      },
+      "language": "english",
+      "category": "multi_column",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-0c26566ffdc6d328.json",
+        "sha256": "4e7eec659ea2fe1691fe6bdcbbb165c814d8e34df1a8e9ca6f3a31b03bce83c7",
+        "test_count": 4
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-9c742aacf5c7d0fb",
+      "source": "olmOCR-bench",
+      "source_sample_id": "old_scans/49.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/old_scans/49.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-9c742aacf5c7d0fb.pdf",
+      "sha256": "14bb8080e9eb5e5bf4601e4bd3ecab3ff8251a91795e090363e4d385e651a03f",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": false,
+        "text_layer_characters": 0
+      },
+      "language": "english",
+      "category": "old_scans",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-9c742aacf5c7d0fb.json",
+        "sha256": "63dc6e231226c415fc67b162059bbe03c9e15c38aa6f0ba88d29f412d42f83c2",
+        "test_count": 6
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-ea799bf8a149ef10",
+      "source": "olmOCR-bench",
+      "source_sample_id": "old_scans_math/4_pg512.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/old_scans_math/4_pg512.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-ea799bf8a149ef10.pdf",
+      "sha256": "1b352c7ee2c5d33726eacd938f89ae1bbecb7bf2ec091bf49f3b476915fdf09c",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 952
+      },
+      "language": "english",
+      "category": "old_scans_math",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-ea799bf8a149ef10.json",
+        "sha256": "f94d8c3ea5de4848c4fba8fbdf546cf969b000ce63e72a6efa303c03b1848d00",
+        "test_count": 22
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-f1eccbdfafa96285",
+      "source": "olmOCR-bench",
+      "source_sample_id": "tables/a38ac67eb01a33cca0e2894b9c995d52b74c_pg2_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/tables/a38ac67eb01a33cca0e2894b9c995d52b74c_pg2_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-f1eccbdfafa96285.pdf",
+      "sha256": "af44fb16af865495c4d6036e89d63a8671d8a8e760aa05f4de80273ae0842c56",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 4178
+      },
+      "language": "english",
+      "category": "table_tests",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-f1eccbdfafa96285.json",
+        "sha256": "c67b0a5cd4bf566f397c001b040b9959d9aba27875caf3ce4b1d5f40e44110a6",
+        "test_count": 10
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-2e73e2911dc7c43a",
+      "source": "olmOCR-bench",
+      "source_sample_id": "arxiv_math/2503.08395_pg5.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/arxiv_math/2503.08395_pg5.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-2e73e2911dc7c43a.pdf",
+      "sha256": "8f19e41c8b005a22e9e9c48b771436224aace6de6b171cc55f143ff4a97d7a20",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 3371
+      },
+      "language": "english",
+      "category": "arxiv_math",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-2e73e2911dc7c43a.json",
+        "sha256": "0f885e1718b99c6135eddd61f0aa897feb73deea99c781b6c083fc75d889306f",
+        "test_count": 8
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-ae59d4855df2a9eb",
+      "source": "olmOCR-bench",
+      "source_sample_id": "headers_footers/7d57d413abf82db5fb75f7ad24a24ec912cfa837_page_1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/headers_footers/7d57d413abf82db5fb75f7ad24a24ec912cfa837_page_1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-ae59d4855df2a9eb.pdf",
+      "sha256": "1045c9251a16f6d877c56fb3d24c51043b4f518347e95aae5d557494e2f2184c",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 1886
+      },
+      "language": "english",
+      "category": "headers_footers",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-ae59d4855df2a9eb.json",
+        "sha256": "092cb770ec6c88c8d3f1bd9b03857f298b92c9fe730a3e180ea78fbe35bbeed7",
+        "test_count": 2
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-1d51d467559f2ea6",
+      "source": "olmOCR-bench",
+      "source_sample_id": "long_tiny_text/13_pg165_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/long_tiny_text/13_pg165_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-1d51d467559f2ea6.pdf",
+      "sha256": "875829c298510e5cbaf47b2b00def405200c90a04160e1e9800ae20b413b2961",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 8972
+      },
+      "language": "english",
+      "category": "long_tiny_text",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-1d51d467559f2ea6.json",
+        "sha256": "56b9ca8cfef843068f694a7297d37579371b0a4c51f094ea596741412499e738",
+        "test_count": 10
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    },
+    {
+      "id": "olm-c3aa46d345d69969",
+      "source": "olmOCR-bench",
+      "source_sample_id": "multi_column/0da8fcaacd0a502c317f9d222a55ffbb81e1_page_7_pg1.pdf",
+      "source_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/resolve/54a96a6fb6a2bd3b297e59869491db4d3625b711/bench_data/pdfs/multi_column/0da8fcaacd0a502c317f9d222a55ffbb81e1_page_7_pg1.pdf",
+      "pdf_path": "artifacts/parser-benchmark/data/pdfs/olm-c3aa46d345d69969.pdf",
+      "sha256": "a682f22dbcf3bc587695aa569698fc061e754312ef9acb62e3026a78973b0ce6",
+      "input_kind": "upstream_original_pdf",
+      "input_details": {
+        "pages": 1,
+        "has_text_layer": true,
+        "text_layer_characters": 3820
+      },
+      "language": "english",
+      "category": "multi_column",
+      "layout": "upstream_category",
+      "reference": {
+        "format": "olmocr_tests",
+        "path": "artifacts/parser-benchmark/data/references/olm-c3aa46d345d69969.json",
+        "sha256": "026ea403bd12f85f597d420f99875526bb0c0af328d642d16d4a8c7a61b77954",
+        "test_count": 4
+      },
+      "human_review": {
+        "status": "pending",
+        "reviewer": null
+      }
+    }
+  ],
+  "counts": {
+    "total": 100,
+    "source": {
+      "OmniDocBench": 80,
+      "olmOCR-bench": 20
+    },
+    "language": {
+      "english": 52,
+      "simplified_chinese": 30,
+      "en_ch_mixed": 17,
+      "other": 1
+    },
+    "category": {
+      "academic_literature": 9,
+      "research_report": 2,
+      "book": 14,
+      "newspaper": 3,
+      "colorful_textbook": 14,
+      "note": 3,
+      "multi_column": 4,
+      "table_tests": 3,
+      "PPT2PDF": 9,
+      "exam_paper": 14,
+      "magazine": 11,
+      "historical_document": 1,
+      "arxiv_math": 3,
+      "headers_footers": 3,
+      "long_tiny_text": 3,
+      "old_scans": 2,
+      "old_scans_math": 2
+    },
+    "input_kind": {
+      "image_wrapped_pdf": 80,
+      "upstream_original_pdf": 20
+    },
+    "has_text_layer": {
+      "False": 82,
+      "True": 18
+    }
+  }
+}

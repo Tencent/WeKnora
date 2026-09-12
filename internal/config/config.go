@@ -33,12 +33,106 @@ type Config struct {
 	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
 	IM              *IMConfig              `yaml:"im"               json:"im"`
 	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Evaluation      *EvaluationConfig      `yaml:"evaluation"       json:"evaluation"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+}
+
+// EvaluationConfig configures evaluation task execution.
+type EvaluationConfig struct {
+	TaskTimeout time.Duration `yaml:"task_timeout" json:"task_timeout"`
+	// RetentionDays keeps terminal evaluation tasks for this many days before
+	// physical cleanup. Nil means the default, zero disables the cleanup, and
+	// a negative value fails startup.
+	RetentionDays *int                     `yaml:"retention_days" json:"retention_days"`
+	Dataset       *EvaluationDatasetLimits `yaml:"dataset"      json:"dataset"`
+}
+
+// EvaluationDatasetLimits bounds structured dataset registry inputs. Limits
+// are enforced during decoding and again before transactional writes.
+type EvaluationDatasetLimits struct {
+	MaxRequestBodyBytes int64 `yaml:"max_request_body_bytes" json:"max_request_body_bytes"`
+	MaxPassages         int   `yaml:"max_passages"           json:"max_passages"`
+	MaxQuestions        int   `yaml:"max_questions"          json:"max_questions"`
+	MaxRelevance        int   `yaml:"max_relevance"          json:"max_relevance"`
+	MaxQuestionBytes    int   `yaml:"max_question_bytes"     json:"max_question_bytes"`
+	MaxPassageBytes     int   `yaml:"max_passage_bytes"      json:"max_passage_bytes"`
+}
+
+// DefaultEvaluationDatasetLimits returns the architecture-mandated default limits.
+func DefaultEvaluationDatasetLimits() EvaluationDatasetLimits {
+	return EvaluationDatasetLimits{
+		MaxRequestBodyBytes: 64 << 20, // 64 MiB
+		MaxPassages:         100000,
+		MaxQuestions:        10000,
+		MaxRelevance:        1000000,
+		MaxQuestionBytes:    64 << 10, // 64 KiB
+		MaxPassageBytes:     1 << 20,  // 1 MiB per passage or reference answer
+	}
+}
+
+// EvaluationDatasetLimitsOrDefault returns the configured limits with defaults
+// filling any unset (non-positive) field.
+func EvaluationDatasetLimitsOrDefault(cfg *Config) EvaluationDatasetLimits {
+	limits := DefaultEvaluationDatasetLimits()
+	if cfg == nil || cfg.Evaluation == nil || cfg.Evaluation.Dataset == nil {
+		return limits
+	}
+	configured := cfg.Evaluation.Dataset
+	if configured.MaxRequestBodyBytes > 0 {
+		limits.MaxRequestBodyBytes = configured.MaxRequestBodyBytes
+	}
+	if configured.MaxPassages > 0 {
+		limits.MaxPassages = configured.MaxPassages
+	}
+	if configured.MaxQuestions > 0 {
+		limits.MaxQuestions = configured.MaxQuestions
+	}
+	if configured.MaxRelevance > 0 {
+		limits.MaxRelevance = configured.MaxRelevance
+	}
+	if configured.MaxQuestionBytes > 0 {
+		limits.MaxQuestionBytes = configured.MaxQuestionBytes
+	}
+	if configured.MaxPassageBytes > 0 {
+		limits.MaxPassageBytes = configured.MaxPassageBytes
+	}
+	return limits
+}
+
+// DefaultEvaluationTaskTimeout bounds the execution phase of one background evaluation task.
+const DefaultEvaluationTaskTimeout = 2 * time.Hour
+
+// EvaluationTaskTimeout returns the configured timeout or its safe default.
+func EvaluationTaskTimeout(cfg *Config) time.Duration {
+	if cfg != nil && cfg.Evaluation != nil && cfg.Evaluation.TaskTimeout > 0 {
+		return cfg.Evaluation.TaskTimeout
+	}
+	return DefaultEvaluationTaskTimeout
+}
+
+// DefaultEvaluationRetentionDays keeps terminal evaluation tasks for 90 days
+// when retention_days is not configured.
+const DefaultEvaluationRetentionDays = 90
+
+// EvaluationRetentionDays resolves the retention configuration: nil means the
+// default, zero disables the cleanup, and a negative value is a startup error.
+func EvaluationRetentionDays(cfg *Config) (days int, enabled bool, err error) {
+	if cfg == nil || cfg.Evaluation == nil || cfg.Evaluation.RetentionDays == nil {
+		return DefaultEvaluationRetentionDays, true, nil
+	}
+	days = *cfg.Evaluation.RetentionDays
+	if days < 0 {
+		return 0, false, fmt.Errorf("evaluation retention_days must be >= 0, got %d", days)
+	}
+	if days == 0 {
+		return 0, false, nil
+	}
+	return days, true, nil
 }
 
 // AgentConfig represents the global agent settings.
@@ -527,7 +621,9 @@ func LoadConfig() (*Config, error) {
 	})
 
 	// 使用处理后的配置内容
-	viper.ReadConfig(strings.NewReader(result))
+	if err := viper.ReadConfig(strings.NewReader(result)); err != nil {
+		return nil, fmt.Errorf("error reading expanded config: %w", err)
+	}
 
 	// 解析配置到结构体
 	var cfg Config
@@ -582,6 +678,7 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
+	applyEvaluationEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
 
@@ -769,6 +866,25 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_DOCREADER_CALL_TIMEOUT")); value != "" {
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
+		}
+	}
+}
+
+func applyEvaluationEnvOverrides(cfg *Config) {
+	if cfg.Evaluation == nil {
+		cfg.Evaluation = &EvaluationConfig{}
+	}
+	if cfg.Evaluation.TaskTimeout <= 0 {
+		cfg.Evaluation.TaskTimeout = DefaultEvaluationTaskTimeout
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_EVALUATION_TASK_TIMEOUT")); value != "" {
+		if timeout, err := time.ParseDuration(value); err == nil && timeout > 0 {
+			cfg.Evaluation.TaskTimeout = timeout
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_EVALUATION_RETENTION_DAYS")); value != "" {
+		if days, err := strconv.Atoi(value); err == nil {
+			cfg.Evaluation.RetentionDays = &days
 		}
 	}
 }

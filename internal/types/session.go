@@ -42,6 +42,9 @@ type SummaryConfig struct {
 	Temperature float64 `json:"temperature"`
 	// Seed
 	Seed int `json:"seed"`
+	// SeedProvided distinguishes an explicit seed (including seed=0) from an
+	// unset seed. Only providers that actually forward the seed mark it applied.
+	SeedProvided bool `json:"seed_provided,omitempty"`
 	// Max completion tokens
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	// Thinking - whether to enable thinking mode

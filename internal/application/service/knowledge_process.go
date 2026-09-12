@@ -151,7 +151,7 @@ func (s *knowledgeService) cloneKnowledge(
 	return s.repo.UpdateKnowledgeForTransfer(ctx, &before, dst)
 }
 
-// processDocumentFromPassage handles asynchronous processing of text passages
+// processDocumentFromPassage indexes text passages synchronously.
 func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, passage []string,
 ) {
@@ -179,14 +179,7 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		start = end
 	}
 	// Process and store chunks
-	var opts ProcessChunksOptions
-	if kb.QuestionGenerationConfig != nil && kb.QuestionGenerationConfig.Enabled {
-		opts.EnableQuestionGeneration = true
-		opts.QuestionCount = kb.QuestionGenerationConfig.QuestionCount
-		if opts.QuestionCount <= 0 {
-			opts.QuestionCount = 3
-		}
-	}
+	opts := ProcessChunksOptions{SkipEnrichment: true}
 	s.processChunks(ctx, kb, knowledge, chunks, opts)
 }
 
@@ -195,7 +188,9 @@ type ProcessChunksOptions struct {
 	EnableQuestionGeneration bool
 	QuestionCount            int
 	EnableMultimodel         bool
-	StoredImages             []docparser.StoredImage
+	// SkipEnrichment completes after chunks and retrieval indexes are stored.
+	SkipEnrichment bool
+	StoredImages   []docparser.StoredImage
 	// ParentChunks holds parent chunk data when parent-child chunking is enabled.
 	// When set, the chunks passed to processChunks are child chunks, and each
 	// child's ParentIndex references an entry in this slice.
@@ -681,10 +676,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	pendingPDFMultimodal := !isImage && !isVideo && options.EnableMultimodel && len(options.StoredImages) > 0
 
 	now := time.Now()
+	textChunkCount := len(textChunks)
+	if options.SkipEnrichment {
+		textChunkCount = 0
+	}
 	finalizeIndexedKnowledgeState(
 		knowledge,
 		totalStorageSize,
-		len(textChunks),
+		textChunkCount,
 		pendingMultimodal || pendingPDFMultimodal,
 		now,
 	)
@@ -694,7 +693,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
-	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+	if options.SkipEnrichment {
+		s.skipStage(ctx, knowledge.ID, types.StageMultimodal, "skipped")
+		logger.Infof(ctx, "Synchronous passage indexing completed without enrichment: %s", knowledge.ID)
+	} else if options.EnableMultimodel && len(options.StoredImages) > 0 {
 		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
 			"image_count":    len(options.StoredImages),
 			"enable_ocr":     true,
@@ -3617,10 +3619,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		QuestionCount:            payload.QuestionCount,
 		EnableMultimodel:         payload.EnableMultimodel,
 		StoredImages:             storedImages,
-	}
-
-	if convertResult != nil {
-		processOpts.Metadata = convertResult.Metadata
+		Metadata:                 convertResult.Metadata,
 	}
 
 	if eff.ChunkingConfig.EnableParentChild {

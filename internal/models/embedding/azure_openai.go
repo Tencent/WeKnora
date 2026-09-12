@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/models/call"
+	"github.com/Tencent/WeKnora/internal/types"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -146,6 +150,7 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 }
 
 func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
+	ctx = call.WithNewBatch(ctx)
 	url := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=%s",
 		e.baseURL, e.modelName, e.apiVersion)
 
@@ -165,7 +170,20 @@ func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData [
 			}
 		}
 
-		req, reqErr := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		req, reqErr := http.NewRequestWithContext(
+			call.WithMetadata(
+				ctx,
+				map[string]any{
+					"attempt_number": i +
+						1,
+				},
+			),
+			"POST",
+			url,
+			bytes.NewReader(
+				jsonData,
+			),
+		)
 		if reqErr != nil {
 			err = reqErr
 			continue
@@ -174,7 +192,10 @@ func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData [
 		req.Header.Set("api-key", e.apiKey)
 		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
-		resp, err = e.httpClient.Do(req)
+		resp, err = call.DoJSON(e.httpClient, req, "embedding")
+		if errors.Is(err, types.ErrModelAccounting) {
+			return nil, err
+		}
 		if err == nil {
 			return resp, nil
 		}
@@ -189,3 +210,6 @@ func (e *AzureOpenAIEmbedder) supportsDimensionsParam() bool {
 func (e *AzureOpenAIEmbedder) GetModelName() string { return e.modelName }
 func (e *AzureOpenAIEmbedder) GetDimensions() int   { return e.dimensions }
 func (e *AzureOpenAIEmbedder) GetModelID() string   { return e.modelID }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (e *AzureOpenAIEmbedder) RequestAccountingSupported() bool { return true }

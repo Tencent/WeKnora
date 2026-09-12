@@ -37,6 +37,9 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	if err != nil {
 		return nil, err
 	}
+	if batchSize <= 0 {
+		return nil, fmt.Errorf("embedding batch size must be positive")
+	}
 	textEmbeddings := utils.MapSlice(texts, func(text string) *textEmbedding {
 		return &textEmbedding{text: text}
 	})
@@ -46,7 +49,10 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 		return func() {
 			defer wg.Done()
 			// If an error has already occurred, don't continue processing
-			if firstErr != nil {
+			mu.Lock()
+			stopped := firstErr != nil
+			mu.Unlock()
+			if stopped || ctx.Err() != nil {
 				return
 			}
 			// Embed text
@@ -85,13 +91,22 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 		wg.Add(1)
 		err := e.pool.Submit(processChunk(texts))
 		if err != nil {
-			return nil, err
+			wg.Done()
+			mu.Lock()
+			if firstErr == nil {
+				firstErr = err
+			}
+			mu.Unlock()
+			break
 		}
 	}
 
 	// Wait for all tasks to complete
 	wg.Wait()
 
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	// Check if any errors occurred
 	if firstErr != nil {
 		return nil, firstErr

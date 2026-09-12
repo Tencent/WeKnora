@@ -80,6 +80,23 @@ export interface KnowledgeBaseStoreView {
   vector_store_status?: VectorStoreStatus;
 }
 
+/** Configuration fields returned by knowledge-base list and detail endpoints. */
+export interface KnowledgeBaseConfigurationView extends KnowledgeBaseStoreView {
+  id: string;
+  name: string;
+  type: 'document' | 'faq';
+  embedding_model_id: string;
+  chunking_config: {
+    chunk_size: number;
+    chunk_overlap: number;
+    separators?: string[];
+    enable_parent_child?: boolean;
+    parent_chunk_size?: number;
+    child_chunk_size?: number;
+    strategy?: string;
+  };
+}
+
 export function createKnowledgeBase(data: {
   name: string;
   description?: string;

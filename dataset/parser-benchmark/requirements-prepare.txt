@@ -1,0 +1,5 @@
+# Matches the runtime used to create the frozen image-only PDF packaging.
+pypdf==6.10.0
+reportlab==4.4.9
+Pillow==12.3.0
+pypdfium2==5.13.0

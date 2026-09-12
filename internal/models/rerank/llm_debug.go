@@ -68,3 +68,9 @@ func logRerankDebug(ctx context.Context, model string, query string, documents [
 	}
 	logger.LLMDebugLog(ctx, record)
 }
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (d *debugReranker) RequestAccountingSupported() bool {
+	inner, ok := d.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
+}

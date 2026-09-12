@@ -138,9 +138,10 @@ type PipelineState struct {
 
 // PipelineContext holds runtime context for the current pipeline execution.
 type PipelineContext struct {
-	EventBus      EventBusInterface `json:"-"`
-	MessageID     string            `json:"-"`
-	UserMessageID string            `json:"-"`
+	EventBus          EventBusInterface          `json:"-"`
+	MessageID         string                     `json:"-"`
+	UserMessageID     string                     `json:"-"`
+	EvaluationTimings *EvaluationPipelineTimings `json:"-"`
 }
 
 // ChatManage represents the full configuration, state and runtime context

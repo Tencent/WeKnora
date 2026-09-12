@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "dataset_id": "golden-v1",
+  "description": "Golden regression fixture: two questions covering relevant, irrelevant, unknown-source, and duplicate-PID ranks with fixed generation outputs. No live model output.",
+  "knowledge_id": "golden-knowledge",
+  "passages": [
+    {"pid": "0", "content": "the sky appears blue on clear days"},
+    {"pid": "1", "content": "the sun is a star at the center of the solar system"},
+    {"pid": "2", "content": "the moon reflects sunlight toward earth"},
+    {"pid": "3", "content": "sunlight takes eight minutes to reach earth"},
+    {"pid": "4", "content": "owls are nocturnal birds of prey"}
+  ],
+  "questions": [
+    {"qid": "gq1", "question": "what shines during the day?", "answer": "golden sun rises over hills"},
+    {"qid": "gq2", "question": "what glows at night?", "answer": "silver moon glows at night"}
+  ],
+  "relevance": [
+    {"qid": "gq1", "pid": "1", "grade": 1},
+    {"qid": "gq1", "pid": "3", "grade": 2},
+    {"qid": "gq2", "pid": "2", "grade": 1}
+  ],
+  "samples": [
+    {
+      "qid": "gq1",
+      "search": [
+        {"knowledge_id": "other-knowledge", "chunk_index": 1, "score": 0.95},
+        {"knowledge_id": "golden-knowledge", "chunk_index": 1, "score": 0.90},
+        {"knowledge_id": "golden-knowledge", "chunk_index": 3, "score": 0.85},
+        {"knowledge_id": "golden-knowledge", "chunk_index": 3, "score": 0.80},
+        {"knowledge_id": "golden-knowledge", "chunk_index": 2, "score": 0.70}
+      ],
+      "rerank": [
+        {"knowledge_id": "golden-knowledge", "chunk_index": 3, "score": 0.99},
+        {"knowledge_id": "other-knowledge", "chunk_index": 1, "score": 0.90}
+      ],
+      "generated_text": "golden sun rises over hills"
+    },
+    {
+      "qid": "gq2",
+      "vector_search": [
+        {"knowledge_id": "golden-knowledge", "chunk_index": 2, "score": 0.90},
+        {"knowledge_id": "golden-knowledge", "chunk_index": 4, "score": 0.80}
+      ],
+      "keyword_search": [
+        {"knowledge_id": "golden-knowledge", "chunk_index": 4, "score": 12.00},
+        {"knowledge_id": "golden-knowledge", "chunk_index": 2, "score": 8.00}
+      ],
+      "search": [
+        {"knowledge_id": "golden-knowledge", "chunk_index": 2, "score": 0.90},
+        {"knowledge_id": "golden-knowledge", "chunk_index": 4, "score": 0.80}
+      ],
+      "rerank": [],
+      "generated_text": "completely unrelated words here"
+    }
+  ]
+}

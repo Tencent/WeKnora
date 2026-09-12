@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -12,6 +14,43 @@ type provisioningUserRepo struct {
 	interfaces.UserRepository
 	created       *types.User
 	updatedTenant uint64
+}
+
+func TestResolveLoginTenantID_CrossTenantFlagOffClearsForeignPreference(t *testing.T) {
+	repo := &provisioningUserRepo{}
+	tenantSvc := &provisioningTenantService{}
+	memberSvc := &membershipLookupService{byTenant: map[uint64]*types.TenantMember{
+		1: {TenantID: 1, Status: types.TenantMemberStatusActive},
+	}}
+	svc := &userService{
+		userRepo: repo, tenantService: tenantSvc, memberService: memberSvc,
+		config: &config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: false}},
+	}
+	preferred := uint64(2)
+	user := &types.User{
+		ID: "super", TenantID: 1, CanAccessAllTenants: true,
+		Preferences: types.UserPreferences{LastActiveTenantID: &preferred},
+	}
+
+	if got := svc.resolveLoginTenantID(context.Background(), user); got != 1 {
+		t.Fatalf("resolved tenant = %d, want home tenant 1", got)
+	}
+	if user.Preferences.LastActiveTenantID != nil {
+		t.Fatalf("foreign preference must be cleared when cross-tenant access is disabled")
+	}
+}
+
+func TestSwitchTenant_CrossTenantFlagOffRequiresMembership(t *testing.T) {
+	svc := &userService{
+		memberService: &membershipLookupService{},
+		config:        &config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: false}},
+	}
+	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
+
+	_, err := svc.SwitchTenant(context.Background(), user, 2, "")
+	if !errors.Is(err, ErrMembershipNotFound) {
+		t.Fatalf("SwitchTenant error = %v, want ErrMembershipNotFound", err)
+	}
 }
 
 func (r *provisioningUserRepo) GetUserByEmail(context.Context, string) (*types.User, error) {

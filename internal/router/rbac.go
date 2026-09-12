@@ -367,6 +367,15 @@ func (a *apiKeyRouteGroup) With(policy middleware.APIKeyRoutePolicy) *apiKeyRout
 	return &apiKeyRouteGroup{g: a.g, grp: a.grp, policy: policy}
 }
 
+// Group returns a nested wrapper that keeps the parent's API-key policy.
+func (a *apiKeyRouteGroup) Group(relativePath string, handlers ...gin.HandlerFunc) *apiKeyRouteGroup {
+	return &apiKeyRouteGroup{
+		g:      a.g,
+		grp:    a.grp.Group(relativePath, handlers...),
+		policy: a.policy,
+	}
+}
+
 func (a *apiKeyRouteGroup) handle(method, rel string, handlers ...gin.HandlerFunc) gin.IRoutes {
 	full := path.Join(a.grp.BasePath(), rel)
 	a.g.ensureAPIKeyAuthorizer().Register(method, full, a.policy)

@@ -1,9 +1,14 @@
-# 忽略所有隐藏文件和目录
-.*
-# 但不忽略特定隐藏文件和目录
+# 本地隐藏文件和目录
+.local-service/
+.env*
 !.env.example
-!.gitignore
-!.github/
+!.env.lite.example
+.DS_Store
+.idea/
+.vscode/
+.cache/
+.pytest_cache/
+.coverage
 
 # 敏感文件
 *.pem
@@ -20,6 +25,13 @@
 node_modules/
 /dist/
 /build/
+/artifacts/evaluation-regression/
+/artifacts/evaluation-performance/
+/artifacts/synthetic-evaluation/
+/artifacts/evaluation-rag-http/
+/artifacts/evaluation-demo/
+/artifacts/public-datasets/
+/artifacts/parser-benchmark/
 *.log
 
 # 临时文件
