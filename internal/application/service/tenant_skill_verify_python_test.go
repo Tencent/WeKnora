@@ -36,9 +36,10 @@ func TestSkillPythonVerifier(t *testing.T) {
 		// wantProblem is a substring of the expected stderr. Empty means the
 		// tree must verify cleanly.
 		wantProblem string
-		// wantExit is the code a failing tree must exit with: 2 when every
-		// finding is a missing declared package, 1 otherwise. Both refuse the
-		// snapshot; the code only classifies the finding.
+		// wantExit is the code a failing tree must exit with: 2 when installing
+		// a package would satisfy everything found, 1 when it would not. The
+		// install flow reads it to decide whether another installer round is
+		// worth its minutes.
 		wantExit int
 		// wantNote is a substring of a stdout note - something the checker
 		// reported without refusing the install.
@@ -61,8 +62,9 @@ func TestSkillPythonVerifier(t *testing.T) {
 		wantProblem: "scripts/helper.py has a syntax error",
 		wantExit:    1,
 	}, {
-		// A syntax error among missing packages still exits 1: the batch is
-		// classified by the finding installing a package cannot fix.
+		// The exit code is the whole verdict, so one unfixable finding among
+		// fixable ones has to sink the batch: sending the installer back for a
+		// package it can install would only delay a failure it cannot.
 		name: "a syntax error alongside a missing requirement",
 		files: map[string]string{
 			"requirements.txt": "pandas==3.0.1\n",
@@ -160,7 +162,8 @@ func TestSkillPythonVerifier(t *testing.T) {
 				require.Error(t, err, "this skill is broken and must not reach a snapshot")
 				require.Contains(t, stderr, tc.wantProblem)
 				require.Equal(t, tc.wantExit, verifierExitCode(t, err),
-					"stderr: %s", stderr)
+					"the exit code is what decides whether an installer round can fix this; "+
+						"stderr: %s", stderr)
 			}
 			if tc.wantNote != "" {
 				require.Contains(t, stdout, "note: ",

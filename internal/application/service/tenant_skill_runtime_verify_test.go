@@ -41,6 +41,7 @@ func TestRuntimePrerequisitesMarkdownOnlySkillCannotSkipReport(t *testing.T) {
 	_, err := fx.svc.verifySkill(context.Background(), fx.sandboxMgr, "session", installSkillDir, fx.bundle)
 	var gate *skillVerificationError
 	require.ErrorAs(t, err, &gate)
+	require.True(t, gate.Repairable)
 	require.Contains(t, err.Error(), "install-report.json")
 }
 
@@ -61,6 +62,7 @@ func TestRuntimePrerequisiteReportValidation(t *testing.T) {
 			err := fx.svc.verifyRuntimePrerequisites(context.Background(), fx.sandboxMgr, "session", installSkillDir)
 			var gate *skillVerificationError
 			require.ErrorAs(t, err, &gate)
+			require.True(t, gate.Repairable)
 		})
 	}
 }
@@ -77,6 +79,7 @@ func TestRuntimePrerequisitesResolveSkillLocalCLI(t *testing.T) {
 	err := fx.svc.verifyRuntimePrerequisites(context.Background(), mgr, "session", dir)
 	var gate *skillVerificationError
 	require.ErrorAs(t, err, &gate)
+	require.True(t, gate.Repairable)
 	require.Contains(t, err.Error(), "weknora-test-cli")
 	require.NoError(t, os.WriteFile(path.Join(binDir, "weknora-test-cli"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
 	require.NoError(t, fx.svc.verifyRuntimePrerequisites(context.Background(), mgr, "session", dir))
@@ -92,7 +95,7 @@ func TestRunInstallDoesNotSnapshotUnresolvedExternalPrerequisites(t *testing.T) 
 	err := fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle)
 	require.ErrorContains(t, err, "browser extension")
 	require.NotContains(t, fx.events, "create-snapshot")
-	require.Len(t, fx.agentPrompts, 1, "an external setup blocker must not trigger another installer round")
+	require.Len(t, fx.agentPrompts, 1, "an external setup blocker must not trigger pointless package retries")
 }
 
 func TestRuntimeReportPromptsDoNotPrescribeSkillSpecificValues(t *testing.T) {
@@ -100,13 +103,22 @@ func TestRuntimeReportPromptsDoNotPrescribeSkillSpecificValues(t *testing.T) {
 	fx.bundle.Files = map[string][]byte{
 		"SKILL.md": []byte("Summarize supplied text. No external commands are required."),
 	}
-	prompt := buildInstallPrompt(installSkillDir, fx.bundle, nil)
-	for _, field := range []string{".weknora/install-report.json", "commands:", "blockers:"} {
-		require.Contains(t, prompt, field)
+	prompts := map[string]string{
+		"install": buildInstallPrompt(installSkillDir, fx.bundle, nil),
+		"repair": buildRepairPrompt(installSkillDir, &skillVerificationError{
+			Language: "runtime prerequisites", Problems: []string{"Missing install-report.json"},
+		}),
 	}
-	for _, leakedExample := range []string{
-		"bsk", "browser extension", "127.0.0.1", "Describe an unresolved external prerequisite here",
-	} {
-		require.NotContains(t, strings.ToLower(prompt), strings.ToLower(leakedExample))
+	for name, prompt := range prompts {
+		t.Run(name, func(t *testing.T) {
+			for _, field := range []string{".weknora/install-report.json", "commands:", "blockers:"} {
+				require.Contains(t, prompt, field)
+			}
+			for _, leakedExample := range []string{
+				"bsk", "browser extension", "127.0.0.1", "Describe an unresolved external prerequisite here",
+			} {
+				require.NotContains(t, strings.ToLower(prompt), strings.ToLower(leakedExample))
+			}
+		})
 	}
 }
