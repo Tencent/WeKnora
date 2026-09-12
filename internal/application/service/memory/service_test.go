@@ -33,7 +33,7 @@ func newMemoryHarness(t *testing.T) (*Service, *gorm.DB, *stubTenantRepo) {
 	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&types.MemorySubject{}, &types.MemoryItem{}, &types.MemoryTombstone{},
 		&types.MemoryTopicStat{}, &types.MemoryDocAffinity{},
-		&types.MemoryItemEmbedding{}))
+		&types.MemoryItemEmbedding{}, &types.MemoryExtractionSession{}))
 
 	tenantRepo := &stubTenantRepo{
 		configs: map[uint64]*types.MemoryConfig{},

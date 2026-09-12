@@ -41,15 +41,25 @@ type MemoryRepository interface {
 	EnqueuePendingSession(
 		ctx context.Context, scope MemoryScope, sessionID string, inFlightTimeout time.Duration,
 	) (*types.MemorySubject, bool, error)
-	// ClaimPendingSessions takes the pending queue for processing, returning
-	// the sessions to drain and the cursor to walk forward from.
-	ClaimPendingSessions(ctx context.Context, scope MemoryScope) ([]string, time.Time, error)
-	// FinishExtraction advances the watermark and releases the in-flight slot.
-	// A zero cursor leaves the watermark untouched.
-	FinishExtraction(ctx context.Context, scope MemoryScope, cursor time.Time) error
-	// ReleaseExtractionSlot clears the in-flight marker without advancing the
-	// watermark, used when a run ends early.
-	ReleaseExtractionSlot(ctx context.Context, scope MemoryScope) error
+	// ClaimPendingSessions leases a snapshot without removing durable work.
+	// A nil batch means no work remains; RetryAt defers a busy lease.
+	ClaimPendingSessions(ctx context.Context, scope MemoryScope, fallbackSession, leaseID string, ttl time.Duration) (*types.MemoryExtractionBatch, error)
+	// CheckpointExtraction acknowledges a processed segment (or a recorded
+	// skip). A concurrent enqueue changes Revision and keeps the session pending.
+	CheckpointExtraction(ctx context.Context, scope MemoryScope, leaseID string, session types.MemoryExtractionSession, cursor types.MemoryMessageCursor, drained bool) error
+	HasPendingExtraction(ctx context.Context, scope MemoryScope) (bool, error)
+	// RecordExtractionFailure returns true after the bounded invalid-output
+	// retry budget. It preserves a failure range without storing transcript text.
+	RecordExtractionFailure(
+		ctx context.Context, scope MemoryScope, leaseID string, session MemoryExtractionFailure,
+	) (bool, error)
+	FinishExtraction(ctx context.Context, scope MemoryScope, leaseID string) error
+	// Empty leaseID only releases a queued task, never a running worker.
+	ReleaseExtractionSlot(ctx context.Context, scope MemoryScope, leaseID string) error
+	// SaveItem atomically inserts and resolves active/pending replacements.
+	SaveItem(ctx context.Context, scope MemoryScope, item *types.MemoryItem, replacesID string) error
+	// ConfirmPendingItem atomically activates a proposal and retires its target.
+	ConfirmPendingItem(ctx context.Context, scope MemoryScope, id string) error
 
 	// CreateItem inserts one memory item.
 	CreateItem(ctx context.Context, item *types.MemoryItem) error
@@ -116,9 +126,6 @@ type MemoryRepository interface {
 	// ListLive returns items of one kind that the user can see: in use plus
 	// proposed and awaiting a decision.
 	ListLive(ctx context.Context, scope MemoryScope, kind string, limit int) ([]*types.MemoryItem, error)
-	// SetItemStatus moves an item between statuses, used to confirm or reject
-	// something the system inferred.
-	SetItemStatus(ctx context.Context, scope MemoryScope, id, status string) error
 
 	// BumpTopic records one more sighting of a topic and returns the running
 	// total, so a caller can decide whether it has recurred enough to promote.
@@ -172,6 +179,13 @@ type MemoryRepository interface {
 	ArchiveLowestRanked(ctx context.Context, scope MemoryScope, keep int) (int64, error)
 	// CountActive returns the number of active items in the scope.
 	CountActive(ctx context.Context, scope MemoryScope) (int64, error)
+}
+
+// MemoryExtractionFailure identifies an invalid-output range without retaining message text.
+type MemoryExtractionFailure struct {
+	Session types.MemoryExtractionSession
+	End     types.MemoryMessageCursor
+	Code    string
 }
 
 // MemoryRecall is what one turn pulls in: the resident block plus any

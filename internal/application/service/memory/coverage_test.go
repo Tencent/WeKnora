@@ -356,8 +356,8 @@ func TestATruncatedRunDoesNotSwallowTheMessages(t *testing.T) {
 
 	task := enqueuer.pop()
 	require.NotNil(t, task)
-	require.Error(t, svc.Handle(context.Background(), task),
-		"a run that read nothing has to fail, or the messages are consumed for good")
+	require.NoError(t, svc.Handle(context.Background(), task))
+	require.NotEmpty(t, enqueuer.tasks, "invalid output must schedule another attempt")
 
 	scope, err := ResolveScope(ctx)
 	require.NoError(t, err)

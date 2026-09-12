@@ -205,14 +205,13 @@ type MemorySubject struct {
 	BlockUpdatedAt  *time.Time `json:"block_updated_at"  gorm:"column:block_updated_at"`
 	ItemCount       int        `json:"item_count"        gorm:"column:item_count;not null;default:0"`
 	LastExtractedAt *time.Time `json:"last_extracted_at" gorm:"column:last_extracted_at"`
-	// ExtractCursor is the watermark: everything this subject said up to and
-	// including this instant has already been considered for distillation.
-	// Distillation walks forward from here, which is what makes "no message is
-	// skipped" a property of the data rather than of timing.
-	ExtractCursor *time.Time `json:"extract_cursor" gorm:"column:extract_cursor"`
-	// PendingSessions are the sessions with turns past the cursor. A turn that
-	// arrives while a task is already in flight is recorded here instead of
-	// being dropped, so it is picked up by the run that is already coming.
+	// ExtractCursor is the legacy subject-wide watermark, retained for
+	// the upgrade boundary for newly initialized session cursors. It is never
+	// advanced by new workers; each session has its own progress row.
+	ExtractCursor   *time.Time            `json:"extract_cursor" gorm:"column:extract_cursor"`
+	ExtractionState MemoryExtractionState `json:"-" gorm:"column:extraction_state;type:jsonb"`
+	// PendingSessions is the legacy queue, imported into indexed progress rows
+	// once on the next enqueue or claim. New workers never grow this array.
 	PendingSessions MemoryPendingSessions `json:"pending_sessions" gorm:"column:pending_sessions;type:jsonb"`
 	// ExtractScheduledAt marks a distillation task as in flight, so concurrent
 	// turns enqueue one task rather than one per turn.
@@ -235,10 +234,7 @@ type MemorySubject struct {
 // distillation for one subject.
 type MemoryPendingSessions []string
 
-// MaxMemoryPendingSessions bounds the queue. A subject chatting in more
-// sessions than this between two runs loses the oldest entry rather than
-// growing the row without limit; the cursor still covers those sessions the
-// next time they produce a turn.
+// MaxMemoryPendingSessions bounds one processing batch, never the durable queue.
 const MaxMemoryPendingSessions = 32
 
 func (p MemoryPendingSessions) Value() (driver.Value, error) {
@@ -270,7 +266,7 @@ func (p *MemoryPendingSessions) Scan(value interface{}) error {
 	return json.Unmarshal(b, p)
 }
 
-// Append adds a session id, keeping the queue de-duplicated and bounded.
+// Append adds a session id without dropping existing work.
 func (p MemoryPendingSessions) Append(sessionID string) MemoryPendingSessions {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -282,9 +278,6 @@ func (p MemoryPendingSessions) Append(sessionID string) MemoryPendingSessions {
 		}
 	}
 	updated := append(p, sessionID)
-	if len(updated) > MaxMemoryPendingSessions {
-		updated = updated[len(updated)-MaxMemoryPendingSessions:]
-	}
 	return updated
 }
 
@@ -320,6 +313,7 @@ type MemoryItem struct {
 	// Without it an in-flight task stays in context forever and slowly turns
 	// the memory into a list of things the user finished months ago.
 	ExpiresAt    *time.Time `json:"expires_at" gorm:"column:expires_at"`
+	ReplacesID   string     `json:"replaces_id,omitempty" gorm:"column:replaces_id;type:varchar(36);not null;default:''"`
 	SupersededBy string     `json:"superseded_by"      gorm:"column:superseded_by;type:varchar(36)"`
 	LastUsedAt   *time.Time `json:"last_used_at"       gorm:"column:last_used_at"`
 	UseCount     int        `json:"use_count"          gorm:"column:use_count;not null;default:0"`
@@ -1371,9 +1365,12 @@ func TopicLooksLikeOneQuestion(topic string) bool {
 // a few kilobytes of float per row along for the ride. Only the code that
 // actually scores similarity loads these.
 type MemoryItemEmbedding struct {
-	ItemID    string `json:"item_id"   gorm:"primaryKey;type:varchar(36)"`
-	TenantID  uint64 `json:"tenant_id" gorm:"not null;index:idx_mem_emb_scope,priority:1"`
-	SubjectID string `json:"subject_id" gorm:"type:varchar(512);not null;index:idx_mem_emb_scope,priority:2"`
+	// Input snapshot prevents a slow embedding call from overwriting a newer edit.
+	SourceContent string `json:"-" gorm:"-"`
+	SourceTopic   string `json:"-" gorm:"-"`
+	ItemID        string `json:"item_id"   gorm:"primaryKey;type:varchar(36)"`
+	TenantID      uint64 `json:"tenant_id" gorm:"not null;index:idx_mem_emb_scope,priority:1"`
+	SubjectID     string `json:"subject_id" gorm:"type:varchar(512);not null;index:idx_mem_emb_scope,priority:2"`
 	// ModelID records which model produced this vector. Vectors from different
 	// models are not comparable, so a model change has to invalidate them
 	// rather than silently score nonsense.

@@ -87,6 +87,8 @@ type MessageRepository interface {
 	ListMessagesBySessionAfterTime(
 		ctx context.Context, sessionID string, afterTime time.Time, limit int,
 	) ([]*types.Message, error)
+	// ListMessagesBySessionAfterCursor uses (created_at, id) for lossless paging.
+	ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error)
 	// UpdateMessage updates a message
 	UpdateMessage(ctx context.Context, message *types.Message) error
 	// UpdateMessageImages updates only the images JSONB column for a message
