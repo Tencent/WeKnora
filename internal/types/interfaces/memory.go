@@ -158,7 +158,7 @@ type MemoryRepository interface {
 	// TopDocAffinity returns the documents this person relies on most. A
 	// knowledgeBaseID restricts the query before the result limit is applied.
 	TopDocAffinity(
-		ctx context.Context, scope MemoryScope, knowledgeBaseID string, limit int,
+		ctx context.Context, scope MemoryScope, knowledgeBaseID string, knowledgeIDs []string, limit int,
 	) ([]*types.MemoryDocAffinity, error)
 	// DocAffinityByID returns one affinity row inside the scope, or (nil, nil)
 	// when it is absent.
@@ -298,7 +298,7 @@ type MemoryService interface {
 	// The Wiki learning overlay uses these objective counters as evidence; it
 	// never asks an LLM to invent a mastery score.
 	LearningDocuments(
-		ctx context.Context, knowledgeBaseID string, limit int,
+		ctx context.Context, knowledgeBaseID string, knowledgeIDs []string, limit int,
 	) ([]*types.MemoryDocView, error)
 	// CreateItem adds a memory typed by the user in the memory manager.
 	CreateItem(ctx context.Context, kind, content string, importance int) (*types.MemoryItem, error)

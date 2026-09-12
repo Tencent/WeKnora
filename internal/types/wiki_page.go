@@ -729,6 +729,9 @@ type WikiGraphNode struct {
 	// deliberately capped below 100 because retrieval history alone cannot
 	// prove that a person has mastered the material.
 	Learning *WikiNodeLearning `json:"learning,omitempty"`
+	// SourceKnowledgeIDs is handler-only context used to load exactly the
+	// personal evidence needed by this returned graph slice.
+	SourceKnowledgeIDs []string `json:"-"`
 }
 
 const (

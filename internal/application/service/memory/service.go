@@ -635,7 +635,7 @@ func (s *Service) FamiliarKnowledgeIDs(ctx context.Context) []string {
 	if err != nil {
 		return nil
 	}
-	rows, err := s.repo.TopDocAffinity(ctx, scope, "", 200)
+	rows, err := s.repo.TopDocAffinity(ctx, scope, "", nil, 200)
 	if err != nil {
 		logger.Warnf(ctx, "memory: load familiar documents failed: %v", err)
 		return nil
@@ -655,7 +655,7 @@ func (s *Service) FamiliarKnowledgeIDs(ctx context.Context) []string {
 // use is meaningful for an "exploring" Wiki node even though it is not yet a
 // stable retrieval preference.
 func (s *Service) LearningDocuments(
-	ctx context.Context, knowledgeBaseID string, limit int,
+	ctx context.Context, knowledgeBaseID string, knowledgeIDs []string, limit int,
 ) ([]*types.MemoryDocView, error) {
 	scope, err := ResolveScope(ctx)
 	if err != nil {
@@ -664,10 +664,10 @@ func (s *Service) LearningDocuments(
 	// The export handler asks for one row past its 20k safety ceiling so it can
 	// truthfully mark a clipped learning profile. Interactive graph callers use
 	// much smaller limits.
-	if limit <= 0 || limit > 20001 {
+	if len(knowledgeIDs) == 0 && (limit <= 0 || limit > 20001) {
 		limit = 2000
 	}
-	rows, err := s.repo.TopDocAffinity(ctx, scope, knowledgeBaseID, limit)
+	rows, err := s.repo.TopDocAffinity(ctx, scope, knowledgeBaseID, knowledgeIDs, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1016,7 +1016,7 @@ func (s *Service) RetrievalContextFor(ctx context.Context) interfaces.RetrievalC
 // usually come from. Titles are used rather than ids because the rewriter's job
 // is to produce better search text, not to address documents.
 func (s *Service) topDocumentTitles(ctx context.Context, scope interfaces.MemoryScope) []string {
-	rows, err := s.repo.TopDocAffinity(ctx, scope, "", 5)
+	rows, err := s.repo.TopDocAffinity(ctx, scope, "", nil, 5)
 	if err != nil {
 		logger.Warnf(ctx, "memory: load document affinity failed: %v", err)
 		return nil

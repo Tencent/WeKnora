@@ -3412,8 +3412,12 @@ function mergeGraphData(
       nodeBySlug.set(n.slug, n)
       bloomGenerations.set(n.slug, gen)
     } else {
-      if (n.familiar) existing.familiar = true
+      // The latest server slice is authoritative for personal evidence. In
+      // particular, opt-out or deletion must clear stale rings left by an
+      // earlier bloom instead of merging learning state monotonically.
+      existing.familiar = Boolean(n.familiar)
       if (n.learning) existing.learning = n.learning
+      else delete existing.learning
     }
   }
   const edgeKey = (e: { source: string; target: string }) => `${e.source}→${e.target}`

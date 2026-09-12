@@ -963,7 +963,7 @@ func (r *memoryRepository) DocAffinity(
 }
 
 func (r *memoryRepository) TopDocAffinity(
-	ctx context.Context, scope interfaces.MemoryScope, knowledgeBaseID string, limit int,
+	ctx context.Context, scope interfaces.MemoryScope, knowledgeBaseID string, knowledgeIDs []string, limit int,
 ) ([]*types.MemoryDocAffinity, error) {
 	var rows []*types.MemoryDocAffinity
 	query := r.scoped(ctx, scope).
@@ -971,6 +971,9 @@ func (r *memoryRepository) TopDocAffinity(
 		Order("hits DESC, last_used_at DESC")
 	if knowledgeBaseID != "" {
 		query = query.Where("knowledge_base_id = ?", knowledgeBaseID)
+	}
+	if len(knowledgeIDs) > 0 {
+		query = query.Where("knowledge_id IN ?", knowledgeIDs)
 	}
 	if limit > 0 {
 		query = query.Limit(limit)

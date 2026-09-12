@@ -29,7 +29,7 @@ func (s *memoryExportEmptyStub) ListItems(
 }
 
 func (s *memoryExportEmptyStub) LearningDocuments(
-	context.Context, string, int,
+	context.Context, string, []string, int,
 ) ([]*types.MemoryDocView, error) {
 	return nil, nil
 }
@@ -41,9 +41,9 @@ func (s *memoryExportLearningStub) ListItems(
 }
 
 func (s *memoryExportLearningStub) LearningDocuments(
-	_ context.Context, knowledgeBaseID string, limit int,
+	_ context.Context, knowledgeBaseID string, knowledgeIDs []string, limit int,
 ) ([]*types.MemoryDocView, error) {
-	if knowledgeBaseID != "" {
+	if knowledgeBaseID != "" || len(knowledgeIDs) != 0 {
 		return nil, nil
 	}
 	s.learningLimit = limit

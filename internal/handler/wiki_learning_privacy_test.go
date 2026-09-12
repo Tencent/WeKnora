@@ -21,7 +21,9 @@ func (s *learningGraphWikiStub) GetGraph(
 	_ context.Context, request *types.WikiGraphRequest,
 ) (*types.WikiGraphData, error) {
 	s.request = request
-	return &types.WikiGraphData{}, nil
+	return &types.WikiGraphData{Nodes: []types.WikiGraphNode{{
+		Slug: "summary/doc-1", SourceKnowledgeIDs: []string{"doc-1"},
+	}}}, nil
 }
 
 type learningGraphKBStub struct {
@@ -42,16 +44,18 @@ type learningGraphMemoryStub struct {
 	available     bool
 	learningCalls int
 	requestedKB   string
+	requestedIDs  []string
 }
 
 func (s *learningGraphMemoryStub) MemoryAvailable(context.Context) bool   { return s.available }
 func (s *learningGraphMemoryStub) LearningAvailable(context.Context) bool { return s.available }
 
 func (s *learningGraphMemoryStub) LearningDocuments(
-	_ context.Context, knowledgeBaseID string, _ int,
+	_ context.Context, knowledgeBaseID string, knowledgeIDs []string, _ int,
 ) ([]*types.MemoryDocView, error) {
 	s.learningCalls++
 	s.requestedKB = knowledgeBaseID
+	s.requestedIDs = append([]string(nil), knowledgeIDs...)
 	return []*types.MemoryDocView{{KnowledgeID: "doc-1", Hits: 2}}, nil
 }
 
@@ -87,6 +91,7 @@ func TestWikiGraphLoadsLearningProfileWhenMemoryIsAvailable(t *testing.T) {
 
 	require.Equal(t, 1, memory.learningCalls)
 	require.Equal(t, "kb-1", memory.requestedKB)
+	require.Equal(t, []string{"doc-1"}, memory.requestedIDs)
 	require.Len(t, wiki.request.LearningDocuments, 1)
 	require.Equal(t, []string{"doc-1"}, wiki.request.FamiliarKnowledgeIDs)
 }

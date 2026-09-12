@@ -683,12 +683,13 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 			familiar = learning != nil && learning.State == types.WikiLearningStateFamiliar
 		}
 		nodes = append(nodes, types.WikiGraphNode{
-			Slug:      p.Slug,
-			Title:     p.Title,
-			PageType:  p.PageType,
-			LinkCount: linkCount[slug],
-			Familiar:  familiar,
-			Learning:  learning,
+			Slug:               p.Slug,
+			Title:              p.Title,
+			PageType:           p.PageType,
+			LinkCount:          linkCount[slug],
+			Familiar:           familiar,
+			Learning:           learning,
+			SourceKnowledgeIDs: p.SourceKnowledgeIDs(),
 		})
 	}
 	// Deterministic node ordering — the map iteration above is random.
