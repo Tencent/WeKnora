@@ -221,9 +221,12 @@ type ChatOptions struct {
 	ParallelToolCalls *bool
 	Format            json.RawMessage // structured output (json_schema form)
 
-	// PromptCacheKey is the provider routing key; empty falls back to the
-	// session ID on the call context. CacheRetention controls prompt-cache
-	// TTL ("none"/"short"/"long"; empty = short).
+	// PromptCacheKey is the provider routing key (openai-family
+	// prompt_cache_key + session affinity); empty means no routing key is
+	// sent — callers that want session affinity pass the session ID
+	// explicitly (there is no implicit context fallback; openai_wire.go
+	// receives ChatOptions.PromptCacheKey only). CacheRetention controls
+	// prompt-cache TTL ("none"/"short"/"long"; empty = short).
 	PromptCacheKey string
 	CacheRetention string
 

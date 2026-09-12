@@ -1952,10 +1952,17 @@ func (h *InitializationHandler) checkChatModelConnection(
 	_, err = invoke.Chat(ctx, invokeCfg, testOptions)
 	if err != nil {
 		errMsg := err.Error()
-		// 400 = endpoint reachable + auth ok, just a parameter mismatch
-		// (e.g. max_tokens vs max_completion_tokens). Treat as success.
-		if strings.Contains(errMsg, "status code: 400") {
-			return true, "连接正常，模型可用"
+		// 400 = endpoint reachable + auth OK (401/403 classify as auth
+		// failures first), the vendor just rejected the minimal test request
+		// itself. Typed check — 2026-09-13 review: the v1-era string match
+		// "status code: 400" no longer matches the unified error format, so
+		// this success branch had gone dead and every 400 (including genuine
+		// config errors like a wrong URL path) surfaced as a connection
+		// failure. The upstream reason stays in the message so real config
+		// errors remain visible instead of masquerading as success.
+		var pe *invoke.ProviderError
+		if stderrors.As(err, &pe) && pe.Status == http.StatusBadRequest {
+			return true, fmt.Sprintf("连接正常，鉴权通过；厂商拒绝测试请求：%s", pe.Message)
 		}
 		// For every other failure mode we surface a human-readable hint
 		// AND the upstream error verbatim. Swallowing the underlying

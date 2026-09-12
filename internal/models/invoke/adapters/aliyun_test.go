@@ -772,16 +772,28 @@ func TestAliyunCacheBreakpointPlacement(t *testing.T) {
 
 // TestAliyunUsageCacheFields pins the native cache counters mapping:
 // prompt_tokens_details.cached_tokens → CacheReadTokens,
-// cache_creation_input_tokens → CacheWriteTokens (anthropic semantics),
-// either counter flips CacheReported.
+// prompt_tokens_details.cache_creation.cache_creation_input_tokens →
+// CacheWriteTokens (anthropic semantics), either counter flips CacheReported.
+// The nested path is the documented wire form (对话 API 文档 §usage 字段表);
+// the flat top-level form stays as a fallback read.
 func TestAliyunUsageCacheFields(t *testing.T) {
 	a := newAliyunAdapter()
 	resp, err := a.ParseChatResponse(200, nil, []byte(`{"request_id":"r","output":{"choices":[`+
 		`{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]},`+
 		`"usage":{"input_tokens":28,"output_tokens":9,"total_tokens":37,`+
-		`"prompt_tokens_details":{"cached_tokens":7},"cache_creation_input_tokens":28}}`))
+		`"prompt_tokens_details":{"cached_tokens":7,"cache_creation":{`+
+		`"cache_creation_input_tokens":28}}}}`))
 	require.NoError(t, err)
 	require.Equal(t, 7, resp.Usage.CacheReadTokens)
+	require.Equal(t, 28, resp.Usage.CacheWriteTokens)
+	require.True(t, resp.Usage.CacheReported)
+
+	// 顶层回落：嵌套缺位时读顶层同名键（真机核对前的双读兜底）。
+	resp, err = a.ParseChatResponse(200, nil, []byte(`{"request_id":"r","output":{"choices":[`+
+		`{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]},`+
+		`"usage":{"input_tokens":28,"output_tokens":9,"total_tokens":37,`+
+		`"cache_creation_input_tokens":28}}`))
+	require.NoError(t, err)
 	require.Equal(t, 28, resp.Usage.CacheWriteTokens)
 	require.True(t, resp.Usage.CacheReported)
 

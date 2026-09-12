@@ -621,10 +621,15 @@ type aliyunUsage struct {
 		// cached_tokens（命中 Cache 的 Token 数）挂在 prompt_tokens_details
 		// 下——input_tokens_details 里是 text/image/video_tokens 细分。
 		CachedTokens int `json:"cached_tokens"`
+		// cache_creation 是嵌套对象（对话 API 文档 §usage 字段表：对象行 +
+		// 后随字段表），cache_creation_input_tokens 挂在其下——顶层直读
+		// 恒解不出，CacheWriteTokens 会静默归零（2026-09-13 审查发现）。
+		CacheCreation struct {
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		} `json:"cache_creation"`
 	} `json:"prompt_tokens_details"`
-	// cache_creation_input_tokens：显式缓存断点首次写入的 token 数（对话
-	// API 文档 §usage）。语义同 anthropic 的 cache_creation_input_tokens，
-	// 落 invoke.Usage.CacheWriteTokens，下游零改动。
+	// 顶层回落：文档的嵌套解读待真机核对（方案 §六.2），核对前双读兜底，
+	// 防个别版本/网关扁平化输出——核对后收敛为单路径。
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
@@ -638,8 +643,12 @@ func (u *aliyunUsage) usage() invoke.Usage {
 		out.CacheReadTokens = u.PromptTokensDetails.CachedTokens
 		out.CacheReported = true
 	}
-	if u.CacheCreationInputTokens > 0 {
-		out.CacheWriteTokens = u.CacheCreationInputTokens
+	cacheWrite := u.PromptTokensDetails.CacheCreation.CacheCreationInputTokens
+	if cacheWrite == 0 {
+		cacheWrite = u.CacheCreationInputTokens
+	}
+	if cacheWrite > 0 {
+		out.CacheWriteTokens = cacheWrite
 		out.CacheReported = true
 	}
 	return out
@@ -774,12 +783,10 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 		return aliyunFlushDone(state, &choice.Message), nil
 	}
 	d := choice.Message
-	if d.ReasoningContent != "" {
-		return &invoke.StreamEvent{
-			Kind:  invoke.StreamKindThinking,
-			Delta: &invoke.ContentDelta{Text: d.ReasoningContent},
-		}, nil
-	}
+	// One event per frame (bridge contract) — same priority as the openai
+	// bridge: tool_calls > content > reasoning (2026-09-13 review round).
+	// incremental_output keeps reasoning/content on separate frames for
+	// conforming vendors; the priority only matters for mixed frames.
 	if len(d.ToolCalls) > 0 {
 		assembler := invoke.ToolCallAssemblerFrom(state)
 		if assembler == nil {
@@ -801,6 +808,12 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 		return &invoke.StreamEvent{
 			Kind:  invoke.StreamKindAnswer,
 			Delta: &invoke.ContentDelta{Text: text},
+		}, nil
+	}
+	if d.ReasoningContent != "" {
+		return &invoke.StreamEvent{
+			Kind:  invoke.StreamKindThinking,
+			Delta: &invoke.ContentDelta{Text: d.ReasoningContent},
 		}, nil
 	}
 	return nil, nil
@@ -858,10 +871,17 @@ func aliyunFlushDone(state *invoke.StreamBridgeState, tail *aliyunResponseMessag
 
 const aliyunModelListPath = "/api/v1/models"
 
+// aliyunListPageSize is the single source for the catalog page size: the
+// request-side page_size literal and the entry pagination loop's
+// ListPageSize() (whose "short page" check terminates the loop) MUST agree —
+// a drifted pair either under- or over-pulls and can silently truncate the
+// remote catalog to the first page (2026-09-13 review).
+const aliyunListPageSize = 100
+
 // ListPageSize opts the adapter into the entry's pagination loop
 // (invoke.PaginatedLister): the catalog paginates by total, and the probe
 // must not stop at page one (2026-09-12 ruling ③).
-func (a *AliyunAdapter) ListPageSize() int { return 100 }
+func (a *AliyunAdapter) ListPageSize() int { return aliyunListPageSize }
 
 // aliyunCapabilityFilter maps the model type being edited onto the catalog's
 // capability codes (查询模型列表.md §capabilities): TG=文本生成,
@@ -896,7 +916,7 @@ func (a *AliyunAdapter) BuildListRequest(ep invoke.Endpoint, opts invoke.ListOpt
 		pageNo = 1
 	}
 	q.Set("page_no", strconv.Itoa(pageNo))
-	q.Set("page_size", "100")
+	q.Set("page_size", strconv.Itoa(aliyunListPageSize))
 	return &invoke.Request{
 		Method: http.MethodGet,
 		URL:    aliyunNativeBaseURL(ep.BaseURL) + aliyunModelListPath + "?" + q.Encode(),

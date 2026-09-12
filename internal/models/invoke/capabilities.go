@@ -139,8 +139,12 @@ type Capabilities struct {
 	Rerank    *RerankCaps    `json:"rerank,omitempty"`
 	ASR       *ASRCaps       `json:"asr,omitempty"`
 	// Credentials declares the credential slots the provider needs (§6.8);
-	// the frontend renders its credential form from this spec.
-	Credentials []CredentialFieldSpec `json:"credentials,omitempty"`
+	// the frontend renders its credential form from this spec. No omitempty:
+	// weknoracloud declares an EMPTY slice ("no slots") and the wire must
+	// carry `[]` — an omitted key would push the frontend into its
+	// api_key-slot fallback, i.e. provider knowledge leaking back in
+	// (2026-09-13 review).
+	Credentials []CredentialFieldSpec `json:"credentials"`
 }
 
 // isZero reports whether c is the unset zero value, used by

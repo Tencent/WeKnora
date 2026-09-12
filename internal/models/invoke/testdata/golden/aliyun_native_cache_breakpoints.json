@@ -62,8 +62,10 @@
       "input_tokens": 28,
       "output_tokens": 9,
       "total_tokens": 37,
-      "prompt_tokens_details": { "cached_tokens": 0 },
-      "cache_creation_input_tokens": 28
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_creation": { "cache_creation_input_tokens": 28 }
+      }
     }
   }
 }

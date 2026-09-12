@@ -158,6 +158,12 @@ func (e *Executor) Do(ctx context.Context, key ModelKey, req *Request) (*RawResu
 		}
 	}() // non-stream: round-trip ends here
 	defer rpmTpmPlaceholder(ctx, key)() // RPM/TPM reserved slot (§13.1), passthrough this cycle
+	if req.BodyStream != nil {
+		// One-shot body (design §6.2/§12 freeze): a BodyStream reader cannot
+		// be replayed — a retried attempt would resend an empty/truncated
+		// body. No current adapter uses it (ASR builds a replayable []byte).
+		return e.attemptOnce(ctx, req)
+	}
 	return WithProviderRetry(ctx, func(ctx context.Context) (*RawResult, error) {
 		return e.attemptOnce(ctx, req)
 	})

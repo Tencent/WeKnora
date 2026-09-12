@@ -143,6 +143,11 @@ func foldChatOptions(m *ModelConfig, opts *ChatOptions) *ChatOptions {
 
 // Chat runs one non-stream chat call.
 func Chat(ctx context.Context, m *ModelConfig, opts *ChatOptions) (*ChatResponse, error) {
+	if opts == nil {
+		// Nil-tolerant like foldChatOptions — the debug hook must not be the
+		// one place that panics on the documented-nil case.
+		opts = &ChatOptions{}
+	}
 	start := time.Now()
 	gen := startLangfuse(ctx, "chat.completion", m, opts)
 	resp, err := chatWithFallback(ctx, m, opts)
@@ -178,6 +183,11 @@ func chatOnce(ctx context.Context, m *ModelConfig, opts *ChatOptions) (*ChatResp
 	}
 	a, _ := resolveAdapter(m.Provider)
 	ca, _ := a.(ChatAdapter)
+	if ca == nil {
+		// Registry can shrink (tests unregister) between execute and parse —
+		// mirror ChatStream's guard: explicit error, never a nil deref.
+		return nil, &ProviderError{Kind: ErrUnsupportedType, Message: "provider adapter unavailable: " + m.Provider}
+	}
 	resp, err := ca.ParseChatResponse(result.Status, result.Header, result.Body)
 	return resp, normalizeErr(err)
 }
@@ -208,6 +218,11 @@ func chatExecute(ctx context.Context, m *ModelConfig, opts *ChatOptions) (*RawRe
 // from v1. Adapter TranslateStreamEvent yields internal StreamEvents; the
 // single mapping switch below carries no vendor knowledge.
 func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan types.StreamResponse, error) {
+	if opts == nil {
+		// Nil-tolerant like Chat — the entry never dereferences the caller's
+		// opts unguarded.
+		opts = &ChatOptions{}
+	}
 	start := time.Now()
 	gen := startLangfuse(ctx, "chat.completion.stream", m, opts)
 	streamOpts := *opts
@@ -215,11 +230,13 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 	streamOpts = *foldChatOptions(m, &streamOpts)
 	result, err := chatExecute(ctx, m, &streamOpts) // slot held by the returned stream reader
 	if err != nil {
-		// v1 wrapInvokeError("create chat completion stream", …).
+		// v1 wrapInvokeError("create chat completion stream", …). The langfuse
+		// generation closes HERE only for the pre-stream failure; on success
+		// the producer goroutine's defer closes it with the ACCUMULATED stream
+		// state (closing at stream start recorded no output/usage and marked
+		// in-stream failures as success — 2026-09-13 review, v1 parity).
 		err = WrapInvokeError("create chat completion stream", err)
-	}
-	gen.finish(nil, err)
-	if err != nil {
+		gen.finish(nil, err)
 		logLLMDebugStream(ctx, m.ModelName, opts.Messages, opts, "", nil, nil, err, time.Since(start))
 		return nil, err
 	}
@@ -269,6 +286,19 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 			logLLMDebugStream(ctx, m.ModelName, opts.Messages, opts,
 				streamContent.String(), streamToolCalls, streamUsage, streamErr, time.Since(start))
 		}()
+		// langfuse stream close (v1 parity): the generation finish rides the
+		// producer goroutine's exit with the accumulated answer content, tool
+		// calls, usage and in-stream error — never at stream start.
+		defer func() {
+			resp := &ChatResponse{Content: streamContent.String()}
+			if len(streamToolCalls) > 0 {
+				resp.ToolCalls = llmToolCallsToInvoke(streamToolCalls)
+			}
+			if u := tokenUsageToInvoke(streamUsage); u != nil {
+				resp.Usage = *u
+			}
+			gen.finish(resp, streamErr)
+		}()
 		// Cancellation also unblocks a pending demux read via Close. The
 		// streamDone branch keeps the watcher from outliving the stream.
 		go func() {
@@ -301,10 +331,11 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 		for {
 			chunk, ok := demux.Next()
 			if !ok {
-				if err := demux.Err(); err != nil && ctx.Err() == nil {
+				switch {
+				case demux.Err() != nil && ctx.Err() == nil:
 					interrupted := types.StreamResponse{
 						ResponseType: types.ResponseTypeError,
-						Content:      err.Error(),
+						Content:      demux.Err().Error(),
 						Done:         true,
 						FinishReason: types.FinishReasonIncomplete,
 					}
@@ -318,6 +349,28 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 					}
 					observe(interrupted)
 					emit(interrupted)
+				case ctx.Err() == nil:
+					// Clean EOF without a provider terminator: a vendor (or an
+					// intermediary proxy) that never sends [DONE] must still
+					// deliver the assembled terminal state — v1 synthesized it
+					// on the EOF branch (openai_stream.go:122-135). Without
+					// this the accumulated tool calls and pending usage are
+					// silently dropped and an agent loses the tool round
+					// (2026-09-13 review). FinishReason stays honestly
+					// Incomplete: no terminator frame was ever seen.
+					final := types.StreamResponse{
+						ResponseType: types.ResponseTypeAnswer,
+						Done:         true,
+						FinishReason: types.FinishReasonIncomplete,
+					}
+					if assembler := toolAssembler(state); assembler != nil {
+						final.ToolCalls = toLLMToolCalls(assembler.Calls())
+					}
+					if u := pendingUsage.usageToTypes(); u != nil {
+						final.Usage = u
+					}
+					observe(final)
+					emit(final)
 				}
 				return
 			}
@@ -451,11 +504,51 @@ func toLLMToolCalls(calls []ToolCall) []types.LLMToolCall {
 	return out
 }
 
+// llmToolCallsToInvoke is the reverse of toLLMToolCalls: the langfuse stream
+// finish feeds the accumulated session-level tool calls back into the
+// entry-level ChatResponse shape.
+func llmToolCallsToInvoke(calls []types.LLMToolCall) []ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]ToolCall, 0, len(calls))
+	for _, c := range calls {
+		out = append(out, ToolCall{
+			ID:               c.ID,
+			Type:             c.Type,
+			Function:         FunctionCall{Name: c.Function.Name, Arguments: c.Function.Arguments},
+			ProviderMetadata: c.ProviderMetadata,
+		})
+	}
+	return out
+}
+
+// tokenUsageToInvoke maps the wire-facing TokenUsage back onto the internal
+// Usage for the langfuse stream finish (nil-safe; the legacy CachedTokens
+// alias and CacheStatus are presentation-level and not carried back).
+func tokenUsageToInvoke(u *types.TokenUsage) *Usage {
+	if u == nil {
+		return nil
+	}
+	return &Usage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      u.TotalTokens,
+		CacheReadTokens:  u.CacheReadTokens,
+		CacheWriteTokens: u.CacheWriteTokens,
+		CacheMissTokens:  u.CacheMissTokens,
+		CacheReported:    u.CacheReported,
+	}
+}
+
 // Embed runs one embedding call. Langfuse tracking and the llm_debug record
 // mirror the v1 decorator stack (langfuseEmbedder outermost, debugEmbedder
 // below it); vendors whose API yields one vector per request are fanned out
 // per input (v1 volcengine loop), so callers always pass the full batch.
 func Embed(ctx context.Context, m *ModelConfig, opts *EmbeddingOptions) (*EmbeddingResponse, error) {
+	if opts == nil {
+		opts = &EmbeddingOptions{}
+	}
 	start := time.Now()
 	gen := startEmbeddingLangfuse(ctx, m, opts)
 	resp, err := embedWithFanOut(ctx, m, opts)
@@ -503,6 +596,10 @@ func embedWithFanOut(ctx context.Context, m *ModelConfig, opts *EmbeddingOptions
 		total.PromptTokens += resp.Usage.PromptTokens
 		total.CompletionTokens += resp.Usage.CompletionTokens
 		total.TotalTokens += resp.Usage.TotalTokens
+		total.CacheReadTokens += resp.Usage.CacheReadTokens
+		total.CacheWriteTokens += resp.Usage.CacheWriteTokens
+		total.CacheMissTokens += resp.Usage.CacheMissTokens
+		total.CacheReported = total.CacheReported || resp.Usage.CacheReported
 	}
 	return &EmbeddingResponse{Vectors: vectors, Usage: total}, nil
 }

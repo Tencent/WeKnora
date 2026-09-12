@@ -170,7 +170,7 @@ func TestReconcileAliyunNativeCacheBreakpoints(t *testing.T) {
 	g := newReconcileServer(t, jsonHandler(200, `{"request_id":"req-cache","output":{"choices":[`+
 		`{"finish_reason":"stop","message":{"role":"assistant","content":"Ethanol is a short-chain alcohol."}}]},`+
 		`"usage":{"input_tokens":28,"output_tokens":9,"total_tokens":37,`+
-		`"prompt_tokens_details":{"cached_tokens":0},"cache_creation_input_tokens":28}}`))
+		`"prompt_tokens_details":{"cached_tokens":0,"cache_creation":{"cache_creation_input_tokens":28}}}}`))
 	m := newGoldenModelConfig(t, g.Server.URL, "aliyun", "qwen3-max", nil)
 
 	resp, err := invoke.Chat(context.Background(), m, &invoke.ChatOptions{

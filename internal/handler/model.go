@@ -95,13 +95,17 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		}
 	}
 
+	// Store raw values — SanitizeForLog is a LOG-hygiene helper and must not
+	// mutate persisted data (2026-09-13 review: Create used to strip control
+	// characters at rest while Update stored raw, so editing a name carrying
+	// an invisible control character made the corruption visible).
 	model := &types.Model{
 		TenantID:    tenantID,
-		Name:        secutils.SanitizeForLog(req.Name),
-		DisplayName: secutils.SanitizeForLog(req.DisplayName),
-		Type:        types.ModelType(secutils.SanitizeForLog(string(req.Type))),
+		Name:        req.Name,
+		DisplayName: req.DisplayName,
+		Type:        req.Type,
 		Source:      req.Source,
-		Description: secutils.SanitizeForLog(req.Description),
+		Description: req.Description,
 		Parameters:  req.Parameters,
 	}
 
@@ -435,12 +439,9 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("query cannot be empty"))
 			return
 		}
-		record, callErr := h.service.GetModelByID(ctx, id)
-		if callErr != nil {
-			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
-			return
-		}
-		invokeCfg, callErr := h.service.BuildModelConfig(ctx, record)
+		// The outer fetch already loaded the record — a second GetModelByID
+		// per case is a wasted round trip and a TOCTOU gap (2026-09-13 review).
+		invokeCfg, callErr := h.service.BuildModelConfig(ctx, model)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
@@ -510,12 +511,9 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("image file is required"))
 			return
 		}
-		record, callErr := h.service.GetModelByID(ctx, id)
-		if callErr != nil {
-			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
-			return
-		}
-		invokeCfg, callErr := h.service.BuildModelConfig(ctx, record)
+		// The outer fetch already loaded the record — a second GetModelByID
+		// per case is a wasted round trip and a TOCTOU gap (2026-09-13 review).
+		invokeCfg, callErr := h.service.BuildModelConfig(ctx, model)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
@@ -663,7 +661,51 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 		newParams.ExtraConfig = model.Parameters.ExtraConfig
 	}
 	if newParams.Chat == nil {
+		// Flat-field fold (design §8 write-side is shard-only; 2026-09-13
+		// review): the Get* readers prefer the Chat shard, so a caller
+		// writing the flat context_window/max_output_tokens/supports_vision
+		// while a shard exists would save values that are silently shadowed
+		// on read-back ("saved but no effect"). Non-zero flat writes fold
+		// into the shard; with no shard at all, non-zero flat values create
+		// one via EnsureChat. Clearing a shard value stays a replace-vs-patch
+		// semantics question (review finding, pending ruling).
 		newParams.Chat = model.Parameters.Chat
+		// The fold must read the REQUEST's flat legacy fields directly: the
+		// Get* readers prefer the (just-preserved) shard and would fold the
+		// old shard values back onto themselves — a no-op that keeps flat
+		// writes shadowed. Migration-window reads by design.
+		foldContextWindow := newParams.ContextWindow //nolint:staticcheck // SA1019 migration-window fold input
+		foldMaxOutput := newParams.MaxOutputTokens   //nolint:staticcheck // SA1019 migration-window fold input
+		foldVision := newParams.SupportsVision       //nolint:staticcheck // SA1019 migration-window fold input
+		if newParams.Chat == nil {
+			if foldContextWindow > 0 || foldMaxOutput > 0 || foldVision {
+				chat := newParams.EnsureChat()
+				chat.ContextWindow = foldContextWindow
+				chat.MaxOutputTokens = foldMaxOutput
+				if foldVision {
+					chat.InputModalities = append(chat.InputModalities, "image")
+				}
+			}
+		} else {
+			if foldContextWindow > 0 {
+				newParams.Chat.ContextWindow = foldContextWindow
+			}
+			if foldMaxOutput > 0 {
+				newParams.Chat.MaxOutputTokens = foldMaxOutput
+			}
+			if foldVision {
+				hasImage := false
+				for _, mod := range newParams.Chat.InputModalities {
+					if mod == "image" {
+						hasImage = true
+						break
+					}
+				}
+				if !hasImage {
+					newParams.Chat.InputModalities = append(newParams.Chat.InputModalities, "image")
+				}
+			}
+		}
 	}
 	model.Parameters = newParams
 

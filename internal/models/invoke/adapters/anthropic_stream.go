@@ -31,6 +31,10 @@ type anthropicStreamAccum struct {
 	completion int
 	read       int
 	write      int
+	// reported is true once a usage frame carried either cache counter —
+	// the honest "vendor reported cache numbers" flag (absence of frames
+	// must not fabricate zero-counters downstream).
+	reported bool
 }
 
 func (a *anthropicStreamAccum) merge(u *anthropicUsageFields) {
@@ -43,6 +47,7 @@ func (a *anthropicStreamAccum) merge(u *anthropicUsageFields) {
 	if u.CacheCreationInputTokens != nil {
 		a.write = max(a.write, *u.CacheCreationInputTokens)
 	}
+	a.reported = a.reported || u.CacheReadInputTokens != nil || u.CacheCreationInputTokens != nil
 	uncached := max(0, a.prompt-a.read-a.write)
 	uncached = max(uncached, u.InputTokens)
 	a.prompt = uncached + a.read + a.write
@@ -54,6 +59,13 @@ func (a *anthropicStreamAccum) usage() *invoke.Usage {
 		PromptTokens:     a.prompt,
 		CompletionTokens: a.completion,
 		TotalTokens:      a.prompt + a.completion,
+		// v1 SetPromptCacheUsage parity (2026-09-13 review: the v2 port
+		// dropped the four detail fields, leaving Anthropic's engine-level
+		// cache_hit_rate stats permanently empty).
+		CacheReadTokens:  a.read,
+		CacheWriteTokens: a.write,
+		CacheMissTokens:  max(0, a.prompt-a.read-a.write),
+		CacheReported:    a.reported,
 	}
 }
 

@@ -364,6 +364,13 @@ func parseAnthropicResponse(resp *anthropicResponse) *invoke.ChatResponse {
 			PromptTokens:     promptTokens,
 			CompletionTokens: outputTokens,
 			TotalTokens:      promptTokens + outputTokens,
+			// v1 SetPromptCacheUsage parity (2026-09-13 review: the v2 port
+			// dropped the detail fields — same regression as the stream side;
+			// without them the engine's cache_hit_rate stats stay empty).
+			CacheReadTokens:  cacheRead,
+			CacheWriteTokens: cacheWrite,
+			CacheMissTokens:  max(0, promptTokens-cacheRead),
+			CacheReported:    resp.Usage.CacheReadInputTokens != nil || resp.Usage.CacheCreationInputTokens != nil,
 		},
 	}
 }

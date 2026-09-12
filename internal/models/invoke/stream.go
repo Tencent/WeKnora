@@ -90,9 +90,11 @@ func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk S
 		return nil, nil
 	}
 	d := choice.Delta
-	if d.ReasoningContent != "" {
-		return &StreamEvent{Kind: StreamKindThinking, Delta: &ContentDelta{Text: d.ReasoningContent}}, nil
-	}
+	// One event per frame (bridge contract): a non-conforming vendor that
+	// stuffs several payloads into one delta forces a priority — tool_calls
+	// (agent-critical) > content (answer payload) > reasoning (streaming
+	// nicety). v1 processed all three per delta; the multi-event bridge
+	// refactor is tracked as a follow-up (2026-09-13 review round).
 	if len(d.ToolCalls) > 0 {
 		a := toolAssembler(state)
 		if a == nil {
@@ -114,6 +116,9 @@ func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk S
 	}
 	if d.Content != "" {
 		return &StreamEvent{Kind: StreamKindAnswer, Delta: &ContentDelta{Text: d.Content}}, nil
+	}
+	if d.ReasoningContent != "" {
+		return &StreamEvent{Kind: StreamKindThinking, Delta: &ContentDelta{Text: d.ReasoningContent}}, nil
 	}
 	return nil, nil
 }

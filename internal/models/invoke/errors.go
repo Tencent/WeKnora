@@ -103,8 +103,10 @@ var contextOverflowPatterns = regexp.MustCompile(strings.Join([]string{
 // raw snippet. Kind/Status are decided by status + body patterns only.
 func ClassifyStatusBody(status int, body string) *ProviderError {
 	snippet := extractErrorMessage(body)
-	if len(snippet) > 512 {
-		snippet = snippet[:512]
+	// Cap by runes: a byte slice can sever a multi-byte UTF-8 sequence and put
+	// an invalid tail into a user-visible message (CJK vendor error envelopes).
+	if runes := []rune(snippet); len(runes) > 512 {
+		snippet = string(runes[:512])
 	}
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
@@ -185,6 +187,14 @@ func isNetTimeout(err error) bool {
 func WrapInvokeError(action string, err error) error {
 	pe := ClassifyError(err)
 	pe.Message = action + ": " + pe.Message
+	if pe == err {
+		// err was already the top *ProviderError and ClassifyError returned the
+		// SAME instance — writing pe.Err = err here would make Unwrap()
+		// self-referential and hang any errors.Is/As chain walk (e.g. asynq's
+		// SkipRetry check on the worker side). The instance already carries its
+		// original Err; only the message prefix is added.
+		return pe
+	}
 	pe.Err = err
 	return pe
 }
