@@ -210,6 +210,73 @@ time.sleep(30)`
 				require.Equal(t, 73, exit.ExitCode)
 			})
 
+			t.Run("AggregateDescendantMemory", func(t *testing.T) {
+				exec(t, "rm -f /workspace/output/terminal-memory-*.pid")
+				code := `import os,resource,time
+root = "/workspace/output/terminal-memory-"
+limit = 96*1024*1024
+assert resource.getrlimit(resource.RLIMIT_AS) == (limit, limit)
+read_fd, write_fd = os.pipe()
+for index in range(3):
+ if os.fork() == 0:
+  os.close(write_fd)
+  if index == 2:
+   os.setsid()
+   if os.fork() != 0:
+    os._exit(0)
+  with open(root+str(index)+".pid", "w") as target:
+   target.write(str(os.getpid()))
+  os.read(read_fd, 1)
+  data = bytearray(32*1024*1024)
+  data[::4096] = b"x"*(len(data)//4096)
+  with open("/proc/self/stat") as src:
+   assert int(src.read().rsplit(")", 1)[1].split()[20]) < limit
+  time.sleep(30)
+  os._exit(0)
+os.close(read_fd)
+with open(root+"parent.pid", "w") as target:
+ target.write(str(os.getpid()))
+while not all(os.path.exists(root+str(i)+".pid") for i in range(3)):
+ time.sleep(0.01)
+print("READY", flush=True)
+input()
+os.write(write_fd, b"xxx")
+time.sleep(30)`
+				term := open(t, ctx, CommandTerminalRequest{
+					Command:     "stty -echo; python3 -c " + ShellQuote(code),
+					MemoryBytes: 96 * 1024 * 1024, Timeout: 6 * time.Second,
+				})
+				terminalReadUntil(t, term, "READY")
+				require.NoError(t, term.Input(ctx, []byte("allocate\n")))
+				output, err := io.ReadAll(term)
+				require.NoError(t, err)
+				require.NotContains(t, string(output), "MemoryError")
+				require.NotContains(t, string(output), "AssertionError")
+				exit, err := term.Wait(ctx)
+				require.NoError(t, err)
+				// Check adopted descendants even if a regression returns timeout.
+				exec(t, `for file in /workspace/output/terminal-memory-*.pid; do `+
+					`pid=$(cat "$file"); test ! -e /proc/$pid || exit 1; done`)
+				require.Equal(t, "memory_limit", exit.Reason)
+				require.Equal(t, 200, exit.ExitCode)
+			})
+
+			t.Run("SIGKILLIsNotMemoryLimit", func(t *testing.T) {
+				term := open(t, ctx, CommandTerminalRequest{Command: "kill -KILL $$"})
+				exit, err := term.Wait(ctx)
+				require.NoError(t, err)
+				require.Equal(t, 137, exit.ExitCode)
+				require.Equal(t, "exited", exit.Reason)
+			})
+
+			t.Run("ReservedMemoryExitIsNotMemoryLimit", func(t *testing.T) {
+				term := open(t, ctx, CommandTerminalRequest{Command: "exit 200"})
+				exit, err := term.Wait(ctx)
+				require.NoError(t, err)
+				require.Equal(t, 1, exit.ExitCode)
+				require.Equal(t, "exited", exit.Reason)
+			})
+
 			t.Run("UnreadOutputBounded", func(t *testing.T) {
 				term := open(t, ctx, CommandTerminalRequest{
 					Command: `python3 -c 'import os; os.write(1,b"x"*1048576)'`,

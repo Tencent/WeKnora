@@ -20,7 +20,8 @@ export default {
     imageTooLarge: '无法预览：此图片超过尺寸或像素数量限制。',
     noArtifacts: '当前会话暂无产物', missingArtifactIdentity: '缺少预览标识', noAudit: '暂无审计记录',
     selectConfig: '选择沙箱配置', bind: '绑定到当前会话', noConfigs: '暂无可用沙箱配置',
-    limits: '资源限制', commandTimeout: '命令超时', sessionTimeout: '会话超时', cpuLimit: 'CPU 时间', memoryLimit: '内存', fileLimit: '文件大小',
+    limits: '资源限制', commandTimeout: '命令超时', sessionTimeout: '会话超时', cpuLimit: 'CPU 时间', memoryLimit: '内存（命令树 RSS / 每进程 AS）', fileLimit: '文件大小',
+    memoryLimitHint: '同一上限约束每进程地址空间，并采样命令及后代的 RSS 合计，达到上限即终止命令树。共享页会重复计入，采样可能超调；这不是容器或整个沙箱的内存硬配额。',
     terminalUnavailable: '当前沙箱不支持终端', filesUnavailable: '当前沙箱不支持文件访问',
     states: {
       bound: '已绑定', ready: '就绪', available: '可用', disabled: '工作台未启用',

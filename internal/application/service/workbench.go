@@ -47,15 +47,21 @@ type WorkbenchLimits struct {
 	SessionTimeoutSeconds int   `json:"session_timeout_seconds"`
 	CPUSeconds            int   `json:"cpu_seconds"`
 	MemoryBytes           int64 `json:"memory_bytes"`
-	MaxFileBytes          int64 `json:"max_file_bytes"`
-	MaxOutputBytes        int64 `json:"max_output_bytes"`
-	MaxFrameBytes         int64 `json:"max_frame_bytes"`
+	// MemoryEnforcement describes both budgets using MemoryBytes, not a container quota.
+	MemoryEnforcement string `json:"memory_enforcement"`
+	MaxFileBytes      int64  `json:"max_file_bytes"`
+	MaxOutputBytes    int64  `json:"max_output_bytes"`
+	MaxFrameBytes     int64  `json:"max_frame_bytes"`
 }
 
 // DefaultWorkbenchLimits returns the server-enforced console limits.
 func DefaultWorkbenchLimits() WorkbenchLimits {
 	return WorkbenchLimits{
-		120, 1800, 60, 512 << 20, WorkbenchMaxFileBytes, WorkbenchMaxOutputBytes, WorkbenchMaxFrameBytes,
+		CommandTimeoutSeconds: 120, SessionTimeoutSeconds: 1800,
+		CPUSeconds: sandbox.DefaultTerminalCPUSeconds, MemoryBytes: sandbox.DefaultTerminalMemoryBytes,
+		MemoryEnforcement: "per_process_as_and_aggregate_rss_sampled",
+		MaxFileBytes:      WorkbenchMaxFileBytes, MaxOutputBytes: WorkbenchMaxOutputBytes,
+		MaxFrameBytes: WorkbenchMaxFrameBytes,
 	}
 }
 

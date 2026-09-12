@@ -169,6 +169,8 @@ func terminalExitFor(code int) CommandTerminalExit {
 		reason = "interrupted"
 	case 152:
 		reason = "cpu_limit"
+	case 200: // Reserved by terminal_runner.py; command exit 200 is remapped to 1.
+		reason = "memory_limit"
 	}
 	return CommandTerminalExit{ExitCode: code, Reason: reason}
 }

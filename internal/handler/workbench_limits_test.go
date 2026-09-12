@@ -2,16 +2,63 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWorkbenchMemoryLimitStatusSocketAndAudit(t *testing.T) {
+	f := newWorkbenchHandlerFixture(t)
+	w := httptest.NewRecorder()
+	f.router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session/sandbox/workbench", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	var status struct {
+		Data service.WorkbenchStatus `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &status))
+	require.EqualValues(t, 512<<20, status.Data.Limits.MemoryBytes)
+	require.Equal(t, "per_process_as_and_aggregate_rss_sampled", status.Data.Limits.MemoryEnforcement)
+
+	conn := f.socket(t)
+	require.NoError(t, conn.WriteJSON(map[string]any{"type": "auth", "ticket": f.ticket(t)}))
+	ready := readWorkbenchEvent(t, conn, "ready")
+	limits := ready["limits"].(map[string]any)
+	require.EqualValues(t, 512<<20, limits["memory_bytes"])
+	require.Equal(t, status.Data.Limits.MemoryEnforcement, limits["memory_enforcement"])
+	for _, exit := range []sandbox.CommandTerminalExit{
+		{ExitCode: 200, Reason: "memory_limit"},
+		{ExitCode: 137, Reason: "exited"},
+	} {
+		require.NoError(t, conn.WriteJSON(map[string]any{"type": "command", "command": "test command"}))
+		started := readWorkbenchEvent(t, conn, "started")
+		kind, _, err := conn.ReadMessage()
+		require.NoError(t, err)
+		require.Equal(t, websocket.BinaryMessage, kind)
+		terminal := <-f.manager.terminals
+		terminal.finish(exit.ExitCode, exit.Reason)
+		event := readWorkbenchEvent(t, conn, "exit")
+		require.EqualValues(t, exit.ExitCode, event["exit_code"])
+		require.Equal(t, exit.Reason, event["reason"])
+		f.audit.mu.Lock()
+		row := f.audit.rows[len(f.audit.rows)-1]
+		f.audit.mu.Unlock()
+		require.Equal(t, types.AuditOutcomeFailed, row.Outcome)
+		var details map[string]any
+		require.NoError(t, json.Unmarshal(row.Details, &details))
+		require.EqualValues(t, exit.ExitCode, details["exit_code"])
+		require.Equal(t, exit.Reason, details["reason"])
+		require.Equal(t, started["execution_id"], details["execution_id"])
+	}
+}
 
 func TestWorkbenchSocketAuthTimeoutAndSemaphore(t *testing.T) {
 	f := newWorkbenchHandlerFixture(t)

@@ -49,6 +49,7 @@
           <dt>{{ t('workbench.memoryLimit') }}</dt><dd>{{ formatWorkbenchBytes(status.limits.memory_bytes) }}</dd>
           <dt>{{ t('workbench.fileLimit') }}</dt><dd>{{ formatWorkbenchBytes(maxBytes) }}</dd>
         </dl>
+        <p v-if="status.limits.memory_enforcement === 'per_process_as_and_aggregate_rss_sampled'">{{ t('workbench.memoryLimitHint') }}</p>
       </details>
       <t-tabs v-model="tab" class="workbench-tabs">
         <t-tab-panel value="terminal" :label="t('workbench.terminal')" />

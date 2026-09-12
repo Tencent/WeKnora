@@ -20,7 +20,8 @@ export default {
     imageTooLarge: 'プレビューを停止しました。この画像は寸法またはピクセル数の制限を超えています。',
     noArtifacts: 'このセッションに成果物はありません', missingArtifactIdentity: 'プレビュー識別子がありません', noAudit: '監査記録はありません',
     selectConfig: 'サンドボックス設定を選択', bind: 'セッションに関連付け', noConfigs: '利用可能なサンドボックス設定がありません',
-    limits: '制限', commandTimeout: 'コマンド制限時間', sessionTimeout: 'セッション制限時間', cpuLimit: 'CPU 時間', memoryLimit: 'メモリ', fileLimit: 'ファイルサイズ',
+    limits: '制限', commandTimeout: 'コマンド制限時間', sessionTimeout: 'セッション制限時間', cpuLimit: 'CPU 時間', memoryLimit: 'メモリ（ツリー RSS / プロセス別 AS）', fileLimit: 'ファイルサイズ',
+    memoryLimitHint: '同じ上限を各プロセスのアドレス空間と、コマンドおよび子孫プロセスの RSS 合計に適用します。RSS のサンプリング値が上限に達するとツリー全体を終了します。共有ページは重複計上され、サンプリング間に超過する場合があります。コンテナやサンドボックス全体の厳密なメモリ制限ではありません。',
     terminalUnavailable: 'このサンドボックスではターミナルを利用できません', filesUnavailable: 'このサンドボックスではファイルにアクセスできません',
     states: {
       bound: '関連付け済み', ready: '準備完了', available: '利用可能', disabled: 'ワークベンチは無効です',

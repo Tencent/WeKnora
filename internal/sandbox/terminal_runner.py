@@ -2,8 +2,9 @@
 
 Requires Linux /proc, prctl and Python 3. The supervisor is outside its child's
 rlimits so exhaustion cannot prevent cleanup. RLIMIT_AS is per-process; CPU
-also has an aggregate, sampled descendant budget. Container isolation remains
-the security boundary, including for commands running as sandbox root.
+and RSS also have aggregate, sampled command-tree budgets. RSS counts shared
+pages per process and sampling can overshoot; this is not a container quota.
+Container isolation remains the security boundary, including for sandbox root.
 """
 import ctypes
 import fcntl
@@ -26,6 +27,8 @@ fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", int(rows), int(cols), 0, 
 signal.signal(signal.SIGTTOU, signal.SIG_IGN)
 signal.signal(signal.SIGTTIN, signal.SIG_IGN)
 stopping = 0
+# Reserved supervisor result, not 137: ordinary SIGKILL is not proof of a limit.
+MEMORY_LIMIT_EXIT = 200
 
 
 def stop(sig, frame):
@@ -46,7 +49,8 @@ def processes():
             with open("/proc/" + name + "/stat") as src:
                 fields = src.read().rsplit(")", 1)[1].split()
             result[int(name)] = (int(fields[1]), fields[19],
-                                sum(int(fields[i]) for i in (11, 12, 13, 14)))
+                                sum(int(fields[i]) for i in (11, 12, 13, 14)),
+                                int(fields[21]))  # RSS in pages, /proc stat field 24
         except (OSError, ValueError, IndexError):
             pass
     return result
@@ -104,6 +108,7 @@ except (ProcessLookupError, PermissionError):
     pass
 deadline = time.monotonic() + wall
 ticks = os.sysconf("SC_CLK_TCK")
+page_size = os.sysconf("SC_PAGE_SIZE")
 code = 125
 try:
     while True:
@@ -111,6 +116,8 @@ try:
         if pid:
             code = os.waitstatus_to_exitcode(status)
             code = code if code >= 0 else 128 - code
+            if code == MEMORY_LIMIT_EXIT:
+                code = 1  # A command cannot claim the supervisor's memory result.
             break
         if stopping:
             code = 128 + stopping
@@ -122,11 +129,15 @@ try:
             code = 124
             break
         table = processes()
+        tree = descendants(table)
         usage = resource.getrusage(resource.RUSAGE_CHILDREN)
         consumed = usage.ru_utime + usage.ru_stime
-        consumed += sum(table[pid][2] / ticks for pid in descendants(table))
+        consumed += sum(table[pid][2] / ticks for pid in tree)
         if consumed >= cpu:
             code = 152
+            break
+        if sum(table[pid][3] for pid in tree) * page_size >= memory:
+            code = MEMORY_LIMIT_EXIT
             break
         try:
             os.utime("/var/lib/weknora-sandbox-activity", None)

@@ -20,7 +20,8 @@ export default {
     imageTooLarge: '미리보기가 차단되었습니다. 이 이미지가 크기 또는 픽셀 수 제한을 초과합니다.',
     noArtifacts: '이 세션에 결과물이 없습니다', missingArtifactIdentity: '미리보기 식별자가 없습니다', noAudit: '감사 기록이 없습니다',
     selectConfig: '샌드박스 설정 선택', bind: '세션에 연결', noConfigs: '사용 가능한 샌드박스 설정이 없습니다',
-    limits: '제한', commandTimeout: '명령 제한 시간', sessionTimeout: '세션 제한 시간', cpuLimit: 'CPU 시간', memoryLimit: '메모리', fileLimit: '파일 크기',
+    limits: '제한', commandTimeout: '명령 제한 시간', sessionTimeout: '세션 제한 시간', cpuLimit: 'CPU 시간', memoryLimit: '메모리 (트리 RSS / 프로세스별 AS)', fileLimit: '파일 크기',
+    memoryLimitHint: '동일한 한도를 프로세스별 주소 공간과 명령 및 하위 프로세스의 RSS 합계에 적용합니다. 샘플링한 RSS가 한도에 도달하면 명령 트리 전체를 종료합니다. 공유 페이지는 중복 집계되며 샘플링 사이에 한도를 초과할 수 있습니다. 컨테이너나 샌드박스 전체의 엄격한 메모리 할당량은 아닙니다.',
     terminalUnavailable: '이 샌드박스에서는 터미널을 사용할 수 없습니다', filesUnavailable: '이 샌드박스에서는 파일에 접근할 수 없습니다',
     states: {
       bound: '연결됨', ready: '준비됨', available: '사용 가능', disabled: '워크벤치가 비활성화되어 있습니다',

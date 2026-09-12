@@ -12,6 +12,7 @@ export interface WorkbenchStatus {
     session_timeout_seconds: number
     cpu_seconds: number
     memory_bytes: number
+    memory_enforcement?: 'per_process_as_and_aggregate_rss_sampled'
     max_file_bytes: number
   }
   reason?: string

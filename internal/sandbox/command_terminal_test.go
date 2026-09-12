@@ -408,9 +408,13 @@ func TestTerminalRuntimePythonProbeSuite(t *testing.T) {
 	require.True(t, ok)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(
-		ctx, python, "-I", filepath.Join(filepath.Dir(source), "terminal_runtime_probe_test.py"),
-	).CombinedOutput()
-	require.NoError(t, err, "%s", out)
-	t.Logf("%s", out)
+	for _, suite := range []string{"terminal_runtime_probe_test.py", "terminal_runner_test.py"} {
+		t.Run(suite, func(t *testing.T) {
+			out, err := exec.CommandContext(
+				ctx, python, "-B", "-I", filepath.Join(filepath.Dir(source), suite),
+			).CombinedOutput()
+			require.NoError(t, err, "%s", out)
+			t.Logf("%s", out)
+		})
+	}
 }

@@ -43,12 +43,16 @@ WEKNORA_SANDBOX_WORKBENCH_ORIGINS=https://weknora.example.com
 | --- | --- |
 | 单命令时长 / 控制台寿命 | 120 秒 / 30 分钟 |
 | CPU 时间 | 命令及后代累计 60 秒 |
-| 地址空间 | 每进程 512 MiB |
+| 内存 | 命令及后代 RSS 合计 512 MiB（采样）；同时保留每进程 512 MiB 地址空间上限 |
 | 命令文本 / JSON 帧 | 8 KiB / 16 KiB |
 | 未读取输出缓冲 / 控制台累计输出 | 256 KiB / 32 MiB |
 | 终端尺寸 | 行、列各不超过 500 |
 
-地址空间限制不等于整个沙箱的内存上限，CPU 时间也不等于容器 CPU 配额；部署方仍需配置容器或 MicroVM 的内存、CPU、PID 限额。超限会结束命令，沙箱及文件不会因此自动销毁。
+内存监督与 CPU 监督复用 Linux `/proc` 进程树采样，每轮暂停约 25 ms；监督进程不计入命令预算。`memory_bytes` 同时用于每进程 `RLIMIT_AS` 和命令及后代 RSS 合计上限，状态接口与 `ready` 帧以 `memory_enforcement=per_process_as_and_aggregate_rss_sampled` 声明这两项约束。RSS 达到上限后终止整个命令树，包括由 subreaper 收养的后代。
+
+RSS 共享页会在多个进程中重复计入；采样存在延迟和超调，也可能漏掉采样间隔内的短时峰值。它不是容器或整个沙箱的内存硬配额，CPU 时间也不等于容器 CPU 配额；部署方仍需配置容器或 MicroVM 的内存、CPU、PID 限额。超限会结束命令，沙箱及文件不会因此自动销毁。
+
+监督器确认 RSS 超限时返回专用退出码 200，终端和审计原因均为 `memory_limit`。普通 `SIGKILL` / 137 不推断为内存超限；命令自行 `exit 200` 会归一为 1 / `exited`，避免冒用监督器结果。单进程触及 `RLIMIT_AS` 时由程序处理分配失败，不会仅凭 `MemoryError` 或非零退出码推断 `memory_limit`。清理无法确认时不报告限额终止成功。
 
 服务端每五秒及每次启动命令前重新检查身份和空间策略。stdin、resize、ping 只续租；权限撤销、租约丢失或连接结束后，服务端用独立清理期限终止命令，关闭传输本身不作为进程已退出的证据。
 
@@ -85,6 +89,7 @@ HTTP 入口位于 `/api/v1/sessions/{id}/sandbox`，提供工作台状态、显�
 go test ./internal/sandbox ./internal/handler ./internal/handler/session ./internal/router
 go test ./internal/application/service -run '^TestWorkbench'
 python3 -B -I internal/sandbox/workbench_files_test.py
+python3 -B -I internal/sandbox/terminal_runner_test.py
 ```
 
 真实测试仅识别 `WORKBENCH_TEST_*`，不会读取生产 E2B 凭据、Docker context 或通用 `DOCKER_HOST`。配置缺失时只跳过对应后端；配置完整后的连接失败会使测试失败。它们会创建沙箱、执行资源限制测试并在结束时销毁自己的会话，应使用专用测试账号或 daemon。
@@ -144,6 +149,6 @@ go test -tags='sandbox_terminal_integration workbench_integration' ./internal/sa
   -run '^TestWorkbenchIntegrationConfig$' -count=1 -v
 ```
 
-终端测试覆盖提前输出、二进制 stdin、resize、interrupt、CPU/地址空间/输出限额及后代清理；文件测试覆盖 8 MiB 往返、特殊节点、路径注入和不覆盖写入。套件未配置后端时的 skip 不能计作真实运行通过。测试进程被强制结束时，应在测试控制面检查遗留沙箱。
+终端测试覆盖提前输出、二进制 stdin、resize、interrupt、CPU/地址空间/命令树 RSS/输出限额及后代清理。`AggregateDescendantMemory` 在每进程地址空间低于上限时触发 RSS 总量限制，并检查包括 double-fork 后代在内的进程清理；另验证 137 和命令自报 200 不会误记为内存超限。文件测试覆盖 8 MiB 往返、特殊节点、路径注入和不覆盖写入。套件未配置后端时的 skip 不能计作真实运行通过。测试进程被强制结束时，应在测试控制面检查遗留沙箱。
 
 前端测试、类型检查和构建见 `frontend/package.json`。浏览器安全检查与 PPTX fixture 的完整准备命令见 [Skills 示例](../examples/skills/README.md#本地测试与预览)。[Frontend CI](../.github/workflows/frontend.yml) 会生成 fixture 并运行 builder、文件 helper 和浏览器安全测试，不需要真实沙箱凭据。

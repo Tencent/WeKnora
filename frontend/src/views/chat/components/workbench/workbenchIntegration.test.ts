@@ -77,6 +77,16 @@ test('known status reasons are localized instead of showing raw identifiers', ()
   assert.match(panel, /te\(key\) \? t\(key\) : reason/)
 })
 
+test('memory limits display both per-process AS and sampled aggregate RSS semantics', () => {
+  assert.match(panel, /status.limits.memory_enforcement === 'per_process_as_and_aggregate_rss_sampled'/)
+  assert.match(panel, /t\('workbench.memoryLimitHint'\)/)
+  for (const locale of ['en-US', 'zh-CN', 'ja-JP', 'ko-KR', 'ru-RU']) {
+    const source = read(`../../../../i18n/locales/${locale}.ts`)
+    assert.match(source, /memoryLimit: '[^']*RSS[^']*AS/)
+    assert.match(source, /memoryLimitHint: '[^']+RSS/)
+  }
+})
+
 test('both development and production proxies carry WebSocket upgrades', () => {
   const vite = read('../../../../../vite.config.ts')
   const nginx = read('../../../../../nginx-api-proxy.conf')

@@ -345,6 +345,23 @@ func TestWorkbenchAuditScopedAndCapped(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorkbenchSession)
 }
 
+func TestWorkbenchMemoryLimitAuditQueryable(t *testing.T) {
+	s, ctx, _, _, _ := newWorkbenchFixture(t)
+	execution, err := s.OpenTerminal(ctx, "session", sandbox.CommandTerminalRequest{
+		Command: "memory workload", Cols: 80, Rows: 24,
+	})
+	require.NoError(t, err)
+	require.NoError(t, execution.Finish(sandbox.CommandTerminalExit{ExitCode: 200, Reason: "memory_limit"}, nil))
+	rows, err := s.Audit(ctx, "session", 100)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, types.AuditOutcomeAccepted, rows[0].Outcome)
+	require.Equal(t, types.AuditOutcomeFailed, rows[1].Outcome)
+	require.Equal(t, execution.ExecutionID, rows[1].TargetID)
+	require.Contains(t, string(rows[1].Details), `"reason":"memory_limit"`)
+	require.Contains(t, string(rows[1].Details), `"exit_code":200`)
+}
+
 func TestWorkbenchPathsAndRedaction(t *testing.T) {
 	for _, value := range []string{"/etc/passwd", "../secret", "a/../b", "a\\b", "a\x00b", "a\nb", "a//b", "a/./b"} {
 		require.Error(t, ValidateWorkbenchPath(value, false), value)

@@ -20,7 +20,8 @@ export default {
     imageTooLarge: 'Preview blocked: this image exceeds the dimension or pixel limit.',
     noArtifacts: 'No artifacts in this session', missingArtifactIdentity: 'Preview identity unavailable', noAudit: 'No audit entries',
     selectConfig: 'Select sandbox configuration', bind: 'Bind to session', noConfigs: 'No available sandbox configurations',
-    limits: 'Limits', commandTimeout: 'Command timeout', sessionTimeout: 'Session timeout', cpuLimit: 'CPU time', memoryLimit: 'Memory', fileLimit: 'File size',
+    limits: 'Limits', commandTimeout: 'Command timeout', sessionTimeout: 'Session timeout', cpuLimit: 'CPU time', memoryLimit: 'Memory (tree RSS / per-process AS)', fileLimit: 'File size',
+    memoryLimitHint: 'The same limit caps per-process address space and sampled RSS summed over the command and descendants. Reaching the RSS limit terminates the command tree. Shared pages count repeatedly and sampling can overshoot; this is not a container or sandbox-wide hard memory quota.',
     terminalUnavailable: 'Terminal is unavailable for this sandbox', filesUnavailable: 'File access is unavailable for this sandbox',
     states: {
       bound: 'Bound', ready: 'Ready', available: 'Available', disabled: 'Workbench is disabled',

@@ -17,8 +17,9 @@ const (
 )
 
 // CommandTerminalRequest starts exactly one audited command, never an existing shell.
-// Zero limits select bounded defaults. MemoryBytes is inherited RLIMIT_AS,
-// not an aggregate container memory quota.
+// Zero limits select bounded defaults. MemoryBytes caps both inherited per-process
+// RLIMIT_AS and sampled command-tree RSS (shared pages counted per process).
+// Sampling can overshoot; this is not a container memory quota.
 type CommandTerminalRequest struct {
 	Command     string
 	Cols, Rows  uint16
