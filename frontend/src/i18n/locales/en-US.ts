@@ -6041,6 +6041,7 @@ export default {
       requiresKb: '(requires knowledge base configuration)',
       requiresRagKb: '(requires a KB with vector/keyword indexing enabled)',
       requiresWikiKb: '(requires a Wiki-enabled knowledge base)',
+      requiresOwnedWikiKb: '(requires a Wiki knowledge base owned by this workspace)',
       wikiSearch: 'Search Wiki',
       wikiSearchDesc: 'Keyword / semantic search over Wiki pages',
       wikiReadPage: 'Read Wiki Page',

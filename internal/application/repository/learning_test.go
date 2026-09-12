@@ -78,13 +78,21 @@ func learningTestDB(t *testing.T, dialect string) *gorm.DB {
 	}
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.WikiPage{}, &types.Knowledge{}, &types.Chunk{}))
-	file := "../../../migrations/sqlite/000015_learning.up.sql"
-	if dialect == "postgres" {
-		file = "../../../migrations/versioned/000094_learning.up.sql"
+	files := []string{
+		"../../../migrations/sqlite/000015_learning.up.sql",
+		"../../../migrations/sqlite/000016_learning_credit_source.up.sql",
 	}
-	up, err := os.ReadFile(file)
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(string(up)).Error)
+	if dialect == "postgres" {
+		files = []string{
+			"../../../migrations/versioned/000094_learning.up.sql",
+			"../../../migrations/versioned/000095_learning_credit_source.up.sql",
+		}
+	}
+	for _, file := range files {
+		up, err := os.ReadFile(file)
+		require.NoError(t, err)
+		require.NoError(t, db.Exec(string(up)).Error)
+	}
 	return db
 }
 

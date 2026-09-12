@@ -22,7 +22,12 @@ func TestMigrationSourcesHaveUniqueVersions(t *testing.T) {
 			driver, err := iofs.New(os.DirFS("../../migrations"), test.directory)
 			require.NoError(t, err, "migration versions and directions must be unique")
 			t.Cleanup(func() { require.NoError(t, driver.Close()) })
-			for offset, wantIdentifier := range []string{test.identifier, "browser_authorization", "learning"} {
+			for offset, wantIdentifier := range []string{
+				test.identifier,
+				"browser_authorization",
+				"learning",
+				"learning_credit_source",
+			} {
 				version := test.previous + uint(offset)
 				if offset > 0 {
 					next, err := driver.Next(version - 1)

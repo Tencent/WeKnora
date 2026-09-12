@@ -15,10 +15,16 @@ func TestLearningSQLiteMigrationConstraintsAndRollback(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	up, err := os.ReadFile("../../migrations/sqlite/000015_learning.up.sql")
 	require.NoError(t, err)
+	creditUp, err := os.ReadFile("../../migrations/sqlite/000016_learning_credit_source.up.sql")
+	require.NoError(t, err)
+	creditDown, err := os.ReadFile("../../migrations/sqlite/000016_learning_credit_source.down.sql")
+	require.NoError(t, err)
 	down, err := os.ReadFile("../../migrations/sqlite/000015_learning.down.sql")
 	require.NoError(t, err)
 	for range 2 {
 		_, err = db.Exec(string(up))
+		require.NoError(t, err)
+		_, err = db.Exec(string(creditUp))
 		require.NoError(t, err)
 		_, err = db.Exec(`INSERT INTO learning_profiles(tenant_id,subject_id) VALUES (1,'web_user:a')`)
 		require.NoError(t, err)
@@ -68,6 +74,8 @@ func TestLearningSQLiteMigrationConstraintsAndRollback(t *testing.T) {
 		var count int
 		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM learning_attempts`).Scan(&count))
 		require.Zero(t, count)
+		_, err = db.Exec(string(creditDown))
+		require.NoError(t, err)
 		_, err = db.Exec(string(down))
 		require.NoError(t, err)
 		for _, table := range []string{

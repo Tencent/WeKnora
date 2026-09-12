@@ -1220,6 +1220,7 @@ export default {
       requiresKb: '(지식베이스 설정 필요)',
       requiresRagKb: '(벡터/키워드 인덱싱이 활성화된 지식베이스가 필요합니다)',
       requiresWikiKb: '(Wiki 기능이 활성화된 지식베이스가 필요합니다)',
+      requiresOwnedWikiKb: '(현재 워크스페이스가 소유한 Wiki 지식베이스가 필요합니다)',
       wikiSearch: 'Wiki 검색',
       wikiSearchDesc: 'Wiki 지식베이스에서 키워드/의미 기반 검색',
       wikiReadPage: 'Wiki 페이지 읽기',

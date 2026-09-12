@@ -482,6 +482,9 @@ test('live and persisted Agent results keep only references, never answers or qu
   for (const display_type of ['learning_profile', 'learning_recommendations']) {
     assert.equal(learningToolReference(JSON.stringify({ display_type, knowledge_base_id: 'kb', profile: result }))?.display_type, display_type)
   }
+  assert.equal(learningToolReference(JSON.stringify({ display_type: 'learning_quiz', knowledge_base_id: 'kb' })), null)
+  assert.equal(learningToolReference(JSON.stringify({ display_type: 'learning_profile' })), null)
+  assert.equal(learningToolReference(output, undefined, false), null)
   assert.equal(learningToolReference('not JSON'), null)
 })
 

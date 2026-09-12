@@ -16,22 +16,52 @@ import (
 // LearningHandler serves personal learning requests for authenticated Web users.
 type LearningHandler struct{ service interfaces.LearningService }
 
+type updateLearningSettingsRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type learningOverlayRequest struct {
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	Slugs           []string `json:"slugs"`
+}
+
+type prepareLearningQuizRequest struct {
+	PageID string `json:"page_id"`
+}
+
 // NewLearningHandler creates an HTTP handler for the learning service.
 func NewLearningHandler(svc interfaces.LearningService) *LearningHandler {
 	return &LearningHandler{service: svc}
 }
 
-// GetSettings returns the caller's personal learning settings.
+// GetSettings godoc
+// @Summary      获取个人学习设置
+// @Description  返回当前 Web 用户的学习开关与算法版本
+// @Tags         引导式学习
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "学习设置"
+// @Failure      403  {object}  map[string]interface{}  "仅支持当前空间的 Web 用户"
+// @Security     Bearer
+// @Router       /learning/settings [get]
 func (h *LearningHandler) GetSettings(c *gin.Context) {
 	data, err := h.service.GetSettings(c.Request.Context())
 	h.respond(c, data, err)
 }
 
-// SetEnabled updates whether personal learning is enabled for the caller.
+// SetEnabled godoc
+// @Summary      更新个人学习开关
+// @Description  开启或关闭当前 Web 用户的个人学习画像
+// @Tags         引导式学习
+// @Accept       json
+// @Produce      json
+// @Param        request  body      updateLearningSettingsRequest  true  "学习设置"
+// @Success      200      {object}  map[string]interface{}          "更新后的学习设置"
+// @Failure      400      {object}  map[string]interface{}          "请求无效"
+// @Failure      403      {object}  map[string]interface{}          "身份不支持"
+// @Security     Bearer
+// @Router       /learning/settings [put]
 func (h *LearningHandler) SetEnabled(c *gin.Context) {
-	var input struct {
-		Enabled *bool `json:"enabled"`
-	}
+	var input updateLearningSettingsRequest
 	if !decodeLearningRequest(c, &input) {
 		return
 	}
@@ -43,19 +73,47 @@ func (h *LearningHandler) SetEnabled(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
-// Overview returns the caller's learning overview for a Wiki knowledge base.
+// Overview godoc
+// @Summary      获取学习概览
+// @Description  返回当前用户在指定自有 Wiki 知识库中的学习状态统计
+// @Tags         引导式学习
+// @Produce      json
+// @Param        knowledge_base_id  query     string  true  "知识库 ID"
+// @Success      200                {object}  map[string]interface{}  "学习概览"
+// @Failure      403                {object}  map[string]interface{}  "学习未开启或无权访问"
+// @Security     Bearer
+// @Router       /learning/overview [get]
 func (h *LearningHandler) Overview(c *gin.Context) {
 	data, err := h.service.Overview(c.Request.Context(), c.Query("knowledge_base_id"))
 	h.respond(c, data, err)
 }
 
-// Node returns the caller's learning state for a Wiki page.
+// Node godoc
+// @Summary      获取知识节点学习状态
+// @Description  返回当前用户对指定 Wiki 页面的熟悉度、掌握度和来源状态
+// @Tags         引导式学习
+// @Produce      json
+// @Param        id   path      string  true  "Wiki 页面 ID"
+// @Success      200  {object}  map[string]interface{}  "节点学习状态"
+// @Failure      404  {object}  map[string]interface{}  "节点不存在"
+// @Security     Bearer
+// @Router       /learning/nodes/{id} [get]
 func (h *LearningHandler) Node(c *gin.Context) {
 	data, err := h.service.Node(c.Request.Context(), c.Param("id"))
 	h.respond(c, data, err)
 }
 
-// Recommendations returns suggested Wiki topics for the caller to study.
+// Recommendations godoc
+// @Summary      获取学习推荐
+// @Description  按复习需求、图邻域、个人兴趣和内容质量返回 Wiki 主题
+// @Tags         引导式学习
+// @Produce      json
+// @Param        knowledge_base_id  query     string  true   "知识库 ID"
+// @Param        limit              query     int     false  "返回数量"  default(5)
+// @Success      200                {object}  map[string]interface{}  "学习推荐"
+// @Failure      400                {object}  map[string]interface{}  "参数无效"
+// @Security     Bearer
+// @Router       /learning/recommendations [get]
 func (h *LearningHandler) Recommendations(c *gin.Context) {
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "5"))
 	if err != nil || limit < 1 || limit > 20 {
@@ -66,17 +124,33 @@ func (h *LearningHandler) Recommendations(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
-// RecordView records a Wiki page view for the caller.
+// RecordView godoc
+// @Summary      记录知识节点阅读
+// @Description  将当前用户对指定 Wiki 页面的阅读记录为熟悉度信号，不更新掌握度
+// @Tags         引导式学习
+// @Produce      json
+// @Param        id   path      string  true  "Wiki 页面 ID"
+// @Success      200  {object}  map[string]interface{}  "记录成功"
+// @Failure      404  {object}  map[string]interface{}  "节点不存在"
+// @Security     Bearer
+// @Router       /learning/nodes/{id}/view [post]
 func (h *LearningHandler) RecordView(c *gin.Context) {
 	h.respond(c, nil, h.service.RecordView(c.Request.Context(), c.Param("id")))
 }
 
-// Overlay returns the caller's learning states for the requested Wiki slugs.
+// Overlay godoc
+// @Summary      批量获取知识图谱学习状态
+// @Description  返回最多 2000 个 Wiki slug 对应的个人学习状态
+// @Tags         引导式学习
+// @Accept       json
+// @Produce      json
+// @Param        request  body      learningOverlayRequest  true  "知识库与 Wiki slug"
+// @Success      200      {object}  map[string]interface{}   "节点学习状态列表"
+// @Failure      400      {object}  map[string]interface{}   "请求无效"
+// @Security     Bearer
+// @Router       /learning/overlay [post]
 func (h *LearningHandler) Overlay(c *gin.Context) {
-	var input struct {
-		KnowledgeBaseID string   `json:"knowledge_base_id"`
-		Slugs           []string `json:"slugs"`
-	}
+	var input learningOverlayRequest
 	if !decodeLearningRequest(c, &input) {
 		return
 	}
@@ -88,11 +162,20 @@ func (h *LearningHandler) Overlay(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
-// PrepareQuiz requests a source-backed quiz for a Wiki page.
+// PrepareQuiz godoc
+// @Summary      准备来源测验
+// @Description  为指定 Wiki 页面复用或创建异步生成的三题单选测验
+// @Tags         引导式学习
+// @Accept       json
+// @Produce      json
+// @Param        request  body      prepareLearningQuizRequest  true  "Wiki 页面"
+// @Success      200      {object}  map[string]interface{}      "测验状态"
+// @Failure      403      {object}  map[string]interface{}      "学习未开启"
+// @Failure      422      {object}  map[string]interface{}      "来源证据不足"
+// @Security     Bearer
+// @Router       /learning/question-sets [post]
 func (h *LearningHandler) PrepareQuiz(c *gin.Context) {
-	var input struct {
-		PageID string `json:"page_id"`
-	}
+	var input prepareLearningQuizRequest
 	if !decodeLearningRequest(c, &input) {
 		return
 	}
@@ -104,13 +187,32 @@ func (h *LearningHandler) PrepareQuiz(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
-// GetQuiz returns a quiz owned by the caller.
+// GetQuiz godoc
+// @Summary      获取来源测验
+// @Description  返回当前用户拥有的测验状态与不含答案的题目
+// @Tags         引导式学习
+// @Produce      json
+// @Param        id   path      string  true  "测验 ID"
+// @Success      200  {object}  map[string]interface{}  "测验"
+// @Failure      404  {object}  map[string]interface{}  "测验不存在"
+// @Security     Bearer
+// @Router       /learning/question-sets/{id} [get]
 func (h *LearningHandler) GetQuiz(c *gin.Context) {
 	data, err := h.service.GetQuiz(c.Request.Context(), c.Param("id"))
 	h.respond(c, data, err)
 }
 
-// SubmitAnswer submits the caller's selected quiz option for assessment.
+// SubmitAnswer godoc
+// @Summary      提交测验答案
+// @Description  幂等提交一个选项，并在来源仍有效时更新 BKT 掌握度
+// @Tags         引导式学习
+// @Accept       json
+// @Produce      json
+// @Param        request  body      types.LearningAnswer    true  "答题请求"
+// @Success      200      {object}  map[string]interface{}  "判分结果"
+// @Failure      409      {object}  map[string]interface{}  "重复作答或来源已变化"
+// @Security     Bearer
+// @Router       /learning/attempts [post]
 func (h *LearningHandler) SubmitAnswer(c *gin.Context) {
 	var input types.LearningAnswer
 	if !decodeLearningRequest(c, &input) {
@@ -120,13 +222,29 @@ func (h *LearningHandler) SubmitAnswer(c *gin.Context) {
 	h.respond(c, data, err)
 }
 
-// Export returns the caller's learning records for the requested scope.
+// Export godoc
+// @Summary      导出个人学习数据
+// @Description  导出当前用户全部或指定知识库的学习画像、测验和作答记录
+// @Tags         引导式学习
+// @Produce      json
+// @Param        knowledge_base_id  query     string  false  "知识库 ID；省略时导出全部"
+// @Success      200                {object}  map[string]interface{}  "学习数据导出"
+// @Security     Bearer
+// @Router       /learning/export [get]
 func (h *LearningHandler) Export(c *gin.Context) {
 	data, err := h.service.Export(c.Request.Context(), c.Query("knowledge_base_id"))
 	h.respond(c, data, err)
 }
 
-// Clear deletes the caller's learning records for the requested scope.
+// Clear godoc
+// @Summary      删除个人学习数据
+// @Description  删除当前用户全部或指定知识库的学习画像、测验和作答记录
+// @Tags         引导式学习
+// @Produce      json
+// @Param        knowledge_base_id  query     string  false  "知识库 ID；省略时删除全部"
+// @Success      200                {object}  map[string]interface{}  "删除计数"
+// @Security     Bearer
+// @Router       /learning/profile [delete]
 func (h *LearningHandler) Clear(c *gin.Context) {
 	data, err := h.service.Clear(c.Request.Context(), c.Query("knowledge_base_id"))
 	h.respond(c, data, err)

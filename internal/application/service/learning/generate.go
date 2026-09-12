@@ -30,7 +30,14 @@ func (s *service) enqueue(payload types.LearningGeneratePayload) error {
 	}
 	b, _ := json.Marshal(payload)
 	_, err := s.tasks.Enqueue(asynq.NewTask(types.TypeLearningGenerate, b),
-		asynq.Queue(types.QueueQuestion), asynq.Timeout(180*time.Second), asynq.MaxRetry(2))
+		asynq.Queue(types.QueueQuestion),
+		asynq.Timeout(180*time.Second),
+		asynq.MaxRetry(2),
+		asynq.TaskID("learning-generate-"+payload.QuizID+"-"+strconv.FormatInt(payload.Epoch, 10)),
+	)
+	if errors.Is(err, asynq.ErrTaskIDConflict) || errors.Is(err, asynq.ErrDuplicateTask) {
+		return nil
+	}
 	if err != nil {
 		return types.ErrLearningBusy
 	}

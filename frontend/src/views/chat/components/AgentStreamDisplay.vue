@@ -216,12 +216,12 @@
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
                         :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
-                    <div v-else-if="event.output" class="tool-output-wrapper">
+                    <div v-else-if="event.output || event.error" class="tool-output-wrapper">
                       <div class="fallback-header">
                         <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
                       </div>
                       <div class="detail-output-wrapper">
-                        <div class="detail-output">{{ event.output }}</div>
+                        <div class="detail-output">{{ event.output || event.error }}</div>
                       </div>
                     </div>
                     <!-- Raw arguments hidden for user-friendly display -->
@@ -508,12 +508,12 @@
                       :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
-                  <div v-else-if="event.output" class="tool-output-wrapper">
+                  <div v-else-if="event.output || event.error" class="tool-output-wrapper">
                     <div class="fallback-header">
                       <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
                     </div>
                     <div class="detail-output-wrapper">
-                      <div class="detail-output">{{ event.output }}</div>
+                      <div class="detail-output">{{ event.output || event.error }}</div>
                     </div>
                   </div>
 
@@ -1180,7 +1180,7 @@ const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
   const learningType = learningToolDisplayType(event?.tool_name)
-  if (learningType) return learningType
+  if (learningType && event?.success !== false) return learningType
   const mcpType = getMcpToolDisplayType(event?.tool_name)
   if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType

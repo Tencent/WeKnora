@@ -145,7 +145,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), { success: undefined });
 const learningReference = computed(() => learningToolReference(props.output, {
   ...props.toolData, ...(props.displayType ? { display_type: props.displayType } : {}),
-}));
+}, props.success));
 
 const displayType = computed(() => props.displayType);
 const toolData = computed(() => props.toolData || {});

@@ -8248,6 +8248,524 @@ const docTemplate = `{
                 }
             }
         },
+        "/learning/attempts": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "幂等提交一个选项，并在来源仍有效时更新 BKT 掌握度",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "提交测验答案",
+                "parameters": [
+                    {
+                        "description": "答题请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LearningAnswer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "判分结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "重复作答或来源已变化",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/export": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "导出当前用户全部或指定知识库的学习画像、测验和作答记录",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "导出个人学习数据",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库 ID；省略时导出全部",
+                        "name": "knowledge_base_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "学习数据导出",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/nodes/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前用户对指定 Wiki 页面的熟悉度、掌握度和来源状态",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "获取知识节点学习状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wiki 页面 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "节点学习状态",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "节点不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/nodes/{id}/view": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "将当前用户对指定 Wiki 页面的阅读记录为熟悉度信号，不更新掌握度",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "记录知识节点阅读",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wiki 页面 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "记录成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "节点不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/overlay": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回最多 2000 个 Wiki slug 对应的个人学习状态",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "批量获取知识图谱学习状态",
+                "parameters": [
+                    {
+                        "description": "知识库与 Wiki slug",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.learningOverlayRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "节点学习状态列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求无效",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/overview": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前用户在指定自有 Wiki 知识库中的学习状态统计",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "获取学习概览",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库 ID",
+                        "name": "knowledge_base_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "学习概览",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "学习未开启或无权访问",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/profile": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "删除当前用户全部或指定知识库的学习画像、测验和作答记录",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "删除个人学习数据",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库 ID；省略时删除全部",
+                        "name": "knowledge_base_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除计数",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/question-sets": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "为指定 Wiki 页面复用或创建异步生成的三题单选测验",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "准备来源测验",
+                "parameters": [
+                    {
+                        "description": "Wiki 页面",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.prepareLearningQuizRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "测验状态",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "学习未开启",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "422": {
+                        "description": "来源证据不足",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/question-sets/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前用户拥有的测验状态与不含答案的题目",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "获取来源测验",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "测验 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "测验",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "测验不存在",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/recommendations": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "按复习需求、图邻域、个人兴趣和内容质量返回 Wiki 主题",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "获取学习推荐",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库 ID",
+                        "name": "knowledge_base_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "返回数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "学习推荐",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "参数无效",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/learning/settings": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前 Web 用户的学习开关与算法版本",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "获取个人学习设置",
+                "responses": {
+                    "200": {
+                        "description": "学习设置",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "仅支持当前空间的 Web 用户",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "开启或关闭当前 Web 用户的个人学习画像",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "引导式学习"
+                ],
+                "summary": "更新个人学习开关",
+                "parameters": [
+                    {
+                        "description": "学习设置",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.updateLearningSettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的学习设置",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求无效",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "身份不支持",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/mcp-services": {
             "get": {
                 "security": [
@@ -8258,7 +8776,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前空间的所有MCP服务",
+                "description": "获取当前空间的所有MCP服务（含已保存工具目录数量）",
                 "consumes": [
                     "application/json"
                 ],
@@ -13119,6 +13637,113 @@ const docTemplate = `{
                 }
             }
         },
+        "/sessions/{id}/steer": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "刷新页面后用来恢复输入框上方的队列。没有正在运行的 turn 时返回空列表。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "列出当前运行中尚未消费的排队消息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{id}/steer/{steer_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "从当前运行的排队列表里去掉一条，不再注入也不再作为 follow-up 发出。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "删除一条排队中的消息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "排队消息 ID",
+                        "name": "steer_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/sessions/{session_id}/artifacts": {
             "get": {
                 "security": [
@@ -13312,6 +13937,137 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "会话不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/steer": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "向运行中的对话追加消息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "追加消息",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_session.SteerMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "queued | new_run",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "会话不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/steer/{steer_id}/inject": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "把一条 delivery=after 的排队消息改为 inject，运行中的 agent 会在下一轮边界读到它。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "将排队消息改为立即注入",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "排队消息 ID",
+                        "name": "steer_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "queued | new_run",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -17629,6 +18385,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.AgentStep": {
             "type": "object",
             "properties": {
+                "intermediate_answer": {
+                    "description": "IntermediateAnswer preserves a plain answer followed by a loop-end steer.\nThe canonical final answer is still stored in Message.Content.",
+                    "type": "boolean"
+                },
                 "iteration": {
                     "description": "Iteration number (0-indexed)",
                     "type": "integer"
@@ -17650,6 +18410,13 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall"
+                    }
+                },
+                "user_messages_before": {
+                    "description": "UserMessagesBefore records consumed steer rows in delivery order, before\nthis model response. Unlike timestamps, this remains unambiguous on replay.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
                     }
                 }
             }
@@ -18265,7 +19032,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "context_template_id": {
-                    "description": "ContextTemplateID references a template ID in prompt_templates/ YAML files.\nIf set and ContextTemplate is empty, the template content will be resolved at startup.",
+                    "description": "ContextTemplateID references a template ID in prompt_templates/ YAML files.\nIf set and ContextTemplate is empty, the template content is resolved at request time for saved agents.",
                     "type": "string"
                 },
                 "data_analysis_enabled": {
@@ -18448,7 +19215,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "system_prompt_id": {
-                    "description": "SystemPromptID references a template ID in prompt_templates/ YAML files.\nIf set and SystemPrompt is empty, the template content will be resolved at startup.",
+                    "description": "SystemPromptID references a template ID in prompt_templates/ YAML files.\nIf set and SystemPrompt is empty, the template content is resolved at request time for saved agents.",
                     "type": "string"
                 },
                 "temperature": {
@@ -19582,6 +20349,20 @@ const docTemplate = `{
                 },
                 "vlm_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.LearningAnswer": {
+            "type": "object",
+            "properties": {
+                "attempt_id": {
+                    "type": "string"
+                },
+                "option_id": {
+                    "type": "string"
+                },
+                "question_id": {
+                    "type": "string"
                 }
             }
         },
@@ -21629,6 +22410,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "local_browser_enabled": {
+                    "type": "boolean"
+                },
                 "mcp_service_ids": {
                     "type": "array",
                     "items": {
@@ -22569,6 +23353,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.UserPreferences": {
             "type": "object",
             "properties": {
+                "browser_search_instructions": {
+                    "description": "BrowserSearchInstructions customizes browser search for this user. Nil/empty uses the platform default.",
+                    "type": "string"
+                },
                 "last_active_tenant_id": {
                     "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Written by the SPA's preferences\nPUT and by service-level SwitchTenant (including when switching\nhome, which stores the home ID). Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome. Refresh JWT claims have no tenant_id, so RefreshToken\nre-resolves from this field.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
                     "type": "integer"
@@ -25162,6 +25950,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.learningOverlayRequest": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "slugs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_handler.meEnvVarRequest": {
             "type": "object",
             "properties": {
@@ -25193,6 +25995,14 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.prepareLearningQuizRequest": {
+            "type": "object",
+            "properties": {
+                "page_id": {
                     "type": "string"
                 }
             }
@@ -25310,6 +26120,14 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.updateLearningSettingsRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
         "internal_handler.updateMemberRoleRequest": {
             "type": "object",
             "required": [
@@ -25324,6 +26142,10 @@ const docTemplate = `{
         "internal_handler.updateMyPreferencesRequest": {
             "type": "object",
             "properties": {
+                "browser_search_instructions": {
+                    "type": "string",
+                    "maxLength": 4000
+                },
                 "last_active_tenant_id": {
                     "description": "LastActiveTenantID lets clients persist \"after a fresh login,\ndrop me back into this workspace\" across devices. The SPA sends\nthis after every tenant switch; POST /auth/switch-tenant records\nthe same preference server-side. Send a positive workspace id to\nset / replace, or 0 to clear. Membership is validated at next\nlogin, not here. Nil = field omitted from the PATCH and stays\nuntouched.",
                     "type": "integer"
@@ -25407,6 +26229,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "local_browser_enabled": {
+                    "description": "Browser source",
+                    "type": "boolean"
                 },
                 "mcp_service_ids": {
                     "description": "Per-request MCP services selected via @mention",
@@ -25574,6 +26400,37 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_handler_session.SteerMessageRequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "delivery": {
+                    "description": "Delivery is \"after\" (default) or \"inject\". See the constants above.",
+                    "type": "string"
+                },
+                "expected_assistant_message_id": {
+                    "description": "Optional for older clients. New clients pin delivery to the run they see\nand supply a stable ID so a consume event may precede the HTTP response.",
+                    "type": "string"
+                },
+                "mentioned_items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
+                    }
+                },
+                "query": {
+                    "type": "string"
+                },
+                "steer_id": {
+                    "type": "string"
                 }
             }
         },

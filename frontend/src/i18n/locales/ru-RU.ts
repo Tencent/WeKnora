@@ -1220,6 +1220,7 @@ export default {
       requiresKb: '(требуется настройка базы знаний)',
       requiresRagKb: '(требуется база знаний с включённым векторным/ключевым индексом)',
       requiresWikiKb: '(требуется база знаний с включённой Wiki)',
+      requiresOwnedWikiKb: '(требуется Wiki-база знаний этого рабочего пространства)',
       wikiSearch: 'Поиск по Wiki',
       wikiSearchDesc: 'Поиск страниц Wiki по ключевым словам / семантике',
       wikiReadPage: 'Читать страницу Wiki',

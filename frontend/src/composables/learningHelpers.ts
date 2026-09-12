@@ -112,7 +112,8 @@ export function learningToolDisplayType(toolName?: string) {
   return types[toolName as keyof typeof types]
 }
 
-export function learningToolReference(output?: string, data?: unknown) {
+export function learningToolReference(output?: string, data?: unknown, success?: boolean) {
+  if (success === false) return null
   const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
   const parse = (value: unknown) => { try { return object(JSON.parse(String(value || ''))) } catch { return {} } }
   const live = object(data)
@@ -123,6 +124,9 @@ export function learningToolReference(output?: string, data?: unknown) {
   const text = (key: string) => typeof payload[key] === 'string' ? payload[key] as string : ''
   const display_type = text('display_type')
   if (!['learning_quiz', 'learning_profile', 'learning_recommendations'].includes(display_type)) return null
+  const knowledge_base_id = text('knowledge_base_id')
+  const quiz_id = text('quiz_id')
+  if (!knowledge_base_id || (display_type === 'learning_quiz' && !quiz_id)) return null
   // Do not retain questions, feedback or profile data from model context.
-  return { display_type, quiz_id: text('quiz_id'), knowledge_base_id: text('knowledge_base_id') }
+  return { display_type, quiz_id, knowledge_base_id }
 }

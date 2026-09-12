@@ -31,6 +31,7 @@ export type KBCapability = 'vector' | 'keyword' | 'wiki' | 'graph' | 'faq';
 export interface ToolRequirement {
   anyOf?: KBCapability[];
   allOf?: KBCapability[];
+  requiresOwnedWiki?: boolean;
   /**
    * Whether this tool can use user-provided file references (via @ 提及) as
    * an additional retrieval scope. Tools with `consumesFiles: false` ignore
@@ -41,9 +42,9 @@ export interface ToolRequirement {
 }
 
 export const TOOL_CAPABILITY_REQUIREMENTS: Record<string, ToolRequirement> = {
-  get_learning_profile: { allOf: ['wiki'] },
-  recommend_learning_topics: { allOf: ['wiki'] },
-  prepare_learning_quiz: { allOf: ['wiki'] },
+  get_learning_profile: { allOf: ['wiki'], requiresOwnedWiki: true },
+  recommend_learning_topics: { allOf: ['wiki'], requiresOwnedWiki: true },
+  prepare_learning_quiz: { allOf: ['wiki'], requiresOwnedWiki: true },
   // ---- base / reasoning (no KB dependency) ----
   thinking: {},
   todo_write: {},
@@ -85,6 +86,7 @@ export interface ScopeCapabilities {
   vector: boolean;
   keyword: boolean;
   wiki: boolean;
+  ownedWiki: boolean;
   graph: boolean;
   faq: boolean;
 }
@@ -93,7 +95,8 @@ export interface ScopeCapabilities {
  * Machine-readable reason a tool is unsatisfiable. Map to a user-facing
  * string via i18n on the caller side (see `AgentEditorModal.vue`).
  */
-export type RequirementMissKind = 'none' | 'needsKb' | 'needsRag' | 'needsWiki' | 'needsGraph' | 'needsFaq';
+export type RequirementMissKind =
+  | 'none' | 'needsKb' | 'needsRag' | 'needsWiki' | 'needsOwnedWiki' | 'needsGraph' | 'needsFaq';
 
 /**
  * Evaluate whether a tool's requirements are satisfied by the scope.
@@ -110,12 +113,15 @@ export function evaluateToolRequirement(
 ): { ok: boolean; missKind: RequirementMissKind } {
   const req = TOOL_CAPABILITY_REQUIREMENTS[toolName];
   // Tools absent from the map or with no requirements: always available.
-  if (!req || (!req.anyOf?.length && !req.allOf?.length)) {
+  if (!req || (!req.anyOf?.length && !req.allOf?.length && !req.requiresOwnedWiki)) {
     return { ok: true, missKind: 'none' };
   }
 
   // Any capability requirement implies needing at least one KB in scope.
   if (!hasAnyKb) return { ok: false, missKind: 'needsKb' };
+  if (req.requiresOwnedWiki && !scope.ownedWiki) {
+    return { ok: false, missKind: 'needsOwnedWiki' };
+  }
 
   const has = (c: KBCapability): boolean => !!scope[c];
 
@@ -167,6 +173,10 @@ export function deriveKbFilterFromTools(
   return { any_of: Array.from(caps) };
 }
 
+export function toolsRequireOwnedWiki(tools: string[] | undefined | null): boolean {
+  return (tools || []).some(tool => TOOL_CAPABILITY_REQUIREMENTS[tool]?.requiresOwnedWiki === true);
+}
+
 /**
  * Implicit KB capability requirement for the "quick-answer" (RAG) agent
  * mode. Quick-answer drives retrieval purely through vector/keyword chunk
@@ -212,6 +222,7 @@ export function kbSatisfiesAgentRequirements(
   agentMode: string | undefined | null,
   allowedTools: string[] | undefined | null,
 ): boolean {
+  if (toolsRequireOwnedWiki(allowedTools) && !kbCaps?.ownedWiki) return false;
   const filter = deriveKbFilterForAgent(agentMode, allowedTools);
   if (!filter) return true;
   if (!kbCaps) return false;
@@ -233,6 +244,7 @@ export function kbSatisfiesToolRequirements(
   kbCaps: Partial<ScopeCapabilities> | undefined | null,
   allowedTools: string[] | undefined | null,
 ): boolean {
+  if (toolsRequireOwnedWiki(allowedTools) && !kbCaps?.ownedWiki) return false;
   const filter = deriveKbFilterFromTools(allowedTools || []);
   if (!filter) return true;
   if (!kbCaps) return false;

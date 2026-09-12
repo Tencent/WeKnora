@@ -6041,6 +6041,7 @@ export default {
       requiresKb: '（ナレッジベースの設定が必要）',
       requiresRagKb: '（ベクトル/キーワードインデックスが有効なナレッジベースが必要）',
       requiresWikiKb: '（Wikiが有効なナレッジベースが必要）',
+      requiresOwnedWikiKb: '（このワークスペースが所有するWikiナレッジベースが必要）',
       wikiSearch: 'Wikiを検索',
       wikiSearchDesc: 'Wikiページをキーワード/セマンティック検索します',
       wikiReadPage: 'Wikiページを読み取り',

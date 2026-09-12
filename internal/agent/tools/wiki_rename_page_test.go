@@ -143,16 +143,3 @@ func TestWikiRenameToolRejectsAmbiguityAndInvalidArguments(t *testing.T) {
 		})
 	}
 }
-
-func TestWikiRenameToolReportsCommittedSyncWarning(t *testing.T) {
-	svc := newRenameToolService()
-	svc.result.SyncWarnings = []string{"Rename committed; retrieval sync needs attention"}
-	result, err := NewWikiRenamePageTool(
-		svc,
-		[]string{"kb-a"},
-	).Execute(context.Background(), json.RawMessage(`{"slug":"concept/old","new_slug":"concept/new"}`))
-	require.NoError(t, err)
-	require.True(t, result.Success)
-	require.Contains(t, result.Output, "Rename committed; retrieval sync needs attention")
-	require.Equal(t, svc.result.SyncWarnings, result.Data["sync_warnings"])
-}

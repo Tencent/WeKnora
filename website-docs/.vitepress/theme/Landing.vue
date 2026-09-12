@@ -180,7 +180,7 @@ const map = [
     index: '03',
     icon: 'modules',
     title: '功能模块',
-    brief: '二十三项能力的配置项、行为约定与实现路径。',
+    brief: '二十四项能力的配置项、行为约定与实现路径。',
     items: [
       { text: '租户、用户与认证授权', link: '/03-features/01-tenant-auth' },
       { text: '知识库与知识管理', link: '/03-features/02-knowledge-base' },
@@ -205,6 +205,7 @@ const map = [
       { text: '图片与文件的对外访问', link: '/03-features/21-file-access' },
       { text: '技能目录与沙箱', link: '/03-features/22-skills-sandbox' },
       { text: '跨会话长期记忆', link: '/03-features/23-memory' },
+      { text: '引导式学习', link: '/03-features/24-guided-learning' },
     ],
   },
   {
@@ -228,6 +229,7 @@ const map = [
       { text: '租户与成员', link: '/04-api/02-api-tenant' },
       { text: '沙箱、技能与个人变量', link: '/04-api/02-api-sandbox-skills' },
       { text: '长期记忆', link: '/04-api/02-api-memory' },
+      { text: '引导式学习', link: '/04-api/02-api-learning' },
     ],
   },
   {

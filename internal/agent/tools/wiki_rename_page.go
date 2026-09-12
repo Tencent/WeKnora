@@ -117,10 +117,6 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	if updatedCount > 0 {
 		outputMsg += fmt.Sprintf("\n- Affected pages: %s", strings.Join(updatedSlugs, ", "))
 	}
-	if len(renamed.SyncWarnings) > 0 {
-		outputMsg += "\n- " + strings.Join(renamed.SyncWarnings, "\n- ")
-	}
-
 	return &types.ToolResult{
 		Success: true,
 		Output:  outputMsg,
@@ -132,7 +128,6 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 			"title":          renamed.Page.Title,
 			"updated_count":  updatedCount,
 			"affected_pages": updatedSlugs,
-			"sync_warnings":  renamed.SyncWarnings,
 		},
 	}, nil
 }

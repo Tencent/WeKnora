@@ -4907,6 +4907,11 @@ watch(() => props.view, (v) => {
     loadGraph()
   } else if (v === 'browser') {
     nextTick(async () => {
+      const slug = route.query.slug
+      if (typeof slug === 'string' && slug && selectedPage.value?.slug !== slug) {
+        await navigateToSlug(slug)
+        await nextTick()
+      }
       if (readerBodyRef.value && renderedContent.value) {
         await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
       }

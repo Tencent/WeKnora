@@ -75,14 +75,24 @@ func (f *fakeChat) Chat(
 }
 
 type fakeTasks struct {
-	tasks []*asynq.Task
-	fail  bool
-	hook  func(*asynq.Task)
+	tasks   []*asynq.Task
+	taskIDs []string
+	fail    bool
+	err     error
+	hook    func(*asynq.Task)
 }
 
-func (f *fakeTasks) Enqueue(t *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+func (f *fakeTasks) Enqueue(t *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
 	if f.hook != nil {
 		f.hook(t)
+	}
+	for _, option := range opts {
+		if option.Type() == asynq.TaskIDOpt {
+			f.taskIDs = append(f.taskIDs, option.Value().(string))
+		}
+	}
+	if f.err != nil {
+		return nil, f.err
 	}
 	if f.fail {
 		return nil, errors.New("queue unavailable")
@@ -122,9 +132,11 @@ func newFixture(t *testing.T) *fixture {
 	sqlDB.SetMaxOpenConns(8)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(&types.KnowledgeBase{}, &types.WikiPage{}, &types.Knowledge{}, &types.Chunk{}))
-	migration, err := os.ReadFile("../../../../migrations/sqlite/000015_learning.up.sql")
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(string(migration)).Error)
+	for _, name := range []string{"000015_learning.up.sql", "000016_learning_credit_source.up.sql"} {
+		migration, err := os.ReadFile("../../../../migrations/sqlite/" + name)
+		require.NoError(t, err)
+		require.NoError(t, db.Exec(string(migration)).Error)
+	}
 	kb := &types.KnowledgeBase{
 		ID:               uuid.NewString(),
 		TenantID:         7,
@@ -511,6 +523,43 @@ func TestLearningConcurrentFirstAnswerAndRegenerationFingerprint(t *testing.T) {
 	require.Equal(t, int64(3), count)
 }
 
+func TestLearningSourceChangeAllowsSameFingerprintToBeCreditedAgain(t *testing.T) {
+	f := newFixture(t)
+	first := f.ready(t)
+	result, err := f.svc.SubmitAnswer(f.ctx, types.LearningAnswer{
+		QuestionID: first.Questions[0].ID,
+		OptionID:   "0",
+		AttemptID:  "before-source-change",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Mastery.Attempts)
+
+	require.NoError(t, f.db.Model(f.chunk).Update("content", evidenceText+" Updated source.").Error)
+	f.model.responses = append(f.model.responses, generationResponse(f.chunk),
+		`{"answers":[{"index":3,"ambiguous":false},{"index":2,"ambiguous":false},{"index":1,"ambiguous":false}]}`)
+	second, err := f.svc.PrepareQuiz(f.ctx, f.page.ID)
+	require.NoError(t, err)
+	require.NoError(t, f.svc.Handle(context.Background(), f.tasks.tasks[len(f.tasks.tasks)-1]))
+	second, err = f.svc.GetQuiz(f.ctx, second.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID, second.ID)
+
+	result, err = f.svc.SubmitAnswer(f.ctx, types.LearningAnswer{
+		QuestionID: second.Questions[0].ID,
+		OptionID:   "0",
+		AttemptID:  "after-source-change",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Mastery.Attempts, "a new source stamp starts a fresh assessment history")
+
+	var attempts []types.LearningAttempt
+	require.NoError(t, f.db.Where("page_id = ? AND credited = ?", f.page.ID, true).
+		Order("created_at, attempt_id").Find(&attempts).Error)
+	require.Len(t, attempts, 2)
+	require.Equal(t, attempts[0].Fingerprint, attempts[1].Fingerprint)
+	require.NotEqual(t, attempts[0].SourceStamp, attempts[1].SourceStamp)
+}
+
 func TestLearningClearSuppressesOldWorkerAndQueueRecovery(t *testing.T) {
 	f := newFixture(t)
 	f.tasks.fail = true
@@ -518,8 +567,14 @@ func TestLearningClearSuppressesOldWorkerAndQueueRecovery(t *testing.T) {
 	require.Equal(t, "pending", q.Status)
 	require.Empty(t, f.tasks.tasks)
 	f.tasks.fail = false
+	require.NoError(t, f.db.Model(&types.LearningQuiz{}).Where("id = ?", q.ID).
+		Update("updated_at", time.Now().UTC().Add(-2*time.Minute)).Error)
 	require.NoError(t, f.svc.Recover(context.Background()))
 	require.Len(t, f.tasks.tasks, 1)
+	require.Len(t, f.tasks.taskIDs, 2)
+	require.Equal(t, f.tasks.taskIDs[0], f.tasks.taskIDs[1])
+	require.NoError(t, f.svc.Recover(context.Background()))
+	require.Len(t, f.tasks.tasks, 1, "the dispatch cooldown must suppress immediate duplicate recovery")
 	f.model.hook = func(i int) {
 		if i == 1 {
 			_, err := f.svc.Clear(f.ctx, "")
@@ -534,6 +589,21 @@ func TestLearningClearSuppressesOldWorkerAndQueueRecovery(t *testing.T) {
 	var count int64
 	require.NoError(t, f.db.Model(&types.LearningQuiz{}).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestLearningRecoveryTreatsStableTaskIDConflictAsAlreadyDispatched(t *testing.T) {
+	f := newFixture(t)
+	q := f.prepare(t)
+	require.Len(t, f.tasks.tasks, 1)
+	require.Len(t, f.tasks.taskIDs, 1)
+	require.Contains(t, f.tasks.taskIDs[0], q.ID)
+
+	f.tasks.err = asynq.ErrTaskIDConflict
+	require.NoError(t, f.db.Model(&types.LearningQuiz{}).Where("id = ?", q.ID).
+		Update("updated_at", time.Now().UTC().Add(-2*time.Minute)).Error)
+	require.NoError(t, f.svc.Recover(context.Background()))
+	require.Len(t, f.tasks.taskIDs, 2)
+	require.Equal(t, f.tasks.taskIDs[0], f.tasks.taskIDs[1])
 }
 
 func TestLearningRecoveryPurgesOrphansWithoutResurrection(t *testing.T) {

@@ -1222,6 +1222,7 @@ export default {
       requiresKb: '（需要配置知识库）',
       requiresRagKb: '（需要关联启用向量/关键词索引的知识库）',
       requiresWikiKb: '（需要关联启用 Wiki 能力的知识库）',
+      requiresOwnedWikiKb: '（需要关联当前空间自有的 Wiki 知识库）',
       wikiSearch: '搜索 Wiki',
       wikiSearchDesc: '在 Wiki 知识库中按关键词/语义搜索页面',
       wikiReadPage: '阅读 Wiki 页面',

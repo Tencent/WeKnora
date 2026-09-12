@@ -78,7 +78,8 @@ func (r *learningRepository) SubmitAnswer(
 		}
 		var credits int64
 		if err := learningScope(tx, scope).Model(&types.LearningAttempt{}).
-			Where("page_id = ? AND fingerprint = ? AND credited = ?", q.PageID, question.Fingerprint, true).
+			Where("page_id = ? AND fingerprint = ? AND source_stamp = ? AND credited = ?",
+				q.PageID, question.Fingerprint, q.SourceStamp, true).
 			Count(&credits).Error; err != nil {
 			return err
 		}

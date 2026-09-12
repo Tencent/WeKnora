@@ -10,6 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const learningRecoveryDispatchDelay = time.Minute
+
 func learningKBFilter(db *gorm.DB, kbID string) *gorm.DB {
 	if kbID != "" {
 		return db.Where("knowledge_base_id = ?", kbID)
@@ -255,13 +257,16 @@ func (r *learningRepository) Recover(ctx context.Context, limit int) ([]types.Le
 			return nil, err
 		}
 	}
+	now := time.Now().UTC()
+	dispatchBefore := now.Add(-learningRecoveryDispatchDelay)
 	var pending []types.LearningQuiz
 	err = r.db.WithContext(ctx).Table("learning_quizzes AS q").Select("q.*").
 		Joins("JOIN learning_profiles p ON p.tenant_id = q.tenant_id "+
 			"AND p.subject_id = q.subject_id AND p.epoch = q.epoch AND p.enabled = ?", true).
 		Where(
-			"q.status = ? OR (q.status = ? AND (q.lease_until IS NULL OR q.lease_until <= ?))",
-			"pending", "running", time.Now().UTC(),
+			"(q.status = ? AND q.updated_at <= ?) OR "+
+				"(q.status = ? AND (q.lease_until IS NULL OR q.lease_until <= ?))",
+			"pending", dispatchBefore, "running", now,
 		).
 		Order("q.updated_at, q.id").Limit(limit).Find(&pending).Error
 	if err != nil {
@@ -284,8 +289,12 @@ func (r *learningRepository) Recover(ctx context.Context, limit int) ([]types.Le
 			if !p.Enabled || p.Epoch != current.Epoch {
 				return nil
 			}
-			if current.Status != "pending" &&
-				(current.Status != "running" || (current.LeaseUntil != nil && current.LeaseUntil.After(time.Now()))) {
+			checkedAt := time.Now().UTC()
+			pendingReady := current.Status == "pending" &&
+				!current.UpdatedAt.After(checkedAt.Add(-learningRecoveryDispatchDelay))
+			runningExpired := current.Status == "running" &&
+				(current.LeaseUntil == nil || !current.LeaseUntil.After(checkedAt))
+			if !pendingReady && !runningExpired {
 				return nil
 			}
 			if _, err := learningFreshQuiz(tx, scope, p, &current); err != nil {
@@ -295,7 +304,7 @@ func (r *learningRepository) Recover(ctx context.Context, limit int) ([]types.Le
 				return nil
 			}
 			wake = &types.LearningGeneratePayload{QuizID: current.ID, Epoch: current.Epoch}
-			return tx.Model(&current).Update("updated_at", time.Now().UTC()).Error
+			return tx.Model(&current).Update("updated_at", checkedAt).Error
 		})
 		if err != nil {
 			return nil, err

@@ -159,11 +159,35 @@ test('live and persisted tool results render fresh HTTP reference cards, not raw
   }
 })
 
+test('failed or incomplete learning tool results keep the original error output', async () => {
+  const failed = await render(Renderer, {
+    displayType: 'learning_quiz',
+    toolData: {},
+    output: 'learning_evidence: source quotes are insufficient',
+    success: false,
+  })
+  assert.match(failed, /fallback-output/)
+  assert.match(failed, /learning_evidence: source quotes are insufficient/)
+  assert.doesNotMatch(failed, /fresh-learning-ref/)
+
+  const incomplete = await render(Renderer, {
+    displayType: 'learning_quiz',
+    toolData: { knowledge_base_id: 'kb' },
+    success: true,
+  })
+  assert.match(incomplete, /fallback-output/)
+  assert.doesNotMatch(incomplete, /fresh-learning-ref/)
+  const stream = readFileSync(new URL('../../chat/components/AgentStreamDisplay.vue', import.meta.url), 'utf8')
+  assert.match(stream, /learningType && event\?\.success !== false/)
+  assert.match(stream, /event\.output \|\| event\.error/)
+})
+
 test('Wiki integration overlays existing graph nodes and scopes reader versus graph selection', () => {
   const wiki = readFileSync(new URL('./WikiBrowser.vue', import.meta.url), 'utf8')
   const state = readFileSync(new URL('../../../composables/useLearningState.ts', import.meta.url), 'utf8')
   assert.match(wiki, /graphDrawerVisible\.value \? graphDrawerPage\.value : null/)
   assert.match(wiki, /pageId: learningPage\.value\?\.id/)
+  assert.match(wiki, /selectedPage\.value\?\.slug !== slug[\s\S]*await navigateToSlug\(slug\)/)
   assert.match(wiki, /watch\(\(\) => learning\.state\.overlay, applyLearningOverlay/)
   assert.match(wiki, /\.node-learning-state/)
   assert.doesNotMatch(state, /getWikiGraph|loadGraph|renderGraph/)
