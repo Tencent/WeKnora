@@ -2969,8 +2969,8 @@ export default {
         label: '应用到所有现有空间',
         tooltip: '保存的值默认只对之后新建的空间生效；点击此按钮将当前值同步写入所有现有空间。',
         confirmBtn: '确认应用',
-        confirmBody: '将把所有现有空间的存储配额覆盖为 {value} GB。如有空间被运维单独调整过的配额，也会一并被覆盖。是否继续？',
-        success: '已将 {count} 个空间的存储配额更新为 {gb} GB',
+        confirmBody: '将把所有现有空间的存储配额覆盖为 {value} {unit}。如有空间被运维单独调整过的配额，也会一并被覆盖。是否继续？',
+        success: '已将 {count} 个空间的存储配额更新为 {value} {unit}',
         failed: '应用到所有空间失败'
       },
       passwordReset: {
@@ -3116,6 +3116,7 @@ export default {
           max_owned_per_user: '每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。',
           self_service_creation_enabled: '是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；跨空间超管仍可创建。修改后立即生效。',
           default_storage_quota_gb: '新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。0 或负数表示使用内置默认值 10GB。',
+          default_storage_quota_mb: '包括注册自动创建的个人空间。正数优先于 GB 设置；0 或负数沿用 GB 设置。每个设置按数据库、环境变量、内置默认值的顺序读取，仅影响之后新建的空间。',
           auto_create_api_key: '为新空间自动生成 full_access API Key，并在创建响应中返回明文 token。仅用于兼容依赖旧行为的集成；默认关闭，建议通过 API Key 管理显式创建。',
           auto_accept_invitation: '开启后，空间管理员通过邮箱邀请已注册用户时，对方会立即成为成员，不再经过收件箱确认。关闭时保持「发出邀请 → 被邀请人确认」流程。修改后立即生效。'
         },
@@ -3147,6 +3148,7 @@ export default {
           max_owned_per_user: '每用户最大空间数',
           self_service_creation_enabled: '允许用户自助创建空间',
           default_storage_quota_gb: '新空间默认存储配额 (GB)',
+          default_storage_quota_mb: '新空间默认存储配额 (MB)',
           auto_create_api_key: '创建空间时自动生成 API Key',
           auto_accept_invitation: '邀请已注册用户时自动加入'
         },
