@@ -77,6 +77,25 @@ class ScoringIntegrityTests(unittest.TestCase):
         self.assertEqual(score.extract_metadata({"metadata": {"parser_fallback": "builtin_scanned_renderer"}})["parser_fallback"], "builtin_scanned_renderer")
 
 
+class ManifestMetadataTests(unittest.TestCase):
+    def test_frozen_manifests_preserve_unique_inputs_and_separate_references(self):
+        full = score.read_json(ROOT / "dataset/parser-benchmark/manifest-full.json")["samples"]
+        smoke = score.read_json(ROOT / "dataset/parser-benchmark/manifest-smoke.json")["samples"]
+        index = {row["id"]: row for row in full}
+        self.assertEqual(len(full), 100)
+        self.assertEqual(len(index), 100)
+        for row in smoke:
+            self.assertEqual(row, index[row["id"]])
+        for row in full:
+            self.assertNotEqual(row["pdf_path"], row["reference"]["path"])
+            self.assertRegex(row["sha256"], r"^[0-9a-f]{64}$")
+            self.assertRegex(row["reference"]["sha256"], r"^[0-9a-f]{64}$")
+            self.assertFalse(Path(row["pdf_path"]).is_absolute())
+            self.assertFalse(Path(row["reference"]["path"]).is_absolute())
+            self.assertNotIn("..", Path(row["pdf_path"]).parts)
+            self.assertNotIn("..", Path(row["reference"]["path"]).parts)
+
+
 class DatasetIntegrityTests(unittest.TestCase):
     def test_smoke_is_exact_subset_of_full_and_references_are_separate(self):
         full_path = ROOT / "dataset/parser-benchmark/manifest-full.json"

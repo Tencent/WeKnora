@@ -71,7 +71,7 @@ python3 scripts/run-parser-benchmark.py --native --execute \
 ## 评分与报告
 
 ```bash
-python3 -B scripts/test_parser_benchmark.py
+python3 -B scripts/test_parser_benchmark.py ScoringIntegrityTests OfficialDenominatorAuditTests ReviewBindingTests ManifestMetadataTests
 python3 -B scripts/test_parser_benchmark_launcher.py
 python3 -B scripts/test_parser_benchmark_cpu_batch.py
 python3 scripts/score-parser-benchmark.py --manifest dataset/parser-benchmark/manifest-full.json \
@@ -82,3 +82,11 @@ python3 scripts/build-parser-benchmark-report.py --help
 评分依赖、固定官方评测源码、Chromium 与独立 OmniDocBench 环境按[数据集说明](parser-benchmark-dataset.md)安装。普通工程测试使用合成输入，不执行云请求。正式评分分别报告适用参考页、实际评分页、服务错误页与空输出页；公式字符检测匹配（Character Detection Matching，CDM）只有实际执行并产生有效结果后才提供分数。
 
 报告生成目录可通过本地 HTTP 服务访问，并将地址配置为 `VITE_PARSER_BENCHMARK_URL`。人工审核者、时间、决定和签名仅由实际审核者填写；缺失评分、签名和云端费用保持缺失。
+
+完整公开样本检查使用单独入口。按数据准备说明安装 `requirements-prepare.txt` 并准备 100 页 PDF 及参考标注后，执行以下命令核对全部输入和参考摘要，并确认 OmniDocBench 输入不含参考答案文本层。缺少任何输入、参考标注或 PDF 读取依赖都会导致该检查失败。
+
+```bash
+python3 -B scripts/test_parser_benchmark.py DatasetIntegrityTests
+```
+
+`make evaluation-verify` 与持续集成执行合成评分、分母、审核绑定及冻结清单元数据检查；它们不需要下载选做 PDF 语料，也不把这些检查称为八引擎实际运行。

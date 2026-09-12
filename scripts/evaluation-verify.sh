@@ -39,7 +39,7 @@ go test -tags sqlite_fts5 ./internal/modelobs ./internal/modelcache ./internal/m
 python3 -B scripts/test_evaluation_openrouter_budget.py > "$run_dir/budget.log" 2>&1
 python3 -B scripts/test_evaluation_expanded_reader.py > "$run_dir/reader.log" 2>&1
 phase=parser-offline
-python3 -B scripts/test_parser_benchmark.py > "$run_dir/parser.log" 2>&1
+python3 -B scripts/test_parser_benchmark.py ScoringIntegrityTests OfficialDenominatorAuditTests ReviewBindingTests ManifestMetadataTests > "$run_dir/parser.log" 2>&1
 python3 -B scripts/test_parser_benchmark_launcher.py >> "$run_dir/parser.log" 2>&1
 python3 -B scripts/test_parser_benchmark_cpu_batch.py >> "$run_dir/parser.log" 2>&1
 phase=version
