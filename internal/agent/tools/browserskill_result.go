@@ -83,7 +83,21 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 // RPC success and page-operation success are different contracts. Inspect only
 // known result envelopes; arbitrary page text containing 'error' is still data.
 func (t *BrowserSkillTool) interpretResult(method string, raw json.RawMessage) *types.ToolResult {
+	if method == "screenshot" {
+		result := browserScreenshotResult(raw)
+		if !result.Success {
+			t.failed.Store(true)
+		}
+		return result
+	}
 	result := &types.ToolResult{Success: true, Output: string(raw)}
+	if browserskill.NavigationIncomplete(method, raw) {
+		result.Success = false
+		result.Error = "Navigation did not reach the requested loading phase. The page may already have changed. " +
+			"Observe current state before deciding what remains; do not automatically reload or repeat navigation."
+		t.failed.Store(true)
+		return result
+	}
 	if method != "evaluate" && method != "request_help" {
 		return result
 	}

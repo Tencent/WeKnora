@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    captureScreenshot: "Сделать снимок страницы",
+    navigationIncomplete: "Страница не достигла нужного этапа загрузки. Проверьте её состояние.",
+    noEntries: "Записи отсутствуют.",
+    stopping: "Завершение задачи…",
+    elapsedSeconds: "{seconds} с",
+
     searchInstructionsTitle: "Инструкции поиска в браузере",
     searchInstructionsDescription: "Укажите предпочитаемую поисковую систему и URL поиска.",
     searchInstructionsHint: "Применяется со следующего запроса. Пустое поле — настройки по умолчанию.",

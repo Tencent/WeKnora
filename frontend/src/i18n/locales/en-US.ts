@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    captureScreenshot: "Capture screenshot",
+    navigationIncomplete: "Navigation did not reach the requested loading phase. Check the current page.",
+    noEntries: "No entries returned.",
+    stopping: "Ending task…",
+    elapsedSeconds: "{seconds} s",
+
     searchInstructionsTitle: "Browser search instructions",
     searchInstructionsDescription: "Set your preferred search engine and search URL.",
     searchInstructionsHint: "Applies to your next request. Leave empty to use the default.",

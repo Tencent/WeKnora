@@ -115,3 +115,19 @@ func TestBrowserRPCFailureReachesModelAndAllowsFreshObservation(t *testing.T) {
 	require.Contains(t, invalid.Error, "max_tokens")
 	require.Equal(t, 2, manager.calls, "invalid method fields must fail before dispatch")
 }
+
+func TestNavigationTimeoutRetainsTask(t *testing.T) {
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
+	manager := &browserLifecycleManager{response: json.RawMessage(
+		`{"tab_id":1,"reached":"timeout","error_text":"timed out waiting for lifecycle"}`,
+	)}
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{Tenant: 7, User: "alice"}, "review")
+	tool.manager = manager
+	result, err := tool.Execute(ctx, json.RawMessage(`{"method":"navigate","url":"https://example.com"}`))
+	require.NoError(t, err)
+	tool.Cleanup(ctx)
+	t.Logf("success=%v retained=%v output=%s", result.Success, manager.retained, result.Output)
+	require.False(t, result.Success, "navigation that did not reach requested phase must not count as completed")
+	require.Equal(t, []bool{true}, manager.retained, "unfinished navigation should retain pages")
+}

@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    captureScreenshot: "スクリーンショットを取得",
+    navigationIncomplete: "ページの読み込みが指定の段階に達しませんでした。現在のページを確認してください。",
+    noEntries: "記録はありません。",
+    stopping: "タスクを終了中…",
+    elapsedSeconds: "{seconds} 秒",
+
     searchInstructionsTitle: "ブラウザー検索の指示",
     searchInstructionsDescription: "使用する検索エンジンと検索 URL を設定します。",
     searchInstructionsHint: "保存後、次のリクエストから適用。空欄は既定値を使用します。",

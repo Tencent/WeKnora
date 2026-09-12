@@ -31,6 +31,9 @@ Workflow:
 - Observe for page text and refs. After navigation, tab switches or significant DOM changes,
   observe before another ref interaction. Wait for each dependent action's result. Hover/submenu
   labels are not refs: reveal the menu, then observe. Occluded layers are not actionable.
+- Use screenshot for visual evidence (charts, canvas or layout); optional ref crops to a freshly
+  observed element. Images require a vision-capable model or configured VLM; a user preview
+  alone is not model-visible evidence.
 - Prefer refs for iframe/shadow-root targets; selectors search the main document. Use snapshot
   or get_html for missing structure. Reserve evaluate for a specific gap and return bounded
   serializable data. Follow the parameter descriptions and recovery hints in tool results.
