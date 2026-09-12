@@ -42,6 +42,8 @@ WeKnora 使用 Tencent/BrowserSkill 的官方 daemon 和扩展执行浏览器操
 
 结果卡片展示控制台消息与堆栈、网络请求状态与错误、脚本返回值及具体失败原因；较长结果会截断并提示。小预览展示最近动作、动作耗时、已知页面地址和最近错误；页面地址去掉账号、查询参数和片段。耗时在动作执行期间更新，结束后固定。
 
+支持 Document Picture-in-Picture 的浏览器可点击预览标题栏的“弹出悬浮窗”，把同一个预览和暂停、继续、结束按钮移到置顶窗口。切换标签页时继续同步画面；关闭悬浮窗或点击“返回对话小窗”会恢复页内预览，不结束浏览器任务。任务结束、切换会话或离开对话页面时关闭该会话的悬浮窗。此功能依赖安全上下文（HTTPS 或本机 localhost）及用户点击；不支持的浏览器保留页内小窗，打开失败时显示提示并允许重试。悬浮窗依赖原页面，不能在关闭 WeKnora 页面后独立运行。
+
 模型调用采用扁平参数，例如 `{"method":"navigate","url":"https://example.com"}`、`{"method":"click","ref":"e3"}`、`{"method":"observe"}`。Schema 不再提供 `params` 字段，旧的嵌套格式直接拒绝。服务端校验所选动作的必填字段、字段类型及定位条件，再将参数转换为 BrowserSkill 原生 RPC 信封；会话和设备 ID 始终由服务端绑定。
 
 `wait_ms` 的外层参数为 `duration_ms`，范围 0–10000 毫秒；工具描述、参数 schema 和执行前校验保持一致。命令超时或中断后暂停任务，不自动重放点击/提交。前端显示具体浏览器动作与可读错误，结果卡片分别展示网页内容、截图或标签列表，不展示原始协议 JSON。标签组统一显示 WeKnora，不再附带内部任务 ID。
@@ -104,6 +106,16 @@ BROWSERSKILL_TEST_TASK_WINDOW=0 # 可选：通过扩展界面切换后台标签�
 测试使用独立浏览器资料目录，覆盖配对、后台标签组、导航/输入/点击、目标标签截图、人工等待期间预览、显式定位、暂停/继续/结束、任务隔离、授权持久化和双节点路由。目标部署网络、真实模型任务与规模容量仍须现场验收；本机浏览器不保证免除网站验证或 403。
 
 补丁中的 `task-focus.browser.test.ts` 使用独立 Chrome 与原生 CDP 验证后台绘制、内容读取、截图和释放后的可见性恢复，避免 Playwright 默认的焦点模拟掩盖问题。在应用补丁后的 BrowserSkill 源码中，设置 `BSK_GEOMETRY_CHROME` 为测试 Chrome 路径，再执行 `pnpm --filter @browser-skill/extension exec vitest run src/browser-driver/__tests__/task-focus.browser.test.ts`（Node 20 另需 `NODE_OPTIONS=--experimental-websocket`）。
+
+仅验证预览组件的真实 PiP 窗口（使用模拟任务 API，不需要扩展或模型）：
+
+```bash
+BROWSERSKILL_TEST_CHROMIUM=/absolute/path/to/Chrome \
+BROWSERSKILL_TEST_PLAYWRIGHT=/absolute/path/to/playwright-core/index.mjs \
+node frontend/scripts/verify-browser-preview-pip.mjs
+```
+
+该验收覆盖真实弹出/还原、窗口样式、切换标签页后同步、隐藏页面分支、共享操作按钮、会话切换清理及不支持/打开失败的回退。
 
 ### 输入框选择本机浏览器
 

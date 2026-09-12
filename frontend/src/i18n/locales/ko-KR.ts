@@ -1,5 +1,9 @@
 export default {
   localBrowser: {
+    pipOpen: "미리보기 팝업 열기",
+    pipReturn: "대화 내 미리보기로 돌아가기",
+    pipFailed: "플로팅 창을 열 수 없습니다. 다시 시도해 주세요.",
+
     captureScreenshot: "스크린샷 캡처",
     navigationIncomplete: "페이지가 요청한 로드 단계에 도달하지 못했습니다. 현재 페이지를 확인하세요.",
     noEntries: "반환된 기록이 없습니다.",

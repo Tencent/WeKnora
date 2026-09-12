@@ -1,5 +1,9 @@
 export default {
   localBrowser: {
+    pipOpen: "プレビューを別ウィンドウで表示",
+    pipReturn: "会話内のプレビューに戻す",
+    pipFailed: "フローティングウィンドウを開けませんでした。もう一度お試しください。",
+
     captureScreenshot: "スクリーンショットを取得",
     navigationIncomplete: "ページの読み込みが指定の段階に達しませんでした。現在のページを確認してください。",
     noEntries: "記録はありません。",

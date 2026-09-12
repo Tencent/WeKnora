@@ -1,5 +1,9 @@
 export default {
   localBrowser: {
+    pipOpen: "弹出悬浮窗",
+    pipReturn: "返回对话小窗",
+    pipFailed: "无法打开悬浮窗，请重试。",
+
     captureScreenshot: "截取网页画面",
     navigationIncomplete: "导航未达到目标加载阶段，请检查当前页面。",
     noEntries: "没有返回记录。",
