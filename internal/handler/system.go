@@ -2303,9 +2303,8 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 
 // ApplyDefaultStorageQuotaToAllTenants godoc
 // @Summary      Apply the default storage quota to every existing workspace
-// @Description  Reads the current value of `tenant.default_storage_quota_gb`
-// @Description  (3-tier resolver: DB > ENV > default) and writes that many
-// @Description  GiB into storage_quota for every row in tenants. Bypasses
+// @Description  Resolves the MB override or legacy GB default (DB > ENV > default per setting)
+// @Description  and writes the effective byte quota to every existing workspace. Bypasses
 // @Description  the per-workspace PUT whitelist, which forbids storage_quota
 // @Description  edits by Owners. SystemAdmin only.
 // @Description  Idempotent — running twice with the same setting is a no-op.
@@ -2317,18 +2316,8 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 func (h *SystemHandler) ApplyDefaultStorageQuotaToAllTenants(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 
-	// Resolve via the same 3-tier path the CreateTenant handler uses
-	// so the action's effect mirrors what new tenants would receive.
-	gb := h.systemSettingSvc.GetInt(
-		ctx,
-		"tenant.default_storage_quota_gb",
-		"WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
-		10,
-	)
-	if gb <= 0 {
-		gb = 10
-	}
-	quotaBytes := gb * 1024 * 1024 * 1024
+	quotaBytes := service.ResolveDefaultTenantStorageQuota(ctx, h.systemSettingSvc)
+	gb := float64(quotaBytes) / float64(1024*1024*1024)
 
 	affected, err := h.tenantSvc.BulkSetStorageQuota(ctx, quotaBytes)
 	if err != nil {

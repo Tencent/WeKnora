@@ -521,7 +521,7 @@ export interface ApplyDefaultStorageQuotaResult {
 }
 
 /**
- * Apply the current `tenant.default_storage_quota_gb` setting to every
+ * Apply the effective MB/GB default storage quota to every
  * existing tenant. Reads the resolved setting server-side (DB > ENV >
  * default), then writes that quota to every row. SystemAdmin only.
  *

@@ -49,7 +49,7 @@ func TestResolveFileServiceUsesWorkspaceDefaultForStubTenant(t *testing.T) {
 
 	tenantRepo := repository.NewTenantRepository(db)
 	storageRepo := repository.NewStorageBackendRepository(db)
-	tenant, err := service.NewTenantService(tenantRepo, storageRepo).CreateTenant(
+	tenant, err := service.NewTenantService(tenantRepo, storageRepo, nil).CreateTenant(
 		context.Background(), &types.Tenant{Name: "workspace"})
 	require.NoError(t, err)
 	require.NotNil(t, tenant.DefaultStorageBackendID)

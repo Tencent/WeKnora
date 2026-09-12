@@ -200,6 +200,14 @@ var registry = map[string]settingSpec{
 			"仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。" +
 			"0 或负数表示使用内置默认值 10GB。",
 	},
+	"tenant.default_storage_quota_mb": {
+		Type:     "int",
+		EnvName:  "WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_MB",
+		Default:  int64(0),
+		Category: "tenant",
+		Description: "新空间默认存储配额（MB），包括注册自动创建的个人空间。" +
+			"正数优先于 GB 配额；0 或负数沿用 GB 设置。仅新建空间时读取，不自动修改现有空间。",
+	},
 	// tenant.auto_create_api_key restores the legacy behaviour where creating
 	// a tenant also minted a full-access API key and returned its plaintext
 	// token in the create response. Newer versions stopped doing this (keys

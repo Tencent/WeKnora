@@ -282,21 +282,19 @@
           -->
               <div v-if="hasOverride(item) || hasBulkAction(item)" class="setting-control-actions">
                 <!--
-              Per-key bulk action. Currently only one key
-              (tenant.default_storage_quota_gb) carries one — clicking
-              writes the current setting value onto every existing
-              tenant. We do this as a separate explicit action rather
+              Both quota rows apply the effective default (MB takes precedence)
+              to every existing tenant. We do this as a separate explicit action rather
               than auto-cascade on save so a SystemAdmin who tweaks the
               default while triaging a single new-tenant question
-              doesn't accidentally rewrite production quotas. Hidden
-              when the row is dirty because applying a not-yet-saved
-              value would confuse "what just happened".
+              doesn't accidentally rewrite production quotas. Disabled
+              while either quota row is dirty, so the confirmation
+              always describes the saved effective default.
             -->
-                <t-popconfirm v-if="hasBulkAction(item)" :content="bulkActionConfirmBody(item)"
+                <t-popconfirm v-if="hasBulkAction(item)" :content="bulkActionConfirmBody()"
                   :confirm-btn="{ content: t('system.globalSettings.bulkApply.confirmBtn'), theme: 'primary' }"
                   :cancel-btn="{ content: t('system.globalSettings.confirm.cancelBtn') }" placement="left"
                   @confirm="runBulkAction(item)">
-                  <t-button variant="text" size="small" :disabled="savingKey === item.key || isDirty(item)"
+                  <t-button variant="text" size="small" :disabled="quotaActionDisabled"
                     :title="t('system.globalSettings.bulkApply.tooltip')" class="setting-bulk-btn">
                     <template #icon><t-icon name="usergroup" /></template>
                     {{ t('system.globalSettings.bulkApply.label') }}
@@ -344,6 +342,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { PASSWORD_SPECIAL_CHARS } from '@/utils/passwordPolicy'
 import { isSettingValueDirty, resolveCurrentSetting } from './systemSettingsEdit'
+import { STORAGE_QUOTA_KEYS, resolveStorageQuota, formatStorageQuota } from './storageQuota'
 
 const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
@@ -483,6 +482,7 @@ const SETTINGS_SECTION_KEYS: Record<Exclude<SettingsSection, 'other'>, readonly 
   ],
   tenant: [
     'tenant.default_storage_quota_gb',
+    'tenant.default_storage_quota_mb',
     'tenant.auto_create_api_key',
     'tenant.auto_accept_invitation',
   ],
@@ -878,32 +878,24 @@ function highRiskConfirmBody(item: SystemSettingItem, value: unknown): string {
   })
 }
 
-// hasBulkAction tells the template whether the current row carries an
-// extra "apply to existing data" action beyond plain save/reset.
-// Currently only `tenant.default_storage_quota_gb` does — saving the
-// setting only affects future tenants, so the bulk button is the
-// escape hatch for "rewrite all current tenants too".
 function hasBulkAction(item: SystemSettingItem): boolean {
-  return item.key === 'tenant.default_storage_quota_gb'
+  return STORAGE_QUOTA_KEYS.some((key) => key === item.key)
 }
+
+const quotaActionDisabled = computed(() => savingKey.value !== null ||
+  settings.value.some((item) => hasBulkAction(item) && isDirty(item)))
 
 async function refreshSandboxDockerCapability(key: string) {
   if (key !== 'sandbox.docker_enabled') return
   await deploymentCapabilities.ensureLoaded(true)
 }
 
-function bulkActionConfirmBody(item: SystemSettingItem): string {
-  // Use the canonical (saved) value, not the in-progress edit, so the
-  // operator sees exactly what will be written. The button is disabled
-  // when the row is dirty (see template), so item.value is the value
-  // that's currently in effect for new tenants.
-  const v = item.value
-  const valueText = v === null || v === undefined ? '' : String(v)
-  return t('system.globalSettings.bulkApply.confirmBody', { value: valueText })
+function bulkActionConfirmBody(): string {
+  return t('system.globalSettings.bulkApply.confirmBody', resolveStorageQuota(settings.value))
 }
 
 async function runBulkAction(item: SystemSettingItem) {
-  if (!hasBulkAction(item)) return
+  if (!hasBulkAction(item) || quotaActionDisabled.value) return
   savedKey.value = null
   savingKey.value = item.key
   try {
@@ -911,7 +903,7 @@ async function runBulkAction(item: SystemSettingItem) {
     MessagePlugin.success(
       t('system.globalSettings.bulkApply.success', {
         count: result.affected,
-        gb: result.quota_gb,
+        ...formatStorageQuota(result.quota_bytes),
       }),
     )
     markSettingSaved(item)
