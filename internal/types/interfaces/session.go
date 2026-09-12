@@ -55,6 +55,9 @@ type SessionService interface {
 	// It emits an event when the title is generated
 	// modelID: optional model ID to use for title generation (if empty, uses first available KnowledgeQA model)
 	GenerateTitleAsync(ctx context.Context, session *types.Session, userQuery string, modelID string, eventBus *event.EventBus)
+	// InspectIMMaterialInput checks only the current text for a request, without
+	// answering or reading history, and resolves whether images have a model route.
+	InspectIMMaterialInput(ctx context.Context, req *types.QARequest) (hasRequest, imagesUsable bool, err error)
 	// KnowledgeQA performs knowledge-based question answering.
 	// Events are emitted through eventBus (references, answer chunks, completion).
 	KnowledgeQA(ctx context.Context, req *types.QARequest, eventBus *event.EventBus) error

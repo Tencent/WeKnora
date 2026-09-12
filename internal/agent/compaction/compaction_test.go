@@ -139,6 +139,38 @@ func TestSplitTurnSummarizesThePrefixSeparately(t *testing.T) {
 		"the prefix must be summarized with the prefix instructions, not the history ones")
 }
 
+func TestFeishuSplitTurnSummaryDoesNotClaimToSeeOriginalImages(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		llm := &stubChat{response: "summary text"}
+		if fail {
+			llm.err = errors.New("summary unavailable")
+		}
+		msgs := reactTurn(12)
+		msgs[1].Content = "compare the images" + (types.MessageAttachments{{
+			FileName: "photo.png", IsImage: true, ImageIndex: 1,
+			SourceMessageID: "source-photo", Content: "OCR text",
+		}}).BuildPrompt(1)
+		msgs[1].Images = []string{"image-data"}
+		original := msgs[1].Content
+		c := New(llm, newEstimator(t), testSettings())
+		result, err := c.Compact(t.Context(), msgs, ReasonThreshold)
+		require.NoError(t, err)
+		require.True(t, result.SplitTurn)
+		for _, prompt := range llm.prompts {
+			assert.NotContains(t, prompt, types.IMImageAvailablePrompt)
+			assert.Contains(t, prompt, types.IMImageUnavailablePrompt)
+			assert.Contains(t, prompt, "source-photo")
+		}
+		assert.NotContains(t, result.Summary, types.IMImageAvailablePrompt)
+		assert.Equal(t, original, msgs[1].Content)
+		assert.Equal(t, []string{"image-data"}, msgs[1].Images)
+	}
+	// Ordinary quoted prose is unaffected; only the new attachment marker changes.
+	plain := []chat.Message{{Role: "user", Content: types.IMImageAvailablePrompt}}
+	assert.Contains(t, serializeConversation(plain), types.IMImageAvailablePrompt)
+	assert.Contains(t, rawArchive(plain), types.IMImageAvailablePrompt)
+}
+
 // The retained tail has to stay valid for the provider: a tool result whose
 // originating assistant message was summarized away is rejected outright.
 func TestKeptTailNeverStartsWithAnOrphanToolResult(t *testing.T) {

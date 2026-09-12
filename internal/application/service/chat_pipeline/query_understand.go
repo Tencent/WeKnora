@@ -103,7 +103,11 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	}
 
 	// --- Build prompts ---
-	systemContent, userContent := p.buildPrompts(ctx, chatManage, historyList)
+	imageCount := 0
+	if useImages {
+		imageCount = len(chatManage.Images)
+	}
+	systemContent, userContent := p.buildPrompts(ctx, chatManage, historyList, imageCount)
 
 	userMsg := chat.Message{Role: "user", Content: userContent}
 	if useImages {
@@ -125,6 +129,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 		Temperature:         0.3,
 		MaxCompletionTokens: maxTokens,
 		Thinking:            &thinking,
+		RequireImages:       chatManage.RewriteContext != "" && useImages,
 	})
 	if err != nil {
 		pipelineError(ctx, "QueryUnderstand", "model_call", map[string]interface{}{
@@ -136,6 +141,9 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 
 	// --- Parse structured output ---
 	p.parseOutput(chatManage, response.Content)
+	if chatManage.RewriteContext != "" && !useImages {
+		chatManage.ImageDescription = ""
+	}
 
 	// Persist image description asynchronously — this DB write does not affect
 	// the current pipeline result, so it can run in the background.
@@ -241,6 +249,12 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 		}
 		if chatManage.VLMModelID != "" {
 			m, err := p.modelService.GetChatModel(ctx, chatManage.VLMModelID)
+			if err == nil && chatManage.RewriteContext != "" {
+				info, infoErr := p.modelService.GetModelByID(ctx, chatManage.VLMModelID)
+				if infoErr != nil || !chat.SupportsIMChatImages(info) {
+					err = fmt.Errorf("configured VLM chat transport cannot accept images")
+				}
+			}
 			if err == nil {
 				return m, true
 			}
@@ -285,7 +299,7 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 
 // buildPrompts constructs system and user prompts with placeholder replacement.
 func (p *PluginQueryUnderstand) buildPrompts(
-	ctx context.Context, chatManage *types.ChatManage, historyList []*types.History,
+	ctx context.Context, chatManage *types.ChatManage, historyList []*types.History, imageCount int,
 ) (string, string) {
 	userPrompt := p.config.Conversation.RewritePromptUser
 	if chatManage.RewritePromptUser != "" {
@@ -299,15 +313,22 @@ func (p *PluginQueryUnderstand) buildPrompts(
 	conversationText := formatConversationHistory(historyList)
 
 	queryContent := chatManage.Query
-	if len(chatManage.Images) > 0 {
-		queryContent += fmt.Sprintf("\n\n<images_uploaded count=\"%d\" />", len(chatManage.Images))
+	uploadedCount := len(chatManage.Images)
+	if chatManage.RewriteContext != "" {
+		uploadedCount = imageCount
+	}
+	if uploadedCount > 0 {
+		queryContent += fmt.Sprintf("\n\n<images_uploaded count=\"%d\" />", uploadedCount)
 	} else {
 		queryContent += "\n\n<no_image_attached />"
 	}
 	if len(chatManage.Attachments) > 0 {
-		queryContent += chatManage.Attachments.BuildPrompt()
+		queryContent += chatManage.Attachments.BuildPrompt(imageCount)
 	} else {
 		queryContent += "\n<no_document_attached />"
+	}
+	if chatManage.RewriteContext != "" {
+		queryContent += "\n\n" + chatManage.RewriteContext
 	}
 	queryContent += p.memoryBackground(ctx, chatManage)
 

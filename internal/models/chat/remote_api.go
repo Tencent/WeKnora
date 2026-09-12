@@ -135,6 +135,19 @@ func (c *RemoteAPIChat) buildOutbound(
 	ctx context.Context, messages []Message, opts *ChatOptions, isStream bool,
 ) (body any, endpoint string, useRawHTTP bool, err error) {
 	req := c.shapedRequest(messages, opts, isStream)
+	if opts != nil && opts.RequireImages {
+		imageCount := 0
+		for _, message := range req.Messages {
+			for _, part := range message.MultiContent {
+				if part.Type == openai.ChatMessagePartTypeImageURL {
+					imageCount++
+				}
+			}
+		}
+		if imageCount == 0 {
+			return nil, "", false, fmt.Errorf("model transport cannot accept required image input")
+		}
+	}
 
 	thinking := c.thinkingOverride
 	if thinking == nil {
@@ -190,11 +203,15 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 
 	req := *(body.(*openai.ChatCompletionRequest))
 	c.logRequest(timeoutCtx, req, false)
+	imageWarning := ""
 	resp, err := c.client.CreateChatCompletion(timeoutCtx, req)
 	if err != nil {
-		if isMultimodalNotSupportedError(err) {
+		if isMultimodalNotSupportedError(err) && (opts == nil || !opts.RequireImages) {
 			logger.Warnf(timeoutCtx, "[LLM Request] Model %s does not support multimodal, retrying without images", c.modelName)
-			cleaned := stripImagesFromMessages(messages)
+			cleaned, omittedMaterials := stripImagesFromMessages(messages)
+			if omittedMaterials {
+				imageWarning = imImageOmissionNotice
+			}
 			req = c.shapedRequest(cleaned, opts, false)
 			resp, err = c.client.CreateChatCompletion(timeoutCtx, req)
 		}
@@ -207,6 +224,7 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	if err != nil {
 		return nil, err
 	}
+	result.Content = imageWarning + result.Content
 	logUsage(timeoutCtx, c.modelName, &result.Usage)
 	return result, nil
 }
@@ -298,12 +316,16 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	}
 
 	streamChan := make(chan types.StreamResponse)
+	imageWarning := ""
 
 	stream, err := c.client.CreateChatCompletionStream(timeoutCtx, req)
 	if err != nil {
-		if isMultimodalNotSupportedError(err) {
+		if isMultimodalNotSupportedError(err) && (opts == nil || !opts.RequireImages) {
 			logger.Warnf(timeoutCtx, "[LLM Stream] Model %s does not support multimodal, retrying without images", c.modelName)
-			cleaned := stripImagesFromMessages(messages)
+			cleaned, omittedMaterials := stripImagesFromMessages(messages)
+			if omittedMaterials {
+				imageWarning = imImageOmissionNotice
+			}
 			req = c.shapedRequest(cleaned, opts, true)
 			stream, err = c.client.CreateChatCompletionStream(timeoutCtx, req)
 		}
@@ -318,6 +340,12 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 		defer cancel()
 		if streamDumper != nil {
 			defer streamDumper.Close()
+		}
+		if imageWarning != "" {
+			select {
+			case streamChan <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: imageWarning}:
+			case <-timeoutCtx.Done():
+			}
 		}
 		c.processStream(timeoutCtx, stream, streamChan, streamDumper)
 	}()

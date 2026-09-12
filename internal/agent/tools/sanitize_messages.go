@@ -2,8 +2,10 @@ package tools
 
 import (
 	"html"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // SanitizeMessages validates and fixes a message array for LLM compatibility.
@@ -32,6 +34,9 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 			if prev.Role == msg.Role && prev.Role != "tool" {
 				// Merge with previous message
 				result[len(result)-1].Content += "\n\n" + msg.Content
+				if strings.Contains(msg.Content, ">"+types.IMImageAvailablePrompt+"</image>") {
+					result[len(result)-1].Images = append(append([]string(nil), prev.Images...), msg.Images...)
+				}
 				continue
 			}
 		}

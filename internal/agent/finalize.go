@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -42,6 +44,18 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			"any missing evidence. Use the user's requested language and format. Do not claim that an " +
 			"unperformed action succeeded.",
 	})
+	// Split-turn compaction can remove the original user image message.
+	finalMessage := &messages[len(messages)-1]
+	for index, image := range e.materialImages {
+		if !slices.ContainsFunc(conversation, func(message chat.Message) bool {
+			return slices.Contains(message.Images, image)
+		}) {
+			finalMessage.Images = append(finalMessage.Images, image)
+			// Use the marker that text-only retries invalidate along with the image.
+			finalMessage.Content += fmt.Sprintf("\n<image index=\"%d\">%s</image>",
+				index+1, types.IMImageAvailablePrompt)
+		}
+	}
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
