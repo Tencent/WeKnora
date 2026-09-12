@@ -1,5 +1,9 @@
 export default {
   localBrowser: {
+    pipOpen: "Pop out preview",
+    pipReturn: "Return to conversation",
+    pipFailed: "Could not open the floating window. Please try again.",
+
     captureScreenshot: "Capture screenshot",
     navigationIncomplete: "Navigation did not reach the requested loading phase. Check the current page.",
     noEntries: "No entries returned.",
