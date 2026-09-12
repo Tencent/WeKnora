@@ -30,6 +30,11 @@ func (s *Service) MemoryAvailable(ctx context.Context) bool {
 	return ok
 }
 
+func (s *Service) LearningAvailable(ctx context.Context) bool {
+	_, cfg, ok := s.enabledScope(ctx)
+	return ok && cfg.RetrievalConditioningEnabled()
+}
+
 // SearchMemory ranks this user's stored memories against an arbitrary query.
 //
 // Recall runs once per turn, against the question the user opened with, and
