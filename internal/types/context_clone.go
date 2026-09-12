@@ -74,7 +74,8 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// document affinity all run from a context descended from a CloneContext.
 	// Dropping this key would let an agent that cannot read memory keep
 	// writing to it.
-	MemoryDisabledContextKey: true,
+	MemoryDisabledContextKey:     true,
+	LLMContentRedactedContextKey: true,
 
 	// Marks model calls as coming from an asynq worker so the per-model chat
 	// concurrency governor throttles them, leaving interactive chat latency

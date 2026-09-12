@@ -1,0 +1,15 @@
+version: 1
+student:
+  name: "刘德宝"
+  github_id: "mingri31164"
+topic:
+  id: "4"
+  title: "知识网络与引导式学习"
+result:
+  type: code
+  url: "https://github.com/Tencent/WeKnora/pull/3145"
+repository:
+  url: "git@github.com:mingri31164/WeKnora.git"
+  branch: "feat/guided-learning"
+  commit: "a98c96840e6099bfaf1bd3488009773ff5d2e6ac"
+  tag: "rhino-2026-final-4-v2"

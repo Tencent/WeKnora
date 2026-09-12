@@ -167,6 +167,9 @@ func (c *RemoteAPIChat) buildOutbound(
 
 // logRequest 记录请求日志
 func (c *RemoteAPIChat) logRequest(ctx context.Context, req any, isStream bool) {
+	if types.LLMContentRedacted(ctx) {
+		return
+	}
 	if jsonData, err := json.MarshalIndent(req, "", "  "); err == nil {
 		logger.Infof(ctx, "[LLM Request] model=%s, stream=%v, request:\n%s",
 			c.modelName, isStream, secutils.CompactImageDataURLForLog(string(jsonData)))
@@ -224,8 +227,10 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 	if err := secutils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
-	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, raw HTTP request:\n%s",
-		endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
+	if !types.LLMContentRedacted(ctx) {
+		logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s, raw HTTP request:\n%s",
+			endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(jsonData)))
+	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -292,7 +297,10 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	req := *(body.(*openai.ChatCompletionRequest))
 	c.logRequest(timeoutCtx, req, true)
 
-	streamDumper := newStreamPacketDumper(c.modelName, &req)
+	var streamDumper *streamPacketDumper
+	if !types.LLMContentRedacted(timeoutCtx) {
+		streamDumper = newStreamPacketDumper(c.modelName, &req)
+	}
 	if streamDumper != nil {
 		logger.Infof(timeoutCtx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
 	}
@@ -357,7 +365,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 		return nil, fmt.Errorf("endpoint SSRF check failed: %w", err)
 	}
 
-	if prettyJSON, pErr := json.MarshalIndent(customReq, "", "  "); pErr == nil {
+	if prettyJSON, pErr := json.MarshalIndent(customReq, "", "  "); pErr == nil && !types.LLMContentRedacted(ctx) {
 		logger.Infof(ctx, "[LLM Stream Request] endpoint=%s, model=%s, stream=true, request:\n%s",
 			endpoint, c.modelName, secutils.CompactImageDataURLForLog(string(prettyJSON)))
 	} else {
@@ -388,7 +396,10 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 	}
 
 	streamChan := make(chan types.StreamResponse)
-	streamDumper := newStreamPacketDumper(c.modelName, customReq)
+	var streamDumper *streamPacketDumper
+	if !types.LLMContentRedacted(ctx) {
+		streamDumper = newStreamPacketDumper(c.modelName, customReq)
+	}
 	if streamDumper != nil {
 		logger.Infof(ctx, "[LLM Stream Raw Dump] writing packets to %s", streamDumper.Path())
 	}

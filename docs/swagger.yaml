@@ -258,6 +258,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
+      intermediate_answer:
+        description: |-
+          IntermediateAnswer preserves a plain answer followed by a loop-end steer.
+          The canonical final answer is still stored in Message.Content.
+        type: boolean
       iteration:
         description: Iteration number (0-indexed)
         type: integer
@@ -278,6 +283,13 @@ definitions:
         description: Tools called in this step (Act phase)
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall'
+        type: array
+      user_messages_before:
+        description: |-
+          UserMessagesBefore records consumed steer rows in delivery order, before
+          this model response. Unlike timestamps, this remains unambiguous on replay.
+        items:
+          type: string
         type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.AnswerStrategy:
@@ -829,7 +841,7 @@ definitions:
       context_template_id:
         description: |-
           ContextTemplateID references a template ID in prompt_templates/ YAML files.
-          If set and ContextTemplate is empty, the template content will be resolved at startup.
+          If set and ContextTemplate is empty, the template content is resolved at request time for saved agents.
         type: string
       data_analysis_enabled:
         description: |-
@@ -1030,7 +1042,7 @@ definitions:
       system_prompt_id:
         description: |-
           SystemPromptID references a template ID in prompt_templates/ YAML files.
-          If set and SystemPrompt is empty, the template content will be resolved at startup.
+          If set and SystemPrompt is empty, the template content is resolved at request time for saved agents.
         type: string
       temperature:
         description: Temperature for LLM (0-1)
@@ -1888,6 +1900,15 @@ definitions:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig'
       vlm_config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.LearningAnswer:
+    properties:
+      attempt_id:
+        type: string
+      option_id:
+        type: string
+      question_id:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ListMembersResponse:
     properties:
@@ -3517,6 +3538,8 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        type: boolean
       mcp_service_ids:
         items:
           type: string
@@ -4218,6 +4241,10 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.UserPreferences:
     properties:
+      browser_search_instructions:
+        description: BrowserSearchInstructions customizes browser search for this
+          user. Nil/empty uses the platform default.
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID remembers the last workspace the user actively
@@ -6134,6 +6161,15 @@ definitions:
       tenant_name:
         type: string
     type: object
+  internal_handler.learningOverlayRequest:
+    properties:
+      knowledge_base_id:
+        type: string
+      slugs:
+        items:
+          type: string
+        type: array
+    type: object
   internal_handler.meEnvVarRequest:
     properties:
       name:
@@ -6158,6 +6194,11 @@ definitions:
       expires_at_unix:
         type: integer
       name:
+        type: string
+    type: object
+  internal_handler.prepareLearningQuizRequest:
+    properties:
+      page_id:
         type: string
     type: object
   internal_handler.registerByInviteRequest:
@@ -6246,6 +6287,11 @@ definitions:
     required:
     - display_status
     type: object
+  internal_handler.updateLearningSettingsRequest:
+    properties:
+      enabled:
+        type: boolean
+    type: object
   internal_handler.updateMemberRoleRequest:
     properties:
       role:
@@ -6255,6 +6301,9 @@ definitions:
     type: object
   internal_handler.updateMyPreferencesRequest:
     properties:
+      browser_search_instructions:
+        maxLength: 4000
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID lets clients persist "after a fresh login,
@@ -6321,6 +6370,9 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        description: Browser source
+        type: boolean
       mcp_service_ids:
         description: Per-request MCP services selected via @mention
         items:
@@ -6440,6 +6492,30 @@ definitions:
         items:
           type: string
         type: array
+    required:
+    - query
+    type: object
+  internal_handler_session.SteerMessageRequest:
+    properties:
+      channel:
+        type: string
+      delivery:
+        description: Delivery is "after" (default) or "inject". See the constants
+          above.
+        type: string
+      expected_assistant_message_id:
+        description: |-
+          Optional for older clients. New clients pin delivery to the run they see
+          and supply a stable ID so a consume event may precede the HTTP response.
+        type: string
+      mentioned_items:
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
+      query:
+        type: string
+      steer_id:
+        type: string
     required:
     - query
     type: object
@@ -11743,11 +11819,343 @@ paths:
       summary: Get wiki statistics
       tags:
       - Wiki
+  /learning/attempts:
+    post:
+      consumes:
+      - application/json
+      description: 幂等提交一个选项，并在来源仍有效时更新 BKT 掌握度
+      parameters:
+      - description: 答题请求
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.LearningAnswer'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 判分结果
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: 重复作答或来源已变化
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 提交测验答案
+      tags:
+      - 引导式学习
+  /learning/export:
+    get:
+      description: 导出当前用户全部或指定知识库的学习画像、测验和作答记录
+      parameters:
+      - description: 知识库 ID；省略时导出全部
+        in: query
+        name: knowledge_base_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 学习数据导出
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 导出个人学习数据
+      tags:
+      - 引导式学习
+  /learning/nodes/{id}:
+    get:
+      description: 返回当前用户对指定 Wiki 页面的熟悉度、掌握度和来源状态
+      parameters:
+      - description: Wiki 页面 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 节点学习状态
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 节点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取知识节点学习状态
+      tags:
+      - 引导式学习
+  /learning/nodes/{id}/view:
+    post:
+      description: 将当前用户对指定 Wiki 页面的阅读记录为熟悉度信号，不更新掌握度
+      parameters:
+      - description: Wiki 页面 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 记录成功
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 节点不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 记录知识节点阅读
+      tags:
+      - 引导式学习
+  /learning/overlay:
+    post:
+      consumes:
+      - application/json
+      description: 返回最多 2000 个 Wiki slug 对应的个人学习状态
+      parameters:
+      - description: 知识库与 Wiki slug
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.learningOverlayRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 节点学习状态列表
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求无效
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 批量获取知识图谱学习状态
+      tags:
+      - 引导式学习
+  /learning/overview:
+    get:
+      description: 返回当前用户在指定自有 Wiki 知识库中的学习状态统计
+      parameters:
+      - description: 知识库 ID
+        in: query
+        name: knowledge_base_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 学习概览
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 学习未开启或无权访问
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取学习概览
+      tags:
+      - 引导式学习
+  /learning/profile:
+    delete:
+      description: 删除当前用户全部或指定知识库的学习画像、测验和作答记录
+      parameters:
+      - description: 知识库 ID；省略时删除全部
+        in: query
+        name: knowledge_base_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除计数
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 删除个人学习数据
+      tags:
+      - 引导式学习
+  /learning/question-sets:
+    post:
+      consumes:
+      - application/json
+      description: 为指定 Wiki 页面复用或创建异步生成的三题单选测验
+      parameters:
+      - description: Wiki 页面
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.prepareLearningQuizRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测验状态
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 学习未开启
+          schema:
+            additionalProperties: true
+            type: object
+        "422":
+          description: 来源证据不足
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 准备来源测验
+      tags:
+      - 引导式学习
+  /learning/question-sets/{id}:
+    get:
+      description: 返回当前用户拥有的测验状态与不含答案的题目
+      parameters:
+      - description: 测验 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 测验
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 测验不存在
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取来源测验
+      tags:
+      - 引导式学习
+  /learning/recommendations:
+    get:
+      description: 按复习需求、图邻域、个人兴趣和内容质量返回 Wiki 主题
+      parameters:
+      - description: 知识库 ID
+        in: query
+        name: knowledge_base_id
+        required: true
+        type: string
+      - default: 5
+        description: 返回数量
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 学习推荐
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 参数无效
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取学习推荐
+      tags:
+      - 引导式学习
+  /learning/settings:
+    get:
+      description: 返回当前 Web 用户的学习开关与算法版本
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 学习设置
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 仅支持当前空间的 Web 用户
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取个人学习设置
+      tags:
+      - 引导式学习
+    put:
+      consumes:
+      - application/json
+      description: 开启或关闭当前 Web 用户的个人学习画像
+      parameters:
+      - description: 学习设置
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.updateLearningSettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 更新后的学习设置
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求无效
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: 身份不支持
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 更新个人学习开关
+      tags:
+      - 引导式学习
   /mcp-services:
     get:
       consumes:
       - application/json
-      description: 获取当前空间的所有MCP服务
+      description: 获取当前空间的所有MCP服务（含已保存工具目录数量）
       produces:
       - application/json
       responses:
@@ -12000,7 +12408,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
+      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要
+        Admin。
       parameters:
       - description: MCP服务ID
         in: path
@@ -14791,6 +15200,73 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
+  /sessions/{id}/steer:
+    get:
+      description: 刷新页面后用来恢复输入框上方的队列。没有正在运行的 turn 时返回空列表。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出当前运行中尚未消费的排队消息
+      tags:
+      - 问答
+  /sessions/{id}/steer/{steer_id}:
+    delete:
+      description: 从当前运行的排队列表里去掉一条，不再注入也不再作为 follow-up 发出。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除一条排队中的消息
+      tags:
+      - 问答
   /sessions/{session_id}/artifacts:
     get:
       description: 返回本会话中所有 assistant 消息产生的技能产物元数据（不含 URL）
@@ -14916,6 +15392,89 @@ paths:
       summary: 置顶会话
       tags:
       - 会话
+  /sessions/{session_id}/steer:
+    post:
+      consumes:
+      - application/json
+      description: 向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 追加消息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.SteerMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 会话不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 向运行中的对话追加消息
+      tags:
+      - 问答
+  /sessions/{session_id}/steer/{steer_id}/inject:
+    post:
+      description: 把一条 delivery=after 的排队消息改为 inject，运行中的 agent 会在下一轮边界读到它。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 将排队消息改为立即注入
+      tags:
+      - 问答
   /sessions/{session_id}/stop:
     post:
       consumes:

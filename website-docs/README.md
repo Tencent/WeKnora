@@ -105,6 +105,7 @@ npm run preview  # 预览构建产物
 | [图片与文件的对外访问](03-features/21-file-access.md) | 四种 URL 形式、各渠道怎么取、IM/API 图片不显示的排查表 |
 | [技能目录与沙箱](03-features/22-skills-sandbox.md) | 目录/安装、Docker/Cube/E2B、网络策略、个人变量、生成文件 |
 | [跨会话长期记忆](03-features/23-memory.md) | 空间/个人开关、自动提取、待确认项、主题/文档偏好与整理 |
+| [引导式学习](03-features/24-guided-learning.md) | Wiki 主题推荐、来源测验、个人学习状态与隐私管理 |
 
 ### API 参考 {#_04-api-参考}
 
@@ -127,6 +128,7 @@ npm run preview  # 预览构建产物
 | [IM、Embed 与文件](04-api/02-api-channels.md) | IM 回调与渠道、微信扫码、Embed、文件服务 |
 | [沙箱、技能与个人变量](04-api/02-api-sandbox-skills.md) | 配置、模板、库存、安装与进度、目录、个人变量 |
 | [长期记忆](04-api/02-api-memory.md) | 空间配置、个人设置/条目、主题、文档偏好、导出与整理 |
+| [引导式学习](04-api/02-api-learning.md) | 个人学习设置、Wiki 节点状态、推荐、来源测验、导出与删除 |
 
 ### 客户端 {#_05-客户端}
 

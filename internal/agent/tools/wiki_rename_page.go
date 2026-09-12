@@ -49,9 +49,6 @@ func NewWikiRenamePageTool(
 }
 
 func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
-	// Attribute every page write performed by this tool to the agent so
-	// revision history distinguishes agent edits from pipeline/user ones.
-	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
 	var params struct {
 		Slug    string `json:"slug"`
 		NewSlug string `json:"new_slug"`
@@ -80,6 +77,10 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 	if params.NewSlug == params.Slug {
 		return &types.ToolResult{Success: false, Error: "new_slug must be different from old slug"}, nil
 	}
+	renamer, ok := t.wikiPageService.(interfaces.WikiPageRenamer)
+	if !ok {
+		return &types.ToolResult{Success: false, Error: interfaces.ErrWikiRenameUnsupported.Error()}, nil
+	}
 
 	// Get existing page
 	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
@@ -87,89 +88,44 @@ func (t *wikiRenamePageTool) Execute(ctx context.Context, args json.RawMessage) 
 		return &types.ToolResult{Success: false, Error: "Failed to resolve page to rename: " + err.Error()}, nil
 	}
 
-	inLinks := make([]string, len(existingPage.InLinks))
-	copy(inLinks, existingPage.InLinks)
-
-	// Create new page with new slug but same content
-	newPage := &types.WikiPage{
-		TenantID:        existingPage.TenantID,
+	renamed, err := renamer.RenamePage(ctx, interfaces.WikiPageRenameRequest{
 		KnowledgeBaseID: kbID,
-		Slug:            params.NewSlug,
-		Title:           existingPage.Title,
-		Summary:         existingPage.Summary,
-		Content:         existingPage.Content,
-		PageType:        existingPage.PageType,
-		Status:          existingPage.Status,
-		Aliases:         append(types.StringArray(nil), existingPage.Aliases...),
-		ParentSlug:      existingPage.ParentSlug,
-		FolderID:        existingPage.FolderID,
-		SortOrder:       existingPage.SortOrder,
-		SourceRefs:      append(types.StringArray(nil), existingPage.SourceRefs...),
-		ChunkRefs:       append(types.StringArray(nil), existingPage.ChunkRefs...),
-		InLinks:         append(types.StringArray(nil), existingPage.InLinks...),
-		PageMetadata:    append(types.JSON(nil), existingPage.PageMetadata...),
-	}
-	_, err = t.wikiPageService.CreatePage(ctx, newPage)
+		PageID:          existingPage.ID,
+		OldSlug:         params.Slug,
+		NewSlug:         params.NewSlug,
+	})
 	if err != nil {
-		return &types.ToolResult{Success: false, Error: "Failed to create renamed page: " + err.Error()}, nil
-	}
-
-	changes, updatedSlugs, rewriteErr := applyIncomingWikiContentRewrite(
-		ctx, t.wikiPageService, kbID, inLinks,
-		func(content string) (string, bool) {
-			updated := strings.ReplaceAll(
-				content, "[["+params.Slug+"]]", "[["+params.NewSlug+"]]",
-			)
-			updated = strings.ReplaceAll(
-				updated, "[["+params.Slug+"|", "[["+params.NewSlug+"|",
-			)
-			return updated, updated != content
-		},
-	)
-	if rewriteErr != nil {
-		rollbackErr := rollbackWikiContentChanges(ctx, t.wikiPageService, changes)
-		cleanupErr := t.wikiPageService.DeletePage(ctx, kbID, params.NewSlug)
-		return &types.ToolResult{
-			Success: false,
-			Error: "Rename aborted while updating incoming links: " +
-				joinWikiMutationErrors(rewriteErr, rollbackErr, cleanupErr),
-		}, nil
-	}
-	updatedCount := len(updatedSlugs)
-
-	// Delete old page
-	err = t.wikiPageService.DeletePage(ctx, kbID, params.Slug)
-	if err != nil {
-		rollbackErr := rollbackWikiContentChanges(ctx, t.wikiPageService, changes)
-		cleanupErr := t.wikiPageService.DeletePage(ctx, kbID, params.NewSlug)
-		return &types.ToolResult{
-			Success: false,
-			Error: "Rename aborted because the old page could not be deleted: " +
-				joinWikiMutationErrors(err, rollbackErr, cleanupErr),
-		}, nil
+		return &types.ToolResult{Success: false, Error: "Failed to rename wiki page: " + err.Error()}, nil
 	}
 	t.routes.forget(params.Slug, kbID)
 	t.routes.remember(params.NewSlug, kbID)
 
-	// Inject cross-links so other pages know about this new slug
-	t.wikiPageService.InjectCrossLinks(ctx, kbID, []string{params.NewSlug})
-
-	// Rebuild the index page to reflect the new/updated summary
-	_ = t.wikiPageService.RebuildIndexPage(ctx, kbID)
-
-	outputMsg := fmt.Sprintf("Successfully renamed page [[%s]] → [[%s]] and updated %d incoming links.", params.Slug, params.NewSlug, updatedCount)
+	updatedSlugs := make([]string, 0, len(renamed.AffectedPages))
+	for _, page := range renamed.AffectedPages {
+		if page.ID != renamed.Page.ID {
+			updatedSlugs = append(updatedSlugs, page.Slug)
+		}
+	}
+	updatedCount := len(updatedSlugs)
+	outputMsg := fmt.Sprintf(
+		"Successfully renamed page [[%s]] to [[%s]], preserving its ID and history, "+
+			"and updated %d related pages.",
+		params.Slug,
+		params.NewSlug,
+		updatedCount,
+	)
 	if updatedCount > 0 {
 		outputMsg += fmt.Sprintf("\n- Affected pages: %s", strings.Join(updatedSlugs, ", "))
 	}
-
 	return &types.ToolResult{
 		Success: true,
 		Output:  outputMsg,
 		Data: map[string]interface{}{
 			"display_type":   "wiki_rename_page",
+			"page_id":        renamed.Page.ID,
 			"old_slug":       params.Slug,
 			"new_slug":       params.NewSlug,
-			"title":          existingPage.Title,
+			"title":          renamed.Page.Title,
 			"updated_count":  updatedCount,
 			"affected_pages": updatedSlugs,
 		},

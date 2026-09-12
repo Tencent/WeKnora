@@ -1,4 +1,8 @@
 <template>
+  <div class="wiki-learning-layout">
+    <LearningPanel v-if="learningAvailable && learning.state.error !== 'unavailable'" :controller="learning"
+      :scope-key="learningScope" :page="learningPage" @open-page="openLearningPage"
+      @open-source="emit('open-source-doc', $event)" />
   <div class="wiki-browser">
     <!-- Graph view (full screen) -->
     <template v-if="view === 'graph'">
@@ -79,6 +83,11 @@
               {{ $t('knowledgeEditor.wikiBrowser.legendFamiliar') }}
             </div>
           </div>
+          <LearningLegend v-if="learning.state.settings?.enabled" />
+          <div v-if="learning.state.overlayError" class="learning-overlay-error" role="status">
+            {{ $t(`learning.errors.${learning.state.overlayError}`) }}
+            <t-button size="small" variant="text" @click="learning.overlay()">{{ $t('learning.retry') }}</t-button>
+          </div>
           <div class="legend-divider"></div>
           <div class="legend-actions">
             <div class="legend-action" @click="fitGraphToView" title="Fit to View">
@@ -127,7 +136,7 @@
         </div>
 
         <!-- Graph page detail drawer -->
-        <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="480px"
+        <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="min(480px, 100vw)"
           :footer="false" placement="right" :show-overlay="false" :close-btn="true" destroy-on-close
           class="wiki-graph-drawer">
           <template v-if="graphDrawerPage">
@@ -788,6 +797,7 @@
       </div>
     </teleport>
   </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -804,6 +814,11 @@ import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess'
 import picturePreview from '@/components/picture-preview.vue'
 import WikiFolderActions from './WikiFolderActions.vue'
 import WikiRevisionDrawer from './WikiRevisionDrawer.vue'
+import LearningPanel from './LearningPanel.vue'
+import LearningLegend from './LearningLegend.vue'
+import { useLearning } from '@/composables/useLearning'
+import { eligibleLearningPage, learningColors } from '@/composables/learningHelpers'
+import { useAuthStore } from '@/stores/auth'
 import {
   expandedWikiDirectoryPaths,
   expandWikiDirectoryPath,
@@ -841,6 +856,7 @@ const router = useRouter()
 const route = useRoute()
 const menuStore = useMenuStore()
 const settingsStore = useSettingsStore()
+const authStore = useAuthStore()
 
 const { t } = useI18n()
 
@@ -852,6 +868,7 @@ const props = defineProps<{
   // 对应后端 g.OwnedWikiKBOrAdmin() 守卫（KB creator OR Admin+ OR
   // org-share editor）。父组件没传时按 false 兜底，避免漏 gate。
   canEdit?: boolean
+  learningAvailable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -868,6 +885,8 @@ const kbFileAccess = computed<ProtectedFileAccessContext>(() => ({
 }))
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
+let pageSelectionRequest = 0
+let graphPageRequest = 0
 
 // Per-type pagination state for the sidebar. 4万-page wikis used to load
 // the entire page list into `pages.value` at startup (50 pages of 500 =
@@ -1138,6 +1157,37 @@ function fitGraphToView() {
 
 const graphDrawerVisible = ref(false)
 const graphDrawerPage = ref<WikiPage | null>(null)
+const learningAvailable = computed(() => props.learningAvailable === true && authStore.isLoggedIn)
+const learningScope = computed(() => JSON.stringify([authStore.effectiveTenantId, authStore.currentUserId, props.knowledgeBaseId, learningAvailable.value]))
+const learningPage = computed(() => {
+  const page = props.view === 'graph' ? (graphDrawerVisible.value ? graphDrawerPage.value : null) : selectedPage.value
+  return eligibleLearningPage(page) && page?.knowledge_base_id === props.knowledgeBaseId ? page : null
+})
+const learning = useLearning(() => ({ kbId: props.knowledgeBaseId, available: learningAvailable.value,
+  pageId: learningPage.value?.id, slugs: graphData.value?.nodes.map(node => node.slug) || [] }))
+function openLearningPage(slug: string) {
+  if (props.view === 'graph') void openGraphDrawer(slug)
+  else void navigateToSlug(slug)
+}
+function applyLearningOverlay() {
+  const nodes = new Map(learning.state.overlay.map(node => [node.slug, node]))
+  for (const { g, node } of graphNodeElsRef) {
+    const overlay = nodes.get(node.slug)
+    const marker = g.querySelector<SVGRectElement>('.node-learning-state')
+    if (marker) {
+      marker.style.display = overlay ? '' : 'none'
+      marker.setAttribute('fill', overlay ? learningColors[overlay.mastery.state] : 'transparent')
+    }
+    const ring = g.querySelector<SVGCircleElement>('.node-familiar-ring')
+    if (ring) ring.style.opacity = node.familiar || overlay?.familiar ? '0.9' : '0'
+    const title = g.querySelector('title')
+    if (title) title.textContent = [node.title, overlay ? t(`learning.states.${overlay.mastery.state}`) : '',
+      overlay ? t('learning.masteryTooltip', { count: overlay.mastery.attempts, probability: Math.round(overlay.mastery.p_mastery * 100) }) : '',
+      node.familiar || overlay?.familiar ? t('learning.familiarTooltip') : '',
+      overlay?.mastery.source_stale ? t('learning.sourceStale') : ''].filter(Boolean).join('\n')
+  }
+}
+watch(() => learning.state.overlay, applyLearningOverlay, { flush: 'post' })
 const navHistory = ref<WikiPage[]>([])
 // navFromSystemView remembers that the user was viewing the Index when they
 // clicked into a slug, so goBack can restore it
@@ -1432,7 +1482,7 @@ const graphFrontierCount = computed(() => {
   return count
 })
 
-const graphFamiliarCount = computed(() => graphData.value?.meta?.familiar_count || 0)
+const graphFamiliarCount = computed(() => graphData.value?.nodes.filter(node => node.familiar || learning.state.overlay.some(item => item.slug === node.slug && item.familiar)).length || 0)
 
 // graphStatusCard drives the little summary panel below the legend.
 //
@@ -1536,10 +1586,15 @@ function renderMarkdown(content: string): string {
 }
 
 async function openGraphDrawer(slug: string) {
+  const request = ++graphPageRequest
+  graphDrawerPage.value = null
+  graphDrawerVisible.value = true
   try {
     const res = await getWikiPage(props.knowledgeBaseId, slug)
+    if (request !== graphPageRequest) return
     graphDrawerPage.value = (res as any).data || res as any
     graphDrawerVisible.value = true
+    void router.replace({ query: { ...route.query, slug } })
   } catch (e) {
     console.error(`Failed to load page ${slug}:`, e)
   }
@@ -2638,6 +2693,7 @@ async function loadIndex() {
 // overview. Re-uses the intro already fetched during loadPages(); only
 // re-fetches on first ever open or if a prior attempt failed.
 async function openIndexView() {
+  pageSelectionRequest++
   selectedPage.value = null
   activeSystemView.value = 'index'
   if (!indexMarkdown.value) {
@@ -3536,6 +3592,7 @@ async function loadPageIssues(slug: string) {
 }
 
 async function selectPage(page: WikiPage) {
+  const request = ++pageSelectionRequest
   try {
     if (selectedPage.value && selectedPage.value.id !== page.id) {
       navHistory.value.push(selectedPage.value)
@@ -3547,8 +3604,11 @@ async function selectPage(page: WikiPage) {
       navFromSystemView.value = activeSystemView.value
     }
     activeSystemView.value = ''
+    selectedPage.value = null
     const res = await getWikiPage(props.knowledgeBaseId, page.slug)
+    if (request !== pageSelectionRequest) return
     selectedPage.value = (res as any).data || res as any
+    void router.replace({ query: { ...route.query, slug: page.slug } })
     await loadPageIssues(page.slug)
   } catch (e) {
     console.error('Failed to load wiki page:', e)
@@ -3556,6 +3616,7 @@ async function selectPage(page: WikiPage) {
 }
 
 async function navigateToSlug(slug: string) {
+  const request = ++pageSelectionRequest
   try {
     if (selectedPage.value && selectedPage.value.slug !== slug) {
       navHistory.value.push(selectedPage.value)
@@ -3566,8 +3627,11 @@ async function navigateToSlug(slug: string) {
       navFromSystemView.value = activeSystemView.value
     }
     activeSystemView.value = ''
+    selectedPage.value = null
     const res = await getWikiPage(props.knowledgeBaseId, slug)
+    if (request !== pageSelectionRequest) return
     selectedPage.value = (res as any).data || res as any
+    void router.replace({ query: { ...route.query, slug } })
     await loadPageIssues(slug)
   } catch (e) {
     console.error(`Failed to navigate to ${slug}:`, e)
@@ -3575,9 +3639,11 @@ async function navigateToSlug(slug: string) {
 }
 
 function goBack() {
+  pageSelectionRequest++
   const prev = navHistory.value.pop()
   if (prev) {
     selectedPage.value = prev
+    void router.replace({ query: { ...route.query, slug: prev.slug } })
     loadPageIssues(prev.slug)
     return
   }
@@ -3972,6 +4038,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   for (const n of graphNodes) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
+    g.dataset.slug = n.slug
 
     const r = nodeRadius(n)
 
@@ -4009,14 +4076,14 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     // Solid outer ring: this page was built from a document the current
     // person keeps citing. Distinct from the dashed expansion ring so
     // "I use this" and "there are more neighbors" do not look the same.
-    if (n.familiar) {
+    {
       const familiarRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
       familiarRing.setAttribute('r', String(r + 7))
       familiarRing.setAttribute('fill', 'none')
       familiarRing.setAttribute('stroke', '#0052d9')
       familiarRing.setAttribute('stroke-width', '2')
       familiarRing.setAttribute('pointer-events', 'none')
-      familiarRing.style.opacity = '0.9'
+      familiarRing.style.opacity = n.familiar ? '0.9' : '0'
       familiarRing.classList.add('node-familiar-ring')
       g.appendChild(familiarRing)
     }
@@ -4055,6 +4122,18 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     text.style.textShadow = '0 1px 3px var(--td-bg-color-container), 0 -1px 3px var(--td-bg-color-container), 1px 0 3px var(--td-bg-color-container), -1px 0 3px var(--td-bg-color-container)'
     text.textContent = n.title.length > 14 ? n.title.substring(0, 14) + '…' : n.title
     g.appendChild(text)
+
+    const learningMarker = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    learningMarker.classList.add('node-learning-state')
+    learningMarker.setAttribute('x', String(-r - 8))
+    learningMarker.setAttribute('y', String(-r - 4))
+    learningMarker.setAttribute('width', '8')
+    learningMarker.setAttribute('height', '8')
+    learningMarker.setAttribute('rx', '2')
+    learningMarker.setAttribute('stroke', 'var(--td-bg-color-container)')
+    learningMarker.setAttribute('pointer-events', 'none')
+    g.appendChild(learningMarker)
+    g.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'title'))
 
     // Hover bloom button — the ⊕ badge floating off the node's upper-right.
     // Invisible by default; fades in on mouseenter when bloom would
@@ -4347,6 +4426,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   graphAnimFrame = requestAnimationFrame(tick)
   graphReady.value = true
+  applyLearningOverlay()
 }
 
 // Set edge line positions, shortened to stop at node circle boundary so arrows are visible
@@ -4828,6 +4908,11 @@ watch(() => props.view, (v) => {
     loadGraph()
   } else if (v === 'browser') {
     nextTick(async () => {
+      const slug = route.query.slug
+      if (typeof slug === 'string' && slug && selectedPage.value?.slug !== slug) {
+        await navigateToSlug(slug)
+        await nextTick()
+      }
       if (readerBodyRef.value && renderedContent.value) {
         await hydrateProtectedFileImages(readerBodyRef.value, kbFileAccess.value)
       }
@@ -4837,12 +4922,10 @@ watch(() => props.view, (v) => {
 
 watch(() => route.query.slug, (newSlug) => {
   if (newSlug && typeof newSlug === 'string') {
-    if (!selectedPage.value || selectedPage.value.slug !== newSlug) {
-      if (props.view === 'graph') {
-        handleGraphSearchSelect(newSlug)
-      } else {
-        navigateToSlug(newSlug)
-      }
+    if (props.view === 'graph') {
+      if (graphDrawerPage.value?.slug !== newSlug) handleGraphSearchSelect(newSlug)
+    } else if (selectedPage.value?.slug !== newSlug) {
+      navigateToSlug(newSlug)
     }
   }
 })
@@ -4854,6 +4937,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  pageSelectionRequest++
+  graphPageRequest++
   if (statsTimer) {
     clearInterval(statsTimer)
   }
@@ -4877,15 +4962,33 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="less">
+.wiki-learning-layout { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
+.wiki-learning-layout > .learning-panel { flex: none; }
+.learning-overlay-error { max-width: 260px; font-size: 12px; }
 .wiki-browser {
   display: flex;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   background: var(--td-bg-color-container);
   // Align list rows with the session sidebar grid (menu.vue).
   --wiki-list-inset-x: 10px;
   --wiki-list-row-radius: 6px;
   --wiki-list-row-min-height: 30px;
+}
+@media (max-width: 760px) {
+  .wiki-browser { flex-direction: column; overflow: auto; }
+  .wiki-browser .wiki-sidebar { width: 100%; min-width: 0; max-height: 26vh; flex-shrink: 0; box-sizing: border-box; border-right: 0; }
+  .wiki-browser .wiki-content { flex: none; overflow: visible; }
+  .wiki-browser .wiki-reader { padding-inline: 10px; }
+  .wiki-browser .wiki-reader-title-row { flex-direction: column; gap: 10px; }
+  .wiki-browser .wiki-reader-title { font-size: 20px; overflow-wrap: anywhere; }
+  .wiki-browser .wiki-reader-aside { align-items: flex-start; }
+  .wiki-browser .wiki-reader { min-width: 0; min-height: 280px; overflow: visible; }
+  .wiki-browser .wiki-graph { display: flex; flex-direction: column; flex: none; height: auto; overflow: visible; }
+  .wiki-browser .wiki-graph-search-container { position: static; order: -1; width: auto; margin: 10px; }
+  .wiki-browser .wiki-graph-canvas { height: 320px; min-height: 320px; }
+  .wiki-browser .wiki-graph-legend { position: static; width: auto; max-width: none; max-height: 200px; margin: 10px; }
+  .wiki-browser .legend-items, .wiki-browser .legend-actions { flex-direction: row; flex-wrap: wrap; }
 }
 
 // ── Left Sidebar ──
@@ -6211,6 +6314,11 @@ onUnmounted(() => {
 }
 
 .wiki-graph-legend {
+  width: 240px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  box-sizing: border-box;
   position: absolute;
   top: 16px;
   right: 16px;
@@ -6232,6 +6340,7 @@ onUnmounted(() => {
 }
 
 .legend-items {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;

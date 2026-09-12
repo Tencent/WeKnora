@@ -177,7 +177,9 @@ func Logger() gin.HandlerFunc {
 			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string
-		if !browserTraffic && (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
+		privateLearning := strings.HasPrefix(path, "/api/v1/learning/") || path == "/api/v1/learning"
+		if !browserTraffic && !privateLearning &&
+			(c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
 			requestBody = readRequestBody(c)
 		}
 
@@ -187,8 +189,11 @@ func Logger() gin.HandlerFunc {
 			ResponseWriter: c.Writer,
 			body:           responseBody,
 		}
-		if !browserTraffic {
+		if !browserTraffic && !privateLearning {
 			c.Writer = responseWriter
+		}
+		if privateLearning {
+			raw = "" // Never copy learner answers or export filters into access logs.
 		}
 
 		// Process request

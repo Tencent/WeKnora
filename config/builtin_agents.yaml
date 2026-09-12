@@ -3,6 +3,35 @@
 # The "default" locale is used as fallback when the user's language is not found.
 
 builtin_agents:
+  - id: "builtin-guided-learning"
+    avatar: ""
+    is_builtin: true
+    i18n:
+      default: {name: "Guided Learning", description: "Source-backed Wiki practice and personal learning recommendations"}
+      zh-CN: {name: "引导式学习", description: "基于 Wiki 来源的测验与个人学习推荐"}
+      zh-TW: {name: "引導式學習", description: "依據 Wiki 來源的測驗與個人學習建議"}
+      ja-JP: {name: "学習ガイド", description: "Wikiの出典に基づく練習と個人向け学習提案"}
+      ko-KR: {name: "학습 가이드", description: "Wiki 출처 기반 연습과 개인별 학습 추천"}
+      ru-RU: {name: "Учебный помощник", description: "Практика и персональные рекомендации по Wiki"}
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "guided-learning"
+      system_prompt_id: "guided_learning"
+      temperature: 0.2
+      max_completion_tokens: 4096
+      max_iterations: 12
+      kb_selection_mode: "all"
+      allowed_tools:
+        - "get_learning_profile"
+        - "recommend_learning_topics"
+        - "prepare_learning_quiz"
+        - "wiki_search"
+        - "wiki_read_page"
+        - "wiki_read_source_doc"
+      web_search_enabled: false
+      multi_turn_enabled: true
+      history_turns: 5
+
   - id: "builtin-quick-answer"
     avatar: ""
     is_builtin: true

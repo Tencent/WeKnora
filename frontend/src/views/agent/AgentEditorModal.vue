@@ -1878,6 +1878,7 @@ import { integrationSectionKey } from '@/config/settingsRoute';
 import {
   evaluateToolRequirement,
   deriveKbFilterFromTools,
+  toolsRequireOwnedWiki,
   type RequirementMissKind,
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
@@ -2380,6 +2381,9 @@ const mcpSelectionMode = ref<'all' | 'selected' | 'none'>('none');
 // 工具的 KB 能力依赖关系统一在 `@/utils/tool-capabilities` 声明，
 // `availableTools` 通过 `evaluateToolRequirement` 读取，不在这里重复维护。
 const allTools = computed(() => [
+  { value: 'get_learning_profile', label: t('learning.tools.profile'), description: t('learning.tools.profileDesc'), group: 'wiki_read' },
+  { value: 'recommend_learning_topics', label: t('learning.tools.recommend'), description: t('learning.tools.recommendDesc'), group: 'wiki_read' },
+  { value: 'prepare_learning_quiz', label: t('learning.tools.quiz'), description: t('learning.tools.quizDesc'), group: 'wiki_read' },
   // 基础思考类
   { value: 'thinking', label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc'), group: 'base' },
   { value: 'todo_write', label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc'), group: 'base' },
@@ -2471,19 +2475,23 @@ const hasFaqKnowledgeBase = computed(() => {
 // 把"作用域内 KB 能力"聚合成一个 ScopeCapabilities 对象，交给
 // `evaluateToolRequirement` 统一判定；UI 上的所有可用性提示都应出自此处。
 const scopeCapabilities = computed<ScopeCapabilities>(() => {
-  const scope: ScopeCapabilities = { vector: false, keyword: false, wiki: false, graph: false, faq: false };
+  const scope: ScopeCapabilities = {
+    vector: false, keyword: false, wiki: false, ownedWiki: false, graph: false, faq: false,
+  };
   for (const kb of kbsInScope.value) {
     const caps = kb.capabilities;
     if (caps) {
       if (caps.vector) scope.vector = true;
       if (caps.keyword) scope.keyword = true;
       if (caps.wiki) scope.wiki = true;
+      if (caps.wiki && !kb.shared) scope.ownedWiki = true;
       if (caps.graph) scope.graph = true;
       if (caps.faq) scope.faq = true;
     } else {
       // 向后兼容：capabilities 尚未加载时，退回到 ragEnabled/wikiEnabled 推断
       if (kb.ragEnabled) { scope.vector = true; scope.keyword = true; }
       if (kb.wikiEnabled) scope.wiki = true;
+      if (kb.wikiEnabled && !kb.shared) scope.ownedWiki = true;
       if (kb.type === 'faq') scope.faq = true;
     }
   }
@@ -2497,6 +2505,7 @@ const missKindToReason = (kind: RequirementMissKind): string | undefined => {
   switch (kind) {
     case 'needsKb': return t('agentEditor.tools.requiresKb');
     case 'needsWiki': return t('agentEditor.tools.requiresWikiKb');
+    case 'needsOwnedWiki': return t('agentEditor.tools.requiresOwnedWikiKb');
     case 'needsRag':
     case 'needsGraph':
     case 'needsFaq': return t('agentEditor.tools.requiresRagKb');
@@ -3207,9 +3216,13 @@ const effectiveKbFilter = (preset: AgentTypePreset | null): AgentTypeKBFilter | 
 };
 
 // 评估单个 KB 是否满足给定预设的 kb_filter
-const kbSatisfiesPresetFilter = (kb: { capabilities?: KBCapabilities; ragEnabled?: boolean; wikiEnabled?: boolean; type?: string }, preset: AgentTypePreset | null): { ok: boolean; reason: string } => {
+const kbSatisfiesPresetFilter = (kb: { capabilities?: KBCapabilities; ragEnabled?: boolean; wikiEnabled?: boolean; type?: string; shared?: boolean }, preset: AgentTypePreset | null): { ok: boolean; reason: string } => {
   const filter = effectiveKbFilter(preset);
-  if (!preset || !filter) return { ok: true, reason: '' };
+  if (!preset) return { ok: true, reason: '' };
+  if (kb.shared && toolsRequireOwnedWiki(preset.config?.allowed_tools)) {
+    return { ok: false, reason: t('agentEditor.tools.requiresOwnedWikiKb') };
+  }
+  if (!filter) return { ok: true, reason: '' };
   const caps = kb.capabilities || {
     vector: !!kb.ragEnabled,
     keyword: !!kb.ragEnabled,
