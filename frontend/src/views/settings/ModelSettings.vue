@@ -849,13 +849,17 @@ const handleModelSave = async (modelData: any) => {
     ) {
       extraConfig.thinking_control = modelData.thinkingControl
     }
-    if (saveType === 'chat' && modelData.pricingEnabled) {
-      extraConfig.pricing_enabled = 'true'
-      extraConfig.pricing_currency = String(modelData.pricingCurrency || 'USD').trim().toUpperCase()
-      extraConfig.input_price_per_million = String(Math.max(0, Number(modelData.inputPricePerMillion) || 0))
-      extraConfig.output_price_per_million = String(Math.max(0, Number(modelData.outputPricePerMillion) || 0))
-      extraConfig.cache_read_price_per_million = String(Math.max(0, Number(modelData.cacheReadPricePerMillion) || 0))
-      extraConfig.cache_write_price_per_million = String(Math.max(0, Number(modelData.cacheWritePricePerMillion) || 0))
+    if (saveType === 'chat') {
+      // Send the disabled state explicitly. Omitting ExtraConfig causes the
+      // update handler to preserve the previous pricing map.
+      extraConfig.pricing_enabled = String(modelData.pricingEnabled === true)
+      if (modelData.pricingEnabled) {
+        extraConfig.pricing_currency = String(modelData.pricingCurrency || 'USD').trim().toUpperCase()
+        extraConfig.input_price_per_million = String(Math.max(0, Number(modelData.inputPricePerMillion) || 0))
+        extraConfig.output_price_per_million = String(Math.max(0, Number(modelData.outputPricePerMillion) || 0))
+        extraConfig.cache_read_price_per_million = String(Math.max(0, Number(modelData.cacheReadPricePerMillion) || 0))
+        extraConfig.cache_write_price_per_million = String(Math.max(0, Number(modelData.cacheWritePricePerMillion) || 0))
+      }
     }
     if (saveType === 'embedding') {
       extraConfig.embedding_cache_enabled = String(modelData.embeddingCacheEnabled !== false)
