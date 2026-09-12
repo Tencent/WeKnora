@@ -42,8 +42,10 @@ export interface InitializationConfig {
     };
     multimodal: {
         enabled: boolean;
-        storageType: 'cos' | 'minio';
+        // 后端写入 effectiveProvider，可为任意已配置的存储 provider（如 'obs'）
+        storageType: string;
         vlm?: {
+            modelId?: string;
             modelName: string;
             baseUrl: string;
             /** @deprecated Use credentials.apiKey from GET responses */
@@ -179,22 +181,6 @@ export function updateKBConfig(kbId: string, config: KBModelConfigRequest): Prom
 }
 
 // 根据知识库ID执行配置更新（旧版，保留兼容性）
-export function initializeSystemByKB(kbId: string, config: InitializationConfig): Promise<any> {
-    return new Promise((resolve, reject) => {
-        console.log('Starting KB config update...', kbId, config);
-        post(`/api/v1/initialization/initialize/${kbId}`, config)
-            .then((response: any) => {
-                console.log('KB config update completed', response);
-                resolve(response);
-            })
-            .catch((error: any) => {
-                console.error('Failed to update KB config:', error);
-                reject(error.error || error);
-            });
-    });
-}
-
-// 检查Ollama服务状态
 export function checkOllamaStatus(): Promise<{ available: boolean; version?: string; error?: string; baseUrl?: string }> {
     return new Promise((resolve, reject) => {
         get('/api/v1/initialization/ollama/status')
@@ -272,35 +258,6 @@ export function getDownloadProgress(taskId: string): Promise<DownloadTask> {
     });
 }
 
-// 获取所有下载任务
-export function listDownloadTasks(): Promise<DownloadTask[]> {
-    return new Promise((resolve, reject) => {
-        get('/api/v1/initialization/ollama/download/tasks')
-            .then((response: any) => {
-                resolve(response.data || []);
-            })
-            .catch((error: any) => {
-                console.error('Failed to list download tasks:', error);
-                reject(error);
-            });
-    });
-}
-
-
-export function getCurrentConfigByKB(kbId: string): Promise<InitializationConfig & { hasFiles: boolean }> {
-    return new Promise((resolve, reject) => {
-        get(`/api/v1/initialization/config/${kbId}`)
-            .then((response: any) => {
-                resolve(response.data || {});
-            })
-            .catch((error: any) => {
-                console.error('Failed to get KB config:', error);
-                reject(error);
-            });
-    });
-}
-
-// 所有"测试连接"接口共用的通用可选参数。
 // customHeaders / extraConfig / interfaceType 对应后端 ModelTestRequest 里的同名字段，
 // 会被透传给真正的模型装配流程，保证测试连接与生产调用走完全相同的路径。
 interface BaseModelTestPayload {
@@ -405,100 +362,6 @@ export function checkASRModel(modelConfig: {
     });
 }
 
-export function testMultimodalFunction(testData: {
-    image: File;
-    vlm_model: string;
-    vlm_base_url: string;
-    vlm_api_key?: string;
-    vlm_interface_type?: string;
-    storage_type?: 'cos' | 'minio';
-    // COS optional fields (required only when storage_type === 'cos')
-    cos_secret_id?: string;
-    cos_secret_key?: string;
-    cos_region?: string;
-    cos_bucket_name?: string;
-    cos_app_id?: string;
-    cos_path_prefix?: string;
-    // MinIO optional fields
-    minio_bucket_name?: string;
-    minio_path_prefix?: string;
-    chunk_size: number;
-    chunk_overlap: number;
-    separators: string[];
-}): Promise<{
-    success: boolean;
-    caption?: string;
-    ocr?: string;
-    processing_time?: number;
-    message?: string;
-}> {
-    return new Promise((resolve, reject) => {
-        const formData = new FormData();
-        formData.append('image', testData.image);
-        formData.append('vlm_model', testData.vlm_model);
-        formData.append('vlm_base_url', testData.vlm_base_url);
-        if (testData.vlm_api_key) {
-            formData.append('vlm_api_key', testData.vlm_api_key);
-        }
-        if (testData.vlm_interface_type) {
-            formData.append('vlm_interface_type', testData.vlm_interface_type);
-        }
-        if (testData.storage_type) {
-            formData.append('storage_type', testData.storage_type);
-        }
-        // Append COS fields only when storage_type is COS
-        if (testData.storage_type === 'cos') {
-            if (testData.cos_secret_id) formData.append('cos_secret_id', testData.cos_secret_id);
-            if (testData.cos_secret_key) formData.append('cos_secret_key', testData.cos_secret_key);
-            if (testData.cos_region) formData.append('cos_region', testData.cos_region);
-            if (testData.cos_bucket_name) formData.append('cos_bucket_name', testData.cos_bucket_name);
-            if (testData.cos_app_id) formData.append('cos_app_id', testData.cos_app_id);
-            if (testData.cos_path_prefix) formData.append('cos_path_prefix', testData.cos_path_prefix);
-        }
-        // MinIO fields
-        if (testData.minio_bucket_name) formData.append('minio_bucket_name', testData.minio_bucket_name);
-        if (testData.minio_path_prefix) formData.append('minio_path_prefix', testData.minio_path_prefix);
-        formData.append('chunk_size', testData.chunk_size.toString());
-        formData.append('chunk_overlap', testData.chunk_overlap.toString());
-        formData.append('separators', JSON.stringify(testData.separators));
-
-        // 获取鉴权Token
-        const token = localStorage.getItem('weknora_token');
-        const headers: Record<string, string> = {};
-        if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        // 跨空间访问请求头：直接附，避免 short-circuit "selectedTenantId
-        // === defaultTenantId 时不附" 在某些边角下让 header 静默丢失。
-        // 与 utils/request.ts、api/chat/streame.ts 行为一致。
-        const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
-        if (selectedTenantId) {
-            headers['X-Tenant-ID'] = selectedTenantId;
-        }
-
-        // 使用原生fetch因为需要发送FormData
-        fetch('/api/v1/initialization/multimodal/test', {
-            method: 'POST',
-            headers,
-            body: formData
-        })
-            .then(response => response.json())
-            .then((data: any) => {
-                if (data.success) {
-                    resolve(data.data || {});
-                } else {
-                    resolve({ success: false, message: data.message || t('error.initialization.testFailed') });
-                }
-            })
-            .catch((error: any) => {
-                console.error('Failed multimodal test:', error);
-                reject(error);
-            });
-    });
-}
-
-// 文本内容关系提取接口
 export interface TextRelationExtractionRequest {
     text: string;
     tags: string[];
@@ -611,14 +474,15 @@ export interface ProviderCapabilities {
     };
     chat?: ProviderChatCaps;
     embedding?: ProviderEmbeddingCaps;
-    rerank?: Record<string, never>;
-    asr?: Record<string, never>;
+    // 镜像后端 RerankCaps / ASRCaps（internal/models/invoke/capabilities.go）
+    rerank?: { max_documents?: number; min_score?: number; max_score?: number };
+    asr?: { audio_formats?: string[]; languages?: string[]; streaming?: boolean };
     // 厂商需要的凭证槽位；weknoracloud 声明为空数组（凭证在空间级设置）。
     credentials?: ProviderCredentialFieldSpec[];
 }
 
 // 厂商凭证槽位声明（design §6.8）：前端据此动态渲染凭证表单。
-// 镜像后端 internal/models/provider/capabilities.go 的 CredentialFieldSpec。
+// 镜像后端 internal/models/invoke/capabilities.go 的 CredentialFieldSpec。
 export interface ProviderCredentialFieldSpec {
     key: string;        // 固定三槽：api_key / app_id / app_secret
     required: boolean;

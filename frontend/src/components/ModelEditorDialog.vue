@@ -27,7 +27,7 @@
       </span>
     </template>
 
-    <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
+    <t-form ref="formRef" :data="formData" layout="vertical">
 
       <section v-if="!isEdit" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionType') }}</h4>
@@ -554,9 +554,9 @@ const loadProviders = async () => {
   loadingProviders.value = true
   try {
     const providers = await listModelProviders(activeModelType.value)
-    if (providers.length > 0) {
-      apiProviderOptions.value = providers
-    }
+    // 无条件赋值（2026-09-13 审查）：失败/空返回时保留旧列表会让用户给
+    // embedding 挑一个 chat 专属厂商；清空后 computed 自动回落 generic 兜底。
+    apiProviderOptions.value = providers
   } catch (error) {
     console.error('Failed to load providers from API, using fallback', error)
   } finally {
@@ -692,8 +692,9 @@ function applyPrefill(meta: CatalogModelEntry, source: PrefillSource) {
       l => !providerLevels?.length || providerLevels.includes(l),
     )
     set('selectedLevels', levels.length > 0, () => { f.selectedLevels = [...levels] })
-    set('thinkingLevel', !!meta.thinking.default_level, () => {
-      f.thinkingLevel = meta.thinking?.default_level || ''
+    const defaultLevel = meta.thinking.default_level
+    set('thinkingLevel', !!defaultLevel && levels.includes(defaultLevel), () => {
+      f.thinkingLevel = defaultLevel || ''
       if (f.thinkingLevel && f.thinkingEnabled === undefined) f.thinkingEnabled = true
     })
   }
@@ -775,6 +776,18 @@ const ensureCatalogLoaded = async (provider: string) => {
   }
 }
 
+// 后端 RemoteModel 摊平字段 → 目录条目形状（applyPrefill 的输入）。
+// 后端不发 thinking 的 supported/can_disable/default_level：有 levels 即视为
+// supported，can_disable 取宽（可被取值链第 2 级目录修正）。
+const remoteModelPrefill = (m: RemoteCatalogModel): CatalogModelEntry => ({
+  context_window: m.context_window,
+  max_output_tokens: m.max_output_tokens,
+  input_modalities: m.modalities,
+  thinking: m.thinking_levels?.length
+    ? { supported: true, can_disable: true, levels: m.thinking_levels }
+    : undefined,
+})
+
 /** 换模型 ID = 新选择：按取值链预填（接口元数据 → 目录 → 留空）。 */
 const prefillForModelId = async (modelId: string) => {
   if (!showRemoteModelSelect.value || !modelId.trim() || !formData.value.provider) return
@@ -784,14 +797,23 @@ const prefillForModelId = async (modelId: string) => {
   }
   const provider = formData.value.provider
   const id = modelId.trim()
-  // 1) 接口元数据
+  // 1) 接口元数据（后端已摊平为扁平字段，meta 信封已删除——取值链第 1 级）
   const remoteHit = remoteModels.value.find(m => m.id === id)
-  if (remoteHit?.meta) applyPrefill(remoteHit.meta, 'remote')
+  if (remoteHit) applyPrefill(remoteModelPrefill(remoteHit), 'remote')
   // 2) models.json 目录（补齐接口元数据未覆盖的字段）
   await ensureCatalogLoaded(provider)
   const entry = lookupCatalogEntry(provider, id)
   if (entry) applyPrefill(entry, 'catalog')
 }
+
+// 厂商 caps 晚到（/models/providers 异步返回常慢于探测/目录）：思考区翻真
+// 时重跑一次预填——applyPrefill 的 manualFields 守卫保证不覆盖手动值
+// （2026-09-13 审查：此前预填只在 modelName 变化时执行一次，慢网下静默丢失）。
+watch(showThinkingSection, (supported) => {
+  if (supported && !hydratingForm.value) {
+    void prefillForModelId(formData.value.modelName)
+  }
+})
 
 
 // Header icon for the SettingDrawer — uses the same TDesign icon name table
@@ -1023,46 +1045,6 @@ const formData = ref<ModelFormData>({
   lkeapRegion: 'ap-guangzhou',
 })
 
-const rules = computed(() => ({
-  modelName: [
-    { required: true, message: t('model.editor.validation.modelNameRequired') },
-    {
-      validator: (val: string) => {
-        if (!val || !val.trim()) {
-          return { result: false, message: t('model.editor.validation.modelNameEmpty') }
-        }
-        if (val.trim().length > 100) {
-          return { result: false, message: t('model.editor.validation.modelNameMax') }
-        }
-        return { result: true }
-      },
-      trigger: 'blur'
-    }
-  ],
-  baseUrl: [
-    {
-      required: true,
-      message: t('model.editor.validation.baseUrlRequired'),
-      trigger: 'blur'
-    },
-    {
-      validator: (val: string) => {
-        if (!val || !val.trim()) {
-          return { result: false, message: t('model.editor.validation.baseUrlEmpty') }
-        }
-        // 简单的 URL 格式校验
-        try {
-          new URL(val.trim())
-          return { result: true }
-        } catch {
-          return { result: false, message: t('model.editor.validation.baseUrlInvalid') }
-        }
-      },
-      trigger: 'blur'
-    }
-  ]
-}))
-
 // 获取弹窗描述文字
 const getModalDescription = () => {
   const key = `model.editor.description.${activeModelType.value}` as const
@@ -1187,6 +1169,10 @@ watch(() => props.visible, (val) => {
     dimensionChecked.value = false
     dimensionSuccess.value = false
     dimensionMessage.value = ''
+    // 编辑路径不走 resetForm，上一会话探测出的远端模型列表会跨会话残留，
+    // 用户可能选中错误厂商的模型 ID（2026-09-13 审查）
+    remoteModels.value = []
+    probingRemoteModels.value = false
 
     const currentId = props.modelData?.id ?? null
     draftModelType.value = props.modelType
@@ -1309,10 +1295,13 @@ const handleProviderChange = (value: string) => {
 let probeTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(
-  () => [formData.value.source, formData.value.provider, formData.value.modelName, activeModelType.value] as const,
-  ([source, provider, modelName, modelType], [prevSource, prevProvider, prevModelName, prevModelType]) => {
+  () => [formData.value.source, formData.value.provider, formData.value.modelName, activeModelType.value,
+    formData.value.baseUrl, formData.value.apiKey] as const,
+  ([source, provider, modelName, modelType, baseUrl, apiKey],
+    [prevSource, prevProvider, prevModelName, prevModelType, prevBaseUrl, prevApiKey]) => {
     if (hydratingForm.value) return
-    if (source === prevSource && provider === prevProvider && modelName === prevModelName && modelType === prevModelType) return
+    if (source === prevSource && provider === prevProvider && modelName === prevModelName
+      && modelType === prevModelType && baseUrl === prevBaseUrl && apiKey === prevApiKey) return
 
     // 远端模型列表探测（防抖）：新建用已填 base_url+api_key，编辑用存储凭证；
     // 切换模型类型同样重探（裁定③：列表按当前编辑类型过滤）
@@ -1673,8 +1662,25 @@ const handleConfirm = async () => {
       }
     }
 
-    // 执行表单验证
-    await formRef.value?.validate()
+    // 数字字段显式校验（2026-09-13 审查）：t-input 的 :min/:max 只约束步进
+    // 箭头、挡不住键入——越界值此前被父组件静默丢弃（卡片显示默认值）或
+    // 原样发往后端。字段留空仍交给父组件的门控语义。
+    // 运行时形态是 number | ''（清空输入）| undefined，统一按 unknown 比较
+    const cw = formData.value.contextWindow as unknown
+    if (cw !== '' && cw != null && (Number.isNaN(Number(cw)) || Number(cw) < 1024 || Number(cw) > 10000000)) {
+      MessagePlugin.warning(t('model.editor.validation.contextWindowRange'))
+      return
+    }
+    const mo = formData.value.maxOutputTokens as unknown
+    if (mo !== '' && mo != null && (Number.isNaN(Number(mo)) || Number(mo) < 1)) {
+      MessagePlugin.warning(t('model.editor.validation.maxOutputTokensRange'))
+      return
+    }
+    const mc = formData.value.maxConcurrency as unknown
+    if (mc !== '' && mc != null && (Number.isNaN(Number(mc)) || Number(mc) < 0)) {
+      MessagePlugin.warning(t('model.editor.validation.maxConcurrencyRange'))
+      return
+    }
 
     // Credential removal in edit mode is handled inline by the
     // CredentialResource card (it confirms + DELETEs to /credentials), so
@@ -1705,6 +1711,7 @@ const handleConfirm = async () => {
 
 // 监听模型选择变化（处理下载逻辑和自动维度检测提示）
 watch(() => formData.value.modelName, async (newValue, oldValue) => {
+  if (hydratingForm.value) return // 编辑打开的灌入不触发下载/维度提示副作用
   if (!newValue) return
 
   // 处理下载逻辑
@@ -1760,8 +1767,12 @@ const startDownload = async (modelName: string) => {
           // 刷新模型列表
           await loadOllamaModels()
 
-          // 自动选中新下载的模型
-          formData.value.modelName = modelName
+          // 自动选中新下载的模型——仅当抽屉仍打开且还在 local 新建流程：
+          // ESC/遮罩关闭不清理下载轮询，完成后若用户已改开编辑表单，这里
+          // 的无条件回填会把别人家表单的 modelName 写坏（2026-09-13 审查）。
+          if (props.visible && formData.value.source === 'local' && !isEdit.value) {
+            formData.value.modelName = modelName
+          }
 
           // 重置状态
           downloadProgress.value = 0
@@ -1823,6 +1834,7 @@ watch(() => formData.value.source, () => {
 
 // 监听模型名称变化，清理维度检测状态
 watch(() => formData.value.modelName, () => {
+  if (hydratingForm.value) return // 编辑打开的灌入不是用户输入
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''

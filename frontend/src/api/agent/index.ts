@@ -135,6 +135,19 @@ export interface CustomAgentConfig {
   // 意图提示词：非检索意图（问候、闲聊等）时覆盖主系统提示词
   intent_prompts?: Record<string, string>;
 
+  // ===== 上下文模板 / 检索历史 / 数据分析 / FAQ / 联网抓取 / 查询理解 =====
+  // （后端 custom_agent.go 全量替换 config——按本接口从零构造会清零这些
+  // 字段，2026-09-13 审查补齐镜像）
+  context_template_id?: string;
+  retain_retrieval_history?: boolean;
+  data_analysis_enabled?: boolean;
+  faq_priority_enabled?: boolean;
+  faq_direct_answer_threshold?: number;
+  faq_score_boost?: number;
+  web_fetch_enabled?: boolean;
+  web_fetch_top_n?: number;
+  query_understand_model_id?: string;
+
   // ===== 已废弃字段（保留兼容）=====
   welcome_message?: string;
   question_suggestions?: QuestionSuggestionConfig;

@@ -26,28 +26,26 @@ interface StreamOptions {
 }
 
 export function useStream() {
-  // 响应式状态
-  const output = ref('')              // 显示内容
+  // 响应式状态（output/isLoading 曾是有写无读的死状态、buffer 是只进不读的
+  // 跨流死缓冲——随流累积，2026-09-13 审查删除；消费者只取下方 return 的键）
   const isStreaming = ref(false)      // 流状态
-  const isLoading = ref(false)        // 初始加载
   const error = ref<string | null>(null)// 错误信息
   const lastStreamRequest = ref<StreamRequestMeta | null>(null)
   let controller = new AbortController()
   let streamGeneration = 0
 
-  // 流式渲染缓冲
-  let buffer: string[] = []
-  let renderTimer: number | null = null
-
   // 启动流式请求
   const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; summary_model_id?: string; thinking_level?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
     const myGeneration = ++streamGeneration
+    // 终止在途旧流（2026-09-13 审查）：此前 generation guard 只丢 UI 渲染，
+    // 旧连接仍在耗网络与上游 tokens——先 abort 旧 controller 再换新；
+    // 旧流的 onclose/catch 需校验 generation，防止清理动作杀死新流。
+    controller.abort()
+    controller = new AbortController()
     const streamAbort = controller
     // 重置状态
-    output.value = '';
     error.value = null;
     isStreaming.value = true;
-    isLoading.value = true;
 
     // 获取API配置
     const apiUrl = getApiBaseUrl();
@@ -183,12 +181,19 @@ export function useStream() {
           if (res.status === 401) throw new StreamAuthError(res.status);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           console.log(`[TTFB] response:headers request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
-          isLoading.value = false;
         },
 
         onmessage: (ev) => {
           if (myGeneration !== streamGeneration) return
-          const parsed = JSON.parse(ev.data);
+          // 坏帧跳过（2026-09-13 审查）：裸 JSON.parse 的一帧异常会 reject
+          // 整条流；SSE 语义本可跳过坏帧续传。
+          let parsed: any;
+          try {
+            parsed = JSON.parse(ev.data);
+          } catch {
+            console.warn('[stream] skip non-JSON SSE frame:', String(ev.data).slice(0, 120));
+            return;
+          }
           // Log first answer chunk for end-to-end TTFB measurement.
           // Filter by event type so non-answer events (references, tool
           // calls, etc.) don't count as the "first token" arrival.
@@ -196,7 +201,6 @@ export function useStream() {
             firstAnswerLogged = true;
             console.log(`[TTFB] response:first_answer request_id=${requestID} elapsed_ms=${(performance.now() - sentAt).toFixed(1)}`);
           }
-          buffer.push(parsed); // 数据存入缓冲
           // 执行自定义处理
           if (chunkHandler) {
             chunkHandler(parsed);
@@ -209,7 +213,8 @@ export function useStream() {
         },
 
         onclose: () => {
-          stopStream();
+          // generation 守卫：被新流 abort 的旧连接走到这里时不得清理新流
+          if (myGeneration === streamGeneration) stopStream();
         },
       });
 
@@ -227,8 +232,11 @@ export function useStream() {
         reloginMessage: i18n.global.t('error.pleaseRelogin'),
       });
     } catch (err) {
-      error.value = err instanceof Error ? err.message : String(err)
-      stopStream()
+      // generation 守卫：旧流被 abort 的报错不得写入新流的 error 状态
+      if (myGeneration === streamGeneration) {
+        error.value = err instanceof Error ? err.message : String(err)
+        stopStream()
+      }
     }
   }
 
@@ -245,16 +253,13 @@ export function useStream() {
     controller.abort();
     controller = new AbortController(); // 重置控制器（如需重新发起）
     isStreaming.value = false;
-    isLoading.value = false;
   }
 
   // 组件卸载时自动清理
   onUnmounted(stopStream)
 
   return {
-    output,          // 显示内容
     isStreaming,     // 是否在流式传输中
-    isLoading,       // 初始连接状态
     error,
     lastStreamRequest,
     onChunk,

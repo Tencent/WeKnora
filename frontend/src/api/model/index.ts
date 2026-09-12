@@ -60,10 +60,10 @@ export interface ModelConfig {
   status?: string;
   // Per-field configured? metadata from the main response. For builtin
   // models it is returned only to system administrators.
-  credentials?: Record<ModelCredentialField, { configured: boolean }>;
+  // 后端只构造 api_key/app_secret 两键（app_id 非密钥不进此 map）
+  credentials?: Partial<Record<ModelCredentialField, { configured: boolean }>>;
   created_at?: string;
   updated_at?: string;
-  deleted_at?: string | null;
 }
 
 // 创建模型
@@ -103,24 +103,6 @@ export function listModels(type?: string): Promise<ModelConfig[]> {
         console.error('Failed to list models:', error);
         // 抛出而非吞掉：调用方（含缓存层）才能区分「真失败」与「成功但无模型」，
         // 避免把一次瞬时失败的空结果缓存下来。各 UI 调用点均已 try/catch 兜底。
-        reject(error);
-      });
-  });
-}
-
-// 获取单个模型
-export function getModel(id: string): Promise<ModelConfig> {
-  return new Promise((resolve, reject) => {
-    get(`/api/v1/models/${id}`)
-      .then((response: any) => {
-        if (response.success && response.data) {
-          resolve(response.data);
-        } else {
-          reject(new Error(response.message || t('error.model.getFailed')));
-        }
-      })
-      .catch((error: any) => {
-        console.error('Failed to get model:', error);
         reject(error);
       });
   });
@@ -225,7 +207,7 @@ export async function debugModel(
 export type ModelCredentialField = 'api_key' | 'app_id' | 'app_secret'
 
 export interface ModelCredentialsResponse {
-  fields: Record<ModelCredentialField, { configured: boolean }>
+  fields: Partial<Record<ModelCredentialField, { configured: boolean }>>
 }
 
 export async function putModelCredentials(
@@ -300,18 +282,14 @@ export interface RemoteCatalogModel {
   id: string;
   display_name?: string;
   owned_by?: string;
-  // 接口元数据（取值链第 1 级）。多数 OpenAI 兼容列表只有 id，meta 为空。
-  meta?: {
-    context_window?: number;
-    max_output_tokens?: number;
-    input_modalities?: string[];
-    thinking?: {
-      supported: boolean;
-      can_disable: boolean;
-      levels?: string[];
-      default_level?: string;
-    };
-  };
+  // 接口元数据（取值链第 1 级）——后端已摊平为扁平字段（invoke.RemoteModel，
+  // v1 的恒空 meta 信封已删除）。多数 OpenAI 兼容列表只有 id，其余为空。
+  context_window?: number;
+  max_output_tokens?: number;
+  modalities?: string[];
+  thinking_levels?: string[];
+  /** @deprecated 后端 meta 信封已删除，恒 undefined，勿再读取 */
+  meta?: unknown;
 }
 
 // 后端代理探测厂商模型列表（密钥不出服务端）。失败降级 available:false，不阻断创建。

@@ -2420,8 +2420,8 @@ export default {
       selectedLevelsPlaceholder: '选择该模型支持的档位',
       selectedLevelsDesc: '从厂商档位词表中勾选该模型实际支持的档位；留空表示未指定。',
       thinkingLevelLabel: '默认思考档位',
-      thinkingLevelPlaceholder: '留空 = 适配器自决',
-      thinkingLevelDesc: '用户/智能体未指定档位时使用的默认档；留空由适配器决定（用厂商默认或不发档位参数）。',
+      thinkingLevelPlaceholder: '留空 = 服务商自决',
+      thinkingLevelDesc: '用户/智能体未指定档位时使用的默认档；留空由模型服务商决定（用厂商默认或不发档位参数）。',
       thinkingLevelsUnsupportedHint: '该模型不支持思考强度调节',
       maxOutputTokensLabel: '最大输出 token',
       maxOutputTokensPlaceholder: '留空 = 不限制',
@@ -2562,6 +2562,9 @@ export default {
         baseUrlRequired: '请输入 Base URL',
         baseUrlEmpty: 'Base URL 不能为空',
         baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL',
+        contextWindowRange: '上下文窗口需在 1024 ~ 10000000 之间',
+        maxOutputTokensRange: '最大输出 Token 需为正整数',
+        maxConcurrencyRange: '后台并发上限需为非负整数',
         credentialRequired: '请填写{field}'
       },
       thinkingLevels: {

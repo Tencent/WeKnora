@@ -1102,12 +1102,14 @@ const resetSessionThinking = () => {
   sessionThinking.value = { enabled: false, level: '' };
 };
 
-// 会话中切模型：已选档位 ∉ 新模型集合 → 清空 + toast（同 §8.1.2 规则）
+// 会话中切模型：已选档位 ∉ 新模型集合 → 清空 + toast（同 §8.1.2 规则）；
+// 切到不支持思考的模型同样清空——面板因 thinkingSupported=false 隐藏后，
+// 残留档位仍会随请求发出，用户既看不见也无法清除（2026-09-13 审查）。
 watch(selectedModelId, () => {
   const level = sessionThinking.value.level;
   if (!level) return;
   const options = sessionThinkingLevelOptions.value;
-  if (options.length > 0 && !options.includes(level)) {
+  if (options.length === 0 || !options.includes(level)) {
     resetSessionThinking();
     MessagePlugin.warning(t('input.thinkingLevelResetToast'));
   }

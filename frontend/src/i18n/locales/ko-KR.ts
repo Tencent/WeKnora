@@ -2418,8 +2418,8 @@ export default {
       selectedLevelsPlaceholder: '이 모델이 지원하는 레벨 선택',
       selectedLevelsDesc: '벤더 레벨 어휘에서 이 모델이 실제로 지원하는 레벨을 선택하세요. 비워 두면 미지정입니다.',
       thinkingLevelLabel: '기본 사고 레벨',
-      thinkingLevelPlaceholder: '비움 = 어댑터가 결정',
-      thinkingLevelDesc: '사용자/에이전트가 레벨을 지정하지 않았을 때 쓰이는 기본 레벨입니다. 비워 두면 어댑터가 결정합니다(벤더 기본값 사용 또는 레벨 파라미터 미전송).',
+      thinkingLevelPlaceholder: '비움 = 모델 공급자가 결정',
+      thinkingLevelDesc: '사용자/에이전트가 레벨을 지정하지 않았을 때 쓰이는 기본 레벨입니다. 비워 두면 모델 공급자가 결정합니다(벤더 기본값 사용 또는 레벨 파라미터 미전송).',
       thinkingLevelsUnsupportedHint: '이 모델은 사고 강도 조절을 지원하지 않습니다',
       appIdLabel: 'App ID',
       appSecretLabel: 'App Secret',
@@ -2560,6 +2560,9 @@ export default {
         baseUrlRequired: 'Base URL을 입력해주세요',
         baseUrlEmpty: 'Base URL은 비워둘 수 없습니다',
         baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요',
+        contextWindowRange: '컨텍스트 윈도우는 1024~10000000 사이여야 합니다',
+        maxOutputTokensRange: '최대 출력 토큰은 양의 정수여야 합니다',
+        maxConcurrencyRange: '백그라운드 동시 실행 상한은 0 이상의 정수여야 합니다',
         credentialRequired: '{field}을(를) 입력해주세요'
       },
       thinkingLevels: {

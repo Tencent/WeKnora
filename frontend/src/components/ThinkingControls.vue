@@ -29,6 +29,7 @@
     <template v-else>
       <!-- 思考开关 -->
       <div v-if="showToggle" class="thinking-controls__toggle">
+        <span class="thinking-controls__toggle-label">{{ t('model.editor.thinkingToggleLabel') }}</span>
         <t-switch
           :model-value="effectiveEnabled"
           :disabled="!canDisable"
@@ -205,6 +206,11 @@ const onSelectedLevelsChange = (value: unknown) => {
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  &__toggle-label {
+    font-size: 14px;
+    color: var(--td-text-color-primary);
   }
 
   &__toggle-desc {
