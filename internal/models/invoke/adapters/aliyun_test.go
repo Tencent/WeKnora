@@ -579,3 +579,215 @@ func TestAliyunRerankReturnDocumentsGating(t *testing.T) {
 	require.True(t, build("qwen3-vl-rerank").ReturnDocuments, "qwen3-vl-rerank 支持")
 	require.False(t, build("qwen3.7-text-rerank").ReturnDocuments, "qwen3.7-text-rerank 不支持——省略")
 }
+
+// --- 思考谓词 + 显式缓存（2026-09-13 显式缓存方案；思考谓词随 providers.go 迁入） ---
+
+// TestAliyunThinkingPredicates pins the qwen/dashscope thinking predicates
+// (moved from providers_test.go together with the predicates' privatization).
+func TestAliyunThinkingPredicates(t *testing.T) {
+	require.True(t, aliyunIsQwenThinkingModel("qwen3-32b"))
+	require.True(t, aliyunIsQwenThinkingModel("qwen-plus-latest"))
+	require.True(t, aliyunIsQwenThinkingModel("qwen-max"))
+	require.True(t, aliyunIsQwenThinkingModel("qwen-turbo"))
+	require.False(t, aliyunIsQwenThinkingModel("qwen2.5-72b"))
+	require.False(t, aliyunIsQwenThinkingModel("deepseek-v3"))
+
+	require.True(t, aliyunIsDashScopeHybridThinkingModel("deepseek-v4"))
+	require.True(t, aliyunIsDashScopeHybridThinkingModel("deepseek-v3.2"))
+	require.True(t, aliyunIsDashScopeHybridThinkingModel("kimi-k2.5"))
+	require.True(t, aliyunIsDashScopeHybridThinkingModel("GLM-5.1"))
+	require.True(t, aliyunIsDashScopeHybridThinkingModel("zhipu/glm-4.7"))
+	require.False(t, aliyunIsDashScopeHybridThinkingModel("qwen2.5-72b"))
+
+	require.True(t, aliyunIsDashScopeAlwaysThinkingModel("ZHIPU/GLM-5.3-Flash"))
+	require.True(t, aliyunIsDashScopeAlwaysThinkingModel("kimi/kimi-k3"))
+	require.False(t, aliyunIsDashScopeAlwaysThinkingModel("glm-5.1"))
+}
+
+// TestAliyunExplicitCachePredicate pins the documented explicit-cache list
+// (官方上下文缓存页北京地域快照)：名单内命中，名单未点名的近邻（vl-max、
+// deepseek-v4、glm-5.3 等）一律不放——未文档化的不支持行为不可依赖。
+func TestAliyunExplicitCachePredicate(t *testing.T) {
+	positive := []string{
+		"qwen3.8-max", "qwen3.7-flash", "qwen3.6-plus",
+		"qwen3-max", "Qwen3-Max-Preview", "qwen3-coder-plus", "qwen3-vl-plus-latest",
+		"deepseek-v3.2", "kimi-k2.5", "kimi-k2.6", "kimi-k2.7", "glm-5.1", "GLM-5.1-Air",
+	}
+	negative := []string{
+		"qwen2.5-72b-instruct", "qwen-plus", "qwen3-vl-max", "qwen3.5-max",
+		"deepseek-v3.1", "deepseek-v4", "kimi-k2", "kimi-k3", "glm-5.3", "zhipu/glm-5.3",
+	}
+	for _, m := range positive {
+		require.True(t, aliyunSupportsExplicitCache(m), m)
+	}
+	for _, m := range negative {
+		require.False(t, aliyunSupportsExplicitCache(m), m)
+	}
+}
+
+// TestAliyunExplicitCacheGating pins the request-level gate: documented
+// models + default/long retention inject markers (default-on, 2026-09-13
+// 裁定——legacy 时代即默认开), while off-list models and CacheRetentionNone
+// (one-shot compaction summaries) never do.
+func TestAliyunExplicitCacheGating(t *testing.T) {
+	a := newAliyunAdapter()
+	build := func(model, retention string) string {
+		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, &invoke.ChatOptions{
+			Messages: []invoke.Message{
+				invoke.TextMessage("system", "sys"), invoke.TextMessage("user", "hi"),
+			},
+			CacheRetention: retention,
+		})
+		require.NoError(t, err)
+		return string(req.Body)
+	}
+	for _, model := range []string{"qwen3-max", "deepseek-v3.2"} {
+		require.Contains(t, build(model, ""), "cache_control", "默认开（默认 short retention）")
+		require.Contains(t, build(model, invoke.CacheRetentionLong), "cache_control", "long 在 DashScope 退化为同一滚动窗，仍发断点")
+	}
+	require.NotContains(t, build("qwen2.5-72b-instruct", ""), "cache_control", "名单外不发")
+	require.NotContains(t, build("qwen3-max", invoke.CacheRetentionNone), "cache_control", "显式退出不发")
+}
+
+// TestAliyunCacheBreakpointPlacement pins marker placement on the typed body:
+// first system + last non-system, tool-carrying middle messages untouched, the
+// marker lands on the final form AFTER the structured-output hint, vision part
+// arrays mark their trailing part, and an empty-content tail falls back to an
+// earlier message.
+func TestAliyunCacheBreakpointPlacement(t *testing.T) {
+	a := newAliyunAdapter()
+
+	type markerPart struct {
+		Text         string `json:"text"`
+		Image        string `json:"image"`
+		CacheControl *struct {
+			Type string `json:"type"`
+		} `json:"cache_control"`
+	}
+	type rawMessage struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	request := func(t *testing.T, model string, opts *invoke.ChatOptions) []rawMessage {
+		t.Helper()
+		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, opts)
+		require.NoError(t, err)
+		var body struct {
+			Input struct {
+				Messages []rawMessage `json:"messages"`
+			} `json:"input"`
+		}
+		require.NoError(t, json.Unmarshal(req.Body, &body))
+		return body.Input.Messages
+	}
+	// 未注入断点的消息内容是 plain string（文本路径退化），不是 part 数组。
+	parts := func(t *testing.T, raw json.RawMessage) []markerPart {
+		t.Helper()
+		if len(raw) > 0 && raw[0] == '"' {
+			return nil
+		}
+		var ps []markerPart
+		require.NoError(t, json.Unmarshal(raw, &ps))
+		return ps
+	}
+	marked := func(t *testing.T, raw json.RawMessage) bool {
+		t.Helper()
+		ps := parts(t, raw)
+		return len(ps) > 0 && ps[len(ps)-1].CacheControl != nil
+	}
+
+	t.Run("first system + last conversation, middle untouched", func(t *testing.T) {
+		msgs := request(t, "qwen3-max", &invoke.ChatOptions{
+			Messages: []invoke.Message{
+				invoke.TextMessage("system", "sys prompt"),
+				invoke.TextMessage("user", "q1"),
+				invoke.TextMessage("assistant", "a1"),
+				invoke.TextMessage("user", "q2"),
+			},
+		})
+		require.Len(t, msgs, 4)
+		sys := parts(t, msgs[0].Content)
+		require.Len(t, sys, 1)
+		require.Equal(t, "sys prompt", sys[0].Text)
+		require.NotNil(t, sys[0].CacheControl)
+		require.Equal(t, "ephemeral", sys[0].CacheControl.Type)
+		require.False(t, marked(t, msgs[1].Content))
+		require.False(t, marked(t, msgs[2].Content))
+		require.True(t, marked(t, msgs[3].Content), "末条消息承载随轮次推进的断点")
+	})
+
+	t.Run("tool-ended conversation marks the tool result", func(t *testing.T) {
+		msgs := request(t, "deepseek-v3.2", &invoke.ChatOptions{
+			Messages: []invoke.Message{
+				invoke.TextMessage("system", "sys"),
+				invoke.TextMessage("user", "q"),
+				invoke.TextMessage("tool", "tool result"),
+			},
+		})
+		require.True(t, marked(t, msgs[2].Content), "tool 消息支持断点，最后一条落点")
+	})
+
+	t.Run("marker lands after the structured-output hint", func(t *testing.T) {
+		msgs := request(t, "qwen3-max", &invoke.ChatOptions{
+			Messages: []invoke.Message{
+				invoke.TextMessage("system", "sys"),
+				invoke.TextMessage("user", "q2"),
+			},
+			Format: json.RawMessage(`{"type":"object"}`),
+		})
+		last := parts(t, msgs[len(msgs)-1].Content)
+		require.Len(t, last, 1)
+		require.NotNil(t, last[0].CacheControl)
+		require.Contains(t, last[0].Text, "Use this JSON schema:", "断点在 schema hint 之后的最终形态上")
+	})
+
+	t.Run("vision part array marks the trailing part", func(t *testing.T) {
+		msgs := request(t, "qwen3-vl-plus", &invoke.ChatOptions{
+			Messages: []invoke.Message{
+				invoke.TextMessage("system", "sys"),
+				{Role: "user", Content: []invoke.Part{
+					{Image: &invoke.ImageRef{URL: "https://example.com/pic.jpg"}},
+					{Text: "这是什么？"},
+				}},
+			},
+		})
+		visionParts := parts(t, msgs[1].Content)
+		require.Len(t, visionParts, 2)
+		require.Nil(t, visionParts[0].CacheControl)
+		require.NotNil(t, visionParts[1].CacheControl)
+	})
+
+	t.Run("empty-content tail falls back to an earlier message", func(t *testing.T) {
+		msgs := request(t, "qwen3-max", &invoke.ChatOptions{
+			Messages: []invoke.Message{
+				invoke.TextMessage("system", "sys"),
+				invoke.TextMessage("user", "q"),
+				{Role: "assistant", Content: []invoke.Part{{Text: ""}}},
+			},
+		})
+		require.True(t, marked(t, msgs[1].Content), "空内容尾条不可标记，回退到上一条非 system 消息")
+		require.False(t, marked(t, msgs[2].Content))
+	})
+}
+
+// TestAliyunUsageCacheFields pins the native cache counters mapping:
+// prompt_tokens_details.cached_tokens → CacheReadTokens,
+// cache_creation_input_tokens → CacheWriteTokens (anthropic semantics),
+// either counter flips CacheReported.
+func TestAliyunUsageCacheFields(t *testing.T) {
+	a := newAliyunAdapter()
+	resp, err := a.ParseChatResponse(200, nil, []byte(`{"request_id":"r","output":{"choices":[`+
+		`{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]},`+
+		`"usage":{"input_tokens":28,"output_tokens":9,"total_tokens":37,`+
+		`"prompt_tokens_details":{"cached_tokens":7},"cache_creation_input_tokens":28}}`))
+	require.NoError(t, err)
+	require.Equal(t, 7, resp.Usage.CacheReadTokens)
+	require.Equal(t, 28, resp.Usage.CacheWriteTokens)
+	require.True(t, resp.Usage.CacheReported)
+
+	resp, err = a.ParseChatResponse(200, nil, []byte(`{"request_id":"r","output":{"choices":[`+
+		`{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]},`+
+		`"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}`))
+	require.NoError(t, err)
+	require.False(t, resp.Usage.CacheReported, "无缓存计数 = 未上报")
+}

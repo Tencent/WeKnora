@@ -7,28 +7,8 @@ import (
 )
 
 // --- 模型名谓词（providers.go 声明面的直接覆盖；审查轮 T-5 补齐） ---
-
-// TestQwenModelPredicates pins the Qwen thinking/family predicates.
-func TestQwenModelPredicates(t *testing.T) {
-	assert.True(t, IsQwenThinkingModel("qwen3-32b"))
-	assert.True(t, IsQwenThinkingModel("qwen-plus-latest"))
-	assert.True(t, IsQwenThinkingModel("qwen-max"))
-	assert.True(t, IsQwenThinkingModel("qwen-turbo"))
-	assert.False(t, IsQwenThinkingModel("qwen2.5-72b"))
-	assert.False(t, IsQwenThinkingModel("deepseek-v3"))
-
-	assert.True(t, IsQwen3Model("qwen3-32b"))
-	assert.True(t, IsQwen3Model("Qwen3-Next"))
-	assert.False(t, IsQwen3Model("qwen-plus"))
-}
-
-// TestDeepSeekModelPredicate pins the deepseek substring match.
-func TestDeepSeekModelPredicate(t *testing.T) {
-	assert.True(t, IsDeepSeekModel("deepseek-chat"))
-	assert.True(t, IsDeepSeekModel("deepseek-v3.1"))
-	assert.True(t, IsDeepSeekModel("DeepSeek-Chat"))
-	assert.False(t, IsDeepSeekModel("qwen-max"))
-}
+// 注：qwen/dashscope 系谓词 2026-09-13 迁入 adapters/aliyun.go 私有化，
+// 断言随迁（TestAliyunThinkingPredicates / TestAliyunExplicitCachePredicate）。
 
 // TestLKEAPThinkingPredicates pins the LKEAP DeepSeek V3.x / R1 split.
 func TestLKEAPThinkingPredicates(t *testing.T) {

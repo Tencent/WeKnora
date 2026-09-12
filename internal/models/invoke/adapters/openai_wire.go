@@ -341,12 +341,13 @@ func resolveCacheRetention(opts *invoke.ChatOptions) string {
 	return invoke.CacheRetentionShort
 }
 
-// promptCachePolicy ports prompt_cache.go:190 (sendKey / sendCacheControl /
-// sendAffinity triple).
+// promptCachePolicy ports prompt_cache.go:190 (sendKey / sendAffinity pair).
+// The sendCacheControl leg (Anthropic-style breakpoint injection) retired
+// 2026-09-13: its only producer was aliyun, which now speaks the native
+// DashScope wire — breakpoints live in aliyun.go (applyAliyunCacheBreakpoints).
 type promptCachePolicy struct {
-	sendKey          bool
-	sendCacheControl bool
-	sendAffinity     bool
+	sendKey      bool
+	sendAffinity bool
 }
 
 // promptCachePolicyFor ports prompt_cache.go:196-209. NOTE: v1's session-ID
@@ -356,9 +357,10 @@ func promptCachePolicyFor(name invoke.ProviderName, baseURL string) promptCacheP
 	switch name {
 	case invoke.ProviderOpenAI, invoke.ProviderAzureOpenAI, invoke.ProviderOpenRouter:
 		return promptCachePolicy{sendKey: true, sendAffinity: true}
-		// aliyun left the family with the 2026-09-12 native ruling: DashScope's
-		// native context cache is server-side implicit — the compatible-mode
-		// cache_control breakpoint convention has no native-wire equivalent.
+		// aliyun left the family with the 2026-09-12 native ruling: its cache
+		// story is native explicit-cache breakpoints (aliyun.go,
+		// applyAliyunCacheBreakpoints, 2026-09-13 方案) + server-side implicit
+		// routing — NOT this openai-wire prompt_cache_key convention.
 	}
 	if strings.Contains(baseURL, "api.openai.com") {
 		return promptCachePolicy{sendKey: true, sendAffinity: true}
@@ -366,33 +368,13 @@ func promptCachePolicyFor(name invoke.ProviderName, baseURL string) promptCacheP
 	return promptCachePolicy{}
 }
 
-type cacheControlMarker struct {
-	Type string `json:"type"`
-	TTL  string `json:"ttl,omitempty"`
-}
-
-// cacheControlFor ports prompt_cache.go:216 (aliyun long TTL = 1h).
-func cacheControlFor(retention string, longTTL string) *cacheControlMarker {
-	if retention == invoke.CacheRetentionNone {
-		return nil
-	}
-	marker := &cacheControlMarker{Type: "ephemeral"}
-	if retention == invoke.CacheRetentionLong && longTTL != "" {
-		marker.TTL = longTTL
-	}
-	return marker
-}
-
-// applyPromptCacheToJSONBody ports prompt_cache.go:227-272: inject the cache
-// routing key / retention and cache_control breakpoints into the shaped body.
-// Rewriting forces the map (alphabetical-key) body form.
+// applyPromptCacheToJSONBody ports prompt_cache.go:227-252: inject the cache
+// routing key / retention into the shaped body. Rewriting forces the map
+// (alphabetical-key) body form.
 func applyPromptCacheToJSONBody(
 	body any, policy promptCachePolicy, sessionID string, retention string,
 ) (any, bool, error) {
-	if retention == invoke.CacheRetentionNone {
-		return body, false, nil
-	}
-	if !policy.sendKey && !policy.sendCacheControl {
+	if retention == invoke.CacheRetentionNone || !policy.sendKey || sessionID == "" {
 		return body, false, nil
 	}
 	data, err := json.Marshal(body)
@@ -403,121 +385,11 @@ func applyPromptCacheToJSONBody(
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, false, err
 	}
-	rewritten := false
-	if policy.sendKey && sessionID != "" {
-		payload["prompt_cache_key"] = sessionID
-		if retention == invoke.CacheRetentionLong {
-			payload["prompt_cache_retention"] = "24h"
-		}
-		rewritten = true
-	}
-	if policy.sendCacheControl {
-		marker := cacheControlFor(retention, "1h")
-		if marker != nil {
-			applyCacheControlBreakpoints(payload, marker)
-			rewritten = true
-		}
-	}
-	if !rewritten {
-		return body, false, nil
+	payload["prompt_cache_key"] = sessionID
+	if retention == invoke.CacheRetentionLong {
+		payload["prompt_cache_retention"] = "24h"
 	}
 	return payload, true, nil
-}
-
-// applyCacheControlBreakpoints .. addCacheControlToMessageContent are verbatim
-// ports of prompt_cache.go:274-365 (breakpoint placement: first instruction
-// message, last tool, last conversation message).
-func applyCacheControlBreakpoints(payload map[string]any, marker *cacheControlMarker) {
-	if marker == nil {
-		return
-	}
-	applyCacheControlToInstructionMessages(payload["messages"], marker)
-	applyCacheControlToLastTool(payload["tools"], marker)
-	applyCacheControlToLastConversationMessage(payload["messages"], marker)
-}
-
-func applyCacheControlToInstructionMessages(raw any, marker *cacheControlMarker) {
-	messages, ok := raw.([]any)
-	if !ok {
-		return
-	}
-	for _, item := range messages {
-		msg, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		if role == "system" || role == "developer" {
-			addCacheControlToMessageContent(msg, marker)
-			return
-		}
-	}
-}
-
-func applyCacheControlToLastConversationMessage(raw any, marker *cacheControlMarker) {
-	messages, ok := raw.([]any)
-	if !ok {
-		return
-	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg, ok := messages[i].(map[string]any)
-		if !ok {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		if role == "user" || role == "assistant" || role == "tool" {
-			if addCacheControlToMessageContent(msg, marker) {
-				return
-			}
-		}
-	}
-}
-
-func applyCacheControlToLastTool(raw any, marker *cacheControlMarker) {
-	tools, ok := raw.([]any)
-	if !ok || len(tools) == 0 {
-		return
-	}
-	last, ok := tools[len(tools)-1].(map[string]any)
-	if !ok {
-		return
-	}
-	last["cache_control"] = marker
-}
-
-func addCacheControlToMessageContent(msg map[string]any, marker *cacheControlMarker) bool {
-	content, ok := msg["content"]
-	if !ok || content == nil {
-		return false
-	}
-	if text, ok := content.(string); ok {
-		if text == "" {
-			return false
-		}
-		msg["content"] = []any{
-			map[string]any{
-				"type":          "text",
-				"text":          text,
-				"cache_control": marker,
-			},
-		}
-		return true
-	}
-	parts, ok := content.([]any)
-	if !ok {
-		return false
-	}
-	for i := len(parts) - 1; i >= 0; i-- {
-		part, ok := parts[i].(map[string]any)
-		if !ok {
-			continue
-		}
-		if partType, _ := part["type"].(string); partType == "text" || partType == "tool_result" {
-			part["cache_control"] = marker
-			return true
-		}
-	}
-	return false
 }
 
 // attachPromptCacheHeaders ports prompt_cache.go:367-374 (session affinity

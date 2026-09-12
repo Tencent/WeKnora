@@ -4,6 +4,7 @@
     "native DashScope generation wire ({model, input, parameters} envelope, 2026-09-12 ruling)",
     "qwen3 family carries enable_thinking on every request; non-stream pins false even with Thinking=true",
     "stream pins false with Thinking=nil (alwaysSend) + X-DashScope-SSE header + incremental_output",
+    "qwen3-max is on the documented explicit-cache list: the sole conversation message carries a cache_control:{type:ephemeral} breakpoint by default (2026-09-13 方案)",
     "no [DONE] sentinel — the final frame carries finish_reason + usage and closes the stream"
   ],
   "requests": [
@@ -20,7 +21,12 @@
           "messages": [
             {
               "role": "user",
-              "content": "你好"
+              "content": [
+                {
+                  "text": "你好",
+                  "cache_control": { "type": "ephemeral" }
+                }
+              ]
             }
           ]
         },
@@ -45,7 +51,12 @@
           "messages": [
             {
               "role": "user",
-              "content": "你好"
+              "content": [
+                {
+                  "text": "你好",
+                  "cache_control": { "type": "ephemeral" }
+                }
+              ]
             }
           ]
         },

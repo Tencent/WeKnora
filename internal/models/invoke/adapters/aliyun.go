@@ -22,8 +22,13 @@ package adapters
 // emits the Done event itself on that frame.
 //
 // Deliberate deltas vs the compatible-mode era:
-//   - no cache_control breakpoints in the body: DashScope's context cache is
-//     server-side implicit; the compat convention has no native equivalent.
+//   - explicit context cache rides the NATIVE wire (2026-09-13 显式缓存方案):
+//     `cache_control:{"type":"ephemeral"}` markers on the first system
+//     message + the last conversation message, gated to the documented
+//     explicit-cache model list (aliyunSupportsExplicitCache). Tool
+//     definitions take NO marker (the native wire ignores them) and no TTL
+//     is sent (fixed 5-minute validity, refreshed on each hit — the
+//     CacheRetention long/short distinction collapses on DashScope).
 //   - frequency_penalty is not part of the native schema and is dropped.
 //   - ThinkingControl override tokens: only "none" and "enable_thinking"
 //     map; anything else falls back to the model-conditional default (the
@@ -123,6 +128,16 @@ const (
 type aliyunPart struct {
 	Text  string `json:"text,omitempty"`
 	Image string `json:"image,omitempty"`
+	// CacheControl turns the part into an explicit-cache breakpoint
+	// ({"type":"ephemeral"}, 对话 API 文档 §cache_control). nil = no marker.
+	CacheControl *aliyunCacheControl `json:"cache_control,omitempty"`
+}
+
+// aliyunCacheControl is the native explicit-cache marker. The wire accepts
+// ONLY {"type":"ephemeral"} — no ttl field (fixed 5-minute validity, reset on
+// each hit), unlike the anthropic-style marker the compat funnel used to send.
+type aliyunCacheControl struct {
+	Type string `json:"type"`
 }
 
 type aliyunFunctionCall struct {
@@ -289,10 +304,75 @@ func aliyunMessageContent(msg invoke.Message, vision bool) any {
 	}
 }
 
+// --- 模型名谓词（2026-09-13 自 providers.go 迁入并私有化：唯一消费者是本
+// 适配器，平台层不留厂商知识；providers.go 保留的是 openai funnel 共享系） ---
+
+// aliyunIsQwenThinkingModel 检查模型名是否为支持思维链的 Qwen 模型
+// （qwen3/plus/max/turbo 前缀）——enable_thinking alwaysSend + 非流式钉 false。
+func aliyunIsQwenThinkingModel(modelName string) bool {
+	lowerName := strings.ToLower(modelName)
+	return strings.HasPrefix(lowerName, "qwen3") ||
+		strings.HasPrefix(lowerName, "qwen-plus") ||
+		strings.HasPrefix(lowerName, "qwen-max") ||
+		strings.HasPrefix(lowerName, "qwen-turbo")
+}
+
+// aliyunIsDashScopeHybridThinkingModel 检查 DashScope 托管的混合思考模型
+// （enable_thinking 适用面，对话 API 文档 §enable_thinking，2026-09-12 裁定④扩容）：
+// Qwen 思考族之外，还包括 DeepSeek-V4/V3.2/V3.1 系列（含 siliconflow/ 直供
+// 前缀）、Kimi-K2.6/K2.5 系列（含 kimi/ 直供前缀）、GLM 系列（阿里云直供 glm-*
+// 与智谱直供 ZHIPU/GLM-*）。子串匹配以同时覆盖直供前缀形态。
+func aliyunIsDashScopeHybridThinkingModel(modelName string) bool {
+	if aliyunIsQwenThinkingModel(modelName) {
+		return true
+	}
+	lower := strings.ToLower(modelName)
+	return strings.Contains(lower, "deepseek-v4") ||
+		strings.Contains(lower, "deepseek-v3.2") ||
+		strings.Contains(lower, "deepseek-v3.1") ||
+		strings.Contains(lower, "kimi-k2.6") ||
+		strings.Contains(lower, "kimi-k2.5") ||
+		strings.Contains(lower, "glm-") ||
+		strings.Contains(lower, "zhipu/glm")
+}
+
+// aliyunIsDashScopeAlwaysThinkingModel 检查「始终开启思考」的 DashScope 模型：
+// enable_thinking 仅支持 true，传入 false 会导致 API 请求失败（文档原文）。
+// 覆盖智谱直供 ZHIPU/GLM-5.3(-Flash) 与 kimi-k3（含 kimi/kimi-k3 直供前缀）。
+// 这类模型不发 enable_thinking（服务端默认即开）——模型级 CanDisable=false
+// 的运行时落点；目录（models.json）预填时同样标 can_disable=false。
+func aliyunIsDashScopeAlwaysThinkingModel(modelName string) bool {
+	lower := strings.ToLower(modelName)
+	return strings.Contains(lower, "zhipu/glm-5.3") ||
+		strings.Contains(lower, "kimi-k3")
+}
+
+// aliyunSupportsExplicitCache 检查模型是否在 DashScope 显式缓存（上下文缓存）
+// 的文档支持名单内（官方「上下文缓存」页，北京地域快照，2026-09-13 方案 §三.3）：
+// qwen3.8-/3.7-/3.6- 新代系、qwen3-max、qwen3-coder、qwen3-vl-plus 前缀；
+// 第三方 deepseek-v3.2、kimi-k2.5/2.6/2.7、glm-5.1。名单随地域漂移（美区
+// 带后缀变体）且厂商会扩容，保守起见只放文档点名的型号——不在名单内的
+// 模型不发 cache_control：未文档化的不支持行为不可依赖。真机验证后再放宽。
+func aliyunSupportsExplicitCache(model string) bool {
+	lower := strings.ToLower(model)
+	for _, prefix := range []string{
+		"qwen3.8-", "qwen3.7-", "qwen3.6-", "qwen3-max", "qwen3-coder", "qwen3-vl-plus",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return strings.Contains(lower, "deepseek-v3.2") ||
+		strings.Contains(lower, "kimi-k2.5") ||
+		strings.Contains(lower, "kimi-k2.6") ||
+		strings.Contains(lower, "kimi-k2.7") ||
+		strings.Contains(lower, "glm-5.1")
+}
+
 // applyAliyunThinking ports the qwenThinkingProvider semantics onto the
 // native parameters object, extended per the 2026-09-12 ruling ④ to the
 // full DashScope hybrid family (enable_thinking 适用面, see
-// invoke.IsDashScopeHybridThinkingModel):
+// aliyunIsDashScopeHybridThinkingModel):
 //   - qwen thinking family: enable_thinking on EVERY request (v1
 //     alwaysSend), pinned false on non-stream calls (Qwen3 rejects thinking
 //     in non-stream mode);
@@ -310,11 +390,11 @@ func aliyunMessageContent(msg invoke.Message, vision bool) any {
 func applyAliyunThinking(
 	params *aliyunParameters, control string, model string, opts *invoke.ChatOptions, isStream bool,
 ) {
-	if invoke.IsDashScopeAlwaysThinkingModel(model) {
+	if aliyunIsDashScopeAlwaysThinkingModel(model) {
 		return // 始终思考族：不发字段（false 必被拒，默认即开）
 	}
-	qwen := invoke.IsQwenThinkingModel(model)
-	hybrid := qwen || invoke.IsDashScopeHybridThinkingModel(model)
+	qwen := aliyunIsQwenThinkingModel(model)
+	hybrid := qwen || aliyunIsDashScopeHybridThinkingModel(model)
 	switch control {
 	case "none":
 		return
@@ -348,6 +428,63 @@ func appendAliyunSchemaHint(msg *aliyunMessage, schema string) {
 	}
 	if parts, ok := msg.Content.([]aliyunPart); ok && len(parts) > 0 {
 		parts[len(parts)-1].Text += hint
+	}
+}
+
+// applyAliyunCacheBreakpoints injects explicit-cache markers onto the typed
+// request (2026-09-13 显式缓存方案 — the native-wire successor of the retired
+// compat-mode JSON rewrite in openai_wire.go). Placement: the first system
+// message + the last non-system message — two breakpoints, under the native
+// 4-marker cap, and the trailing one advances turn-by-turn over append-only
+// agent histories so the stable prefix keeps hitting. Tool definitions are
+// deliberately NOT marked (the native wire ignores markers there), and no
+// TTL rides the marker (server-fixed 5-minute validity: CacheRetentionLong
+// degrades to the same rolling window on DashScope).
+//
+// Gating: CacheRetentionNone opts out (one-shot compaction summaries), and
+// only documented explicit-cache models are marked — the wire behavior for
+// unsupported models is undocumented, so it is never exercised. Runs AFTER
+// appendAliyunSchemaHint so the marker lands on the final body form.
+func applyAliyunCacheBreakpoints(msgs []aliyunMessage, model string, retention string) {
+	if retention == invoke.CacheRetentionNone || !aliyunSupportsExplicitCache(model) {
+		return
+	}
+	marker := &aliyunCacheControl{Type: "ephemeral"}
+	for i := range msgs {
+		if msgs[i].Role == "system" && markAliyunMessage(&msgs[i], marker) {
+			break
+		}
+	}
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "system" && markAliyunMessage(&msgs[i], marker) {
+			return
+		}
+	}
+}
+
+// markAliyunMessage rewrites one message's content to carry the marker and
+// reports whether anything was marked. A plain string becomes a one-part
+// array (the explicit-cache convention reads markers off content parts); a
+// part array takes the marker on its last non-empty part. Empty content
+// returns false so the caller falls back to an earlier message.
+func markAliyunMessage(msg *aliyunMessage, marker *aliyunCacheControl) bool {
+	switch content := msg.Content.(type) {
+	case string:
+		if content == "" {
+			return false
+		}
+		msg.Content = []aliyunPart{{Text: content, CacheControl: marker}}
+		return true
+	case []aliyunPart:
+		for i := len(content) - 1; i >= 0; i-- {
+			if content[i].Text != "" || content[i].Image != "" {
+				content[i].CacheControl = marker
+				return true
+			}
+		}
+		return false
+	default:
+		return false
 	}
 }
 
@@ -392,7 +529,7 @@ func (a *AliyunAdapter) BuildChatRequest(
 		// 严格校验下，老模型对 max_completion_tokens 会 400 或静默忽略）。
 		if opts.MaxCompletionTokens > 0 {
 			switch {
-			case vision, !invoke.IsQwenThinkingModel(model):
+			case vision, !aliyunIsQwenThinkingModel(model):
 				params.MaxTokens = opts.MaxCompletionTokens
 			default:
 				params.MaxCompletionTokens = opts.MaxCompletionTokens
@@ -442,6 +579,7 @@ func (a *AliyunAdapter) BuildChatRequest(
 	if opts != nil && len(opts.Format) > 0 && !vision && len(msgs) > 0 {
 		appendAliyunSchemaHint(&msgs[len(msgs)-1], string(opts.Format))
 	}
+	applyAliyunCacheBreakpoints(msgs, model, resolveCacheRetention(opts))
 
 	data, err := json.Marshal(aliyunGenerationRequest{
 		Model:      model,
@@ -484,6 +622,10 @@ type aliyunUsage struct {
 		// 下——input_tokens_details 里是 text/image/video_tokens 细分。
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
+	// cache_creation_input_tokens：显式缓存断点首次写入的 token 数（对话
+	// API 文档 §usage）。语义同 anthropic 的 cache_creation_input_tokens，
+	// 落 invoke.Usage.CacheWriteTokens，下游零改动。
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 }
 
 func (u *aliyunUsage) usage() invoke.Usage {
@@ -494,6 +636,10 @@ func (u *aliyunUsage) usage() invoke.Usage {
 	}
 	if u.PromptTokensDetails.CachedTokens > 0 {
 		out.CacheReadTokens = u.PromptTokensDetails.CachedTokens
+		out.CacheReported = true
+	}
+	if u.CacheCreationInputTokens > 0 {
+		out.CacheWriteTokens = u.CacheCreationInputTokens
 		out.CacheReported = true
 	}
 	return out

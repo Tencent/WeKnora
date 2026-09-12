@@ -2,7 +2,7 @@
   "scenario": "aliyun_native_plain_chat",
   "behavior": [
     "native DashScope envelope on text-generation; qwen2.5 (non-hybrid) sends NO enable_thinking",
-    "cache_control breakpoints are GONE on the native wire — DashScope context cache is server-side implicit, CacheRetention=long sends nothing",
+    "no cache_control markers: qwen2.5-72b-instruct is OFF the documented explicit-cache list, so CacheRetention=long sends nothing (list models DO get breakpoints — see aliyun_native_cache_breakpoints)",
     "non-thinking legacy models carry the universally-supported max_tokens budget (max_completion_tokens is new-generation only)"
   ],
   "requests": [

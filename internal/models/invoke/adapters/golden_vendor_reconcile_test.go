@@ -141,8 +141,8 @@ func TestReconcileAliyunQwenThinkingPin(t *testing.T) {
 }
 
 // 场景 19：Aliyun 原生 plain chat——非 qwen3 模型不发 enable_thinking；
-// cache_control 断点随 compatible-mode 路线退役（原生上下文缓存为服务端隐式，
-// CacheRetention=long 不再往 body 塞任何标记）。
+// cache_control 断点按显式缓存名单收敛（2026-09-13 方案）：qwen2.5 不在名单内，
+// CacheRetention=long 不往 body 塞任何标记（名单内模型见场景 19b）。
 func TestReconcileAliyunNativePlainChat(t *testing.T) {
 	allowLoopbackSSRF(t)
 	g := newReconcileServer(t, jsonHandler(200, `{"request_id":"req-plain","output":{"choices":[`+
@@ -159,6 +159,30 @@ func TestReconcileAliyunNativePlainChat(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assertRequestsMatchGolden(t, "aliyun_native_plain_chat", g)
+}
+
+// 场景 19b：Aliyun 原生显式缓存——文档名单模型（qwen3-max）在首条 system 与
+// 末条消息注入 cache_control:{"type":"ephemeral"}（2026-09-13 显式缓存方案，
+// 默认开；long retention 在 DashScope 上退化为同一个 5 分钟滚动窗，不发 TTL）；
+// usage 的 cache_creation_input_tokens 回填 CacheWriteTokens。
+func TestReconcileAliyunNativeCacheBreakpoints(t *testing.T) {
+	allowLoopbackSSRF(t)
+	g := newReconcileServer(t, jsonHandler(200, `{"request_id":"req-cache","output":{"choices":[`+
+		`{"finish_reason":"stop","message":{"role":"assistant","content":"Ethanol is a short-chain alcohol."}}]},`+
+		`"usage":{"input_tokens":28,"output_tokens":9,"total_tokens":37,`+
+		`"prompt_tokens_details":{"cached_tokens":0},"cache_creation_input_tokens":28}}`))
+	m := newGoldenModelConfig(t, g.Server.URL, "aliyun", "qwen3-max", nil)
+
+	resp, err := invoke.Chat(context.Background(), m, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			textMsg("system", "You are a chemistry expert."), textMsg("user", "Ethanol properties?"),
+		},
+		MaxCompletionTokens: 64,
+		CacheRetention:      invoke.CacheRetentionLong,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 28, resp.Usage.CacheWriteTokens, "cache_creation_input_tokens → CacheWriteTokens")
+	assertRequestsMatchGolden(t, "aliyun_native_cache_breakpoints", g)
 }
 
 // 场景 20：Zhipu（max_tokens wire 字段；baseProvider 行为）。
