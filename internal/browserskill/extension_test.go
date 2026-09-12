@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +177,46 @@ func TestRealExtension(t *testing.T) {
 	if !strings.Contains(string(snap), "Save") {
 		t.Fatalf("page missing: %s", snap)
 	}
+	var snapshot struct {
+		Text string `json:"text"`
+	}
+	if err = json.Unmarshal(snap, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	ref := regexp.MustCompile(`@(e[0-9]+)\b`).FindStringSubmatch(snapshot.Text)
+	if len(ref) != 2 {
+		t.Fatalf("fixture has no screenshot crop ref: %s", snapshot.Text)
+	}
+	viewportWidth := 0
+	for _, crop := range []string{"", ref[1]} {
+		params := map[string]any{}
+		if crop != "" {
+			params["ref"] = crop
+		}
+		capture, captureErr := call(ctx, scope, "chat", "screenshot", params)
+		if captureErr != nil {
+			t.Fatal(captureErr)
+		}
+		var shot struct {
+			Image string `json:"image_base64"`
+		}
+		if err = json.Unmarshal(capture, &shot); err != nil {
+			t.Fatal(err)
+		}
+		data, decodeErr := base64.StdEncoding.DecodeString(shot.Image)
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		img, decodeErr := png.Decode(bytes.NewReader(data))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if crop == "" {
+			viewportWidth = img.Bounds().Dx()
+		} else if img.Bounds().Dx() >= viewportWidth {
+			t.Fatal("element screenshot was not cropped")
+		}
+	}
 	if _, err = call(ctx, scope, "chat", "fill", map[string]any{"selector": "#name", "value": "世界"}); err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +281,9 @@ func TestRealExtension(t *testing.T) {
 		case <-tick.C:
 		}
 	}
+	if m.Status(scope, "chat").HelpPrompt != "Integration test: no action required" {
+		t.Fatal("human-help prompt missing from preview status")
+	}
 	checkBackground()
 	if _, err = m.Preview(ctx, scope, "chat"); err != nil {
 		t.Fatal(err)
@@ -247,6 +292,42 @@ func TestRealExtension(t *testing.T) {
 	case <-helpDone:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+	if !m.Status(scope, "chat").Paused {
+		t.Fatal("timed-out human help must retain a paused task")
+	}
+	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	// Completing the real extension help overlay releases the same pending RPC.
+	go func() {
+		result, e := call(ctx, scope, "chat", "request_help", map[string]any{
+			"prompt": "Confirm this fixture step", "timeout_ms": 10000,
+		})
+		if e == nil && !strings.Contains(string(result), `"continued"`) {
+			e = fmt.Errorf("unexpected help outcome: %s", result)
+		}
+		helpDone <- e
+	}()
+	_, _ = io.WriteString(input, "complete-help\n")
+	select {
+	case line := <-hostLines:
+		if line != "complete-help-done" {
+			t.Fatalf("complete help: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case e := <-helpDone:
+		if e != nil {
+			t.Fatal(e)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if m.Status(scope, "chat").Paused || m.Status(scope, "chat").NeedsHelp {
+		t.Fatal("completed help did not release automation")
 	}
 	checkBackground()
 	if err = m.Focus(ctx, scope, "chat"); err != nil {
@@ -332,6 +413,31 @@ func TestRealExtension(t *testing.T) {
 	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
 		t.Fatal(err)
 	}
+	_, _ = io.WriteString(input, "interrupt-window\n")
+	select {
+	case line := <-hostLines:
+		if line != "interrupt-window-done" {
+			t.Fatalf("window interruption: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	for !m.Status(scope, "chat").Paused {
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status(scope, "chat").SessionID != taskID {
+		t.Fatal("resume replaced the original session")
+	}
+	if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err != nil {
+		t.Fatal(err)
+	}
 	// Focus above intentionally changes the foreground. Compare subsequent
 	// background work with that user-selected tab, not the startup popup.
 	_, _ = io.WriteString(input, "remember-foreground\n")
@@ -414,4 +520,40 @@ func TestRealExtension(t *testing.T) {
 		}
 		checkCleanup()
 	}
+	// Stop must cancel a real pending extension command and clean its tabs,
+	// rather than rejecting the control while the automation queue is busy.
+	if err = m.Control(ctx, scope, "chat", "select"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, callErr := call(ctx, scope, "chat", "request_help", map[string]any{
+			"prompt": "This pending test will be cancelled by Stop", "timeout_ms": 30000,
+		})
+		helpDone <- callErr
+	}()
+	for !m.Status(scope, "chat").NeedsHelp {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-tick.C:
+		}
+	}
+	if err = m.Control(ctx, scope, "chat", "stop"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-helpDone:
+		if err == nil {
+			t.Fatal("Stop did not cancel pending help")
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if m.Status(scope, "chat").Selected {
+		t.Fatal("stopped task is still selected")
+	}
+	checkCleanup()
 }

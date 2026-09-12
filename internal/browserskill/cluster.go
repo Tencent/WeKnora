@@ -31,8 +31,9 @@ type (
 )
 
 type clusterResponse struct {
-	Data  json.RawMessage `json:"data,omitempty"`
-	Error string          `json:"error,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	Error    string          `json:"error,omitempty"`
+	RPCError *RPCError       `json:"rpc_error,omitempty"`
 }
 
 func signRPC(secret, timestamp string, body []byte) string {
@@ -118,7 +119,7 @@ func (m *Manager) route(
 	if err != nil {
 		return nil, false, err
 	}
-	forwardCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	forwardCtx, cancel := context.WithTimeout(ctx, clusterTimeout(operation, method))
 	defer cancel()
 	request, err := http.NewRequestWithContext(
 		forwardCtx,
@@ -146,6 +147,10 @@ func (m *Manager) route(
 	var result clusterResponse
 	if json.NewDecoder(io.LimitReader(response.Body, maxFrame)).Decode(&result) != nil {
 		return nil, true, errors.New("invalid browser owner response")
+	}
+	if result.RPCError != nil {
+		result.RPCError.BoundDetails()
+		return nil, true, result.RPCError
 	}
 	if result.Error != "" {
 		return nil, true, errors.New(result.Error)
@@ -207,7 +212,9 @@ func (m *Manager) InternalHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Signed internal RPC is executed locally, never forwarded a second time.
-	ctx, cancel := context.WithTimeout(context.WithValue(r.Context(), localRPCKey{}, true), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(
+		context.WithValue(r.Context(), localRPCKey{}, true), clusterTimeout(input.Operation, input.Method),
+	)
 	defer cancel()
 	result := clusterResponse{}
 	switch input.Operation {
@@ -237,6 +244,9 @@ func (m *Manager) InternalHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		result.Error = err.Error()
+		if errors.As(err, &result.RPCError) {
+			result.RPCError.BoundDetails()
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)

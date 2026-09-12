@@ -49,12 +49,13 @@ const (
 	EventAgentComplete EventType = "agent.complete" // Agent 完成
 
 	// Agent streaming events (for real-time feedback)
-	EventAgentThought     EventType = "thought"      // Agent 思考过程
-	EventAgentToolCall    EventType = "tool_call"    // 工具调用通知
-	EventAgentToolResult  EventType = "tool_result"  // 工具结果
-	EventAgentReflection  EventType = "reflection"   // Agent 反思
-	EventAgentReferences  EventType = "references"   // 知识引用
-	EventAgentFinalAnswer EventType = "final_answer" // 最终答案
+	EventAgentThought       EventType = "thought"        // Agent 思考过程
+	EventAgentCommandOutput EventType = "command_output" // bounded command output
+	EventAgentToolCall      EventType = "tool_call"      // 工具调用通知
+	EventAgentToolResult    EventType = "tool_result"    // 工具结果
+	EventAgentReflection    EventType = "reflection"     // Agent 反思
+	EventAgentReferences    EventType = "references"     // 知识引用
+	EventAgentFinalAnswer   EventType = "final_answer"   // 最终答案
 
 	// MCP tool human approval (issue #1173)
 	EventToolApprovalRequired EventType = "tool_approval_required"

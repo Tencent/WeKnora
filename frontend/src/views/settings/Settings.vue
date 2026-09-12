@@ -53,6 +53,7 @@
                         <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2"
                           stroke-linecap="round" />
                       </svg>
+                      <BrowserIcon v-else-if="item.key === 'browserconnection'" class="nav-icon" width="17" height="17" />
                       <span v-else-if="item.emoji" class="nav-icon nav-icon-emoji">{{ item.emoji }}</span>
                       <t-icon v-else :name="item.icon" class="nav-icon" />
                       <span class="nav-label">{{ item.label }}</span>
@@ -237,6 +238,7 @@ import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
 import GeneralSettings from './GeneralSettings.vue'
 import BrowserConnectionSettings from './BrowserConnectionSettings.vue'
+import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 import ModelSettings from './ModelSettings.vue'
 import OllamaSettings from './OllamaSettings.vue'
 import McpSettings from './McpSettings.vue'

@@ -25,16 +25,32 @@ try {
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
   const worker = browser.serviceWorkers()[0] ?? await browser.waitForEvent('serviceworker');
-  const taskWindow = process.env.BROWSERSKILL_TEST_TASK_WINDOW === '1';
+  const taskWindow = process.env.BROWSERSKILL_TEST_TASK_WINDOW !== '0';
   const popup = await browser.newPage();
   await popup.goto(new URL('popup.html', worker.url()).href);
   await popup.locator('details summary').click();
   await popup.locator('#remote-pairing').fill(pairing);
   await popup.locator('details button').first().click();
-  await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('details [role=alert]'));
+  try {
+    await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('details [role=alert]'));
+  } catch (error) {
+    // Never include the password input or pairing credential in diagnostics.
+    console.error('Extension pairing UI:', await popup.locator('body').innerText());
+    console.error('Pairing form state:', await popup.evaluate(() => ({
+      length: document.querySelector('#remote-pairing')?.value.length,
+      disabled: document.querySelector('#remote-pairing')?.disabled,
+      buttons: [...document.querySelectorAll('details button')].map(b => ({text:b.textContent,disabled:b.disabled})),
+    })));
+    throw error;
+  }
   if (await popup.locator('details [role=alert]').count()) throw new Error('Extension authorization failed before browser tests');
-  if (taskWindow) {
-    await popup.locator('#bsk-task-window-mode').selectOption('window');
+  if (!taskWindow) {
+    await popup.locator('#bsk-task-window-mode').selectOption('tabs');
+    await popup.waitForFunction(() => {
+      const select = document.querySelector('#bsk-task-window-mode');
+      return select?.value === 'tabs' && !select.disabled;
+    });
+  } else {
     await popup.waitForFunction(() => {
       const select = document.querySelector('#bsk-task-window-mode');
       return select?.value === 'window' && !select.disabled;
@@ -49,6 +65,29 @@ try {
   process.stdout.write('ready\n');
   for await (const command of lines) {
     if (command === 'close') break;
+    if (command === 'complete-help' || command === 'interrupt-window') {
+      const selector = command === 'complete-help'
+        ? '[data-slot="help-request-banner"][data-display-mode="full"] [data-slot="help-continue-button"]'
+        : '[data-slot="control-overlay-stop-all"]';
+      // Click the actual extension overlay in an isolated fixture browser.
+      let clicked = false;
+      const deadline = Date.now() + 5000;
+      while (!clicked && Date.now() < deadline) {
+        for (const page of browser.pages().filter(page => page !== popup).reverse()) {
+          const button = command === 'complete-help'
+            ? page.locator('[data-slot="help-request-banner"][data-display-mode="full"]')
+                .filter({hasText:'Confirm this fixture step'}).locator('[data-slot="help-continue-button"]').first()
+            : page.locator(selector).first();
+          if (!await button.isVisible()) continue;
+          await button.click({timeout:5000});
+          clicked = true;
+          break;
+        }
+        if (!clicked) await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!clicked) throw new Error('Browser task overlay was not clickable');
+      process.stdout.write(command+'-done\n');
+    }
     if (command === 'check-detached') {
       // getTargets().attached includes Playwright's own debugger. Probe only
       // this extension's attachment without attaching or changing the page.

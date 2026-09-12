@@ -108,12 +108,12 @@ type CustomAgentConfig struct {
 	// System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)
 	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
 	// SystemPromptID references a template ID in prompt_templates/ YAML files.
-	// If set and SystemPrompt is empty, the template content will be resolved at startup.
+	// If set and SystemPrompt is empty, the template content is resolved at request time for saved agents.
 	SystemPromptID string `yaml:"system_prompt_id" json:"system_prompt_id,omitempty"`
 	// Context template for normal mode (how to format retrieved chunks)
 	ContextTemplate string `yaml:"context_template" json:"context_template"`
 	// ContextTemplateID references a template ID in prompt_templates/ YAML files.
-	// If set and ContextTemplate is empty, the template content will be resolved at startup.
+	// If set and ContextTemplate is empty, the template content is resolved at request time for saved agents.
 	ContextTemplateID string `yaml:"context_template_id" json:"context_template_id,omitempty"`
 
 	// ===== Model Settings =====

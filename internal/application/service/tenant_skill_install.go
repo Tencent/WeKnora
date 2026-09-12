@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -258,6 +259,11 @@ func (s *TenantSkillService) ReinstallSkill(
 func (s *TenantSkillService) runInstall(
 	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle, instructions ...string,
 ) (err error) {
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name:     "skill.install",
+		Metadata: map[string]interface{}{"tenant_id": tenantID, "sandbox_config_id": configID, "skill_id": skillID},
+	})
+	defer func() { span.Finish(nil, nil, err) }()
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = types.WithSandboxTenantID(ctx, tenantID)
 

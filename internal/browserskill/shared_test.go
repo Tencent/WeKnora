@@ -38,6 +38,26 @@ type sharedFixture struct {
 	calls chan map[string]any
 }
 
+func TestConcurrentCommandsShareAutomaticSessionCreation(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "auto-start-queue"}
+	connectSharedFixture(ctx, t, m, s, "", "browser")
+	require.NoError(t, m.Control(ctx, s, "chat", "select"))
+	begin, done := make(chan struct{}), make(chan error, 20)
+	for range 20 {
+		go func() {
+			<-begin
+			_, err := m.Call(ctx, s, "chat", "snapshot", nil)
+			done <- err
+		}()
+	}
+	close(begin)
+	for range 20 {
+		require.NoError(t, <-done)
+	}
+	require.NotEmpty(t, m.Status(s, "chat").SessionID)
+}
+
 func (f *sharedFixture) send(v any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -50,6 +70,7 @@ func connectSharedFixture(
 	m *Manager,
 	scope Scope,
 	link, claimedID string,
+	intercepts ...func(*sharedFixture, string, string, map[string]any) bool,
 ) *sharedFixture {
 	t.Helper()
 	var err error
@@ -91,6 +112,9 @@ func connectSharedFixture(
 			if ws.ReadJSON(&req) != nil {
 				return
 			}
+			if len(intercepts) > 0 && intercepts[0](f, req.ID, req.Method, req.Params) {
+				continue
+			}
 			result := map[string]any{}
 			switch req.Method {
 			case "tool.session_start":
@@ -102,6 +126,24 @@ func connectSharedFixture(
 				result = map[string]any{"returned_tab_ids": []int{}, "return_failures": []any{}}
 			case "tool.snapshot":
 				result = map[string]any{"text": scope.key(), "ref_count": 0, "tab_id": 1}
+			case "tool.screenshot":
+				f.calls <- req.Params
+				result = map[string]any{
+					"image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/" +
+						"x8AAwMCAO+aTioAAAAASUVORK5CYII=",
+					"format": "png", "width": 1, "height": 1, "tab_id": 1,
+				}
+			case "tool.request_help":
+				f.calls <- req.Params
+				result = map[string]any{"outcome": req.Params["prompt"], "tab_id": 1}
+			case "tool.click":
+				if f.send(map[string]any{"id": req.ID, "error": map[string]any{
+					"code": "not_found", "message": "fixture ref missing",
+					"data": map[string]any{"reason": "ref_not_found", "effect_state": "none", "tab_id": 1},
+				}}) != nil {
+					return
+				}
+				continue
 			case "tool.navigate":
 				f.calls <- req.Params
 				if req.Params["url"] == "https://slow.example" {
@@ -133,6 +175,79 @@ func connectSharedFixture(
 		}
 	}()
 	return f
+}
+
+func TestStopCancelsActiveCommandAndRejectsFurtherCalls(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "stop-user"}
+	f := connectSharedFixture(ctx, t, m, s, "", "browser")
+	require.NoError(t, m.Control(ctx, s, "chat", "start"))
+	done := make(chan error, 1)
+	go func() {
+		_, err := m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://slow.example"})
+		done <- err
+	}()
+	select {
+	case <-f.calls:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	require.NoError(t, m.Control(ctx, s, "chat", "stop"))
+	require.Error(t, <-done)
+	require.False(t, m.Status(s, "chat").Selected)
+	_, err := m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://must-not-run.example"})
+	require.Error(t, err)
+	require.NoError(t, m.Control(ctx, s, "chat", "stop"), "ending an ended task is idempotent")
+}
+
+func TestScreenshotUsesNativeTaskAndPreservesCrop(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "image-user"}
+	f := connectSharedFixture(ctx, t, m, s, "", "browser")
+	require.NoError(t, m.Control(ctx, s, "chat", "select"))
+	result, err := m.Call(ctx, s, "chat", "screenshot",
+		map[string]any{"ref": "e3", "tab_id": 1, "session_id": "foreign"})
+	require.NoError(t, err)
+	require.Contains(t, string(result), "image_base64")
+	params := <-f.calls
+	require.Equal(t, "e3", params["ref"])
+	require.Equal(t, m.Status(s, "chat").SessionID, params["session_id"])
+	require.Equal(t, "screenshot", m.Status(s, "chat").Action)
+
+	_, err = m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://example.com"})
+	require.NoError(t, err)
+	<-f.calls
+	status := m.Status(s, "chat")
+	require.Equal(t, "navigate", status.Action)
+	require.Equal(t, "https://example.com", status.PageURL)
+	require.Empty(t, status.LastError)
+}
+
+func TestProgressReportsNavigationFailureAndFreezesElapsedTime(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "progress"}
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(f *sharedFixture, id, method string, _ map[string]any) bool {
+		if method != "tool.navigate" {
+			return false
+		}
+		_ = f.send(map[string]any{"id": id, "result": map[string]any{
+			"url": "https://user:pass@example.com/path?token=secret#fragment", "tab_id": 1,
+			"reached": "timeout", "error_text": "document not ready",
+		}})
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "select"))
+	_, err := m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://example.com"})
+	require.NoError(t, err, "the transport succeeded even though navigation did not finish")
+	status := m.Status(s, "chat")
+	require.Equal(t, "document not ready", status.LastError)
+	require.Equal(t, "https://example.com/path", status.PageURL)
+	d := m.get(s)
+	d.mu.Lock()
+	task := d.tasks["chat"]
+	task.actionFinished = task.actionStarted.Add(1234 * time.Millisecond)
+	d.mu.Unlock()
+	require.EqualValues(t, 1234, m.Status(s, "chat").ActionElapsedMS)
 }
 
 func TestSharedDaemonRoutesAndIsolatesUsers(t *testing.T) {
@@ -378,6 +493,81 @@ func TestLivePreviewBypassesUnfinishedAutomation(t *testing.T) {
 		require.Error(t, err)
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+}
+
+func TestWindowInterruptResumesSameTask(t *testing.T) {
+	for _, running := range []bool{false, true} {
+		t.Run(fmt.Sprintf("running=%v", running), func(t *testing.T) {
+			m, ctx := sharedTestManager(t)
+			s := Scope{1, "interrupt-user"}
+			f := connectSharedFixture(ctx, t, m, s, "", "browser")
+			require.NoError(t, m.Control(ctx, s, "chat", "start"))
+			id := m.Status(s, "chat").SessionID
+			done := make(chan error, 1)
+			if running {
+				go func() {
+					_, err := m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://slow.example"})
+					done <- err
+				}()
+				select {
+				case <-f.calls:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			require.NoError(t, f.send(map[string]any{
+				"event": "session.user_interrupt", "payload": map[string]any{"session_id": id},
+			}))
+			require.Eventually(t, func() bool { return m.Status(s, "chat").Paused }, time.Second, time.Millisecond)
+			if running {
+				select {
+				case err := <-done:
+					require.Error(t, err)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+			require.True(t, m.Status(s, "chat").Connected)
+			_, err := m.Call(ctx, s, "chat", "snapshot", nil)
+			require.ErrorContains(t, err, "paused")
+			require.NoError(t, m.Control(ctx, s, "chat", "resume"))
+			require.Equal(t, id, m.Status(s, "chat").SessionID)
+			_, err = m.Call(ctx, s, "chat", "navigate", map[string]any{"url": "https://continued.example"})
+			require.NoError(t, err, "the first action after explicit resume must not consume a stale interrupt")
+		})
+	}
+}
+
+func TestHumanHelpOutcomeControlsPause(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "help-user"}
+	f := connectSharedFixture(ctx, t, m, s, "", "browser")
+	for _, outcome := range []string{"continued", "completed", "cancelled", "timed_out", "disabled"} {
+		t.Run(outcome, func(t *testing.T) {
+			require.NoError(t, m.Control(ctx, s, outcome, "start"))
+			_, err := m.Call(ctx, s, outcome, "request_help", map[string]any{"prompt": outcome})
+			require.NoError(t, err)
+			select {
+			case params := <-f.calls:
+				require.Equal(t, float64(300000), params["timeout_ms"])
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			paused := outcome != "continued" && outcome != "completed"
+			status := m.Status(s, outcome)
+			require.Equal(t, paused, status.Paused)
+			require.True(t, status.Connected)
+			require.False(t, status.NeedsHelp)
+			if paused {
+				_, err = m.Call(ctx, s, outcome, "snapshot", nil)
+				require.ErrorContains(t, err, "task_paused")
+				require.NoError(t, m.Control(ctx, s, outcome, "resume"))
+			}
+			_, err = m.Call(ctx, s, outcome, "navigate", map[string]any{"url": "https://continued.example"})
+			require.NoError(t, err)
+			<-f.calls
+		})
 	}
 }
 

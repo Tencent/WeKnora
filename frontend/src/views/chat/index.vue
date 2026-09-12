@@ -188,6 +188,7 @@ import { listSteerSession, promoteSteerSession, removeSteerSession, steerSession
 import { persistedAssistantId, previewSteerMessage, discardSteerPreview, reconcileSteerMessageId } from '@/utils/steerStreamFork';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
+import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
@@ -1276,7 +1277,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_id: selectedAgentId,
         agent_source_tenant_id: selectedAgentSourceTenantId,
         web_search_enabled: webSearchEnabled,
-        local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled,
+        local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore().knownOffline,
         summary_model_id: modelId,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,

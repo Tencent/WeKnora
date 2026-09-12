@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -21,6 +22,7 @@ const browserToolParameters = `{
       "enum": [
         "observe",
         "snapshot",
+        "screenshot",
         "navigate",
         "navigate_back",
         "navigate_forward",
@@ -125,7 +127,7 @@ const browserToolParameters = `{
     "ref": {
       "type": "string",
       "minLength": 1,
-      "description": "Latest page ref. Use ref or selector, not both, for click/fill/hover/scroll_to/focus/select."
+      "description": "Fresh page ref; omit selector when set. Optional screenshot element crop."
     },
     "selector": {
       "type": "string",
@@ -146,7 +148,8 @@ const browserToolParameters = `{
     "key": {
       "type": "string",
       "minLength": 1,
-      "description": "Required for press. Examples: Enter, Escape, Ctrl+A."
+      "description": "Required for press: a key or shortcut such as Enter, Escape, Ctrl+A. ` +
+	`Use fill with value to enter text, not press."
     },
     "settle_ms": {
       "type": "integer",
@@ -163,7 +166,8 @@ const browserToolParameters = `{
       "items": {
         "type": "string"
       },
-      "description": "Required for select. Array of option values; an empty array clears a multiple selection."
+      "description": "Required for select: native select option value attributes, not visible labels. ` +
+	`For custom dropdowns use click/observe. Empty clears a multiple selection."
     },
     "scope": {
       "type": "string",
@@ -196,7 +200,8 @@ const browserToolParameters = `{
     "expression": {
       "type": "string",
       "minLength": 1,
-      "description": "Required for evaluate. JavaScript expression."
+      "description": "Required for evaluate. Use only for a specific gap after observation; ` +
+	`return bounded JSON-serializable values, not DOM nodes. Inspect result ok/error."
     },
     "return_by_value": {
       "type": "boolean"
@@ -406,6 +411,7 @@ const browserToolParameters = `{
 type browserArgumentRule struct{ fields, required []string }
 
 var browserArgumentRules = map[string]browserArgumentRule{
+	"screenshot": {fields: []string{"ref", "tab_id"}},
 	"observe": {
 		fields:   []string{"debug_surfaces", "max_depth", "max_tokens", "probe_hover", "tab_id"},
 		required: []string{},
@@ -568,7 +574,10 @@ func (t *BrowserSkillTool) ValidateArguments(args json.RawMessage) error {
 	}
 	for name := range input {
 		if name != "method" && name != "keep_open" && !slices.Contains(rule.fields, name) {
-			return fmt.Errorf("%s does not accept argument %q", method, name)
+			return fmt.Errorf(
+				"%s does not accept argument %q; allowed fields: %s (plus keep_open)",
+				method, name, strings.Join(rule.fields, ", "),
+			)
 		}
 	}
 	for _, name := range rule.required {

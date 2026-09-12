@@ -44,29 +44,40 @@ func (s Scope) valid() bool { return s.Tenant != 0 && s.User != "" }
 
 // Status describes the connection and current conversation task.
 type Status struct {
-	Idle      bool   `json:"idle"`
-	NeedsHelp bool   `json:"needs_help"`
-	Enabled   bool   `json:"enabled"`
-	Selected  bool   `json:"selected"`
-	Connected bool   `json:"connected"`
-	Paused    bool   `json:"paused"`
-	SessionID string `json:"task_id,omitempty"`
+	Action          string `json:"action,omitempty"`
+	ActionElapsedMS int64  `json:"action_elapsed_ms"`
+	PageURL         string `json:"page_url,omitempty"`
+	LastError       string `json:"last_error,omitempty"`
+	Stopping        bool   `json:"stopping"`
+	HelpPrompt      string `json:"help_prompt,omitempty"`
+	Idle            bool   `json:"idle"`
+	NeedsHelp       bool   `json:"needs_help"`
+	Enabled         bool   `json:"enabled"`
+	Selected        bool   `json:"selected"`
+	Connected       bool   `json:"connected"`
+	Paused          bool   `json:"paused"`
+	SessionID       string `json:"task_id,omitempty"`
 }
 type task struct {
-	commands         chan struct{}
-	helpCalls        int
-	previewAt        time.Time
-	previewData      json.RawMessage
-	previewBusy      bool
-	idle             bool
-	id               string
-	selected, paused bool
-	starting         bool
-	stopping         bool
-	forgotten        bool
-	epoch            uint64
-	calls            map[uint64]context.CancelFunc
-	nextCall         uint64
+	action                        string
+	actionStarted, actionFinished time.Time
+	pageURL, lastError            string
+	lifecycleCancel               context.CancelFunc
+	helpPrompt                    string
+	commands                      chan struct{}
+	helpCalls                     int
+	previewAt                     time.Time
+	previewData                   json.RawMessage
+	previewBusy                   bool
+	idle                          bool
+	id                            string
+	selected, paused              bool
+	starting                      bool
+	stopping                      bool
+	forgotten                     bool
+	epoch                         uint64
+	calls                         map[uint64]context.CancelFunc
+	nextCall                      uint64
 }
 type device struct {
 	writeMu    sync.Mutex
@@ -144,9 +155,23 @@ func (m *Manager) Status(s Scope, session string) Status {
 	if t := d.tasks[session]; t != nil {
 		result.Selected = t.selected
 		result.Paused = t.paused
+		result.Action = t.action
+		result.Stopping = t.stopping
+		result.PageURL = t.pageURL
+		result.LastError = t.lastError
+		if !t.actionStarted.IsZero() {
+			end := t.actionFinished
+			if end.IsZero() {
+				end = time.Now()
+			}
+			result.ActionElapsedMS = end.Sub(t.actionStarted).Milliseconds()
+		}
 		result.Idle = t.idle
 		result.SessionID = t.id
 		result.NeedsHelp = t.helpCalls > 0 && !t.paused
+		if result.NeedsHelp {
+			result.HelpPrompt = t.helpPrompt
+		}
 	}
 	return result
 }
@@ -436,7 +461,9 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if m.receiveUI(d, data) {
 					continue
 				}
-				m.observe(d, data)
+				if m.observe(d, data) {
+					continue
+				}
 			}
 			if !events {
 				d.writeMu.Lock()
@@ -524,7 +551,11 @@ func validExtensionOrigin(origin string) bool {
 	return true
 }
 
-func (m *Manager) observe(d *device, data []byte) {
+// observe consumes window interrupts at the gateway, which owns explicit pause
+// and resume. Forwarding them as well leaves a second, one-shot daemon marker
+// that passive resume snapshots cannot clear and rejects the next user-approved
+// action. pauseTask cancels active RPCs through the normal daemon cancel path.
+func (m *Manager) observe(d *device, data []byte) bool {
 	var e struct {
 		Event   string `json:"event"`
 		Payload struct {
@@ -532,10 +563,10 @@ func (m *Manager) observe(d *device, data []byte) {
 		} `json:"payload"`
 	}
 	if json.Unmarshal(data, &e) != nil {
-		return
+		return false
 	}
 	if e.Event != "session.user_interrupt" && e.Event != "session.window_closed" {
-		return
+		return false
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -550,15 +581,13 @@ func (m *Manager) observe(d *device, data []byte) {
 			}
 		}
 	}
+	return e.Event == "session.user_interrupt"
 }
 
 type rpcReply struct {
 	ID     string          `json:"id"`
 	Result json.RawMessage `json:"result"`
-	Error  *struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
+	Error  *RPCError       `json:"error"`
 }
 
 func rpc(ctx context.Context, d *device, method string, params any) (json.RawMessage, error) {
@@ -567,7 +596,11 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 		return nil, errors.New("BrowserSkill daemon unavailable")
 	}
 	defer func() { _ = conn.Close() }()
-	deadline := time.Now().Add(35 * time.Second)
+	timeout := 35 * time.Second
+	if IsHumanStep(strings.TrimPrefix(method, "tool.")) {
+		timeout = HumanStepTimeout
+	}
+	deadline := time.Now().Add(timeout)
 	if t, ok := ctx.Deadline(); ok {
 		deadline = t
 	}
@@ -596,7 +629,8 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 		return nil, errors.New("invalid BrowserSkill response")
 	}
 	if reply.Error != nil {
-		return nil, fmt.Errorf("%s: %s", reply.Error.Code, reply.Error.Message)
+		reply.Error.BoundDetails()
+		return nil, reply.Error
 	}
 	return reply.Result, nil
 }
@@ -663,6 +697,7 @@ func (m *Manager) Call(
 		target.commands = make(chan struct{}, 1)
 	}
 	gate := target.commands
+	epoch := target.epoch
 	d.mu.Unlock()
 	select {
 	case gate <- struct{}{}:
@@ -672,9 +707,17 @@ func (m *Manager) Call(
 	defer func() { <-gate }()
 	d.mu.Lock()
 	t := d.tasks[session]
-	if t == nil || t != target || !t.selected || t.paused || d.conn == nil || !d.ready || time.Now().After(d.expires) {
+	if t == nil || t != target || !t.selected {
 		d.mu.Unlock()
-		return nil, errors.New("local browser is disconnected or paused; ask the user to connect or resume")
+		return nil, errors.New("local browser task ended; wait for a new user turn")
+	}
+	if d.conn == nil || !d.ready || time.Now().After(d.expires) {
+		d.mu.Unlock()
+		return nil, errors.New("local browser is offline; keep Chrome and the extension open for reconnection")
+	}
+	if t.paused || t.stopping || t.epoch != epoch {
+		d.mu.Unlock()
+		return nil, pausedError()
 	}
 	if t.id == "" {
 		d.mu.Unlock()
@@ -691,6 +734,10 @@ func (m *Manager) Call(
 		}
 	}
 	t.idle = false
+	t.action, t.actionStarted, t.actionFinished, t.lastError = method, time.Now(), time.Time{}, ""
+	if method == "tab_select" || method == "tab_close" || method == "tab_return" {
+		t.pageURL = ""
+	}
 	id := t.id
 	callCtx, cancel := context.WithCancel(ctx)
 	t.nextCall++
@@ -699,9 +746,10 @@ func (m *Manager) Call(
 		t.calls = map[uint64]context.CancelFunc{}
 	}
 	t.calls[callID] = cancel
-	helping := method == "request_help" || method == "tab_borrow"
+	helping := IsHumanStep(method)
 	if helping {
 		t.helpCalls++
+		t.helpPrompt, _ = params["prompt"].(string)
 	}
 	d.mu.Unlock()
 	defer func() {
@@ -710,6 +758,7 @@ func (m *Manager) Call(
 		delete(t.calls, callID)
 		if helping {
 			t.helpCalls--
+			t.helpPrompt = ""
 		}
 		d.mu.Unlock()
 	}()
@@ -728,7 +777,21 @@ func (m *Manager) Call(
 		}
 	}
 	clean["session_id"] = id
+	if helping {
+		// Keep all transports inside the same bounded human-wait budget.
+		clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+	}
 	result, err := rpc(callCtx, d, "tool."+method, clean)
+	if method == "request_help" && err == nil {
+		var help struct {
+			Outcome string `json:"outcome"`
+		}
+		if json.Unmarshal(result, &help) != nil || (help.Outcome != "continued" && help.Outcome != "completed") {
+			d.mu.Lock()
+			pauseTask(t)
+			d.mu.Unlock()
+		}
+	}
 	if sessionGone(err) {
 		d.mu.Lock()
 		if t.id == id {
@@ -737,15 +800,61 @@ func (m *Manager) Call(
 		}
 		d.mu.Unlock()
 	}
-	if err != nil &&
-		(strings.Contains(err.Error(), "user_aborted") ||
-			strings.Contains(err.Error(), "interrupted or timed out") ||
-			strings.Contains(err.Error(), "unfinished command")) {
+	if interruptedCommand(err) {
 		d.mu.Lock()
 		pauseTask(t)
 		d.mu.Unlock()
 	}
+	d.mu.Lock()
+	t.actionFinished = time.Now()
+	var page struct {
+		URL      string          `json:"url"`
+		FinalURL string          `json:"final_url"`
+		Error    string          `json:"error_text"`
+		OK       *bool           `json:"ok"`
+		Failure  json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(result, &page) == nil {
+		if page.FinalURL != "" {
+			t.pageURL = statusPageURL(page.FinalURL)
+		} else if page.URL != "" {
+			t.pageURL = statusPageURL(page.URL)
+		}
+	}
+	if err != nil {
+		t.lastError = err.Error()
+	} else if NavigationIncomplete(method, result) {
+		t.lastError = page.Error
+		if t.lastError == "" {
+			t.lastError = "Navigation did not reach the requested loading phase. " +
+				"Observe the current page before continuing."
+		}
+	} else if method == "evaluate" && page.OK != nil && !*page.OK {
+		var failure struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(page.Failure, &failure)
+		t.lastError = failure.Text
+	}
+	if len(t.lastError) > 1200 {
+		t.lastError = string([]rune(t.lastError)[:min(len([]rune(t.lastError)), 1200)])
+	}
+	d.mu.Unlock()
 	return result, err
+}
+
+func interruptedCommand(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rpcErr *RPCError
+	if errors.As(err, &rpcErr) &&
+		(rpcErr.Code == "timeout" || rpcErr.Code == "cancelled" || rpcErr.Code == "user_aborted") {
+		return true
+	}
+	return strings.Contains(err.Error(), "user_aborted") ||
+		strings.Contains(err.Error(), "interrupted or timed out") ||
+		strings.Contains(err.Error(), "unfinished command")
 }
 
 func sessionGone(err error) bool {
@@ -782,6 +891,9 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	if d == nil {
 		return errors.New("pair a browser first")
 	}
+	if action == "stop" {
+		return m.stopTask(ctx, s, session, d, false)
+	}
 	d.mu.Lock()
 	t := d.tasks[session]
 	if action == "finish" {
@@ -791,7 +903,8 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 			d.mu.Unlock()
 			return nil
 		}
-		action = "stop"
+		d.mu.Unlock()
+		return m.stopTask(ctx, s, session, d, true)
 	}
 	if action == "auto_start" && (t == nil || !t.selected || t.paused || t.forgotten) {
 		d.mu.Unlock()
@@ -814,9 +927,9 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 		d.mu.Unlock()
 		return errors.New("invalid browser control")
 	}
-	if t.forgotten {
+	if t.forgotten || t.stopping {
 		d.mu.Unlock()
-		return errors.New("browser conversation was deleted")
+		return errors.New("browser conversation was deleted or its task is ending")
 	}
 	if action == "select" {
 		// Re-selecting a tab never clears an interruption or resumes a task.
@@ -832,16 +945,6 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 		d.mu.Unlock()
 		return errors.New("browser task lifecycle is busy")
 	}
-	if action == "stop" && t.id == "" {
-		pauseTask(t)
-		if err := m.store.clearTask(ctx, s, session); err != nil {
-			d.mu.Unlock()
-			return err
-		}
-		delete(d.tasks, session)
-		d.mu.Unlock()
-		return nil
-	}
 	if d.conn == nil || !d.ready || time.Now().After(d.expires) {
 		d.mu.Unlock()
 		return errors.New("browser is disconnected")
@@ -854,17 +957,22 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	generation := d.generation
 	browserID := d.browserID
 	t.starting = true
-	t.stopping = action == "stop"
 	t.selected = true
-	pauseTask(t)
+	if action == "auto_start" {
+		// The first queued command creates the session on behalf of the whole
+		// queue. Only a user interruption/resume invalidates queued commands.
+		t.paused = true
+	} else {
+		pauseTask(t)
+	}
 	epoch := t.epoch
+	lifecycleCtx, lifecycleCancel := context.WithCancel(ctx)
+	t.lifecycleCancel = lifecycleCancel
+	defer lifecycleCancel()
 	d.mu.Unlock()
 	method := "session.start"
 	params := map[string]any{"focused": false, "browser_instance_id": browserID}
-	if action == "stop" {
-		method = "session.stop"
-		params = map[string]any{"session_id": id, "all": false}
-	} else if id != "" {
+	if id != "" {
 		// Refresh the observation before releasing a paused task to the agent.
 		method = "tool.snapshot"
 		params = map[string]any{"session_id": id}
@@ -873,30 +981,30 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	if err := m.store.markTask(ctx, s, session); err != nil {
 		d.mu.Lock()
 		t.starting = false
-		t.stopping = false
+		t.lifecycleCancel = nil
 		d.mu.Unlock()
 		return err
 	}
-	result, err := rpc(ctx, d, method, params)
+	result, err := rpc(lifecycleCtx, d, method, params)
 	// A cancel acknowledgement can precede the extension's terminal response.
 	// Only the passive resume snapshot may be retried while that response drains.
 	drainUntil := time.Now().Add(2 * time.Second)
 	for method == "tool.snapshot" && err != nil &&
 		strings.Contains(err.Error(), "unfinished command") && time.Now().Before(drainUntil) {
 		select {
-		case <-ctx.Done():
-			err = ctx.Err()
+		case <-lifecycleCtx.Done():
+			err = lifecycleCtx.Err()
 		case <-time.After(50 * time.Millisecond):
-			result, err = rpc(ctx, d, method, params)
+			result, err = rpc(lifecycleCtx, d, method, params)
 		}
-		if ctx.Err() != nil {
+		if lifecycleCtx.Err() != nil {
 			break
 		}
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	t.starting = false
-	t.stopping = false
+	t.lifecycleCancel = nil
 	if err != nil {
 		if sessionGone(err) && t.id == id {
 			t.id = ""
@@ -905,28 +1013,6 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	if d.generation != generation {
 		return errors.New("browser connection changed; start a new task explicitly")
-	}
-	if action == "stop" {
-		var stopped struct {
-			Stopped []string `json:"stopped"`
-		}
-		if json.Unmarshal(result, &stopped) != nil {
-			return errors.New("invalid stop response")
-		}
-		found := false
-		for _, v := range stopped.Stopped {
-			if v == id {
-				found = true
-			}
-		}
-		if !found {
-			return errors.New("BrowserSkill could not finish returning tabs; retry ending the task")
-		}
-		if err := m.store.clearTask(ctx, s, session); err != nil {
-			return err
-		}
-		delete(d.tasks, session)
-		return nil
 	}
 	if id == "" {
 		var reply struct {

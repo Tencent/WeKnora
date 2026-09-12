@@ -500,13 +500,9 @@ func escapeXMLAttr(s string) string {
 // conversation history — replayed user turns keep bare Content so stale scope
 // snapshots do not steer follow-up questions.
 //
-// Per-turn communication_instruction and answer_instruction remind the model
-// not to leak internal tool names or IDs in user-visible text, and to end the
-// turn by writing its complete answer as plain assistant text.
-//
 // Emitted as an XML-ish block (not free prose) so it is a visually distinct,
-// non-instruction envelope that is hard to conflate with user text and
-// prompt-injection-safe.
+// data envelope. Escaping preserves its structure; the system source-data
+// contract defines how to treat its contents. This is not an authorization gate.
 func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
@@ -551,13 +547,7 @@ func buildRuntimeContextBlock(
 			}
 		}
 		sb.WriteString("  </pinned_documents>\n")
-		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. ")
-		sb.WriteString("Prioritize retrieving content from these documents (e.g. list_knowledge_chunks with the knowledge_id). ")
-		sb.WriteString("If an earlier turn analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
 	}
-
-	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
-	sb.WriteString("  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not request any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n")
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
@@ -583,10 +573,10 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 			lines = append(
 				lines,
 				fmt.Sprintf(
-					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP service "+
-						"@%s. Describe the required tools and call them through call_mcp_tool before "+
-						"answering; report connection or authentication failures if the service is "+
-						"unavailable.",
+					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP "+
+						"service @%s. Describe the required tools, then use the offered functions or "+
+						"call_mcp_tool as available before answering; report connection or "+
+						"authentication failures if the service is unavailable.",
 					sanitizeMustUseField(svc.ID),
 					sanitizeMustUseField(svc.Name),
 				),
@@ -601,20 +591,29 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if display == "" {
 			display = sanitizeMustUseField(svc.ID)
 		}
-		lines = append(lines, fmt.Sprintf("Must use MCP tools whose names start with %s (@%s) to answer the question below.", prefix, display))
+		lines = append(lines, fmt.Sprintf(
+			"Must use MCP tools whose names start with %s (@%s) to answer the question below.",
+			prefix, display,
+		))
 	}
 	for _, skill := range skills {
 		if skill == nil || skill.Name == "" {
 			continue
 		}
 		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf("Must call read_file(path=%q) for @Skill %q before answering.", "skill://"+name+"/SKILL.md", name))
+		lines = append(lines, fmt.Sprintf(
+			"Must call read_file(path=%q) for @Skill %q before answering.",
+			"skill://"+name+"/SKILL.md", name,
+		))
 	}
 	if len(lines) == 0 {
 		return ""
 	}
 	return "<must_use>\n" + strings.Join(lines, "\n") +
-		"\nThese selections do not replace research into the task's factual content or exclude other relevant available sources unless the user explicitly restricts them.\n</must_use>"
+		"\nThese selections do not replace research into the task's factual content or exclude other " +
+		"relevant available sources unless the user explicitly restricts them. Apply selections to the " +
+		"relevant parts of the task; an @mention does not authorize unrelated actions. Follow the " +
+		"user's current explicit restrictions if they narrow or cancel a selection.\n</must_use>"
 }
 
 // sanitizeMustUseField strips newlines and angle brackets so an MCP/skill name
@@ -824,13 +823,6 @@ func (e *AgentEngine) appendToolResults(
 		}
 
 		messages = append(messages, toolMsg)
-	}
-
-	if stepContainsMarkdownImage(step) {
-		// Keep the requirement at the end of the current prefix. Editing the
-		// system prompt would invalidate provider prefix cache for tools and
-		// the whole transcript on every later round of this turn.
-		messages = appendAgentRetrievedImageRequirement(messages)
 	}
 
 	return messages

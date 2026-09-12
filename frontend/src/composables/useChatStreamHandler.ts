@@ -809,6 +809,19 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
+      case 'command_output': {
+        const toolCallId = dataPayload?.tool_call_id as string | undefined
+        if (!toolCallId) break
+        const tool = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+          event => event.type === 'tool_call' && event.tool_call_id === toolCallId,
+        )
+        // Late progress must not resurrect a completed command or attach to
+        // another concurrent call just because it uses the same tool name.
+        if (tool?.pending && tool.tool_name === 'shell_exec' && !(tool.command_output as ChatMessage | undefined)?.done) {
+          tool.command_output = dataPayload
+        }
+        break
+      }
       case 'tool_result':
       case 'error': {
         if (dataPayload) {
@@ -1118,6 +1131,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'thinking' ||
       data.response_type === 'tool_call' ||
       data.response_type === 'tool_result' ||
+      data.response_type === 'command_output' ||
       data.response_type === 'reflection' ||
       data.response_type === 'artifacts_pending' ||
       data.response_type === 'context_compacted' ||

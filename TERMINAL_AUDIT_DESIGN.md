@@ -2,7 +2,7 @@
 
 ## Baseline and scope
 
-- Source of truth after latest-main sync: `upstream/main` at `7e53c3167164d68cfb6c2e897ddd3e755b4b5a45`.
+- Source of truth after latest-main sync: `upstream/main` at `462999ec3f5c1467ef0ccf5cf8c422393f40a0e6`.
 - Main already has the provider-neutral `RemoteTerminalManager` / `RemoteTerminalSession`, current terminal ticket, authenticated WebSocket bridge, xterm UI, pinned session binding, periodic auth recheck, idle disconnect, and native `AuditLog` service/repository/UI.
 - PR #3146 is open, merge-conflicting, and builds a separate `CommandTerminal`/Workbench audit stack. It remains analysis only and is not an architecture or code source for this PR.
 - PR-03 audits commands entered in the current interactive PTY only. It does not create a second terminal, ticket, socket, audit store, or frontend terminal.

@@ -127,8 +127,11 @@ func (e *AgentEngine) SetPinnedMentions(mcpServices []*PinnedMCPServiceInfo, ski
 
 func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromptOptions {
 	opts := &BuildSystemPromptOptions{
-		Language: types.LanguageNameFromContext(ctx),
-		Config:   e.appConfig,
+		Language:         types.LanguageNameFromContext(ctx),
+		Config:           e.appConfig,
+		SkillInstallMode: e.config.SkillInstallMode(),
+		MemoryPrompt:     e.memoryPrompt,
+		ProtocolPrompt:   e.modelContext.ProtocolPrompt(),
 	}
 	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
 		opts.SkillsMetadata = e.skillsManager.GetAllMetadata()
@@ -151,19 +154,16 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 }
 
 func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
-	prompt := BuildSystemPromptWithOptions(
+	sections := BuildSystemPromptSections(
 		e.knowledgeBasesInfo,
 		e.config.WebSearchEnabled,
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
-	if e.config.LocalBrowserEnabled {
-		prompt += localBrowserSourcePrompt
+	for _, section := range sections {
+		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
 	}
-	// Memory has to ride in the system prompt: buildMessagesWithLLMContext
-	// drops system messages coming from history, so a separate memory message
-	// would be silently discarded from the second turn onward.
-	return strings.TrimRight(prompt, " \t\r\n") + e.memoryPrompt + e.modelContext.ProtocolPrompt()
+	return renderSystemPromptSections(sections)
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
@@ -516,7 +516,7 @@ loop:
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
 				logger.Infof(ctx, "[Agent] Synthesizing final answer from %d existing tool results",
 					totalTC)
-				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID)
+				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, messages)
 				state.IsComplete = true
 			}
 			return state, ctx.Err()
@@ -557,7 +557,7 @@ loop:
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
 	if !state.IsComplete && ctx.Err() == nil {
-		e.handleMaxIterations(ctx, query, state, sessionID)
+		e.handleMaxIterations(ctx, query, state, sessionID, messages)
 	}
 
 	return state, nil
@@ -849,6 +849,7 @@ func (e *AgentEngine) runReActIteration(
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
+	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
@@ -905,7 +906,9 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs []string
 			logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
 			continue
 		}
-		descriptions = append(descriptions, strings.TrimSpace(desc))
+		if desc = strings.TrimSpace(desc); desc != "" {
+			descriptions = append(descriptions, desc)
+		}
 	}
 	return descriptions
 }
