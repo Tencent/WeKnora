@@ -31,6 +31,12 @@ type SandboxTerminalTicketClaims struct {
 // IssueSandboxTerminalTicket mints a short-lived JWT for the browser
 // WebSocket handshake. It is not an access token: ValidateToken rejects it.
 func IssueSandboxTerminalTicket(userID string, tenantID uint64, sessionID, tokenID string, ttl time.Duration) (string, error) {
+	return issueSandboxTicket(userID, tenantID, sessionID, tokenID, ttl, sandboxTerminalTicketType)
+}
+
+func issueSandboxTicket(
+	userID string, tenantID uint64, sessionID, tokenID string, ttl time.Duration, purpose string,
+) (string, error) {
 	userID = strings.TrimSpace(userID)
 	sessionID = strings.TrimSpace(sessionID)
 	tokenID = strings.TrimSpace(tokenID)
@@ -45,7 +51,7 @@ func IssueSandboxTerminalTicket(userID string, tenantID uint64, sessionID, token
 		"tenant_id":  tenantID,
 		"session_id": sessionID,
 		"token_id":   tokenID,
-		"type":       sandboxTerminalTicketType,
+		"type":       purpose,
 		"exp":        time.Now().Add(ttl).Unix(),
 		"iat":        time.Now().Unix(),
 	})
@@ -55,6 +61,10 @@ func IssueSandboxTerminalTicket(userID string, tenantID uint64, sessionID, token
 // ParseSandboxTerminalTicket validates a handshake ticket. Access and
 // refresh tokens are rejected.
 func ParseSandboxTerminalTicket(raw string) (*SandboxTerminalTicketClaims, error) {
+	return parseSandboxTicket(raw, sandboxTerminalTicketType)
+}
+
+func parseSandboxTicket(raw, purpose string) (*SandboxTerminalTicketClaims, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, errors.New("missing terminal ticket")
@@ -73,7 +83,7 @@ func ParseSandboxTerminalTicket(raw string) (*SandboxTerminalTicketClaims, error
 		return nil, errors.New("invalid terminal ticket claims")
 	}
 	tokenType, _ := claims["type"].(string)
-	if tokenType != sandboxTerminalTicketType {
+	if tokenType != purpose {
 		return nil, errors.New("not a terminal ticket")
 	}
 	userID, _ := claims["user_id"].(string)

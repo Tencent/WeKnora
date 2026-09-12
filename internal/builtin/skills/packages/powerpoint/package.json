@@ -1,0 +1,12 @@
+{
+  "name": "weknora-builtin-powerpoint",
+  "version": "2026.9.5",
+  "private": true,
+  "dependencies": {
+    "fontkit": "2.0.4",
+    "linebreak": "1.1.0",
+    "pptxgenjs": "4.0.1",
+    "prismjs": "1.30.0",
+    "skia-canvas": "3.0.8"
+  }
+}

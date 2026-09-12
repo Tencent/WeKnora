@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,7 +69,8 @@ func (e *skillVerificationError) Error() string {
 // pass here is deterministic: the files the bundle named are present, the
 // isolated dependency trees the installer was told to create exist, every
 // source parses with the interpreter that would run it, and every distribution
-// the manifests name is installed.
+// the manifests name is installed at a compatible declared version. Original
+// dependency manifests must also remain unchanged.
 //
 // Import resolution is deliberately absent. Whether `import helper` resolves
 // depends on what a script does to sys.path before the import runs, which no
@@ -203,10 +206,10 @@ func (s *TenantSkillService) verifyScriptsParse(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) ([]string, error) {
 	var notes []string
-	if scripts := sortedScriptPaths(bundle, ".py"); len(scripts) > 0 {
+	if scripts := sortedScriptPaths(bundle, ".py"); len(scripts) > 0 || bundleHasPythonDeps(bundle) {
 		entry, auxiliary := splitAuxiliaryScripts(scripts)
 		found, err := s.execVerify(ctx, mgr, sessionID, skillDir, "python",
-			skillPythonVerifyCommand(skillDir, entry, auxiliary))
+			skillPythonVerifyCommand(skillDir, entry, auxiliary, bundle))
 		notes = append(notes, found...)
 		if err != nil {
 			return notes, err
@@ -302,10 +305,23 @@ func verificationProblems(stderr string) []string {
 // Auxiliary files are named after --optional. They are checked the same way,
 // and what is found in them is reported rather than allowed to refuse the
 // install.
-func skillPythonVerifyCommand(skillDir string, entry, auxiliary []string) string {
+func skillPythonVerifyCommand(skillDir string, entry, auxiliary []string, bundles ...*SkillBundle) string {
 	venv := path.Join(skillDir, ".venv", "bin", "python")
 	quotedVenv := sandbox.ShellQuote(venv)
 	args := []string{sandbox.ShellQuote(skillDir)}
+	if len(bundles) > 0 && bundles[0] != nil {
+		hashes := map[string]string{}
+		for _, name := range []string{"requirements.txt", "requirements.lock", "pyproject.toml"} {
+			if content, ok := bundles[0].Files[name]; ok {
+				sum := sha256.Sum256(content)
+				hashes[name] = hex.EncodeToString(sum[:])
+			}
+		}
+		if len(hashes) > 0 {
+			encoded, _ := json.Marshal(hashes)
+			args = append(args, "--manifest-hashes", sandbox.ShellQuote(base64.StdEncoding.EncodeToString(encoded)))
+		}
+	}
 	for _, rel := range entry {
 		args = append(args, sandbox.ShellQuote(rel))
 	}
@@ -479,7 +495,8 @@ func bundleHasPythonDeps(bundle *SkillBundle) bool {
 	}
 	_, req := bundle.Files["requirements.txt"]
 	_, pyproject := bundle.Files["pyproject.toml"]
-	return req || pyproject
+	_, lock := bundle.Files["requirements.lock"]
+	return req || pyproject || lock
 }
 
 func bundleHasNodeDeps(bundle *SkillBundle) bool {

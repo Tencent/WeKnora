@@ -15,6 +15,7 @@ import { listMCPServices, type MCPService } from '@/api/mcp-service'
 import { listSkillCatalog, listSkills, type SkillCatalogItem, type SkillInfo } from '@/api/skill'
 import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
+import { createSkillResourceCache } from './skillResourceCache'
 import { isStorageConfigDenied } from './storageEngineAccess'
 
 const CACHE_TTL_MS = 60_000
@@ -59,7 +60,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const mcpServices = ref<MCPService[]>([])
   const skills = ref<SkillInfo[]>([])
   const skillsAvailable = ref(false)
-  const skillsConfigId = ref('')
   const skillCatalog = ref<SkillCatalogItem[]>([])
   const agentTypePresets = ref<AgentTypePreset[]>([])
   const promptTemplates = ref<PromptTemplatesConfig | null>(null)
@@ -122,29 +122,24 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     })
   }
 
-  async function ensureSkills(sandboxConfigId?: string, force = false): Promise<void> {
+  const skillCache = createSkillResourceCache(listSkills)
+  let skillRequestRevision = 0
+  async function ensureSkills(sandboxConfigId?: string, force = false, sessionId?: string): Promise<Omit<Awaited<ReturnType<typeof listSkills>>, '$httpStatus'> | null> {
     const configId = sandboxConfigId?.trim() || ''
-    if (configId !== skillsConfigId.value) {
-      force = true
+    const revision = ++skillRequestRevision
+    skillsAvailable.value = false
+    skills.value = []
+    if (!configId && !sessionId) return { data: [], skills_available: false }
+    try {
+      const response = await skillCache.get(configId, sessionId, force)
+      if (revision === skillRequestRevision) {
+        skillsAvailable.value = response.skills_available !== false
+        skills.value = response.data || []
+      }
+      return response
+    } catch {
+      return null
     }
-    return runOnce('skills', force, async () => {
-      skillsConfigId.value = configId
-      if (!configId) {
-        skillsAvailable.value = false
-        skills.value = []
-        loadedAt.value.skills = Date.now()
-        return
-      }
-      try {
-        const skillsRes = await listSkills(configId)
-        skillsAvailable.value = skillsRes.skills_available !== false
-        skills.value = skillsRes.data && skillsRes.data.length > 0 ? skillsRes.data : []
-      } catch {
-        skillsAvailable.value = false
-        skills.value = []
-      }
-      loadedAt.value.skills = Date.now()
-    })
   }
 
   async function ensureSkillCatalog(force = false): Promise<void> {
@@ -216,6 +211,10 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   }
 
   function invalidate(...keys: EditorResourceKey[]) {
+    if (!keys.length || keys.includes('skills')) {
+      skillRequestRevision++
+      skillCache.clear()
+    }
     if (keys.length === 0) {
       loadedAt.value = {}
       storageConfig.value = null
@@ -224,7 +223,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       mcpServices.value = []
       skills.value = []
       skillsAvailable.value = false
-      skillsConfigId.value = ''
       skillCatalog.value = []
       agentTypePresets.value = []
       promptTemplates.value = null

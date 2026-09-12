@@ -220,6 +220,7 @@ build_sandbox_image() {
     # 而 Docker 后端只在本地缺失时才去拉，本地不打这个标签就等于白构建。
     docker build \
         --platform $PLATFORM \
+        --build-arg "APT_MIRROR=${APT_MIRROR:-}" \
         -f docker/Dockerfile.sandbox \
         --target sandbox \
         -t wechatopenai/weknora-sandbox:latest \
@@ -238,6 +239,7 @@ build_sandbox_image() {
 
     docker build \
         --platform linux/amd64 \
+        --build-arg "APT_MIRROR=${APT_MIRROR:-}" \
         -f docker/Dockerfile.sandbox \
         --target cube \
         -t wechatopenai/weknora-sandbox:latest-cube \

@@ -12,9 +12,12 @@ const (
 	// It is outside /workspace on purpose: /workspace is per-session scratch
 	// and is wiped before every snapshot.
 	SkillsImageRoot = "/opt/weknora/tenant/skills"
+	// BuiltinSkillsImageRoot is the script root for preinstalled skill packages.
+	BuiltinSkillsImageRoot = "/opt/weknora/builtin/skills"
 
-	// SkillsManifestPath lists what the image claims to contain. It is a
-	// troubleshooting aid, never the source of truth for execution.
+	// SkillsManifestPath records the installed resources carried by an image.
+	// Runtime intersects it with ready/enabled database rows; it cannot grant
+	// a skill by itself or substitute for installation verification.
 	SkillsManifestPath = SkillsImageRoot + "/.manifest.json"
 )
 
@@ -106,7 +109,7 @@ func ValidatedSessionOutputDir(dir string) (string, bool) {
 func ValidatedImageSkillDir(skillDir string) (string, bool) {
 	clean := path.Clean(strings.TrimSpace(skillDir))
 	expected, err := SkillDirFor(path.Base(clean))
-	if err != nil || expected != clean {
+	if err != nil || (expected != clean && path.Join(BuiltinSkillsImageRoot, path.Base(clean)) != clean) {
 		return "", false
 	}
 	return clean, true
@@ -133,6 +136,9 @@ func InterpreterSkillDir(remotePath, skillDir string) (string, bool) {
 func SkillNameFromImagePath(p string) (name string, inImage bool) {
 	clean := path.Clean(strings.TrimSpace(p))
 	root := path.Clean(SkillsImageRoot)
+	if clean == BuiltinSkillsImageRoot || strings.HasPrefix(clean, BuiltinSkillsImageRoot+"/") {
+		root = BuiltinSkillsImageRoot
+	}
 	if clean == root {
 		return "", true
 	}
@@ -157,6 +163,9 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 	}
 	clean := path.Clean(strings.TrimSpace(scriptPath))
 	dir, err := SkillDirFor(name)
+	if strings.HasPrefix(clean, BuiltinSkillsImageRoot+"/") {
+		dir = path.Join(BuiltinSkillsImageRoot, name)
+	}
 	if err != nil || clean == dir {
 		return "", false
 	}
@@ -169,6 +178,14 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 // inspects or debugs a Python skill has to name this path.
 func SkillVenvPython(skillDir string) string {
 	return path.Join(skillDir, ".venv", "bin", "python")
+}
+
+// BuiltinSkillRuntimeGuard fails before a builtin command can fall back to a
+// different environment. It runs in the same exec, without an extra round trip.
+func BuiltinSkillRuntimeGuard(dir string) string {
+	return "if [ ! -x " + ShellQuote(SkillVenvPython(dir)) + " ]; then printf '%s\\n' " +
+		ShellQuote("builtin skill runtime missing: "+dir+"; recreate the sandbox from a verified image") +
+		" >&2; exit 126; fi; "
 }
 
 // SkillInterpreterCommand picks how to run one script of a skill.
@@ -185,6 +202,10 @@ func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
 	case ".py":
 		venvPython := SkillVenvPython(skillDir)
 		script := ShellQuote(scriptPath)
+		if strings.HasPrefix(skillDir, BuiltinSkillsImageRoot+"/") {
+			return "/bin/sh", []string{"-c", BuiltinSkillRuntimeGuard(skillDir) +
+				fmt.Sprintf(`exec %s %s "$@"`, ShellQuote(venvPython), script), skillShellArgv0}
+		}
 		return "/bin/sh", []string{"-c", fmt.Sprintf(
 			`if [ -x %s ]; then exec %s %s "$@"; else exec python3 %s "$@"; fi`,
 			ShellQuote(venvPython), ShellQuote(venvPython), script, script,

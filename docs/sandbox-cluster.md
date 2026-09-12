@@ -25,6 +25,8 @@
 
 生产环境应使用与 WeKnora 相同的版本标签，不建议长期指向 `latest`。Skills 新增系统依赖时，应先更新标准镜像并重新注册模板，再切换集群的默认模板 ID。
 
+构建时可用 `--build-arg APT_MIRROR=https://mirrors.ustc.edu.cn` 切换 Debian 软件包源；该源会保留在镜像中供后续安装复用。不传参数则使用上游默认源。
+
 ### 两个镜像变体
 
 `docker/Dockerfile.sandbox` 产出两个 target，内容相同、入口不同：

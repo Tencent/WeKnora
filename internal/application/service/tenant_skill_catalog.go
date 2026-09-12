@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	builtin "github.com/Tencent/WeKnora/internal/builtin/skills"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -24,11 +25,13 @@ type SkillCatalogInstallView struct {
 	Enabled           bool      `json:"enabled"`
 	Error             string    `json:"error,omitempty"`
 	BundleSHA256      string    `json:"bundle_sha256,omitempty"`
+	Version           string    `json:"version,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // SkillCatalogView is a tenant skill definition plus its sandbox installations.
 type SkillCatalogView struct {
+	Builtin       bool                      `json:"builtin,omitempty"`
 	ID            string                    `json:"id"`
 	Name          string                    `json:"name"`
 	Version       string                    `json:"version,omitempty"`
@@ -129,6 +132,7 @@ func catalogView(
 	configByID map[string]*types.TenantSandboxConfigEntity,
 ) SkillCatalogView {
 	view := SkillCatalogView{
+		Builtin:       builtin.MatchesArchiveDigest(cat.Name, cat.BundleSHA256),
 		ID:            cat.ID,
 		Name:          cat.Name,
 		Version:       cat.Version,
@@ -155,6 +159,7 @@ func installView(
 		Enabled:         row.Enabled,
 		Error:           row.Error,
 		BundleSHA256:    row.BundleSHA256,
+		Version:         row.Version,
 		UpdatedAt:       row.UpdatedAt,
 	}
 	if cfg := configByID[row.SandboxConfigID]; cfg != nil {

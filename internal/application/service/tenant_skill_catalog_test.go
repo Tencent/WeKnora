@@ -29,7 +29,7 @@ func TestListCatalogGroupsInstallsByDefinition(t *testing.T) {
 	}))
 	require.NoError(t, repo.CreateSkill(ctx, &types.TenantSkillEntity{
 		ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-a", CatalogID: "cat-pdf",
-		Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
+		Name: "pdf", Version: "old-version", Status: types.SkillStatusReady, Enabled: true,
 	}))
 	require.NoError(t, repo.CreateSkill(ctx, &types.TenantSkillEntity{
 		ID: "sk-2", TenantID: 7, SandboxConfigID: "cfg-b", CatalogID: "cat-pdf",
@@ -42,6 +42,11 @@ func TestListCatalogGroupsInstallsByDefinition(t *testing.T) {
 	require.Len(t, list, 1)
 	require.Equal(t, "pdf", list[0].Name)
 	require.Len(t, list[0].Installations, 2)
+	for _, install := range list[0].Installations {
+		if install.SkillID == "sk-1" {
+			require.Equal(t, "old-version", install.Version)
+		}
+	}
 }
 
 func TestResolveCatalogFindsLegacySkillID(t *testing.T) {

@@ -22,16 +22,16 @@ What remains is what a file, not a runtime, can settle:
 
     - the execution user can read every source file
     - every source file parses
-    - every distribution the manifests name is installed in the venv
+    - every distribution the manifests and lock name is installed at a compatible version
 
 Findings are graded, because rejecting an install is expensive.
 
     stdout  `note: ...` lines - reported, image kept
     stderr  problem lines - the install is refused
     exit 0  the image may be kept
-    exit 1  a problem no installer round can fix: a syntax error, or a file the
-            execution user cannot read
-    exit 2  every problem is a dependency missing from this image, so handing
+    exit 1  a problem that stops installation: a syntax error, an unreadable
+            file, or a dependency manifest changed from the original bundle
+    exit 2  every problem is a missing or incompatible dependency, so handing
             these lines back to the installer is worth a round
 
 Files named after --optional are checked identically, but their findings are
@@ -40,6 +40,9 @@ tests/ directory must not decide whether the skill installs.
 """
 
 import ast
+import base64
+import hashlib
+import json
 import os
 import re
 import sys
@@ -51,6 +54,10 @@ EXIT_MISSING_DEPENDENCY = 2
 
 root = os.path.abspath(sys.argv[1])
 _argv_scripts = sys.argv[2:]
+manifest_hashes = {}
+if _argv_scripts[:1] == ["--manifest-hashes"]:
+    manifest_hashes = json.loads(base64.b64decode(_argv_scripts[1]))
+    _argv_scripts = _argv_scripts[2:]
 if OPTIONAL_FLAG in _argv_scripts:
     _cut = _argv_scripts.index(OPTIONAL_FLAG)
     entry_scripts = _argv_scripts[:_cut]
@@ -150,13 +157,32 @@ def load_pyproject(path):
         return None
 
 
+def requirement_file_lines(filename):
+    """Read pip/uv lock lines, including continued hash lists."""
+    location = os.path.join(root, filename)
+    if not os.path.isfile(location):
+        return
+    pending = ""
+    with open(location, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            continued = line.endswith("\\")
+            pending += " " + (line[:-1] if continued else line)
+            if continued:
+                continue
+            yield re.sub(r"\s+--hash(?:=|\s+)\S+", "", pending).strip()
+            pending = ""
+    if pending.strip():
+        yield re.sub(r"\s+--hash(?:=|\s+)\S+", "", pending).strip()
+
+
 def declared_requirement_lines():
-    """(source, requirement-line) pairs from requirements.txt and pyproject.toml."""
-    requirements = os.path.join(root, "requirements.txt")
-    if os.path.isfile(requirements):
-        with open(requirements, encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                yield "requirements.txt", line
+    """Include the lock so a transitive version drift cannot pass verification."""
+    for filename in ("requirements.txt", "requirements.lock"):
+        for line in requirement_file_lines(filename):
+            yield filename, line
     pyproject = os.path.join(root, "pyproject.toml")
     if not os.path.isfile(pyproject):
         return
@@ -182,45 +208,49 @@ def declared_requirement_lines():
 
 
 def check_declared_requirements():
-    """Check the manifests name nothing the venv is missing.
-
-    This is the installer's literal instruction - "install requirements.txt" -
-    so a distribution it names that pip did not land is a failed install. A
-    line pip would have skipped is not: an environment marker that is false
-    here, or an extras-gated dependency, is reported instead. Refusing an
-    install over `pywin32; sys_platform == "win32"` on Linux rejects a skill
-    whose requirements are all present.
-    """
+    """Check installed distributions and PEP 440 version constraints."""
+    from importlib import metadata
     try:
-        from importlib import metadata
+        from packaging.requirements import Requirement
     except ImportError:
-        return
+        try:
+            # Install venvs are seeded with pip; avoid a network dependency
+            # merely to verify another dependency's version.
+            from pip._vendor.packaging.requirements import Requirement
+        except ImportError:
+            Requirement = None
     for source, raw in declared_requirement_lines():
         name = distribution_name(raw)
         if not name:
             continue
-        try:
-            metadata.distribution(name)
-            continue
-        except Exception:
-            pass
-        missing = "%s declares %s but it is not installed in %s" % (
-            source,
-            name,
-            sys.prefix,
-        )
         marker = marker_of(raw)
-        if not marker:
-            add_problem(missing, repairable=True)
+        applies = marker_applies(marker) if marker else True
+        if applies is False:
             continue
-        applies = marker_applies(marker)
-        if applies:
-            add_problem(missing, repairable=True)
-        elif applies is None:
-            add_note(
-                "%s, and its environment marker '%s' cannot be evaluated here, "
-                "so it is not enforced" % (missing, marker)
-            )
+        try:
+            dist = metadata.distribution(name)
+        except metadata.PackageNotFoundError:
+            missing = "%s declares %s but it is not installed in %s" % (source, name, sys.prefix)
+            if applies:
+                add_problem(missing, repairable=True)
+            else:
+                add_note("%s, and its environment marker '%s' cannot be evaluated here, so it is not enforced" % (missing, marker))
+            continue
+        if applies is None:
+            add_note("%s: version constraint for %s has an unevaluable marker '%s'" % (source, name, marker))
+            continue
+        if Requirement is None:
+            if re.search(r"[<>=!~]", raw.split(";")[0]):
+                add_problem("Cannot verify %s version in %s; install packaging into this venv and retry" % (name, source), repairable=True)
+            continue
+        try:
+            requirement = Requirement(raw.split(" #", 1)[0].strip())
+        except Exception as exc:
+            add_problem("Cannot verify requirement in %s: %s (%s)" % (source, raw, exc), repairable=True)
+            continue
+        if requirement.specifier and not requirement.specifier.contains(dist.version, prereleases=True):
+            add_problem("%s requires %s%s but installed version is %s; restore the declared version" %
+                        (source, name, requirement.specifier, dist.version), repairable=True)
 
 
 for relative in all_scripts:
@@ -237,7 +267,19 @@ for relative in all_scripts:
     except SyntaxError as exc:
         report("%s has a syntax error on line %s: %s" % (relative, exc.lineno, exc.msg))
 
-check_declared_requirements()
+manifests_valid = True
+for name, expected in manifest_hashes.items():
+    try:
+        with open(os.path.join(root, name), "rb") as handle:
+            actual = hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        actual = None
+    if actual != expected:
+        manifests_valid = False
+        add_problem("%s changed during installation; restore the original manifest" % name)
+
+if manifests_valid:
+    check_declared_requirements()
 
 for note in notes:
     sys.stdout.write("note: %s\n" % note)

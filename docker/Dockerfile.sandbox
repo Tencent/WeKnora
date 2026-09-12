@@ -32,7 +32,15 @@ RUN ln -s /usr/local/bin/uv /usr/local/bin/uvx
 # Node package manager: pnpm
 RUN npm install -g pnpm
 
-# Install minimal CLI tools (bash/grep/sed/coreutils/findutils already in slim
+# Optional Debian mirror origin, e.g. https://mirrors.ustc.edu.cn. Keep the
+# distribution suites, security repository and Debian signing key unchanged.
+# This sources file is inherited by office builds and later skill installers.
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+    python3 -c 'import os, re; from pathlib import Path; p = Path("/etc/apt/sources.list.d/debian.sources"); mirror = os.environ["APT_MIRROR"].rstrip("/"); p.write_text(re.sub(r"https?://(?:deb|security)\.debian\.org(?=/)", lambda _: mirror, p.read_text()))'; \
+    fi
+
+# Install shared runtime tools (bash/grep/sed/coreutils/findutils already in slim
 # image). `file` is not in slim; models reach for it after a script-type error.
 # curl is not optional: the sandbox connectivity check probes egress with it,
 # and skills that fetch a URL expect it to be there. The compression tools are

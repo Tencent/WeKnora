@@ -234,6 +234,9 @@
               : $t('settings.sandbox.templateLockedByInFlight') }}
           </p>
         </t-form-item>
+        <t-loading :loading="dockerMetadataLoading" size="small">
+          <TemplateBuiltinSkills :item="dockerBuiltinTemplate" />
+        </t-loading>
         <t-form-item :label="$t('settings.sandbox.dockerHost')" :help="$t('settings.sandbox.dockerHostHelp')">
           <t-input v-model="docker.host" placeholder="unix:///var/run/docker.sock"
             :disabled="retargetFrozen" @input="onFieldInput('host')" />
@@ -332,6 +335,7 @@
                   </t-popconfirm>
                 </span>
               </div>
+              <TemplateBuiltinSkills :item="item" />
               <dl v-if="templateFieldRows(item).length" class="template-row__fields">
                 <div v-for="field in templateFieldRows(item)" :key="field.key" class="template-row__field">
                   <dt>{{ field.label }}</dt>
@@ -355,6 +359,12 @@
           >
             {{ $t('settings.sandbox.noTemplates') }}
           </div>
+        </div>
+        <div v-if="backend !== 'docker' && currentTemplateId && templates.some(item => item.id === currentTemplateId && item.version)" class="template-manifest-import">
+          <p class="template-row__hint">{{ $t('skillDiscovery.cloudManifestHint') }}</p>
+          <input ref="manifestInput" type="file" accept=".json,application/json" hidden @change="importTemplateManifest" />
+          <t-button theme="default" variant="outline" size="small" @click="manifestInput?.click()">{{ $t('skillDiscovery.importManifest') }}</t-button>
+          <t-button v-if="templateSkills" theme="default" variant="text" size="small" @click="clearTemplateManifest">{{ $t('skillDiscovery.clearManifest') }}</t-button>
         </div>
         <t-alert v-if="templatesError" theme="warning" class="compact-alert" :message="templatesError" />
         <a class="inline-guide-link" :href="clusterGuideUrl" target="_blank" rel="noopener noreferrer">
@@ -742,6 +752,7 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import TemplateBuiltinSkills from '@/components/settings/TemplateBuiltinSkills.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import {
@@ -761,6 +772,8 @@ import {
   type SandboxDockerConfig,
   type SandboxNetworkPolicy,
   type SandboxTemplate,
+  type TemplateSkillsDeclaration,
+  type BuiltinSkillsManifest,
   isNamedSandboxBackend,
   NAMED_SANDBOX_BACKEND_TYPES,
 } from '@/api/system'
@@ -931,7 +944,12 @@ function denyOutRowCoversAllIPv4(row: string): boolean {
   return /^\d{1,3}(?:\.\d{1,3}){3}\/0$/.test(value)
 }
 const inFlightFromSkills = ref(false)
+const dockerBuiltinTemplate = ref<SandboxTemplate>()
+const dockerMetadataLoading = ref(false)
+let dockerMetadataRequest = 0
 const templates = ref<SandboxTemplate[]>([])
+const templateSkills = ref<TemplateSkillsDeclaration>()
+const manifestInput = ref<HTMLInputElement>()
 const templatesLoading = ref(false)
 const templatesLoaded = ref(false)
 const templatesError = ref('')
@@ -1119,6 +1137,7 @@ function defaultBackendType(): string {
 function reset() {
   stopTemplatePolling()
   const cfg: SandboxConfig = props.record?.config || {}
+  templateSkills.value = cfg.template_skills ? JSON.parse(JSON.stringify(cfg.template_skills)) : undefined
   name.value = props.record?.name || ''
   description.value = props.record?.description || ''
   backend.value = isNamedSandboxBackend(cfg.sandbox_type || '')
@@ -1454,6 +1473,55 @@ function withStoredSecret<T extends { api_key?: string }>(block: T, stored: bool
   return block
 }
 
+// Docker keeps its short two-step editor. Inspect the image's metadata in
+// place, without running a deep check or silently changing the entered tag.
+watch(() => [props.visible, backend.value, docker.image, docker.host, docker.tls_cert_path, allowPrivateEndpoints.value, dockerBackendEnabled.value], async () => {
+  const request = ++dockerMetadataRequest
+  dockerBuiltinTemplate.value = undefined
+  dockerMetadataLoading.value = false
+  if (!props.visible || backend.value !== 'docker' || !docker.image?.trim() || !dockerBackendEnabled.value) return
+  dockerMetadataLoading.value = true
+  try {
+    const response = await querySandboxTemplates({ config: collectPayload(), config_id: effectiveRecord.value?.id })
+    if (request === dockerMetadataRequest) dockerBuiltinTemplate.value = response.data.templates.find(item => item.id === docker.image)
+  } catch {
+    // No metadata is not evidence of an empty image. Leave the unknown hint.
+  } finally {
+    if (request === dockerMetadataRequest) dockerMetadataLoading.value = false
+  }
+}, { immediate: true })
+
+async function importTemplateManifest(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    if (file.size > 64 * 1024) throw new Error('manifest too large')
+    const manifest: BuiltinSkillsManifest = JSON.parse(await file.text())
+    const selected = templates.value.find(item => item.id === currentTemplateId.value)
+    if (!selected?.version || manifest.schema_version !== 1 || !Array.isArray(manifest.skills) || manifest.skills.length > 128
+      || !manifest.skills.every(skill => typeof skill.name === 'string' && /^[a-f0-9]{64}$/.test(skill.digest) && skill.verified === true)) {
+      throw new Error('invalid manifest')
+    }
+    templateSkills.value = {
+      provider: backend.value,
+      endpoint: (backend.value === 'cube' ? cube.api_url : e2b.api_url)?.trim().replace(/\/+$/, '') || '',
+      template_id: selected.id,
+      revision: selected.version,
+      manifest,
+    }
+    await loadTemplates()
+  } catch {
+    MessagePlugin.error(t('skillDiscovery.invalidManifest'))
+  }
+}
+
+async function clearTemplateManifest() {
+  templateSkills.value = undefined
+  await loadTemplates()
+}
+
 function collectPayload(): SandboxConfig {
   const envVars: Record<string, string> = {}
   for (const row of envRows.value) {
@@ -1463,6 +1531,7 @@ function collectPayload(): SandboxConfig {
   }
   const payload: SandboxConfig = {
     sandbox_type: backend.value,
+    template_skills: templateSkills.value,
     default_timeout_sec: defaultTimeoutSec.value || undefined,
     terminal_idle_disconnect_sec: terminalIdleDisconnectSec.value || undefined,
     allow_private_endpoints: allowPrivateEndpoints.value || undefined,
@@ -2494,4 +2563,6 @@ onUnmounted(stopTemplatePolling)
     line-height: 1.4;
   }
 }
+
+.template-manifest-import { margin-top: 12px; }
 </style>

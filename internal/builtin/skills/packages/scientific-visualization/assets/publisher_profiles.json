@@ -1,0 +1,269 @@
+{
+  "schema_version": "1.0",
+  "accessed": "2026-07-23",
+  "notice": "Dated publisher snapshots for planning only. They do not establish submission compliance; verify the target journal, article type, and submission stage.",
+  "profiles": {
+    "nature": {
+      "label": "Nature (flagship)",
+      "scope": "Final submission after acceptance in principle",
+      "phase": "final",
+      "journal_specific": true,
+      "sources": [
+        "https://www.nature.com/nature/for-authors/final-submission",
+        "https://research-figure-guide.nature.com/figures/preparing-figures-our-specifications"
+      ],
+      "widths_mm": {
+        "single": 89.0,
+        "one-and-half-min": 120.0,
+        "one-and-half-max": 136.0,
+        "full": 183.0
+      },
+      "max_height_mm": 247.0,
+      "formats": {
+        "line-art": ["pdf", "eps", "ai", "ps"],
+        "photo": ["psd", "tiff", "jpeg"],
+        "combination": ["pdf", "eps", "ai", "ps"]
+      },
+      "raster_dpi": {
+        "photo": {"min": 300.0, "max": 600.0},
+        "line-art": null,
+        "combination": null
+      },
+      "color_modes": ["RGB", "CMYK"],
+      "preferred_color_mode": "RGB",
+      "max_file_bytes": null,
+      "notes": [
+        "Keep line art, text, and labels editable rather than rasterizing or outlining them.",
+        "The companion research-figure guide says image exports should be at least 450 dpi; the flagship final-submission page accepts photographic images at 300-600 dpi.",
+        "Panel labels are lowercase, bold, upright, 8 pt; other text is 5-7 pt at final size."
+      ]
+    },
+    "science": {
+      "label": "Science (AAAS)",
+      "scope": "Revised manuscript figures",
+      "phase": "revised",
+      "journal_specific": true,
+      "sources": [
+        "https://www.science.org/content/page/instructions-preparing-initial-manuscript",
+        "https://www.science.org/content/page/instructions-preparing-revised-manuscript"
+      ],
+      "widths_mm": {
+        "single": 57.0,
+        "double": 121.0,
+        "full": 184.0
+      },
+      "max_height_mm": null,
+      "formats": {
+        "line-art": ["pdf", "eps", "ai"],
+        "photo": ["tiff"],
+        "combination": ["pdf", "eps"]
+      },
+      "raster_dpi": {
+        "photo": {"min": 300.0},
+        "line-art": {"min": 300.0},
+        "combination": {"min": 300.0}
+      },
+      "color_modes": null,
+      "preferred_color_mode": null,
+      "max_file_bytes": null,
+      "notes": [
+        "Initial-submission figures may be embedded and should be 300 dpi; revised figures are uploaded separately.",
+        "Revised guidance prefers vectors and prohibits upsampling.",
+        "Lettering should be about 7 pt after reduction and never smaller than 5 pt."
+      ]
+    },
+    "cell": {
+      "label": "Cell Press",
+      "scope": "Final production files for most Cell Press journals",
+      "phase": "final",
+      "journal_specific": false,
+      "sources": [
+        "https://www.cell.com/information-for-authors/figure-guidelines"
+      ],
+      "widths_mm": {
+        "single": 85.0,
+        "one-and-half": 114.0,
+        "full": 174.0
+      },
+      "max_height_mm": 200.0,
+      "formats": {
+        "line-art": ["pdf", "tiff", "eps"],
+        "photo": ["tiff", "pdf", "jpeg"],
+        "combination": ["pdf", "tiff", "eps"]
+      },
+      "raster_dpi": {
+        "photo": {"min": 300.0},
+        "line-art": {"min": 1000.0},
+        "combination": null,
+        "black-and-white": {"min": 500.0}
+      },
+      "color_modes": ["RGB"],
+      "preferred_color_mode": "RGB",
+      "max_file_bytes": 20000000,
+      "notes": [
+        "Widths apply to two-column article formats; three-column formats differ.",
+        "TIFF and PDF are preferred for most final production files; exceptions include STAR Protocols and Cell Leading Edge.",
+        "The 16.5 by 20 cm overall size is a recommendation, not a universal hard limit.",
+        "Use Arial, capital panel labels, and about 6-8 pt text at final size."
+      ]
+    },
+    "plos": {
+      "label": "PLOS research journals",
+      "scope": "Figures after provisional Editorial Accept (PLOS Computational Biology snapshot)",
+      "phase": "post-provisional-accept",
+      "journal_specific": false,
+      "sources": [
+        "https://journals.plos.org/ploscompbiol/s/figures"
+      ],
+      "widths_mm": {
+        "minimum": 66.8,
+        "text-column": 132.0,
+        "full": 190.5
+      },
+      "width_range_px_at_300_dpi": [789, 2250],
+      "max_height_mm": 222.3,
+      "max_height_px_at_300_dpi": 2625,
+      "formats": {
+        "line-art": ["eps", "tiff"],
+        "photo": ["tiff"],
+        "combination": ["eps", "tiff"]
+      },
+      "raster_dpi": {
+        "photo": {"min": 300.0, "max": 600.0},
+        "line-art": {"min": 300.0, "max": 600.0},
+        "combination": {"min": 300.0, "max": 600.0}
+      },
+      "color_modes": ["RGB", "L"],
+      "preferred_color_mode": "RGB",
+      "max_file_bytes": null,
+      "max_file_bytes_exclusive": 10000000,
+      "notes": [
+        "PLOS waives formatting requirements until provisional Editorial Accept.",
+        "Use Arial, Times, or Symbol at 8-12 pt; combine all panels for one figure into one file.",
+        "The cited page states TIFF or EPS only and requires RGB 8-bit/channel or grayscale.",
+        "The <10 MB rule is screened as <10,000,000 bytes; verify how the submission portal reports MB."
+      ]
+    },
+    "elsevier": {
+      "label": "Elsevier general artwork guidance",
+      "scope": "Publisher-general defaults; target journals may override them",
+      "phase": "final",
+      "journal_specific": false,
+      "sources": [
+        "https://www.elsevier.com/about/policies-and-standards/author/artwork-and-media-instructions/artwork-formats-checklist",
+        "https://www.elsevier.com/about/policies-and-standards/author/artwork-and-media-instructions/artwork-sizing"
+      ],
+      "widths_mm": {
+        "minimum": 30.0,
+        "single": 90.0,
+        "one-and-half": 140.0,
+        "full": 190.0
+      },
+      "max_height_mm": null,
+      "formats": {
+        "line-art": ["eps", "pdf"],
+        "photo": ["tiff", "jpeg"],
+        "combination": ["eps", "pdf", "tiff"]
+      },
+      "raster_dpi": {
+        "photo": {"min": 300.0},
+        "line-art": {"min": 1000.0},
+        "combination": {"min": 500.0}
+      },
+      "color_modes": ["RGB"],
+      "preferred_color_mode": "RGB",
+      "max_file_bytes": null,
+      "notes": [
+        "Elsevier explicitly directs authors to the target journal's Guide for Authors for overrides.",
+        "Normal lettering is generally 7 pt at final size; 6 pt is a rule-of-thumb floor for subscripts and superscripts."
+      ]
+    },
+    "ieee": {
+      "label": "IEEE journals",
+      "scope": "IEEE Author Center journal graphics guidance",
+      "phase": "submission",
+      "journal_specific": false,
+      "sources": [
+        "https://journals.ieeeauthorcenter.ieee.org/create-your-ieee-journal-article/create-graphics-for-your-article/resolution-and-size/"
+      ],
+      "widths_mm": {
+        "single": 88.9,
+        "full": 182.0
+      },
+      "max_height_mm": null,
+      "formats": {
+        "line-art": ["ps", "eps", "pdf"],
+        "photo": [],
+        "combination": ["ps", "eps", "pdf"]
+      },
+      "raster_dpi": {
+        "photo": {"min_exclusive": 300.0},
+        "line-art": {"min_exclusive": 600.0},
+        "combination": {"min_exclusive": 300.0}
+      },
+      "color_modes": null,
+      "preferred_color_mode": null,
+      "max_file_bytes": null,
+      "notes": [
+        "The cited page identifies PS, EPS, and PDF as acceptable vector formats.",
+        "IEEE states greater than 300 dpi for non-vector color/grayscale and greater than 600 dpi for black-and-white line art."
+      ]
+    },
+    "bmc": {
+      "label": "BMC journal example",
+      "scope": "BMC Bioinformatics preparing-your-manuscript guidance; verify the target BMC journal",
+      "phase": "submission",
+      "journal_specific": true,
+      "sources": [
+        "https://bmcbioinformatics.biomedcentral.com/submission-guidelines/preparing-your-manuscript"
+      ],
+      "widths_mm": {
+        "half": 85.0,
+        "full": 170.0
+      },
+      "max_height_mm": 225.0,
+      "formats": {
+        "line-art": ["eps", "pdf"],
+        "photo": ["tiff", "jpeg", "png", "bmp"],
+        "combination": ["eps", "pdf"]
+      },
+      "raster_dpi": {
+        "photo": {"target": 300.0},
+        "line-art": {"target": 300.0},
+        "combination": {"target": 300.0}
+      },
+      "color_modes": null,
+      "preferred_color_mode": null,
+      "max_file_bytes": 10000000,
+      "notes": [
+        "The source says approximately 300 dpi at final size, not a universal minimum.",
+        "Figures are 600 px standard or 1200 px high-resolution on the web.",
+        "All fonts must be embedded and lines should be wider than 0.25 pt at final width."
+      ]
+    },
+    "acs": {
+      "label": "ACS Publications general graphics page",
+      "scope": "General manuscript-graphics sizing; consult the selected ACS journal",
+      "phase": "submission",
+      "journal_specific": false,
+      "sources": [
+        "https://pubs.acs.org/page/4authors/submission/graphics_prep.html"
+      ],
+      "widths_mm": {
+        "single": 82.55,
+        "full": 177.8
+      },
+      "max_height_mm": 241.3,
+      "formats": null,
+      "raster_dpi": null,
+      "color_modes": null,
+      "preferred_color_mode": null,
+      "max_file_bytes": null,
+      "notes": [
+        "The general page gives 3.25-inch and 7-inch widths but does not establish a current universal digital format/DPI profile.",
+        "It recommends lettering no smaller than 5 pt after reduction and lines no thinner than 1 pt.",
+        "Use the target ACS journal's current Author Guidelines for binding technical requirements."
+      ]
+    }
+  }
+}

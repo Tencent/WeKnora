@@ -1,0 +1,4 @@
+pypdf==6.0.0
+reportlab==4.4.3
+pdfplumber==0.11.7
+pypdfium2==4.30.0

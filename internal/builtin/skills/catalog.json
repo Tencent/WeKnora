@@ -1,0 +1,204 @@
+[
+  {
+    "id": "xlsx",
+    "name": "xlsx",
+    "title": {
+      "zh-CN": "Excel 表格",
+      "en-US": "Excel workbooks"
+    },
+    "description": {
+      "zh-CN": "创建、编辑表格、图表与公式，支持重算和 CSV 转换。",
+      "en-US": "Create and edit spreadsheets, formulas, charts and CSV files."
+    },
+    "category": "office",
+    "distribution": "builtin",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/spreadsheet",
+    "license_url": "https://github.com/openai/skills/blob/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/spreadsheet/LICENSE.txt",
+    "runtime": "sandbox",
+    "version": "2026.09.5"
+  },
+  {
+    "id": "docx",
+    "name": "docx",
+    "title": {
+      "zh-CN": "Word 文档",
+      "en-US": "Word documents"
+    },
+    "description": {
+      "zh-CN": "生成、编辑 Word 文档，检查版式与中英文字体。",
+      "en-US": "Create and edit Word documents with rendered layout and font checks."
+    },
+    "category": "office",
+    "distribution": "builtin",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/45d05d75363abf13f99d09e899d61e07b8010685/skills/.curated/doc",
+    "license_url": "https://github.com/openai/skills/blob/45d05d75363abf13f99d09e899d61e07b8010685/skills/.curated/doc/LICENSE.txt",
+    "runtime": "sandbox",
+    "version": "2026.09.5"
+  },
+  {
+    "id": "powerpoint",
+    "name": "powerpoint",
+    "title": {
+      "zh-CN": "演示文稿",
+      "en-US": "Presentations"
+    },
+    "description": {
+      "zh-CN": "使用 PptxGenJS 生成可编辑演示文稿、原生图表，并渲染检查。",
+      "en-US": "Create editable presentations and native charts with PptxGenJS and rendered checks."
+    },
+    "category": "office",
+    "distribution": "builtin",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/slides",
+    "license_url": "https://github.com/openai/skills/blob/e6afb0d74cc75d220df2faf3dd6c635c2dc6a108/skills/.curated/slides/LICENSE.txt",
+    "runtime": "sandbox",
+    "version": "2026.09.5"
+  },
+  {
+    "id": "pdf",
+    "name": "pdf",
+    "title": {
+      "zh-CN": "PDF 工具",
+      "en-US": "PDF toolkit"
+    },
+    "description": {
+      "zh-CN": "提取文本与表格、合并拆分 PDF、填写表单和渲染页面。",
+      "en-US": "Extract text and tables, merge PDFs, fill forms and render pages."
+    },
+    "category": "office",
+    "distribution": "builtin",
+    "publisher": "OpenAI / WeKnora",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/pdf",
+    "license_url": "https://github.com/openai/skills/blob/49f948faa9258a0c61caceaf225e179651397431/skills/.curated/pdf/LICENSE.txt",
+    "runtime": "sandbox",
+    "version": "2026.09.5"
+  },
+  {
+    "id": "exploratory-data-analysis",
+    "name": "exploratory-data-analysis",
+    "title": {
+      "zh-CN": "探索性数据分析",
+      "en-US": "Exploratory data analysis"
+    },
+    "description": {
+      "zh-CN": "检查数据结构、缺失值与分布，输出可复现的分析报告。",
+      "en-US": "Inspect data structure, missing values and distributions with reproducible reports."
+    },
+    "category": "analysis",
+    "distribution": "builtin",
+    "publisher": "K-Dense",
+    "license": "MIT",
+    "source_url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/9cf7d9aea7d84754db4c167ab04b299d33c444bc/skills/exploratory-data-analysis",
+    "license_url": "https://github.com/K-Dense-AI/scientific-agent-skills/blob/9cf7d9aea7d84754db4c167ab04b299d33c444bc/LICENSE.md",
+    "runtime": "sandbox",
+    "version": "2026.09.5"
+  },
+  {
+    "id": "statistical-analysis",
+    "name": "statistical-analysis",
+    "title": {
+      "zh-CN": "统计分析",
+      "en-US": "Statistical analysis"
+    },
+    "description": {
+      "zh-CN": "检验假设、比较组别、回归分析并报告效应量与不确定性。",
+      "en-US": "Select statistical tests, check assumptions and report effect sizes and uncertainty."
+    },
+    "category": "analysis",
+    "distribution": "builtin",
+    "publisher": "K-Dense",
+    "license": "MIT",
+    "source_url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/9cf7d9aea7d84754db4c167ab04b299d33c444bc/skills/statistical-analysis",
+    "license_url": "https://github.com/K-Dense-AI/scientific-agent-skills/blob/9cf7d9aea7d84754db4c167ab04b299d33c444bc/LICENSE.md",
+    "runtime": "sandbox",
+    "version": "2026.09.5"
+  },
+  {
+    "id": "scientific-visualization",
+    "name": "scientific-visualization",
+    "title": {
+      "zh-CN": "科学可视化",
+      "en-US": "Scientific visualization"
+    },
+    "description": {
+      "zh-CN": "生成适合报告与论文的图表，检查配色、尺寸与导出格式。",
+      "en-US": "Create publication figures with palette, sizing and export checks."
+    },
+    "category": "analysis",
+    "distribution": "builtin",
+    "publisher": "K-Dense",
+    "license": "MIT",
+    "source_url": "https://github.com/K-Dense-AI/scientific-agent-skills/tree/9cf7d9aea7d84754db4c167ab04b299d33c444bc/skills/scientific-visualization",
+    "license_url": "https://github.com/K-Dense-AI/scientific-agent-skills/blob/9cf7d9aea7d84754db4c167ab04b299d33c444bc/LICENSE.md",
+    "runtime": "sandbox",
+    "version": "2026.09.5"
+  },
+  {
+    "id": "tencent-browser-skill",
+    "name": "browser-skill",
+    "title": {
+      "zh-CN": "腾讯 BrowserSkill",
+      "en-US": "Tencent BrowserSkill"
+    },
+    "description": {
+      "zh-CN": "连接用户已登录的 Chrome 或 Edge，通过独立的智能体窗口执行任务。需要本机 CLI、守护进程和浏览器扩展。",
+      "en-US": "Use a signed-in Chrome or Edge browser through a separate agent window. Requires a local CLI, daemon and browser extension."
+    },
+    "category": "browser",
+    "distribution": "external_link",
+    "publisher": "Tencent",
+    "license": "MIT",
+    "source_url": "https://github.com/Tencent/BrowserSkill",
+    "license_url": "https://github.com/Tencent/BrowserSkill/blob/main/LICENSE",
+    "docs_url": "https://github.com/Tencent/BrowserSkill/blob/main/README.zh-CN.md",
+    "runtime": "local_browser"
+  },
+  {
+    "id": "ppt-master",
+    "name": "ppt-master",
+    "title": {
+      "zh-CN": "PPT Master",
+      "en-US": "PPT Master"
+    },
+    "description": {
+      "zh-CN": "可选：SVG 驱动的演示文稿工作流，含模板与图标库；资源较大，按需安装。",
+      "en-US": "Optional SVG presentation workflow with templates and an extensive icon library; install on demand."
+    },
+    "category": "office",
+    "distribution": "community",
+    "publisher": "hugohe3",
+    "license": "MIT",
+    "source_url": "https://github.com/hugohe3/ppt-master/tree/c47602895b186e32e77d0ece4dfcab423ced5c0e/skills/ppt-master",
+    "license_url": "https://github.com/hugohe3/ppt-master/blob/c47602895b186e32e77d0ece4dfcab423ced5c0e/LICENSE",
+    "install_source": "https://github.com/hugohe3/ppt-master/tree/c47602895b186e32e77d0ece4dfcab423ced5c0e/skills/ppt-master",
+    "runtime": "sandbox",
+    "version": "c47602895b18"
+  },
+  {
+    "id": "frontend-slides",
+    "name": "frontend-slides",
+    "title": {
+      "zh-CN": "Frontend Slides",
+      "en-US": "Frontend Slides"
+    },
+    "description": {
+      "zh-CN": "可选：单文件 HTML 演示文稿、动画与视觉风格探索。",
+      "en-US": "Optional self-contained HTML presentations with animation and visual style exploration."
+    },
+    "category": "office",
+    "distribution": "community",
+    "publisher": "zarazhangrui",
+    "license": "MIT",
+    "source_url": "https://github.com/zarazhangrui/frontend-slides/tree/9906a34d640d2111f724544cbc50f7f130569ae1/plugins/frontend-slides/skills/frontend-slides",
+    "license_url": "https://github.com/zarazhangrui/frontend-slides/blob/9906a34d640d2111f724544cbc50f7f130569ae1/LICENSE",
+    "install_source": "https://github.com/zarazhangrui/frontend-slides/tree/9906a34d640d2111f724544cbc50f7f130569ae1/plugins/frontend-slides/skills/frontend-slides",
+    "runtime": "sandbox",
+    "version": "9906a34d640d"
+  }
+]

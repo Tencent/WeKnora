@@ -1,0 +1,522 @@
+{
+  "sources": [
+    {
+      "repository": "openai/skills",
+      "commit": "45d05d75363abf13f99d09e899d61e07b8010685",
+      "license_path": "skills/.curated/doc/LICENSE.txt",
+      "skills": [
+        {
+          "name": "docx",
+          "path": "skills/.curated/doc"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/docx/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/doc/SKILL.md",
+          "sha256": "0a635585817d1ac96e8e512114d08258b70f9e54ce0052078a258291ac13a8ed"
+        },
+        {
+          "path": "packages/docx/LICENSE",
+          "source_path": "skills/.curated/doc/LICENSE.txt",
+          "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+        },
+        {
+          "path": "packages/docx/scripts/render_docx.py",
+          "source_path": "skills/.curated/doc/scripts/render_docx.py",
+          "sha256": "52b3c3158913ebcad2ada7b8193970b70453239e255054aa2d60c1683af08751"
+        },
+        {
+          "path": "packages/docx/assets/doc.png",
+          "source_path": "skills/.curated/doc/assets/doc.png",
+          "sha256": "7eadf1088e5062f681dba6596173a1df13bbfbcddd8a8a9bb78fd2071947dcf8"
+        },
+        {
+          "path": "packages/docx/assets/doc-small.svg",
+          "source_path": "skills/.curated/doc/assets/doc-small.svg",
+          "sha256": "bd5415fbbfe72c66c1527411d61625731fdd2f75b25d1542510b6ddef699ebe0"
+        }
+      ]
+    },
+    {
+      "repository": "openai/skills",
+      "commit": "e6afb0d74cc75d220df2faf3dd6c635c2dc6a108",
+      "license_path": "skills/.curated/spreadsheet/LICENSE.txt",
+      "skills": [
+        {
+          "name": "xlsx",
+          "path": "skills/.curated/spreadsheet"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/xlsx/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/spreadsheet/SKILL.md",
+          "sha256": "36baea99e96c77c13d15d24f9d53cd072ccbc120e810bf4e68049edb5b0f1d65"
+        },
+        {
+          "path": "packages/xlsx/LICENSE",
+          "source_path": "skills/.curated/spreadsheet/LICENSE.txt",
+          "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+        },
+        {
+          "path": "packages/xlsx/assets/spreadsheet.png",
+          "source_path": "skills/.curated/spreadsheet/assets/spreadsheet.png",
+          "sha256": "a5771930cd28ff46e6ed53aa8a08a25902ed71178d1cac642c178f659638d7aa"
+        },
+        {
+          "path": "packages/xlsx/assets/spreadsheet-small.svg",
+          "source_path": "skills/.curated/spreadsheet/assets/spreadsheet-small.svg",
+          "sha256": "403c95e0cea6f994221d3b6281ea4eb2ab15a0dd2c1156f2d412b4744df62f6b"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/read_existing_spreadsheet.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/read_existing_spreadsheet.py",
+          "sha256": "cf2f24d90174d92bd9044e95035ab4cf2e34a5faa355a2fa1898e49088e9ad02"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/create_basic_spreadsheet.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/create_basic_spreadsheet.py",
+          "sha256": "7c291b6230c9809145c8f7f216fd2b7d099b16b89d3fae0ab4d5a3d990c05418"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/styling_spreadsheet.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/styling_spreadsheet.py",
+          "sha256": "5427ca11beb2b408a5dede6af1fa868fa131ad2a435d40bb88e52c4a8de7bc67"
+        },
+        {
+          "path": "packages/xlsx/references/examples/openpyxl/create_spreadsheet_with_styling.py",
+          "source_path": "skills/.curated/spreadsheet/references/examples/openpyxl/create_spreadsheet_with_styling.py",
+          "sha256": "fbfd41b9eca17f0f274f4ce7bd8ead6bc9292d764fe3bc325a1fca57dbe954ea"
+        }
+      ]
+    },
+    {
+      "repository": "openai/skills",
+      "commit": "e6afb0d74cc75d220df2faf3dd6c635c2dc6a108",
+      "license_path": "skills/.curated/slides/LICENSE.txt",
+      "skills": [
+        {
+          "name": "powerpoint",
+          "path": "skills/.curated/slides"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/powerpoint/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/slides/SKILL.md",
+          "sha256": "57ee0941f872546029bc45b5b0bd58d4a02d88b84d4e8e4275c466da5451efa6"
+        },
+        {
+          "path": "packages/powerpoint/LICENSE",
+          "source_path": "skills/.curated/slides/LICENSE.txt",
+          "sha256": "9a7110fc2d2f964038e5dc49128f908f29f47a574c961cba16085914e879cbda"
+        },
+        {
+          "path": "packages/powerpoint/references/pptxgenjs-helpers.md",
+          "source_path": "skills/.curated/slides/references/pptxgenjs-helpers.md",
+          "sha256": "7aabd51f5cd85614d90c24ced9c5d9a152d87ff103eb143ce1fb551581c335ea"
+        },
+        {
+          "path": "packages/powerpoint/scripts/detect_font.py",
+          "source_path": "skills/.curated/slides/scripts/detect_font.py",
+          "sha256": "07537d7181f79fb65e84810604ddd814165d1ac90481b208bb8b206048aa637d"
+        },
+        {
+          "path": "packages/powerpoint/scripts/render_slides.py",
+          "source_path": "skills/.curated/slides/scripts/render_slides.py",
+          "sha256": "a5fd2d975233e69f55c87c84a54b6ce5990a52e78293db5412bdc44cd528b4ea"
+        },
+        {
+          "path": "packages/powerpoint/scripts/slides_test.py",
+          "source_path": "skills/.curated/slides/scripts/slides_test.py",
+          "sha256": "916882b8a88b7fe39e76c9009cbef3afa6a29a9e626d160b198c04f7f6a6a69b"
+        },
+        {
+          "path": "packages/powerpoint/scripts/create_montage.py",
+          "source_path": "skills/.curated/slides/scripts/create_montage.py",
+          "sha256": "dd9688825147be710608b1511b2adfd774062027633980799bdf8a675b4a875f"
+        },
+        {
+          "path": "packages/powerpoint/scripts/ensure_raster_image.py",
+          "source_path": "skills/.curated/slides/scripts/ensure_raster_image.py",
+          "sha256": "3708b8ade8c7d6c46bb0915fbdfdbbd9880725db06aeb822ccebecc434ebe835"
+        },
+        {
+          "path": "packages/powerpoint/assets/slides.png",
+          "source_path": "skills/.curated/slides/assets/slides.png",
+          "sha256": "879c4ff68c3930ea609b4d9f018a91756a785fb263c30994b05ac53c6f1ca6a8"
+        },
+        {
+          "path": "packages/powerpoint/assets/slides-small.svg",
+          "source_path": "skills/.curated/slides/assets/slides-small.svg",
+          "sha256": "1e9354b508ece05e8902520826c6b6f48aa289335fa7759baf1c444b6be1cdab"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/layout.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/layout.js",
+          "sha256": "774076d2671697c56c9df7d968c7f46be337dd7d63508d75e0f6976237a5db96"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/util.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/util.js",
+          "sha256": "49554b6376f5bad986283fb78a4ecc55b33f17826348689bb7d0f13eb4e24dc2"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/code.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/code.js",
+          "sha256": "c80e641cbb1d16d1ca15bd9b1a5a595597825cd435cb4024cc95617a82109f0f"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/layout_builders.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/layout_builders.js",
+          "sha256": "e66d671e7edac49ded358d26f7929718019be72e031a090d957a31b4945ebbc3"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/index.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/index.js",
+          "sha256": "4416b22333646a1a0e0c4d63e34ca92c853323b410a9489250ffbcf4ccab7184"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/latex.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/latex.js",
+          "sha256": "abc4a111bf3fe0248a67d307a57e532c9a72591f71922ec198a1b6b14db47700"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/image.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/image.js",
+          "sha256": "b9034d39cc330b2e4d963b36c521a99b9fee56b6f79b81d342906d7e061e70d6"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/svg.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/svg.js",
+          "sha256": "911725defa53b54123d61f457707a163f8e41ffc06e9148c13f12ba8a0834ba7"
+        },
+        {
+          "path": "packages/powerpoint/assets/pptxgenjs_helpers/text.js",
+          "source_path": "skills/.curated/slides/assets/pptxgenjs_helpers/text.js",
+          "sha256": "ba5f0e38929bd9a826397ca597618a23b89561a2c2f097d3289f5364611c7ccf"
+        }
+      ]
+    },
+    {
+      "repository": "openai/skills",
+      "commit": "49f948faa9258a0c61caceaf225e179651397431",
+      "license_path": "skills/.curated/pdf/LICENSE.txt",
+      "skills": [
+        {
+          "name": "pdf",
+          "path": "skills/.curated/pdf"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/pdf/UPSTREAM_SKILL.md",
+          "source_path": "skills/.curated/pdf/SKILL.md",
+          "sha256": "d108cf2b36355ab37eb5962933f4d09785ec002f3105c506129320209306b9d2"
+        },
+        {
+          "path": "packages/pdf/LICENSE",
+          "source_path": "skills/.curated/pdf/LICENSE.txt",
+          "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+        },
+        {
+          "path": "packages/pdf/assets/pdf.png",
+          "source_path": "skills/.curated/pdf/assets/pdf.png",
+          "sha256": "17da356d195d4e3fa24f9becbee6b8d9e60e13005762b5ab0809c520c76da6ee"
+        }
+      ]
+    },
+    {
+      "repository": "NousResearch/hermes-agent",
+      "license_path": "LICENSE",
+      "skills": [
+        {
+          "name": "xlsx",
+          "path": "skills/productivity/xlsx"
+        }
+      ],
+      "commit": "e74c4a00ca77c662ffb44bc2986cf877df196dd3",
+      "files": [
+        {
+          "path": "packages/xlsx/scripts/xlsx_recalc.py",
+          "source_path": "skills/productivity/xlsx/scripts/xlsx_recalc.py",
+          "sha256": "e61d8ab12a330a1efd4339bcc419a2a2793bd9a64b87f264580f732cae62dbfa"
+        },
+        {
+          "path": "packages/xlsx/LICENSE-HERMES",
+          "source_path": "LICENSE",
+          "sha256": "8aa3c7717d57a68490c31eef4b57b6887e892f0566ff866078ebd76113d357e2"
+        }
+      ],
+      "selection": "Reviewed resource subset; WeKnora adaptation files are maintained separately."
+    },
+    {
+      "repository": "K-Dense-AI/scientific-agent-skills",
+      "commit": "9cf7d9aea7d84754db4c167ab04b299d33c444bc",
+      "license_path": "LICENSE.md",
+      "skills": [
+        {
+          "name": "exploratory-data-analysis",
+          "path": "skills/exploratory-data-analysis"
+        },
+        {
+          "name": "statistical-analysis",
+          "path": "skills/statistical-analysis"
+        },
+        {
+          "name": "scientific-visualization",
+          "path": "skills/scientific-visualization"
+        }
+      ],
+      "files": [
+        {
+          "path": "packages/exploratory-data-analysis/LICENSE",
+          "source_path": "LICENSE.md",
+          "sha256": "09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/UPSTREAM_SKILL.md",
+          "source_path": "skills/exploratory-data-analysis/SKILL.md",
+          "sha256": "71506b29ce46a6257332c95ac12a7c8bc3c18e35544d47fc3d870f94a82a65fe"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/assets/report_template.md",
+          "source_path": "skills/exploratory-data-analysis/assets/report_template.md",
+          "sha256": "0f967f7b0d203816a683bbf536b9e4dec46c35e7f1d332d7f77e61ac40f13c7a"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/references/bioinformatics_genomics_formats.md",
+          "source_path": "skills/exploratory-data-analysis/references/bioinformatics_genomics_formats.md",
+          "sha256": "e296b5e61204e4a4de0e3f4490d08e94438f65e63851d29445780d7150e6eddd"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/references/chemistry_molecular_formats.md",
+          "source_path": "skills/exploratory-data-analysis/references/chemistry_molecular_formats.md",
+          "sha256": "077a97025a52904730f2bb2b39f96106520efef1057d637d66dca8eeab13de26"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/references/general_scientific_formats.md",
+          "source_path": "skills/exploratory-data-analysis/references/general_scientific_formats.md",
+          "sha256": "42727d3b5fb6577f8c7137e4ffa6d59fec433b4360ad114e334f8bd3b885b7fb"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/references/microscopy_imaging_formats.md",
+          "source_path": "skills/exploratory-data-analysis/references/microscopy_imaging_formats.md",
+          "sha256": "6d425e81bedcd12965f8b7626d42177651a860682e5a26049fb6eb8f96493e82"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/references/proteomics_metabolomics_formats.md",
+          "source_path": "skills/exploratory-data-analysis/references/proteomics_metabolomics_formats.md",
+          "sha256": "6225a355973ab9a296e152845cc5f8e6bf76f734c51dfbd55b0f944ffc1f07e3"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/references/spectroscopy_analytical_formats.md",
+          "source_path": "skills/exploratory-data-analysis/references/spectroscopy_analytical_formats.md",
+          "sha256": "297f124f69281f884c33addd658b90b66c88a7bebc8bed6dea12284fb6897466"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/__init__.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/__init__.py",
+          "sha256": "87539288ce5d4caf24fc9fca14e5d70c41730c9d4285106ac4db0c4b5cefd60c"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/_capabilities.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/_capabilities.py",
+          "sha256": "58d431522bd302345e61dca1926d5cc4c0b21c0d63577cdeb127509a72c7fee8"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/_common.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/_common.py",
+          "sha256": "62f572df67792eaff8ddaa53f9938e27fbb55175442d18fcc432b66a31242b1b"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/_structured.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/_structured.py",
+          "sha256": "afe279b590f2fff35a1b779b5c814b28b000b19b0c2203c6d7c6fb50ab39c149"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/_tabular.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/_tabular.py",
+          "sha256": "9c25736f9e0ddcc2c74a51e9ac8e11caa9fea47b8026d3ddd047673f2f49de17"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/capability_manifest.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/capability_manifest.py",
+          "sha256": "1e52e1db668ebce919751a75b53ad959c36749e4b1695f59d8ac2d6c8eda4abf"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/distribution_sensitivity.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/distribution_sensitivity.py",
+          "sha256": "ca6e9f3dd59cfb382b1ff0874e709933c136ec942085a0437d4000bbf7f1f3c8"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/eda_analyzer.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/eda_analyzer.py",
+          "sha256": "6532b28ad3f28dd9f58acecb54361c8271d2755584a54ecb0be34da74d1e5d20"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/image_inspector.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/image_inspector.py",
+          "sha256": "bf25687da27c67eb33b976d11bfb23a40f847b635aca941374efa1133184144d"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/missingness_leakage_audit.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/missingness_leakage_audit.py",
+          "sha256": "28458714e80ee31db636c0265ba21e1623ba27816d31e236fdc9b873a5b78ffc"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/report_scaffold.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/report_scaffold.py",
+          "sha256": "4d745592384bfceb0ec7384eecfc5e8ba49ebfa4ec55be75a99ce7c7e102f60b"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/sequence_inspector.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/sequence_inspector.py",
+          "sha256": "6f821c8e3b2897ad178a1c684670226b17c1afce37cd083c4f77a1daabb0340f"
+        },
+        {
+          "path": "packages/exploratory-data-analysis/scripts/tabular_profile.py",
+          "source_path": "skills/exploratory-data-analysis/scripts/tabular_profile.py",
+          "sha256": "78cd139292c18e31d17de882762948db7b51fdc3278546f994270a287d0149db"
+        },
+        {
+          "path": "packages/statistical-analysis/LICENSE",
+          "source_path": "LICENSE.md",
+          "sha256": "09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1"
+        },
+        {
+          "path": "packages/statistical-analysis/UPSTREAM_SKILL.md",
+          "source_path": "skills/statistical-analysis/SKILL.md",
+          "sha256": "1b1d63fd667ef454a8e0cadf32457a511883d3308dcc79c47c48bc565d9a23f7"
+        },
+        {
+          "path": "packages/statistical-analysis/references/assumptions_and_diagnostics.md",
+          "source_path": "skills/statistical-analysis/references/assumptions_and_diagnostics.md",
+          "sha256": "b8fdccb2d2f160c78bd11415e30c50a0dea755f046e936b8c85b23333d1b47f8"
+        },
+        {
+          "path": "packages/statistical-analysis/references/bayesian_statistics.md",
+          "source_path": "skills/statistical-analysis/references/bayesian_statistics.md",
+          "sha256": "c6b994b512c38009f26aed3913884aa85fef2bdcefd8a9858b124deed3a05f70"
+        },
+        {
+          "path": "packages/statistical-analysis/references/effect_sizes_and_power.md",
+          "source_path": "skills/statistical-analysis/references/effect_sizes_and_power.md",
+          "sha256": "6de003ff25fe3613322f5cfbd4d042327b17a381c034bc2dbbe068212ecce732"
+        },
+        {
+          "path": "packages/statistical-analysis/references/reporting_standards.md",
+          "source_path": "skills/statistical-analysis/references/reporting_standards.md",
+          "sha256": "6854623fb5e8080e7d02b6c713ee44cb4a4cf03757d97840764118af54137a88"
+        },
+        {
+          "path": "packages/statistical-analysis/references/test_selection_guide.md",
+          "source_path": "skills/statistical-analysis/references/test_selection_guide.md",
+          "sha256": "64f5d93f87d83431b767a24d6b32c0ed82f2cbd32b1bd07476b49b5ac6a858a5"
+        },
+        {
+          "path": "packages/statistical-analysis/scripts/assumption_checks.py",
+          "source_path": "skills/statistical-analysis/scripts/assumption_checks.py",
+          "sha256": "3fabf359ab0128bbfc498dadb53a4782431cde473c0a6681ea7298a605757018"
+        },
+        {
+          "path": "packages/scientific-visualization/LICENSE",
+          "source_path": "LICENSE.md",
+          "sha256": "09b02a3c9df3053c55531d503357a9c7cde275970e6c3ceaa1ddf5f0e90b40c1"
+        },
+        {
+          "path": "packages/scientific-visualization/UPSTREAM_SKILL.md",
+          "source_path": "skills/scientific-visualization/SKILL.md",
+          "sha256": "f7c7f9a2350ea02db2db55cd28921a54c74b089f6762f1b0b63a13b8f6eeec33"
+        },
+        {
+          "path": "packages/scientific-visualization/assets/color_palettes.py",
+          "source_path": "skills/scientific-visualization/assets/color_palettes.py",
+          "sha256": "173d95887be654867db3602430ade84f6362ae80477c5373de0b44ce40375f57"
+        },
+        {
+          "path": "packages/scientific-visualization/assets/nature.mplstyle",
+          "source_path": "skills/scientific-visualization/assets/nature.mplstyle",
+          "sha256": "1c0c6bcb4d6add27247f43541d8e588aa562f21c4c88c7eaa673a2eac63dfb35"
+        },
+        {
+          "path": "packages/scientific-visualization/assets/presentation.mplstyle",
+          "source_path": "skills/scientific-visualization/assets/presentation.mplstyle",
+          "sha256": "db47ccdf7267a39407a959141b851d72295a66489f01c9a23ec8e963a02144c8"
+        },
+        {
+          "path": "packages/scientific-visualization/assets/publication.mplstyle",
+          "source_path": "skills/scientific-visualization/assets/publication.mplstyle",
+          "sha256": "45973599d92b27e5b156b4a23aa794795b5d83173633acb47e55658af304f999"
+        },
+        {
+          "path": "packages/scientific-visualization/assets/publisher_profiles.json",
+          "source_path": "skills/scientific-visualization/assets/publisher_profiles.json",
+          "sha256": "12633ca62d1b7539b40fa31c01aa5b266546a25734961a41fc79250a5b328b9b"
+        },
+        {
+          "path": "packages/scientific-visualization/references/color_palettes.md",
+          "source_path": "skills/scientific-visualization/references/color_palettes.md",
+          "sha256": "9b6e7d74922d64e333aff67fd41c0b53891736f5d37b01f11e96225d2dc1bfc1"
+        },
+        {
+          "path": "packages/scientific-visualization/references/journal_requirements.md",
+          "source_path": "skills/scientific-visualization/references/journal_requirements.md",
+          "sha256": "17d36a91d5afc4975682038f36a3b13470e886f64d53b23100b3ea5688e07daa"
+        },
+        {
+          "path": "packages/scientific-visualization/references/matplotlib_examples.md",
+          "source_path": "skills/scientific-visualization/references/matplotlib_examples.md",
+          "sha256": "0f603898a5ac91757fec3dccd62bb5ee2e24e254fdebfb97f8d2b3ecec167dd5"
+        },
+        {
+          "path": "packages/scientific-visualization/references/publication_guidelines.md",
+          "source_path": "skills/scientific-visualization/references/publication_guidelines.md",
+          "sha256": "abfd60dbf157dcf87d396e5859d100b8d98a25bfe8b802bfcc149b049300dc20"
+        },
+        {
+          "path": "packages/scientific-visualization/references/sources.md",
+          "source_path": "skills/scientific-visualization/references/sources.md",
+          "sha256": "186544985dba77fe948393483cd2c7fd2c4b543c04c1fc1bcc652190d0fb9cd0"
+        },
+        {
+          "path": "packages/scientific-visualization/scripts/_common.py",
+          "source_path": "skills/scientific-visualization/scripts/_common.py",
+          "sha256": "1bbbfb48500af7dd6df98076584085b2b2a24aee3024a7d9ce91dcb27ebd4b15"
+        },
+        {
+          "path": "packages/scientific-visualization/scripts/export_plan.py",
+          "source_path": "skills/scientific-visualization/scripts/export_plan.py",
+          "sha256": "29e33fbb4a8a4f558e0a190afda50721f7bcb0fabf39a4f2b8f465152d9f20bf"
+        },
+        {
+          "path": "packages/scientific-visualization/scripts/figure_export.py",
+          "source_path": "skills/scientific-visualization/scripts/figure_export.py",
+          "sha256": "5fc7dd947621b861b12fad2c053f80f465f686b92258c9a7991db618d62b8627"
+        },
+        {
+          "path": "packages/scientific-visualization/scripts/image_metadata.py",
+          "source_path": "skills/scientific-visualization/scripts/image_metadata.py",
+          "sha256": "bd8df685ae0a31f92ab10ac5e5ac7472275d06a62e1543adb94a4de6bfe78693"
+        },
+        {
+          "path": "packages/scientific-visualization/scripts/palette_audit.py",
+          "source_path": "skills/scientific-visualization/scripts/palette_audit.py",
+          "sha256": "3a90b3c9a4a39dde6a341dc3de7b99cd2bca4773c66564fc90cdc2706a5a8165"
+        },
+        {
+          "path": "packages/scientific-visualization/scripts/style_presets.py",
+          "source_path": "skills/scientific-visualization/scripts/style_presets.py",
+          "sha256": "3c811ecb16c012691b69e9f27993ef096977754c3a6e73d247e816a674efff21"
+        },
+        {
+          "path": "packages/scientific-visualization/scripts/style_preview.py",
+          "source_path": "skills/scientific-visualization/scripts/style_preview.py",
+          "sha256": "f96f2ec01b86423418446eebdd2ed887da83f0a1b54f499d920191d56a3542c0"
+        }
+      ],
+      "selection": "Reviewed resource subset; WeKnora adaptation files are maintained separately."
+    }
+  ]
+}
