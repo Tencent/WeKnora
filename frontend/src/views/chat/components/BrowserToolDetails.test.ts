@@ -52,3 +52,18 @@ test('flat argument validation failures identify invalid tool input', async () =
  assert.match(html, /浏览器工具参数格式错误或不完整/)
  assert.doesNotMatch(html, /请检查当前页面后重试/)
 })
+
+test('diagnostics, script values, and navigation errors are rendered safely', async () => {
+ const logs = await render({arguments:{method:'console'},success:true,output:{entries:[{level:'error',text:'API <script>alert(1)</script>'}]}})
+ assert.match(logs,/API &lt;script&gt;/)
+ assert.doesNotMatch(logs,/<script>/)
+ const value = await render({arguments:{method:'evaluate'},success:true,output:{ok:true,value:{count:123}}})
+ assert.match(value,/count/)
+ assert.match(value,/123/)
+ const navigation = await render({arguments:{method:'navigate'},success:true,output:{reached:'timeout',error_text:'Loading did not finish'}})
+ assert.match(navigation,/Loading did not finish/)
+ assert.match(navigation,/未达到目标加载阶段/)
+ assert.doesNotMatch(navigation,/操作已完成/)
+ const image = await render({arguments:{method:'screenshot'},success:true,output:'{"width":1}',tool_data:{image_base64:'aGVsbG8=',format:'png'}})
+ assert.match(image,/<img[^>]+src="data:image\/png;base64,aGVsbG8="/)
+})

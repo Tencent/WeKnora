@@ -1,5 +1,11 @@
 export default {
   localBrowser: {
+    captureScreenshot: "스크린샷 캡처",
+    navigationIncomplete: "페이지가 요청한 로드 단계에 도달하지 못했습니다. 현재 페이지를 확인하세요.",
+    noEntries: "반환된 기록이 없습니다.",
+    stopping: "작업 종료 중…",
+    elapsedSeconds: "{seconds}초",
+
     searchInstructionsTitle: "브라우저 검색 지침",
     searchInstructionsDescription: "선호하는 검색 엔진과 검색 URL을 설정합니다.",
     searchInstructionsHint: "저장 후 다음 요청부터 적용됩니다. 비워 두면 기본값을 사용합니다.",

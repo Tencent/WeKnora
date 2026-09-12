@@ -103,6 +103,7 @@ func (s *sessionService) AgentQA(
 			modelContextWindow = modelInfo.Parameters.ContextWindow
 		}
 	}
+	agentConfig.ChatModelSupportsVision = agentModelSupportsVision
 	agentConfig.MaxContextTokens = types.AgentMaxContextTokens(
 		agentConfig.MaxContextTokens, modelContextWindow,
 	)

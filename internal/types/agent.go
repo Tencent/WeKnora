@@ -146,8 +146,9 @@ type AgentConfig struct {
 	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
 
 	// Runtime-only fields (not persisted)
-	VLMModelID      string `json:"-"` // VLM model ID for tool result image analysis (set from CustomAgent config)
-	SandboxConfigID string `json:"-"` // Workspace sandbox config ID for skill execution (set from CustomAgent config)
+	ChatModelSupportsVision bool   `json:"-"` // Resolved model capability, never supplied by tool input.
+	VLMModelID              string `json:"-"` // VLM model ID for tool images, resolved from CustomAgent config.
+	SandboxConfigID         string `json:"-"` // Workspace sandbox config ID for skill execution.
 	// TenantSkills are the skills installed into the selected sandbox config's
 	// snapshot image, already narrowed to the ones this run can actually
 	// invoke. Runtime only: it is derived per turn from the config the agent

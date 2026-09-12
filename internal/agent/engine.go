@@ -849,6 +849,7 @@ func (e *AgentEngine) runReActIteration(
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
+	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
@@ -905,7 +906,9 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs []string
 			logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
 			continue
 		}
-		descriptions = append(descriptions, strings.TrimSpace(desc))
+		if desc = strings.TrimSpace(desc); desc != "" {
+			descriptions = append(descriptions, desc)
+		}
 	}
 	return descriptions
 }
