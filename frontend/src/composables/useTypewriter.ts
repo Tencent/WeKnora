@@ -168,15 +168,23 @@ export function useTypewriter(
   motionQuery?.addEventListener('change', handleMotionChange);
 
   watch(
-    getTarget,
-    (full) => {
+    [getTarget, getComplete],
+    ([full, complete], [previous, wasComplete]) => {
       const target = full.length;
       if (!initialized) {
         initialized = true;
-        if (getComplete() || reduceMotion) {
+        if (complete || reduceMotion) {
           typedLength.value = target;
           return;
         }
+      }
+      // A completed answer can be reconciled after artifact collection. This
+      // replaces already-rendered content; it is not another streaming chunk.
+      if (complete && wasComplete && full !== previous) {
+        typedLength.value = target;
+        revealCredit = 0;
+        stop();
+        return;
       }
       if (typedLength.value > target) {
         typedLength.value = 0;

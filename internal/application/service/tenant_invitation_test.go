@@ -558,6 +558,66 @@ func TestInvitationService_AcceptByToken_AllowsMultipleUsers(t *testing.T) {
 	}
 }
 
+func TestInvitationService_AcceptByToken_ReconcilesDirectInvitation(t *testing.T) {
+	svc, repo, _ := newInvitationSvc()
+	ctx := context.Background()
+	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create direct invitation: %v", err)
+	}
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create share link: %v", err)
+	}
+
+	if _, err := svc.AcceptByToken(ctx, plain, "u-alice"); err != nil {
+		t.Fatalf("accept by token: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, direct.ID)
+	if err != nil {
+		t.Fatalf("get direct invitation: %v", err)
+	}
+	if got.Status != types.TenantInvitationStatusAccepted {
+		t.Fatalf("direct invitation must be reconciled as accepted, got %s", got.Status)
+	}
+	pending, err := svc.CountPendingByInvitee(ctx, "u-alice")
+	if err != nil {
+		t.Fatalf("count pending: %v", err)
+	}
+	if pending != 0 {
+		t.Fatalf("joined user must not retain an actionable invitation, got %d", pending)
+	}
+}
+
+func TestInvitationService_AcceptByToken_ReconcilesDirectInvitationForExistingMember(t *testing.T) {
+	svc, repo, memberSvc := newInvitationSvc()
+	ctx := context.Background()
+	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create direct invitation: %v", err)
+	}
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	if err != nil {
+		t.Fatalf("create share link: %v", err)
+	}
+	if _, err := memberSvc.AddMember(ctx, "u-alice", 1, types.TenantRoleViewer, nil); err != nil {
+		t.Fatalf("seed membership: %v", err)
+	}
+
+	if _, err := svc.AcceptByToken(ctx, plain, "u-alice"); err != nil {
+		t.Fatalf("idempotent accept by token: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, direct.ID)
+	if err != nil {
+		t.Fatalf("get direct invitation: %v", err)
+	}
+	if got.Status != types.TenantInvitationStatusAccepted {
+		t.Fatalf("direct invitation must be reconciled for an existing member, got %s", got.Status)
+	}
+}
+
 func TestInvitationService_AcceptByToken_RevokedTokenRejected(t *testing.T) {
 	svc, _, _ := newInvitationSvc()
 	ctx := context.Background()

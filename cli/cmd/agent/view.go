@@ -146,7 +146,9 @@ func renderAgent(w io.Writer, a *sdk.Agent) {
 	if c.MaxCompletionTokens != 0 {
 		llm = append(llm, row{"Max completion tokens", fmt.Sprintf("%d", c.MaxCompletionTokens)})
 	}
-	if c.MaxIterations != 0 {
+	if c.MaxIterations < 0 {
+		llm = append(llm, row{"Max iterations", "unlimited"})
+	} else if c.MaxIterations != 0 {
 		llm = append(llm, row{"Max iterations", fmt.Sprintf("%d", c.MaxIterations)})
 	}
 	if c.AgentMode != "" {

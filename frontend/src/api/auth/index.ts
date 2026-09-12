@@ -95,6 +95,7 @@ export interface RegisterResponse {
 // 新加 key 时记得：后端 service.UpdateUserPreferences 也要在 merge 分支里
 // 处理；前端调用方按需读 / 默认值降级。
 export interface UserPreferences {
+  browser_search_instructions?: string | null
   // last_active_tenant_id 持久化「刷新 / 换设备 / 重新登录后回到上次的空间」
   // 偏好；后端在 Login / RefreshToken 时校验 membership 有效后才会沿用，
   // 否则回退到 home 并清掉这个字段。传 0 给 PATCH 表示「清除偏好」。
@@ -262,6 +263,7 @@ export async function getOIDCConfig(): Promise<OIDCConfigResponse> {
 export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_only' | string
+  complex_password_enabled: boolean
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {
@@ -269,7 +271,7 @@ export async function getAuthConfig(): Promise<AuthConfigResponse> {
     const response = await get('/api/v1/auth/config')
     return response as unknown as AuthConfigResponse
   } catch {
-    return { success: false, registration_mode: 'self_serve' }
+    return { success: false, registration_mode: 'self_serve', complex_password_enabled: false }
   }
 }
 
@@ -324,10 +326,10 @@ export interface AuthCapabilities {
   auto_accept_invitation: boolean
 }
 
-export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }> {
+export async function getCurrentUser(): Promise<{ success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities; preference_defaults?: { browser_search_instructions: string } }; message?: string }> {
   try {
     const response = await get('/api/v1/auth/me')
-    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities }; message?: string }
+    return response as unknown as { success: boolean; data?: { user: UserInfo; tenant?: TenantInfo | null; memberships?: MembershipInfo[]; tenant_required?: boolean; capabilities?: AuthCapabilities; preference_defaults?: { browser_search_instructions: string } }; message?: string }
   } catch (error: any) {
     return {
       success: false,

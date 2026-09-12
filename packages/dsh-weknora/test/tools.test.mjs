@@ -6,7 +6,7 @@ import { resolveConfig } from '../dist/config.js'
 import { apply } from '../dist/index.js'
 import { createTools } from '../dist/tools.js'
 import { assertLosslessJson, assertSupportedSchema, validate } from './helpers/json-schema.mjs'
-import { startMockWeknora } from './helpers/mock-weknora.mjs'
+import { startMockWeknora, ARCH_HANDLE, ARCH_PUBLIC } from './helpers/mock-weknora.mjs'
 
 const never = new AbortController().signal
 const exec = { signal: never }
@@ -335,4 +335,27 @@ test('apply registers into ctx.tools and honours the prefix and toggles', () => 
 test('apply fails the plugin load on an invalid row', () => {
   const ctx = { tools: { register: () => () => undefined } }
   assert.throws(() => apply(ctx, { baseUrl: 'ftp://kb.example.com' }), /dsh-weknora configuration is invalid/)
+})
+
+test('search rewrites cited figures to public URLs in passage content', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
+  const { value, text } = await call(byName.get('weknora_search'), { query: '系统架构图' })
+  const hit = value.results.find(result => result.knowledge_id === 'doc-architecture')
+  assert.ok(hit, 'the architecture document must be in the ranked hits')
+  assert.ok(hit.content.includes(`![系统架构](${ARCH_PUBLIC})`))
+  assert.ok(text.includes(`![系统架构](${ARCH_PUBLIC})`))
+})
+
+test('ask copies public figure URLs from the retrieved passages', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'] })
+  const { value, text } = await call(byName.get('weknora_ask'), { query: '系统架构图长什么样' })
+  assert.ok(value.answer.includes(`![系统架构](${ARCH_PUBLIC})`))
+  assert.ok(text.includes(`![系统架构](${ARCH_PUBLIC})`))
+})
+
+test('handle mode keeps internal resource handles instead of public URLs', async () => {
+  const { byName } = await toolset({ knowledgeBaseIds: ['kb-product'], resourceUrls: 'handle' })
+  const { value } = await call(byName.get('weknora_search'), { query: '系统架构图' })
+  const hit = value.results.find(result => result.knowledge_id === 'doc-architecture')
+  assert.ok(hit.content.includes(`![系统架构](${ARCH_HANDLE})`))
 })

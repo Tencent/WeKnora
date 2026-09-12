@@ -374,18 +374,17 @@ func ResolveMinerUParseMethod(method string, legacyOCREnabled *bool) string {
 }
 
 func (c *ParserEngineConfig) ResolveChatParserEngine(fileType string) string {
-	if c == nil {
-		return ""
-	}
-	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
-	for _, rule := range c.ChatParserEngineRules {
-		for _, candidate := range rule.FileTypes {
-			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(candidate)), ".") == fileType {
-				return strings.TrimSpace(rule.Engine)
+	if c != nil {
+		normalized := normalizeParserFileType(fileType)
+		for _, rule := range c.ChatParserEngineRules {
+			for _, candidate := range rule.FileTypes {
+				if normalizeParserFileType(candidate) == normalized {
+					return strings.TrimSpace(rule.Engine)
+				}
 			}
 		}
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // ToOverridesMap returns a map suitable for ParserEngineOverrides in parse requests.
@@ -634,6 +633,12 @@ type TenantSandboxConfig struct {
 	// program's built-in default.
 	DefaultTimeoutSec int `json:"default_timeout_sec,omitempty"`
 
+	// TerminalIdleDisconnectSec is how long an interactive terminal may go
+	// without keystrokes or PTY output before WeKnora closes the connection
+	// so the sandbox can pause on its provider TTL. 0 uses the built-in
+	// default (15 minutes). Not an identity field.
+	TerminalIdleDisconnectSec int `json:"terminal_idle_disconnect_sec,omitempty"`
+
 	// AllowPrivateEndpoints permits this workspace config to reach RFC1918 or
 	// loopback cluster endpoints. Link-local/cloud-metadata addresses remain
 	// blocked. It is explicit in the UI instead of hidden in process env.
@@ -664,6 +669,12 @@ type TenantSandboxConfig struct {
 	// leaves those sandboxes on the previous image; only sessions that start
 	// afterwards boot the new snapshot.
 	SkillRollout string `json:"skill_rollout,omitempty"`
+
+	// Network is the outbound/inbound network policy applied to every sandbox
+	// created from this config — chat sessions, skill installs and deep
+	// connectivity probes alike. nil and the zero value mean the same thing:
+	// outbound egress allowed, inbound public access closed.
+	Network *SandboxNetworkPolicy `json:"network,omitempty"`
 
 	// ── 后端专属配置（同一时刻只有一个生效，由 SandboxType 决定）───
 
@@ -843,10 +854,11 @@ type SkillImageConfig struct {
 }
 
 // Value implements the driver.Valuer interface. Every secret-bearing field
-// (Cube.APIKey, E2B.APIKey and all EnvVars values) is encrypted before
-// persisting. EnvVars are included because environment variables routinely
-// carry credentials, and their values are handed to tenant scripts verbatim.
-// The receiver is never mutated: nested structs and the map are copied first.
+// (Cube.APIKey, E2B.APIKey, all EnvVars values, and injected header values) is
+// encrypted before persisting. EnvVars are included because environment
+// variables routinely carry credentials, and their values are handed to tenant
+// scripts verbatim. The receiver is never mutated: nested structs and the map
+// are copied first.
 func (c *TenantSandboxConfig) Value() (driver.Value, error) {
 	if c == nil {
 		return nil, nil
@@ -882,6 +894,11 @@ func (c *TenantSandboxConfig) Value() (driver.Value, error) {
 			envVars[name] = encrypt(value)
 		}
 		cp.EnvVars = envVars
+	}
+	// Injected headers are the sandbox-side way to call an API without the
+	// credential ever entering the sandbox, so their values are secrets.
+	if c.Network != nil {
+		cp.Network = c.Network.CloneWithSecrets(encrypt)
 	}
 
 	return json.Marshal(&cp)
@@ -923,6 +940,13 @@ func (c *TenantSandboxConfig) Scan(value interface{}) error {
 	}
 	for name, stored := range c.EnvVars {
 		c.EnvVars[name] = decrypt(stored, "env_vars."+name)
+	}
+	if c.Network != nil {
+		// CloneWithSecrets has no rule/header context, so rotated-key failures
+		// share one label rather than identifying the individual credential.
+		c.Network = c.Network.CloneWithSecrets(func(stored string) string {
+			return decrypt(stored, "network.injected_header")
+		})
 	}
 
 	return nil

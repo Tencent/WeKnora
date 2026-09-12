@@ -21,45 +21,64 @@ type fakeKBShareService struct {
 func (f *fakeKBShareService) ShareKnowledgeBase(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) UpdateSharePermission(context.Context, string, types.OrgMemberRole, string, uint64) error {
 	return errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) RemoveShare(context.Context, string, string, uint64) error {
 	return errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) ListSharesByKnowledgeBase(context.Context, string, uint64) ([]*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) ListSharesByOrganization(context.Context, string) ([]*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) ListSharedKnowledgeBases(context.Context, uint64, types.TenantRole) ([]*types.SharedKnowledgeBaseInfo, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) ListSharedKnowledgeBasesInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) ListSharedKnowledgeBaseIDsByOrganizations(context.Context, []string, uint64) (map[string][]string, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) GetShare(context.Context, string) (*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) GetShareByKBAndOrg(context.Context, string, string) (*types.KnowledgeBaseShare, error) {
 	return nil, errors.New("not implemented")
 }
-func (f *fakeKBShareService) CheckTenantKBPermission(context.Context, string, uint64, types.TenantRole) (types.OrgMemberRole, bool, error) {
-	return "", false, errors.New("not implemented")
+
+func (f *fakeKBShareService) CheckTenantKBPermission(
+	_ context.Context,
+	kbID string,
+	_ uint64,
+	_ types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
+	return types.OrgRoleViewer, f.allowedKBs[kbID], nil
 }
+
 func (f *fakeKBShareService) HasTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole, requiredRole types.OrgMemberRole) (bool, error) {
 	return f.allowedKBs[kbID], nil
 }
+
 func (f *fakeKBShareService) GetKBSourceTenant(context.Context, string) (uint64, error) {
 	return 0, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) CountSharesByKnowledgeBaseIDs(context.Context, []string) (map[string]int64, error) {
 	return nil, errors.New("not implemented")
 }
+
 func (f *fakeKBShareService) CountByOrganizations(context.Context, []string) (map[string]int64, error) {
 	return nil, errors.New("not implemented")
 }
@@ -153,3 +172,57 @@ func TestGetKnowledgeBatchWithSharedAccess_ExcludesSharedKnowledgeWithoutPermiss
 }
 
 var _ interfaces.KBShareService = (*fakeKBShareService)(nil)
+
+type countingKBShareService struct {
+	fakeKBShareService
+	calls int
+}
+
+func (s *countingKBShareService) CheckTenantKBPermission(
+	ctx context.Context,
+	id string,
+	tenantID uint64,
+	role types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
+	s.calls++
+	return s.fakeKBShareService.CheckTenantKBPermission(ctx, id, tenantID, role)
+}
+
+func TestGetKnowledgeBatchWithSharedAccessChecksEachKBOnceAndRechecksNextRequest(t *testing.T) {
+	shares := &countingKBShareService{
+		fakeKBShareService: fakeKBShareService{allowedKBs: map[string]bool{"kb-shared": true}},
+	}
+	svc, db := newKnowledgeSharedAccessService(t, shares)
+	for _, id := range []string{"first", "second"} {
+		seedKnowledge(t, db, &types.Knowledge{ID: id, TenantID: 2, KnowledgeBaseID: "kb-shared", Type: "file"})
+	}
+	got, err := svc.GetKnowledgeBatchWithSharedAccess(newSharedAccessContext(), 1, []string{"first", "second"})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, 1, shares.calls)
+	shares.allowedKBs["kb-shared"] = false
+	got, err = svc.GetKnowledgeBatchWithSharedAccess(newSharedAccessContext(), 1, []string{"first", "second"})
+	require.NoError(t, err)
+	require.Empty(t, got)
+	require.Equal(t, 2, shares.calls)
+}
+
+func TestResolveKBReadTenantPreservesServiceBoundary(t *testing.T) {
+	kb := &types.KnowledgeBase{ID: "kb", TenantID: 2}
+	shares := &fakeKBShareService{allowedKBs: map[string]bool{"kb": true}}
+	tenant, err := resolveKBReadTenant(newSharedAccessContext(), kb, shares)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), tenant)
+	_, err = resolveKBReadTenant(
+		context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1)),
+		kb,
+		shares,
+	)
+	require.Error(t, err, "direct cross-tenant calls still require a user identity")
+	_, err = resolveKBReadTenant(newSharedAccessContext(), kb, nil)
+	require.Error(t, err, "a missing share service cannot grant access")
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(2))
+	tenant, err = resolveKBReadTenant(ctx, kb, nil)
+	require.NoError(t, err, "a service execution context already scoped to the KB remains usable")
+	require.Equal(t, uint64(2), tenant)
+}

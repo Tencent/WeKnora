@@ -116,6 +116,7 @@ definitions:
     - 2103
     - 2200
     - 2201
+    - 2300
     type: integer
     x-enum-varnames:
     - ErrBadRequest
@@ -141,6 +142,7 @@ definitions:
     - ErrAgentInvalidTemperature
     - ErrVectorStoreBindingInvalid
     - ErrVectorStoreUnavailable
+    - ErrModelInUse
   github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile:
     properties:
       all_caps_short_line_count:
@@ -550,7 +552,10 @@ definitions:
       parser_engine_rules:
         description: |-
           ParserEngineRules configures which parser engine to use for each file type.
-          When empty, the builtin engine is used for all types.
+          When empty, DefaultParserEngine is used (builtin/simple routing, except
+          types that only a specific engine can parse: ppt/pptx fall back to
+          markitdown). A linked anydoc binding is preferred for every type it
+          converts.
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule'
         type: array
@@ -687,6 +692,46 @@ definitions:
     properties:
       weknoracloud:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WeKnoraCloudCredentials'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.CubeEgressRule:
+    properties:
+      audit:
+        description: Audit is none | metadata | full. Empty uses the server default.
+        type: string
+      deny:
+        description: |-
+          Deny inverts the action, which defaults to allow. A deny rule still
+          needs Host or SNI: the target has to reach CubeEgress for it to answer
+          with a request-level 403 instead of the network layer dropping it.
+        type: boolean
+      host:
+        type: string
+      inject:
+        description: Inject adds credential headers on allowed HTTPS requests.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CubeHeaderInject'
+        type: array
+      methods:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      path:
+        type: string
+      scheme:
+        type: string
+      sni:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.CubeHeaderInject:
+    properties:
+      format:
+        type: string
+      header:
+        type: string
+      secret:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.CubeSandboxConfig:
     properties:
@@ -869,12 +914,17 @@ definitions:
         description: Timeout for a single LLM call in seconds (0 = use global default)
         type: integer
       max_completion_tokens:
-        description: Maximum completion tokens (only for normal mode)
+        description: |-
+          Maximum completion tokens. Quick-answer uses this for the RAG answer.
+          Smart-reasoning ReAct rounds send this value as-is (zero becomes
+          DefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).
         type: integer
       max_iterations:
         description: |-
           ===== Agent Mode Settings =====
-          Maximum iterations for ReAct loop (only for agent type)
+          Maximum iterations for the ReAct loop. Zero is unset (filled with a
+          default). A negative value is unlimited: the loop runs until the model
+          stops, the user cancels, or another guard fires.
         type: integer
       mcp_auth_wait_timeout:
         description: |-
@@ -962,7 +1012,7 @@ definitions:
       skills_selection_mode:
         description: |-
           ===== Skills Settings (only for smart-reasoning mode) =====
-          Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
+          Skills selection mode: "all" = all installed skills, "selected" = specific skills, "none" = no skills
         type: string
       supported_file_types:
         description: |-
@@ -1144,6 +1194,18 @@ definitions:
         description: |-
           TLSCertPath is a directory on the WeKnora host containing ca.pem,
           cert.pem and key.pem. Required when Host is a TCP endpoint.
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.E2BHostRule:
+    properties:
+      headers:
+        additionalProperties:
+          type: string
+        description: |-
+          Headers values are credentials and are encrypted at rest; names stay
+          readable so operators can see which headers are injected.
+        type: object
+      host:
         type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.E2BSandboxConfig:
@@ -2015,6 +2077,10 @@ definitions:
       url:
         description: 'Optional: required for SSE/HTTP Streamable'
         type: string
+      usage_instructions:
+        description: UsageInstructions is maintained locally and is not overwritten
+          by directory refresh.
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPStdioConfig:
     properties:
@@ -2416,6 +2482,16 @@ definitions:
         type: string
       base_url:
         type: string
+      context_window:
+        description: |-
+          ContextWindow is the model's total context window in tokens and
+          MaxOutputTokens the most it emits in one response. Both are provider
+          facts the agent cannot discover but has to act on: the context window is
+          what decides when conversation history gets compacted, and assuming a
+          window larger than the real one means compaction never fires and the
+          provider rejects the request mid-conversation instead. 0 means unknown,
+          which falls back to DefaultMaxContextTokens.
+        type: integer
       custom_headers:
         additionalProperties:
           type: string
@@ -2441,6 +2517,8 @@ definitions:
           across all replicas. 0 (the default) means "fall back to the
           process-wide model.max_concurrency". Interactive user-facing calls are
           never gated. Only chat / vlm / embedding honour this (see limiter.Gate).
+        type: integer
+      max_output_tokens:
         type: integer
       parameter_size:
         description: Ollama model parameter size (e.g., "7B", "13B", "70B")
@@ -2468,6 +2546,7 @@ definitions:
     - siliconflow
     - jina
     - openrouter
+    - litellm
     - requesty
     - nvidia
     - novita
@@ -2480,6 +2559,7 @@ definitions:
       ModelSourceGemini: Gemini model
       ModelSourceHunyuan: Hunyuan model
       ModelSourceJina: Jina AI model
+      ModelSourceLiteLLM: LiteLLM proxy model
       ModelSourceLocal: Local model
       ModelSourceMimo: Mimo model
       ModelSourceMinimax: Minimax mode
@@ -2507,6 +2587,7 @@ definitions:
     - SiliconFlow model
     - Jina AI model
     - OpenRouter model
+    - LiteLLM proxy model
     - Requesty model
     - NVIDIA model
     - Novita AI model
@@ -2526,6 +2607,7 @@ definitions:
     - ModelSourceSiliconFlow
     - ModelSourceJina
     - ModelSourceOpenRouter
+    - ModelSourceLiteLLM
     - ModelSourceRequesty
     - ModelSourceNvidia
     - ModelSourceNovita
@@ -3179,6 +3261,50 @@ definitions:
       use_ssl:
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy:
+    properties:
+      allow_out:
+        description: |-
+          AllowOut accepts IPv4, IPv4 CIDR, a DNS name, or a single-label
+          wildcard such as "*.example.com". Domain entries are only meaningful
+          together with a deny-all; see ValidateSandboxNetworkPolicy.
+        items:
+          type: string
+        type: array
+      allow_public_inbound:
+        description: |-
+          AllowPublicInbound is accepted on the wire for old payloads and then
+          cleared. Inbound is always credential-required; a true value has no
+          runtime effect.
+        type: boolean
+      cube_rules:
+        description: |-
+          CubeRules are validated whenever present and consumed only by the Cube
+          provider adapter.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CubeEgressRule'
+        type: array
+      deny_egress_by_default:
+        description: |-
+          DenyEgressByDefault installs a 0.0.0.0/0 deny-all, after which only
+          AllowOut (and L7 rule targets) can reach the network. false allows
+          public egress, which is what skill installs need.
+        type: boolean
+      deny_out:
+        description: |-
+          DenyOut accepts IPv4 and IPv4 CIDR only. Neither provider can deny a
+          domain: denial is a pure longest-prefix match on the destination IP.
+        items:
+          type: string
+        type: array
+      e2b_host_rules:
+        description: |-
+          E2BHostRules are validated whenever present and consumed only by the E2B
+          provider adapter.
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.E2BHostRule'
+        type: array
+    type: object
   github_com_Tencent_WeKnora_internal_types.SearchParams:
     properties:
       disable_keywords_match:
@@ -3828,6 +3954,14 @@ definitions:
           become visible to all scripts running in the tenant's\nsandboxes — do not
           place secrets here that scripts must not access."
         type: object
+      network:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy'
+        description: |-
+          Network is the outbound/inbound network policy applied to every sandbox
+          created from this config — chat sessions, skill installs and deep
+          connectivity probes alike. nil and the zero value mean the same thing:
+          outbound egress allowed, inbound public access closed.
       sandbox_type:
         description: SandboxType is cube, e2b, or docker; disabled is the hidden policy
           row.
@@ -3848,6 +3982,13 @@ definitions:
           leaves those sandboxes on the previous image; only sessions that start
           afterwards boot the new snapshot.
         type: string
+      terminal_idle_disconnect_sec:
+        description: |-
+          TerminalIdleDisconnectSec is how long an interactive terminal may go
+          without keystrokes or PTY output before WeKnora closes the connection
+          so the sandbox can pause on its provider TTL. 0 uses the built-in
+          default (15 minutes). Not an identity field.
+        type: integer
       volume_mount:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VolumeMountConfig'
@@ -3908,12 +4049,29 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolResult'
         description: Execution result (contains Output)
+      target:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCallTarget'
+        description: Target identifies the actual proxy target; Name/Args retain the
+          model call for replay.
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolCallMetadata:
     additionalProperties:
       items:
         type: integer
       type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ToolCallTarget:
+    properties:
+      args:
+        additionalProperties: true
+        type: object
+      name:
+        type: string
+      service_name:
+        type: string
+      tool_name:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolResult:
     properties:
@@ -4065,11 +4223,14 @@ definitions:
           LastActiveTenantID remembers the last workspace the user actively
           switched into, so a fresh login (new device, cleared browser, new
           refresh token) lands them back in that workspace instead of always
-          bouncing to their home workspace. Login / RefreshToken validate that
+          bouncing to their home workspace. Written by the SPA's preferences
+          PUT and by service-level SwitchTenant (including when switching
+          home, which stores the home ID). Login / RefreshToken validate that
           the workspace still exists and the user still has an active membership
           (or CanAccessAllTenants) before honouring this preference; an
           invalid pointer is best-effort cleared and the user falls back to
-          home.
+          home. Refresh JWT claims have no tenant_id, so RefreshToken
+          re-resolves from this field.
 
           nil  = no preference (use user.TenantID, i.e. home)
           *0   = "clear preference" sentinel for the partial-update endpoint
@@ -4253,6 +4414,7 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderType:
     enum:
+    - brave
     - bing
     - google
     - duckduckgo
@@ -4264,8 +4426,10 @@ definitions:
     - zhipu
     - exa
     - metaso
+    - bocha
     type: string
     x-enum-varnames:
+    - WebSearchProviderTypeBrave
     - WebSearchProviderTypeBing
     - WebSearchProviderTypeGoogle
     - WebSearchProviderTypeDuckDuckGo
@@ -4277,6 +4441,7 @@ definitions:
     - WebSearchProviderTypeZhipu
     - WebSearchProviderTypeExa
     - WebSearchProviderTypeMetaso
+    - WebSearchProviderTypeBocha
   github_com_Tencent_WeKnora_internal_types.WikiConfig:
     properties:
       content_instructions:
@@ -6051,7 +6216,8 @@ definitions:
       source:
         description: |-
           Source is exactly one of: "@owner/slug" or a slash-free slug (ClawHub),
-          a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, or
+          a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a
+          ClawHub skills-sh catalog page or "skills-sh:owner/repo/slug" locator, or
           a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
           ClawHub id and a GitHub repo. The fetch carries no credential.
         type: string
@@ -6091,11 +6257,13 @@ definitions:
     properties:
       last_active_tenant_id:
         description: |-
-          LastActiveTenantID lets the SPA persist "after a fresh login,
-          drop me back into this workspace" across devices. Send a positive
-          workspace id to set / replace, or 0 to clear. Membership is validated
-          at next login, not here. Nil = field omitted from the PATCH and
-          stays untouched.
+          LastActiveTenantID lets clients persist "after a fresh login,
+          drop me back into this workspace" across devices. The SPA sends
+          this after every tenant switch; POST /auth/switch-tenant records
+          the same preference server-side. Send a positive workspace id to
+          set / replace, or 0 to clear. Membership is validated at next
+          login, not here. Nil = field omitted from the PATCH and stays
+          untouched.
         type: integer
     type: object
   internal_handler_session.AttachmentUpload:
@@ -6810,7 +6978,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；成功后所有会话被撤销，需重新登录。
+      description: 修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；开启复杂密码后还需包含大小写与特殊字符。成功后所有会话被撤销，需重新登录。
       parameters:
       - description: 密码修改请求
         in: body
@@ -6844,7 +7012,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口
+      description: 返回当前部署的注册模式与密码复杂度开关，供前端决定是否展示注册入口以及密码校验规则
       produces:
       - application/json
       responses:
@@ -7172,7 +7340,10 @@ paths:
     post:
       consumes:
       - application/json
-      description: 为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系
+      description: |-
+        为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系（跨租户超级用户除外）。
+        成功换签会把目标空间写入「最近活跃租户」偏好，下次登录与 refresh 都落在该空间（refresh JWT 不含 tenant_id）。
+        该偏好是账号级的：一次换签会改变该用户所有设备的下次登录/refresh 落点。偏好写入失败则整次换签失败，不会发出新 token。
       parameters:
       - description: 切换请求
         in: body
@@ -7197,7 +7368,7 @@ paths:
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "403":
-          description: 无该空间成员关系
+          description: 无该空间成员关系或偏好写入失败
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -8966,6 +9137,10 @@ paths:
         in: query
         name: sort_order
         type: string
+      - description: 启用状态筛选；不传时返回全部
+        in: query
+        name: is_enabled
+        type: boolean
       produces:
       - application/json
       responses:
@@ -11784,6 +11959,92 @@ paths:
       summary: 移除 MCP 服务的单个凭据字段
       tags:
       - MCP服务
+  /mcp-services/{id}/metadata:
+    get:
+      consumes:
+      - application/json
+      description: 只读数据库，不连接上游。未同步时 data 为 null；连接配置变更后 stale 为 true。OAuth 目录按当前授权主体隔离。
+      parameters:
+      - description: MCP服务ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 目录快照
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: OAuth 目录缺少授权主体
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 服务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 读取已保存的 MCP 工具目录
+      tags:
+      - MCP服务
+  /mcp-services/{id}/metadata/refresh:
+    post:
+      consumes:
+      - application/json
+      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
+      parameters:
+      - description: MCP服务ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 同步后的目录快照
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 目录不完整或校验失败
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: OAuth 目录缺少授权主体
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 静态认证目录需要管理员刷新
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 服务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 刷新期间连接配置已变更
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 元数据存储不可用
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 同步 MCP 工具目录
+      tags:
+      - MCP服务
   /mcp-services/{id}/oauth/authorize-url:
     post:
       consumes:
@@ -11927,7 +12188,8 @@ paths:
     put:
       consumes:
       - application/json
-      description: 为指定 MCP 服务下的某个工具设置/更新审批要求
+      description: 为指定 MCP 服务下的某个工具更新启用状态和/或人工审批要求。至少提供 require_approval 或 enabled
+        之一；省略的字段保持原值。
       parameters:
       - description: MCP 服务 ID
         in: path
@@ -11939,7 +12201,7 @@ paths:
         name: tool_name
         required: true
         type: string
-      - description: '{require_approval: bool}'
+      - description: '{require_approval?: bool, enabled?: bool}'
         in: body
         name: request
         required: true
@@ -11965,7 +12227,7 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 设置 MCP 工具人工审批策略
+      summary: 设置 MCP 工具策略
       tags:
       - MCP服务
   /mcp-services/{id}/tools:
@@ -12831,6 +13093,10 @@ paths:
           schema:
             additionalProperties: true
             type: object
+        "400":
+          description: 模型仍被知识库、智能体或长期记忆引用
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
           description: 模型不存在
           schema:
@@ -13870,7 +14136,9 @@ paths:
         as multipart form field "file", or JSON {"source":"..."} to
         pull a public skill. source is one of: "@owner/slug" or a
         slash-free slug (ClawHub), a github.com / gitlab.com /
-        skills.sh / clawhub / skillhub URL, or a direct zip/SKILL.md
+        skills.sh / clawhub / skillhub URL, a ClawHub skills-sh
+        catalog page (https://clawhub.ai/skills-sh/owner/repo/slug),
+        a skills-sh:owner/repo/slug locator, or a direct zip/SKILL.md
         URL. Bare "owner/slug" is rejected as ambiguous. The source
         must be readable anonymously. The install boots a sandbox and
         runs for minutes, so the request is only accepted; follow it
@@ -14205,6 +14473,50 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: Retry a skill install
+      tags:
+      - SandboxConfig
+  /sandbox-configs/{id}/skills/{skillId}/stop:
+    post:
+      description: Abort an in-flight install so the operator can retry or uninstall.
+        After a process restart the row may still say installing with no live process;
+        this rewrites it immediately instead of waiting for the stuck-run reaper.
+        Removal is not stopped.
+      parameters:
+      - description: Sandbox config ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill ID
+        in: path
+        name: skillId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stopped skill
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Skill is not installing
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Skill not found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Stop a skill install
       tags:
       - SandboxConfig
   /sandbox-configs/{id}/skills/{skillId}/transcript:
@@ -14831,6 +15143,126 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 获取当前沙箱配置上可执行的 Skills
+      tags:
+      - Skills
+  /skills/catalog:
+    get:
+      description: Returns every skill definition in this workspace and which sandbox
+        configs it is installed on.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List workspace skills
+      tags:
+      - Skills
+    post:
+      consumes:
+      - application/json
+      - multipart/form-data
+      description: Records a skill without installing it. Send a zip as multipart
+        field "file", or JSON {"source":"..."}.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Add a skill to the workspace catalog
+      tags:
+      - Skills
+  /skills/catalog/{id}:
+    delete:
+      description: Refused while any sandbox still has an installation of this skill.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Delete a catalog skill
+      tags:
+      - Skills
+  /skills/catalog/{id}/files:
+    get:
+      description: Lists the stored catalog bundle. Files belong to the skill definition,
+        not a sandbox install.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List files of a catalog skill
+      tags:
+      - Skills
+  /skills/catalog/{id}/files/content:
+    get:
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Skill-root-relative file path
+        in: query
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Read one file of a catalog skill
+      tags:
+      - Skills
+  /skills/catalog/{id}/install:
+    post:
+      consumes:
+      - application/json
+      description: Runs the existing snapshot install onto each named sandbox config.
+      parameters:
+      - description: Catalog skill ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Install a catalog skill onto sandboxes
       tags:
       - Skills
   /storage-backends:

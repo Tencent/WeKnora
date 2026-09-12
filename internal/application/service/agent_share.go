@@ -512,26 +512,8 @@ func (s *agentShareService) TenantCanAccessKBViaSomeSharedAgent(ctx context.Cont
 		return false, err
 	}
 	for _, info := range list {
-		if info.Agent == nil {
-			continue
-		}
-		agent := info.Agent
-		if agent.TenantID != kb.TenantID {
-			continue
-		}
-		mode := agent.Config.KBSelectionMode
-		if mode == "none" {
-			continue
-		}
-		if mode == "all" {
+		if types.SharedAgentIncludesKB(info.Agent, kb) {
 			return true, nil
-		}
-		if mode == "selected" {
-			for _, id := range agent.Config.KnowledgeBases {
-				if id == kb.ID {
-					return true, nil
-				}
-			}
 		}
 	}
 	return false, nil

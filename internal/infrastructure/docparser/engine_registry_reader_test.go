@@ -30,6 +30,7 @@ func TestNewReaderRoutesByEngine(t *testing.T) {
 		{name: "builtin engine goes remote", engine: BuiltinEngineName, fileType: "md", want: remote},
 		{name: "unset engine handles simple formats in Go", fileType: "csv", want: &SimpleFormatReader{}},
 		{name: "unset engine sends complex formats to docreader", fileType: "docx", want: remote},
+		{name: "default pptx engine is remote markitdown", engine: "markitdown", fileType: "pptx", want: remote},
 		{name: "URLs always go to docreader", fileType: "md", isURL: true, want: remote},
 		{name: "docreader-only engines fall through", engine: "markitdown", fileType: "docx", want: remote},
 	}

@@ -30,6 +30,14 @@ func (s *stubAuthTokenRepo) GetTokenByValue(_ context.Context, tokenValue string
 	}
 	return token, nil
 }
+func (s *stubAuthTokenRepo) GetTokenByID(_ context.Context, id string) (*types.AuthToken, error) {
+	for _, token := range s.tokens {
+		if token != nil && token.ID == id {
+			return token, nil
+		}
+	}
+	return nil, errors.New("token not found")
+}
 func (s *stubAuthTokenRepo) GetTokensByUserID(context.Context, string) ([]*types.AuthToken, error) {
 	return nil, nil
 }
@@ -141,6 +149,26 @@ func TestValidateTokenRejectsRefreshToken(t *testing.T) {
 	}
 }
 
+func TestValidateTokenRejectsSandboxTerminalTicket(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	ticket := signTestJWT(jwt.MapClaims{
+		"user_id":    "user-1",
+		"tenant_id":  1,
+		"session_id": "sess",
+		"token_id":   "tok-1",
+		"type":       sandboxTerminalTicketType,
+		"exp":        time.Now().Add(time.Minute).Unix(),
+	})
+
+	_, _, err := svc.ValidateToken(ctx, ticket)
+	if err == nil || err.Error() != "terminal ticket cannot be used as access token" {
+		t.Fatalf("ValidateToken(terminal ticket) err = %v, want terminal ticket rejection", err)
+	}
+}
+
 func TestRefreshTokenRejectsAccessTokenRecord(t *testing.T) {
 	ctx := context.Background()
 	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
@@ -216,7 +244,8 @@ func TestAdminResetPasswordRejectsWeakPasswordBeforeWrite(t *testing.T) {
 		t.Fatalf("AdminResetPassword() err = %v, want ErrPasswordPolicy", err)
 	}
 	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
-		t.Fatalf("weak password caused side effects: updates=%d revocations=%v", repo.updateCalls, tokenRepo.revokedUserIDs)
+		t.Fatalf("weak password caused side effects: updates=%d revocations=%v",
+			repo.updateCalls, tokenRepo.revokedUserIDs)
 	}
 }
 
@@ -236,7 +265,8 @@ func TestChangePasswordRequiresPolicyAndRevokesSessions(t *testing.T) {
 		t.Fatalf("ChangePassword(weak) err = %v, want ErrPasswordPolicy", err)
 	}
 	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
-		t.Fatalf("weak password caused side effects: updates=%d revocations=%v", repo.updateCalls, tokenRepo.revokedUserIDs)
+		t.Fatalf("weak password caused side effects: updates=%d revocations=%v",
+			repo.updateCalls, tokenRepo.revokedUserIDs)
 	}
 
 	if err := svc.ChangePassword(ctx, "user-1", "wrong-pass", "NewSecure9"); !errors.Is(err, ErrInvalidOldPassword) {
@@ -274,6 +304,34 @@ func TestChangePasswordRejectsSamePassword(t *testing.T) {
 	}
 }
 
+func TestChangePasswordHonoursRuntimeComplexPolicy(t *testing.T) {
+	ctx := context.Background()
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	svc.systemSettingSvc = &stubComplexPasswordSettings{enabled: true}
+	repo := svc.userRepo.(*stubUserRepoForAuth)
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte("OldSecure9"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash old password: %v", err)
+	}
+	repo.users["user-1"].PasswordHash = string(hashed)
+
+	if err := svc.ChangePassword(ctx, "user-1", "wrong-pass", "weak"); !errors.Is(err, ErrInvalidOldPassword) {
+		t.Fatalf("ChangePassword(wrong old, weak new) err = %v, want ErrInvalidOldPassword", err)
+	}
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "NewSecure9"); !errors.Is(err, ErrComplexPasswordPolicy) {
+		t.Fatalf("ChangePassword(simple new) err = %v, want ErrComplexPasswordPolicy", err)
+	}
+	if repo.updateCalls != 0 || len(tokenRepo.revokedUserIDs) != 0 {
+		t.Fatalf("complex-policy reject caused side effects: updates=%d revocations=%v",
+			repo.updateCalls, tokenRepo.revokedUserIDs)
+	}
+	if err := svc.ChangePassword(ctx, "user-1", "OldSecure9", "NewSecure9!"); err != nil {
+		t.Fatalf("ChangePassword(complex new) err = %v", err)
+	}
+}
+
 func TestUserIDFromSignedTokenAcceptsExpiredToken(t *testing.T) {
 	expired := signTestJWT(jwt.MapClaims{
 		"user_id": "user-1",
@@ -287,5 +345,36 @@ func TestUserIDFromSignedTokenAcceptsExpiredToken(t *testing.T) {
 	}
 	if userID != "user-1" {
 		t.Fatalf("userIDFromSignedToken(expired) = %q, want user-1", userID)
+	}
+}
+
+func TestGetAccessTokenLookupsRedactJWT(t *testing.T) {
+	ctx := context.Background()
+	raw := "jwt-secret-value"
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{
+		raw: {
+			ID:        "tok-1",
+			UserID:    "user-1",
+			Token:     raw,
+			TokenType: "access_token",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}}
+	svc := newAuthTestUserService(tokenRepo)
+
+	byValue, err := svc.GetAccessTokenByValue(ctx, raw)
+	if err != nil {
+		t.Fatalf("GetAccessTokenByValue: %v", err)
+	}
+	if byValue.ID != "tok-1" || byValue.Token != "" {
+		t.Fatalf("GetAccessTokenByValue = %+v, want id tok-1 with redacted token", byValue)
+	}
+
+	byID, err := svc.GetAccessTokenByID(ctx, "tok-1")
+	if err != nil {
+		t.Fatalf("GetAccessTokenByID: %v", err)
+	}
+	if byID.ID != "tok-1" || byID.Token != "" {
+		t.Fatalf("GetAccessTokenByID = %+v, want id tok-1 with redacted token", byID)
 	}
 }

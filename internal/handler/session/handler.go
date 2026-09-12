@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -17,6 +18,7 @@ import (
 
 // Handler handles all HTTP requests related to conversation sessions
 type Handler struct {
+	browserSkill         *browserskill.Manager
 	messageService       interfaces.MessageService // Service for managing messages
 	suggestionService    interfaces.MessageSuggestionService
 	sessionService       interfaces.SessionService       // Service for managing sessions
@@ -28,6 +30,7 @@ type Handler struct {
 	agentShareService    interfaces.AgentShareService    // Service for resolving shared agents (KB scope in retrieval)
 	kbShareService       interfaces.KBShareService       // Service for resolving shared KB permissions
 	fileService          interfaces.FileService          // Service for file storage (image uploads)
+	resourceCatalog      interfaces.ResourceCatalog
 	storageResolver      interfaces.StorageBackendResolver
 	modelService         interfaces.ModelService // Service for model management (VLM access)
 	attachmentProcessor  *AttachmentProcessor    // Processor for file attachments
@@ -37,6 +40,15 @@ type Handler struct {
 	// not support artifact collection; handlers must check before using.
 	artifactCollector *service.ArtifactCollector
 	memoryService     interfaces.MemoryService // Service for cross-session long-term memory
+	// userService / memberService back the sandbox terminal's self-contained
+	// handshake (browser WebSocket upgrades cannot send Authorization).
+	userService   interfaces.UserService
+	memberService interfaces.TenantMemberService
+	// terminalService opens PTYs on the sandbox bound to a session. It also
+	// owns first-use provisioning: the WS handshake carries the chat page's
+	// selected agent so the sandbox is created with the same config a
+	// conversation turn would use.
+	terminalService *service.SandboxTerminalService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -52,6 +64,7 @@ func NewHandler(
 	agentShareService interfaces.AgentShareService,
 	kbShareService interfaces.KBShareService,
 	fileService interfaces.FileService,
+	resourceCatalog interfaces.ResourceCatalog,
 	storageResolver interfaces.StorageBackendResolver,
 	modelService interfaces.ModelService,
 	documentReader interfaces.DocumentReader,
@@ -59,8 +72,13 @@ func NewHandler(
 	temporaryDocuments interfaces.TemporaryDocumentService,
 	artifactCollector *service.ArtifactCollector,
 	memoryService interfaces.MemoryService,
+	userService interfaces.UserService,
+	memberService interfaces.TenantMemberService,
+	terminalService *service.SandboxTerminalService,
+	browserSkill *browserskill.Manager,
 ) *Handler {
 	return &Handler{
+		browserSkill:         browserSkill,
 		sessionService:       sessionService,
 		messageService:       messageService,
 		suggestionService:    suggestionService,
@@ -72,11 +90,15 @@ func NewHandler(
 		agentShareService:    agentShareService,
 		kbShareService:       kbShareService,
 		fileService:          fileService,
+		resourceCatalog:      resourceCatalog,
 		storageResolver:      storageResolver,
 		modelService:         modelService,
 		temporaryDocuments:   temporaryDocuments,
 		artifactCollector:    artifactCollector,
 		memoryService:        memoryService,
+		userService:          userService,
+		memberService:        memberService,
+		terminalService:      terminalService,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
@@ -360,6 +382,8 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), []string{id})
+
 	// Return success message
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -444,6 +468,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
+		h.browserSkill.ForgetAll(browserSkillScope(ctx))
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "All sessions deleted successfully",
@@ -481,6 +506,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), sanitizedIDs)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Sessions deleted successfully",

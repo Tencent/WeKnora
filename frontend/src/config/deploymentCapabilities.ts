@@ -9,6 +9,7 @@ export const DEPLOYMENT_CAPABILITY_KEYS = [
   'settings.vectorstore',
   'settings.storage',
   'settings.sandbox',
+  'settings.sandbox.docker',
 ] as const
 
 export type DeploymentCapabilityKey = typeof DEPLOYMENT_CAPABILITY_KEYS[number]
@@ -35,6 +36,11 @@ export function isDeploymentCapabilitySupported(
       options?.liteMode === true ||
       options?.edition?.trim().toLowerCase() === 'lite'
     if (isLite) return false
+  }
+  // Docker talks to a local Engine API (often docker.sock = host root), so
+  // missing or failed capability probes must not leave the picker visible.
+  if (key === 'settings.sandbox.docker') {
+    return capabilities[key]?.supported === true
   }
   return capabilities[key]?.supported !== false
 }

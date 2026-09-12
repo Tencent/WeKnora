@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -513,8 +514,10 @@ func (s *DataSourceService) ManualSync(ctx context.Context, dsID string) (*types
 	logger.Infof(ctx, "sync task enqueued: ds=%s syncLog=%s", dsID, syncLog.ID)
 	recordKBActivity(ctx, s.audit, ds.TenantID, ds.KnowledgeBaseID, types.AuditActionDataSourceSyncStarted,
 		"data_source", ds.ID, types.AuditOutcomeAccepted,
-		map[string]any{"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
-			"task_id": info.ID, "trigger": "manual", "processing_status": "pending"})
+		map[string]any{
+			"name": ds.Name, "type": ds.Type, "sync_log_id": syncLog.ID,
+			"task_id": info.ID, "trigger": "manual", "processing_status": "pending",
+		})
 	return syncLog, nil
 }
 
@@ -627,6 +630,10 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return nil
 	}
 
+	ctx, err = access.WithKBTaskWrite(ctx, kb, ds.TenantID)
+	if err != nil {
+		return fmt.Errorf("%w: data source KB does not belong to its tenant", asynq.SkipRetry)
+	}
 	wasPaused := ds.Status == types.DataSourceStatusPaused
 
 	// Get connector
@@ -719,7 +726,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	// Process fetched items and write to knowledge base
-	var result = &types.SyncResult{
+	result := &types.SyncResult{
 		Total: len(items),
 	}
 
@@ -1250,6 +1257,15 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		"external_id":        item.ExternalID,
 		"source_resource_id": item.SourceResourceID,
 		"datasource_id":      ds.ID,
+	}
+	// The source system's own last-modified time, when the connector supplied
+	// one. The knowledge row's UpdatedAt moves on every re-parse, so this is
+	// the only record of how old the document itself is.
+	if !item.UpdatedAt.IsZero() {
+		metadata["source_updated_at"] = item.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	if !item.CreatedAt.IsZero() {
+		metadata["source_created_at"] = item.CreatedAt.UTC().Format(time.RFC3339)
 	}
 	for k, v := range item.Metadata {
 		metadata[k] = v

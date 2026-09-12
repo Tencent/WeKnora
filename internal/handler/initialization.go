@@ -1648,16 +1648,20 @@ type ModelTestRequest struct {
 
 // fillSecretsFromStoredModel mutates req in place: if req.ModelID is set
 // and a secret field on the request is empty, the corresponding value from
-// the stored (and decrypted) model is copied in. Non-empty request values
-// are always preferred — they represent the user actively typing a new key
-// they want to verify. Missing or inaccessible model is treated as a no-op
-// (the connection test will fail downstream with a clearer "missing apiKey"
-// error than we could produce here).
+// the stored (and decrypted) model is copied in. The stored ExtraConfig is
+// filled in as well when the request does not carry one — provider-specific
+// settings (thinking_control, api_version, remote_model_name, ...) must
+// apply to the connection test exactly as they apply to real traffic, and
+// the frontend only sends extraConfig when the user actively edits it.
+// Non-empty request values are always preferred — they represent the user
+// actively typing a new key they want to verify. Missing or inaccessible
+// model is treated as a no-op (the connection test will fail downstream
+// with a clearer "missing apiKey" error than we could produce here).
 func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, req *ModelTestRequest) {
 	if req == nil || req.ModelID == "" {
 		return
 	}
-	if req.APIKey != "" && req.AppSecret != "" {
+	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil {
 		return
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
@@ -1671,6 +1675,9 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	}
 	if req.AppSecret == "" {
 		req.AppSecret = stored.Parameters.AppSecret
+	}
+	if req.ExtraConfig == nil {
+		req.ExtraConfig = stored.Parameters.ExtraConfig
 	}
 }
 
@@ -2221,9 +2228,23 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		return
 	}
 
+	// 验证文件大小 — MAX_FILE_SIZE_MB env (50MB 默认)。
+	// 见 utils/filesize.go 注释：故意保留为部署期 env，不做 runtime setting。
+	maxSizeMB := utils.GetMaxFileSizeMB()
+	maxSize := maxSizeMB * 1024 * 1024
+	// 上限必须在 multipart 解析之前生效：FormFile 会先把整个 body 缓冲下来
+	// （超出内存部分落临时文件），之后的 header.Size 检查看到的已是收完的上传。
+	// nginx 的 location /api/ 仍是 MAX_FILE_SIZE；这里是直连 app 时的同一道上限。
+	limitUploadBody(c, maxSize)
+
 	// 获取上传的图片文件
 	file, header, err := c.Request.FormFile("image")
 	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			logger.Error(ctx, "File size too large")
+			c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", maxSizeMB)))
+			return
+		}
 		logger.Error(ctx, "Failed to get uploaded image", err)
 		c.Error(errors.NewBadRequestError("获取上传图片失败"))
 		return
@@ -2237,10 +2258,6 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 		return
 	}
 
-	// 验证文件大小 — MAX_FILE_SIZE_MB env (50MB 默认)。
-	// 见 utils/filesize.go 注释：故意保留为部署期 env，不做 runtime setting。
-	maxSizeMB := utils.GetMaxFileSizeMB()
-	maxSize := maxSizeMB * 1024 * 1024
 	if header.Size > maxSize {
 		logger.Error(ctx, "File size too large")
 		c.Error(errors.NewBadRequestError(fmt.Sprintf("图片文件大小不能超过%dMB", maxSizeMB)))

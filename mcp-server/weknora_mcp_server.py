@@ -360,6 +360,26 @@ class WeKnoraClient:
             "POST", f"/knowledge-bases/{kb_id}/knowledge/manual", json=data
         )
 
+    def update_knowledge_from_text(
+        self,
+        knowledge_id: str,
+        content: str,
+        title: str = "",
+        status: str = "publish",
+    ) -> Dict:
+        """Update an existing manual Markdown knowledge entry.
+
+        An empty ``title`` keeps the current title. ``status`` defaults to
+        ``"publish"`` so the updated content is re-indexed immediately; pass
+        ``"draft"`` to save it without indexing.
+        """
+        data = {
+            "title": title,
+            "content": content,
+            "status": status,
+        }
+        return self._request("PUT", f"/knowledge/manual/{knowledge_id}", json=data)
+
     def list_knowledge(self, kb_id: str, page: int = 1, page_size: int = 20) -> Dict:
         """List knowledge in a knowledge base"""
         params = {"page": page, "page_size": page_size}
@@ -757,6 +777,25 @@ def create_knowledge_from_text(
     """
     return client.create_knowledge_from_text(
         client.resolve_kb_id(kb_id), title, content, tag_ids=tag_ids, status=status
+    )
+
+
+@mcp.tool()
+def update_knowledge_from_text(
+    knowledge_id: str,
+    content: str,
+    title: str = "",
+    status: str = "publish",
+) -> dict:
+    """Update an existing manual Markdown knowledge entry.
+
+    ``knowledge_id`` is the ID returned by ``create_knowledge_from_text`` or
+    ``list_knowledge``. ``content`` is required. Leave ``title`` empty to keep
+    the current title. ``status`` defaults to ``"publish"`` so the new content
+    is re-indexed; pass ``"draft"`` to save without indexing.
+    """
+    return client.update_knowledge_from_text(
+        knowledge_id, content, title=title, status=status
     )
 
 

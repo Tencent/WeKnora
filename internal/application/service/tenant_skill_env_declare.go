@@ -54,7 +54,7 @@ var reservedEnvNames = map[string]bool{
 }
 
 func init() {
-	// The names ExecuteScript actually writes, not a guessed prefix. Output
+	// The names skill environment preparation actually writes, not a guessed prefix. Output
 	// dir, history root and skill dir currently share WEKNORA_SKILL_, but
 	// SESSION_INPUT_DIR does not; pulling the list from skills keeps the
 	// blacklist aligned when a fifth injected name appears.

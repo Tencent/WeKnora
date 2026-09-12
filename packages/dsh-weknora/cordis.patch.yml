@@ -11,3 +11,4 @@
         apiKey: !!js process.env.WEKNORA_API_KEY
         knowledgeBaseIds: !!js (process.env.WEKNORA_KNOWLEDGE_BASE_IDS ?? '').split(',').filter(Boolean)
         agentId: !!js process.env.WEKNORA_AGENT_ID
+        resourceUrls: !!js process.env.WEKNORA_RESOURCE_URLS || 'public'

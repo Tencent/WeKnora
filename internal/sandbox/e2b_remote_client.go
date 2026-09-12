@@ -23,7 +23,8 @@ import (
 
 // E2BRemoteClient implements RemoteSandboxClient on top of the go-e2b client.
 type E2BRemoteClient struct {
-	client *e2b.Client
+	client        *e2b.Client
+	inboundTokens *InboundTokenRegistry
 
 	templateID string
 	timeout    time.Duration
@@ -46,9 +47,9 @@ func NewE2BRemoteClientWithTransport(
 	transport *http.Transport,
 ) (*E2BRemoteClient, error) {
 	if transport == nil {
-		return newE2BRemoteClient(cfg, nil)
+		return newE2BRemoteClient(cfg, nil, NewInboundTokenRegistry())
 	}
-	return newE2BRemoteClient(cfg, transport)
+	return newE2BRemoteClient(cfg, transport, NewInboundTokenRegistry())
 }
 
 // NewE2BRemoteClientWithPool builds the client on top of the shared gateway
@@ -61,14 +62,15 @@ func NewE2BRemoteClientWithPool(
 	pool *SandboxGatewayTransportPool,
 ) (*E2BRemoteClient, error) {
 	if pool == nil {
-		return newE2BRemoteClient(cfg, nil)
+		return newE2BRemoteClient(cfg, nil, NewInboundTokenRegistry())
 	}
-	return newE2BRemoteClient(cfg, pool.RoundTripperFor(cfg))
+	return newE2BRemoteClient(cfg, pool.RoundTripperFor(cfg), pool.InboundTokens())
 }
 
 func newE2BRemoteClient(
 	cfg *Config,
 	transport http.RoundTripper,
+	inboundTokens *InboundTokenRegistry,
 ) (*E2BRemoteClient, error) {
 	if cfg == nil {
 		return nil, errors.New("e2b remote client config is required")
@@ -80,12 +82,22 @@ func newE2BRemoteClient(
 	if timeout <= 0 {
 		timeout = DefaultE2BHTTPTimeout
 	}
+	// Attach the inbound-token injector even when the caller did not go
+	// through the gateway pool. go-e2b stores TrafficAccessToken but never
+	// sends the header; without this wrap, NewE2BRemoteClient / WithTransport
+	// would register tokens that no HTTP stack consults. A pool-built split
+	// that already owns the same registry is left as-is.
+	transport = attachInboundTokenTransport(transport, inboundTokens)
 	// Every E2B client speaks to envd through the compatibility shim, whether
 	// or not a gateway is configured: the two details it rewrites belong to the
 	// envd protocol itself, not to any one deployment. See envd_compat_transport.go.
 	httpClient := &http.Client{
-		Timeout:   timeout,
-		Transport: NewEnvdCompatTransport(transport, DefaultSandboxExecUser),
+		// Command streams share this client with control-plane requests. A
+		// client-wide timeout would override even a longer WithTimeout on Run.
+		Transport: &e2bRPCTimeoutTransport{
+			next:    NewEnvdCompatTransport(transport, DefaultSandboxExecUser),
+			timeout: timeout,
+		},
 	}
 	client, err := e2b.NewClient(e2b.ClientConfig{
 		APIKey:        cfg.E2BAPIKey,
@@ -102,9 +114,10 @@ func newE2BRemoteClient(
 		ttl = DefaultE2BSandboxTTL
 	}
 	return &E2BRemoteClient{
-		client:     client,
-		templateID: strings.TrimSpace(cfg.E2BTemplate),
-		timeout:    ttl,
+		client:        client,
+		inboundTokens: inboundTokens,
+		templateID:    strings.TrimSpace(cfg.E2BTemplate),
+		timeout:       ttl,
 	}, nil
 }
 
@@ -131,6 +144,16 @@ func (h *e2bRemoteHandle) Metadata() map[string]string {
 	return cloneMetadata(h.metadata)
 }
 
+// TrafficAccessToken implements RemoteInboundTokenCarrier. E2B issues it only
+// in the create response; go-e2b keeps the field but never sends the header,
+// so both persisting it and attaching it are WeKnora's job.
+func (h *e2bRemoteHandle) TrafficAccessToken() string {
+	if h == nil || h.sandbox == nil {
+		return ""
+	}
+	return h.sandbox.TrafficAccessToken
+}
+
 // --- RemoteSandboxClient ------------------------------------------------------
 
 func (c *E2BRemoteClient) Provider() RemoteProvider { return SandboxTypeE2B }
@@ -146,7 +169,11 @@ func (c *E2BRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// E2B stores snapshots as templates, so a snapshot ID can be handed
 		// straight back as CreateOptions.TemplateID.
 		SupportsSnapshots: true,
-		SupportsVolumes:   true,
+		// E2B has no named-volume mount API that WeKnora can use; advertising
+		// it would let a workspace configure a mount that never appears.
+		SupportsVolumes: false,
+		// envd exposes an interactive PTY service that go-e2b wraps.
+		SupportsTerminals: true,
 	}
 }
 
@@ -201,7 +228,7 @@ func (c *E2BRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate, 
 			ID:        item.TemplateID,
 			Name:      name,
 			Status:    status,
-			Version:   item.EnvdVersion,
+			Version:   item.BuildID,
 			CreatedAt: item.CreatedAt,
 			UpdatedAt: item.UpdatedAt,
 			Standard:  standard,
@@ -369,8 +396,17 @@ func (c *E2BRemoteClient) DeleteSupersededStandardTemplates(ctx context.Context,
 	return nil
 }
 
+// e2bPtyPromptOverrideCmd re-sources the image prompt after E2B's
+// template provisioner appends `PS1='\w $ '` to bashrc. Harmless if the
+// image already sources /etc/weknora/pty-prompt.sh (PROMPT_COMMAND wins
+// either way); required when rebuilding from an older image that does not.
+const e2bPtyPromptOverrideCmd = `. /etc/weknora/pty-prompt.sh 2>/dev/null; ` +
+	`for f in /root/.bashrc /home/user/.bashrc /etc/profile.d/zz-weknora-prompt.sh; do ` +
+	`grep -q /etc/weknora/pty-prompt.sh "$f" 2>/dev/null || echo '. /etc/weknora/pty-prompt.sh' >> "$f"; ` +
+	`done`
+
 func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTemplate, error) {
-	builder := e2b.NewTemplate().FromImage(DefaultDockerImage)
+	builder := e2b.NewTemplate().FromImage(DefaultDockerImage).RunCmd(e2bPtyPromptOverrideCmd)
 	build, err := builder.BuildInBackground(ctx, c.client, e2b.BuildConfig{
 		Name: StandardTemplateName,
 		// Creating a sandbox from a plain template name or ID resolves the
@@ -428,19 +464,20 @@ func (c *E2BRemoteClient) Create(
 		)
 	}
 
-	// Translate the neutral RemoteNetworkPolicy to E2B's SDK types. When
-	// the caller supplied no policy at all we fall back to the same
-	// permissive defaults the Cube adapter uses (public egress + public
-	// URL reachability) so upgrading WeKnora deployments do not silently
-	// lose `curl` / `pip` access from inside the sandbox.
 	policy := request.Network
 	if policy.AllowInternetAccess == nil {
 		defaultOn := true
 		policy.AllowInternetAccess = &defaultOn
 	}
+	// Deliberately the opposite of E2B's own default (which is public).
+	// Closing inbound requires Secure=true, pinned below, and makes the
+	// create response carry a traffic access token that the lifecycle
+	// persists — go-e2b stores that token but never sends it, so
+	// gatewaySplitTransport is what puts it on data-plane requests.
+	// Do not change this to true.
 	if policy.AllowPublicTraffic == nil {
-		defaultOn := true
-		policy.AllowPublicTraffic = &defaultOn
+		defaultClosed := false
+		policy.AllowPublicTraffic = &defaultClosed
 	}
 	config := e2b.SandboxConfig{
 		Template:            template,
@@ -453,6 +490,7 @@ func (c *E2BRemoteClient) Create(
 			AllowPublicTraffic: policy.AllowPublicTraffic,
 			AllowOut:           append([]string(nil), policy.AllowOut...),
 			DenyOut:            append([]string(nil), policy.DenyOut...),
+			Rules:              toE2BRequestRules(policy.E2BHostRules),
 		},
 		AutoPause:    action == RemoteOnTimeoutPause,
 		VolumeMounts: toE2BVolumeMounts(request.VolumeMounts),
@@ -472,6 +510,9 @@ func (c *E2BRemoteClient) Create(
 			"e2b returned an empty sandbox handle", nil,
 		)
 	}
+	// go-e2b keeps this token but never sends it, so register it for the
+	// data-plane transport to attach.
+	c.inboundTokens.Put(sandbox.ID, sandbox.TrafficAccessToken)
 	return &e2bRemoteHandle{
 		sandbox:  sandbox,
 		metadata: cloneMetadata(request.Metadata),
@@ -480,9 +521,10 @@ func (c *E2BRemoteClient) Create(
 
 func (c *E2BRemoteClient) Connect(
 	ctx context.Context,
-	sandboxID string,
+	request RemoteConnectRequest,
 ) (RemoteSandboxHandle, error) {
-	if strings.TrimSpace(sandboxID) == "" {
+	sandboxID := strings.TrimSpace(request.SandboxID)
+	if sandboxID == "" {
 		return nil, e2bInvalidRequest("Connect", "sandbox ID is required", nil)
 	}
 	timeoutSeconds, err := e2bTimeoutSeconds(
@@ -503,6 +545,10 @@ func (c *E2BRemoteClient) Connect(
 			"e2b returned a mismatched sandbox handle", nil,
 		)
 	}
+	if sandbox.TrafficAccessToken == "" {
+		sandbox.TrafficAccessToken = request.TrafficAccessToken
+	}
+	c.inboundTokens.Put(sandbox.ID, sandbox.TrafficAccessToken)
 	return &e2bRemoteHandle{sandbox: sandbox}, nil
 }
 
@@ -717,6 +763,7 @@ func (c *E2BRemoteClient) Delete(ctx context.Context, sandboxID string) error {
 	if err := sandbox.CloseWithContext(ctx); err != nil {
 		return normalizeE2BError("Delete", err)
 	}
+	c.inboundTokens.Delete(sandboxID)
 	return nil
 }
 
@@ -740,6 +787,9 @@ func (c *E2BRemoteClient) Exec(
 	if request.Timeout < 0 {
 		return nil, e2bInvalidRequest("Exec", "execution timeout cannot be negative", nil)
 	}
+	if request.User == "" {
+		request.User = DefaultSandboxExecUser
+	}
 
 	// The SDK runs every command through `/bin/bash -l -c <cmd>`, so argv mode
 	// is lowered to a quoted shell line and stdin (when present) is piped in
@@ -762,6 +812,10 @@ func (c *E2BRemoteClient) Exec(
 
 	start := time.Now()
 	options := []e2b.RunOption{}
+	if request.OnOutput != nil {
+		options = append(options, e2b.WithOnStdout(func(p []byte) { request.OnOutput("stdout", p) }),
+			e2b.WithOnStderr(func(p []byte) { request.OnOutput("stderr", p) }))
+	}
 	if request.WorkDir != "" {
 		options = append(options, e2b.WithCwd(request.WorkDir))
 	}
@@ -825,10 +879,12 @@ func (c *E2BRemoteClient) Exec(
 }
 
 // Filesystem operations name DefaultSandboxExecUser explicitly rather than
-// relying on the daemon's default account. It keeps ownership aligned with the
-// account scripts run as, and it is required for interoperability: E2B Cloud
-// falls back to "user" when the request omits it, while other E2B-compatible
-// control planes reject the call outright.
+// relying on the daemon's default account. Naming the user is required for
+// interoperability: E2B Cloud falls back to "user" when the request omits it,
+// while other E2B-compatible control planes reject the call outright. The
+// default account is root, which matches what scripts run as; under
+// one-session-one-sandbox there is no shared volume here to defend with
+// file-mode ownership.
 func (c *E2BRemoteClient) WriteFile(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
@@ -842,7 +898,7 @@ func (c *E2BRemoteClient) WriteFile(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("WriteFile", "path is required", nil)
 	}
-	if _, err := sandbox.Filesystem.WriteBytes(ctx, path, content, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
+	if _, err := sandbox.Filesystem.WriteBytes(ctx, path, content, e2b.WithFileUser(remoteFileUser(ctx))); err != nil {
 		return normalizeE2BError("WriteFile", err)
 	}
 	return nil
@@ -860,7 +916,7 @@ func (c *E2BRemoteClient) ReadFile(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("ReadFile", "path is required", nil)
 	}
-	content, err := sandbox.Filesystem.ReadBytes(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
+	content, err := sandbox.Filesystem.ReadBytes(ctx, path, e2b.WithFileUser(remoteFileUser(ctx)))
 	if err != nil {
 		return nil, normalizeE2BError("ReadFile", err)
 	}
@@ -879,7 +935,7 @@ func (c *E2BRemoteClient) ListDir(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("ListDir", "path is required", nil)
 	}
-	entries, err := sandbox.Filesystem.List(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
+	entries, err := sandbox.Filesystem.List(ctx, path, e2b.WithFileUser(remoteFileUser(ctx)))
 	if err != nil {
 		return nil, normalizeE2BError("ListDir", err)
 	}
@@ -899,19 +955,18 @@ func (c *E2BRemoteClient) ListDir(
 func (c *E2BRemoteClient) MakeDir(
 	ctx context.Context,
 	handle RemoteSandboxHandle,
-	path string,
+	dir string,
 ) error {
 	sandbox, err := e2bHandleSandbox("MakeDir", handle)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(path) == "" {
+	if strings.TrimSpace(dir) == "" {
 		return e2bInvalidRequest("MakeDir", "path is required", nil)
 	}
-	if err := sandbox.Filesystem.MakeDir(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
-		return ignoreExistingDir(normalizeE2BError("MakeDir", err))
-	}
-	return nil
+	return makeDirTree(dir, func(component string) error {
+		return normalizeE2BError("MakeDir", sandbox.Filesystem.MakeDir(ctx, component, e2b.WithFileUser(remoteFileUser(ctx))))
+	})
 }
 
 func (c *E2BRemoteClient) Remove(
@@ -926,7 +981,7 @@ func (c *E2BRemoteClient) Remove(
 	if strings.TrimSpace(path) == "" {
 		return e2bInvalidRequest("Remove", "path is required", nil)
 	}
-	if err := sandbox.Filesystem.Remove(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser)); err != nil {
+	if err := sandbox.Filesystem.Remove(ctx, path, e2b.WithFileUser(remoteFileUser(ctx))); err != nil {
 		return normalizeE2BError("Remove", err)
 	}
 	return nil
@@ -944,7 +999,7 @@ func (c *E2BRemoteClient) Stat(
 	if strings.TrimSpace(path) == "" {
 		return nil, e2bInvalidRequest("Stat", "path is required", nil)
 	}
-	info, err := sandbox.Filesystem.Stat(ctx, path, e2b.WithFileUser(DefaultSandboxExecUser))
+	info, err := sandbox.Filesystem.Stat(ctx, path, e2b.WithFileUser(remoteFileUser(ctx)))
 	if err != nil {
 		return nil, normalizeE2BError("Stat", err)
 	}
@@ -1122,6 +1177,30 @@ func toE2BVolumeMounts(src []RemoteVolumeMount) []e2b.VolumeMount {
 	return result
 }
 
+// toE2BRequestRules maps the neutral host rules onto E2B's per-host transform
+// map. E2B has no notion of a deny verdict or an audit level here — a rule is
+// only ever a header injection — which is why the neutral type carries the
+// richer Cube shape separately instead of one merged rule type.
+func toE2BRequestRules(rules []RemoteE2BHostRule) map[string][]e2b.RequestRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make(map[string][]e2b.RequestRule, len(rules))
+	for _, rule := range rules {
+		if len(rule.Headers) == 0 {
+			continue
+		}
+		headers := make(map[string]string, len(rule.Headers))
+		for name, value := range rule.Headers {
+			headers[name] = value
+		}
+		out[rule.Host] = append(out[rule.Host], e2b.RequestRule{
+			Transform: e2b.RequestTransform{Headers: headers},
+		})
+	}
+	return out
+}
+
 // isE2BExecTimeout reports whether a failed command Run should be treated as
 // a timeout kill (Killed=true) rather than a transport error. It recognises:
 //   - our own execCtx deadline (request.Timeout);
@@ -1253,6 +1332,7 @@ func normalizeE2BError(op string, err error) error {
 			}
 		}
 	}
+	kind = snapshotDeleteKind(op, kind, err.Error())
 	remoteErr := NewRemoteError(SandboxTypeE2B, op, kind, err.Error(), err)
 	remoteErr.StatusCode = status
 	return remoteErr
@@ -1272,8 +1352,9 @@ func e2bRemoteEntryType(fileType string) RemoteDirEntryType {
 }
 
 var (
-	_ RemoteSandboxClient   = (*E2BRemoteClient)(nil)
-	_ RemoteSnapshotManager = (*E2BRemoteClient)(nil)
-	_ RemoteTemplateCatalog = (*E2BRemoteClient)(nil)
-	_ RemoteSandboxHandle   = (*e2bRemoteHandle)(nil)
+	_ RemoteSandboxClient       = (*E2BRemoteClient)(nil)
+	_ RemoteSnapshotManager     = (*E2BRemoteClient)(nil)
+	_ RemoteTemplateCatalog     = (*E2BRemoteClient)(nil)
+	_ RemoteSandboxHandle       = (*e2bRemoteHandle)(nil)
+	_ RemoteInboundTokenCarrier = (*e2bRemoteHandle)(nil)
 )

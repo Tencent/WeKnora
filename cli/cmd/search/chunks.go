@@ -37,8 +37,15 @@ type ChunksOptions struct {
 // ChunksService is the narrow SDK surface used by runChunks. *sdk.Client
 // satisfies it; tests inject fakes via Factory.Client.
 type ChunksService interface {
-	HybridSearch(ctx context.Context, kbID string, params *sdk.SearchParams) ([]*sdk.SearchResult, error)
+	HybridSearch(
+		ctx context.Context,
+		kbID string,
+		params *sdk.SearchParams,
+		opts ...sdk.ResourceURLOptions,
+	) ([]*sdk.SearchResult, error)
 }
+
+var _ ChunksService = (*sdk.Client)(nil)
 
 // NewCmdChunks builds `weknora search chunks "<query>" --kb <id-or-name>`.
 // Uses a positional query argument with the KB selected via flag.

@@ -110,6 +110,13 @@ function deadline(signal: AbortSignal, timeoutMs: number): AbortSignal {
 }
 
 export class WeknoraClient {
+  /**
+   * A knowledge-base-restricted API key rejects `resource_urls=public` with
+   * 403. After the first such refusal this client stays on handle mode so
+   * later calls do not pay the same round trip.
+   */
+  private publicModeBlocked = false
+
   constructor(private readonly config: ResolvedConfig) {}
 
   private headers(): Record<string, string> {
@@ -122,16 +129,42 @@ export class WeknoraClient {
     return headers
   }
 
+  private resourceMode(): 'handle' | 'public' {
+    return this.config.resourceUrls === 'public' && !this.publicModeBlocked ? 'public' : 'handle'
+  }
+
   private url(path: string, query?: Record<string, string | number | undefined>): string {
     const url = new URL(`${this.config.baseUrl}${path}`)
-    if (this.config.resourceUrls === 'public') url.searchParams.set('resource_urls', 'public')
     for (const [key, value] of Object.entries(query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value))
     }
+    if (this.resourceMode() === 'public') url.searchParams.set('resource_urls', 'public')
     return url.toString()
   }
 
+  private isPublicModeForbidden(error: unknown): boolean {
+    return error instanceof WeknoraApiError
+      && this.config.resourceUrls === 'public'
+      && !this.publicModeBlocked
+      && error.status === 403
+      && error.message.includes('resource_urls=public')
+  }
+
   private async fetchJson<T>(
+    path: string,
+    init: { method: 'GET' | 'POST', body?: unknown, query?: Record<string, string | number | undefined> },
+    signal: AbortSignal,
+  ): Promise<Envelope<T>> {
+    try {
+      return await this.fetchJsonOnce(path, init, signal)
+    } catch (error) {
+      if (!this.isPublicModeForbidden(error)) throw error
+      this.publicModeBlocked = true
+      return await this.fetchJsonOnce(path, init, signal)
+    }
+  }
+
+  private async fetchJsonOnce<T>(
     path: string,
     init: { method: 'GET' | 'POST', body?: unknown, query?: Record<string, string | number | undefined> },
     signal: AbortSignal,
@@ -262,17 +295,26 @@ export class WeknoraClient {
       ...input.agentId === undefined ? {} : { agent_id: input.agentId, agent_enabled: true },
       ...input.webSearch ? { web_search_enabled: true } : {},
     }
-    const combined = deadline(signal, this.config.chatTimeoutMs)
-    let response: Response
-    try {
-      response = await fetch(this.url(path), {
-        method: 'POST',
-        headers: { ...this.headers(), Accept: 'text/event-stream' },
-        body: JSON.stringify(body),
-        signal: combined,
-      })
-    } catch (cause) {
-      throw new WeknoraApiError(`POST ${path} failed: ${describeTransportFailure(cause, signal)}`)
+    const open = async (): Promise<Response> => {
+      const combined = deadline(signal, this.config.chatTimeoutMs)
+      try {
+        return await fetch(this.url(path), {
+          method: 'POST',
+          headers: { ...this.headers(), Accept: 'text/event-stream' },
+          body: JSON.stringify(body),
+          signal: combined,
+        })
+      } catch (cause) {
+        throw new WeknoraApiError(`POST ${path} failed: ${describeTransportFailure(cause, signal)}`)
+      }
+    }
+    let response = await open()
+    if (!response.ok) {
+      const text = await response.text()
+      const error = new WeknoraApiError(`POST ${path} failed with HTTP ${response.status}: ${reasonOf(text)}`, response.status)
+      if (!this.isPublicModeForbidden(error)) throw error
+      this.publicModeBlocked = true
+      response = await open()
     }
     if (!response.ok) {
       const text = await response.text()

@@ -363,6 +363,18 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		return
 	}
 
+	// The optional file makes this a multipart body, so the cap has to be in
+	// place before the first PostForm below — that call is what parses it, and
+	// parsing is what buffers the upload to disk. Answer an oversized body here
+	// too: the file is read with a `fileErr == nil` guard further down, which
+	// would otherwise report a rejected upload as one that was never sent.
+	limitUploadBody(c, secutils.GetMaxFileSize())
+	if _, formErr := c.MultipartForm(); formErr != nil && isRequestBodyTooLarge(formErr) {
+		c.Error(errors.NewBadRequestError(
+			fmt.Sprintf("file cannot exceed %d MB", secutils.GetMaxFileSizeMB())))
+		return
+	}
+
 	input := c.PostForm("input")
 	if len(input) > modelDebugMaxInputBytes {
 		c.Error(errors.NewBadRequestError("input is too long"))
@@ -655,6 +667,7 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 // @Produce      json
 // @Param        id   path      string  true  "模型ID"
 // @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Failure      400  {object}  errors.AppError         "模型仍被知识库、智能体或长期记忆引用"
 // @Failure      404  {object}  errors.AppError         "模型不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth

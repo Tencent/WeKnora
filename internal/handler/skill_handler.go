@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -18,12 +19,25 @@ type usableSkillLister interface {
 // SkillHandler handles skill-related HTTP requests
 type SkillHandler struct {
 	usableSkills usableSkillLister
+	catalog      skillCatalogService
 }
 
-// NewSkillHandler creates a new skill handler
-func NewSkillHandler(usableSkills usableSkillLister) *SkillHandler {
+type skillCatalogService interface {
+	ListCatalog(ctx context.Context, tenantID uint64) ([]service.SkillCatalogView, error)
+	RegisterCatalogFromArchive(ctx context.Context, tenantID uint64, archive []byte) (*types.TenantSkillCatalogEntity, error)
+	RegisterCatalogFromSource(ctx context.Context, tenantID uint64, source string) (*types.TenantSkillCatalogEntity, error)
+	InstallCatalogToConfigs(ctx context.Context, tenantID uint64, catalogID string, configIDs []string) (*service.CatalogInstallResult, error)
+	DeleteCatalog(ctx context.Context, tenantID uint64, catalogID string) error
+	ListCatalogFiles(ctx context.Context, tenantID uint64, catalogID string) ([]service.SkillFileEntry, error)
+	ReadCatalogFile(ctx context.Context, tenantID uint64, catalogID, relativePath string) (*service.SkillFileContent, error)
+}
+
+// NewSkillHandler creates a new skill handler. catalog may be nil in tests
+// that only exercise the chat picker.
+func NewSkillHandler(usableSkills usableSkillLister, catalog skillCatalogService) *SkillHandler {
 	return &SkillHandler{
 		usableSkills: usableSkills,
+		catalog:      catalog,
 	}
 }
 

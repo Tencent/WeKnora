@@ -315,3 +315,64 @@ func TestEffectiveStorageProvider_CrossBackendDetection(t *testing.T) {
 			dstSame.EffectiveStorageProvider(tenantDefault), sp)
 	}
 }
+
+func TestDefaultParserEngine(t *testing.T) {
+	for input, want := range map[string]string{
+		"pptx": "markitdown", ".PPT": "markitdown", "ppt": "markitdown",
+		"pdf": "", "csv": "", "docx": "", "": "",
+	} {
+		if got := DefaultParserEngine(input); got != want {
+			t.Errorf("DefaultParserEngine(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestDefaultParserEnginePrefersRegisteredEngineForFallbackTypes(t *testing.T) {
+	t.Cleanup(func() { SetPreferParserEngine(nil) })
+	SetPreferParserEngine(func(fileType string) string {
+		if fileType == "pptx" || fileType == "ppt" || fileType == "pdf" || fileType == "docx" {
+			return "anydoc"
+		}
+		return ""
+	})
+	if got := DefaultParserEngine("pptx"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(pptx) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("ppt"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(ppt) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("pdf"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(pdf) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("docx"); got != "anydoc" {
+		t.Fatalf("DefaultParserEngine(docx) = %q, want anydoc", got)
+	}
+	if got := DefaultParserEngine("txt"); got != "" {
+		t.Fatalf("DefaultParserEngine(txt) = %q, want empty", got)
+	}
+}
+
+func TestDefaultParserEngineIgnoresEmptyPreference(t *testing.T) {
+	t.Cleanup(func() { SetPreferParserEngine(nil) })
+	SetPreferParserEngine(func(string) string { return "" })
+	if got := DefaultParserEngine("pptx"); got != "markitdown" {
+		t.Fatalf("DefaultParserEngine(pptx) = %q, want markitdown when preference is empty", got)
+	}
+}
+
+func TestChunkingConfigResolveParserEngineDefaults(t *testing.T) {
+	var empty ChunkingConfig
+	if got := empty.ResolveParserEngine("pptx"); got != "markitdown" {
+		t.Fatalf("empty rules ResolveParserEngine(pptx) = %q, want markitdown", got)
+	}
+	if got := empty.ResolveParserEngine("pdf"); got != "" {
+		t.Fatalf("empty rules ResolveParserEngine(pdf) = %q, want empty", got)
+	}
+
+	configured := ChunkingConfig{ParserEngineRules: []ParserEngineRule{
+		{FileTypes: []string{"pptx"}, Engine: "mineru"},
+	}}
+	if got := configured.ResolveParserEngine(".PPTX"); got != "mineru" {
+		t.Fatalf("configured ResolveParserEngine(pptx) = %q, want mineru", got)
+	}
+}

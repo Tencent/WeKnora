@@ -69,6 +69,19 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      # TestReadURL drives the live WebParser (Playwright WebKit). Without the
+      # browser binary, scrape used to return "Error parsing web page: …" as
+      # markdown and the Go client treated that as success. After #2883 the
+      # parser raises, so CI must install WebKit the same way the image does.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-webkit-${{ hashFiles('docreader/uv.lock') }}
+
+      - name: Install Playwright WebKit
+        run: uv run --project docreader --python ${{ env.PYTHON_VERSION }} python -m playwright install --with-deps webkit
+
       - name: Start DocReader gRPC server
         run: |
           uv run --project docreader --python ${{ env.PYTHON_VERSION }} python -m docreader.main &

@@ -57,11 +57,8 @@ func buildOptionsSection(opts *ChatOptions) string {
 	if opts.TopP > 0 {
 		parts = append(parts, fmt.Sprintf("TopP=%.2f", opts.TopP))
 	}
-	if opts.MaxTokens > 0 {
-		parts = append(parts, fmt.Sprintf("MaxTokens=%d", opts.MaxTokens))
-	}
-	if opts.MaxCompletionTokens > 0 {
-		parts = append(parts, fmt.Sprintf("MaxCompletionTokens=%d", opts.MaxCompletionTokens))
+	if budget := opts.CompletionBudget(); budget > 0 {
+		parts = append(parts, fmt.Sprintf("CompletionBudget=%d", budget))
 	}
 	if opts.FrequencyPenalty > 0 {
 		parts = append(parts, fmt.Sprintf("FrequencyPenalty=%.2f", opts.FrequencyPenalty))

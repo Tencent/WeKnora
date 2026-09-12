@@ -1,11 +1,10 @@
 # WeKnora CLI（weknora 命令行工具）
 
-WeKnora CLI（二进制名 `weknora`）是 WeKnora RAG 服务的官方命令行客户端，源码位于仓库的 `cli/` 目录（独立 Go module：`github.com/Tencent/WeKnora/cli`，要求 Go 1.26+）。它面向两类使用者：
+WeKnora CLI（命令名 `weknora`）用于管理知识库与文档、执行检索和流式问答。交互使用可选择可读输出，脚本和 AI Agent 可使用 JSON 响应、类型化错误、`--dry-run` 预演及 `weknora schema` 契约查询；`weknora mcp serve` 提供 MCP 服务。
 
-- **人类用户**：管理知识库（Knowledge Base）与文档、执行混合检索（hybrid search）、进行有引用溯源（grounded）的流式问答；
-- **AI Agent / 脚本**：默认输出 JSON envelope、提供类型化错误码与退出码矩阵、`--dry-run` 预演、`weknora schema` 机器可读契约，以及 `weknora mcp serve` MCP 服务器模式。
+源码位于 `cli/`，是独立的 Go module（`github.com/Tencent/WeKnora/cli`），源码构建需要 Go 1.26+。命令入口为 `cli/cmd/root.go`。
 
-命令树入口在 `cli/cmd/root.go`，各命令组按目录组织在 `cli/cmd/` 下。
+在控制台「设置 → 发布与集成 → CLI」可查看安装步骤，并复制当前部署的连接命令。服务地址保留反向代理路径前缀，末尾无需 `/api/v1`。连接后运行 `weknora doctor` 和 `weknora kb list`，确认服务与凭证可用。
 
 ## 总体架构
 
@@ -438,7 +437,7 @@ weknora api /api/v1/knowledge-bases/<id> -X DELETE -y
 |---|---|---|
 | serve | `serve` | 在 stdin/stdout 上运行 JSON-RPC 2.0 MCP 服务器（当前仅 stdio 传输）；日志走 stderr；启动即急切构建 SDK client，无 profile 时以 `auth.unauthenticated` 立即失败 |
 
-暴露**精选 10 个工具**（实现见 `cli/internal/mcp/tools.go`）：`kb_list` / `kb_view` / `doc_list` / `doc_view` / `doc_download` / `search_chunks` / `chunk_list` / `agent_list` 为只读；`chat` 与 `session_ask` 会创建会话/消息记录。破坏性动词（create / delete / upload）被刻意排除。
+提供 10 个工具（实现见 `cli/internal/mcp/tools.go`）：`kb_list` / `kb_view` / `doc_list` / `doc_view` / `doc_download` / `search_chunks` / `chunk_list` / `agent_list` 为只读；`chat` 与 `session_ask` 会创建会话/消息记录。不提供创建资源、删除资源和上传文件工具。
 
 MCP 客户端注册示例（写入客户端的 `mcpServers` 配置）：
 
@@ -507,7 +506,7 @@ WEKNORA_E2E_HOST=https://kb.example.com WEKNORA_E2E_TOKEN=eyJ... \
 
 ---
 
-## 5 分钟上手
+## 分钟上手 {#_5-分钟上手}
 
 ```bash
 # 1. 注册服务器为 profile 并激活

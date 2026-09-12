@@ -52,7 +52,7 @@ func NewUserEnvResolver(
 //
 // An empty skillName resolves only the config-wide variables, which is what
 // shell_exec gets when the model names no skill. An unknown name behaves the
-// same way: preloaded skills reach here too and carry no declaration.
+// same way: host-staged skills carry no declaration.
 func (r *userEnvResolver) ResolveEnv(
 	ctx context.Context, skillName string,
 ) (map[string]string, []string, error) {

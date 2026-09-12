@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -1099,72 +1101,57 @@ func (s *knowledgeBaseService) SetEmbeddingModel(ctx context.Context, id string,
 // CopyKnowledgeBase copies a knowledge base to a new knowledge base (shallow copy).
 // Source and target must belong to the tenant in context; cross-tenant access is rejected.
 //
-// Defensive checks:
-//
-//   - When dstKB != "" (clone into an existing target), the source's
-//     EmbeddingModelID and VectorStoreID must match the target's. Mismatched
-//     embedding models would silently mix incompatible vector spaces;
-//     mismatched vector stores would require copying physical vector data
-//     between stores, which is not yet supported.
-//   - When dstKB == "" (create a new target), VectorStoreID is copied from
-//     the source so the new KB shares the same physical vector index. GORM
-//     `<-:create` allows INSERT, so the new row is well-formed.
-//
-// The handler's CopyKnowledgeBase endpoint runs the same checks synchronously
-// before enqueueing the async clone task, so the 400 errors here are
-// defense-in-depth for the worker entry point.
+// The transfer grant fixes both resource IDs and whether a new destination
+// may be created. Existing targets must be compatible with the source. A
+// worker retry reloads the reserved target instead of creating another KB.
 func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 	srcKB string, dstKB string,
 ) (*types.KnowledgeBase, *types.KnowledgeBase, error) {
-	tenantID := types.MustTenantIDFromContext(ctx)
-	// Load source KB with tenant scope to prevent cross-tenant cloning
-	sourceKB, err := s.repo.GetKnowledgeBaseByIDAndTenant(ctx, srcKB, tenantID)
+	destinationID, create, creatorID, err := access.CloneDestination(ctx, srcKB)
 	if err != nil {
-		logger.Errorf(ctx, "Get source knowledge base failed: %v", err)
 		return nil, nil, err
 	}
+	if dstKB != "" && dstKB != destinationID {
+		return nil, nil, access.ErrForbidden
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	sourceKB, err := s.repo.GetKnowledgeBaseByIDAndTenant(ctx, srcKB, tenantID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if sourceKB == nil || sourceKB.ID != srcKB || sourceKB.TenantID != tenantID {
+		return nil, nil, access.ErrForbidden
+	}
+	sourceCopy := *sourceKB
+	sourceKB = &sourceCopy
 	sourceKB.EnsureDefaults()
-	var targetKB *types.KnowledgeBase
-	if dstKB != "" {
-		// Load target KB with tenant scope so we only clone into the caller's tenant
-		targetKB, err = s.repo.GetKnowledgeBaseByIDAndTenant(ctx, dstKB, tenantID)
-		if err != nil {
+	targetKB, err := s.repo.GetKnowledgeBaseByIDAndTenant(ctx, destinationID, tenantID)
+	if err != nil && (!create || !errors.Is(err, repository.ErrKnowledgeBaseNotFound)) {
+		return nil, nil, err
+	}
+	if targetKB != nil {
+		targetCopy := *targetKB
+		targetKB = &targetCopy
+		targetKB.EnsureDefaults()
+		if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, access.KBTransferClone); err != nil {
 			return nil, nil, err
 		}
-
-		// Defense 1: embedding model must match. Mixing incompatible
-		// vector spaces would produce semantically broken search results.
-		if sourceKB.EmbeddingModelID != targetKB.EmbeddingModelID {
-			return nil, nil, apperrors.NewBadRequestError(
-				"source and target knowledge bases use different embedding models; " +
-					"clone into a target with the same embedding model")
-		}
-
-		// Defense 2: vector store binding must match. Cross-store cloning
-		// would require copying physical vector data between stores.
-		// (both nil → equal; both same UUID → equal; otherwise → rejected)
-		if !sourceKB.SharesStoreWith(targetKB) {
-			return nil, nil, apperrors.NewBadRequestError(
-				"source and target knowledge bases are bound to different vector stores; " +
-					"cross-store cloning is not yet supported")
-		}
-
-		// Defense 3: the concrete storage instance must match. Comparing only
-		// provider names would incorrectly allow COS-A -> COS-B clones.
-		if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil {
-			defaultID, defaultProvider := "", ""
-			if tenant.DefaultStorageBackendID != nil {
-				defaultID = *tenant.DefaultStorageBackendID
-			}
-			if tenant.StorageEngineConfig != nil {
-				defaultProvider = tenant.StorageEngineConfig.DefaultProvider
-			}
-			if !sourceKB.SharesStorageBackendWith(targetKB, defaultID, defaultProvider) {
-				return nil, nil, apperrors.NewBadRequestError(
-					"source and target knowledge bases use different storage instances; cross-storage-backend cloning is not supported")
-			}
+		tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+		if err := access.ValidateKBTransferCompatibility(sourceKB,
+			targetKB,
+			access.KBTransferClone,
+			"",
+			tenant); err != nil {
+			return nil, nil, apperrors.NewBadRequestError(err.Error())
 		}
 	} else {
+		reserved := &types.KnowledgeBase{ID: destinationID, TenantID: tenantID}
+		if !create {
+			return nil, nil, access.ErrNotFound
+		}
+		if err := access.RequireKBTransfer(ctx, sourceKB, reserved, access.KBTransferClone); err != nil {
+			return nil, nil, err
+		}
 		var faqConfig *types.FAQConfig
 		if sourceKB.FAQConfig != nil {
 			cfg := *sourceKB.FAQConfig
@@ -1173,7 +1160,8 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 		// Preserve VectorStoreID so the cloned KB lands on the same
 		// physical index. GORM `<-:create` permits the value at INSERT.
 		targetKB = &types.KnowledgeBase{
-			ID:                    uuid.New().String(),
+			ID:                    destinationID,
+			CreatorID:             creatorID,
 			Name:                  sourceKB.Name,
 			Type:                  sourceKB.Type,
 			Description:           sourceKB.Description,

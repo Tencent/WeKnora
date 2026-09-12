@@ -81,6 +81,21 @@ type TenantSkillRepository interface {
 	// DeleteUserEnvVarsByConfig removes every principal's values for a config,
 	// including the config-wide ones DeleteSkill never sees.
 	DeleteUserEnvVarsByConfig(ctx context.Context, tenantID uint64, configID string) error
+
+	// CreateCatalog inserts a tenant-level skill definition.
+	CreateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error
+	// GetCatalog returns nil when the row is missing or belongs to another workspace.
+	GetCatalog(ctx context.Context, tenantID uint64, catalogID string) (*types.TenantSkillCatalogEntity, error)
+	// GetCatalogByName scopes lookup by workspace because names are unique per tenant.
+	GetCatalogByName(ctx context.Context, tenantID uint64, name string) (*types.TenantSkillCatalogEntity, error)
+	// ListCatalogsByTenant returns every live catalog row of one workspace.
+	ListCatalogsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillCatalogEntity, error)
+	// UpdateCatalog writes mutable definition fields (bundle, description, version).
+	UpdateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error
+	// DeleteCatalog soft-deletes a definition. Install rows are not touched.
+	DeleteCatalog(ctx context.Context, tenantID uint64, catalogID string) error
+	// ListSkillsByCatalog returns installations of one catalog skill.
+	ListSkillsByCatalog(ctx context.Context, tenantID uint64, catalogID string) ([]*types.TenantSkillEntity, error)
 }
 
 type tenantSkillRepository struct{ db *gorm.DB }
@@ -178,6 +193,7 @@ func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.Tenant
 			"installed_snapshot_id": e.InstalledSnapshotID,
 			"install_session_id":    e.InstallSessionID,
 			"install_message_id":    e.InstallMessageID,
+			"catalog_id":            e.CatalogID,
 			"status":                e.Status,
 			"error":                 e.Error,
 			"installing_since":      e.InstallingSince,
@@ -387,4 +403,89 @@ func (r *tenantSkillRepository) DeleteUserEnvVarsByConfig(
 	return r.db.WithContext(ctx).
 		Where("tenant_id = ? AND sandbox_config_id = ?", tenantID, configID).
 		Delete(&types.TenantUserEnvVar{}).Error
+}
+
+func (r *tenantSkillRepository) CreateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error {
+	return r.db.WithContext(ctx).Create(e).Error
+}
+
+func (r *tenantSkillRepository) GetCatalog(
+	ctx context.Context, tenantID uint64, catalogID string,
+) (*types.TenantSkillCatalogEntity, error) {
+	var e types.TenantSkillCatalogEntity
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND id = ?", tenantID, catalogID).
+		First(&e).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+func (r *tenantSkillRepository) GetCatalogByName(
+	ctx context.Context, tenantID uint64, name string,
+) (*types.TenantSkillCatalogEntity, error) {
+	var e types.TenantSkillCatalogEntity
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND name = ?", tenantID, name).
+		First(&e).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+func (r *tenantSkillRepository) ListCatalogsByTenant(
+	ctx context.Context, tenantID uint64,
+) ([]*types.TenantSkillCatalogEntity, error) {
+	var list []*types.TenantSkillCatalogEntity
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ?", tenantID).
+		Order("created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func (r *tenantSkillRepository) UpdateCatalog(ctx context.Context, e *types.TenantSkillCatalogEntity) error {
+	return r.db.WithContext(ctx).
+		Model(&types.TenantSkillCatalogEntity{}).
+		Where("tenant_id = ? AND id = ?", e.TenantID, e.ID).
+		Updates(map[string]any{
+			"name":          e.Name,
+			"version":       e.Version,
+			"description":   e.Description,
+			"instructions":  e.Instructions,
+			"bundle_ref":    e.BundleRef,
+			"bundle_sha256": e.BundleSHA256,
+			"updated_at":    time.Now(),
+		}).Error
+}
+
+func (r *tenantSkillRepository) DeleteCatalog(ctx context.Context, tenantID uint64, catalogID string) error {
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND id = ?", tenantID, catalogID).
+		Delete(&types.TenantSkillCatalogEntity{}).Error
+}
+
+func (r *tenantSkillRepository) ListSkillsByCatalog(
+	ctx context.Context, tenantID uint64, catalogID string,
+) ([]*types.TenantSkillEntity, error) {
+	var list []*types.TenantSkillEntity
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND catalog_id = ?", tenantID, catalogID).
+		Order("created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+	return list, nil
 }

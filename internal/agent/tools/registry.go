@@ -12,12 +12,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// toolErrorHint is appended to tool error messages to guide the LLM to retry with a different approach.
-const toolErrorHint = "\n\n[Analyze the error above and try a different approach.]"
-
 // ToolRegistry manages the registration and retrieval of tools
 type ToolRegistry struct {
 	tools             map[string]types.Tool
+	deferred          map[string]bool
+	mcpDirect         bool // Full exposure is an explicit compatibility path.
+	mcpPrepared       bool
 	maxToolOutputSize int // maximum chars for tool output (0 = use DefaultMaxToolOutput)
 }
 
@@ -31,7 +31,8 @@ type outputLimitProvider interface {
 // NewToolRegistry creates a new tool registry
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
-		tools: make(map[string]types.Tool),
+		tools:    make(map[string]types.Tool),
+		deferred: make(map[string]bool),
 	}
 }
 
@@ -53,6 +54,16 @@ func (r *ToolRegistry) getMaxToolOutput() int {
 // If a tool with the same name is already registered, the existing one is kept
 // (first-wins) to prevent tool execution hijacking via name collision (GHSA-67q9-58vj-32qx).
 func (r *ToolRegistry) RegisterTool(tool types.Tool) {
+	r.registerTool(tool, false)
+}
+
+// RegisterDeferredTool retains execution capability without advertising the
+// full definition to the model. Registration is completed before execution.
+func (r *ToolRegistry) RegisterDeferredTool(tool types.Tool) {
+	r.registerTool(tool, true)
+}
+
+func (r *ToolRegistry) registerTool(tool types.Tool, deferred bool) {
 	name := tool.Name()
 	if _, exists := r.tools[name]; exists {
 		logger.Warnf(context.Background(),
@@ -60,6 +71,10 @@ func (r *ToolRegistry) RegisterTool(tool types.Tool) {
 		return
 	}
 	r.tools[name] = tool
+	if r.deferred == nil {
+		r.deferred = make(map[string]bool)
+	}
+	r.deferred[name] = deferred
 }
 
 // GetTool retrieves a tool by name
@@ -90,6 +105,15 @@ func (r *ToolRegistry) ListTools() []string {
 // iteration order would otherwise reshuffle the tools block and break cache
 // hits.
 func (r *ToolRegistry) GetFunctionDefinitions() []types.FunctionDefinition {
+	return r.functionDefinitions(false)
+}
+
+// GetModelFunctionDefinitions is the stable model-facing projection of the registry.
+func (r *ToolRegistry) GetModelFunctionDefinitions() []types.FunctionDefinition {
+	return r.functionDefinitions(true)
+}
+
+func (r *ToolRegistry) functionDefinitions(modelOnly bool) []types.FunctionDefinition {
 	names := make([]string, 0, len(r.tools))
 	for name := range r.tools {
 		names = append(names, name)
@@ -98,6 +122,9 @@ func (r *ToolRegistry) GetFunctionDefinitions() []types.FunctionDefinition {
 
 	definitions := make([]types.FunctionDefinition, 0, len(names))
 	for _, name := range names {
+		if modelOnly && r.deferred[name] {
+			continue
+		}
 		tool := r.tools[name]
 		definitions = append(definitions, types.FunctionDefinition{
 			Name:        tool.Name(),
@@ -114,30 +141,75 @@ func (r *ToolRegistry) ExecuteTool(
 	name string,
 	args json.RawMessage,
 ) (*types.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
 	common.PipelineInfo(ctx, "AgentTool", "execute_start", map[string]interface{}{
 		"tool": name,
 		"args": args,
 	})
 	tool, err := r.GetTool(name)
 	if err != nil {
+		if msg := RetiredToolReplacement(name); msg != "" {
+			common.PipelineWarn(ctx, "AgentTool", "retired_tool", map[string]interface{}{
+				"tool":  name,
+				"error": msg,
+			})
+			return &types.ToolResult{Success: false, Error: msg}, nil
+		}
 		common.PipelineError(ctx, "AgentTool", "execute_failed", map[string]interface{}{
 			"tool":  name,
 			"error": err.Error(),
 		})
 		return &types.ToolResult{
 			Success: false,
-			Error:   err.Error() + toolErrorHint,
+			Error:   err.Error(),
 		}, err
 	}
 
+	if direct, ok := tool.(*MCPRegisteredTool); ok {
+		// Authorization precedes schema validation: even parameter-error details
+		// must not expose another engine principal's registered tool definition.
+		if err := direct.catalog.authorize(ctx); err != nil {
+			return mcpDiscoveryFailure(err, "unavailable")
+		}
+	}
+	return r.execute(ctx, tool, args)
+}
+
+// execute is shared by direct calls and catalog-resolved MCP calls. A proxy
+// must validate the target schema and retain the original result, not just
+// validate its outer arguments or bypass the execution pipeline.
+func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.RawMessage) (*types.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}, err
+	}
+	name := tool.Name()
 	// Cast parameters to match expected schema types before execution.
 	// This handles common LLM quirks like returning "true" instead of true.
 	args = CastParams(args, tool.Parameters())
 
 	// Validate parameters against the tool's JSON Schema before execution.
 	// This catches invalid arguments early, avoiding a wasted tool execution + LLM round.
-	if validationErrs := ValidateParams(args, tool.Parameters()); len(validationErrs) > 0 {
-		errMsg := FormatValidationErrors(validationErrs) + toolErrorHint
+	var validationErrs []ValidationError
+	if validator, ok := tool.(interface{ ValidateArguments(json.RawMessage) error }); ok {
+		if err := validator.ValidateArguments(args); err != nil {
+			validationErrs = []ValidationError{{Message: err.Error()}}
+		}
+	} else {
+		validationErrs = ValidateParams(args, tool.Parameters())
+	}
+	if len(validationErrs) > 0 {
+		errMsg := FormatValidationErrors(validationErrs)
+		if name == ToolCallMCPTool {
+			errMsg += mcpCallArgumentsHint
+		}
+		if name == ToolWriteSandboxFile {
+			errMsg += writeSandboxMissingFieldHint
+		}
+		if name == ToolEditSandboxFile {
+			errMsg += editSandboxMissingFieldHint
+		}
 		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
 			"tool":   name,
 			"errors": errMsg,
@@ -157,12 +229,24 @@ func (r *ToolRegistry) ExecuteTool(
 		}
 	}
 	result, execErr := tool.Execute(WithOutputBudget(ctx, maxOutput), args)
+	if result == nil {
+		result = &types.ToolResult{Success: false, Error: "tool returned no result"}
+	}
+	if execErr != nil {
+		result.Success = false
+		if result.Error == "" {
+			result.Error = execErr.Error()
+		}
+	}
 
 	// Truncate large tool outputs to prevent context window poisoning. The
 	// limit is counted in runes to match TruncateToolOutput; comparing bytes
 	// here would leave CJK output effectively uncapped.
 	if result != nil && utf8.RuneCountInString(result.Output) > maxOutput {
 		result.Output = TruncateToolOutput(result.Output, maxOutput)
+	}
+	if utf8.RuneCountInString(result.Error) > maxOutput {
+		result.Error = TruncateToolOutput(result.Error, maxOutput)
 	}
 
 	fields := map[string]interface{}{
@@ -179,10 +263,6 @@ func (r *ToolRegistry) ExecuteTool(
 		fields["error"] = execErr.Error()
 		common.PipelineError(ctx, "AgentTool", "execute_done", fields)
 	} else if result != nil && !result.Success {
-		// Append error hint to guide LLM to retry with a different approach
-		if result.Error != "" {
-			result.Error = result.Error + toolErrorHint
-		}
 		common.PipelineWarn(ctx, "AgentTool", "execute_done", fields)
 	} else {
 		common.PipelineInfo(ctx, "AgentTool", "execute_done", fields)

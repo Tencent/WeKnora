@@ -43,11 +43,10 @@ const (
 	skillInstallInFlightSkip = 3 * time.Minute
 
 	// skillSnapshotRetention is how long a superseded snapshot stays on the
-	// provider after the pointer has moved. Live sandboxes may still have
-	// been created from it (especially SkillRolloutNewSession); once they
-	// expire, the template is only a billed leftover. Twenty-four hours is
-	// well past every backend's default sandbox TTL. A config that sets a
-	// longer sandbox TTL extends this via snapshotRetentionFor.
+	// provider after the pointer has moved before prune even tries. Paused
+	// session sandboxes can pin the template past this window; prune retries
+	// on Conflict. A config that sets a longer sandbox TTL extends this via
+	// snapshotRetentionFor.
 	skillSnapshotRetention = 24 * time.Hour
 
 	// skillSnapshotTTLMargin is added on top of a config's own sandbox TTL
@@ -108,6 +107,12 @@ type TenantSkillService struct {
 	cron    *cron.Cron
 	cronMu  sync.Mutex
 	started bool
+
+	// runCancels lets StopSkill abort the goroutine that holds this skill's
+	// install. The map is per-process: a restart or another replica has
+	// nothing to cancel, and StopSkill then only rewrites the stuck row.
+	runCancelMu sync.Mutex
+	runCancels  map[string]*skillRunCancel
 }
 
 // NewTenantSkillService wires the repositories and runtimes the install and
@@ -145,6 +150,7 @@ func NewTenantSkillService(
 		snapshotRetention: skillSnapshotRetention,
 		installHeartbeat:  skillInstallHeartbeatInterval,
 		localLocks:        newKeyedMutex(),
+		runCancels:        map[string]*skillRunCancel{},
 		bundleCache:       newSkillBundleArchiveCache(),
 		cron: cron.New(cron.WithSeconds(), cron.WithChain(
 			cron.Recover(cron.DefaultLogger),
@@ -158,10 +164,17 @@ func NewTenantSkillService(
 // run's changes, and the config holds exactly one pointer. Two concurrent
 // installs would each snapshot a base that lacks the other's work, and whoever
 // wrote the pointer last would silently discard the other install.
+//
+// With Redis this is a 30s renewable lease, so every replica of the same
+// workspace contends on one key. Without Redis it is a process-local mutex
+// and two replicas can write the pointer independently.
 func (s *TenantSkillService) withConfigLock(
 	ctx context.Context, tenantID uint64, configID string, fn func(context.Context) error,
 ) error {
-	key := skillImageLockKey(tenantID, configID)
+	return s.withSkillLock(ctx, skillImageLockKey(tenantID, configID), fn)
+}
+
+func (s *TenantSkillService) withSkillLock(ctx context.Context, key string, fn func(context.Context) error) error {
 	if s.redis == nil {
 		release, err := s.localLocks.lock(ctx, key)
 		if err != nil {

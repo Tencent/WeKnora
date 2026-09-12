@@ -63,11 +63,11 @@ func TestResolvePerRequestMCPScope_SharedAgentAllowsPreset(t *testing.T) {
 	assert.Equal(t, []string{"mcp-a"}, effective)
 }
 
-func TestApplyPerRequestMCPScope_SelectedNarrowsAndPins(t *testing.T) {
+func TestApplyPerRequestMCPScope_SelectedPinsWithoutNarrowing(t *testing.T) {
 	cfg := &types.AgentConfig{MCPSelectionMode: "selected", MCPServices: []string{"mcp-a", "mcp-b"}}
 	applyPerRequestMCPScope(context.Background(), cfg, []string{"mcp-a", "mcp-b"}, false, []string{"mcp-b"})
 	assert.Equal(t, "selected", cfg.MCPSelectionMode)
-	assert.Equal(t, []string{"mcp-b"}, cfg.MCPServices)
+	assert.Equal(t, []string{"mcp-a", "mcp-b"}, cfg.MCPServices)
 	assert.Equal(t, []string{"mcp-b"}, cfg.PinnedMCPServiceIDs)
 }
 
@@ -78,18 +78,33 @@ func TestApplyPerRequestMCPScope_NoneIgnoresMentionAndDoesNotPin(t *testing.T) {
 	assert.Empty(t, cfg.PinnedMCPServiceIDs)
 }
 
-func TestApplyPerRequestSkillScope_SelectedEmptyIntersectionDisables(t *testing.T) {
+func TestApplyPerRequestSkillScope_SelectedPinsMentionedAndKeepsAllowed(t *testing.T) {
+	cfg := &types.AgentConfig{SkillsEnabled: true, AllowedSkills: []string{"a", "b"}}
+	applyPerRequestSkillScope(context.Background(), cfg, "selected", []string{"a"})
+	assert.True(t, cfg.SkillsEnabled)
+	// Allow-gate is not narrowed: a prompt-mandated skill the user did not
+	// @mention (b) must remain callable.
+	assert.Equal(t, []string{"a", "b"}, cfg.AllowedSkills)
+	assert.Equal(t, []string{"a"}, cfg.PinnedSkillNames)
+}
+
+func TestApplyPerRequestSkillScope_SelectedMentionOutsideAllowedIsNotPinned(t *testing.T) {
 	cfg := &types.AgentConfig{SkillsEnabled: true, AllowedSkills: []string{"a", "b"}}
 	applyPerRequestSkillScope(context.Background(), cfg, "selected", []string{"c"})
-	assert.False(t, cfg.SkillsEnabled)
+	// Skills stay enabled (no narrowing-to-empty disable); the out-of-scope
+	// mention is simply not pinned.
+	assert.True(t, cfg.SkillsEnabled)
+	assert.Equal(t, []string{"a", "b"}, cfg.AllowedSkills)
 	assert.Empty(t, cfg.PinnedSkillNames)
 }
 
-func TestApplyPerRequestSkillScope_AllPinsMentioned(t *testing.T) {
+func TestApplyPerRequestSkillScope_AllPinsMentionedWithoutNarrowingGate(t *testing.T) {
 	cfg := &types.AgentConfig{SkillsEnabled: true}
 	applyPerRequestSkillScope(context.Background(), cfg, "all", []string{"analysis", "analysis"})
 	assert.True(t, cfg.SkillsEnabled)
-	assert.Equal(t, []string{"analysis"}, cfg.AllowedSkills)
+	// "all" mode keeps AllowedSkills empty (= all allowed); it does not narrow
+	// to only the mentioned set, so other skills the agent needs stay callable.
+	assert.Empty(t, cfg.AllowedSkills)
 	assert.Equal(t, []string{"analysis"}, cfg.PinnedSkillNames)
 }
 
@@ -111,5 +126,5 @@ func TestConfigureSkillsFromAgentDoesNotLoadHostPreloadedDir(t *testing.T) {
 	assert.True(t, cfg.SkillsEnabled)
 	assert.Equal(t, "cfg-1", cfg.SandboxConfigID)
 	assert.Empty(t, cfg.SkillDirs,
-		"the host skills/preloaded tree is not what the sandbox image carries")
+		"a host skill directory is not what the sandbox image carries")
 }

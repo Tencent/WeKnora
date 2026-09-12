@@ -51,6 +51,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/memory"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -289,6 +290,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
+	must(container.Provide(func(cleaner interfaces.ResourceCleaner, db *gorm.DB) (*browserskill.Manager, error) {
+		manager := browserskill.NewManager(browserskill.NewStore(db))
+		if err := manager.ValidateConfiguration(); err != nil {
+			return nil, err
+		}
+		cleaner.RegisterWithName("BrowserSkill", func() error { manager.Close(); return nil })
+		return manager, nil
+	}))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
@@ -310,6 +319,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// The factory returns nil when the sandbox backend does not support
 	// per-session file inspection; downstream code guards on nil.
 	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
+
+	// SandboxTerminalService opens interactive PTYs on session sandboxes for
+	// the frontend terminal panel. First-use provisioning takes a sandbox
+	// config ID already resolved by the WebSocket handler (own or shared agent).
+	must(container.Provide(service.NewSandboxTerminalService))
 
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
@@ -427,9 +441,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewStorageBackendHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
-	must(container.Provide(service.NewSkillService))
 	must(container.Provide(func(s *service.TenantSkillService) *handler.SkillHandler {
-		return handler.NewSkillHandler(s)
+		return handler.NewSkillHandler(s, s)
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))
@@ -1628,6 +1641,8 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
 	registry.Register("exa", infra_web_search.NewExaProvider)
 	registry.Register("metaso", infra_web_search.NewMetasoProvider)
+	registry.Register("bocha", infra_web_search.NewBochaProvider)
+	registry.Register("brave", infra_web_search.NewBraveProvider)
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and

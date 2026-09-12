@@ -258,6 +258,16 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	require.Len(t, chunks, 1)
 	assert.Equal(t, enabledChunk.ID, chunks[0].ID)
 
+	disabled := false
+	chunks, total, err = repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, &disabled,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, chunks, 1)
+	assert.Equal(t, disabledChunk.ID, chunks[0].ID)
+
 	allChunks, allTotal, err := repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},
 		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, nil,

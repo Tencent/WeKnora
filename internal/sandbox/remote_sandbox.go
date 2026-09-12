@@ -112,17 +112,16 @@ func (s *RemoteSandbox) ExecuteOnHandle(
 		return nil, ErrInvalidScript
 	}
 
-	// Skills installed into the image are already on disk; uploading them again
-	// would both waste a round trip and shadow the venv layout next to them.
+	// Scripts already on disk skip upload so the skill venv layout is not
+	// shadowed. Image paths derive the skill directory; workspace paths
+	// require an explicit SkillDir so arbitrary files cannot inherit a
+	// skill interpreter by accident.
 	if remote := strings.TrimSpace(cfg.RemoteScriptPath); remote != "" {
-		skillDir, ok := SkillDirForImageScript(remote)
+		skillDir, ok := InterpreterSkillDir(remote, cfg.SkillDir)
 		if !ok {
-			// RemoteScriptPath is only trusted for installed image skills; rejecting
-			// other paths avoids silently executing arbitrary sandbox files with
-			// image-skill defaults when callers pass an unvalidated path.
 			return nil, ErrInvalidScript
 		}
-		command, baseArgs := SkillInterpreterCommand(skillDir, remote)
+		command, baseArgs := SkillInterpreterCommand(skillDir, path.Clean(remote))
 		request := RemoteExecRequest{
 			Command: command,
 			Args:    append(baseArgs, cfg.Args...),
@@ -240,7 +239,7 @@ func getInterpreter(scriptName string) string {
 		return "python3"
 	case ".sh", ".bash":
 		return "bash"
-	case ".js":
+	case ".js", ".mjs", ".cjs":
 		return "node"
 	case ".rb":
 		return "ruby"

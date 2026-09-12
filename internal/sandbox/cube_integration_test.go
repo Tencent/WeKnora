@@ -211,7 +211,7 @@ func TestIntegrationCubeClient_CreateConnectRoundTrip(t *testing.T) {
 
 	// Reconnect to the same sandbox — this is the critical path that
 	// exercises CubeAPI's /sandboxes/{id}/connect endpoint.
-	reattached, err := client.Connect(ctx, sandboxID)
+	reattached, err := client.Connect(ctx, RemoteConnectRequest{SandboxID: sandboxID})
 	if err != nil {
 		t.Fatalf("Connect existing sandbox via real CubeAPI: %v", err)
 	}

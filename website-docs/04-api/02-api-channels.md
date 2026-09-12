@@ -1,6 +1,6 @@
 # API 参考：IM、Embed 与文件服务
 
-路由注册：`internal/router/router.go` 的 `RegisterIMRoutes`、`RegisterIMChannelRoutes`、`RegisterEmbedChannelRoutes`、`RegisterEmbedPublicRoutes`、`serveFilesWithResources`、`servePresignedFiles`、`servePresignedPreview`、`serveResourceGrants`。Handler：`internal/handler/im.go`、`internal/handler/wechat_qrcode.go`、`internal/handler/embed_channel.go`。
+管理 IM 和网页嵌入渠道，并提供渠道回调、访客会话与文件访问接口。管理端、IM 平台回调和 Embed 访客使用各自的认证方式。
 
 ## IM 回调（免全局认证）
 
@@ -17,6 +17,8 @@ curl -X POST $BASE/api/v1/im/callback/ch-1 -H 'Content-Type: application/json' -
 ## IM 渠道管理（需认证）
 
 API key：`manage_channels`/full。IM 渠道携带外部 bot 凭证：列表 Viewer+，变更/开关/扫码登录 Admin+。
+
+飞书/Lark credentials.api_base_url 同时影响 HTTP API 和 WebSocket bootstrap；云之家支持 session_mode=thread。配置示例及网络要求见[IM 集成](../03-features/12-im-integration.md)。IM/Embed 的记忆偏好来自绑定 Agent 的 config.memory_enabled，当前渠道接口没有单独的 memory_enabled 参数。
 
 ### POST /api/v1/agents/:id/im-channels
 
@@ -131,7 +133,7 @@ API key：`manage_channels`/full。Handler: `internal/handler/embed_channel.go`
 | `header_title_mode` | string | 否 | `channel`（默认）/`session` |
 | `show_suggested_questions` | bool | 否 | 默认 true |
 | `allow_web_search` / `allow_file_upload` | bool | 否 | 默认 false |
-| `default_locale` | string | 否 | `zh-CN/en-US/ko-KR/ru-RU`/空（跟随浏览器） |
+| `default_locale` | string | 否 | `zh-CN/en-US/ko-KR/ja-JP/ru-RU`/空（跟随浏览器） |
 | `webhook_url` / `webhook_secret` | string | 否 | 访客事件 webhook |
 | `agent_id` | string | 否 | 绑定 Agent |
 
@@ -441,3 +443,7 @@ curl "$BASE/api/v1/files/presigned-preview?file_path=local://1/x.png" -H "Author
 ```bash
 curl $BASE/r/abc123 -o file.png
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterIMRoutes`、`RegisterIMChannelRoutes`、`RegisterEmbedChannelRoutes`、`RegisterEmbedPublicRoutes`、`serveFilesWithResources`、`servePresignedFiles`、`servePresignedPreview`、`serveResourceGrants`。Handler：`internal/handler/im.go`、`internal/handler/wechat_qrcode.go`、`internal/handler/embed_channel.go`。

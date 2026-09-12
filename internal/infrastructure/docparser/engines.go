@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -29,6 +30,7 @@ const (
 )
 
 func init() {
+	types.SetPreferParserEngine(preferAnydocWhenAvailable)
 	RegisterEngine(&builtinEngine{})
 	RegisterEngine(&simpleEngine{})
 	RegisterEngine(&anydocEngine{})
@@ -37,6 +39,19 @@ func init() {
 	RegisterEngine(&mineruCloudEngine{})
 	RegisterEngine(&paddleOCRVLEngine{})
 	RegisterEngine(&paddleOCRVLCloudEngine{})
+}
+
+// preferAnydocWhenAvailable is the type-level default override: when the
+// anydoc binding is linked and converts this file type, use it instead of
+// builtin or the markitdown fallback. Simple formats stay on the Go reader.
+func preferAnydocWhenAvailable(fileType string) string {
+	if IsSimpleFormat(fileType) {
+		return ""
+	}
+	if anydoc.Available() && anydoc.Supports(fileType, "") {
+		return AnydocEngineName
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -51,7 +66,8 @@ func (e *builtinEngine) Description() string { return "DocReader built-in parser
 
 func (e *builtinEngine) FileTypes(_ bool) []string {
 	return []string{
-		"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls", "epub",
+		"docx", "doc", "pdf", "md", "markdown", "xlsx", "xls",
+		"pptx", "ppt", "epub",
 		"html", "htm", "mhtml", "xmind",
 		"jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp",
 		"mp3", "wav", "m4a", "flac", "ogg",

@@ -10,7 +10,7 @@ import {
   CURRENT_TICK_SCALE,
   activeQuestionId,
   answerPreviewText,
-  collectUserQuestions,
+  collectOutlineMessages,
   isChatOverflowing,
   mapQuestionTicks,
   nearestTickId,
@@ -21,6 +21,7 @@ import {
   tickDisplayScale,
   tickMountainScale,
   viewportBand,
+  visibleMessageIds,
 } from './chatQuestionMinimap.ts'
 
 test('isChatOverflowing is false when content fits or matches the viewport', () => {
@@ -48,8 +49,8 @@ test('shouldShowQuestionMinimap requires overflow and at least two questions', (
   assert.equal(shouldShowQuestionMinimap(false, 4), false)
 })
 
-test('collectUserQuestions keeps loaded user turns with ids, in list order', () => {
-  const questions = collectUserQuestions([
+test('collectOutlineMessages includes both user and assistant messages in order', () => {
+  const questions = collectOutlineMessages([
     { role: 'assistant', id: 'a1', content: 'hi' },
     { role: 'user', content: 'no id yet' },
     { role: 'user', id: 'u1', content: 'first', images: [{}] },
@@ -59,10 +60,29 @@ test('collectUserQuestions keeps loaded user turns with ids, in list order', () 
   assert.deepEqual(
     questions.map((q) => ({ id: q.id, hasAttachments: q.hasAttachments, answerContent: q.answerContent })),
     [
+      { id: 'a1', hasAttachments: false, answerContent: '' },
       { id: 'u1', hasAttachments: true, answerContent: 'answer one' },
+      { id: 'a2', hasAttachments: false, answerContent: '' },
       { id: 'u2', hasAttachments: true, answerContent: '' },
     ],
   )
+  assert.deepEqual(questions.map(q => q.role), ['assistant', 'user', 'assistant', 'user'])
+})
+
+test('all messages intersecting the viewport are highlighted, including partial and long answers', () => {
+  const items = [
+    { id: 'above', offsetTop: 0, offsetBottom: 100 },
+    { id: 'user', offsetTop: 90, offsetBottom: 125 },
+    { id: 'assistant', offsetTop: 140, offsetBottom: 280 },
+    { id: 'next-user', offsetTop: 290, offsetBottom: 330 },
+    { id: 'below', offsetTop: 300, offsetBottom: 400 },
+    { id: 'hidden', offsetTop: 150, offsetBottom: 150 },
+  ]
+  assert.deepEqual([...visibleMessageIds(items, 100, 200)], ['user', 'assistant', 'next-user'])
+  assert.deepEqual([...visibleMessageIds([
+    { id: 'long-answer', offsetTop: 0, offsetBottom: 2000 },
+  ], 500, 200)], ['long-answer'])
+  assert.equal(visibleMessageIds(items, 100, 0).size, 0)
 })
 
 test('answerPreviewText strips markdown and stays empty when there is no answer yet', () => {

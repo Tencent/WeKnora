@@ -1,21 +1,8 @@
 # 异步任务系统
 
-WeKnora 的文档解析、索引构建、富化（摘要 / 问题生成 / 图谱抽取 / 多模态）、Wiki 生成、数据源同步、批量删除与重解析等所有耗时操作，都通过基于 [asynq](https://github.com/hibiken/asynq)（Redis 作为 broker）的异步任务系统执行。涉及的主要源码：
+文档解析、索引构建、摘要与问题生成、图谱提取、Wiki 生成、数据源同步及批量操作由任务系统调度。标准部署使用 [asynq](https://github.com/hibiken/asynq) 和 Redis；Lite 模式使用无 Redis 的执行器。两种模式共用任务处理逻辑，执行方式和运维能力有所不同。
 
-| 模块 | 源码路径 |
-| --- | --- |
-| 任务注册与 worker pool 构建 | `internal/router/task.go` |
-| Lite 模式同步执行器（无 Redis） | `internal/router/sync_task.go` |
-| 任务巡检 / 取消 / 运维面板 | `internal/router/task_inspector.go`、`internal/router/task_inspector_errors.go` |
-| 队列拓扑与任务类型定义 | `internal/types/task.go` |
-| 死信中间件 | `internal/middleware/asynqdl/asynqdl.go` |
-| 持久化任务队列 / 死信仓储 | `internal/application/repository/task_queue.go` |
-| 死信 / 待处理操作模型 | `internal/types/task_dead_letter.go`、`internal/types/task_pending_op.go` |
-| 事件总线 | `internal/event/`（`event.go`、`event_data.go`、`global.go`、`middleware.go`、`adapter.go`） |
-| 运行时辅助（DI 容器、启动横幅、uptime） | `internal/runtime/`（`container.go`、`server.go`、`startup.go`） |
-| 卡死任务兜底清扫 | `internal/application/service/knowledge_housekeeping.go` |
-
-## 1. 总体架构：双执行模式
+## 总体架构：双执行模式 {#_1-总体架构-双执行模式}
 
 WeKnora 有两种任务执行模式，通过部署形态选择：
 
@@ -30,7 +17,7 @@ WeKnora 有两种任务执行模式，通过部署形态选择：
 
 两种模式注册的 handler 集合完全一致（对比 `RunAsynqServer` 与 `RegisterSyncHandlers`），保证任务语义不因部署形态漂移。
 
-## 2. Redis 在系统中的角色
+## Redis 在系统中的角色 {#_2-redis-在系统中的角色}
 
 | 角色 | 说明 | 源码位置 |
 | --- | --- | --- |
@@ -53,7 +40,7 @@ opt := &asynq.RedisClientOpt{
 }
 ```
 
-## 3. 任务类型清单
+## 任务类型清单 {#_3-任务类型清单}
 
 任务类型常量定义在 `internal/types/task.go`：
 
@@ -63,6 +50,8 @@ opt := &asynq.RedisClientOpt{
 | `manual:process` | `TypeManualProcess` | 手工知识更新（cleanup + 重新索引） | `default` |
 | `temporary_document:process` | `TypeTemporaryDocumentProcess` | 会话临时文档（聊天附件）解析 | `chat_attachment` |
 | `knowledge:post_process` | `TypeKnowledgePostProcess` | 知识后处理统一调度（fan-out 富化子任务） | `postprocess` |
+| `knowledge:auto_tag` | `TypeKnowledgeAutoTag` | 文档已有标签的自动关联 | `summary` |
+| `memory:extract` | `TypeMemoryExtract` | 个人记忆后台抽取 | `memory` |
 | `summary:generation` | `TypeSummaryGeneration` | 摘要生成 | `summary` |
 | `datatable:summary` | `TypeDataTableSummary` | 表格摘要 | `summary` |
 | `image:multimodal` | `TypeImageMultimodal` | 图片 OCR + VLM Caption | `multimodal` |
@@ -81,11 +70,15 @@ opt := &asynq.RedisClientOpt{
 
 所有 payload 结构体（如 `DocumentProcessPayload`、`ImageMultimodalPayload`）都内嵌 `types.TracingContext`，用于跨进程传递 Langfuse/W3C traceparent（见可观测性文档），并统一携带 `tenant_id` / `knowledge_id` / `knowledge_base_id` 等路由字段，供死信归档与取消匹配使用。
 
-## 4. Worker Pool 拓扑与治理策略
+自动标签与摘要共享 summary 队列，属于可选富化任务；仅在文档知识库开启 auto_tag_config 时入队，失败不影响已完成的解析。记忆抽取使用独立 memory 队列，由 enrichment pool 消费，并以权重 1 参与 shared pool 弹性借用，worker pool 总数仍为 6。
+
+记忆任务按个人主体去重、延迟聚合；memory_subjects 的 extract_cursor、pending_sessions 与调度时间用于续接，避免每次发问立即启动一次模型提取。空间关闭记忆或 write_mode 非 auto 时不跑后台蒸馏。Lite 的同步执行器也注册自动标签和记忆任务，遵循同样的业务开关。
+
+## Worker Pool 拓扑与治理策略 {#_4-worker-pool-拓扑与治理策略}
 
 `internal/types/task.go` 中的 `queueDefinitions` 是队列拓扑的**唯一事实来源**（single source of truth），worker server 构建（`QueueWeightsForPool`）与运维面板展示（`QueueStats`）共用该注册表，防止权重漂移。
 
-### 4.1 六个独立 worker pool
+### 六个独立 worker pool {#_4-1-六个独立-worker-pool}
 
 每个 pool 是一个独立的 `asynq.Server`，并发度**硬隔离**（不是权重偏好）。默认并发与配置键（system_settings 键 / 环境变量，见 `types.ResolveWorkerPoolConcurrency`）：
 
@@ -93,19 +86,19 @@ opt := &asynq.RedisClientOpt{
 | --- | --- | --- | --- |
 | `core` | 8 | `default`(1)、`chat_attachment`(3) | `asynq.core_concurrency` / `WEKNORA_ASYNQ_CORE_CONCURRENCY` |
 | `postprocess` | 2 | `postprocess`(1) | `asynq.postprocess_concurrency` / `WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY` |
-| `enrichment` | 12 | `summary`(2)、`multimodal`(1)、`graph`(1)、`question`(1) | `asynq.enrichment_concurrency` / `WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY` |
+| `enrichment` | 12 | `summary`(2)、`multimodal`(1)、`graph`(1)、`question`(1)、`memory`(1) | `asynq.enrichment_concurrency` / `WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY` |
 | `maintenance` | 4 | `sync`(2)、`low`(1) | `asynq.maintenance_concurrency` / `WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY` |
 | `shared`（弹性层） | 6 | core + enrichment 中 `SharedWeight > 0` 的队列 | `asynq.shared_concurrency` / `WEKNORA_ASYNQ_SHARED_CONCURRENCY` |
 | `wiki` | 8 | `wiki`(1) | `asynq.wiki_concurrency` / `WEKNORA_WIKI_ASYNQ_CONCURRENCY` |
 
 设计要点（源码注释均可佐证）：
 
-- **保障容量 + 弹性借用**：core/postprocess/enrichment/maintenance 提供最低保障容量；`shared` pool 同时订阅 core 与 enrichment 的队列，闲置容量可被任一阶段借用（`NewSharedAsynqServer`：Redis dequeue 原子，多 server 订阅同一队列每个任务仍只执行一次）。post-process 与 maintenance 被刻意排除在 shared 之外（`QueueWeightsForSharedPool` 注释：post-process 需要延迟保证，长 maintenance 任务不应占用面向用户的突发容量）。
+- **保障容量 + 弹性借用**：core/postprocess/enrichment/maintenance 提供最低保障容量；`shared` pool 同时订阅 core 与 enrichment 的队列，闲置容量可被任一阶段借用（`NewSharedAsynqServer`：Redis dequeue 原子，多 server 订阅同一队列每个任务仍只执行一次）。post-process 和 maintenance 不参与 shared pool：前者需要独立保障延迟，后者执行时间较长，可能占用交互任务的突发容量。范围由 `QueueWeightsForSharedPool` 定义。
 - **Wiki 硬隔离**：`wiki` pool 只拉取 `wiki` 队列，防止解析流水线与 Wiki 生成互相饿死（`NewWikiAsynqServer` 注释）。
 - **聊天附件优先**：`chat_attachment` 在 core pool 权重 3 高于 `default` 的 1，大批量 KB 导入不会让交互式聊天上传排队。
 - **滚动升级兼容**：`QueueMaintenance` 常量的物理 Redis 队列名保持旧版的 `"low"`，旧版本入队的任务在滚动部署期间仍可被消费。
 
-### 4.2 Worker Pool 架构图
+### Worker Pool 架构图 {#_4-2-worker-pool-架构图}
 
 ```mermaid
 flowchart LR
@@ -127,6 +120,7 @@ flowchart LR
         Q8["sync (2)"]
         Q9["low (1, maintenance)"]
         Q10["wiki (1)"]
+        Q11["memory (1)"]
     end
 
     subgraph Workers["六个独立 asynq.Server (共享同一个 ServeMux)"]
@@ -148,6 +142,8 @@ flowchart LR
     Q8 --> MT
     Q9 --> MT
     Q10 --> WK
+    Q11 --> EN
+    Q11 -. "弹性借用" .-> SH
     Q1 -. "弹性借用" .-> SH
     Q2 -. "弹性借用" .-> SH
     Q4 -. "弹性借用" .-> SH
@@ -163,15 +159,15 @@ flowchart LR
     Workers --> MW --> H["业务 Handler<br/>(KnowledgeService.ProcessDocument 等)"]
 ```
 
-### 4.3 中间件治理
+### 中间件治理 {#_4-3-中间件治理}
 
 `RunAsynqServer`（`internal/router/task.go`）在同一个 mux 上按顺序安装三个中间件：
 
-1. **`asynqdl.MiddlewareWithCallback`（死信）** — 必须最先安装，以便看到 handler 返回的原始错误（后续中间件可能转换错误）。见第 7 节。
+1. **`asynqdl.MiddlewareWithCallback`（死信）** — 必须最先安装，以便看到 handler 返回的原始错误（后续中间件可能转换错误）。见[失败重试与死信处理](#_7-失败重试与死信处理)。
 2. **`backgroundTaskMiddleware`** — 对每个任务 context 打 `types.WithBackgroundTask` 标记，使 per-model 聊天并发治理器（chat concurrency governor）对 ingestion/enrichment 的 LLM 调用限流，但不影响交互式用户聊天。
 3. **`langfuse.AsynqMiddleware`** — Langfuse 关闭时为直通；开启时续接上游 HTTP trace 或新开独立 trace，将 handler 执行包成 SPAN。
 
-### 4.4 重试退避策略
+### 重试退避策略 {#_4-4-重试退避策略}
 
 默认使用 asynq 的指数退避（约 10s、40s、90s、2.5m…），但对 Wiki ingest 锁冲突做了定制（`asynqRetryDelayFunc`）：
 
@@ -187,7 +183,7 @@ func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 
 原因：孤儿锁 TTL ≤ 60s，固定 15s 重试几乎必然成功；指数退避反而会让崩溃重启后的 KB 卡 7–10 分钟。
 
-## 5. 任务生命周期状态机
+## 任务生命周期状态机 {#_5-任务生命周期状态机}
 
 asynq 侧的运行时状态（`internal/router/task_inspector.go` 中 `runtimeTaskState` 映射为 `types.RuntimeTaskState`）：`pending`、`active`、`scheduled`、`retry`、`archived`、`completed`。业务侧知识行的 `parse_status`（`internal/types/knowledge.go`）：`pending` → `processing` → `finalizing` → `completed`，以及 `failed` / `deleting` / `cancelled`。
 
@@ -234,19 +230,19 @@ stateDiagram-v2
     k_cancelled : cancelled
 ```
 
-## 6. 任务巡检、取消与运维面板（TaskInspector）
+## 任务巡检、取消与运维面板（TaskInspector） {#_6-任务巡检、取消与运维面板-taskinspector}
 
 `internal/router/task_inspector.go` 实现 `interfaces.TaskInspector`，asynq 模式下由 `asynq.Inspector` + 原生 Redis client 支撑；Lite 模式为 `noopTaskInspector`（goroutine 无法在启动前被摘除，checkpoint 式中止是唯一停止信号）。
 
-### 6.1 按知识 / 知识库取消
+### 按知识 / 知识库取消 {#_6-1-按知识-知识库取消}
 
-- `CancelTasksForKnowledge(ctx, knowledgeID)`：扫描全部注册队列（`queuesScanned` 来自 `types.QueueDefinitions()`）的 pending/scheduled/retry/active 四个状态，payload 中 `knowledge_id` 匹配即处理。可取消的任务类型白名单 `taskTypesForKnowledgeCancel`：`document:process`、`manual:process`、`image:multimodal`、`knowledge:post_process`、`question:generation`、`summary:generation`、`chunk:extract`（刻意不含 FAQ 导入 / KB 级任务）。
+- `CancelTasksForKnowledge(ctx, knowledgeID)`：扫描全部注册队列（`queuesScanned` 来自 `types.QueueDefinitions()`）的 pending/scheduled/retry/active 四个状态，payload 中 `knowledge_id` 匹配即处理。可取消的任务类型白名单 `taskTypesForKnowledgeCancel`：`document:process`、`manual:process`、`image:multimodal`、`knowledge:post_process`、`question:generation`、`summary:generation`、`chunk:extract`（不含 FAQ 导入和知识库级任务）。
 - 取消流程分三阶段（`cancelMatchingTasks`）：① 先删干净排队态；② 快照 active 任务后调用 `Inspector.CancelProcessing` 发信号，并在 1s 的 settle 窗口内轮询（25ms 间隔）删除因 `context.Canceled` 转入 retry 的记录（`deleteCancelledTransitions`）；③ 再扫一遍排队态，兜住取消期间新入队的下游任务。
 - `CancelTasksForKnowledgeBase`：KB 删除后的孤儿任务清理；`kb:delete` 与 `index:delete` 明确排除（它们携带快照、负责真正的存储清理，删掉会泄漏资源）。clone/move 的语义 KB 字段（`source_id`/`target_id`/`source_kb_id`/`target_kb_id`）也参与匹配。
 - 一切均为 best-effort：Redis 抖动时记 Warn 日志并吞掉，取消 API 依然返回成功。
 - `HasQueuedTasksForKnowledge`：只读探测，housekeeping 清扫用它区分"积压但未孤儿"的行，避免误标 failed。
 
-### 6.2 运维面板（SystemAdmin Runtime Dashboard）
+### 运维面板（SystemAdmin Runtime Dashboard） {#_6-2-运维面板-systemadmin-runtime-dashboard}
 
 - `QueueStats()`：逐队列 `GetQueueInfo`，输出 `types.QueueStat`（size/pending/active/scheduled/retry/archived/completed、当日 processed/failed、paused、`latency_ms`（最老 pending 任务年龄）、内存占用），并附上静态 pool/weight 元数据。从未创建过的队列返回零值行（`isAsynqQueueNotFound` 同时兼容 asynq v0.26 泄漏的内部 `NOT_FOUND` 错误串，见 `task_inspector_errors.go`）。
 - `ListRuntimeTasks()`：基于 Redis 键 `asynq:{<queue>}:<state>` 直接分页 —— pending/active 是 LIST（最新在前），scheduled/retry 是按 `NextProcessAt` 升序的 ZSET，archived/completed 按分数倒序。游标为 base64 编码的锚点窗口（最多 32 个锚点，`runtimeTaskCursorMaxAnchors`），锚点消失（任务完成/重试/删除）时可继续分页。payload 只投影白名单路由元数据（tenant/kb/knowledge/task/sync 等 ID），**绝不暴露文档内容或密钥**。
@@ -262,16 +258,16 @@ stateDiagram-v2
 | POST | `/api/v1/system/admin/runtime/queues/:queue/tasks/:task_id/actions/:action` | `cancel` / `run_now` / `delete`（写平台审计） |
 | DELETE | `/api/v1/system/admin/runtime/queues/:queue/archived` | 清空 archived（写平台审计 `system.queue_archived_purged`） |
 
-## 7. 失败重试与死信处理
+## 失败重试与死信处理 {#_7-失败重试与死信处理}
 
-### 7.1 asynq 死信中间件（`internal/middleware/asynqdl/asynqdl.go`）
+### asynq 死信中间件（`internal/middleware/asynqdl/asynqdl.go`） {#_7-1-asynq-死信中间件-internal-middleware-asynqdl-asynqdl-go}
 
 - 只在**最后一次尝试**失败时（`isFinalAttempt`：`retried >= max_retry`）写一行 `task_dead_letters`，避免瞬时抖动每次都产生一行。
 - `buildDeadLetter` 用宽容的 `payloadProbe` 从任意 payload 提取 `tenant_id` / `knowledge_base_id` / `kb_id` / `knowledge_id` / `source_kb_id`，`inferScope` 按"爆炸半径"推断 scope（`knowledge_base` > `knowledge` > `tenant` > `unknown`）。payload 原样保留（可用于将来重放），`last_error` 截断到 8KB。
 - 插入是 best-effort：DB 失败只记日志，原始任务错误始终原样向 asynq 上抛（进入 archived）。
-- `OnDeadLetter` 回调（`internal/router/task.go` 的 `newDeadLetterKnowledgeFailer`）：`document:process` / `knowledge:post_process` / `manual:process` 耗尽重试时，单条 UPDATE 把知识行 `parse_status=failed` + `error_message` 一并写入（避免半更新），并调用 `SpanTracker.FinalizeAttempt` 关闭对应 attempt 的根 span，让时间线不再显示"进行中"。`knowledge:list_delete` 有专门分支 `markKnowledgeListDeleteFailed`。`image:multimodal` 刻意**不**标记父知识失败（finalize-on-last-attempt 已保证进度）。回调用 `context.Background()` 执行且 panic 被捕获，绝不改变原始任务错误。
+- `OnDeadLetter` 回调（`internal/router/task.go` 的 `newDeadLetterKnowledgeFailer`）：`document:process` / `knowledge:post_process` / `manual:process` 耗尽重试时，单条 UPDATE 把知识行 `parse_status=failed` + `error_message` 一并写入（避免半更新），并调用 `SpanTracker.FinalizeAttempt` 关闭对应 attempt 的根 span，让时间线不再显示"进行中"。`knowledge:list_delete` 有专门分支 `markKnowledgeListDeleteFailed`。`image:multimodal` 不标记父知识失败（finalize-on-last-attempt 已保证进度）。回调用 `context.Background()` 执行且 panic 被捕获，绝不改变原始任务错误。
 
-### 7.2 持久化任务队列与服务级死信（`internal/application/repository/task_queue.go`）
+### 持久化任务队列与服务级死信（`internal/application/repository/task_queue.go`） {#_7-2-持久化任务队列与服务级死信-internal-application-repository-task-queue-go}
 
 `task_pending_ops` 表是 Redis list 队列的持久化替代（重启不丢、无 TTL 驱逐），队列身份是 `(task_type, scope, scope_id)` 三元组，目前主要消费者是 Wiki ingest：
 
@@ -282,15 +278,15 @@ stateDiagram-v2
 
 死信仓储 `taskDeadLetterRepository` 提供 `ListByScope` / `ListByTaskType`（id 倒序游标分页，limit 1–200）与 `DeleteByID`；运维可直接 SQL 按任务类型 / scope / 租户查询失败，无需翻日志。
 
-### 7.3 兜底：housekeeping 清扫
+### 兜底：housekeeping 清扫 {#_7-3-兜底-housekeeping-清扫}
 
 `internal/application/service/knowledge_housekeeping.go`：cron 每 5 分钟（`0 */5 * * * *`）扫描卡在 `pending`/`processing`/`finalizing` 超过 stale 阈值的知识行并标记 failed。这是 asynq 重试、死信回调、multimodal finalize 之外的最后防线（worker 被 kill 在 handler 中间、defer 没跑到等场景）。清扫结合 span 心跳、`updated_at` 与 `TaskInspector.HasQueuedTasksForKnowledge`，避免误杀"积压但未孤儿"的行。可用 `WEKNORA_HOUSEKEEPING_ENABLED=false` 关闭。
 
-## 8. 事件总线（`internal/event`）
+## 事件总线（`internal/event`） {#_8-事件总线-internal-event}
 
 事件总线用于**进程内**的会话/Agent 流式事件分发（如 SSE 推送、IM 回调），与 asynq（跨进程持久任务）互补。
 
-### 8.1 结构与投递保证
+### 结构与投递保证 {#_8-1-结构与投递保证}
 
 ```go
 // internal/event/event.go
@@ -313,7 +309,7 @@ type Event struct {
 - `middleware.go` 提供 handler 中间件：`WithLogging`（触发/失败日志）、`WithTiming`（耗时写入 metadata）、`WithRecovery`（panic 转 `PanicError`），`Chain` / `ApplyMiddleware` 组合。
 - `adapter.go` 的 `EventBusAdapter` 把 `*EventBus` 适配为 `types.EventBusInterface`，避免循环依赖。
 
-### 8.2 事件类型清单（`internal/event/event.go`）
+### 事件类型清单（`internal/event/event.go`） {#_8-2-事件类型清单-internal-event-event-go}
 
 | 分组 | 事件类型 |
 | --- | --- |
@@ -330,7 +326,7 @@ type Event struct {
 
 每类事件的数据结构定义在 `internal/event/event_data.go`（如 `AgentToolCallData` 携带 `tool_call_id`/`tool_name`/`arguments`/`hint`，`AgentFinalAnswerData` 携带 `content`/`done`/`is_fallback` 等）。
 
-### 8.3 主要订阅者
+### 主要订阅者 {#_8-3-主要订阅者}
 
 | 订阅者 | 源码 | 订阅内容 |
 | --- | --- | --- |
@@ -338,7 +334,7 @@ type Event struct {
 | 知识问答 handler | `internal/handler/session/qa.go`、`helpers.go` | `thought`、`final_answer`、`stop` |
 | IM 集成（企微等） | `internal/im/service.go` | `final_answer`、`error`、`references`、`agent.complete`、`thought`、`tool_call`、`tool_result`、`mcp_oauth_required` 等，转译为各 IM 平台消息 |
 
-## 9. `internal/runtime` 包
+## `internal/runtime` 包 {#_9-internal-runtime-包}
 
 该包很小，是运行时基础设施而非 worker 逻辑：
 
@@ -346,10 +342,25 @@ type Event struct {
 - `server.go`：`MarkServerStarted()` / `ServerStartedAt()` / `ServerUptime()` —— 进程启动时刻记录，供运维面板显示 uptime。
 - `startup.go`：`SilenceGinRouteSpam()` 抑制约 150 行 Gin 路由注册日志并汇总为一行（`LogGinRouteCount`）；`LogStartupEnv()` 打印精选环境变量横幅（敏感值只显示 `set (N chars)`），并对典型 footgun 发出显式警告（如 `SYSTEM_AES_KEY` 长度不等于 32 时加密实际被禁用、`REDIS_TLS_INSECURE_SKIP_VERIFY=true`）。
 
-## 10. 如何监控任务
+## 如何监控任务 {#_10-如何监控任务}
 
 1. **运维面板 / Runtime API**（第 6.2 节）：队列深度、最老 pending 延迟（`latency_ms`）、当日 processed/failed、worker 心跳；按状态浏览任务、查看 `last_error`、`retried/max_retry`、执行 `run_now`/`cancel`/`delete`。
 2. **死信表 SQL**：`SELECT * FROM task_dead_letters WHERE scope='knowledge_base' AND scope_id='<kbID>' ORDER BY id DESC;` 或按 `task_type` 聚合失败率；`task_pending_ops` 的 `PendingCount` / `enqueued_at` 可发现从未排空的积压。
 3. **日志**：worker 侧统一走 `internal/logger`，关键前缀有 `[TaskInspector]`（取消/巡检）、`asynq dead-letter`、`[SyncTask]`（Lite 模式）、`[Housekeeping]`；启动时每个 pool 打印 `asynq <pool> server starting with concurrency=...`。
 4. **Langfuse trace**：开启后每个 asynq 任务是一个 `asynq.<task_type>` SPAN（含 queue、retry、payload 大小元数据），与触发它的 HTTP 请求同 trace（见可观测性文档）。
 5. **平台审计**：对 archived 任务的 `run_now`/`delete`/purge 操作写入 `audit_logs`（`system.queue_task_*` 动作），可追责。
+
+## 实现参考
+
+| 模块 | 源码路径 |
+| --- | --- |
+| 任务注册与 worker pool 构建 | `internal/router/task.go` |
+| Lite 模式同步执行器（无 Redis） | `internal/router/sync_task.go` |
+| 任务巡检 / 取消 / 运维面板 | `internal/router/task_inspector.go`、`internal/router/task_inspector_errors.go` |
+| 队列拓扑与任务类型定义 | `internal/types/task.go` |
+| 死信中间件 | `internal/middleware/asynqdl/asynqdl.go` |
+| 持久化任务队列 / 死信仓储 | `internal/application/repository/task_queue.go` |
+| 死信 / 待处理操作模型 | `internal/types/task_dead_letter.go`、`internal/types/task_pending_op.go` |
+| 事件总线 | `internal/event/`（`event.go`、`event_data.go`、`global.go`、`middleware.go`、`adapter.go`） |
+| 运行时辅助（DI 容器、启动横幅、uptime） | `internal/runtime/`（`container.go`、`server.go`、`startup.go`） |
+| 卡死任务兜底清扫 | `internal/application/service/knowledge_housekeeping.go` |

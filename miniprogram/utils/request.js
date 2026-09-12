@@ -1,12 +1,13 @@
 const { getSettings } = require("./config");
+const { t } = require("./i18n");
 
 function request(path, options = {}) {
   const settings = getSettings();
   if (!settings.baseUrl) {
-    return Promise.reject(new Error("Please configure the WeKnora API base URL first."));
+    return Promise.reject(new Error(t("missingBaseUrl")));
   }
   if (!settings.apiKey) {
-    return Promise.reject(new Error("Please configure the WeKnora API key first."));
+    return Promise.reject(new Error(t("missingApiKey")));
   }
 
   return new Promise((resolve, reject) => {
@@ -24,7 +25,9 @@ function request(path, options = {}) {
           resolve(response.data);
           return;
         }
-        const message = response.data?.error?.message || response.data?.message || `HTTP ${response.statusCode}`;
+        const data = response.data || {};
+        const errorObj = data.error || {};
+        const message = errorObj.message || data.message || `HTTP ${response.statusCode}`;
         reject(new Error(message));
       },
       fail(error) {

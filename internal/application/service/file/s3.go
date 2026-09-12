@@ -65,6 +65,12 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
 			o.UsePathStyle = usePathStyle
+			if !strings.Contains(endpoint, "amazonaws.com") {
+				// S3-compatible services commonly reject the SDK's default
+				// trailing checksum negotiation. Only relax this for explicit
+				// non-AWS endpoints; standard AWS S3 keeps its default behavior.
+				o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+			}
 			o.HTTPClient = httpClient
 		})
 	} else {

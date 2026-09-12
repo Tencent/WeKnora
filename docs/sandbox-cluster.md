@@ -21,7 +21,7 @@
 - Node.js 20、npm 与 npx；
 - jq 及基础 Shell 工具；
 - `/workspace` 工作目录；
-- UID 1000 的非 root `user` 账号（E2B 模板约定的账号名，WeKnora 以它执行脚本与文件操作）。
+- UID 1000 的 `user` 账号（E2B 模板约定的账号名，保留供按名字寻址的工具与 `sudo` 使用；WeKnora 执行脚本与文件操作默认用的是 root，见 `DefaultSandboxExecUser`）。
 
 生产环境应使用与 WeKnora 相同的版本标签，不建议长期指向 `latest`。Skills 新增系统依赖时，应先更新标准镜像并重新注册模板，再切换集群的默认模板 ID。
 
@@ -36,7 +36,7 @@
 
 区别在于 Cube 变体额外注入了 envd。Cube 直接把 OCI 镜像变成模板，并以 `GET :49983/health` 探活，这个端点只有 envd 提供；不带 envd 的镜像建模板必然以 `connection refused` 失败。E2B 不需要这个变体，因为它的构建流程会自行注入 envd；Docker 后端则完全不需要 envd。详见 [Cube 自带镜像接入](https://cubesandbox.com/zh/guide/tutorials/bring-your-own-image.html)。
 
-Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` 没有 arm64，Cube 自身的 PVM 形态也只支持 x86_64。变体内 envd 以 root 运行，脚本仍按请求指定的账号执行，落在同一个 uid 1000 的 `user` 上。
+Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` 没有 arm64，Cube 自身的 PVM 形态也只支持 x86_64。变体内 envd 以 root 运行，脚本按请求指定的账号执行；WeKnora 默认显式指定 root。
 
 ## CubeSandbox
 
@@ -66,7 +66,7 @@ Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` �
 3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并列出集群模板。**不会自动创建**。没有 WeKnora 标准模板时在占位卡片上点「创建」，会从 `wechatopenai/weknora-sandbox:main-cube` 发起构建。改 DNS 或需要换镜像时在 weknora 卡片上点「重建」：优先对现有标准模板做 in-place rebuild（模板 ID 不变）；只有 redo 被拒绝时才先建新模板、成功后再删旧的。已安装 Skill 的配置（以及同一集群上其它已装 Skill 的配置）不能重建。失败模板同样用「重建」（CubeMaster 拒绝 redo、错误码 130400 时尤其需要）。
 4. 模板构建状态会自动刷新。状态变为 `READY` 后才可选择并进入运行配置；界面显示模板名称、状态和版本，配置内部才保存该集群自己的 `template_id`。
 
-模板镜像必须提供 uid 1000 的 `user` 账号：WeKnora 以该账号执行脚本与文件操作。写权限只保证在 `/workspace/output` 与 `/workspace/input` 下。
+标准模板保留 uid 1000 的 `user` 兼容账号；WeKnora 默认显式以 root 执行脚本与文件操作。模板应提供可写的 `/workspace`，运行前会准备 `input`、`output` 和本次工作目录。技能安装的维护调用只准备其工作目录。自定义只读挂载仍限制 root 的写入。
 
 多实例 WeKnora 必须配置 Redis，以共享 session 到 sandbox 的绑定。只有单实例开发环境才应使用内存绑定。
 

@@ -2,8 +2,10 @@ package skills
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,9 +43,36 @@ Use this skill when testing.
 	if !skill.Loaded {
 		t.Error("Expected Loaded to be true after parsing")
 	}
+	if skill.FrontmatterRepaired {
+		t.Error("valid frontmatter should not be marked repaired")
+	}
 
 	t.Logf("Parsed skill: name=%s, description=%s, instructions_len=%d",
 		skill.Name, skill.Description, len(skill.Instructions))
+}
+
+func TestParseSkillFileUTF8BOM(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		t.Run(fmt.Sprintf("newline=%q", newline), func(t *testing.T) {
+			content := "\ufeff---\nname: test-skill\ndescription: A test skill.\n---\nKeep this \ufeff character.\n"
+			content = strings.ReplaceAll(content, "\n", newline)
+			skill, err := ParseSkillFile(content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if skill.Name != "test-skill" || skill.Description != "A test skill." ||
+				skill.Instructions != "Keep this \ufeff character." {
+				t.Fatalf("unexpected parsed skill: %+v", skill)
+			}
+			metadata, err := ParseSkillMetadata(content)
+			if err != nil || metadata.Name != "test-skill" {
+				t.Fatalf("unexpected metadata: %+v, error: %v", metadata, err)
+			}
+		})
+	}
+	if _, err := ParseSkillFile("\ufeff# Missing frontmatter"); err == nil {
+		t.Fatal("BOM must not bypass frontmatter validation")
+	}
 }
 
 func TestSkillValidation(t *testing.T) {
@@ -72,7 +101,19 @@ func TestSkillValidation(t *testing.T) {
 			skillName:   "My Skill",
 			description: "A skill",
 			wantErr:     true,
-			errContains: "lowercase letters",
+			errContains: "letters, numbers, hyphens, and underscores",
+		},
+		{
+			name:        "underscore is allowed",
+			skillName:   "word_docx",
+			description: "A skill",
+			wantErr:     false,
+		},
+		{
+			name:        "unicode letters are allowed",
+			skillName:   "律师助手",
+			description: "A skill",
+			wantErr:     false,
 		},
 		{
 			name:        "reserved word in name",
@@ -93,7 +134,27 @@ func TestSkillValidation(t *testing.T) {
 			skillName:   "this-is-a-very-long-skill-name-that-exceeds-the-maximum-allowed-length-of-64-characters",
 			description: "A skill",
 			wantErr:     true,
-			errContains: "exceeds maximum length",
+			errContains: "maximum is 64",
+		},
+		{
+			name:        "description at 1024 CJK runes is allowed even though it is over 1024 bytes",
+			skillName:   "my-skill",
+			description: strings.Repeat("描", 1024),
+			wantErr:     false,
+		},
+		{
+			name:        "description over 1024 CJK runes is rejected",
+			skillName:   "my-skill",
+			description: strings.Repeat("描", 1025),
+			wantErr:     true,
+			errContains: "maximum is 1024",
+		},
+		{
+			name:        "description over 1024 ASCII runes is rejected",
+			skillName:   "my-skill",
+			description: strings.Repeat("a", 1025),
+			wantErr:     true,
+			errContains: "maximum is 1024",
 		},
 	}
 
@@ -376,6 +437,8 @@ func TestIsScript(t *testing.T) {
 		{"script.sh", true},
 		{"script.bash", true},
 		{"script.js", true},
+		{"script.mjs", true},
+		{"script.cjs", true},
 		{"script.ts", true},
 		{"script.rb", true},
 		{"README.md", false},
@@ -388,5 +451,21 @@ func TestIsScript(t *testing.T) {
 		if result != tt.expected {
 			t.Errorf("IsScript(%s) = %v, expected %v", tt.path, result, tt.expected)
 		}
+	}
+}
+
+func TestIsOnDemandInstallerPath(t *testing.T) {
+	for _, path := range []string{
+		"scripts/install_deps.py",
+		"scripts/install_dep.sh",
+		"setup_deps.py",
+		"bootstrap_deps.py",
+	} {
+		if !IsOnDemandInstallerPath(path) {
+			t.Errorf("IsOnDemandInstallerPath(%s) = false, want true", path)
+		}
+	}
+	if IsOnDemandInstallerPath("scripts/generate_ppt.py") {
+		t.Error("a real skill script must not look like an on-demand installer")
 	}
 }

@@ -106,6 +106,23 @@ var (
 	ErrDangerousCommand  = errors.New("script contains dangerous command")
 	ErrArgInjection      = errors.New("argument injection detected")
 	ErrStdinInjection    = errors.New("stdin injection detected")
+	// ErrNoLiveSessionSandbox is returned by lookup-only entry points (the
+	// interactive terminal) when the session has no currently bound sandbox.
+	// Unlike Execute, these entry points never provision: creating a sandbox
+	// needs the agent's config-pin context, which they do not carry.
+	ErrNoLiveSessionSandbox = errors.New("session has no live sandbox")
+	// ErrSandboxPaused is returned by lookup-only terminal opens when the
+	// session has a bound sandbox that is not confirmed running (paused,
+	// transitioning, or missing from the provider list). Connect would
+	// resume a paused instance and start billing again; the UI must get
+	// an explicit click first. Distinct from ErrNoLiveSessionSandbox,
+	// which means there is no binding to resume.
+	ErrSandboxPaused = errors.New("session sandbox is paused")
+	// ErrTerminalUnsupported is returned when the active backend cannot
+	// stream PTYs (Docker, a disabled manager). Distinct from
+	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,
+	// it just cannot host an interactive terminal.
+	ErrTerminalUnsupported = errors.New("sandbox backend does not support interactive terminals")
 )
 
 // Sandbox defines the interface for isolated script execution
@@ -184,12 +201,18 @@ type ExecuteConfig struct {
 	SessionID string
 
 	// RemoteScriptPath is an absolute path to a script that already exists
-	// inside the sandbox image (installed skills). When set, the executor
-	// skips the upload step and runs it in place. Only paths under a valid
-	// skill directory in SkillsImageRoot are accepted; script-content
-	// validation is skipped because the file is already on the image, so
-	// callers must have vetted the bundle at install time.
+	// inside the sandbox. When set, the executor skips the upload step and
+	// runs it in place. Accepted locations:
+	//   - an installed skill file under SkillsImageRoot (bundle vetted at install)
+	//   - a session-writable file under /workspace, not under /workspace/input,
+	//     which also requires SkillDir so the skill's interpreter is used
 	RemoteScriptPath string
+
+	// SkillDir is the installed skill directory whose venv/node_modules
+	// should run RemoteScriptPath. Required when RemoteScriptPath sits under
+	// /workspace. Image-skill paths derive the directory from the script and
+	// ignore this field.
+	SkillDir string
 }
 
 // ExecuteResult contains the result of script execution
@@ -225,6 +248,11 @@ type Config struct {
 
 	// DefaultTimeout is the default execution timeout
 	DefaultTimeout time.Duration
+
+	// TerminalIdleDisconnect is how long an open interactive terminal may
+	// go without input or PTY output before the WebSocket is closed. Zero
+	// is treated as DefaultTerminalIdleDisconnect at use time.
+	TerminalIdleDisconnect time.Duration
 
 	// AllowPrivateEndpoints is the per-workspace outbound policy for this
 	// connection. Link-local addresses are blocked regardless.
@@ -276,6 +304,12 @@ type Config struct {
 
 	// EnvVars are additional environment variables to set for the sandbox.
 	EnvVars map[string]string
+
+	// Network is the outbound/inbound policy every sandbox built from this
+	// config is created with. DefaultConfig and ResolveEffectiveConfig fully
+	// specify it: leaving it nil would let adapters use provider defaults,
+	// which expose inbound traffic publicly.
+	Network RemoteNetworkPolicy
 
 	// CubeAPIURL is the base URL of the CubeAPI (E2B-compatible) endpoint.
 	// Only used when Type == SandboxTypeCube. Example: "http://127.0.0.1:33000".
@@ -334,7 +368,8 @@ type Config struct {
 	// E2BSandboxTTL is the E2B-side idle timeout hint.
 	E2BSandboxTTL time.Duration
 
-	// E2BHTTPTimeout bounds each HTTP call to the E2B API.
+	// E2BHTTPTimeout bounds ordinary E2B HTTP calls, including response bodies.
+	// Command streams use their execution timeout instead.
 	E2BHTTPTimeout time.Duration
 }
 
@@ -352,6 +387,7 @@ func DefaultConfig() *Config {
 		MaxCPU:          DefaultCPULimit,
 		CubeSandboxTTL:  DefaultCubeSandboxTTL,
 		CubeHTTPTimeout: DefaultCubeHTTPTimeout,
+		Network:         resolveNetworkPolicy(nil),
 	}
 }
 

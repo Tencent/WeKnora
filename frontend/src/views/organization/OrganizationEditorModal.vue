@@ -108,7 +108,7 @@
                             <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm1') }}</li>
                             <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm2') }}</li>
                             <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
-                            <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
+                            <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
                             <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.editorPerm3') }}</li>
                           </ul>
                         </div>

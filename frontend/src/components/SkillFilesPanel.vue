@@ -130,6 +130,10 @@ import {
   enhanceMarkdownContainer,
 } from '@/utils/mermaidShared'
 import {
+  getCatalogSkillFile,
+  listCatalogSkillFiles,
+} from '@/api/skill'
+import {
   getConfigSkillFile,
   listConfigSkillFiles,
   type ConfigSkillFileContent,
@@ -157,8 +161,9 @@ interface FrontmatterField {
 }
 
 const props = defineProps<{
-  configId: string
-  skillId: string
+  configId?: string
+  skillId?: string
+  catalogId?: string
   drawerWidth: number
 }>()
 
@@ -484,7 +489,7 @@ async function enhancePreview() {
 }
 
 async function selectFile(path: string) {
-  if (!props.configId || !props.skillId) return
+  if (!props.catalogId && (!props.configId || !props.skillId)) return
   selectedPath.value = path
   fileLoading.value = true
   fileError.value = ''
@@ -494,7 +499,9 @@ async function selectFile(path: string) {
   frontmatterFields.value = []
   markdownMode.value = 'preview'
   try {
-    const res = await getConfigSkillFile(props.configId, props.skillId, path)
+    const res = props.catalogId
+      ? await getCatalogSkillFile(props.catalogId, path)
+      : await getConfigSkillFile(props.configId || '', props.skillId || '', path)
     const data = res?.data
     file.value = data || null
     if (!data) {
@@ -519,7 +526,7 @@ async function copyContent() {
 }
 
 async function loadFiles() {
-  if (!props.configId || !props.skillId) return
+  if (!props.catalogId && (!props.configId || !props.skillId)) return
   listLoading.value = true
   listError.value = ''
   nodes.value = []
@@ -527,7 +534,9 @@ async function loadFiles() {
   file.value = null
   fileError.value = ''
   try {
-    const res = await listConfigSkillFiles(props.configId, props.skillId)
+    const res = props.catalogId
+      ? await listCatalogSkillFiles(props.catalogId)
+      : await listConfigSkillFiles(props.configId || '', props.skillId || '')
     const list = res?.data || []
     const tree = buildTree(list)
     nodes.value = tree
@@ -544,7 +553,7 @@ async function loadFiles() {
 }
 
 watch(
-  () => [props.configId, props.skillId],
+  () => [props.catalogId, props.configId, props.skillId],
   () => {
     void loadFiles()
   },

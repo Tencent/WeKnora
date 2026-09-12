@@ -1,12 +1,12 @@
 # 总体架构
 
-本章从部署视角与代码视角两个维度介绍 WeKnora 的整体架构：系统由哪些进程/容器组成、各组件之间如何通信、使用了哪些技术栈，以及代码仓库的顶层目录布局。
+WeKnora 由 Web 前端、Go 主服务和 Python 文档解析服务组成，使用数据库保存业务数据，通过 Redis 调度异步任务。向量存储、对象存储、知识图谱和模型服务可按部署需求配置。
 
-## 1. 系统组成
+## 系统组成 {#_1-系统组成}
 
 WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架构，外加 PostgreSQL 与 Redis 两个基础设施依赖；其余组件（向量库、知识图谱、联网搜索等）均为可选，通过 Docker Compose profile 按需启用。
 
-### 1.1 核心服务（默认启动）
+### 核心服务（默认启动） {#_1-1-核心服务-默认启动}
 
 | 服务 | 镜像 / 构建 | 端口 | 职责 |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 
 `app` 与 `docreader` 之间还通过共享卷 `docreader-tmp`（挂载于 `/tmp/docreader`）传递解析产物图片；`app` 的本地文件存储卷为 `data-files`（`/data/files`）。
 
-### 1.2 可选组件（Compose profile）
+### 可选组件（Compose profile） {#_1-2-可选组件-compose-profile}
 
 | 服务 | profile | 用途 |
 | --- | --- | --- |
@@ -34,7 +34,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 
 此外，Go 后端还可直连未在 compose 内的外部引擎：Elasticsearch v7/v8、OpenSearch、腾讯云 VectorDB、火山 VikingDB，以及 8 种对象存储（local/MinIO/COS/TOS/S3/OSS/KS3/OBS）。
 
-### 1.3 部署形态
+### 部署形态 {#_1-3-部署形态}
 
 除标准 Docker Compose 部署外，仓库还支持：
 
@@ -42,7 +42,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 - **桌面版**：`cmd/desktop` 基于 Wails v2 打包为桌面应用；
 - **Kubernetes**：`helm/` Chart；**裸机**：`deploy/` systemd 单元；**macOS**：`Formula/` Homebrew 配方。
 
-## 2. 技术栈清单
+## 技术栈清单 {#_2-技术栈清单}
 
 | 层 | 技术 | 版本/说明 |
 | --- | --- | --- |
@@ -70,21 +70,21 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | 文档解析服务 | Python + grpcio | `docreader/main.py`；解析器位于 `docreader/parser/`（pdf/docx/excel/epub/web/image/markitdown/opendataloader 等） |
 | 桌面端 | Wails v2 | `cmd/desktop` |
 
-## 3. 进程间通信方式
+## 进程间通信方式 {#_3-进程间通信方式}
 
 | 链路 | 协议 | 说明 |
 | --- | --- | --- |
 | 浏览器 → `frontend`(NGINX) → `app` | HTTP/HTTPS（REST + SSE） | NGINX 反代 `/api`；聊天走 SSE 流式响应 |
 | `app` → `docreader` | **gRPC**（默认 `docreader:50051`，`DOCREADER_TRANSPORT=grpc`，支持 TLS/mTLS 与 `GRPC_AUTH_TOKEN`） | proto 定义在 `docreader/proto/`；大文件走流式 `ReadStream` |
 | `app` → `postgres` | PostgreSQL wire（GORM/pgx） | 业务数据 + BM25 + pgvector |
-| `app` ↔ `redis` | RESP（支持 TLS） | ① Asynq 任务队列（文档解析/富化/Wiki 等 19 类任务）；② SSE 流断线续传的 Stream Manager（`STREAM_MANAGER_TYPE`）；③ `system_settings` 变更 Pub/Sub；④ Embed 渠道限流；⑤ 分布式 per-model 并发信号量 |
+| `app` ↔ `redis` | RESP（支持 TLS） | ① Asynq 任务队列（文档解析/富化/Wiki/记忆等任务）；② SSE 流断线续传的 Stream Manager（`STREAM_MANAGER_TYPE`）；③ `system_settings` 变更 Pub/Sub；④ Embed 渠道限流；⑤ 分布式 per-model 并发信号量 |
 | `app` → `neo4j` | Bolt（`bolt://neo4j:7687`） | GraphRAG 实体/关系存取 |
 | `app` → `searxng` / Web 搜索 provider | HTTP | SSRF 白名单校验（`SSRF_WHITELIST_EXTRA` 默认放行 compose 内 `searxng,qdrant,milvus,weaviate,doris-fe,doris-be`） |
 | `app` → 向量库/对象存储/LLM 提供商 | 各自 SDK（HTTP/gRPC/MySQL 协议） | Doris 走 MySQL 协议 + Stream Load HTTP |
-| `app` → `sandbox` | 本地 `docker run` | Skills 代码执行隔离 |
+| `app` → 沙箱后端 | Docker Engine API / Cube/E2B 控制面与数据面 | 会话执行、技能安装与文件产物；按空间沙箱配置选择 |
 | `app` ↔ IM 平台 | HTTP webhook / 长连接 SDK | 微信、企业微信、飞书、钉钉、Slack、Telegram、QQ、Mattermost、云之家（`internal/im/`） |
 
-## 4. 总体架构图
+## 总体架构图 {#_4-总体架构图}
 
 ```mermaid
 graph LR
@@ -102,7 +102,7 @@ graph LR
         DR["docreader: Python gRPC (:50051)<br/>PDF / DOCX / Excel / Web 解析"]
         PG[("postgres: ParadeDB pg17<br/>业务数据 + BM25 + pgvector")]
         RD[("redis 7<br/>Asynq 队列 / 流管理 / PubSub / 限流")]
-        SBX["sandbox 容器 (按需 docker run)"]
+        SBX["Docker 会话沙箱 (默认关闭)"]
         subgraph Optional["可选 profile"]
             SX["searxng (联网搜索)"]
             NEO[("neo4j (知识图谱)")]
@@ -112,6 +112,7 @@ graph LR
         end
     end
 
+    REMOTE["Cube / E2B 会话沙箱"]
     EXT["外部服务: LLM API / Elasticsearch / OpenSearch / COS / S3 / OSS ..."]
 
     Browser -->|"HTTP / SSE"| FE
@@ -123,7 +124,8 @@ graph LR
     APP -->|"gRPC ReadStream"| DR
     APP -->|"GORM (SQL)"| PG
     APP -->|"RESP"| RD
-    APP -->|"docker run"| SBX
+    APP -->|"Docker Engine API"| SBX
+    APP -->|"控制面 / 数据面"| REMOTE
     APP -->|"HTTP"| SX
     APP -->|"Bolt"| NEO
     APP -->|"SDK"| VDB
@@ -133,7 +135,7 @@ graph LR
     DR -.->|"共享卷 docreader-tmp"| APP
 ```
 
-## 5. 典型请求链路：文档上传与解析入库
+## 典型请求链路：文档上传与解析入库 {#_5-典型请求链路-文档上传与解析入库}
 
 下图展示一篇文档从上传到可被检索的完整链路，覆盖了绝大多数组件间交互（同步 API、Asynq 异步任务、gRPC 解析、Embedding 与向量写入、富化子任务）：
 
@@ -173,7 +175,7 @@ sequenceDiagram
 
 对话链路（`POST /api/v1/knowledge-chat/:session_id` 或 agent-chat）则为同步 SSE：Handler → `SessionService` → `chat_pipeline` 插件流水线（query 理解 → 并行检索 → rerank → 合并 → Prompt 组装 → LLM 流式补全）→ 通过 Stream Manager（Redis/内存）将 token 流推回客户端，详见后端设计篇。
 
-## 6. 代码仓库顶层目录导览
+## 代码仓库顶层目录导览 {#_6-代码仓库顶层目录导览}
 
 | 目录 | 职责 |
 | --- | --- |
@@ -190,10 +192,9 @@ sequenceDiagram
 | `docker/` | 各镜像 Dockerfile（app/docreader/sandbox/odl-hybrid）与 searxng 配置 |
 | `deploy/` | 裸机部署资源（systemd 服务单元等） |
 | `helm/` | Kubernetes Helm Chart（Chart.yaml / values.yaml / templates/） |
-| `skills/` | Agent Skills 技能包目录，`skills/preloaded/` 随镜像预装，可通过挂载 + `WEKNORA_SKILLS_DIR` 免重建扩展 |
+| `examples/` | API 使用示例代码；`examples/skills/` 为 Agent Skill 包示例 |
 | `dataset/` | 评估用 QA 数据集及生成脚本 |
-| `examples/` | API 使用示例代码 |
-| `scripts/` | 构建/启动/迁移辅助脚本（如 `start_all.sh`、`build_frontend_dist.sh`） |
+| `scripts/` | 构建/启动/迁移辅助脚本（如 `start_all.sh`；`build_frontend_dist.sh` 供 Lite / 桌面打包，UI 镜像由 `frontend/Dockerfile` 多阶段构建） |
 | `tests/`、`testdata/` | 集成测试与测试数据 |
 | `Formula/` | Homebrew 安装配方（macOS） |
 | `misc/` | 杂项（如 `dex-config.yaml` OIDC 测试配置） |

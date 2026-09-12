@@ -11,30 +11,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
-
-const retrievedImageOutputRequirement = `
-
-## Retrieved Image Output Requirement
-The retrieved context for this turn contains Markdown images. Images attached to retrieved passages should be treated as relevant by default.
-- Unless the user explicitly requests text-only output, or every retrieved image is clearly unrelated to the answer, the final answer MUST include at least one relevant Markdown image copied from the retrieved context.
-- Copy the complete Markdown image syntax and its URL verbatim. Never invent, shorten, normalize, or replace the URL.
-- Use ASCII half-width parentheses in image Markdown exactly as ![alt](url). Never use full-width （ or ）.
-- Place each image immediately after the paragraph it supports, rather than collecting images at the end.
-- When multiple retrieved images support different sections of a multi-section answer, include them in their corresponding sections instead of stopping after the first image.
-- Before finishing, silently verify that the answer contains a Markdown image whenever this requirement applies.`
-
-func appendRetrievedImageOutputRequirement(systemPrompt, renderedContexts string) string {
-	if !searchutil.MarkdownImageRegex.MatchString(renderedContexts) {
-		return systemPrompt
-	}
-	return strings.TrimRight(systemPrompt, " \t\r\n") + retrievedImageOutputRequirement
-}
 
 // pipelineInfo logs pipeline info level entries.
 func pipelineInfo(ctx context.Context, stage, action string, fields map[string]interface{}) {
@@ -71,6 +52,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		PromptCacheKey:      chatManage.SessionID,
 	}
 	if opt.Thinking != nil {
 		pipelineInfo(ctx, "Stream", "thinking_option", map[string]interface{}{
@@ -94,7 +76,7 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 		"language": chatManage.Language,
 		"contexts": chatManage.RenderedContexts,
 	})
-	systemPrompt = appendRetrievedImageOutputRequirement(systemPrompt, chatManage.RenderedContexts)
+	systemPrompt += "\n\n" + types.SourceDataBoundaryPrompt + "\n\n" + types.SourcedAnswerOutputPrompt
 	// Memory goes at the end of the system prompt, after the retrieved-context
 	// placeholders have been rendered, so a remembered sentence can never be
 	// substituted into prompt structure.

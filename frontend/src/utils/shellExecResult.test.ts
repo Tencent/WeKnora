@@ -48,3 +48,31 @@ test('previewShellCommand collapses whitespace and truncates', () => {
   assert.equal(previewShellCommand('ls   -la'), 'ls -la')
   assert.equal(previewShellCommand('abcdefghij', 8), 'abcdefg…')
 })
+
+test('buildShellExecView parses skill-script markdown and command fallback', () => {
+  const view = buildShellExecView(
+    {
+      skill_name: 'smart-charts',
+      script_path: 'scripts/cli.py',
+      args: ['--x-axis', '工作项目'],
+      exit_code: 1,
+    },
+    null,
+    [
+      '=== Script Execution: smart-charts/scripts/cli.py ===',
+      '',
+      '**Arguments**: [--x-axis 工作项目]',
+      '**Exit Code**: 1',
+      '',
+      '## Standard Output',
+      '',
+      '```',
+      '{"chart":{"success":false,"error":{"error":"X轴字段不存在：工作项目"}}}',
+      '```',
+      '',
+    ].join('\n'),
+  )
+  assert.equal(view.command, 'smart-charts/scripts/cli.py --x-axis 工作项目')
+  assert.equal(view.exitCode, 1)
+  assert.match(view.stdout, /X轴字段不存在：工作项目/)
+})

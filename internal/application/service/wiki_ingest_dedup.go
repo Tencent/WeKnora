@@ -1,10 +1,13 @@
 package service
 
 import (
+	"context"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -210,6 +213,436 @@ func dedupMergeRejectReason(srcSlug, dstSlug string, srcCandidates map[string]bo
 		return "type mismatch: " + srcSlug[:srcSlash+1] + " vs " + dstSlug[:dstSlash+1]
 	}
 	return ""
+}
+
+// normalizeWikiIdentityTitle returns the conservative identity key used only
+// to prevent same-type, same-title pages from being created under different
+// slugs. It intentionally preserves punctuation: "寓言" and "《寓言》" can
+// represent a concept and a work/chapter and must remain distinguishable.
+// Removing whitespace and folding case is enough to close model formatting
+// drift such as "Acme Corp" vs "acme  corp".
+func normalizeWikiIdentityTitle(title string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, strings.TrimSpace(title))
+}
+
+// exactIdentityTarget returns the stable existing page for an extracted item
+// when a same-type candidate has the exact normalized display title. The LLM
+// remains responsible for semantic/alias matches; this deterministic fast path
+// only covers the unambiguous identity invariant that one page type should not
+// carry two pages with the same visible title.
+func exactIdentityTarget(
+	item extractedItem,
+	pageType string,
+	candidates map[string]bool,
+	pages map[string]*types.WikiPageLite,
+) string {
+	identity := normalizeWikiIdentityTitle(item.Name)
+	if identity == "" {
+		return ""
+	}
+	matches := make([]string, 0, 2)
+	for slug := range candidates {
+		page := pages[slug]
+		if page == nil || page.PageType != pageType {
+			continue
+		}
+		if normalizeWikiIdentityTitle(page.Title) == identity {
+			matches = append(matches, page.Slug)
+		}
+	}
+	if len(matches) == 0 {
+		return ""
+	}
+	for _, slug := range matches {
+		if slug == item.Slug {
+			return slug
+		}
+	}
+	sort.Strings(matches)
+	return matches[0]
+}
+
+func identityClaimString(v interface{}) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	default:
+		return ""
+	}
+}
+
+// claimWikiIdentitySlug reserves one slug for a normalized (KB, page type,
+// title) identity before Reduce starts. Standard mode uses Redis so concurrent
+// batches/processes converge; the batch-local map covers Lite mode and a Redis
+// error. Only exact existing-page resolutions are authoritative and may
+// overwrite a provisional claim. Semantic LLM merges must SetNX so they cannot
+// split a title that another worker already reserved.
+func (s *wikiIngestService) claimWikiIdentitySlug(
+	ctx context.Context,
+	kbID, pageType, title, proposedSlug string,
+	authoritative bool,
+	batchCtx *WikiBatchContext,
+) string {
+	identity := normalizeWikiIdentityTitle(title)
+	expectedPrefix := pageType + "/"
+	if identity == "" || proposedSlug == "" || !strings.HasPrefix(proposedSlug, expectedPrefix) {
+		return proposedSlug
+	}
+
+	claim := proposedSlug
+	usedRedis := false
+	claimKey := wikiIdentityClaimPrefix + kbID + ":" + pageType + ":" + identity
+	if s.redisClient != nil {
+		authArg := "0"
+		if authoritative {
+			authArg = "1"
+		}
+		ttlSec := int64(wikiIdentityClaimTTL / time.Second)
+		if ttlSec < 1 {
+			ttlSec = 1
+		}
+		res, err := s.redisClient.Eval(ctx, wikiIdentityClaimScript, []string{claimKey},
+			proposedSlug, ttlSec, authArg, expectedPrefix).Result()
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: identity claim failed for %s: %v (using batch-local claim)", proposedSlug, err)
+		} else if existing := identityClaimString(res); strings.HasPrefix(existing, expectedPrefix) {
+			claim = existing
+			usedRedis = true
+		}
+	}
+
+	if batchCtx != nil {
+		localKey := pageType + "\x00" + identity
+		if authoritative || usedRedis {
+			// Redis is the cross-batch source of truth when it answered.
+			// Exact existing-page hits also overwrite a stale local value.
+			batchCtx.identityClaims.Store(localKey, claim)
+		} else {
+			actual, _ := batchCtx.identityClaims.LoadOrStore(localKey, claim)
+			if existing, ok := actual.(string); ok && strings.HasPrefix(existing, expectedPrefix) {
+				claim = existing
+			}
+		}
+	}
+	return claim
+}
+
+// preferWikiIdentityDisplayName keeps the tighter display form when two names
+// fold to the same identity ("孔子" over "孔 子") and returns the discarded
+// form so it can be recorded as an alias.
+func preferWikiIdentityDisplayName(dst, src string) (name, extraAlias string) {
+	if dst == "" {
+		return src, ""
+	}
+	if src == "" || src == dst {
+		return dst, ""
+	}
+	if normalizeWikiIdentityTitle(dst) == normalizeWikiIdentityTitle(src) {
+		if len([]rune(src)) < len([]rune(dst)) {
+			return src, dst
+		}
+		return dst, src
+	}
+	return dst, src
+}
+
+// mergeExtractedIdentity folds duplicate candidates that converged to the same
+// slug. It preserves every alias/chunk reference and keeps the richer fallback
+// text, so convergence never discards evidence before the citation/reduce pass.
+func mergeExtractedIdentity(dst, src extractedItem) extractedItem {
+	name, extraAlias := preferWikiIdentityDisplayName(dst.Name, src.Name)
+	dst.Name = name
+	dst.Aliases = appendUniqueString(dst.Aliases, extraAlias)
+	for _, alias := range src.Aliases {
+		dst.Aliases = appendUniqueString(dst.Aliases, alias)
+	}
+	if len([]rune(src.Description)) > len([]rune(dst.Description)) {
+		dst.Description = src.Description
+	}
+	if len([]rune(src.Details)) > len([]rune(dst.Details)) {
+		dst.Details = src.Details
+	}
+	for _, chunkID := range src.SourceChunks {
+		dst.SourceChunks = appendUniqueString(dst.SourceChunks, chunkID)
+	}
+	return dst
+}
+
+func appendUniqueString(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+// stabilizeExtractedIdentities applies deterministic existing-page resolutions,
+// cross-batch identity claims, and same-result coalescing. mergeTargets maps
+// an extracted slug to a semantic/LLM merge destination and is not
+// authoritative. exactTargets maps an extracted slug to an existing same-title
+// page and may overwrite a provisional Redis claim.
+func (s *wikiIngestService) stabilizeExtractedIdentities(
+	ctx context.Context,
+	kbID, pageType string,
+	items []extractedItem,
+	mergeTargets, exactTargets map[string]string,
+	batchCtx *WikiBatchContext,
+) []extractedItem {
+	out := make([]extractedItem, 0, len(items))
+	bySlug := make(map[string]int, len(items))
+	claimedByIdentity := make(map[string]string, len(items))
+	for _, item := range items {
+		originalSlug := item.Slug
+		authoritative := false
+		if target := exactTargets[originalSlug]; target != "" {
+			item.Slug = target
+			authoritative = true
+		} else if target := mergeTargets[originalSlug]; target != "" {
+			item.Slug = target
+		}
+		identity := normalizeWikiIdentityTitle(item.Name)
+		if !authoritative {
+			if slug, ok := claimedByIdentity[identity]; ok && slug != "" {
+				item.Slug = slug
+			} else {
+				item.Slug = s.claimWikiIdentitySlug(
+					ctx, kbID, pageType, item.Name, item.Slug, false, batchCtx,
+				)
+				if identity != "" {
+					claimedByIdentity[identity] = item.Slug
+				}
+			}
+		} else {
+			item.Slug = s.claimWikiIdentitySlug(
+				ctx, kbID, pageType, item.Name, item.Slug, true, batchCtx,
+			)
+			if identity != "" {
+				claimedByIdentity[identity] = item.Slug
+			}
+		}
+		if idx, ok := bySlug[item.Slug]; ok {
+			out[idx] = mergeExtractedIdentity(out[idx], item)
+			continue
+		}
+		bySlug[item.Slug] = len(out)
+		out = append(out, item)
+	}
+	return out
+}
+
+func identityPageCacheKey(pageType, identity string) string {
+	return pageType + "\x00" + identity
+}
+
+func loadCachedIdentityPages(batchCtx *WikiBatchContext, pageType, identity string) ([]*types.WikiPageLite, bool) {
+	if batchCtx == nil {
+		return nil, false
+	}
+	v, ok := batchCtx.identityPages.Load(identityPageCacheKey(pageType, identity))
+	if !ok {
+		return nil, false
+	}
+	pages, _ := v.([]*types.WikiPageLite)
+	return pages, true
+}
+
+func storeCachedIdentityPages(batchCtx *WikiBatchContext, pageType, identity string, pages []*types.WikiPageLite) {
+	if batchCtx == nil {
+		return
+	}
+	if pages == nil {
+		pages = []*types.WikiPageLite{}
+	}
+	batchCtx.identityPages.Store(identityPageCacheKey(pageType, identity), pages)
+}
+
+func bindExactIdentityPages(
+	itemSlugs []string,
+	pages []*types.WikiPageLite,
+	pageType, identity string,
+	candidatePages map[string]*types.WikiPageLite,
+	itemCandidates map[string]map[string]bool,
+) {
+	if len(itemSlugs) == 0 || len(pages) == 0 {
+		return
+	}
+	for _, p := range pages {
+		if p == nil || p.Slug == "" || p.PageType != pageType {
+			continue
+		}
+		if normalizeWikiIdentityTitle(p.Title) != identity {
+			continue
+		}
+		if _, ok := candidatePages[p.Slug]; !ok {
+			candidatePages[p.Slug] = p
+		}
+		for _, slug := range itemSlugs {
+			own := itemCandidates[slug]
+			if own == nil {
+				own = make(map[string]bool)
+				itemCandidates[slug] = own
+			}
+			own[p.Slug] = true
+		}
+	}
+}
+
+func (s *wikiIngestService) attachExactIdentityPages(
+	ctx context.Context,
+	kbID, pageType string,
+	items []extractedItem,
+	candidatePages map[string]*types.WikiPageLite,
+	itemCandidates map[string]map[string]bool,
+	batchCtx *WikiBatchContext,
+) {
+	if s.wikiService == nil || len(items) == 0 {
+		return
+	}
+
+	slugsByIdentity := make(map[string][]string, len(items))
+	for _, item := range items {
+		identity := normalizeWikiIdentityTitle(item.Name)
+		if identity == "" || item.Slug == "" {
+			continue
+		}
+		slugsByIdentity[identity] = append(slugsByIdentity[identity], item.Slug)
+	}
+	if len(slugsByIdentity) == 0 {
+		return
+	}
+
+	cached := make(map[string][]*types.WikiPageLite, len(slugsByIdentity))
+	miss := make([]string, 0, len(slugsByIdentity))
+	for identity := range slugsByIdentity {
+		if pages, ok := loadCachedIdentityPages(batchCtx, pageType, identity); ok {
+			cached[identity] = pages
+			continue
+		}
+		miss = append(miss, identity)
+	}
+
+	if len(miss) > 0 {
+		pages, err := s.wikiService.FindPagesByNormalizedTitles(ctx, kbID, pageType, miss)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: exact identity lookup failed for %s (%d titles): %v", pageType, len(miss), err)
+		} else {
+			byIdentity := make(map[string][]*types.WikiPageLite, len(miss))
+			for _, p := range pages {
+				if p == nil {
+					continue
+				}
+				identity := normalizeWikiIdentityTitle(p.Title)
+				if identity == "" {
+					continue
+				}
+				byIdentity[identity] = append(byIdentity[identity], p)
+			}
+			for _, identity := range miss {
+				hits := byIdentity[identity]
+				if hits == nil {
+					hits = []*types.WikiPageLite{}
+				}
+				cached[identity] = hits
+				storeCachedIdentityPages(batchCtx, pageType, identity, hits)
+			}
+		}
+	}
+
+	for identity, slugs := range slugsByIdentity {
+		bindExactIdentityPages(slugs, cached[identity], pageType, identity, candidatePages, itemCandidates)
+	}
+}
+
+func collectExactIdentityTargets(
+	items []extractedItem,
+	pageType string,
+	itemCandidates map[string]map[string]bool,
+	candidatePages map[string]*types.WikiPageLite,
+	exactTargets map[string]string,
+) {
+	for _, item := range items {
+		if target := exactIdentityTarget(item, pageType, itemCandidates[item.Slug], candidatePages); target != "" {
+			exactTargets[item.Slug] = target
+		}
+	}
+}
+
+// reclaimExtractedIdentities re-runs exact title lookup plus identity claims
+// after citation discovery. Citation new_slugs skip the extract-time dedup
+// pass, so without this they can materialize a second same-title page.
+func (s *wikiIngestService) reclaimExtractedIdentities(
+	ctx context.Context,
+	kbID string,
+	entities, concepts []extractedItem,
+	batchCtx *WikiBatchContext,
+) ([]extractedItem, []extractedItem) {
+	if len(entities) == 0 && len(concepts) == 0 {
+		return entities, concepts
+	}
+	candidatePages := make(map[string]*types.WikiPageLite)
+	itemCandidates := make(map[string]map[string]bool)
+	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeEntity, entities, candidatePages, itemCandidates, batchCtx)
+	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeConcept, concepts, candidatePages, itemCandidates, batchCtx)
+	exactTargets := make(map[string]string)
+	collectExactIdentityTargets(entities, types.WikiPageTypeEntity, itemCandidates, candidatePages, exactTargets)
+	collectExactIdentityTargets(concepts, types.WikiPageTypeConcept, itemCandidates, candidatePages, exactTargets)
+	return s.stabilizeExtractedIdentities(ctx, kbID, types.WikiPageTypeEntity, entities, nil, exactTargets, batchCtx),
+		s.stabilizeExtractedIdentities(ctx, kbID, types.WikiPageTypeConcept, concepts, nil, exactTargets, batchCtx)
+}
+
+// remapSlugUpdatesByIdentity re-reads identity claims after every map worker
+// has finished so in-flight slug choices converge before Reduce groups and
+// locks by slug. Summary/retract updates keep their original slugs.
+func (s *wikiIngestService) remapSlugUpdatesByIdentity(
+	ctx context.Context,
+	kbID string,
+	slugUpdates map[string][]SlugUpdate,
+	batchCtx *WikiBatchContext,
+) map[string][]SlugUpdate {
+	if len(slugUpdates) == 0 {
+		return slugUpdates
+	}
+	out := make(map[string][]SlugUpdate, len(slugUpdates))
+	claimedByIdentity := make(map[string]string, len(slugUpdates))
+	for _, updates := range slugUpdates {
+		for _, u := range updates {
+			if u.Type == types.WikiPageTypeEntity || u.Type == types.WikiPageTypeConcept {
+				title := u.Item.Name
+				if title == "" {
+					title = u.Slug
+				}
+				identity := normalizeWikiIdentityTitle(title)
+				var claimed string
+				if identity != "" {
+					claimed = claimedByIdentity[u.Type+"\x00"+identity]
+				}
+				if claimed == "" {
+					claimed = s.claimWikiIdentitySlug(ctx, kbID, u.Type, title, u.Slug, false, batchCtx)
+					if identity != "" && claimed != "" {
+						claimedByIdentity[u.Type+"\x00"+identity] = claimed
+					}
+				}
+				if claimed != "" {
+					u.Slug = claimed
+					u.Item.Slug = claimed
+				}
+			}
+			out[u.Slug] = append(out[u.Slug], u)
+		}
+	}
+	return out
 }
 
 // dedupPairScore is the max similarity between any surface form of a and

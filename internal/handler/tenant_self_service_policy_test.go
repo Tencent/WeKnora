@@ -36,6 +36,10 @@ func (s *tenantPolicySettingService) GetBool(context.Context, string, string, bo
 	return s.enabled
 }
 
+func (s *tenantPolicySettingService) GetString(_ context.Context, _ string, _ string, def string) string {
+	return def
+}
+
 func (s *tenantPolicySettingService) GetInt(_ context.Context, _ string, _ string, def int64) int64 {
 	return def
 }

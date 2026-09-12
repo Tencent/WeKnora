@@ -1,6 +1,6 @@
 # Go SDK
 
-WeKnora 官方 Go SDK 位于仓库的 `client/` 目录，是一个独立的 Go module，封装了 WeKnora 服务端 `/api/v1/*` 全部主要资源的 CRUD 操作与 SSE 流式对话能力。服务端自身、官方 CLI（`weknora`）均基于此 SDK 构建。
+Go SDK 封装知识库、文档、会话等主要资源的 CRUD 操作，以及 SSE 流式问答。源码位于 `client/`，以独立 Go module 提供；官方 CLI 和服务端相关调用复用此 SDK。
 
 ## 安装
 
@@ -315,11 +315,38 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | 方法 | 说明 | 源文件 |
 |---|---|---|
 | `StartEvaluation` / `GetEvaluationResult` | 发起评估任务 / 查询评估结果 | `client/evaluation.go` |
-| `ListSkills` | 列出预置 Agent skill | `client/skill.go` |
+| `ListSkills(ctx, sandboxConfigID)` | 列出指定沙箱配置可调用的技能，返回技能列表与可用标志 | `client/skill.go` |
 | `GetWebSearchProviders` | 列出可用 Web 搜索提供商 | `client/web_search.go` |
 | `Raw` | 原始 HTTP 逃生舱（Experimental） | `client/client.go` |
 
 合计约 170 个公开方法，覆盖约 20 类资源。
+
+### 记忆、沙箱技能与个人变量
+
+| 文件 | 方法与用途 |
+| --- | --- |
+| `client/memory.go` | GetMemorySettings / UpdateMemorySettings；List/Create/Update/DeleteMemoryItem；Confirm/RejectMemoryItem；ClearMemoryItems |
+| `client/memory.go` | ListMemoryTopics / PromoteMemoryTopic / DeleteMemoryTopic；ListMemoryDocuments / DeleteMemoryDocument；ExportMemory / ConsolidateMemory |
+| `client/skill.go` | InstallSandboxSkillFromSource / UploadSandboxSkill / ReinstallSandboxSkill / StopSandboxSkill，管理安装流程 |
+| `client/skill.go` | UpdateSandboxSkill / SetSandboxSkillEnabled / SetSandboxSkillEnvValues；ListSandboxSkillFiles / GetSandboxSkillFile |
+| `client/env_var.go` | ListMyEnvVars；SetMySkillEnvVar / DeleteMySkillEnvVar；SetMySandboxEnvVar / DeleteMySandboxEnvVar |
+| `client/tenant.go` | UpdateTenantAPIKey，修改已有 Key 的完整授权配置而不轮换 token |
+
+空间技能变量由管理员设置，个人变量只用于调用者自己；列表不返回明文。记忆和技能方法的权限仍由后端接口校验，SDK 不绕过这些约束。
+
+```go
+items, total, err := c.ListMemoryItems(ctx, "active", 50, 0)
+_ = items
+_ = total
+_ = err
+
+skills, available, err := c.ListSkills(ctx, "sandbox-config-id")
+_ = skills
+_ = available
+_ = err
+```
+
+系统管理员创建用户使用 `POST /system/admin/users/create`；当前 SDK 没有该端点的专用方法，可使用前述 Raw 逃生舱机制或 HTTP 客户端，响应见[系统 API](../04-api/02-api-system.md)。完整新增契约见[长期记忆 API](../04-api/02-api-memory.md)、[沙箱与技能 API](../04-api/02-api-sandbox-skills.md)。
 
 ## 流式对话（SSE）
 

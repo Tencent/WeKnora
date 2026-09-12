@@ -29,7 +29,7 @@ func (c *contractClient) Health(context.Context) error { return nil }
 func (c *contractClient) Create(_ context.Context, req RemoteCreateRequest) (RemoteSandboxHandle, error) {
 	return &contractHandle{id: "sandbox-1", provider: c.provider, metadata: req.Metadata}, nil
 }
-func (c *contractClient) Connect(context.Context, string) (RemoteSandboxHandle, error) {
+func (c *contractClient) Connect(context.Context, RemoteConnectRequest) (RemoteSandboxHandle, error) {
 	return &contractHandle{id: "sandbox-1", provider: c.provider}, nil
 }
 func (c *contractClient) Get(context.Context, string) (*RemoteSandboxSummary, error) {

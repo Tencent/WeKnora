@@ -1,0 +1,25 @@
+{
+  "version": "0.2.1",
+  "assets": {
+    "darwin-arm64": {
+      "url": "https://github.com/Tencent/BrowserSkill/releases/download/cli-v0.2.1/bsk-v0.2.1-aarch64-apple-darwin.tar.gz",
+      "sha256": "a2e7d03f7f9aa4d1f0cc977dae71099b9ee4805a5c06cdefde3919afbecf06ad"
+    },
+    "darwin-x64": {
+      "url": "https://github.com/Tencent/BrowserSkill/releases/download/cli-v0.2.1/bsk-v0.2.1-x86_64-apple-darwin.tar.gz",
+      "sha256": "3181f7010e12e2b9a395d26690a21abc4cacc1cf5c705930baea2ed2efcae7e2"
+    },
+    "linux-x64": {
+      "url": "https://github.com/Tencent/BrowserSkill/releases/download/cli-v0.2.1/bsk-v0.2.1-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "a533cbf532fe9848332d72c2b92e92e0d76626765417ca5f374914385731265f"
+    },
+    "linux-arm64": {
+      "url": "https://github.com/Tencent/BrowserSkill/releases/download/cli-v0.2.1/bsk-v0.2.1-aarch64-unknown-linux-musl.tar.gz",
+      "sha256": "d30f301fe64ea4784899d0cba3e8991d6b59017173bf83258a161a64c94a42f5"
+    },
+    "windows-x64": {
+      "url": "https://github.com/Tencent/BrowserSkill/releases/download/cli-v0.2.1/bsk-v0.2.1-x86_64-pc-windows-msvc.zip",
+      "sha256": "98539807febcaca0442024b289ce2df5691e71bdc8d6568aa98e38054fd2a04e"
+    }
+  }
+}

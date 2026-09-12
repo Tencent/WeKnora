@@ -184,6 +184,37 @@ func IsRemoteInvalidRequest(err error) bool {
 	return remoteKind(err) == RemoteErrorKindInvalidRequest
 }
 
+// IsRemoteConflict reports whether the provider refused the call because the
+// resource is busy (concurrent mutation, snapshot still referenced, …).
+func IsRemoteConflict(err error) bool {
+	return remoteKind(err) == RemoteErrorKindConflict
+}
+
+// snapshotDeleteKind reclassifies a snapshot/template delete that failed
+// because sandboxes still reference it. E2B returns that as HTTP 400
+// invalid_request; it is Conflict: the caller did nothing wrong and should
+// retry after those sandboxes (typically paused) go away.
+func snapshotDeleteKind(op string, kind RemoteErrorKind, message string) RemoteErrorKind {
+	if op != "DeleteSnapshot" && op != "DeleteTemplate" {
+		return kind
+	}
+	if kind == RemoteErrorKindConflict || snapshotInUseBySandboxes(message) {
+		return RemoteErrorKindConflict
+	}
+	return kind
+}
+
+func snapshotInUseBySandboxes(message string) bool {
+	msg := strings.ToLower(message)
+	if strings.Contains(msg, "paused sandbox") {
+		return true
+	}
+	if strings.Contains(msg, "sandboxes using") {
+		return true
+	}
+	return strings.Contains(msg, "cannot delete template") && strings.Contains(msg, "using it")
+}
+
 // IsRemoteDirAlreadyExists reports whether MakeDir failed because the
 // directory is already present. Cube's envd MakeDir is not mkdir -p: a
 // directory created by a previous call (or by a shell `mkdir -p` in

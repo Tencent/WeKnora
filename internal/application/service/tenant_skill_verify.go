@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
@@ -20,50 +21,143 @@ import (
 //go:embed tenant_skill_verify.py
 var skillPythonVerifier string
 
+// skillVerifyRepairableExit is the exit code a verification pass uses when
+// every problem it found is a dependency missing from this image. It separates
+// "another installer round can fix this" from "the bundle has to change", which
+// is the only distinction that decides what the install flow does next.
+const skillVerifyRepairableExit = 2
+
+// skillTreeVerifyDirExit is the exit code the tree check uses when the skill
+// directory itself is gone, so no file inside it can be probed. Exit 1 is the
+// shared "every finding is one stderr line" code; exit 0 means everything the
+// bundle names is still in place.
+const skillTreeVerifyDirExit = 3
+
+// skillVerifyNotePrefix marks a line the checker reports without refusing the
+// install. Notes travel on stdout so a non-zero exit stays unambiguous.
+const skillVerifyNotePrefix = "note: "
+
+// skillVerificationError is what the gate said, kept structured because it is
+// also the brief for a repair round. The gate is the only authority on what has
+// to resolve in this image, so handing back its own lines is what keeps the
+// installer from deriving "what this skill needs" a second time.
+type skillVerificationError struct {
+	// Language names the pass that failed, as the operator sees it.
+	Language string
+	// Repairable is true when installing a package would satisfy every line.
+	Repairable bool
+	// Problems are the checker's own lines, one per finding.
+	Problems []string
+	// Summary describes the command result itself, and is the only thing worth
+	// printing when the pass died without producing lines at all.
+	Summary string
+}
+
+func (e *skillVerificationError) Error() string {
+	if len(e.Problems) == 0 {
+		return fmt.Sprintf("%s verification failed (%s)", e.Language, e.Summary)
+	}
+	return fmt.Sprintf("%s verification failed: %s", e.Language, strings.Join(e.Problems, "; "))
+}
+
 // verifySkill is the server's own check, and the last gate before the image
 // pointer moves: a broken install must leave the previous snapshot serving.
 //
-// It deliberately proves loadability rather than behaviour. Nothing in the
-// runtime designates an entry point — the model names any script it likes in
-// execute_skill_script — so there is no single command whose success would
-// stand in for the skill working. What every one of those calls does need is
-// that the interpreter can parse the file and resolve its imports inside this
-// image, and that is checkable for all scripts at once without executing a
-// line of the skill's own code.
+// It checks only what a file can settle, never what a runtime decides. Every
+// pass here is deterministic: the files the bundle named are present, the
+// isolated dependency trees the installer was told to create exist, every
+// source parses with the interpreter that would run it, and every distribution
+// the manifests name is installed.
 //
-// Not executing is the point, not a limitation. The previous implementation
-// ran one guessed script with --help; skills that do not parse arguments
-// simply ran their whole main path inside the tree about to be snapshotted.
+// Import resolution is deliberately absent. Whether `import helper` resolves
+// depends on what a script does to sys.path before the import runs, which no
+// static evaluator can enumerate — and every approximation of it refused
+// skills that run perfectly. That proof belongs to the installer agent, which
+// holds a root shell and the real interpreter and can simply run the import.
+// See the header of tenant_skill_verify.py.
+//
+// Findings are graded rather than uniformly fatal. Refusing an install costs
+// the minutes of dependency work that already succeeded, so only evidence that
+// the install itself is broken may do it: a finding in a file nothing the
+// skill offers ever loads, or a requirement pip would have skipped, is
+// returned as a note.
 func (s *TenantSkillService) verifySkill(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
-) error {
+) ([]string, error) {
 	if err := s.verifySkillTree(ctx, mgr, sessionID, skillDir, bundle); err != nil {
-		return err
+		return nil, err
 	}
 	if err := s.verifyDeclaredDependencies(ctx, mgr, sessionID, skillDir, bundle); err != nil {
-		return err
+		return nil, err
 	}
-	return s.verifyScriptsLoad(ctx, mgr, sessionID, skillDir, bundle)
+	notes, err := s.verifyScriptsParse(ctx, mgr, sessionID, skillDir, bundle)
+	if err != nil {
+		return notes, err
+	}
+	return notes, s.verifyRuntimePrerequisites(ctx, mgr, sessionID, skillDir)
 }
 
 // verifySkillTree confirms the files the agent was given are still the files
 // the image carries. The agent has a root shell in this directory, so "we
 // wrote it before the agent ran" is not evidence that it survived.
+//
+// The whole check is one command and one round trip, however many files the
+// bundle carries: a missing file costs one remote exec per call otherwise, and
+// a skill with dozens of scripts was spending minutes on that round-trip tax.
+// Every missing file is reported on its own stderr line and the check keeps
+// going, so one round trip returns every finding instead of stopping at the
+// first — an install that fails anyway may as well fail completely.
 func (s *TenantSkillService) verifySkillTree(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) error {
-	if _, err := s.execInstall(ctx, mgr, sessionID,
-		fmt.Sprintf("test -f %s", sandbox.ShellQuote(path.Join(skillDir, "SKILL.md")))); err != nil {
-		return fmt.Errorf("skill directory is incomplete after install: %w", err)
+	res, err := s.execInstall(ctx, mgr, sessionID,
+		skillTreeVerifyCommand(skillDir, sortedScriptPaths(bundle, allScriptExtensions...)))
+	if err == nil {
+		return nil
 	}
-	for _, rel := range sortedScriptPaths(bundle, allScriptExtensions...) {
-		target := path.Join(skillDir, rel)
-		if _, err := s.execInstall(ctx, mgr, sessionID,
-			fmt.Sprintf("test -f %s", sandbox.ShellQuote(target))); err != nil {
-			return fmt.Errorf("script %s is missing after install: %w", rel, err)
+	if res != nil {
+		switch res.ExitCode {
+		case skillTreeVerifyDirExit:
+			// The directory itself is gone; nothing inside it could be probed
+			// and the command already said exactly that.
+			return errors.New("skill directory is incomplete after install")
+		case 1:
+			// The command's own protocol: exit 1 means every finding is one
+			// stderr line, and those lines are the final message. Any other
+			// non-zero exit has no protocol behind it and falls through to
+			// the transport wrapping below rather than promoting arbitrary
+			// stderr noise to a verdict.
+			if lines := verificationProblems(res.Stderr); len(lines) > 0 {
+				return errors.New(strings.Join(lines, "; "))
+			}
 		}
 	}
-	return nil
+	return fmt.Errorf("skill tree verification failed: %w", err)
+}
+
+// skillTreeVerifyCommand folds the structural check into one command: the
+// SKILL.md probe plus one test per bundled script, each missing file reported
+// without stopping the rest. It cds into the skill directory and iterates
+// relative paths, which makes every stderr line the final user-facing message
+// — the Go side never has to reassemble one. Paths reach the command only
+// through ShellQuote: a file name comes from an uploaded archive, and a
+// metacharacter in one must stay a literal.
+func skillTreeVerifyCommand(skillDir string, scripts []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "cd %s || { echo 'skill directory is incomplete after install' >&2; exit %d; }",
+		sandbox.ShellQuote(skillDir), skillTreeVerifyDirExit)
+	b.WriteString("; status=0")
+	b.WriteString("; [ -f 'SKILL.md' ] || { echo 'SKILL.md is missing after install' >&2; status=1; }")
+	if len(scripts) > 0 {
+		b.WriteString("; for f in")
+		for _, rel := range scripts {
+			b.WriteByte(' ')
+			b.WriteString(sandbox.ShellQuote(rel))
+		}
+		b.WriteString(`; do [ -f "$f" ] || { echo "script $f is missing after install" >&2; status=1; }; done`)
+	}
+	b.WriteString("; exit $status")
+	return b.String()
 }
 
 // verifyDeclaredDependencies checks that the isolated trees the installer was
@@ -92,42 +186,60 @@ func (s *TenantSkillService) verifyDeclaredDependencies(
 	return nil
 }
 
-// verifyScriptsLoad runs one pass per language present in the bundle. Each
-// pass covers every script of that language, because every one of them is a
-// script the model may name at runtime.
-func (s *TenantSkillService) verifyScriptsLoad(
+// verifyScriptsParse runs one pass per language present in the bundle. Each
+// pass covers every file of that language: parsing is a property of the file,
+// not of a guessed entry point.
+//
+// All three passes are parse-only — `ast.parse`, `node --check`, `bash -n`.
+// None of them executes the skill's code and none of them decides whether an
+// import resolves. The Python pass additionally checks the manifests against
+// what pip actually landed, which is the one finding here another installer
+// round can still fix.
+//
+// Only the Python pass takes the auxiliary split, because it is the only one
+// whose findings depend on what the image carries: a bundled tests/ directory
+// naming a package the venv does not have must not fail an install that works.
+func (s *TenantSkillService) verifyScriptsParse(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
-) error {
+) ([]string, error) {
+	var notes []string
 	if scripts := sortedScriptPaths(bundle, ".py"); len(scripts) > 0 {
-		if err := s.execVerify(ctx, mgr, sessionID, skillDir, "python",
-			skillPythonVerifyCommand(skillDir, scripts)); err != nil {
-			return err
+		entry, auxiliary := splitAuxiliaryScripts(scripts)
+		found, err := s.execVerify(ctx, mgr, sessionID, skillDir, "python",
+			skillPythonVerifyCommand(skillDir, entry, auxiliary))
+		notes = append(notes, found...)
+		if err != nil {
+			return notes, err
 		}
 	}
-	if scripts := sortedScriptPaths(bundle, ".js", ".mjs"); len(scripts) > 0 {
-		if err := s.execVerify(ctx, mgr, sessionID, skillDir, "node",
-			skillNodeVerifyCommand(skillDir, scripts, nodeDependencyNames(bundle))); err != nil {
-			return err
+	if scripts := sortedScriptPaths(bundle, ".js", ".mjs", ".cjs"); len(scripts) > 0 {
+		found, err := s.execVerify(ctx, mgr, sessionID, skillDir, "node",
+			skillNodeVerifyCommand(skillDir, scripts, nodeDependencyNames(bundle)))
+		notes = append(notes, found...)
+		if err != nil {
+			return notes, err
 		}
 	}
 	if scripts := sortedScriptPaths(bundle, ".sh"); len(scripts) > 0 {
-		if err := s.execVerify(ctx, mgr, sessionID, skillDir, "shell",
-			skillShellVerifyCommand(skillDir, scripts)); err != nil {
-			return err
+		found, err := s.execVerify(ctx, mgr, sessionID, skillDir, "shell",
+			skillShellVerifyCommand(skillDir, scripts))
+		notes = append(notes, found...)
+		if err != nil {
+			return notes, err
 		}
 	}
-	return nil
+	return notes, nil
 }
 
-// execVerify runs one verification pass as the ordinary sandbox user, with the
-// same working directory and environment a real skill call gets. Running it as
-// install-mode root would test permissions that never reach a session.
+// execVerify uses the ordinary execution path and workspace bootstrap, with
+// the same working directory and skill environment as a session call. Both
+// paths currently run as root; AsRoot would select the maintenance bootstrap.
 func (s *TenantSkillService) execVerify(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir, label, command string,
-) error {
+) ([]string, error) {
 	executor, err := installExecutor(mgr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	res, err := executor.ExecShellCommandWithOptions(ctx, sessionID, command,
 		sandbox.ShellExecOptions{
@@ -139,25 +251,69 @@ func (s *TenantSkillService) execVerify(
 			},
 		})
 	if err != nil {
-		return fmt.Errorf("%s verification: %w", label, err)
+		return nil, fmt.Errorf("%s verification: %w", label, err)
 	}
+	// Notes are read even from a failed pass: an install refused for a missing
+	// package may also have noticed something about a file it did not refuse
+	// over, and that is exactly the context whoever reads the failure needs.
+	notes := verificationNotes(res.Stdout)
 	if res.ExitCode != 0 {
-		return fmt.Errorf("%s verification failed (%s)", label, describeExecFailure(res))
+		return notes, &skillVerificationError{
+			Language:   label,
+			Repairable: res.ExitCode == skillVerifyRepairableExit,
+			Problems:   verificationProblems(res.Stderr),
+			Summary:    describeExecFailure(res),
+		}
 	}
-	return nil
+	return notes, nil
 }
 
-// skillPythonVerifyCommand pipes the verifier into the same interpreter a
+// verificationNotes pulls the reported-but-not-refused findings out of stdout.
+func verificationNotes(stdout string) []string {
+	var notes []string
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, skillVerifyNotePrefix); ok {
+			notes = append(notes, after)
+		}
+	}
+	return notes
+}
+
+// verificationProblems splits a failed pass's stderr into its findings. Blank
+// lines are dropped; everything else is the checker's own wording, which is
+// what a repair round is given.
+func verificationProblems(stderr string) []string {
+	var problems []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			problems = append(problems, line)
+		}
+	}
+	return problems
+}
+
+// skillPythonVerifyCommand pipes the parser into the same interpreter a
 // runtime skill call would use, and names the files to check on the command
 // line. The list is explicit rather than a directory walk so the pass covers
 // exactly the uploaded sources — never .venv, node_modules or anything else
 // the agent created while installing.
-func skillPythonVerifyCommand(skillDir string, scripts []string) string {
+//
+// Auxiliary files are named after --optional. They are checked the same way,
+// and what is found in them is reported rather than allowed to refuse the
+// install.
+func skillPythonVerifyCommand(skillDir string, entry, auxiliary []string) string {
 	venv := path.Join(skillDir, ".venv", "bin", "python")
 	quotedVenv := sandbox.ShellQuote(venv)
 	args := []string{sandbox.ShellQuote(skillDir)}
-	for _, rel := range scripts {
+	for _, rel := range entry {
 		args = append(args, sandbox.ShellQuote(rel))
+	}
+	if len(auxiliary) > 0 {
+		args = append(args, skillVerifyOptionalFlag)
+		for _, rel := range auxiliary {
+			args = append(args, sandbox.ShellQuote(rel))
+		}
 	}
 	// The script arrives base64-encoded on stdin: it contains quotes, newlines
 	// and backslashes, and a heredoc would still be at the mercy of whatever
@@ -173,6 +329,9 @@ func skillPythonVerifyCommand(skillDir string, scripts []string) string {
 // skillNodeVerifyCommand parses every JavaScript file and, when the bundle
 // declares runtime dependencies, checks each one resolves. `node --check` is
 // parse-only: it never runs the module body.
+//
+// A declared dependency that is missing exits with the repairable code: it is
+// the one thing here another installer round can still put in place.
 func skillNodeVerifyCommand(skillDir string, scripts, deps []string) string {
 	parts := make([]string, 0, 2)
 	if len(deps) > 0 {
@@ -182,18 +341,75 @@ func skillNodeVerifyCommand(skillDir string, scripts, deps []string) string {
 		}
 		parts = append(parts, fmt.Sprintf(
 			"for d in %s; do [ -e %s/\"$d\" ] || "+
-				"{ echo \"package.json declares $d but node_modules/$d is missing\" >&2; exit 1; }; done",
+				"{ echo \"package.json declares $d but node_modules/$d is missing\" >&2; exit %d; }; done",
 			strings.Join(quoted, " "), sandbox.ShellQuote(path.Join(skillDir, "node_modules")),
+			skillVerifyRepairableExit,
 		))
 	}
 	parts = append(parts, forEachScript(skillDir, scripts, "node --check \"$f\""))
 	return strings.Join(parts, "; ")
 }
 
-// skillShellVerifyCommand parses every shell script. `sh -n` reads the file
-// and exits without executing any of it.
+// skillShellVerifyCommand parses every shell script with the shell that would
+// run it. `-n` reads the file and exits without executing any of it.
+//
+// bash, not sh: skills ship `#!/bin/bash` almost exclusively, and
+// SkillInterpreterCommand runs them with bash for that reason. /bin/sh is dash
+// on Debian, where an array literal, `function f()`, a C-style for loop and
+// process substitution are all outright syntax errors — so checking with sh
+// would refuse installs over scripts that run perfectly.
 func skillShellVerifyCommand(skillDir string, scripts []string) string {
-	return forEachScript(skillDir, scripts, "sh -n \"$f\"")
+	return "if command -v bash >/dev/null 2>&1; then parser=bash; else parser=sh; fi; " +
+		forEachScript(skillDir, scripts, `"$parser" -n "$f"`)
+}
+
+// skillVerifyOptionalFlag separates the files whose failure refuses the install
+// from the ones whose failure is only reported. It is the checker's own argv
+// contract; both sides must keep using this spelling.
+const skillVerifyOptionalFlag = "--optional"
+
+// auxiliaryScriptDirs are the directory names Python and JavaScript projects
+// universally use for files that ship with a project without being part of
+// what it offers. A skill's tests import pytest; its examples import whatever
+// they illustrate. Nothing the skill exposes loads either, so neither may
+// decide whether the skill installs.
+var auxiliaryScriptDirs = map[string]struct{}{
+	"test": {}, "tests": {}, "testing": {}, "__tests__": {},
+	"example": {}, "examples": {}, "sample": {}, "samples": {},
+	"benchmark": {}, "benchmarks": {}, "fixtures": {},
+	"doc": {}, "docs": {},
+}
+
+// skillAuxiliaryScript reports whether a bundled path is one of those files.
+//
+// The rule is the naming convention the language communities already share,
+// not a list grown one skill at a time: a directory the ecosystem reserves for
+// tests, examples or docs, or a file name pytest and setuptools already treat
+// as theirs.
+func skillAuxiliaryScript(rel string) bool {
+	segments := strings.Split(path.Clean(rel), "/")
+	for _, segment := range segments[:len(segments)-1] {
+		if _, ok := auxiliaryScriptDirs[strings.ToLower(segment)]; ok {
+			return true
+		}
+	}
+	base := strings.ToLower(segments[len(segments)-1])
+	stem := strings.TrimSuffix(base, path.Ext(base))
+	return stem == "conftest" || stem == "setup" ||
+		strings.HasPrefix(stem, "test_") || strings.HasSuffix(stem, "_test")
+}
+
+// splitAuxiliaryScripts separates the files whose failure is a failed install
+// from the ones whose failure is a note, preserving the caller's order.
+func splitAuxiliaryScripts(scripts []string) (entry, auxiliary []string) {
+	for _, rel := range scripts {
+		if skillAuxiliaryScript(rel) {
+			auxiliary = append(auxiliary, rel)
+			continue
+		}
+		entry = append(entry, rel)
+	}
+	return entry, auxiliary
 }
 
 func forEachScript(skillDir string, scripts []string, check string) string {
@@ -206,7 +422,7 @@ func forEachScript(skillDir string, scripts []string, check string) string {
 
 // allScriptExtensions is every suffix the runtime knows how to execute, which
 // is what makes a bundle file a script the model can name.
-var allScriptExtensions = []string{".py", ".js", ".mjs", ".sh"}
+var allScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".sh"}
 
 // sortedScriptPaths returns the bundle's files with any of the given suffixes,
 // in a stable order so the emitted command is deterministic.

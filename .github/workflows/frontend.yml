@@ -53,3 +53,18 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  docker-image:
+    name: Docker multi-stage image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build UI image
+        run: |
+          docker build \
+            -f frontend/Dockerfile \
+            --build-arg VITE_FRONTEND_COMMIT="${GITHUB_SHA::7}" \
+            -t weknora-ui:ci \
+            frontend/

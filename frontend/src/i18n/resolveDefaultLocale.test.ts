@@ -9,6 +9,7 @@ test('resolveDefaultLocale prefers runtime over build-time default', () => {
 
 test('resolveDefaultLocale falls back to build-time then built-in default', () => {
   assert.equal(resolveDefaultLocale('', 'ko-KR'), 'ko-KR')
+  assert.equal(resolveDefaultLocale('', 'ja-JP'), 'ja-JP')
   assert.equal(resolveDefaultLocale(undefined, undefined), BUILT_IN_DEFAULT)
 })
 

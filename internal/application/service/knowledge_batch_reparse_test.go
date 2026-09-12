@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -81,18 +82,21 @@ func TestReparseKnowledgeManualEnqueueFailureIsVisible(t *testing.T) {
 	repo := &reparseFailureKnowledgeRepo{knowledge: knowledge}
 	svc := &knowledgeService{
 		repo:      repo,
-		kbService: &reparseFailureKBService{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		kbService: &reparseFailureKBService{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}},
 		task:      failingReparseTaskEnqueuer{err: enqueueErr},
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
+	ctx, grantErr := access.WithKBTaskWrite(ctx, &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, 7)
+	require.NoError(t, grantErr)
+
 	got, err := svc.ReparseKnowledge(ctx, knowledge.ID, nil)
 
 	require.Error(t, err)
-	require.Same(t, knowledge, got)
-	require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
-	require.Equal(t, "disabled", knowledge.EnableStatus)
-	require.Equal(t, "Failed to enqueue processing task", knowledge.ErrorMessage)
+	require.NotNil(t, got)
+	require.Equal(t, types.ParseStatusFailed, got.ParseStatus)
+	require.Equal(t, "disabled", got.EnableStatus)
+	require.Equal(t, "Failed to enqueue processing task", got.ErrorMessage)
 	require.GreaterOrEqual(t, repo.updateCalls, 2, "pending and failed states must both be persisted")
 }
 

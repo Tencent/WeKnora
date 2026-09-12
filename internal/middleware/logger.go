@@ -43,8 +43,9 @@ func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
 // sensitiveFieldRegex 匹配 JSON 中的敏感字段（不区分大小写，兼容 snake_case / camelCase / PascalCase）。
 // $1 捕获原始字段名（包括两侧引号），保持日志中的字段名不变，仅将值替换为 "***"。
 var sensitiveFieldRegex = regexp.MustCompile(
-	`(?i)("(?:new[_-]?password|old[_-]?password|password|passwd|token|access[_-]?token|` +
-		`refresh[_-]?token|id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
+	`(?i)("(?:new[_-]?password|old[_-]?password|password|passwd|ticket|token|access[_-]?token|` +
+		`refresh[_-]?token|next[_-]?token|device[_-]?token|pending[_-]?token|pairing[_-]?link|` +
+		`id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
 		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret|` +
 		`authorization[_-]?url|authorization[_-]?attempt)")\s*:\s*"[^"]*"`,
 )
@@ -61,12 +62,18 @@ var sensitiveQueryFields = map[string]struct{}{
 	"id_token":              {},
 	"refresh_token":         {},
 	"state":                 {},
-	"token":                 {},
+	// ticket is the sandbox terminal's WebSocket handshake credential. A
+	// browser cannot set Authorization on an upgrade, so it travels in the
+	// query string; anyone holding it for its 2-minute TTL can open a shell
+	// in the session's sandbox, which is why it must never reach a log line.
+	"ticket": {},
+	"token":  {},
 }
 
-// sanitizeQuery prevents OAuth authorization codes and CSRF/attempt state from
-// being copied into access logs. Parsing the query also covers repeated and
-// percent-encoded parameters without relying on fragile string replacement.
+// sanitizeQuery prevents OAuth authorization codes, CSRF/attempt state, and
+// handshake credentials from being copied into access logs. Parsing the query
+// also covers repeated and percent-encoded parameters without relying on
+// fragile string replacement.
 func sanitizeQuery(raw string) string {
 	values, err := url.ParseQuery(raw)
 	if err != nil {
@@ -164,9 +171,13 @@ func Logger() gin.HandlerFunc {
 			return
 		}
 
+		// Browser traffic contains credentials, page content and screenshots.
+		// Keep access metadata, but never read or buffer these request/response bodies.
+		browserTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
+			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string
-		if c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH" {
+		if !browserTraffic && (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
 			requestBody = readRequestBody(c)
 		}
 
@@ -176,7 +187,9 @@ func Logger() gin.HandlerFunc {
 			ResponseWriter: c.Writer,
 			body:           responseBody,
 		}
-		c.Writer = responseWriter
+		if !browserTraffic {
+			c.Writer = responseWriter
+		}
 
 		// Process request
 		c.Next()

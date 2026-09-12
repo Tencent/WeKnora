@@ -38,8 +38,12 @@ func TestRunRemoveProducesANewSnapshotWithoutTheSkillDir(t *testing.T) {
 		"the maintenance session is kept for troubleshooting")
 	require.Equal(t, []string{"Skill remove"}, fx.sessionTitles,
 		"the transcript is kept to troubleshoot this operation, so it must name it")
+	// The seeded row owns a pre-catalog object: no definition and no sibling
+	// install names it, so letting the row go is what makes it unreachable.
+	// A row that reads the definition's copy has nothing of its own to reclaim,
+	// which is the case the catalog test below covers.
 	require.Equal(t, []string{"file://sk-1.zip"}, fx.deletedBundles,
-		"the archive outlives nothing: its only readers are the removed row and read_skill")
+		"an archive this row alone named is reclaimed with it")
 
 	skill, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
 	require.NoError(t, err)
@@ -256,8 +260,8 @@ func TestRunRemoveDeletesTheOrphanSnapshotAfterTheLockIsLost(t *testing.T) {
 	require.Equal(t, []string{"sess-1"}, fx.destroyedSandboxes)
 }
 
-// The archive is deleted only once the row that names it is gone. The other
-// order leaves a row pointing at an object that no longer exists.
+// The catalog archive is independent of this sandbox row. A failed row
+// delete must not take the definition zip with it either.
 func TestRunRemoveKeepsTheBundleWhenTheRowCannotBeDeleted(t *testing.T) {
 	fx := newInstallFixture(t)
 	fx.seedInstalledSkill("sk-1", "snap-old", 2)

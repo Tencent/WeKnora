@@ -1,78 +1,39 @@
 <template>
-  <div
-    :class="[
-      'submenu_item',
-      !batchMode && activePath === item.path ? 'submenu_item_active' : '',
-      batchMode && selectedIds.includes(item.id) ? 'submenu_item_selected' : '',
-      batchMode ? 'submenu_item_batch' : '',
-    ]"
-    @mouseenter="emit('hover-in')"
-    @mouseleave="emit('hover-out')"
-    @click="batchMode ? emit('toggle-select') : emit('navigate')"
-  >
-    <t-checkbox
-      v-if="batchMode"
-      class="batch-checkbox"
-      :checked="selectedIds.includes(item.id)"
-      @click.stop
-      @change="emit('toggle-select')"
-    />
-    <form
-      v-if="titleEditing"
-      class="session-title-edit"
-      @submit.prevent="submitTitleEdit"
-      @click.stop
-    >
-      <input
-        ref="titleInputRef"
-        v-model="titleDraft"
-        class="session-title-edit__input"
-        :maxlength="SESSION_TITLE_MAX_LENGTH"
-        @keydown.esc.prevent="cancelTitleEdit"
-        @blur="submitTitleEdit"
-      />
+  <div :class="[
+    'submenu_item',
+    !batchMode && activePath === item.path ? 'submenu_item_active' : '',
+    batchMode && selectedIds.includes(item.id) ? 'submenu_item_selected' : '',
+    batchMode ? 'submenu_item_batch' : '',
+  ]" @mouseenter="emit('hover-in')" @mouseleave="emit('hover-out')"
+    @click="batchMode ? emit('toggle-select') : emit('navigate')">
+    <t-checkbox v-if="batchMode" class="batch-checkbox" :checked="selectedIds.includes(item.id)" @click.stop
+      @change="emit('toggle-select')" />
+    <form v-if="titleEditing" class="session-title-edit" @submit.prevent="submitTitleEdit" @click.stop>
+      <input ref="titleInputRef" v-model="titleDraft" class="session-title-edit__input"
+        :maxlength="SESSION_TITLE_MAX_LENGTH" @keydown.esc.prevent="cancelTitleEdit" @blur="submitTitleEdit" />
     </form>
     <span v-else class="submenu_title" :class="batchMode ? 'submenu_title--batch' : ''" :title="item.title">
       <t-icon v-if="item.is_pinned" name="pin" class="submenu_pin_icon" />
       <span class="submenu_title-text">{{ item.title }}</span>
+      <span v-if="apiOwnerTag" class="session-owner-tag" :class="`session-owner-tag--${apiOwnerTag.kind}`"
+        :title="apiOwnerTag.full">{{ apiOwnerTag.label }}</span>
     </span>
+    <span v-if="running" class="session-running-indicator" role="status" :aria-label="t('menu.sessionInProgress')"
+      :title="t('menu.sessionInProgress')"><span class="session-running-indicator__spinner" aria-hidden="true" /></span>
     <div v-if="!batchMode" class="session-row-menu-wrap" @click.stop>
-      <t-popup
-        v-model:visible="menuOpen"
-        :overlay-class-name="menuOverlayClass"
-        trigger="click"
-        destroy-on-close
-        placement="bottom-right"
-        @visible-change="onMenuVisibleChange"
-      >
-        <button
-          type="button"
-          class="menu-more-wrap"
-          aria-haspopup="menu"
-          :aria-expanded="menuOpen"
-          @click.stop
-        >
+      <t-popup v-model:visible="menuOpen" :overlay-class-name="menuOverlayClass" trigger="click" destroy-on-close
+        placement="bottom-right" @visible-change="onMenuVisibleChange">
+        <button type="button" class="menu-more-wrap" aria-haspopup="menu" :aria-expanded="menuOpen" @click.stop>
           <t-icon name="ellipsis" class="menu-more" />
         </button>
         <template #content>
           <div class="session-action-menu" @click.stop>
             <template v-if="menuMode === 'menu'">
               <template v-for="(option, index) in menuOptions" :key="option.value">
-                <div
-                  v-if="shouldShowDividerBefore(option.value, index)"
-                  class="session-action-menu__divider"
-                />
-                <button
-                  type="button"
-                  class="session-action-menu__item"
-                  :class="{ 'is-danger': option.theme === 'error' }"
-                  @click="handleMenuClick(option)"
-                >
-                  <component
-                    :is="option.prefixIcon"
-                    v-if="option.prefixIcon"
-                    class="session-action-menu__icon"
-                  />
+                <div v-if="shouldShowDividerBefore(option.value, index)" class="session-action-menu__divider" />
+                <button type="button" class="session-action-menu__item"
+                  :class="{ 'is-danger': option.theme === 'error' }" @click="handleMenuClick(option)">
+                  <component :is="option.prefixIcon" v-if="option.prefixIcon" class="session-action-menu__icon" />
                   <span>{{ option.content }}</span>
                 </button>
               </template>
@@ -89,11 +50,7 @@
                 <button type="button" class="session-action-confirm__btn" @click="backToMenu">
                   {{ t('common.cancel') }}
                 </button>
-                <button
-                  type="button"
-                  class="session-action-confirm__btn is-danger"
-                  @click="confirmDangerAction"
-                >
+                <button type="button" class="session-action-confirm__btn is-danger" @click="confirmDangerAction">
                   {{ menuMode === 'clear' ? t('common.clear') : t('common.delete') }}
                 </button>
               </div>
@@ -120,11 +77,12 @@ interface SessionMenuOption {
 type MenuMode = 'menu' | 'clear' | 'delete'
 
 const props = defineProps<{
-  item: { id: string; path: string; title: string; is_pinned?: boolean }
+  item: { id: string; path: string; title: string; is_pinned?: boolean; user_id?: string }
   batchMode: boolean
   activePath: string
   selectedIds: string[]
   menuOptions: SessionMenuOption[]
+  running?: boolean
   /** 渠道文件夹下的会话（样式与聊天区会话共用文案列对齐） */
   nested?: boolean
 }>()
@@ -151,6 +109,30 @@ const menuOverlayClass = computed(() => (
     ? 'session-action-menu-popup'
     : 'session-action-menu-popup is-confirm'
 ))
+
+/**
+ * API/渠道会话的 owner 是合成主体（api_external_user:<tenant>:<EMP_ID> /
+ * api_tenant_key:<tenant>:<keyID>），不是真实账号。为方便管理员稽核"这条是谁的"，
+ * 在标题旁渲染一个小徽标：外部员工会话取 sub（可读标识），平台 key 会话标 generic。
+ * 普通账号会话（user_id 为空或为真实用户 UUID）不显示。
+ */
+interface ApiOwnerTag { kind: 'user' | 'key'; label: string; full: string }
+const API_EXTERNAL_USER_PREFIX = 'api_external_user:'
+const API_TENANT_KEY_PREFIX = 'api_tenant_key:'
+
+const apiOwnerTag = computed<ApiOwnerTag | null>(() => {
+  const uid = props.item.user_id || ''
+  if (uid.startsWith(API_EXTERNAL_USER_PREFIX)) {
+    const tail = uid.slice(API_EXTERNAL_USER_PREFIX.length)
+    const segments = tail.split(':').filter(Boolean)
+    const label = segments.length ? segments[segments.length - 1] : tail
+    return label ? { kind: 'user', label, full: uid } : null
+  }
+  if (uid.startsWith(API_TENANT_KEY_PREFIX)) {
+    return { kind: 'key', label: 'API', full: uid }
+  }
+  return null
+})
 
 const onMenuVisibleChange = (visible: boolean): void => {
   if (!visible) menuMode.value = 'menu'
@@ -223,6 +205,40 @@ const confirmDangerAction = (): void => {
   position: relative;
 }
 
+.session-running-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-left: 4px;
+  color: var(--td-brand-color);
+}
+
+.session-running-indicator__spinner {
+  display: block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--td-component-stroke);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: session-running-spin 0.8s linear infinite;
+}
+
+@keyframes session-running-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-running-indicator__spinner {
+    animation: none;
+  }
+}
+
 .session-row-menu-wrap {
   position: relative;
   flex: 0 0 auto;
@@ -263,6 +279,36 @@ const confirmDangerAction = (): void => {
 
   &:hover {
     background: var(--td-bg-color-container-hover);
+  }
+}
+
+// 合成 owner（api_external_user / api_tenant_key）会话的"提问人"徽标。
+// 父级 .submenu_title 是 flex，故必须 flex:0 0 auto，标题省略号只压缩标题文本。
+.session-owner-tag {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  max-width: 108px;
+  height: 16px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  line-height: 15px;
+  font-weight: 400;
+  border-radius: 4px;
+
+  &--user {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+    border: 0.5px solid var(--td-brand-color-light-active);
+  }
+
+  &--key {
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-container-hover);
+    border: 0.5px solid var(--td-component-stroke);
   }
 }
 </style>

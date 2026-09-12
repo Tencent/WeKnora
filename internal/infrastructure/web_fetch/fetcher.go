@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -24,26 +26,31 @@ const (
 	fetchTimeout         = 60 * time.Second
 	pipelineFetchTimeout = 15 * time.Second
 	maxBodySize          = 100 * 1024
+	maxAgentBodySize     = 2 * 1024 * 1024
 )
 
 // ErrorCode identifies the stage and class of a fetch failure.
 type ErrorCode string
 
+// Fetch failure codes distinguish retryable network errors from permanent failures.
 const (
-	ErrorInvalidURL       ErrorCode = "invalid_url"
-	ErrorDNS              ErrorCode = "dns_failed"
-	ErrorTimeout          ErrorCode = "connection_timeout"
-	ErrorTLS              ErrorCode = "tls_failed"
-	ErrorHTTP403          ErrorCode = "http_403"
-	ErrorHTTP429          ErrorCode = "http_429"
-	ErrorHTTP5xx          ErrorCode = "http_5xx"
-	ErrorHTTPStatus       ErrorCode = "http_status"
-	ErrorSSRFRejected     ErrorCode = "ssrf_rejected"
-	ErrorRedirectRejected ErrorCode = "redirect_rejected"
-	ErrorRead             ErrorCode = "read_failed"
-	ErrorHTMLParse        ErrorCode = "html_parse_failed"
-	ErrorEmptyContent     ErrorCode = "empty_content"
-	ErrorConnection       ErrorCode = "connection_failed"
+	ErrorInvalidURL         ErrorCode = "invalid_url"
+	ErrorDNS                ErrorCode = "dns_failed"
+	ErrorTimeout            ErrorCode = "connection_timeout"
+	ErrorTLS                ErrorCode = "tls_failed"
+	ErrorHTTP403            ErrorCode = "http_403"
+	ErrorHTTP429            ErrorCode = "http_429"
+	ErrorHTTP5xx            ErrorCode = "http_5xx"
+	ErrorHTTPStatus         ErrorCode = "http_status"
+	ErrorSSRFRejected       ErrorCode = "ssrf_rejected"
+	ErrorRedirectRejected   ErrorCode = "redirect_rejected"
+	ErrorRead               ErrorCode = "read_failed"
+	ErrorHTMLParse          ErrorCode = "html_parse_failed"
+	ErrorEmptyContent       ErrorCode = "empty_content"
+	ErrorConnection         ErrorCode = "connection_failed"
+	ErrorBodyTooLarge       ErrorCode = "body_too_large"
+	ErrorUnsupportedContent ErrorCode = "unsupported_content"
+	ErrorSnapshotExpired    ErrorCode = "snapshot_expired"
 )
 
 // FetchError carries stable, machine-readable failure details.
@@ -84,6 +91,7 @@ func ErrorDetails(err error) (ErrorCode, bool, string) {
 
 // Fetcher fetches and extracts public web pages through an SSRF-safe client.
 type Fetcher struct {
+	markdown      bool
 	client        *http.Client
 	timeout       time.Duration
 	maxBodySize   int64
@@ -101,13 +109,17 @@ type pinnedTarget struct {
 }
 
 type httpFetchResult struct {
-	body     []byte
-	finalURL string
+	body        []byte
+	finalURL    string
+	contentType string
 }
 
 // NewFetcher creates a production fetcher with DNS and redirect SSRF guards.
 func NewFetcher() *Fetcher {
-	return newFetcher(fetchTimeout, renderWithChromium)
+	f := newFetcher(fetchTimeout, renderWithChromium)
+	f.markdown = true
+	f.maxBodySize = maxAgentBodySize
+	return f
 }
 
 // NewPipelineFetcher creates an HTTP-only fetcher for the chat pipeline.
@@ -159,8 +171,12 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 	defer cancel()
 	httpResult, httpErr := f.fetchHTTP(requestCtx, rawURL, parsedURL)
 	if httpErr == nil {
-		content, parseErr := htmlToText(string(httpResult.body))
-		requiresBrowser := parseErr == nil && needsBrowserFallback(content, httpResult.body)
+		content, parseErr := f.extractContent(httpResult)
+		if parseErr != nil && f.markdown {
+			return "", parseErr
+		}
+		requiresBrowser := parseErr == nil && (!f.markdown || isHTMLContent(httpResult.contentType)) &&
+			needsBrowserFallback(content, httpResult.body)
 		if parseErr == nil && strings.TrimSpace(content) != "" && !requiresBrowser {
 			logger.Infof(ctx, "[WebFetch] fetched %s → %d chars", rawURL, len(content))
 			return content, nil
@@ -168,7 +184,9 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 		if f.renderBrowser != nil {
 			browserURL := firstNonEmpty(httpResult.finalURL, rawURL)
 			if rendered, browserErr := f.fetchWithBrowser(requestCtx, browserURL); browserErr == nil {
-				content, browserParseErr := htmlToText(rendered)
+				content, browserParseErr := f.extractContent(&httpFetchResult{
+					body: []byte(rendered), finalURL: browserURL, contentType: "text/html",
+				})
 				if browserParseErr == nil && strings.TrimSpace(content) != "" {
 					logger.Infof(ctx, "[WebFetch] rendered %s → %d chars", rawURL, len(content))
 					return content, nil
@@ -186,7 +204,9 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 
 	if f.renderBrowser != nil && canRenderAfterHTTPError(httpErr) {
 		if rendered, browserErr := f.fetchWithBrowser(requestCtx, rawURL); browserErr == nil {
-			content, browserParseErr := htmlToText(rendered)
+			content, browserParseErr := f.extractContent(&httpFetchResult{
+				body: []byte(rendered), finalURL: rawURL, contentType: "text/html",
+			})
 			if browserParseErr == nil && strings.TrimSpace(content) != "" {
 				logger.Infof(ctx, "[WebFetch] rendered %s → %d chars", rawURL, len(content))
 				return content, nil
@@ -207,18 +227,33 @@ func (f *Fetcher) fetchHTTP(ctx context.Context, rawURL string, parsedURL *url.U
 		return nil, classifyRequestError(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	success := resp.StatusCode == http.StatusOK
+	if f.markdown {
+		success = resp.StatusCode >= 200 && resp.StatusCode < 300
+	}
+	if !success {
 		return nil, classifyHTTPStatus(resp.StatusCode, resp.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBodySize))
+	readLimit := f.maxBodySize
+	if f.markdown {
+		readLimit++
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, readLimit))
 	if err != nil {
 		return nil, newFetchError(ErrorRead, true, "read failed: %v", err)
+	}
+	if f.markdown && int64(len(body)) > f.maxBodySize {
+		return nil, newFetchError(ErrorBodyTooLarge, false, "page exceeds the %d byte download limit", f.maxBodySize)
+	}
+	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if contentType == "" {
+		contentType, _, _ = mime.ParseMediaType(http.DetectContentType(body))
 	}
 	finalURL := rawURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		finalURL = resp.Request.URL.String()
 	}
-	return &httpFetchResult{body: body, finalURL: finalURL}, nil
+	return &httpFetchResult{body: body, finalURL: finalURL, contentType: contentType}, nil
 }
 
 func (f *Fetcher) pinnedDialContext() func(context.Context, string, string) (net.Conn, error) {
@@ -315,14 +350,10 @@ func renderWithChromium(ctx context.Context, target pinnedTarget) (string, error
 	); err != nil {
 		return "", fmt.Errorf("chromium render failed: %w", err)
 	}
-	return string(limitBytes([]byte(html), maxBodySize)), nil
-}
-
-func limitBytes(value []byte, max int64) []byte {
-	if int64(len(value)) <= max {
-		return value
+	if len(html) > maxAgentBodySize {
+		return "", newFetchError(ErrorBodyTooLarge, false, "rendered page exceeds download limit")
 	}
-	return value[:max]
+	return html, nil
 }
 
 func needsBrowserFallback(content string, html []byte) bool {
@@ -482,4 +513,27 @@ func stripTags(html string) string {
 		}
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func isHTMLContent(contentType string) bool {
+	return contentType == "text/html" || contentType == "application/xhtml+xml"
+}
+
+func (f *Fetcher) extractContent(result *httpFetchResult) (string, error) {
+	if !f.markdown {
+		return htmlToText(string(result.body))
+	}
+	if isHTMLContent(result.contentType) {
+		return htmlToMarkdown(string(result.body), result.finalURL)
+	}
+	if strings.HasPrefix(result.contentType, "text/") ||
+		result.contentType == "application/json" || result.contentType == "application/xml" ||
+		strings.HasSuffix(result.contentType, "+json") || strings.HasSuffix(result.contentType, "+xml") {
+		if !utf8.Valid(result.body) || strings.ContainsRune(string(result.body), 0) {
+			return "", newFetchError(ErrorUnsupportedContent, false, "page is not UTF-8 text")
+		}
+		return strings.TrimSpace(string(result.body)), nil
+	}
+	return "", newFetchError(ErrorUnsupportedContent, false,
+		"unsupported page content type: %s; use an appropriate document reader", result.contentType)
 }

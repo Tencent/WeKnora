@@ -58,7 +58,11 @@ func (t *envdCompatTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 	rewritten := req.Clone(req.Context())
 	if t.user != "" && rewritten.Header.Get("Authorization") == "" {
-		rewritten.Header.Set("Authorization", basicAuthorizationFor(t.user))
+		user := t.user
+		if req.URL.Path == envdFilesRoute || strings.HasPrefix(req.URL.Path, "/filesystem.Filesystem/") {
+			user = remoteFileUser(req.Context())
+		}
+		rewritten.Header.Set("Authorization", basicAuthorizationFor(user))
 	}
 	if err := rewriteEnvdUpload(rewritten); err != nil {
 		return nil, err

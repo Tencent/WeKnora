@@ -47,9 +47,10 @@
         </button>
       </header>
       <SkillFilesPanel
-        v-if="visible && configId && skillId"
+        v-if="visible && (catalogId || (configId && skillId))"
         :config-id="configId"
         :skill-id="skillId"
+        :catalog-id="catalogId"
         :drawer-width="drawerWidth"
       />
     </div>
@@ -66,8 +67,9 @@ const MIN_WIDTH = 480
 
 const props = defineProps<{
   visible: boolean
-  configId: string
-  skillId: string
+  configId?: string
+  skillId?: string
+  catalogId?: string
   skillName: string
 }>()
 

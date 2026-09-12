@@ -32,11 +32,14 @@ func (s *mcpToolApprovalService) ListByService(ctx context.Context, tenantID uin
 	return s.repo.ListByService(ctx, tenantID, serviceID)
 }
 
-func (s *mcpToolApprovalService) SetRequireApproval(
-	ctx context.Context, tenantID uint64, serviceID, toolName string, require bool,
+func (s *mcpToolApprovalService) SetPolicy(
+	ctx context.Context, tenantID uint64, serviceID, toolName string, requireApproval, enabled *bool,
 ) error {
 	if toolName == "" {
 		return fmt.Errorf("tool_name is required")
+	}
+	if requireApproval == nil && enabled == nil {
+		return fmt.Errorf("require_approval or enabled is required")
 	}
 	svc, err := s.mcpRepo.GetByID(ctx, tenantID, serviceID)
 	if err != nil {
@@ -45,15 +48,28 @@ func (s *mcpToolApprovalService) SetRequireApproval(
 	if svc == nil {
 		return fmt.Errorf("mcp service not found")
 	}
-	row := &types.MCPToolApproval{
-		TenantID:        tenantID,
-		ServiceID:       serviceID,
-		ToolName:        toolName,
-		RequireApproval: require,
-	}
-	return s.repo.Upsert(ctx, row)
+	return s.repo.UpsertPolicy(ctx, tenantID, serviceID, toolName, types.MCPToolPolicyPatch{
+		RequireApproval: requireApproval,
+		Enabled:         enabled,
+	})
+}
+
+func (s *mcpToolApprovalService) SetRequireApproval(
+	ctx context.Context, tenantID uint64, serviceID, toolName string, require bool,
+) error {
+	return s.SetPolicy(ctx, tenantID, serviceID, toolName, &require, nil)
+}
+
+func (s *mcpToolApprovalService) SetEnabled(
+	ctx context.Context, tenantID uint64, serviceID, toolName string, enabled bool,
+) error {
+	return s.SetPolicy(ctx, tenantID, serviceID, toolName, nil, &enabled)
 }
 
 func (s *mcpToolApprovalService) IsRequired(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
 	return s.repo.IsRequired(ctx, tenantID, serviceID, toolName)
+}
+
+func (s *mcpToolApprovalService) IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error) {
+	return s.repo.IsEnabled(ctx, tenantID, serviceID, toolName)
 }

@@ -585,6 +585,7 @@ import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { copyWithToast } from '@/utils/clipboard';
+import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
@@ -1037,7 +1038,7 @@ async function handleSave() {
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: formData.value.knowledge_base_id,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
@@ -1055,7 +1056,7 @@ async function handleSave() {
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: formData.value.knowledge_base_id,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));

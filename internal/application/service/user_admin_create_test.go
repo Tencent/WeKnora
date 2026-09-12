@@ -60,7 +60,13 @@ func TestAdminCreateUserGeneratesPolicyCompliantPasswordWhenEmpty(t *testing.T) 
 	if user == nil || repo.created == nil {
 		t.Fatalf("user was not persisted: %v", repo.created)
 	}
-	if err := ValidatePasswordPolicy(generated); err != nil {
+
+	complexPasswordEnabled := false
+	if svc.config != nil && svc.config.Auth != nil {
+		complexPasswordEnabled = svc.config.Auth.ComplexPasswordEnabled
+	}
+
+	if err := ValidatePasswordPolicy(generated, complexPasswordEnabled); err != nil {
 		t.Fatalf("generated password violates the policy: %v", err)
 	}
 	if bcrypt.CompareHashAndPassword([]byte(repo.created.PasswordHash), []byte(generated)) != nil {
@@ -135,12 +141,24 @@ func TestGeneratePolicyCompliantPasswordAlwaysComplies(t *testing.T) {
 	// ~0.4% of base64url draws have no digit. Regenerating until the
 	// policy passes makes compliance certain for every draw.
 	for i := range 2000 {
-		pw, err := generatePolicyCompliantPassword()
+		pw, err := generatePolicyCompliantPassword(false)
 		if err != nil {
-			t.Fatalf("iteration %d: generate: %v", i, err)
+			t.Fatalf("iteration %d: failed to generate simple password: %v", i, err)
 		}
-		if err := ValidatePasswordPolicy(pw); err != nil {
-			t.Fatalf("iteration %d: generated password %q violates the policy: %v", i, pw, err)
+		if err := ValidatePasswordPolicy(pw, false); err != nil {
+			t.Fatalf("iteration %d: generated simple password %q violates the policy: %v", i, pw, err)
+		}
+	}
+
+	// Complex policies are constructed to comply in a single pass; still
+	// sample many draws so a shuffle regression cannot hide.
+	for i := range 200 {
+		pw, err := generatePolicyCompliantPassword(true)
+		if err != nil {
+			t.Fatalf("iteration %d: failed to generate complex password: %v", i, err)
+		}
+		if err := ValidatePasswordPolicy(pw, true); err != nil {
+			t.Fatalf("iteration %d: generated complex password %q violates the policy: %v", i, pw, err)
 		}
 	}
 }
@@ -162,6 +180,35 @@ func TestAdminCreateUserRejectsWeakPasswordBeforePersisting(t *testing.T) {
 		if repo.created != nil {
 			t.Fatalf("password=%q reached persistence", pw)
 		}
+	}
+}
+
+func TestAdminCreateUserHonoursRuntimeComplexPolicy(t *testing.T) {
+	repo := &adminCreateUserRepo{}
+	svc := &userService{
+		userRepo:         repo,
+		systemSettingSvc: &stubComplexPasswordSettings{enabled: true},
+	}
+
+	user, generated, err := svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "alice", Email: "alice@example.com",
+	}, types.TenantProvisioningTenantless)
+	if err != nil {
+		t.Fatalf("AdminCreateUser generate: %v", err)
+	}
+	if user == nil || generated == "" {
+		t.Fatal("expected a generated complex password")
+	}
+	if err := ValidatePasswordPolicy(generated, true); err != nil {
+		t.Fatalf("generated password %q violates complex policy: %v", generated, err)
+	}
+
+	simple := "PlainPass9"
+	_, _, err = svc.AdminCreateUser(context.Background(), &types.AdminCreateUserRequest{
+		Username: "bob", Email: "bob@example.com", Password: &simple,
+	}, types.TenantProvisioningTenantless)
+	if !errors.Is(err, ErrComplexPasswordPolicy) {
+		t.Fatalf("explicit simple password err=%v, want ErrComplexPasswordPolicy", err)
 	}
 }
 

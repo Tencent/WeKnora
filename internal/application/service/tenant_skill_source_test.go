@@ -2,8 +2,10 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -23,7 +25,7 @@ func TestParseSkillSource(t *testing.T) {
 			in:   "@lyingbug/weknora",
 			want: parsedSkillSource{
 				Kind: skillSourceRegistry, Registry: defaultSkillRegistryOrigin,
-				Slug: "lyingbug/weknora",
+				Owner: "lyingbug", Slug: "weknora",
 			},
 		},
 		{
@@ -31,7 +33,7 @@ func TestParseSkillSource(t *testing.T) {
 			in:   "https://clawhub.ai/lyingbug/weknora",
 			want: parsedSkillSource{
 				Kind: skillSourceRegistry, Registry: "https://clawhub.ai",
-				Slug: "lyingbug/weknora",
+				Owner: "lyingbug", Slug: "weknora",
 			},
 		},
 		{
@@ -39,7 +41,15 @@ func TestParseSkillSource(t *testing.T) {
 			in:   "https://clawhub.ai/steipete/skills/github",
 			want: parsedSkillSource{
 				Kind: skillSourceRegistry, Registry: "https://clawhub.ai",
-				Slug: "steipete/github",
+				Owner: "steipete", Slug: "github",
+			},
+		},
+		{
+			name: "clawhub owner skills path",
+			in:   "https://clawhub.ai/jixinyi546-maker/skills/emar-ppt-skill",
+			want: parsedSkillSource{
+				Kind: skillSourceRegistry, Registry: "https://clawhub.ai",
+				Owner: "jixinyi546-maker", Slug: "emar-ppt-skill",
 			},
 		},
 		{
@@ -106,11 +116,51 @@ func TestParseSkillSource(t *testing.T) {
 			},
 		},
 		{
-			name: "skills.sh maps to github",
+			name: "clawhub skills-sh catalog page",
+			in:   "https://clawhub.ai/skills-sh/skills-101/superpowers/ai-image-generation",
+			want: parsedSkillSource{
+				Kind: skillSourceSkillsSh, Registry: "https://clawhub.ai",
+				Owner: "skills-101", Repo: "superpowers", Slug: "ai-image-generation",
+			},
+		},
+		{
+			name: "clawhub skills-sh repo named skills",
+			in:   "https://clawhub.ai/skills-sh/doany-ai/skills/ai-image-generation",
+			want: parsedSkillSource{
+				Kind: skillSourceSkillsSh, Registry: "https://clawhub.ai",
+				Owner: "doany-ai", Repo: "skills", Slug: "ai-image-generation",
+			},
+		},
+		{
+			name: "skills-sh colon reference",
+			in:   "skills-sh:skills-101/superpowers/ai-image-generation",
+			want: parsedSkillSource{
+				Kind: skillSourceSkillsSh, Registry: defaultSkillRegistryOrigin,
+				Owner: "skills-101", Repo: "superpowers", Slug: "ai-image-generation",
+			},
+		},
+		{
+			name: "skills-sh slash reference",
+			in:   "skills-sh/skills-101/superpowers/ai-image-generation",
+			want: parsedSkillSource{
+				Kind: skillSourceSkillsSh, Registry: defaultSkillRegistryOrigin,
+				Owner: "skills-101", Repo: "superpowers", Slug: "ai-image-generation",
+			},
+		},
+		{
+			name: "skills.sh catalog page uses clawhub resolver",
 			in:   "https://skills.sh/vercel-labs/agent-skills/web-design",
 			want: parsedSkillSource{
+				Kind: skillSourceSkillsSh, Registry: defaultSkillRegistryOrigin,
+				Owner: "vercel-labs", Repo: "agent-skills", Slug: "web-design",
+			},
+		},
+		{
+			name: "skills.sh owner/repo stays github",
+			in:   "https://skills.sh/vercel-labs/agent-skills",
+			want: parsedSkillSource{
 				Kind: skillSourceGitHub, Owner: "vercel-labs", Repo: "agent-skills",
-				Ref: "HEAD", Subdir: "web-design",
+				Ref: "HEAD",
 			},
 		},
 		{
@@ -154,6 +204,14 @@ func TestParseSkillSourceRejects(t *testing.T) {
 	_, err = parseSkillSource("vercel-labs/agent-skills@frontend-design")
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.ErrorContains(t, err, "ambiguous")
+
+	_, err = parseSkillSource("https://clawhub.ai/skills-sh/skills-101/superpowers")
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "owner/repo/slug")
+
+	_, err = parseSkillSource("https://clawhub.ai/foo/bar/baz/qux")
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "unrecognized registry path")
 }
 
 func TestParseSkillSourceAtSlugIsRegistryNotGitHub(t *testing.T) {
@@ -161,7 +219,8 @@ func TestParseSkillSourceAtSlugIsRegistryNotGitHub(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, skillSourceRegistry, got.Kind)
 	require.Equal(t, defaultSkillRegistryOrigin, got.Registry)
-	require.Equal(t, "clawhub_pskoett/self-improving-agent", got.Slug)
+	require.Equal(t, "clawhub_pskoett", got.Owner)
+	require.Equal(t, "self-improving-agent", got.Slug)
 }
 
 func TestFetchSkillArchiveRejectsAmbiguousShorthandWithoutFetching(t *testing.T) {
@@ -170,12 +229,147 @@ func TestFetchSkillArchiveRejectsAmbiguousShorthandWithoutFetching(t *testing.T)
 	require.ErrorContains(t, err, "ambiguous")
 }
 
+func TestClawHubSkillsShMapsToInstallResolver(t *testing.T) {
+	cases := []string{
+		"https://clawhub.ai/skills-sh/skills-101/superpowers/ai-image-generation",
+		"skills-sh:skills-101/superpowers/ai-image-generation",
+		"skills-sh/skills-101/superpowers/ai-image-generation",
+		"https://www.skills.sh/skills-101/superpowers/ai-image-generation",
+	}
+	for _, in := range cases {
+		got, err := parseSkillSource(in)
+		require.NoError(t, err, in)
+		u, err := got.fetchURL()
+		require.NoError(t, err, in)
+		parsed, err := url.Parse(u)
+		require.NoError(t, err, in)
+		require.Equal(t, "https://clawhub.ai/api/v1/skills/ai-image-generation/install",
+			parsed.Scheme+"://"+parsed.Host+parsed.Path, in)
+		require.Equal(t, "skills-sh:skills-101/superpowers/ai-image-generation",
+			parsed.Query().Get("reference"), in)
+	}
+}
+
+func TestSourceFromHandoffSkillsShGitHubNestedPath(t *testing.T) {
+	ok := true
+	next, err := sourceFromHandoff(parsedSkillSource{
+		Kind: skillSourceSkillsSh, Registry: defaultSkillRegistryOrigin,
+	}, skillSourceHandoff{
+		OK:          &ok,
+		InstallKind: "github",
+		GitHub: &skillSourceGitHubHandoff{
+			Repo:   "skills-101/superpowers",
+			Path:   "tools/image/ai-image-generation",
+			Commit: "becc25649700d5457772a00e5143e28ccf9e5afa",
+			SourceURL: "https://github.com/skills-101/superpowers/tree/" +
+				"becc25649700d5457772a00e5143e28ccf9e5afa/tools/image/ai-image-generation",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, skillSourceGitHub, next.Kind)
+	require.Equal(t, "skills-101", next.Owner)
+	require.Equal(t, "superpowers", next.Repo)
+	require.Equal(t, "becc25649700d5457772a00e5143e28ccf9e5afa", next.Ref)
+	require.Equal(t, "tools/image/ai-image-generation", next.Subdir)
+}
+
+func TestSourceFromHandoffSkillsShGitHubWithoutSourceURL(t *testing.T) {
+	ok := true
+	next, err := sourceFromHandoff(parsedSkillSource{Kind: skillSourceSkillsSh}, skillSourceHandoff{
+		OK:          &ok,
+		InstallKind: "github",
+		GitHub: &skillSourceGitHubHandoff{
+			Repo:   "openai/skills",
+			Path:   "skills/.curated/pdf",
+			Commit: "49f948faa9258a0c61caceaf225e179651397431",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, skillSourceGitHub, next.Kind)
+	require.Equal(t, "openai", next.Owner)
+	require.Equal(t, "skills", next.Repo)
+	require.Equal(t, "49f948faa9258a0c61caceaf225e179651397431", next.Ref)
+	require.Equal(t, "skills/.curated/pdf", next.Subdir)
+}
+
+func TestSourceFromHandoffSkillsShRefused(t *testing.T) {
+	ok := false
+	_, err := sourceFromHandoff(parsedSkillSource{Kind: skillSourceSkillsSh}, skillSourceHandoff{
+		OK:      &ok,
+		Reason:  "github_upstream_missing",
+		Message: "upstream listing is gone",
+	})
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "upstream listing is gone")
+}
+
+func TestClawHubOwnerSlugMapsToDownloadAPI(t *testing.T) {
+	cases := []string{
+		"@jixinyi546-maker/emar-ppt-skill",
+		"https://clawhub.ai/jixinyi546-maker/emar-ppt-skill",
+		"https://clawhub.ai/jixinyi546-maker/skills/emar-ppt-skill",
+	}
+	for _, in := range cases {
+		got, err := parseSkillSource(in)
+		require.NoError(t, err, in)
+		u, err := got.fetchURL()
+		require.NoError(t, err, in)
+		parsed, err := url.Parse(u)
+		require.NoError(t, err, in)
+		require.Equal(t, "https://clawhub.ai/api/v1/download", parsed.Scheme+"://"+parsed.Host+parsed.Path, in)
+		require.Equal(t, "emar-ppt-skill", parsed.Query().Get("slug"), in)
+		require.Equal(t, "jixinyi546-maker", parsed.Query().Get("ownerHandle"), in)
+	}
+}
+
 func TestSkillHubCNMapsToDownloadAPI(t *testing.T) {
 	got, err := parseSkillSource("https://skillhub.cn/skills/clawhub_pskoett/self-improving-agent")
 	require.NoError(t, err)
 	u, err := got.fetchURL()
 	require.NoError(t, err)
 	require.Equal(t, skillHubCNAPIOrigin+"/api/v1/download?slug=self-improving-agent", u)
+}
+
+func TestFetchSkillArchiveFromSkillsShInstallResolver(t *testing.T) {
+	archive := zipBundle(t, map[string]string{
+		"repo-main/README.md":                                "# repo",
+		"repo-main/tools/image/ai-image-generation/SKILL.md": validSkillMD,
+		"repo-main/tools/image/ai-image-generation/run.py":   "print(1)\n",
+		"repo-main/other/SKILL.md": strings.Replace(
+			validSkillMD, "name: pdf-tools", "name: other-skill", 1),
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/skills/ai-image-generation/install":
+			require.Equal(t, "skills-sh:skills-101/superpowers/ai-image-generation",
+				r.URL.Query().Get("reference"))
+			_ = json.NewEncoder(w).Encode(skillSourceHandoff{
+				InstallKind: "github",
+				GitHub: &skillSourceGitHubHandoff{
+					Repo:   "skills-101/superpowers",
+					Path:   "tools/image/ai-image-generation",
+					Commit: "abc123",
+				},
+				ArchiveURL: "http://" + r.Host + "/archive.zip",
+			})
+		case "/archive.zip":
+			w.Header().Set("Content-Type", "application/zip")
+			_, _ = w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	got, err := fetchSkillArchive(t.Context(),
+		server.URL+"/skills-sh/skills-101/superpowers/ai-image-generation", server.Client())
+	require.NoError(t, err)
+	bundle, err := ParseSkillBundle(got)
+	require.NoError(t, err)
+	require.Equal(t, "pdf-tools", bundle.Name)
+	require.Contains(t, bundle.Files, "run.py")
+	require.NotContains(t, bundle.Files, "README.md")
 }
 
 func TestFetchSkillArchiveFromRegistry(t *testing.T) {
@@ -321,18 +515,23 @@ func TestFetchSkillArchiveFollowsGitHubHandoff(t *testing.T) {
 }
 
 func TestFetchSkillArchiveFromSkillMarkdown(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/markdown")
-		_, _ = w.Write([]byte(validSkillMD))
-	}))
-	t.Cleanup(server.Close)
-	allowLoopbackSkillFetch(t)
+	for _, prefix := range []string{"", "\ufeff"} {
+		t.Run(fmt.Sprintf("prefix=%q", prefix), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/markdown")
+				_, _ = w.Write([]byte(prefix + validSkillMD))
+			}))
+			t.Cleanup(server.Close)
+			allowLoopbackSkillFetch(t)
 
-	got, err := fetchSkillArchive(t.Context(), server.URL+"/SKILL.md", server.Client())
-	require.NoError(t, err)
-	bundle, err := ParseSkillBundle(got)
-	require.NoError(t, err)
-	require.Equal(t, "pdf-tools", bundle.Name)
+			got, err := fetchSkillArchive(t.Context(), server.URL+"/SKILL.md", server.Client())
+			require.NoError(t, err)
+			bundle, err := ParseSkillBundle(got)
+			require.NoError(t, err)
+			require.Equal(t, "pdf-tools", bundle.Name)
+			require.Equal(t, []byte(prefix+validSkillMD), bundle.Files["SKILL.md"])
+		})
+	}
 }
 
 func TestParseSkillBundleNestedRemoteArchive(t *testing.T) {
@@ -371,4 +570,21 @@ func TestFetchSkillArchiveRejectsNonSkillHTML(t *testing.T) {
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.True(t, strings.Contains(err.Error(), "skill archive") ||
 		strings.Contains(err.Error(), "zip skill bundle"))
+}
+
+func TestFetchSkillArchiveRejectsOversizeBody(t *testing.T) {
+	t.Setenv("MAX_FILE_SIZE_MB", "1")
+	t.Setenv("MAX_SKILL_BUNDLE_SIZE_MB", "1")
+	payload := strings.Repeat("z", 2<<20)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+		_, _ = w.Write([]byte(payload))
+	}))
+	t.Cleanup(server.Close)
+	allowLoopbackSkillFetch(t)
+
+	_, err := fetchSkillArchive(t.Context(), server.URL+"/demo.zip", server.Client())
+	require.ErrorIs(t, err, ErrSkillSourceInvalid)
+	require.ErrorContains(t, err, "1 MB")
 }

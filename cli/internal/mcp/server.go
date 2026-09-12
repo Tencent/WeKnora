@@ -25,6 +25,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Tencent/WeKnora/cli/internal/build"
+	sdk "github.com/Tencent/WeKnora/client"
 )
 
 // ServiceClient bundles the SDK methods the tool registry needs. *sdk.Client
@@ -40,6 +41,8 @@ type ServiceClient interface {
 	agentService
 	chunkListService
 }
+
+var _ ServiceClient = (*sdk.Client)(nil)
 
 // RunStdio constructs the MCP server, registers the curated 10 tools, and
 // blocks reading JSON-RPC from stdin until the client disconnects or ctx

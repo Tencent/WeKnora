@@ -208,6 +208,7 @@ import { ref, computed, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { saveWeKnoraCloudCredentials, getWeKnoraCloudStatus, createModel, listModels } from '@/api/model'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { testEmbeddingModel } from '@/api/initialization'
 import {
   WKC_MODEL_KINDS,
@@ -220,6 +221,7 @@ import {
 } from '@/utils/weknoraCloudModels'
 
 const { t } = useI18n()
+const chatResources = useChatResourcesStore()
 
 const form = ref({ appId: '', appSecret: '' })
 const saving = ref(false)
@@ -253,6 +255,7 @@ const refreshExistingKinds = async () => {
   try {
     const models = await listModels()
     existingKinds.value = existingWkcKinds(models)
+    chatResources.replaceModels(models)
   } catch {
     existingKinds.value = new Set()
   }

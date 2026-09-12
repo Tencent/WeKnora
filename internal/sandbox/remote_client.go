@@ -15,6 +15,8 @@ package sandbox
 import (
 	"context"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // RemoteProvider identifies a remote sandbox backend. Values match the
@@ -36,6 +38,15 @@ type RemoteSandboxHandle interface {
 	// creation, when the provider preserves it. Returns nil when the provider
 	// does not support metadata recovery.
 	Metadata() map[string]string
+}
+
+// RemoteConnectRequest re-attaches to an existing sandbox. TrafficAccessToken
+// is the inbound credential recovered from the session binding; adapters apply
+// it when the provider's connect response omits it, which is the normal case
+// because the token is only ever issued at create time.
+type RemoteConnectRequest struct {
+	SandboxID          string
+	TrafficAccessToken string
 }
 
 // RemoteTimeoutMode describes how the remote provider should treat the
@@ -119,41 +130,104 @@ type RemoteCreateRequest struct {
 }
 
 // RemoteNetworkPolicy is the provider-neutral outbound-network policy for a
-// new sandbox. Only the fields both Cube and E2B accept live here; provider-
-// specific extensions (E2B request rules, Cube L7 policy, egress proxies,
-// masked host names) stay inside the adapters until we have a second caller
-// that needs them expressed at this layer.
+// new sandbox. The fields both Cube and E2B accept are shared; the two L7
+// extensions they do not share are carried here as separate slices rather
+// than merged, because their shapes have nothing in common. Each adapter
+// consumes its own and ignores the other's. Extensions with no admin-facing
+// surface yet (egress proxies, masked host names) still stay in the adapters.
 //
 // Field semantics match the underlying providers:
 //
-//   - AllowInternetAccess: top-level egress switch. When nil the adapter
-//     leaves it unset so the provider server-side default (typically true)
-//     applies. When *false the sandbox has no default egress; specific
-//     hosts must appear in AllowOut.
+//   - AllowInternetAccess: top-level egress switch. Both adapters materialise
+//     nil as true rather than leaving it unset, because the provider default
+//     is the template's rather than the protocol's. ResolveEffectiveConfig
+//     always fills it, so nil reaches an adapter only from a hand-built
+//     Config. When false the sandbox has no default egress; specific hosts
+//     must appear in AllowOut.
 //   - AllowPublicTraffic: whether the sandbox is reachable from the public
-//     internet by URL. nil defers to the provider default; false hides the
-//     sandbox behind a per-sandbox traffic access token.
+//     internet by URL. ResolveEffectiveConfig always sets this to false
+//     (credential required). nil reaches an adapter only from a hand-built
+//     Config and is materialised as false there too. true is leftover for
+//     tests; production create never sends it.
 //   - AllowOut / DenyOut: CIDR blocks or domain names. Cube treats these as
 //     L3/L4 filters; E2B applies domain-level filtering only on HTTP(S).
 //     Both providers require that specific domain allow-lists be paired
-//     with a deny-all (DenyOut: ["0.0.0.0/0"]) — the adapters surface the
-//     provider-native error unchanged so callers can react.
+//     with a deny-all; types.ValidateSandboxNetworkPolicy enforces that at
+//     save time, so the adapters never see the provider-native error.
 type RemoteNetworkPolicy struct {
 	AllowInternetAccess *bool
 	AllowPublicTraffic  *bool
 	AllowOut            []string
 	DenyOut             []string
+	// CubeRules / E2BHostRules are the provider-specific L7 extensions. Each
+	// adapter consumes its own and ignores the other's, so this type stays a
+	// superset rather than a lowest common denominator.
+	CubeRules    []RemoteCubeEgressRule
+	E2BHostRules []RemoteE2BHostRule
 }
 
-// IsZero reports whether the policy carries no caller-specified fields, in
-// which case adapters apply their own permissive defaults for backwards
-// compatibility with WeKnora deployments that predate provider-neutral
-// network policy.
-func (p RemoteNetworkPolicy) IsZero() bool {
-	return p.AllowInternetAccess == nil &&
-		p.AllowPublicTraffic == nil &&
-		len(p.AllowOut) == 0 &&
-		len(p.DenyOut) == 0
+// DeniesEgressByDefault reports whether outbound traffic falls back to deny,
+// leaving only AllowOut (and L7 rule targets) reachable.
+//
+// It accepts both spellings the drawer and the validator accept: the top-level
+// switch turned off, or a deny-all entry in DenyOut. A caller that checks only
+// AllowInternetAccess misreads a strict-but-valid config as an open one, which
+// is how the deep connectivity check came to report a correct deny-all policy
+// as a hard egress failure.
+func (p RemoteNetworkPolicy) DeniesEgressByDefault() bool {
+	if p.AllowInternetAccess != nil && !*p.AllowInternetAccess {
+		return true
+	}
+	return types.DenyOutCoversAllIPv4(p.DenyOut)
+}
+
+// RemoteInboundTokenCarrier is implemented by handles whose provider issues
+// a per-sandbox inbound traffic token. Cube and E2B always do; Docker does
+// not. It is an optional capability in the same spirit as RemoteSnapshotManager.
+type RemoteInboundTokenCarrier interface {
+	TrafficAccessToken() string
+}
+
+// InboundTokenOf returns the inbound credential a handle carries, or "" when
+// the provider has none. Callers persist it so a later reconnect can restore
+// it.
+func InboundTokenOf(handle RemoteSandboxHandle) string {
+	carrier, ok := handle.(RemoteInboundTokenCarrier)
+	if !ok {
+		return ""
+	}
+	return carrier.TrafficAccessToken()
+}
+
+// RemoteCubeEgressRule is one CubeEgress L7 rule in neutral form. Allow is
+// phrased positively here even though the stored config says Deny: adapters
+// map onto provider payloads whose field is also an allow flag, and having
+// the negation happen exactly once (in ResolveEffectiveConfig) is what keeps
+// a double negative from creeping in.
+type RemoteCubeEgressRule struct {
+	Name    string
+	Scheme  string
+	SNI     string
+	Host    string
+	Methods []string
+	Path    string
+	Allow   bool
+	Audit   string
+	Inject  []RemoteHeaderInject
+}
+
+// RemoteHeaderInject is one credential header injected by the egress proxy.
+// Format defaults to "${SECRET}" provider-side when empty.
+type RemoteHeaderInject struct {
+	Header string
+	Secret string
+	Format string
+}
+
+// RemoteE2BHostRule is one E2B per-host request transform.
+type RemoteE2BHostRule struct {
+	Host    string
+	Headers map[string]string
 }
 
 // RemoteSandboxSummary is the neutral view of a sandbox listing / probe.
@@ -223,6 +297,10 @@ type RemoteListFilter struct {
 // RemoteExecRequest describes a single command invocation. See the
 // RemoteSandboxClient.Exec contract for how Shell interacts with Args.
 type RemoteExecRequest struct {
+	// OnOutput receives stdout/stderr chunks while the command runs. It is an
+	// observation hook only; callers must not retain the supplied bytes.
+	OnOutput func(stream string, chunk []byte) `json:"-"`
+
 	// Command is the executable name (Shell=false) or the shell expression
 	// (Shell=true).
 	Command string
@@ -249,19 +327,27 @@ type RemoteExecRequest struct {
 	// default". Both backends support selecting it (E2B WithUser, Cube
 	// CommandOptions.User).
 	//
-	// Callers that rely on filesystem permissions for isolation MUST set a
-	// non-root user: root bypasses mode bits entirely, which would defeat
-	// read-only protection on shared volumes.
+	// The default is root: each chat session owns its own sandbox
+	// (one-session-one-sandbox, single tenant), so there is no shared-volume
+	// tenant boundary inside a sandbox for file-mode isolation to defend.
+	// Cross-tenant and host isolation live at the container boundary, not in
+	// the exec account. Callers that still rely on in-container filesystem
+	// permissions should not treat mode bits as a root isolation boundary.
+	// Enforce read-only access at the mount level instead.
 	User string
 
 	// Timeout bounds a single exec call. Zero means "use provider default".
 	Timeout time.Duration
 }
 
-// DefaultSandboxExecUser is the non-root account WeKnora runs sandboxed
-// scripts as. The sandbox template must provision this user; E2B base
-// templates ship a "user" account, and Cube templates are expected to match.
-const DefaultSandboxExecUser = "user"
+// DefaultSandboxExecUser is the account WeKnora runs sandboxed scripts as.
+// It is root: every chat session gets its own sandbox, so the in-container
+// account is not a tenant boundary and root is the least surprising default
+// for an agent that installs packages and writes wherever it needs. The
+// adapters resolve an empty request user to this constant, independent of
+// the image USER. The image retains a "user" compatibility account for
+// E2B/Cube tooling that explicitly selects it.
+const DefaultSandboxExecUser = "root"
 
 // RemoteExecResult is the neutral shape returned by Exec.
 type RemoteExecResult struct {
@@ -346,6 +432,12 @@ type RemoteSandboxCapabilities struct {
 	// use this to tell an operator up front that a backend cannot serve
 	// volume-based features, instead of failing later at first use.
 	SupportsVolumes bool
+
+	// SupportsTerminals is true when the provider can open interactive PTYs
+	// inside a running sandbox (RemoteTerminalManager). Callers use this to
+	// reject terminal features with an unsupported-backend error instead of
+	// failing after the WebSocket is upgraded.
+	SupportsTerminals bool
 }
 
 // RemoteSandboxClient is the contract SessionBoundManager talks to. All
@@ -374,10 +466,10 @@ type RemoteSandboxClient interface {
 	// is owned by the caller; Delete must eventually be called.
 	Create(ctx context.Context, req RemoteCreateRequest) (RemoteSandboxHandle, error)
 
-	// Connect re-attaches to an already-running sandbox by ID. Adapters that
+	// Connect re-attaches to an already-running sandbox. Adapters that
 	// cannot support reconnect must return RemoteErrorKindUnsupported here
 	// and set SupportsReconnect=false.
-	Connect(ctx context.Context, sandboxID string) (RemoteSandboxHandle, error)
+	Connect(ctx context.Context, req RemoteConnectRequest) (RemoteSandboxHandle, error)
 
 	// Get fetches a single sandbox summary by ID. Returns nil summary and
 	// RemoteErrorKindNotFound when the sandbox is gone.
