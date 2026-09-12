@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -367,7 +368,7 @@ func embeddingCacheOptionsFromConfig(config Config) embeddingCacheOptions {
 }
 
 func embeddingCacheNamespace(config Config) string {
-	identity := strings.Join([]string{
+	identityParts := []string{
 		config.ModelID,
 		config.ModelName,
 		string(config.Source),
@@ -376,9 +377,36 @@ func embeddingCacheNamespace(config Config) string {
 		strconv.Itoa(config.Dimensions),
 		strconv.Itoa(config.TruncatePromptTokens),
 		strconv.FormatBool(config.SupportsDimensionOverride),
-	}, "\x00")
+		strconv.Itoa(config.MaxConcurrency),
+	}
+	identityParts = appendCacheIdentityMap(identityParts, "extra", config.ExtraConfig)
+	identityParts = appendCacheIdentityMap(identityParts, "header", config.CustomHeaders)
+	identity := strings.Join(identityParts, "\x00")
 	digest := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(digest[:])
+}
+
+func appendCacheIdentityMap(parts []string, prefix string, values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if !isSecretCacheIdentityKey(key) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		parts = append(parts, prefix+":"+key, values[key])
+	}
+	return parts
+}
+
+func isSecretCacheIdentityKey(key string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(key))
+	compact := strings.NewReplacer("_", "", "-", "", ".", "").Replace(normalized)
+	return strings.Contains(normalized, "secret") || strings.Contains(normalized, "password") ||
+		strings.Contains(normalized, "token") || strings.Contains(normalized, "credential") ||
+		strings.Contains(normalized, "authorization") || strings.Contains(normalized, "cookie") ||
+		strings.Contains(normalized, "signature") || strings.Contains(compact, "apikey")
 }
 
 func cloneVector(vector []float32) []float32 {

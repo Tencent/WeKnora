@@ -73,20 +73,22 @@ func NewEvaluationService(
 // and metrics are stored as JSON so a run remains reproducible even when the
 // application's default model or retrieval settings change later.
 type evaluationRecord struct {
-	ID         string                 `gorm:"primaryKey;size:255"`
-	TenantID   uint64                 `gorm:"index;not null"`
-	DatasetID  string                 `gorm:"size:255;not null"`
-	Status     types.EvaluationStatue `gorm:"not null"`
-	ErrMsg     string                 `gorm:"type:text"`
-	Total      int
-	Finished   int
-	Params     json.RawMessage `gorm:"type:jsonb;not null"`
-	RunConfig  json.RawMessage `gorm:"type:jsonb;not null"`
-	Metric     json.RawMessage `gorm:"type:jsonb"`
-	Usage      json.RawMessage `gorm:"type:jsonb;not null"`
-	StartedAt  time.Time       `gorm:"not null"`
-	FinishedAt *time.Time
-	DurationMS int64 `gorm:"not null;default:0"`
+	ID          string                 `gorm:"primaryKey;size:255"`
+	TenantID    uint64                 `gorm:"index;not null"`
+	DatasetID   string                 `gorm:"size:255;not null"`
+	Status      types.EvaluationStatue `gorm:"not null"`
+	ErrMsg      string                 `gorm:"type:text"`
+	Total       int
+	Finished    int
+	Params      json.RawMessage `gorm:"type:jsonb;not null"`
+	RunConfig   json.RawMessage `gorm:"type:jsonb;not null"`
+	Metric      json.RawMessage `gorm:"type:jsonb"`
+	Usage       json.RawMessage `gorm:"type:jsonb;not null"`
+	StartedAt   time.Time       `gorm:"not null"`
+	FinishedAt  *time.Time
+	DurationMS  int64      `gorm:"not null;default:0"`
+	WorkerID    string     `gorm:"size:255;index"`
+	HeartbeatAt *time.Time `gorm:"index"`
 }
 
 func (evaluationRecord) TableName() string {
@@ -98,13 +100,21 @@ func (evaluationRecord) TableName() string {
 type evaluationStorage struct {
 	db             *gorm.DB
 	fingerprintKey []byte
+	workerID       string
 	mu             sync.Mutex
 }
+
+const (
+	evaluationHeartbeatInterval = 20 * time.Second
+	evaluationHeartbeatTimeout  = 2 * time.Minute
+	evaluationLegacyStaleAfter  = 24 * time.Hour
+)
 
 func newEvaluationStorage(db *gorm.DB) *evaluationStorage {
 	return &evaluationStorage{
 		db:             db,
 		fingerprintKey: []byte(os.Getenv("WEKNORA_MODEL_CALL_FINGERPRINT_KEY")),
+		workerID:       fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano()),
 	}
 }
 
@@ -115,6 +125,9 @@ func (e *evaluationStorage) register(ctx context.Context, detail *types.Evaluati
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC()
+	record.WorkerID = e.workerID
+	record.HeartbeatAt = &now
 	return e.db.WithContext(ctx).Create(record).Error
 }
 
@@ -208,6 +221,9 @@ func (e *evaluationStorage) update(
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC()
+	record.WorkerID = e.workerID
+	record.HeartbeatAt = &now
 	return e.db.WithContext(ctx).Save(record).Error
 }
 
@@ -223,29 +239,65 @@ func (e *evaluationStorage) reconcileInterrupted(ctx context.Context, finishedAt
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
+	staleHeartbeat := finishedAt.Add(-evaluationHeartbeatTimeout)
+	legacyStale := finishedAt.Add(-evaluationLegacyStaleAfter)
 	var records []evaluationRecord
 	if err := e.db.WithContext(ctx).
 		Where("status IN ?", []types.EvaluationStatue{
 			types.EvaluationStatuePending, types.EvaluationStatueRunning,
-		}).Find(&records).Error; err != nil {
+		}).Where("heartbeat_at < ? OR (heartbeat_at IS NULL AND started_at < ?)", staleHeartbeat, legacyStale).
+		Find(&records).Error; err != nil {
 		return 0, err
 	}
+	var recovered int64
 	for i := range records {
 		durationMS := finishedAt.Sub(records[i].StartedAt).Milliseconds()
 		if durationMS < 0 {
 			durationMS = 0
 		}
-		if err := e.db.WithContext(ctx).Model(&evaluationRecord{}).
+		result := e.db.WithContext(ctx).Model(&evaluationRecord{}).
 			Where("id = ? AND status IN ?", records[i].ID, []types.EvaluationStatue{
 				types.EvaluationStatuePending, types.EvaluationStatueRunning,
-			}).Updates(map[string]interface{}{
-			"status": types.EvaluationStatueFailed, "err_msg": evaluationInterruptedMessage,
-			"finished_at": finishedAt, "duration_ms": durationMS,
-		}).Error; err != nil {
-			return int64(i), err
+			}).Where("heartbeat_at < ? OR (heartbeat_at IS NULL AND started_at < ?)", staleHeartbeat, legacyStale).
+			Updates(map[string]interface{}{
+				"status": types.EvaluationStatueFailed, "err_msg": evaluationInterruptedMessage,
+				"finished_at": finishedAt, "duration_ms": durationMS,
+			})
+		if result.Error != nil {
+			return recovered, result.Error
 		}
+		recovered += result.RowsAffected
 	}
-	return int64(len(records)), nil
+	return recovered, nil
+}
+
+func (e *evaluationStorage) heartbeat(ctx context.Context, taskID string) error {
+	if e == nil || e.db == nil {
+		return nil
+	}
+	return e.db.WithContext(ctx).Model(&evaluationRecord{}).
+		Where("id = ? AND worker_id = ? AND status IN ?", taskID, e.workerID, []types.EvaluationStatue{
+			types.EvaluationStatuePending, types.EvaluationStatueRunning,
+		}).Update("heartbeat_at", time.Now().UTC()).Error
+}
+
+func (e *evaluationStorage) keepAlive(ctx context.Context, taskID string) func() {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(evaluationHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := e.heartbeat(context.WithoutCancel(ctx), taskID); err != nil {
+					logger.Warnf(ctx, "Failed to refresh evaluation heartbeat: %v", err)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 func evaluationDetailToRecord(detail *types.EvaluationDetail) (*evaluationRecord, error) {
@@ -516,6 +568,18 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		evaluationKB = kb
 		logger.Infof(ctx, "Created new knowledge base with ID: %s based on existing one", knowledgeBaseID)
 	}
+	// The caller owns the temporary KB until the background worker is started.
+	// This covers every model-snapshot and task-registration error below.
+	workerOwnsEvaluationKB := false
+	defer func() {
+		if !workerOwnsEvaluationKB && evaluationKB != nil {
+			if cleanupErr := e.knowledgeBaseService.DeleteKnowledgeBase(
+				context.WithoutCancel(ctx), evaluationKB.ID,
+			); cleanupErr != nil {
+				logger.Errorf(ctx, "Failed to clean up unstarted evaluation knowledge base: %v", cleanupErr)
+			}
+		}
+	}()
 
 	if rerankModelID == "" {
 		// 获取默认的重排模型
@@ -619,6 +683,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 	// Start evaluation in background goroutine
 	logger.Info(ctx, "Starting evaluation in background")
+	workerOwnsEvaluationKB = true
 	go func() {
 		// Create new context with logger for background task
 		newCtx := logger.CloneContext(ctx)
@@ -627,6 +692,16 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 			taskID: taskID, tenantID: tenantID,
 		})
 		logger.Infof(newCtx, "Background evaluation started for task ID: %s", taskID)
+		stopHeartbeat := e.evaluationStorage.keepAlive(newCtx, taskID)
+		defer stopHeartbeat()
+		defer func() {
+			logger.Infof(newCtx, "Cleaning up evaluation knowledge base: %s", knowledgeBaseID)
+			if cleanupErr := e.knowledgeBaseService.DeleteKnowledgeBase(
+				context.WithoutCancel(newCtx), knowledgeBaseID,
+			); cleanupErr != nil {
+				logger.Errorf(newCtx, "Failed to delete evaluation knowledge base: %v", cleanupErr)
+			}
+		}()
 
 		// Update task status to running
 		if err := e.evaluationStorage.update(newCtx, taskID, func(current *types.EvaluationDetail) {
@@ -738,14 +813,6 @@ func (e *EvaluationService) EvalDataset(
 			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
 		}
 
-		logger.Infof(ctx, "Cleaning up resources - deleting knowledge base: %s", knowledgeBaseID)
-		if err := e.knowledgeBaseService.DeleteKnowledgeBase(ctx, knowledgeBaseID); err != nil {
-			logger.Errorf(
-				ctx,
-				"Failed to delete knowledge base: %v, knowledge base ID: %s",
-				err, knowledgeBaseID,
-			)
-		}
 	}()
 
 	// Initialize parallel evaluation metrics

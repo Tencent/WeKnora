@@ -81,6 +81,7 @@ func TestEvaluationStorageReconcilesWorkersLostOnRestart(t *testing.T) {
 	}{
 		{id: "pending", status: types.EvaluationStatuePending},
 		{id: "running", status: types.EvaluationStatueRunning},
+		{id: "active-other-replica", status: types.EvaluationStatueRunning},
 		{id: "complete", status: types.EvaluationStatueSuccess},
 	} {
 		require.NoError(t, storage.register(context.Background(), &types.EvaluationDetail{
@@ -93,6 +94,14 @@ func TestEvaluationStorageReconcilesWorkersLostOnRestart(t *testing.T) {
 	}
 
 	finishedAt := startedAt.Add(90 * time.Second)
+	staleHeartbeat := finishedAt.Add(-evaluationHeartbeatTimeout - time.Second)
+	activeHeartbeat := finishedAt.Add(-evaluationHeartbeatTimeout + time.Second)
+	require.NoError(t, db.Model(&evaluationRecord{}).
+		Where("id IN ?", []string{"pending", "running"}).
+		Update("heartbeat_at", staleHeartbeat).Error)
+	require.NoError(t, db.Model(&evaluationRecord{}).
+		Where("id = ?", "active-other-replica").
+		Updates(map[string]interface{}{"worker_id": "another-replica", "heartbeat_at": activeHeartbeat}).Error)
 	recovered, err := storage.reconcileInterrupted(context.Background(), finishedAt)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, recovered)
@@ -107,6 +116,9 @@ func TestEvaluationStorageReconcilesWorkersLostOnRestart(t *testing.T) {
 	complete, err := storage.get(context.Background(), "complete")
 	require.NoError(t, err)
 	require.Equal(t, types.EvaluationStatueSuccess, complete.Task.Status)
+	active, err := storage.get(context.Background(), "active-other-replica")
+	require.NoError(t, err)
+	require.Equal(t, types.EvaluationStatueRunning, active.Task.Status)
 }
 
 func TestModelUsagePreservesCostsForMultipleModels(t *testing.T) {
