@@ -1548,6 +1548,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "Command running",
+      installCommandWaiting: "Waiting for command output. Elapsed time continues to update.",
       skillFiles: 'View files',
       skillFilesTitle: 'Files',
       skillFilesEmpty: 'This skill has no files to browse yet.',
