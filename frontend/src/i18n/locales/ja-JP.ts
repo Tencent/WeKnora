@@ -1548,6 +1548,8 @@ export default {
       },
       skillTranscriptEmpty: 'このインストールには記録が残っていません。',
       skillTranscriptWaiting: 'インストールを開始しました。処理ログを待っています…',
+      installCommandRunning: "コマンド実行中",
+      installCommandWaiting: "出力を待っています。経過時間は更新されます。",
       skillFiles: 'ファイルを表示',
       skillFilesTitle: 'ファイル',
       skillFilesEmpty: 'このスキルには参照できるファイルがまだありません。',

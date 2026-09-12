@@ -5684,6 +5684,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "명령 실행 중",
+      installCommandWaiting: "명령 출력을 기다리는 중입니다. 경과 시간은 계속 업데이트됩니다.",
       skillFiles: '파일 보기',
       skillFilesTitle: '파일',
       skillFilesEmpty: '이 스킬에서 볼 수 있는 파일이 아직 없습니다.',

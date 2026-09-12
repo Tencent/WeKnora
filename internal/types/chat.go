@@ -221,6 +221,10 @@ const (
 	ResponseTypeToolCall ResponseType = "tool_call"
 	// Tool result response type (for agent tool results)
 	ResponseTypeToolResult ResponseType = "tool_result"
+	// ResponseTypeInstallOutput carries installer progress without completing a tool.
+	ResponseTypeInstallOutput ResponseType = "install_output"
+	// ResponseTypeCommandOutput updates the pending tool card without completing it.
+	ResponseTypeCommandOutput ResponseType = "command_output"
 	// Error response type
 	ResponseTypeError ResponseType = "error"
 	// Reflection response type (for agent reflection)

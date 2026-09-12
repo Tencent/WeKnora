@@ -5684,6 +5684,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "Команда выполняется",
+      installCommandWaiting: "Ожидание вывода команды. Время выполнения обновляется.",
       skillFiles: 'Просмотреть файлы',
       skillFilesTitle: 'Файлы',
       skillFilesEmpty: 'У этого навыка пока нет файлов для просмотра.',

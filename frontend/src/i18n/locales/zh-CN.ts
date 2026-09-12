@@ -5686,6 +5686,8 @@ export default {
       },
       skillTranscriptEmpty: '这次安装没有留下记录。',
       skillTranscriptWaiting: '安装已开始，正在等待过程记录…',
+      installCommandRunning: "命令执行中",
+      installCommandWaiting: "等待命令输出，耗时持续更新。",
       skillFiles: '查看文件',
       skillFilesTitle: '文件',
       skillFilesEmpty: '该技能还没有可查看的文件。',

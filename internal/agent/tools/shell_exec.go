@@ -491,7 +491,12 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 			" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote(execCommand)
 	}
 	beforeOutputs, inspectedOutputs := sandboxOutputSnapshot(ctx, t.executor, sessionID)
-	res, err := t.executor.ExecShellCommand(ctx, sessionID, execCommand, workDir, timeout, env)
+	output, finishOutput := shellCommandOutput(ctx, command)
+	defer finishOutput()
+	// Observe only the requested command, not skill staging or artifact probes.
+	execCtx := sandbox.WithCommandOutput(ctx, output)
+	res, err := t.executor.ExecShellCommand(execCtx, sessionID, execCommand, workDir, timeout, env)
+	finishOutput()
 	noteSandboxMutation()
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][ShellExec] execution error: session=%s err=%v", sessionID, err)

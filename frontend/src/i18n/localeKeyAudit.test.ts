@@ -51,6 +51,15 @@ test('critical runtime i18n trees are present', () => {
   assert.deepEqual(missing, [], missing.join('\n'))
 })
 
+test('installer command progress messages resolve in the settings namespace', () => {
+  for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
+    for (const name of ['installCommandRunning', 'installCommandWaiting']) {
+      const key = `settings.sandbox.${name}`
+      assert.equal(typeof getLocaleValueAtPath(bundle, key), 'string', `${locale}: missing ${key}`)
+    }
+  }
+})
+
 test('referenced i18n keys used in app code exist in every locale', () => {
   const failures = findUsedKeysMissingInLocales(referencedKeys, localeKeysByName)
   assert.deepEqual(failures, [], failures.slice(0, 20).join('\n'))
