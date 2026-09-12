@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/application/service/metric"
@@ -86,8 +85,11 @@ func (m *MetricList) Avg() *types.MetricResult {
 type HookMetric struct {
 	qaPairMetricList []*qaPairMetric // Per-QA pair metrics
 	metricResults    *MetricList     // Aggregated results
+	knowledgeID      string          // Temporary evaluation knowledge source
 	mu               *sync.RWMutex   // Thread safety
 }
+
+const unknownRetrievalID = -1
 
 // qaPairMetric stores metrics for a single QA pair
 type qaPairMetric struct {
@@ -98,10 +100,11 @@ type qaPairMetric struct {
 }
 
 // NewHookMetric creates a new HookMetric with given capacity
-func NewHookMetric(capacity int) *HookMetric {
+func NewHookMetric(capacity int, knowledgeID string) *HookMetric {
 	return &HookMetric{
 		metricResults:    &MetricList{},
 		qaPairMetricList: make([]*qaPairMetric, capacity),
+		knowledgeID:      knowledgeID,
 		mu:               &sync.RWMutex{},
 	}
 }
@@ -139,31 +142,25 @@ func (h *HookMetric) recordFinish(index int) {
 		retrievalSource = h.qaPairMetricList[index].searchResult
 	}
 
-	// Map retrieved chunks back to original passage IDs via content matching.
-	// ChunkIndex is the chunk's ordinal position in the knowledge base, which
-	// does NOT correspond to the dataset's passage IDs. Instead, we match each
-	// retrieved chunk's content against the ground truth passages to determine
-	// which passage it came from.
+	// Evaluation ingests a PID-indexed passage slice into one temporary knowledge.
+	// Passage processing preserves the slice index as ChunkIndex, so a result from
+	// that knowledge has stable PID provenance without guessing from its content.
+	// Keep one entry per rank: unknown sources and duplicate PIDs remain explicit
+	// misses instead of being removed and compressing the ranking.
 	qaPair := h.qaPairMetricList[index].qaPair
-	retrievalIDs := make([]int, 0, len(retrievalSource))
-	seen := make(map[int]struct{})
-	for _, r := range retrievalSource {
-		if r.Content == "" {
+	retrievalIDs := make([]int, len(retrievalSource))
+	seen := make(map[int]struct{}, len(retrievalSource))
+	for i, r := range retrievalSource {
+		retrievalIDs[i] = unknownRetrievalID
+		if r == nil || r.KnowledgeID != h.knowledgeID || r.ChunkIndex < 0 {
 			continue
 		}
-		for i, passage := range qaPair.Passages {
-			if passage == "" {
-				continue
-			}
-			if strings.Contains(passage, r.Content) || strings.Contains(r.Content, passage) {
-				pid := qaPair.PIDs[i]
-				if _, ok := seen[pid]; !ok {
-					seen[pid] = struct{}{}
-					retrievalIDs = append(retrievalIDs, pid)
-				}
-				break
-			}
+		pid := r.ChunkIndex
+		if _, ok := seen[pid]; ok {
+			continue
 		}
+		seen[pid] = struct{}{}
+		retrievalIDs[i] = pid
 	}
 
 	// Get generated text if available

@@ -17,10 +17,12 @@
 | -------- | ------ | ---- | --------------------------------------------------- |
 | task_id  | string | 是   | 从 `POST /evaluation` 返回的任务 ID                  |
 
+通用唯一标识符（Universally Unique Identifier，UUID）用于区分同一毫秒内创建的任务。任务 ID 格式为 `evaluation_<tenantID>_<Unix 毫秒时间戳>_<8 位 UUID 片段>_<datasetID>`。
+
 **请求**:
 
 ```bash
-curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4858-b72e-e92beb80becb' \
+curl --location 'http://localhost:8080/api/v1/evaluation?task_id=evaluation_1_1787880000000_a1b2c3d4_default' \
 --header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json'
 ```
@@ -31,7 +33,7 @@ curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4
 {
     "data": {
         "task": {
-            "id": "c34563ad-b09f-4858-b72e-e92beb80becb",
+            "id": "evaluation_1_1787880000000_a1b2c3d4_default",
             "tenant_id": 1,
             "dataset_id": "default",
             "start_time": "2025-08-12T14:54:26.221804768+08:00",
@@ -90,16 +92,18 @@ curl --location 'http://localhost:8080/api/v1/evaluation?task_id=c34563ad-b09f-4
 }
 ```
 
+检索指标按评估管道的结果顺序计算。无法归属到本次临时知识的结果和重复数据集段落标识（passage ID，PID）结果保留排名位置，并按未命中计分。
+
 ## POST `/evaluation` - 创建评估任务
 
 **参数说明（请求体）**:
 
-| 字段              | 类型   | 必填 | 说明                                            |
-| ----------------- | ------ | ---- | ----------------------------------------------- |
-| dataset_id        | string | 是   | 评估数据集，目前仅支持 `default`（官方测试集）   |
-| knowledge_base_id | string | 是   | 评估使用的知识库 ID                              |
-| chat_id           | string | 是   | 评估使用的对话模型 ID                            |
-| rerank_id         | string | 是   | 评估使用的重排序模型 ID                          |
+| 字段              | 类型   | 必填 | 说明 |
+| ----------------- | ------ | ---- | ---- |
+| dataset_id        | string | 否   | 空值使用 `default`；当前固定加载 `dataset/samples/` |
+| knowledge_base_id | string | 否   | 空值使用默认模型创建临时评估知识库；提供时复制该知识库的模型配置创建临时知识库 |
+| chat_id           | string | 否   | 空值自动选择可用的知识问答（KnowledgeQA）模型；没有可用模型时任务创建失败 |
+| rerank_id         | string | 否   | 空值自动选择可用的重排序（Rerank）模型；没有可用模型时跳过重排 |
 
 **请求**:
 
@@ -121,7 +125,7 @@ curl --location 'http://localhost:8080/api/v1/evaluation' \
 {
     "data": {
         "task": {
-            "id": "c34563ad-b09f-4858-b72e-e92beb80becb",
+            "id": "evaluation_1_1787880000000_a1b2c3d4_default",
             "tenant_id": 1,
             "dataset_id": "default",
             "start_time": "2025-08-12T14:54:26.221804768+08:00",
