@@ -1,0 +1,26 @@
+{
+  "body": {
+    "elements": [
+      {
+        "content": "正式回读的已结束回复\n### 两项结果\n1. 第一项：ALPHA-100\n2. 第二项：BETA-200\n\n结尾原文完整保留。\n",
+        "element_id": "internal-content",
+        "tag": "markdown"
+      }
+    ]
+  },
+  "config": {
+    "enable_forward_interaction": false,
+    "streaming_mode": false,
+    "summary": {
+      "content": "正式回读的预览摘要"
+    }
+  },
+  "header": {
+    "template": "blue",
+    "title": {
+      "content": "WeKnora",
+      "tag": "plain_text"
+    }
+  },
+  "schema": "2.0"
+}

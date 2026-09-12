@@ -1771,7 +1771,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 
 	// Validate only the current input, before adding any reference material.
 	currentInputLength := len(contentRunes)
-	if isFeishu && msg.Material != nil {
+	if isFeishu && msg.Material != nil && msg.Material.Type != "interactive" {
 		// Slash-command normalization may omit post code blocks or mentions.
 		// The original current body still counts toward the input limit.
 		currentInputLength = 0
@@ -2067,10 +2067,15 @@ func (s *Service) executeQARequest(req *qaRequest) {
 	hasMaterialRequest := false
 	if req.msg.Material != nil {
 		prepareCtx, prepareCancel := context.WithTimeout(ctx, imAttachmentReadTimeout)
+		query := req.msg.Content
+		if req.msg.Material.Type == "interactive" &&
+			(req.adapter.Platform() == PlatformFeishu || req.adapter.Platform() == PlatformLark) {
+			query = "" // Empty queries check image capability without classifying card contents.
+		}
 		var imagesUsable bool
 		var inspectErr error
 		hasMaterialRequest, imagesUsable, inspectErr = s.sessionService.InspectIMMaterialInput(prepareCtx,
-			buildIMQARequest(req.session, req.msg.Content, "", "", req.agent, kbIDs, nil))
+			buildIMQARequest(req.session, query, "", "", req.agent, kbIDs, nil))
 		prepared = s.prepareIMMaterials(prepareCtx, req.msg, req.adapter)
 		prepareCancel()
 		if !imagesUsable {

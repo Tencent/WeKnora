@@ -118,6 +118,10 @@ func (a *Adapter) convertEvent(ctx context.Context, event *larkim.P2MessageRecei
 	}
 
 	msg := event.Event.Message
+	loggedContent := ptrStr(msg.Content)
+	if ptrStr(msg.MessageType) == "interactive" {
+		loggedContent = "[card material; body is read by the queue worker]"
+	}
 
 	// Debug: log every raw receive event so we can see exactly what the platform
 	// delivers (or doesn't). This is the single chokepoint for all message
@@ -127,17 +131,21 @@ func (a *Adapter) convertEvent(ctx context.Context, event *larkim.P2MessageRecei
 		a.region.Label,
 		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
 		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
-		ptrStr(msg.ThreadId), ptrStr(msg.Content),
+		ptrStr(msg.ThreadId), loggedContent,
 	)
 
-	senderID := ""
-	if event.Event.Sender != nil && event.Event.Sender.SenderId != nil {
-		senderID = ptrStr(event.Event.Sender.SenderId.OpenId)
+	senderID, senderType := "", ""
+	if event.Event.Sender != nil {
+		senderType = ptrStr(event.Event.Sender.SenderType)
+		if event.Event.Sender.SenderId != nil {
+			senderID = ptrStr(event.Event.Sender.SenderId.OpenId)
+		}
 	}
 	return a.parseIncoming(ctx, &feishuMessage{
 		MessageID: ptrStr(msg.MessageId), ParentID: ptrStr(msg.ParentId), RootID: ptrStr(msg.RootId),
 		MessageType: ptrStr(msg.MessageType), ChatType: ptrStr(msg.ChatType), ChatID: ptrStr(msg.ChatId),
-		Content: ptrStr(msg.Content), CreateTime: ptrStr(msg.CreateTime), Mentions: msg.Mentions,
+		Content: ptrStr(msg.Content), CreateTime: ptrStr(msg.CreateTime), UpdateTime: ptrStr(msg.UpdateTime),
+		SenderType: senderType, Mentions: msg.Mentions,
 	}, senderID, "")
 }
 

@@ -76,11 +76,11 @@ func TestTenantMessageReadsKeepForwardOwnershipAndParentMetadata(t *testing.T) {
 		items[2].CreateTime != "123456" {
 		t.Fatalf("forward metadata lost: %+v", items)
 	}
-	if items[3].Unavailable == "" ||
+	if items[3].CardStatus != "empty" ||
 		items[3].ParentID != "original" ||
 		items[4].Unavailable == "" ||
 		items[4].ParentID != "original" {
-		t.Fatal("unsupported or malformed body lost legal parent metadata")
+		t.Fatal("empty card or malformed body lost legal parent metadata")
 	}
 	part := items[2].Parts[1]
 	resource := &im.IncomingMessage{

@@ -277,11 +277,14 @@ type feishuMessage struct {
 	ChatID      string                 `json:"chat_id"`
 	Content     string                 `json:"content"`
 	CreateTime  string                 `json:"create_time"`
+	UpdateTime  string                 `json:"update_time"`
+	SenderType  string                 `json:"-"` // Taken from the event sender, never the card body.
 	Mentions    []*larkim.MentionEvent `json:"mentions"`
 }
 
 type feishuSender struct {
-	SenderID *feishuSenderID `json:"sender_id"`
+	SenderID   *feishuSenderID `json:"sender_id"`
+	SenderType string          `json:"sender_type"`
 }
 
 type feishuSenderID struct {
@@ -339,11 +342,14 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 	}
 
 	senderID := ""
-	if eventBody.Event.Sender != nil && eventBody.Event.Sender.SenderID != nil {
-		senderID = eventBody.Event.Sender.SenderID.OpenID
+	if eventBody.Event.Sender != nil {
+		msg.SenderType = eventBody.Event.Sender.SenderType
+		if eventBody.Event.Sender.SenderID != nil {
+			senderID = eventBody.Event.Sender.SenderID.OpenID
+		}
 	}
 	switch msg.MessageType {
-	case "text", "file", "image", "post", "merge_forward":
+	case "text", "file", "image", "post", "merge_forward", "interactive":
 		return a.parseIncoming(c.Request.Context(), msg, senderID, threadID)
 	default:
 		logger.Infof(c.Request.Context(), "[%s] Ignoring unsupported message type: %s", a.region.Label, msg.MessageType)
@@ -538,12 +544,22 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 
 	apiURL := a.api("/open-apis/im/v1/messages/%s/resources/%s?type=%s",
 		msg.MessageID, msg.FileKey, resourceType)
+	cardResource := msg.Material != nil && msg.Material.Type == "interactive"
+	if cardResource {
+		// Message resources reject cards (234043). The independent asset APIs
+		// permit only this bot's own uploads; they do not grant access to other apps.
+		apiURL = a.api("/open-apis/im/v1/%ss/%s", resourceType, msg.FileKey)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
+	if cardResource && resourceType == "file" {
+		// The file API supplies Content-Disposition only for this request type.
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -44,6 +45,7 @@ type imPreparedMaterials struct {
 	context     strings.Builder
 	warnings    []string
 	textCount   int
+	cards       []string
 }
 
 type materialPreparation struct {
@@ -58,6 +60,8 @@ type materialPreparation struct {
 	resources map[materialResourceKey]int // attachment index; -1 for a failed attempt
 	path      map[string]bool
 	noted     map[string]bool
+
+	cardFormattedRemaining int
 }
 
 func newMaterialPreparation(ctx context.Context, service *Service, adapter Adapter) *materialPreparation {
@@ -67,6 +71,7 @@ func newMaterialPreparation(ctx context.Context, service *Service, adapter Adapt
 		budget: imMaterialBudget{downloadRemaining: maxIMAttachmentBytes, textRemaining: maxIMAttachmentContentBytes},
 		reads:  make(map[string]*materialRead), admitted: make(map[materialKey]bool),
 		resources: make(map[materialResourceKey]int), path: make(map[string]bool), noted: make(map[string]bool),
+		cardFormattedRemaining: MaxCardFormattedTextBytes,
 	}
 }
 
@@ -75,10 +80,11 @@ func (s *Service) prepareIMMaterials(ctx context.Context, msg *IncomingMessage, 
 	defer cancel()
 	p := newMaterialPreparation(prepareCtx, s, adapter)
 	root := msg.Material
-	if root.Type != "merge_forward" {
+	if root.Type != "merge_forward" && !p.isCard(root) {
 		p.reads[root.MessageID] = &materialRead{messages: map[string]*MessageMaterial{root.MessageID: root}}
 	}
 	p.visit(root, 0, true)
+	root.RawContent = ""
 	if prepareCtx.Err() != nil {
 		p.note("材料准备已停止：超时或请求被取消，后续材料未纳入本次分析。")
 	}
@@ -105,6 +111,15 @@ func (p *materialPreparation) text(value string) string {
 	return limited
 }
 
+func (p *materialPreparation) cardResourceMetadata(value string) string {
+	if len(value) > p.budget.textRemaining {
+		p.note("卡片资源的名称或类型超过本轮材料原文额度，该元信息未纳入本次分析。")
+		return ""
+	}
+	p.budget.textRemaining -= len(value)
+	return value
+}
+
 func materialIdentity(material *MessageMaterial) materialKey {
 	contextID := material.ResourceMessageID
 	if contextID == "" {
@@ -113,7 +128,7 @@ func materialIdentity(material *MessageMaterial) materialKey {
 	return materialKey{contextID, material.MessageID}
 }
 
-func (p *materialPreparation) read(messageID string) *materialRead {
+func (p *materialPreparation) read(messageID string, fallback ...*MessageMaterial) *materialRead {
 	if cached, ok := p.reads[messageID]; ok {
 		return cached
 	}
@@ -123,7 +138,15 @@ func (p *materialPreparation) read(messageID string) *materialRead {
 		read.err = errors.New("adapter does not support reading messages")
 		return read
 	}
-	items, err := p.reader.ReadMessage(p.ctx, messageID)
+	var items []*MessageMaterial
+	var err error
+	if reader, ok := p.reader.(interface {
+		ReadMessageWithFallback(context.Context, string, *MessageMaterial) ([]*MessageMaterial, error)
+	}); ok && len(fallback) == 1 {
+		items, err = reader.ReadMessageWithFallback(p.ctx, messageID, fallback[0])
+	} else {
+		items, err = p.reader.ReadMessage(p.ctx, messageID)
+	}
 	if err != nil {
 		read.err = err
 		return read
@@ -133,6 +156,7 @@ func (p *materialPreparation) read(messageID string) *materialRead {
 			continue
 		}
 		snapshot := *item
+		snapshot.RawContent = ""
 		if snapshot.ResourceMessageID == "" {
 			snapshot.ResourceMessageID = messageID
 		}
@@ -166,6 +190,12 @@ func (p *materialPreparation) canVisit(key materialKey, depth int) bool {
 	return true
 }
 
+// Card handling is local to Feishu/Lark; other adapters retain their material behavior.
+func (p *materialPreparation) isCard(material *MessageMaterial) bool {
+	return material.Type == "interactive" &&
+		(p.adapter.Platform() == PlatformFeishu || p.adapter.Platform() == PlatformLark)
+}
+
 func (p *materialPreparation) visit(material *MessageMaterial, depth int, current bool) {
 	key := materialIdentity(material)
 	if !p.canVisit(key, depth) {
@@ -177,26 +207,53 @@ func (p *materialPreparation) visit(material *MessageMaterial, depth int, curren
 	p.admitted[key] = true
 
 	var read *materialRead
-	if material.Type == "merge_forward" {
-		read = p.read(key.context)
+	if material.Type == "merge_forward" || (current && p.isCard(material)) {
+		if p.isCard(material) {
+			read = p.read(key.context, material)
+		} else {
+			read = p.read(key.context)
+		}
 		if read.err != nil {
-			logger.Warnf(p.ctx, "[IM] forward read failed: message=%s error=%v", material.MessageID, read.err)
-			p.note(fmt.Sprintf("转发消息 %s 读取失败，其子消息未纳入本次分析。", material.MessageID))
+			logger.Warnf(p.ctx, "[IM] material read failed: message=%s error=%v", material.MessageID, read.err)
+			if p.isCard(material) {
+				// Only the reader may approve an event fallback after checking the failure.
+				unavailable := *material
+				unavailable.Parts, unavailable.RawContent = nil, ""
+				unavailable.CardStatus, unavailable.SnapshotSource = "unreadable", "read_failed"
+				unavailable.ReadTime = time.Now().UTC().Format(time.RFC3339Nano)
+				unavailable.Unavailable = "卡片读取失败，未使用旧事件正文"
+				material = &unavailable
+			} else {
+				p.note(fmt.Sprintf("转发消息 %s 读取失败，其子消息未纳入本次分析。", material.MessageID))
+			}
 		} else if snapshot := read.messages[material.MessageID]; snapshot != nil {
 			resolved := *snapshot
 			// The current event may carry a reference/source omitted by the
-			// fetched forward container. Do not discard already-known metadata.
+			// fetched snapshot. Do not discard already-known metadata.
 			if current {
-				if material.ParentID != "" {
+				if material.ParentID != "" && (!p.isCard(material) || resolved.ParentID == "") {
 					resolved.ParentID = material.ParentID
 				}
-				if material.ChatID != "" {
+				if material.ChatID != "" && (!p.isCard(material) || resolved.ChatID == "") {
 					resolved.ChatID = material.ChatID
 				}
-				if material.SenderID != "" {
-					resolved.SenderID = material.SenderID
+				if p.isCard(material) {
+					// Sender ID and type are one identity, not independent defaults.
+					if resolved.SenderID == "" && resolved.SenderType == "" {
+						resolved.SenderID, resolved.SenderType = material.SenderID, material.SenderType
+					} else if resolved.SenderID != "" && resolved.SenderID == material.SenderID &&
+						resolved.SenderType == "" {
+						resolved.SenderType = material.SenderType
+					}
+				} else {
+					if material.SenderID != "" {
+						resolved.SenderID = material.SenderID
+					}
+					if resolved.SenderType == "" {
+						resolved.SenderType = material.SenderType
+					}
 				}
-				if material.CreateTime != "" {
+				if material.CreateTime != "" && (!p.isCard(material) || resolved.CreateTime == "") {
 					resolved.CreateTime = material.CreateTime
 				}
 			}
@@ -205,24 +262,44 @@ func (p *materialPreparation) visit(material *MessageMaterial, depth int, curren
 	}
 
 	if first {
+		if p.isCard(material) {
+			material = p.card(material)
+		}
 		fmt.Fprintf(&p.result.context,
 			"\n<message id=\"%s\" chat=\"%s\" resource_context=\"%s\" depth=\"%d\" "+
-				"sender=\"%s\" time=\"%s\" type=\"%s\">\n",
+				"sender=\"%s\" time=\"%s\" type=\"%s\"",
 			html.EscapeString(material.MessageID), html.EscapeString(material.ChatID),
 			html.EscapeString(key.context), depth,
 			html.EscapeString(material.SenderID), html.EscapeString(material.CreateTime),
 			html.EscapeString(material.Type))
+		if p.isCard(material) {
+			fmt.Fprintf(&p.result.context,
+				" sender_type=\"%s\" update_time=\"%s\" read_time=\"%s\" snapshot_source=\"%s\" card_status=\"%s\"",
+				html.EscapeString(material.SenderType), html.EscapeString(material.UpdateTime),
+				html.EscapeString(material.ReadTime), html.EscapeString(material.SnapshotSource),
+				html.EscapeString(material.CardStatus))
+		}
+		p.result.context.WriteString(">\n")
 		if material.Unavailable != "" {
 			p.note(fmt.Sprintf("消息 %s：%s。", material.MessageID, material.Unavailable))
 		}
+		for _, warning := range material.Warnings {
+			if p.isCard(material) {
+				warning = p.text(warning)
+				if warning == "" {
+					continue
+				}
+			}
+			p.note(fmt.Sprintf("消息 %s（读取上下文 %s）：%s", material.MessageID, key.context, warning))
+		}
 		hasText := false
 		for _, part := range material.Parts {
-			if p.ctx.Err() != nil {
+			if p.ctx.Err() != nil && (!p.isCard(material) || part.Type != "") {
 				break
 			}
 			if part.Type == "" {
 				text := part.Text
-				if !current {
+				if !current && !p.isCard(material) {
 					text = p.text(text)
 				}
 				if strings.TrimSpace(text) != "" {
@@ -283,7 +360,81 @@ func (p *materialPreparation) visit(material *MessageMaterial, depth int, curren
 	}
 }
 
+// Card fields and rows are atomic: a byte cap must never create a partial value.
+func (p *materialPreparation) card(material *MessageMaterial) *MessageMaterial {
+	bounded := *material
+	bounded.Parts, bounded.RawContent = nil, ""
+	if bounded.CardStatus == "" {
+		bounded.CardStatus = "unknown"
+	}
+	for _, part := range material.Parts {
+		if bounded.CardStatus == "unreadable" {
+			break
+		}
+		if p.ctx.Err() != nil {
+			bounded.CardStatus = "partial"
+			break
+		}
+		if part.Type != "" {
+			bounded.Parts = append(bounded.Parts, part)
+			continue
+		}
+		originalBytes := len(part.Text)
+		if part.OriginalTextBytes != nil && *part.OriginalTextBytes >= 0 {
+			originalBytes = *part.OriginalTextBytes
+		}
+		if originalBytes > p.budget.textRemaining || len(part.Text) > p.cardFormattedRemaining {
+			bounded.CardStatus = "partial"
+			p.note(fmt.Sprintf("卡片 %s 超过本轮材料文本额度，后续完整字段或表格行未纳入本次分析。", material.MessageID))
+			continue
+		}
+		p.budget.textRemaining -= originalBytes
+		p.cardFormattedRemaining -= len(part.Text)
+		bounded.Parts = append(bounded.Parts, part)
+	}
+	result := "已取得部分信息，无法确认卡片完整性"
+	switch bounded.CardStatus {
+	case "complete":
+		result = "已提取卡片文字和字段"
+	case "partial":
+		result = "已提取部分卡片内容，存在缺失或截断"
+		if len(bounded.Parts) == 0 {
+			result = "卡片正文未能纳入本次分析，存在缺失或截断"
+		}
+	case "empty":
+		result = "卡片没有可分析内容"
+	case "unreadable":
+		result = "无法读取卡片，请重发原卡片或用文字补充内容"
+	default:
+		bounded.CardStatus = "unknown"
+	}
+	metadata := []string{"读取上下文 " + materialIdentity(material).context}
+	for _, field := range [][2]string{
+		{"会话", material.ChatID},
+		{"来源", material.SnapshotSource},
+		{"发送者", material.SenderID},
+		{"发送者类型", material.SenderType},
+		{"创建时间", material.CreateTime},
+		{"更新时间", material.UpdateTime},
+		{"读取时间", material.ReadTime},
+	} {
+		if field[1] != "" {
+			metadata = append(metadata, field[0]+" "+field[1])
+		}
+	}
+	p.result.cards = append(p.result.cards, html.EscapeString(fmt.Sprintf("卡片 %s（%s）：%s。",
+		material.MessageID, strings.Join(metadata, "；"), result)))
+	if bounded.CardStatus == "partial" || bounded.CardStatus == "unknown" || bounded.CardStatus == "unreadable" {
+		p.note(fmt.Sprintf("卡片 %s（读取上下文 %s）：%s。", material.MessageID, materialIdentity(material).context, result))
+	}
+	return &bounded
+}
+
 func (p *materialPreparation) resource(material *MessageMaterial, part MaterialPart, current bool) {
+	if p.isCard(material) && material.SnapshotSource != "message_read" {
+		p.note(fmt.Sprintf("卡片 %s 未取得可见消息的正式回读，资源正文未读取；请重新引用原卡片。", material.MessageID))
+		return
+	}
 	contextID := materialIdentity(material).context
 	key := materialResourceKey{contextID, part.FileKey}
 	if index, exists := p.resources[key]; exists {
@@ -305,21 +456,35 @@ func (p *materialPreparation) resource(material *MessageMaterial, part MaterialP
 		Platform: p.adapter.Platform(), MessageType: part.Type, MessageID: contextID,
 		FileKey: part.FileKey, FileName: part.FileName, FileSize: part.FileSize,
 	}
+	if p.isCard(material) {
+		fileMsg.Material = material
+	}
 	attachments, images, downloaded, err := p.service.prepareIMAttachments(p.ctx, fileMsg, p.adapter, &p.budget)
 	if err != nil {
 		logger.Warnf(p.ctx, "[IM] material attachment failed: message=%s resource=%s error=%v",
 			material.MessageID, part.FileKey, err)
 		reason := "附件读取失败"
+		if p.isCard(material) {
+			reason = "卡片资源正文未取得，请单独发送原图或文件；当前应用可能无权下载该资源"
+		}
 		if errors.Is(err, errIMDownloadBudget) {
 			reason = errIMDownloadBudget.Error()
 		}
-		p.note(fmt.Sprintf("消息 %s 的附件 %s：%s。", material.MessageID, part.FileName, reason))
+		name := part.FileName
+		if p.isCard(material) {
+			name = p.cardResourceMetadata(name)
+		}
+		p.note(fmt.Sprintf("消息 %s 的附件 %s：%s。", material.MessageID, name, reason))
 		return
 	}
 	if len(attachments) == 0 {
 		return
 	}
 	attachment := attachments[0]
+	if p.isCard(material) {
+		attachment.FileName = p.cardResourceMetadata(attachment.FileName)
+		attachment.FileType = p.cardResourceMetadata(attachment.FileType)
+	}
 	if attachment.ContentMode == "download_prefix" {
 		p.note(fmt.Sprintf("消息 %s 的附件 %s 已达到下载额度，完整性未确认；仅保留已取得的文字，不自动入库。",
 			material.MessageID, attachment.FileName))
@@ -347,7 +512,7 @@ func (p *materialPreparation) resource(material *MessageMaterial, part MaterialP
 	p.resources[key] = len(p.result.attachments)
 	p.result.attachments = append(p.result.attachments, attachment)
 	fmt.Fprintf(&p.result.context, "[附件 %d]", len(p.result.attachments))
-	if current && downloaded != nil {
+	if current && downloaded != nil && !p.isCard(material) {
 		p.result.directFiles = append(p.result.directFiles, downloaded)
 	}
 }
@@ -365,8 +530,12 @@ func (prepared *imPreparedMaterials) receipt() string {
 			files++
 		}
 	}
-	return fmt.Sprintf("已接收可读取的材料：%d 条文字、%d 张图片、%d 个文件。尚未进行内容分析；请引用原始材料消息补充问题。",
+	receipt := fmt.Sprintf("已接收可读取的材料：%d 条文字、%d 张图片、%d 个文件。尚未进行内容分析；请引用原始材料消息补充问题。",
 		prepared.textCount, images, files)
+	if len(prepared.cards) > 0 {
+		receipt += "\n\n" + strings.Join(prepared.cards, "\n")
+	}
+	return receipt
 }
 
 func (prepared *imPreparedMaterials) disableImages() {

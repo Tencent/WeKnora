@@ -202,10 +202,19 @@ type MessageMaterial struct {
 	ResourceMessageID string
 	ChatID            string
 	SenderID          string
+	SenderType        string
 	CreateTime        string
+	UpdateTime        string
+	ReadTime          string
+	SnapshotSource    string
 	Type              string
 	Parts             []MaterialPart
 	Unavailable       string
+	Warnings          []string
+	// RawContent is an ephemeral card event fallback, never a current request
+	// or persisted material. CardStatus describes only the extracted snapshot.
+	RawContent string
+	CardStatus string
 }
 
 // MaterialPart preserves text/image order without putting resource keys in the query.
@@ -215,7 +224,14 @@ type MaterialPart struct {
 	FileKey  string
 	FileName string
 	FileSize int64
+	// Card readers may separate original value bytes from generated formatting.
+	// Nil preserves legacy len(Text) accounting; zero is valid for fixed labels.
+	OriginalTextBytes *int
 }
+
+// MaxCardFormattedTextBytes bounds card fields including generated provenance.
+// Original values still share the existing 32 KiB material text budget.
+const MaxCardFormattedTextBytes = 256 << 10
 
 // MessageReader is an optional adapter capability. A forward may return a flat
 // list of snapshots linked by UpperMessageID, all in the requested context.

@@ -3,12 +3,15 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/im"
@@ -27,8 +30,13 @@ func (a *Adapter) parseIncoming(
 	ctx context.Context, msg *feishuMessage, senderID, threadID string,
 ) (*im.IncomingMessage, error) {
 	switch msg.MessageType {
-	case "text", "post", "image", "file", "merge_forward":
+	case "text", "post", "image", "file", "merge_forward", "interactive":
 	default:
+		return nil, nil
+	}
+	// A card is material, including its mentions and commands. Only a proven
+	// user can submit one directly; groups require a separate text/post @.
+	if msg.MessageType == "interactive" && (msg.SenderType != "user" || senderID == "" || msg.ChatType != "p2p") {
 		return nil, nil
 	}
 	chatType, chatID := im.ChatTypeDirect, ""
@@ -52,7 +60,8 @@ func (a *Adapter) parseIncoming(
 	material := &im.MessageMaterial{
 		MessageID: msg.MessageID, ParentID: msg.ParentID,
 		ResourceMessageID: msg.MessageID, ChatID: msg.ChatID,
-		SenderID: senderID, CreateTime: msg.CreateTime, Type: msg.MessageType,
+		SenderID: senderID, SenderType: msg.SenderType, CreateTime: msg.CreateTime,
+		UpdateTime: msg.UpdateTime, SnapshotSource: "event", Type: msg.MessageType,
 	}
 	content, mentioned, commandAllowed, err := parseMaterialBody(material, msg.Content, mentions, botID)
 	if err != nil {
@@ -269,6 +278,10 @@ func parseMaterialBody(
 		commandText.WriteString(strings.Join(commandParts, "\n"))
 	case "merge_forward":
 		// Children and their parent links come from ReadMessage, not this body.
+	case "interactive":
+		// Defer parsing until the worker can read the current authorized snapshot
+		// under the shared preparation deadline. Never classify an event preview.
+		material.RawContent = raw
 	default:
 		material.Unavailable = "不支持的消息正文类型：" + material.Type
 	}
@@ -294,11 +307,23 @@ func parseMaterialBody(
 	return content, mentioned, commandAllowed, nil
 }
 
+type messageAPIError struct {
+	Status    int
+	Code      int    `json:"code"`
+	Msg       string `json:"msg"`
+	Uncertain bool   `json:"-"`
+}
+
+func (e *messageAPIError) Error() string {
+	return fmt.Sprintf("read Feishu API: HTTP %d code=%d %s", e.Status, e.Code, e.Msg)
+}
+
 // getAPIJSON uses the same tenant identity and region as resource downloads.
 func (a *Adapter) getAPIJSON(ctx context.Context, path string, result any) error {
 	token, err := a.getTenantAccessToken(ctx)
 	if err != nil {
-		return err
+		// An identity failure cannot authorize use of an older event body.
+		return &messageAPIError{Msg: "robot identity unavailable: " + err.Error()}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.api("%s", path), nil)
 	if err != nil {
@@ -310,11 +335,37 @@ func (a *Adapter) getAPIJSON(ctx context.Context, path string, result any) error
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("read Feishu API: HTTP %d", resp.StatusCode)
+	// Detect overflow, including a valid JSON prefix followed by extra bytes.
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, (32<<20)+1))
+	// Check access decisions before decoding data. A malformed items value must
+	// not turn an explicit denial into a recoverable parse failure, even when
+	// the response framing is truncated after a complete error envelope.
+	var envelope struct {
+		Code *int            `json:"code"`
+		Msg  json.RawMessage `json:"msg"`
 	}
-	// Bound an API response even when a forward contains more than we admit.
-	return json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(result)
+	envelopeErr := json.Unmarshal(body, &envelope)
+	apiErr := &messageAPIError{
+		Status: resp.StatusCode, Uncertain: readErr != nil || envelopeErr != nil || envelope.Code == nil,
+	}
+	_ = json.Unmarshal(envelope.Msg, &apiErr.Msg)
+	if envelope.Code != nil {
+		apiErr.Code = *envelope.Code
+	}
+	if resp.StatusCode != http.StatusOK || apiErr.Code != 0 {
+		return apiErr
+	}
+	if apiErr.Uncertain || len(body) > 32<<20 {
+		apiErr.Uncertain = true
+		apiErr.Msg = "API response incomplete, invalid or exceeds 32 MiB"
+		return apiErr
+	}
+	if err := json.Unmarshal(body, result); err != nil {
+		// A partially decoded DTO may already contain a revoked target. Only
+		// the card body parser, after visibility checks, can permit fallback.
+		return &messageAPIError{Status: resp.StatusCode, Uncertain: true, Msg: "API response data invalid"}
+	}
+	return nil
 }
 
 func (a *Adapter) getBotOpenID(ctx context.Context) (string, error) {
@@ -341,24 +392,125 @@ func (a *Adapter) getBotOpenID(ctx context.Context) (string, error) {
 
 // ReadMessage returns immutable snapshots; a caller must apply path depth and
 // budgets on each traversal, not cache a previously truncated expansion.
-func (a *Adapter) ReadMessage(ctx context.Context, messageID string) ([]*im.MessageMaterial, error) {
+func (a *Adapter) ReadMessage(
+	ctx context.Context, messageID string,
+) ([]*im.MessageMaterial, error) {
+	return a.ReadMessageWithFallback(ctx, messageID, nil)
+}
+
+// ReadMessageWithFallback keeps Feishu event recovery optional for message readers.
+func (a *Adapter) ReadMessageWithFallback(
+	ctx context.Context, messageID string, event *im.MessageMaterial,
+) ([]*im.MessageMaterial, error) {
 	if !feishuSafePathParam(messageID) {
 		return nil, fmt.Errorf("invalid message_id format")
 	}
 	var result struct {
-		Code int `json:"code"`
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
 		Data struct {
 			Items []*larkim.Message `json:"items"`
 		} `json:"data"`
 	}
-	if err := a.getAPIJSON(ctx, "/open-apis/im/v1/messages/"+messageID+"?user_id_type=open_id", &result); err != nil {
+	path := "/open-apis/im/v1/messages/" + messageID + "?user_id_type=open_id"
+	read := func(withCardParameter bool) error {
+		result.Code, result.Msg, result.Data.Items = 0, "", nil
+		url := path
+		if withCardParameter {
+			url += "&card_msg_content_type=user_card_content"
+		}
+		if err := a.getAPIJSON(ctx, url, &result); err != nil {
+			return err
+		}
+		if result.Code != 0 {
+			return &messageAPIError{Status: http.StatusOK, Code: result.Code, Msg: result.Msg}
+		}
+		return nil
+	}
+	err := read(true)
+	var apiErr *messageAPIError
+	if errors.As(err, &apiErr) && apiErr.Code == 230001 &&
+		strings.Contains(apiErr.Msg, "card_msg_content_type") && ctx.Err() == nil {
+		// Only an explicit rejection of this parameter permits one retry.
+		err = read(false)
+	}
+	budgets := make(map[string]*cardParseBudget)
+	budgetFor := func(id string) *cardParseBudget {
+		if budgets[id] == nil {
+			budgets[id] = &cardParseBudget{}
+		}
+		return budgets[id]
+	}
+	eventFallback := func() *im.MessageMaterial {
+		if event == nil || ctx.Err() != nil {
+			return nil
+		}
+		if event.Type != "interactive" || event.MessageID != messageID || event.RawContent == "" ||
+			(event.ResourceMessageID != "" && event.ResourceMessageID != messageID) {
+			return nil
+		}
+		parsed := parseCard(ctx, event.RawContent, budgetFor(messageID))
+		if len(parsed.Parts) == 0 || parsed.Status == "unreadable" || parsed.Status == "empty" {
+			return nil
+		}
+		snapshot := *event
+		snapshot.RawContent, snapshot.Unavailable = "", ""
+		snapshot.Parts, snapshot.CardStatus = parsed.Parts, "unknown"
+		snapshot.SnapshotSource = "event_fallback"
+		snapshot.ReadTime = time.Now().UTC().Format(time.RFC3339Nano)
+		snapshot.Warnings = append(parsed.Missing, "回读未成功，仅保留收到的事件片段，无法确认当前卡片完整性；请重新引用原卡片重试")
+		return &snapshot
+	}
+	if err != nil {
+		// Unknown API denials fail closed. Only transient failures may retain an
+		// already authorized event fragment, never a revoked/invisible snapshot.
+		apiErr = nil
+		var transportErr *url.Error
+		transient := errors.As(err, &transportErr)
+		if errors.As(err, &apiErr) {
+			transient = (apiErr.Status >= 500 || apiErr.Status == http.StatusTooManyRequests) &&
+				apiErr.Code == 0 && !apiErr.Uncertain
+		}
+		if transient {
+			if event := eventFallback(); event != nil {
+				return []*im.MessageMaterial{event}, nil
+			}
+		}
+		if apiErr != nil && event != nil &&
+			event.MessageID == messageID && event.Type == "interactive" {
+			reason := "卡片回读失败，请重新引用原卡片重试"
+			switch apiErr.Code {
+			case 230002, 230006, 230013, 230027, 230050, 99991663, 99991664:
+				reason = "机器人无权读取此卡片或卡片已不可见；请检查消息权限后重试"
+			case 230110:
+				reason = "卡片消息已撤回，请重新发送材料"
+			}
+			if apiErr.Status == http.StatusUnauthorized || apiErr.Status == http.StatusForbidden {
+				reason = "机器人未获准读取此卡片；请检查身份与消息权限后重试"
+			}
+			snapshot := *event
+			snapshot.RawContent, snapshot.Parts, snapshot.Warnings = "", nil, nil
+			snapshot.CardStatus, snapshot.Unavailable, snapshot.SnapshotSource = "unreadable", reason, "read_failed"
+			snapshot.ReadTime = time.Now().UTC().Format(time.RFC3339Nano)
+			return []*im.MessageMaterial{&snapshot}, nil
+		}
 		return nil, err
 	}
-	if result.Code != 0 || len(result.Data.Items) == 0 {
-		return nil, fmt.Errorf("message unavailable: code=%d", result.Code)
+	if len(result.Data.Items) == 0 {
+		return nil, errors.New("message missing or no longer visible")
 	}
 	materials := make([]*im.MessageMaterial, 0, len(result.Data.Items))
+	parsedCards := make(map[[2]string]cardParseResult)
+	type cardSnapshot struct {
+		body                            string
+		message                         *im.MessageMaterial
+		conflicting, deleted, knownCard bool
+	}
+	cardSnapshots := make(map[string]*cardSnapshot)
 	for _, item := range result.Data.Items {
+		if ctx.Err() != nil {
+			break
+		}
 		if item == nil || ptrStr(item.MessageId) == "" {
 			continue
 		}
@@ -366,9 +518,12 @@ func (a *Adapter) ReadMessage(ctx context.Context, messageID string) ([]*im.Mess
 			MessageID: ptrStr(item.MessageId), ParentID: ptrStr(item.ParentId),
 			UpperMessageID: ptrStr(item.UpperMessageId), ResourceMessageID: messageID,
 			ChatID: ptrStr(item.ChatId), CreateTime: ptrStr(item.CreateTime), Type: ptrStr(item.MsgType),
+			UpdateTime: ptrStr(item.UpdateTime), ReadTime: time.Now().UTC().Format(time.RFC3339Nano),
+			SnapshotSource: "message_read",
 		}
 		if item.Sender != nil {
 			material.SenderID = ptrStr(item.Sender.Id)
+			material.SenderType = ptrStr(item.Sender.SenderType)
 		}
 		var mentions []messageMention
 		for _, mention := range item.Mentions {
@@ -382,11 +537,87 @@ func (a *Adapter) ReadMessage(ctx context.Context, messageID string) ([]*im.Mess
 			material.Unavailable = "消息已撤回"
 		} else if item.Body == nil || item.Body.Content == nil {
 			material.Unavailable = "消息正文缺失"
+		} else if material.Type == "interactive" {
+			// Nested forwards can repeat a snapshot. Reuse only identical bodies
+			// within this response; changed bodies still share the message budget.
+			key := [2]string{material.MessageID, *item.Body.Content}
+			parsed, exists := parsedCards[key]
+			if !exists {
+				parsed = parseCard(ctx, *item.Body.Content, budgetFor(material.MessageID))
+				parsedCards[key] = parsed
+			}
+			material.Parts, material.CardStatus, material.Warnings = parsed.Parts, parsed.Status, parsed.Missing
+			if parsed.Status == "unreadable" {
+				material.Unavailable = "卡片正文无法解析"
+				if material.MessageID == messageID {
+					if event := eventFallback(); event != nil {
+						// Only the body failed. Keep the authorized message's
+						// parent relation and provenance when retaining an old fragment.
+						material.Parts, material.CardStatus = event.Parts, event.CardStatus
+						material.Warnings, material.SnapshotSource = event.Warnings, event.SnapshotSource
+						material.Unavailable = ""
+					}
+				}
+			}
 		} else if _, _, _, err := parseMaterialBody(material, *item.Body.Content, mentions, ""); err != nil {
 			material.Parts = nil
 			material.Unavailable = "消息正文无法解析"
 		}
+		if material.Type == "interactive" && material.CardStatus == "" {
+			material.CardStatus = "unreadable"
+		}
+		deleted := item.Deleted != nil && *item.Deleted
+		if material.Type == "interactive" || deleted {
+			body := ""
+			if item.Body != nil {
+				body = ptrStr(item.Body.Content)
+			}
+			snapshot := cardSnapshots[material.MessageID]
+			if snapshot == nil {
+				snapshot = &cardSnapshot{body: body, message: material}
+				cardSnapshots[material.MessageID] = snapshot
+			} else {
+				snapshot.conflicting = snapshot.conflicting || snapshot.body != body
+				previousStatus := snapshot.message.CardStatus
+				if !snapshot.deleted && (previousStatus == "unreadable" || previousStatus == "empty") &&
+					material.CardStatus != "unreadable" {
+					snapshot.message = material
+				}
+			}
+			snapshot.knownCard = snapshot.knownCard || material.Type == "interactive"
+			if deleted {
+				snapshot.message, snapshot.deleted = material, true
+			}
+		}
 		materials = append(materials, material)
+	}
+	// The material graph indexes each message ID once. Conflicting occurrences
+	// must retain one usable snapshot with its own provenance; deletion wins.
+	for _, snapshot := range cardSnapshots {
+		if !snapshot.knownCard {
+			continue
+		}
+		if snapshot.deleted {
+			selected := *snapshot.message
+			selected.Type, selected.CardStatus = "interactive", "unreadable"
+			snapshot.message = &selected
+		} else if snapshot.conflicting {
+			selected := *snapshot.message
+			if selected.CardStatus != "unreadable" && selected.CardStatus != "partial" {
+				selected.CardStatus = "unknown"
+			}
+			selected.Warnings = append(append([]string(nil), selected.Warnings...),
+				"同一卡片返回的正文不一致或缺失，无法确认完整性；未合并正文，读取情况以保留快照为准")
+			snapshot.message = &selected
+		}
+	}
+	for _, material := range materials {
+		snapshot := cardSnapshots[material.MessageID]
+		if snapshot != nil && snapshot.knownCard && (snapshot.conflicting || snapshot.deleted) {
+			upper, parent := material.UpperMessageID, material.ParentID
+			*material = *snapshot.message
+			material.UpperMessageID, material.ParentID = upper, parent
+		}
 	}
 	return materials, nil
 }
