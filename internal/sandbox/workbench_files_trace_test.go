@@ -106,6 +106,11 @@ func TestWorkbenchTracePayloadRedaction(t *testing.T) {
 		require.NoError(t, err)
 		return &RemoteExecResult{Stdout: string(payload), Stderr: secretBody}, nil
 	}
+	_, err = mgr.client.Exec(ctx, &fakeTokenlessHandle{id: "ordinary", provider: SandboxTypeDocker}, RemoteExecRequest{
+		Command: "ordinary-command-marker", Shell: true,
+	})
+	require.EqualError(t, err, "ordinary-error-marker")
+	ctx, rootTrace := tracer.StartTrace(ctx, langfuse.TraceOptions{Name: "workbench-redaction-test"})
 	for _, req := range []WorkbenchFileRequest{
 		{Operation: "write", Path: secretPath, Content: []byte(secretBody)},
 		{Operation: "read", Path: secretPath},
@@ -124,6 +129,7 @@ func TestWorkbenchTracePayloadRedaction(t *testing.T) {
 		Command: "ordinary-command-marker", Shell: true,
 	})
 	require.EqualError(t, err, "ordinary-error-marker")
+	rootTrace.Finish(nil, nil)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	require.NoError(t, tracer.Shutdown(shutdownCtx))
