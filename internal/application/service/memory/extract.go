@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 )
 
@@ -114,7 +114,7 @@ func (s *Service) ScheduleExtraction(ctx context.Context, sessionID, messageID, 
 
 	delay := cfg.ExtractDelay()
 	previous, shouldEnqueue, err := s.repo.EnqueuePendingSession(
-		ctx, scope, sessionID, delay+extractInFlightGrace,
+		ctx, scope, sessionID, cfg.ExtractMinInterval()+delay+extractInFlightGrace,
 	)
 	if err != nil {
 		logger.Warnf(ctx, "memory: record pending session failed: %v", err)
@@ -129,7 +129,7 @@ func (s *Service) ScheduleExtraction(ctx context.Context, sessionID, messageID, 
 	// The minimum interval only defers: if the previous run was recent, the
 	// task is queued further out rather than the turn being discarded.
 	if previous != nil && previous.LastExtractedAt != nil {
-		if remaining := cfg.ExtractMinInterval() - time.Since(*previous.LastExtractedAt); remaining > delay {
+		if remaining := cfg.ExtractMinInterval() - time.Now().Sub(*previous.LastExtractedAt); remaining > delay {
 			delay = remaining
 		}
 	}
@@ -145,7 +145,7 @@ func (s *Service) enqueueExtraction(
 	scope interfaces.MemoryScope,
 	sessionID, messageID, chatModelID string,
 	delay time.Duration,
-) {
+) error {
 	payload := types.MemoryExtractPayload{
 		TenantID:    scope.TenantID,
 		SubjectID:   scope.SubjectID,
@@ -159,7 +159,7 @@ func (s *Service) enqueueExtraction(
 	if err != nil {
 		logger.Warnf(ctx, "memory: marshal extraction payload failed: %v", err)
 		s.releaseSlot(ctx, scope)
-		return
+		return err
 	}
 
 	task := asynq.NewTask(types.TypeMemoryExtract, body)
@@ -170,11 +170,13 @@ func (s *Service) enqueueExtraction(
 	); err != nil {
 		logger.Warnf(ctx, "memory: enqueue extraction failed: %v", err)
 		s.releaseSlot(ctx, scope)
+		return err
 	}
+	return nil
 }
 
 func (s *Service) releaseSlot(ctx context.Context, scope interfaces.MemoryScope) {
-	if err := s.repo.ReleaseExtractionSlot(ctx, scope); err != nil {
+	if err := s.repo.ReleaseExtractionSlot(ctx, scope, ""); err != nil {
 		logger.Warnf(ctx, "memory: release extraction slot failed: %v", err)
 	}
 }
@@ -283,102 +285,100 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 		return nil
 	}
 
-	// Take the queue before reading anything. Turns arriving from here on land
-	// in a fresh queue and get their own follow-up run rather than being
-	// erased by this one.
-	pending, cursor, err := s.repo.ClaimPendingSessions(ctx, scope)
+	// A lease serializes duplicate tasks, while the durable session queue
+	// stays intact until each segment has actually been applied.
+	leaseID := uuid.NewString()
+	batch, err := s.repo.ClaimPendingSessions(ctx, scope, payload.SessionID, leaseID, extractInFlightGrace)
 	if err != nil {
 		return fmt.Errorf("claim pending sessions: %w", err)
 	}
-	if payload.SessionID != "" && !containsString(pending, payload.SessionID) {
-		pending = append(pending, payload.SessionID)
-	}
-
-	// Expired items are archived before the existing-notes list is built, so a
-	// finished task is not offered to the model as something still true.
-	if archived, err := s.repo.ExpireOverdue(ctx, scope); err != nil {
-		logger.Warnf(ctx, "memory: expire overdue items failed: %v", err)
-	} else if archived > 0 {
-		logger.Infof(ctx, "memory: archived %d expired items", archived)
-	}
-
-	segments, truncated, err := s.collectSegments(ctx, pending, cursor)
-	if err != nil {
-		return err
-	}
-	if len(segments) == 0 {
-		// Nothing new to read. Advance nothing, but release the slot so the
-		// next turn can schedule a run immediately.
-		s.releaseSlot(ctx, scope)
+	if batch == nil {
 		return nil
 	}
-
-	// One call per topic segment. Handing the model a flat pile of messages
-	// spanning two conversations and an hour-long gap is exactly where
-	// extraction quality falls apart, and it also destroys attribution.
-	var newCursor time.Time
-	for _, segment := range segments {
-		existing, err := s.repo.ListActiveByKinds(ctx, scope, types.MemoryKinds, extractCandidatePool)
-		if err != nil {
-			return fmt.Errorf("load existing memories: %w", err)
+	if !batch.RetryAt.IsZero() {
+		// A redelivery can arrive before a dead worker's lease expires. Simply
+		// acknowledging it here would strand the durable queue forever.
+		if s.enqueuer == nil {
+			return fmt.Errorf("memory extraction is leased until %s", batch.RetryAt)
 		}
-		existing = s.narrowToRelevant(ctx, scope, cfg, segment, existing)
-		forgotten, err := s.repo.ListTombstones(ctx, scope, 30)
-		if err != nil {
-			logger.Warnf(ctx, "memory: load tombstones failed: %v", err)
+		return s.enqueueExtraction(ctx, scope, payload.SessionID, payload.MessageID, payload.ChatModelID, time.Until(batch.RetryAt)+time.Second)
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.repo.ReleaseExtractionSlot(cleanup, scope, leaseID); err != nil {
+			logger.Warnf(cleanup, "memory: release worker lease failed: %v", err)
 		}
+	}()
+	// Stop model calls before the lease can expire and another worker starts.
+	ctx, cancel := context.WithTimeout(ctx, extractInFlightGrace-time.Minute)
+	defer cancel()
+	if _, err := s.repo.ExpireOverdue(ctx, scope); err != nil {
+		return err
+	}
 
-		knownTopics, err := s.repo.TopTopics(ctx, scope, topicCandidateLimit)
+	processed := 0
+	for _, session := range batch.Sessions {
+		segments, more, err := s.collectSessionSegments(ctx, session)
 		if err != nil {
-			logger.Warnf(ctx, "memory: load known topics failed: %v", err)
-			knownTopics = nil
-		}
-
-		parsed, err := s.callExtractionModel(ctx, cfg, payload, segment, existing, forgotten, knownTopics)
-		if err != nil {
-			// Leave the watermark where it is: the messages this run failed on
-			// must be read again, not skipped. Advancing over the segments that
-			// did succeed keeps the failure from replaying them.
-			if !newCursor.IsZero() {
-				if err := s.repo.FinishExtraction(ctx, scope, newCursor); err != nil {
-					logger.Warnf(ctx, "memory: advance extraction cursor failed: %v", err)
-				}
-			}
-			s.releaseSlot(ctx, scope)
 			return err
 		}
-		s.applyDecisions(ctx, scope, cfg, segment, existing, parsed.Memories)
-		// Subjects are counted separately from memories: one question is noise,
-		// the same subject across conversations is an interest.
-		s.observeTopics(ctx, scope, cfg, s.extractionModelID(ctx, cfg, payload), parsed.Topics)
-		if segment.end.After(newCursor) {
-			newCursor = segment.end
+		if len(segments) == 0 {
+			if err := s.repo.CheckpointExtraction(ctx, scope, leaseID, session, session.Cursor, true); err != nil {
+				return err
+			}
+			continue
+		}
+		for i, segment := range segments {
+			if len(segment.lines) > 0 {
+				if err := s.extractSegment(ctx, scope, cfg, payload, segment); err != nil {
+					return err
+				}
+			}
+			cursor := types.MemoryMessageCursor{At: segment.end, ID: segment.endID}
+			if err := s.repo.CheckpointExtraction(ctx, scope, leaseID, session, cursor, !more && i == len(segments)-1); err != nil {
+				return err
+			}
+			processed++
+			if processed >= extractMaxSegmentsPerRun {
+				break
+			}
+		}
+		if processed >= extractMaxSegmentsPerRun {
+			break
 		}
 	}
-
-	if err := s.repo.FinishExtraction(ctx, scope, newCursor); err != nil {
-		logger.Warnf(ctx, "memory: advance extraction cursor failed: %v", err)
+	if err := s.repo.FinishExtraction(ctx, scope, leaseID); err != nil {
+		return err
 	}
-
-	// Either this run hit its message cap, or new turns arrived while it was
-	// working. Both mean there is more to read, and both are how the "every
-	// message is eventually considered" guarantee survives a busy user.
-	s.scheduleFollowUpIfNeeded(ctx, scope, cfg, payload, truncated)
-
-	// Maintenance rides along on a background run that has already happened
-	// rather than needing its own scheduler, which keeps it working identically
-	// in Lite mode where there is no asynq worker to hold a periodic job.
+	s.scheduleFollowUpIfNeeded(ctx, scope, cfg, payload)
 	s.consolidateIfDue(ctx, scope, cfg, s.extractionModelID(ctx, cfg, payload))
 	return nil
 }
 
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
+func (s *Service) extractSegment(ctx context.Context, scope interfaces.MemoryScope, cfg *types.MemoryConfig, payload types.MemoryExtractPayload, segment transcriptSegment) error {
+	existing, err := s.repo.ListActiveByKinds(ctx, scope, types.MemoryKinds, extractCandidatePool)
+	if err != nil {
+		return fmt.Errorf("load existing memories: %w", err)
 	}
-	return false
+	existing = s.narrowToRelevant(ctx, scope, cfg, segment, existing)
+	forgotten, err := s.repo.ListTombstones(ctx, scope, 30)
+	if err != nil {
+		return fmt.Errorf("load memory tombstones: %w", err)
+	}
+	knownTopics, err := s.repo.TopTopics(ctx, scope, topicCandidateLimit)
+	if err != nil {
+		return fmt.Errorf("load known topics: %w", err)
+	}
+	parsed, err := s.callExtractionModel(ctx, cfg, payload, segment, existing, forgotten, knownTopics)
+	if err != nil {
+		return err
+	}
+	if err := s.applyDecisions(ctx, scope, cfg, segment, existing, parsed.Memories); err != nil {
+		return err
+	}
+	s.observeTopics(ctx, scope, cfg, s.extractionModelID(ctx, cfg, payload), parsed.Topics)
+	return nil
 }
 
 // scheduleFollowUpIfNeeded queues the next run when work remains.
@@ -387,7 +387,6 @@ func (s *Service) scheduleFollowUpIfNeeded(
 	scope interfaces.MemoryScope,
 	cfg *types.MemoryConfig,
 	payload types.MemoryExtractPayload,
-	truncated bool,
 ) {
 	if s.enqueuer == nil {
 		return
@@ -400,7 +399,7 @@ func (s *Service) scheduleFollowUpIfNeeded(
 	if subject == nil {
 		return
 	}
-	if !truncated && len(subject.PendingSessions) == 0 {
+	if len(subject.PendingSessions) == 0 {
 		return
 	}
 	sessionID := payload.SessionID
@@ -409,7 +408,7 @@ func (s *Service) scheduleFollowUpIfNeeded(
 	}
 	// Claim the slot again for the successor; FinishExtraction just cleared it.
 	if _, shouldEnqueue, err := s.repo.EnqueuePendingSession(
-		ctx, scope, sessionID, cfg.ExtractDelay()+extractInFlightGrace,
+		ctx, scope, "", cfg.ExtractMinInterval()+cfg.ExtractDelay()+extractInFlightGrace,
 	); err != nil || !shouldEnqueue {
 		if err != nil {
 			logger.Warnf(ctx, "memory: claim follow-up slot failed: %v", err)
@@ -439,112 +438,66 @@ type transcriptSegment struct {
 	context []string
 	// end is the newest message timestamp the segment covers, including the
 	// assistant rows in between, and is what the watermark advances to.
-	end time.Time
+	end   time.Time
+	endID string
 }
 
-// collectSegments reads everything past the watermark and cuts it into
-// segments.
-//
-// Walking forward from a watermark rather than reading "the most recent N
-// messages" is what makes coverage a property of the data: a burst of turns, a
-// second concurrent session, or a slow worker can delay a message but cannot
-// make it invisible. Segmenting on top of that is what keeps quality: a run
-// that spans two conversations and an hour-long gap is one where the model has
-// to guess which statement belongs to which situation.
-//
-// Only role=user messages are extracted from. The assistant's own words are the
-// model talking to itself, and feeding them back is how a prompt injection in a
-// retrieved document ends up stored as a fact about the user.
-func (s *Service) collectSegments(
-	ctx context.Context, sessions []string, cursor time.Time,
-) (segments []transcriptSegment, truncated bool, err error) {
-	for _, sessionID := range sessions {
-		if strings.TrimSpace(sessionID) == "" {
+// collectSessionSegments reads a bounded page using a session-local cursor.
+// Every row, including assistant-only pages, belongs to a checkpoint. A gap
+// is flushed before admitting the next message so it cannot advance over it.
+func (s *Service) collectSessionSegments(ctx context.Context, session types.MemoryExtractionSession) ([]transcriptSegment, bool, error) {
+	messages, err := s.messageRepo.ListMessagesBySessionAfterCursor(ctx, session.SessionID, session.Cursor, extractMaxMessagesPerRun+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("load session messages: %w", err)
+	}
+	more := len(messages) > extractMaxMessagesPerRun
+	if more {
+		messages = messages[:extractMaxMessagesPerRun]
+	}
+	var segments []transcriptSegment
+	current := transcriptSegment{sessionID: session.SessionID}
+	var lastAt time.Time
+	hasRows := false
+	flush := func() {
+		if !hasRows {
+			return
+		}
+		segments = append(segments, current)
+		current = transcriptSegment{sessionID: session.SessionID}
+		hasRows = false
+	}
+	for _, message := range messages {
+		if message == nil {
 			continue
 		}
-		messages, err := s.messageRepo.ListMessagesBySessionAfterTime(
-			ctx, sessionID, cursor, extractMaxMessagesPerRun+1,
-		)
-		if err != nil {
-			return nil, false, fmt.Errorf("load session messages: %w", err)
+		content := strings.TrimSpace(message.Content)
+		isUser := message.Role == "user" && content != ""
+		if isUser && !lastAt.IsZero() && message.CreatedAt.Sub(lastAt) > extractSegmentGap {
+			flush()
 		}
-		if len(messages) > extractMaxMessagesPerRun {
-			truncated = true
-			messages = messages[:extractMaxMessagesPerRun]
+		current.end, current.endID = message.CreatedAt, message.ID
+		hasRows = true
+		if !isUser {
+			continue
 		}
-
-		var (
-			lines   []transcriptLine
-			end     time.Time
-			lastAt  time.Time
-			flushed []transcriptSegment
-		)
-		flush := func() {
-			if len(lines) == 0 {
-				return
-			}
-			flushed = append(flushed, transcriptSegment{
-				sessionID: sessionID,
-				lines:     lines,
-				end:       end,
-			})
-			lines = nil
+		lastAt = message.CreatedAt
+		if runes := []rune(content); len(runes) > extractMaxLineRunes {
+			content = string(runes[:extractMaxLineRunes])
 		}
-		for _, message := range messages {
-			if message == nil {
-				continue
-			}
-			// The watermark covers assistant rows too: they are not read, but
-			// leaving them behind it would make the cursor move back and forth
-			// around every turn.
-			if message.CreatedAt.After(end) {
-				end = message.CreatedAt
-			}
-			if message.Role != "user" {
-				continue
-			}
-			content := strings.TrimSpace(message.Content)
-			if content == "" {
-				continue
-			}
-			if !lastAt.IsZero() && message.CreatedAt.Sub(lastAt) > extractSegmentGap {
-				flush()
-			}
-			lastAt = message.CreatedAt
-			if runes := []rune(content); len(runes) > extractMaxLineRunes {
-				content = string(runes[:extractMaxLineRunes])
-			}
-			lines = append(lines, transcriptLine{
-				sessionID: sessionID,
-				messageID: message.ID,
-				at:        message.CreatedAt,
-				content:   content,
-			})
+		current.lines = append(current.lines, transcriptLine{sessionID: session.SessionID, messageID: message.ID, at: message.CreatedAt, content: content})
+	}
+	flush()
+	for i := range segments {
+		if len(segments[i].lines) == 0 {
+			continue
 		}
-		flush()
-
-		for i := range flushed {
-			// Every segment but the first in a session already has its lead-in
-			// inside this run; the first one needs it fetched.
-			if i == 0 {
-				flushed[i].context = s.priorContext(ctx, sessionID, flushed[i].lines)
-			} else {
-				flushed[i].context = tailContents(flushed[i-1].lines, extractContextLines)
-			}
-			segments = append(segments, flushed[i])
+		if i == 0 {
+			segments[i].context = s.priorContext(ctx, session.SessionID, segments[i].lines)
+		} else {
+			segments[i].context = tailContents(segments[i-1].lines, extractContextLines)
 		}
 	}
-
-	sort.SliceStable(segments, func(i, j int) bool {
-		return segments[i].lines[0].at.Before(segments[j].lines[0].at)
-	})
-	if len(segments) > extractMaxSegmentsPerRun {
-		// The rest stay ahead of the watermark and are picked up by the
-		// follow-up run, so capping the work of one run never loses a message.
-		segments = segments[:extractMaxSegmentsPerRun]
-		truncated = true
-	}
-	return segments, truncated, nil
+	return segments, more, nil
 }
 
 // priorContext fetches the few user messages just before a segment.
@@ -697,9 +650,9 @@ Lines:
 Existing notes: (none)
 {"memories":[
 {"action":"add","target":null,"kind":"profile","topic":"可能的身份",
- "content":"可能在负责连锁门店的排班","importance":2,"source":1,
+ "content":"可能在负责仓库单据管理","importance":2,"source":1,
  "expires_at":null,"inferred":true}],
-"topics":["门店排班管理"]}
+"topics":["仓库单据保留规则"]}
 The identity is a guess, so it is marked inferred and waits for confirmation.
 The subject is counted either way.
 
@@ -961,7 +914,7 @@ func (s *Service) callExtractionModel(
 		return extractionResponse{}, err
 	}
 	if response == nil {
-		return extractionResponse{}, nil
+		return extractionResponse{}, fmt.Errorf("extraction model returned no response")
 	}
 
 	// A truncated call is retried once with room to spare. Reasoning models
@@ -989,12 +942,7 @@ func (s *Service) callExtractionModel(
 
 	parsed, err := parseExtractionResponse(response.Content)
 	if err != nil {
-		// A malformed but complete response is the model's fault, not a
-		// transient failure: the same prompt at temperature zero produces the
-		// same garbage, so retrying only burns the budget. Truncation is
-		// handled above precisely because it is *not* this case.
-		logger.Warnf(ctx, "memory: unparsable extraction response: %v", err)
-		return extractionResponse{}, nil
+		return extractionResponse{}, fmt.Errorf("parse extraction response: %w", err)
 	}
 	return parsed, nil
 }
@@ -1075,7 +1023,7 @@ func (s *Service) applyDecisions(
 	segment transcriptSegment,
 	existing []*types.MemoryItem,
 	decisions []extractionDecision,
-) {
+) error {
 	applied := 0
 	// Two decisions about the same topic inside one response would otherwise
 	// supersede each other, leaving a superseded row from a single run.
@@ -1097,7 +1045,7 @@ func (s *Service) applyDecisions(
 		if decision.Target != nil && *decision.Target >= 0 && *decision.Target < len(existing) {
 			target = existing[*decision.Target]
 		}
-		if target != nil && topic == "" {
+		if target != nil && (action == "update" || topic == "") {
 			topic = target.Topic
 		}
 
@@ -1119,8 +1067,7 @@ func (s *Service) applyDecisions(
 			// memory manager as something that stopped being true, which is
 			// more useful than it disappearing without explanation.
 			if err := s.repo.SupersedeItem(ctx, scope, target.ID, ""); err != nil {
-				logger.Warnf(ctx, "memory: delete decision failed: %v", err)
-				continue
+				return fmt.Errorf("delete memory decision: %w", err)
 			}
 			seenTopics[key] = struct{}{}
 			applied++
@@ -1138,11 +1085,15 @@ func (s *Service) applyDecisions(
 				ExpiresAt:       parseExpiry(decision.ExpiresAt),
 				Inferred:        decision.Inferred,
 			}
-			if _, err := s.write(ctx, scope, cfg, item); err != nil {
-				if !errors.Is(err, ErrPreviouslyForgotten) && !errors.Is(err, ErrSensitiveContent) {
-					logger.Warnf(ctx, "memory: apply extraction decision failed: %v", err)
+			var targetID string
+			if action == "update" && target != nil {
+				targetID = target.ID
+			}
+			if _, err := s.writeReplacing(ctx, scope, cfg, item, targetID); err != nil {
+				if errors.Is(err, ErrPreviouslyForgotten) || errors.Is(err, ErrSensitiveContent) {
+					continue
 				}
-				continue
+				return fmt.Errorf("apply memory decision: %w", err)
 			}
 			seenTopics[key] = struct{}{}
 			applied++
@@ -1151,4 +1102,5 @@ func (s *Service) applyDecisions(
 	if applied > 0 {
 		logger.Infof(ctx, "memory: stored %d memories for subject %s", applied, scope.SubjectID)
 	}
+	return nil
 }

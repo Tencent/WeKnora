@@ -97,108 +97,6 @@ func (r *memoryRepository) UpdateSubjectBlock(
 		}).Error
 }
 
-// EnqueuePendingSession is the whole "never drop a turn" mechanism, so it runs
-// inside a transaction: reading the subject, appending the session and claiming
-// the in-flight slot must not interleave with a concurrent turn, or two turns
-// could both decide nobody is scheduled (two tasks) or both decide someone is
-// (a turn recorded against a run that already read the queue).
-func (r *memoryRepository) EnqueuePendingSession(
-	ctx context.Context, scope interfaces.MemoryScope, sessionID string, inFlightTimeout time.Duration,
-) (*types.MemorySubject, bool, error) {
-	var (
-		snapshot   types.MemorySubject
-		shouldSend bool
-	)
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var subject types.MemorySubject
-		if err := tx.Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).
-			Clauses(forUpdateClause()).
-			First(&subject).Error; err != nil {
-			return err
-		}
-		snapshot = subject
-
-		now := time.Now()
-		updates := map[string]interface{}{"updated_at": now}
-		if pending := subject.PendingSessions.Append(sessionID); len(pending) != len(subject.PendingSessions) {
-			updates["pending_sessions"] = pending
-		}
-		// A stale marker (worker crashed, task lost) must not wedge the subject
-		// forever, so the claim expires.
-		inFlight := subject.ExtractScheduledAt != nil &&
-			now.Sub(*subject.ExtractScheduledAt) < inFlightTimeout
-		if !inFlight {
-			updates["extract_scheduled_at"] = now
-			shouldSend = true
-		}
-		return tx.Model(&types.MemorySubject{}).
-			Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).
-			Updates(updates).Error
-	})
-	if err != nil {
-		return nil, false, err
-	}
-	return &snapshot, shouldSend, nil
-}
-
-// ClaimPendingSessions empties the queue and returns it together with the
-// watermark to walk forward from. Emptying it here (rather than after the run)
-// is deliberate: turns arriving during the run land in a fresh queue and
-// trigger a follow-up, instead of being erased by the run that never saw them.
-func (r *memoryRepository) ClaimPendingSessions(
-	ctx context.Context, scope interfaces.MemoryScope,
-) ([]string, time.Time, error) {
-	var (
-		pending []string
-		cursor  time.Time
-	)
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var subject types.MemorySubject
-		if err := tx.Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).
-			Clauses(forUpdateClause()).
-			First(&subject).Error; err != nil {
-			return err
-		}
-		pending = append(pending, subject.PendingSessions...)
-		if subject.ExtractCursor != nil {
-			cursor = *subject.ExtractCursor
-		}
-		return tx.Model(&types.MemorySubject{}).
-			Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).
-			Updates(map[string]interface{}{
-				"pending_sessions": types.MemoryPendingSessions{},
-				"updated_at":       time.Now(),
-			}).Error
-	})
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-	return pending, cursor, nil
-}
-
-func (r *memoryRepository) FinishExtraction(
-	ctx context.Context, scope interfaces.MemoryScope, cursor time.Time,
-) error {
-	now := time.Now()
-	updates := map[string]interface{}{
-		"last_extracted_at":    now,
-		"extract_scheduled_at": nil,
-		"updated_at":           now,
-	}
-	if !cursor.IsZero() {
-		updates["extract_cursor"] = cursor
-	}
-	return r.scoped(ctx, scope).Model(&types.MemorySubject{}).Updates(updates).Error
-}
-
-func (r *memoryRepository) ReleaseExtractionSlot(
-	ctx context.Context, scope interfaces.MemoryScope,
-) error {
-	return r.scoped(ctx, scope).
-		Model(&types.MemorySubject{}).
-		Updates(map[string]interface{}{"extract_scheduled_at": nil, "updated_at": time.Now()}).Error
-}
-
 func (r *memoryRepository) CreateItem(ctx context.Context, item *types.MemoryItem) error {
 	if item.ID == "" {
 		item.ID = uuid.New().String()
@@ -351,16 +249,26 @@ func (r *memoryRepository) FindActiveByKey(
 func (r *memoryRepository) UpdateItemContent(
 	ctx context.Context, scope interfaces.MemoryScope, id, content, normalizedKey string, importance int,
 ) error {
-	return r.scoped(ctx, scope).
-		Model(&types.MemoryItem{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{
-			"content":        content,
-			"normalized_key": normalizedKey,
-			"importance":     importance,
-			"origin":         types.MemoryOriginManual,
-			"updated_at":     time.Now(),
+	return r.withSubject(ctx, scope, func(tx *gorm.DB, _ *types.MemorySubject) error {
+		var current types.MemoryItem
+		if err := tx.Where("tenant_id = ? AND subject_id = ? AND id = ?", scope.TenantID, scope.SubjectID, id).First(&current).Error; err != nil {
+			return err
+		}
+		if current.Content != content {
+			if err := tx.Where("tenant_id = ? AND subject_id = ? AND item_id = ?", scope.TenantID, scope.SubjectID, id).Delete(&types.MemoryItemEmbedding{}).Error; err != nil {
+				return err
+			}
+			// Editing a confirmed fact invalidates proposals based on its old wording.
+			if err := tx.Model(&types.MemoryItem{}).Where("tenant_id = ? AND subject_id = ? AND replaces_id = ? AND status = ?", scope.TenantID, scope.SubjectID, id, types.MemoryStatusPending).
+				Updates(map[string]interface{}{"status": types.MemoryStatusSuperseded, "invalid_at": time.Now(), "superseded_by": id}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&current).Updates(map[string]interface{}{
+			"content": content, "normalized_key": normalizedKey, "importance": importance,
+			"origin": types.MemoryOriginManual, "updated_at": time.Now(),
 		}).Error
+	})
 }
 
 func (r *memoryRepository) SupersedeItem(
@@ -561,12 +469,27 @@ func (r *memoryRepository) UpsertItemEmbedding(
 	if embedding.CreatedAt.IsZero() {
 		embedding.CreatedAt = now
 	}
-	return r.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "item_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"model_id", "dims", "vector", "updated_at"}),
-		}).
-		Create(embedding).Error
+	return r.withSubject(ctx, scope, func(tx *gorm.DB, _ *types.MemorySubject) error {
+		if embedding.SourceContent != "" {
+			var current types.MemoryItem
+			err := tx.Where("tenant_id = ? AND subject_id = ? AND id = ?", scope.TenantID, scope.SubjectID, embedding.ItemID).First(&current).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if current.Content != embedding.SourceContent || current.Topic != embedding.SourceTopic {
+				return nil
+			}
+		}
+		return tx.
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "item_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"model_id", "dims", "vector", "updated_at"}),
+			}).
+			Create(embedding).Error
+	})
 }
 
 // DeleteItemEmbedding drops one memory's vector so the backfill rebuilds it.

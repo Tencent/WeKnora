@@ -87,6 +87,10 @@ curl --location --request PUT 'http://localhost:8080/api/v1/memory/settings' \
 
 推断出的记忆（`status=pending`）确认后才注入提示词；否决会留下 tombstone，避免下一轮蒸馏把同一句话再写回来。
 
+如果推断用于修改已有记忆，确认前旧记忆继续生效；确认会在同一事务中激活推断并替换旧条目。已经失效、到期或基于已修改内容的推断不能再次确认，接口返回 HTTP 409，客户端应刷新列表。编辑正文会同时使旧向量失效，并尝试生成新向量；生成失败时保留词面检索，后续整理可补齐向量。
+
+自动提取按会话保存 `(created_at, message_id)` 游标。待处理会话在领取任务后仍保留，只有成功处理的片段才推进游标。批次截断、失败重试或工作进程重启不会清除未完成的会话；处理期间到达的新消息由后续任务继续处理。
+
 ## GET `/memory/export`
 
 返回 `{success, total, truncated, data}`，并带 `Content-Disposition: attachment; filename="weknora-memories.json"`。`truncated` 仅在触达导出上限（2 万条）时为 true。

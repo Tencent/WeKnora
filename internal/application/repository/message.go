@@ -124,7 +124,18 @@ func (r *messageRepository) ListMessagesBySessionAfterTime(
 	return messages, nil
 }
 
-// UpdateMessage updates an existing message
+// ListMessagesBySessionAfterCursor uses a stable tie-breaker for memory paging.
+func (r *messageRepository) ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error) {
+	var messages []*types.Message
+	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
+	if !cursor.At.IsZero() || cursor.ID != "" {
+		query = query.Where("created_at > ? OR (created_at = ? AND id > ?)", cursor.At, cursor.At, cursor.ID)
+	}
+	err := query.Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error
+	return messages, err
+}
+
+// UpdateMessage updates an existing message.
 func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Message) error {
 	return r.db.WithContext(ctx).Model(&types.Message{}).Where(
 		"id = ? AND session_id = ?", message.ID, message.SessionID,

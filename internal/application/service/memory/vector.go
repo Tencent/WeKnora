@@ -100,10 +100,12 @@ func (s *Service) storeItemEmbedding(
 		return
 	}
 	err := s.repo.UpsertItemEmbedding(ctx, scope, &types.MemoryItemEmbedding{
-		ItemID:  item.ID,
-		ModelID: modelID,
-		Dims:    len(vector),
-		Vector:  types.EncodeEmbedding(vector),
+		ItemID:        item.ID,
+		SourceContent: item.Content,
+		SourceTopic:   item.Topic,
+		ModelID:       modelID,
+		Dims:          len(vector),
+		Vector:        types.EncodeEmbedding(vector),
 	})
 	if err != nil {
 		logger.Warnf(ctx, "memory: store embedding failed: %v", err)
@@ -298,10 +300,12 @@ func (s *Service) backfillEmbeddings(
 			break
 		}
 		err := s.repo.UpsertItemEmbedding(ctx, scope, &types.MemoryItemEmbedding{
-			ItemID:  item.ID,
-			ModelID: modelID,
-			Dims:    len(vector),
-			Vector:  types.EncodeEmbedding(vector),
+			ItemID:        item.ID,
+			SourceContent: item.Content,
+			SourceTopic:   item.Topic,
+			ModelID:       modelID,
+			Dims:          len(vector),
+			Vector:        types.EncodeEmbedding(vector),
 		})
 		if err != nil {
 			logger.Warnf(ctx, "memory: backfill embedding failed: %v", err)

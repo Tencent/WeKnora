@@ -27,6 +27,8 @@ var versionedSQLiteTables = []string{
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
+	"memory_subjects":    {"extraction_state"},               // 000094
+	"memory_items":       {"replaces_id"},                    // 000094
 	"tenants":            {"api_principal_config"},           // 000064
 	"users":              {"is_system_admin"},                // 000053
 	"knowledges":         {"pending_subtasks_count"},         // 000056
@@ -37,7 +39,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_tool_approvals": {"enabled"},                        // 000091
 }
 
-const expectedSQLiteMigrationVersion = 14
+const expectedSQLiteMigrationVersion = 15
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

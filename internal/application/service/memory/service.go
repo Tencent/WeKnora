@@ -299,6 +299,10 @@ func (s *Service) write(
 	cfg *types.MemoryConfig,
 	item types.MemoryItem,
 ) (*types.MemoryItem, error) {
+	return s.writeReplacing(ctx, scope, cfg, item, "")
+}
+
+func (s *Service) writeReplacing(ctx context.Context, scope interfaces.MemoryScope, cfg *types.MemoryConfig, item types.MemoryItem, targetID string) (*types.MemoryItem, error) {
 	content := types.SanitizeMemoryContent(item.Content)
 	if content == "" {
 		return nil, errors.New("memory: empty content")
@@ -347,11 +351,19 @@ func (s *Service) write(
 
 	topic := types.SanitizeMemoryTopic(item.Topic)
 	normalizedKey := types.MemoryItemKey(topic, content)
-	existing, err := s.repo.FindActiveByKey(ctx, scope, normalizedKey)
+	var existing *types.MemoryItem
+	if targetID != "" {
+		existing, err = s.repo.GetItem(ctx, scope, targetID)
+		if err == nil && existing == nil {
+			return nil, types.ErrMemoryConflict
+		}
+	} else {
+		existing, err = s.repo.FindActiveByKey(ctx, scope, normalizedKey)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("find conflicting memory: %w", err)
 	}
-	if existing != nil && types.SanitizeMemoryContent(existing.Content) == content {
+	if existing != nil && existing.Status == types.MemoryStatusActive && types.SanitizeMemoryContent(existing.Content) == content {
 		// Same statement about the same topic: nothing changed, so keep the
 		// original timestamps instead of churning the row on every turn.
 		return existing, nil
@@ -366,7 +378,7 @@ func (s *Service) write(
 		if err != nil {
 			return nil, err
 		}
-		if duplicate != nil && !longer {
+		if duplicate != nil && !longer && (duplicate.Status == types.MemoryStatusActive || statusForWrite(item) == types.MemoryStatusPending) {
 			return duplicate, nil
 		}
 		// The new statement subsumes the old one, so let it supersede.
@@ -392,15 +404,11 @@ func (s *Service) write(
 	if stored.Origin == "" {
 		stored.Origin = types.MemoryOriginExtracted
 	}
-	if err := s.repo.CreateItem(ctx, stored); err != nil {
-		return nil, fmt.Errorf("create memory item: %w", err)
-	}
 	if existing != nil {
-		// Supersede rather than delete: the old statement keeps its content
-		// and gains invalid_at, so the memory manager can show what changed.
-		if err := s.repo.SupersedeItem(ctx, scope, existing.ID, stored.ID); err != nil {
-			logger.Warnf(ctx, "memory: supersede %s failed: %v", existing.ID, err)
-		}
+		targetID = existing.ID
+	}
+	if err := s.repo.SaveItem(ctx, scope, stored, targetID); err != nil {
+		return nil, fmt.Errorf("save memory item: %w", err)
 	}
 
 	s.enforceCapacity(ctx, scope, cfg)
@@ -747,6 +755,12 @@ func (s *Service) UpdateItem(
 	if sanitized == "" {
 		return nil, errors.New("memory: empty content")
 	}
+	if redacted, changed := types.RedactSensitive(sanitized); changed {
+		if types.IsMostlyRedacted(redacted) {
+			return nil, ErrSensitiveContent
+		}
+		sanitized = types.SanitizeMemoryContent(redacted)
+	}
 	// Keep the original topic: the user is correcting the statement, not
 	// re-filing it under a different subject, and reusing the topic is what
 	// keeps the correction able to supersede a future extraction.
@@ -756,7 +770,12 @@ func (s *Service) UpdateItem(
 		return nil, err
 	}
 	s.rebuildBlock(ctx, scope)
-	return s.repo.GetItem(ctx, scope, id)
+	updated, err := s.repo.GetItem(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	s.storeItemEmbedding(ctx, scope, s.workspaceConfig(ctx, scope.TenantID), updated)
+	return updated, nil
 }
 
 // DeleteItem forgets one memory permanently.
@@ -1288,9 +1307,10 @@ func (s *Service) ConfirmItem(ctx context.Context, id string) (*types.MemoryItem
 	if existing == nil {
 		return nil, ErrItemNotFound
 	}
-	if err := s.repo.SetItemStatus(ctx, scope, id, types.MemoryStatusActive); err != nil {
+	if err := s.repo.ConfirmPendingItem(ctx, scope, id); err != nil {
 		return nil, err
 	}
+	s.enforceCapacity(ctx, scope, s.workspaceConfig(ctx, scope.TenantID))
 	s.rebuildBlock(ctx, scope)
 	return s.repo.GetItem(ctx, scope, id)
 }
