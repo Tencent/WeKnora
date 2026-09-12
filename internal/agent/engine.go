@@ -789,10 +789,33 @@ func (e *AgentEngine) runReActIteration(
 				})
 				return iterOutcomeContinue, nil
 			}
-			// Retries exhausted — use fallback message rather than empty answer
+			// Retries exhausted — use fallback message rather than empty answer.
+			// analyzeResponse emitted nothing for the empty rounds (they were
+			// retryable), so the fallback must be emitted here as the turn's
+			// sole terminal answer event (#2906).
 			logger.Warnf(ctx, "[Agent][Round-%d] Empty content after %d retries - using fallback",
 				round, maxEmptyResponseRetries)
-			state.FinalAnswer = "I'm sorry, I was unable to generate a response. Please try again."
+			fallback := "I'm sorry, I was unable to generate a response. Please try again."
+			answerID := generateEventID("answer")
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: fallback,
+					Done:    false,
+				},
+			})
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: "",
+					Done:    true,
+				},
+			})
+			state.FinalAnswer = fallback
 			state.IsComplete = true
 			state.RoundSteps = append(state.RoundSteps, verdict.step)
 			e.closeAnswerStream(ctx, sessionID, verdict.answerID)
