@@ -101,8 +101,8 @@ func (s *Service) ScheduleExtraction(ctx context.Context, sessionID, messageID, 
 		return
 	}
 
-	// The subject row carries the queue and the watermark, so it has to exist
-	// before the first turn is recorded.
+	// The subject row serializes queue mutations, so it must exist before
+	// the first per-session progress row is recorded.
 	subject, err := s.repo.EnsureSubject(ctx, scope)
 	if err != nil {
 		logger.Warnf(ctx, "memory: ensure subject for extraction failed: %v", err)
@@ -246,6 +246,8 @@ type extractionResponse struct {
 	Topics []string `json:"topics"`
 }
 
+var errInvalidExtractionOutput = errors.New("invalid memory extraction output")
+
 // Handle runs one distillation pass.
 func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 	var payload types.MemoryExtractPayload
@@ -318,6 +320,7 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 	}
 
 	processed := 0
+	var retryErr error
 	for _, session := range batch.Sessions {
 		segments, more, err := s.collectSessionSegments(ctx, session)
 		if err != nil {
@@ -330,15 +333,32 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 			continue
 		}
 		for i, segment := range segments {
+			cursor := types.MemoryMessageCursor{At: segment.end, ID: segment.endID}
 			if len(segment.lines) > 0 {
 				if err := s.extractSegment(ctx, scope, cfg, payload, segment); err != nil {
-					return err
+					if !errors.Is(err, errInvalidExtractionOutput) {
+						return err
+					}
+					failure := interfaces.MemoryExtractionFailure{
+						Session: session, End: cursor, Code: "invalid_model_output",
+					}
+					skip, recordErr := s.repo.RecordExtractionFailure(ctx, scope, leaseID, failure)
+					if recordErr != nil {
+						return recordErr
+					}
+					if !skip {
+						retryErr = err
+						processed++
+						break // Retry this range later, while other sessions can progress.
+					}
+					logger.Warnf(ctx, "memory: skipping invalid segment; failure recorded for session %s",
+						session.SessionID)
 				}
 			}
-			cursor := types.MemoryMessageCursor{At: segment.end, ID: segment.endID}
 			if err := s.repo.CheckpointExtraction(ctx, scope, leaseID, session, cursor, !more && i == len(segments)-1); err != nil {
 				return err
 			}
+			session.Cursor = cursor
 			processed++
 			if processed >= extractMaxSegmentsPerRun {
 				break
@@ -351,7 +371,12 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 	if err := s.repo.FinishExtraction(ctx, scope, leaseID); err != nil {
 		return err
 	}
-	s.scheduleFollowUpIfNeeded(ctx, scope, cfg, payload)
+	if err := s.scheduleFollowUpIfNeeded(ctx, scope, cfg, payload); err != nil {
+		return err
+	}
+	if retryErr != nil && s.enqueuer == nil {
+		return retryErr
+	}
 	s.consolidateIfDue(ctx, scope, cfg, s.extractionModelID(ctx, cfg, payload))
 	return nil
 }
@@ -387,36 +412,26 @@ func (s *Service) scheduleFollowUpIfNeeded(
 	scope interfaces.MemoryScope,
 	cfg *types.MemoryConfig,
 	payload types.MemoryExtractPayload,
-) {
+) error {
 	if s.enqueuer == nil {
-		return
+		return nil
 	}
-	subject, err := s.repo.GetSubject(ctx, scope)
+	pending, err := s.repo.HasPendingExtraction(ctx, scope)
 	if err != nil {
-		logger.Warnf(ctx, "memory: reload subject for follow-up failed: %v", err)
-		return
+		return fmt.Errorf("load pending memory extraction: %w", err)
 	}
-	if subject == nil {
-		return
-	}
-	if len(subject.PendingSessions) == 0 {
-		return
+	if !pending {
+		return nil
 	}
 	sessionID := payload.SessionID
-	if len(subject.PendingSessions) > 0 {
-		sessionID = subject.PendingSessions[0]
-	}
 	// Claim the slot again for the successor; FinishExtraction just cleared it.
 	if _, shouldEnqueue, err := s.repo.EnqueuePendingSession(
 		ctx, scope, "", cfg.ExtractMinInterval()+cfg.ExtractDelay()+extractInFlightGrace,
 	); err != nil || !shouldEnqueue {
-		if err != nil {
-			logger.Warnf(ctx, "memory: claim follow-up slot failed: %v", err)
-		}
-		return
+		return err
 	}
 	logger.Infof(ctx, "memory: queueing follow-up distillation for subject %s", scope.SubjectID)
-	s.enqueueExtraction(ctx, scope, sessionID, payload.MessageID, payload.ChatModelID, extractFollowUpDelay)
+	return s.enqueueExtraction(ctx, scope, sessionID, payload.MessageID, payload.ChatModelID, extractFollowUpDelay)
 }
 
 // transcriptLine is one thing the user said, kept with the identity of the
@@ -914,7 +929,7 @@ func (s *Service) callExtractionModel(
 		return extractionResponse{}, err
 	}
 	if response == nil {
-		return extractionResponse{}, fmt.Errorf("extraction model returned no response")
+		return extractionResponse{}, fmt.Errorf("%w: no response", errInvalidExtractionOutput)
 	}
 
 	// A truncated call is retried once with room to spare. Reasoning models
@@ -930,19 +945,16 @@ func (s *Service) callExtractionModel(
 			return extractionResponse{}, err
 		}
 		if response == nil || isTruncated(response) {
-			// Returning an error is what keeps the watermark where it is, so
-			// these messages are read again rather than silently consumed by a
-			// run that learned nothing.
 			return extractionResponse{}, fmt.Errorf(
-				"extraction model returned no usable output within %d tokens; "+
+				"%w: no usable output within %d tokens; "+
 					"if this is a reasoning model, its thinking is consuming the budget",
-				extractBudgetRetryTokens)
+				errInvalidExtractionOutput, extractBudgetRetryTokens)
 		}
 	}
 
 	parsed, err := parseExtractionResponse(response.Content)
 	if err != nil {
-		return extractionResponse{}, fmt.Errorf("parse extraction response: %w", err)
+		return extractionResponse{}, fmt.Errorf("%w: %v", errInvalidExtractionOutput, err)
 	}
 	return parsed, nil
 }
@@ -1040,12 +1052,24 @@ func (s *Service) applyDecisions(
 
 		topic := types.SanitizeMemoryTopic(decision.Topic)
 		// An update or delete says which note it means by index; fall back to
-		// the topic only when the index is absent or out of range.
+		// the topic only when the index is absent.
 		var target *types.MemoryItem
-		if decision.Target != nil && *decision.Target >= 0 && *decision.Target < len(existing) {
-			target = existing[*decision.Target]
-		}
-		if target != nil && (action == "update" || topic == "") {
+		if action == "update" || action == "delete" {
+			if decision.Target != nil {
+				if *decision.Target < 0 || *decision.Target >= len(existing) || existing[*decision.Target] == nil {
+					continue
+				}
+				target = existing[*decision.Target]
+			} else {
+				var err error
+				target, err = s.repo.FindActiveByKey(ctx, scope, types.MemoryItemKey(topic, decision.Content))
+				if err != nil {
+					return fmt.Errorf("find memory decision target: %w", err)
+				}
+				if target == nil {
+					continue
+				}
+			}
 			topic = target.Topic
 		}
 
@@ -1056,13 +1080,6 @@ func (s *Service) applyDecisions(
 
 		switch action {
 		case "delete":
-			if target == nil {
-				found, err := s.repo.FindActiveByKey(ctx, scope, key)
-				if err != nil || found == nil {
-					continue
-				}
-				target = found
-			}
 			// Superseding with no replacement keeps the note visible in the
 			// memory manager as something that stopped being true, which is
 			// more useful than it disappearing without explanation.
@@ -1073,6 +1090,9 @@ func (s *Service) applyDecisions(
 			applied++
 			s.rebuildBlock(ctx, scope)
 		case "add", "update":
+			if types.SanitizeMemoryContent(decision.Content) == "" {
+				continue
+			}
 			source := decision.resolveSource(segment)
 			item := types.MemoryItem{
 				Kind:            decision.Kind,
@@ -1090,7 +1110,8 @@ func (s *Service) applyDecisions(
 				targetID = target.ID
 			}
 			if _, err := s.writeReplacing(ctx, scope, cfg, item, targetID); err != nil {
-				if errors.Is(err, ErrPreviouslyForgotten) || errors.Is(err, ErrSensitiveContent) {
+				if errors.Is(err, ErrPreviouslyForgotten) || errors.Is(err, ErrSensitiveContent) ||
+					errors.Is(err, types.ErrMemoryConflict) {
 					continue
 				}
 				return fmt.Errorf("apply memory decision: %w", err)

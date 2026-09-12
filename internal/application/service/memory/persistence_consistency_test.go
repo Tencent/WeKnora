@@ -3,24 +3,28 @@ package memory
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestMemoryConsistencyRealMessagePaging(t *testing.T) {
 	s, db, tr := newMemoryHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
-	// Only the actual SQL paging contract is under test here.
-	require.NoError(t, db.Exec("CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, created_at DATETIME, deleted_at DATETIME)").Error)
+	require.NoError(t, db.AutoMigrate(&types.Message{}))
 	at := time.Now().UTC().Truncate(time.Second)
 	for i := 0; i < 85; i++ {
 		require.NoError(t, db.Exec("INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)", fmt.Sprintf("m%03d", i), "s", "user", "hello", at).Error)
 	}
 	require.NoError(t, db.Exec("INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)", "other", "unrelated", "user", "private", at).Error)
+	require.NoError(t, db.Create(&types.Message{
+		ID: "deleted", SessionID: "s", Role: "user", CreatedAt: at, DeletedAt: gorm.DeletedAt{Time: at, Valid: true},
+	}).Error)
 	s.messageRepo = repository.NewMessageRepository(db)
 	var cursor types.MemoryMessageCursor
 	seen := map[string]bool{}
@@ -105,24 +109,59 @@ func TestMemoryConsistencyRedeliveryWaitsForCrashedWorkerLease(t *testing.T) {
 
 func TestMemoryConsistencyMigrationRestoresLegacyPendingTarget(t *testing.T) {
 	_, db, _ := newMemoryHarness(t)
-	// Recreate just the legacy columns needed by the data migration, then run
-	// the real migration against a premature replacement from the old code.
-	require.NoError(t, db.Exec("DROP TABLE memory_items").Error)
-	require.NoError(t, db.Exec("DROP TABLE memory_subjects").Error)
-	require.NoError(t, db.Exec("CREATE TABLE memory_subjects (id TEXT PRIMARY KEY)").Error)
-	require.NoError(t, db.Exec(`CREATE TABLE memory_items (
- id TEXT PRIMARY KEY, tenant_id INTEGER, subject_id TEXT, normalized_key TEXT,
- status TEXT, superseded_by TEXT, invalid_at DATETIME, valid_from DATETIME)`).Error)
+	testMemoryConsistencyMigration(t, db, "sqlite")
+}
+
+func execMemoryMigration(t *testing.T, db *gorm.DB, path string) {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var sql strings.Builder
+	for _, line := range strings.Split(string(contents), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "--") {
+			sql.WriteString(line)
+			sql.WriteByte('\n')
+		}
+	}
+	for _, stmt := range strings.Split(sql.String(), ";") {
+		if strings.TrimSpace(stmt) != "" {
+			require.NoError(t, db.Exec(stmt).Error, stmt)
+		}
+	}
+}
+
+func testMemoryConsistencyMigration(t *testing.T, db *gorm.DB, dialect string) {
+	t.Helper()
+	for _, table := range []string{
+		"memory_extraction_sessions", "memory_item_embeddings", "memory_doc_affinity",
+		"memory_topic_stats", "memory_tombstones", "memory_items", "memory_subjects",
+	} {
+		require.NoError(t, db.Exec("DROP TABLE IF EXISTS "+table).Error)
+	}
+	require.NoError(t, db.Exec("CREATE TABLE IF NOT EXISTS tenants (id BIGINT PRIMARY KEY)").Error)
+	require.NoError(t, db.Exec("CREATE TABLE IF NOT EXISTS messages (id VARCHAR(36) PRIMARY KEY)").Error)
+	baseline := "sqlite/000004_memory"
+	migration := "sqlite/000015_memory_consistency"
+	if dialect == "postgres" {
+		baseline = "versioned/000084_memory"
+		migration = "versioned/000094_memory_consistency"
+	}
+	execMemoryMigration(t, db, "../../../../migrations/"+baseline+".up.sql")
 	for _, row := range []struct{ id, key, status, by string }{
-		{"old", "job", "superseded", "proposal"}, {"proposal", "job", "pending", ""},
-		{"old2", "database", "superseded", "proposal2"}, {"proposal2", "database", "pending", ""},
+		{"old", "job", "superseded", "proposal"},
+		{"proposal", "job", "pending", ""},
+		{"old2", "database", "superseded", "proposal2"},
+		{"proposal2", "database", "pending", ""},
 		{"newer", "database", "active", ""},
 	} {
-		require.NoError(t, db.Exec("INSERT INTO memory_items VALUES (?, 1, 'alice', ?, ?, ?, NULL, ?)", row.id, row.key, row.status, row.by, time.Now()).Error)
+		require.NoError(t, db.Exec("INSERT INTO memory_items "+
+			"(id, tenant_id, subject_id, normalized_key, status, superseded_by, valid_from, kind, content) "+
+			"VALUES (?, 1, 'alice', ?, ?, ?, ?, 'fact', 'legacy fact')",
+			row.id, row.key, row.status, row.by, time.Now()).Error)
 	}
-	up, err := os.ReadFile("../../../../migrations/sqlite/000015_memory_consistency.up.sql")
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(string(up)).Error)
+	execMemoryMigration(t, db, "../../../../migrations/"+migration+".up.sql")
+	require.True(t, db.Migrator().HasTable(&types.MemoryExtractionSession{}))
+	require.True(t, db.Migrator().HasIndex(&types.MemoryItem{}, "idx_memory_replaces"))
 	var old, proposal, untouched types.MemoryItem
 	require.NoError(t, db.First(&old, "id = ?", "old").Error)
 	require.NoError(t, db.First(&proposal, "id = ?", "proposal").Error)
@@ -134,8 +173,7 @@ func TestMemoryConsistencyMigrationRestoresLegacyPendingTarget(t *testing.T) {
 	var active int64
 	require.NoError(t, db.Model(&types.MemoryItem{}).Where("normalized_key = 'database' AND status = 'active'").Count(&active).Error)
 	require.Equal(t, int64(1), active)
-	down, err := os.ReadFile("../../../../migrations/sqlite/000015_memory_consistency.down.sql")
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(string(down)).Error)
+	execMemoryMigration(t, db, "../../../../migrations/"+migration+".down.sql")
+	require.False(t, db.Migrator().HasTable(&types.MemoryExtractionSession{}))
 	require.False(t, db.Migrator().HasColumn(&types.MemoryItem{}, "replaces_id"))
 }

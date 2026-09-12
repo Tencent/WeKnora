@@ -14,6 +14,7 @@ import (
 // 000041 task queue, 000053 system settings, 000055 processing spans,
 // 000063 knowledge multi-tags, 000093 browser authorization.
 var versionedSQLiteTables = []string{
+	"memory_extraction_sessions",
 	"task_pending_ops",
 	"task_dead_letters",
 	"system_settings",

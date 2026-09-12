@@ -172,16 +172,16 @@ func TestExtractionAppliesUpdateAndDeleteDecisions(t *testing.T) {
 }
 
 func TestExtractionPreservesWorkOnUnparsableModelOutput(t *testing.T) {
-	svc, tenantRepo, messages, models, _ := newExtractionHarness(t)
+	svc, tenantRepo, messages, models, queue := newExtractionHarness(t)
 	tenantRepo.set(7, &types.MemoryConfig{Enabled: true, WriteMode: types.MemoryWriteAuto})
 	messages.messages = []*types.Message{{Role: "user", Content: "随便说点什么"}}
 	models.response = "抱歉，我不太明白你的意思。"
 
-	// Malformed output must not acknowledge unread work. Bounded task retries
-	// can recover, and the durable queue remains available after exhaustion.
-	require.Error(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
+	// The first malformed output retains the range and queues a retry.
+	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m", ChatModelID: "m1",
 	})))
+	require.NotNil(t, queue.pop())
 	_, total, err := svc.ListItems(enabledCtx(t, tenantRepo, 7, "alice"), "", 10, 0)
 	require.NoError(t, err)
 	require.Zero(t, total)

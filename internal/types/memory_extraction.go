@@ -21,19 +21,31 @@ func (c MemoryMessageCursor) After(other MemoryMessageCursor) bool {
 	return c.At.After(other.At) || (c.At.Equal(other.At) && c.ID > other.ID)
 }
 
+// MemoryExtractionSession is a small indexed row, not an entry in a growing
+// subject JSON document. Completed cursors prevent historical re-extraction.
 type MemoryExtractionSession struct {
-	SessionID string              `json:"-"`
-	Revision  uint64              `json:"revision"`
-	Cursor    MemoryMessageCursor `json:"cursor"`
+	TenantID     uint64              `json:"-" gorm:"primaryKey;autoIncrement:false"`
+	SubjectID    string              `json:"-" gorm:"primaryKey;type:varchar(512)"`
+	SessionID    string              `json:"-" gorm:"primaryKey;type:varchar(36)"`
+	Revision     uint64              `json:"revision" gorm:"not null;default:0"`
+	Cursor       MemoryMessageCursor `json:"cursor" gorm:"embedded;embeddedPrefix:cursor_"`
+	Pending      bool                `json:"-" gorm:"not null;default:false"`
+	FailureCount int                 `json:"-" gorm:"not null;default:0"`
+	FailureCode  string              `json:"-" gorm:"type:varchar(64);not null;default:''"`
+	FailedFrom   MemoryMessageCursor `json:"-" gorm:"embedded;embeddedPrefix:failed_from_"`
+	FailedTo     MemoryMessageCursor `json:"-" gorm:"embedded;embeddedPrefix:failed_to_"`
+	FailedAt     *time.Time          `json:"-"`
+	UpdatedAt    time.Time           `json:"-"`
 }
 
-// Progress survives claiming, truncation, task retries and worker restarts.
-// A subject-wide timestamp is retained only as a legacy diagnostic field;
-// it must never skip messages from another, slower conversation.
+// TableName selects the indexed session progress table.
+func (MemoryExtractionSession) TableName() string { return "memory_extraction_sessions" }
+
+// MemoryExtractionState contains only the subject-wide worker lease.
+// Cursors and queued work live in MemoryExtractionSession.
 type MemoryExtractionState struct {
-	Sessions   map[string]MemoryExtractionSession `json:"sessions"`
-	LeaseID    string                             `json:"lease_id,omitempty"`
-	LeaseUntil time.Time                          `json:"lease_until,omitempty"`
+	LeaseID    string    `json:"lease_id,omitempty"`
+	LeaseUntil time.Time `json:"lease_until,omitempty"`
 }
 
 func (s MemoryExtractionState) Value() (driver.Value, error) { return json.Marshal(s) }

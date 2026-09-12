@@ -206,11 +206,12 @@ type MemorySubject struct {
 	ItemCount       int        `json:"item_count"        gorm:"column:item_count;not null;default:0"`
 	LastExtractedAt *time.Time `json:"last_extracted_at" gorm:"column:last_extracted_at"`
 	// ExtractCursor is the legacy subject-wide watermark, retained for
-	// diagnostics. Only ExtractionState session cursors govern processing.
+	// the upgrade boundary for newly initialized session cursors. It is never
+	// advanced by new workers; each session has its own progress row.
 	ExtractCursor   *time.Time            `json:"extract_cursor" gorm:"column:extract_cursor"`
 	ExtractionState MemoryExtractionState `json:"-" gorm:"column:extraction_state;type:jsonb"`
-	// PendingSessions remain durable until their snapshot revision is fully
-	// processed. Claiming a batch does not remove sessions from this queue.
+	// PendingSessions is the legacy queue, imported into indexed progress rows
+	// once on the next enqueue or claim. New workers never grow this array.
 	PendingSessions MemoryPendingSessions `json:"pending_sessions" gorm:"column:pending_sessions;type:jsonb"`
 	// ExtractScheduledAt marks a distillation task as in flight, so concurrent
 	// turns enqueue one task rather than one per turn.
@@ -265,7 +266,7 @@ func (p *MemoryPendingSessions) Scan(value interface{}) error {
 	return json.Unmarshal(b, p)
 }
 
-// Append adds a session id, keeping the queue de-duplicated and bounded.
+// Append adds a session id without dropping existing work.
 func (p MemoryPendingSessions) Append(sessionID string) MemoryPendingSessions {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {

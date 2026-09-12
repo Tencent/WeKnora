@@ -2,6 +2,24 @@
 ALTER TABLE memory_subjects ADD COLUMN extraction_state TEXT;
 ALTER TABLE memory_items ADD COLUMN replaces_id VARCHAR(36) NOT NULL DEFAULT '';
 
+-- Progress is an indexed row per conversation; subject rows only hold a lease.
+CREATE TABLE memory_extraction_sessions (
+ tenant_id BIGINT NOT NULL,
+ subject_id VARCHAR(512) NOT NULL,
+ session_id VARCHAR(36) NOT NULL,
+ revision BIGINT NOT NULL DEFAULT 0,
+ cursor_at DATETIME, cursor_id VARCHAR(36) NOT NULL DEFAULT '',
+ pending BOOLEAN NOT NULL DEFAULT false,
+ failure_count INTEGER NOT NULL DEFAULT 0,
+ failure_code VARCHAR(64) NOT NULL DEFAULT '',
+ failed_from_at DATETIME, failed_from_id VARCHAR(36) NOT NULL DEFAULT '',
+ failed_to_at DATETIME, failed_to_id VARCHAR(36) NOT NULL DEFAULT '',
+ failed_at DATETIME, updated_at DATETIME NOT NULL,
+ PRIMARY KEY (tenant_id, subject_id, session_id)
+);
+CREATE INDEX idx_memory_extraction_pending ON memory_extraction_sessions (tenant_id, subject_id, pending, updated_at, session_id);
+CREATE INDEX idx_memory_replaces ON memory_items (tenant_id, subject_id, replaces_id, status);
+
 -- Recover the old active record when a legacy pending inference prematurely
 -- superseded it. Keep an explicit target so confirmation can still replace it.
 UPDATE memory_items

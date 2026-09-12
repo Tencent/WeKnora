@@ -259,7 +259,9 @@ func (r *memoryRepository) UpdateItemContent(
 				return err
 			}
 			// Editing a confirmed fact invalidates proposals based on its old wording.
-			if err := tx.Model(&types.MemoryItem{}).Where("tenant_id = ? AND subject_id = ? AND replaces_id = ? AND status = ?", scope.TenantID, scope.SubjectID, id, types.MemoryStatusPending).
+			if err := tx.Model(&types.MemoryItem{}).
+				Where("tenant_id = ? AND subject_id = ? AND replaces_id = ? AND status = ?",
+					scope.TenantID, scope.SubjectID, id, types.MemoryStatusPending).
 				Updates(map[string]interface{}{"status": types.MemoryStatusSuperseded, "invalid_at": time.Now(), "superseded_by": id}).Error; err != nil {
 				return err
 			}
@@ -274,22 +276,36 @@ func (r *memoryRepository) UpdateItemContent(
 func (r *memoryRepository) SupersedeItem(
 	ctx context.Context, scope interfaces.MemoryScope, id, supersededBy string,
 ) error {
-	now := time.Now()
-	return r.scoped(ctx, scope).
-		Model(&types.MemoryItem{}).
-		Where("id = ? AND status = ?", id, types.MemoryStatusActive).
-		Updates(map[string]interface{}{
-			"status":        types.MemoryStatusSuperseded,
-			"invalid_at":    now,
-			"superseded_by": supersededBy,
-			"updated_at":    now,
-		}).Error
+	return r.withSubject(ctx, scope, func(tx *gorm.DB, _ *types.MemorySubject) error {
+		return tx.Model(&types.MemoryItem{}).
+			Where("tenant_id = ? AND subject_id = ? AND ((id = ? AND status = ?) OR (replaces_id = ? AND status = ?))",
+				scope.TenantID, scope.SubjectID, id, types.MemoryStatusActive, id, types.MemoryStatusPending).
+			Updates(map[string]interface{}{
+				"status": types.MemoryStatusSuperseded, "invalid_at": time.Now(),
+				"superseded_by": supersededBy, "updated_at": time.Now(),
+			}).Error
+	})
 }
 
 func (r *memoryRepository) DeleteItem(
 	ctx context.Context, scope interfaces.MemoryScope, id string,
 ) error {
-	return r.scoped(ctx, scope).Where("id = ?", id).Delete(&types.MemoryItem{}).Error
+	return r.withSubject(ctx, scope, func(tx *gorm.DB, _ *types.MemorySubject) error {
+		if err := tx.Model(&types.MemoryItem{}).
+			Where("tenant_id = ? AND subject_id = ? AND replaces_id = ? AND status = ?",
+				scope.TenantID, scope.SubjectID, id, types.MemoryStatusPending).
+			Updates(map[string]interface{}{
+				"status": types.MemoryStatusSuperseded, "invalid_at": time.Now(),
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("tenant_id = ? AND subject_id = ? AND item_id = ?", scope.TenantID, scope.SubjectID, id).
+			Delete(&types.MemoryItemEmbedding{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND subject_id = ? AND id = ?", scope.TenantID, scope.SubjectID, id).
+			Delete(&types.MemoryItem{}).Error
+	})
 }
 
 func (r *memoryRepository) DeleteAll(
@@ -572,15 +588,6 @@ func (r *memoryRepository) MarkForcedConsolidated(
 	return r.scoped(ctx, scope).
 		Model(&types.MemorySubject{}).
 		Updates(map[string]interface{}{"forced_consolidated_at": now, "updated_at": now}).Error
-}
-
-func (r *memoryRepository) SetItemStatus(
-	ctx context.Context, scope interfaces.MemoryScope, id, status string,
-) error {
-	return r.scoped(ctx, scope).
-		Model(&types.MemoryItem{}).
-		Where("id = ?", id).
-		Updates(map[string]interface{}{"status": status, "updated_at": time.Now()}).Error
 }
 
 // BumpTopic counts one more sighting. The insert-then-increment shape keeps two
