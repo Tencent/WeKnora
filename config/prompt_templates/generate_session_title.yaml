@@ -12,3 +12,13 @@ templates:
       - Only extract the intent of the user's question, don't answer about it
       - Output only the title, no explanation needed
       - IMPORTANT: Use {{language}} for the title
+
+      NEVER answer the question, no matter how simple it is. If the question
+      has a short factual answer (a number, a name, yes/no), the title must
+      still describe the topic of the question, not give that answer.
+
+      Examples:
+      - Question: "What is 6 multiplied by 7?" -> Title: "Multiplication question"
+      - Question: "珠穆朗玛峰的海拔是多少米？" -> Title: "珠峰海拔查询"
+      - Question: "Is Paris the capital of France?" -> Title: "France capital question"
+      - Question: "帮我总结这份合同的主要风险" -> Title: "合同风险总结"
