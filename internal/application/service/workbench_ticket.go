@@ -7,10 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/redis/go-redis/v9"
 )
@@ -29,15 +32,21 @@ type WorkbenchIdentity struct {
 	TenantID  uint64    `json:"tenant_id"`
 	UserID    string    `json:"user_id"`
 	SessionID string    `json:"session_id"`
+	TokenID   string    `json:"token_id"`
 	Origin    string    `json:"origin"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
+
+type workbenchTokenContextKey struct{}
 
 // Context restores only the verified web identity needed for reauthorization.
 func (i WorkbenchIdentity) Context(ctx context.Context) context.Context {
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, i.TenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, i.UserID)
 	ctx = types.WithSandboxTenantID(ctx, i.TenantID)
+	if i.TokenID != "" {
+		ctx = context.WithValue(ctx, workbenchTokenContextKey{}, i.TokenID)
+	}
 	return types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: i.UserID})
 }
 
@@ -62,7 +71,9 @@ func workbenchHash(value string) string {
 }
 
 // IssueTicket authorizes the session and stores only the random ticket's hash.
-func (s *WorkbenchService) IssueTicket(ctx context.Context, sessionID, origin string) (*WorkbenchTicket, error) {
+func (s *WorkbenchService) IssueTicket(
+	ctx context.Context, sessionID, origin, accessToken string,
+) (*WorkbenchTicket, error) {
 	status, err := s.Status(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -76,15 +87,30 @@ func (s *WorkbenchService) IssueTicket(ctx context.Context, sessionID, origin st
 	if origin == "" {
 		return nil, ErrWorkbenchInvalid
 	}
+	if s.deps.Users == nil {
+		return nil, ErrWorkbenchUnavailable
+	}
+	uid, _ := types.UserIDFromContext(ctx)
+	record, err := s.deps.Users.GetAccessTokenByValue(ctx, accessToken)
+	if err != nil {
+		if errors.Is(err, repository.ErrTokenNotFound) {
+			return nil, ErrWorkbenchDenied
+		}
+		return nil, ErrWorkbenchUnavailable
+	}
+	if record == nil || strings.TrimSpace(record.ID) == "" ||
+		AssertAccessTokenStillActive(record, uid, time.Now()) != nil {
+		return nil, ErrWorkbenchDenied
+	}
 	token, err := workbenchRandomToken()
 	if err != nil {
 		return nil, err
 	}
 	tid, _ := types.TenantIDFromContext(ctx)
-	uid, _ := types.UserIDFromContext(ctx)
 	identity := WorkbenchIdentity{
 		TenantID: tid, UserID: uid, SessionID: sessionID,
-		Origin: origin, ExpiresAt: time.Now().Add(WorkbenchTicketTTL),
+		TokenID: record.ID,
+		Origin:  origin, ExpiresAt: time.Now().Add(WorkbenchTicketTTL),
 	}
 	if err := s.store.putTicket(ctx, workbenchHash(token), identity); err != nil {
 		return nil, err
@@ -110,10 +136,36 @@ func (s *WorkbenchService) ConsumeTicket(ctx context.Context, ticket, origin str
 	if i.Origin != origin || origin == "" || !time.Now().Before(i.ExpiresAt) || i.UserID == "" || i.TenantID == 0 {
 		return WorkbenchIdentity{}, ErrWorkbenchTicket
 	}
+	if err := s.checkTerminalToken(ctx, i.TokenID, i.UserID, true); err != nil {
+		return WorkbenchIdentity{}, err
+	}
 	if _, err := s.Authorize(i.Context(ctx), i.SessionID); err != nil {
 		return WorkbenchIdentity{}, err
 	}
 	return i, nil
+}
+
+func (s *WorkbenchService) checkTerminalToken(ctx context.Context, tokenID, userID string, rejectExpired bool) error {
+	if strings.TrimSpace(tokenID) == "" {
+		return ErrWorkbenchDenied
+	}
+	if s.deps.Users == nil {
+		return ErrWorkbenchUnavailable
+	}
+	token, err := s.deps.Users.GetAccessTokenByID(ctx, tokenID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTokenNotFound) {
+			return ErrWorkbenchDenied
+		}
+		return ErrWorkbenchUnavailable
+	}
+	if AssertAccessTokenNotRevoked(token, userID) != nil {
+		return ErrWorkbenchDenied
+	}
+	if rejectExpired && assertAccessTokenNotExpired(token, time.Now()) != nil {
+		return ErrWorkbenchDenied
+	}
+	return nil
 }
 
 type workbenchStore interface {

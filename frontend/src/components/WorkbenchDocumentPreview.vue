@@ -120,13 +120,14 @@ async function load() {
     let nextBlob: Blob | undefined
     let nextHtml = ''
     let nextType = ''
-    if (kind === 'pptx' || type === 'xlsx') {
+    const zipSpreadsheet = kind === 'excel' && sample[0] === 0x50 && sample[1] === 0x4b && sample[2] === 3 && sample[3] === 4
+    if (kind === 'pptx' || type === 'xlsx' || zipSpreadsheet) {
       const data = await prepareWorkbenchOfficePreview(blob, kind === 'pptx' ? 'pptx' : 'xlsx', maxBytes, signal)
       if (kind === 'pptx') {
         nextBlob = new Blob([data], { type: blob.type })
         nextType = 'pptx'
       } else {
-        nextHtml = sanitizeWorkbenchPreview(await spreadsheetHTML(new Blob([data]), type))
+        nextHtml = sanitizeWorkbenchPreview(await spreadsheetHTML(new Blob([data]), 'xlsx'))
       }
     } else if (kind === 'excel') {
       nextHtml = sanitizeWorkbenchPreview(await spreadsheetHTML(blob, type))
@@ -140,7 +141,7 @@ async function load() {
       nextType = type
     } else if (kind === 'text') {
       nextBlob = blob
-      nextType = type || 'txt'
+      nextType = 'txt'
     }
     signal.throwIfAborted()
     if (current !== generation) return

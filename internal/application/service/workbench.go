@@ -83,6 +83,7 @@ type WorkbenchServiceDeps struct {
 	Authorization interfaces.WorkbenchAuthorizationRepository
 	Redis         *redis.Client
 	Sessions      interfaces.SessionService
+	Users         interfaces.UserService
 	Policy        WorkspaceSandboxPolicy
 	Pinner        *SessionSandboxPinner
 	Resolver      sandbox.TenantSandboxResolver
@@ -131,6 +132,11 @@ func (s *WorkbenchService) authorizeIdentity(ctx context.Context, sessionID stri
 	}
 	if _, apiKey := types.TenantAPIKeyScopeFromContext(ctx); apiKey {
 		return nil, ErrWorkbenchDenied
+	}
+	if tokenID, ok := ctx.Value(workbenchTokenContextKey{}).(string); ok {
+		if err := s.checkTerminalToken(ctx, tokenID, uid, false); err != nil {
+			return nil, err
+		}
 	}
 	if sessionID == "" || len(sessionID) > 128 {
 		return nil, ErrWorkbenchSession

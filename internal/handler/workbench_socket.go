@@ -429,11 +429,17 @@ func (w *workbenchConsole) execute(
 	w.json(map[string]any{"type": "started", "execution_id": execution.ExecutionID})
 	buffer := make([]byte, 8192)
 	var readErr error
+	outputLimited := false
 	for {
 		n, err := execution.Terminal.Read(buffer)
 		if n > 0 {
-			if w.outputBytes.Add(int64(n)) > service.WorkbenchMaxOutputBytes ||
-				!w.enqueue(websocket.BinaryMessage, append([]byte(nil), buffer[:n]...)) {
+			if w.outputBytes.Add(int64(n)) > service.WorkbenchMaxOutputBytes {
+				outputLimited = true
+				w.cancel()
+				closeTerminal()
+				break
+			}
+			if !w.enqueue(websocket.BinaryMessage, append([]byte(nil), buffer[:n]...)) {
 				readErr = service.ErrWorkbenchUnavailable
 				w.cancel()
 				closeTerminal()
@@ -458,6 +464,12 @@ func (w *workbenchConsole) execute(
 	close(finished)
 	<-watcherDone
 	operationErr := errors.Join(readErr, waitErr, closeErr)
+	if outputLimited {
+		exit = sandbox.CommandTerminalExit{ExitCode: 137, Reason: "output_limit"}
+		if operationErr != nil {
+			exit.ExitCode = -1
+		}
+	}
 	exit = service.NormalizeWorkbenchTerminalExit(exit, operationErr)
 	if err := execution.Finish(exit, operationErr); err != nil {
 		w.failure(err)

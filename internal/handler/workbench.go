@@ -28,8 +28,8 @@ type workbenchService interface {
 	Status(context.Context, string) (*service.WorkbenchStatus, error)
 	Bind(context.Context, string, string) (*service.WorkbenchStatus, error)
 	Files(context.Context, string, sandbox.WorkbenchFileRequest) (*sandbox.WorkbenchFileResult, error)
-	Audit(context.Context, string, int) ([]*types.AuditLog, error)
-	IssueTicket(context.Context, string, string) (*service.WorkbenchTicket, error)
+	Audit(context.Context, string, uint64, int) ([]*types.AuditLog, error)
+	IssueTicket(context.Context, string, string, string) (*service.WorkbenchTicket, error)
 	ConsumeTicket(context.Context, string, string) (service.WorkbenchIdentity, error)
 	AcquireConsole(context.Context, service.WorkbenchIdentity) (*service.WorkbenchLease, error)
 	OpenTerminal(context.Context, string, sandbox.CommandTerminalRequest) (*service.WorkbenchExecution, error)
@@ -299,7 +299,12 @@ func (h *WorkbenchHandler) Ticket(c *gin.Context) {
 		workbenchHTTPError(c, err)
 		return
 	}
-	data, err := h.service.IssueTicket(c.Request.Context(), workbenchSessionID(c), origin)
+	parts := strings.Fields(c.GetHeader("Authorization"))
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		workbenchHTTPError(c, service.ErrWorkbenchDenied)
+		return
+	}
+	data, err := h.service.IssueTicket(c.Request.Context(), workbenchSessionID(c), origin, parts[1])
 	workbenchJSON(c, data, err)
 }
 
@@ -444,13 +449,27 @@ func (h *WorkbenchHandler) Remove(c *gin.Context) {
 	workbenchJSON(c, data, err)
 }
 
-// Audit lists the bounded audit history for this session and user.
+// Audit lists one cursor-paginated page for this session and user.
 func (h *WorkbenchHandler) Audit(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	afterID, err := strconv.ParseUint(c.DefaultQuery("after_id", "0"), 10, 64)
+	if err != nil {
+		workbenchHTTPError(c, service.ErrWorkbenchInvalid)
+		return
+	}
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	if err != nil || limit < 1 {
 		workbenchHTTPError(c, service.ErrWorkbenchInvalid)
 		return
 	}
-	data, err := h.service.Audit(c.Request.Context(), workbenchSessionID(c), limit)
-	workbenchJSON(c, data, err)
+	data, err := h.service.Audit(c.Request.Context(), workbenchSessionID(c), afterID, limit)
+	if err != nil {
+		workbenchHTTPError(c, err)
+		return
+	}
+	var nextCursor uint64
+	if n := len(data); n > 0 {
+		nextCursor = data[n-1].ID
+	}
+	c.JSON(http.StatusOK, auditLogListResponse{Success: true, Data: data, NextCursor: nextCursor})
 }

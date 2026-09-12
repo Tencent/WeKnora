@@ -83,7 +83,13 @@ export function createWorkbenchApi(sessionId: string, transport: WorkbenchTransp
     mkdir: (path: string) => mutation(transport.post(`${base}/directories`, { path }, options)),
     rename: (path: string, newPath: string) => mutation(transport.patch(`${base}/files`, { path, new_path: newPath }, options)),
     remove: (path: string) => mutation(transport.del(`${base}/files?${pathQuery(path)}`, undefined, options)),
-    audit: () => data(transport.get<Envelope<AuditLog[]>>(`${base}/audit`, options)),
+    audit: async (afterId = 0) => {
+      const query = afterId ? `?${new URLSearchParams({ after_id: String(afterId) })}` : ''
+      const response = await transport.get<Envelope<AuditLog[]> & { next_cursor?: number }>(`${base}/audit${query}`, options)
+      signal?.throwIfAborted()
+      if (response.success !== true || !Array.isArray(response.data)) throw response
+      return { data: response.data, next_cursor: response.next_cursor || 0 }
+    },
   }
 }
 

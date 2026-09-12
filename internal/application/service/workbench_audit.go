@@ -143,7 +143,9 @@ func NormalizeWorkbenchTerminalExit(exit sandbox.CommandTerminalExit, operationE
 }
 
 // Audit lists the caller's workbench records for one owned session.
-func (s *WorkbenchService) Audit(ctx context.Context, sessionID string, limit int) ([]*types.AuditLog, error) {
+func (s *WorkbenchService) Audit(
+	ctx context.Context, sessionID string, afterID uint64, limit int,
+) ([]*types.AuditLog, error) {
 	session, err := s.authorizeIdentity(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -158,6 +160,7 @@ func (s *WorkbenchService) Audit(ctx context.Context, sessionID string, limit in
 		ctx,
 		session.TenantID,
 		&interfaces.AuditLogQuery{
+			AfterID:     afterID,
 			Limit:       limit,
 			ScopeType:   workbenchAuditScope,
 			ScopeID:     sessionID,
@@ -171,7 +174,7 @@ func (s *WorkbenchService) Audit(ctx context.Context, sessionID string, limit in
 	for _, row := range rows {
 		if row != nil && row.TenantID == session.TenantID && row.ScopeType == workbenchAuditScope &&
 			row.ScopeID == sessionID &&
-			row.ActorUserID == session.UserID {
+			row.ActorUserID == session.UserID && (afterID == 0 || row.ID < afterID) {
 			result = append(result, row)
 			if len(result) == limit {
 				break

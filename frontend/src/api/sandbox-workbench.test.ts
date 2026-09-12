@@ -9,6 +9,7 @@ test('workbench requests use the finalized session-scoped contract and cancellat
     method,
     async (url: string, body?: unknown, options?: unknown, uploadOptions?: unknown) => {
       calls.push({ method, url, body: method === 'get' ? undefined : body, options: method === 'get' ? body : uploadOptions || options })
+      if (url.endsWith('/audit')) return { success: true, data: [], next_cursor: 0 }
       return { success: true, data: { value: method } }
     },
   ])) as unknown as WorkbenchTransport
@@ -61,4 +62,19 @@ test('failed envelopes are surfaced and never converted into empty success resul
   await assert.rejects(api.bind('cfg'), error => error === denied)
   await assert.rejects(api.mkdir('dir'), error => error === denied)
   await assert.rejects(api.audit(), error => error === denied)
+})
+
+test('audit pages preserve the server cursor and share the cancellation scope', async () => {
+  const controller = new AbortController()
+  const calls: string[] = []
+  const transport = { get: async (url: string, options: { signal: AbortSignal }) => {
+    calls.push(url)
+    assert.equal(options.signal, controller.signal)
+    return { success: true, data: [{ id: 9 }], next_cursor: 9 }
+  } } as unknown as WorkbenchTransport
+  const api = createWorkbenchApi('session', transport, controller.signal)
+  assert.deepEqual(await api.audit(10), { data: [{ id: 9 }], next_cursor: 9 })
+  assert.equal(calls[0], '/api/v1/sessions/session/sandbox/audit?after_id=10')
+  controller.abort()
+  await assert.rejects(api.audit(9), { name: 'AbortError' })
 })

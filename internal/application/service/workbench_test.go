@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -157,6 +158,8 @@ func newWorkbenchFixture(
 		"CREATE TABLE tenants (id integer PRIMARY KEY, status text, deleted_at datetime)",
 		"CREATE TABLE tenant_members (user_id text, tenant_id integer, status text, deleted_at datetime)",
 		"CREATE TABLE im_channel_sessions (session_id text)",
+		"CREATE TABLE auth_tokens (id text PRIMARY KEY, user_id text, token text, token_type text, " +
+			"expires_at datetime, is_revoked boolean, created_at datetime, updated_at datetime)",
 		"INSERT INTO users VALUES ('alice', true, NULL), ('bob', true, NULL)",
 		"INSERT INTO tenants VALUES (7, 'active', NULL), (8, 'active', NULL)",
 		"INSERT INTO tenant_members VALUES " +
@@ -174,11 +177,17 @@ func newWorkbenchFixture(
 		require.NoError(t, db.Model(&types.Session{}).Create(row).Error)
 	}
 	audit := &workbenchTestAudit{}
+	tokens := repository.NewAuthTokenRepository(db)
+	require.NoError(t, tokens.CreateToken(context.Background(), &types.AuthToken{
+		ID: "access", UserID: "alice", Token: "workbench-test-access", TokenType: "access_token",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}))
 	manager := &workbenchTestManager{audit: audit}
 	policy := &workbenchTestPolicy{}
 	s := NewWorkbenchService(WorkbenchServiceDeps{
 		Authorization: repository.NewWorkbenchAuthorizationRepository(db),
 		Sessions:      workbenchTestSessions{db: db}, Policy: policy, Pinner: NewSessionSandboxPinner(db),
+		Users:    &userService{tokenRepo: tokens},
 		Resolver: workbenchTestResolver{manager: manager}, Configs: workbenchTestConfigs{}, Audit: audit,
 	})
 	s.enabled = true
@@ -271,7 +280,7 @@ func TestWorkbenchStatusDoesNotAdvertiseTerminalWithoutStore(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, status.Capabilities["terminal"])
 	require.True(t, status.Capabilities["files"])
-	_, err = s.IssueTicket(ctx, "session", "http://localhost:15173")
+	_, err = s.IssueTicket(ctx, "session", "http://localhost:15173", "workbench-test-access")
 	require.ErrorIs(t, err, ErrWorkbenchCapability)
 }
 
@@ -335,13 +344,13 @@ func TestWorkbenchAuditScopedAndCapped(t *testing.T) {
 		TenantID: 8, ActorUserID: "alice", ScopeType: workbenchAuditScope, ScopeID: "session",
 		Details: types.JSON(`{"command":"foreign secret"}`),
 	}}, audit.rows...)
-	rows, err := s.Audit(ctx, "session", 500)
+	rows, err := s.Audit(ctx, "session", 0, 500)
 	require.NoError(t, err)
 	require.Len(t, rows, 100)
 	for _, row := range rows {
 		require.EqualValues(t, 7, row.TenantID)
 	}
-	_, err = s.Audit(ctx, "bob-session", 100)
+	_, err = s.Audit(ctx, "bob-session", 0, 100)
 	require.ErrorIs(t, err, ErrWorkbenchSession)
 }
 
@@ -352,7 +361,7 @@ func TestWorkbenchMemoryLimitAuditQueryable(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, execution.Finish(sandbox.CommandTerminalExit{ExitCode: 200, Reason: "memory_limit"}, nil))
-	rows, err := s.Audit(ctx, "session", 100)
+	rows, err := s.Audit(ctx, "session", 0, 100)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, types.AuditOutcomeAccepted, rows[0].Outcome)

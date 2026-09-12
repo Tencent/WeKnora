@@ -100,6 +100,7 @@ type workbenchHandlerManager struct {
 	terminals chan *workbenchPipeTerminal
 	opened    atomic.Int32
 	fileErr   error
+	closeErr  error
 	lastFile  sandbox.WorkbenchFileRequest
 }
 
@@ -124,6 +125,7 @@ func (m *workbenchHandlerManager) OpenSessionCommandTerminal(
 	reader, writer := io.Pipe()
 	terminal := &workbenchPipeTerminal{
 		reader: reader, writer: writer, done: make(chan struct{}), resized: make(chan [2]uint16, 2),
+		closeErr: m.closeErr,
 	}
 	m.opened.Add(1)
 	m.terminals <- terminal
@@ -132,13 +134,14 @@ func (m *workbenchHandlerManager) OpenSessionCommandTerminal(
 }
 
 type workbenchPipeTerminal struct {
-	reader  *io.PipeReader
-	writer  *io.PipeWriter
-	done    chan struct{}
-	resized chan [2]uint16
-	once    sync.Once
-	exit    sandbox.CommandTerminalExit
-	closed  atomic.Bool
+	reader   *io.PipeReader
+	writer   *io.PipeWriter
+	done     chan struct{}
+	resized  chan [2]uint16
+	once     sync.Once
+	exit     sandbox.CommandTerminalExit
+	closed   atomic.Bool
+	closeErr error
 }
 
 func (p *workbenchPipeTerminal) Read(b []byte) (int, error) { return p.reader.Read(b) }
@@ -169,7 +172,7 @@ func (p *workbenchPipeTerminal) Close() error {
 	p.closed.Store(true)
 	p.finish(-1, "closed")
 	_ = p.reader.Close()
-	return nil
+	return p.closeErr
 }
 
 func (p *workbenchPipeTerminal) Wait(ctx context.Context) (sandbox.CommandTerminalExit, error) {
@@ -179,6 +182,19 @@ func (p *workbenchPipeTerminal) Wait(ctx context.Context) (sandbox.CommandTermin
 	case <-ctx.Done():
 		return sandbox.CommandTerminalExit{}, ctx.Err()
 	}
+}
+
+type workbenchHandlerUsers struct {
+	interfaces.UserService
+	tokens interfaces.AuthTokenRepository
+}
+
+func (u workbenchHandlerUsers) GetAccessTokenByValue(ctx context.Context, value string) (*types.AuthToken, error) {
+	return u.tokens.GetTokenByValue(ctx, value)
+}
+
+func (u workbenchHandlerUsers) GetAccessTokenByID(ctx context.Context, id string) (*types.AuthToken, error) {
+	return u.tokens.GetTokenByID(ctx, id)
 }
 
 type workbenchHandlerFixture struct {
@@ -208,6 +224,8 @@ func newWorkbenchHandlerFixture(t *testing.T) *workbenchHandlerFixture {
 		"CREATE TABLE tenants(id integer PRIMARY KEY, status text, deleted_at datetime)",
 		"CREATE TABLE tenant_members(user_id text, tenant_id integer, status text, deleted_at datetime)",
 		"CREATE TABLE im_channel_sessions(session_id text)",
+		"CREATE TABLE auth_tokens (id text PRIMARY KEY, user_id text, token text, token_type text, " +
+			"expires_at datetime, is_revoked boolean, created_at datetime, updated_at datetime)",
 		"INSERT INTO users VALUES('alice', true, NULL)", "INSERT INTO tenants VALUES(7, 'active', NULL)",
 		"INSERT INTO tenant_members VALUES('alice', 7, 'active', NULL)",
 	} {
@@ -222,9 +240,15 @@ func newWorkbenchHandlerFixture(t *testing.T) *workbenchHandlerFixture {
 	t.Cleanup(func() { _ = client.Close() })
 	manager := &workbenchHandlerManager{terminals: make(chan *workbenchPipeTerminal, 8)}
 	audit, policy := &workbenchHandlerAudit{}, &workbenchHandlerPolicy{}
+	tokens := repository.NewAuthTokenRepository(db)
+	require.NoError(t, tokens.CreateToken(context.Background(), &types.AuthToken{
+		ID: "access", UserID: "alice", Token: "workbench-test-access", TokenType: "access_token",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}))
 	svc := service.NewWorkbenchService(service.WorkbenchServiceDeps{
 		Authorization: repository.NewWorkbenchAuthorizationRepository(db),
 		Redis:         client, Sessions: workbenchHandlerSessions{db: db}, Policy: policy,
+		Users:  workbenchHandlerUsers{tokens: tokens},
 		Pinner: service.NewSessionSandboxPinner(db), Resolver: workbenchHandlerResolver{manager: manager},
 		Configs: workbenchHandlerConfigs{}, Audit: audit,
 	})
@@ -248,7 +272,7 @@ func newWorkbenchHandlerFixture(t *testing.T) *workbenchHandlerFixture {
 
 func (f *workbenchHandlerFixture) ticket(t *testing.T) string {
 	t.Helper()
-	ticket, err := f.h.service.IssueTicket(f.ctx, "session", "http://127.0.0.1:15173")
+	ticket, err := f.h.service.IssueTicket(f.ctx, "session", "http://127.0.0.1:15173", "workbench-test-access")
 	require.NoError(t, err)
 	return ticket.Ticket
 }
@@ -447,6 +471,7 @@ func TestWorkbenchTicketHTTPOrigin(t *testing.T) {
 		status int
 	}{{"http://127.0.0.1:15173", 200}, {"http://evil.example", 403}, {"", 200}} {
 		r := httptest.NewRequest("POST", "/sessions/session/sandbox/command-ticket", nil)
+		r.Header.Set("Authorization", "Bearer workbench-test-access")
 		if test.origin != "" {
 			r.Header.Set("Origin", test.origin)
 		}

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -172,4 +173,43 @@ func TestWorkbenchBackpressureCancelsAndOutputLimitClosesProcess(t *testing.T) {
 	require.True(t, terminal.closed.Load())
 	require.Error(t, ctx.Err())
 	require.Equal(t, 2, f.audit.count())
+}
+
+func TestWorkbenchCumulativeOutputLimitRetainsCauseAndCleanupOutcome(t *testing.T) {
+	for _, cleanupFailed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cleaned", true: "cleanup-unknown"}[cleanupFailed], func(t *testing.T) {
+			f := newWorkbenchHandlerFixture(t)
+			if cleanupFailed {
+				f.manager.closeErr = errors.New("private cleanup failure")
+			}
+			ctx, cancel := context.WithCancel(f.ctx)
+			defer cancel()
+			command := &workbenchCommand{cancel: cancel}
+			w := &workbenchConsole{
+				handler: f.h, ctx: ctx, cancel: cancel,
+				outgoing: make(chan workbenchOutput, 32), active: command,
+				identity: service.WorkbenchIdentity{TenantID: 7, UserID: "alice", SessionID: "session"},
+			}
+			w.outputBytes.Store(service.WorkbenchMaxOutputBytes)
+			w.workers.Add(1)
+			w.execute(ctx, command, sandbox.CommandTerminalRequest{Command: "echo excess", Cols: 80, Rows: 24})
+			terminal := <-f.manager.terminals
+			require.True(t, terminal.closed.Load())
+			require.Equal(t, 2, f.audit.count())
+			var details struct {
+				Reason   string `json:"reason"`
+				ExitCode int    `json:"exit_code"`
+			}
+			require.NoError(t, json.Unmarshal(f.audit.rows[1].Details, &details))
+			require.Equal(t, "output_limit", details.Reason)
+			if cleanupFailed {
+				require.Equal(t, -1, details.ExitCode)
+				require.Equal(t, types.AuditOutcome("unknown"), f.audit.rows[1].Outcome)
+			} else {
+				require.Equal(t, 137, details.ExitCode)
+				require.Equal(t, types.AuditOutcomeFailed, f.audit.rows[1].Outcome)
+			}
+			require.NotContains(t, string(f.audit.rows[1].Details), "private")
+		})
+	}
 }

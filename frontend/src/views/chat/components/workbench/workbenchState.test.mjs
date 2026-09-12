@@ -27,7 +27,7 @@ function evaluate(source, imports, globals = {}) {
     exports, AbortController, console, ...globals,
     require(name) {
       if (name === 'vue') return vue
-      if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key, te: () => true }) }
+      if (name === 'vue-i18n') return { useI18n: () => ({ t: key => key, te: () => true, locale: vue.ref('en-US') }) }
       assert.ok(name in imports, `Unexpected import: ${name}`)
       return imports[name]
     },
@@ -77,7 +77,7 @@ function mount(component, props = {}) {
   })
   const passthrough = { setup: (_, { slots }) => () => vue.h('div', slots.default?.()) }
   const app = renderer.createApp(component, props)
-  for (const name of ['t-drawer', 't-button', 't-select', 't-tabs', 't-tab-panel', 't-icon', 't-loading', 't-textarea']) {
+  for (const name of ['t-drawer', 't-button', 't-select', 't-tabs', 't-tab-panel', 't-icon', 't-loading', 't-textarea', 't-tag']) {
     app.component(name, passthrough)
   }
   const root = { children: [] }
@@ -146,6 +146,103 @@ test('command textarea uses one TDesign keydown callback with composition-safe s
     assert.equal(prevented, submit, JSON.stringify(event))
     assert.equal(h.state.command, submit ? '' : 'printf shortcut')
   }
+})
+
+function mountAudit(renderTemplate = false) {
+  const requests = []
+  const controller = new AbortController()
+  const component = compileComponent('./WorkbenchAudit.vue', {
+    '@/utils/sandboxWorkbench': workbenchUtils,
+  }, {}, renderTemplate)
+  return {
+    ...mount(component, {
+      api: { audit(afterId = 0) {
+        const request = { afterId, ...deferred() }
+        requests.push(request)
+        return request.promise
+      } },
+      signal: controller.signal, active: true, revision: 0,
+    }),
+    requests,
+    controller,
+  }
+}
+
+const auditPage = (ids, next) => ({
+  data: ids.map(id => ({ id, action: 'sandbox_workbench.command', outcome: 'success', created_at: '2026-09-12T00:00:00Z' })),
+  next_cursor: next,
+})
+
+test('audit pagination exposes commands beyond the first hundred records', async t => {
+  const h = mountAudit(true)
+  t.after(() => h.app.unmount())
+  h.requests[0].resolve(auditPage(Array.from({ length: 100 }, (_, i) => 120 - i), 21))
+  await flush()
+  const more = h.find(node => node.onClick === h.state.loadMore)
+  assert.ok(more, 'a visible control must retrieve older audit records')
+  const pending = more.onClick()
+  assert.equal(h.requests[1].afterId, 21)
+  h.requests[1].resolve(auditPage(Array.from({ length: 20 }, (_, i) => 20 - i), 1))
+  await pending
+  assert.equal(h.state.rows.length, 120)
+  assert.equal(h.state.rows.at(-1).id, 1)
+  const last = h.state.loadMore()
+  h.requests[2].resolve(auditPage([], 0))
+  await last
+  assert.equal(h.state.cursor, 0)
+  await h.state.loadMore()
+  assert.equal(h.requests.length, 3)
+})
+
+for (const refreshFirst of [false, true]) {
+  test(`audit refresh rejects stale pagination when refresh resolves ${refreshFirst ? 'first' : 'last'}`, async t => {
+    const h = mountAudit()
+    t.after(() => h.app.unmount())
+    h.requests[0].resolve(auditPage([100], 100))
+    await flush()
+    const old = h.state.loadMore()
+    const refresh = h.state.refresh()
+    assert.equal(h.state.loadingMore, false)
+    if (!refreshFirst) {
+      h.requests[1].resolve(auditPage([99], 99))
+      await old
+      assert.equal(h.state.loading, true)
+    }
+    h.requests[2].resolve(auditPage([200], 200))
+    await refresh
+    const more = h.state.loadMore()
+    assert.equal(h.requests[3].afterId, 200)
+    if (refreshFirst) {
+      h.requests[1].reject(new Error('stale failure'))
+      await old
+      assert.equal(h.state.loadingMore, true)
+      assert.equal(h.state.error, '')
+    }
+    h.requests[3].resolve(auditPage([199], 199))
+    await more
+    assert.deepEqual(Array.from(h.state.rows, row => row.id), [200, 199])
+    assert.equal(h.state.cursor, 199)
+  })
+}
+
+test('audit pagination retries errors and ignores results after scope cancellation', async t => {
+  const h = mountAudit()
+  t.after(() => h.app.unmount())
+  h.requests[0].resolve(auditPage([10], 10))
+  await flush()
+  const failed = h.state.loadMore()
+  h.requests[1].reject(new Error('request failed'))
+  await failed
+  assert.equal(h.state.cursor, 10)
+  assert.equal(h.state.loadingMore, false)
+  const retry = h.state.loadMore()
+  assert.equal(h.requests[2].afterId, 10)
+  h.controller.abort()
+  h.requests[2].resolve(auditPage([9], 9))
+  await retry
+  assert.deepEqual(Array.from(h.state.rows, row => row.id), [10])
+  await h.state.refresh()
+  assert.equal(h.requests.length, 3)
 })
 
 function mountArtifacts() {
