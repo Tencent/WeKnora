@@ -41,14 +41,17 @@ type learningGraphMemoryStub struct {
 	interfaces.MemoryService
 	available     bool
 	learningCalls int
+	requestedKB   string
 }
 
-func (s *learningGraphMemoryStub) MemoryAvailable(context.Context) bool { return s.available }
+func (s *learningGraphMemoryStub) MemoryAvailable(context.Context) bool   { return s.available }
+func (s *learningGraphMemoryStub) LearningAvailable(context.Context) bool { return s.available }
 
 func (s *learningGraphMemoryStub) LearningDocuments(
-	context.Context, int,
+	_ context.Context, knowledgeBaseID string, _ int,
 ) ([]*types.MemoryDocView, error) {
 	s.learningCalls++
+	s.requestedKB = knowledgeBaseID
 	return []*types.MemoryDocView{{KnowledgeID: "doc-1", Hits: 2}}, nil
 }
 
@@ -83,6 +86,7 @@ func TestWikiGraphLoadsLearningProfileWhenMemoryIsAvailable(t *testing.T) {
 	wiki := invokeLearningGraph(t, memory)
 
 	require.Equal(t, 1, memory.learningCalls)
+	require.Equal(t, "kb-1", memory.requestedKB)
 	require.Len(t, wiki.request.LearningDocuments, 1)
 	require.Equal(t, []string{"doc-1"}, wiki.request.FamiliarKnowledgeIDs)
 }

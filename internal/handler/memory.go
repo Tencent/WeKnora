@@ -415,7 +415,7 @@ func (h *MemoryHandler) Export(c *gin.Context) {
 			break
 		}
 	}
-	learningDocs, err := h.memoryService.LearningDocuments(ctx, memoryExportMaxItems+1)
+	learningDocs, err := h.memoryService.LearningDocuments(ctx, "", memoryExportMaxItems+1)
 	if err != nil {
 		h.fail(c, err, "Failed to export learning profile")
 		return

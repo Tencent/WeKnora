@@ -864,8 +864,10 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 		Types:           typesFilter,
 		Limit:           limit,
 	}
-	if h.memoryService != nil && h.memoryService.MemoryAvailable(c.Request.Context()) {
-		learningDocs, learningErr := h.memoryService.LearningDocuments(c.Request.Context(), wikiGraphMaxLimit)
+	if h.memoryService != nil && h.memoryService.LearningAvailable(c.Request.Context()) {
+		learningDocs, learningErr := h.memoryService.LearningDocuments(
+			c.Request.Context(), kbID, wikiGraphMaxLimit,
+		)
 		if learningErr != nil {
 			// Learning is a personal overlay on an otherwise valid Wiki graph.
 			// Degrade to the ordinary graph if memory is unavailable rather than

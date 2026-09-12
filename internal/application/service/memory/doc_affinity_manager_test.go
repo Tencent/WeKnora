@@ -54,18 +54,37 @@ func TestLearningDocumentsIncludesOneOffsAndStaysPersonScoped(t *testing.T) {
 		KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", Title: "排班手册",
 	}})
 
-	aliceDocs, err := svc.LearningDocuments(alice, 10)
+	aliceDocs, err := svc.LearningDocuments(alice, "", 10)
 	require.NoError(t, err)
 	require.Len(t, aliceDocs, 1)
 	require.Equal(t, 1, aliceDocs[0].Hits)
 
-	bobDocs, err := svc.LearningDocuments(bob, 10)
+	bobDocs, err := svc.LearningDocuments(bob, "", 10)
 	require.NoError(t, err)
 	require.Empty(t, bobDocs)
 
-	otherTenantDocs, err := svc.LearningDocuments(aliceOtherTenant, 10)
+	otherTenantDocs, err := svc.LearningDocuments(aliceOtherTenant, "", 10)
 	require.NoError(t, err)
 	require.Empty(t, otherTenantDocs)
+}
+
+func TestLearningDocumentsFiltersKnowledgeBaseBeforeLimit(t *testing.T) {
+	svc, _, tenantRepo := newMemoryHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	highRankedOtherKB := []types.MemoryDocAffinity{{
+		KnowledgeID: "other-doc", KnowledgeBaseID: "kb-other", Title: "Other",
+	}}
+	for range 3 {
+		svc.RecordAnswerSources(ctx, highRankedOtherKB)
+	}
+	svc.RecordAnswerSources(ctx, []types.MemoryDocAffinity{{
+		KnowledgeID: "target-doc", KnowledgeBaseID: "kb-target", Title: "Target",
+	}})
+
+	docs, err := svc.LearningDocuments(ctx, "kb-target", 1)
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	require.Equal(t, "target-doc", docs[0].KnowledgeID)
 }
 
 func TestDeleteDocumentStopsPersonalizingRetrieval(t *testing.T) {
