@@ -31,7 +31,18 @@ try {
   await popup.locator('details summary').click();
   await popup.locator('#remote-pairing').fill(pairing);
   await popup.locator('details button').first().click();
-  await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('details [role=alert]'));
+  try {
+    await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('details [role=alert]'));
+  } catch (error) {
+    // Never include the password input or pairing credential in diagnostics.
+    console.error('Extension pairing UI:', await popup.locator('body').innerText());
+    console.error('Pairing form state:', await popup.evaluate(() => ({
+      length: document.querySelector('#remote-pairing')?.value.length,
+      disabled: document.querySelector('#remote-pairing')?.disabled,
+      buttons: [...document.querySelectorAll('details button')].map(b => ({text:b.textContent,disabled:b.disabled})),
+    })));
+    throw error;
+  }
   if (await popup.locator('details [role=alert]').count()) throw new Error('Extension authorization failed before browser tests');
   if (!taskWindow) {
     await popup.locator('#bsk-task-window-mode').selectOption('tabs');
@@ -63,7 +74,10 @@ try {
       const deadline = Date.now() + 5000;
       while (!clicked && Date.now() < deadline) {
         for (const page of browser.pages().filter(page => page !== popup).reverse()) {
-          const button = page.locator(selector).first();
+          const button = command === 'complete-help'
+            ? page.locator('[data-slot="help-request-banner"][data-display-mode="full"]')
+                .filter({hasText:'Confirm this fixture step'}).locator('[data-slot="help-continue-button"]').first()
+            : page.locator(selector).first();
           if (!await button.isVisible()) continue;
           await button.click({timeout:5000});
           clicked = true;

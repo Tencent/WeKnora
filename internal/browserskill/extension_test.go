@@ -8,12 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +176,46 @@ func TestRealExtension(t *testing.T) {
 	}
 	if !strings.Contains(string(snap), "Save") {
 		t.Fatalf("page missing: %s", snap)
+	}
+	var snapshot struct {
+		Text string `json:"text"`
+	}
+	if err = json.Unmarshal(snap, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	ref := regexp.MustCompile(`@(e[0-9]+)\b`).FindStringSubmatch(snapshot.Text)
+	if len(ref) != 2 {
+		t.Fatalf("fixture has no screenshot crop ref: %s", snapshot.Text)
+	}
+	viewportWidth := 0
+	for _, crop := range []string{"", ref[1]} {
+		params := map[string]any{}
+		if crop != "" {
+			params["ref"] = crop
+		}
+		capture, captureErr := call(ctx, scope, "chat", "screenshot", params)
+		if captureErr != nil {
+			t.Fatal(captureErr)
+		}
+		var shot struct {
+			Image string `json:"image_base64"`
+		}
+		if err = json.Unmarshal(capture, &shot); err != nil {
+			t.Fatal(err)
+		}
+		data, decodeErr := base64.StdEncoding.DecodeString(shot.Image)
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		img, decodeErr := png.Decode(bytes.NewReader(data))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if crop == "" {
+			viewportWidth = img.Bounds().Dx()
+		} else if img.Bounds().Dx() >= viewportWidth {
+			t.Fatal("element screenshot was not cropped")
+		}
 	}
 	if _, err = call(ctx, scope, "chat", "fill", map[string]any{"selector": "#name", "value": "世界"}); err != nil {
 		t.Fatal(err)
@@ -478,4 +520,40 @@ func TestRealExtension(t *testing.T) {
 		}
 		checkCleanup()
 	}
+	// Stop must cancel a real pending extension command and clean its tabs,
+	// rather than rejecting the control while the automation queue is busy.
+	if err = m.Control(ctx, scope, "chat", "select"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_, callErr := call(ctx, scope, "chat", "request_help", map[string]any{
+			"prompt": "This pending test will be cancelled by Stop", "timeout_ms": 30000,
+		})
+		helpDone <- callErr
+	}()
+	for !m.Status(scope, "chat").NeedsHelp {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-tick.C:
+		}
+	}
+	if err = m.Control(ctx, scope, "chat", "stop"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-helpDone:
+		if err == nil {
+			t.Fatal("Stop did not cancel pending help")
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if m.Status(scope, "chat").Selected {
+		t.Fatal("stopped task is still selected")
+	}
+	checkCleanup()
 }
