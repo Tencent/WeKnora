@@ -262,13 +262,35 @@ func (e *cachedEmbedder) cachedBatch(
 	if len(missingTexts) > 0 {
 		batchKey := modelobs.SharingScope(ctx) + "\x00" + singleflightBatchKey(prefix, missingHashes)
 		resultCh := e.coordinator.requests.DoChan(batchKey, func() (any, error) {
+			// A caller can observe a miss before another flight writes its result,
+			// then become the leader after that flight has left the group. Recheck
+			// inside the flight, including partial fills from overlapping batches.
+			fresh, refreshErr := e.coordinator.store.GetEmbeddingCache(ctx, prefix, missingHashes)
+			vectors := make([][]float32, len(missingHashes))
+			pendingTexts := make([]string, 0, len(missingTexts))
+			pendingHashes := make([]string, 0, len(missingHashes))
+			pendingIndices := make([]int, 0, len(missingHashes))
+			for index, hash := range missingHashes {
+				if refreshErr == nil && fresh[hash] != nil {
+					if vector, err := decodeCacheVector(fresh[hash], e.inner.GetDimensions()); err == nil {
+						vectors[index] = vector
+						continue
+					}
+				}
+				pendingTexts = append(pendingTexts, missingTexts[index])
+				pendingHashes = append(pendingHashes, hash)
+				pendingIndices = append(pendingIndices, index)
+			}
+			if len(pendingTexts) == 0 {
+				return vectors, nil
+			}
 			callCtx := modelobs.WithApplicationCacheStatus(ctx, lookupStatus)
-			vectors, err := provider(callCtx, missingTexts)
+			generated, err := provider(callCtx, pendingTexts)
 			if err != nil {
 				return nil, err
 			}
 			entries, err := buildCacheEntries(
-				prefix, missingHashes, vectors, e.inner.GetDimensions(), e.coordinator.ttl,
+				prefix, pendingHashes, generated, e.inner.GetDimensions(), e.coordinator.ttl,
 			)
 			if err != nil {
 				return nil, err
@@ -284,6 +306,9 @@ func (e *cachedEmbedder) cachedBatch(
 					"Embedding cache persist failed (vectors still returned): "+
 						"entries %d, error_kind %s",
 					len(entries), cacheWriteErrorKind(err))
+			}
+			for index, position := range pendingIndices {
+				vectors[position] = generated[index]
 			}
 			return vectors, nil
 		})
