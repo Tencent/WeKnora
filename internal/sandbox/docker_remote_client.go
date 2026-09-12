@@ -727,7 +727,7 @@ func (c *DockerRemoteClient) Exec(
 	}
 
 	start := time.Now()
-	stdout, stderr, err := c.streamExec(execCtx, created.ID, req.Stdin)
+	stdout, stderr, err := c.streamExec(execCtx, created.ID, req.Stdin, req.OnOutput)
 	if err != nil {
 		return nil, err
 	}
@@ -759,6 +759,7 @@ func (c *DockerRemoteClient) streamExec(
 	ctx context.Context,
 	execID string,
 	stdin string,
+	output ...func(string, []byte),
 ) (string, string, error) {
 	attached, err := c.api.ExecAttach(ctx, execID, client.ExecAttachOptions{})
 	if err != nil {
@@ -788,7 +789,12 @@ func (c *DockerRemoteClient) streamExec(
 	var stdout, stderr bytes.Buffer
 	done := make(chan error, 1)
 	go func() {
-		_, copyErr := stdcopy.StdCopy(&stdout, &stderr, attached.Reader)
+		var out, errOut io.Writer = &stdout, &stderr
+		if len(output) > 0 && output[0] != nil {
+			out = io.MultiWriter(&stdout, remoteOutputWriter{stream: "stdout", callback: output[0]})
+			errOut = io.MultiWriter(&stderr, remoteOutputWriter{stream: "stderr", callback: output[0]})
+		}
+		_, copyErr := stdcopy.StdCopy(out, errOut, attached.Reader)
 		done <- copyErr
 	}()
 
@@ -1323,3 +1329,11 @@ var (
 	_ RemoteSandboxClient   = (*DockerRemoteClient)(nil)
 	_ RemoteSnapshotManager = (*DockerRemoteClient)(nil)
 )
+
+// remoteOutputWriter observes bytes without changing buffered exec results.
+type remoteOutputWriter struct {
+	stream   string
+	callback func(string, []byte)
+}
+
+func (w remoteOutputWriter) Write(p []byte) (int, error) { w.callback(w.stream, p); return len(p), nil }

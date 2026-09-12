@@ -1238,3 +1238,18 @@ func TestDockerSessionCreateRequestDeletesIdleSandboxes(t *testing.T) {
 	require.Equal(t, RemoteOnTimeoutKill, request.Timeout.Action,
 		"pausing a container keeps its memory on the host, so it reclaims nothing")
 }
+
+func TestDockerExecObservesBothOutputStreamsWithoutChangingResult(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execStdout = "download started\n"
+	engine.execStderr = "download progress\n"
+	docker := newTestDockerClient(t, engine)
+	observed := map[string]string{}
+	result, err := docker.Exec(context.Background(), testHandle("container-1"), RemoteExecRequest{
+		Command: "echo", Timeout: time.Second,
+		OnOutput: func(stream string, p []byte) { observed[stream] += string(p) },
+	})
+	require.NoError(t, err)
+	require.Equal(t, result.Stdout, observed["stdout"])
+	require.Equal(t, result.Stderr, observed["stderr"])
+}

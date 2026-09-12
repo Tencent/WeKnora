@@ -65,9 +65,37 @@ test('live files and artifacts share validated Office rendering without changing
   assert.match(workbenchPreview, /preparedType.value = nextType/)
   assert.match(workbenchPreview, /const parentAbort = \(\) => controller.abort\(\)/)
   assert.match(workbenchPreview, /if \(current !== generation\) return/)
-  assert.match(preview, /<vue-office-pptx :src="pptxData"/)
-  assert.match(preview, /case 'pptx': \{\s*pptxData.value = await blob.arrayBuffer\(\)/)
+  assert.match(preview, /<vue-office-pptx :key="loadedForId" :src="pptxData"/)
+  assert.match(preview, /case 'pptx': \{\s*const prepared = await preparePptxPreview\(await blob.arrayBuffer\(\)\)/)
+  assert.match(preview, /pptxData.value = prepared.data/)
+  assert.match(preview, /@rendered="onPptxRendered"/)
   assert.match(workbenchPreview, /spreadsheetHTML/)
+})
+
+test('artifact drawer keeps restricted previews separate from the native preview toolbar', () => {
+  const drawer = read('../ChatArtifactsDrawer.vue')
+  const restricted = drawer.match(/<WorkbenchDocumentPreview\b[^>]*\/>/)?.[0] || ''
+  const native = drawer.match(/<DocumentPreview\b[^>]*\/>/)?.[0] || ''
+  assert.match(restricted, /v-if="restrictedPreview"/)
+  assert.match(restricted, /:max-preview-bytes="maxPreviewBytes"/)
+  assert.match(restricted, /:request-signal="requestSignal"/)
+  assert.doesNotMatch(restricted, /toolbar-target/)
+  assert.match(native, /v-else/)
+  assert.match(native, /:toolbar-target="previewActions"/)
+  assert.match(native, /fill-height/)
+  for (const branch of [restricted, native]) {
+    assert.match(branch, /:message-id="messageId"/)
+    assert.match(branch, /:artifact-index="previewItem.index"/)
+  }
+  assert.match(drawer, /<div v-else ref="previewActions"/)
+  assert.match(workbenchPreview, /:source-blob="preparedBlob" :source-key="preparedKey"/)
+  assert.doesNotMatch(workbenchPreview, /buildHtmlPreview|allow-scripts/)
+})
+
+test('upstream browser entry and request guards coexist with the feature-gated workbench', () => {
+  assert.match(chat, /<BrowserTaskPreview v-if="!embeddedMode && session_id" :key="session_id" :session-id="session_id"/)
+  assert.match(chat, /local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore\(\).knownOffline/)
+  assert.match(chat, /hydrateSessionInputState\(lastState, preserveDraft\)/)
 })
 
 test('known status reasons are localized instead of showing raw identifiers', () => {

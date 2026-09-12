@@ -183,6 +183,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// auth headers on the WS handshake, so this must precede the global Auth
 	// middleware). The ticket is minted by an authenticated POST.
 	RegisterSandboxTerminalRoutes(r, params.SessionHandler)
+	r.GET("/api/v1/local-browser/extension", params.SessionHandler.BrowserSkillExtension)
+	r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
+	r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
@@ -282,6 +285,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
 		RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, params.SandboxSkillHandler, rbacGuards)
 		RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
+		v1.GET("/me/browser", params.SessionHandler.BrowserSkillAccount)
+		v1.GET("/me/browser/extension", params.SessionHandler.BrowserSkillDownload)
+		v1.POST("/me/browser", params.SessionHandler.BrowserSkillAccount)
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		params.SystemHandler.BindDeploymentCapabilities(deploymentCapabilitiesFromRouter(params))

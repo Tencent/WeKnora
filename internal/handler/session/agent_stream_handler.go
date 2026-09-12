@@ -114,6 +114,7 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentThought, h.handleThought)
 	h.eventBus.On(event.EventAgentToolCall, h.handleToolCall)
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
+	h.eventBus.On(event.EventAgentCommandOutput, h.handleCommandOutput)
 	h.eventBus.On(event.EventAgentReferences, h.handleReferences)
 	h.eventBus.On(event.EventMemoryRecalled, h.handleMemoryRecalled)
 	h.eventBus.On(event.EventContextCompacted, h.handleContextCompacted)
@@ -877,4 +878,20 @@ func publicArtifactViews(list types.MessageArtifacts) []map[string]interface{} {
 		})
 	}
 	return out
+}
+
+// handleCommandOutput forwards UI-only progress without adding partial output
+// to the model conversation or completing the tool call.
+func (h *AgentStreamHandler) handleCommandOutput(_ context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.CommandOutputData)
+	if !ok || data.ToolCallID == "" {
+		return nil
+	}
+	return h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeCommandOutput, Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tool_call_id": data.ToolCallID, "command": data.Command,
+			"started_at": data.StartedAt, "output": data.Output, "done": data.Done,
+		},
+	})
 }

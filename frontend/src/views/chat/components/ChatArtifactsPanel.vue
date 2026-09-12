@@ -30,10 +30,12 @@
           <t-icon name="download" size="16px" />
         </template>
       </t-button>
+      <div ref="previewActions" class="artifact-preview-actions" />
     </div>
 
     <div v-if="previewItem" class="artifact-preview-body">
       <DocumentPreview
+        :toolbar-target="previewActions"
         :session-id="sessionId"
         :message-id="previewItem.messageId"
         :artifact-index="previewItem.index"
@@ -157,6 +159,7 @@ const props = withDefaults(
 
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
+const previewActions = ref<HTMLElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 const previewItem = ref<SessionArtifactItem | null>(null)
 const downloading = reactive<Record<string, boolean>>({})
@@ -325,6 +328,10 @@ async function handleDownload(item: SessionArtifactItem) {
   :deep(.t-button__icon) {
     margin: 0;
   }
+}
+
+.artifact-preview-actions {
+  flex-shrink: 0;
 }
 
 .artifact-panel-header-icon {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { renderArtifactFileIcon } from './artifactFileIcon'
 
 import {
   isArtifactRefHref,
@@ -10,6 +11,19 @@ import {
 } from './sandboxArtifactRefs.ts'
 
 const labels = { previewHint: '点击预览', missingHint: '文件不可用' }
+
+test('inline file cards reuse the drawer icon and keep filenames escaped', () => {
+  for (const name of ['report.pdf', 'table.xlsx', 'notes.docx', 'slides.pptx', 'chart.html', 'bad.<img src=x onerror=alert(1)>']) {
+    const icon = renderArtifactFileIcon(name)
+    const html = renderArtifactReference({ href: 'sandbox:' + name, artifacts: [{ index: 3, file_name: name }], labels })
+    assert.ok(html?.includes(icon))
+    assert.ok(html?.includes('data-artifact-index="3"'))
+    assert.doesNotMatch(icon, /<img|onerror/)
+    assert.doesNotMatch(html!, /<img src=x/)
+  }
+  assert.match(renderArtifactFileIcon('report.pdf'), /kind-file-pdf/)
+  assert.match(renderArtifactFileIcon('report.pdf'), />PDF<\/text>/)
+})
 
 // 22 位句柄，与后端 types.ResourceHandleLength 一致。
 const handleFor = (i: number) => `art${i}`.padEnd(22, 'x')

@@ -1,3 +1,16 @@
+# Build the paired extension and fetch the checksum-pinned native daemon.
+# Node runs on the builder architecture; only bsk targets the runtime image.
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS browserskill
+WORKDIR /build
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git python3 ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+COPY scripts/build_browserskill.sh scripts/browserskill-release.json ./scripts/
+COPY patches/browserskill ./patches/browserskill
+ARG TARGETOS
+ARG TARGETARCH
+RUN bash scripts/build_browserskill.sh /opt/weknora/browserskill "${TARGETOS}/${TARGETARCH}"
+
 # Build stage
 FROM golang:1.26-bookworm AS builder
 
@@ -76,6 +89,11 @@ FROM debian:12.12-slim
 WORKDIR /app
 
 ARG APK_MIRROR_ARG
+
+# Pairing derives the gateway URL from the user's page origin by default.
+ENV BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk \
+    BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.2.1.zip
+COPY --from=browserskill /opt/weknora/browserskill /opt/weknora/browserskill
 
 # Create a non-root user first
 RUN useradd -m -s /bin/bash appuser

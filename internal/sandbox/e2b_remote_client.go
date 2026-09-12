@@ -238,7 +238,7 @@ func (c *E2BRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplate, 
 			ID:        item.TemplateID,
 			Name:      name,
 			Status:    status,
-			Version:   item.EnvdVersion,
+			Version:   item.BuildID,
 			CreatedAt: item.CreatedAt,
 			UpdatedAt: item.UpdatedAt,
 			Standard:  standard,
@@ -827,6 +827,10 @@ func (c *E2BRemoteClient) Exec(
 
 	start := time.Now()
 	options := []e2b.RunOption{}
+	if request.OnOutput != nil {
+		options = append(options, e2b.WithOnStdout(func(p []byte) { request.OnOutput("stdout", p) }),
+			e2b.WithOnStderr(func(p []byte) { request.OnOutput("stderr", p) }))
+	}
 	if request.WorkDir != "" {
 		options = append(options, e2b.WithCwd(request.WorkDir))
 	}

@@ -12,7 +12,8 @@ const sandboxSpanPreviewRunes = 256
 // wrapLangfuseRemoteClient records provider-neutral sandbox RPCs as Langfuse
 // spans (sandbox.exec / sandbox.connect / …) so LiteFuse shows a product-level
 // tree instead of a pile of Docker Engine HTTP calls parented to whatever
-// agent.round happened to be recording. No-op when Langfuse is disabled.
+// agent.round happened to be recording. No-op when Langfuse is disabled or
+// the caller has no parent trace.
 //
 // Snapshot capability is forwarded: wrapping must not hide RemoteSnapshotManager
 // from SnapshotManagerFrom.
@@ -248,7 +249,7 @@ func startSandboxSpan(
 	name string,
 	input, extraMeta map[string]interface{},
 ) (context.Context, *langfuse.Span) {
-	return langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+	return langfuse.GetManager().StartChildSpan(ctx, langfuse.SpanOptions{
 		Name:     name,
 		Input:    input,
 		Metadata: extraMeta,

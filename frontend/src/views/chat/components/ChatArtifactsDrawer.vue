@@ -90,6 +90,7 @@
                 >
                     <template #icon><t-icon name="close" size="16px" /></template>
                 </t-button>
+                <div v-else ref="previewActions" class="artifact-preview-actions" />
             </div>
             <div v-else class="artifact-drawer-header">
                 <div class="artifact-drawer-header-icon">
@@ -112,6 +113,7 @@
             />
             <DocumentPreview
                 v-else
+                :toolbar-target="previewActions"
                 :session-id="sessionId"
                 :message-id="messageId"
                 :artifact-index="previewItem.index"
@@ -232,6 +234,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const previewActions = ref<HTMLElement | null>(null)
 
 /** TDesign always follows @close with update:visible=false; swallow that when popping preview. */
 let suppressDrawerClose = false
@@ -484,6 +487,10 @@ onUnmounted(() => {
     :deep(.t-button__icon) {
         margin: 0;
     }
+}
+
+.artifact-preview-actions {
+    flex-shrink: 0;
 }
 
 .artifact-drawer-header-icon {
