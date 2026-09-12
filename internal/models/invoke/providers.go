@@ -118,6 +118,8 @@ const (
 	DeepSeekBaseURL = "https://api.deepseek.com/v1"
 
 	GeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+	// GeminiOpenAICompatBaseURL 是官方 OpenAI 兼容层（裁定 #31：compat 路由的默认端点）。
+	GeminiOpenAICompatBaseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 	HunyuanBaseURL = "https://api.hunyuan.cloud.tencent.com/v1"
 

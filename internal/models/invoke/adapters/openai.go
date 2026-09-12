@@ -100,13 +100,6 @@ func specFor(name invoke.ProviderName) openaiVendorSpec {
 		// counters) + tool_choice strip (unsupported by DeepSeek).
 		spec.forceRaw = true
 		spec.shape = shapeDeepSeek
-	case invoke.ProviderGemini:
-		// UNREACHABLE since P5-1: gemini registers via GeminiAdapter (native
-		// generateContent route) and no openaiAdapter instance carries this
-		// name anymore. Kept as the compat-layer record: ForceRawHTTP let
-		// vendor-only fields survive the SDK marshal; tool thought-signature
-		// metadata had no channel in the neutral message model (§6.1).
-		spec.forceRaw = true
 	case invoke.ProviderAzureOpenAI:
 		spec.azure = true
 	case invoke.ProviderVolcengine:

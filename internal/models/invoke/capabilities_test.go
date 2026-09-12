@@ -10,7 +10,9 @@ import (
 
 func TestProtocolFor(t *testing.T) {
 	assert.Equal(t, ProtocolAnthropicMessages, protocolFor(ProviderAnthropic))
-	assert.Equal(t, ProtocolGoogleGenai, protocolFor(ProviderGemini))
+	// gemini rides the official OpenAI-compat layer (裁定 #31) — wire family is
+	// the standard OpenAI Chat shape now.
+	assert.Equal(t, ProtocolOpenAIChat, protocolFor(ProviderGemini))
 	// OpenAI-compatible family is the default for everything else.
 	assert.Equal(t, ProtocolOpenAIChat, protocolFor(ProviderOpenAI))
 	assert.Equal(t, ProtocolOpenAIChat, protocolFor(ProviderGeneric))

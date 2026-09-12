@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,9 +79,10 @@ func newRawCaptureServer(t *testing.T, handler http.HandlerFunc) *rawCaptureServ
 }
 
 // 场景 32 对账：流式（NDJSON + think 思考流 + done chunk usage）。
-// 入口级对账：thinking/answer/done 事件序列；usage 数值由适配器级断言钉死
-// （契约一条 chunk 一事件，Done 事件携带 usage 但入口映射当前丢弃，已上报；
-// thinking 收尾 marker 同为已上报的入口层差异，比较时剔除）。
+// 入口级对账：thinking/answer/done 事件序列；usage 数值由适配器级断言钉死。
+// 历史注：Done 事件携带 usage 曾被入口映射丢弃（已上报），P5-1 起由
+// usage-in-Done seam 修复——Done chunk 现携带 usage（invoke.go）。入口级
+// 对账仍剔除 usage/thinking 收尾 marker（后者为既有入口层差异）。
 func TestGoldenReplayOllamaStream(t *testing.T) {
 	allowLoopbackSSRF(t)
 	golden := loadGoldenDoc(t, "ollama_stream")
@@ -120,6 +122,18 @@ func TestGoldenReplayOllamaStream(t *testing.T) {
 
 	// 客户端事件序列对账（usage 除外，见函数注释）。
 	require.Equal(t, stripUsage(goldenStreamView(t, golden.Client)), stripUsage(normalizeStream(t, chunks)))
+
+	// usage-in-Done 正向断言（P5-1 seam 修复后的回归钉）：done chunk 携带
+	// 与 done 行一致的 usage（口径见下方适配器级测试）。
+	var doneUsage *types.TokenUsage
+	for _, chunk := range chunks {
+		if chunk.Done && chunk.Usage != nil {
+			doneUsage = chunk.Usage
+		}
+	}
+	require.NotNil(t, doneUsage, "usage-in-Done seam: the done chunk must carry usage")
+	require.Equal(t, 12, doneUsage.PromptTokens)
+	require.Equal(t, 7, doneUsage.CompletionTokens)
 }
 
 // 适配器级钉死：done 行 usage 口径（prompt=PromptEvalCount,

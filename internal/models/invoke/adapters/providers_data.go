@@ -95,7 +95,7 @@ var providerInfos = map[invoke.ProviderName]invoke.ProviderInfo{
 		DisplayName: "Google Gemini",
 		Description: "gemini-3-flash-preview, gemini-2.5-pro, gemini-embedding-2, etc.",
 		DefaultURLs: map[types.ModelType]string{
-			types.ModelTypeKnowledgeQA: invoke.GeminiBaseURL,
+			types.ModelTypeKnowledgeQA: invoke.GeminiOpenAICompatBaseURL,
 			types.ModelTypeEmbedding:   invoke.GeminiBaseURL,
 		},
 		ModelTypes: []types.ModelType{

@@ -181,9 +181,8 @@ func protocolFor(name ProviderName) ProtocolFamily {
 	switch name {
 	case ProviderAnthropic:
 		return ProtocolAnthropicMessages
-	case ProviderGemini:
-		return ProtocolGoogleGenai
 	default:
+		// gemini 亦落此处：走官方 OpenAI 兼容层（裁定 #31），wire 即 OpenAI Chat 形态。
 		return ProtocolOpenAIChat
 	}
 }
