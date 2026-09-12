@@ -428,3 +428,56 @@ func TestAliyunEmbeddingTextNativeWire(t *testing.T) {
 	require.NotNil(t, body.Parameters)
 	require.Equal(t, 512, body.Parameters.Dimension)
 }
+
+// rerank 双协议 + base 规则：qwen3-rerank 走扁平 reranks，其余走 text-rerank
+// 信封；base 含本协议端点路径则直用，否则归一回根拼协议路径。
+func TestAliyunRerankWireDispatch(t *testing.T) {
+	const root = "https://dashscope.aliyuncs.com"
+	const textPath = "/api/v1/services/rerank/text-rerank/text-rerank"
+	const flatPath = "/compatible-api/v1/reranks"
+
+	cases := []struct {
+		name, base, model, wantURL string
+	}{
+		{"envelope empty base", "", "gte-rerank-v2", root + textPath},
+		{"envelope root base", root, "qwen3.7-text-rerank", root + textPath},
+		{"envelope legacy compatible-mode base", root + "/compatible-mode/v1", "gte-rerank-v2", root + textPath},
+		{"envelope full-endpoint base passes through", root + textPath, "gte-rerank-v2", root + textPath},
+		{"flat empty base", "", "qwen3-rerank", root + flatPath},
+		{"flat text-rerank prefill normalizes to root", root + textPath, "qwen3-rerank", root + flatPath},
+		{"flat full-endpoint base passes through", root + flatPath, "qwen3-rerank", root + flatPath},
+	}
+	for _, c := range cases {
+		req, err := buildAliyunRerank(
+			invoke.Endpoint{BaseURL: c.base, Credentials: invoke.Credentials{APIKey: "sk"}},
+			c.model, &invoke.RerankOptions{Query: "q", Documents: []string{"d1", "d2"}})
+		require.NoError(t, err, c.name)
+		require.Equal(t, c.wantURL, req.URL, c.name)
+	}
+
+	// 扁平请求体：query/documents 顶层、无 parameters、top_n 省略（厂商默认全量）。
+	req, err := buildAliyunRerank(invoke.Endpoint{}, "qwen3-rerank",
+		&invoke.RerankOptions{Query: "q", Documents: []string{"d1", "d2"}})
+	require.NoError(t, err)
+	var flat map[string]any
+	require.NoError(t, json.Unmarshal(req.Body, &flat))
+	require.Equal(t, "qwen3-rerank", flat["model"])
+	require.Equal(t, "q", flat["query"])
+	require.NotContains(t, flat, "input")
+	require.NotContains(t, flat, "parameters")
+	require.NotContains(t, flat, "top_n")
+
+	// 解析分派：ParseRerankResponse 契约不带模型名——顶层 results 优先，
+	// output.results 回落，两种信封都能吃。
+	a := newAliyunAdapter()
+	flatResp, err := a.ParseRerankResponse(200, nil,
+		[]byte(`{"results":[{"index":1,"relevance_score":0.9}]}`))
+	require.NoError(t, err)
+	require.Equal(t, 1, flatResp.Results[0].Index)
+	require.InDelta(t, 0.9, flatResp.Results[0].Score, 1e-9)
+	envResp, err := a.ParseRerankResponse(200, nil,
+		[]byte(`{"output":{"results":[{"index":0,"relevance_score":0.5}]}}`))
+	require.NoError(t, err)
+	require.Equal(t, 0, envResp.Results[0].Index)
+	require.InDelta(t, 0.5, envResp.Results[0].Score, 1e-9)
+}

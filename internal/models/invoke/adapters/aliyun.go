@@ -175,19 +175,25 @@ type aliyunToolChoice struct {
 // aliyunParameters is the native parameters object. DashScope validates
 // strictly, so every field is omitted unless the platform decided it.
 type aliyunParameters struct {
-	ResultFormat        string                `json:"result_format,omitempty"`
-	IncrementalOutput   bool                  `json:"incremental_output,omitempty"`
-	MaxCompletionTokens int                   `json:"max_completion_tokens,omitempty"`
-	MaxTokens           int                   `json:"max_tokens,omitempty"`
-	Temperature         float64               `json:"temperature,omitempty"`
-	TopP                float64               `json:"top_p,omitempty"`
-	PresencePenalty     float64               `json:"presence_penalty,omitempty"`
-	Seed                int                   `json:"seed,omitempty"`
-	EnableThinking      *bool                 `json:"enable_thinking,omitempty"`
-	ResponseFormat      *aliyunResponseFormat `json:"response_format,omitempty"`
-	Tools               []aliyunToolDef       `json:"tools,omitempty"`
-	ToolChoice          any                   `json:"tool_choice,omitempty"`
-	ParallelToolCalls   *bool                 `json:"parallel_tool_calls,omitempty"`
+	ResultFormat        string  `json:"result_format,omitempty"`
+	IncrementalOutput   bool    `json:"incremental_output,omitempty"`
+	MaxCompletionTokens int     `json:"max_completion_tokens,omitempty"`
+	MaxTokens           int     `json:"max_tokens,omitempty"`
+	Temperature         float64 `json:"temperature,omitempty"`
+	TopP                float64 `json:"top_p,omitempty"`
+	// PresencePenalty/Seed follow the platform's value-type ChatOptions
+	// contract ("zero = do not send"): the native wire documents
+	// presence_penalty [-2,2] (negatives raise repetition) and seed
+	// [0, 2³¹−1], but a negative penalty and seed=0 are unreachable until
+	// that contract grows opt-in signaling — a platform-level item, shared
+	// with the openai funnel (openai_wire.go gates on >0 the same way).
+	PresencePenalty   float64               `json:"presence_penalty,omitempty"`
+	Seed              int                   `json:"seed,omitempty"`
+	EnableThinking    *bool                 `json:"enable_thinking,omitempty"`
+	ResponseFormat    *aliyunResponseFormat `json:"response_format,omitempty"`
+	Tools             []aliyunToolDef       `json:"tools,omitempty"`
+	ToolChoice        any                   `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool                 `json:"parallel_tool_calls,omitempty"`
 }
 
 type aliyunInput struct {
@@ -889,7 +895,18 @@ func parseAliyunEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingR
 	return &invoke.EmbeddingResponse{Vectors: embeddings}, nil
 }
 
-// --- rerank: the native DashScope wire (P3 port, always was native) ---
+// --- rerank: the native DashScope wires (P3 port; dual protocol since the
+// 2026-09-12 native ruling) ---
+// 排序文档（2026-09）：qwen3-rerank 走扁平的 /compatible-api/v1/reranks
+// （{model, query, documents, top_n?} 顶层、results 在响应顶层）；其余
+// rerank 模型（gte-rerank-v2 / qwen3.7-text-rerank / qwen3-vl-rerank）走
+// text-rerank 端点的 {model, input, parameters} 信封（results 在
+// output.results 下）。
+
+const (
+	aliyunTextRerankPath = "/api/v1/services/rerank/text-rerank/text-rerank"
+	aliyunFlatRerankPath = "/compatible-api/v1/reranks"
+)
 
 type aliyunRerankRequest struct {
 	Model      string             `json:"model"`
@@ -907,41 +924,110 @@ type aliyunRerankParams struct {
 	TopN            int  `json:"top_n"`
 }
 
-const aliyunRerankEndpoint = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-
-func buildAliyunRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
-	base := ep.BaseURL
-	if base == "" {
-		base = aliyunRerankEndpoint
-	}
-	body := aliyunRerankRequest{
-		Model: model,
-		Input: aliyunRerankInput{
-			Query:     opts.Query,
-			Documents: opts.Documents,
-		},
-		Parameters: aliyunRerankParams{
-			ReturnDocuments: true,
-			TopN:            len(opts.Documents), // v1: return all documents
-		},
-	}
-	return buildRerankRequestShared(base, ep, body, "")
+// aliyunFlatRerankRequest is the qwen3-rerank flat shape: query/documents on
+// the TOP level, no parameters wrapper. top_n is omitted (vendor default =
+// return all — the platform's "return every document" posture), and
+// return_documents stays off (the caller re-derives document text from the
+// input — the facet-wide convention).
+type aliyunFlatRerankRequest struct {
+	Model     string   `json:"model"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
 }
 
-// parseAliyunRerank unwraps the DashScope envelope: results live under
-// output.results (v1 AliyunRerankResponse), NOT at the top level — a
-// top-level parse silently returns zero results (P3 review finding 2).
-func parseAliyunRerank(_ int, _ http.Header, body []byte) (*invoke.RerankResponse, error) {
-	var resp struct {
-		Output struct {
-			Results []rankResultWire `json:"results"`
-		} `json:"output"`
+// aliyunFlatRerank reports the flat-protocol model family (exactly the
+// qwen3-rerank naming — qwen3.7-text-rerank / qwen3-vl-rerank stay on the
+// text-rerank envelope per the doc's endpoint table).
+func aliyunFlatRerank(model string) bool {
+	return strings.HasPrefix(strings.ToLower(model), "qwen3-rerank")
+}
+
+// aliyunRerankRoot reduces any stored base to the DashScope root for rerank
+// URL joining: rerank SERVICE paths (/api/v1/services/...,
+// /compatible-api/...) are cut FIRST, then the standard normalization runs —
+// that order matters, cutting a text-rerank endpoint leaves a bare /api/v1
+// suffix for the standard trim to remove.
+func aliyunRerankRoot(base string) string {
+	if idx := strings.Index(base, "/services/"); idx != -1 {
+		base = base[:idx]
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	if idx := strings.Index(base, "/compatible-api/"); idx != -1 {
+		base = base[:idx]
+	}
+	return aliyunNativeBaseURL(base)
+}
+
+// aliyunRerankURL resolves the endpoint for the model's protocol:
+//   - a base already pointing at a full endpoint OF THAT PROTOCOL
+//     (contains /reranks for the flat family, /rerank for the envelope
+//     family) passes through untouched — the v1 full-endpoint posture;
+//   - anything else (empty, the DashScope root, a compatible-mode legacy
+//     record, or the OTHER protocol's full endpoint — e.g. the text-rerank
+//     prefill copied onto a qwen3-rerank record, which could never be
+//     valid, or vice versa) is reduced to the root and the protocol path
+//     appended.
+func aliyunRerankURL(base, model string) string {
+	if aliyunFlatRerank(model) {
+		if strings.Contains(base, "/reranks") {
+			return base
+		}
+		return aliyunRerankRoot(base) + aliyunFlatRerankPath
+	}
+	if strings.Contains(base, "/rerank") && !strings.Contains(base, "/reranks") {
+		return base
+	}
+	return aliyunRerankRoot(base) + aliyunTextRerankPath
+}
+
+func buildAliyunRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
+	var body any
+	if aliyunFlatRerank(model) {
+		body = aliyunFlatRerankRequest{
+			Model:     model,
+			Query:     opts.Query,
+			Documents: opts.Documents,
+		}
+	} else {
+		body = aliyunRerankRequest{
+			Model: model,
+			Input: aliyunRerankInput{
+				Query:     opts.Query,
+				Documents: opts.Documents,
+			},
+			Parameters: aliyunRerankParams{
+				ReturnDocuments: true,
+				TopN:            len(opts.Documents), // v1: return all documents
+			},
+		}
+	}
+	return buildRerankRequestShared(aliyunRerankURL(ep.BaseURL, model), ep, body, "")
+}
+
+// parseAliyunRerank 解析两种响应信封：text-rerank 的 results 在
+// output.results 下（P3 review finding 2——只读顶层会静默得到零结果），
+// qwen3-rerank 扁平协议的 results 在顶层。ParseRerankResponse 契约不带模型
+// 名，故按信封形态宽容解析：顶层优先，回落 output 信封。
+func parseAliyunRerank(_ int, _ http.Header, body []byte) (*invoke.RerankResponse, error) {
+	var top struct {
+		Results []rankResultWire `json:"results"`
+	}
+	if err := json.Unmarshal(body, &top); err != nil {
 		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
 	}
-	out := make([]invoke.RerankResult, 0, len(resp.Output.Results))
-	for _, r := range resp.Output.Results {
+	wire := top.Results
+	if wire == nil {
+		var env struct {
+			Output struct {
+				Results []rankResultWire `json:"results"`
+			} `json:"output"`
+		}
+		if err := json.Unmarshal(body, &env); err != nil {
+			return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
+		}
+		wire = env.Output.Results
+	}
+	out := make([]invoke.RerankResult, 0, len(wire))
+	for _, r := range wire {
 		out = append(out, invoke.RerankResult{Index: r.Index, Score: r.Score})
 	}
 	return &invoke.RerankResponse{Results: out}, nil

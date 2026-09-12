@@ -119,6 +119,25 @@ func TestReconcileAliyunRerank(t *testing.T) {
 	require.Equal(t, 0.5, resp.Results[0].Score)
 }
 
+// 场景 R6b：qwen3-rerank——扁平 /compatible-api/v1/reranks 协议（results 在
+// 响应顶层）；text-rerank 形态的存量 base 对该协议永远无效，归一回根拼路径。
+func TestReconcileAliyunQwen3Rerank(t *testing.T) {
+	allowLoopbackSSRF(t)
+	flatBody := `{"results":[{"index":1,"relevance_score":0.91},{"index":0,"relevance_score":0.32}],` +
+		`"model":"qwen3-rerank","usage":{"total_tokens":12}}`
+	g := newReconcileServer(t, jsonHandler(200, flatBody))
+	m := newRerankGoldenConfig(t, g.Server.URL, "aliyun", "qwen3-rerank", "sk-key")
+
+	resp, err := invoke.Rerank(context.Background(), m, &invoke.RerankOptions{
+		Query: "q", Documents: []string{"d1", "d2"},
+	})
+	require.NoError(t, err)
+	assertRequestsMatchGolden(t, "rerank_aliyun_qwen3", g)
+	require.Len(t, resp.Results, 2)
+	require.Equal(t, 1, resp.Results[0].Index, "按 relevance_score 降序原样透传")
+	require.InDelta(t, 0.91, resp.Results[0].Score, 1e-9)
+}
+
 // 场景 R7：weknoracloud——HMAC 签名。
 func TestReconcileWeKnoraCloudRerank(t *testing.T) {
 	allowLoopbackSSRF(t)

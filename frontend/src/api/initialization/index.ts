@@ -591,7 +591,7 @@ export interface ProviderThinkingCaps {
 export interface ProviderChatCaps {
     thinking: ProviderThinkingCaps;
     input_modalities?: string[]; // text/image/audio
-    protocol: string;            // openai_chat / anthropic_messages / google_genai / ollama
+    protocol: string;            // openai_chat / anthropic_messages / google_genai / ollama / dashscope
     parallel_tool_calls: boolean;
 }
 
