@@ -420,9 +420,16 @@ type ASRSegment struct {
 // §5.10). BaseURL is SSRF-gated by the entry; Credentials carries the API
 // key (app-level credentials stay unused today — native adapters that need
 // them read Credentials.AppID/AppSecret).
+//
+// 2026-09-12 ruling: EVERY remote list load filters by the model type being
+// edited — ModelType carries that facet (empty = unfiltered legacy callers),
+// and PageNo (1-based; 0 → adapter default) drives the entry's pagination
+// loop for adapters that opt in via PaginatedLister.
 type ListOptions struct {
 	BaseURL     string
 	Credentials Credentials
+	ModelType   types.ModelType
+	PageNo      int
 }
 
 // RemoteModel is one model discovered on the provider. The json contract is

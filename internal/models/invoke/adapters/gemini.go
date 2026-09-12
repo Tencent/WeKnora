@@ -246,7 +246,7 @@ func (a *GeminiAdapter) ParseEmbeddingResponse(
 // BuildListRequest targets the compat list endpoint directly: the family's
 // openAIListURL derives .../openai/v1/models for this base (wrong — the
 // compat layer serves /models at the root of the /openai segment).
-func (a *GeminiAdapter) BuildListRequest(ep invoke.Endpoint) (*invoke.Request, error) {
+func (a *GeminiAdapter) BuildListRequest(ep invoke.Endpoint, _ invoke.ListOptions) (*invoke.Request, error) {
 	base := geminiCompatBaseURL(ep.BaseURL)
 	header := http.Header{}
 	if key := strings.TrimSpace(ep.Credentials.APIKey); key != "" {

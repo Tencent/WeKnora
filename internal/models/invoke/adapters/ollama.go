@@ -362,7 +362,7 @@ func (a *OllamaAdapter) ParseEmbeddingResponse(
 // BuildListRequest describes the native model-list call. ollama records with
 // a trailing /v1 on base_url are stripped upstream (shared constructor rule,
 // §6.1) so this adapter always appends the native path.
-func (a *OllamaAdapter) BuildListRequest(ep invoke.Endpoint) (*invoke.Request, error) {
+func (a *OllamaAdapter) BuildListRequest(ep invoke.Endpoint, _ invoke.ListOptions) (*invoke.Request, error) {
 	if strings.TrimSpace(ep.BaseURL) == "" {
 		return nil, fmt.Errorf("ollama provider: base URL is required")
 	}

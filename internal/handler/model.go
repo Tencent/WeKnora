@@ -927,6 +927,9 @@ type ProbeRemoteCatalogRequest struct {
 	BaseURL  string `json:"base_url"`
 	APIKey   string `json:"api_key,omitempty"`
 	ModelID  string `json:"model_id,omitempty"`
+	// ModelType 是当前编辑的模型类型（2026-09-12 裁定③：所有远程列表
+	// 加载按编辑类型过滤；适配器按各自目录能力消费，无过滤能力的忽略）。
+	ModelType string `json:"model_type,omitempty"`
 }
 
 // ProbeRemoteCatalog godoc
@@ -971,6 +974,7 @@ func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
 	models, err := invoke.List(ctx, req.Provider, &invoke.ListOptions{
 		BaseURL:     req.BaseURL,
 		Credentials: invoke.Credentials{APIKey: apiKey},
+		ModelType:   types.ModelType(req.ModelType),
 	})
 	if err != nil {
 		// Failure degrades, never blocks (design §5.10.2): the frontend

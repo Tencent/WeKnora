@@ -49,7 +49,8 @@ func TestAnthropicListURL(t *testing.T) {
 // degrade, different reason text).
 func TestAzureListRejected(t *testing.T) {
 	a := &openaiAdapter{name: "azure_openai", spec: openaiVendorSpec{azure: true}}
-	if _, err := a.BuildListRequest(invoke.Endpoint{BaseURL: "https://x.openai.azure.com"}); err == nil {
+	if _, err := a.BuildListRequest(
+		invoke.Endpoint{BaseURL: "https://x.openai.azure.com"}, invoke.ListOptions{}); err == nil {
 		t.Fatal("azure BuildListRequest must fail explicitly")
 	}
 }

@@ -704,9 +704,11 @@ const remoteModels = ref<RemoteCatalogModel[]>([])
 const probingRemoteModels = ref(false)
 let probeSequence = 0
 
+// 2026-09-12 裁定③：所有远程模型列表加载按当前编辑的模型类型过滤——
+// 五类型全放开远程下拉（探测请求携带 model_type；无过滤能力的厂商由
+// 适配器忽略，失败降级手输不变）。
 const showRemoteModelSelect = computed(() =>
-  (activeModelType.value === 'chat' || activeModelType.value === 'vllm')
-  && formData.value.source === 'remote'
+  formData.value.source === 'remote'
   && formData.value.provider !== 'weknoracloud'
 )
 
@@ -728,8 +730,8 @@ const probeRemoteModels = async () => {
   try {
     // 编辑模式 apiKey 不在表单里：传 model_id 让后端用存储凭证兜底
     const payload = isEdit.value && props.modelData?.id
-      ? { provider: formData.value.provider, model_id: props.modelData.id, base_url: formData.value.baseUrl || '' }
-      : { provider: formData.value.provider, base_url: formData.value.baseUrl || '', api_key: formData.value.apiKey || '' }
+      ? { provider: formData.value.provider, model_id: props.modelData.id, base_url: formData.value.baseUrl || '', model_type: activeModelType.value }
+      : { provider: formData.value.provider, base_url: formData.value.baseUrl || '', api_key: formData.value.apiKey || '', model_type: activeModelType.value }
     const result = await probeRemoteCatalog(payload)
     if (seq !== probeSequence) return
     remoteModels.value = result.available ? (result.models ?? []) : []
@@ -1307,12 +1309,13 @@ const handleProviderChange = (value: string) => {
 let probeTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(
-  () => [formData.value.source, formData.value.provider, formData.value.modelName] as const,
-  ([source, provider, modelName], [prevSource, prevProvider, prevModelName]) => {
+  () => [formData.value.source, formData.value.provider, formData.value.modelName, activeModelType.value] as const,
+  ([source, provider, modelName, modelType], [prevSource, prevProvider, prevModelName, prevModelType]) => {
     if (hydratingForm.value) return
-    if (source === prevSource && provider === prevProvider && modelName === prevModelName) return
+    if (source === prevSource && provider === prevProvider && modelName === prevModelName && modelType === prevModelType) return
 
-    // 远端模型列表探测（防抖）：新建用已填 base_url+api_key，编辑用存储凭证
+    // 远端模型列表探测（防抖）：新建用已填 base_url+api_key，编辑用存储凭证；
+    // 切换模型类型同样重探（裁定③：列表按当前编辑类型过滤）
     if (showRemoteModelSelect.value) {
       if (probeTimer) clearTimeout(probeTimer)
       probeTimer = setTimeout(() => { void probeRemoteModels() }, 500)

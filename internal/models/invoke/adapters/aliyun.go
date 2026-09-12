@@ -35,9 +35,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // --- adapter + registration ---
@@ -288,30 +290,49 @@ func aliyunMessageContent(msg invoke.Message, vision bool) any {
 }
 
 // applyAliyunThinking ports the qwenThinkingProvider semantics onto the
-// native parameters object: hybrid models (qwen3 family) carry
-// enable_thinking on EVERY request — pinned false on non-stream calls
-// (Qwen3 rejects thinking in non-stream mode), the platform decision on
-// streams. ThinkingControl override tokens: "none" suppresses the field,
+// native parameters object, extended per the 2026-09-12 ruling ④ to the
+// full DashScope hybrid family (enable_thinking 适用面, see
+// invoke.IsDashScopeHybridThinkingModel):
+//   - qwen thinking family: enable_thinking on EVERY request (v1
+//     alwaysSend), pinned false on non-stream calls (Qwen3 rejects thinking
+//     in non-stream mode);
+//   - the non-Qwen hybrids (deepseek-v4/v3.2/v3.1, kimi-k2.6/k2.5, glm):
+//     the field rides ONLY an explicit platform decision (Thinking != nil
+//     or the ThinkingControl override) — no alwaysSend, no non-stream pin
+//     (those constraints are Qwen-specific);
+//   - always-on models (ZHIPU/GLM-5.3*, kimi-k3 — CanDisable=false): the
+//     field is NEVER sent; the vendor rejects enable_thinking=false
+//     outright and the server default is thinking-on.
+//
+// ThinkingControl override tokens: "none" suppresses the field,
 // "enable_thinking" forces the strategy on any model; anything else falls
 // back to the model-conditional default (documented delta above).
 func applyAliyunThinking(
 	params *aliyunParameters, control string, model string, opts *invoke.ChatOptions, isStream bool,
 ) {
-	apply := invoke.IsQwenThinkingModel(model)
+	if invoke.IsDashScopeAlwaysThinkingModel(model) {
+		return // 始终思考族：不发字段（false 必被拒，默认即开）
+	}
+	qwen := invoke.IsQwenThinkingModel(model)
+	hybrid := qwen || invoke.IsDashScopeHybridThinkingModel(model)
 	switch control {
 	case "none":
 		return
 	case "enable_thinking":
-		apply = true
+		hybrid = true
 	}
-	if !apply {
+	if !hybrid {
+		return
+	}
+	// 非 qwen 混合族仅在显式决策时发声（Thinking 或 override）。
+	if !qwen && (opts == nil || opts.Thinking == nil) && control != "enable_thinking" {
 		return
 	}
 	thinking := false
 	if opts != nil && opts.Thinking != nil {
 		thinking = *opts.Thinking
 	}
-	if !isStream {
+	if qwen && !isStream {
 		thinking = false
 	}
 	params.EnableThinking = &thinking
@@ -394,8 +415,12 @@ func (a *AliyunAdapter) BuildChatRequest(
 			}
 			if opts.ToolChoice != "" {
 				switch opts.ToolChoice {
-				case "none", "required", "auto":
+				case "none", "auto":
 					params.ToolChoice = opts.ToolChoice
+				case "required":
+					// 裁定⑥（2026-09-12）：DashScope 只有 auto/none/{function}
+					// 三种取值，required 无等价物——不传（服务端默认 auto），
+					// 比 400 或语义弱化都安全。
 				default:
 					params.ToolChoice = aliyunToolChoice{
 						Type:     "function",
@@ -687,17 +712,44 @@ func aliyunFlushDone(state *invoke.StreamBridgeState, tail *aliyunResponseMessag
 
 const aliyunModelListPath = "/api/v1/models"
 
-// BuildListRequest targets the native model catalog with the
-// text-generation capability filter (the compatible-mode /models endpoint
-// is gone with the compat route). Single page — the probe caps the result
-// list anyway.
-func (a *AliyunAdapter) BuildListRequest(ep invoke.Endpoint) (*invoke.Request, error) {
+// ListPageSize opts the adapter into the entry's pagination loop
+// (invoke.PaginatedLister): the catalog paginates by total, and the probe
+// must not stop at page one (2026-09-12 ruling ③).
+func (a *AliyunAdapter) ListPageSize() int { return 100 }
+
+// aliyunCapabilityFilter maps the model type being edited onto the catalog's
+// capability codes (查询模型列表.md §capabilities): TG=文本生成,
+// TR=文本向量, ME=多模态向量. Types without a code (rerank/ASR — the
+// catalog has no such filter, aliyun serves no ASR) list unfiltered; the
+// caller-side UX still shows whatever the vendor returns.
+func aliyunCapabilityFilter(modelType types.ModelType) []string {
+	switch modelType {
+	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM:
+		return []string{"TG"}
+	case types.ModelTypeEmbedding:
+		return []string{"TR", "ME"}
+	default:
+		return nil
+	}
+}
+
+// BuildListRequest targets the native model catalog filtered by the model
+// type being edited (ruling ③: EVERY remote list load filters by the edited
+// type — the handler forwards it via ListOptions.ModelType); pagination is
+// entry-driven via ListPageSize above.
+func (a *AliyunAdapter) BuildListRequest(ep invoke.Endpoint, opts invoke.ListOptions) (*invoke.Request, error) {
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 	header.Set("Authorization", "Bearer "+ep.Credentials.APIKey)
 	q := url.Values{}
-	q.Set("capabilities", "TG")
-	q.Set("page_no", "1")
+	for _, cap := range aliyunCapabilityFilter(opts.ModelType) {
+		q.Add("capabilities", cap)
+	}
+	pageNo := opts.PageNo
+	if pageNo <= 0 {
+		pageNo = 1
+	}
+	q.Set("page_no", strconv.Itoa(pageNo))
 	q.Set("page_size", "100")
 	return &invoke.Request{
 		Method: http.MethodGet,
@@ -905,6 +957,9 @@ func parseAliyunEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingR
 
 const (
 	aliyunTextRerankPath = "/api/v1/services/rerank/text-rerank/text-rerank"
+	// aliFlatRerankPath 挂在 DashScope 根即可达（用户 2026-09-12 确认
+	// dashscope.aliyuncs.com 代理 compatible-api；文档示例域名为
+	// {WorkspaceId}.cn-beijing.maas.aliyuncs.com，两者同源）。
 	aliyunFlatRerankPath = "/compatible-api/v1/reranks"
 )
 
@@ -920,8 +975,10 @@ type aliyunRerankInput struct {
 }
 
 type aliyunRerankParams struct {
-	ReturnDocuments bool `json:"return_documents"`
-	TopN            int  `json:"top_n"`
+	// return_documents 仅 gte-rerank（含 v2）与 qwen3-vl-rerank 支持（文档
+	// 参数表）；其余模型携带会被严格校验拒收——omitempty + 门控。
+	ReturnDocuments bool `json:"return_documents,omitempty"`
+	TopN            int  `json:"top_n,omitempty"`
 }
 
 // aliyunFlatRerankRequest is the qwen3-rerank flat shape: query/documents on
@@ -933,6 +990,14 @@ type aliyunFlatRerankRequest struct {
 	Model     string   `json:"model"`
 	Query     string   `json:"query"`
 	Documents []string `json:"documents"`
+}
+
+// aliyunSupportsReturnDocuments gates the return_documents parameter by
+// model family (排序 API 参数表)：仅 gte-rerank（含 v2）与 qwen3-vl-rerank
+// 支持；qwen3.7-text-rerank 等携带即被拒。
+func aliyunSupportsReturnDocuments(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.Contains(lower, "gte-rerank") || strings.Contains(lower, "qwen3-vl-rerank")
 }
 
 // aliyunFlatRerank reports the flat-protocol model family (exactly the
@@ -995,7 +1060,7 @@ func buildAliyunRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOpti
 				Documents: opts.Documents,
 			},
 			Parameters: aliyunRerankParams{
-				ReturnDocuments: true,
+				ReturnDocuments: aliyunSupportsReturnDocuments(model),
 				TopN:            len(opts.Documents), // v1: return all documents
 			},
 		}

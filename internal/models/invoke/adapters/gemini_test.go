@@ -135,7 +135,7 @@ func TestGeminiFormatMapping(t *testing.T) {
 // openAIListURL would derive .../openai/v1/models — wrong for this base).
 func TestGeminiListFacet(t *testing.T) {
 	a := newGeminiAdapter()
-	req, err := a.BuildListRequest(geminiTestEndpoint())
+	req, err := a.BuildListRequest(geminiTestEndpoint(), invoke.ListOptions{})
 	require.NoError(t, err)
 	assert.Equal(t,
 		"https://generativelanguage.googleapis.com/v1beta/openai/models", req.URL)

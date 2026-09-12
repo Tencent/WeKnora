@@ -22,12 +22,14 @@ var (
 	_ invoke.ListModelsAdapter = (*AnthropicAdapter)(nil)
 )
 
-// BuildListRequest ports v1 openAIListURL + Bearer auth. The openaiAdapter
+// BuildListRequest ports v1 openAIListURL + Bearer auth (opts ignored: the
+// openai-shaped /models family has no type filter — vendor filtering lands
+// per-adapter as adapters unfreeze). The openaiAdapter
 // methods promote to every embedding/rerank/ASR composite that embeds it, and
 // weKnoraCloudAdapter (sign-type vendor: the listing probe carries neither the
 // Bearer header nor the body signature, so the server rejects it — same
 // degrade as v1's empty Bearer).
-func (a *openaiAdapter) BuildListRequest(ep invoke.Endpoint) (*invoke.Request, error) {
+func (a *openaiAdapter) BuildListRequest(ep invoke.Endpoint, _ invoke.ListOptions) (*invoke.Request, error) {
 	if a.spec.azure {
 		// Azure deployment mode has no OpenAI-shaped /models endpoint. v1 let
 		// the doomed request go out and come back 404 (probe degraded to
@@ -52,7 +54,7 @@ func (a *openaiAdapter) ParseListResponse(_ int, _ http.Header, body []byte) ([]
 }
 
 // BuildListRequest ports v1 anthropicListURL + x-api-key/anthropic-version.
-func (a *AnthropicAdapter) BuildListRequest(ep invoke.Endpoint) (*invoke.Request, error) {
+func (a *AnthropicAdapter) BuildListRequest(ep invoke.Endpoint, _ invoke.ListOptions) (*invoke.Request, error) {
 	header := make(http.Header)
 	header.Set("x-api-key", ep.Credentials.APIKey)
 	header.Set("anthropic-version", anthropicVersion)

@@ -318,7 +318,7 @@ export interface RemoteCatalogModel {
 interface CatalogEnvelope<T> { success: boolean; data: T }
 
 export async function probeRemoteCatalog(
-  body: { provider: string; base_url?: string; api_key?: string; model_id?: string },
+  body: { provider: string; base_url?: string; api_key?: string; model_id?: string; model_type?: string },
 ): Promise<{ available: boolean; models?: RemoteCatalogModel[]; reason?: string }> {
   const response = await post<CatalogEnvelope<{ available: boolean; models?: RemoteCatalogModel[]; reason?: string }>>(
     '/api/v1/models/remote-catalog',

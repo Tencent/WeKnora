@@ -26,7 +26,7 @@ func (a *listProbeAdapter) Capabilities() Capabilities {
 	}
 }
 
-func (a *listProbeAdapter) BuildListRequest(ep Endpoint) (*Request, error) {
+func (a *listProbeAdapter) BuildListRequest(ep Endpoint, _ ListOptions) (*Request, error) {
 	return &Request{Method: http.MethodGet, URL: ep.BaseURL + "/models"}, nil
 }
 
@@ -102,5 +102,76 @@ func TestProbeTimeoutDefault(t *testing.T) {
 	t.Setenv("WEKNORA_REMOTE_CATALOG_TIMEOUT_SECONDS", "bogus")
 	if got := probeTimeout(); got != defaultProbeTimeout {
 		t.Errorf("probeTimeout(bogus) = %v, want default", got)
+	}
+}
+
+// paginatedProbeAdapter opts into the entry's pagination loop: page 1 serves
+// a FULL page (2 models), page 2 a partial one (1) — the loop must stop on
+// the short page. It also records the ModelType/PageNo it was asked for.
+type paginatedProbeAdapter struct {
+	listProbeAdapter
+	queries []ListOptions
+}
+
+func (a *paginatedProbeAdapter) ListPageSize() int { return 2 }
+
+func (a *paginatedProbeAdapter) BuildListRequest(ep Endpoint, opts ListOptions) (*Request, error) {
+	a.queries = append(a.queries, opts)
+	return &Request{
+		Method: http.MethodGet,
+		URL:    fmt.Sprintf("%s/models?page_no=%d&model_type=%s", ep.BaseURL, opts.PageNo, opts.ModelType),
+	}, nil
+}
+
+func (a *paginatedProbeAdapter) ParseListResponse(_ int, _ http.Header, _ []byte) ([]RemoteModel, error) {
+	switch len(a.queries) {
+	case 1:
+		return []RemoteModel{{ID: "p1-a"}, {ID: "p1-b"}}, nil // 满页 → 续拉
+	default:
+		return []RemoteModel{{ID: "p2-a"}}, nil // 短页 → 停
+	}
+}
+
+// TestListEntryPaginationLoop pins the 2026-09-12 ruling ③ mechanics: a
+// PaginatedLister adapter gets page-looped probes (full page → next page,
+// short page stops) and every page carries the ModelType filter verbatim;
+// non-paginated adapters keep the single-shot contract.
+func TestListEntryPaginationLoop(t *testing.T) {
+	allowLoopbackSSRF(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"output":{"models":[]}}`))
+	}))
+	defer srv.Close()
+
+	fake := &paginatedProbeAdapter{}
+	registerFake(t, fake)
+	models, err := List(t.Context(), "fake", &ListOptions{BaseURL: srv.URL, ModelType: "embedding"})
+	if err != nil {
+		t.Fatalf("List = %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("models = %d, want 3 (full page + short page)", len(models))
+	}
+	if len(fake.queries) != 2 {
+		t.Fatalf("probe calls = %d, want 2", len(fake.queries))
+	}
+	if fake.queries[0].PageNo != 1 || fake.queries[1].PageNo != 2 {
+		t.Errorf("page numbers = %d,%d, want 1,2", fake.queries[0].PageNo, fake.queries[1].PageNo)
+	}
+	for i, q := range fake.queries {
+		if q.ModelType != "embedding" {
+			t.Errorf("query[%d].ModelType = %q, want forwarded verbatim", i, q.ModelType)
+		}
+	}
+
+	// 单发契约：未实现 PaginatedLister 的适配器只发一次（即使满页）。
+	single := &listProbeAdapter{results: []RemoteModel{{ID: "a"}, {ID: "b"}, {ID: "c"}}}
+	registerFake(t, single)
+	models, err = List(t.Context(), "fake", &ListOptions{BaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("single-shot List = %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("single-shot models = %d, want 3", len(models))
 	}
 }

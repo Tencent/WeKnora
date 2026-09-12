@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -382,11 +383,33 @@ func TestAliyunBareDoneSentinel(t *testing.T) {
 
 func TestAliyunListFacet(t *testing.T) {
 	a := newAliyunAdapter()
-	req, err := a.BuildListRequest(invoke.Endpoint{Credentials: invoke.Credentials{APIKey: "sk"}})
+	// 类型过滤（裁定③）：chat→TG；embedding→TR+ME；rerank/未指定→不过滤。
+	chatReq, err := a.BuildListRequest(invoke.Endpoint{Credentials: invoke.Credentials{APIKey: "sk"}},
+		invoke.ListOptions{ModelType: types.ModelTypeKnowledgeQA})
 	require.NoError(t, err)
-	require.Equal(t, http.MethodGet, req.Method)
-	require.Equal(t, "https://dashscope.aliyuncs.com/api/v1/models?capabilities=TG&page_no=1&page_size=100", req.URL)
-	require.Equal(t, "Bearer sk", req.Header.Get("Authorization"))
+	require.Equal(t, http.MethodGet, chatReq.Method)
+	require.Equal(t,
+		"https://dashscope.aliyuncs.com/api/v1/models?capabilities=TG&page_no=1&page_size=100", chatReq.URL)
+	require.Equal(t, "Bearer sk", chatReq.Header.Get("Authorization"))
+
+	embReq, err := a.BuildListRequest(invoke.Endpoint{}, invoke.ListOptions{ModelType: types.ModelTypeEmbedding})
+	require.NoError(t, err)
+	require.Equal(t,
+		"https://dashscope.aliyuncs.com/api/v1/models?capabilities=TR&capabilities=ME&page_no=1&page_size=100",
+		embReq.URL)
+
+	rrReq, err := a.BuildListRequest(invoke.Endpoint{}, invoke.ListOptions{ModelType: types.ModelTypeRerank})
+	require.NoError(t, err)
+	require.Equal(t, "https://dashscope.aliyuncs.com/api/v1/models?page_no=1&page_size=100",
+		rrReq.URL, "目录无 rerank 能力码——不过滤")
+
+	// 翻页：PageNo 透传（入口按满页续拉，ListPageSize 声明页大小）。
+	page2, err := a.BuildListRequest(invoke.Endpoint{},
+		invoke.ListOptions{ModelType: types.ModelTypeKnowledgeQA, PageNo: 2})
+	require.NoError(t, err)
+	require.Equal(t,
+		"https://dashscope.aliyuncs.com/api/v1/models?capabilities=TG&page_no=2&page_size=100", page2.URL)
+	require.Equal(t, 100, a.ListPageSize())
 
 	models, err := a.ParseListResponse(200, nil, []byte(`{"request_id":"r","output":{`+
 		`"total":2,"page_no":1,"page_size":100,"models":[`+
@@ -480,4 +503,79 @@ func TestAliyunRerankWireDispatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, envResp.Results[0].Index)
 	require.InDelta(t, 0.5, envResp.Results[0].Score, 1e-9)
+}
+
+// 裁定④（2026-09-12）：DashScope 混合思考族扩展到 deepseek/kimi/glm——
+// 非 qwen 族仅显式决策发声（nil 不发、无非流式钉 false）；always-on
+// 族（ZHIPU/GLM-5.3、kimi-k3）永不出字段（false 必被拒，默认即开）。
+func TestAliyunThinkingExtendedHybridFamilies(t *testing.T) {
+	a := newAliyunAdapter()
+	build := func(model string, opts *invoke.ChatOptions) *bool {
+		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, opts)
+		require.NoError(t, err)
+		var body struct {
+			Parameters struct {
+				EnableThinking *bool `json:"enable_thinking"`
+			} `json:"parameters"`
+		}
+		require.NoError(t, json.Unmarshal(req.Body, &body))
+		return body.Parameters.EnableThinking
+	}
+
+	on, off := true, false
+	// deepseek-v3.2（含 siliconflow/ 直供前缀）：显式决策发声。
+	require.NotNil(t, build("deepseek-v3.2", &invoke.ChatOptions{Thinking: &on}), "deepseek 显式开")
+	require.NotNil(t, build("siliconflow/deepseek-v3.2", &invoke.ChatOptions{Thinking: &off}), "直供前缀同族")
+	require.Nil(t, build("deepseek-v3.2", &invoke.ChatOptions{}), "nil 决策不发")
+	// 非 qwen 混合族无非流式钉 false（该约束是 Qwen 特有）。
+	got := build("kimi-k2.6", &invoke.ChatOptions{Thinking: &on})
+	require.True(t, *got)
+	// glm 阿里云直供：显式关。
+	got = build("glm-5.1", &invoke.ChatOptions{Thinking: &off})
+	require.False(t, *got)
+	// always-on 族：任何决策都不发字段。
+	require.Nil(t, build("ZHIPU/GLM-5.3", &invoke.ChatOptions{Thinking: &off}), "始终思考族 false 必被拒——不发")
+	require.Nil(t, build("kimi-k3", &invoke.ChatOptions{Thinking: &off}))
+	require.Nil(t, build("ZHIPU/GLM-5.3", &invoke.ChatOptions{Thinking: &on}), "开也无需发（默认即开）")
+	// qwen 族行为不变（alwaysSend + 非流式钉 false）。
+	require.NotNil(t, build("qwen3-max", &invoke.ChatOptions{}))
+}
+
+// 裁定⑥（2026-09-12）：tool_choice=required 在 DashScope 无等价物——不传。
+func TestAliyunToolChoiceRequiredOmitted(t *testing.T) {
+	a := newAliyunAdapter()
+	req, err := a.BuildChatRequest(invoke.Endpoint{}, "qwen-plus", &invoke.ChatOptions{
+		Messages:   []invoke.Message{invoke.TextMessage("user", "hi")},
+		Tools:      []invoke.ToolDef{{Name: "f", Description: "d"}},
+		ToolChoice: "required",
+	})
+	require.NoError(t, err)
+	var body struct {
+		Parameters struct {
+			ToolChoice any   `json:"tool_choice"`
+			Tools      []any `json:"tools"`
+		} `json:"parameters"`
+	}
+	require.NoError(t, json.Unmarshal(req.Body, &body))
+	require.Len(t, body.Parameters.Tools, 1)
+	require.Nil(t, body.Parameters.ToolChoice, "required 无等价值——不传（服务端默认 auto）")
+}
+
+// B9：return_documents 仅 gte-rerank（含 v2）与 qwen3-vl-rerank 支持——
+// qwen3.7-text-rerank 携带会被严格校验拒收。
+func TestAliyunRerankReturnDocumentsGating(t *testing.T) {
+	build := func(model string) aliyunRerankParams {
+		req, err := buildAliyunRerank(invoke.Endpoint{}, model,
+			&invoke.RerankOptions{Query: "q", Documents: []string{"d1", "d2"}})
+		require.NoError(t, err)
+		var body struct {
+			Parameters aliyunRerankParams `json:"parameters"`
+		}
+		require.NoError(t, json.Unmarshal(req.Body, &body))
+		return body.Parameters
+	}
+	require.True(t, build("gte-rerank").ReturnDocuments, "gte-rerank 支持")
+	require.True(t, build("gte-rerank-v2").ReturnDocuments, "gte-rerank-v2 支持")
+	require.True(t, build("qwen3-vl-rerank").ReturnDocuments, "qwen3-vl-rerank 支持")
+	require.False(t, build("qwen3.7-text-rerank").ReturnDocuments, "qwen3.7-text-rerank 不支持——省略")
 }

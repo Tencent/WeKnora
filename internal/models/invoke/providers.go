@@ -328,6 +328,36 @@ func IsQwen3Model(modelName string) bool {
 	return strings.HasPrefix(strings.ToLower(modelName), "qwen3")
 }
 
+// IsDashScopeHybridThinkingModel 检查 DashScope 托管的混合思考模型
+// （enable_thinking 适用面，对话 API 文档 §enable_thinking，2026-09-12 裁定④扩容）：
+// Qwen 思考族（IsQwenThinkingModel）之外，还包括 DeepSeek-V4/V3.2/V3.1 系列
+// （含 siliconflow/ 直供前缀）、Kimi-K2.6/K2.5 系列（含 kimi/ 直供前缀）、GLM 系列
+// （阿里云直供 glm-* 与智谱直供 ZHIPU/GLM-*）。子串匹配以同时覆盖直供前缀形态。
+func IsDashScopeHybridThinkingModel(modelName string) bool {
+	if IsQwenThinkingModel(modelName) {
+		return true
+	}
+	lower := strings.ToLower(modelName)
+	return strings.Contains(lower, "deepseek-v4") ||
+		strings.Contains(lower, "deepseek-v3.2") ||
+		strings.Contains(lower, "deepseek-v3.1") ||
+		strings.Contains(lower, "kimi-k2.6") ||
+		strings.Contains(lower, "kimi-k2.5") ||
+		strings.Contains(lower, "glm-") ||
+		strings.Contains(lower, "zhipu/glm")
+}
+
+// IsDashScopeAlwaysThinkingModel 检查「始终开启思考」的 DashScope 模型：
+// enable_thinking 仅支持 true，传入 false 会导致 API 请求失败（文档原文）。
+// 覆盖智谱直供 ZHIPU/GLM-5.3(-Flash) 与 kimi-k3（含 kimi/kimi-k3 直供前缀）。
+// 这类模型在适配器层不发 enable_thinking（服务端默认即开）——模型级
+// CanDisable=false 的运行时落点；目录（models.json）预填时同样标 can_disable=false。
+func IsDashScopeAlwaysThinkingModel(modelName string) bool {
+	lower := strings.ToLower(modelName)
+	return strings.Contains(lower, "zhipu/glm-5.3") ||
+		strings.Contains(lower, "kimi-k3")
+}
+
 // IsDeepSeekModel 检查模型名是否为 DeepSeek 模型
 // DeepSeek 模型不支持 tool_choice 参数
 func IsDeepSeekModel(modelName string) bool {

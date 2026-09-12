@@ -63,11 +63,22 @@ type ASRAdapter interface {
 }
 
 // ListModelsAdapter is the OPTIONAL fifth facet: providers without a list
-// endpoint (e.g. azure deployment mode) do not implement it.
+// endpoint (e.g. azure deployment mode) do not implement it. opts carries
+// the query-shaping fields (ModelType filter + PageNo, 2026-09-12 ruling);
+// BaseURL/Credentials ride ep (entry-normalized, SSRF-gated).
 type ListModelsAdapter interface {
 	Adapter
-	BuildListRequest(ep Endpoint) (*Request, error)
+	BuildListRequest(ep Endpoint, opts ListOptions) (*Request, error)
 	ParseListResponse(status int, header http.Header, body []byte) ([]RemoteModel, error)
+}
+
+// PaginatedLister is the OPTIONAL pagination opt-in for ListModelsAdapter:
+// a positive page size makes invoke.List loop pages (full page → next page,
+// bounded by the entry's result cap) instead of issuing a single probe.
+// Adapters whose listing endpoint returns everything in one shot (the
+// openai-shaped /models family) simply don't implement it.
+type PaginatedLister interface {
+	ListPageSize() int
 }
 
 // Registry holds adapters by provider name and enforces the registration-time
