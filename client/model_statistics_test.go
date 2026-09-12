@@ -16,7 +16,8 @@ func TestListModelUsageEncodesIntervalAndModels(t *testing.T) {
 		if r.URL.Path != "/api/v1/models/usage" || r.URL.Query().Get("model_ids") != "a,b" {
 			t.Fatalf("request URL = %s", r.URL.String())
 		}
-		if r.URL.Query().Get("from") != from.Format(time.RFC3339) || r.URL.Query().Get("to") != to.Format(time.RFC3339) {
+		if r.URL.Query().Get("from") != from.Format(time.RFC3339) ||
+			r.URL.Query().Get("to") != to.Format(time.RFC3339) {
 			t.Fatalf("interval query = %s", r.URL.RawQuery)
 		}
 		_, _ = w.Write([]byte(`{
@@ -60,7 +61,8 @@ func TestPutModelPriceUsesImmutablePriceEndpoint(t *testing.T) {
 			t.Fatalf("request = %#v", request)
 		}
 		if request.CachePricing == nil || request.CachePricing.Version != 1 ||
-			request.CachePricing.ReadMicrounitsPerMillion == nil || *request.CachePricing.ReadMicrounitsPerMillion != 0 ||
+			request.CachePricing.ReadMicrounitsPerMillion == nil ||
+			*request.CachePricing.ReadMicrounitsPerMillion != 0 ||
 			request.CachePricing.Write5mMicrounitsPerMillion != nil {
 			t.Fatalf("cache pricing lost zero/unknown distinction: %#v", request.CachePricing)
 		}
@@ -70,7 +72,8 @@ func TestPutModelPriceUsesImmutablePriceEndpoint(t *testing.T) {
 				"id":"price-1","model_id":"model-1","currency":"USD",
 				"valid_from":"2026-09-01T00:00:00Z","created_at":"2026-09-01T00:00:00Z",
 				"input_microunits_per_million":1000000,"output_microunits_per_million":2000000,
-				"cache_pricing":{"version":1,"read_microunits_per_million":0,"write_5m_microunits_per_million":null,"write_1h_microunits_per_million":null}
+				"cache_pricing":{"version":1,"read_microunits_per_million":0,
+                "write_5m_microunits_per_million":null,"write_1h_microunits_per_million":null}
 			}
 		}`))
 	}))
