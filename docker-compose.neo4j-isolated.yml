@@ -1,0 +1,16 @@
+# Optional Neo4j override for self-hosted deployments that should not expose
+# Neo4j beyond the host and need a predictable memory ceiling.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.neo4j-isolated.yml \
+#     --profile neo4j up -d
+services:
+  neo4j:
+    ports: !override
+      - "${NEO4J_BIND_IP:-127.0.0.1}:${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BIND_IP:-127.0.0.1}:${NEO4J_BOLT_PORT:-7687}:7687"
+    environment:
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INITIAL_SIZE:-256m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX_SIZE:-1g}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE_SIZE:-512m}
+    mem_limit: ${NEO4J_MEMORY_LIMIT:-2g}
