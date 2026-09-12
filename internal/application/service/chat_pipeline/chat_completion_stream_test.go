@@ -44,6 +44,44 @@ func (b *syncEventBus) finalAnswerContents() []string {
 	return out
 }
 
+func (b *syncEventBus) thoughtContents() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []string
+	for _, evt := range b.events {
+		if evt.Type != types.EventType(event.EventAgentThought) {
+			continue
+		}
+		if data, ok := evt.Data.(event.AgentThoughtData); ok && data.Content != "" {
+			out = append(out, data.Content)
+		}
+	}
+	return out
+}
+
+// thinkingDoneMarkers counts the empty Done markers that flip the thinking
+// card to its completed state.
+func (b *syncEventBus) thinkingDoneMarkers() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, evt := range b.events {
+		if evt.Type != types.EventType(event.EventAgentThought) {
+			continue
+		}
+		if data, ok := evt.Data.(event.AgentThoughtData); ok && data.Done && data.Content == "" {
+			n++
+		}
+	}
+	return n
+}
+
+func (b *syncEventBus) eventCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.events)
+}
+
 // openStreamChat returns a buffered channel preloaded with chunks and never
 // closes it, so the stream plugin blocks on the channel until ctx is cancelled
 // — deterministically exercising the ctx.Done() branch.
@@ -152,4 +190,99 @@ func TestStreamIgnoresDuplicateTerminalAnswer(t *testing.T) {
 		}
 	}
 	require.Equal(t, []event.AgentFinalAnswerData{{Content: "hello"}, {Done: true}}, answerEvents)
+}
+
+// runStreamPlugin feeds the chunks through the stream plugin and waits for the
+// goroutine to drain the channel (or the plugin to return).
+func runStreamPlugin(t *testing.T, chunks []types.StreamResponse) *syncEventBus {
+	t.Helper()
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: chunks}
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-inline-think"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(context.Background(), types.CHAT_COMPLETION_STREAM, chatManage, func() *PluginError { return nil }))
+	require.Eventually(t, func() bool { return bus.eventCount() > 0 }, 2*time.Second, 5*time.Millisecond)
+	return bus
+}
+
+// TestStreamSplitsInlineThinkBlocks verifies that <think>…</think> reasoning
+// embedded in the plain content channel is routed to thought events instead of
+// leaking raw tags into the answer stream (#3099).
+func TestStreamSplitsInlineThinkBlocks(t *testing.T) {
+	bus := runStreamPlugin(t, []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "<think>rea"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "soning</think>ans"},
+		{ResponseType: types.ResponseTypeAnswer, Content: "wer"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true},
+	})
+
+	require.Equal(t, []string{"rea", "soning"}, bus.thoughtContents())
+	require.Equal(t, 1, bus.thinkingDoneMarkers())
+	answers := bus.finalAnswerContents()
+	require.NotEmpty(t, answers)
+	var joined string
+	for _, a := range answers {
+		joined += a
+	}
+	require.Equal(t, "answer", joined)
+	for _, a := range answers {
+		require.NotContains(t, a, "<think>")
+		require.NotContains(t, a, "</think>")
+	}
+}
+
+// TestStreamSplitsMultipleInlineThinkBlocks covers models that reason once per
+// round and therefore emit several interleaved think blocks.
+func TestStreamSplitsMultipleInlineThinkBlocks(t *testing.T) {
+	bus := runStreamPlugin(t, []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "<think>a</think>A<think>b</think>B"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true},
+	})
+
+	require.Equal(t, []string{"ab"}, bus.thoughtContents())
+	require.Equal(t, 1, bus.thinkingDoneMarkers())
+	answers := bus.finalAnswerContents()
+	require.NotEmpty(t, answers)
+	var joined string
+	for _, a := range answers {
+		joined += a
+	}
+	require.Equal(t, "AB", joined)
+	for _, a := range answers {
+		require.NotContains(t, a, "think>")
+	}
+}
+
+// TestStreamUnterminatedThinkBlockGoesToThought verifies the flush path: an
+// unterminated <think> block at end of stream is thinking text, not answer.
+func TestStreamUnterminatedThinkBlockGoesToThought(t *testing.T) {
+	bus := runStreamPlugin(t, []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "<think>only thinking"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true},
+	})
+
+	require.Equal(t, []string{"only thinking"}, bus.thoughtContents())
+	require.Equal(t, 1, bus.thinkingDoneMarkers())
+	answers := bus.finalAnswerContents()
+	var joined string
+	for _, a := range answers {
+		joined += a
+		require.NotContains(t, a, "think>")
+	}
+	require.Equal(t, "", joined)
+}
+
+// TestStreamPlainAnswerUnchanged guards the no-tags path: plain content must
+// stream exactly as before the inline-think splitter was introduced.
+func TestStreamPlainAnswerUnchanged(t *testing.T) {
+	bus := runStreamPlugin(t, []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "hello "},
+		{ResponseType: types.ResponseTypeAnswer, Content: "world"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true},
+	})
+
+	require.Empty(t, bus.thoughtContents())
+	require.Equal(t, []string{"hello ", "world", ""}, bus.finalAnswerContents())
 }
