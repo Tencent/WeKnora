@@ -60,11 +60,6 @@ type applicationCacheRow struct {
 	AverageLookupDurationMs float64
 }
 
-type modelLatencyRow struct {
-	ModelID    string
-	DurationMs int64
-}
-
 func (r *modelStatisticsRepository) QueryModelUsage(
 	ctx context.Context,
 	query types.ModelUsageQuery,
@@ -129,13 +124,27 @@ func (r *modelStatisticsRepository) QueryModelUsage(
 	if len(query.ModelIDs) > 0 {
 		latencyQuery = latencyQuery.Where("model_id IN ?", query.ModelIDs)
 	}
-	var latencyRows []modelLatencyRow
-	if err := latencyQuery.Select("model_id, duration_ms").Scan(&latencyRows).Error; err != nil {
+	latencyRows, err := latencyQuery.Select("model_id, duration_ms").Rows()
+	if err != nil {
 		return nil, fmt.Errorf("query model latency samples: %w", err)
 	}
+	defer func() { _ = latencyRows.Close() }()
+	// Retain only numeric samples for exact percentiles. Streaming avoids a
+	// second materialized slice of model IDs and ORM row objects.
 	latenciesByModel := make(map[string][]float64)
-	for _, row := range latencyRows {
-		latenciesByModel[row.ModelID] = append(latenciesByModel[row.ModelID], float64(row.DurationMs))
+	for latencyRows.Next() {
+		var modelID string
+		var durationMs int64
+		if err := latencyRows.Scan(&modelID, &durationMs); err != nil {
+			return nil, fmt.Errorf("scan model latency sample: %w", err)
+		}
+		latenciesByModel[modelID] = append(latenciesByModel[modelID], float64(durationMs))
+	}
+	if err := latencyRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate model latency samples: %w", err)
+	}
+	if err := latencyRows.Close(); err != nil {
+		return nil, fmt.Errorf("close model latency samples: %w", err)
 	}
 	for modelID, values := range latenciesByModel {
 		p50, p95, p99, err := evaluationstats.Percentiles(values)
