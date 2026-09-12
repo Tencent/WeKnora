@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -240,6 +241,48 @@ type MessageArtifact struct {
 	SourcePath string    `json:"source_path"` // Absolute path inside the sandbox (used for diff)
 	ModTime    time.Time `json:"mod_time"`    // Sandbox-side modification time (used for diff)
 	CreatedAt  time.Time `json:"created_at"`  // When WeKnora persisted the blob
+}
+
+// ArtifactKind is a semantic projection of an artifact's file type. It is
+// intentionally not stored on MessageArtifact: FileType (or, for legacy
+// rows, the filename extension) remains the single source of truth.
+type ArtifactKind string
+
+const (
+	// ArtifactKindFile is the default for artifacts without a specialized semantic kind.
+	ArtifactKindFile ArtifactKind = "file"
+	// ArtifactKindPresentation identifies an editable presentation artifact.
+	ArtifactKindPresentation ArtifactKind = "presentation"
+	// ArtifactKindWebPage identifies a browser-renderable HTML artifact.
+	ArtifactKindWebPage ArtifactKind = "web_page"
+	// ArtifactKindSpreadsheet identifies a tabular workbook or delimited-text artifact.
+	ArtifactKindSpreadsheet ArtifactKind = "spreadsheet"
+)
+
+// Kind projects the persisted file type into the small, stable vocabulary
+// exposed by artifact APIs. An explicit FileType takes precedence over the
+// filename so inconsistent metadata cannot silently change meaning.
+func (a MessageArtifact) Kind() ArtifactKind {
+	value := strings.ToLower(strings.TrimSpace(a.FileType))
+	if separator := strings.IndexByte(value, ';'); separator >= 0 {
+		value = strings.TrimSpace(value[:separator])
+	}
+	if value == "" {
+		value = strings.ToLower(filepath.Ext(a.FileName))
+	}
+	value = strings.TrimPrefix(value, ".")
+
+	switch value {
+	case "pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+		return ArtifactKindPresentation
+	case "html", "htm", "text/html":
+		return ArtifactKindWebPage
+	case "csv", "tsv", "xlsx", "text/csv", "text/tab-separated-values",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return ArtifactKindSpreadsheet
+	default:
+		return ArtifactKindFile
+	}
 }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.

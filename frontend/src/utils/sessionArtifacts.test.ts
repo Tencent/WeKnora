@@ -6,6 +6,8 @@ import {
   collectSessionArtifacts,
   formatArtifactDateTime,
   formatArtifactSize,
+  resolveArtifactKind,
+  resolveArtifactPreviewExt,
 } from './sessionArtifacts.ts'
 
 test('collectSessionArtifacts keeps per-message download indexes', () => {
@@ -41,6 +43,27 @@ test('collectSessionArtifacts falls back to request_id before the row is persist
   ])
   assert.equal(items[0]?.messageId, 'req-9')
   assert.equal(items[0]?.index, 0)
+})
+
+test('artifact kind is a semantic projection with legacy extension fallback', () => {
+  assert.equal(resolveArtifactKind('deck.pptx', '.pptx'), 'presentation')
+  assert.equal(resolveArtifactKind('site.HTM'), 'web_page')
+  assert.equal(resolveArtifactKind('table.tsv'), 'spreadsheet')
+  assert.equal(resolveArtifactKind('report.pdf', '.pdf'), 'file')
+  assert.equal(resolveArtifactKind('wrong.pdf', '.pdf', 'presentation'), 'presentation')
+})
+
+test('artifact kind routes unknown concrete types into the existing previewer', () => {
+  assert.equal(resolveArtifactPreviewExt({ file_name: 'deck', file_type: '', kind: 'presentation' }), 'pptx')
+  assert.equal(resolveArtifactPreviewExt({ file_name: 'site.bin', file_type: '.bin', kind: 'web_page' }), 'html')
+  assert.equal(resolveArtifactPreviewExt({ file_name: 'table.xlsx', file_type: '.xlsx', kind: 'spreadsheet' }), 'xlsx')
+})
+
+test('history without kind derives the same semantic projection', () => {
+  const items = collectSessionArtifacts([
+    { id: 'assistant', artifacts: [{ file_name: 'deck.pptx', file_type: '.pptx' }] },
+  ])
+  assert.equal(items[0]?.kind, 'presentation')
 })
 
 test('collectSessionArtifacts skips empty or unidentifiable rows', () => {

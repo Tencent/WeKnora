@@ -180,7 +180,7 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact, listMessageArtifacts, type ArtifactMeta } from '@/api/chat'
 import { getFileIcon } from '@/utils/files'
-import { resolveFilePreviewExt } from '@/utils/filePreview'
+import { resolveArtifactPreviewExt } from '@/utils/sessionArtifacts'
 import DocumentPreview from '@/components/document-preview.vue'
 
 const LIST_WIDTH = 440
@@ -244,7 +244,7 @@ const items = computed<ArtifactMeta[]>(() => {
 const previewFileType = computed(() => {
     const item = previewItem.value
     if (!item) return ''
-    return resolveFilePreviewExt(item.file_name, item.file_type)
+    return resolveArtifactPreviewExt(item)
 })
 
 const drawerSize = computed(() => (

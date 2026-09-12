@@ -7,6 +7,44 @@ import (
 	"time"
 )
 
+func TestMessageArtifactKindIsDerivedWithoutPersistence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		artifact MessageArtifact
+		want     ArtifactKind
+	}{
+		{name: "presentation", artifact: MessageArtifact{FileType: ".PPTX"}, want: ArtifactKindPresentation},
+		{name: "web page", artifact: MessageArtifact{FileType: "text/html; charset=utf-8"}, want: ArtifactKindWebPage},
+		{name: "spreadsheet", artifact: MessageArtifact{FileType: "xlsx"}, want: ArtifactKindSpreadsheet},
+		{name: "legacy filename", artifact: MessageArtifact{FileName: "table.CSV"}, want: ArtifactKindSpreadsheet},
+		{
+			name: "explicit type wins", artifact: MessageArtifact{FileName: "deck.pptx", FileType: ".pdf"},
+			want: ArtifactKindFile,
+		},
+		{name: "unknown", artifact: MessageArtifact{FileType: ".zip"}, want: ArtifactKindFile},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := test.artifact.Kind(); got != test.want {
+				t.Fatalf("Kind() = %q, want %q", got, test.want)
+			}
+		})
+	}
+
+	raw, err := (MessageArtifacts{{FileName: "deck.pptx", FileType: ".pptx"}}).Value()
+	if err != nil {
+		t.Fatalf("Value() error = %v", err)
+	}
+	if bytes.Contains(raw.([]byte), []byte(`"kind"`)) {
+		t.Fatalf("semantic kind must not be persisted: %s", raw)
+	}
+}
+
 // TestMessageArtifacts_ValueScanRoundTrip pins the JSONB serialisation
 // contract used by GORM: (Value → bytes → Scan) must produce an equivalent
 // slice, including a zero-time modified-at (which must survive JSON's

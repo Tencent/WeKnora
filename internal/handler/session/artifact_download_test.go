@@ -353,6 +353,28 @@ func TestListSessionArtifacts_StripsURL(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "a.txt") {
 		t.Fatalf("response body missing file name: %s", w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), `"kind":"file"`) {
+		t.Fatalf("response body missing semantic kind: %s", w.Body.String())
+	}
+}
+
+func TestArtifactAPIsProjectKindsFromFileType(t *testing.T) {
+	artifacts := types.MessageArtifacts{
+		{FileName: "deck.pptx", FileType: ".pptx"},
+		{FileName: "site.html", FileType: ".html"},
+		{FileName: "data.xlsx", FileType: ".xlsx"},
+	}
+	views := publicArtifactViews(artifacts)
+	wants := []types.ArtifactKind{
+		types.ArtifactKindPresentation,
+		types.ArtifactKindWebPage,
+		types.ArtifactKindSpreadsheet,
+	}
+	for i, want := range wants {
+		if got := views[i]["kind"]; got != want {
+			t.Fatalf("view %d kind = %q, want %q", i, got, want)
+		}
+	}
 }
 
 func TestBuildAttachmentHeader_CJK(t *testing.T) {
