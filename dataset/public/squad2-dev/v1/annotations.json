@@ -1,0 +1,558 @@
+[
+  {
+    "qid": "squad2-dev-56e1c3e1e3433e1400423148",
+    "source_pid": "squad2-dev-a0001-p0025",
+    "upstream_qid": "56e1c3e1e3433e1400423148",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "time or space",
+        "answer_start": 65
+      },
+      {
+        "text": "time or space",
+        "answer_start": 65
+      },
+      {
+        "text": "time or space",
+        "answer_start": 65
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-570d2f5bfed7b91900d45cd1",
+    "source_pid": "squad2-dev-a0004-p0008",
+    "upstream_qid": "570d2f5bfed7b91900d45cd1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "Parliament of Victoria",
+        "answer_start": 337
+      },
+      {
+        "text": "the Parliament of Victoria",
+        "answer_start": 333
+      },
+      {
+        "text": "Parliament of Victoria",
+        "answer_start": 337
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-57114dfb50c2381900b54a54",
+    "source_pid": "squad2-dev-a0006-p0017",
+    "upstream_qid": "57114dfb50c2381900b54a54",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "open loop",
+        "answer_start": 138
+      },
+      {
+        "text": "open loop",
+        "answer_start": 138
+      },
+      {
+        "text": "open loop",
+        "answer_start": 138
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-571cde695efbb31900334e18",
+    "source_pid": "squad2-dev-a0007-p0039",
+    "upstream_qid": "571cde695efbb31900334e18",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "carbohydrates",
+        "answer_start": 241
+      },
+      {
+        "text": "carbohydrates",
+        "answer_start": 241
+      },
+      {
+        "text": "carbohydrates",
+        "answer_start": 241
+      },
+      {
+        "text": "carbohydrates",
+        "answer_start": 241
+      },
+      {
+        "text": "carbohydrates",
+        "answer_start": 241
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5725b76389a1e219009abd4e",
+    "source_pid": "squad2-dev-a0008-p0002",
+    "upstream_qid": "5725b76389a1e219009abd4e",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "oil was priced in dollars, oil producers' real income decreased",
+        "answer_start": 778
+      },
+      {
+        "text": "Because oil was priced in dollars, oil producers' real income decreased.",
+        "answer_start": 770
+      },
+      {
+        "text": "Because oil was priced in dollars, oil producers' real income decreased",
+        "answer_start": 770
+      },
+      {
+        "text": "Because oil was priced in dollars, oil producers' real income decreased",
+        "answer_start": 770
+      },
+      {
+        "text": "Because oil was priced in dollars, oil producers' real income decreased",
+        "answer_start": 770
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-572667e2f1498d1400e8de92",
+    "source_pid": "squad2-dev-a0015-p0006",
+    "upstream_qid": "572667e2f1498d1400e8de92",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "clasts",
+        "answer_start": 98
+      },
+      {
+        "text": "clasts",
+        "answer_start": 98
+      },
+      {
+        "text": "clasts",
+        "answer_start": 98
+      },
+      {
+        "text": "clasts",
+        "answer_start": 98
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-572755b7708984140094dc51",
+    "source_pid": "squad2-dev-a0018-p0019",
+    "upstream_qid": "572755b7708984140094dc51",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "828,000",
+        "answer_start": 604
+      },
+      {
+        "text": "828,000 women",
+        "answer_start": 604
+      },
+      {
+        "text": "828,000",
+        "answer_start": 604
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5728d9403acd2414000e001e",
+    "source_pid": "squad2-dev-a0017-p0005",
+    "upstream_qid": "5728d9403acd2414000e001e",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "private citizen",
+        "answer_start": 505
+      },
+      {
+        "text": "private citizen",
+        "answer_start": 505
+      },
+      {
+        "text": "private citizen",
+        "answer_start": 505
+      },
+      {
+        "text": "private",
+        "answer_start": 505
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5728ec6a4b864d19001650ae",
+    "source_pid": "squad2-dev-a0017-p0018",
+    "upstream_qid": "5728ec6a4b864d19001650ae",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "suspended sentences",
+        "answer_start": 759
+      },
+      {
+        "text": "suspended sentences",
+        "answer_start": 759
+      },
+      {
+        "text": "suspended",
+        "answer_start": 759
+      },
+      {
+        "text": "suspended",
+        "answer_start": 759
+      },
+      {
+        "text": "suspended",
+        "answer_start": 759
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-57294baaaf94a219006aa26d",
+    "source_pid": "squad2-dev-a0026-p0019",
+    "upstream_qid": "57294baaaf94a219006aa26d",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "concurring, smaller assessments of special problems",
+        "answer_start": 239
+      },
+      {
+        "text": "smaller assessments of special problems instead of the large scale approach",
+        "answer_start": 251
+      },
+      {
+        "text": "concurring, smaller assessments of special problems",
+        "answer_start": 239
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-57298ef11d04691400779531",
+    "source_pid": "squad2-dev-a0027-p0017",
+    "upstream_qid": "57298ef11d04691400779531",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "asymptotic distribution",
+        "answer_start": 474
+      },
+      {
+        "text": "asymptotic",
+        "answer_start": 474
+      },
+      {
+        "text": "asymptotic distribution",
+        "answer_start": 474
+      },
+      {
+        "text": "asymptotic distribution",
+        "answer_start": 474
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5729d51d3f37b31900478591",
+    "source_pid": "squad2-dev-a0022-p0002",
+    "upstream_qid": "5729d51d3f37b31900478591",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "wages and profits",
+        "answer_start": 275
+      },
+      {
+        "text": "wages and profits",
+        "answer_start": 275
+      },
+      {
+        "text": "wages and profits",
+        "answer_start": 275
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5729f4e46aef051400155156",
+    "source_pid": "squad2-dev-a0022-p0018",
+    "upstream_qid": "5729f4e46aef051400155156",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "Economist",
+        "answer_start": 0
+      },
+      {
+        "text": "Economist",
+        "answer_start": 0
+      },
+      {
+        "text": "Economist",
+        "answer_start": 0
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5733a1854776f41900660f0a",
+    "source_pid": "squad2-dev-a0032-p0042",
+    "upstream_qid": "5733a1854776f41900660f0a",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "Warsaw Uprising Museum",
+        "answer_start": 79
+      },
+      {
+        "text": "Warsaw Uprising Museum",
+        "answer_start": 79
+      },
+      {
+        "text": "Warsaw Uprising Museum",
+        "answer_start": 79
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-57379829c3c5551400e51f40",
+    "source_pid": "squad2-dev-a0034-p0033",
+    "upstream_qid": "57379829c3c5551400e51f40",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "1013",
+        "answer_start": 241
+      },
+      {
+        "text": "1013",
+        "answer_start": 241
+      },
+      {
+        "text": "1013",
+        "answer_start": 241
+      },
+      {
+        "text": "1013",
+        "answer_start": 241
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5737a25ac3c5551400e51f54",
+    "source_pid": "squad2-dev-a0034-p0037",
+    "upstream_qid": "5737a25ac3c5551400e51f54",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "formalism",
+        "answer_start": 113
+      },
+      {
+        "text": "the relevant cross-sectional area for the volume for which the stress-tensor is being calculated",
+        "answer_start": 10
+      },
+      {
+        "text": "formalism",
+        "answer_start": 113
+      },
+      {
+        "text": "This formalism",
+        "answer_start": 108
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5a664314c2b11c001a425ed9",
+    "source_pid": "squad2-dev-a0017-p0001",
+    "upstream_qid": "5a664314c2b11c001a425ed9",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "Antigone",
+        "answer_start": 73
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5a667761846392001a1e1c38",
+    "source_pid": "squad2-dev-a0013-p0001",
+    "upstream_qid": "5a667761846392001a1e1c38",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "a fee per unit of connection time, even when no data is transferred",
+        "answer_start": 361
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5a8235a931013a001a3352d8",
+    "source_pid": "squad2-dev-a0020-p0020",
+    "upstream_qid": "5a8235a931013a001a3352d8",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "18 million",
+        "answer_start": 143
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5a893a003b2508001a72a540",
+    "source_pid": "squad2-dev-a0027-p0018",
+    "upstream_qid": "5a893a003b2508001a72a540",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "all numbers up to n = 2 · 1017",
+        "answer_start": 462
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5ad1373b645df0001a2d11cc",
+    "source_pid": "squad2-dev-a0009-p0008",
+    "upstream_qid": "5ad1373b645df0001a2d11cc",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "different ministers of the member states",
+        "answer_start": 70
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5ad158c0645df0001a2d1829",
+    "source_pid": "squad2-dev-a0009-p0035",
+    "upstream_qid": "5ad158c0645df0001a2d1829",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "the number of social services that people can access wherever they move",
+        "answer_start": 156
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5ad3ade2604f3c001a3fec18",
+    "source_pid": "squad2-dev-a0033-p0018",
+    "upstream_qid": "5ad3ade2604f3c001a3fec18",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "protect the King's land in the Ohio Valley from the British",
+        "answer_start": 142
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "squad2-dev-5ad4d8d65b96ef001a10a363",
+    "source_pid": "squad2-dev-a0032-p0018",
+    "upstream_qid": "5ad4d8d65b96ef001a10a363",
+    "is_impossible": true,
+    "answerability_scope": "source_pid_only",
+    "answers": [],
+    "plausible_answers": [
+      {
+        "text": "1775–1795",
+        "answer_start": 663
+      }
+    ],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  }
+]

@@ -35,6 +35,8 @@ var (
 // 无需认证的API列表
 var noAuthAPI = map[string][]string{
 	"/health":                 {"GET"},
+	"/health/live":            {"GET"},
+	"/health/ready":           {"GET"},
 	"/api/v1/auth/register":   {"POST"},
 	"/api/v1/auth/login":      {"POST"},
 	"/api/v1/auth/auto-setup": {"POST"},
@@ -333,6 +335,17 @@ func resolveTargetTenant(
 
 	if targetTenantID == 0 {
 		targetTenantID = resolveFirstMembershipTarget(ctx, user, memberService, tenantService)
+	}
+	// Re-evaluate access for the tenant embedded in every bearer token. This
+	// makes membership removal and the deployment-wide cross-tenant switch take
+	// effect without waiting for an already-issued access token to expire.
+	if targetTenantID != 0 && !IsTenantAccessible(ctx, user, targetTenantID, memberService, cfg) {
+		logger.Warnf(ctx, "User %s presented a token for inaccessible tenant %d", user.ID, targetTenantID)
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Forbidden: insufficient permissions to access target workspace",
+		})
+		c.Abort()
+		return 0, nil, false, false
 	}
 	return targetTenantID, nil, targetTenantID != user.TenantID, true
 }
@@ -783,7 +796,8 @@ func resolveTenantRole(
 	// 2. 跨空间超管直通：CanAccessAllTenants 用户切到别的空间时不强制要求 membership。
 	//    注意：这里只授予临时 Admin 角色，不写入 tenant_members，避免"看一眼别人空间"
 	//    意外升级为持久化所有权。
-	if crossTenantSwitch && user.CanAccessAllTenants {
+	if crossTenantSwitch && cfg != nil && cfg.Tenant != nil &&
+		cfg.Tenant.EnableCrossTenantAccess && user.CanAccessAllTenants {
 		logger.Infof(ctx,
 			"[auth] resolveTenantRole step2 (cross-tenant superuser) -> Admin: user=%s tenant=%d",
 			user.ID, targetTenantID)

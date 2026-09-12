@@ -8,6 +8,8 @@ import (
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/modelcache"
+	"github.com/Tencent/WeKnora/internal/modelobs"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -25,12 +27,14 @@ var ErrModelNotFound = errors.New("model not found")
 
 // modelService implements the model service interface
 type modelService struct {
-	repo          interfaces.ModelRepository
-	kbRepo        interfaces.KnowledgeBaseRepository
-	agentRepo     interfaces.CustomAgentRepository
-	ollamaService *ollama.OllamaService
-	pooler        embedding.EmbedderPooler
-	tenantService interfaces.TenantService
+	repo              interfaces.ModelRepository
+	kbRepo            interfaces.KnowledgeBaseRepository
+	agentRepo         interfaces.CustomAgentRepository
+	ollamaService     *ollama.OllamaService
+	pooler            embedding.EmbedderPooler
+	tenantService     interfaces.TenantService
+	modelCallRecorder *modelobs.Recorder
+	embeddingCache    *modelcache.Coordinator
 }
 
 // NewModelService creates a new model service instance
@@ -41,13 +45,55 @@ func NewModelService(repo interfaces.ModelRepository,
 	pooler embedding.EmbedderPooler,
 	tenantService interfaces.TenantService,
 ) interfaces.ModelService {
+	return newModelService(repo, kbRepo, agentRepo, ollamaService, pooler, tenantService, nil, nil)
+}
+
+// NewModelServiceWithObservability constructs the production model service with provider-call accounting.
+func NewModelServiceWithObservability(repo interfaces.ModelRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
+	agentRepo interfaces.CustomAgentRepository,
+	ollamaService *ollama.OllamaService,
+	pooler embedding.EmbedderPooler,
+	tenantService interfaces.TenantService,
+	modelCallRecorder *modelobs.Recorder,
+) interfaces.ModelService {
+	return newModelService(repo, kbRepo, agentRepo, ollamaService, pooler, tenantService, modelCallRecorder, nil)
+}
+
+// NewModelServiceWithObservabilityAndCache constructs the production model service with
+// provider-call accounting and a process-wide persistent embedding cache coordinator.
+func NewModelServiceWithObservabilityAndCache(repo interfaces.ModelRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
+	agentRepo interfaces.CustomAgentRepository,
+	ollamaService *ollama.OllamaService,
+	pooler embedding.EmbedderPooler,
+	tenantService interfaces.TenantService,
+	modelCallRecorder *modelobs.Recorder,
+	embeddingCache *modelcache.Coordinator,
+) interfaces.ModelService {
+	return newModelService(
+		repo, kbRepo, agentRepo, ollamaService, pooler, tenantService, modelCallRecorder, embeddingCache,
+	)
+}
+
+func newModelService(repo interfaces.ModelRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
+	agentRepo interfaces.CustomAgentRepository,
+	ollamaService *ollama.OllamaService,
+	pooler embedding.EmbedderPooler,
+	tenantService interfaces.TenantService,
+	modelCallRecorder *modelobs.Recorder,
+	embeddingCache *modelcache.Coordinator,
+) interfaces.ModelService {
 	return &modelService{
-		repo:          repo,
-		kbRepo:        kbRepo,
-		agentRepo:     agentRepo,
-		ollamaService: ollamaService,
-		pooler:        pooler,
-		tenantService: tenantService,
+		repo:              repo,
+		kbRepo:            kbRepo,
+		agentRepo:         agentRepo,
+		ollamaService:     ollamaService,
+		pooler:            pooler,
+		tenantService:     tenantService,
+		modelCallRecorder: modelCallRecorder,
+		embeddingCache:    embeddingCache,
 	}
 }
 
@@ -97,7 +143,11 @@ func (s *modelService) resolveWeKnoraCloudCredentials(ctx context.Context, param
 // For local models, it initiates an asynchronous download process
 // Remote models are immediately set to active status
 func (s *modelService) CreateModel(ctx context.Context, model *types.Model) error {
+	if err := validateModelTokenLimits(model); err != nil {
+		return err
+	}
 	logger.Infof(ctx, "Creating model: %s, type: %s, source: %s", model.Name, model.Type, model.Source)
+	types.MaintainModelBehaviorRevision(nil, &model.Parameters)
 
 	// Handle remote models (e.g., OpenAI, Azure)
 	if model.Source == types.ModelSourceRemote {
@@ -225,6 +275,9 @@ func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
 
 // UpdateModel updates an existing model in the repository
 func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) error {
+	if err := validateModelTokenLimits(model); err != nil {
+		return err
+	}
 	logger.Info(ctx, "Start updating model")
 	logger.Infof(ctx, "Updating model ID: %s, name: %s", model.ID, model.Name)
 
@@ -248,6 +301,9 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		model.TenantID = existingModel.TenantID
 		model.IsBuiltin = true
 		model.ManagedBy = ""
+	}
+	if existingModel != nil {
+		types.MaintainModelBehaviorRevision(&existingModel.Parameters, &model.Parameters)
 	}
 
 	// Update model in repository
@@ -506,7 +562,8 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 	}
 
 	logger.Info(ctx, "Embedding model initialized successfully")
-	return embedder, nil
+	observed := s.modelCallRecorder.WrapEmbedder(model, embedder)
+	return s.embeddingCache.Wrap(model, observed), nil
 }
 
 // GetEmbeddingModelForTenant retrieves and initializes an embedding model for a specific tenant
@@ -554,7 +611,8 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 	}
 
 	logger.Info(ctx, "Cross-tenant embedding model initialized successfully")
-	return embedder, nil
+	observed := s.modelCallRecorder.WrapEmbedder(model, embedder)
+	return s.embeddingCache.Wrap(model, observed), nil
 }
 
 // GetRerankModel retrieves and initializes a reranking model instance
@@ -583,7 +641,7 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 	}
 
 	logger.Info(ctx, "Rerank model initialized successfully")
-	return reranker, nil
+	return s.modelCallRecorder.WrapReranker(model, reranker), nil
 }
 
 // GetChatModel retrieves and initializes a chat model instance
@@ -625,7 +683,7 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 		return nil, err
 	}
 
-	return chatModel, nil
+	return s.modelCallRecorder.WrapChat(model, chatModel), nil
 }
 
 // GetVLMModel retrieves and initializes a vision language model instance.
@@ -662,7 +720,7 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 		return nil, err
 	}
 
-	return vlmModel, nil
+	return s.modelCallRecorder.WrapVLM(model, vlmModel), nil
 }
 
 // Note: default model selection logic has been removed; models no longer
@@ -700,7 +758,7 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 		return nil, err
 	}
 
-	return sttModel, nil
+	return s.modelCallRecorder.WrapASR(model, sttModel), nil
 }
 
 func formatModelInUseMessage(kbCount, agentCount int64, memory bool) string {
@@ -719,4 +777,18 @@ func formatModelInUseMessage(kbCount, agentCount int64, memory bool) string {
 		"model is used by %s; reconfigure or remove those references before deleting",
 		joined,
 	)
+}
+
+func validateModelTokenLimits(model *types.Model) error {
+	if model == nil {
+		return errors.New("model is required")
+	}
+	p := model.Parameters
+	if p.ContextWindow < 0 || p.MaxOutputTokens < 0 {
+		return errors.New("model context and output token limits must be non-negative")
+	}
+	if p.ContextWindow > 0 && p.MaxOutputTokens > p.ContextWindow {
+		return errors.New("model output token limit exceeds context window")
+	}
+	return nil
 }

@@ -80,3 +80,9 @@ func wrapChatConcurrency(c Chat, limit int, err error) (Chat, error) {
 	}
 	return &concurrencyChat{inner: c, limit: limit}, nil
 }
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (w *concurrencyChat) RequestAccountingSupported() bool {
+	inner, ok := w.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
+}

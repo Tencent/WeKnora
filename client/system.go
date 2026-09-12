@@ -8,19 +8,35 @@ import (
 
 // SystemInfo represents system version and configuration information
 type SystemInfo struct {
-	Version             string `json:"version"`
-	Edition             string `json:"edition"`
-	CommitID            string `json:"commit_id,omitempty"`
-	BuildTime           string `json:"build_time,omitempty"`
-	GoVersion           string `json:"go_version,omitempty"`
-	KeywordIndexEngine  string `json:"keyword_index_engine,omitempty"`
-	VectorStoreEngine   string `json:"vector_store_engine,omitempty"`
-	GraphDatabaseEngine string `json:"graph_database_engine,omitempty"`
-	MinioEnabled        bool   `json:"minio_enabled,omitempty"`
-	DBVersion           string `json:"db_version,omitempty"`
-	DBMigrationError    string `json:"db_migration_error,omitempty"`
-	StartedAt           string `json:"started_at,omitempty"`
-	UptimeSeconds       int64  `json:"uptime_seconds,omitempty"`
+	Version             string             `json:"version"`
+	Edition             string             `json:"edition"`
+	CommitID            string             `json:"commit_id,omitempty"`
+	BuildTime           string             `json:"build_time,omitempty"`
+	GoVersion           string             `json:"go_version,omitempty"`
+	KeywordIndexEngine  string             `json:"keyword_index_engine,omitempty"`
+	VectorStoreEngine   string             `json:"vector_store_engine,omitempty"`
+	GraphDatabaseEngine string             `json:"graph_database_engine,omitempty"`
+	MinioEnabled        bool               `json:"minio_enabled,omitempty"`
+	DBVersion           string             `json:"db_version,omitempty"`
+	DBMigrationError    string             `json:"db_migration_error,omitempty"`
+	DBMigrationStatus   *DBMigrationStatus `json:"db_migration_status,omitempty"`
+	StartedAt           string             `json:"started_at,omitempty"`
+	UptimeSeconds       int64              `json:"uptime_seconds,omitempty"`
+}
+
+// MigrationChainState reports the applied and expected schema versions.
+type MigrationChainState struct {
+	Version         int  `json:"version"`
+	Dirty           bool `json:"dirty"`
+	ExpectedVersion int  `json:"expected_version"`
+}
+
+// DBMigrationStatus reports both database migration chains and startup readiness.
+type DBMigrationStatus struct {
+	Official MigrationChainState `json:"official"`
+	Topic3   MigrationChainState `json:"topic3"`
+	Ready    bool                `json:"ready"`
+	Phase    string              `json:"phase"`
 }
 
 // ParserEngine represents a document parser engine

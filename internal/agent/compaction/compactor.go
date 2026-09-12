@@ -104,7 +104,10 @@ func (c *Compactor) Compact(
 		return nil, ErrNothingToCompact
 	}
 
-	summary, degraded := c.buildSummary(ctx, prep)
+	summary, degraded, err := c.buildSummary(ctx, prep)
+	if err != nil {
+		return nil, err
+	}
 	summary += prep.fileOps.format()
 	compacted := Apply(messages, prep, summary)
 
@@ -123,7 +126,7 @@ func (c *Compactor) Compact(
 
 // buildSummary produces the checkpoint text, falling back to a raw archive for
 // any part the summarizer could not produce.
-func (c *Compactor) buildSummary(ctx context.Context, p *Preparation) (string, bool) {
+func (c *Compactor) buildSummary(ctx context.Context, p *Preparation) (string, bool, error) {
 	degraded := false
 
 	history := p.PreviousSummary
@@ -136,6 +139,9 @@ func (c *Compactor) buildSummary(ctx context.Context, p *Preparation) (string, b
 			ctx, p.MessagesToSummarize, p.PreviousSummary, instructions, c.settings.summaryBudget(),
 		)
 		if err != nil {
+			if errors.Is(err, types.ErrModelAccounting) || ctx.Err() != nil {
+				return "", false, err
+			}
 			degraded = true
 			// The previous summary is still the best record of everything
 			// before this span, so the archive is appended to it rather than
@@ -151,6 +157,9 @@ func (c *Compactor) buildSummary(ctx context.Context, p *Preparation) (string, b
 			ctx, p.TurnPrefixMessages, "", turnPrefixInstructions, c.settings.turnPrefixBudget(),
 		)
 		if err != nil {
+			if errors.Is(err, types.ErrModelAccounting) || ctx.Err() != nil {
+				return "", false, err
+			}
 			degraded = true
 			prefix = rawArchive(p.TurnPrefixMessages)
 		}
@@ -160,7 +169,7 @@ func (c *Compactor) buildSummary(ctx context.Context, p *Preparation) (string, b
 		history += splitTurnSeparator + prefix
 	}
 
-	return history, degraded
+	return history, degraded, nil
 }
 
 // summarize runs one summarization call with retries.
@@ -187,10 +196,16 @@ func (c *Compactor) summarize(
 		cancel()
 
 		if err != nil {
+			if errors.Is(err, types.ErrModelAccounting) || ctx.Err() != nil {
+				return "", err
+			}
 			lastErr = err
 			continue
 		}
 		if err := validateSummary(resp); err != nil {
+			if errors.Is(err, types.ErrModelAccounting) || ctx.Err() != nil {
+				return "", err
+			}
 			lastErr = err
 			continue
 		}

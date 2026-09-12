@@ -1,0 +1,3259 @@
+Tencent is pleased to support the open source community by making this project available.
+
+Copyright (C) 2025 Tencent. All rights reserved. 
+
+This project is licensed under the MIT License except for the third-party components listed below, which is licensed under different terms. Tencent does not impose any additional limitations beyond what is outlined in the respective licenses of these third-party components. Users must comply with all terms and conditions of original licenses of these third-party components and must ensure that the usage of the third party components adheres to all relevant laws and regulations. 
+
+
+Terms of the MIT License:
+--------------------------------------------------------------------
+Copyright (C) 2025 Tencent. All rights reserved. 
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the " Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice (including the next paragraph) shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------
+Other third-party components:
+
+
+In case you believe there have been errors in the attribution below, you may submit the concerns to us for review and correction.
+Open Source Software Licensed under the Apache-2.0: 
+-------------------------------------------------------------------- 
+1. paddle-1.1.15
+Copyright (c) 2016 PaddlePaddle Authors. All Rights Reserved, 
+
+2. playwright-1.56.0
+Portions Copyright (c) Microsoft Corporation.,  Portions Copyright 2017 Google Inc.
+
+3. grpc-health-7.5.0
+Copyright (c) 2025 The gRPC Authors
+
+ 
+
+Terms of the Apache-2.0: 
+Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License. 
+
+Open Source Software Licensed under the BSD: 
+-------------------------------------------------------------------- 
+1. numpy-2.3.5
+Copyright (c) 2005-2025, NumPy Developers. All rights reserved.
+
+ 
+
+Terms of the BSD: 
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this list
+of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+Neither the name of the ORGANIZATION nor the names of its contributors may be
+used to endorse or promote products derived from this software without specific
+prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+
+Open Source Software Licensed under the MIT: 
+-------------------------------------------------------------------- 
+1. rpds-py-0.30.0
+Copyright (c) 2023 Julian Berman
+
+ 
+
+Terms of the MIT: 
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
+
+Open Source Software Licensed under the MIT-CMU: 
+-------------------------------------------------------------------- 
+1. PIL-1.1.5a2
+Copyright © 1997-2011 by Secret Labs AB,  Copyright © 1995-2011 by Fredrik Lundh and contributors,  Copyright © 2010 by Jeffrey A. Clark and contributors
+
+ 
+
+Terms of the MIT-CMU: 
+Permission to use, copy, modify and distribute this software and its
+documentation for any purpose and without fee is hereby granted, provided that
+the above copyright notice appears in all copies and that both that copyright
+notice and this permission notice appear in supporting documentation, and that
+the name of CMU and The Regents of the University of California not be used in
+advertising or publicity pertaining to distribution of the software without
+specific written permission.
+
+CMU AND THE REGENTS OF THE UNIVERSITY OF CALIFORNIA DISCLAIM ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL CMU OR THE REGENTS OF THE UNIVERSITY OF CALIFORNIA BE
+LIABLE FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM THE LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
+OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ 
+
+Open Source Software Licensed under the Python-2.0: 
+-------------------------------------------------------------------- 
+1. typing-extensions-4.15.0
+Copyright (c) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023 Python Software Foundation,  All Rights Reserved, Copyright (c) 1995-2001 Corporation for National Research Initiatives,  All Rights Reserved, Copyright (c) 1991 - 1995, Stichting Mathematisch Centrum Amsterdam, The Netherlands. All rights reserved.
+
+ 
+
+Terms of the Python-2.0: 
+PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2
+--------------------------------------------
+
+1. This LICENSE AGREEMENT is between the Python Software Foundation
+("PSF"), and the Individual or Organization ("Licensee") accessing and
+otherwise using this software ("Python") in source or binary form and
+its associated documentation.
+
+2. Subject to the terms and conditions of this License Agreement, PSF hereby
+grants Licensee a nonexclusive, royalty-free, world-wide license to reproduce,
+analyze, test, perform and/or display publicly, prepare derivative works,
+distribute, and otherwise use Python alone or in any derivative version,
+provided, however, that PSF's License Agreement and PSF's notice of copyright,
+i.e., "Copyright (c) Python Software Foundation;
+All Rights Reserved" are retained in Python alone or in any derivative version
+prepared by Licensee.
+
+3. In the event Licensee prepares a derivative work that is based on
+or incorporates Python or any part thereof, and wants to make
+the derivative work available to others as provided herein, then
+Licensee hereby agrees to include in any such work a brief summary of
+the changes made to Python.
+
+4. PSF is making Python available to Licensee on an "AS IS"
+basis.  PSF MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR
+IMPLIED.  BY WAY OF EXAMPLE, BUT NOT LIMITATION, PSF MAKES NO AND
+DISCLAIMS ANY REPRESENTATION OR WARRANTY OF MERCHANTABILITY OR FITNESS
+FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF PYTHON WILL NOT
+INFRINGE ANY THIRD PARTY RIGHTS.
+
+5. PSF SHALL NOT BE LIABLE TO LICENSEE OR ANY OTHER USERS OF PYTHON
+FOR ANY INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS AS
+A RESULT OF MODIFYING, DISTRIBUTING, OR OTHERWISE USING PYTHON,
+OR ANY DERIVATIVE THEREOF, EVEN IF ADVISED OF THE POSSIBILITY THEREOF.
+
+6. This License Agreement will automatically terminate upon a material
+breach of its terms and conditions.
+
+7. Nothing in this License Agreement shall be deemed to create any
+relationship of agency, partnership, or joint venture between PSF and
+Licensee.  This License Agreement does not grant permission to use PSF
+trademarks or trade name in a trademark sense to endorse or promote
+products or services of Licensee, or any third party.
+
+8. By copying, installing or otherwise using Python, Licensee
+agrees to be bound by the terms and conditions of this License
+Agreement.
+
+
+BEOPEN.COM LICENSE AGREEMENT FOR PYTHON 2.0
+-------------------------------------------
+
+BEOPEN PYTHON OPEN SOURCE LICENSE AGREEMENT VERSION 1
+
+1. This LICENSE AGREEMENT is between BeOpen.com ("BeOpen"), having an
+office at 160 Saratoga Avenue, Santa Clara, CA 95051, and the
+Individual or Organization ("Licensee") accessing and otherwise using
+this software in source or binary form and its associated
+documentation ("the Software").
+
+2. Subject to the terms and conditions of this BeOpen Python License
+Agreement, BeOpen hereby grants Licensee a non-exclusive,
+royalty-free, world-wide license to reproduce, analyze, test, perform
+and/or display publicly, prepare derivative works, distribute, and
+otherwise use the Software alone or in any derivative version,
+provided, however, that the BeOpen Python License is retained in the
+Software, alone or in any derivative version prepared by Licensee.
+
+3. BeOpen is making the Software available to Licensee on an "AS IS"
+basis.  BEOPEN MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR
+IMPLIED.  BY WAY OF EXAMPLE, BUT NOT LIMITATION, BEOPEN MAKES NO AND
+DISCLAIMS ANY REPRESENTATION OR WARRANTY OF MERCHANTABILITY OR FITNESS
+FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE SOFTWARE WILL NOT
+INFRINGE ANY THIRD PARTY RIGHTS.
+
+4. BEOPEN SHALL NOT BE LIABLE TO LICENSEE OR ANY OTHER USERS OF THE
+SOFTWARE FOR ANY INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS
+AS A RESULT OF USING, MODIFYING OR DISTRIBUTING THE SOFTWARE, OR ANY
+DERIVATIVE THEREOF, EVEN IF ADVISED OF THE POSSIBILITY THEREOF.
+
+5. This License Agreement will automatically terminate upon a material
+breach of its terms and conditions.
+
+6. This License Agreement shall be governed by and interpreted in all
+respects by the law of the State of California, excluding conflict of
+law provisions.  Nothing in this License Agreement shall be deemed to
+create any relationship of agency, partnership, or joint venture
+between BeOpen and Licensee.  This License Agreement does not grant
+permission to use BeOpen trademarks or trade names in a trademark
+sense to endorse or promote products or services of Licensee, or any
+third party.  As an exception, the "BeOpen Python" logos available at
+http://www.pythonlabs.com/logos.html may be used according to the
+permissions granted on that web page.
+
+7. By copying, installing or otherwise using the software, Licensee
+agrees to be bound by the terms and conditions of this License
+Agreement.
+
+
+CNRI LICENSE AGREEMENT FOR PYTHON 1.6.1
+---------------------------------------
+
+1. This LICENSE AGREEMENT is between the Corporation for National
+Research Initiatives, having an office at 1895 Preston White Drive,
+Reston, VA 20191 ("CNRI"), and the Individual or Organization
+("Licensee") accessing and otherwise using Python 1.6.1 software in
+source or binary form and its associated documentation.
+
+2. Subject to the terms and conditions of this License Agreement, CNRI
+hereby grants Licensee a nonexclusive, royalty-free, world-wide
+license to reproduce, analyze, test, perform and/or display publicly,
+prepare derivative works, distribute, and otherwise use Python 1.6.1
+alone or in any derivative version, provided, however, that CNRI's
+License Agreement and CNRI's notice of copyright, i.e., "Copyright (c)
+1995-2001 Corporation for National Research Initiatives; All Rights
+Reserved" are retained in Python 1.6.1 alone or in any derivative
+version prepared by Licensee.  Alternately, in lieu of CNRI's License
+Agreement, Licensee may substitute the following text (omitting the
+quotes): "Python 1.6.1 is made available subject to the terms and
+conditions in CNRI's License Agreement.  This Agreement together with
+Python 1.6.1 may be located on the Internet using the following
+unique, persistent identifier (known as a handle): 1895.22/1013.  This
+Agreement may also be obtained from a proxy server on the Internet
+using the following URL: http://hdl.handle.net/1895.22/1013".
+
+3. In the event Licensee prepares a derivative work that is based on
+or incorporates Python 1.6.1 or any part thereof, and wants to make
+the derivative work available to others as provided herein, then
+Licensee hereby agrees to include in any such work a brief summary of
+the changes made to Python 1.6.1.
+
+4. CNRI is making Python 1.6.1 available to Licensee on an "AS IS"
+basis.  CNRI MAKES NO REPRESENTATIONS OR WARRANTIES, EXPRESS OR
+IMPLIED.  BY WAY OF EXAMPLE, BUT NOT LIMITATION, CNRI MAKES NO AND
+DISCLAIMS ANY REPRESENTATION OR WARRANTY OF MERCHANTABILITY OR FITNESS
+FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF PYTHON 1.6.1 WILL NOT
+INFRINGE ANY THIRD PARTY RIGHTS.
+
+5. CNRI SHALL NOT BE LIABLE TO LICENSEE OR ANY OTHER USERS OF PYTHON
+1.6.1 FOR ANY INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES OR LOSS AS
+A RESULT OF MODIFYING, DISTRIBUTING, OR OTHERWISE USING PYTHON 1.6.1,
+OR ANY DERIVATIVE THEREOF, EVEN IF ADVISED OF THE POSSIBILITY THEREOF.
+
+6. This License Agreement will automatically terminate upon a material
+breach of its terms and conditions.
+
+7. This License Agreement shall be governed by the federal
+intellectual property law of the United States, including without
+limitation the federal copyright law, and, to the extent such
+U.S. federal law does not apply, by the law of the Commonwealth of
+Virginia, excluding Virginia's conflict of law provisions.
+Notwithstanding the foregoing, with regard to derivative works based
+on Python 1.6.1 that incorporate non-separable material that was
+previously distributed under the GNU General Public License (GPL), the
+law of the Commonwealth of Virginia shall govern this License
+Agreement only as to issues arising under or with respect to
+Paragraphs 4, 5, and 7 of this License Agreement.  Nothing in this
+License Agreement shall be deemed to create any relationship of
+agency, partnership, or joint venture between CNRI and Licensee.  This
+License Agreement does not grant permission to use CNRI trademarks or
+trade name in a trademark sense to endorse or promote products or
+services of Licensee, or any third party.
+
+8. By clicking on the "ACCEPT" button where indicated, or by copying,
+installing or otherwise using Python 1.6.1, Licensee agrees to be
+bound by the terms and conditions of this License Agreement.
+
+        ACCEPT
+
+
+CWI LICENSE AGREEMENT FOR PYTHON 0.9.0 THROUGH 1.2
+--------------------------------------------------
+
+Copyright (c) 1991 - 1995, Stichting Mathematisch Centrum Amsterdam,
+The Netherlands.  All rights reserved.
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose and without fee is hereby granted,
+provided that the above copyright notice appear in all copies and that
+both that copyright notice and this permission notice appear in
+supporting documentation, and that the name of Stichting Mathematisch
+Centrum or CWI not be used in advertising or publicity pertaining to
+distribution of the software without specific, written prior
+permission.
+
+STICHTING MATHEMATISCH CENTRUM DISCLAIMS ALL WARRANTIES WITH REGARD TO
+THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS, IN NO EVENT SHALL STICHTING MATHEMATISCH CENTRUM BE LIABLE
+FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ 
+
+Open Source Software Licensed under the apache-1.1: 
+-------------------------------------------------------------------- 
+1. pandas-2.3.3
+Copyright (c) pandas authors.
+You may obtain the source code and detailed information about this component at https://pandas.pydata.org.
+
+ 
+
+Terms of the apache-1.1: 
+The Apache Software License, Version 1.1
+
+Copyright (c) 2000 The Apache Software Foundation.  All rights
+reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in
+   the documentation and/or other materials provided with the
+   distribution.
+
+3. The end-user documentation included with the redistribution,
+   if any, must include the following acknowledgment:
+      "This product includes software developed by the
+       Apache Software Foundation (http://www.apache.org/)."
+   Alternately, this acknowledgment may appear in the software itself,
+   if and wherever such third-party acknowledgments normally appear.
+
+4. The names "Apache" and "Apache Software Foundation" must
+   not be used to endorse or promote products derived from this
+   software without prior written permission. For written
+   permission, please contact apache@apache.org.
+
+5. Products derived from this software may not be called "Apache",
+   nor may "Apache" appear in their name, without prior written
+   permission of the Apache Software Foundation.
+
+THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESSED OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED.  IN NO EVENT SHALL THE APACHE SOFTWARE FOUNDATION OR
+ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE. 
+
+Open Source Software Licensed under the apache-2.0: 
+-------------------------------------------------------------------- 
+1. @xtuc/long-4.2.2
+Copyright (c) @xtuc/long authors.
+You may obtain the source code and detailed information about this component at https://github.com/dcodeIO/long.js#readme.
+
+2. go.opentelemetry.io/otel/metric-1.37.0
+Copyright (c) go.opentelemetry.io/otel/metric authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/metric.
+
+3. long-4.2.2
+Copyright (c) long authors.
+You may obtain the source code and detailed information about this component at https://github.com/dcodeIO/long.js#readme.
+
+4. github.com/bytedance/sonic-1.13.2
+Copyright (c) github.com/bytedance/sonic authors.
+You may obtain the source code and detailed information about this component at github.com/bytedance/sonic.
+
+5. go.opentelemetry.io/auto/sdk-1.1.0
+Copyright (c) go.opentelemetry.io/auto/sdk authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/auto/sdk.
+
+6. github.com/minio/crc64nvme-1.0.1
+Copyright (c) github.com/minio/crc64nvme authors.
+You may obtain the source code and detailed information about this component at github.com/minio/crc64nvme.
+
+7. go.opentelemetry.io/otel/trace-1.37.0
+Copyright (c) go.opentelemetry.io/otel/trace authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/trace.
+
+8. go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc-1.37.0
+Copyright (c) go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc.
+
+9. trafilatura-2.0.0
+Copyright (c) trafilatura authors.
+You may obtain the source code and detailed information about this component at https://trafilatura.readthedocs.io.
+
+10. go.opentelemetry.io/otel/exporters/otlp/otlptrace-1.37.0
+Copyright (c) go.opentelemetry.io/otel/exporters/otlp/otlptrace authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/exporters/otlp/otlptrace.
+
+11. github.com/modern-go/concurrent-0.0.0-20180306012644-bacd9c7ef1dd
+Copyright (c) github.com/modern-go/concurrent authors.
+You may obtain the source code and detailed information about this component at github.com/modern-go/concurrent.
+
+12. gopkg.in/yaml.v3-3.0.1
+Copyright (c) gopkg.in/yaml.v3 authors.
+You may obtain the source code and detailed information about this component at https://goproxy.cn/gopkg.in/yaml.v3/@v/v3.0.1.zip.
+
+13. go.opentelemetry.io/otel/exporters/stdout/stdouttrace-1.35.0
+Copyright (c) go.opentelemetry.io/otel/exporters/stdout/stdouttrace authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/exporters/stdout/stdouttrace.
+
+14. github.com/richardlehane/msoleps-1.0.4
+Copyright (c) github.com/richardlehane/msoleps authors.
+You may obtain the source code and detailed information about this component at github.com/richardlehane/msoleps.
+
+15. google.golang.org/grpc-1.73.0
+Copyright (c) google.golang.org/grpc authors.
+You may obtain the source code and detailed information about this component at google.golang.org/grpc.
+
+16. google.golang.org/genproto/googleapis/rpc-0.0.0-20250603155806-513f23925822
+Copyright (c) google.golang.org/genproto/googleapis/rpc authors.
+You may obtain the source code and detailed information about this component at google.golang.org/genproto/googleapis/rpc.
+
+17. github.com/modern-go/reflect2-1.0.2
+Copyright (c) github.com/modern-go/reflect2 authors.
+You may obtain the source code and detailed information about this component at github.com/modern-go/reflect2.
+
+18. github.com/minio/minio-go-7.0.90
+Copyright (c) github.com/minio/minio-go authors.
+You may obtain the source code and detailed information about this component at github.com/minio/minio-go.
+
+19. requests-default
+Copyright (c) requests authors.
+You may obtain the source code and detailed information about this component at http://python-requests.org.
+
+20. github.com/minio/md5-simd-1.1.2
+Copyright (c) github.com/minio/md5-simd authors.
+You may obtain the source code and detailed information about this component at github.com/minio/md5-simd.
+
+21. openai-2.8.1
+Copyright (c) openai authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/openai/.
+
+22. go.opentelemetry.io/proto/otlp-1.7.0
+Copyright (c) go.opentelemetry.io/proto/otlp authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/proto/otlp.
+
+23. typescript-5.8.3
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+24. github.com/wk8/go-ordered-map-2.1.8
+Copyright (c) github.com/wk8/go-ordered-map authors.
+You may obtain the source code and detailed information about this component at github.com/wk8/go-ordered-map.
+
+25. gopkg.in/yaml-3.0.1
+Copyright (c) gopkg.in/yaml authors.
+You may obtain the source code and detailed information about this component at gopkg.in/yaml.v3.
+
+26. github.com/go-ini/ini-1.67.0
+Copyright (c) github.com/go-ini/ini authors.
+You may obtain the source code and detailed information about this component at github.com/go-ini/ini.
+
+27. leb128-1.13.2
+Copyright (c) leb128 authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+28. go.opentelemetry.io/otel/sdk-1.37.0
+Copyright (c) go.opentelemetry.io/otel/sdk authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/sdk.
+
+29. google.golang.org/genproto/googleapis/api-0.0.0-20250603155806-513f23925822
+Copyright (c) google.golang.org/genproto/googleapis/api authors.
+You may obtain the source code and detailed information about this component at google.golang.org/genproto/googleapis/api.
+
+30. transformers-4.57.3
+Copyright (c) transformers authors.
+You may obtain the source code and detailed information about this component at https://github.com/huggingface/transformers.
+
+31. github.com/richardlehane/mscfb-1.0.4
+Copyright (c) github.com/richardlehane/mscfb authors.
+You may obtain the source code and detailed information about this component at github.com/richardlehane/mscfb.
+
+32. github.com/bytedance/sonic/loader-0.2.4
+Copyright (c) github.com/bytedance/sonic/loader authors.
+You may obtain the source code and detailed information about this component at github.com/bytedance/sonic/loader.
+
+33. minio-7.2.20
+Copyright (c) minio authors.
+You may obtain the source code and detailed information about this component at https://github.com/minio/minio-py.
+
+34. github.com/elastic/go-elasticsearch-8.18.0
+Copyright (c) github.com/elastic/go-elasticsearch authors.
+You may obtain the source code and detailed information about this component at github.com/elastic/go-elasticsearch.
+
+35. paddleocr-3.3.2
+Copyright (c) paddleocr authors.
+You may obtain the source code and detailed information about this component at https://github.com/PaddlePaddle/PaddleOCR.
+
+36. github.com/elastic/go-elasticsearch-7.17.10
+Copyright (c) github.com/elastic/go-elasticsearch authors.
+You may obtain the source code and detailed information about this component at github.com/elastic/go-elasticsearch.
+
+37. go.opentelemetry.io/otel-1.37.0
+Copyright (c) go.opentelemetry.io/otel authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel.
+
+38. @webassemblyjs/leb128-1.13.2
+Copyright 2012 The Obvious Corporation.
+
+39. xlsx-0.20.2
+Copyright (c) xlsx authors.
+You may obtain the source code and detailed information about this component at https://sheetjs.com/.
+
+40. github.com/go-logr/stdr-1.2.2
+Copyright (c) github.com/go-logr/stdr authors.
+You may obtain the source code and detailed information about this component at github.com/go-logr/stdr.
+
+41. github.com/sashabaranov/go-openai-1.40.5
+Copyright (c) github.com/sashabaranov/go-openai authors.
+You may obtain the source code and detailed information about this component at github.com/sashabaranov/go-openai.
+
+42. github.com/spf13/afero-1.12.0
+Copyright (c) github.com/spf13/afero authors.
+You may obtain the source code and detailed information about this component at github.com/spf13/afero.
+
+43. github.com/parquet-go/parquet-go-0.25.0
+Copyright (c) github.com/parquet-go/parquet-go authors.
+You may obtain the source code and detailed information about this component at github.com/parquet-go/parquet-go.
+
+44. python-multipart-0.0.20
+Copyright (c) 2010 by Armin Ronacher., Copyright 2012,  Andrew Dunham
+
+45. dompurify-3.2.6
+Copyright 2015 Mario Heiderich, Copyright 2023 Dr.-Ing. Mario Heiderich,  Cure53
+
+46. github.com/cloudwego/base64x-0.1.5
+Copyright (c) github.com/cloudwego/base64x authors.
+You may obtain the source code and detailed information about this component at github.com/cloudwego/base64x.
+
+47. grpc-1.0.0
+Copyright (c) Hyperf
+
+48. github.com/klauspost/compress-1.18.0
+Copyright (c) github.com/klauspost/compress authors.
+You may obtain the source code and detailed information about this component at github.com/klauspost/compress.
+
+49. github.com/go-logr/logr-1.4.3
+Copyright (c) github.com/go-logr/logr authors.
+You may obtain the source code and detailed information about this component at github.com/go-logr/logr.
+
+50. github.com/elastic/elastic-transport-go-8.7.0
+Copyright (c) github.com/elastic/elastic-transport-go authors.
+You may obtain the source code and detailed information about this component at github.com/elastic/elastic-transport-go.
+
+51. github.com/neo4j/neo4j-go-driver-6.0.0-alpha.1
+Copyright (c) github.com/neo4j/neo4j-go-driver authors.
+You may obtain the source code and detailed information about this component at github.com/neo4j/neo4j-go-driver.
+
+ 
+
+Terms of the apache-2.0: 
+Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License. 
+
+Open Source Software Licensed under the bsd-new: 
+-------------------------------------------------------------------- 
+1. ieee754-1.2.0
+Copyright (c) ieee754 authors.
+You may obtain the source code and detailed information about this component at https://github.com/feross/ieee754#readme.
+
+2. github.com/xuri/excelize-2.10.0
+Copyright (c) github.com/xuri/excelize authors.
+You may obtain the source code and detailed information about this component at github.com/xuri/excelize.
+
+3. go.opentelemetry.io/otel/metric-1.37.0
+Copyright (c) go.opentelemetry.io/otel/metric authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/metric.
+
+4. golang.org/x/text-0.30.0
+Copyright (c) golang.org/x/text authors.
+You may obtain the source code and detailed information about this component at golang.org/x/text.
+
+5. github.com/yosida95/uritemplate-3.0.2
+Copyright (c) github.com/yosida95/uritemplate authors.
+You may obtain the source code and detailed information about this component at github.com/yosida95/uritemplate.
+
+6. go.opentelemetry.io/otel/trace-1.37.0
+Copyright (c) go.opentelemetry.io/otel/trace authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/trace.
+
+7. go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc-1.37.0
+Copyright (c) go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc.
+
+8. torch-2.9.1
+Copyright (c) torch authors.
+You may obtain the source code and detailed information about this component at https://pytorch.org/.
+
+9. golang.org/x/sys-0.37.0
+Copyright (c) golang.org/x/sys authors.
+You may obtain the source code and detailed information about this component at golang.org/x/sys.
+
+10. golang.org/x/crypto-0.43.0
+Copyright (c) golang.org/x/crypto authors.
+You may obtain the source code and detailed information about this component at golang.org/x/crypto.
+
+11. go.opentelemetry.io/otel/exporters/otlp/otlptrace-1.37.0
+Copyright (c) go.opentelemetry.io/otel/exporters/otlp/otlptrace authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/exporters/otlp/otlptrace.
+
+12. httpx-0.28.1
+Copyright (c) httpx authors.
+You may obtain the source code and detailed information about this component at https://github.com/encode/httpx.
+
+13. go.opentelemetry.io/otel/exporters/stdout/stdouttrace-1.35.0
+Copyright (c) go.opentelemetry.io/otel/exporters/stdout/stdouttrace authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/exporters/stdout/stdouttrace.
+
+14. github.com/xuri/efp-0.0.1
+Copyright (c) github.com/xuri/efp authors.
+You may obtain the source code and detailed information about this component at github.com/xuri/efp.
+
+15. golang.org/x/net-0.46.0
+Copyright (c) golang.org/x/net authors.
+You may obtain the source code and detailed information about this component at golang.org/x/net.
+
+16. starlette-0.50.0
+Copyright (c) starlette authors.
+You may obtain the source code and detailed information about this component at https://github.com/encode/starlette.
+
+17. @xtuc/ieee754-1.2.0
+Copyright (c) 2008,  Fair Oaks Labs,  Inc.
+
+18. speakingurl-14.0.1
+Copyright (c) speakingurl authors.
+You may obtain the source code and detailed information about this component at http://pid.github.io/speakingurl/.
+
+19. google.golang.org/protobuf-1.36.9
+Copyright (c) google.golang.org/protobuf authors.
+You may obtain the source code and detailed information about this component at google.golang.org/protobuf.
+
+20. github.com/twitchyliquid64/golang-asm-0.15.1
+Copyright (c) github.com/twitchyliquid64/golang-asm authors.
+You may obtain the source code and detailed information about this component at github.com/twitchyliquid64/golang-asm.
+
+21. github.com/pmezard/go-difflib-1.0.0
+Copyright (c) github.com/pmezard/go-difflib authors.
+You may obtain the source code and detailed information about this component at github.com/pmezard/go-difflib.
+
+22. source-map-0.6.1
+Copyright (c) 2009-2011,  Mozilla Foundation and contributors
+
+23. golang.org/x/sync-0.17.0
+Copyright (c) golang.org/x/sync authors.
+You may obtain the source code and detailed information about this component at golang.org/x/sync.
+
+24. github.com/clbanning/mxj-1.8.4
+Copyright (c) github.com/clbanning/mxj authors.
+You may obtain the source code and detailed information about this component at github.com/clbanning/mxj.
+
+25. github.com/google/uuid-1.6.0
+Copyright (c) github.com/google/uuid authors.
+You may obtain the source code and detailed information about this component at github.com/google/uuid.
+
+26. uvicorn-0.38.0
+Copyright (c) uvicorn authors.
+You may obtain the source code and detailed information about this component at https://github.com/encode/uvicorn.
+
+27. sse-starlette-3.0.3
+Copyright (c) sse-starlette authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/sse-starlette/.
+
+28. idna-3.7
+Copyright (c) 2001-2014 Python Software Foundation,  All Rights Reserved, Copyright (c) 1991-2014 Unicode,  Inc. All rights reserved., Copyright (c) 2013-2023,  Kim Davies and contributors.
+
+29. go.opentelemetry.io/otel/sdk-1.37.0
+Copyright (c) go.opentelemetry.io/otel/sdk authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel/sdk.
+
+30. github.com/go-json-experiment/json-0.0.0-20250725192818-e39067aee2d2
+Copyright (c) github.com/go-json-experiment/json authors.
+You may obtain the source code and detailed information about this component at github.com/go-json-experiment/json.
+
+31. github.com/puerkitobio/goquery-1.10.3
+Copyright (c) github.com/puerkitobio/goquery authors.
+You may obtain the source code and detailed information about this component at github.com/puerkitobio/goquery.
+
+32. golang.org/x/time-0.13.0
+Copyright (c) golang.org/x/time authors.
+You may obtain the source code and detailed information about this component at golang.org/x/time.
+
+33. github.com/pierrec/lz4-4.1.21
+Copyright (c) github.com/pierrec/lz4 authors.
+You may obtain the source code and detailed information about this component at github.com/pierrec/lz4.
+
+34. httpcore-1.0.9
+Copyright (c) httpcore authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/httpcore/.
+
+35. github.com/spf13/pflag-1.0.6
+Copyright (c) github.com/spf13/pflag authors.
+You may obtain the source code and detailed information about this component at github.com/spf13/pflag.
+
+36. go.opentelemetry.io/otel-1.37.0
+Copyright (c) go.opentelemetry.io/otel authors.
+You may obtain the source code and detailed information about this component at go.opentelemetry.io/otel.
+
+37. fast-uri-3.0.6
+Copyright (c) 2011-2021,  Gary Court until https:  github.com garycourt uri-js commit a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae, Copyright (c) 2021 The Fastify Team
+
+38. github.com/grpc-ecosystem/grpc-gateway-2.27.1
+Copyright (c) github.com/grpc-ecosystem/grpc-gateway authors.
+You may obtain the source code and detailed information about this component at github.com/grpc-ecosystem/grpc-gateway.
+
+39. python-dotenv-1.2.1
+Copyright (c) python-dotenv authors.
+You may obtain the source code and detailed information about this component at https://github.com/theskumar/python-dotenv.
+
+40. click-8.3.1
+Copyright (c) click authors.
+You may obtain the source code and detailed information about this component at https://palletsprojects.com/p/click/.
+
+41. github.com/bahlo/generic-list-go-0.2.0
+Copyright (c) github.com/bahlo/generic-list-go authors.
+You may obtain the source code and detailed information about this component at github.com/bahlo/generic-list-go.
+
+42. golang.org/x/arch-0.15.0
+Copyright (c) golang.org/x/arch authors.
+You may obtain the source code and detailed information about this component at golang.org/x/arch.
+
+43. github.com/fsnotify/fsnotify-1.8.0
+Copyright (c) github.com/fsnotify/fsnotify authors.
+You may obtain the source code and detailed information about this component at github.com/fsnotify/fsnotify.
+
+44. github.com/xuri/nfp-0.0.2-0.20250530014748-2ddeb826f9a9
+Copyright (c) github.com/xuri/nfp authors.
+You may obtain the source code and detailed information about this component at github.com/xuri/nfp.
+
+45. google-3.0.0
+Copyright (c) google authors.
+You may obtain the source code and detailed information about this component at http://breakingcode.wordpress.com/.
+
+46. github.com/google/go-querystring-1.1.0
+Copyright (c) github.com/google/go-querystring authors.
+You may obtain the source code and detailed information about this component at github.com/google/go-querystring.
+
+47. serialize-javascript-6.0.2
+Copyright 2014 Yahoo  Inc.
+
+48. github.com/klauspost/compress-1.18.0
+Copyright (c) github.com/klauspost/compress authors.
+You may obtain the source code and detailed information about this component at github.com/klauspost/compress.
+
+49. source-map-js-1.2.1
+Copyright (c) 2009-2011,  Mozilla Foundation and contributors
+
+ 
+
+Terms of the bsd-new: 
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this list
+of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+Neither the name of the ORGANIZATION nor the names of its contributors may be
+used to endorse or promote products derived from this software without specific
+prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+
+Open Source Software Licensed under the bsd-simplified: 
+-------------------------------------------------------------------- 
+1. github.com/andybalholm/cascadia-1.3.3
+Copyright (c) github.com/andybalholm/cascadia authors.
+You may obtain the source code and detailed information about this component at github.com/andybalholm/cascadia.
+
+2. terser-5.43.1
+Copyright (c) terser authors.
+You may obtain the source code and detailed information about this component at https://terser.org.
+
+3. esrecurse-4.3.0
+Copyright (C) 2014 [Yusuke Suzuki](https:  github.com Constellation)
+
+4. estraverse-4.3.0
+Copyright (C) 2012-2016 [Yusuke Suzuki](http:  github.com Constellation)
+
+5. entities-4.5.0
+Copyright (c) Felix B  hm
+
+6. estraverse-5.3.0
+Copyright (C) 2012-2016 [Yusuke Suzuki](http:  github.com Constellation)
+
+7. github.com/redis/go-redis-9.14.0
+Copyright (c) github.com/redis/go-redis authors.
+You may obtain the source code and detailed information about this component at github.com/redis/go-redis.
+
+8. glob-to-regexp-0.4.1
+Copyright (c) 2013,  Nick Fitzgerald
+
+9. eslint-scope-5.1.1
+Copyright (C) 2012-2013 Yusuke Suzuki (twitter: @Constellation) and other contributors., Copyright JS Foundation and other contributors,  https:  js.foundation
+
+ 
+
+Terms of the bsd-simplified: 
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+Redistributions of source code must retain the above copyright notice, this list
+of conditions and the following disclaimer.
+
+Redistributions in binary form must reproduce the above copyright notice, this
+list of conditions and the following disclaimer in the documentation and/or
+other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+
+Open Source Software Licensed under the cc-by-4.0: 
+-------------------------------------------------------------------- 
+1. caniuse-lite-1.0.30001727
+copyright (c) caniuse.com and its other authors
+
+ 
+
+Terms of the cc-by-4.0: 
+Attribution 4.0 International
+
+=======================================================================
+
+Creative Commons Corporation ("Creative Commons") is not a law firm and
+does not provide legal services or legal advice. Distribution of
+Creative Commons public licenses does not create a lawyer-client or
+other relationship. Creative Commons makes its licenses and related
+information available on an "as-is" basis. Creative Commons gives no
+warranties regarding its licenses, any material licensed under their
+terms and conditions, or any related information. Creative Commons
+disclaims all liability for damages resulting from their use to the
+fullest extent possible.
+
+Using Creative Commons Public Licenses
+
+Creative Commons public licenses provide a standard set of terms and
+conditions that creators and other rights holders may use to share
+original works of authorship and other material subject to copyright
+and certain other rights specified in the public license below. The
+following considerations are for informational purposes only, are not
+exhaustive, and do not form part of our licenses.
+
+     Considerations for licensors: Our public licenses are
+     intended for use by those authorized to give the public
+     permission to use material in ways otherwise restricted by
+     copyright and certain other rights. Our licenses are
+     irrevocable. Licensors should read and understand the terms
+     and conditions of the license they choose before applying it.
+     Licensors should also secure all rights necessary before
+     applying our licenses so that the public can reuse the
+     material as expected. Licensors should clearly mark any
+     material not subject to the license. This includes other CC-
+     licensed material, or material used under an exception or
+     limitation to copyright. More considerations for licensors:
+	wiki.creativecommons.org/Considerations_for_licensors
+
+     Considerations for the public: By using one of our public
+     licenses, a licensor grants the public permission to use the
+     licensed material under specified terms and conditions. If
+     the licensor's permission is not necessary for any reason--for
+     example, because of any applicable exception or limitation to
+     copyright--then that use is not regulated by the license. Our
+     licenses grant only permissions under copyright and certain
+     other rights that a licensor has authority to grant. Use of
+     the licensed material may still be restricted for other
+     reasons, including because others have copyright or other
+     rights in the material. A licensor may make special requests,
+     such as asking that all changes be marked or described.
+     Although not required by our licenses, you are encouraged to
+     respect those requests where reasonable. More considerations
+     for the public: 
+	wiki.creativecommons.org/Considerations_for_licensees
+
+=======================================================================
+
+Creative Commons Attribution 4.0 International Public License
+
+By exercising the Licensed Rights (defined below), You accept and agree
+to be bound by the terms and conditions of this Creative Commons
+Attribution 4.0 International Public License ("Public License"). To the
+extent this Public License may be interpreted as a contract, You are
+granted the Licensed Rights in consideration of Your acceptance of
+these terms and conditions, and the Licensor grants You such rights in
+consideration of benefits the Licensor receives from making the
+Licensed Material available under these terms and conditions.
+
+
+Section 1 -- Definitions.
+
+  a. Adapted Material means material subject to Copyright and Similar
+     Rights that is derived from or based upon the Licensed Material
+     and in which the Licensed Material is translated, altered,
+     arranged, transformed, or otherwise modified in a manner requiring
+     permission under the Copyright and Similar Rights held by the
+     Licensor. For purposes of this Public License, where the Licensed
+     Material is a musical work, performance, or sound recording,
+     Adapted Material is always produced where the Licensed Material is
+     synched in timed relation with a moving image.
+
+  b. Adapter's License means the license You apply to Your Copyright
+     and Similar Rights in Your contributions to Adapted Material in
+     accordance with the terms and conditions of this Public License.
+
+  c. Copyright and Similar Rights means copyright and/or similar rights
+     closely related to copyright including, without limitation,
+     performance, broadcast, sound recording, and Sui Generis Database
+     Rights, without regard to how the rights are labeled or
+     categorized. For purposes of this Public License, the rights
+     specified in Section 2(b)(1)-(2) are not Copyright and Similar
+     Rights.
+
+  d. Effective Technological Measures means those measures that, in the
+     absence of proper authority, may not be circumvented under laws
+     fulfilling obligations under Article 11 of the WIPO Copyright
+     Treaty adopted on December 20, 1996, and/or similar international
+     agreements.
+
+  e. Exceptions and Limitations means fair use, fair dealing, and/or
+     any other exception or limitation to Copyright and Similar Rights
+     that applies to Your use of the Licensed Material.
+
+  f. Licensed Material means the artistic or literary work, database,
+     or other material to which the Licensor applied this Public
+     License.
+
+  g. Licensed Rights means the rights granted to You subject to the
+     terms and conditions of this Public License, which are limited to
+     all Copyright and Similar Rights that apply to Your use of the
+     Licensed Material and that the Licensor has authority to license.
+
+  h. Licensor means the individual(s) or entity(ies) granting rights
+     under this Public License.
+
+  i. Share means to provide material to the public by any means or
+     process that requires permission under the Licensed Rights, such
+     as reproduction, public display, public performance, distribution,
+     dissemination, communication, or importation, and to make material
+     available to the public including in ways that members of the
+     public may access the material from a place and at a time
+     individually chosen by them.
+
+  j. Sui Generis Database Rights means rights other than copyright
+     resulting from Directive 96/9/EC of the European Parliament and of
+     the Council of 11 March 1996 on the legal protection of databases,
+     as amended and/or succeeded, as well as other essentially
+     equivalent rights anywhere in the world.
+
+  k. You means the individual or entity exercising the Licensed Rights
+     under this Public License. Your has a corresponding meaning.
+
+
+Section 2 -- Scope.
+
+  a. License grant.
+
+       1. Subject to the terms and conditions of this Public License,
+          the Licensor hereby grants You a worldwide, royalty-free,
+          non-sublicensable, non-exclusive, irrevocable license to
+          exercise the Licensed Rights in the Licensed Material to:
+
+            a. reproduce and Share the Licensed Material, in whole or
+               in part; and
+
+            b. produce, reproduce, and Share Adapted Material.
+
+       2. Exceptions and Limitations. For the avoidance of doubt, where
+          Exceptions and Limitations apply to Your use, this Public
+          License does not apply, and You do not need to comply with
+          its terms and conditions.
+
+       3. Term. The term of this Public License is specified in Section
+          6(a).
+
+       4. Media and formats; technical modifications allowed. The
+          Licensor authorizes You to exercise the Licensed Rights in
+          all media and formats whether now known or hereafter created,
+          and to make technical modifications necessary to do so. The
+          Licensor waives and/or agrees not to assert any right or
+          authority to forbid You from making technical modifications
+          necessary to exercise the Licensed Rights, including
+          technical modifications necessary to circumvent Effective
+          Technological Measures. For purposes of this Public License,
+          simply making modifications authorized by this Section 2(a)
+          (4) never produces Adapted Material.
+
+       5. Downstream recipients.
+
+            a. Offer from the Licensor -- Licensed Material. Every
+               recipient of the Licensed Material automatically
+               receives an offer from the Licensor to exercise the
+               Licensed Rights under the terms and conditions of this
+               Public License.
+
+            b. No downstream restrictions. You may not offer or impose
+               any additional or different terms or conditions on, or
+               apply any Effective Technological Measures to, the
+               Licensed Material if doing so restricts exercise of the
+               Licensed Rights by any recipient of the Licensed
+               Material.
+
+       6. No endorsement. Nothing in this Public License constitutes or
+          may be construed as permission to assert or imply that You
+          are, or that Your use of the Licensed Material is, connected
+          with, or sponsored, endorsed, or granted official status by,
+          the Licensor or others designated to receive attribution as
+          provided in Section 3(a)(1)(A)(i).
+
+  b. Other rights.
+
+       1. Moral rights, such as the right of integrity, are not
+          licensed under this Public License, nor are publicity,
+          privacy, and/or other similar personality rights; however, to
+          the extent possible, the Licensor waives and/or agrees not to
+          assert any such rights held by the Licensor to the limited
+          extent necessary to allow You to exercise the Licensed
+          Rights, but not otherwise.
+
+       2. Patent and trademark rights are not licensed under this
+          Public License.
+
+       3. To the extent possible, the Licensor waives any right to
+          collect royalties from You for the exercise of the Licensed
+          Rights, whether directly or through a collecting society
+          under any voluntary or waivable statutory or compulsory
+          licensing scheme. In all other cases the Licensor expressly
+          reserves any right to collect such royalties.
+
+
+Section 3 -- License Conditions.
+
+Your exercise of the Licensed Rights is expressly made subject to the
+following conditions.
+
+  a. Attribution.
+
+       1. If You Share the Licensed Material (including in modified
+          form), You must:
+
+            a. retain the following if it is supplied by the Licensor
+               with the Licensed Material:
+
+                 i. identification of the creator(s) of the Licensed
+                    Material and any others designated to receive
+                    attribution, in any reasonable manner requested by
+                    the Licensor (including by pseudonym if
+                    designated);
+
+                ii. a copyright notice;
+
+               iii. a notice that refers to this Public License;
+
+                iv. a notice that refers to the disclaimer of
+                    warranties;
+
+                 v. a URI or hyperlink to the Licensed Material to the
+                    extent reasonably practicable;
+
+            b. indicate if You modified the Licensed Material and
+               retain an indication of any previous modifications; and
+
+            c. indicate the Licensed Material is licensed under this
+               Public License, and include the text of, or the URI or
+               hyperlink to, this Public License.
+
+       2. You may satisfy the conditions in Section 3(a)(1) in any
+          reasonable manner based on the medium, means, and context in
+          which You Share the Licensed Material. For example, it may be
+          reasonable to satisfy the conditions by providing a URI or
+          hyperlink to a resource that includes the required
+          information.
+
+       3. If requested by the Licensor, You must remove any of the
+          information required by Section 3(a)(1)(A) to the extent
+          reasonably practicable.
+
+       4. If You Share Adapted Material You produce, the Adapter's
+          License You apply must not prevent recipients of the Adapted
+          Material from complying with this Public License.
+
+
+Section 4 -- Sui Generis Database Rights.
+
+Where the Licensed Rights include Sui Generis Database Rights that
+apply to Your use of the Licensed Material:
+
+  a. for the avoidance of doubt, Section 2(a)(1) grants You the right
+     to extract, reuse, reproduce, and Share all or a substantial
+     portion of the contents of the database;
+
+  b. if You include all or a substantial portion of the database
+     contents in a database in which You have Sui Generis Database
+     Rights, then the database in which You have Sui Generis Database
+     Rights (but not its individual contents) is Adapted Material; and
+
+  c. You must comply with the conditions in Section 3(a) if You Share
+     all or a substantial portion of the contents of the database.
+
+For the avoidance of doubt, this Section 4 supplements and does not
+replace Your obligations under this Public License where the Licensed
+Rights include other Copyright and Similar Rights.
+
+
+Section 5 -- Disclaimer of Warranties and Limitation of Liability.
+
+  a. UNLESS OTHERWISE SEPARATELY UNDERTAKEN BY THE LICENSOR, TO THE
+     EXTENT POSSIBLE, THE LICENSOR OFFERS THE LICENSED MATERIAL AS-IS
+     AND AS-AVAILABLE, AND MAKES NO REPRESENTATIONS OR WARRANTIES OF
+     ANY KIND CONCERNING THE LICENSED MATERIAL, WHETHER EXPRESS,
+     IMPLIED, STATUTORY, OR OTHER. THIS INCLUDES, WITHOUT LIMITATION,
+     WARRANTIES OF TITLE, MERCHANTABILITY, FITNESS FOR A PARTICULAR
+     PURPOSE, NON-INFRINGEMENT, ABSENCE OF LATENT OR OTHER DEFECTS,
+     ACCURACY, OR THE PRESENCE OR ABSENCE OF ERRORS, WHETHER OR NOT
+     KNOWN OR DISCOVERABLE. WHERE DISCLAIMERS OF WARRANTIES ARE NOT
+     ALLOWED IN FULL OR IN PART, THIS DISCLAIMER MAY NOT APPLY TO YOU.
+
+  b. TO THE EXTENT POSSIBLE, IN NO EVENT WILL THE LICENSOR BE LIABLE
+     TO YOU ON ANY LEGAL THEORY (INCLUDING, WITHOUT LIMITATION,
+     NEGLIGENCE) OR OTHERWISE FOR ANY DIRECT, SPECIAL, INDIRECT,
+     INCIDENTAL, CONSEQUENTIAL, PUNITIVE, EXEMPLARY, OR OTHER LOSSES,
+     COSTS, EXPENSES, OR DAMAGES ARISING OUT OF THIS PUBLIC LICENSE OR
+     USE OF THE LICENSED MATERIAL, EVEN IF THE LICENSOR HAS BEEN
+     ADVISED OF THE POSSIBILITY OF SUCH LOSSES, COSTS, EXPENSES, OR
+     DAMAGES. WHERE A LIMITATION OF LIABILITY IS NOT ALLOWED IN FULL OR
+     IN PART, THIS LIMITATION MAY NOT APPLY TO YOU.
+
+  c. The disclaimer of warranties and limitation of liability provided
+     above shall be interpreted in a manner that, to the extent
+     possible, most closely approximates an absolute disclaimer and
+     waiver of all liability.
+
+
+Section 6 -- Term and Termination.
+
+  a. This Public License applies for the term of the Copyright and
+     Similar Rights licensed here. However, if You fail to comply with
+     this Public License, then Your rights under this Public License
+     terminate automatically.
+
+  b. Where Your right to use the Licensed Material has terminated under
+     Section 6(a), it reinstates:
+
+       1. automatically as of the date the violation is cured, provided
+          it is cured within 30 days of Your discovery of the
+          violation; or
+
+       2. upon express reinstatement by the Licensor.
+
+     For the avoidance of doubt, this Section 6(b) does not affect any
+     right the Licensor may have to seek remedies for Your violations
+     of this Public License.
+
+  c. For the avoidance of doubt, the Licensor may also offer the
+     Licensed Material under separate terms or conditions or stop
+     distributing the Licensed Material at any time; however, doing so
+     will not terminate this Public License.
+
+  d. Sections 1, 5, 6, 7, and 8 survive termination of this Public
+     License.
+
+
+Section 7 -- Other Terms and Conditions.
+
+  a. The Licensor shall not be bound by any additional or different
+     terms or conditions communicated by You unless expressly agreed.
+
+  b. Any arrangements, understandings, or agreements regarding the
+     Licensed Material not stated herein are separate from and
+     independent of the terms and conditions of this Public License.
+
+
+Section 8 -- Interpretation.
+
+  a. For the avoidance of doubt, this Public License does not, and
+     shall not be interpreted to, reduce, limit, restrict, or impose
+     conditions on any use of the Licensed Material that could lawfully
+     be made without permission under this Public License.
+
+  b. To the extent possible, if any provision of this Public License is
+     deemed unenforceable, it shall be automatically reformed to the
+     minimum extent necessary to make it enforceable. If the provision
+     cannot be reformed, it shall be severed from this Public License
+     without affecting the enforceability of the remaining terms and
+     conditions.
+
+  c. No term or condition of this Public License will be waived and no
+     failure to comply consented to unless expressly agreed to by the
+     Licensor.
+
+  d. Nothing in this Public License constitutes or may be interpreted
+     as a limitation upon, or waiver of, any privileges and immunities
+     that apply to the Licensor or You, including from the legal
+     processes of any jurisdiction or authority.
+
+
+=======================================================================
+
+Creative Commons is not a party to its public
+licenses. Notwithstanding, Creative Commons may elect to apply one of
+its public licenses to material it publishes and in those instances
+will be considered the “Licensor.” The text of the Creative Commons
+public licenses is dedicated to the public domain under the CC0 Public
+Domain Dedication. Except for the limited purpose of indicating that
+material is shared under a Creative Commons public license or as
+otherwise permitted by the Creative Commons policies published at
+creativecommons.org/policies, Creative Commons does not authorize the
+use of the trademark "Creative Commons" or any other trademark or logo
+of Creative Commons without its prior written consent including,
+without limitation, in connection with any unauthorized modifications
+to any of its public licenses or any other arrangements,
+understandings, or agreements concerning use of licensed material. For
+the avoidance of doubt, this paragraph does not form part of the
+public licenses.
+
+Creative Commons may be contacted at creativecommons.org.
+ 
+
+Open Source Software Licensed under the isc: 
+-------------------------------------------------------------------- 
+1. github.com/davecgh/go-spew-1.1.1
+Copyright (c) github.com/davecgh/go-spew authors.
+You may obtain the source code and detailed information about this component at github.com/davecgh/go-spew.
+
+2. picocolors-1.1.1
+Copyright (c) 2021 Alexey Raspopov,  Kostiantyn Denysov,  Anton Verinov
+
+3. graceful-fs-4.2.11
+Copyright (c) 2011-2022 Isaac Z. Schlueter,  Ben Noordhuis,  and Contributors
+
+4. electron-to-chromium-1.5.183
+Copyright (c) electron-to-chromium authors.
+You may obtain the source code and detailed information about this component at https://github.com/kilian/electron-to-chromium#readme.
+
+ 
+
+Terms of the isc: 
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+ 
+
+Open Source Software Licensed under the mit: 
+-------------------------------------------------------------------- 
+1. sortablejs-1.15.6
+Copyright (c) sortablejs authors.
+You may obtain the source code and detailed information about this component at https://github.com/SortableJS/Sortable#readme.
+
+2. source-map-support-0.5.21
+Copyright (c) 2014 Evan Wallace
+
+3. devtools-api-7.7.7
+Copyright (c) devtools-api authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+4. github.com/goccy/go-json-0.10.5
+Copyright (c) github.com/goccy/go-json authors.
+You may obtain the source code and detailed information about this component at github.com/goccy/go-json.
+
+5. swiper-12.0.3
+Copyright (c) swiper authors.
+You may obtain the source code and detailed information about this component at https://swiperjs.com.
+
+6. markdownify-1.2.2
+Copyright (c) markdownify authors.
+You may obtain the source code and detailed information about this component at http://github.com/matthewwithanm/python-markdownify.
+
+7. github.com/gin-contrib/cors-1.7.5
+Copyright (c) github.com/gin-contrib/cors authors.
+You may obtain the source code and detailed information about this component at github.com/gin-contrib/cors.
+
+8. github.com/go-playground/universal-translator-0.18.1
+Copyright (c) github.com/go-playground/universal-translator authors.
+You may obtain the source code and detailed information about this component at github.com/go-playground/universal-translator.
+
+9. @pagefind/linux-arm64-1.3.0
+Copyright (c) @pagefind/linux-arm64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/pagefind/pagefind#readme.
+
+10. runtime-core-3.5.17
+Copyright (c) runtime-core authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/runtime-core#readme.
+
+11. github.com/mark3labs/mcp-go-0.43.0
+Copyright (c) github.com/mark3labs/mcp-go authors.
+You may obtain the source code and detailed information about this component at github.com/mark3labs/mcp-go.
+
+12. sortablejs-1.15.8
+Copyright (c) sortablejs authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/sortablejs.
+
+13. @popperjs/core-2.11.8
+Copyright (c) @popperjs/core authors.
+You may obtain the source code and detailed information about this component at https://www.npmjs.com/package/@popperjs/core.
+
+14. events-3.3.0
+Copyright Joyent,  Inc. and other Node contributors.
+
+15. hookable-5.5.3
+Copyright (c) hookable authors.
+You may obtain the source code and detailed information about this component at https://github.com/unjs/hookable#readme.
+
+16. lodash-es-4.17.12
+Copyright (c) lodash-es authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/lodash-es.
+
+17. @babel/parser-7.28.0
+Copyright (c) @babel/parser authors.
+You may obtain the source code and detailed information about this component at https://babel.dev/docs/en/next/babel-parser.
+
+18. vue-i18n-11.1.12
+Copyright (c) vue-i18n authors.
+You may obtain the source code and detailed information about this component at https://github.com/intlify/vue-i18n/tree/master/packages/vue-i18n#readme.
+
+19. @vue/runtime-core-3.5.17
+Copyright (c) @vue/runtime-core authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/runtime-core#readme.
+
+20. trusted-types-2.0.7
+Copyright (c) trusted-types authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/trusted-types.
+
+21. pinia-3.0.3
+Copyright (c) pinia authors.
+You may obtain the source code and detailed information about this component at https://pinia.vuejs.org.
+
+22. github.com/dustin/go-humanize-1.0.1
+Copyright (c) github.com/dustin/go-humanize authors.
+You may obtain the source code and detailed information about this component at github.com/dustin/go-humanize.
+
+23. combined-stream-1.0.8
+Copyright (c) 2011 Debuggable Limited <felix@debuggable.com>
+
+24. ajv-keywords-5.1.0
+Copyright (c) 2016 Evgeny Poberezkin
+
+25. github.com/yanyiwu/gojieba-1.4.5
+Copyright (c) github.com/yanyiwu/gojieba authors.
+You may obtain the source code and detailed information about this component at github.com/yanyiwu/gojieba.
+
+26. watchpack-2.4.4
+Copyright (c) 2014 - 2015 Tobias Koppers, Copyright JS Foundation and other contributors
+
+27. wast-printer-1.14.1
+Copyright (c) wast-printer authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+28. @vue/compiler-ssr-3.5.17
+Copyright (c) @vue/compiler-ssr authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-ssr#readme.
+
+29. github.com/pelletier/go-toml-2.2.3
+Copyright (c) github.com/pelletier/go-toml authors.
+You may obtain the source code and detailed information about this component at github.com/pelletier/go-toml.
+
+30. @vue/runtime-dom-3.5.17
+Copyright (c) @vue/runtime-dom authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme.
+
+31. anyio-4.12.0
+Copyright (c) anyio authors.
+You may obtain the source code and detailed information about this component at https://github.com/agronholm/anyio.
+
+32. terser-webpack-plugin-5.3.14
+Copyright JS Foundation and other contributors, copyright,  licenses and etc) will be preserved
+
+33. fastapi-0.122.0
+Copyright (c) fastapi authors.
+You may obtain the source code and detailed information about this component at https://github.com/fastapi/fastapi.
+
+34. go.uber.org/dig-1.18.1
+Copyright (c) go.uber.org/dig authors.
+You may obtain the source code and detailed information about this component at go.uber.org/dig.
+
+35. @vue/compiler-core-3.5.17
+Copyright (c) @vue/compiler-core authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-core#readme.
+
+36. ajv-formats-2.1.1
+Copyright (c) 2020 Evgeny Poberezkin
+
+37. h11-0.16.0
+Copyright (c) 2016 Nathaniel J. Smith <njs@pobox.com> and other contributors
+
+38. resolve-uri-3.1.2
+Copyright (c) resolve-uri authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/resolve-uri#readme.
+
+39. ieee754-1.13.2
+Copyright (c) ieee754 authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+40. types-7.28.1
+Copyright (c) types authors.
+You may obtain the source code and detailed information about this component at https://babel.dev/docs/en/next/babel-types.
+
+41. has-flag-4.0.0
+Copyright [Sindre Sorhus](https:  sindresorhus.com), Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
+
+42. acorn-8.15.0
+Copyright (c) acorn authors.
+You may obtain the source code and detailed information about this component at https://github.com/acornjs/acorn.
+
+43. go.uber.org/multierr-1.11.0
+Copyright (c) go.uber.org/multierr authors.
+You may obtain the source code and detailed information about this component at go.uber.org/multierr.
+
+44. merge-stream-2.0.0
+Copyright (c) Stephen Sugden <me@stephensugden.com> (stephensugden.com)
+
+45. github.com/sourcegraph/conc-0.3.0
+Copyright (c) github.com/sourcegraph/conc authors.
+You may obtain the source code and detailed information about this component at github.com/sourcegraph/conc.
+
+46. github.com/gobwas/httphead-0.1.0
+Copyright (c) github.com/gobwas/httphead authors.
+You may obtain the source code and detailed information about this component at github.com/gobwas/httphead.
+
+47. github.com/invopop/jsonschema-0.13.0
+Copyright (c) github.com/invopop/jsonschema authors.
+You may obtain the source code and detailed information about this component at github.com/invopop/jsonschema.
+
+48. @types/node-22.16.3
+Copyright (c) @types/node authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node.
+
+49. vue-router-4.5.1
+Copyright (c) vue-router authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/router#readme.
+
+50. supports-color-8.1.1
+(c) Sindre Sorhus <sindresorhus@gmail.com> (https:  sindresorhus.com), Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com), Copyright [Sindre Sorhus](http:  sindresorhus.com)
+
+51. linux-arm64-1.3.0
+Copyright (c) linux-arm64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/cloudcannon/pagefind#readme.
+
+52. mcp-default
+Copyright (c) mcp authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/mcp.
+
+53. es-set-tostringtag-2.1.0
+Copyright (c) 2022 ECMAScript Shims
+
+54. escalade-3.2.0
+Copyright [Luke Edwards](https:  lukeed.com), Copyright (c) Luke Edwards <luke.edwards05@gmail.com> (lukeed.com)
+
+55. core-base-11.1.12
+Copyright (c) core-base authors.
+You may obtain the source code and detailed information about this component at https://github.com/intlify/vue-i18n/tree/master/packages/core-base#readme.
+
+56. wasm-opt-1.14.1
+Copyright (c) wasm-opt authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+57. devtools-shared-7.7.7
+Copyright (c) devtools-shared authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+58. httpx-sse-0.4.3
+Copyright (c) httpx-sse authors.
+You may obtain the source code and detailed information about this component at https://github.com/florimondmanca/httpx-sse.
+
+59. asynckit-0.4.0
+Copyright (c) 2016 Alex Indigo
+
+60. parser-7.28.0
+Copyright (c) parser authors.
+You may obtain the source code and detailed information about this component at https://babel.dev/docs/en/next/babel-parser.
+
+61. jsonschema-specifications-2025.9.1
+Copyright (c) jsonschema-specifications authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/jsonschema-specifications/.
+
+62. node-22.16.3
+Copyright (c) node authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node.
+
+63. linux-x64-1.3.0
+Copyright (c) linux-x64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/cloudcannon/pagefind#readme.
+
+64. @intlify/core-base-11.1.12
+Copyright (c) @intlify/core-base authors.
+You may obtain the source code and detailed information about this component at https://github.com/intlify/vue-i18n/tree/master/packages/core-base#readme.
+
+65. wasm-gen-1.14.1
+Copyright (c) wasm-gen authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+66. @vue/devtools-api-7.7.7
+Copyright (c) @vue/devtools-api authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+67. @intlify/shared-11.1.12
+Copyright (c) @intlify/shared authors.
+You may obtain the source code and detailed information about this component at https://github.com/intlify/vue-i18n/tree/master/packages/shared#readme.
+
+68. @jridgewell/sourcemap-codec-1.5.4
+Copyright (c) @jridgewell/sourcemap-codec authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/sourcemap-codec.
+
+69. markitdown-0.1.3
+Copyright (c) markitdown authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/markitdown/.
+
+70. @webassemblyjs/helper-numbers-1.13.2
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+71. @jridgewell/trace-mapping-0.3.29
+Copyright (c) @jridgewell/trace-mapping authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/trace-mapping.
+
+72. gopkg.in/yaml.v3-3.0.1
+Copyright (c) gopkg.in/yaml.v3 authors.
+You may obtain the source code and detailed information about this component at https://goproxy.cn/gopkg.in/yaml.v3/@v/v3.0.1.zip.
+
+73. json-schema-traverse-1.0.0
+Copyright (c) 2017 Evgeny Poberezkin
+
+74. github.com/spf13/viper-1.20.1
+Copyright (c) github.com/spf13/viper authors.
+You may obtain the source code and detailed information about this component at github.com/spf13/viper.
+
+75. form-data-4.0.4
+Copyright (c) form-data authors.
+You may obtain the source code and detailed information about this component at https://github.com/form-data/form-data#readme.
+
+76. github.com/jinzhu/now-1.1.5
+Copyright (c) github.com/jinzhu/now authors.
+You may obtain the source code and detailed information about this component at github.com/jinzhu/now.
+
+77. lodash-es-4.17.21
+Copyright 2012-2015 The Dojo Foundation <http:  dojofoundation.org >, Copyright 2012-2016 The Dojo Foundation <http:  dojofoundation.org >, Copyright 2012 John-David Dalton <http:  allyoucanleet.com >, Copyright (c) 2012 Kit Cambridge., Copyright (c) 2007,  Parakey Inc., Copyright JS Foundation and other contributors <https:  js.foundation >, Copyright (c) 2009-2013 Jeremy Ashkenas,  DocumentCloud and Investigative, Copyright (c) 2009-2014 Jeremy Ashkenas,  DocumentCloud and Investigative, Copyright (c) 2009-2015 Jeremy Ashkenas,  DocumentCloud and Investigative, Copyright (c) 2010-2012 Jeremy Ashkenas,  DocumentCloud, Copyright (c) 2009-2016 Jeremy Ashkenas,  DocumentCloud and Investigative, Copyright (c) 2010-2013 Jeremy Ashkenas,  DocumentCloud, Copyright (c) 2009-2016 Jeremy Ashkenas,  DocumentCloud and Investigative, Copyright (c) 2010-2014 Jeremy Ashkenas,  DocumentCloud, Copyright 2012-2013 The Dojo Foundation <http:  dojofoundation.org >, Copyright (c) 2010-2015 Jeremy Ashkenas,  DocumentCloud, Copyright 2010-2012 Mathias Bynens <http:  mathiasbynens.be >, Copyright (c) 2010-2016 Jeremy Ashkenas,  DocumentCloud, Copyright 2010-2013 Mathias Bynens <http:  mathiasbynens.be >, Copyright 2010-2015 Mathias Bynens <http:  mathiasbynens.be >, Copyright (c) 2009-2012 Jeremy Ashkenas,  DocumentCloud, Copyright 2011-2012 John-David Dalton <http:  allyoucanleet.com >, Copyright (c) 2009-2013 Jeremy Ashkenas,  DocumentCloud, Copyright 2011-2013 John-David Dalton <http:  allyoucanleet.com >, Copyright (c) 2010-2013 Brian Cavalier and John Hann, Copyright jQuery Foundation and other contributors <https:  jquery.org >, Copyright (c) 2010-2011,  The Dojo Foundation, Copyright OpenJS Foundation and other contributors <https:  openjsf.org >
+
+78. @webassemblyjs/helper-wasm-bytecode-1.13.2
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+79. textract-1.6.5
+Copyright (c) textract authors.
+You may obtain the source code and detailed information about this component at https://github.com/deanmalmgren/textract.
+
+80. @babel/helper-string-parser-7.27.1
+Copyright (c) 2014-present Sebastian McKenzie and other contributors
+
+81. @webassemblyjs/utf8-1.13.2
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+82. birpc-2.5.0
+Copyright (c) birpc authors.
+You may obtain the source code and detailed information about this component at https://github.com/antfu/birpc#readme.
+
+83. typing-inspection-0.4.2
+Copyright (c) typing-inspection authors.
+You may obtain the source code and detailed information about this component at https://github.com/pydantic/typing-inspection.
+
+84. tapable-2.2.2
+Copyright (c) tapable authors.
+You may obtain the source code and detailed information about this component at https://github.com/webpack/tapable.
+
+85. gopd-1.2.0
+Copyright (c) 2022 Jordan Harband
+
+86. devtools-api-6.6.4
+Copyright (c) devtools-api authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+87. annotated-types-0.7.0
+Copyright (c) 2022 the contributors
+
+88. @webassemblyjs/ast-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+89. hasown-2.0.2
+Copyright (c) 2014 Radu Brehar
+
+90. safe-buffer-5.2.1
+Copyright (c) Feross Aboukhadijeh, Copyright (C) [Feross Aboukhadijeh](http:  feross.org)
+
+91. darwin-arm64-1.3.0
+Copyright (c) darwin-arm64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/cloudcannon/pagefind#readme.
+
+92. helper-api-error-1.13.2
+Copyright (c) helper-api-error authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+93. github.com/panjf2000/ants-2.11.2
+Copyright (c) github.com/panjf2000/ants authors.
+You may obtain the source code and detailed information about this component at github.com/panjf2000/ants.
+
+94. superjson-2.2.2
+Copyright (c) superjson authors.
+You may obtain the source code and detailed information about this component at https://github.com/blitz-js/superjson#readme.
+
+95. github.com/mattn/go-isatty-0.0.20
+Copyright (c) github.com/mattn/go-isatty authors.
+You may obtain the source code and detailed information about this component at github.com/mattn/go-isatty.
+
+96. @vue/compiler-dom-3.5.17
+Copyright (c) @vue/compiler-dom authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-dom#readme.
+
+97. estree-walker-2.0.2
+Copyright (c) estree-walker authors.
+You may obtain the source code and detailed information about this component at https://github.com/Rich-Harris/estree-walker#readme.
+
+98. ajv-8.17.1
+Copyright (c) 2015-2021 Evgeny Poberezkin
+
+99. mime-types-2.1.35
+Copyright (c) 2014 Jonathan Ong <me@jongleberry.com>, Copyright (c) 2015 Douglas Christopher Wilson <doug@somethingdoug.com>
+
+100. setuptools-80.9.0
+(c) 2014 YOOtheme   MIT License   , Copyright (C) 2016 Jason R Coombs <jaraco@jaraco.com>, Copyright (c) 2010 - 2016 jsPlumb (hello@jsplumbtoolkit.com)
+
+101. reactivity-3.5.17
+Copyright (c) reactivity authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/reactivity#readme.
+
+102. @types/tinycolor2-1.4.6
+Copyright (c) @types/tinycolor2 authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/tinycolor2.
+
+103. commander-2.20.3
+Copyright (c) 2011 TJ Holowaychuk <tj@vision-media.ca>
+
+104. utf8-1.13.2
+Copyright (c) utf8 authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+105. json-schema-7.0.15
+Copyright (c) json-schema authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/json-schema.
+
+106. @vue/compiler-sfc-3.5.17
+Copyright (c) @vue/compiler-sfc authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-sfc#readme.
+
+107. schema-utils-4.3.2
+Copyright JS Foundation and other contributors
+
+108. github.com/subosito/gotenv-1.6.0
+Copyright (c) github.com/subosito/gotenv authors.
+You may obtain the source code and detailed information about this component at github.com/subosito/gotenv.
+
+109. es-define-property-1.0.1
+Copyright (c) es-define-property authors.
+You may obtain the source code and detailed information about this component at https://github.com/ljharb/es-define-property#readme.
+
+110. windows-x64-1.3.0
+Copyright (c) windows-x64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/cloudcannon/pagefind#readme.
+
+111. referencing-0.37.0
+Copyright (c) referencing authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/referencing/.
+
+112. source-map-0.3.10
+Copyright (c) source-map authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/source-map.
+
+113. github.com/chromedp/sysutil-1.1.0
+Copyright (c) github.com/chromedp/sysutil authors.
+You may obtain the source code and detailed information about this component at github.com/chromedp/sysutil.
+
+114. github.com/chromedp/chromedp-0.14.2
+Copyright (c) github.com/chromedp/chromedp authors.
+You may obtain the source code and detailed information about this component at github.com/chromedp/chromedp.
+
+115. docreader-1.0
+Copyright (c) docreader authors.
+You may obtain the source code and detailed information about this component at https://github.com/CBWhiz/docreader.
+
+116. estree-1.0.8
+Copyright (c) estree authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree.
+
+117. darwin-x64-1.3.0
+Copyright (c) darwin-x64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/cloudcannon/pagefind#readme.
+
+118. @jridgewell/source-map-0.3.10
+Copyright (c) @jridgewell/source-map authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/source-map.
+
+119. @types/lodash-es-4.17.12
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+120. @microsoft/fetch-event-source-2.0.1
+Copyright (c) @microsoft/fetch-event-source authors.
+You may obtain the source code and detailed information about this component at https://www.npmjs.com/package/@microsoft/fetch-event-source.
+
+121. has-symbols-1.1.0
+Copyright (c) 2016 Jordan Harband
+
+122. server-renderer-3.5.17
+Copyright (c) server-renderer authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/server-renderer#readme.
+
+123. @vue/server-renderer-3.5.17
+Copyright (c) @vue/server-renderer authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/server-renderer#readme.
+
+124. vue-3.5.17
+Copyright (c) vue authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/vue#readme.
+
+125. @types/papaparse-5.5.0
+Copyright (c) @types/papaparse authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/papaparse.
+
+126. function-bind-1.1.2
+Copyright (c) 2013 Raynos.
+
+127. axios-1.13.2
+Copyright (c) axios authors.
+You may obtain the source code and detailed information about this component at https://axios-http.com.
+
+128. @webassemblyjs/wasm-gen-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+129. gorm.io/gorm-1.25.12
+Copyright (c) gorm.io/gorm authors.
+You may obtain the source code and detailed information about this component at gorm.io/gorm.
+
+130. @pagefind/windows-x64-1.3.0
+Copyright (c) @pagefind/windows-x64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/pagefind/pagefind#readme.
+
+131. github.com/lib/pq-1.10.9
+Copyright (c) github.com/lib/pq authors.
+You may obtain the source code and detailed information about this component at github.com/lib/pq.
+
+132. github.com/jackc/puddle-2.2.2
+Copyright (c) github.com/jackc/puddle authors.
+You may obtain the source code and detailed information about this component at github.com/jackc/puddle.
+
+133. mime-db-1.52.0
+Copyright (c) 2014 Jonathan Ong <me@jongleberry.com>, Copyright (c) 2015-2022 Douglas Christopher Wilson <doug@somethingdoug.com>
+
+134. github.com/robfig/cron-3.0.1
+Copyright (c) github.com/robfig/cron authors.
+You may obtain the source code and detailed information about this component at github.com/robfig/cron.
+
+135. buffer-from-1.1.2
+Copyright (c) 2016,  2018 Linus Unneb  ck
+
+136. json-parse-even-better-errors-2.3.1
+Copyright 2017 Kat March  n, Copyright 2017 Kat March5.n
+
+137. @types/eslint-scope-3.7.7
+Copyright (c) Microsoft Corporation.
+
+138. randombytes-2.1.0
+Copyright (c) 2017 crypto-browserify
+
+139. runtime-7.27.6
+Copyright (c) runtime authors.
+You may obtain the source code and detailed information about this component at https://babel.dev/docs/en/next/babel-runtime.
+
+140. github.com/buger/jsonparser-1.1.1
+Copyright (c) github.com/buger/jsonparser authors.
+You may obtain the source code and detailed information about this component at github.com/buger/jsonparser.
+
+141. marked-5.1.2
+Copyright (c) 2011-2018,  Christopher Jeffrey. (MIT License), Copyright (c) 2018+,  MarkedJS (https:  github.com markedjs ), Copyright    2004,  John Gruber, Copyright (c) 2011,  Christopher Jeffrey (http:  epsilon-not.net ), Copyright (c) 2011-2012,  Christopher Jeffrey. (MIT License), Copyright (c) 2011-2013,  Christopher Jeffrey. (MIT License), Copyright (c) 2011-2022,  Christopher Jeffrey. (MIT License), Copyright (c) 2011-2014,  Christopher Jeffrey. (MIT License), Copyright (c) 2011-2013,  Christopher Jeffrey (https:  github.com chjj ), Copyright (c) 2011-2014,  Christopher Jeffrey (https:  github.com chjj )
+
+142. @vue/devtools-api-6.6.4
+Copyright (c) @vue/devtools-api authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+143. github.com/jinzhu/inflection-1.0.0
+Copyright (c) github.com/jinzhu/inflection authors.
+You may obtain the source code and detailed information about this component at github.com/jinzhu/inflection.
+
+144. dunder-proto-1.0.1
+Copyright (c) dunder-proto authors.
+You may obtain the source code and detailed information about this component at https://github.com/es-shims/dunder-proto#readme.
+
+145. get-intrinsic-1.3.0
+Copyright (c) 2020 Jordan Harband
+
+146. is-what-4.1.16
+Copyright (c) 2018 Luca Ban - Mesqueeb, Copyright (c) 2018 Luca Ban - Mesqueeb Productions
+
+147. message-compiler-11.1.12
+Copyright (c) message-compiler authors.
+You may obtain the source code and detailed information about this component at https://github.com/intlify/vue-i18n/tree/master/packages/message-compiler#readme.
+
+148. helper-string-parser-7.27.1
+Copyright (c) helper-string-parser authors.
+You may obtain the source code and detailed information about this component at https://babel.dev/docs/en/next/babel-helper-string-parser.
+
+149. github.com/spf13/cast-1.10.0
+Copyright (c) github.com/spf13/cast authors.
+You may obtain the source code and detailed information about this component at github.com/spf13/cast.
+
+150. tdesign-vue-next-1.17.2
+Copyright (c) tdesign-vue-next authors.
+You may obtain the source code and detailed information about this component at https://github.com/Tencent/tdesign-vue-next/blob/develop/README.md.
+
+151. github.com/clbanning/mxj-1.8.4
+Copyright (c) github.com/clbanning/mxj authors.
+You may obtain the source code and detailed information about this component at github.com/clbanning/mxj.
+
+152. github.com/cespare/xxhash-2.3.0
+Copyright (c) github.com/cespare/xxhash authors.
+You may obtain the source code and detailed information about this component at github.com/cespare/xxhash.
+
+153. require-from-string-2.0.2
+Copyright [Vsevolod Strukchinsky](http:  github.com floatdrop), Copyright (c) Vsevolod Strukchinsky <floatdrop@gmail.com> (github.com floatdrop)
+
+154. github.com/olekukonko/tablewriter-0.0.5
+Copyright (c) github.com/olekukonko/tablewriter authors.
+You may obtain the source code and detailed information about this component at github.com/olekukonko/tablewriter.
+
+155. @vue/devtools-shared-7.7.7
+Copyright (c) @vue/devtools-shared authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+156. papaparse-5.5.0
+Copyright (c) papaparse authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/papaparse.
+
+157. ast-1.14.1
+Copyright (c) ast authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+158. github.com/rivo/uniseg-0.4.7
+Copyright (c) github.com/rivo/uniseg authors.
+You may obtain the source code and detailed information about this component at github.com/rivo/uniseg.
+
+159. runtime-dom-3.5.17
+Copyright (c) runtime-dom authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme.
+
+160. pydantic-2.12.5
+Copyright (c) pydantic authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/pydantic/.
+
+161. helper-wasm-section-1.14.1
+Copyright (c) helper-wasm-section authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+162. github.com/gin-contrib/sse-1.0.0
+Copyright (c) github.com/gin-contrib/sse authors.
+You may obtain the source code and detailed information about this component at github.com/gin-contrib/sse.
+
+163. gopkg.in/yaml-3.0.1
+Copyright (c) gopkg.in/yaml authors.
+You may obtain the source code and detailed information about this component at gopkg.in/yaml.v3.
+
+164. github.com/mattn/go-runewidth-0.0.15
+Copyright (c) github.com/mattn/go-runewidth authors.
+You may obtain the source code and detailed information about this component at github.com/mattn/go-runewidth.
+
+165. @types/trusted-types-2.0.7
+Copyright (c) @types/trusted-types authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/trusted-types.
+
+166. perfect-debounce-1.0.0
+Copyright (c) perfect-debounce authors.
+You may obtain the source code and detailed information about this component at https://github.com/unjs/perfect-debounce#readme.
+
+167. webpack-sources-3.3.3
+Copyright (c) webpack-sources authors.
+You may obtain the source code and detailed information about this component at https://github.com/webpack/webpack-sources#readme.
+
+168. @babel/types-7.28.1
+Copyright (c) @babel/types authors.
+You may obtain the source code and detailed information about this component at https://babel.dev/docs/en/next/babel-types.
+
+169. @intlify/message-compiler-11.1.12
+Copyright (c) @intlify/message-compiler authors.
+You may obtain the source code and detailed information about this component at https://github.com/intlify/vue-i18n/tree/master/packages/message-compiler#readme.
+
+170. github.com/tiendc/go-deepcopy-1.7.1
+Copyright (c) github.com/tiendc/go-deepcopy authors.
+You may obtain the source code and detailed information about this component at github.com/tiendc/go-deepcopy.
+
+171. @vue/devtools-kit-7.7.7
+Copyright (c) @vue/devtools-kit authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+172. pydantic_core-2.41.5
+Copyright (c) pydantic_core authors.
+You may obtain the source code and detailed information about this component at https://github.com/pydantic/pydantic-core.
+
+173. @vue/shared-3.5.17
+Copyright (c) @vue/shared authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/shared#readme.
+
+174. @babel/runtime-7.27.6
+Copyright (c) 2014-present Sebastian McKenzie and other contributors
+
+175. qcloud_cos-3.3.6
+Copyright (c) qcloud_cos authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/qcloud_cos/.
+
+176. @jridgewell/gen-mapping-0.3.12
+Copyright (c) @jridgewell/gen-mapping authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping.
+
+177. lodash-4.17.20
+Copyright (c) lodash authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/lodash.
+
+178. tinycolor2-1.4.6
+Copyright (c) tinycolor2 authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/tinycolor2.
+
+179. gorm.io/driver/postgres-1.5.11
+Copyright (c) gorm.io/driver/postgres authors.
+You may obtain the source code and detailed information about this component at gorm.io/driver/postgres.
+
+180. github.com/json-iterator/go-1.1.12
+Copyright (c) github.com/json-iterator/go authors.
+You may obtain the source code and detailed information about this component at github.com/json-iterator/go.
+
+181. @webassemblyjs/wasm-edit-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+182. @types/estree-1.0.8
+Copyright (c) @types/estree authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree.
+
+183. dompurify-3.0.5
+Copyright (c) dompurify authors.
+You may obtain the source code and detailed information about this component at https://www.npmjs.com/package/dompurify.
+
+184. compiler-sfc-3.5.17
+Copyright (c) compiler-sfc authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-sfc#readme.
+
+185. github.com/pgvector/pgvector-go-0.3.0
+Copyright (c) github.com/pgvector/pgvector-go authors.
+You may obtain the source code and detailed information about this component at github.com/pgvector/pgvector-go.
+
+186. magic-string-0.30.17
+Copyright (c) magic-string authors.
+You may obtain the source code and detailed information about this component at https://github.com/rich-harris/magic-string#readme.
+
+187. chrome-trace-event-1.0.4
+Copyright (c) 2015 Joyent Inc. All rights reserved.
+
+188. pydantic-settings-2.12.0
+Copyright (c) pydantic-settings authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/pydantic-settings/.
+
+189. gen-mapping-0.3.12
+Copyright (c) gen-mapping authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping.
+
+190. is-what-3.14.1
+Copyright (c) 2018 Luca Ban - Mesqueeb
+
+191. @vue/reactivity-3.5.17
+Copyright (c) @vue/reactivity authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/reactivity#readme.
+
+192. es-module-lexer-1.7.0
+Copyright (c) es-module-lexer authors.
+You may obtain the source code and detailed information about this component at https://github.com/guybedford/es-module-lexer#readme.
+
+193. github.com/mailru/easyjson-0.9.0
+Copyright (c) github.com/mailru/easyjson authors.
+You may obtain the source code and detailed information about this component at github.com/mailru/easyjson.
+
+194. es-object-atoms-1.1.1
+Copyright (c) es-object-atoms authors.
+You may obtain the source code and detailed information about this component at https://github.com/ljharb/es-object-atoms#readme.
+
+195. github.com/cenkalti/backoff-5.0.2
+Copyright (c) github.com/cenkalti/backoff authors.
+You may obtain the source code and detailed information about this component at github.com/cenkalti/backoff.
+
+196. github.com/sagikazarmark/locafero-0.7.0
+Copyright (c) github.com/sagikazarmark/locafero authors.
+You may obtain the source code and detailed information about this component at github.com/sagikazarmark/locafero.
+
+197. @webassemblyjs/wasm-opt-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+198. @pagefind/darwin-arm64-1.3.0
+Copyright (c) @pagefind/darwin-arm64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/pagefind/pagefind#readme.
+
+199. wasm-parser-1.14.1
+Copyright (c) wasm-parser authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+200. @webassemblyjs/helper-buffer-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+201. papaparse-5.5.3
+Copyright (c) 2014 Matthew Holt, Copyright (c) 2015 Matthew Holt
+
+202. @pagefind/darwin-x64-1.3.0
+Copyright (c) @pagefind/darwin-x64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/pagefind/pagefind#readme.
+
+203. weknora-mcp-server-1.0.0
+Copyright (c) weknora-mcp-server authors.
+You may obtain the source code and detailed information about this component at https://github.com/NannaOlympicBroadcast/WeKnoraMCP.
+
+204. github.com/ollama/ollama-0.11.4
+Copyright (c) github.com/ollama/ollama authors.
+You may obtain the source code and detailed information about this component at github.com/ollama/ollama.
+
+205. github.com/golang-migrate/migrate-4.19.0
+Copyright (c) github.com/golang-migrate/migrate authors.
+You may obtain the source code and detailed information about this component at github.com/golang-migrate/migrate.
+
+206. jsonschema-4.25.1
+Copyright (c) jsonschema authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/jsonschema/.
+
+207. math-intrinsics-1.1.0
+Copyright (c) math-intrinsics authors.
+You may obtain the source code and detailed information about this component at https://github.com/es-shims/math-intrinsics#readme.
+
+208. fetch-event-source-2.0.1
+Copyright (c) fetch-event-source authors.
+You may obtain the source code and detailed information about this component at https://github.com/Azure/fetch-event-source#readme.
+
+209. call-bind-apply-helpers-1.0.2
+Copyright (c) call-bind-apply-helpers authors.
+You may obtain the source code and detailed information about this component at https://github.com/ljharb/call-bind-apply-helpers#readme.
+
+210. get-proto-1.0.1
+Copyright (c) get-proto authors.
+You may obtain the source code and detailed information about this component at https://github.com/ljharb/get-proto#readme.
+
+211. github.com/stretchr/testify-1.11.1
+Copyright (c) github.com/stretchr/testify authors.
+You may obtain the source code and detailed information about this component at github.com/stretchr/testify.
+
+212. @types/sortablejs-1.15.8
+Copyright (c) @types/sortablejs authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/sortablejs.
+
+213. github.com/gabriel-vasile/mimetype-1.4.8
+Copyright (c) github.com/gabriel-vasile/mimetype authors.
+You may obtain the source code and detailed information about this component at github.com/gabriel-vasile/mimetype.
+
+214. github.com/jackc/pgservicefile-0.0.0-20240606120523-5a60cdf6a761
+Copyright (c) github.com/jackc/pgservicefile authors.
+You may obtain the source code and detailed information about this component at github.com/jackc/pgservicefile.
+
+215. github.com/ugorji/go/codec-1.2.12
+Copyright (c) github.com/ugorji/go/codec authors.
+You may obtain the source code and detailed information about this component at github.com/ugorji/go/codec.
+
+216. webpack-5.100.1
+Copyright (c) webpack authors.
+You may obtain the source code and detailed information about this component at https://github.com/webpack/webpack.
+
+217. github.com/chromedp/cdproto-0.0.0-20250724212937-08a3db8b4327
+Copyright (c) github.com/chromedp/cdproto authors.
+You may obtain the source code and detailed information about this component at github.com/chromedp/cdproto.
+
+218. compiler-dom-3.5.17
+Copyright (c) compiler-dom authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-dom#readme.
+
+219. compiler-core-3.5.17
+Copyright (c) compiler-core authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-core#readme.
+
+220. github.com/mitchellh/mapstructure-1.4.3
+Copyright (c) github.com/mitchellh/mapstructure authors.
+You may obtain the source code and detailed information about this component at github.com/mitchellh/mapstructure.
+
+221. nanoid-3.3.11
+Copyright 2017 Andrey Sitnik <andrey@sitnik.ru>
+
+222. @types/validator-13.15.2
+Copyright (c) @types/validator authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/validator.
+
+223. floating-point-hex-parser-1.13.2
+Copyright (c) floating-point-hex-parser authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+224. delayed-stream-1.0.0
+Copyright (c) 2011 Debuggable Limited <felix@debuggable.com>
+
+225. helper-wasm-bytecode-1.13.2
+Copyright (c) helper-wasm-bytecode authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+226. github.com/mozillazg/go-httpheader-0.2.1
+Copyright (c) github.com/mozillazg/go-httpheader authors.
+You may obtain the source code and detailed information about this component at github.com/mozillazg/go-httpheader.
+
+227. @webassemblyjs/helper-api-error-1.13.2
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+228. update-browserslist-db-1.1.3
+Copyright 2022 Andrey Sitnik <andrey@sitnik.ru> and other contributors, Copyright 2014 Andrey Sitnik <andrey@sitnik.ru>
+
+229. validator-13.15.23
+Copyright (c) validator authors.
+You may obtain the source code and detailed information about this component at https://github.com/jfstn/Validator#readme.
+
+230. wasm-edit-1.14.1
+Copyright (c) wasm-edit authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+231. dayjs-1.11.10
+Copyright (c) 2018-PRESENT,  iamkun
+
+232. proxy-from-env-1.1.0
+Copyright (C) 2016-2018 Rob Wu <rob@robwu.nl>
+
+233. github.com/jackc/pgpassfile-1.0.0
+Copyright (c) github.com/jackc/pgpassfile authors.
+You may obtain the source code and detailed information about this component at github.com/jackc/pgpassfile.
+
+234. tdesign-icons-vue-next-0.4.1
+Copyright (c) tdesign-icons-vue-next authors.
+You may obtain the source code and detailed information about this component at https://github.com/Tencent/tdesign-icons/blob/develop/README.md.
+
+235. @types/eslint-9.6.1
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+236. sourcemap-codec-1.5.4
+Copyright (c) sourcemap-codec authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/sourcemap-codec.
+
+237. loader-runner-4.3.0
+Copyright (c) Tobias Koppers @sokra
+
+238. github.com/jackc/pgx-5.7.2
+Copyright (c) github.com/jackc/pgx authors.
+You may obtain the source code and detailed information about this component at github.com/jackc/pgx.
+
+239. charset-normalizer-3.4.4
+Copyright (c) charset-normalizer authors.
+You may obtain the source code and detailed information about this component at https://github.com/Ousret/charset_normalizer.
+
+240. @webassemblyjs/wasm-parser-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+241. github.com/gin-gonic/gin-1.10.0
+Copyright (c) github.com/gin-gonic/gin authors.
+You may obtain the source code and detailed information about this component at github.com/gin-gonic/gin.
+
+242. acorn-import-phases-1.0.4
+Copyright (c) acorn-import-phases authors.
+You may obtain the source code and detailed information about this component at https://github.com/nicolo-ribaudo/acorn-import-phases#readme.
+
+243. postcss-8.5.6
+Copyright (c) postcss authors.
+You may obtain the source code and detailed information about this component at https://postcss.org/.
+
+244. @types/lodash-4.17.20
+Copyright (c) @types/lodash authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/lodash.
+
+245. github.com/sirupsen/logrus-1.9.3
+Copyright (c) github.com/sirupsen/logrus authors.
+You may obtain the source code and detailed information about this component at github.com/sirupsen/logrus.
+
+246. @pagefind/linux-x64-1.3.0
+Copyright (c) @pagefind/linux-x64 authors.
+You may obtain the source code and detailed information about this component at https://github.com/pagefind/pagefind#readme.
+
+247. github.com/go-playground/locales-0.14.1
+Copyright (c) github.com/go-playground/locales authors.
+You may obtain the source code and detailed information about this component at github.com/go-playground/locales.
+
+248. github.com/andybalholm/brotli-1.1.0
+Copyright (c) github.com/andybalholm/brotli authors.
+You may obtain the source code and detailed information about this component at github.com/andybalholm/brotli.
+
+249. node-releases-2.0.19
+Copyright (c) 2017 Sergey Rubanov (https:  github.com chicoxyzzy)
+
+250. neo-async-2.6.2
+Copyright (c) 2014-2018 Suguru Motegi
+
+251. eslint-9.6.1
+Copyright (c) eslint authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/eslint.
+
+252. github.com/dgryski/go-rendezvous-0.0.0-20200823014737-9f7001d12a5f
+Copyright (c) github.com/dgryski/go-rendezvous authors.
+You may obtain the source code and detailed information about this component at github.com/dgryski/go-rendezvous.
+
+253. jest-worker-27.5.1
+Copyright (c) Facebook,  Inc. and its affiliates.
+
+254. attrs-25.4.0
+Copyright (c) attrs authors.
+You may obtain the source code and detailed information about this component at https://pypi.org/project/attrs/.
+
+255. helper-buffer-1.14.1
+Copyright (c) helper-buffer authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+256. @types/json-schema-7.0.15
+Copyright (c) Microsoft Corporation.
+
+257. @jridgewell/resolve-uri-3.1.2
+Copyright 2019 Justin Ridgewell <jridgewell@google.com>
+
+258. fast-deep-equal-3.1.3
+Copyright (c) 2017 Evgeny Poberezkin
+
+259. shared-11.1.12
+Copyright (c) shared authors.
+You may obtain the source code and detailed information about this component at https://github.com/intlify/vue-i18n/tree/master/packages/shared#readme.
+
+260. has-tostringtag-1.0.2
+Copyright (c) 2021 Inspect JS
+
+261. github.com/klauspost/cpuid-2.2.10
+Copyright (c) github.com/klauspost/cpuid authors.
+You may obtain the source code and detailed information about this component at github.com/klauspost/cpuid.
+
+262. ollama-0.6.1
+Copyright (c) ollama authors.
+You may obtain the source code and detailed information about this component at https://ollama.com.
+
+263. helper-numbers-1.13.2
+Copyright (c) helper-numbers authors.
+You may obtain the source code and detailed information about this component at https://github.com/xtuc/webassemblyjs#readme.
+
+264. github.com/gobwas/ws-1.4.0
+Copyright (c) github.com/gobwas/ws authors.
+You may obtain the source code and detailed information about this component at github.com/gobwas/ws.
+
+265. @webassemblyjs/floating-point-hex-parser-1.13.2
+Copyright (c) 2017 Mauro Bringolf
+
+266. shared-3.5.17
+Copyright (c) shared authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/shared#readme.
+
+267. copy-anything-3.0.5
+Copyright (c) 2018 Luca Ban
+
+268. github.com/gobwas/pool-0.2.1
+Copyright (c) github.com/gobwas/pool authors.
+You may obtain the source code and detailed information about this component at github.com/gobwas/pool.
+
+269. trace-mapping-0.3.29
+Copyright (c) trace-mapping authors.
+You may obtain the source code and detailed information about this component at https://github.com/jridgewell/sourcemaps/tree/main/packages/trace-mapping.
+
+270. @babel/helper-validator-identifier-7.27.1
+Copyright (c) 2014-present Sebastian McKenzie and other contributors
+
+271. github.com/rs/xid-1.6.0
+Copyright (c) github.com/rs/xid authors.
+You may obtain the source code and detailed information about this component at github.com/rs/xid.
+
+272. helper-validator-identifier-7.27.1
+Copyright (c) helper-validator-identifier authors.
+You may obtain the source code and detailed information about this component at https://www.npmjs.com/package/helper-validator-identifier.
+
+273. urllib3-2.5.0
+Copyright (c) 2008-2020 Andrey Petrov and contributors (see CONTRIBUTORS.txt)
+
+274. devtools-kit-7.7.7
+Copyright (c) devtools-kit authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/devtools#readme.
+
+275. compiler-ssr-3.5.17
+Copyright (c) compiler-ssr authors.
+You may obtain the source code and detailed information about this component at https://github.com/vuejs/core/tree/main/packages/compiler-ssr#readme.
+
+276. rfdc-1.4.1
+Copyright 2019  David Mark Clements <david.mark.clements@gmail.com>
+
+277. enhanced-resolve-5.18.2
+Copyright (c) enhanced-resolve authors.
+You may obtain the source code and detailed information about this component at http://github.com/webpack/enhanced-resolve.
+
+278. github.com/hibiken/asynq-0.25.1
+Copyright (c) github.com/hibiken/asynq authors.
+You may obtain the source code and detailed information about this component at github.com/hibiken/asynq.
+
+279. mitt-3.0.1
+Copyright (c) 2021 Jason Miller, Copyright (c) 2017 Jason Miller, Copyright [Jason Miller](https:  jasonformat.com )
+
+280. follow-redirects-1.15.9
+Copyright 2017 Olivier Lalonde <olalonde@gmail.com>,  James Talmage <james@talmage.io>,  Ruben Verborgh
+
+281. csstype-3.1.3
+Copyright (c) 2017-2018 Fredrik Nicol
+
+282. github.com/leodido/go-urn-1.4.0
+Copyright (c) github.com/leodido/go-urn authors.
+You may obtain the source code and detailed information about this component at github.com/leodido/go-urn.
+
+283. @webassemblyjs/ieee754-1.13.2
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+284. github.com/klauspost/compress-1.18.0
+Copyright (c) github.com/klauspost/compress authors.
+You may obtain the source code and detailed information about this component at github.com/klauspost/compress.
+
+285. @webassemblyjs/wast-printer-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+286. es-errors-1.3.0
+Copyright (c) es-errors authors.
+You may obtain the source code and detailed information about this component at https://github.com/ljharb/es-errors#readme.
+
+287. github.com/tencentyun/cos-go-sdk-v5-0.7.65
+Copyright (c) github.com/tencentyun/cos-go-sdk-v5 authors.
+You may obtain the source code and detailed information about this component at github.com/tencentyun/cos-go-sdk-v5.
+
+288. @types/dompurify-3.0.5
+Copyright (c) @types/dompurify authors.
+You may obtain the source code and detailed information about this component at https://www.npmjs.com/package/@types/dompurify.
+
+289. tinycolor2-1.6.0
+Copyright (c),  Brian Grinstead,  http:  briangrinstead.com, Copyright (c) 2018 Foo Studio <developer@foostudio.mx>
+
+290. browserslist-4.25.1
+Copyright (c) browserslist authors.
+You may obtain the source code and detailed information about this component at https://github.com/browserslist/browserslist#readme.
+
+291. validator-13.15.2
+Copyright (c) validator authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/validator.
+
+292. github.com/go-playground/validator-10.26.0
+Copyright (c) github.com/go-playground/validator authors.
+You may obtain the source code and detailed information about this component at github.com/go-playground/validator.
+
+293. pagefind-1.3.0
+Copyright (c) pagefind authors.
+You may obtain the source code and detailed information about this component at https://github.com/CloudCannon/pagefind#readme.
+
+294. github.com/golang-jwt/jwt-5.3.0
+Copyright (c) github.com/golang-jwt/jwt authors.
+You may obtain the source code and detailed information about this component at github.com/golang-jwt/jwt.
+
+295. PyJWT-2.10.1
+Copyright (c) PyJWT authors.
+You may obtain the source code and detailed information about this component at https://github.com/jpadilla/pyjwt.
+
+296. undici-types-6.21.0
+Copyright (c) undici-types authors.
+You may obtain the source code and detailed information about this component at https://undici.nodejs.org.
+
+297. core-2.11.8
+Copyright (c) core authors.
+You may obtain the source code and detailed information about this component at https://www.npmjs.com/package/core.
+
+298. github.com/go-viper/mapstructure-2.2.1
+Copyright (c) github.com/go-viper/mapstructure authors.
+You may obtain the source code and detailed information about this component at github.com/go-viper/mapstructure.
+
+299. @webassemblyjs/helper-wasm-section-1.14.1
+Copyright (c) 2018 Sven Sauleau <sven@sauleau.com>
+
+300. eslint-scope-3.7.7
+Copyright (c) eslint-scope authors.
+You may obtain the source code and detailed information about this component at https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/eslint-scope.
+
+ 
+
+Terms of the mit: 
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
+
+Open Source Software Licensed under the mpl-2.0: 
+-------------------------------------------------------------------- 
+1. certifi-2023.7.22
+Copyright (c) certifi authors.
+You may obtain the source code and detailed information about this component at https://github.com/certifi/python-certifi.
+
+2. github.com/hashicorp/errwrap-1.1.0
+Copyright (c) github.com/hashicorp/errwrap authors.
+You may obtain the source code and detailed information about this component at github.com/hashicorp/errwrap.
+
+3. github.com/hashicorp/go-multierror-1.1.1
+Copyright (c) github.com/hashicorp/go-multierror authors.
+You may obtain the source code and detailed information about this component at github.com/hashicorp/go-multierror.
+
+4. dompurify-3.2.6
+Copyright 2015 Mario Heiderich, Copyright 2023 Dr.-Ing. Mario Heiderich,  Cure53
+
+ 
+
+Terms of the mpl-2.0: 
+Mozilla Public License Version 2.0
+==================================
+
+1. Definitions
+--------------
+
+1.1. "Contributor"
+    means each individual or legal entity that creates, contributes to
+    the creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+    means the combination of the Contributions of others (if any) used
+    by a Contributor and that particular Contributor's Contribution.
+
+1.3. "Contribution"
+    means Covered Software of a particular Contributor.
+
+1.4. "Covered Software"
+    means Source Code Form to which the initial Contributor has attached
+    the notice in Exhibit A, the Executable Form of such Source Code
+    Form, and Modifications of such Source Code Form, in each case
+    including portions thereof.
+
+1.5. "Incompatible With Secondary Licenses"
+    means
+
+    (a) that the initial Contributor has attached the notice described
+        in Exhibit B to the Covered Software; or
+
+    (b) that the Covered Software was made available under the terms of
+        version 1.1 or earlier of the License, but not also under the
+        terms of a Secondary License.
+
+1.6. "Executable Form"
+    means any form of the work other than Source Code Form.
+
+1.7. "Larger Work"
+    means a work that combines Covered Software with other material, in 
+    a separate file or files, that is not Covered Software.
+
+1.8. "License"
+    means this document.
+
+1.9. "Licensable"
+    means having the right to grant, to the maximum extent possible,
+    whether at the time of the initial grant or subsequently, any and
+    all of the rights conveyed by this License.
+
+1.10. "Modifications"
+    means any of the following:
+
+    (a) any file in Source Code Form that results from an addition to,
+        deletion from, or modification of the contents of Covered
+        Software; or
+
+    (b) any new file in Source Code Form that contains any Covered
+        Software.
+
+1.11. "Patent Claims" of a Contributor
+    means any patent claim(s), including without limitation, method,
+    process, and apparatus claims, in any patent Licensable by such
+    Contributor that would be infringed, but for the grant of the
+    License, by the making, using, selling, offering for sale, having
+    made, import, or transfer of either its Contributions or its
+    Contributor Version.
+
+1.12. "Secondary License"
+    means either the GNU General Public License, Version 2.0, the GNU
+    Lesser General Public License, Version 2.1, the GNU Affero General
+    Public License, Version 3.0, or any later versions of those
+    licenses.
+
+1.13. "Source Code Form"
+    means the form of the work preferred for making modifications.
+
+1.14. "You" (or "Your")
+    means an individual or a legal entity exercising rights under this
+    License. For legal entities, "You" includes any entity that
+    controls, is controlled by, or is under common control with You. For
+    purposes of this definition, "control" means (a) the power, direct
+    or indirect, to cause the direction or management of such entity,
+    whether by contract or otherwise, or (b) ownership of more than
+    fifty percent (50%) of the outstanding shares or beneficial
+    ownership of such entity.
+
+2. License Grants and Conditions
+--------------------------------
+
+2.1. Grants
+
+Each Contributor hereby grants You a world-wide, royalty-free,
+non-exclusive license:
+
+(a) under intellectual property rights (other than patent or trademark)
+    Licensable by such Contributor to use, reproduce, make available,
+    modify, display, perform, distribute, and otherwise exploit its
+    Contributions, either on an unmodified basis, with Modifications, or
+    as part of a Larger Work; and
+
+(b) under Patent Claims of such Contributor to make, use, sell, offer
+    for sale, have made, import, and otherwise transfer either its
+    Contributions or its Contributor Version.
+
+2.2. Effective Date
+
+The licenses granted in Section 2.1 with respect to any Contribution
+become effective for each Contribution on the date the Contributor first
+distributes such Contribution.
+
+2.3. Limitations on Grant Scope
+
+The licenses granted in this Section 2 are the only rights granted under
+this License. No additional rights or licenses will be implied from the
+distribution or licensing of Covered Software under this License.
+Notwithstanding Section 2.1(b) above, no patent license is granted by a
+Contributor:
+
+(a) for any code that a Contributor has removed from Covered Software;
+    or
+
+(b) for infringements caused by: (i) Your and any other third party's
+    modifications of Covered Software, or (ii) the combination of its
+    Contributions with other software (except as part of its Contributor
+    Version); or
+
+(c) under Patent Claims infringed by Covered Software in the absence of
+    its Contributions.
+
+This License does not grant any rights in the trademarks, service marks,
+or logos of any Contributor (except as may be necessary to comply with
+the notice requirements in Section 3.4).
+
+2.4. Subsequent Licenses
+
+No Contributor makes additional grants as a result of Your choice to
+distribute the Covered Software under a subsequent version of this
+License (see Section 10.2) or under the terms of a Secondary License (if
+permitted under the terms of Section 3.3).
+
+2.5. Representation
+
+Each Contributor represents that the Contributor believes its
+Contributions are its original creation(s) or it has sufficient rights
+to grant the rights to its Contributions conveyed by this License.
+
+2.6. Fair Use
+
+This License is not intended to limit any rights You have under
+applicable copyright doctrines of fair use, fair dealing, or other
+equivalents.
+
+2.7. Conditions
+
+Sections 3.1, 3.2, 3.3, and 3.4 are conditions of the licenses granted
+in Section 2.1.
+
+3. Responsibilities
+-------------------
+
+3.1. Distribution of Source Form
+
+All distribution of Covered Software in Source Code Form, including any
+Modifications that You create or to which You contribute, must be under
+the terms of this License. You must inform recipients that the Source
+Code Form of the Covered Software is governed by the terms of this
+License, and how they can obtain a copy of this License. You may not
+attempt to alter or restrict the recipients' rights in the Source Code
+Form.
+
+3.2. Distribution of Executable Form
+
+If You distribute Covered Software in Executable Form then:
+
+(a) such Covered Software must also be made available in Source Code
+    Form, as described in Section 3.1, and You must inform recipients of
+    the Executable Form how they can obtain a copy of such Source Code
+    Form by reasonable means in a timely manner, at a charge no more
+    than the cost of distribution to the recipient; and
+
+(b) You may distribute such Executable Form under the terms of this
+    License, or sublicense it under different terms, provided that the
+    license for the Executable Form does not attempt to limit or alter
+    the recipients' rights in the Source Code Form under this License.
+
+3.3. Distribution of a Larger Work
+
+You may create and distribute a Larger Work under terms of Your choice,
+provided that You also comply with the requirements of this License for
+the Covered Software. If the Larger Work is a combination of Covered
+Software with a work governed by one or more Secondary Licenses, and the
+Covered Software is not Incompatible With Secondary Licenses, this
+License permits You to additionally distribute such Covered Software
+under the terms of such Secondary License(s), so that the recipient of
+the Larger Work may, at their option, further distribute the Covered
+Software under the terms of either this License or such Secondary
+License(s).
+
+3.4. Notices
+
+You may not remove or alter the substance of any license notices
+(including copyright notices, patent notices, disclaimers of warranty,
+or limitations of liability) contained within the Source Code Form of
+the Covered Software, except that You may alter any license notices to
+the extent required to remedy known factual inaccuracies.
+
+3.5. Application of Additional Terms
+
+You may choose to offer, and to charge a fee for, warranty, support,
+indemnity or liability obligations to one or more recipients of Covered
+Software. However, You may do so only on Your own behalf, and not on
+behalf of any Contributor. You must make it absolutely clear that any
+such warranty, support, indemnity, or liability obligation is offered by
+You alone, and You hereby agree to indemnify every Contributor for any
+liability incurred by such Contributor as a result of warranty, support,
+indemnity or liability terms You offer. You may include additional
+disclaimers of warranty and limitations of liability specific to any
+jurisdiction.
+
+4. Inability to Comply Due to Statute or Regulation
+---------------------------------------------------
+
+If it is impossible for You to comply with any of the terms of this
+License with respect to some or all of the Covered Software due to
+statute, judicial order, or regulation then You must: (a) comply with
+the terms of this License to the maximum extent possible; and (b)
+describe the limitations and the code they affect. Such description must
+be placed in a text file included with all distributions of the Covered
+Software under this License. Except to the extent prohibited by statute
+or regulation, such description must be sufficiently detailed for a
+recipient of ordinary skill to be able to understand it.
+
+5. Termination
+--------------
+
+5.1. The rights granted under this License will terminate automatically
+if You fail to comply with any of its terms. However, if You become
+compliant, then the rights granted under this License from a particular
+Contributor are reinstated (a) provisionally, unless and until such
+Contributor explicitly and finally terminates Your grants, and (b) on an
+ongoing basis, if such Contributor fails to notify You of the
+non-compliance by some reasonable means prior to 60 days after You have
+come back into compliance. Moreover, Your grants from a particular
+Contributor are reinstated on an ongoing basis if such Contributor
+notifies You of the non-compliance by some reasonable means, this is the
+first time You have received notice of non-compliance with this License
+from such Contributor, and You become compliant prior to 30 days after
+Your receipt of the notice.
+
+5.2. If You initiate litigation against any entity by asserting a patent
+infringement claim (excluding declaratory judgment actions,
+counter-claims, and cross-claims) alleging that a Contributor Version
+directly or indirectly infringes any patent, then the rights granted to
+You by any and all Contributors for the Covered Software under Section
+2.1 of this License shall terminate.
+
+5.3. In the event of termination under Sections 5.1 or 5.2 above, all
+end user license agreements (excluding distributors and resellers) which
+have been validly granted by You or Your distributors under this License
+prior to termination shall survive termination.
+
+************************************************************************
+*                                                                      *
+*  6. Disclaimer of Warranty                                           *
+*  -------------------------                                           *
+*                                                                      *
+*  Covered Software is provided under this License on an "as is"       *
+*  basis, without warranty of any kind, either expressed, implied, or  *
+*  statutory, including, without limitation, warranties that the       *
+*  Covered Software is free of defects, merchantable, fit for a        *
+*  particular purpose or non-infringing. The entire risk as to the     *
+*  quality and performance of the Covered Software is with You.        *
+*  Should any Covered Software prove defective in any respect, You     *
+*  (not any Contributor) assume the cost of any necessary servicing,   *
+*  repair, or correction. This disclaimer of warranty constitutes an   *
+*  essential part of this License. No use of any Covered Software is   *
+*  authorized under this License except under this disclaimer.         *
+*                                                                      *
+************************************************************************
+
+************************************************************************
+*                                                                      *
+*  7. Limitation of Liability                                          *
+*  --------------------------                                          *
+*                                                                      *
+*  Under no circumstances and under no legal theory, whether tort      *
+*  (including negligence), contract, or otherwise, shall any           *
+*  Contributor, or anyone who distributes Covered Software as          *
+*  permitted above, be liable to You for any direct, indirect,         *
+*  special, incidental, or consequential damages of any character      *
+*  including, without limitation, damages for lost profits, loss of    *
+*  goodwill, work stoppage, computer failure or malfunction, or any    *
+*  and all other commercial damages or losses, even if such party      *
+*  shall have been informed of the possibility of such damages. This   *
+*  limitation of liability shall not apply to liability for death or   *
+*  personal injury resulting from such party's negligence to the       *
+*  extent applicable law prohibits such limitation. Some               *
+*  jurisdictions do not allow the exclusion or limitation of           *
+*  incidental or consequential damages, so this exclusion and          *
+*  limitation may not apply to You.                                    *
+*                                                                      *
+************************************************************************
+
+8. Litigation
+-------------
+
+Any litigation relating to this License may be brought only in the
+courts of a jurisdiction where the defendant maintains its principal
+place of business and such litigation shall be governed by laws of that
+jurisdiction, without reference to its conflict-of-law provisions.
+Nothing in this Section shall prevent a party's ability to bring
+cross-claims or counter-claims.
+
+9. Miscellaneous
+----------------
+
+This License represents the complete agreement concerning the subject
+matter hereof. If any provision of this License is held to be
+unenforceable, such provision shall be reformed only to the extent
+necessary to make it enforceable. Any law or regulation which provides
+that the language of a contract shall be construed against the drafter
+shall not be used to construe this License against a Contributor.
+
+10. Versions of the License
+---------------------------
+
+10.1. New Versions
+
+Mozilla Foundation is the license steward. Except as provided in Section
+10.3, no one other than the license steward has the right to modify or
+publish new versions of this License. Each version will be given a
+distinguishing version number.
+
+10.2. Effect of New Versions
+
+You may distribute the Covered Software under the terms of the version
+of the License under which You originally received the Covered Software,
+or under the terms of any subsequent version published by the license
+steward.
+
+10.3. Modified Versions
+
+If you create software not governed by this License, and you want to
+create a new license for such software, you may create and use a
+modified version of this License if you rename the license and remove
+any references to the name of the license steward (except to note that
+such modified license differs from this License).
+
+10.4. Distributing Source Code Form that is Incompatible With Secondary
+Licenses
+
+If You choose to distribute Source Code Form that is Incompatible With
+Secondary Licenses under the terms of this version of the License, the
+notice described in Exhibit B of this License must be attached.
+
+Exhibit A - Source Code Form License Notice
+-------------------------------------------
+
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+If it is not possible or desirable to put the notice in a particular
+file, then You may include the notice in a location (such as a LICENSE
+file in a relevant directory) where a recipient would be likely to look
+for such a notice.
+
+You may add additional accurate notices of copyright ownership.
+
+Exhibit B - "Incompatible With Secondary Licenses" Notice
+---------------------------------------------------------
+
+  This Source Code Form is "Incompatible With Secondary Licenses", as
+  defined by the Mozilla Public License, v. 2.0. 
+
+Open Source Software Licensed under the nolicense: 
+-------------------------------------------------------------------- 
+1. github.com/leodido/go-urn-1.4.0
+Copyright (c) github.com/leodido/go-urn authors.
+You may obtain the source code and detailed information about this component at github.com/leodido/go-urn.
+
+ 
+
+Terms of the nolicense: 
+license not found 
+
+Open Source Software Licensed under the unknown: 
+-------------------------------------------------------------------- 
+1. docx-0.2.4
+Copyright (c) docx authors.
+You may obtain the source code and detailed information about this component at http://github.com/mikemaccana/python-docx.
+
+ 
+
+Terms of the unknown:

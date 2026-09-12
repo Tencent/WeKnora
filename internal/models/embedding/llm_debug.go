@@ -91,3 +91,9 @@ func safeIdx(v []float32, i int) float32 {
 	}
 	return 0
 }
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (d *debugEmbedder) RequestAccountingSupported() bool {
+	inner, ok := d.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
+}

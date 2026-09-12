@@ -64,3 +64,9 @@ func wrapEmbeddingConcurrency(e Embedder, limit int) Embedder {
 	}
 	return &concurrencyEmbedder{inner: e, limit: limit}
 }
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (w *concurrencyEmbedder) RequestAccountingSupported() bool {
+	inner, ok := w.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
+}

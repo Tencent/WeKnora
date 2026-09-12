@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/call"
 	"github.com/Tencent/WeKnora/internal/types"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -102,6 +106,7 @@ func (e *NvidiaEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 }
 
 func (e *NvidiaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
+	ctx = call.WithNewBatch(ctx)
 	var resp *http.Response
 	var err error
 	url := e.baseURL + "/embeddings"
@@ -123,7 +128,20 @@ func (e *NvidiaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		}
 
 		// Rebuild request each time to ensure Body is valid
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		req, err := http.NewRequestWithContext(
+			call.WithMetadata(
+				ctx,
+				map[string]any{
+					"attempt_number": i +
+						1,
+				},
+			),
+			"POST",
+			url,
+			bytes.NewReader(
+				jsonData,
+			),
+		)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("NvidiaEmbedder failed to create request: %v", err)
 			continue
@@ -132,7 +150,10 @@ func (e *NvidiaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		req.Header.Set("Authorization", "Bearer "+e.apiKey)
 		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
-		resp, err = e.httpClient.Do(req)
+		resp, err = call.DoJSON(e.httpClient, req, "embedding")
+		if errors.Is(err, types.ErrModelAccounting) {
+			return nil, err
+		}
 		if err == nil {
 			return resp, nil
 		}
@@ -221,3 +242,6 @@ func (e *NvidiaEmbedder) GetDimensions() int {
 func (e *NvidiaEmbedder) GetModelID() string {
 	return e.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (e *NvidiaEmbedder) RequestAccountingSupported() bool { return true }

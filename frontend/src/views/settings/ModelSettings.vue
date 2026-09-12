@@ -6,6 +6,17 @@
           <h2>{{ $t('modelSettings.title') }}</h2>
           <p class="section-description">{{ $t('modelSettings.description') }}</p>
         </div>
+        <div class="section-header__actions">
+        <t-button
+          type="button"
+          theme="default"
+          variant="outline"
+          size="medium"
+          @click="showUsageDrawer = true"
+        >
+          <template #icon><chart-analytics-icon aria-hidden="true" /></template>
+          {{ $t('modelSettings.actions.usage') }}
+        </t-button>
         <t-button
           v-if="authStore.hasRole('admin')"
           type="button"
@@ -18,6 +29,7 @@
           <template #icon><play-circle-icon /></template>
           {{ $t('modelSettings.actions.debugModel') }}
         </t-button>
+        </div>
       </div>
 
       <div class="builtin-models-hint" role="note">
@@ -262,6 +274,7 @@
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
       @confirm="handleModelSave" />
     <ModelDebugDrawer v-model:visible="showDebugDrawer" :models="allModels" />
+    <ModelUsageDrawer v-model:visible="showUsageDrawer" :models="allModels" :can-edit-pricing="authStore.hasRole('admin')" />
 
   </div>
 </template>
@@ -269,11 +282,12 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
+import { AddIcon, PlayCircleIcon, ChartAnalyticsIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
+import ModelUsageDrawer from '@/components/ModelUsageDrawer.vue'
 import {
   listModels,
   createModel,
@@ -309,6 +323,7 @@ type FilterType = 'all' | ModelType
 
 const showDialog = ref(false)
 const showDebugDrawer = ref(false)
+const showUsageDrawer = ref(false)
 const showUsageDialog = ref(false)
 const usageConflict = ref<ModelUsageDetails | null>(null)
 const usageConflictModelName = ref('')
@@ -869,6 +884,8 @@ onMounted(() => {
   justify-content: space-between;
   gap: 20px;
 }
+
+.section-header__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 
 .model-test-trigger {
   --td-bg-color-container-hover: transparent;

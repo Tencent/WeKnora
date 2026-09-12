@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
 )
@@ -93,7 +95,7 @@ func (r *WeKnoraCloudReranker) Rerank(ctx context.Context, query string, documen
 		req.Header.Set(k, v)
 	}
 
-	resp, err := r.client.Do(req)
+	resp, err := call.DoJSON(r.client, req, "rerank")
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud reranker: do request: %w", err)
 	}
@@ -132,3 +134,6 @@ func (r *WeKnoraCloudReranker) effectiveModelName() string {
 
 func (r *WeKnoraCloudReranker) GetModelName() string { return r.modelName }
 func (r *WeKnoraCloudReranker) GetModelID() string   { return r.modelID }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (r *WeKnoraCloudReranker) RequestAccountingSupported() bool { return true }

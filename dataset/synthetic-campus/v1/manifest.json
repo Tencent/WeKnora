@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "dataset_id": "topic3-synthetic-campus-v1",
+  "source": "ai_synthetic",
+  "created_on": "2026-09-07",
+  "documents": [
+    {
+      "document_id": "D01",
+      "file": "source_docs/01-实验室开放与预约.md",
+      "title": "澄川大学星帆共享实验室：开放与预约",
+      "passage_ids": [
+        "D01-P01",
+        "D01-P02",
+        "D01-P03",
+        "D01-P04"
+      ],
+      "sha256": "a2c241c32939ce46ba62aa17e06ecfd612f2355f6b1770d254f68dadea555c07"
+    },
+    {
+      "document_id": "D02",
+      "file": "source_docs/02-设备目录与借还.md",
+      "title": "澄川大学星帆共享实验室：设备目录与借还",
+      "passage_ids": [
+        "D02-P01",
+        "D02-P02",
+        "D02-P03",
+        "D02-P04"
+      ],
+      "sha256": "4ee0226a4717b2047bd1d83118298a86ffc0f24dc5ea1ffecf98bb144b4db12a"
+    },
+    {
+      "document_id": "D03",
+      "file": "source_docs/03-计算资源与任务.md",
+      "title": "澄川大学星帆共享实验室：计算资源与任务",
+      "passage_ids": [
+        "D03-P01",
+        "D03-P02",
+        "D03-P03",
+        "D03-P04"
+      ],
+      "sha256": "967bf393d0b000102486945ea5ed54417c26060dc821c8d29e88852773ae1326"
+    },
+    {
+      "document_id": "D04",
+      "file": "source_docs/04-材料仓与项目归档.md",
+      "title": "澄川大学星帆共享实验室：材料仓与项目归档",
+      "passage_ids": [
+        "D04-P01",
+        "D04-P02",
+        "D04-P03",
+        "D04-P04"
+      ],
+      "sha256": "983403fb54c9053f07b26b064126b8d1c20b2c1bea5a3626fcb0a823d74145c0"
+    },
+    {
+      "document_id": "D05",
+      "file": "source_docs/05-服务工单与故障.md",
+      "title": "澄川大学星帆共享实验室：服务工单与故障",
+      "passage_ids": [
+        "D05-P01",
+        "D05-P02",
+        "D05-P03",
+        "D05-P04"
+      ],
+      "sha256": "35e8380a0453259af85ef53fb0800e1155a7d262202539f2d6146bb518125e54"
+    },
+    {
+      "document_id": "D06",
+      "file": "source_docs/06-秋季项目交流日.md",
+      "title": "澄川大学星帆共享实验室：秋季项目交流日",
+      "passage_ids": [
+        "D06-P01",
+        "D06-P02",
+        "D06-P03",
+        "D06-P04"
+      ],
+      "sha256": "e7b80d4f85fb0ea3ef8350b5afefa93aaf0eb20d340d435ff084432ae589c9b6"
+    }
+  ],
+  "passage_count": 24,
+  "question_count": 20,
+  "category_counts": {
+    "fact": 6,
+    "table": 4,
+    "cross_document": 3,
+    "distractor": 3,
+    "calculation": 1,
+    "unanswerable": 3
+  },
+  "intended_use": [
+    "ingestion_smoke_test",
+    "retrieval_pipeline_validation",
+    "draft_answer_rubric"
+  ],
+  "limitations": [
+    "No real-world quality claim",
+    "Reference labels await human review",
+    "Source passage IDs require mapping to actual parsed chunks",
+    "Not a drop-in replacement for the existing golden regression fixture"
+  ],
+  "hash_normalization": "utf8_lf"
+}

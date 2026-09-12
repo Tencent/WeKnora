@@ -1,5 +1,5 @@
 // src/utils/request.js
-import axios from "axios";
+import axios, { type AxiosRequestConfig } from "axios";
 import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
@@ -24,14 +24,13 @@ const BASE_URL = getApiBaseUrl();
  * Defined as a non-enumerable property, so it stays invisible to object spread,
  * JSON.stringify and Object.keys and never leaks into downstream payloads.
  *
- * Guaranteed only for JSON responses (objects/arrays). Blob, string and SSE
- * stream responses do not carry it at runtime, so only read `$httpStatus`
- * when the payload is known to be an object.
+ * Objects, arrays and Blob payloads carry this property. Primitives, null and
+ * string-based SSE responses pass through unchanged.
  */
-export type WithStatus<T> = T & {
+export type WithStatus<T> = T extends object ? T & {
   /** HTTP status code of the response. Non-enumerable. See {@link WithStatus}. */
   readonly $httpStatus: number
-};
+} : T;
 
 const HTTP_STATUS_KEY = '$httpStatus';
 
@@ -40,7 +39,7 @@ const HTTP_STATUS_KEY = '$httpStatus';
  * in place and return it. Primitives pass through untouched.
  * See {@link WithStatus} for where the property is guaranteed.
  */
-function withHttpStatus<T>(data: T, status: number): T {
+function withHttpStatus<T>(data: T, status: number): WithStatus<T> {
   if (data !== null && typeof data === 'object') {
     Object.defineProperty(data, HTTP_STATUS_KEY, {
       value: status,
@@ -49,7 +48,7 @@ function withHttpStatus<T>(data: T, status: number): T {
       writable: false,
     });
   }
-  return data;
+  return data as WithStatus<T>;
 }
 
 // 创建Axios实例
@@ -109,6 +108,20 @@ instance.interceptors.request.use(
   }
 );
 
+// Cancellation settles only this caller; a shared refresh can still serve other requests.
+function waitForRefresh<T>(refresh: Promise<T>, signal?: AxiosRequestConfig['signal']): Promise<T> {
+  if (!signal) return refresh;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(new axios.CanceledError());
+    if (signal.aborted) abort();
+    else signal.addEventListener?.('abort', abort, { once: true });
+    refresh.then(
+      value => signal.aborted ? abort() : resolve(value),
+      reject,
+    ).finally(() => signal.removeEventListener?.('abort', abort));
+  });
+}
+
 // Share-link endpoints (/auth/invitations/lookup, /auth/register-by-invite)
 // are reachable by anonymous users opening an invite link. A 401 from these
 // must surface to the page (e.g. expired token), not trigger the
@@ -134,6 +147,13 @@ instance.interceptors.response.use(
   async (error: any) => {
     const originalRequest = error.config;
     
+    if (axios.isCancel(error) || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      return Promise.reject(error);
+    }
+    if (originalRequest?.signal?.aborted) {
+      return Promise.reject(new axios.CanceledError());
+    }
+
     if (!error.response) {
       return Promise.reject({ message: t('error.networkError') });
     }
@@ -157,15 +177,16 @@ instance.interceptors.response.use(
     }
 
     // 如果是401错误且不是刷新token的请求，尝试刷新token
-    if (error.response.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/refresh')) {
+    if (error.response.status === 401 && originalRequest && !originalRequest._retry && !originalRequest.url?.includes('/auth/refresh')) {
       originalRequest._retry = true;
       try {
-        const token = await refreshAccessTokenShared({
+        const token = await waitForRefresh(refreshAccessTokenShared({
           messages: {
             pleaseRelogin: t('error.pleaseRelogin'),
             tokenRefreshFailed: t('error.tokenRefreshFailed'),
           },
-        });
+        }), originalRequest.signal);
+        originalRequest.headers ??= {};
         originalRequest.headers['Authorization'] = 'Bearer ' + token;
         return instance(originalRequest);
       } catch (refreshError) {
@@ -215,8 +236,11 @@ export function get<T = any>(url: string, config?: any): Promise<WithStatus<T>> 
   return instance.get<T>(url, config) as unknown as Promise<WithStatus<T>>;
 }
 
-export async function getDown(url: string): Promise<Blob> {
+export type DownloadRequestConfig = Pick<AxiosRequestConfig, 'headers' | 'signal' | 'timeout'>;
+
+export async function getDown(url: string, config: DownloadRequestConfig = {}): Promise<Blob> {
   const res = await instance.get<Blob>(url, {
+    ...config,
     responseType: "blob",
   }) as unknown as Blob;
   return res

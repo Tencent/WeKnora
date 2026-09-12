@@ -6,8 +6,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 )
 
-const langfuseRerankPreviewDocs = 8
-const langfuseRerankMaxScores = 50
+const (
+	langfuseRerankPreviewDocs = 8
+	langfuseRerankMaxScores   = 50
+)
 
 // langfuseReranker wraps a Reranker and reports each rerank call as a
 // Langfuse generation observation. Rerankers don't return token usage, but
@@ -165,4 +167,10 @@ func wrapRerankerLangfuse(r Reranker, err error) (Reranker, error) {
 		return r, nil
 	}
 	return &langfuseReranker{inner: r}, nil
+}
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (l *langfuseReranker) RequestAccountingSupported() bool {
+	inner, ok := l.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
 }

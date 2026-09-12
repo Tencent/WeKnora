@@ -1,6 +1,6 @@
 # 数据库与迁移
 
-WeKnora 使用版本化迁移维护数据库结构，PostgreSQL 与 SQLite 分别使用对应的迁移目录。应用启动时可自动执行迁移，也可通过脚本手动执行；新增字段或表时需要同步维护两条路径。
+WeKnora 通过 PostgreSQL 或 SQLite 保存业务数据。官方迁移与课题三迁移使用独立目录和版本表，桥接审计保存来源结构、版本归属和执行进度。
 
 ## 支持的数据库 {#_1-支持的数据库}
 
@@ -18,17 +18,19 @@ WeKnora 使用版本化迁移维护数据库结构，PostgreSQL 与 SQLite 分�
 
 ## 迁移目录结构 {#_2-迁移目录结构}
 
+以下目录分别定义官方结构与课题三扩展。每个版本包含配对的前向和反向结构化查询语言（Structured Query Language，SQL）文件。
+
 ```text
 migrations/
-├── versioned/     # PostgreSQL/ParadeDB 版本化迁移：000000-000091 共 92 版（184 个 .up/.down.sql 文件）
-├── sqlite/        # SQLite 迁移：000000_init（压平的全量 schema）+ 其后的增量版本
-├── paradedb/      # ParadeDB 附加脚本：00-init-db.sql（扩展初始化）、01-migrate-to-paradedb.sql（存量库切换）
-└── mysql/         # 00-init-db.sql，遗留的一次性 MySQL 建表脚本（未接入代码）
+├── versioned/        # PostgreSQL 官方链：000000–000093
+├── sqlite/           # SQLite 官方链：000000–000014
+├── topic3/postgres/  # PostgreSQL 课题链：000001–000016
+├── topic3/sqlite/    # SQLite 课题链：000001–000016
+├── paradedb/         # 检索引擎初始化和转换脚本
+└── mysql/            # 外部检索集成的数据库脚本
 ```
 
-- PostgreSQL 的 `versioned/` 从 `000000_init` 到 `000091_mcp_tool_enabled`；
-- `sqlite/` 以 `000000_init` 作为压平后的全量初始化（JSONB→TEXT、SERIAL→AUTOINCREMENT 等方言差异已适配），其后按需追加增量版本（当前到 `000013_mcp_tool_enabled`），同样由 golang-migrate 顺序执行；
-- `paradedb/00-init-db.sql` 创建 `pg_search` 等扩展；BM25 索引使用中文 Lindera 分词器建在 `embeddings.content` 上。
+官方链使用 `schema_migrations`，课题链使用 `topic3_schema_migrations`，桥接记录使用 `migration_bridge_runs`。PostgreSQL 的课题来源版本 90–103 对应课题链 1–14，SQLite 的课题来源版本 13–26 对应同一逻辑顺序。课题版本 15 为价格表增加可空缓存价格配置。
 
 ### versioned/ 迁移史概览（按主题） {#_2-1-versioned-迁移史概览-按主题}
 
@@ -50,7 +52,7 @@ migrations/
 | 000078 | 分块编辑与自定义元数据 | `chunks` 增加 `source_content`/`content_revision`/`index_status`/`last_editor_id`/`context_header`，新增 `chunk_revisions` 表，`knowledges` 增加 `custom_metadata` |
 | 000079 | 知识库文件夹树 | `knowledges` 增加 `folder_path` 列并回填历史目录上传（原先路径塞在 `file_name` 里），新增 `(tenant_id, knowledge_base_id, folder_path)` 索引 |
 
-### 新增迁移（000080–000091） {#_2-2-新增迁移-000080–000091}
+### 新增迁移（000080–000093） {#_2-2-新增迁移-000080–000091}
 
 | 版本 | 变更 |
 | --- | --- |
@@ -66,6 +68,8 @@ migrations/
 | 000089 | 技能 envs、tenant_user_env_vars |
 | 000090 | tenant_skill_catalog；tenant_skills.catalog_id，回填已有安装 |
 | 000091 | mcp_tool_approvals.enabled，默认 true |
+| 000092 | mcp_services.metadata，服务元数据 |
+| 000093 | browser_profiles、browser_sessions、browser_action_approvals，浏览器授权 |
 
 SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 
@@ -78,6 +82,7 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 | 000009 | 历史 Embed memory 标志列；当前渠道接口不暴露此字段 |
 | 000010–000011 | 多标签关联、principal 模型 |
 | 000012–000013 | 消息 usage、MCP 工具 enabled |
+| 000014 | 浏览器配置、会话与动作审批 |
 
 基线 schema 与后续增量共同决定新建库和已有库的最终结果；不能只看新增迁移文件名判断 Lite 是否有某张表。
 
@@ -204,7 +209,9 @@ subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向
 | `task_dead_letters` | 失败任务死信归档 | `task_type`、`scope`/`scope_id`/`related_id`、`payload`、`last_error`、`fail_count`、`failed_at` |
 | `knowledge_pending_subtasks` | 知识处理子任务队列（000056） | `knowledge_id`、`attempt`、`task_type`、payload |
 | `knowledge_processing_spans` | 文档处理管道 trace（000055） | (`knowledge_id`,`attempt`,`span_id`) 唯一、`parent_span_id`、`name`（DocReader/Chunking/Embedding…）、`kind`、`status`、`input`/`output`/`metadata`（JSONB）、`error_code`/`error_message`、`duration_ms` |
-| `schema_migrations` | golang-migrate 状态表（自动维护） | `version`、`dirty` |
+| `schema_migrations` | 官方迁移状态 | `version`、`dirty` |
+| `topic3_schema_migrations` | 课题三迁移状态 | `version`、`dirty` |
+| `migration_bridge_runs` | 来源归属与可恢复执行审计 | 来源版本、结构摘要、输入清单、备份标识、阶段、双链版本 |
 
 ## ER 图（核心表） {#_4-er-图-核心表}
 
@@ -279,86 +286,62 @@ erDiagram
     knowledges ||--o{ knowledge_processing_spans : "处理 trace"
 ```
 
-## 迁移机制（golang-migrate） {#_5-迁移机制-golang-migrate}
+## 5. 双迁移链与来源桥接
 
-迁移工具是 **golang-migrate/migrate v4**（`go.mod`：`github.com/golang-migrate/migrate/v4 v4.19.1`），状态记录在 `schema_migrations` 表（`version` + `dirty`）。有两条执行路径：
+迁移运行器位于 `internal/database`，通过一个专用数据库连接执行官方和课题三迁移。PostgreSQL 使用覆盖两条链的会话级咨询锁；SQLite 对规范化数据库绝对路径使用跨进程文件锁。每条迁移的完整 SQL、版本行与桥接进度在同一事务中提交，SQL 失败时回滚该事务。
 
-### 应用启动时自动迁移（默认） {#_5-1-应用启动时自动迁移-默认}
+### 5.1 来源校验与可恢复执行
 
-`internal/container/container.go` 的 `initDatabase()`：
+运行器先只读获取版本行、表、列、类型、默认值、约束、索引和触发器，再与嵌入的固定结构画像比较。两种数据库均检查外键孤立行和活动技能安装与同租户目录的对应关系。空库、官方来源、课题三来源和已桥接来源具有独立识别条件；脏版本、未知版本、缺失结构、混合结构和审计不一致均返回错误。
 
-- `AUTO_MIGRATE != "false"` 时（**默认开启**），调用 `database.RunMigrationsWithOptions(migrateDSN, opts)`；
-- `AUTO_RECOVER_DIRTY != "false"` 时（**默认开启**）设置 `MigrationOptions.AutoRecoverDirty = true`，遇到 dirty state 自动尝试恢复；
-- 迁移失败**只打 Warn 日志不阻断启动**（假设迁移可能由外部管理），排查问题时务必看启动日志；
-- postgres 的 migrate DSN 会拼上 `options=-c app.skip_embedding=<true|false>`（取决于 `RETRIEVE_DRIVER` 是否包含 `postgres`），控制 `embeddings` 相关迁移是否实际建表建索引。
+现有数据库首次接纳需要 `MIGRATION_BACKUP_ID`，用于关联已验证备份。接纳事务记录来源结构和版本归属，随后执行缺失官方迁移及课题迁移。桥接记录与两张版本表一致时，中断后从已提交的阶段继续。官方链与课题链均达到目标、结构和数据关系检查通过且完成记录持久化后，数据库才具有就绪状态。
 
-`internal/database/migration.go` 中的路径选择逻辑：
+迁移输入按逐文件安全哈希算法 256 位（Secure Hash Algorithm 256-bit，SHA-256）摘要保存。运行器允许在已有链尾部追加配对迁移，并在迁移事务中记录本次验证的清单。既有 SQL 的内容变化、文件缺失或版本插入保持阻断。摘要用于固定输入，结构和数据正确性由独立查询与测试确认。
 
-```go
-// internal/database/migration.go
-migrationsPath := "file://migrations/versioned"
-if strings.HasPrefix(dsn, "sqlite3://") {
-    migrationsPath = "file://migrations/sqlite"
-}
-```
+SQLite 的课题迁移 16 提供技能安装、快照、环境变量和目录四张表，PostgreSQL 同号迁移保持官方技能结构。SQLite 检索器产生的元数据、全文检索 FTS5（Full-Text Search version 5）及向量扩展 vec0 对象使用实际检索器生成的独立结构画像校验。FTS5 的影子表和 vec0 各维度的结构必须完整匹配；缺失索引和未知对象保持阻断。PostgreSQL 索引的 JSON（JavaScript Object Notation，JavaScript 对象表示法）选项按内容比较，列、键字段和分词器配置仍参与校验。
 
-即 postgres/ParadeDB 走 `migrations/versioned/`，SQLite 走 `migrations/sqlite/`。
+### 5.2 应用启动边界
 
-### 手工执行：scripts/migrate.sh {#_5-2-手工执行-scripts-migrate-sh}
+`internal/container/container.go` 通过 `PrepareDatabaseSchema` 执行迁移或检查双链就绪。`AUTO_MIGRATE=false` 时执行只读检查；任何迁移、结构或就绪错误都会关闭当前应用连接并返回启动错误，后续配置写入和后台任务初始化受到该边界约束。
 
-`scripts/migrate.sh` 是 `migrate` CLI 的包装（Makefile 的 `migrate-*` 目标调用它）：
+`AUTO_RECOVER_DIRTY` 默认为关闭，设置为 `true` 会返回不支持自动改写脏版本的错误。已记录的污染状态需要按结构证据修复或恢复备份。`app.skip_embedding` 保留在 PostgreSQL 连接选项中，控制官方向量迁移的条件分支；结构画像分别覆盖普通 PostgreSQL 和 ParadeDB 向量模式。
 
-- 自动加载根目录 `.env`；
-- DSN 优先取 `DB_URL`（并把 `sslmode=require/prefer` 强制替换为 `disable`），否则由 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME` 拼装（默认 `localhost:5432/postgres/WeKnora`），密码用 Python `urllib.parse.quote` URL 编码以兼容特殊字符；
-- 迁移目录默认 `MIGRATIONS_DIR=migrations/versioned`；
-- 未安装 `migrate` 时提示：`go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest`。
+### 5.3 迁移命令
+
+`scripts/migrate.sh` 调用 `weknora-migrate`，或使用当前项目工具链执行 `cmd/migrate-runner`。目标通过 `MIGRATION_DSN`、`DB_URL` 或显式 SQLite 路径指定；脚本保持连接的传输安全参数，输出不包含连接凭据。
 
 ```bash
-make migrate-up                    # 应用全部待执行迁移
-make migrate-down                  # 回滚
-make migrate-version               # 查看当前版本与 dirty 标志
-make migrate-create name=add_xxx   # 创建下一个空闲版本的 add_xxx.up.sql / .down.sql
-make migrate-force version=74      # 强制标记版本（恢复 dirty）
-make migrate-goto version=60       # 迁移/回滚到指定版本
+make migrate-build
+./scripts/migrate.sh inspect                 # 来源、双链版本、结构与待执行项
+./scripts/migrate.sh plan                    # 同一只读计划
+./scripts/migrate.sh version                 # 双链状态
+./scripts/migrate.sh apply --backup-id verified-backup-id
+./scripts/migrate.sh inspect --sqlite-path '/isolated/path/database.sqlite'
 ```
 
-## 如何新增一个迁移 {#_6-如何新增一个迁移}
+命令的 `up` 与 `apply` 使用同一受校验路径。`force`、`goto` 和 `down` 返回错误；数据恢复按已验证备份及配套应用版本执行。反向 SQL 仅用于隔离夹具中的迁移契约验证。
 
-1. **创建文件**：`make migrate-create name=add_my_feature`，在 `migrations/versioned/` 下生成下一个版本号（当前最大为 `000091`；创建前再次检查目录，使用下一个空闲版本的 up/down 文件）；
-2. **编写 up SQL**：注意 PostgreSQL 方言（JSONB、部分索引、`TIMESTAMP WITH TIME ZONE`）；若涉及 `embeddings` 表，参考既有迁移用 `app.skip_embedding` GUC 做条件门控（`SELECT current_setting('app.skip_embedding', true)`），保证非 postgres 检索引擎部署也能通过迁移；
-3. **编写 down SQL**：必须可逆（drop column/table/index），否则回滚链会断；
-4. **同步 SQLite**：`migrations/sqlite/000000_init.up.sql` 是压平的全量 schema，**新增列/表必须合并进去**（注意方言转换：JSONB→TEXT、SERIAL→INTEGER AUTOINCREMENT、无部分索引语法差异等）。若变更需要在已有 Lite 库上生效（例如删表、删数据），还要在 `migrations/sqlite/` 追加一个增量版本；
-5. **同步 GORM 模型**：在 `internal/types/` 对应 struct 增加字段（GORM 只做 ORM 映射，生产库**不使用 AutoMigrate** 建表，schema 完全由 SQL 迁移驱动）;
-6. **验证**：`make migrate-up` → `make migrate-down` → `make migrate-up` 三连确认可逆；SQLite 侧用 `DB_DRIVER=sqlite` 启动一次 Lite 版验证初始化脚本。
+## 6. 新增课题迁移
 
-## 常见迁移问题排查 {#_7-常见迁移问题排查}
+1. 使用 `make migrate-create name=feature_name` 在 `migrations/topic3/postgres` 和 `migrations/topic3/sqlite` 同时创建下一版本的 `up/down` 文件。
+2. 为两个方言定义相同业务契约，保留既有迁移文件。迁移 SQL 在单个事务内执行，事务外语句需要独立设计和验收。
+3. 更新 `internal/types` 映射和对应服务契约。在专用、全新测试数据库中通过 `cmd/migration-profile-gen` 使用 `go run -tags sqlite_fts5 ./cmd/migration-profile-gen` 生成结构画像；生成器要求管理数据库名称使用 `weknora_x03_` 前缀并创建独立测试数据库。
+4. 执行来源矩阵、既有双链的追加升级、失败恢复、跨进程锁、数据保留和双数据库往返测试。
+5. 同步构建产物中的四个迁移目录及预检输入清单，再执行就绪检查。
 
-### dirty state（最常见） {#_7-1-dirty-state-最常见}
+## 7. 迁移诊断
 
-迁移中途失败/进程被杀后，`schema_migrations.dirty = true`，后续迁移拒绝执行。
+### 7.1 脏版本或结构不一致
 
-```bash
-# 1. 确认状态
-make migrate-version            # 输出形如 "74 (dirty)"
-# 或直接查表
-# SELECT version, dirty FROM schema_migrations;
+只读 `inspect` 输出结构不一致对象和迁移链位置。任何已记录的 `dirty=true` 均阻断接纳。修复需要核对对应版本的实际结构、数据关系与备份，完成可恢复的结构修复后再执行计划。单独改写版本数字不足以建立结构完整性。
 
-# 2. 人工检查该版本的 up SQL 实际执行到哪，把残留补齐或清理
+### 7.2 事务失败或执行中断
 
-# 3. 强制回到上一个干净版本后重试
-make migrate-force version=73
-make migrate-up
-```
-
-应用默认 `AUTO_RECOVER_DIRTY` 开启（`container.go`），启动时会自动尝试恢复；若关闭（设为 `false`），日志会提示手工使用 force。
-
-### 迁移"成功"但表没建出来 {#_7-2-迁移-成功-但表没建出来}
-
-检查启动日志：自动迁移失败只是 Warn（`Database migration failed ... Continuing with application startup`），不会让进程退出。另外 `embeddings` 相关对象受 `app.skip_embedding` 门控——若 `RETRIEVE_DRIVER` 不含 `postgres`，不建 `embeddings` 索引属预期行为。
+迁移运行器的每条 SQL 与版本、进度更新保持原子提交。进程中断后，已提交阶段通过结构画像再次验证；未提交事务由数据库回滚。任一链尚未完成时，就绪检查返回失败。普通 PostgreSQL 的向量迁移受 `app.skip_embedding` 控制，其预期结构与 ParadeDB 向量模式分别核对。
 
 ### 密码特殊字符导致连接失败 {#_7-3-密码特殊字符导致连接失败}
 
-`migrate` CLI 要求 URL 形式 DSN，密码含 `@ # !` 等字符必须 URL 编码。`scripts/migrate.sh` 和 `container.go` 都已处理（分别用 Python `quote` 与 Go `url.QueryEscape`）；自己手拼 `DB_URL` 时需自行编码。
+`weknora-migrate` 接受统一资源定位符（Uniform Resource Locator，URL）形式的 PostgreSQL 数据源名称（Data Source Name，DSN）。连接串的用户名和密码需使用 URL 编码；脚本按输入原样传递连接串及传输安全选项。SQLite 使用显式原始文件路径，运行器负责文件 URI 编码。
 
 ### ParadeDB / 原生 Postgres 差异 {#_7-4-paradedb-原生-postgres-差异}
 
@@ -366,4 +349,4 @@ BM25 索引（`USING bm25`、Lindera 中文分词）只在 ParadeDB 可用；原
 
 ### 版本文件冲突 {#_7-5-版本文件冲突}
 
-多个分支同时新增同一个版本号（如两个分支都生成同一数字前缀）会冲突：golang-migrate 按数字排序且版本号唯一。合并时后合入者需要把自己的迁移改成下一个空闲版本号（up/down 两个文件都要改名）。
+每个目录使用独立且连续的版本号，课题三 PostgreSQL 和 SQLite 版本保持一致。新增文件需要位于各链尾部并保持 `up/down` 配对。同目录重复编号、缺号、已发布文件改写及画像摘要不一致均阻断迁移。

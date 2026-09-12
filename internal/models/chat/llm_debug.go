@@ -210,3 +210,9 @@ func truncateForDebug(s string, maxRunes int) string {
 	}
 	return string(runes[:maxRunes]) + fmt.Sprintf("...(%d chars)", len(runes))
 }
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (c *debugChat) RequestAccountingSupported() bool {
+	inner, ok := c.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
+}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
@@ -110,7 +112,7 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 		req.Header.Set(k, v)
 	}
 
-	resp, err := e.client.Do(req)
+	resp, err := call.DoJSON(e.client, req, "embedding")
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: do request: %w", err)
 	}
@@ -171,3 +173,6 @@ func (e *WeKnoraCloudEmbedder) effectiveModelName() string {
 func (e *WeKnoraCloudEmbedder) GetModelName() string { return e.modelName }
 func (e *WeKnoraCloudEmbedder) GetModelID() string   { return e.modelID }
 func (e *WeKnoraCloudEmbedder) GetDimensions() int   { return e.dimensions }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (e *WeKnoraCloudEmbedder) RequestAccountingSupported() bool { return true }

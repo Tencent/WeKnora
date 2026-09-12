@@ -9,6 +9,8 @@ import (
 	"math"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -104,7 +106,7 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 		r.baseURL, string(jsonData),
 	)
 
-	resp, err := r.client.Do(req)
+	resp, err := call.DoJSON(r.client, req, "rerank")
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -154,3 +156,6 @@ func (r *NvidiaReranker) GetModelName() string {
 func (r *NvidiaReranker) GetModelID() string {
 	return r.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (r *NvidiaReranker) RequestAccountingSupported() bool { return true }

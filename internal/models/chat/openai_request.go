@@ -120,6 +120,12 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(
 	if opts.TopP > 0 {
 		req.TopP = float32(opts.TopP)
 	}
+	// The seed is forwarded only when explicitly provided; providers that
+	// support it then mark the response applied (target architecture 6.3).
+	if OptionsSeedProvided(opts) {
+		seed := opts.Seed
+		req.Seed = &seed
+	}
 	if opts.FrequencyPenalty > 0 {
 		req.FrequencyPenalty = float32(opts.FrequencyPenalty)
 	}

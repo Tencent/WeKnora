@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common"
 	"github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common/profile"
@@ -53,6 +55,8 @@ func NewLKEAPReranker(config *RerankerConfig) (*LKEAPReranker, error) {
 
 	credential := common.NewCredential(secretID, secretKey)
 	cpf := profile.NewClientProfile()
+	cpf.NetworkFailureMaxRetries = 0
+	cpf.RateLimitExceededMaxRetries = 0
 	cpf.HttpProfile.Endpoint = LKEAPRerankEndpoint
 
 	client, err := lkeap.NewClient(credential, region, cpf)
@@ -132,7 +136,16 @@ func lkeapRerankBatches(query string, documents []string) ([]lkeapRerankBatch, e
 	return batches, nil
 }
 
-func (r *LKEAPReranker) rerankBatch(ctx context.Context, query string, documents []string) ([]RankResult, error) {
+func (
+	r *LKEAPReranker,
+) rerankBatch(
+	ctx context.Context,
+	query string,
+	documents []string,
+) (
+	result []RankResult,
+	callErr error,
+) {
 	req := lkeap.NewRunRerankRequest()
 	req.Query = common.StringPtr(query)
 	req.Docs = common.StringPtrs(documents)
@@ -140,6 +153,12 @@ func (r *LKEAPReranker) rerankBatch(ctx context.Context, query string, documents
 
 	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, LKEAPRerankEndpoint, query, documents))
 
+	ctx = call.WithNewBatch(ctx)
+	finish, err := call.Start(ctx, "rerank")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { callErr = finish(callErr, nil) }()
 	resp, err := r.client.RunRerankWithContext(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("LKEAP RunRerank: %w", err)
@@ -179,3 +198,6 @@ func (r *LKEAPReranker) GetModelName() string {
 func (r *LKEAPReranker) GetModelID() string {
 	return r.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (r *LKEAPReranker) RequestAccountingSupported() bool { return true }

@@ -24,6 +24,19 @@ export async function deletePlatformAPIKey(keyId: number): Promise<{ success: bo
   return await del(`/api/v1/system/admin/api-keys/${keyId}`) as unknown as { success: boolean }
 }
 
+export interface DBMigrationChainState {
+  version: number
+  dirty: boolean
+  expected_version: number
+}
+
+export interface DBMigrationStatus {
+  official: DBMigrationChainState
+  topic3: DBMigrationChainState
+  ready: boolean
+  phase: string
+}
+
 export interface SystemInfo {
   version: string
   edition?: string
@@ -35,6 +48,7 @@ export interface SystemInfo {
   graph_database_engine?: string
   minio_enabled?: boolean
   db_version?: string
+  db_migration_status?: DBMigrationStatus
   /** Human-readable error message when the startup migration failed.
    *  When non-empty, the system info view should surface a troubleshooting
    *  banner (see docs/migration-troubleshooting.md). */

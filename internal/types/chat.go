@@ -19,9 +19,19 @@ const (
 
 // TokenUsage holds token consumption statistics returned by the model API.
 type TokenUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	// ReportedCost preserves the provider's exact decimal amount. Its currency
+	// is interpreted only by a provider-specific accounting path.
+	ReportedCost         *string `json:"reported_cost,omitempty"`
+	UsageReportedCalls   int     `json:"usage_reported_calls,omitempty"`
+	UsageUnreportedCalls int     `json:"usage_unreported_calls,omitempty"`
+	CacheReportedCalls   int     `json:"cache_reported_calls,omitempty"`
+	CacheUnreportedCalls int     `json:"cache_unreported_calls,omitempty"`
+	UsageReported        bool    `json:"usage_reported"`
+	CacheWrite5mTokens   *int    `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens   *int    `json:"cache_write_1h_tokens,omitempty"`
+	PromptTokens         int     `json:"prompt_tokens"`
+	CompletionTokens     int     `json:"completion_tokens"`
+	TotalTokens          int     `json:"total_tokens"`
 	// CachedTokens is the legacy alias for CacheReadTokens. It remains on the
 	// wire for compatibility with existing API consumers.
 	CachedTokens     int               `json:"cached_tokens,omitempty"`
@@ -83,6 +93,27 @@ func (u *TokenUsage) Accumulate(other TokenUsage) {
 	if u == nil {
 		return
 	}
+	reported, unreported := other.UsageReportedCalls, other.UsageUnreportedCalls
+	if reported+unreported == 0 {
+		if other.UsageReported || other.PromptTokens > 0 || other.CompletionTokens > 0 || other.TotalTokens > 0 {
+			reported = 1
+		} else {
+			unreported = 1
+		}
+	}
+	u.UsageReportedCalls += reported
+	u.UsageUnreportedCalls += unreported
+	cacheReported, cacheUnreported := other.CacheReportedCalls, other.CacheUnreportedCalls
+	if cacheReported+cacheUnreported == 0 {
+		if other.CacheReported {
+			cacheReported = 1
+		} else {
+			cacheUnreported = 1
+		}
+	}
+	u.CacheReportedCalls += cacheReported
+	u.CacheUnreportedCalls += cacheUnreported
+	u.UsageReported = u.UsageUnreportedCalls == 0 && u.UsageReportedCalls > 0
 	u.PromptTokens += other.PromptTokens
 	u.CompletionTokens += other.CompletionTokens
 	u.TotalTokens += other.TotalTokens

@@ -134,3 +134,9 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (l *langfuseEmbedder) RequestAccountingSupported() bool {
+	inner, ok := l.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
+}

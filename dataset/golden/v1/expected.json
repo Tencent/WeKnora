@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "dataset_id": "golden-v1",
+  "dataset_content_sha256": "d8deca2c2ab7b77123130788c9082d0998ecbf76c1d8556952703045cc2556e1",
+  "float_tolerance": 0.000000001,
+  "retrieval_ids": {
+    "gq1": [3, -1],
+    "gq2": [2, 4]
+  },
+  "ranked_provenance": {
+    "gq1_search": ["unknown", "known", "known", "duplicate", "known"],
+    "gq1_rerank": ["known", "unknown"],
+    "gq2_search": ["known", "known"]
+  },
+  "per_sample": {
+    "gq1": {
+      "precision": 0.5,
+      "recall": 0.5,
+      "ndcg3": 0.82623465712856,
+      "ndcg10": 0.82623465712856,
+      "mrr": 1.0,
+      "map": 0.5,
+      "bleu1": 1.0,
+      "bleu2": 1.0,
+      "bleu4": 1.0,
+      "rouge1": 0.999999995,
+      "rouge2": 0.999999995,
+      "rougel": 0.999999995
+    },
+    "gq2": {
+      "precision": 0.5,
+      "recall": 1.0,
+      "ndcg3": 1.0,
+      "ndcg10": 1.0,
+      "mrr": 1.0,
+      "map": 1.0,
+      "bleu1": 0.155760156614281,
+      "bleu2": 0.17414514918777288,
+      "bleu4": 0.23530495254141282,
+      "rouge1": 0.0,
+      "rouge2": 0.0,
+      "rougel": 0.0
+    }
+  },
+  "aggregate": {
+    "precision": 0.5,
+    "recall": 0.75,
+    "ndcg3": 0.91311732856428,
+    "ndcg10": 0.91311732856428,
+    "mrr": 1.0,
+    "map": 0.75,
+    "bleu1": 0.5778800783071405,
+    "bleu2": 0.5870725745938864,
+    "bleu4": 0.6176524762707064,
+    "rouge1": 0.4999999975,
+    "rouge2": 0.4999999975,
+    "rougel": 0.4999999975
+  },
+  "experiment_manifest": {
+    "schema_version": 1,
+    "dataset_id": "golden-v1",
+    "metric_plan_metrics": 12,
+    "reproducibility_level": "auditable"
+  }
+}

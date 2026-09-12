@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "engine": "paddleocr_vl",
+  "validated_at": "2026-09-11T08:51:29.262294+00:00",
+  "status": "passed",
+  "pipeline": "PaddleOCR-VL-1.6",
+  "device": "cpu",
+  "container_image": "weknora-parser-paddle:ocr3.7.0-pdx3.7.2-cpu",
+  "image_id": "sha256:62a9825d12af001d404d03ccb87b690bb8c047a46349419de4bae768f3ef2a2b",
+  "versions": {
+    "python": "3.11.16",
+    "paddlepaddle": "3.3.1",
+    "paddleocr": "3.7.0",
+    "paddlex": "3.7.2",
+    "numpy": "1.26.4"
+  },
+  "models": [
+    {
+      "name": "PP-DocLayoutV3",
+      "repo_id": "PaddlePaddle/PP-DocLayoutV3",
+      "revision": "7b48a7566925fa464281f930c58eee04fe2c862a"
+    },
+    {
+      "name": "PaddleOCR-VL-1.6-0.9B",
+      "repo_id": "PaddlePaddle/PaddleOCR-VL-1.6",
+      "revision": "c5630abae1d940eafe0697512a0325494b02ab42"
+    }
+  ],
+  "lock_sha256": {
+    "requirements.lock": "64c27cc243fb4e33a798605d30a660f2998e94a30e6e16656b6c92eaffb45bd7",
+    "models.lock.json": "f66393f36f76175ce28a578f92522f3c720b1cd6c999a652a8f55e49852b3c36",
+    "pipeline.yaml": "9cb4e531f5e53beecff62c9fc1cca0e0175b4836a977cf18fd502af954006c1f"
+  },
+  "resource_limits": {
+    "cpu_cores": 6,
+    "memory_bytes": 9663676416,
+    "shared_memory_bytes": 1073741824
+  },
+  "sample": {
+    "id": "omni-8739ae8d4f502788",
+    "sha256": "edde64ca28971957a9a0aa992eab8b28b39dafa7b02fd22c68c6cfa0ba010ac2",
+    "pages": 1
+  },
+  "http_status": 200,
+  "error_code": 0,
+  "http_elapsed_seconds": 478.938,
+  "cold_start_seconds": 71.331,
+  "readiness_confirmed_after_seconds": 128.527,
+  "markdown_characters": 647,
+  "output_blocks": 15,
+  "block_interval_observations": 14,
+  "median_block_interval_seconds": 30.828,
+  "min_block_interval_seconds": 24.859,
+  "max_block_interval_seconds": 41.384,
+  "median_block_characters": 39,
+  "sum_block_characters": 619,
+  "peak_memory_bytes": 9198104576,
+  "peak_memory_gib": 8.566,
+  "post_smoke_memory_bytes": 6614499328,
+  "oom_killed": false,
+  "measurement_notes": [
+    "Cold start is container start to Uvicorn listening log.",
+    "Memory peak is cumulative Linux cgroup memory.peak and includes initialization.",
+    "Block intervals are differences between consecutive inference-start logs, not independently instrumented block durations.",
+    "Block output lengths and timing intervals are not joined one-to-one.",
+    "MinerU formal parsing ran concurrently during this smoke."
+  ],
+  "human_review": {
+    "status": "pending",
+    "reviewer": null
+  }
+}

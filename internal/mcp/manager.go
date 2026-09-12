@@ -103,7 +103,6 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 	var principal types.Principal
 	if service.AuthConfig.IsOAuth() {
 		tenantID, _ = types.TenantIDFromContext(ctx)
-		principal, _ = types.PrincipalFromContext(ctx)
 		principal = types.MCPOAuthPrincipalFromContext(ctx)
 		if !principal.Valid() {
 			return nil, fmt.Errorf("principal context is required to connect to OAuth MCP service %s", service.Name)

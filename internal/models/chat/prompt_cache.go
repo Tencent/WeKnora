@@ -70,6 +70,7 @@ func providerCacheAccountingStatus(name provider.ProviderName) types.PromptCache
 
 func tokenUsageFromOpenAI(usage openai.Usage, providerName provider.ProviderName) types.TokenUsage {
 	u := types.TokenUsage{
+		UsageReported:    true,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
 		TotalTokens:      usage.TotalTokens,
@@ -97,8 +98,10 @@ func cachedTokens(details *openai.PromptTokensDetails) int {
 }
 
 type rawPromptCacheUsage struct {
-	Usage struct {
-		PromptTokens        int  `json:"prompt_tokens"`
+	Usage *struct {
+		PromptTokens        *int `json:"prompt_tokens"`
+		CompletionTokens    *int `json:"completion_tokens"`
+		TotalTokens         *int `json:"total_tokens"`
 		PromptCacheHit      *int `json:"prompt_cache_hit_tokens"`
 		PromptCacheMiss     *int `json:"prompt_cache_miss_tokens"`
 		CacheReadInput      *int `json:"cache_read_input_tokens"`
@@ -116,10 +119,21 @@ func applyRawPromptCacheUsage(data []byte, usage *types.TokenUsage) {
 	if usage == nil || len(data) == 0 {
 		return
 	}
+	types.CaptureReportedCost(data, usage)
 	var raw rawPromptCacheUsage
 	if json.Unmarshal(data, &raw) != nil {
 		return
 	}
+	usage.UsageReported = raw.Usage != nil
+	if raw.Usage == nil {
+		return
+	}
+	usage.UsageReported = raw.Usage.PromptTokens !=
+		nil ||
+		raw.Usage.CompletionTokens !=
+			nil ||
+		raw.Usage.TotalTokens !=
+			nil
 	if raw.Usage.PromptCacheHit != nil || raw.Usage.PromptCacheMiss != nil {
 		read := valueOrZero(raw.Usage.PromptCacheHit)
 		miss := valueOrZero(raw.Usage.PromptCacheMiss)
@@ -167,7 +181,8 @@ func clampPromptCacheKey(key string) string {
 	if len(runes) <= openAIPromptCacheKeyMaxLength {
 		return key
 	}
-	return string(runes[:openAIPromptCacheKeyMaxLength])
+	digest := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(digest[:])
 }
 
 func resolveCacheRetention(opts *ChatOptions) CacheRetention {

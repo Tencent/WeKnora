@@ -1,0 +1,82 @@
+{
+  "repository": "OpenDataLab/PDF-Extract-Kit-1.0",
+  "revision": "05eaf85cc4ddab92c2be61e10abec4586d25c1a6",
+  "mineru_version": "3.4.5",
+  "files": [
+    {
+      "path": "models/Layout/PP-DocLayoutV2/config.json",
+      "size": 3787,
+      "sha256": "18a696b54c64c4fa582afcd3a41407c4b65a99dc7ab187ad2fed8af8e4128ad8"
+    },
+    {
+      "path": "models/Layout/PP-DocLayoutV2/model.safetensors",
+      "size": 214798436,
+      "sha256": "e60f3725aeedc88fd319416ef166bda79171a41516a301c27cab9132dc2739d2"
+    },
+    {
+      "path": "models/Layout/PP-DocLayoutV2/preprocessor_config.json",
+      "size": 575,
+      "sha256": "56281a70c931a291dcaf653605fb4df713fd823f65e939aecd6005c26346a103"
+    },
+    {
+      "path": "models/MFR/unimernet_hf_small_2503/README.md",
+      "size": 1657,
+      "sha256": "96574f3857e919353024edc423b9165dbf46e902cfe97b5b7ec552283bd744f6"
+    },
+    {
+      "path": "models/MFR/unimernet_hf_small_2503/config.json",
+      "size": 5094,
+      "sha256": "64c02e9897410658f7668c6a334a8b306276e4697656cbe06f86d8c4f01fc040"
+    },
+    {
+      "path": "models/MFR/unimernet_hf_small_2503/generation_config.json",
+      "size": 191,
+      "sha256": "d56ca9d5c5efa4283a2565ae42771bafd02910b56ef9c53e9b441c9c4c896d09"
+    },
+    {
+      "path": "models/MFR/unimernet_hf_small_2503/model.safetensors",
+      "size": 810036696,
+      "sha256": "9244e2565585c0f89bc3a6eeeea080ef3c588375fc0d536074fe88e80b917cda"
+    },
+    {
+      "path": "models/MFR/unimernet_hf_small_2503/special_tokens_map.json",
+      "size": 552,
+      "sha256": "358c249e2fb29060c6b73157d428853b0c48710deffc8ee670ab1013880946c9"
+    },
+    {
+      "path": "models/MFR/unimernet_hf_small_2503/tokenizer.json",
+      "size": 3581950,
+      "sha256": "f8e29e3c3a8017f067b62a3d2d9211bb4cebc08a25afe58d3a6069981e3684d6"
+    },
+    {
+      "path": "models/MFR/unimernet_hf_small_2503/tokenizer_config.json",
+      "size": 4522,
+      "sha256": "28b99e33895e06389c26c139b1333b82b7f5d8ed5f4fd14998acfd7c20989338"
+    },
+    {
+      "path": "models/OCR/paddleocr_torch/ch_PP-OCRv6_small_det_infer.safetensors",
+      "size": 9938124,
+      "sha256": "89a96a8adc4e9cd0c994098edc76022e496d35844392562b4694c8fbc583f2da"
+    },
+    {
+      "path": "models/OCR/paddleocr_torch/ch_PP-OCRv6_small_rec_infer.safetensors",
+      "size": 21204736,
+      "sha256": "f65a332afe5aa663f0b9d5706f4ae8457b5b4058a842d5c1eb22df505c27d642"
+    },
+    {
+      "path": "models/TabRec/SlanetPlus/slanet-plus.onnx",
+      "size": 7758305,
+      "sha256": "d57a942af6a2f57d6a4a0372573c696a2379bf5857c45e2ac69993f3b334514b"
+    },
+    {
+      "path": "models/TabRec/UnetStructure/unet.onnx",
+      "size": 8335007,
+      "sha256": "0ea48d3a17e35ef5c2e498a5e799566073234d39b1079ca21d9f4fafe73c6d20"
+    },
+    {
+      "path": "models/TabCls/paddle_table_cls/PP-LCNet_x1_0_table_cls.onnx",
+      "size": 6776877,
+      "sha256": "c84bf1d79c1c74d534b5b12adb14dd12151c42f7ae3e4be4f1042b830f80b949"
+    }
+  ]
+}
