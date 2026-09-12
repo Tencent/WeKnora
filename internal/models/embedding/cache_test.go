@@ -107,6 +107,27 @@ func TestCachedEmbedderSeparatesQueryAndPassageKeys(t *testing.T) {
 	require.Equal(t, 2, inner.embedCalls)
 }
 
+func TestEmbeddingCacheNamespaceIncludesProviderControlsButNotSecrets(t *testing.T) {
+	base := Config{
+		ModelID: "embed", ModelName: "deployment", Provider: "azure",
+		ExtraConfig:   map[string]string{"api_version": "v1", "apiKey": "secret-a"},
+		CustomHeaders: map[string]string{"X-Route": "blue", "Authorization": "secret-b"},
+	}
+	baseline := embeddingCacheNamespace(base)
+
+	changedRoute := base
+	changedRoute.ExtraConfig = map[string]string{"api_version": "v2", "apiKey": "secret-a"}
+	require.NotEqual(t, baseline, embeddingCacheNamespace(changedRoute))
+	changedRoute = base
+	changedRoute.CustomHeaders = map[string]string{"X-Route": "green", "Authorization": "secret-b"}
+	require.NotEqual(t, baseline, embeddingCacheNamespace(changedRoute))
+
+	changedSecrets := base
+	changedSecrets.ExtraConfig = map[string]string{"api_version": "v1", "apiKey": "secret-c"}
+	changedSecrets.CustomHeaders = map[string]string{"X-Route": "blue", "Authorization": "secret-d"}
+	require.Equal(t, baseline, embeddingCacheNamespace(changedSecrets))
+}
+
 func TestCachedEmbedderPreservesPersistentExpiry(t *testing.T) {
 	now := time.Date(2026, time.September, 12, 8, 0, 0, 0, time.UTC)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(11))

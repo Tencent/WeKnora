@@ -838,7 +838,12 @@ const handleModelSave = async (modelData: any) => {
     const trimmedAppSecret = (modelData.appSecret ?? '').trim()
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
-    const extraConfig: Record<string, string> = {}
+    // Updates replace ExtraConfig server-side, so begin with the persisted map
+    // and overlay only fields owned by this form. This preserves provider
+    // routing controls such as api_version and remote_model_name.
+    const extraConfig: Record<string, string> = {
+      ...(editingModel.value?.parameters?.extra_config || {}),
+    }
     if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
     }
