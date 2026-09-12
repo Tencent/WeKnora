@@ -9,6 +9,7 @@ import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
@@ -57,6 +58,10 @@ const excelHtml = ref('');
 const mermaidSvg = ref('');
 const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
+let pptxSlideCount = 0;
+function onPptxRendered(result: unknown) {
+  if (!isCompletePptxRender(result, pptxSlideCount)) error.value = t('preview.loadFailed');
+}
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
@@ -429,7 +434,10 @@ async function loadPreview() {
         break;
       }
       case 'pptx': {
-        pptxData.value = await blob.arrayBuffer();
+        const prepared = await preparePptxPreview(await blob.arrayBuffer());
+        if (getPreviewSourceKey() !== sourceKey || !props.active) return;
+        pptxSlideCount = prepared.slideCount;
+        pptxData.value = prepared.data;
         break;
       }
       case 'mermaid': {
@@ -457,6 +465,7 @@ function cleanup() {
   mermaidSvg.value = '';
   htmlViewMode.value = 'render';
   pptxData.value = null;
+  pptxSlideCount = 0;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
   loadedForId = '';
@@ -566,7 +575,7 @@ onUnmounted(() => {
 
     <!-- PPTX -->
     <div v-else-if="previewType === 'pptx' && pptxData" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-pptx">
-      <vue-office-pptx :src="pptxData" @rendered="() => {}" @error="(e: any) => { error = e?.message || $t('preview.loadFailed'); }" />
+      <vue-office-pptx :key="loadedForId" :src="pptxData" @rendered="onPptxRendered" @error="(e: any) => { error = e?.message || $t('preview.loadFailed'); }" />
     </div>
 
     <!-- Excel -->

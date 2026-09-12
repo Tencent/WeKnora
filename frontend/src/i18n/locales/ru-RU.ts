@@ -40,6 +40,16 @@ export default {
     },
   },
   localBrowser: {
+    pipOpen: "Открыть плавающее окно",
+    pipReturn: "Вернуть предпросмотр в чат",
+    pipFailed: "Не удалось открыть плавающее окно. Повторите попытку.",
+
+    captureScreenshot: "Сделать снимок страницы",
+    navigationIncomplete: "Страница не достигла нужного этапа загрузки. Проверьте её состояние.",
+    noEntries: "Записи отсутствуют.",
+    stopping: "Завершение задачи…",
+    elapsedSeconds: "{seconds} с",
+
     searchInstructionsTitle: "Инструкции поиска в браузере",
     searchInstructionsDescription: "Укажите предпочитаемую поисковую систему и URL поиска.",
     searchInstructionsHint: "Применяется со следующего запроса. Пустое поле — настройки по умолчанию.",
@@ -5719,6 +5729,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "Команда выполняется",
+      installCommandWaiting: "Ожидание вывода команды. Время выполнения обновляется.",
       skillFiles: 'Просмотреть файлы',
       skillFilesTitle: 'Файлы',
       skillFilesEmpty: 'У этого навыка пока нет файлов для просмотра.',

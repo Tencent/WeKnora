@@ -22,6 +22,7 @@ const browserToolParameters = `{
       "enum": [
         "observe",
         "snapshot",
+        "screenshot",
         "navigate",
         "navigate_back",
         "navigate_forward",
@@ -126,7 +127,7 @@ const browserToolParameters = `{
     "ref": {
       "type": "string",
       "minLength": 1,
-      "description": "Latest page ref. Use ref or selector, not both, for click/fill/hover/scroll_to/focus/select."
+      "description": "Fresh page ref; omit selector when set. Optional screenshot element crop."
     },
     "selector": {
       "type": "string",
@@ -410,6 +411,7 @@ const browserToolParameters = `{
 type browserArgumentRule struct{ fields, required []string }
 
 var browserArgumentRules = map[string]browserArgumentRule{
+	"screenshot": {fields: []string{"ref", "tab_id"}},
 	"observe": {
 		fields:   []string{"debug_surfaces", "max_depth", "max_tokens", "probe_hover", "tab_id"},
 		required: []string{},

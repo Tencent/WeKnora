@@ -40,6 +40,16 @@ export default {
     },
   },
   localBrowser: {
+    pipOpen: "미리보기 팝업 열기",
+    pipReturn: "대화 내 미리보기로 돌아가기",
+    pipFailed: "플로팅 창을 열 수 없습니다. 다시 시도해 주세요.",
+
+    captureScreenshot: "스크린샷 캡처",
+    navigationIncomplete: "페이지가 요청한 로드 단계에 도달하지 못했습니다. 현재 페이지를 확인하세요.",
+    noEntries: "반환된 기록이 없습니다.",
+    stopping: "작업 종료 중…",
+    elapsedSeconds: "{seconds}초",
+
     searchInstructionsTitle: "브라우저 검색 지침",
     searchInstructionsDescription: "선호하는 검색 엔진과 검색 URL을 설정합니다.",
     searchInstructionsHint: "저장 후 다음 요청부터 적용됩니다. 비워 두면 기본값을 사용합니다.",
@@ -5719,6 +5729,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "명령 실행 중",
+      installCommandWaiting: "명령 출력을 기다리는 중입니다. 경과 시간은 계속 업데이트됩니다.",
       skillFiles: '파일 보기',
       skillFilesTitle: '파일',
       skillFilesEmpty: '이 스킬에서 볼 수 있는 파일이 아직 없습니다.',

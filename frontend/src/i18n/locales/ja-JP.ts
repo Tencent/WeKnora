@@ -40,6 +40,16 @@ export default {
     },
   },
   localBrowser: {
+    pipOpen: "プレビューを別ウィンドウで表示",
+    pipReturn: "会話内のプレビューに戻す",
+    pipFailed: "フローティングウィンドウを開けませんでした。もう一度お試しください。",
+
+    captureScreenshot: "スクリーンショットを取得",
+    navigationIncomplete: "ページの読み込みが指定の段階に達しませんでした。現在のページを確認してください。",
+    noEntries: "記録はありません。",
+    stopping: "タスクを終了中…",
+    elapsedSeconds: "{seconds} 秒",
+
     searchInstructionsTitle: "ブラウザー検索の指示",
     searchInstructionsDescription: "使用する検索エンジンと検索 URL を設定します。",
     searchInstructionsHint: "保存後、次のリクエストから適用。空欄は既定値を使用します。",
@@ -1582,6 +1592,8 @@ export default {
       },
       skillTranscriptEmpty: 'このインストールには記録が残っていません。',
       skillTranscriptWaiting: 'インストールを開始しました。処理ログを待っています…',
+      installCommandRunning: "コマンド実行中",
+      installCommandWaiting: "出力を待っています。経過時間は更新されます。",
       skillFiles: 'ファイルを表示',
       skillFilesTitle: 'ファイル',
       skillFilesEmpty: 'このスキルには参照できるファイルがまだありません。',

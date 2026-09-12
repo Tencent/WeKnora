@@ -40,6 +40,16 @@ export default {
     },
   },
   localBrowser: {
+    pipOpen: "弹出悬浮窗",
+    pipReturn: "返回对话小窗",
+    pipFailed: "无法打开悬浮窗，请重试。",
+
+    captureScreenshot: "截取网页画面",
+    navigationIncomplete: "导航未达到目标加载阶段，请检查当前页面。",
+    noEntries: "没有返回记录。",
+    stopping: "正在结束任务…",
+    elapsedSeconds: "{seconds} 秒",
+
     searchInstructionsTitle: "浏览器搜索指令",
     searchInstructionsDescription: "设置你偏好的搜索引擎和搜索地址。",
     searchInstructionsHint: "保存后下次请求生效，留空使用默认指令。",
@@ -5721,6 +5731,8 @@ export default {
       },
       skillTranscriptEmpty: '这次安装没有留下记录。',
       skillTranscriptWaiting: '安装已开始，正在等待过程记录…',
+      installCommandRunning: "命令执行中",
+      installCommandWaiting: "等待命令输出，耗时持续更新。",
       skillFiles: '查看文件',
       skillFilesTitle: '文件',
       skillFilesEmpty: '该技能还没有可查看的文件。',

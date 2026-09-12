@@ -297,6 +297,10 @@ type RemoteListFilter struct {
 // RemoteExecRequest describes a single command invocation. See the
 // RemoteSandboxClient.Exec contract for how Shell interacts with Args.
 type RemoteExecRequest struct {
+	// OnOutput receives stdout/stderr chunks while the command runs. It is an
+	// observation hook only; callers must not retain the supplied bytes.
+	OnOutput func(stream string, chunk []byte) `json:"-"`
+
 	// Command is the executable name (Shell=false) or the shell expression
 	// (Shell=true).
 	Command string

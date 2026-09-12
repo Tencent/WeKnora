@@ -33,7 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -307,11 +306,8 @@ func (m *SessionBoundManager) ensureSessionWorkspaceDirs(
 func (m *SessionBoundManager) prepareSessionDirs(
 	ctx context.Context, handle RemoteSandboxHandle, user string, dirs ...string,
 ) (prepErr error) {
-	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name:     "sandbox.ensure_workspace",
-		Input:    map[string]interface{}{"directories": dirs, "user": user},
-		Metadata: sandboxHandleMeta(handle),
-	})
+	ctx, span := startSandboxSpan(ctx, "sandbox.ensure_workspace",
+		map[string]interface{}{"directories": dirs, "user": user}, sandboxHandleMeta(handle))
 	defer func() { span.Finish(nil, nil, prepErr) }()
 	result, err := m.client.Exec(ctx, handle, RemoteExecRequest{
 		Shell:   true,
@@ -689,6 +685,8 @@ func (m *SessionBoundManager) WriteSessionFile(
 // flags select the installer working-directory allowlist and bootstrap. Both
 // ordinary and install calls currently execute as root.
 type ShellExecOptions struct {
+	OnOutput func(stream string, chunk []byte)
+
 	WorkDir string
 	Timeout time.Duration
 	Env     map[string]string
@@ -780,12 +778,13 @@ func (m *SessionBoundManager) ExecShellCommandWithOptions(
 
 	start := time.Now()
 	execResult, execErr := m.client.Exec(ctx, handle, RemoteExecRequest{
-		Command: command,
-		Shell:   true,
-		Env:     opts.Env,
-		WorkDir: workDir,
-		User:    user,
-		Timeout: timeout,
+		Command:  command,
+		OnOutput: commandOutputCallback(ctx, opts.OnOutput),
+		Shell:    true,
+		Env:      opts.Env,
+		WorkDir:  workDir,
+		User:     user,
+		Timeout:  timeout,
 	})
 	duration := time.Since(start)
 	return remoteExecuteResult(execResult, execErr, duration), nil

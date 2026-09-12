@@ -23,7 +23,8 @@ func TestBrowserFlatSchemaCoversEveryMethod(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(schema.Properties["method"], &method))
 	valid := map[string]string{
-		"observe": `{}`, "snapshot": `{}`, "navigate": `{"url":"https://example.com"}`,
+		"screenshot": `{"ref":"e3","tab_id":1}`,
+		"observe":    `{}`, "snapshot": `{}`, "navigate": `{"url":"https://example.com"}`,
 		"navigate_back": `{}`, "navigate_forward": `{}`, "reload": `{}`,
 		"click": `{"ref":"e1"}`, "fill": `{"selector":"input","value":""}`,
 		"press": `{"key":"Enter"}`, "hover": `{"ref":"e1"}`, "wheel": `{"delta_y":500}`,

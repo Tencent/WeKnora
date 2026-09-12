@@ -204,6 +204,11 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
+                  <SandboxCommandProgress
+                    v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
+                    :progress="event.command_output"
+                  />
+
                   <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
                     class="search-results-summary-fixed attachment-parsing-summary">
                     <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
@@ -495,6 +500,11 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
+                <SandboxCommandProgress
+                  v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
+                  :progress="event.command_output"
+                />
+
                 <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
                   class="search-results-summary-fixed attachment-parsing-summary">
                   <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
@@ -597,6 +607,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick }
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
+import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import { learningToolDisplayType } from '@/composables/learningHelpers';
 import ToolApprovalCard from './ToolApprovalCard.vue';

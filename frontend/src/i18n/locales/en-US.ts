@@ -40,6 +40,16 @@ export default {
     },
   },
   localBrowser: {
+    pipOpen: "Pop out preview",
+    pipReturn: "Return to conversation",
+    pipFailed: "Could not open the floating window. Please try again.",
+
+    captureScreenshot: "Capture screenshot",
+    navigationIncomplete: "Navigation did not reach the requested loading phase. Check the current page.",
+    noEntries: "No entries returned.",
+    stopping: "Ending task…",
+    elapsedSeconds: "{seconds} s",
+
     searchInstructionsTitle: "Browser search instructions",
     searchInstructionsDescription: "Set your preferred search engine and search URL.",
     searchInstructionsHint: "Applies to your next request. Leave empty to use the default.",
@@ -1582,6 +1592,8 @@ export default {
       },
       skillTranscriptEmpty: 'This install left no transcript.',
       skillTranscriptWaiting: 'Install has started. Waiting for the process log…',
+      installCommandRunning: "Command running",
+      installCommandWaiting: "Waiting for command output. Elapsed time continues to update.",
       skillFiles: 'View files',
       skillFilesTitle: 'Files',
       skillFilesEmpty: 'This skill has no files to browse yet.',
