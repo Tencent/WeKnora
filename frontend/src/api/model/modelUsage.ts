@@ -110,7 +110,7 @@ const knownBindings = new Set<string>(KNOWN_MODEL_USAGE_BINDINGS)
 
 export function modelUsageBindingI18nKey(binding: string): string {
   const key = knownBindings.has(binding) ? binding : 'unknown'
-  return `modelSettings.usage.bindings.${key}`
+  return `modelSettings.dependencyUsage.bindings.${key}`
 }
 
 export function modelUsageResourceCount(resources: readonly ModelUsageResource[], total?: number): number {

@@ -17,22 +17,23 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
-	Server          *ServerConfig          `yaml:"server"           json:"server"`
-	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
-	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
-	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
-	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
-	Models          []ModelConfig          `yaml:"models"           json:"models"`
-	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
-	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
-	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
-	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
-	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
-	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
-	IM              *IMConfig              `yaml:"im"               json:"im"`
-	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Conversation       *ConversationConfig       `yaml:"conversation"     json:"conversation"`
+	Server             *ServerConfig             `yaml:"server"           json:"server"`
+	KnowledgeBase      *KnowledgeBaseConfig      `yaml:"knowledge_base"   json:"knowledge_base"`
+	Tenant             *TenantConfig             `yaml:"tenant"           json:"tenant"`
+	Auth               *AuthConfig               `yaml:"auth"             json:"auth"`
+	Audit              *AuditConfig              `yaml:"audit"            json:"audit"`
+	ModelObservability *ModelObservabilityConfig `yaml:"model_observability" json:"model_observability"`
+	OIDCAuth           *OIDCAuthConfig           `yaml:"oidc_auth"        json:"oidc_auth"`
+	Models             []ModelConfig             `yaml:"models"           json:"models"`
+	VectorDatabase     *VectorDatabaseConfig     `yaml:"vector_database"  json:"vector_database"`
+	DocReader          *DocReaderConfig          `yaml:"docreader"        json:"docreader"`
+	StreamManager      *StreamManagerConfig      `yaml:"stream_manager"   json:"stream_manager"`
+	ExtractManager     *ExtractManagerConfig     `yaml:"extract"          json:"extract"`
+	WebSearch          *WebSearchConfig          `yaml:"web_search"       json:"web_search"`
+	PromptTemplates    *PromptTemplatesConfig    `yaml:"prompt_templates" json:"prompt_templates"`
+	IM                 *IMConfig                 `yaml:"im"               json:"im"`
+	Agent              *AgentConfig              `yaml:"agent"            json:"agent"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
@@ -263,6 +264,21 @@ type AuditConfig struct {
 	//   < 0 — invalid; ValidateConfig rejects it.
 	// Default: 90 (set by applyAuditDefaults when the section is omitted).
 	RetentionDays int `yaml:"retention_days" json:"retention_days"`
+}
+
+// ModelObservabilityConfig controls privacy-preserving persistence of model
+// call metadata. Prompt and response bodies are never part of this schema.
+type ModelObservabilityConfig struct {
+	// Enabled defaults to true when omitted. A pointer preserves an explicit
+	// false value in YAML.
+	Enabled       *bool `yaml:"enabled" json:"enabled"`
+	RetentionDays int   `yaml:"retention_days" json:"retention_days"`
+	QueueSize     int   `yaml:"queue_size" json:"queue_size"`
+	BatchSize     int   `yaml:"batch_size" json:"batch_size"`
+}
+
+func (c *ModelObservabilityConfig) IsEnabled() bool {
+	return c == nil || c.Enabled == nil || *c.Enabled
 }
 
 // AuthConfig governs the user authentication entry points.
@@ -584,6 +600,7 @@ func LoadConfig() (*Config, error) {
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
+	applyModelObservabilityDefaults(&cfg)
 
 	if err := ValidateConfig(&cfg); err != nil {
 		return nil, err
@@ -645,6 +662,20 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Audit != nil && cfg.Audit.RetentionDays < 0 {
 		errs = append(errs, fmt.Sprintf("audit.retention_days must be >= 0 (got %d); use 0 to disable purge",
 			cfg.Audit.RetentionDays))
+	}
+
+	if cfg.ModelObservability != nil {
+		if cfg.ModelObservability.RetentionDays <= 0 {
+			errs = append(errs, "model_observability.retention_days must be > 0")
+		}
+		if cfg.ModelObservability.QueueSize <= 0 {
+			errs = append(errs, "model_observability.queue_size must be > 0")
+		}
+		if cfg.ModelObservability.BatchSize <= 0 {
+			errs = append(errs, "model_observability.batch_size must be > 0")
+		} else if cfg.ModelObservability.BatchSize > cfg.ModelObservability.QueueSize {
+			errs = append(errs, "model_observability.batch_size must not exceed queue_size")
+		}
 	}
 
 	if cfg.Conversation != nil {
@@ -941,6 +972,37 @@ func applyAuditDefaults(cfg *Config) {
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AUDIT_RETENTION_DAYS")); value != "" {
 		if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 			cfg.Audit.RetentionDays = n
+		}
+	}
+}
+
+func applyModelObservabilityDefaults(cfg *Config) {
+	if cfg.ModelObservability == nil {
+		enabled := true
+		cfg.ModelObservability = &ModelObservabilityConfig{Enabled: &enabled}
+	}
+	if cfg.ModelObservability.Enabled == nil {
+		enabled := true
+		cfg.ModelObservability.Enabled = &enabled
+	}
+	if cfg.ModelObservability.RetentionDays == 0 {
+		cfg.ModelObservability.RetentionDays = 30
+	}
+	if cfg.ModelObservability.QueueSize == 0 {
+		cfg.ModelObservability.QueueSize = 4096
+	}
+	if cfg.ModelObservability.BatchSize == 0 {
+		cfg.ModelObservability.BatchSize = 100
+	}
+
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_MODEL_CALL_OBSERVABILITY_ENABLED")); value != "" {
+		if enabled, err := strconv.ParseBool(value); err == nil {
+			cfg.ModelObservability.Enabled = &enabled
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_MODEL_CALL_RETENTION_DAYS")); value != "" {
+		if days, err := strconv.Atoi(value); err == nil && days > 0 {
+			cfg.ModelObservability.RetentionDays = days
 		}
 	}
 }

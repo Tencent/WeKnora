@@ -2,8 +2,8 @@
 
 评估使用带标准答案的问答数据集，比较分块、模型和检索配置的效果。系统创建评估知识库并导入语料，逐题执行检索与生成，输出 Precision、Recall、NDCG、MRR、MAP、BLEU 和 ROUGE 等指标。
 
-::: tip 通过 API 使用
-评估暂时没有独立的界面入口，通过 `POST /api/v1/evaluation` 发起、`GET /api/v1/evaluation?task_id=...` 轮询结果；创建需要 Admin，查询需要 Viewer 权限。数据集是 Parquet 格式，格式要求见下文。
+::: tip 界面与 API 都可用
+在“设置 → RAG 评测”中可选择数据集、知识库、对话模型和重排模型，查看持久化历史，并同时对比 2–4 次运行。Viewer 可查看，启动评测需要 Admin 权限。也可通过 API 发起和轮询。
 :::
 
 比较配置时应固定数据集，每次调整一个变量，并对照同一组指标分析结果。
@@ -19,7 +19,9 @@
 
 ## 数据集格式
 
-数据集服务（`internal/application/service/dataset.go`）从 `./dataset/samples/` 加载 5 个 **Parquet** 文件：
+数据集根目录由 `WEKNORA_EVALUATION_DATASET_DIR` 配置（默认 `./dataset`）。内置 `default`
+映射到 `samples/`，其他 `dataset_id` 映射到同名子目录。每个目录需要 `manifest.json` 和
+5 个 **Parquet** 文件：
 
 | 文件 | Schema | 含义 |
 | --- | --- | --- |
@@ -59,18 +61,21 @@ type QAPair struct {
 }
 ```
 
-自定义数据集只需按上述 Schema 生成同名 Parquet 文件。加载时服务会打印统计信息（问题数、语料数、平均相关段落数、答案覆盖率等）。
+自定义数据集还需在 manifest 声明 `schema_version`、`id`、名称、语言、场景、来源、
+许可证和覆盖维度。加载前会校验字段类型、空文本、重复 ID、悬空 qid/pid/aid，以及每个问题的
+答案与 qrel 覆盖；失败的数据集会在界面标记为不可用，不会消耗模型额度。
 
 ## 结果查询
 
-`GET /api/v1/evaluation?task_id=evaluation-{tenant}-{dataset}`，返回 `EvaluationDetail`：
+使用创建接口返回的唯一任务 ID 请求
+`GET /api/v1/evaluation?task_id=<task_id>`，返回 `EvaluationDetail`：
 
 ```json
 {
   "success": true,
   "data": {
     "task": {
-      "id": "evaluation-1-default",
+      "id": "evaluation_1_1788792322769_f51acdc7_default",
       "dataset_id": "default",
       "status": 2,
       "total": 100,
@@ -94,7 +99,7 @@ type QAPair struct {
 
 任务运行期间可轮询该接口获取 `finished / total` 进度；`status = 3` 时 `err_msg` 携带失败原因。
 
-> **注意**：评估结果存储在**内存**（`evaluationMemoryStorage`：`map[string]*EvaluationDetail` + `sync.RWMutex`，见 `internal/application/service/evaluation.go`），服务重启后任务与结果会丢失，需重新发起评估。
+> **持久化与隐私**：任务、指标、聚合用量和无密钥运行快照会按租户保存，服务重启后仍可对比。逐次模型调用只保存模型、用途、Token、缓存、费用、耗时和受保护的指纹，不保存 Prompt 或回答正文，并按保留策略清理。
 
 ## 指标清单
 
@@ -154,6 +159,9 @@ evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(a
 {
     evaluationRoutes.POST("", g.Admin(), handler.Evaluation)
     evaluationRoutes.GET("", g.Viewer(), handler.GetEvaluationResult)
+    evaluationRoutes.GET("/datasets", g.Viewer(), handler.GetEvaluationDatasets)
+    evaluationRoutes.GET("/runs", g.Viewer(), handler.GetEvaluationRuns)
+    evaluationRoutes.GET("/model-usage", g.Viewer(), handler.GetModelUsage)
 }
 ```
 
@@ -161,6 +169,19 @@ evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(a
 | --- | --- | --- | --- |
 | POST | `/api/v1/evaluation` | Admin（API Key 需 `RunEvaluations` 能力） | 创建评估任务，立即返回任务信息 |
 | GET | `/api/v1/evaluation?task_id=...` | Viewer | 查询任务状态、进度与指标结果 |
+| GET | `/api/v1/evaluation/datasets` | Viewer | 列出 manifest 数据集及 Schema 就绪状态 |
+| GET | `/api/v1/evaluation/runs` | Viewer | 分页查询当前租户的持久化运行历史 |
+| GET | `/api/v1/evaluation/model-usage` | Viewer | 按模型、用途和时间范围汇总 Token、缓存、费用与耗时 |
+
+### 可控对比
+
+评测历史会保留数据集内容指纹、样本数、代码版本、分块和 RAG 管线参数，以及不含密钥的模型
+配置指纹。界面可选择 2–4 次成功运行，第一项作为基线，并对每个候选项显示质量、耗时、Token、
+缓存命中率和分币种费用差值。
+
+比较前会校验数据集、来源知识库、分块、管线、Embedding 和 Rerank 配置是否一致。进行多对话模型
+横向对比时，只更换 Chat 模型；进行新旧版本回归时，固定模型和数据集。如果快照缺失或其他控制变量不同，
+界面会显示不可比警告，而不是直接解读差值。
 
 #### 创建评估任务
 
@@ -182,7 +203,7 @@ type EvaluationRequest struct {
 | `chat_id` | 否 | 缺省自动选择默认 Chat 模型 |
 | `rerank_id` | 否 | 缺省自动选择默认 Rerank 模型 |
 
-任务 ID 格式为 `evaluation-{tenantID}-{datasetID}`。任务对象（`internal/types/evaluation.go`）：
+任务 ID 由任务类型、租户、时间戳、短 UUID 和数据集 ID 组成，因此同一数据集可保留多次运行。任务对象（`internal/types/evaluation.go`）：
 
 ```go
 type EvaluationTask struct {
@@ -214,7 +235,7 @@ const (
 
 1. **知识库准备**：新建（或按参考 KB 配置克隆）评估专用知识库，取默认 Embedding 与 LLM 模型；
 2. **参数装配**：从系统配置装配 `ChatManage` 评估参数——`VectorThreshold`、`KeywordThreshold`、`EmbeddingTopK`、`RerankTopK`、`RerankThreshold`、`MaxRounds`、`SummaryConfig`（MaxTokens / TopK / TopP / RepeatPenalty / Prompt / ContextTemplate 等）、`FallbackResponse`、改写提示词等；
-3. **任务注册**：以任务 ID 注册到内存存储，状态 `Pending`，立即返回响应；
+3. **任务注册**：将任务、无密钥运行快照和状态 `Pending` 写入数据库，立即返回响应；
 4. **后台执行**（goroutine）：将数据集 corpus 灌入评估 KB → 并行评估每个 QA 对 → 汇聚指标 → 清理资源。
 
 并发度取 `max(GOMAXPROCS - 1, 1)`（errgroup 限流）：
@@ -259,7 +280,7 @@ type MetricInput struct {
 flowchart TD
     A["POST /api/v1/evaluation<br/>(dataset_id, knowledge_base_id, chat_id, rerank_id)"] --> B["创建评估专用知识库<br/>(新建或克隆参考 KB 配置)"]
     B --> C["装配 ChatManage 评估参数<br/>(阈值 / TopK / Summary 配置)"]
-    C --> D["注册任务到内存存储<br/>ID = evaluation-{tenant}-{dataset}, 状态 Pending"]
+    C --> D["持久化任务与运行快照<br/>唯一 ID, 状态 Pending"]
     D --> E["立即返回任务信息"]
     D --> F["goroutine 后台执行, 状态 Running"]
     F --> G["加载 Parquet 数据集<br/>queries / corpus / qrels / answers / qas"]
@@ -282,7 +303,7 @@ flowchart TD
 | 评估服务 | `internal/application/service/evaluation.go` |
 | 指标注册与汇聚 | `internal/application/service/metric_hook.go` |
 | 指标实现 | `internal/application/service/metric/`（`precision.go`、`recall.go`、`ndcg.go`、`mrr.go`、`map.go`、`bleu.go`、`rouge.go`、`rouge_score.go`、`common.go`） |
-| 数据集加载 | `internal/application/service/dataset.go`、`internal/handler/dataset.go` |
+| 数据集加载 | `internal/application/service/dataset.go`、`internal/handler/evaluation.go` |
 | 类型定义 | `internal/types/evaluation.go`、`internal/types/dataset.go` |
 | 内置样例数据集 | `dataset/samples/`（Parquet 文件） |
 | 路由注册 | `internal/router/router.go` 的 `RegisterEvaluationRoutes` |

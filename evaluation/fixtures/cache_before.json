@@ -1,0 +1,55 @@
+{
+  "experiment": {
+    "protocol_version": 1,
+    "cohort": "cold",
+    "workload_fingerprint": "sha256:fixture-workload",
+    "model_fingerprint": "sha256:fixture-model",
+    "configuration_fingerprint": "sha256:fixture-config",
+    "repetitions": 3
+  },
+  "embedding": {
+    "requested_texts": 100,
+    "provider_calls": 100
+  },
+  "model_calls": [
+    {
+      "model_id": "fixture-chat-model",
+      "purpose": "wiki_page_modify",
+      "prompt_prefix_fingerprint": "hmac:fixture-prefix-1",
+      "request_fingerprint": "hmac:fixture-request-1",
+      "usage": {
+        "prompt_tokens": 1000,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cache_miss_tokens": 1000,
+        "cache_reported": true
+      },
+      "pricing": { "currency": "USD" },
+      "estimated_cost": 0.02,
+      "duration_ms": 1000,
+      "success": true
+    },
+    {
+      "model_id": "fixture-chat-model",
+      "purpose": "wiki_page_modify",
+      "prompt_prefix_fingerprint": "hmac:fixture-prefix-2",
+      "request_fingerprint": "hmac:fixture-request-2",
+      "usage": { "prompt_tokens": 1000, "cache_miss_tokens": 1000, "cache_reported": true },
+      "pricing": { "currency": "USD" },
+      "estimated_cost": 0.02,
+      "duration_ms": 1200,
+      "success": true
+    },
+    {
+      "model_id": "fixture-chat-model",
+      "purpose": "wiki_page_modify",
+      "prompt_prefix_fingerprint": "hmac:fixture-prefix-3",
+      "request_fingerprint": "hmac:fixture-request-3",
+      "usage": { "prompt_tokens": 1000, "cache_miss_tokens": 1000, "cache_reported": true },
+      "pricing": { "currency": "USD" },
+      "estimated_cost": 0.02,
+      "duration_ms": 3000,
+      "success": true
+    }
+  ]
+}

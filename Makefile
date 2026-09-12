@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test evaluation-gate clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
 
 # Show help
 help:
@@ -8,6 +8,7 @@ help:
 	@echo "  build             构建应用"
 	@echo "  run               运行应用"
 	@echo "  test              运行测试"
+	@echo "  evaluation-gate   一条命令运行课题三质量门禁并生成评测/缓存报告"
 	@echo "  anydoc-lib        构建 anydoc 静态库（需要 Rust 工具链）"
 	@echo "  build-anydoc      构建带 anydoc 解析引擎的应用"
 	@echo "  clean             清理构建文件"
@@ -106,6 +107,14 @@ run: build
 # Run tests
 test:
 	go test -v ./...
+
+# Topic 3 deterministic acceptance command. Reports are written to the current
+# directory so the command output and submitted artifacts use identical data.
+evaluation-gate:
+	go test ./internal/application/service/metric ./internal/application/service/chat_pipeline ./internal/application/service ./internal/config ./internal/models/chat ./internal/models/embedding ./cmd/retrievalgate ./cmd/evalgate ./cmd/cachebench
+	go run ./cmd/retrievalgate -out evaluation-pipeline-result.json
+	go run ./cmd/evalgate -result evaluation-pipeline-result.json -reference-result evaluation/fixtures/regression_reference.json -baseline evaluation/baseline.json -report evaluation-report.json
+	go run ./cmd/cachebench -strict -before evaluation/fixtures/cache_before.json -after evaluation/fixtures/cache_after.json -report cache-comparison.json
 
 # Clean build artifacts
 clean:
@@ -348,5 +357,3 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
-
-

@@ -161,23 +161,64 @@ python dataset/qa_dataset.py show \
 
 ## 输入数据格式
 
+### 数据集目录和清单
+
+内置 `dataset_id=default` 读取 `dataset/samples/`。自定义数据集 ID（例如
+`support-zh-v1`）读取 `dataset/support-zh-v1/`；可通过
+`WEKNORA_EVALUATION_DATASET_DIR` 修改数据集根目录。ID 只允许 1–64 个字母、数字、
+点、下划线或连字符，不能使用路径分隔符。
+
+每个可评测目录必须额外包含 `manifest.json`：
+
+```json
+{
+  "schema_version": 1,
+  "id": "support-zh-v1",
+  "name": "中文客服问答集 v1",
+  "description": "覆盖退款、物流和账户问题",
+  "language": "zh-CN",
+  "scenario": "customer-support",
+  "source": "内部脱敏工单",
+  "license": "internal-evaluation-only",
+  "created_at": "2026-09-06",
+  "coverage_dimensions": ["single-hop", "multi-hop", "no-answer"]
+}
+```
+
+`schema_version`、`id` 和非空 `name` 为必填项，且清单 ID 必须与请求的
+`dataset_id` 完全一致。其他字段用于说明来源和覆盖范围。服务还会校验 Parquet
+字段类型、空文本、重复 ID、悬空关系，以及每个问题是否同时具备相关段落和答案；
+校验失败时不会启动后台评测或消耗模型额度。
+
 ### 查询文件 (queries.parquet)
 | 列名 | 类型 | 描述 |
 |------|------|------|
-| id | string | 唯一查询标识符 |
+| id | int64 | 唯一查询标识符 |
 | text | string | 实际的问题文本 |
 
 ### 语料库文件 (corpus.parquet)
 | 列名 | 类型 | 描述 |
 |------|------|------|
-| id | string | 唯一段落/文档标识符 |
+| id | int64 | 唯一段落/文档标识符 |
 | text | string | 段落/文档内容 |
 
 ### 相关性判断文件 (qrels.parquet)
 | 列名 | 类型 | 描述 |
 |------|------|------|
-| qid | string | 查询ID（匹配queries.id） |
-| pid | string | 段落ID（匹配corpus.id） |
+| qid | int64 | 查询ID（匹配queries.id） |
+| pid | int64 | 段落ID（匹配corpus.id） |
+
+### 答案文件 (answers.parquet)
+| 列名 | 类型 | 描述 |
+|------|------|------|
+| id | int64 | 唯一答案标识符 |
+| text | string | 参考答案文本 |
+
+### 问答映射文件 (qas.parquet)
+| 列名 | 类型 | 描述 |
+|------|------|------|
+| qid | int64 | 查询ID（匹配queries.id） |
+| aid | int64 | 答案ID（匹配answers.id） |
 
 ## 输出文件
 

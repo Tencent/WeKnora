@@ -396,6 +396,59 @@
             :placeholder="$t('model.editor.maxConcurrencyPlaceholder')" />
           <p class="form-desc">{{ $t('model.editor.maxConcurrencyDesc') }}</p>
         </div>
+
+        <div v-if="activeModelType === 'chat'" class="form-item pricing-config">
+          <label class="form-label">{{ pricingLabels.title }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.pricingEnabled" />
+            <span class="form-desc form-desc--inline">{{ pricingLabels.description }}</span>
+          </div>
+          <template v-if="formData.pricingEnabled">
+            <div class="pricing-config__currency">
+              <label class="form-label">{{ pricingLabels.currency }}</label>
+              <t-input v-model="formData.pricingCurrency" maxlength="16" placeholder="USD / CNY" />
+            </div>
+            <div class="pricing-config__grid">
+              <label>
+                <span>{{ pricingLabels.input }}</span>
+                <t-input v-model.number="formData.inputPricePerMillion" type="number" :min="0" />
+              </label>
+              <label>
+                <span>{{ pricingLabels.output }}</span>
+                <t-input v-model.number="formData.outputPricePerMillion" type="number" :min="0" />
+              </label>
+              <label>
+                <span>{{ pricingLabels.cacheRead }}</span>
+                <t-input v-model.number="formData.cacheReadPricePerMillion" type="number" :min="0" />
+              </label>
+              <label>
+                <span>{{ pricingLabels.cacheWrite }}</span>
+                <t-input v-model.number="formData.cacheWritePricePerMillion" type="number" :min="0" />
+              </label>
+            </div>
+            <p class="form-desc">{{ pricingLabels.unit }}</p>
+            <p class="form-desc pricing-config__note">{{ pricingLabels.note }}</p>
+          </template>
+        </div>
+
+        <div v-if="activeModelType === 'embedding'" class="form-item pricing-config">
+          <label class="form-label">{{ embeddingCacheLabels.title }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.embeddingCacheEnabled" />
+            <span class="form-desc form-desc--inline">{{ embeddingCacheLabels.description }}</span>
+          </div>
+          <div v-if="formData.embeddingCacheEnabled" class="pricing-config__grid">
+            <label>
+              <span>{{ embeddingCacheLabels.ttl }}</span>
+              <t-input v-model.number="formData.embeddingCacheTTLSeconds" type="number" :min="1" />
+            </label>
+            <label>
+              <span>{{ embeddingCacheLabels.maxEntries }}</span>
+              <t-input v-model.number="formData.embeddingCacheMaxEntries" type="number" :min="1" />
+            </label>
+          </div>
+          <p v-if="formData.embeddingCacheEnabled" class="form-desc">{{ embeddingCacheLabels.note }}</p>
+        </div>
       </section>
 
     </t-form>
@@ -450,6 +503,15 @@ interface ModelFormData {
   contextWindow?: number
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
   maxConcurrency?: number
+  pricingEnabled?: boolean
+  pricingCurrency?: string
+  inputPricePerMillion?: number
+  outputPricePerMillion?: number
+  cacheReadPricePerMillion?: number
+  cacheWritePricePerMillion?: number
+  embeddingCacheEnabled?: boolean
+  embeddingCacheTTLSeconds?: number
+  embeddingCacheMaxEntries?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
   thinkingControl?: string
   // 自定义 HTTP 请求头（类似 OpenAI Python SDK 的 extra_headers）
@@ -468,8 +530,57 @@ interface Props {
   modelData?: ModelFormData | null
 }
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const uiStore = useUIStore()
+
+const pricingLabels = computed(() => {
+  const lang = String(locale.value).toLowerCase()
+  if (lang.startsWith('zh')) return {
+    title: 'Token 成本估算', description: '为模型调用计算成本并保存价格快照', currency: '币种',
+    input: '普通输入', output: '模型输出', cacheRead: '缓存读取', cacheWrite: '缓存创建', unit: '单价单位：每百万 Token',
+    note: '请按 Provider 的计费口径填写；0 表示该类 Token 确实免费，不会自动继承普通输入单价。隐式缓存若按普通输入价收取创建 Token，应将“缓存创建”设为普通输入单价。',
+  }
+  if (lang.startsWith('ja')) return {
+    title: 'Token コスト見積もり', description: 'モデル呼び出しのコストを計算し、価格スナップショットを保存します', currency: '通貨',
+    input: '通常入力', output: 'モデル出力', cacheRead: 'キャッシュ読み取り', cacheWrite: 'キャッシュ作成', unit: '単価：100万 Token あたり',
+    note: 'Provider の課金方式に従って入力してください。0 は無料を意味し、通常入力単価を自動継承しません。暗黙的キャッシュの作成が通常入力単価で課金される場合は、同じ単価を設定してください。',
+  }
+  if (lang.startsWith('ko')) return {
+    title: 'Token 비용 추정', description: '평가 호출 비용과 가격 스냅샷을 저장합니다', currency: '통화',
+    input: '일반 입력', output: '모델 출력', cacheRead: '캐시 읽기', cacheWrite: '캐시 생성', unit: '단가: 백만 Token당',
+    note: 'Provider의 과금 방식에 따라 입력하세요. 0은 무료를 뜻하며 일반 입력 단가를 자동 상속하지 않습니다. 암시적 캐시 생성이 일반 입력 단가로 과금되면 같은 단가를 설정하세요.',
+  }
+  if (lang.startsWith('ru')) return {
+    title: 'Оценка стоимости токенов', description: 'Расчёт стоимости и сохранение снимка цен', currency: 'Валюта',
+    input: 'Обычный ввод', output: 'Вывод модели', cacheRead: 'Чтение кэша', cacheWrite: 'Создание кэша', unit: 'Цена за миллион токенов',
+    note: 'Укажите цены по правилам Provider. Ноль означает, что токены бесплатны, и не наследует цену обычного ввода. Если создание неявного кэша оплачивается как обычный ввод, укажите ту же цену.',
+  }
+  return {
+    title: 'Token cost estimation', description: 'Estimate model-call cost and preserve a pricing snapshot', currency: 'Currency',
+    input: 'Regular input', output: 'Model output', cacheRead: 'Cache read', cacheWrite: 'Cache creation', unit: 'Price per one million tokens',
+    note: 'Enter prices using the Provider billing rules. Zero means those tokens are actually free; it does not inherit the regular input price. If implicit-cache creation is billed as regular input, use the same price.',
+  }
+})
+
+const embeddingCacheLabels = computed(() => {
+  const lang = String(locale.value).toLowerCase()
+  if (lang.startsWith('zh')) return {
+    title: 'Embedding 向量缓存', description: '相同模型与文本直接复用向量，减少重复调用',
+    ttl: '有效期（秒）', maxEntries: '进程最大缓存条目', note: '缓存键只保存模型配置指纹和文本哈希，不保存原文。',
+  }
+  if (lang.startsWith('ko')) return {
+    title: 'Embedding 벡터 캐시', description: '같은 모델과 텍스트의 벡터를 재사용합니다',
+    ttl: '유효 기간(초)', maxEntries: '프로세스 최대 항목', note: '캐시 키에는 모델 지문과 텍스트 해시만 저장됩니다.',
+  }
+  if (lang.startsWith('ru')) return {
+    title: 'Кэш векторов Embedding', description: 'Повторно использует вектор для той же модели и текста',
+    ttl: 'Срок действия (сек.)', maxEntries: 'Максимум записей на процесс', note: 'Ключ хранит только отпечаток модели и хэш текста.',
+  }
+  return {
+    title: 'Embedding vector cache', description: 'Reuse vectors for the same model and text',
+    ttl: 'TTL (seconds)', maxEntries: 'Maximum entries per process', note: 'Keys contain only a model fingerprint and text hash, never the original text.',
+  }
+})
 
 const props = withDefaults(defineProps<Props>(), {
   visible: false,
@@ -898,6 +1009,15 @@ const formData = ref<ModelFormData>({
   supportsVision: false,
   contextWindow: undefined,
   maxConcurrency: undefined,
+  pricingEnabled: false,
+  pricingCurrency: 'USD',
+  inputPricePerMillion: 0,
+  outputPricePerMillion: 0,
+  cacheReadPricePerMillion: 0,
+  cacheWritePricePerMillion: 0,
+  embeddingCacheEnabled: true,
+  embeddingCacheTTLSeconds: 86400,
+  embeddingCacheMaxEntries: 10000,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
   appSecret: '',
@@ -1140,6 +1260,15 @@ const resetForm = () => {
     supportsVision: false,
     contextWindow: undefined,
     maxConcurrency: undefined,
+    pricingEnabled: false,
+    pricingCurrency: 'USD',
+    inputPricePerMillion: 0,
+    outputPricePerMillion: 0,
+    cacheReadPricePerMillion: 0,
+    cacheWritePricePerMillion: 0,
+    embeddingCacheEnabled: true,
+    embeddingCacheTTLSeconds: 86400,
+    embeddingCacheMaxEntries: 10000,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],
     appSecret: '',
@@ -2247,6 +2376,33 @@ const handleCancel = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.pricing-config {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  &__currency {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+  }
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      color: var(--td-text-color-secondary);
+      font-size: 12px;
+    }
+  }
 }
 
 // Ollama不可用提示样式
