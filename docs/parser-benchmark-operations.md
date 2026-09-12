@@ -8,6 +8,7 @@
 
 ```bash
 sh scripts/build-parser-benchmark.sh
+export JIEBA_DICT_DIR="$PWD/artifacts/parser-benchmark/bin/jieba"
 python3 scripts/run-parser-benchmark.py --native \
   --manifest dataset/parser-benchmark/manifest-full.json \
   --binary artifacts/parser-benchmark/bin/parser-benchmark \

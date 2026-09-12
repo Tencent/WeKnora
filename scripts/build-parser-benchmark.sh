@@ -17,13 +17,19 @@ if [ -n "${PARSER_BENCHMARK_COMMIT:-}" ] && [ "$PARSER_BENCHMARK_COMMIT" != "$so
   exit 1
 fi
 go test -tags sqlite_fts5 ./cmd/parser-benchmark
-go build -tags sqlite_fts5 \
-  -ldflags "-X main.commitID=$source_commit" \
-  -o "$binary_path" ./cmd/parser-benchmark
 dict_module=$(go list -m -f '{{.Dir}}' github.com/yanyiwu/gojieba)
 for source_dictionary in "$dict_module"/deps/cppjieba/dict/*; do
   target_dictionary="artifacts/parser-benchmark/bin/jieba/$(basename "$source_dictionary")"
-  if [ -e "$target_dictionary" ]; then
+  if [ -d "$source_dictionary" ]; then
+    if [ -e "$target_dictionary" ]; then
+      diff -qr "$source_dictionary" "$target_dictionary" >/dev/null || {
+        echo 'The frozen Jieba dictionary directory differs. Use a separate workspace.' >&2
+        exit 1
+      }
+    else
+      cp -R "$source_dictionary" "$target_dictionary"
+    fi
+  elif [ -e "$target_dictionary" ]; then
     cmp -s "$source_dictionary" "$target_dictionary" || {
       echo 'The frozen Jieba dictionary differs. Build in a separate workspace to preserve this run.' >&2
       exit 1
@@ -32,3 +38,7 @@ for source_dictionary in "$dict_module"/deps/cppjieba/dict/*; do
     cp "$source_dictionary" "$target_dictionary"
   fi
 done
+
+go build -tags sqlite_fts5 \
+  -ldflags "-X main.commitID=$source_commit" \
+  -o "$binary_path" ./cmd/parser-benchmark
