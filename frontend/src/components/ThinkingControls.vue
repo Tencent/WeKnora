@@ -40,8 +40,8 @@
         </div>
       </div>
 
-      <!-- single：档位单选，空 = 跟随模型默认 -->
-      <div v-if="editMode === 'single'" class="thinking-controls__field">
+      <!-- single：档位单选，空 = 跟随模型默认（思考未开启不展示，2026-09-13 反馈 #4） -->
+      <div v-if="editMode === 'single' && (!showToggle || effectiveEnabled)" class="thinking-controls__field">
         <t-select
           :model-value="modelValue.level ?? ''"
           clearable
@@ -51,8 +51,9 @@
         />
       </div>
 
-      <!-- levels：允许集多选 + 默认档（含预填来源徽章插槽） -->
-      <template v-else>
+      <!-- levels：允许集多选 + 默认档（思考未开启不展示——档位与默认档对
+           关闭思考的模型无意义；showToggle=false 的宿主面板不受影响） -->
+      <template v-else-if="!showToggle || effectiveEnabled">
         <div class="thinking-controls__field">
           <label class="thinking-controls__label">
             {{ t('model.editor.selectedLevelsLabel') }}

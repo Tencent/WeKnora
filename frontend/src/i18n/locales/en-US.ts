@@ -4342,6 +4342,12 @@ export default {
       dimensionOverrideDesc: 'Enable only if the provider documentation says this model accepts a dimensions parameter.',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      inputModalitiesLabel: 'Input modalities',
+      inputModalitiesDesc: 'Check the input modalities this model supports; text is the baseline capability and is checked by default. Editing is never locked when the model list does not report modalities.',
+      modalityText: 'Text',
+      modalityImage: 'Image',
+      modalityAudio: 'Audio',
+      modalityVideo: 'Video',
       contextWindowLabel: 'Context Window',
       contextWindowPlaceholder: 'Default {value}',
       contextWindowDesc: 'How many tokens this model can take in one request. Agent history compaction uses this limit. Leave empty for the default 200000 (200K). Use the provider’s real window — a larger guess means compaction never fires and the provider rejects the request.',
@@ -4439,7 +4445,11 @@ export default {
         },
         generic: {
           label: 'Custom (OpenAI-compatible)',
-          description: 'Generic API endpoint'
+          description: 'Generic API endpoint',
+        ollama: {
+          label: 'Ollama',
+          description: 'Local Ollama server (http://localhost:11434)',
+        },
         },
         siliconflow: {
           label: 'SiliconFlow',

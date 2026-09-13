@@ -169,9 +169,9 @@ func credentialsFor(name ProviderName) []CredentialFieldSpec {
 	switch name {
 	case ProviderWeKnoraCloud:
 		return []CredentialFieldSpec{}
-	case ProviderGeneric:
-		// 自定义/自部署（含本地 Ollama 记录，P1c 构造点映射后归入 generic/
-		// ollama 适配器）：凭证可空（匿名可达的服务）。
+	case ProviderGeneric, ProviderOllama:
+		// 自定义/自部署（generic 与本地 Ollama——2026-09-13 起以厂商身份
+		// 出现在厂商列表）：凭证可空（匿名可达的服务）。
 		return []CredentialFieldSpec{{Key: CredentialKeyAPIKey}}
 	case ProviderLKEAP, ProviderVolcengine:
 		return []CredentialFieldSpec{
@@ -192,6 +192,9 @@ func protocolFor(name ProviderName) ProtocolFamily {
 		// 2026-09-12 裁定：阿里云走原生 DashScope 接口（厂商自有协议），
 		// 不再借道 compatible-mode。
 		return ProtocolDashScope
+	case ProviderOllama:
+		// 本地 Ollama 走自有原生协议（ollama.go 适配器同款声明）。
+		return ProtocolOllama
 	default:
 		// gemini 亦落此处：走官方 OpenAI 兼容层（裁定 #31），wire 即 OpenAI Chat 形态。
 		return ProtocolOpenAIChat

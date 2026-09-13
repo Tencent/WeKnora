@@ -71,6 +71,9 @@ const (
 	ProviderAzureOpenAI ProviderName = "azure_openai"
 	// ProviderWeKnoraCloud is the WeKnoraCloud 云服务 provider.
 	ProviderWeKnoraCloud ProviderName = "weknoracloud"
+	// ProviderOllama is the local Ollama server — 2026-09-13 起以厂商身份
+	// 进入 /models/providers（"模型来源"控件退役）。
+	ProviderOllama ProviderName = "ollama"
 )
 
 // AllProviders is the canonical presentation order of the vendor vocabulary —
@@ -104,6 +107,7 @@ func AllProviders() []ProviderName {
 		ProviderNvidia,
 		ProviderNovita,
 		ProviderAzureOpenAI,
+		ProviderOllama,
 	}
 }
 

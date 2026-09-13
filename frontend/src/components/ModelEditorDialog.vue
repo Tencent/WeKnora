@@ -49,109 +49,11 @@
       </section>
 
       <!--
-        Section 1 — 模型来源 + 模型名称（来源直接决定下方字段，所以放一节）
+        Section 1 — 接入配置：厂商决定一切（ollama=本地分支，其余=远程分支）。
+        2026-09-13 裁定：「模型来源」控件退役，source 由 provider 派生。
       -->
       <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionSource') }}</h4>
-
-        <div class="form-item">
-          <!--
-            Section title already says 「模型来源」，所以这里不再重复 label，
-            直接把分段控件作为 section 的首个内容呈现，避免「双标题」感。
-          -->
-          <div class="source-options" role="radiogroup" :aria-label="$t('model.editor.sourceLabel')">
-            <button
-              type="button"
-              class="source-option"
-              :class="{ 'is-active': formData.source === 'remote' }"
-              role="radio"
-              :aria-checked="formData.source === 'remote'"
-              @click="formData.source = 'remote'"
-            >
-              <t-icon name="cloud" class="source-option__icon" />
-              <span class="source-option__label">{{ $t('model.editor.sourceRemote') }}</span>
-            </button>
-            <button
-              type="button"
-              class="source-option"
-              :class="{ 'is-active': formData.source === 'local', 'is-disabled': ollamaServiceStatus === false || activeModelType === 'rerank' }"
-              :disabled="ollamaServiceStatus === false || activeModelType === 'rerank'"
-              role="radio"
-              :aria-checked="formData.source === 'local'"
-              @click="formData.source = 'local'"
-            >
-              <t-icon name="server" class="source-option__icon" />
-              <span class="source-option__label">{{ $t('model.editor.sourceLocal') }}</span>
-            </button>
-          </div>
-
-          <!-- ReRank模型不支持Ollama的提示信息 -->
-          <div v-if="activeModelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
-            <t-icon name="info-circle-filled" class="tip-icon info" />
-            <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
-          </div>
-
-          <!-- Ollama不可用时的提示信息 -->
-          <div v-else-if="shouldShowOllamaUnavailableTip(formData.source, activeModelType, ollamaServiceStatus)"
-            class="ollama-unavailable-tip">
-            <t-icon name="error-circle-filled" class="tip-icon" />
-            <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
-            <t-button variant="text" size="small" @click="goToOllamaSettings" class="tip-link">
-              <template #icon><t-icon name="jump" /></template>
-              {{ $t('model.editor.goToOllamaSettings') }}
-            </t-button>
-          </div>
-        </div>
-
-        <!-- Ollama 本地模型选择器 -->
-        <div v-if="formData.source === 'local'" class="form-item">
-          <label class="form-label required">{{ $t('model.modelName') }}</label>
-          <div class="model-select-row">
-            <t-select v-model="formData.modelName" :loading="loadingOllamaModels" :class="{ 'downloading': downloading }"
-              :style="downloading ? `--progress: ${downloadProgress}%` : ''" filterable :filter="handleModelFilter"
-              :placeholder="$t('model.searchPlaceholder')" @focus="loadOllamaModels"
-              @visible-change="handleDropdownVisibleChange">
-              <!-- 已下载的模型 -->
-              <t-option v-for="model in filteredOllamaModels" :key="model.name" :value="model.name" :label="model.name">
-                <div class="model-option">
-                  <t-icon name="check-circle-filled" class="downloaded-icon" />
-                  <span class="model-name">{{ model.name }}</span>
-                  <span class="model-size">{{ formatModelSize(model.size) }}</span>
-                </div>
-              </t-option>
-
-              <!-- 下载新模型选项（仅当搜索词不在列表中时显示） -->
-              <t-option v-if="showDownloadOption" :value="`__download__${searchKeyword}`"
-                :label="$t('model.editor.downloadLabel', { keyword: searchKeyword })" class="download-option">
-                <div class="model-option download">
-                  <t-icon name="download" class="download-icon" />
-                  <span class="model-name">{{ $t('model.editor.downloadLabel', { keyword: searchKeyword }) }}</span>
-                </div>
-              </t-option>
-
-              <!-- 下载进度后缀 -->
-              <template v-if="downloading" #suffix>
-                <div class="download-suffix">
-                  <t-icon name="loading" class="spinning" />
-                  <span class="progress-text">{{ downloadProgress.toFixed(1) }}%</span>
-                </div>
-              </template>
-            </t-select>
-
-            <!-- 刷新按钮 -->
-            <t-button variant="text" size="small" :loading="loadingOllamaModels" @click="refreshOllamaModels"
-              class="refresh-btn">
-              <t-icon name="refresh" />
-              {{ $t('model.editor.refreshList') }}
-            </t-button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Remote API 配置 -->
-      <template v-if="formData.source === 'remote'">
-        <section class="setting-drawer__section">
-          <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionProvider') }}</h4>
+        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionProvider') }}</h4>
 
           <!-- 厂商选择器 -->
           <div class="form-item">
@@ -215,7 +117,74 @@
             </div>
           </template>
 
+        <!-- 本地 Ollama 分支（2026-09-13 起以厂商身份出现在厂商列表） -->
+        <template v-else-if="isOllamaProvider">
+          <!-- ReRank模型不支持Ollama的提示信息 -->
+          <div v-if="activeModelType === 'rerank'" class="ollama-unavailable-tip rerank-tip">
+            <t-icon name="info-circle-filled" class="tip-icon info" />
+            <span class="tip-text">{{ $t('model.editor.ollamaNotSupportRerank') }}</span>
+          </div>
 
+          <!-- Ollama不可用时的提示信息 -->
+          <div v-else-if="shouldShowOllamaUnavailableTip(isOllamaProvider ? 'local' : 'remote', activeModelType, ollamaServiceStatus)"
+            class="ollama-unavailable-tip">
+            <t-icon name="error-circle-filled" class="tip-icon" />
+            <span class="tip-text">{{ $t('model.editor.ollamaUnavailable') }}</span>
+            <t-button variant="text" size="small" @click="goToOllamaSettings" class="tip-link">
+              <template #icon><t-icon name="jump" /></template>
+              {{ $t('model.editor.goToOllamaSettings') }}
+            </t-button>
+          </div>
+
+
+
+        <!-- Ollama 本地模型选择器 -->
+        <div class="form-item">
+          <label class="form-label required">{{ $t('model.modelName') }}</label>
+          <div class="model-select-row">
+            <t-select v-model="formData.modelName" :loading="loadingOllamaModels" :class="{ 'downloading': downloading }"
+              :style="downloading ? `--progress: ${downloadProgress}%` : ''" filterable :filter="handleModelFilter"
+              :placeholder="$t('model.searchPlaceholder')" @focus="loadOllamaModels"
+              @visible-change="handleDropdownVisibleChange">
+              <!-- 已下载的模型 -->
+              <t-option v-for="model in filteredOllamaModels" :key="model.name" :value="model.name" :label="model.name">
+                <div class="model-option">
+                  <t-icon name="check-circle-filled" class="downloaded-icon" />
+                  <span class="model-name">{{ model.name }}</span>
+                  <span class="model-size">{{ formatModelSize(model.size) }}</span>
+                </div>
+              </t-option>
+
+              <!-- 下载新模型选项（仅当搜索词不在列表中时显示） -->
+              <t-option v-if="showDownloadOption" :value="`__download__${searchKeyword}`"
+                :label="$t('model.editor.downloadLabel', { keyword: searchKeyword })" class="download-option">
+                <div class="model-option download">
+                  <t-icon name="download" class="download-icon" />
+                  <span class="model-name">{{ $t('model.editor.downloadLabel', { keyword: searchKeyword }) }}</span>
+                </div>
+              </t-option>
+
+              <!-- 下载进度后缀 -->
+              <template v-if="downloading" #suffix>
+                <div class="download-suffix">
+                  <t-icon name="loading" class="spinning" />
+                  <span class="progress-text">{{ downloadProgress.toFixed(1) }}%</span>
+                </div>
+              </template>
+            </t-select>
+
+            <!-- 刷新按钮 -->
+            <t-button variant="text" size="small" :loading="loadingOllamaModels" @click="refreshOllamaModels"
+              class="refresh-btn">
+              <t-icon name="refresh" />
+              {{ $t('model.editor.refreshList') }}
+            </t-button>
+          </div>
+        </div>
+        </template>
+
+        <!-- 远程分支：连接组 + 模型名称/显示名称 -->
+        <template v-else>
           <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
             <t-input v-model="formData.baseUrl" :placeholder="getBaseUrlPlaceholder()" />
@@ -295,7 +264,6 @@
               </div>
             </div>
           </div>
-
           <!-- 模型名称 / 模型 ID。远程 chat/vllm 用可搜索下拉（远端列表探测）+ 自由输入。 -->
           <div class="form-item">
             <label class="form-label required">{{ $t('model.modelName') }}</label>
@@ -321,13 +289,12 @@
             <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
           </div>
 
-
           <!--
             Connection test action moved to the drawer footer (footer-left
             slot above) so primary actions live in one row at the bottom.
           -->
-        </section>
-      </template>
+      </section>
+
 
       <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
       <section v-if="['embedding', 'chat', 'vllm'].includes(activeModelType)" class="setting-drawer__section">
@@ -384,15 +351,20 @@
           <p class="form-desc">{{ $t('model.editor.maxOutputTokensDesc') }}</p>
         </div>
 
-        <!-- Chat: 输入模态开关（原「支持视觉」，迁移为 chat 分片 input_modalities） -->
-        <div v-if="activeModelType === 'chat'" class="form-item">
-          <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
-          <div class="vision-toggle">
-            <t-switch v-model="visionChecked" :disabled="visionToggleDisabled"
-              @change="markManualField('inputModalities')" />
-            <span class="form-desc form-desc--inline">{{ $t('model.editor.supportsVisionDesc') }}</span>
-          </div>
-          <p v-if="visionToggleDisabled" class="form-desc">{{ $t('model.editor.visionDisabledHint') }}</p>
+        <!-- Chat/VLLM: 输入模态多选（2026-09-13 裁定 #2/#3：自由编辑，列表
+             未提供模态不设限；LLM 默认文本。存 chat 分片 input_modalities） -->
+        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+          <label class="form-label">
+            {{ $t('model.editor.inputModalitiesLabel') }}
+            <span v-if="prefillBadge('inputModalities')" class="prefill-source">{{ prefillBadge('inputModalities') }}</span>
+          </label>
+          <t-checkbox-group v-model="formData.inputModalities" @change="markManualField('inputModalities')">
+            <t-checkbox value="text">{{ $t('model.editor.modalityText') }}</t-checkbox>
+            <t-checkbox value="image">{{ $t('model.editor.modalityImage') }}</t-checkbox>
+            <t-checkbox value="audio">{{ $t('model.editor.modalityAudio') }}</t-checkbox>
+            <t-checkbox value="video">{{ $t('model.editor.modalityVideo') }}</t-checkbox>
+          </t-checkbox-group>
+          <p class="form-desc">{{ $t('model.editor.inputModalitiesDesc') }}</p>
         </div>
 
         <!-- Chat + 远程 API：思考开关与档位（能力声明驱动；共享组件 design §8.1.1，
@@ -549,6 +521,17 @@ const fallbackProviderOptions = computed<ModelProviderOption[]>(() => [
     description: t('model.editor.providers.generic.description'),
     modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
   },
+  {
+    value: 'ollama',
+    label: t('model.editor.providers.ollama.label'),
+    defaultUrls: {
+      chat: 'http://localhost:11434',
+      embedding: 'http://localhost:11434',
+      vllm: 'http://localhost:11434',
+    } as Record<string, string>,
+    description: t('model.editor.providers.ollama.description'),
+    modelTypes: ['chat', 'embedding', 'vllm']
+  },
 ])
 
 // 从 API 获取 Provider 列表
@@ -627,20 +610,11 @@ const onThinkingManual = (field: 'enabled' | 'selectedLevels' | 'level') => {
   markManualField(field === 'enabled' ? 'thinkingEnabled' : field === 'level' ? 'thinkingLevel' : 'selectedLevels')
 }
 
-/** 厂商能力未声明图像输入时置灰视觉开关。 */
-const visionToggleDisabled = computed(() => {
-  const mods = activeProviderCaps.value?.chat?.input_modalities
-  return activeModelType.value === 'chat'
-    && formData.value.source === 'remote'
-    && !!mods && !mods.includes('image')
-})
-
-const visionChecked = computed({
-  get: () => formData.value.inputModalities?.includes('image') ?? formData.value.supportsVision ?? false,
-  set: (v: boolean) => {
-    formData.value.inputModalities = v ? ['text', 'image'] : ['text']
-    formData.value.supportsVision = v
-  },
+// 输入模态自由编辑（2026-09-13 裁定 #2/#3）：模型列表/目录未提供模态
+// 时不限制用户勾选；LLM 默认勾选文本（所有模型的基础能力）。supportsVision
+// 保持与模态数组同步（payload 的 vllm 扁平字段与列表页图标消费它）。
+watch(() => formData.value.inputModalities, (mods) => {
+  formData.value.supportsVision = !!mods?.includes('image')
 })
 
 const dimensionOverrideDisabled = computed(() =>
@@ -711,7 +685,7 @@ let probeSequence = 0
 // 五类型全放开远程下拉（探测请求携带 model_type；无过滤能力的厂商由
 // 适配器忽略，失败降级手输不变）。
 const showRemoteModelSelect = computed(() =>
-  formData.value.source === 'remote'
+  !isOllamaProvider.value
   && formData.value.provider !== 'weknoracloud'
 )
 
@@ -1207,11 +1181,6 @@ watch(() => props.visible, (val) => {
 
       lastOpenedModelId.value = currentId
 
-      // ReRank 模型强制使用 remote 来源（Ollama 不支持 ReRank）
-      if (activeModelType.value === 'rerank') {
-        formData.value.source = 'remote'
-      }
-
       // 如果当前 provider 是 WeKnoraCloud，检查凭证状态
       if (formData.value.provider === 'weknoracloud') {
         checkWkcCredentialStatus()
@@ -1223,6 +1192,15 @@ watch(() => props.visible, (val) => {
       })
     }
   }
+})
+
+// 「模型来源」控件已退役（2026-09-13 裁定）：ollama 即本地、其余即远程。
+const isOllamaProvider = computed(() => formData.value.provider === 'ollama')
+
+// source 派生自 provider（含灌入期——存量 local 记录若 provider 不一致会被
+// 纠正为派生值，payload 出口再兜底一次）。
+watch(() => formData.value.provider, (p) => {
+  formData.value.source = p === 'ollama' ? 'local' : 'remote'
 })
 
 // 重置表单
@@ -1711,6 +1689,7 @@ const handleConfirm = async () => {
 
     emit('confirm', {
       ...formData.value,
+      source: isOllamaProvider.value ? 'local' : 'remote',
       ...(isEdit.value ? {} : { modelType: activeModelType.value }),
     })
     dialogVisible.value = false

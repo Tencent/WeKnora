@@ -624,6 +624,13 @@ const handleModelSave = async (modelData: any) => {
     // Chat 分片（KnowledgeQA）：思考档位、输入模态、上下文/输出预算一律写分片，
     // 不再写 extra_config.thinking_control 与顶层扁平字段（design §3/D3）。
     const chatShard: NonNullable<ModelConfig['parameters']['chat']> = {}
+    if (saveType === 'chat' || saveType === 'vllm') {
+      // 输入模态自由编辑（2026-09-13 裁定 #2/#3）：vllm 也走分片存模态；
+      // 空数组回落 ['text']（LLM 基础能力）。
+      chatShard.input_modalities = modelData.inputModalities?.length
+        ? modelData.inputModalities
+        : ['text']
+    }
     if (saveType === 'chat') {
       if (Number(modelData.contextWindow) >= 1024) {
         chatShard.context_window = Math.round(Number(modelData.contextWindow))
@@ -668,7 +675,8 @@ const handleModelSave = async (modelData: any) => {
           }
         } : {}),
         ...(saveType === 'vllm' ? {
-          supports_vision: true,
+          // 不再硬编码 true：随用户勾选的模态派生（分片已存全量模态）
+          supports_vision: modelData.supportsVision ?? false,
           ...(Number(modelData.contextWindow) >= 1024
             ? { context_window: Math.round(Number(modelData.contextWindow)) }
             : {}),

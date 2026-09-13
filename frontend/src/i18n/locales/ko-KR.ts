@@ -2404,6 +2404,12 @@ export default {
       dimensionOverrideDesc: '제공자 문서에서 이 모델이 dimensions 매개변수를 지원한다고 확인한 경우에만 켜세요.',
       supportsVisionLabel: '비전/멀티모달 지원',
       supportsVisionDesc: '모델의 이미지 등 멀티모달 입력 지원 여부',
+      inputModalitiesLabel: '입력 모달리티',
+      inputModalitiesDesc: '이 모델이 지원하는 입력 모달리티를 선택하세요. 텍스트는 모든 모델의 기본 능력이므로 기본 선택되어 있습니다. 모델 목록이 모달리티를 제공하지 않아도 편집이 제한되지 않습니다.',
+      modalityText: '텍스트',
+      modalityImage: '이미지',
+      modalityAudio: '오디오',
+      modalityVideo: '비디오',
       contextWindowLabel: '컨텍스트 창',
       contextWindowPlaceholder: '기본값 {value}',
       contextWindowDesc: '모델이 한 요청에 수용할 수 있는 토큰 수입니다. 에이전트 대화 압축이 이 한도를 사용합니다. 비워 두면 기본값 200000(200K)을 사용합니다. 공급자 문서의 실제 값을 입력하세요. 더 크게 설정하면 압축이 발생하지 않고 요청이 거부될 수 있습니다.',
@@ -2518,7 +2524,11 @@ export default {
         },
         generic: {
           label: '사용자 정의 (OpenAI 호환)',
-          description: 'Generic API endpoint'
+          description: 'Generic API endpoint',
+        ollama: {
+          label: 'Ollama',
+          description: '로컬 Ollama 서버 (http://localhost:11434)',
+        },
         },
         requesty: {
           label: 'Requesty',

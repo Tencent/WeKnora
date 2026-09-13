@@ -4342,6 +4342,12 @@ export default {
       dimensionOverrideDesc: 'プロバイダのドキュメントでこのモデルがdimensionsパラメータに対応していると記載されている場合にのみ有効にしてください。デフォルトでは検出された実際の次元数のみを使用します。',
       supportsVisionLabel: '視覚・マルチモーダルに対応',
       supportsVisionDesc: 'モデルが画像やマルチモーダル入力を受け付けるかどうか',
+      inputModalitiesLabel: '入力モダリティ',
+      inputModalitiesDesc: 'このモデルが対応する入力モダリティを選択してください。テキストは全モデルの基本能力のためデフォルトで選択されています。モデル一覧がモダリティを返さない場合も編集は制限されません。',
+      modalityText: 'テキスト',
+      modalityImage: '画像',
+      modalityAudio: '音声',
+      modalityVideo: '動画',
       contextWindowLabel: 'コンテキストウィンドウ',
       contextWindowPlaceholder: 'デフォルト値{value}',
       contextWindowDesc: '1回のリクエストでこのモデルが受け付けられるトークン数です。エージェントの履歴圧縮はこの上限を基準にします。空欄の場合はデフォルト値の200000（200K）が使われます。プロバイダの実際のウィンドウサイズを指定してください。大きすぎる値を指定すると圧縮が働かず、プロバイダにリクエストを拒否されます。',
@@ -4439,7 +4445,11 @@ export default {
         },
         generic: {
           label: 'カスタム（OpenAI互換）',
-          description: '汎用のAPIエンドポイント'
+          description: '汎用のAPIエンドポイント',
+        ollama: {
+          label: 'Ollama',
+          description: 'ローカル Ollama サーバー（http://localhost:11434）',
+        },
         },
         siliconflow: {
           label: 'SiliconFlow',

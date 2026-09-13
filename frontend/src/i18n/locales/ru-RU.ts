@@ -2404,6 +2404,12 @@ export default {
       dimensionOverrideDesc: 'Включайте только если документация провайдера подтверждает поддержку параметра dimensions.',
       supportsVisionLabel: 'Поддержка визуального / мультимодального ввода',
       supportsVisionDesc: 'Поддерживает ли модель изображения и другой мультимодальный ввод',
+      inputModalitiesLabel: 'Входные модальности',
+      inputModalitiesDesc: 'Отметьте входные модальности, которые поддерживает модель; текст — базовая способность всех моделей и отмечен по умолчанию. Если список моделей не сообщает модальности, редактирование не ограничивается.',
+      modalityText: 'Текст',
+      modalityImage: 'Изображение',
+      modalityAudio: 'Аудио',
+      modalityVideo: 'Видео',
       contextWindowLabel: 'Контекстное окно',
       contextWindowPlaceholder: 'По умолчанию {value}',
       contextWindowDesc: 'Сколько токенов модель принимает за один запрос. Сжатие истории агента использует этот лимит. Пустое значение — по умолчанию 200000 (200K). Укажите реальное окно провайдера: завышенное значение не запускает сжатие, и провайдер отклоняет запрос.',
@@ -2518,7 +2524,11 @@ export default {
         },
         generic: {
           label: 'Пользовательский (OpenAI-совместимый)',
-          description: 'Generic API endpoint'
+          description: 'Generic API endpoint',
+        ollama: {
+          label: 'Ollama',
+          description: 'Локальный сервер Ollama (http://localhost:11434)',
+        },
         },
         requesty: {
           label: 'Requesty',

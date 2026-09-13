@@ -309,6 +309,23 @@ var providerInfos = map[invoke.ProviderName]invoke.ProviderInfo{
 		},
 		RequiresAuth: true,
 	},
+	// --- ollama（2026-09-13 裁定：本地 Ollama 回归厂商身份，前端"模型来源"控件退役） ---
+	invoke.ProviderOllama: {
+		Name:        invoke.ProviderOllama,
+		DisplayName: "Ollama",
+		Description: "Local Ollama server (http://localhost:11434)",
+		DefaultURLs: map[types.ModelType]string{
+			types.ModelTypeKnowledgeQA: "http://localhost:11434",
+			types.ModelTypeVLLM:        "http://localhost:11434",
+			types.ModelTypeEmbedding:   "http://localhost:11434",
+		},
+		ModelTypes: []types.ModelType{
+			types.ModelTypeKnowledgeQA,
+			types.ModelTypeVLLM,
+			types.ModelTypeEmbedding,
+		},
+		RequiresAuth: false, // 本地服务，匿名可达
+	},
 	// --- openai ---
 	invoke.ProviderOpenAI: {
 		Name:        invoke.ProviderOpenAI,

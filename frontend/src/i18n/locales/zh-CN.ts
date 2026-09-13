@@ -2406,6 +2406,12 @@ export default {
       dimensionOverrideDesc: '仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。',
       supportsVisionLabel: '支持视觉/多模态',
       supportsVisionDesc: '模型是否支持图片等多模态输入',
+      inputModalitiesLabel: '输入模态',
+      inputModalitiesDesc: '勾选该模型支持的输入模态；文本为所有模型的基础能力，默认勾选。模型列表未提供模态信息时不限制编辑。',
+      modalityText: '文本',
+      modalityImage: '图片',
+      modalityAudio: '音频',
+      modalityVideo: '视频',
       contextWindowLabel: '上下文窗口',
       contextWindowPlaceholder: '默认 {value}',
       contextWindowDesc: '该模型一次请求能容纳的 token 数。智能体压缩对话历史会按此上限工作。留空则使用默认 200000（200K）。请按厂商文档填写真实值，填大会导致压缩不触发、上游直接拒绝请求。',
@@ -2520,7 +2526,11 @@ export default {
         },
         generic: {
           label: '自定义 (OpenAI兼容接口)',
-          description: 'Generic API endpoint (OpenAI-compatible)'
+          description: 'Generic API endpoint (OpenAI-compatible)',
+        ollama: {
+          label: 'Ollama',
+          description: '本地 Ollama 服务（http://localhost:11434）',
+        },
         },
         requesty: {
           label: 'Requesty',
