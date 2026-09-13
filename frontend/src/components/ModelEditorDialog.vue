@@ -806,14 +806,6 @@ const prefillForModelId = async (modelId: string) => {
   if (entry) applyPrefill(entry, 'catalog')
 }
 
-// 厂商 caps 晚到（/models/providers 异步返回常慢于探测/目录）：思考区翻真
-// 时重跑一次预填——applyPrefill 的 manualFields 守卫保证不覆盖手动值
-// （2026-09-13 审查：此前预填只在 modelName 变化时执行一次，慢网下静默丢失）。
-watch(showThinkingSection, (supported) => {
-  if (supported && !hydratingForm.value) {
-    void prefillForModelId(formData.value.modelName)
-  }
-})
 
 
 // Header icon for the SettingDrawer — uses the same TDesign icon name table
@@ -1317,6 +1309,19 @@ watch(
     }
   },
 )
+
+// 厂商 caps 晚到（/models/providers 异步返回常慢于探测/目录）：思考区翻真
+// 时重跑一次预填——applyPrefill 的 manualFields 守卫保证不覆盖手动值
+// （2026-09-13 审查：此前预填只在 modelName 变化时执行一次，慢网下静默丢失）。
+// 注意注册位置：watch 源在注册时立即求值一次，任何（传递性）读取 formData
+// 的 watch 必须放在 const formData 声明之后——放早了会在 setup 期 TDZ 崩溃
+// （2026-09-13 真机回归："添加模型"打不开，Cannot access 'formData' before
+// initialization；最初插在 prefillForModelId 之后、formData 声明之前）。
+watch(showThinkingSection, (supported) => {
+  if (supported && !hydratingForm.value) {
+    void prefillForModelId(formData.value.modelName)
+  }
+})
 
 // 监听来源变化，重置校验状态（已合并到下面的 watch）
 
