@@ -4,6 +4,8 @@
 它复用会话绑定的具名配置与 Docker、E2B、Cube provider，不在 WeKnora 宿主机执行命令，也不改变 Agent 的 ReAct 流程或 `shell_exec` 契约。
 Shell 可以访问本会话沙箱内的文件；宿主机和跨会话隔离依赖后端部署，文件管理的路径限制不能约束 Shell。
 
+首次配置、界面操作、Agent 演示任务及逐项验收见[用户使用与测试手册](sandbox-workbench-guide.md)。本文保留协议、限额和部署契约说明。
+
 部署入口：[Docker 后端](sandbox-docker-backend.md) · [E2B 协议接入](sandbox-protocol.md) · [集群与模板](sandbox-cluster.md)。技能安装见 [Agent Skills](agent-skills.md)，示例见 [Skills 示例](../examples/skills/README.md)。
 
 ## 部署条件
