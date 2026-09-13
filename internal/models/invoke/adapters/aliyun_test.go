@@ -920,3 +920,30 @@ func TestAliyunVisionStructuredOutput(t *testing.T) {
 	require.NotEmpty(t, last)
 	require.Contains(t, last[len(last)-1].Text, "Use this JSON schema:", "hint 落在末个 text part")
 }
+
+// TestAliyunStreamInBandError pins the in-band error surfacing (2026-09-14
+// glm-5.2 report): DashScope fails streaming requests IN-BAND — HTTP 200 +
+// {"code","message","request_id"} with an empty output. The bridge must turn
+// that into a terminal Error event, not drop it (pre-fix the stream closed
+// with zero client-visible events and no log trail).
+func TestAliyunStreamInBandError(t *testing.T) {
+	a := newAliyunAdapter()
+	events, err := a.TranslateStreamEvent(invoke.NewStreamBridgeState(), invoke.StreamChunk{
+		Data: []byte(`{"code":"InvalidInput","message":"Model not found: glm-5.2","request_id":"req-err-1"}`),
+	})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	ev := events[0]
+	require.Equal(t, invoke.StreamKindError, ev.Kind)
+	require.Contains(t, ev.Delta.Text, "Model not found: glm-5.2")
+	require.Contains(t, ev.Delta.Text, "req-err-1")
+	require.NotNil(t, ev.Done, "错误帧即终态——服务端发完即关")
+
+	// 无 message 时回落 code；带 request_id 后缀
+	events, err = a.TranslateStreamEvent(invoke.NewStreamBridgeState(), invoke.StreamChunk{
+		Data: []byte(`{"code":"Throttling","request_id":"req-2"}`),
+	})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Contains(t, events[0].Delta.Text, "Throttling")
+}

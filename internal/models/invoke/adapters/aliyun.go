@@ -756,6 +756,14 @@ type aliyunStreamFrame struct {
 		} `json:"choices"`
 	} `json:"output"`
 	Usage *aliyunUsage `json:"usage"`
+	// Native in-band error envelope: {"code","message","request_id"} with an
+	// empty output (HTTP stays 200 — streaming requests fail in-band, not at
+	// the status line). Without these fields the frame decoded all-zero and
+	// the bridge dropped it: a failing stream closed with ZERO client-visible
+	// events (2026-09-14 glm-5.2 report).
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	RequestID string `json:"request_id"`
 }
 
 const (
@@ -782,6 +790,23 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 	var f aliyunStreamFrame
 	if err := decodeChunk(chunk.Data, &f); err != nil {
 		return nil, err
+	}
+	// Native in-band error: surface it as a terminal Error event instead of
+	// dropping the frame — the entry maps it to an error chunk the QA
+	// pipeline forwards to the client (and logs as stream_error).
+	if f.Code != "" {
+		msg := f.Message
+		if msg == "" {
+			msg = f.Code
+		}
+		if f.RequestID != "" {
+			msg += " (request_id: " + f.RequestID + ")"
+		}
+		return []*invoke.StreamEvent{{
+			Kind:  invoke.StreamKindError,
+			Delta: &invoke.ContentDelta{Text: msg},
+			Done:  &invoke.FinishInfo{Incomplete: true},
+		}}, nil
 	}
 	if f.Usage != nil {
 		state.Set(stateAliyunUsage, f.Usage.usage())
