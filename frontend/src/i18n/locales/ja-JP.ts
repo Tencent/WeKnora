@@ -6400,6 +6400,7 @@ export default {
       docsFailedSummary: '{n}件のドキュメントの同期に失敗しました'
     },
     connector: {
+      dingtalk: 'DingTalk',
       feishu: 'Feishu',
       lark: 'Lark',
       feishu_drive: 'Feishu Drive',
@@ -6411,6 +6412,7 @@ export default {
       gitlab: 'GitLab'
     },
     connectorDesc: {
+      dingtalk: 'DingTalkのナレッジベースからドキュメントを同期します',
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
       lark: 'Lark Wiki（Feishu国際版）からドキュメント、スプレッドシート、ファイルを同期します',
       feishu_drive: 'Feishu Driveのフォルダからドキュメント、スプレッドシート、ファイルを同期します',
@@ -6436,7 +6438,9 @@ export default {
     },
     field: {
       appId: 'App ID',
+      appKey: 'AppKey',
       appSecret: 'App Secret',
+      operatorId: '操作者のUnionID',
       integrationToken: 'Integration Token',
       apiToken: 'APIトークン',
       imaClientId: 'IMA ClientID',
