@@ -288,11 +288,12 @@
             <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')" />
             <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
           </div>
+        </template>
 
-          <!--
-            Connection test action moved to the drawer footer (footer-left
-            slot above) so primary actions live in one row at the bottom.
-          -->
+        <!--
+          Connection test action moved to the drawer footer (footer-left
+          slot above) so primary actions live in one row at the bottom.
+        -->
       </section>
 
 
