@@ -115,11 +115,11 @@
                   :title="contextWindowTitle(model.contextWindow)"
                 >{{ formatContextWindow(model.contextWindow) }}</span>
               </template>
-              <template v-if="model._modelType === 'chat' && model.supportsVision">
+              <template v-if="cardModalities(model).length > 0">
                 <span class="model-card__sep">·</span>
-                <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
-                  :aria-label="$t('model.editor.supportsVisionLabel')">
-                  <t-icon name="image" size="12px" />
+                <span class="model-card__vision">
+                  <t-icon v-for="m in cardModalities(model)" :key="m" :name="modalityIcon(m)" size="12px"
+                    :title="modalityLabel(m)" :aria-label="modalityLabel(m)" />
                 </span>
               </template>
             </p>
@@ -408,6 +408,34 @@ const typeIcon = (type: ModelType): string => {
     asr: 'sound',
   }
   return map[type]
+}
+
+// 卡片元信息行的模态小图标：按已勾选模态逐个渲染（2026-09-13 反馈——
+// 勾了全部四模态却只显示一个图片图标）。旧记录无 input_modalities 时回落
+// supports_vision 布尔（仅图片）。
+const MODALITY_ICONS: Record<string, string> = {
+  text: 'text',
+  image: 'image',
+  audio: 'sound',
+  video: 'video',
+}
+const MODALITY_LABEL_KEYS: Record<string, string> = {
+  text: 'model.editor.modalityText',
+  image: 'model.editor.modalityImage',
+  audio: 'model.editor.modalityAudio',
+  video: 'model.editor.modalityVideo',
+}
+const cardModalities = (model: any): string[] => {
+  if (model._modelType !== 'chat' && model._modelType !== 'vllm') return []
+  if (Array.isArray(model.inputModalities) && model.inputModalities.length > 0) {
+    return model.inputModalities
+  }
+  return model.supportsVision ? ['image'] : []
+}
+const modalityIcon = (m: string) => MODALITY_ICONS[m] ?? m
+const modalityLabel = (m: string) => {
+  const key = MODALITY_LABEL_KEYS[m]
+  return key ? t(key) : m
 }
 
 const typeLabel = (type: ModelType) => {
