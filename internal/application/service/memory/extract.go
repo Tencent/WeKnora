@@ -43,9 +43,8 @@ const (
 	// in-flight claim is stale. Without it, a worker that died between claiming
 	// and running would wedge the subject permanently.
 	extractInFlightGrace = 10 * time.Minute
-	// extractCandidatePool is how many stored memories are considered before
-	// narrowing, and extractRelevantCandidates is how many the model actually
-	// sees.
+	// extractRelevantCandidates is how many stored memories the extraction
+	// model is shown.
 	//
 	// Showing everything was the original behaviour and it does not survive a
 	// store of any size: the model has to hold dozens of unrelated notes in
@@ -53,7 +52,10 @@ const (
 	// without bound, and unrelated memories invite spurious update and delete
 	// decisions. mem0 shows 10 by vector similarity, Graphiti at most 15 per
 	// entity — a small, relevant set is the shape that works.
-	extractCandidatePool      = 200
+	//
+	// Which 15 is decided by searching the whole store, not by pre-selecting a
+	// pool: the memory a new statement duplicates is not reliably one of the
+	// most important ones.
 	extractRelevantCandidates = 15
 	// extractShownTopics bounds the tracked subjects shown to the extraction
 	// call. The resolver still considers more; this is about anchoring, not
@@ -382,11 +384,10 @@ func (s *Service) Handle(ctx context.Context, task *asynq.Task) error {
 }
 
 func (s *Service) extractSegment(ctx context.Context, scope interfaces.MemoryScope, cfg *types.MemoryConfig, payload types.MemoryExtractPayload, segment transcriptSegment) error {
-	existing, err := s.repo.ListActiveByKinds(ctx, scope, types.MemoryKinds, extractCandidatePool)
+	existing, err := s.relevantExisting(ctx, scope, cfg, segment)
 	if err != nil {
 		return fmt.Errorf("load existing memories: %w", err)
 	}
-	existing = s.narrowToRelevant(ctx, scope, cfg, segment, existing)
 	forgotten, err := s.repo.ListTombstones(ctx, scope, 30)
 	if err != nil {
 		return fmt.Errorf("load memory tombstones: %w", err)
@@ -851,21 +852,35 @@ func (s *Service) workspaceChatModelID(ctx context.Context) string {
 	return ""
 }
 
-// narrowToRelevant cuts the stored memories down to the ones this segment
-// could plausibly be about.
+// relevantExisting loads the stored memories this segment could plausibly be
+// about — the ones the model is shown so it can update or supersede them
+// instead of writing a near-duplicate.
 //
-// Falls back to a plain prefix when semantic scoring is unavailable, which is
-// still an improvement on showing everything: the list is ordered by importance
-// and recency, so the prefix is at least the memories most likely to matter.
-func (s *Service) narrowToRelevant(
+// The selection is a semantic search over everything the subject has stored.
+// It used to list the 200 most important memories and rank those, which put a
+// ceiling on what extraction could ever notice: past the 200th memory, a
+// statement that contradicted a stored one was invisible, so the model wrote a
+// second copy of it and both stayed active. Deduplication cannot be bounded by
+// importance, because the memory a new sentence collides with is not
+// especially likely to be an important one.
+//
+// A subject small enough to show in full skips the search: the embedding call
+// would decide nothing, and extraction already pays for a model call.
+func (s *Service) relevantExisting(
 	ctx context.Context,
 	scope interfaces.MemoryScope,
 	cfg *types.MemoryConfig,
 	segment transcriptSegment,
-	existing []*types.MemoryItem,
-) []*types.MemoryItem {
+) ([]*types.MemoryItem, error) {
+	// One more than fits, so "everything fits" can be told from "there is
+	// more" without a second query.
+	existing, err := s.repo.ListActiveByKinds(
+		ctx, scope, types.MemoryKinds, extractRelevantCandidates+1)
+	if err != nil {
+		return nil, err
+	}
 	if len(existing) <= extractRelevantCandidates {
-		return existing
+		return existing, nil
 	}
 
 	var query strings.Builder
@@ -874,26 +889,27 @@ func (s *Service) narrowToRelevant(
 		query.WriteString("\n")
 	}
 
-	ranking, _ := s.vectorRanking(ctx, scope, cfg, query.String(), existing)
-	if len(ranking) == 0 {
+	hits, skip := s.vectorSearch(
+		ctx, scope, cfg, query.String(), types.MemoryKinds, extractRelevantCandidates)
+	if len(hits) == 0 {
+		// The importance-ordered prefix is the honest fallback: without
+		// semantic scoring there is nothing to rank by, and the memories most
+		// likely to matter are the ones this person keeps around.
 		logger.Infof(ctx,
-			"memory: no semantic ranking available, showing the %d most important of %d memories",
-			extractRelevantCandidates, len(existing))
-		return existing[:extractRelevantCandidates]
+			"memory: no semantic ranking available (%s), showing the %d most important memories",
+			skip, extractRelevantCandidates)
+		return existing[:extractRelevantCandidates], nil
 	}
 
-	narrowed := make([]*types.MemoryItem, 0, extractRelevantCandidates)
-	for _, index := range ranking {
-		if len(narrowed) >= extractRelevantCandidates {
-			break
-		}
-		if index >= 0 && index < len(existing) && existing[index] != nil {
-			narrowed = append(narrowed, existing[index])
+	relevant := make([]*types.MemoryItem, 0, len(hits))
+	for _, hit := range hits {
+		if hit.Item != nil {
+			relevant = append(relevant, hit.Item)
 		}
 	}
-	logger.Infof(ctx, "memory: narrowed %d memories to %d relevant ones for extraction",
-		len(existing), len(narrowed))
-	return narrowed
+	logger.Infof(ctx, "memory: showing extraction %d memories closest to this segment",
+		len(relevant))
+	return relevant, nil
 }
 
 // callExtractionModel runs the single LLM call in the write path.

@@ -12,6 +12,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -1407,6 +1408,26 @@ func DecodeEmbedding(raw []byte) []float32 {
 		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(raw[i*4:]))
 	}
 	return out
+}
+
+// FormatEmbeddingLiteral renders a vector the way pgvector parses it, so the
+// database can do the distance arithmetic instead of shipping every stored
+// vector to the application to be scored there.
+func FormatEmbeddingLiteral(vector []float32) string {
+	if len(vector) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(vector) * 8)
+	b.WriteByte('[')
+	for i, value := range vector {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(value), 'f', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
 }
 
 // CosineSimilarity scores two vectors in [-1, 1]. Mismatched lengths score 0:

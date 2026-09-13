@@ -168,7 +168,7 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 	}
 
 	situational, err := s.repo.ListActiveByKinds(recallCtx, scope,
-		[]string{types.MemoryKindFact, types.MemoryKindTask}, 400)
+		[]string{types.MemoryKindFact, types.MemoryKindTask}, lexicalPoolSize(cfg))
 	if err != nil {
 		logger.Warnf(recallCtx, "memory: load situational items failed: %v", err)
 		situational = nil
@@ -190,8 +190,17 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 		"memory: recall start subject=%s resident=%d candidates=%d block_runes=%d",
 		scope.SubjectID, len(residentItems), len(candidates), len([]rune(block)))
 
-	matched, rankTrace := s.selectRecallWithTrace(recallCtx, scope, cfg, query, candidates,
-		types.MemoryRecallMaxItems, types.MemoryRecallRuneBudget)
+	matched, rankTrace := s.selectRecallWithTrace(recallCtx, scope, cfg, recallSelection{
+		Query:      query,
+		Candidates: candidates,
+		Kinds:      []string{types.MemoryKindFact, types.MemoryKindTask},
+		// The semantic search runs over the whole subject, so it can find a
+		// resident memory the block already printed. Passing the exclusion in
+		// keeps that from being injected twice.
+		ExcludeIDs: resident,
+		MaxItems:   types.MemoryRecallMaxItems,
+		RuneBudget: types.MemoryRecallRuneBudget,
+	})
 
 	prompt := types.WrapMemoryForPrompt(block, types.RenderMemoryRecall(matched))
 	if prompt == "" {
@@ -219,8 +228,10 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 	s.touchAsync(recallCtx, scope, used)
 
 	logger.Infof(recallCtx,
-		"memory: recall done subject=%s used=%d matched=%d interest_injected=%d interest_relevant=%d mode=%s prompt_runes=%d",
-		scope.SubjectID, len(used), len(matched), len(selectedInterests), len(relevantInterests),
+		"memory: recall done subject=%s used=%d matched=%d outside_pool=%d "+
+			"interest_injected=%d interest_relevant=%d mode=%s prompt_runes=%d",
+		scope.SubjectID, len(used), len(matched), rankTrace.VectorOutsidePool,
+		len(selectedInterests), len(relevantInterests),
 		rankTrace.Mode, len([]rune(prompt)))
 	recallSpan.Finish(langfuse.SummarizeMemoryRecallOutput(map[string]interface{}{
 		"outcome":           "ok",
@@ -230,6 +241,7 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 		"candidate_count":   len(candidates),
 		"lexical_hits":      rankTrace.LexicalHits,
 		"vector_hits":       rankTrace.VectorHits,
+		"vector_outside":    rankTrace.VectorOutsidePool,
 		"vector_skip":       rankTrace.VectorSkipReason,
 		"ranking_mode":      rankTrace.Mode,
 		"fused_candidates":  rankTrace.FusedCandidates,

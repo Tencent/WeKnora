@@ -20,6 +20,27 @@ func (s MemoryScope) Valid() bool {
 	return s.TenantID > 0 && s.SubjectID != ""
 }
 
+// MemoryVectorQuery is one semantic lookup over a subject's stored vectors.
+type MemoryVectorQuery struct {
+	// ModelID pins the vector space. Vectors from another model are skipped
+	// rather than scored, because the distance between them is meaningless.
+	ModelID string
+	// Vector is the embedded query.
+	Vector []float32
+	// Kinds restricts which memories may come back. Empty means every kind.
+	Kinds []string
+	// MinScore is the cosine floor below which a match is not a match.
+	MinScore float64
+	// Limit is how many hits to return, best first.
+	Limit int
+}
+
+// MemoryVectorHit is one semantic match and how close it was.
+type MemoryVectorHit struct {
+	Item  *types.MemoryItem
+	Score float64
+}
+
 // MemoryRepository is the storage contract for long-term memory. Every method
 // takes an explicit scope rather than reading it from ctx, so a background
 // worker cannot accidentally operate on whatever the ambient context happens
@@ -120,6 +141,19 @@ type MemoryRepository interface {
 	// Only vectors produced by modelID are returned: vectors from a different
 	// model are not comparable, so mixing them would score nonsense.
 	ItemEmbeddings(ctx context.Context, scope MemoryScope, itemIDs []string, modelID string) (map[string][]float32, error)
+	// SearchItemsByVector returns this subject's semantically closest items,
+	// ranked by the database over every vector it holds.
+	//
+	// It replaces "list some items, then score the ones that happened to be
+	// listed". That order was the bug: candidates were chosen by importance,
+	// which says nothing about whether an item answers the question, so a
+	// well-matching memory outside the listed window could not be found at all.
+	SearchItemsByVector(ctx context.Context, scope MemoryScope, query MemoryVectorQuery) ([]MemoryVectorHit, error)
+	// SyncVectorColumn copies stored vectors into the database's own vector
+	// type for rows written before there was one. Returns how many it moved,
+	// and 0 on a deployment that scores in process. No model calls: the vector
+	// already exists, only its representation is behind.
+	SyncVectorColumn(ctx context.Context, scope MemoryScope, limit int) (int, error)
 	// ItemsMissingEmbeddings returns active items that have no vector yet, so a
 	// background pass can fill them in.
 	ItemsMissingEmbeddings(ctx context.Context, scope MemoryScope, modelID string, limit int) ([]*types.MemoryItem, error)

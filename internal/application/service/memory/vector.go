@@ -37,10 +37,18 @@ const (
 	// slightly lower because the lexical ranking is fused in alongside and can
 	// still rescue an exact-term match the model embedded poorly.
 	minCosine = 0.5
-	// vectorCandidateCap bounds how many stored vectors one recall loads.
-	vectorCandidateCap = 400
 	// backfillPerRun is how many missing vectors one maintenance pass fills.
-	backfillPerRun = 50
+	//
+	// Each one costs an embedding call, so this is a rate rather than a batch
+	// size. It has to outpace what a busy subject accumulates while its model
+	// is unreachable; at the previous 50 a subject sitting at the capacity cap
+	// took over a month before semantic recall could see all of it, which in
+	// practice meant it never could.
+	backfillPerRun = 200
+	// vectorSyncPerRun is how many rows one maintenance pass moves into the
+	// database's vector type. Far larger than the embedding backfill because
+	// it makes no model calls: the vector already exists.
+	vectorSyncPerRun = 2000
 )
 
 // embedder resolves the embedding model pinned on this workspace.
@@ -177,21 +185,26 @@ func (s *Service) embedAliases(
 	return stat.Aliases
 }
 
-// vectorRanking scores candidates against a query by cosine similarity and
-// returns them best-first. An empty result means semantic scoring was
-// unavailable, not that nothing matched — callers fall back rather than
-// treating it as an empty match set. skipReason is set when vector recall was
-// not attempted or could not run.
-func (s *Service) vectorRanking(
+// vectorSearch asks the store for the memories closest to the query.
+//
+// The search runs over every vector the subject has. It used to run over the
+// vectors of an already-chosen candidate list, which meant semantic recall
+// could only re-order what a plain `ORDER BY importance` had picked — a memory
+// that answered the question exactly but sat outside that window was
+// unreachable, and no amount of widening the window fixes the ordering being
+// blind to the question in the first place.
+//
+// An empty result means semantic matching was unavailable or found nothing;
+// callers fall back to lexical matching rather than treating it as "nothing
+// matched". skipReason says which.
+func (s *Service) vectorSearch(
 	ctx context.Context,
 	scope interfaces.MemoryScope,
 	cfg *types.MemoryConfig,
 	query string,
-	candidates []*types.MemoryItem,
-) ([]int, string) {
-	if len(candidates) == 0 {
-		return nil, "no_candidates"
-	}
+	kinds []string,
+	limit int,
+) ([]interfaces.MemoryVectorHit, string) {
 	modelID, ok := s.embedder(ctx, cfg)
 	if !ok {
 		return nil, "vector_disabled"
@@ -200,54 +213,21 @@ func (s *Service) vectorRanking(
 	if len(queryVector) == 0 {
 		return nil, "embed_failed"
 	}
-
-	ids := make([]string, 0, len(candidates))
-	indexByID := make(map[string]int, len(candidates))
-	for i, item := range candidates {
-		if item == nil || item.ID == "" {
-			continue
-		}
-		ids = append(ids, item.ID)
-		indexByID[item.ID] = i
-		if len(ids) >= vectorCandidateCap {
-			break
-		}
-	}
-	vectors, err := s.repo.ItemEmbeddings(ctx, scope, ids, modelID)
+	hits, err := s.repo.SearchItemsByVector(ctx, scope, interfaces.MemoryVectorQuery{
+		ModelID:  modelID,
+		Vector:   queryVector,
+		Kinds:    kinds,
+		MinScore: minCosine,
+		Limit:    limit,
+	})
 	if err != nil {
-		logger.Warnf(ctx, "memory: load embeddings failed: %v", err)
-		return nil, "load_embeddings_failed"
+		logger.Warnf(ctx, "memory: vector search failed: %v", err)
+		return nil, "vector_search_failed"
 	}
-	if len(vectors) == 0 {
-		return nil, "no_stored_vectors"
+	if len(hits) == 0 {
+		return nil, "no_vector_matches"
 	}
-
-	type scored struct {
-		index int
-		score float64
-	}
-	ranked := make([]scored, 0, len(vectors))
-	for _, id := range ids {
-		vector, ok := vectors[id]
-		if !ok {
-			continue
-		}
-		similarity := types.CosineSimilarity(queryVector, vector)
-		if similarity < minCosine {
-			continue
-		}
-		ranked = append(ranked, scored{index: indexByID[id], score: similarity})
-	}
-	sortScoredDesc(ranked, func(i int) float64 { return ranked[i].score })
-
-	out := make([]int, 0, len(ranked))
-	for _, entry := range ranked {
-		out = append(out, entry.index)
-	}
-	if len(out) == 0 {
-		return nil, "below_similarity_threshold"
-	}
-	return out, ""
+	return hits, ""
 }
 
 // fuseRankings combines two ranked id lists by reciprocal rank fusion.
@@ -317,11 +297,6 @@ func (s *Service) backfillEmbeddings(
 		logger.Infof(ctx, "memory: backfilled %d embeddings for %s", filled, scope.SubjectID)
 	}
 	return filled
-}
-
-// sortScoredDesc sorts in place, highest score first.
-func sortScoredDesc[T any](items []T, score func(int) float64) {
-	sort.SliceStable(items, func(i, j int) bool { return score(i) > score(j) })
 }
 
 // sortStableByIndexScore sorts in place, highest score first, preserving the

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -14,6 +15,11 @@ import (
 
 type memoryRepository struct {
 	db *gorm.DB
+	// Whether the database can rank vectors itself. Probed once, on first use,
+	// because it depends on a migration that is conditional on pgvector being
+	// installed and so cannot be decided from the dialect alone.
+	vectorOnce   sync.Once
+	vectorColumn bool
 }
 
 // NewMemoryRepository creates the long-term memory repository.
@@ -499,12 +505,19 @@ func (r *memoryRepository) UpsertItemEmbedding(
 				return nil
 			}
 		}
-		return tx.
+		err := tx.
 			Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "item_id"}},
 				DoUpdates: clause.AssignmentColumns([]string{"model_id", "dims", "vector", "updated_at"}),
 			}).
 			Create(embedding).Error
+		if err != nil {
+			return err
+		}
+		// The blob above is what every deployment reads; this is the same
+		// vector in the type the database can sort by. Written in the same
+		// transaction so a row is never searchable with a stale vector.
+		return r.writeVectorColumn(tx, embedding.ItemID, embedding.Vector)
 	})
 }
 
