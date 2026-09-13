@@ -1203,6 +1203,9 @@ onMounted(() => {
 .model-card__vision {
   display: inline-flex;
   align-items: center;
+  /* inline-flex 盒默认按基线对齐，而 svg 图标没有文本基线——图标会沉到
+     文本行下方；middle 让图标与文字垂直居中（2026-09-13 反馈） */
+  vertical-align: middle;
   gap: 3px;
 }
 
