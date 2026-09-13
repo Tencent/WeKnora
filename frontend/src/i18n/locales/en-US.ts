@@ -4278,6 +4278,7 @@ export default {
       typeLabel: 'Model Type',
       sectionSource: 'Source',
       sectionProvider: 'Provider Settings',
+      sectionParameters: 'Model Parameters',
       sectionAdvanced: 'Advanced Options',
       sourceLabel: 'Model Source',
       sourceLocal: 'Ollama',

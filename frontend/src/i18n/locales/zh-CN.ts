@@ -2374,6 +2374,7 @@ export default {
       typeLabel: '模型类型',
       sectionSource: '模型来源',
       sectionProvider: '接入配置',
+      sectionParameters: '模型参数设置',
       sectionAdvanced: '高级选项',
       sourceLabel: '模型来源',
       sourceLocal: 'Ollama',

@@ -297,9 +297,10 @@
       </section>
 
 
-      <!-- Section 3 — 高级选项（仅在有内容时渲染，避免空 section 出现底部分隔线） -->
+      <!-- Section 3 — 模型参数设置（2026-09-13 裁定：上下文/预算/模态/思考
+           属模型参数；并发上限单独留"高级选项"） -->
       <section v-if="['embedding', 'chat', 'vllm'].includes(activeModelType)" class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
+        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionParameters') }}</h4>
 
         <!-- Embedding 专用：维度 -->
         <div v-if="activeModelType === 'embedding'" class="form-item">
@@ -391,6 +392,11 @@
           are gated by the governor (see internal/models/limiter), so we surface
           it just for those three. 0 = fall back to the global default.
         -->
+      </section>
+
+      <!-- Section 4 — 高级选项（仅后台并发上限：治理治理面，非模型参数） -->
+      <section v-if="['chat', 'embedding', 'vllm'].includes(activeModelType)" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
         <div class="form-item">
           <label class="form-label">{{ $t('model.editor.maxConcurrencyLabel') }}</label>
           <t-input v-model.number="formData.maxConcurrency" type="number" :min="0" :max="4096"

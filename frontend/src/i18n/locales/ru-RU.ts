@@ -2372,6 +2372,7 @@ export default {
       typeLabel: 'Тип модели',
       sectionSource: 'Источник',
       sectionProvider: 'Настройки провайдера',
+      sectionParameters: 'Параметры модели',
       sectionAdvanced: 'Дополнительные параметры',
       sourceLabel: 'Источник модели',
       sourceLocal: 'Ollama',

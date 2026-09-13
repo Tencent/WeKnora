@@ -4278,6 +4278,7 @@ export default {
       typeLabel: 'モデルタイプ',
       sectionSource: 'ソース',
       sectionProvider: 'プロバイダ設定',
+      sectionParameters: 'モデルパラメータ設定',
       sectionAdvanced: '詳細オプション',
       sourceLabel: 'モデルのソース',
       sourceLocal: 'Ollama',

@@ -2372,6 +2372,7 @@ export default {
       typeLabel: '모델 유형',
       sectionSource: '모델 소스',
       sectionProvider: '연결 설정',
+      sectionParameters: '모델 파라미터 설정',
       sectionAdvanced: '고급 옵션',
       sourceLabel: '모델 소스',
       sourceLocal: 'Ollama',
