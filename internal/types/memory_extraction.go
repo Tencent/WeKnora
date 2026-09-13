@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-var ErrMemoryConflict = errors.New("memory changed; reload before applying this proposal")
 var ErrMemoryExtractionLeaseLost = errors.New("memory extraction lease lost")
+var ErrMemoryDigestLeaseLost = errors.New("memory digest lease lost")
 
 // MemoryMessageCursor breaks timestamp ties using the message primary key.
 type MemoryMessageCursor struct {

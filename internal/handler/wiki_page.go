@@ -864,10 +864,6 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 		Types:           typesFilter,
 		Limit:           limit,
 	}
-	if h.memoryService != nil {
-		req.FamiliarKnowledgeIDs = h.memoryService.FamiliarKnowledgeIDs(c.Request.Context())
-	}
-
 	graph, err := h.wikiService.GetGraph(c.Request.Context(), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

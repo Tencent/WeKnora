@@ -5,38 +5,48 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/google/uuid"
 )
 
 // ErrMemoryDisabled is returned by write operations when memory is off at the
 // workspace or user level.
 var ErrMemoryDisabled = errors.New("memory: disabled for this scope")
 
-// ErrItemNotFound is returned when an item id does not exist in the caller's
-// own memory space. Scope mismatch and genuine absence deliberately produce
-// the same error so an id cannot be probed for existence across users.
-var ErrItemNotFound = errors.New("memory: item not found")
-
-// ErrPreviouslyForgotten means the statement matches one the user deleted.
-// Callers on the write path treat it as "nothing to do", not as a failure.
-var ErrPreviouslyForgotten = errors.New("memory: previously forgotten by the user")
+// ErrNotFound is returned when a record id does not exist in the caller's own
+// memory space. Scope mismatch and genuine absence deliberately produce the
+// same error so an id cannot be probed for existence across users.
+var ErrNotFound = errors.New("memory: record not found")
 
 // ErrSensitiveContent means the statement was almost entirely credentials or
 // identity numbers, so redacting it left nothing worth remembering.
 var ErrSensitiveContent = errors.New("memory: statement was sensitive material")
 
-// rejectedMessageWindow is how long a rejected message keeps blocking
-// re-derivation. The case this closes is the debounced run that reads the same
-// message minutes after the user deleted what it produced; past that, whatever
-// the user said is treated fresh again.
-const rejectedMessageWindow = time.Hour
+// ErrContentTooLong means the text exceeded the store's rune budget. Refused
+// rather than trimmed: a note or a profile cut off mid-sentence changes what
+// it instructs the model to do.
+var ErrContentTooLong = errors.New("memory: content too long")
+
+// ErrEmptyContent means nothing survived sanitization.
+var ErrEmptyContent = errors.New("memory: empty content")
+
+// ErrNotesFull means the subject already holds MemoryNotesMaxItems notes.
+//
+// The cap exists because every note rides in every turn, so the twenty-first
+// one would push the store past what a system prompt can carry. Adding is
+// refused rather than served by dropping the oldest, because the oldest note
+// is an instruction the user gave and never withdrew.
+var ErrNotesFull = errors.New("memory: note store is full")
+
+// interestCandidateLimit bounds how many of the most-repeated keywords the
+// interest query considers. Generous relative to the handful that can survive
+// the threshold, because keywords below the cut are still the cheapest way to
+// see why something did not qualify.
+const interestCandidateLimit = 40
 
 // Service implements interfaces.MemoryService.
 type Service struct {
@@ -107,9 +117,19 @@ func (s *Service) enabledScope(ctx context.Context) (interfaces.MemoryScope, *ty
 	return scope, cfg, true
 }
 
-// Recall assembles the memory to inject for one turn. It never calls a model
-// and never returns an error: memory is an enhancement, so any failure has to
-// degrade into an ordinary answer rather than into a failed request.
+// Recall assembles the memory to inject for one turn.
+//
+// Three things go in, and they are three different kinds of claim. The
+// consolidated profile is what memory believes about this person, and it rides
+// in every turn because that is the layer it was written to be. The user's
+// verbatim notes are standing instructions they typed themselves. And when the
+// question matches a past conversation, an excerpt of that account comes along
+// — enough to know the conversation happened and roughly how it went, with the
+// rest reachable through the search tool.
+//
+// Never calls a chat model and never returns an error: memory is an
+// enhancement, so any failure has to degrade into an ordinary answer rather
+// than into a failed request.
 func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRecall {
 	recallCtx, recallSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
 		Name: "memory.recall",
@@ -125,762 +145,364 @@ func (s *Service) Recall(ctx context.Context, query string) interfaces.MemoryRec
 		recallSpan.Finish(langfuse.SummarizeMemoryRecallOutput(map[string]interface{}{
 			"outcome": "disabled",
 			"reason":  reason,
-		}, nil), nil, nil)
+		}), nil, nil)
 		return interfaces.MemoryRecall{}
 	}
 
-	subject, err := s.repo.GetSubject(recallCtx, scope)
-	if err != nil || subject == nil {
-		reason := "no_subject"
-		if err != nil {
-			reason = "subject_load_failed"
-			logger.Warnf(recallCtx, "memory: load subject for recall failed: %v", err)
-		}
-		logger.Infof(recallCtx, "memory: recall skipped (%s)", reason)
+	digest, err := s.repo.GetDigest(recallCtx, scope)
+	if err != nil {
+		logger.Warnf(recallCtx, "memory: load profile for recall failed: %v", err)
+	}
+	notes, err := s.repo.ListNotes(recallCtx, scope, types.MemoryNotesMaxItems)
+	if err != nil {
+		logger.Warnf(recallCtx, "memory: load notes for recall failed: %v", err)
+	}
+	matched, rankTrace := s.matchEpisodes(recallCtx, scope, cfg, query)
+
+	body := ""
+	if digest != nil {
+		body = digest.Body
+	}
+	excerpts := make([]string, 0, len(matched))
+	for _, episode := range matched {
+		excerpts = append(excerpts, renderEpisodeExcerpt(episode))
+	}
+	prompt := types.WrapMemoryDocumentForPrompt(body, types.MemoryNoteTexts(notes), excerpts)
+	if prompt == "" {
+		logger.Infof(recallCtx, "memory: recall empty subject=%s", scope.SubjectID)
 		recallSpan.Finish(langfuse.SummarizeMemoryRecallOutput(map[string]interface{}{
 			"outcome":    "empty",
-			"reason":     reason,
 			"subject_id": scope.SubjectID,
-		}, nil), map[string]interface{}{
+		}), map[string]interface{}{
 			"tenant_id": scope.TenantID,
 		}, nil)
 		return interfaces.MemoryRecall{}
 	}
 
-	residentItems, err := s.repo.ListActiveResident(recallCtx, scope, 60)
-	if err != nil {
-		logger.Warnf(recallCtx, "memory: load resident items failed: %v", err)
-		residentItems = nil
-	}
-	standing, interests := splitResidentInterests(residentItems)
-	selectedInterests, relevantInterests := selectResidentInterests(
-		query, interests, types.MemoryResidentInterestMaxItems)
-	blockItems := append(append([]*types.MemoryItem(nil), standing...), selectedInterests...)
+	// An excerpt that rode into a turn was relevant to the question, which is
+	// worth recording and is not a read: nothing asked for it, and nothing has
+	// said it helped. It moves last_used_at so the account stays inside the
+	// digest selection's window, and leaves use_count to the search tool. Off
+	// the request path: the answer does not wait on a counter.
+	s.markRecalledAsync(recallCtx, scope, matched)
 
-	// Render from the items rather than from subject.BlockText. The cached
-	// block saves nothing here — the items were just loaded either way — and
-	// trusting it means any change that alters what belongs in the block
-	// (a write that failed, a new resident kind) stays invisible until the
-	// user's next write. The cache is only a fallback for a failed load.
-	block := types.RenderMemoryBlock(blockItems)
-	if block == "" {
-		block = subject.BlockText
-	}
-
-	situational, err := s.repo.ListActiveByKinds(recallCtx, scope,
-		[]string{types.MemoryKindFact, types.MemoryKindTask}, lexicalPoolSize(cfg))
-	if err != nil {
-		logger.Warnf(recallCtx, "memory: load situational items failed: %v", err)
-		situational = nil
-	}
-	// Resident items are already in the block; matching them again would print
-	// them twice.
-	resident := make(map[string]struct{}, len(residentItems))
-	for _, item := range residentItems {
-		resident[item.ID] = struct{}{}
-	}
-	candidates := situational[:0:0]
-	for _, item := range situational {
-		if _, ok := resident[item.ID]; !ok {
-			candidates = append(candidates, item)
-		}
-	}
-
+	used := types.UsedMemoriesFromDocuments(digest, notes, matched)
 	logger.Infof(recallCtx,
-		"memory: recall start subject=%s resident=%d candidates=%d block_runes=%d",
-		scope.SubjectID, len(residentItems), len(candidates), len([]rune(block)))
-
-	matched, rankTrace := s.selectRecallWithTrace(recallCtx, scope, cfg, recallSelection{
-		Query:      query,
-		Candidates: candidates,
-		Kinds:      []string{types.MemoryKindFact, types.MemoryKindTask},
-		// The semantic search runs over the whole subject, so it can find a
-		// resident memory the block already printed. Passing the exclusion in
-		// keeps that from being injected twice.
-		ExcludeIDs: resident,
-		MaxItems:   types.MemoryRecallMaxItems,
-		RuneBudget: types.MemoryRecallRuneBudget,
-	})
-
-	prompt := types.WrapMemoryForPrompt(block, types.RenderMemoryRecall(matched))
-	if prompt == "" {
-		emptyMeta := s.recallEmptyMeta(scope, len(residentItems), len(candidates), rankTrace)
-		emptyMeta["block_runes"] = len([]rune(block))
-		logger.Infof(recallCtx,
-			"memory: recall empty subject=%s resident=%d candidates=%d mode=%s",
-			scope.SubjectID, len(residentItems), len(candidates), rankTrace.Mode)
-		recallSpan.Finish(langfuse.SummarizeMemoryRecallOutput(emptyMeta, nil), map[string]interface{}{
-			"tenant_id": scope.TenantID,
-		}, nil)
-		return interfaces.MemoryRecall{}
-	}
-
-	// What was injected and what is reported are deliberately not the same set.
-	// An interest that rode along because the cap left room is standing
-	// background, not something this question pulled in, and reporting it would
-	// put a memory unrelated to the answer on the chat timeline every turn.
-	//
-	// The block is also rendered from a truncated list, so report the items
-	// that actually fit rather than everything that was loaded.
-	used := residentItemsWithinBlock(standing, block)
-	used = append(used, residentItemsWithinBlock(relevantInterests, block)...)
-	used = append(used, matched...)
-	s.touchAsync(recallCtx, scope, used)
-
-	logger.Infof(recallCtx,
-		"memory: recall done subject=%s used=%d matched=%d outside_pool=%d "+
-			"interest_injected=%d interest_relevant=%d mode=%s prompt_runes=%d",
-		scope.SubjectID, len(used), len(matched), rankTrace.VectorOutsidePool,
-		len(selectedInterests), len(relevantInterests),
+		"memory: recall done subject=%s profile_runes=%d notes=%d episodes=%d mode=%s prompt_runes=%d",
+		scope.SubjectID, len([]rune(body)), len(notes), len(matched),
 		rankTrace.Mode, len([]rune(prompt)))
 	recallSpan.Finish(langfuse.SummarizeMemoryRecallOutput(map[string]interface{}{
-		"outcome":           "ok",
-		"subject_id":        scope.SubjectID,
-		"resident_count":    len(residentItems),
-		"block_runes":       len([]rune(block)),
-		"candidate_count":   len(candidates),
-		"lexical_hits":      rankTrace.LexicalHits,
-		"vector_hits":       rankTrace.VectorHits,
-		"vector_outside":    rankTrace.VectorOutsidePool,
-		"vector_skip":       rankTrace.VectorSkipReason,
-		"ranking_mode":      rankTrace.Mode,
-		"fused_candidates":  rankTrace.FusedCandidates,
-		"matched_count":     len(matched),
-		"interest_total":    len(interests),
-		"interest_injected": len(selectedInterests),
-		"interest_relevant": len(relevantInterests),
-		"used_count":        len(used),
-		"prompt_runes":      len([]rune(prompt)),
-	}, used), map[string]interface{}{
+		"outcome":       "ok",
+		"subject_id":    scope.SubjectID,
+		"profile_runes": len([]rune(body)),
+		"note_count":    len(notes),
+		"episode_count": len(matched),
+		"vector_hits":   rankTrace.VectorHits,
+		"vector_skip":   rankTrace.VectorSkipReason,
+		"ranking_mode":  rankTrace.Mode,
+		"prompt_runes":  len([]rune(prompt)),
+	}), map[string]interface{}{
 		"tenant_id": scope.TenantID,
 	}, nil)
 
-	return interfaces.MemoryRecall{Prompt: prompt, Items: used}
+	return interfaces.MemoryRecall{Prompt: prompt, Used: used, Episodes: matched, Notes: notes}
 }
 
-// residentItemsWithinBlock filters to the items whose content survived the
-// block's rune budget.
-func residentItemsWithinBlock(items []*types.MemoryItem, block string) []*types.MemoryItem {
-	if block == "" {
+// renderEpisodeExcerpt is how one matched account appears inside a turn.
+func renderEpisodeExcerpt(episode *types.MemoryEpisode) string {
+	if episode == nil {
+		return ""
+	}
+	date := ""
+	if !episode.ToAt.IsZero() {
+		date = episode.ToAt.Format("2006-01-02")
+	}
+	return fmt.Sprintf("### %s（%s，%s，slug=%s）\n%s",
+		episode.Title, date, episode.Outcome, episode.Slug,
+		types.MemoryEpisodeExcerpt(episode))
+}
+
+// RememberVerbatim records something the user explicitly asked to remember.
+//
+// Separate from everything else in this file, and stored as the user's own
+// words rather than as anything a model produced. Two reasons. It has to take
+// effect on the very next turn — a person who types "记住：我只用中文" and is
+// then answered in English has been told the feature does not work, whatever
+// the background pipeline does twenty minutes later. And it is the one memory
+// nobody should paraphrase: the distillation that writes accounts and the
+// consolidation that rewrites the profile are both allowed to reword what they
+// read, which is exactly wrong for an instruction.
+func (s *Service) RememberVerbatim(
+	ctx context.Context, content, sessionID, messageID string,
+) error {
+	scope, _, ok := s.enabledScope(ctx)
+	if !ok {
+		return ErrMemoryDisabled
+	}
+	content = types.SanitizeMemoryNote(content)
+	if content == "" {
 		return nil
 	}
-	within := make([]*types.MemoryItem, 0, len(items))
-	for _, item := range items {
-		if item != nil && strings.Contains(block, types.SanitizeMemoryContent(item.Content)) {
-			within = append(within, item)
+	// Redact before storing. A note is injected into the system prompt of
+	// every later turn, so a credential that reaches storage is not merely
+	// retained, it is re-sent to a model repeatedly.
+	if redacted, changed := types.RedactSensitive(content); changed {
+		if types.IsMostlyRedacted(redacted) {
+			return ErrSensitiveContent
 		}
+		content = types.SanitizeMemoryNote(redacted)
 	}
-	return within
+	if _, err := s.repo.EnsureSubject(ctx, scope); err != nil {
+		return fmt.Errorf("ensure memory subject: %w", err)
+	}
+	return s.repo.AddNote(ctx, scope, &types.MemoryNote{
+		Content:         content,
+		SourceSessionID: sessionID,
+		SourceMessageID: messageID,
+	})
 }
 
-// touchAsync records usage without adding a write to the request's critical
-// path. WithoutCancel keeps it alive after the HTTP handler returns.
-func (s *Service) touchAsync(ctx context.Context, scope interfaces.MemoryScope, items []*types.MemoryItem) {
-	if len(items) == 0 {
-		return
+// ---------------------------------------------------------------------------
+// Memory manager
+//
+// Everything below backs the screen where a person reads and edits what is
+// stored about them. Each store is exposed as what it is — the profile that
+// rides in every turn, the accounts of past conversations, the instructions
+// they typed — so that deleting something in the manager changes the next
+// answer. A manager over rows that no turn reads is worse than no manager,
+// because it tells the user they are in control when they are not.
+// ---------------------------------------------------------------------------
+
+// Profile returns the consolidated profile, or (nil, nil) before the first
+// consolidation has written one.
+func (s *Service) Profile(ctx context.Context) (*types.MemoryDigest, error) {
+	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return nil, err
 	}
-	ids := make([]string, 0, len(items))
-	for _, item := range items {
-		ids = append(ids, item.ID)
-	}
-	bgCtx := context.WithoutCancel(ctx)
-	go func() {
-		if err := s.repo.TouchUsed(bgCtx, scope, ids); err != nil {
-			logger.Warnf(bgCtx, "memory: touch used failed: %v", err)
-		}
-	}()
+	return s.repo.GetDigest(ctx, scope)
 }
 
-// Remember stores one statement, resolving any contradiction with what is
-// already known about the same topic.
-func (s *Service) Remember(ctx context.Context, item types.MemoryItem) (*types.MemoryItem, error) {
-	scope, cfg, ok := s.enabledScope(ctx)
+// SaveProfile installs a profile the person wrote themselves.
+//
+// The body is not sanitized down to a single line the way a note is: the
+// profile is a sectioned document, and its headings are what the injector and
+// the retrieval conditioner read sections out of. Over-length is refused
+// rather than trimmed, because a document cut mid-section loses the heading
+// that gives the rest of it meaning.
+func (s *Service) SaveProfile(ctx context.Context, body string) (int64, error) {
+	scope, _, ok := s.enabledScope(ctx)
+	if !ok {
+		return 0, ErrMemoryDisabled
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return 0, ErrEmptyContent
+	}
+	if len([]rune(body)) > types.MemoryDigestMaxRunes {
+		return 0, ErrContentTooLong
+	}
+	if redacted, changed := types.RedactSensitive(body); changed {
+		if types.IsMostlyRedacted(redacted) {
+			return 0, ErrSensitiveContent
+		}
+		body = redacted
+	}
+	if _, err := s.repo.EnsureSubject(ctx, scope); err != nil {
+		return 0, fmt.Errorf("ensure memory subject: %w", err)
+	}
+	return s.repo.SaveUserDigest(ctx, scope, body)
+}
+
+// DeleteProfile clears the profile and leaves the accounts alone, so the next
+// consolidation rebuilds it from what the person has actually discussed. This
+// is the "that description of me is wrong, start over" action, as distinct
+// from Clear.
+func (s *Service) DeleteProfile(ctx context.Context) error {
+	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteDigest(ctx, scope)
+}
+
+// ListEpisodes pages the accounts of past conversations, newest first.
+func (s *Service) ListEpisodes(
+	ctx context.Context, limit, offset int,
+) ([]*types.MemoryEpisode, int64, error) {
+	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.repo.ListEpisodes(ctx, scope, limit, offset)
+}
+
+// GetEpisode returns one account. An id belonging to another subject is
+// reported as missing, so the manager cannot be used to discover that somebody
+// else's account exists.
+func (s *Service) GetEpisode(ctx context.Context, id string) (*types.MemoryEpisode, error) {
+	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	episode, err := s.repo.GetEpisode(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	if episode == nil {
+		return nil, ErrNotFound
+	}
+	return episode, nil
+}
+
+// DeleteEpisode forgets one account. The profile already built from it is left
+// standing: it is a summary of many conversations, and silently rewriting it
+// here would take longer than a request may last.
+func (s *Service) DeleteEpisode(ctx context.Context, id string) error {
+	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return err
+	}
+	episode, err := s.repo.GetEpisode(ctx, scope, id)
+	if err != nil {
+		return err
+	}
+	if episode == nil {
+		return ErrNotFound
+	}
+	return s.repo.DeleteEpisode(ctx, scope, id)
+}
+
+// ListNotes returns what the user asked to remember, in their own words.
+func (s *Service) ListNotes(ctx context.Context, limit int) ([]*types.MemoryNote, error) {
+	scope, err := ResolveScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListNotes(ctx, scope, limit)
+}
+
+// AddNote records something the person typed in the manager.
+//
+// Deliberately the same store and the same sanitization as an in-chat "记住：
+// ...", so a memory added by hand reaches the next turn's prompt exactly as
+// one asked for in conversation does.
+func (s *Service) AddNote(ctx context.Context, content string) (*types.MemoryNote, error) {
+	scope, _, ok := s.enabledScope(ctx)
 	if !ok {
 		return nil, ErrMemoryDisabled
 	}
-	return s.write(ctx, scope, cfg, item)
-}
-
-// write is the single insertion path. Both the explicit "remember this" route
-// and the background extraction task go through it, so sanitization, conflict
-// resolution, block rebuild and capacity enforcement cannot be bypassed by
-// adding a new caller.
-func (s *Service) write(
-	ctx context.Context,
-	scope interfaces.MemoryScope,
-	cfg *types.MemoryConfig,
-	item types.MemoryItem,
-) (*types.MemoryItem, error) {
-	return s.writeReplacing(ctx, scope, cfg, item, "")
-}
-
-func (s *Service) writeReplacing(ctx context.Context, scope interfaces.MemoryScope, cfg *types.MemoryConfig, item types.MemoryItem, targetID string) (*types.MemoryItem, error) {
-	content := types.SanitizeMemoryContent(item.Content)
-	if content == "" {
-		return nil, errors.New("memory: empty content")
+	// Length is judged before sanitization, which collapses whitespace and
+	// would otherwise let a long paste through as a shorter single line.
+	if len([]rune(strings.TrimSpace(content))) > types.MemoryNoteMaxRunes {
+		return nil, ErrContentTooLong
 	}
-	// Redact before anything else looks at the statement. A memory is injected
-	// into the system prompt of every later turn, so a credential that reaches
-	// storage is not merely retained, it is re-sent to a model repeatedly.
+	content = types.SanitizeMemoryNote(content)
+	if content == "" {
+		return nil, ErrEmptyContent
+	}
+	// Redact before storing. A note is injected into the system prompt of
+	// every later turn, so a credential that reaches storage is not merely
+	// retained, it is re-sent to a model repeatedly.
 	if redacted, changed := types.RedactSensitive(content); changed {
 		if types.IsMostlyRedacted(redacted) {
-			logger.Infof(ctx, "memory: dropped a statement that was mostly sensitive material")
 			return nil, ErrSensitiveContent
 		}
-		logger.Infof(ctx, "memory: redacted sensitive material before storing")
-		content = types.SanitizeMemoryContent(redacted)
+		content = types.SanitizeMemoryNote(redacted)
 	}
-	if !types.IsValidMemoryKind(item.Kind) {
-		item.Kind = types.MemoryKindFact
-	}
-
-	// Something the user deliberately forgot must not come back the next time
-	// distillation reads the message it came from. Two checks, because the
-	// re-derived statement is usually worded slightly differently and so does
-	// not hash the same: the exact fingerprint, and whether the message it came
-	// from already produced a memory the user rejected.
-	forgotten, err := s.repo.HasTombstone(ctx, scope, types.MemoryFingerprint(content))
-	if err != nil {
-		return nil, fmt.Errorf("check forgotten memory: %w", err)
-	}
-	if !forgotten && item.SourceMessageID != "" && item.Origin == types.MemoryOriginExtracted {
-		// Only the background path is gated this way. An explicit "remember
-		// this" is the user asking again, and must always win.
-		forgotten, err = s.repo.HasTombstoneForMessage(
-			ctx, scope, item.SourceMessageID, rejectedMessageWindow,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("check forgotten source: %w", err)
-		}
-	}
-	if forgotten {
-		logger.Infof(ctx, "memory: skipped a statement the user previously deleted")
-		return nil, ErrPreviouslyForgotten
+	if err := s.checkNoteCapacity(ctx, scope, content); err != nil {
+		return nil, err
 	}
 	if _, err := s.repo.EnsureSubject(ctx, scope); err != nil {
 		return nil, fmt.Errorf("ensure memory subject: %w", err)
 	}
-
-	topic := types.SanitizeMemoryTopic(item.Topic)
-	normalizedKey := types.MemoryItemKey(topic, content)
-	var existing *types.MemoryItem
-	if targetID != "" {
-		existing, err = s.repo.GetItem(ctx, scope, targetID)
-		if err == nil && existing == nil {
-			return nil, types.ErrMemoryConflict
-		}
-	} else {
-		existing, err = s.repo.FindActiveByKey(ctx, scope, normalizedKey)
+	note := &types.MemoryNote{Content: content}
+	if err := s.repo.AddNote(ctx, scope, note); err != nil {
+		return nil, err
 	}
-	if err != nil {
-		return nil, fmt.Errorf("find conflicting memory: %w", err)
+	// Re-read rather than return what was sent: the store deduplicates on the
+	// text, so the caller has to be told the id and timestamps of the note it
+	// actually holds, which may be one written months ago.
+	stored, err := s.repo.GetNote(ctx, scope, note.ID)
+	if err != nil || stored == nil {
+		return note, err
 	}
-	if existing != nil && existing.Status == types.MemoryStatusActive && types.SanitizeMemoryContent(existing.Content) == content {
-		// Same statement about the same topic: nothing changed, so keep the
-		// original timestamps instead of churning the row on every turn.
-		return existing, nil
-	}
-	if existing == nil {
-		// The same fact often arrives twice: once because the user said
-		// "remember ..." and again from the background distillation, phrased
-		// slightly differently ("我们的生产库是 X" vs "生产库是 X"). They get
-		// different topic keys, so key matching alone lets both through and
-		// the user sees their memory duplicated.
-		duplicate, longer, err := s.findContainedDuplicate(ctx, scope, item.Kind, content)
-		if err != nil {
-			return nil, err
-		}
-		if duplicate != nil && !longer && (duplicate.Status == types.MemoryStatusActive || statusForWrite(item) == types.MemoryStatusPending) {
-			return duplicate, nil
-		}
-		// The new statement subsumes the old one, so let it supersede.
-		existing = duplicate
-	}
-
-	stored := &types.MemoryItem{
-		ID:              uuid.New().String(),
-		TenantID:        scope.TenantID,
-		SubjectID:       scope.SubjectID,
-		Kind:            item.Kind,
-		Content:         content,
-		Topic:           topic,
-		NormalizedKey:   normalizedKey,
-		Importance:      types.ClampMemoryImportance(item.Importance),
-		Origin:          item.Origin,
-		Status:          statusForWrite(item),
-		SourceSessionID: item.SourceSessionID,
-		SourceMessageID: item.SourceMessageID,
-		ValidFrom:       time.Now(),
-		ExpiresAt:       item.ExpiresAt,
-	}
-	if stored.Origin == "" {
-		stored.Origin = types.MemoryOriginExtracted
-	}
-	if existing != nil {
-		targetID = existing.ID
-	}
-	if err := s.repo.SaveItem(ctx, scope, stored, targetID); err != nil {
-		return nil, fmt.Errorf("save memory item: %w", err)
-	}
-
-	s.enforceCapacity(ctx, scope, cfg)
-	s.rebuildBlock(ctx, scope)
-	// A memory with no vector is invisible to semantic recall, so this runs on
-	// every write. It is best effort: failing to embed must not fail the write,
-	// and the backfill pass picks up whatever this missed.
-	s.storeItemEmbedding(ctx, scope, cfg, stored)
 	return stored, nil
 }
 
-// findContainedDuplicate looks for a live memory of the same kind whose
-// statement contains, or is contained by, the incoming one.
-//
-// Containment is deliberately the whole rule. It is cheap, explainable to a
-// user reading their own memory list, and it cannot merge two statements that
-// merely share a topic — only ones where the shorter adds nothing the longer
-// does not already say. The returned bool reports whether the new statement is
-// the longer of the two.
-func (s *Service) findContainedDuplicate(
-	ctx context.Context, scope interfaces.MemoryScope, kind, content string,
-) (*types.MemoryItem, bool, error) {
-	candidates, err := s.repo.ListLive(ctx, scope, kind, 200)
+// checkNoteCapacity refuses a note that would take the subject over the
+// injection cap. Re-adding text already stored is allowed through: it
+// refreshes a note rather than growing the store.
+func (s *Service) checkNoteCapacity(
+	ctx context.Context, scope interfaces.MemoryScope, content string,
+) error {
+	count, err := s.repo.CountNotes(ctx, scope)
 	if err != nil {
-		return nil, false, fmt.Errorf("scan for duplicate memory: %w", err)
+		return fmt.Errorf("count notes: %w", err)
 	}
-	normalized := types.NormalizeMemoryForMatch(content)
-	if normalized == "" {
-		return nil, false, nil
-	}
-	for _, candidate := range candidates {
-		if candidate == nil {
-			continue
-		}
-		existing := types.NormalizeMemoryForMatch(candidate.Content)
-		if existing == "" {
-			continue
-		}
-		if strings.Contains(existing, normalized) {
-			return candidate, false, nil
-		}
-		if strings.Contains(normalized, existing) {
-			return candidate, true, nil
-		}
-	}
-	return nil, false, nil
-}
-
-// statusForWrite decides whether a memory takes effect immediately or waits
-// for the user.
-//
-// Something the user said takes effect at once. Something the system guessed
-// about them — their role, their domain, inferred from the questions they ask —
-// is proposed instead. Inference is where the value is and also where the harm
-// is: a wrong guess asserted silently is how a memory feature loses trust for
-// good, and unlike ChatGPT's background layer this one stays auditable.
-func statusForWrite(item types.MemoryItem) string {
-	if item.Inferred && item.Origin != types.MemoryOriginExplicit && item.Origin != types.MemoryOriginManual {
-		return types.MemoryStatusPending
-	}
-	return types.MemoryStatusActive
-}
-
-// enforceCapacity archives the lowest ranked items once the subject exceeds
-// its cap. This is the only automatic forgetting in the system.
-func (s *Service) enforceCapacity(ctx context.Context, scope interfaces.MemoryScope, cfg *types.MemoryConfig) {
-	maxItems := cfg.EffectiveMaxItems()
-	count, err := s.repo.CountActive(ctx, scope)
-	if err != nil {
-		logger.Warnf(ctx, "memory: count active failed: %v", err)
-		return
-	}
-	if count <= int64(maxItems) {
-		return
-	}
-	archived, err := s.repo.ArchiveLowestRanked(ctx, scope, maxItems)
-	if err != nil {
-		logger.Warnf(ctx, "memory: archive overflow failed: %v", err)
-		return
-	}
-	logger.Infof(ctx, "memory: archived %d items over the %d cap", archived, maxItems)
-}
-
-// rebuildBlock re-renders the resident block so the read path stays a single
-// primary-key lookup. Called after every mutation.
-func (s *Service) rebuildBlock(ctx context.Context, scope interfaces.MemoryScope) {
-	items, err := s.repo.ListActiveResident(ctx, scope, 60)
-	if err != nil {
-		logger.Warnf(ctx, "memory: rebuild block load failed: %v", err)
-		return
-	}
-	count, err := s.repo.CountActive(ctx, scope)
-	if err != nil {
-		logger.Warnf(ctx, "memory: rebuild block count failed: %v", err)
-		return
-	}
-	block := types.RenderMemoryBlock(items)
-	if err := s.repo.UpdateSubjectBlock(ctx, scope, block, int(count)); err != nil {
-		logger.Warnf(ctx, "memory: rebuild block store failed: %v", err)
-	}
-}
-
-// ListItems backs the memory manager list.
-func (s *Service) ListItems(
-	ctx context.Context, status string, limit, offset int,
-) ([]*types.MemoryItem, int64, error) {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	return s.repo.ListItems(ctx, scope, status, limit, offset)
-}
-
-// ListTopics returns subjects that have been counted but not yet promoted.
-func (s *Service) ListTopics(
-	ctx context.Context, limit, offset int,
-) ([]*types.MemoryTopicView, int64, error) {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	stats, total, err := s.repo.ListUnpromotedTopics(ctx, scope, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	threshold := s.workspaceConfig(ctx, scope.TenantID).EffectiveInterestThreshold()
-	views := make([]*types.MemoryTopicView, 0, len(stats))
-	for _, stat := range stats {
-		if view := types.MemoryTopicViewFromStat(stat, threshold); view != nil {
-			views = append(views, view)
-		}
-	}
-	return views, total, nil
-}
-
-func (s *Service) unpromotedTopic(
-	ctx context.Context, scope interfaces.MemoryScope, id string,
-) (*types.MemoryTopicStat, error) {
-	stat, err := s.repo.TopicByID(ctx, scope, id)
-	if err != nil {
-		return nil, err
-	}
-	if stat == nil || stat.PromotedAt != nil {
-		return nil, ErrItemNotFound
-	}
-	return stat, nil
-}
-
-// PromoteTopic turns a counted subject into an interest without waiting.
-func (s *Service) PromoteTopic(ctx context.Context, id string) (*types.MemoryItem, error) {
-	scope, cfg, ok := s.enabledScope(ctx)
-	if !ok {
-		return nil, ErrMemoryDisabled
-	}
-	stat, err := s.unpromotedTopic(ctx, scope, id)
-	if err != nil {
-		return nil, err
-	}
-	item, err := s.write(ctx, scope, cfg, types.MemoryItem{
-		Kind:       types.MemoryKindInterest,
-		Topic:      stat.Topic,
-		Content:    stat.Topic,
-		Importance: 3,
-		Origin:     types.MemoryOriginManual,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.MarkTopicPromoted(ctx, scope, stat.NormalizedKey); err != nil {
-		logger.Warnf(ctx, "memory: mark topic promoted failed: %v", err)
-	}
-	return item, nil
-}
-
-// DeleteTopic stops tracking a subject and remembers the refusal so automatic
-// promotion cannot bring the same label back.
-func (s *Service) DeleteTopic(ctx context.Context, id string) error {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
-		return err
-	}
-	stat, err := s.unpromotedTopic(ctx, scope, id)
-	if err != nil {
-		return err
-	}
-	s.tombstoneTopic(ctx, scope, stat)
-	return s.repo.DeleteTopic(ctx, scope, id)
-}
-
-// ListDocuments returns documents cited often enough to count as a habit.
-func (s *Service) ListDocuments(
-	ctx context.Context, limit, offset int,
-) ([]*types.MemoryDocView, int64, error) {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	rows, total, err := s.repo.ListFamiliarDocs(
-		ctx, scope, types.MemoryDocAffinityMinHits, limit, offset,
-	)
-	if err != nil {
-		return nil, 0, err
-	}
-	views := make([]*types.MemoryDocView, 0, len(rows))
-	for _, row := range rows {
-		if view := types.MemoryDocViewFromAffinity(row); view != nil {
-			views = append(views, view)
-		}
-	}
-	return views, total, nil
-}
-
-// DeleteDocument stops using one document as a personal retrieval signal.
-func (s *Service) DeleteDocument(ctx context.Context, id string) error {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
-		return err
-	}
-	row, err := s.repo.DocAffinityByID(ctx, scope, id)
-	if err != nil {
-		return err
-	}
-	if row == nil {
-		return ErrItemNotFound
-	}
-	return s.repo.DeleteDocAffinity(ctx, scope, id)
-}
-
-// FamiliarKnowledgeIDs returns document ids this person keeps citing.
-func (s *Service) FamiliarKnowledgeIDs(ctx context.Context) []string {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
+	if count < int64(types.MemoryNotesMaxItems) {
 		return nil
 	}
-	rows, err := s.repo.TopDocAffinity(ctx, scope, 200)
+	held, err := s.repo.ListNotes(ctx, scope, types.MemoryNotesMaxItems)
 	if err != nil {
-		logger.Warnf(ctx, "memory: load familiar documents failed: %v", err)
-		return nil
+		return fmt.Errorf("load notes: %w", err)
 	}
-	ids := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row == nil || row.KnowledgeID == "" || row.Hits < types.MemoryDocAffinityMinHits {
-			continue
+	for _, note := range held {
+		if note != nil && note.Content == content {
+			return nil
 		}
-		ids = append(ids, row.KnowledgeID)
 	}
-	return ids
+	return ErrNotesFull
 }
 
-func (s *Service) topicWasForgotten(
-	ctx context.Context, scope interfaces.MemoryScope, labels ...string,
-) bool {
-	seen := make(map[string]struct{}, len(labels))
-	for _, label := range labels {
-		fingerprint := types.MemoryFingerprint(types.SanitizeMemoryContent(label))
-		if fingerprint == "" {
-			continue
-		}
-		if _, ok := seen[fingerprint]; ok {
-			continue
-		}
-		seen[fingerprint] = struct{}{}
-		forgotten, err := s.repo.HasTombstone(ctx, scope, fingerprint)
-		if err != nil {
-			logger.Warnf(ctx, "memory: check forgotten topic failed: %v", err)
-			continue
-		}
-		if forgotten {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *Service) tombstoneTopic(
-	ctx context.Context, scope interfaces.MemoryScope, stat *types.MemoryTopicStat,
-) {
-	if stat == nil {
-		return
-	}
-	labels := make([]string, 0, 1+len(stat.Aliases))
-	if stat.Topic != "" {
-		labels = append(labels, stat.Topic)
-	}
-	labels = append(labels, stat.Aliases...)
-	seen := make(map[string]struct{}, len(labels))
-	for _, label := range labels {
-		content := types.SanitizeMemoryContent(label)
-		fingerprint := types.MemoryFingerprint(content)
-		if fingerprint == "" {
-			continue
-		}
-		if _, ok := seen[fingerprint]; ok {
-			continue
-		}
-		seen[fingerprint] = struct{}{}
-		if err := s.repo.AddTombstone(ctx, scope, stat.Topic, fingerprint, ""); err != nil {
-			logger.Warnf(ctx, "memory: record topic tombstone failed: %v", err)
-		}
-	}
-}
-
-// CreateItem adds a memory the user typed themselves. It goes through the same
-// write path as everything else, so a hand-written memory can supersede an
-// extracted one about the same topic rather than sitting next to it.
-func (s *Service) CreateItem(
-	ctx context.Context, kind, content string, importance int,
-) (*types.MemoryItem, error) {
-	scope, cfg, ok := s.enabledScope(ctx)
-	if !ok {
-		return nil, ErrMemoryDisabled
-	}
-	if !types.IsValidMemoryKind(kind) {
-		kind = types.MemoryKindFact
-	}
-	if importance <= 0 {
-		importance = 3
-	}
-	return s.write(ctx, scope, cfg, types.MemoryItem{
-		Kind:       kind,
-		Content:    content,
-		Importance: importance,
-		Origin:     types.MemoryOriginManual,
-	})
-}
-
-// UpdateItem edits one item from the memory manager. Edited items become
-// manual so a later extraction does not quietly undo a user's correction.
-func (s *Service) UpdateItem(
-	ctx context.Context, id, content string, importance int,
-) (*types.MemoryItem, error) {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
-		return nil, err
-	}
-	existing, err := s.repo.GetItem(ctx, scope, id)
-	if err != nil {
-		return nil, err
-	}
-	if existing == nil {
-		return nil, ErrItemNotFound
-	}
-	sanitized := types.SanitizeMemoryContent(content)
-	if sanitized == "" {
-		return nil, errors.New("memory: empty content")
-	}
-	if redacted, changed := types.RedactSensitive(sanitized); changed {
-		if types.IsMostlyRedacted(redacted) {
-			return nil, ErrSensitiveContent
-		}
-		sanitized = types.SanitizeMemoryContent(redacted)
-	}
-	// Keep the original topic: the user is correcting the statement, not
-	// re-filing it under a different subject, and reusing the topic is what
-	// keeps the correction able to supersede a future extraction.
-	normalizedKey := types.MemoryItemKey(existing.Topic, sanitized)
-	importance = types.ClampMemoryImportance(importance)
-	if err := s.repo.UpdateItemContent(ctx, scope, id, sanitized, normalizedKey, importance); err != nil {
-		return nil, err
-	}
-	s.rebuildBlock(ctx, scope)
-	updated, err := s.repo.GetItem(ctx, scope, id)
-	if err != nil {
-		return nil, err
-	}
-	s.storeItemEmbedding(ctx, scope, s.workspaceConfig(ctx, scope.TenantID), updated)
-	return updated, nil
-}
-
-// DeleteItem forgets one memory permanently.
-func (s *Service) DeleteItem(ctx context.Context, id string) error {
+// DeleteNote forgets one explicit instruction.
+func (s *Service) DeleteNote(ctx context.Context, id string) error {
 	scope, err := ResolveScope(ctx)
 	if err != nil {
 		return err
 	}
-	existing, err := s.repo.GetItem(ctx, scope, id)
+	note, err := s.repo.GetNote(ctx, scope, id)
 	if err != nil {
 		return err
 	}
-	if existing == nil {
-		return ErrItemNotFound
+	if note == nil {
+		return ErrNotFound
 	}
-	// Record the rejection before removing the row. Deleting a memory that
-	// distillation is about to re-derive from the same message is how a user
-	// ends up deleting the same thing twice and stops trusting the feature.
-	if err := s.repo.AddTombstone(
-		ctx, scope, existing.Topic, types.MemoryFingerprint(existing.Content), existing.SourceMessageID,
-	); err != nil {
-		logger.Warnf(ctx, "memory: record tombstone failed: %v", err)
-	}
-	if err := s.repo.DeleteItem(ctx, scope, id); err != nil {
-		return err
-	}
-	s.rebuildBlock(ctx, scope)
-	return nil
+	return s.repo.DeleteNote(ctx, scope, id)
 }
 
 // Clear forgets everything in the caller's memory space.
+//
+// All three stores go, and the count returned is every row dropped, because
+// the person asking for this is asking for the product to know nothing about
+// them — a profile left behind would keep describing them in every turn.
 func (s *Service) Clear(ctx context.Context) (int64, error) {
 	scope, err := ResolveScope(ctx)
 	if err != nil {
 		return 0, err
 	}
-	// Clearing is a rejection of everything currently stored, so it leaves the
-	// same tombstones an individual delete would.
-	s.tombstoneEverything(ctx, scope)
-	removed, err := s.repo.DeleteAll(ctx, scope)
+	var removed int64
+	digest, err := s.repo.GetDigest(ctx, scope)
 	if err != nil {
 		return 0, err
 	}
-	if err := s.repo.DeleteAllTopics(ctx, scope); err != nil {
+	if digest != nil {
+		if err := s.repo.DeleteDigest(ctx, scope); err != nil {
+			return 0, err
+		}
+		removed++
+	}
+	episodes, err := s.repo.DeleteAllEpisodes(ctx, scope)
+	if err != nil {
 		return 0, err
 	}
-	if err := s.repo.DeleteAllDocAffinity(ctx, scope); err != nil {
+	removed += episodes
+	notes, err := s.repo.DeleteAllNotes(ctx, scope)
+	if err != nil {
 		return 0, err
 	}
-	s.rebuildBlock(ctx, scope)
+	removed += notes
 	return removed, nil
-}
-
-// tombstoneEverything records a rejection for each memory a clear removes.
-//
-// A subject keeps at most MaxMemoryTombstones rejections, and the store can
-// hold far more rows than that: max_items caps active memories only, so
-// superseded and archived rows pile up without limit. Reading one flat page
-// therefore spent the whole budget on whatever happened to be newest, and a
-// live memory could be left with no tombstone and free to be re-derived.
-//
-// Walking status by status spends the budget where it changes behaviour: what
-// the user was still being served, then what was waiting on their decision,
-// then the rest. The total is capped so this call cannot trim away its own
-// earlier, more important rows.
-func (s *Service) tombstoneEverything(ctx context.Context, scope interfaces.MemoryScope) {
-	budget := types.MaxMemoryTombstones
-	for _, status := range []string{
-		types.MemoryStatusActive,
-		types.MemoryStatusPending,
-		types.MemoryStatusArchived,
-		types.MemoryStatusSuperseded,
-	} {
-		if budget <= 0 {
-			return
-		}
-		items, _, err := s.repo.ListItems(ctx, scope, status, budget, 0)
-		if err != nil {
-			logger.Warnf(ctx, "memory: list %s items during clear failed: %v", status, err)
-			continue
-		}
-		for _, item := range items {
-			if item == nil {
-				continue
-			}
-			if err := s.repo.AddTombstone(
-				ctx, scope, item.Topic, types.MemoryFingerprint(item.Content), item.SourceMessageID,
-			); err != nil {
-				logger.Warnf(ctx, "memory: record tombstone during clear failed: %v", err)
-			}
-			budget--
-		}
-	}
 }
 
 // GetSettings returns the merged view the settings UI renders.
@@ -894,7 +516,7 @@ func (s *Service) GetSettings(ctx context.Context) (*types.MemorySettings, error
 		WorkspaceEnabled: cfg.MemoryEnabled(),
 		UserEnabled:      true,
 		WriteMode:        cfg.WriteMode,
-		MaxItems:         cfg.EffectiveMaxItems(),
+		MaxEpisodes:      cfg.EffectiveMaxEpisodes(),
 	}
 	if settings.WriteMode == "" {
 		settings.WriteMode = types.MemoryWriteExplicitOnly
@@ -905,11 +527,11 @@ func (s *Service) GetSettings(ctx context.Context) (*types.MemorySettings, error
 	}
 	if subject != nil {
 		settings.UserEnabled = subject.Enabled
-		settings.ItemCount = subject.ItemCount
 	}
-	count, err := s.repo.CountActive(ctx, scope)
-	if err == nil {
-		settings.ItemCount = int(count)
+	// Counted from the store rather than from a column on the subject, so the
+	// figure cannot drift from what the accounts page lists.
+	if _, total, err := s.repo.ListEpisodes(ctx, scope, 1, 0); err == nil {
+		settings.EpisodeCount = int(total)
 	}
 	settings.Effective = settings.WorkspaceEnabled && settings.UserEnabled
 	return settings, nil
@@ -956,379 +578,92 @@ func (s *Service) RetrievalContextFor(ctx context.Context) interfaces.RetrievalC
 		return interfaces.RetrievalContext{}
 	}
 
-	items, err := s.repo.ListActiveByKinds(condCtx, scope,
-		[]string{types.MemoryKindProfile, types.MemoryKindInterest}, 30)
+	// The profile's 用户画像 section is the background, and the person's
+	// promoted interests are the interests. Both come from the document layer
+	// now: the profile is where a consolidation put what it concluded about
+	// who this person is, and it is derived from every account rather than
+	// from whichever statements happened to be stored as profile kind.
+	digest, err := s.repo.GetDigest(condCtx, scope)
 	if err != nil {
-		logger.Warnf(condCtx, "memory: load retrieval context failed: %v", err)
-		condSpan.Finish(map[string]interface{}{
-			"outcome": "error",
-			"error":   err.Error(),
-		}, nil, err)
-		return interfaces.RetrievalContext{}
+		logger.Warnf(condCtx, "memory: load profile for retrieval context failed: %v", err)
 	}
-
 	var (
 		background []string
-		interests  []string
-		used       []*types.MemoryItem
 		budget     int
 	)
-	for _, item := range items {
-		if item == nil {
-			continue
+	if digest != nil {
+		// Only 用户画像, not the whole profile. What the rewriter needs is the
+		// vocabulary of this person's domain; feeding it their preferences
+		// about answer style would put "回答简短" into a search query.
+		for _, line := range types.MemoryDigestBullets(
+			types.MemoryDigestSection(digest.Body, types.MemoryDigestSectionProfile),
+		) {
+			cost := len([]rune(line)) + 2
+			if budget+cost > retrievalBackgroundRuneBudget {
+				break
+			}
+			budget += cost
+			background = append(background, line)
 		}
-		line := types.SanitizeMemoryContent(item.Content)
-		if line == "" {
-			continue
-		}
-		cost := len([]rune(line)) + 2
-		if budget+cost > retrievalBackgroundRuneBudget {
-			break
-		}
-		budget += cost
-		used = append(used, item)
-		if item.Kind == types.MemoryKindInterest {
-			interests = append(interests, line)
-			continue
-		}
-		background = append(background, line)
 	}
 
-	documents := s.topDocumentTitles(condCtx, scope)
+	interests := s.recurringInterests(condCtx, scope, cfg)
 
+	// Who is asking, and nothing about which documents they usually land on.
+	// That list belonged to a counter that measured which documents the
+	// retriever kept picking rather than which ones the person found useful,
+	// and spending it here was the worst of the available places: it edits the
+	// question towards those documents before anything has been matched, so a
+	// question they cannot answer comes back with them anyway.
 	retrievalCtx := interfaces.RetrievalContext{
 		Background: strings.Join(background, "；"),
 		Interests:  interests,
-		Documents:  documents,
-		Items:      used,
 	}
 	logger.Infof(condCtx,
-		"memory: retrieval context subject=%s interests=%d documents=%d items=%d",
-		scope.SubjectID, len(interests), len(documents), len(used))
+		"memory: retrieval context subject=%s background=%d interests=%d",
+		scope.SubjectID, len(background), len(interests))
 	condSpan.Finish(langfuse.SummarizeRetrievalContextOutput(
-		retrievalCtx.Background, retrievalCtx.Interests, retrievalCtx.Documents, retrievalCtx.Items,
+		retrievalCtx.Background, retrievalCtx.Interests,
 	), map[string]interface{}{
 		"tenant_id": scope.TenantID,
 	}, nil)
 	return retrievalCtx
 }
 
-// topDocumentTitles gives the rewriter the vocabulary this person's answers
-// usually come from. Titles are used rather than ids because the rewriter's job
-// is to produce better search text, not to address documents.
-func (s *Service) topDocumentTitles(ctx context.Context, scope interfaces.MemoryScope) []string {
-	rows, err := s.repo.TopDocAffinity(ctx, scope, 5)
-	if err != nil {
-		logger.Warnf(ctx, "memory: load document affinity failed: %v", err)
-		return nil
-	}
-	titles := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if row == nil || strings.TrimSpace(row.Title) == "" {
-			continue
-		}
-		// One sighting is not a habit.
-		if row.Hits < types.MemoryDocAffinityMinHits {
-			continue
-		}
-		titles = append(titles, row.Title)
-	}
-	return titles
-}
-
-// DocumentAffinity scores documents by how much this person has relied on them.
-func (s *Service) DocumentAffinity(ctx context.Context, knowledgeIDs []string) map[string]int {
-	scope, cfg, ok := s.enabledScope(ctx)
-	if !ok || !cfg.RetrievalConditioningEnabled() || len(knowledgeIDs) == 0 {
-		return nil
-	}
-	affinity, err := s.repo.DocAffinity(ctx, scope, knowledgeIDs)
-	if err != nil {
-		logger.Warnf(ctx, "memory: read document affinity failed: %v", err)
-		return nil
-	}
-	return affinity
-}
-
-// RecordAnswerSources notes which documents an answer drew on.
+// recurringInterests lists what this person keeps coming back to.
 //
-// The references attached to an answer are a weaker signal than an explicit
-// thumbs-up, but they are the only one available without asking the user
-// anything, and they are what makes the reranker able to prefer the material
-// this person keeps coming back to.
-func (s *Service) RecordAnswerSources(ctx context.Context, refs []types.MemoryDocAffinity) {
-	if len(refs) == 0 {
-		return
-	}
-	scope, cfg, ok := s.enabledScope(ctx)
-	if !ok || !cfg.RetrievalConditioningEnabled() {
-		return
-	}
-	if _, err := s.repo.EnsureSubject(ctx, scope); err != nil {
-		logger.Warnf(ctx, "memory: ensure subject for affinity failed: %v", err)
-		return
-	}
-	if err := s.repo.BumpDocAffinity(ctx, scope, refs); err != nil {
-		logger.Warnf(ctx, "memory: record answer sources failed: %v", err)
-	}
-}
-
-// ObserveQuestionTopics counts what a person asked about and promotes a subject
-// into memory once it recurs.
+// Counted from the keywords the accounts already carry, and a keyword has to
+// appear in several separate conversations before it qualifies. One
+// conversation about invoicing is a question; four are an interest.
 //
-// This is the answer to "a knowledge-base question is not about the user, so it
-// produces nothing". A single question really is noise — recording it would
-// fill the profile with every passing curiosity. But the same subject across
-// several conversations says something durable about the person, and counting
-// first is how MemoryOS separates the two without a rule that throws away every
-// question. Returns the interests promoted by this call.
-func (s *Service) ObserveQuestionTopics(ctx context.Context, topics []string) []string {
-	if len(topics) == 0 {
-		return nil
-	}
-	scope, cfg, ok := s.enabledScope(ctx)
-	if !ok {
-		return nil
-	}
-	return s.observeTopics(ctx, scope, cfg, cfg.ExtractModelID, topics)
-}
-
-// observeTopics is the scope-explicit form.
-//
-// Distillation runs on a background worker whose context carries no principal —
-// its scope comes from the task payload — so anything the distiller calls has
-// to be handed the scope rather than re-deriving it from the request.
-func (s *Service) observeTopics(
-	ctx context.Context,
-	scope interfaces.MemoryScope,
-	cfg *types.MemoryConfig,
-	modelID string,
-	topics []string,
+// This replaced a subject tracker that resolved model-named topics against
+// each other through character deletion, bigram overlap and an adjudicating
+// model call. Three layers of guessing about whether two strings mean the same
+// thing, to produce the same list of noun phrases this query produces from
+// data already on disk. The keywords are exact forms lifted from the accounts,
+// so equality here means equality; varied wording undercounts, which delays a
+// promotion rather than corrupting a count.
+func (s *Service) recurringInterests(
+	ctx context.Context, scope interfaces.MemoryScope, cfg *types.MemoryConfig,
 ) []string {
-	if len(topics) == 0 || cfg == nil || !cfg.AutoExtractEnabled() {
+	counts, err := s.repo.EpisodeKeywordCounts(ctx, scope, interestCandidateLimit)
+	if err != nil {
+		logger.Warnf(ctx, "memory: load recurring keywords failed: %v", err)
 		return nil
 	}
-	if _, err := s.repo.EnsureSubject(ctx, scope); err != nil {
-		logger.Warnf(ctx, "memory: ensure subject for topics failed: %v", err)
-		return nil
-	}
-
-	// Clean the labels first, then resolve them against the subjects this
-	// person already has. Counting the raw string is what made this feature
-	// silently useless: a model names the same subject differently every run,
-	// so each sighting landed under its own key and no topic ever recurred.
-	surfaces := make([]string, 0, len(topics))
-	for _, topic := range topics {
-		if topic = types.SanitizeMemoryTopic(topic); topic != "" {
-			surfaces = append(surfaces, topic)
-		}
-	}
-	if len(surfaces) == 0 {
-		return nil
-	}
-	resolutions := s.resolveTopics(ctx, scope, modelID, surfaces)
-
 	threshold := cfg.EffectiveInterestThreshold()
-	var promoted []string
-	for _, resolution := range resolutions {
-		// The stored label stays the one this subject was first recorded under,
-		// so a person's topic list does not churn its wording every time the
-		// model rephrases. The new wording is kept as an alias.
-		canonicalTopic := resolution.Surface
-		if resolution.Canonical != nil {
-			canonicalTopic = resolution.Canonical.Topic
+	interests := make([]string, 0, types.MemoryInterestMaxItems)
+	for _, row := range counts {
+		if row.Episodes < threshold {
+			// Ordered by frequency, so nothing below this can qualify either.
+			break
 		}
-		key := types.NormalizeTopicKey(canonicalTopic)
-		if key == "" {
-			continue
+		if keyword := strings.TrimSpace(row.Keyword); keyword != "" {
+			interests = append(interests, keyword)
 		}
-		if s.topicWasForgotten(ctx, scope, canonicalTopic, resolution.Surface) {
-			continue
+		if len(interests) >= types.MemoryInterestMaxItems {
+			break
 		}
-		aliasesBefore := s.topicAliasCount(ctx, scope, key)
-		stat, err := s.repo.BumpTopic(ctx, scope, canonicalTopic, key, resolution.Surface)
-		if err != nil {
-			logger.Warnf(ctx, "memory: count topic %q failed: %v", canonicalTopic, err)
-			continue
-		}
-		if stat == nil {
-			logger.Warnf(ctx, "memory: topic %q produced no row", canonicalTopic)
-			continue
-		}
-		// Without this line there is no way to tell, from the outside, whether
-		// a topic was counted, which subject it was folded into, or which tier
-		// decided — and "hits is always 1" looks identical to "nothing ran".
-		logger.Infof(ctx,
-			"memory: topic %q -> %q (tier=%s, hits=%d, threshold=%d)",
-			resolution.Surface, canonicalTopic, resolutionTier(resolution), stat.Hits, threshold)
-		if types.TopicLooksLikeOneQuestion(canonicalTopic) {
-			logger.Warnf(ctx,
-				"memory: topic %q names one question rather than a subject, so it will never "+
-					"recur and can never reach the threshold", canonicalTopic)
-		}
-		// A new wording changes what this subject's interest should embed to,
-		// and the vector was written once at promotion time. Drop it and let
-		// the maintenance backfill rebuild it with the wording included.
-		if len(stat.Aliases) > aliasesBefore {
-			s.invalidateInterestEmbedding(ctx, scope, canonicalTopic)
-		}
-		if resolution.MergedLabel != "" {
-			canonicalTopic, key = s.renameTopic(ctx, scope, stat, resolution.MergedLabel, key)
-		}
-
-		if stat.PromotedAt != nil || stat.Hits < threshold {
-			continue
-		}
-		if _, err := s.write(ctx, scope, cfg, types.MemoryItem{
-			Kind:       types.MemoryKindInterest,
-			Topic:      canonicalTopic,
-			Content:    canonicalTopic,
-			Importance: 3,
-			Origin:     types.MemoryOriginExtracted,
-		}); err != nil {
-			if !errors.Is(err, ErrPreviouslyForgotten) && !errors.Is(err, ErrSensitiveContent) {
-				logger.Warnf(ctx, "memory: promote interest failed: %v", err)
-			}
-			// Mark it promoted anyway: a topic the user has forgotten once
-			// should not re-propose itself on every subsequent question.
-		}
-		if err := s.repo.MarkTopicPromoted(ctx, scope, key); err != nil {
-			logger.Warnf(ctx, "memory: mark topic promoted failed: %v", err)
-		}
-		promoted = append(promoted, canonicalTopic)
 	}
-	if len(promoted) > 0 {
-		logger.Infof(ctx, "memory: promoted %d recurring topics into interests", len(promoted))
-	}
-	return promoted
-}
-
-// renameTopic adopts a better label for a subject and keeps everything that
-// refers to it in step. Returns the label and key to carry on with.
-//
-// The label a merge leaves behind is otherwise just whichever wording arrived
-// first, and that label is not cosmetic: it is fed to the query rewriter as
-// this person's vocabulary and shown to them as what we think they care about.
-func (s *Service) renameTopic(
-	ctx context.Context,
-	scope interfaces.MemoryScope,
-	stat *types.MemoryTopicStat,
-	newLabel, currentKey string,
-) (string, string) {
-	newKey := types.NormalizeTopicKey(newLabel)
-	renamed, err := s.repo.RenameTopic(ctx, scope, currentKey, newKey, newLabel)
-	if err != nil {
-		logger.Warnf(ctx, "memory: rename topic %q failed: %v", stat.Topic, err)
-		return stat.Topic, currentKey
-	}
-	if !renamed {
-		return stat.Topic, currentKey
-	}
-	logger.Infof(ctx, "memory: renamed topic %q to %q", stat.Topic, newLabel)
-	s.renameInterestItem(ctx, scope, stat.Topic, newLabel)
-	return newLabel, newKey
-}
-
-// renameInterestItem keeps a promoted interest in step with its subject.
-//
-// It only touches an item that still reads exactly as the old label. Anything
-// else has been edited by the user, and quietly overwriting someone's own
-// wording is worse than leaving the two slightly out of step.
-func (s *Service) renameInterestItem(
-	ctx context.Context, scope interfaces.MemoryScope, oldLabel, newLabel string,
-) {
-	items, err := s.repo.ListActiveByKinds(ctx, scope, []string{types.MemoryKindInterest}, 100)
-	if err != nil {
-		logger.Warnf(ctx, "memory: load interests for rename failed: %v", err)
-		return
-	}
-	for _, item := range items {
-		if item == nil || item.Content != oldLabel {
-			continue
-		}
-		err := s.repo.UpdateItemContent(
-			ctx, scope, item.ID, newLabel, types.MemoryItemKey(newLabel, newLabel), item.Importance)
-		if err != nil {
-			logger.Warnf(ctx, "memory: rename interest item failed: %v", err)
-			continue
-		}
-		// The vector still spells the old label, so semantic recall would keep
-		// matching a name this subject no longer goes by.
-		if err := s.repo.DeleteItemEmbedding(ctx, scope, item.ID); err != nil {
-			logger.Warnf(ctx, "memory: drop renamed interest embedding failed: %v", err)
-		}
-		s.rebuildBlock(ctx, scope)
-		return
-	}
-}
-
-// topicAliasCount reports how many wordings a subject is already known by, so
-// the caller can tell whether a sighting added one.
-func (s *Service) topicAliasCount(
-	ctx context.Context, scope interfaces.MemoryScope, key string,
-) int {
-	stat, err := s.repo.TopicByKey(ctx, scope, key)
-	if err != nil || stat == nil {
-		return 0
-	}
-	return len(stat.Aliases)
-}
-
-// invalidateInterestEmbedding drops the vector of the interest promoted from
-// this subject, if there is one. Best effort: losing the vector for one
-// maintenance cycle costs semantic recall on one memory, and the item stays
-// reachable by wording the whole time.
-func (s *Service) invalidateInterestEmbedding(
-	ctx context.Context, scope interfaces.MemoryScope, topic string,
-) {
-	items, err := s.repo.ListActiveByKinds(ctx, scope, []string{types.MemoryKindInterest}, 100)
-	if err != nil {
-		logger.Warnf(ctx, "memory: load interests for re-embedding failed: %v", err)
-		return
-	}
-	for _, item := range items {
-		if item == nil || item.Content != topic {
-			continue
-		}
-		if err := s.repo.DeleteItemEmbedding(ctx, scope, item.ID); err != nil {
-			logger.Warnf(ctx, "memory: drop interest embedding failed: %v", err)
-		}
-		return
-	}
-}
-
-// resolutionTier names which rule matched, for logs.
-func resolutionTier(resolution topicResolution) string {
-	if resolution.Tier == "" {
-		return "new"
-	}
-	return resolution.Tier
-}
-
-// ConfirmItem accepts something the system inferred, moving it out of the
-// pending inbox and into use.
-func (s *Service) ConfirmItem(ctx context.Context, id string) (*types.MemoryItem, error) {
-	scope, err := ResolveScope(ctx)
-	if err != nil {
-		return nil, err
-	}
-	existing, err := s.repo.GetItem(ctx, scope, id)
-	if err != nil {
-		return nil, err
-	}
-	if existing == nil {
-		return nil, ErrItemNotFound
-	}
-	if err := s.repo.ConfirmPendingItem(ctx, scope, id); err != nil {
-		return nil, err
-	}
-	s.enforceCapacity(ctx, scope, s.workspaceConfig(ctx, scope.TenantID))
-	s.rebuildBlock(ctx, scope)
-	return s.repo.GetItem(ctx, scope, id)
-}
-
-// RejectItem declines an inference. It deletes rather than archives, so the
-// tombstone stops the same guess from being proposed again next week.
-func (s *Service) RejectItem(ctx context.Context, id string) error {
-	return s.DeleteItem(ctx, id)
+	return interests
 }

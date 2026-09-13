@@ -219,7 +219,7 @@ func (s *sessionService) AgentQA(
 		recall := s.memoryService.Recall(memoryCtx, req.Query)
 		if recall.Prompt != "" {
 			engine.SetMemoryPrompt(recall.Prompt)
-			used := types.UsedMemoriesFromItems(recall.Items)
+			used := recall.Used
 			if err := eventBus.Emit(ctx, event.Event{
 				Type:      event.EventMemoryRecalled,
 				SessionID: sessionID,

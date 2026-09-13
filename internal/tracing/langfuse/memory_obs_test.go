@@ -1,24 +1,32 @@
 package langfuse
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/Tencent/WeKnora/internal/types"
-)
+func TestARecallSpanKeepsTheMetaItWasGiven(t *testing.T) {
+	meta := map[string]interface{}{
+		"outcome":       "ok",
+		"episode_count": 1,
+		"ranking_mode":  "lexical_only",
+	}
+	out := SummarizeMemoryRecallOutput(meta)
 
-func TestSummarizeMemoryRecallOutput_includesMetaAndItems(t *testing.T) {
-	out := SummarizeMemoryRecallOutput(map[string]interface{}{
-		"matched": 1,
-		"mode":    "lexical_only",
-	}, []*types.MemoryItem{
-		{ID: "m1", Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产用 PostgreSQL 17"},
-	})
-
-	if out["matched"] != 1 || out["mode"] != "lexical_only" {
+	if out["outcome"] != "ok" || out["episode_count"] != 1 || out["ranking_mode"] != "lexical_only" {
 		t.Fatalf("meta not preserved: %#v", out)
 	}
-	items := out["recalled_items"].([]map[string]interface{})
-	if len(items) != 1 || items[0]["id"] != "m1" {
-		t.Fatalf("unexpected recalled_items: %#v", items)
+	// A span's recorded output must not change after it was finished, so the
+	// caller's map cannot be the one that got stored.
+	meta["outcome"] = "disabled"
+	if out["outcome"] != "ok" {
+		t.Fatalf("recorded output followed the caller's map: %#v", out)
+	}
+}
+
+func TestRetrievalConditioningOutputOmitsAnEmptyBackground(t *testing.T) {
+	out := SummarizeRetrievalContextOutput("", nil)
+	if _, ok := out["background"]; ok {
+		t.Fatalf("an empty background must not be recorded: %#v", out)
+	}
+	if out["interest_count"] != 0 {
+		t.Fatalf("interest count must always be reported: %#v", out)
 	}
 }

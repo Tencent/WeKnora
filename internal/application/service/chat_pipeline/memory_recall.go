@@ -78,13 +78,13 @@ func (p *PluginMemoryRecall) OnEvent(ctx context.Context,
 	}
 
 	chatManage.MemoryPrompt = recall.Prompt
-	chatManage.UsedMemories = types.UsedMemoriesFromItems(recall.Items)
+	chatManage.UsedMemories = recall.Used
 	emitMemoryRecalled(ctx, chatManage.EventBus, chatManage.SessionID, chatManage.UsedMemories)
 
-	memoryIDs := make([]string, 0, len(recall.Items))
-	for _, item := range recall.Items {
-		if item != nil && item.ID != "" {
-			memoryIDs = append(memoryIDs, item.ID)
+	memoryIDs := make([]string, 0, len(recall.Used))
+	for _, used := range recall.Used {
+		if used.ID != "" {
+			memoryIDs = append(memoryIDs, used.ID)
 		}
 	}
 	pipelineInfo(ctx, "MemoryRecall", "output", map[string]interface{}{

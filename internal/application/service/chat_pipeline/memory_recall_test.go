@@ -42,9 +42,9 @@ func newMemoryRecallPlugin(memoryService interfaces.MemoryService) *PluginMemory
 func TestMemoryReachesTheMessagesSentToTheModel(t *testing.T) {
 	memoryService := &stubMemoryService{
 		recall: interfaces.MemoryRecall{
-			Prompt: types.WrapMemoryForPrompt("Preferences:\n- 回答请直接给结论", ""),
-			Items: []*types.MemoryItem{
-				{ID: "m1", Kind: types.MemoryKindPreference, Content: "回答请直接给结论"},
+			Prompt: types.WrapMemoryDocumentForPrompt("Preferences:\n- 回答请直接给结论", nil, nil),
+			Used: types.UsedMemories{
+				{ID: "m1", Kind: types.UsedMemoryKindNote, Content: "回答请直接给结论"},
 			},
 		},
 	}
@@ -92,9 +92,9 @@ func TestMemoryIsAbsentWhenNothingRecalled(t *testing.T) {
 func TestMemoryRecallEmitsWhatTheAnswerSaw(t *testing.T) {
 	memoryService := &stubMemoryService{
 		recall: interfaces.MemoryRecall{
-			Prompt: types.WrapMemoryForPrompt("About the user:\n- 在做医疗影像", ""),
-			Items: []*types.MemoryItem{
-				{ID: "m1", Kind: types.MemoryKindProfile, Content: "在做医疗影像"},
+			Prompt: types.WrapMemoryDocumentForPrompt("About the user:\n- 在做医疗影像", nil, nil),
+			Used: types.UsedMemories{
+				{ID: "m1", Kind: types.UsedMemoryKindDigest, Content: "在做医疗影像"},
 			},
 		},
 	}

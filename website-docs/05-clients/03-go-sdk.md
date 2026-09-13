@@ -325,8 +325,9 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 
 | 文件 | 方法与用途 |
 | --- | --- |
-| `client/memory.go` | GetMemorySettings / UpdateMemorySettings；List/Create/Update/DeleteMemoryItem；Confirm/RejectMemoryItem；ClearMemoryItems |
-| `client/memory.go` | ListMemoryTopics / PromoteMemoryTopic / DeleteMemoryTopic；ListMemoryDocuments / DeleteMemoryDocument；ExportMemory / ConsolidateMemory |
+| `client/memory.go` | GetMemorySettings / UpdateMemorySettings；GetMemoryProfile / SaveMemoryProfile / DeleteMemoryProfile |
+| `client/memory.go` | ListMemoryEpisodes / GetMemoryEpisode / DeleteMemoryEpisode；ListMemoryNotes / CreateMemoryNote / DeleteMemoryNote |
+| `client/memory.go` | ClearMemory（清空三层记忆）；ExportMemory / ConsolidateMemory |
 | `client/skill.go` | InstallSandboxSkillFromSource / UploadSandboxSkill / ReinstallSandboxSkill / StopSandboxSkill，管理安装流程 |
 | `client/skill.go` | UpdateSandboxSkill / SetSandboxSkillEnabled / SetSandboxSkillEnvValues；ListSandboxSkillFiles / GetSandboxSkillFile |
 | `client/env_var.go` | ListMyEnvVars；SetMySkillEnvVar / DeleteMySkillEnvVar；SetMySandboxEnvVar / DeleteMySandboxEnvVar |
@@ -335,8 +336,12 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 空间技能变量由管理员设置，个人变量只用于调用者自己；列表不返回明文。记忆和技能方法的权限仍由后端接口校验，SDK 不绕过这些约束。
 
 ```go
-items, total, err := c.ListMemoryItems(ctx, "active", 50, 0)
-_ = items
+profile, err := c.GetMemoryProfile(ctx) // 尚未生成画像时 profile 为 nil
+_ = profile
+_ = err
+
+episodes, total, err := c.ListMemoryEpisodes(ctx, 20, 0)
+_ = episodes
 _ = total
 _ = err
 

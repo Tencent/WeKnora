@@ -66,73 +66,27 @@
       <div class="list-toolbar">
         <div class="list-title">
           <h3>{{ t('memorySettings.listTitle') }}</h3>
-          <span class="list-count">{{ t('memorySettings.listCount', { count: totalAll }) }}</span>
         </div>
         <div class="list-actions">
-          <t-popup
-            v-model="addVisible"
-            trigger="click"
-            placement="bottom-end"
-            destroy-on-close
-            overlay-class-name="memory-add-popup-overlay"
-          >
-            <t-button size="small" variant="text" :disabled="!canWrite">
-              <template #icon><t-icon name="add" /></template>
-              {{ t('memorySettings.add') }}
-            </t-button>
-            <template #content>
-              <div class="add-popup" @click.stop>
-                <div class="add-popup-title">{{ t('memorySettings.addTitle') }}</div>
-                <label class="add-field">
-                  <span class="add-label">{{ t('memorySettings.addKindLabel') }}</span>
-                  <t-select
-                    v-model="draftKind"
-                    size="small"
-                    :popup-props="{ overlayClassName: 'memory-add-kind-popup' }"
-                  >
-                    <t-option v-for="kind in kinds" :key="kind" :value="kind" :label="kindLabel(kind)" />
-                  </t-select>
-                  <span class="add-kind-hint">{{ kindHint(draftKind) }}</span>
-                </label>
-                <label class="add-field">
-                  <span class="add-label">{{ t('memorySettings.addContentLabel') }}</span>
-                  <t-textarea
-                    v-model="draftContent"
-                    :placeholder="t('memorySettings.addPlaceholder')"
-                    :maxlength="300"
-                    :autosize="{ minRows: 3, maxRows: 6 }"
-                  />
-                </label>
-                <div class="add-popup-footer">
-                  <t-button size="small" variant="outline" @click="addVisible = false">
-                    {{ t('common.cancel') }}
-                  </t-button>
-                  <t-button size="small" theme="primary" :disabled="!draftContent.trim()" @click="handleCreate">
-                    {{ t('memorySettings.add') }}
-                  </t-button>
-                </div>
-              </div>
-            </template>
-          </t-popup>
-          <t-button size="small" variant="text" @click="handleExport">
+          <t-button size="small" variant="text" :disabled="isEmptyStore" @click="handleExport">
             <template #icon><t-icon name="download" /></template>
             {{ t('memorySettings.export') }}
           </t-button>
           <t-popconfirm
-            :content="t('memorySettings.consolidateConfirm')"
-            :confirm-btn="{ content: t('memorySettings.consolidate') }"
+            :content="t('memorySettings.rewriteConfirm')"
+            :confirm-btn="{ content: t('memorySettings.rewrite') }"
             :cancel-btn="t('common.cancel')"
             placement="bottom"
-            @confirm="handleConsolidate"
+            @confirm="handleRewrite"
           >
             <t-button
               size="small"
               variant="text"
-              :loading="consolidating"
-              :disabled="!canWrite || totalAll === 0"
+              :loading="rewriting"
+              :disabled="!canWrite || episodeTotal === 0"
             >
-              <template #icon><t-icon name="swap" /></template>
-              {{ t('memorySettings.consolidate') }}
+              <template #icon><t-icon name="refresh" /></template>
+              {{ t('memorySettings.rewrite') }}
             </t-button>
           </t-popconfirm>
           <t-popconfirm
@@ -143,7 +97,7 @@
             placement="left"
             @confirm="handleClear"
           >
-            <t-button size="small" theme="danger" variant="text" :disabled="totalAll === 0 && trackingCount === 0 && documentCount === 0">
+            <t-button size="small" theme="danger" variant="text" :disabled="isEmptyStore">
               <template #icon><t-icon name="delete" /></template>
               {{ t('memorySettings.clear') }}
             </t-button>
@@ -163,361 +117,316 @@
       </t-tabs>
 
       <t-loading :loading="loading">
-        <div v-if="listIsEmpty" class="empty">
-          <p class="empty-title">
-            {{ emptyTitle }}
-          </p>
-          <p class="empty-desc">
-            {{ emptyDescription }}
-          </p>
-        </div>
-        <p v-if="statusHint" class="status-hint">
-          {{ statusHint }}
-        </p>
-        <ul v-if="isDocuments && documents.length > 0" class="memory-list">
-          <li v-for="doc in documents" :key="doc.id" class="memory-item">
-            <div class="memory-main">
-              <p class="memory-content">{{ doc.title || t('memorySettings.untitledDocument') }}</p>
-              <div class="memory-meta">
-                <span>{{ t('memorySettings.documentsHits', { hits: doc.hits }) }}</span>
-                <span>{{ formatTime(doc.last_used_at) }}</span>
-              </div>
+        <!-- Profile: one document the user corrects, so it gets a full-height
+             editor rather than a row in a list. -->
+        <section v-if="tab === 'profile'" class="panel">
+          <p class="panel-desc">{{ t('memorySettings.profile.description') }}</p>
+
+          <div v-if="!profile" class="empty">
+            <p class="empty-title">{{ t('memorySettings.profile.emptyTitle') }}</p>
+            <p class="empty-desc">{{ t('memorySettings.profile.emptyDescription') }}</p>
+          </div>
+
+          <template v-else>
+            <div class="profile-meta">
+              <span>{{ t('memorySettings.profile.revision', { revision: profile.revision }) }}</span>
+              <span>{{ t('memorySettings.profile.builtFrom', { count: profile.episode_count }) }}</span>
+              <span v-if="profile.updated_at">
+                {{ t('memorySettings.profile.updatedAt', { time: formatTime(profile.updated_at) }) }}
+              </span>
             </div>
-            <div class="memory-actions">
-              <t-button
-                size="small"
-                theme="primary"
-                variant="text"
-                :disabled="!doc.knowledge_base_id"
-                :title="doc.knowledge_base_id ? t('memorySettings.openDocument') : t('memorySettings.openDocumentUnavailable')"
-                @click="handleOpenDocument(doc)"
-              >
-                <template #icon><t-icon name="jump" /></template>
-                {{ t('memorySettings.openDocument') }}
-              </t-button>
-              <t-popconfirm
-                theme="danger"
-                :content="t('memorySettings.stopTrackingDocumentConfirm')"
-                :confirm-btn="{ content: t('memorySettings.stopTrackingDocument'), theme: 'danger' }"
-                :cancel-btn="t('common.cancel')"
-                placement="left"
-                @confirm="handleStopTrackingDocument(doc)"
-              >
-                <t-button size="small" theme="default" variant="text">
-                  {{ t('memorySettings.stopTrackingDocument') }}
-                </t-button>
-              </t-popconfirm>
-            </div>
-          </li>
-        </ul>
-        <ul v-else-if="isTracking && topics.length > 0" class="memory-list">
-          <li v-for="topic in topics" :key="topic.id" class="memory-item">
-            <div class="memory-main">
-              <p class="memory-content">{{ topic.topic }}</p>
-              <div class="topic-progress">
-                <t-progress :percentage="topicProgress(topic)" size="small" :label="false" />
-                <span>{{ topicProgressText(topic) }}</span>
-              </div>
-              <div class="memory-meta">
-                <span>{{ t('memorySettings.kinds.interest') }}</span>
-                <span
-                  v-if="topic.aliases && topic.aliases.length > 0"
-                  class="memory-topic"
-                  :title="topic.aliases.join(', ')"
+            <!-- A rewrite replaces the whole body, so a person who typed their own
+                 wording needs to know it is the thing at stake. -->
+            <p v-if="profile.user_edited_at" class="panel-hint">
+              {{ t('memorySettings.profile.userEdited') }}
+            </p>
+            <t-textarea
+              v-model="profileDraft"
+              class="profile-editor"
+              :disabled="!canWrite"
+              :maxlength="MEMORY_PROFILE_MAX_LENGTH"
+              :autosize="{ minRows: 12, maxRows: 26 }"
+              :placeholder="t('memorySettings.profile.placeholder')"
+            />
+            <div class="profile-footer">
+              <span class="profile-length">
+                {{ t('memorySettings.profile.length', {
+                  count: profileDraft.length,
+                  max: MEMORY_PROFILE_MAX_LENGTH,
+                }) }}
+              </span>
+              <div class="profile-actions">
+                <t-popconfirm
+                  theme="danger"
+                  :content="t('memorySettings.profile.deleteConfirm')"
+                  :confirm-btn="{ content: t('common.delete'), theme: 'danger' }"
+                  :cancel-btn="t('common.cancel')"
+                  placement="top"
+                  @confirm="handleDeleteProfile"
                 >
-                  {{ t('memorySettings.trackingAliases', { aliases: topic.aliases.join(', ') }) }}
-                </span>
-                <span>{{ formatTime(topic.last_seen_at) }}</span>
-              </div>
-            </div>
-            <div class="memory-actions">
-              <t-button
-                size="small"
-                theme="primary"
-                variant="text"
-                :disabled="!canWrite"
-                @click="handlePromoteTopic(topic)"
-              >
-                <template #icon><t-icon name="star" /></template>
-                {{ t('memorySettings.promoteTopic') }}
-              </t-button>
-              <t-popconfirm
-                theme="danger"
-                :content="t('memorySettings.dismissTopicConfirm')"
-                :confirm-btn="{ content: t('memorySettings.dismissTopic'), theme: 'danger' }"
-                :cancel-btn="t('common.cancel')"
-                placement="left"
-                @confirm="handleDismissTopic(topic)"
-              >
-                <t-button size="small" theme="default" variant="text">
-                  {{ t('memorySettings.dismissTopic') }}
-                </t-button>
-              </t-popconfirm>
-            </div>
-          </li>
-        </ul>
-        <ul v-else-if="isItems && items.length > 0" class="memory-list">
-          <li v-for="item in items" :key="item.id" class="memory-item">
-            <div class="memory-main">
-              <div v-if="editingId === item.id" class="memory-edit">
-                <t-textarea
-                  v-model="editingContent"
-                  :autosize="{ minRows: 2, maxRows: 6 }"
-                  @keydown.enter.ctrl="handleSaveEdit(item)"
-                />
-                <div class="memory-edit-actions">
-                  <t-button size="small" variant="outline" @click="editingId = ''">
-                    {{ t('common.cancel') }}
+                  <t-button size="small" theme="danger" variant="text" :disabled="!canWrite">
+                    {{ t('memorySettings.profile.delete') }}
                   </t-button>
-                  <t-button size="small" theme="primary" @click="handleSaveEdit(item)">
-                    {{ t('common.save') }}
-                  </t-button>
-                </div>
-              </div>
-              <p v-else class="memory-content" :class="{ inactive: isRetired(item) }">
-                {{ item.content }}
-              </p>
-              <div class="memory-meta">
-                <span :title="kindHint(item.kind)">{{ kindLabel(item.kind) }}</span>
-                <span
-                  v-if="item.topic && item.topic !== item.content"
-                  class="memory-topic"
-                  :title="item.topic"
-                >
-                  {{ item.topic }}
-                </span>
-                <span>{{ originLabel(item.origin) }}</span>
-                <span>{{ formatTime(item.valid_from) }}</span>
-              </div>
-            </div>
-            <div class="memory-actions">
-              <template v-if="item.status === 'pending'">
+                </t-popconfirm>
                 <t-button
                   size="small"
                   theme="primary"
-                  variant="text"
-                  :disabled="!canWrite"
-                  @click="handleConfirm(item)"
+                  :loading="savingProfile"
+                  :disabled="!canWrite || !profileDirty"
+                  @click="handleSaveProfile"
                 >
-                  <template #icon><t-icon name="check" /></template>
-                  {{ t('memorySettings.confirmGuess') }}
+                  {{ t('common.save') }}
                 </t-button>
-                <t-button size="small" theme="default" variant="text" @click="handleReject(item)">
-                  <template #icon><t-icon name="close" /></template>
-                  {{ t('memorySettings.rejectGuess') }}
-                </t-button>
-              </template>
-              <t-button
-                v-if="item.status === 'active'"
-                size="small"
-                theme="default"
-                variant="text"
-                shape="square"
-                :disabled="!canWrite"
-                :title="t('common.edit')"
-                @click="startEdit(item)"
-              >
-                <template #icon><t-icon name="edit" /></template>
-              </t-button>
-              <!-- Rejecting a guess already drops it and remembers the refusal, so a
-                   delete button on a pending row is a weaker duplicate of "No". -->
-              <t-popconfirm
-                v-if="item.status !== 'pending'"
-                theme="danger"
-                :content="t('memorySettings.deleteConfirm')"
-                :confirm-btn="{ content: t('common.delete'), theme: 'danger' }"
-                :cancel-btn="t('common.cancel')"
-                placement="left"
-                @confirm="handleDelete(item)"
-              >
-                <t-button
-                  size="small"
-                  theme="danger"
-                  variant="text"
-                  shape="square"
-                  :title="t('common.delete')"
-                >
-                  <template #icon><t-icon name="delete" /></template>
-                </t-button>
-              </t-popconfirm>
+              </div>
             </div>
-          </li>
-        </ul>
-      </t-loading>
+          </template>
+        </section>
 
-      <t-pagination
-        v-if="listTotal > pageSize"
-        class="memory-pagination"
-        :total="listTotal"
-        :page-size="pageSize"
-        :current="page"
-        :show-jumper="false"
-        :show-page-size="false"
-        @current-change="handlePageChange"
-      />
+        <!-- Episodes: a browsable history. Summaries run to paragraphs, so a row
+             stays one line until it is opened. -->
+        <section v-else-if="tab === 'episodes'" class="panel">
+          <p class="panel-desc">{{ t('memorySettings.episodes.description') }}</p>
+
+          <div v-if="episodes.length === 0" class="empty">
+            <p class="empty-title">{{ t('memorySettings.episodes.emptyTitle') }}</p>
+            <p class="empty-desc">{{ t('memorySettings.episodes.emptyDescription') }}</p>
+          </div>
+
+          <ul v-else class="memory-list">
+            <li v-for="episode in episodes" :key="episode.id" class="memory-item">
+              <div class="memory-main">
+                <button
+                  type="button"
+                  class="episode-head"
+                  :aria-expanded="expandedId === episode.id"
+                  @click="toggleEpisode(episode)"
+                >
+                  <t-icon
+                    class="episode-chevron"
+                    :name="expandedId === episode.id ? 'chevron-down' : 'chevron-right'"
+                    size="14px"
+                  />
+                  <span class="episode-title">{{ episode.title }}</span>
+                </button>
+                <div class="memory-meta">
+                  <span>{{ formatRange(episode.from_at, episode.to_at) }}</span>
+                  <span :class="outcomeClass(episode.outcome)">{{ outcomeLabel(episode.outcome) }}</span>
+                  <!-- Recall ranks on use, so this is the answer to "why is this
+                       one still here" and belongs on every row. -->
+                  <span>{{ t('memorySettings.episodes.useCount', { count: episode.use_count }) }}</span>
+                </div>
+                <div v-if="episode.keywords?.length" class="episode-keywords">
+                  <span v-for="keyword in episode.keywords" :key="keyword" class="episode-keyword">
+                    {{ keyword }}
+                  </span>
+                </div>
+                <p v-if="expandedId === episode.id" class="episode-summary">
+                  {{ expandedSummary || t('memorySettings.episodes.summaryEmpty') }}
+                </p>
+              </div>
+              <div class="memory-actions">
+                <t-popconfirm
+                  theme="danger"
+                  :content="t('memorySettings.episodes.deleteConfirm')"
+                  :confirm-btn="{ content: t('common.delete'), theme: 'danger' }"
+                  :cancel-btn="t('common.cancel')"
+                  placement="left"
+                  @confirm="handleDeleteEpisode(episode)"
+                >
+                  <t-button
+                    size="small"
+                    theme="danger"
+                    variant="text"
+                    shape="square"
+                    :title="t('common.delete')"
+                  >
+                    <template #icon><t-icon name="delete" /></template>
+                  </t-button>
+                </t-popconfirm>
+              </div>
+            </li>
+          </ul>
+
+          <t-pagination
+            v-if="episodeTotal > pageSize"
+            class="memory-pagination"
+            :total="episodeTotal"
+            :page-size="pageSize"
+            :current="page"
+            :show-jumper="false"
+            :show-page-size="false"
+            @current-change="handlePageChange"
+          />
+        </section>
+
+        <!-- Notes: the user's own sentences, kept word for word. -->
+        <section v-else class="panel">
+          <p class="panel-desc">{{ t('memorySettings.notes.description') }}</p>
+
+          <div class="note-add">
+            <t-textarea
+              v-model="noteDraft"
+              :disabled="!canWrite || notesFull"
+              :maxlength="MEMORY_NOTE_MAX_LENGTH"
+              :autosize="{ minRows: 2, maxRows: 5 }"
+              :placeholder="t('memorySettings.notes.placeholder')"
+            />
+            <div class="note-add-footer">
+              <span class="note-count">
+                {{ t('memorySettings.notes.count', {
+                  count: notes.length,
+                  max: MEMORY_NOTE_MAX_COUNT,
+                }) }}
+              </span>
+              <t-button
+                size="small"
+                theme="primary"
+                :loading="addingNote"
+                :disabled="!canWrite || notesFull || !noteDraft.trim()"
+                @click="handleAddNote"
+              >
+                {{ t('memorySettings.notes.add') }}
+              </t-button>
+            </div>
+            <!-- Adding past the cap fails server-side; saying so up front beats a
+                 toast that arrives after the sentence was typed. -->
+            <p v-if="notesFull" class="panel-hint">
+              {{ t('memorySettings.notes.full', { max: MEMORY_NOTE_MAX_COUNT }) }}
+            </p>
+          </div>
+
+          <div v-if="notes.length === 0" class="empty">
+            <p class="empty-title">{{ t('memorySettings.notes.emptyTitle') }}</p>
+            <p class="empty-desc">{{ t('memorySettings.notes.emptyDescription') }}</p>
+          </div>
+
+          <ul v-else class="memory-list">
+            <li v-for="note in notes" :key="note.id" class="memory-item">
+              <div class="memory-main">
+                <p class="memory-content">{{ note.content }}</p>
+                <div class="memory-meta">
+                  <span>{{ formatTime(note.created_at) }}</span>
+                </div>
+              </div>
+              <div class="memory-actions">
+                <t-popconfirm
+                  theme="danger"
+                  :content="t('memorySettings.notes.deleteConfirm')"
+                  :confirm-btn="{ content: t('common.delete'), theme: 'danger' }"
+                  :cancel-btn="t('common.cancel')"
+                  placement="left"
+                  @confirm="handleDeleteNote(note)"
+                >
+                  <t-button
+                    size="small"
+                    theme="danger"
+                    variant="text"
+                    shape="square"
+                    :title="t('common.delete')"
+                  >
+                    <template #icon><t-icon name="delete" /></template>
+                  </t-button>
+                </t-popconfirm>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </t-loading>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
-  clearMemoryItems,
+  clearAllMemories,
   consolidateMemory,
-  createMemoryItem,
-  confirmMemoryItem,
-  deleteMemoryDocument,
-  deleteMemoryItem,
-  deleteMemoryTopic,
-  exportMemoryItems,
+  createMemoryNote,
+  deleteMemoryEpisode,
+  deleteMemoryNote,
+  deleteMemoryProfile,
+  exportMemories,
+  getMemoryEpisode,
+  getMemoryProfile,
   getMemorySettings,
-  listMemoryDocuments,
-  listMemoryItems,
-  listMemoryTopics,
-  promoteMemoryTopic,
-  rejectMemoryItem,
+  listMemoryEpisodes,
+  listMemoryNotes,
   updateMemoryEnabled,
-  updateMemoryItem,
-  type MemoryDoc,
-  type MemoryItem,
-  type MemoryKind,
+  updateMemoryProfile,
+  MEMORY_NOTE_MAX_COUNT,
+  MEMORY_NOTE_MAX_LENGTH,
+  MEMORY_PROFILE_MAX_LENGTH,
+  type MemoryDigest,
+  type MemoryEpisode,
+  type MemoryEpisodeOutcome,
+  type MemoryNote,
   type MemorySettings,
-  type MemoryStatus,
-  type MemoryTopic,
 } from '@/api/memory'
 
 const { t } = useI18n()
-const router = useRouter()
 
-type MemoryListTab = MemoryStatus | 'tracking' | 'documents'
+type MemoryTab = 'profile' | 'episodes' | 'notes'
 
 const settings = ref<MemorySettings | null>(null)
 const userEnabled = ref(false)
-const items = ref<MemoryItem[]>([])
-const topics = ref<MemoryTopic[]>([])
-const documents = ref<MemoryDoc[]>([])
-const total = ref(0)
-const trackingCount = ref(0)
-const documentCount = ref(0)
-const tab = ref<MemoryListTab>('active')
+const tab = ref<MemoryTab>('profile')
 const loading = ref(false)
-const consolidating = ref(false)
+const rewriting = ref(false)
 const page = ref(1)
 const pageSize = 20
 
-const draftKind = ref<MemoryKind>('fact')
-const draftContent = ref('')
-const addVisible = ref(false)
-const editingId = ref('')
-const editingContent = ref('')
-const editingImportance = ref(3)
+const profile = ref<MemoryDigest | null>(null)
+const profileLoaded = ref('')
+const profileDraft = ref('')
+const savingProfile = ref(false)
 
-const kinds: MemoryKind[] = ['profile', 'preference', 'fact', 'task', 'interest']
-const usageRowKeys = ['alwaysOn', 'situational', 'interest', 'tracking', 'documents', 'pending', 'inactive'] as const
+const episodes = ref<MemoryEpisode[]>([])
+const episodeTotal = ref(0)
+const expandedId = ref('')
+const expandedSummary = ref('')
 
-const statuses: MemoryStatus[] = ['active', 'pending', 'superseded', 'archived']
-const tabs: MemoryListTab[] = ['active', 'pending', 'tracking', 'documents', 'superseded', 'archived']
-const statusLabelKeys: Record<MemoryStatus, string> = {
-  active: 'memorySettings.statusActive',
-  pending: 'memorySettings.statusPending',
-  superseded: 'memorySettings.statusSuperseded',
-  archived: 'memorySettings.statusArchived',
-}
-const counts = ref<Record<MemoryStatus, number>>({
-  active: 0,
-  pending: 0,
-  superseded: 0,
-  archived: 0,
-})
+const notes = ref<MemoryNote[]>([])
+const noteDraft = ref('')
+const addingNote = ref(false)
 
-const isTracking = computed(() => tab.value === 'tracking')
-const isDocuments = computed(() => tab.value === 'documents')
-const isItems = computed(() => !isTracking.value && !isDocuments.value)
-const listTotal = computed(() => {
-  if (isTracking.value) return trackingCount.value
-  if (isDocuments.value) return documentCount.value
-  return total.value
-})
-const listIsEmpty = computed(() => {
-  if (isTracking.value) return topics.value.length === 0
-  if (isDocuments.value) return documents.value.length === 0
-  return items.value.length === 0
-})
+const tabs: MemoryTab[] = ['profile', 'episodes', 'notes']
+const usageRowKeys = ['profile', 'episodes', 'notes'] as const
 
-const tabLabel = (value: MemoryListTab) => {
-  if (value === 'tracking') {
-    return `${t('memorySettings.statusTracking')}(${trackingCount.value})`
-  }
-  if (value === 'documents') {
-    return `${t('memorySettings.statusDocuments')}(${documentCount.value})`
-  }
-  return `${t(statusLabelKeys[value])}(${counts.value[value]})`
+const tabIcons: Record<MemoryTab, string> = {
+  profile: 'user',
+  episodes: 'chat',
+  notes: 'bookmark',
 }
 
-const tabIcons: Record<MemoryListTab, string> = {
-  active: 'check-circle',
-  pending: 'help-circle',
-  tracking: 'chart-bubble',
-  documents: 'file',
-  superseded: 'history',
-  archived: 'folder',
+const tabIcon = (value: MemoryTab) => tabIcons[value]
+
+const tabLabel = (value: MemoryTab) => {
+  const label = t(`memorySettings.tabs.${value}`)
+  if (value === 'profile') return label
+  if (value === 'episodes') return `${label}(${episodeTotal.value})`
+  return `${label}(${notes.value.length})`
 }
 
-const tabIcon = (value: MemoryListTab) => tabIcons[value]
-
-const totalAll = computed(() => statuses.reduce((sum, value) => sum + counts.value[value], 0))
-
-const emptyTitle = computed(() => {
-  if (tab.value === 'pending') return t('memorySettings.pendingEmptyTitle')
-  if (tab.value === 'tracking') return t('memorySettings.trackingEmptyTitle')
-  if (tab.value === 'documents') return t('memorySettings.documentsEmptyTitle')
-  if (tab.value === 'superseded') return t('memorySettings.supersededEmptyTitle')
-  if (tab.value === 'archived') return t('memorySettings.archivedEmptyTitle')
-  return t('memorySettings.emptyTitle')
-})
-
-const emptyDescription = computed(() => {
-  if (tab.value === 'pending') return t('memorySettings.pendingEmptyDescription')
-  if (tab.value === 'tracking') return t('memorySettings.trackingEmptyDescription')
-  if (tab.value === 'documents') return t('memorySettings.documentsEmptyDescription')
-  if (tab.value === 'superseded') return t('memorySettings.supersededEmptyDescription')
-  if (tab.value === 'archived') return t('memorySettings.archivedEmptyDescription')
-  return t('memorySettings.emptyDescription')
-})
-
-const statusHint = computed(() => {
-  if (isTracking.value) {
-    return topics.value.length === 0 ? '' : t('memorySettings.trackingHint')
-  }
-  if (isDocuments.value) {
-    return documents.value.length === 0 ? '' : t('memorySettings.documentsHint')
-  }
-  if (items.value.length === 0) return ''
-  if (tab.value === 'pending') return t('memorySettings.pendingHint')
-  if (tab.value === 'superseded') return t('memorySettings.supersededHint')
-  if (tab.value === 'archived') return t('memorySettings.archivedHint')
-  return ''
-})
-
-// Writing requires both switches; the list itself stays readable either way so
-// a user who just turned memory off can still review and delete what is stored.
+// Writing requires both switches; everything stays readable either way so a user
+// who just turned memory off can still review and delete what is stored.
 const canWrite = computed(() => settings.value?.effective === true)
 
-// A pending guess is not in use yet, but it is not retired either: the greyed-out
-// strike-through reads as "thrown away" and only fits superseded and archived rows.
-const isRetired = (item: MemoryItem) =>
-  item.status === 'superseded' || item.status === 'archived'
+const isEmptyStore = computed(
+  () => !profile.value && episodeTotal.value === 0 && notes.value.length === 0,
+)
 
-const kindLabel = (kind: MemoryKind) => t(`memorySettings.kinds.${kind}`)
+const profileDirty = computed(() => profileDraft.value !== profileLoaded.value)
 
-const kindHint = (kind: MemoryKind) => t(`memorySettings.kindHints.${kind}`)
+const notesFull = computed(() => notes.value.length >= MEMORY_NOTE_MAX_COUNT)
 
-const originLabel = (origin: MemoryItem['origin']) => t(`memorySettings.origins.${origin}`)
+const outcomeLabel = (outcome: MemoryEpisodeOutcome) =>
+  t(`memorySettings.episodes.outcomes.${outcome}`)
 
-const formatTime = (value: string) => {
+const outcomeClass = (outcome: MemoryEpisodeOutcome) => `episode-outcome outcome-${outcome}`
+
+const formatTime = (value: string | null) => {
   if (!value) return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
@@ -532,16 +441,12 @@ const formatTime = (value: string) => {
   return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
 }
 
-const topicProgress = (topic: MemoryTopic) => {
-  const threshold = Math.max(topic.threshold, 1)
-  return Math.min(100, Math.round((topic.hits / threshold) * 100))
-}
-
-const topicProgressText = (topic: MemoryTopic) => {
-  if (topic.hits >= topic.threshold) {
-    return t('memorySettings.trackingReady')
-  }
-  return t('memorySettings.trackingProgress', { hits: topic.hits, threshold: topic.threshold })
+const formatRange = (from: string, to: string) => {
+  const start = formatTime(from)
+  const end = formatTime(to)
+  if (!start) return end
+  if (!end || start === end) return start
+  return `${start} – ${end}`
 }
 
 const loadSettings = async () => {
@@ -554,173 +459,65 @@ const loadSettings = async () => {
   }
 }
 
-const loadItems = async () => {
-  loading.value = true
+const loadProfile = async () => {
   try {
-    const response = await listMemoryItems({
-      status: tab.value as MemoryStatus,
+    const response = await getMemoryProfile()
+    profile.value = response.data || null
+    profileLoaded.value = response.data?.body || ''
+    profileDraft.value = profileLoaded.value
+  } catch (error: any) {
+    console.error('Failed to load memory profile:', error)
+    profile.value = null
+    profileLoaded.value = ''
+    profileDraft.value = ''
+  }
+}
+
+const loadEpisodes = async () => {
+  try {
+    const response = await listMemoryEpisodes({
       limit: pageSize,
       offset: (page.value - 1) * pageSize,
     })
-    items.value = response.data || []
-    total.value = response.total || 0
+    episodes.value = response.data || []
+    episodeTotal.value = response.total || 0
   } catch (error: any) {
-    console.error('Failed to load memories:', error)
-    items.value = []
-    total.value = 0
+    console.error('Failed to load memory episodes:', error)
+    episodes.value = []
+    episodeTotal.value = 0
+  }
+}
+
+const loadNotes = async () => {
+  try {
+    const response = await listMemoryNotes({ limit: MEMORY_NOTE_MAX_COUNT })
+    notes.value = response.data || []
+  } catch (error: any) {
+    console.error('Failed to load memory notes:', error)
+    notes.value = []
+  }
+}
+
+// The toolbar acts on all three stores at once and the tab labels carry counts,
+// so every section is loaded even when only one of them is on screen.
+const loadAll = async () => {
+  loading.value = true
+  try {
+    await Promise.all([loadProfile(), loadEpisodes(), loadNotes()])
   } finally {
     loading.value = false
   }
 }
 
-const loadTopics = async () => {
-  loading.value = true
-  try {
-    const response = await listMemoryTopics({
-      limit: pageSize,
-      offset: (page.value - 1) * pageSize,
-    })
-    topics.value = response.data || []
-    trackingCount.value = response.total || 0
-  } catch (error: any) {
-    console.error('Failed to load topics:', error)
-    topics.value = []
-    trackingCount.value = 0
-  } finally {
-    loading.value = false
-  }
-}
-
-const loadDocuments = async () => {
-  loading.value = true
-  try {
-    const response = await listMemoryDocuments({
-      limit: pageSize,
-      offset: (page.value - 1) * pageSize,
-    })
-    documents.value = response.data || []
-    documentCount.value = response.total || 0
-  } catch (error: any) {
-    console.error('Failed to load documents:', error)
-    documents.value = []
-    documentCount.value = 0
-  } finally {
-    loading.value = false
-  }
-}
-
-const loadList = async () => {
-  if (isTracking.value) {
-    await loadTopics()
-    return
-  }
-  if (isDocuments.value) {
-    await loadDocuments()
-    return
-  }
-  await loadItems()
-}
-
-// Counts are loaded per status so every tab carries its own size, which is how
-// a user finds out an inference is waiting for them without switching tabs.
-const loadCounts = async () => {
-  const [totals, topicResponse, documentResponse] = await Promise.all([
-    Promise.all(
-      statuses.map(async (value) => {
-        try {
-          const response = await listMemoryItems({ status: value, limit: 1 })
-          return response.total || 0
-        } catch (error: any) {
-          return 0
-        }
-      }),
-    ),
-    listMemoryTopics({ limit: 1 }).catch(() => ({ total: 0 })),
-    listMemoryDocuments({ limit: 1 }).catch(() => ({ total: 0 })),
-  ])
-  statuses.forEach((value, index) => {
-    counts.value[value] = totals[index]
-  })
-  trackingCount.value = topicResponse.total || 0
-  documentCount.value = documentResponse.total || 0
-}
-
-const reload = async () => {
-  page.value = 1
-  await Promise.all([loadList(), loadCounts()])
-}
-
-const handlePromoteTopic = async (topic: MemoryTopic) => {
-  try {
-    await promoteMemoryTopic(topic.id)
-    MessagePlugin.success(t('memorySettings.promoteSuccess'))
-    tab.value = 'active'
-    await reload()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('memorySettings.promoteFailed'))
-  }
-}
-
-const handleDismissTopic = async (topic: MemoryTopic) => {
-  try {
-    await deleteMemoryTopic(topic.id)
-    MessagePlugin.success(t('memorySettings.dismissSuccess'))
-    await reload()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('memorySettings.dismissFailed'))
-  }
-}
-
-const handleOpenDocument = (doc: MemoryDoc) => {
-  if (!doc.knowledge_base_id) {
-    MessagePlugin.warning(t('memorySettings.openDocumentUnavailable'))
-    return
-  }
-  router.push({
-    name: 'knowledgeBaseDetail',
-    params: { kbId: doc.knowledge_base_id },
-    query: { knowledge_id: doc.knowledge_id },
-  })
-}
-
-const handleStopTrackingDocument = async (doc: MemoryDoc) => {
-  try {
-    await deleteMemoryDocument(doc.id)
-    MessagePlugin.success(t('memorySettings.stopTrackingDocumentSuccess'))
-    await reload()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('memorySettings.stopTrackingDocumentFailed'))
-  }
-}
-
-const handleConfirm = async (item: MemoryItem) => {
-  try {
-    await confirmMemoryItem(item.id)
-    MessagePlugin.success(t('memorySettings.confirmSuccess'))
-    await reload()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('memorySettings.confirmFailed'))
-  }
-}
-
-const handleReject = async (item: MemoryItem) => {
-  try {
-    await rejectMemoryItem(item.id)
-    MessagePlugin.success(t('memorySettings.rejectSuccess'))
-    await reload()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('memorySettings.rejectFailed'))
-  }
-}
-
-const handleTabChange = async (value: string | number) => {
-  tab.value = value as MemoryListTab
-  await reload()
+const handleTabChange = (value: string | number) => {
+  tab.value = value as MemoryTab
 }
 
 const handlePageChange = async (current: number) => {
   page.value = current
-  await loadList()
+  expandedId.value = ''
+  expandedSummary.value = ''
+  await loadEpisodes()
 }
 
 const handleEnabledChange = async (value: boolean) => {
@@ -737,60 +534,133 @@ const handleEnabledChange = async (value: boolean) => {
   }
 }
 
-watch(addVisible, (visible) => {
-  if (visible) draftContent.value = ''
-})
-
-const handleCreate = async () => {
-  const content = draftContent.value.trim()
-  if (!content) return
+const handleSaveProfile = async () => {
+  if (savingProfile.value) return
+  savingProfile.value = true
   try {
-    await createMemoryItem({ kind: draftKind.value, content })
-    draftContent.value = ''
-    addVisible.value = false
-    tab.value = 'active'
-    await reload()
-    await loadSettings()
-    MessagePlugin.success(t('memorySettings.toasts.added'))
+    await updateMemoryProfile(profileDraft.value)
+    await loadProfile()
+    MessagePlugin.success(t('memorySettings.profile.saved'))
+  } catch (error: any) {
+    MessagePlugin.error(t('memorySettings.toasts.saveFailed', { message: error?.message || '' }))
+  } finally {
+    savingProfile.value = false
+  }
+}
+
+const handleDeleteProfile = async () => {
+  try {
+    await deleteMemoryProfile()
+    await loadProfile()
+    MessagePlugin.success(t('memorySettings.profile.deleted'))
   } catch (error: any) {
     MessagePlugin.error(t('memorySettings.toasts.saveFailed', { message: error?.message || '' }))
   }
 }
 
-const startEdit = (item: MemoryItem) => {
-  editingId.value = item.id
-  editingContent.value = item.content
-  editingImportance.value = item.importance
+// The list carries titles only, so the narrative is fetched the first time a row
+// is opened rather than pulling every summary into the page.
+const toggleEpisode = async (episode: MemoryEpisode) => {
+  if (expandedId.value === episode.id) {
+    expandedId.value = ''
+    expandedSummary.value = ''
+    return
+  }
+  expandedId.value = episode.id
+  expandedSummary.value = episode.summary || ''
+  if (expandedSummary.value) return
+  try {
+    const response = await getMemoryEpisode(episode.id)
+    if (expandedId.value !== episode.id) return
+    expandedSummary.value = response.data?.summary || ''
+  } catch (error: any) {
+    if (expandedId.value !== episode.id) return
+    expandedSummary.value = t('memorySettings.episodes.summaryFailed')
+  }
 }
 
-const handleSaveEdit = async (item: MemoryItem) => {
-  const content = editingContent.value.trim()
-  if (!content) return
+const handleDeleteEpisode = async (episode: MemoryEpisode) => {
   try {
-    await updateMemoryItem(item.id, { content, importance: editingImportance.value })
-    editingId.value = ''
-    await Promise.all([loadItems(), loadCounts()])
-    MessagePlugin.success(t('memorySettings.toasts.updated'))
+    await deleteMemoryEpisode(episode.id)
+    if (expandedId.value === episode.id) {
+      expandedId.value = ''
+      expandedSummary.value = ''
+    }
+    // The last row of the last page leaves the page empty, so step back one.
+    if (episodes.value.length === 1 && page.value > 1) page.value -= 1
+    await loadEpisodes()
+    await loadSettings()
+    MessagePlugin.success(t('memorySettings.episodes.deleted'))
   } catch (error: any) {
     MessagePlugin.error(t('memorySettings.toasts.saveFailed', { message: error?.message || '' }))
   }
 }
 
-const handleDelete = async (item: MemoryItem) => {
+const handleAddNote = async () => {
+  const content = noteDraft.value.trim()
+  if (!content || addingNote.value) return
+  addingNote.value = true
   try {
-    await deleteMemoryItem(item.id)
-    await Promise.all([loadItems(), loadCounts()])
-    await loadSettings()
-    MessagePlugin.success(t('memorySettings.toasts.deleted'))
+    await createMemoryNote(content)
+    noteDraft.value = ''
+    await loadNotes()
+    MessagePlugin.success(t('memorySettings.notes.added'))
   } catch (error: any) {
     MessagePlugin.error(t('memorySettings.toasts.saveFailed', { message: error?.message || '' }))
+  } finally {
+    addingNote.value = false
+  }
+}
+
+const handleDeleteNote = async (note: MemoryNote) => {
+  try {
+    await deleteMemoryNote(note.id)
+    await loadNotes()
+    MessagePlugin.success(t('memorySettings.notes.deleted'))
+  } catch (error: any) {
+    MessagePlugin.error(t('memorySettings.toasts.saveFailed', { message: error?.message || '' }))
+  }
+}
+
+// A rewrite that changes nothing is a normal outcome, so each reason says which
+// one it was instead of leaving the button looking broken.
+const rewriteSkipMessage: Record<string, string> = {
+  too_soon: 'memorySettings.rewriteTooSoon',
+  too_few_items: 'memorySettings.rewriteTooFewEpisodes',
+}
+
+const handleRewrite = async () => {
+  if (rewriting.value) return
+  rewriting.value = true
+  try {
+    const response = await consolidateMemory()
+    const result = response.data
+    if (result?.skipped === 'model_unavailable') {
+      MessagePlugin.warning(t('memorySettings.rewriteModelUnavailable'))
+    } else if (result?.skipped) {
+      MessagePlugin.info(
+        t(rewriteSkipMessage[result.skipped] ?? 'memorySettings.rewriteNothing'),
+      )
+    } else {
+      MessagePlugin.success(
+        t('memorySettings.rewriteSuccess', { count: result?.reviewed || 0 }),
+      )
+    }
+    await loadProfile()
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('memorySettings.rewriteFailed'))
+  } finally {
+    rewriting.value = false
   }
 }
 
 const handleClear = async () => {
   try {
-    const response = await clearMemoryItems()
-    await reload()
+    const response = await clearAllMemories()
+    page.value = 1
+    expandedId.value = ''
+    expandedSummary.value = ''
+    await loadAll()
     await loadSettings()
     MessagePlugin.success(t('memorySettings.toasts.cleared', { count: response.removed || 0 }))
   } catch (error: any) {
@@ -798,48 +668,10 @@ const handleClear = async () => {
   }
 }
 
-// A review that merges nothing is the normal outcome, so saying only "nothing
-// to do" leaves the person unable to tell a tidy store from a broken button.
-const consolidateSkipMessage: Record<string, string> = {
-  too_few_items: 'memorySettings.consolidateTooFewItems',
-  no_candidates: 'memorySettings.consolidateNoCandidates',
-  model_declined: 'memorySettings.consolidateModelDeclined',
-  too_soon: 'memorySettings.consolidateTooSoon',
-}
-
-const handleConsolidate = async () => {
-  if (consolidating.value) return
-  consolidating.value = true
-  try {
-    const response = await consolidateMemory()
-    const result = response.data
-    if (result?.merged || result?.demoted || result?.expired) {
-      MessagePlugin.success(
-        t('memorySettings.consolidateSuccess', {
-          merged: result.merged || 0,
-          demoted: result.demoted || 0,
-          expired: result.expired || 0,
-        }),
-      )
-    } else if (result?.skipped === 'model_unavailable') {
-      // Nothing merged because nothing could be judged, which is a problem to
-      // fix rather than a tidy store.
-      MessagePlugin.warning(t('memorySettings.consolidateModelUnavailable'))
-    } else {
-      MessagePlugin.info(t(consolidateSkipMessage[result?.skipped ?? ''] ?? 'memorySettings.consolidateNothing'))
-    }
-    await reload()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('memorySettings.consolidateFailed'))
-  } finally {
-    consolidating.value = false
-  }
-}
-
 const handleExport = async () => {
   try {
-    const response = await exportMemoryItems()
-    const blob = new Blob([JSON.stringify(response.data || [], null, 2)], {
+    const response = await exportMemories()
+    const blob = new Blob([JSON.stringify(response.data || {}, null, 2)], {
       type: 'application/json',
     })
     const url = URL.createObjectURL(blob)
@@ -848,6 +680,7 @@ const handleExport = async () => {
     link.download = 'weknora-memories.json'
     link.click()
     URL.revokeObjectURL(url)
+    if (response.truncated) MessagePlugin.info(t('memorySettings.exportTruncated'))
   } catch (error: any) {
     MessagePlugin.error(t('memorySettings.toasts.saveFailed', { message: error?.message || '' }))
   }
@@ -855,7 +688,7 @@ const handleExport = async () => {
 
 onMounted(async () => {
   await loadSettings()
-  await reload()
+  await loadAll()
 })
 </script>
 
@@ -932,13 +765,6 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-.status-hint {
-  margin: 12px 0 0;
-  color: var(--td-text-color-secondary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
 .settings-group {
   display: flex;
   flex-direction: column;
@@ -1006,11 +832,6 @@ onMounted(async () => {
   }
 }
 
-.list-count {
-  font-size: 13px;
-  color: var(--td-text-color-placeholder);
-}
-
 .list-actions {
   display: flex;
   align-items: center;
@@ -1064,6 +885,65 @@ onMounted(async () => {
   }
 }
 
+.panel {
+  padding-top: 16px;
+}
+
+.panel-desc {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+}
+
+.panel-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--td-text-color-placeholder);
+}
+
+.profile-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--td-text-color-placeholder);
+
+  > span:not(:last-child)::after {
+    content: '·';
+    margin: 0 6px;
+  }
+}
+
+.profile-editor {
+  :deep(textarea) {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+}
+
+.profile-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.profile-length {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+}
+
+.profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .memory-list {
   list-style: none;
   margin: 0;
@@ -1094,11 +974,6 @@ onMounted(async () => {
   line-height: 1.6;
   color: var(--td-text-color-primary);
   word-break: break-word;
-
-  &.inactive {
-    color: var(--td-text-color-placeholder);
-    text-decoration: line-through;
-  }
 }
 
 .memory-meta {
@@ -1116,44 +991,81 @@ onMounted(async () => {
   }
 }
 
-.memory-topic {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.topic-progress {
+.episode-head {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 6px 0 4px;
-  max-width: 360px;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--td-text-color-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: left;
+  cursor: pointer;
 
-  :deep(.t-progress) {
-    flex: 1;
-    min-width: 80px;
+  &:hover .episode-title {
+    color: var(--td-brand-color);
   }
 
-  > span {
-    flex-shrink: 0;
-    font-size: 12px;
-    line-height: 18px;
-    color: var(--td-text-color-placeholder);
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color-focus);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 }
 
-.memory-edit {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 8px;
+.episode-chevron {
+  flex-shrink: 0;
+  color: var(--td-text-color-placeholder);
 }
 
-.memory-edit-actions {
+.episode-title {
+  min-width: 0;
+  font-weight: 500;
+  word-break: break-word;
+}
+
+.episode-outcome {
+  &.outcome-success {
+    color: var(--td-success-color);
+  }
+
+  &.outcome-partial {
+    color: var(--td-warning-color);
+  }
+
+  &.outcome-fail {
+    color: var(--td-error-color);
+  }
+}
+
+.episode-keywords {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.episode-keyword {
+  padding: 0 6px;
+  border-radius: 3px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.episode-summary {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--td-text-color-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .memory-actions {
@@ -1166,6 +1078,23 @@ onMounted(async () => {
 
 .memory-pagination {
   margin-top: 16px;
+}
+
+.note-add {
+  margin-bottom: 8px;
+}
+
+.note-add-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.note-count {
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
 }
 
 .empty {
@@ -1187,7 +1116,7 @@ onMounted(async () => {
 }
 </style>
 
-<!-- t-popup renders into body, so the add form and usage popover have to be styled globally. -->
+<!-- t-popup renders into body, so the usage popover has to be styled globally. -->
 <style lang="less">
 .memory-usage-popup-overlay {
   z-index: 3050 !important;
@@ -1251,72 +1180,6 @@ onMounted(async () => {
 }
 
 :root[theme-mode='dark'] .memory-usage-popup-overlay .t-popup__content {
-  background: rgba(36, 36, 36, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.05),
-    0 2px 4px rgba(0, 0, 0, 0.12),
-    0 8px 32px rgba(0, 0, 0, 0.28) !important;
-}
-
-.memory-add-popup-overlay {
-  z-index: 3050;
-
-  .t-popup__content {
-    padding: 14px 16px !important;
-    width: 320px;
-    max-width: calc(100vw - 24px);
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-  }
-
-  .add-popup {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .add-popup-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-  }
-
-  .add-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .add-label {
-    font-size: 12px;
-    color: var(--td-text-color-secondary);
-  }
-
-  .add-kind-hint {
-    font-size: 12px;
-    line-height: 18px;
-    color: var(--td-text-color-placeholder);
-  }
-
-  .add-popup-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-}
-
-/* The kind dropdown mounts to body too, above the popup that opened it. */
-.memory-add-kind-popup {
-  z-index: 6200;
-}
-
-:root[theme-mode='dark'] .memory-add-popup-overlay .t-popup__content {
   background: rgba(36, 36, 36, 0.92) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
   box-shadow:

@@ -193,13 +193,6 @@ func TestWikiSourceKnowledgeID(t *testing.T) {
 			t.Errorf("WikiSourceKnowledgeID(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
-	page := &WikiPage{SourceRefs: StringArray{"doc-1|手册", "doc-2"}}
-	if !page.BuiltFrom(map[string]struct{}{"doc-1": {}}) {
-		t.Errorf("page should match doc-1")
-	}
-	if page.BuiltFrom(map[string]struct{}{"doc-9": {}}) {
-		t.Errorf("page should not match an unrelated document")
-	}
 }
 
 func TestWikiGraphDataJSON(t *testing.T) {

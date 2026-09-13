@@ -30,7 +30,7 @@ func NewMemoryHandler(memoryService interfaces.MemoryService) *MemoryHandler {
 
 // GetSettings godoc
 // @Summary      获取我的记忆设置
-// @Description  返回合并后的记忆开关状态（空间级 + 个人级）与记忆条数
+// @Description  返回合并后的记忆开关状态（空间级 + 个人级）与会话记忆条数
 // @Tags         长期记忆
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "记忆设置"
@@ -83,53 +83,234 @@ func (h *MemoryHandler) UpdateSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": settings})
 }
 
-// ListItems godoc
-// @Summary      列出我的记忆
-// @Description  分页返回当前用户的记忆条目，可按状态过滤
+// ---------------------------------------------------------------------------
+// Profile
+// ---------------------------------------------------------------------------
+
+// GetProfile godoc
+// @Summary      获取我的记忆画像
+// @Description  返回每轮对话都会注入的常驻画像，尚未生成时返回 null
 // @Tags         长期记忆
 // @Produce      json
-// @Param        status  query     string  false  "状态过滤"  Enums(active, superseded, archived, pending)
-// @Param        limit   query     int     false  "每页条数"  default(50)
-// @Param        offset  query     int     false  "偏移量"
-// @Success      200     {object}  map[string]interface{}  "记忆列表"
+// @Success      200  {object}  map[string]interface{}  "记忆画像"
 // @Security     Bearer
-// @Router       /memory/items [get]
-func (h *MemoryHandler) ListItems(c *gin.Context) {
+// @Router       /memory/profile [get]
+func (h *MemoryHandler) GetProfile(c *gin.Context) {
 	ctx := c.Request.Context()
-	status := c.Query("status")
-	switch status {
-	case "", types.MemoryStatusActive, types.MemoryStatusSuperseded,
-		types.MemoryStatusArchived, types.MemoryStatusPending:
-	default:
-		c.Error(apperrors.NewBadRequestError("unsupported status"))
+	profile, err := h.memoryService.Profile(ctx)
+	if err != nil {
+		h.fail(c, err, "Failed to load memory profile")
 		return
 	}
-	limit, offset := memoryListPaging(c)
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": profile})
+}
 
-	items, total, err := h.memoryService.ListItems(ctx, status, limit, offset)
+type saveMemoryProfileRequest struct {
+	Body string `json:"body"`
+}
+
+// SaveProfile godoc
+// @Summary      修改我的记忆画像
+// @Description  用用户自己写的内容替换常驻画像，后台整理时会保留这次修改
+// @Tags         长期记忆
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object  true  "画像正文"
+// @Success      200      {object}  map[string]interface{}  "画像版本号"
+// @Security     Bearer
+// @Router       /memory/profile [put]
+func (h *MemoryHandler) SaveProfile(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req saveMemoryProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	revision, err := h.memoryService.SaveProfile(ctx, req.Body)
 	if err != nil {
-		h.fail(c, err, "Failed to list memories")
+		h.fail(c, err, "Failed to save memory profile")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"revision": revision}})
+}
+
+// DeleteProfile godoc
+// @Summary      删除我的记忆画像
+// @Description  清空常驻画像，会话记忆保留，下次后台整理会重新生成
+// @Tags         长期记忆
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Security     Bearer
+// @Router       /memory/profile [delete]
+func (h *MemoryHandler) DeleteProfile(c *gin.Context) {
+	ctx := c.Request.Context()
+	if err := h.memoryService.DeleteProfile(ctx); err != nil {
+		h.fail(c, err, "Failed to delete memory profile")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// Episodes
+// ---------------------------------------------------------------------------
+
+// ListEpisodes godoc
+// @Summary      列出我的会话记忆
+// @Description  分页返回每段对话的记忆档案，按时间倒序
+// @Tags         长期记忆
+// @Produce      json
+// @Param        limit   query     int  false  "每页条数"  default(20)
+// @Param        offset  query     int  false  "偏移量"
+// @Success      200     {object}  map[string]interface{}  "会话记忆列表"
+// @Security     Bearer
+// @Router       /memory/episodes [get]
+func (h *MemoryHandler) ListEpisodes(c *gin.Context) {
+	ctx := c.Request.Context()
+	limit, offset := memoryListPaging(c)
+	episodes, total, err := h.memoryService.ListEpisodes(ctx, limit, offset)
+	if err != nil {
+		h.fail(c, err, "Failed to list memory episodes")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    items,
+		"data":    episodes,
 		"total":   total,
 	})
 }
 
+// GetEpisode godoc
+// @Summary      读取一段会话记忆
+// @Description  返回一段对话的完整记忆档案
+// @Tags         长期记忆
+// @Produce      json
+// @Param        id   path      string  true  "会话记忆 ID"
+// @Success      200  {object}  map[string]interface{}  "会话记忆"
+// @Security     Bearer
+// @Router       /memory/episodes/{id} [get]
+func (h *MemoryHandler) GetEpisode(c *gin.Context) {
+	ctx := c.Request.Context()
+	episode, err := h.memoryService.GetEpisode(ctx, c.Param("id"))
+	if err != nil {
+		h.fail(c, err, "Failed to load memory episode")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": episode})
+}
+
+// DeleteEpisode godoc
+// @Summary      删除一段会话记忆
+// @Description  永久删除一段对话的记忆档案
+// @Tags         长期记忆
+// @Produce      json
+// @Param        id   path      string  true  "会话记忆 ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Security     Bearer
+// @Router       /memory/episodes/{id} [delete]
+func (h *MemoryHandler) DeleteEpisode(c *gin.Context) {
+	ctx := c.Request.Context()
+	if err := h.memoryService.DeleteEpisode(ctx, c.Param("id")); err != nil {
+		h.fail(c, err, "Failed to delete memory episode")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// Notes
+// ---------------------------------------------------------------------------
+
+// ListNotes godoc
+// @Summary      列出我要求记住的内容
+// @Description  返回用户明确要求记住的原话，按时间倒序
+// @Tags         长期记忆
+// @Produce      json
+// @Param        limit  query     int  false  "条数上限"
+// @Success      200    {object}  map[string]interface{}  "记忆列表"
+// @Security     Bearer
+// @Router       /memory/notes [get]
+func (h *MemoryHandler) ListNotes(c *gin.Context) {
+	ctx := c.Request.Context()
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", strconv.Itoa(types.MemoryNotesMaxItems)))
+	if limit <= 0 || limit > types.MemoryNotesMaxItems {
+		limit = types.MemoryNotesMaxItems
+	}
+	notes, err := h.memoryService.ListNotes(ctx, limit)
+	if err != nil {
+		h.fail(c, err, "Failed to list memory notes")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": notes})
+}
+
+type createMemoryNoteRequest struct {
+	Content string `json:"content"`
+}
+
+// CreateNote godoc
+// @Summary      新增一条我要求记住的内容
+// @Description  手动添加一条原话记忆，下一轮对话即生效
+// @Tags         长期记忆
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object  true  "记忆内容"
+// @Success      200      {object}  map[string]interface{}  "新增的记忆"
+// @Security     Bearer
+// @Router       /memory/notes [post]
+func (h *MemoryHandler) CreateNote(c *gin.Context) {
+	ctx := c.Request.Context()
+	var req createMemoryNoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		return
+	}
+	note, err := h.memoryService.AddNote(ctx, req.Content)
+	if err != nil {
+		h.fail(c, err, "Failed to create memory note")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": note})
+}
+
+// DeleteNote godoc
+// @Summary      删除一条我要求记住的内容
+// @Description  永久删除一条原话记忆
+// @Tags         长期记忆
+// @Produce      json
+// @Param        id   path      string  true  "记忆 ID"
+// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Security     Bearer
+// @Router       /memory/notes/{id} [delete]
+func (h *MemoryHandler) DeleteNote(c *gin.Context) {
+	ctx := c.Request.Context()
+	if err := h.memoryService.DeleteNote(ctx, c.Param("id")); err != nil {
+		h.fail(c, err, "Failed to delete memory note")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// ---------------------------------------------------------------------------
+// Clear and export
+// ---------------------------------------------------------------------------
+
 const (
 	// memoryExportPageSize is how many rows one export page reads.
 	memoryExportPageSize = 500
-	// memoryExportMaxItems bounds a single export so one enormous store cannot
-	// turn a download into an unbounded read.
-	memoryExportMaxItems = 20000
+	// memoryExportMaxEpisodes bounds a single export so one enormous store
+	// cannot turn a download into an unbounded read.
+	memoryExportMaxEpisodes = 20000
+	// memoryEpisodePageMax bounds one page of the accounts list. An account
+	// carries a full narrative summary, so a page of them is orders of
+	// magnitude heavier than a page of rows used to be.
+	memoryEpisodePageMax = 100
 )
 
 func memoryListPaging(c *gin.Context) (limit, offset int) {
-	limit, _ = strconv.Atoi(c.DefaultQuery("limit", "50"))
-	if limit <= 0 || limit > 200 {
-		limit = 50
+	limit, _ = strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > memoryEpisodePageMax {
+		limit = 20
 	}
 	offset, _ = strconv.Atoi(c.DefaultQuery("offset", "0"))
 	if offset < 0 {
@@ -138,239 +319,14 @@ func memoryListPaging(c *gin.Context) (limit, offset int) {
 	return limit, offset
 }
 
-// ListTopics godoc
-// @Summary      列出正在观察的主题
-// @Description  返回已计数、尚未提升为长期关注的主题，以及距离阈值还差几次
-// @Tags         长期记忆
-// @Produce      json
-// @Param        limit   query     int  false  "每页条数"  default(50)
-// @Param        offset  query     int  false  "偏移量"
-// @Success      200     {object}  map[string]interface{}  "主题列表"
-// @Security     Bearer
-// @Router       /memory/topics [get]
-func (h *MemoryHandler) ListTopics(c *gin.Context) {
-	ctx := c.Request.Context()
-	limit, offset := memoryListPaging(c)
-	topics, total, err := h.memoryService.ListTopics(ctx, limit, offset)
-	if err != nil {
-		h.fail(c, err, "Failed to list topics")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    topics,
-		"total":   total,
-	})
-}
-
-// PromoteTopic godoc
-// @Summary      立即记为长期关注
-// @Description  不等待剩余次数，把正在观察的主题提升为一条长期关注记忆
-// @Tags         长期记忆
-// @Produce      json
-// @Param        id   path      string  true  "主题 ID"
-// @Success      200  {object}  map[string]interface{}  "新增的记忆"
-// @Security     Bearer
-// @Router       /memory/topics/{id}/promote [post]
-func (h *MemoryHandler) PromoteTopic(c *gin.Context) {
-	ctx := c.Request.Context()
-	item, err := h.memoryService.PromoteTopic(ctx, c.Param("id"))
-	if err != nil {
-		h.fail(c, err, "Failed to promote topic")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
-}
-
-// DeleteTopic godoc
-// @Summary      停止跟踪一个主题
-// @Description  删除尚未提升的主题计数，并记住这次拒绝，之后不会再自动记为长期关注
-// @Tags         长期记忆
-// @Produce      json
-// @Param        id   path      string  true  "主题 ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Security     Bearer
-// @Router       /memory/topics/{id} [delete]
-func (h *MemoryHandler) DeleteTopic(c *gin.Context) {
-	ctx := c.Request.Context()
-	if err := h.memoryService.DeleteTopic(ctx, c.Param("id")); err != nil {
-		h.fail(c, err, "Failed to delete topic")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-// ListDocuments godoc
-// @Summary      列出常用资料
-// @Description  返回当前用户回答里反复引用的文档，次数未达习惯门槛的不展示
-// @Tags         长期记忆
-// @Produce      json
-// @Param        limit   query     int  false  "每页条数"  default(50)
-// @Param        offset  query     int  false  "偏移量"
-// @Success      200     {object}  map[string]interface{}  "文档列表"
-// @Security     Bearer
-// @Router       /memory/documents [get]
-func (h *MemoryHandler) ListDocuments(c *gin.Context) {
-	ctx := c.Request.Context()
-	limit, offset := memoryListPaging(c)
-	docs, total, err := h.memoryService.ListDocuments(ctx, limit, offset)
-	if err != nil {
-		h.fail(c, err, "Failed to list documents")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    docs,
-		"total":   total,
-	})
-}
-
-// DeleteDocument godoc
-// @Summary      停止用某份文档做个性化检索
-// @Description  删除一条文档亲和度计数，之后检索不再因为这份文档而加权
-// @Tags         长期记忆
-// @Produce      json
-// @Param        id   path      string  true  "亲和度 ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Security     Bearer
-// @Router       /memory/documents/{id} [delete]
-func (h *MemoryHandler) DeleteDocument(c *gin.Context) {
-	ctx := c.Request.Context()
-	if err := h.memoryService.DeleteDocument(ctx, c.Param("id")); err != nil {
-		h.fail(c, err, "Failed to delete document affinity")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-type createMemoryItemRequest struct {
-	Kind       string `json:"kind"`
-	Content    string `json:"content"`
-	Importance int    `json:"importance"`
-}
-
-// CreateItem godoc
-// @Summary      新增一条记忆
-// @Description  手动添加一条长期记忆
-// @Tags         长期记忆
-// @Accept       json
-// @Produce      json
-// @Param        request  body      object  true  "记忆内容"
-// @Success      200      {object}  map[string]interface{}  "新增的记忆"
-// @Security     Bearer
-// @Router       /memory/items [post]
-func (h *MemoryHandler) CreateItem(c *gin.Context) {
-	ctx := c.Request.Context()
-	var req createMemoryItemRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-	item, err := h.memoryService.CreateItem(ctx, req.Kind, req.Content, req.Importance)
-	if err != nil {
-		h.fail(c, err, "Failed to create memory")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
-}
-
-type updateMemoryItemRequest struct {
-	Content    string `json:"content"`
-	Importance int    `json:"importance"`
-}
-
-// UpdateItem godoc
-// @Summary      修改一条记忆
-// @Description  修改记忆内容与重要度，修改后该条记忆不会被后台抽取覆盖
-// @Tags         长期记忆
-// @Accept       json
-// @Produce      json
-// @Param        id       path      string  true  "记忆ID"
-// @Param        request  body      object  true  "记忆内容"
-// @Success      200      {object}  map[string]interface{}  "更新后的记忆"
-// @Security     Bearer
-// @Router       /memory/items/{id} [put]
-func (h *MemoryHandler) UpdateItem(c *gin.Context) {
-	ctx := c.Request.Context()
-	var req updateMemoryItemRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
-		return
-	}
-	item, err := h.memoryService.UpdateItem(ctx, c.Param("id"), req.Content, req.Importance)
-	if err != nil {
-		h.fail(c, err, "Failed to update memory")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
-}
-
-// DeleteItem godoc
-// @Summary      删除一条记忆
-// @Description  永久删除一条记忆
-// @Tags         长期记忆
-// @Produce      json
-// @Param        id  path      string  true  "记忆ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
-// @Security     Bearer
-// @Router       /memory/items/{id} [delete]
-func (h *MemoryHandler) DeleteItem(c *gin.Context) {
-	ctx := c.Request.Context()
-	if err := h.memoryService.DeleteItem(ctx, c.Param("id")); err != nil {
-		h.fail(c, err, "Failed to delete memory")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
-// ConfirmItem godoc
-// @Summary      确认一条推断出的记忆
-// @Description  接受系统推断的记忆，使其开始生效
-// @Tags         长期记忆
-// @Produce      json
-// @Param        id   path      string  true  "记忆 ID"
-// @Success      200  {object}  map[string]interface{}  "确认成功"
-// @Security     Bearer
-// @Router       /memory/items/{id}/confirm [post]
-//
-// Inferred memories are the ones worth having and the ones most likely to be
-// wrong, so they wait here rather than taking effect silently.
-func (h *MemoryHandler) ConfirmItem(c *gin.Context) {
-	ctx := c.Request.Context()
-	item, err := h.memoryService.ConfirmItem(ctx, c.Param("id"))
-	if err != nil {
-		h.fail(c, err, "Failed to confirm memory")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
-}
-
-// RejectItem godoc
-// @Summary      否决一条推断出的记忆
-// @Description  拒绝系统推断的记忆，并记住这次拒绝
-// @Tags         长期记忆
-// @Produce      json
-// @Param        id   path      string  true  "记忆 ID"
-// @Success      200  {object}  map[string]interface{}  "否决成功"
-// @Security     Bearer
-// @Router       /memory/items/{id}/reject [post]
-func (h *MemoryHandler) RejectItem(c *gin.Context) {
-	ctx := c.Request.Context()
-	if err := h.memoryService.RejectItem(ctx, c.Param("id")); err != nil {
-		h.fail(c, err, "Failed to reject memory")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
-}
-
 // Clear godoc
 // @Summary      清空我的记忆
-// @Description  永久删除当前用户的全部记忆
+// @Description  永久删除当前用户的常驻画像、全部会话记忆与原话记忆
 // @Tags         长期记忆
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "清空成功"
 // @Security     Bearer
-// @Router       /memory/items [delete]
+// @Router       /memory/all [delete]
 func (h *MemoryHandler) Clear(c *gin.Context) {
 	ctx := c.Request.Context()
 	removed, err := h.memoryService.Clear(ctx)
@@ -383,7 +339,7 @@ func (h *MemoryHandler) Clear(c *gin.Context) {
 
 // Export godoc
 // @Summary      导出我的记忆
-// @Description  以 JSON 导出当前用户的全部记忆
+// @Description  以 JSON 导出当前用户的常驻画像、会话记忆与原话记忆
 // @Tags         长期记忆
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "记忆导出"
@@ -391,29 +347,39 @@ func (h *MemoryHandler) Clear(c *gin.Context) {
 // @Router       /memory/export [get]
 func (h *MemoryHandler) Export(c *gin.Context) {
 	ctx := c.Request.Context()
-	// Export is a snapshot, not a page, so it walks every status to the end.
-	//
-	// A single fixed page used to serve this on the grounds that it matched the
-	// largest capacity a workspace can configure. It does not: max_items caps
-	// active memories only, while superseded and archived rows accumulate
-	// without limit, so a long-lived store holds far more than its capacity and
-	// the export quietly returned a prefix of it.
-	var items []*types.MemoryItem
-	var total int64
+	profile, err := h.memoryService.Profile(ctx)
+	if err != nil {
+		h.fail(c, err, "Failed to export memories")
+		return
+	}
+	// Export is a snapshot, not a page, so it walks the accounts to the end.
+	// A store holds far more accounts than one page of the manager shows, and
+	// a download that silently returned the first page would look complete.
+	var episodes []*types.MemoryEpisode
+	var episodeTotal int64
 	for {
-		page, pageTotal, err := h.memoryService.ListItems(ctx, "", memoryExportPageSize, len(items))
+		page, pageTotal, err := h.memoryService.ListEpisodes(ctx, memoryExportPageSize, len(episodes))
 		if err != nil {
 			h.fail(c, err, "Failed to export memories")
 			return
 		}
-		total = pageTotal
-		items = append(items, page...)
-		if len(page) < memoryExportPageSize || int64(len(items)) >= total {
+		episodeTotal = pageTotal
+		episodes = append(episodes, page...)
+		if len(page) < memoryExportPageSize || int64(len(episodes)) >= episodeTotal {
 			break
 		}
-		if len(items) >= memoryExportMaxItems {
+		if len(episodes) >= memoryExportMaxEpisodes {
 			break
 		}
+	}
+	notes, err := h.memoryService.ListNotes(ctx, types.MemoryNotesMaxItems)
+	if err != nil {
+		h.fail(c, err, "Failed to export memories")
+		return
+	}
+	total := episodeTotal + int64(len(notes))
+	if profile != nil {
+		total++
 	}
 	c.Header("Content-Disposition", `attachment; filename="weknora-memories.json"`)
 	c.JSON(http.StatusOK, gin.H{
@@ -421,14 +387,18 @@ func (h *MemoryHandler) Export(c *gin.Context) {
 		"total":   total,
 		// Say so rather than letting a partial file look complete. Only the
 		// safety ceiling can trigger this, so it stays false in practice.
-		"truncated": int64(len(items)) < total,
-		"data":      items,
+		"truncated": int64(len(episodes)) < episodeTotal,
+		"data": gin.H{
+			"profile":  profile,
+			"episodes": episodes,
+			"notes":    notes,
+		},
 	})
 }
 
 // Consolidate godoc
 // @Summary      立刻整理我的记忆
-// @Description  合并意思接近的条目、归档到期事项，不等待每日后台整理
+// @Description  立刻用最近的会话记忆重写一次常驻画像，不等待后台整理
 // @Tags         长期记忆
 // @Produce      json
 // @Success      200  {object}  map[string]interface{}  "整理结果"
@@ -444,17 +414,18 @@ func (h *MemoryHandler) Consolidate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
 }
 
-// fail maps service errors onto HTTP responses. A missing item and an item
+// fail maps service errors onto HTTP responses. A missing record and one
 // belonging to someone else produce the same 404 on purpose.
 func (h *MemoryHandler) fail(c *gin.Context, err error, message string) {
 	switch {
 	case errors.Is(err, memory.ErrNoMemoryScope):
 		c.Error(apperrors.NewUnauthorizedError("no principal in request"))
-	case errors.Is(err, memory.ErrItemNotFound):
+	case errors.Is(err, memory.ErrNotFound):
 		c.Error(apperrors.NewNotFoundError("memory not found"))
-	case errors.Is(err, types.ErrMemoryConflict):
-		c.Error(apperrors.NewConflictError(err.Error()))
-	case errors.Is(err, memory.ErrSensitiveContent):
+	case errors.Is(err, memory.ErrSensitiveContent),
+		errors.Is(err, memory.ErrContentTooLong),
+		errors.Is(err, memory.ErrEmptyContent),
+		errors.Is(err, memory.ErrNotesFull):
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 	case errors.Is(err, memory.ErrMemoryDisabled):
 		c.Error(apperrors.NewBadRequestError("memory is disabled"))

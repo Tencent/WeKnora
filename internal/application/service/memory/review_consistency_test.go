@@ -13,58 +13,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMemoryConsistencyInvalidDecisionsDoNotBlockValidOnes(t *testing.T) {
-	s, _, tr := newMemoryHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	scope := scopeFor(t, ctx)
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindFact, Topic: "职业", Content: "我是工程师"})
-	require.NoError(t, err)
-	require.NoError(t, s.repo.DeleteItem(ctx, scope, old.ID)) // Snapshot became stale during the model call.
-	zero, invalid := 0, 99
-	require.NoError(t, s.applyDecisions(ctx, scope, s.workspaceConfig(ctx, 1),
-		transcriptSegment{}, []*types.MemoryItem{old}, []extractionDecision{
-			{Action: "update", Target: &zero, Content: "我是经理"},
-			{Action: "add", Content: "  "},
-			{Action: "update", Target: &invalid, Content: "错误索引"},
-			{Action: "update", Topic: "不存在", Content: "不应该变成新增"},
-			{Action: "add", Kind: types.MemoryKindFact, Topic: "编辑器", Content: "使用 Neovim"},
-		}))
-	items, total, err := s.ListItems(ctx, types.MemoryStatusActive, 10, 0)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, total)
-	require.Equal(t, "使用 Neovim", items[0].Content)
-}
-
-func TestMemoryConsistencyDeleteInvalidatesPendingTarget(t *testing.T) {
-	s, _, tr := newMemoryHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	old, err := s.Remember(ctx, types.MemoryItem{Topic: "职业", Content: "我是工程师"})
-	require.NoError(t, err)
-	proposal, err := s.Remember(ctx, types.MemoryItem{Topic: "职业", Content: "可能是经理", Inferred: true})
-	require.NoError(t, err)
-	require.NoError(t, s.DeleteItem(ctx, old.ID))
-	_, total, err := s.ListItems(ctx, types.MemoryStatusPending, 10, 0)
-	require.NoError(t, err)
-	require.Zero(t, total)
-	_, err = s.ConfirmItem(ctx, proposal.ID)
-	require.ErrorIs(t, err, types.ErrMemoryConflict)
-}
-
-func TestMemoryConsistencyPoisonSegmentHasBoundedRetries(t *testing.T) {
+func TestMemoryConsistencyPoisonConversationHasBoundedRetries(t *testing.T) {
 	s, tr, messages, models, queue := newExtractionHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
 	at := time.Now().Add(-24 * time.Hour)
 	// Separate sessions also prove a poison input cannot pin the other queue entries.
-	badMessage := userMessage("bad", "poison-marker", at)
-	messages.set("bad", []*types.Message{badMessage})
-	messages.set("good", []*types.Message{userMessage("good", "valid-marker", at.Add(time.Hour))})
-	models.response = `{"memories":[]}`
+	badConversation := []*types.Message{
+		userMessage("bad", "poison-marker", at),
+		userMessage("bad", "poison-marker-后一句", at.Add(time.Minute)),
+	}
+	messages.set("bad", badConversation)
+	messages.set("good", []*types.Message{
+		userMessage("good", "valid-marker", at.Add(time.Hour)),
+		userMessage("good", "valid-marker-后一句", at.Add(time.Hour+time.Minute)),
+	})
+	models.response = accountResponse("一个会话", "用户在这个会话里说了两句话。")
 	models.responseFor = map[string]string{"poison-marker": "not json"}
 	s.ScheduleExtraction(ctx, "bad", "m", "model")
 	s.ScheduleExtraction(ctx, "good", "m", "model")
 	drainExtractions(t, s, queue)
 	poisonCalls := 0
-	for _, prompt := range models.prompts {
+	for _, prompt := range models.promptsSeen() {
 		if containsTranscript(prompt, "poison-marker") {
 			poisonCalls++
 		}
@@ -88,18 +57,19 @@ func TestMemoryConsistencyPoisonSegmentHasBoundedRetries(t *testing.T) {
 	require.True(t, progress.Cursor.At.Equal(progress.FailedTo.At))
 	require.Equal(t, progress.Cursor.ID, progress.FailedTo.ID)
 	require.NoError(t, s.repo.FinishExtraction(ctx, scopeFor(t, ctx), "inspect"))
-	// Later messages in the same conversation still run, without re-reading the poison input.
-	messages.set("bad", []*types.Message{
-		badMessage,
-		userMessage("bad", "later-valid-marker", at.Add(2*time.Hour)),
-	})
+	// A conversation given up on is not abandoned: later turns in it still run.
+	messages.set("bad", append(badConversation,
+		userMessage("bad", "later-valid-marker", at.Add(2*time.Hour))))
 	models.responseFor = nil
 	s.ScheduleExtraction(ctx, "bad", "later", "model")
-	before := len(models.prompts)
+	before := len(models.promptsSeen())
 	drainExtractions(t, s, queue)
-	require.Greater(t, len(models.prompts), before)
-	require.Contains(t, transcriptBlock(models.prompts[before]), "later-valid-marker")
-	require.NotContains(t, transcriptBlock(models.prompts[before]), "poison-marker")
+	require.Greater(t, len(models.promptsSeen()), before)
+	require.Contains(t, transcriptBlock(models.promptsSeen()[before]), "later-valid-marker")
+
+	stored, err := s.repo.EpisodeBySession(ctx, scopeFor(t, ctx), "bad")
+	require.NoError(t, err)
+	require.NotNil(t, stored, "the conversation has to become writable again once the model behaves")
 }
 
 func containsTranscript(prompt, marker string) bool {
@@ -156,19 +126,26 @@ func TestMemoryConsistencyProgressDoesNotGrowSubjectJSON(t *testing.T) {
 	require.Equal(t, "done", batch.Sessions[0].Cursor.ID)
 }
 
-type brokenDecisionLookup struct{ interfaces.MemoryRepository }
+type brokenEpisodeStore struct{ interfaces.MemoryRepository }
 
-func (brokenDecisionLookup) FindActiveByKey(
-	context.Context, interfaces.MemoryScope, string,
-) (*types.MemoryItem, error) {
-	return nil, fmt.Errorf("database unavailable")
+func (brokenEpisodeStore) SaveEpisode(
+	context.Context, interfaces.MemoryScope, *types.MemoryEpisode,
+) error {
+	return fmt.Errorf("database unavailable")
 }
 
-func TestMemoryConsistencyDecisionDatabaseErrorsRemainRetryable(t *testing.T) {
-	s, _, tr := newMemoryHarness(t)
+// A database that is briefly unavailable must surface as a failed task, which
+// asynq retries. Swallowing it would consume the conversation: the run would
+// report success and no account of it would ever be written.
+func TestMemoryConsistencyStorageDatabaseErrorsRemainRetryable(t *testing.T) {
+	s, tr, messages, models, queue := newExtractionHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
-	s.repo = brokenDecisionLookup{s.repo}
-	err := s.applyDecisions(ctx, scopeFor(t, ctx), s.workspaceConfig(ctx, 1),
-		transcriptSegment{}, nil, []extractionDecision{{Action: "update", Topic: "职业", Content: "经理"}})
-	require.ErrorContains(t, err, "database unavailable")
+	s.repo = brokenEpisodeStore{s.repo}
+	messages.set("s", settledConversation("s", "我是工程师", "在做后端"))
+	models.response = accountResponse("职业", "用户是做后端的工程师。")
+
+	s.ScheduleExtraction(ctx, "s", "m", "model")
+	task := queue.pop()
+	require.NotNil(t, task)
+	require.ErrorContains(t, s.Handle(context.Background(), task), "database unavailable")
 }

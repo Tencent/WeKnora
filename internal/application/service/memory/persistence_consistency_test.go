@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -44,22 +45,6 @@ func TestMemoryConsistencyRealMessagePaging(t *testing.T) {
 	require.Len(t, seen, 85)
 }
 
-func TestMemoryConsistencyReplacementRollsBackAsOneOperation(t *testing.T) {
-	s, db, tr := newMemoryHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindFact, Topic: "数据库", Content: "使用 MySQL"})
-	require.NoError(t, err)
-	require.NoError(t, db.Exec(`CREATE TRIGGER fail_supersede BEFORE UPDATE OF status ON memory_items
- WHEN NEW.status = 'superseded' BEGIN SELECT RAISE(ABORT, 'injected failure'); END`).Error)
-	_, err = s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindFact, Topic: "数据库", Content: "已迁移到 PostgreSQL"})
-	require.Error(t, err)
-	items, total, err := s.ListItems(ctx, "", 20, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), total, "failed replacement must roll back the inserted row")
-	require.Equal(t, old.ID, items[0].ID)
-	require.Equal(t, types.MemoryStatusActive, items[0].Status)
-}
-
 func TestMemoryConsistencyLeaseRecoveryRetainsProgress(t *testing.T) {
 	s, db, tr := newMemoryHarness(t)
 	at := time.Now()
@@ -90,8 +75,8 @@ func TestMemoryConsistencyRedeliveryWaitsForCrashedWorkerLease(t *testing.T) {
 	s, tr, messages, models, queue := newExtractionHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
 	scope := scopeFor(t, ctx)
-	models.response = `{"memories":[]}`
-	messages.set("s", []*types.Message{userMessage("s", "must-survive-restart", time.Now().Add(-time.Hour))})
+	models.response = accountResponse("重启前的会话", "用户在重启前说了两句话。")
+	messages.set("s", settledConversation("s", "must-survive-restart", "还有一句也要活下来"))
 	s.ScheduleExtraction(ctx, "s", "m", "model")
 	original := queue.pop()
 	_, err := s.repo.ClaimPendingSessions(ctx, scope, "s", "crashed", time.Minute)
@@ -104,12 +89,8 @@ func TestMemoryConsistencyRedeliveryWaitsForCrashedWorkerLease(t *testing.T) {
 	// Simulate the crashed worker's lease being released by recovery.
 	require.NoError(t, s.repo.ReleaseExtractionSlot(ctx, scope, "crashed"))
 	require.NoError(t, s.Handle(ctx, retry))
-	require.Equal(t, 1, models.callCount())
-}
-
-func TestMemoryConsistencyMigrationRestoresLegacyPendingTarget(t *testing.T) {
-	_, db, _ := newMemoryHarness(t)
-	testMemoryConsistencyMigration(t, db, "sqlite")
+	require.Equal(t, 1, models.callsContaining(episodeTranscriptHeading),
+		"the redelivered task has to write the account the crashed one did not")
 }
 
 func execMemoryMigration(t *testing.T, db *gorm.DB, path string) {
@@ -130,50 +111,117 @@ func execMemoryMigration(t *testing.T, db *gorm.DB, path string) {
 	}
 }
 
-func testMemoryConsistencyMigration(t *testing.T, db *gorm.DB, dialect string) {
+// seedUsedAccount files an account and leaves it looking like history the
+// profile already carries: read at least once, and folded into a revision.
+func seedUsedAccount(
+	t *testing.T, svc *Service, ctx context.Context, session, slug string, age time.Duration,
+) *types.MemoryEpisode {
 	t.Helper()
-	for _, table := range []string{
-		"memory_extraction_sessions", "memory_item_embeddings", "memory_doc_affinity",
-		"memory_topic_stats", "memory_tombstones", "memory_items", "memory_subjects",
-	} {
-		require.NoError(t, db.Exec("DROP TABLE IF EXISTS "+table).Error)
+	scope := scopeFor(t, ctx)
+	episode := seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: session, Slug: slug, Title: slug,
+		Summary:  "用户问了一个问题，得到了答案。",
+		Keywords: types.MemoryEpisodeTokens{"提问"},
+		ToAt:     time.Now().Add(-age),
+	})
+	require.NoError(t, svc.repo.TouchEpisodes(ctx, scope, []string{episode.ID}))
+	require.NoError(t, svc.repo.MarkEpisodesConsolidated(ctx, scope, []string{episode.ID}, 1))
+	return episode
+}
+
+// Ranking the store by reads only works if a read means something asked for
+// the account. Recall is this system guessing that an account is relevant, and
+// since the guess is made from similarity to the question, counting it would
+// rank the store by how often it guessed — an account matching a question the
+// person keeps asking would climb past one that mattered once and decisively.
+func TestRecallIsRelevanceRatherThanARead(t *testing.T) {
+	svc, _, tenantRepo := newMemoryHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+	episode := seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-1", Slug: "import-413", Title: "入库报 413",
+		Summary: "用户批量导入时反复报 413。",
+		ToAt:    time.Now().Add(-time.Hour),
+	})
+
+	require.NoError(t, svc.repo.MarkEpisodesRecalled(ctx, scope, []string{episode.ID}))
+
+	recalled, err := svc.repo.EpisodeBySession(ctx, scope, "s-1")
+	require.NoError(t, err)
+	require.Zero(t, recalled.UseCount, "being injected is not being asked for")
+	require.NotNil(t, recalled.LastUsedAt,
+		"but it was relevant, which is what keeps it inside the selection window")
+
+	require.NoError(t, svc.repo.TouchEpisodes(ctx, scope, []string{episode.ID}))
+
+	searched, err := svc.repo.EpisodeBySession(ctx, scope, "s-1")
+	require.NoError(t, err)
+	require.Equal(t, 1, searched.UseCount,
+		"the search tool asked for this account by question, and that counts")
+}
+
+func slugsInStore(t *testing.T, svc *Service, ctx context.Context) []string {
+	t.Helper()
+	episodes, _, err := svc.repo.ListEpisodes(ctx, scopeFor(t, ctx), 100, 0)
+	require.NoError(t, err)
+	slugs := make([]string, 0, len(episodes))
+	for _, episode := range episodes {
+		slugs = append(slugs, episode.Slug)
 	}
-	require.NoError(t, db.Exec("CREATE TABLE IF NOT EXISTS tenants (id BIGINT PRIMARY KEY)").Error)
-	require.NoError(t, db.Exec("CREATE TABLE IF NOT EXISTS messages (id VARCHAR(36) PRIMARY KEY)").Error)
-	baseline := "sqlite/000004_memory"
-	migration := "sqlite/000015_memory_consistency"
-	if dialect == "postgres" {
-		baseline = "versioned/000084_memory"
-		migration = "versioned/000094_memory_consistency"
+	return slugs
+}
+
+// The cap is enforced on the least-read accounts, and an account filed a
+// moment ago has by definition never been read. In a store where everything
+// else has been recalled, that puts the newest account at the front of the
+// deletion queue — so the one thing the cap must never drop is the account the
+// run that triggered it just paid a model call to write.
+func TestTheCapDoesNotDropTheAccountJustFiled(t *testing.T) {
+	svc, _, tenantRepo := newMemoryHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+
+	seedUsedAccount(t, svc, ctx, "s-old", "oldest-conversation", 72*time.Hour)
+	seedUsedAccount(t, svc, ctx, "s-mid", "middle-conversation", 48*time.Hour)
+	fresh := seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-new", Slug: "just-filed", Title: "刚写下的账目",
+		Summary:  "用户排查了一个导入失败的问题。",
+		Keywords: types.MemoryEpisodeTokens{"导入"},
+		ToAt:     time.Now(),
+	})
+
+	removed, err := svc.repo.PruneEpisodes(ctx, scope, 2)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), removed)
+
+	require.Contains(t, slugsInStore(t, svc, ctx), fresh.Slug,
+		"the account this run just wrote must survive the cap it triggered")
+	require.NotContains(t, slugsInStore(t, svc, ctx), "oldest-conversation",
+		"the cap has to fall on the least useful history instead")
+}
+
+// Material the profile has not read yet is the only copy of that conversation.
+// Dropping it to satisfy the cap would lose it for good, because consolidation
+// reads the store rather than a queue.
+func TestTheCapWaitsForAccountsTheProfileHasNotReadYet(t *testing.T) {
+	svc, _, tenantRepo := newMemoryHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	scope := scopeFor(t, ctx)
+
+	for i := 0; i < 3; i++ {
+		seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+			SessionID: fmt.Sprintf("s-%d", i),
+			Slug:      fmt.Sprintf("unconsolidated-%d", i),
+			Title:     fmt.Sprintf("第 %d 次对话", i),
+			Summary:   "用户问了一个问题，得到了答案。",
+			Keywords:  types.MemoryEpisodeTokens{"提问"},
+			ToAt:      time.Now().Add(-time.Duration(i) * time.Hour),
+		})
 	}
-	execMemoryMigration(t, db, "../../../../migrations/"+baseline+".up.sql")
-	for _, row := range []struct{ id, key, status, by string }{
-		{"old", "job", "superseded", "proposal"},
-		{"proposal", "job", "pending", ""},
-		{"old2", "database", "superseded", "proposal2"},
-		{"proposal2", "database", "pending", ""},
-		{"newer", "database", "active", ""},
-	} {
-		require.NoError(t, db.Exec("INSERT INTO memory_items "+
-			"(id, tenant_id, subject_id, normalized_key, status, superseded_by, valid_from, kind, content) "+
-			"VALUES (?, 1, 'alice', ?, ?, ?, ?, 'fact', 'legacy fact')",
-			row.id, row.key, row.status, row.by, time.Now()).Error)
-	}
-	execMemoryMigration(t, db, "../../../../migrations/"+migration+".up.sql")
-	require.True(t, db.Migrator().HasTable(&types.MemoryExtractionSession{}))
-	require.True(t, db.Migrator().HasIndex(&types.MemoryItem{}, "idx_memory_replaces"))
-	var old, proposal, untouched types.MemoryItem
-	require.NoError(t, db.First(&old, "id = ?", "old").Error)
-	require.NoError(t, db.First(&proposal, "id = ?", "proposal").Error)
-	require.NoError(t, db.First(&untouched, "id = ?", "old2").Error)
-	require.Equal(t, types.MemoryStatusActive, old.Status)
-	require.Empty(t, old.SupersededBy)
-	require.Equal(t, "old", proposal.ReplacesID)
-	require.Equal(t, types.MemoryStatusSuperseded, untouched.Status, "do not override a newer active fact")
-	var active int64
-	require.NoError(t, db.Model(&types.MemoryItem{}).Where("normalized_key = 'database' AND status = 'active'").Count(&active).Error)
-	require.Equal(t, int64(1), active)
-	execMemoryMigration(t, db, "../../../../migrations/"+migration+".down.sql")
-	require.False(t, db.Migrator().HasTable(&types.MemoryExtractionSession{}))
-	require.False(t, db.Migrator().HasColumn(&types.MemoryItem{}, "replaces_id"))
+
+	removed, err := svc.repo.PruneEpisodes(ctx, scope, 1)
+	require.NoError(t, err)
+	require.Zero(t, removed,
+		"a cap that deletes what no profile has summarized would lose the conversation entirely")
+	require.Len(t, slugsInStore(t, svc, ctx), 3)
 }

@@ -11,11 +11,12 @@
     <ChatMemoryStep
       v-if="memoryOnly"
       variant="root"
-      :memories="memoryItems"
+      :memories="recalledMemories"
       :expanded="memoryExpanded"
       :forgetting-id="forgettingId"
       @toggle="toggleMemory"
       @forget="forgetMemory"
+      @open-profile="openMemoryProfile"
     />
 
     <div v-else-if="showPrePipelineWait" class="tree-children">
@@ -39,12 +40,13 @@
     <div v-else-if="!showCollapsedRoot" class="tree-children">
       <ChatMemoryStep
         v-if="hasMemory"
-        :memories="memoryItems"
+        :memories="recalledMemories"
         :expanded="memoryExpanded"
         :is-last="memoryIsLast"
         :forgetting-id="forgettingId"
         @toggle="toggleMemory"
         @forget="forgetMemory"
+        @open-profile="openMemoryProfile"
       />
 
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
@@ -169,12 +171,13 @@
       <div v-if="showExpandedTimeline" class="tree-children tree-children-expanded">
         <ChatMemoryStep
           v-if="hasMemory"
-          :memories="memoryItems"
+          :memories="recalledMemories"
           :expanded="memoryExpanded"
           :is-last="memoryIsLast"
           :forgetting-id="forgettingId"
           @toggle="toggleMemory"
           @forget="forgetMemory"
+          @open-profile="openMemoryProfile"
         />
 
         <div v-for="(step, index) in steps" :key="step.id" class="tree-child"
@@ -297,12 +300,13 @@ const waitController = createRagWaitController((view) => {
 // own: it is one more thing the turn did before answering, and giving it a
 // separate visual language would make it read as unrelated to the pipeline.
 const {
-  memoryItems,
+  recalledMemories,
   hasMemory,
   expanded: memoryExpanded,
   forgettingId,
   toggle: toggleMemory,
   forget: forgetMemory,
+  openProfile: openMemoryProfile,
 } = useChatMemoryRow(() => props.session?.used_memories)
 
 const thinkingContent = computed(() => {

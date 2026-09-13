@@ -180,12 +180,12 @@
 
       <div v-if="config.enabled" class="setting-row">
         <div class="setting-info">
-          <label>{{ t('memoryWorkspaceSettings.maxItemsLabel') }}</label>
-          <p class="desc">{{ t('memoryWorkspaceSettings.maxItemsDescription') }}</p>
+          <label>{{ t('memoryWorkspaceSettings.maxEpisodesLabel') }}</label>
+          <p class="desc">{{ t('memoryWorkspaceSettings.maxEpisodesDescription') }}</p>
         </div>
         <div class="setting-control">
           <t-input-number
-            v-model="config.max_items"
+            v-model="config.max_episodes"
             :min="10"
             :max="2000"
             :step="10"
@@ -215,7 +215,7 @@ const config = reactive<MemoryConfig>({
   enabled: false,
   write_mode: 'explicit_only',
   extract_model_id: '',
-  max_items: 200,
+  max_episodes: 200,
   extract_delay_seconds: 90,
   extract_min_interval_seconds: 300,
   extract_instructions: '',
@@ -235,7 +235,7 @@ const loadConfig = async () => {
       config.enabled = response.data.enabled ?? false
       config.write_mode = response.data.write_mode === 'auto' ? 'auto' : 'explicit_only'
       config.extract_model_id = response.data.extract_model_id || ''
-      config.max_items = response.data.max_items || 200
+      config.max_episodes = response.data.max_episodes || 200
       config.extract_delay_seconds = response.data.extract_delay_seconds || 90
       config.extract_min_interval_seconds = response.data.extract_min_interval_seconds || 300
       config.extract_instructions = response.data.extract_instructions || ''

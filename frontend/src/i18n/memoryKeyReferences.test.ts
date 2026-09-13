@@ -52,12 +52,17 @@ test('memory i18n keys referenced in code exist in every locale', () => {
   assert.deepEqual(failures, [], failures.slice(0, 20).join('\n'))
 })
 
-// Kind and origin labels are looked up dynamically, so the scan above cannot
-// see them and a renamed kind would silently render a raw key in the chat.
-test('dynamic memory kind and origin labels exist in every locale', () => {
+// Kind labels and the section tabs are looked up dynamically, so the scan above
+// cannot see them and a renamed kind would silently render a raw key in the chat.
+test('dynamic memory kind and tab labels exist in every locale', () => {
+  const kinds = ['digest', 'note', 'episode']
   const dynamic = [
-    ...['profile', 'preference', 'fact', 'task'].map((kind) => `memorySettings.kinds.${kind}`),
-    ...['explicit', 'extracted', 'manual'].map((origin) => `memorySettings.origins.${origin}`),
+    ...kinds.map((kind) => `memorySettings.kinds.${kind}`),
+    ...kinds.map((kind) => `memorySettings.kindHints.${kind}`),
+    ...['profile', 'episodes', 'notes'].map((tab) => `memorySettings.tabs.${tab}`),
+    ...['success', 'partial', 'fail', 'uncertain'].map(
+      (outcome) => `memorySettings.episodes.outcomes.${outcome}`,
+    ),
   ]
   const failures: string[] = []
   for (const [localeName, bundle] of Object.entries(LOCALE_BUNDLES) as Array<[LocaleName, unknown]>) {

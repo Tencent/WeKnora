@@ -76,11 +76,10 @@ export interface WikiGraphMeta {
   truncated: boolean;
   center?: string;
   depth?: number;
-  familiar_count?: number;
 }
 
 export interface WikiGraphData {
-  nodes: { slug: string; title: string; page_type: string; link_count: number; familiar?: boolean }[];
+  nodes: { slug: string; title: string; page_type: string; link_count: number }[];
   edges: { source: string; target: string }[];
   meta: WikiGraphMeta;
 }

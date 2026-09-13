@@ -20,18 +20,52 @@
     </div>
 
     <div v-if="expanded" class="memory-detail-content">
-      <div v-for="memory in memories" :key="memory.id" class="memory-row">
-        <span class="memory-kind">{{ memoryKindLabel(memory.kind) }}</span>
-        <span class="memory-text">{{ memory.content }}</span>
-        <button
-          type="button"
-          class="memory-forget"
-          :disabled="forgettingId === memory.id"
-          :title="t('chat.memoryForget')"
-          @click.stop="emit('forget', memory)"
-        >
-          <t-icon name="delete" />
-        </button>
+      <div v-for="memory in memories" :key="memory.id" class="memory-entry">
+        <div class="memory-row">
+          <span
+            v-if="memoryKindLabel(memory.kind)"
+            class="memory-kind"
+            :title="memoryKindHint(memory.kind)"
+          >
+            {{ memoryKindLabel(memory.kind) }}
+          </span>
+          <!-- An episode row carries only its title, so opening it is the only
+               way to see what the conversation was actually about. -->
+          <button
+            v-if="memory.kind === 'episode'"
+            type="button"
+            class="memory-text memory-text-button"
+            :aria-expanded="openEpisodeId === memory.id"
+            @click.stop="toggleEpisode(memory)"
+          >
+            {{ memory.content }}
+          </button>
+          <span v-else class="memory-text">{{ memory.content }}</span>
+          <!-- The profile has no row to delete and stands for everything the
+               assistant knows, so this kind offers a way in instead. -->
+          <button
+            v-if="memory.kind === 'digest'"
+            type="button"
+            class="memory-action"
+            :title="t('chat.memoryOpenProfile')"
+            @click.stop="emit('open-profile')"
+          >
+            <t-icon name="chevron-right-double" />
+          </button>
+          <button
+            v-else-if="isForgettableMemoryKind(memory.kind)"
+            type="button"
+            class="memory-action memory-forget"
+            :disabled="forgettingId === memory.id"
+            :title="t('chat.memoryForget')"
+            @click.stop="emit('forget', memory)"
+          >
+            <t-icon name="delete" />
+          </button>
+        </div>
+        <p v-if="openEpisodeId === memory.id" class="memory-episode-summary">
+          {{ episodeSummary }}
+        </p>
       </div>
       <p class="memory-hint">{{ t('chat.memoryHint') }}</p>
     </div>
@@ -39,7 +73,10 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { getMemoryEpisode } from '@/api/memory'
+import { isForgettableMemoryKind } from '@/composables/useChatMemoryRow'
 
 type Memory = { id: string; kind: string; content: string }
 
@@ -60,17 +97,40 @@ withDefaults(
 const emit = defineEmits<{
   (event: 'toggle'): void
   (event: 'forget', memory: Memory): void
+  (event: 'open-profile'): void
 }>()
 
 const { t } = useI18n()
 
-const MEMORY_KINDS = ['profile', 'preference', 'fact', 'task', 'interest'] as const
+const MEMORY_KINDS = ['digest', 'note', 'episode'] as const
 
-const memoryKindLabel = (kind: string) => {
-  if ((MEMORY_KINDS as readonly string[]).includes(kind)) {
-    return t(`memorySettings.kinds.${kind}`)
+const isKnownKind = (kind: string) => (MEMORY_KINDS as readonly string[]).includes(kind)
+
+// A kind the client does not know yet gets no tag at all: an invented label
+// would claim the memory came from somewhere it did not.
+const memoryKindLabel = (kind: string) => (isKnownKind(kind) ? t(`memorySettings.kinds.${kind}`) : '')
+
+const memoryKindHint = (kind: string) => (isKnownKind(kind) ? t(`memorySettings.kindHints.${kind}`) : '')
+
+const openEpisodeId = ref('')
+const episodeSummary = ref('')
+
+const toggleEpisode = async (memory: Memory) => {
+  if (openEpisodeId.value === memory.id) {
+    openEpisodeId.value = ''
+    episodeSummary.value = ''
+    return
   }
-  return t('memorySettings.kinds.fact')
+  openEpisodeId.value = memory.id
+  episodeSummary.value = t('chat.memoryEpisodeLoading')
+  try {
+    const response = await getMemoryEpisode(memory.id)
+    if (openEpisodeId.value !== memory.id) return
+    episodeSummary.value = response.data?.summary || t('chat.memoryEpisodeEmpty')
+  } catch (error: any) {
+    if (openEpisodeId.value !== memory.id) return
+    episodeSummary.value = t('chat.memoryEpisodeFailed')
+  }
 }
 </script>
 
@@ -173,7 +233,32 @@ const memoryKindLabel = (kind: string) => {
   word-break: break-word;
 }
 
-.memory-forget {
+.memory-text-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-text-color-primary);
+    outline: none;
+  }
+}
+
+.memory-episode-summary {
+  margin: 2px 0 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--td-component-stroke);
+  color: var(--td-text-color-placeholder);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-action {
   flex: 0 0 auto;
   margin-left: auto;
   padding: 0;
@@ -189,11 +274,11 @@ const memoryKindLabel = (kind: string) => {
 
   &:focus-visible {
     opacity: 1;
-    color: var(--td-error-color);
+    color: var(--td-text-color-primary);
   }
 
   &:hover:not(:disabled) {
-    color: var(--td-error-color);
+    color: var(--td-text-color-primary);
   }
 
   &:disabled {
@@ -202,9 +287,17 @@ const memoryKindLabel = (kind: string) => {
   }
 }
 
+// Delete is the one destructive control here, so it is the one that turns red.
+.memory-forget {
+  &:hover:not(:disabled),
+  &:focus-visible {
+    color: var(--td-error-color);
+  }
+}
+
 // Revealing the control on hover keeps the list readable as a list, while
-// still putting delete one click away from the memory it belongs to.
-.memory-row:hover .memory-forget {
+// still putting the action one click away from the memory it belongs to.
+.memory-row:hover .memory-action {
   opacity: 1;
 }
 
