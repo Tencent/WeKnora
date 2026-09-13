@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
@@ -34,6 +35,10 @@ func (m *Materializer) Materialize(ctx context.Context, snapshot CatalogSnapshot
 	if err := plan.ValidateAgainst(snapshot); err != nil {
 		return nil, fmt.Errorf("validate training orchestration plan: %w", err)
 	}
+	knowledgeByVideo, err := m.readAuditedKnowledge(ctx, snapshot)
+	if err != nil {
+		return nil, err
+	}
 
 	videoByID := make(map[string]CatalogVideo, len(snapshot.Videos))
 	for _, video := range snapshot.Videos {
@@ -45,11 +50,12 @@ func (m *Materializer) Materialize(ctx context.Context, snapshot CatalogSnapshot
 			continue
 		}
 		material := ClusterMaterial{
-			ContractVersion: MaterialContractVersion,
-			ClusterKey:      cluster.ClusterKey,
-			SourceVideoIDs:  append([]string(nil), cluster.SourceVideoIDs...),
-			SummaryBlocks:   []MaterialBlock{},
-			Evidence:        []MaterialEvidence{},
+			ContractVersion:  MaterialContractVersion,
+			ClusterKey:       cluster.ClusterKey,
+			SourceVideoIDs:   append([]string(nil), cluster.SourceVideoIDs...),
+			SummaryBlocks:    []MaterialBlock{},
+			Evidence:         []MaterialEvidence{},
+			KnowledgeObjects: []MaterialKnowledge{},
 		}
 		for requestIndex, request := range cluster.MaterialRequests {
 			video, ok := videoByID[strings.TrimSpace(request.VideoID)]
@@ -96,12 +102,72 @@ func (m *Materializer) Materialize(ctx context.Context, snapshot CatalogSnapshot
 				})
 			}
 		}
+		for _, videoID := range cluster.SourceVideoIDs {
+			material.KnowledgeObjects = append(material.KnowledgeObjects, knowledgeByVideo[strings.TrimSpace(videoID)]...)
+		}
 		if err := material.ValidateAgainst(cluster); err != nil {
 			return nil, fmt.Errorf("validate material for cluster %s: %w", cluster.ClusterKey, err)
 		}
 		materials = append(materials, material)
 	}
 	return materials, nil
+}
+
+func (m *Materializer) readAuditedKnowledge(ctx context.Context, snapshot CatalogSnapshot) (map[string][]MaterialKnowledge, error) {
+	reader, ok := m.Wiki.(KnowledgePageReader)
+	if !ok {
+		return map[string][]MaterialKnowledge{}, nil
+	}
+	pages, err := reader.ListAllPages(ctx, m.KnowledgeBaseID, "")
+	if err != nil {
+		return nil, fmt.Errorf("list audited knowledge objects: %w", err)
+	}
+	result := make(map[string][]MaterialKnowledge)
+	for _, video := range snapshot.Videos {
+		videoID := strings.TrimSpace(video.VideoID)
+		generation := strings.TrimSpace(video.TranscriptGeneration)
+		for _, page := range pages {
+			if page.PageType != "index" || strings.TrimSpace(page.ID) == "" {
+				continue
+			}
+			validation, validationErr := knowledge.ValidateWikiObjectPage(page.Content, page.PageType, videoID, generation)
+			if validationErr != nil {
+				continue
+			}
+			evidenceIDs := append([]string(nil), validation.EvidenceIDs...)
+			for _, contribution := range validation.EvidenceContributions {
+				if contribution.VideoID == videoID && contribution.TranscriptGeneration == generation && strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+					evidenceIDs = append([]string(nil), contribution.EvidenceIDs...)
+					break
+				}
+			}
+			result[videoID] = append(result[videoID], MaterialKnowledge{
+				VideoID: videoID, KnowledgeObjectID: validation.KnowledgeObjectID,
+				WikiPageID: page.ID, KnowledgeType: validation.KnowledgeType, Title: validation.Title,
+				EvidenceIDs: uniqueStrings(evidenceIDs),
+			})
+		}
+		result[videoID] = dedupeMaterialKnowledge(result[videoID])
+	}
+	return result, nil
+}
+
+func dedupeMaterialKnowledge(values []MaterialKnowledge) []MaterialKnowledge {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]MaterialKnowledge, 0, len(values))
+	for _, value := range values {
+		key := strings.TrimSpace(value.VideoID) + "\x00" + strings.TrimSpace(value.KnowledgeObjectID) + "\x00" + strings.TrimSpace(value.WikiPageID)
+		if key == "\x00\x00\x00" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		value.EvidenceIDs = uniqueStrings(value.EvidenceIDs)
+		result = append(result, value)
+	}
+	return result
 }
 
 func (m *Materializer) readSummaryBlocks(ctx context.Context, video CatalogVideo, request MaterialRequest) ([]MaterialBlock, error) {

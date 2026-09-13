@@ -452,7 +452,7 @@ func buildProcessingStatus(video model.Video, jobs []model.VideoProcessingJob) P
 		if !retryableProcessingStages[job.JobType] {
 			continue
 		}
-		isUpstreamStage := job.JobType == "transcription" || job.JobType == "subtitle_generate"
+		isUpstreamStage := job.JobType == "transcription" || job.JobType == "subtitle_generate" || job.JobType == "index"
 		if !isUpstreamStage && video.TranscriptGeneration != "" && job.TranscriptGeneration != video.TranscriptGeneration {
 			continue
 		}

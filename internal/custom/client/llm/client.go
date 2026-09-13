@@ -465,6 +465,13 @@ streamLoop:
 		}
 	}
 	if options.requireCompleted && !doneMarkerSeen && finishReason == "" {
+		// Some OpenAI-compatible providers close a clean SSE response without
+		// sending either [DONE] or a finish_reason. A clean EOF is acceptable
+		// only when the accumulated application payload is already one complete
+		// JSON value; incomplete output must still fail closed.
+		if completed, incompleteReason, normalizeErr := normalizeCompletedJSON(output.String()); normalizeErr == nil && incompleteReason == "" {
+			return completed, nil
+		}
 		return "", &IncompleteOutputError{Reason: "stream ended before completion marker", FinishReason: finishReason, OutputBytes: output.Len()}
 	}
 	if options.requireCompleted && finishReason == "length" {

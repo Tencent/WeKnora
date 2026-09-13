@@ -476,24 +476,28 @@ func ValidateGenerated(document Document, expectedVideoType string, knownChunkID
 
 // NormalizeOrchestrationProfileReferences makes the profile's evidence
 // references a deterministic projection of the summary blocks selected by the
-// model. The model is allowed to choose the blocks and their evidence, but it
-// must not create a second, independently inconsistent evidence list. Unknown
-// blocks and units without any evidence after projection remain hard errors.
+// model. Topic evidence is derived from the selected blocks in document order;
+// any legacy/model-provided evidence list is ignored by this projection.
 func NormalizeOrchestrationProfileReferences(document *Document, knownChunkIDs map[string]struct{}) error {
 	if document == nil || document.OrchestrationProfile == nil {
 		return nil
 	}
-	blockEvidence := make(map[string]map[string]struct{})
+	blockEvidence := make(map[string][]string)
 	for _, section := range document.Sections {
 		for _, block := range section.Blocks {
 			blockID := strings.TrimSpace(block.ID)
 			if blockID == "" {
 				continue
 			}
-			evidence := make(map[string]struct{}, len(block.EvidenceChunkIDs))
+			evidence := make([]string, 0, len(block.EvidenceChunkIDs))
+			seen := make(map[string]struct{}, len(block.EvidenceChunkIDs))
 			for _, chunkID := range block.EvidenceChunkIDs {
 				if chunkID = strings.TrimSpace(chunkID); chunkID != "" {
-					evidence[chunkID] = struct{}{}
+					if _, duplicate := seen[chunkID]; duplicate {
+						continue
+					}
+					seen[chunkID] = struct{}{}
+					evidence = append(evidence, chunkID)
 				}
 			}
 			blockEvidence[blockID] = evidence
@@ -501,34 +505,26 @@ func NormalizeOrchestrationProfileReferences(document *Document, knownChunkIDs m
 	}
 	for unitIndex := range document.OrchestrationProfile.TopicUnits {
 		unit := &document.OrchestrationProfile.TopicUnits[unitIndex]
-		selectedEvidence := make(map[string]struct{})
+		normalized := make([]string, 0)
+		seen := make(map[string]struct{})
 		for _, blockID := range unit.SummaryBlockIDs {
 			blockID = strings.TrimSpace(blockID)
 			evidence, ok := blockEvidence[blockID]
 			if !ok {
 				return fmt.Errorf("orchestration profile topic unit %d references unknown summary block %q", unitIndex+1, blockID)
 			}
-			for chunkID := range evidence {
-				selectedEvidence[chunkID] = struct{}{}
-			}
-		}
-		normalized := make([]string, 0, len(unit.EvidenceChunkIDs))
-		seen := make(map[string]struct{}, len(unit.EvidenceChunkIDs))
-		for _, chunkID := range unit.EvidenceChunkIDs {
-			chunkID = strings.TrimSpace(chunkID)
-			if knownChunkIDs != nil {
-				if _, ok := knownChunkIDs[chunkID]; !ok {
-					return fmt.Errorf("orchestration profile topic unit %d references unknown evidence chunk %q", unitIndex+1, chunkID)
+			for _, chunkID := range evidence {
+				if knownChunkIDs != nil {
+					if _, ok := knownChunkIDs[chunkID]; !ok {
+						return fmt.Errorf("orchestration profile topic unit %d references unknown evidence chunk %q", unitIndex+1, chunkID)
+					}
 				}
+				if _, duplicate := seen[chunkID]; duplicate {
+					continue
+				}
+				seen[chunkID] = struct{}{}
+				normalized = append(normalized, chunkID)
 			}
-			if _, ok := selectedEvidence[chunkID]; !ok {
-				continue
-			}
-			if _, duplicate := seen[chunkID]; duplicate {
-				continue
-			}
-			seen[chunkID] = struct{}{}
-			normalized = append(normalized, chunkID)
 		}
 		if len(normalized) == 0 {
 			return fmt.Errorf("orchestration profile topic unit %d has no evidence in its summary blocks", unitIndex+1)

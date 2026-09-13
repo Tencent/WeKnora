@@ -84,11 +84,16 @@ test('scene view consumes every user-facing training orchestration field group',
   assert.match(scene, /topic_source_counts/)
   assert.match(scene, /not_selected_reason_counts/)
   assert.match(scene, /skipped_reason_counts/)
-  assert.match(scene, /units: cluster\.member_topics\.length/)
+  assert.match(scene, /units: stages\.reduce\(\(total, stage\) => total \+ stage\.units\.length, 0\)/)
+  assert.match(scene, /filter\(cluster => cluster\.path\.stages\.some\(stage => stage\.units\.length > 0\)\)/)
+  assert.doesNotMatch(scene, /isSingleVideoSingleUnitCandidate/)
+  assert.match(scene, /const firstCluster = trainingClusters\.value\[0\]/)
   assert.match(scene, /cluster\.units \}\} 个单元 · \{\{ cluster\.videos \}\} 个视频/)
   assert.match(scene, /String\(unit\.sequence\)\.padStart\(2, '0'\)/)
-  assert.match(scene, /你将解决/)
+  assert.match(scene, /学习任务/)
   assert.match(scene, /学完可以/)
+  assert.match(scene, /<strong>\{\{ ref\.title \}\}<\/strong>/)
+  assert.match(api, /title: string/)
   assert.match(scene, /selectedClusterRelations/)
   assert.match(scene, /edge\.connectedToSelection/)
   assert.match(scene, /routeTrainingEdge\(sourceCenter, targetCenter, obstacleCenters/)
@@ -104,6 +109,19 @@ test('scene view consumes every user-facing training orchestration field group',
   assert.match(api, /assertSupportedTrainingProjection\(projection\)/)
 })
 
+test('scene view places gap analysis below the complete learning path block', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
+  const pathStart = scene.indexOf('<div class="training-path">')
+  const detailStart = scene.indexOf('<div v-if="activeUnit" class="path-detail">', pathStart)
+  const gapStart = scene.indexOf('<section v-if="activeCluster.gap_analysis"', pathStart)
+
+  assert.ok(pathStart >= 0)
+  assert.ok(detailStart > pathStart)
+  assert.ok(gapStart > pathStart)
+  assert.ok(gapStart > detailStart)
+})
+
 test('meeting todos expose source evidence and a timestamped video jump', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const meeting = readFileSync(join(here, '../../components/videohub/MeetingSceneView.vue'), 'utf8')
@@ -112,6 +130,14 @@ test('meeting todos expose source evidence and a timestamped video jump', () => 
   assert.match(meeting, /todo\.evidenceQuote/)
   assert.match(meeting, /@click="openTodoEvidence\(todo\)"/)
   assert.match(meeting, /emit\('selectVideo', todo\.videoId, todo\.seconds\)/)
+})
+
+test('scene evidence jumps preserve sub-second evidence offsets', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const source = readFileSync(join(here, 'KnowledgeGraph.vue'), 'utf8')
+
+  assert.match(source, /function openVideo\(videoId: string, seconds: number\).*query\.t = Math\.max\(0, seconds\)/)
+  assert.doesNotMatch(source, /function openVideo\(videoId: string, seconds: number\).*Math\.floor\(seconds\)/)
 })
 
 test('scene view loads and refreshes the real training orchestration API without fixtures', () => {
@@ -123,6 +149,8 @@ test('scene view loads and refreshes the real training orchestration API without
   assert.match(scene, /generateTrainingProjection/)
   assert.match(scene, /fetchTrainingJob/)
   assert.match(scene, /while \(job\.status === 'queued' \|\| job\.status === 'running'\)/)
+	assert.match(scene, /智能刷新/)
+	assert.match(scene, /generateTrainingProjection\(\)/)
   assert.match(scene, /@click="emit\('selectWiki'/)
   assert.match(scene, /@click="emit\('selectVideo'/)
   assert.doesNotMatch(scene, /const trainingClusters = \[/)

@@ -195,6 +195,19 @@ func TestCompleteJSONAcceptsFinishReasonWithoutDoneMarker(t *testing.T) {
 	}
 }
 
+func TestCompleteJSONAcceptsCompleteJSONOnCleanEOF(t *testing.T) {
+	client := NewClient(config.LLMConfig{BaseURL: "https://llm.example.test/v1", APIKey: "key", Model: "MiniMax-M3"})
+	client.http.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		stream := "data: " + `{"choices":[{"delta":{"content":"{}"}}]}` + "\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(stream))}, nil
+	})
+
+	content, err := client.CompleteJSON(t.Context(), "prompt")
+	if err != nil || content != "{}" {
+		t.Fatalf("content=%q err=%v", content, err)
+	}
+}
+
 func TestCompleteJSONNormalizesKnownModelWrappers(t *testing.T) {
 	client := NewClient(config.LLMConfig{BaseURL: "https://llm.example.test/v1", APIKey: "key", Model: "MiniMax-M3"})
 	client.http.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {

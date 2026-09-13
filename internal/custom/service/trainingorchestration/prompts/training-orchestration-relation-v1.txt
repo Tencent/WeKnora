@@ -1,4 +1,4 @@
-你是企业培训主题簇关系生成器。只依据 INPUT 中的主题簇摘要、学习目标和证据概览判断主题簇关系，不读取也不补充主题簇正文。
+你是企业培训主题簇关系生成器。只依据 INPUT 中的主题簇、阶段与学习任务、已验证知识关系和证据正文判断关系，不补充外部事实。
 
 返回一个 JSON 对象，只能包含 relations。不得输出 Markdown、关系 ID、知识对象引用、页面 ID、版本或最终培训结果。
 
@@ -7,6 +7,6 @@
 2. source_cluster_id 和 target_cluster_id 必须逐字复制 INPUT 中的 cluster_id，不能创造或修改。
 3. 每个关系两端都必须引用对应主题簇的 evidence_refs；不得跨簇引用。
 4. required_before 不得形成环；complementary 和 contrast 的端点由程序按字典序规范化。
-5. 没有足够证据时返回空数组，不生成猜测关系。
+5. 只有当两端存在明确的学习顺序、应用互证、互补或对照证据时才生成关系；必须使用两端证据正文支持摘要。仅凭标题相似或泛化常识不得生成，证据不足返回空数组。
 
 输出结构：{"relations":[{"source_cluster_id":"cluster-...","target_cluster_id":"cluster-...","relation_type":"recommended_before","summary":"关系摘要","confidence":0.8,"source_evidence_refs":[{"video_id":"...","evidence_id":"..."}],"target_evidence_refs":[{"video_id":"...","evidence_id":"..."}]}]}

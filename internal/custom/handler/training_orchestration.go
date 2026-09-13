@@ -11,12 +11,17 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/trainingorchestration"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 type TrainingOrchestrationAPI interface {
 	Start(context.Context) (model.TrainingOrchestrationJob, error)
 	GetJob(context.Context, string) (model.TrainingOrchestrationJob, error)
 	GetCurrent(context.Context) (*trainingorchestration.ProjectionDocument, *model.TrainingOrchestrationCurrent, error)
+}
+
+type trainingOrchestrationOverwriteAPI interface {
+	StartWithOptions(context.Context, bool) (model.TrainingOrchestrationJob, error)
 }
 
 type TrainingOrchestrationHandler struct{ service TrainingOrchestrationAPI }
@@ -30,7 +35,18 @@ func (h *TrainingOrchestrationHandler) Generate(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "培训学习路径服务尚未配置"})
 		return
 	}
-	job, err := h.service.Start(c.Request.Context())
+	var job model.TrainingOrchestrationJob
+	var err error
+	overwrite := strings.EqualFold(strings.TrimSpace(c.Query("overwrite")), "true") || c.Query("overwrite") == "1"
+	if overwrite && !types.IsSystemAdminFromContext(c.Request.Context()) && !types.TenantRoleFromContext(c.Request.Context()).HasPermission(types.TenantRoleAdmin) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "仅管理员可以强制重新生成培训学习路径"})
+		return
+	}
+	if overwriteService, ok := h.service.(trainingOrchestrationOverwriteAPI); ok {
+		job, err = overwriteService.StartWithOptions(c.Request.Context(), overwrite)
+	} else {
+		job, err = h.service.Start(c.Request.Context())
+	}
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "启动培训学习路径生成失败", "detail": err.Error()})
 		return

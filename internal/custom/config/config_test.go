@@ -93,12 +93,12 @@ func TestLoadReadsTrainingGovernanceConfig(t *testing.T) {
 	}
 }
 
-func TestLoadUsesTrainingPromptVersionV3ByDefault(t *testing.T) {
+func TestLoadUsesTrainingPromptVersionV4ByDefault(t *testing.T) {
 	t.Setenv("CUSTOM_TRAINING_PROMPT_VERSION", "")
 
 	cfg := Load()
-	if cfg.Training.PromptVersion != "training-orchestration-v3" {
-		t.Fatalf("Training.PromptVersion = %q, want training-orchestration-v3", cfg.Training.PromptVersion)
+	if cfg.Training.PromptVersion != "training-orchestration-v4" {
+		t.Fatalf("Training.PromptVersion = %q, want training-orchestration-v4", cfg.Training.PromptVersion)
 	}
 }
 

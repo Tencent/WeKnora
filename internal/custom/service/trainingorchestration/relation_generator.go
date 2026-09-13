@@ -60,11 +60,26 @@ type relationGenerationInput struct {
 }
 
 type relationGenerationCluster struct {
-	ClusterID    string        `json:"cluster_id"`
-	Title        string        `json:"title"`
-	Summary      string        `json:"summary"`
-	LearningGoal string        `json:"learning_goal"`
-	EvidenceRefs []EvidenceRef `json:"evidence_refs"`
+	ClusterID          string                    `json:"cluster_id"`
+	Title              string                    `json:"title"`
+	Summary            string                    `json:"summary"`
+	LearningGoal       string                    `json:"learning_goal"`
+	EvidenceRefs       []EvidenceRef             `json:"evidence_refs"`
+	Stages             []relationGenerationStage `json:"stages"`
+	KnowledgeRelations []string                  `json:"verified_knowledge_relations"`
+	EvidenceText       map[string]string         `json:"evidence_text"`
+}
+
+type relationGenerationStage struct {
+	Title    string                   `json:"title"`
+	Sequence int                      `json:"sequence"`
+	Units    []relationGenerationUnit `json:"units"`
+}
+type relationGenerationUnit struct {
+	Title     string        `json:"title"`
+	Outcome   string        `json:"outcome"`
+	Knowledge []string      `json:"knowledge"`
+	Evidence  []EvidenceRef `json:"evidence"`
 }
 
 type relationGenerationLimits struct {
@@ -98,10 +113,22 @@ func (g *RelationGenerator) Generate(ctx context.Context, clusters []TopicCluste
 			return nil, fmt.Errorf("relation input repeats cluster %s", cluster.ClusterID)
 		}
 		clusterByID[cluster.ClusterID] = cluster
-		inputClusters = append(inputClusters, relationGenerationCluster{
+		item := relationGenerationCluster{
 			ClusterID: cluster.ClusterID, Title: cluster.Title, Summary: cluster.Summary,
-			LearningGoal: cluster.LearningGoal, EvidenceRefs: cluster.EvidenceRefs,
-		})
+			LearningGoal: cluster.LearningGoal, EvidenceRefs: cluster.EvidenceRefs, EvidenceText: cluster.EvidenceText,
+		}
+		for _, stage := range cluster.Path.Stages {
+			s := relationGenerationStage{Title: stage.Title, Sequence: stage.Sequence}
+			for _, unit := range stage.Units {
+				u := relationGenerationUnit{Title: unit.LearningTitle, Outcome: unit.LearningOutcome, Evidence: unit.EvidenceRefs}
+				for _, k := range unit.KnowledgeRefs {
+					u.Knowledge = append(u.Knowledge, k.Title+" ("+string(k.KnowledgeType)+")")
+				}
+				s.Units = append(s.Units, u)
+			}
+			item.Stages = append(item.Stages, s)
+		}
+		inputClusters = append(inputClusters, item)
 	}
 	batches, err := g.packRelationClusters(inputClusters)
 	if err != nil {

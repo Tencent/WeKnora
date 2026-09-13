@@ -50,6 +50,7 @@ export function createLoadingContentModuleState(module: VideoContentModule): Vid
 export function contentModuleForStage(stage: string): VideoContentModule | 'all' | null {
   if (stage === 'outline') return 'outline'
   if (stage === 'summary') return 'summary'
+  if (stage === 'summary_enhance') return 'summary'
   if (stage === 'graph') return 'relatedKnowledge'
   if (stage === 'related_knowledge') return 'relatedKnowledge'
   if (stage === 'assemble') return 'all'

@@ -3,10 +3,12 @@ package trainingorchestration
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/transcript"
 )
 
@@ -30,10 +32,16 @@ func TestProjectionAssemblerBuildsValidatedDocumentAndStatistics(t *testing.T) {
 	}
 	plan := validAcceptedPlan(snapshot)
 	plan.TopicClusters[0].Summary = "主题摘要"
+	plan.TopicClusters[0].Summary = "主题摘要"
 	plan.UnselectedVideos = []UnselectedVideo{{VideoID: "video-2", Reason: "重复证据"}}
 	plan.SourceFingerprint = testStageFourFingerprint(t, snapshot)
 	material := validStageFourMaterial(plan.TopicClusters[0].ClusterKey)
+	material.KnowledgeObjects = []MaterialKnowledge{{
+		VideoID: "video-1", KnowledgeObjectID: "object-1", WikiPageID: "page-1",
+		KnowledgeType: knowledge.TypeConcept, Title: "核心概念", EvidenceIDs: []string{"evs:gen-1:one"},
+	}}
 	draft := validStageFourDraft(plan.TopicClusters[0].ClusterKey, material.Evidence[0])
+	appendSecondDraftUnit(&draft, material.Evidence[0], "补充理解")
 
 	assembler := &ProjectionAssembler{
 		Fingerprint: stageFourFingerprint("planner-model", "planning-v1"),
@@ -54,18 +62,56 @@ func TestProjectionAssemblerBuildsValidatedDocumentAndStatistics(t *testing.T) {
 	if projection.GeneratedAt != "2026-09-10T01:02:03Z" || projection.OwnerScopeID != "scope-1" {
 		t.Fatalf("unexpected projection identity: %#v", projection)
 	}
-	if len(projection.TopicClusters) != 1 || len(projection.TopicClusters[0].Path.Stages[0].Units) != 1 {
+	if len(projection.TopicClusters) != 1 || len(projection.TopicClusters[0].Path.Stages[0].Units) != 2 {
 		t.Fatalf("unexpected assembled clusters: %#v", projection.TopicClusters)
 	}
 	stats := projection.Statistics
 	if stats.SelectedVideos != 1 || stats.NotSelectedVideos != 1 || stats.SkippedVideos != 1 {
 		t.Fatalf("selected/not-selected statistics are incorrect: %#v", stats)
 	}
-	if stats.LearningUnitCount != 1 || stats.LearningDurationSecs != 2 {
+	if stats.LearningUnitCount != 2 || stats.LearningDurationSecs != 2 {
 		t.Fatalf("learning statistics are incorrect: %#v", stats)
 	}
 	if stats.TopicClusterCount != 1 || stats.SkippedReasonCounts[SkipInaccessible] != 1 {
 		t.Fatalf("aggregate statistics are incorrect: %#v", stats)
+	}
+}
+
+func TestProjectionAssemblerBindsAuditedKnowledgeByEvidence(t *testing.T) {
+	snapshot := CatalogSnapshot{
+		ContractVersion: PlanningContractVersion,
+		OwnerScopeID:    "scope-1",
+		Videos: []CatalogVideo{func() CatalogVideo {
+			video := validCatalogVideo("video-1")
+			video.Title = "视频一"
+			return video
+		}()},
+	}
+	plan := validAcceptedPlan(snapshot)
+	plan.TopicClusters[0].Summary = "主题摘要"
+	plan.SourceFingerprint = testStageFourFingerprint(t, snapshot)
+	material := validStageFourMaterial(plan.TopicClusters[0].ClusterKey)
+	material.KnowledgeObjects = []MaterialKnowledge{{
+		VideoID: "video-1", KnowledgeObjectID: "object-1", WikiPageID: "page-1",
+		KnowledgeType: knowledge.TypeConcept, Title: "核心概念", EvidenceIDs: []string{"evs:gen-1:one"},
+	}}
+	draft := validStageFourDraft(plan.TopicClusters[0].ClusterKey, material.Evidence[0])
+	appendSecondDraftUnit(&draft, material.Evidence[0], "补充理解")
+	doc, err := (&ProjectionAssembler{Fingerprint: stageFourFingerprint("planner-model", "planning-v1")}).Assemble(StageFourAssemblyInput{
+		InitialCatalog: snapshot, LatestCatalog: snapshot, Plan: plan,
+		Materials: []ClusterMaterial{material}, Drafts: []ClusterGenerationDraft{draft},
+	})
+	if err != nil {
+		t.Fatalf("Assemble returned error: %v", err)
+	}
+	cluster := doc.TrainingPathProjection.TopicClusters[0]
+	unit := cluster.Path.Stages[0].Units[0]
+	if len(unit.KnowledgeRefs) != 1 || unit.KnowledgeRefs[0].KnowledgeObjectID != "object-1" ||
+		unit.KnowledgeRefs[0].Title != "核心概念" || cluster.KnowledgeObjectIDs[0] != "object-1" {
+		t.Fatalf("knowledge was not bound by evidence: cluster=%#v unit=%#v", cluster, unit)
+	}
+	if got := doc.TrainingPathProjection.Statistics.SelectedKnowledgeCount; got != 1 {
+		t.Fatalf("selected knowledge count = %d, want 1", got)
 	}
 }
 
@@ -168,8 +214,18 @@ func TestProjectionAssemblerRejectsRelationEvidenceOutsideEndpoint(t *testing.T)
 	materialTwo.SummaryBlocks[0].VideoID = "video-2"
 	materialTwo.Evidence[0].VideoID = "video-2"
 	materialTwo.Evidence[0].Text = "证据二"
+	materialOne.KnowledgeObjects = []MaterialKnowledge{{
+		VideoID: "video-1", KnowledgeObjectID: "object-1", WikiPageID: "page-1",
+		KnowledgeType: knowledge.TypeConcept, Title: "主题一概念", EvidenceIDs: []string{"evs:gen-1:one"},
+	}}
+	materialTwo.KnowledgeObjects = []MaterialKnowledge{{
+		VideoID: "video-2", KnowledgeObjectID: "object-2", WikiPageID: "page-2",
+		KnowledgeType: knowledge.TypeConcept, Title: "主题二概念", EvidenceIDs: []string{"evs:gen-1:one"},
+	}}
 	draftOne := validStageFourDraft("cluster-1", materialOne.Evidence[0])
 	draftTwo := validStageFourDraft("cluster-2", materialTwo.Evidence[0])
+	appendSecondDraftUnit(&draftOne, materialOne.Evidence[0], "补充理解")
+	appendSecondDraftUnit(&draftTwo, materialTwo.Evidence[0], "补充理解")
 	draftTwo.PrimaryTemplate = "skill_method"
 
 	_, err := (&ProjectionAssembler{Fingerprint: stageFourFingerprint("planner-model", "planning-v1")}).Assemble(StageFourAssemblyInput{
@@ -263,6 +319,143 @@ func TestStageFourOrchestratorPassesRetrievedMaterialToGenerationAndAssembly(t *
 	if len(assembler.input.Materials) != 1 || len(assembler.input.Materials[0].Evidence) != 1 || assembler.input.Materials[0].Evidence[0].EvidenceID != "evs:gen-1:two" {
 		t.Fatalf("assembler did not receive retrieved evidence: %#v", assembler.input.Materials)
 	}
+}
+
+func TestStageFourOrchestratorIncrementalRegeneratesOnlyAffectedCluster(t *testing.T) {
+	videos := make([]CatalogVideo, 0, 3)
+	for index := 1; index <= 3; index++ {
+		id := "video-" + string(rune('0'+index))
+		video := validCatalogVideo(id)
+		video.Title = "视频" + string(rune('0'+index))
+		video.KnowledgeSignals = []KnowledgeSignal{{
+			SourceVideoID: id, KnowledgeObjectID: "object-" + string(rune('0'+index)), WikiPageID: "knowledge-page-" + string(rune('0'+index)),
+			KnowledgeType: knowledge.TypeConcept, Title: "知识" + string(rune('0'+index)), EvidenceIDs: []string{"evs:gen-1:one"},
+		}}
+		videos = append(videos, video)
+	}
+	snapshot := CatalogSnapshot{ContractVersion: PlanningContractVersion, OwnerScopeID: "scope-1", Videos: videos}
+	snapshot.SourceFingerprint = testStageFourFingerprint(t, snapshot)
+
+	clusters := make([]TopicCluster, 0, 3)
+	materials := make([]ClusterMaterial, 0, 3)
+	for index, video := range videos {
+		clusterKey := "cluster-" + string(rune('1'+index))
+		planCluster := incrementalTestPlanCluster(clusterKey, video.VideoID, "主题"+string(rune('1'+index)))
+		material := incrementalTestMaterial(clusterKey, video.VideoID, "object-"+string(rune('1'+index)), "knowledge-page-"+string(rune('1'+index)))
+		draft := validStageFourDraft(clusterKey, material.Evidence[0])
+		appendSecondDraftUnit(&draft, material.Evidence[0], "补充理解")
+		cluster, err := AssembleClusterGenerationDraft(snapshot, planCluster, draft, material)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clusters = append(clusters, cluster)
+		materials = append(materials, material)
+	}
+	untouchedRelation := TopicClusterRelation{
+		RelationID: "old-relation", SourceClusterID: "cluster-2", TargetClusterID: "cluster-3", RelationType: "complementary",
+		Summary: "未变化主题之间的原关系", Confidence: .9, ReviewStatus: "passed",
+		SourceEvidenceRefs: []EvidenceRef{clusters[1].EvidenceRefs[0]}, TargetEvidenceRefs: []EvidenceRef{clusters[2].EvidenceRefs[0]},
+	}
+	previousProjection := Projection{
+		SchemaVersion: SchemaVersion, OwnerScopeID: snapshot.OwnerScopeID, SourceFingerprint: snapshot.SourceFingerprint,
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339Nano), TopicClusters: clusters, TopicClusterRelations: []TopicClusterRelation{untouchedRelation},
+	}
+	input := catalogInputPackage(snapshot)
+	bindProjectionKnowledgeFields(&previousProjection, input)
+	ensureGapAnalyses(&previousProjection)
+	previousProjection.Statistics = buildStatistics(input, clusters, selectedVideoIDs(clusters), allProjectionEvidence(clusters))
+	previous := ProjectionDocument{TrainingPathProjection: previousProjection}
+	if err := ValidateProjection(previous, input); err != nil {
+		t.Fatalf("previous projection is invalid: %v", err)
+	}
+
+	subset := CatalogSnapshot{ContractVersion: PlanningContractVersion, OwnerScopeID: snapshot.OwnerScopeID, Videos: []CatalogVideo{videos[0]}}
+	plan := PlanDraft{
+		ContractVersion: PlanningContractVersion, SourceFingerprint: testStageFourFingerprint(t, subset),
+		TopicClusters: []PlanCluster{incrementalTestPlanCluster("cluster-1", "video-1", "主题1（更新）")}, UnselectedVideos: []UnselectedVideo{},
+	}
+	draft := validStageFourDraft("cluster-1", materials[0].Evidence[0])
+	appendSecondDraftUnit(&draft, materials[0].Evidence[0], "更新后的补充理解")
+	generator := &recordingStageFourClusterGenerator{draft: draft}
+	relations := &recordingIncrementalRelationGenerator{}
+	orchestrator := &StageFourOrchestrator{
+		Planner: stageFourPlannerStub{plan: plan}, Materializer: stageFourMaterializerStub{materials: []ClusterMaterial{materials[0]}},
+		ClusterGenerator: generator, RelationGenerator: relations, SnapshotReader: stageFourSnapshotReaderStub{snapshot: snapshot},
+		Assembler: &ProjectionAssembler{Fingerprint: stageFourFingerprint("planner-model", "planning-v1")},
+	}
+
+	result, err := orchestrator.RunIncremental(t.Context(), snapshot, previous, []string{"video-1"})
+	if err != nil {
+		t.Fatalf("RunIncremental returned error: %v", err)
+	}
+	if len(generator.materials) != 1 || generator.materials[0].SourceVideoIDs[0] != "video-1" {
+		t.Fatalf("incremental generator received unexpected material: %#v", generator.materials)
+	}
+	if len(relations.clusterIDs) != 2 || len(relations.clusterIDs[0]) != 1 || relations.clusterIDs[0][0] != "cluster-1" || len(relations.clusterIDs[1]) != 3 {
+		t.Fatalf("relation regeneration scope is incorrect: %#v", relations.clusterIDs)
+	}
+	byID := make(map[string]TopicCluster)
+	for _, cluster := range result.TrainingPathProjection.TopicClusters {
+		byID[cluster.ClusterID] = cluster
+	}
+	if byID["cluster-1"].Title != "主题1（更新）" || byID["cluster-2"].Title != clusters[1].Title || byID["cluster-3"].Title != clusters[2].Title {
+		t.Fatalf("affected/untouched clusters were merged incorrectly: %#v", byID)
+	}
+	foundUntouched, foundRegenerated := false, false
+	for _, relation := range result.TrainingPathProjection.TopicClusterRelations {
+		if relation.SourceClusterID == "cluster-2" && relation.TargetClusterID == "cluster-3" && relation.Summary == untouchedRelation.Summary {
+			foundUntouched = true
+		}
+		if relation.SourceClusterID == "cluster-1" && relation.TargetClusterID == "cluster-2" {
+			foundRegenerated = true
+		}
+	}
+	if !foundUntouched || !foundRegenerated {
+		t.Fatalf("incremental relations were not preserved/replaced correctly: %#v", result.TrainingPathProjection.TopicClusterRelations)
+	}
+}
+
+func incrementalTestPlanCluster(clusterKey, videoID, title string) PlanCluster {
+	return PlanCluster{
+		ClusterKey: clusterKey, Title: title, Summary: title + "摘要", LearningGoal: title + "目标", PrimaryTemplate: "concept_cognition",
+		ReviewStatus: PlanAccepted, Confidence: .9, SourceVideoIDs: []string{videoID}, MaterialRequests: []MaterialRequest{{
+			VideoID: videoID, SummaryWikiPageID: "page-1", SummaryVersion: 3, TranscriptGeneration: "gen-1",
+			SummaryBlockIDs: []string{"block-1"}, EvidenceIDs: []string{"evs:gen-1:one"},
+		}},
+	}
+}
+
+func incrementalTestMaterial(clusterKey, videoID, objectID, pageID string) ClusterMaterial {
+	material := validStageFourMaterial(clusterKey)
+	material.SourceVideoIDs = []string{videoID}
+	material.SummaryBlocks[0].VideoID = videoID
+	material.Evidence[0].VideoID = videoID
+	material.Evidence[0].EndMs = 200
+	material.KnowledgeObjects = []MaterialKnowledge{{
+		VideoID: videoID, KnowledgeObjectID: objectID, WikiPageID: pageID,
+		KnowledgeType: knowledge.TypeConcept, Title: objectID, EvidenceIDs: []string{"evs:gen-1:one"},
+	}}
+	return material
+}
+
+type recordingIncrementalRelationGenerator struct{ clusterIDs [][]string }
+
+func (g *recordingIncrementalRelationGenerator) Generate(_ context.Context, clusters []TopicCluster) ([]TopicClusterRelation, error) {
+	ids := make([]string, 0, len(clusters))
+	byID := make(map[string]TopicCluster, len(clusters))
+	for _, cluster := range clusters {
+		ids = append(ids, cluster.ClusterID)
+		byID[cluster.ClusterID] = cluster
+	}
+	sort.Strings(ids)
+	g.clusterIDs = append(g.clusterIDs, ids)
+	if len(clusters) < 2 || len(byID["cluster-1"].EvidenceRefs) == 0 || len(byID["cluster-2"].EvidenceRefs) == 0 {
+		return []TopicClusterRelation{}, nil
+	}
+	return []TopicClusterRelation{{
+		SourceClusterID: "cluster-1", TargetClusterID: "cluster-2", RelationType: "application", Summary: "更新主题的应用关系",
+		Confidence: .9, ReviewStatus: "passed", SourceEvidenceRefs: []EvidenceRef{byID["cluster-1"].EvidenceRefs[0]}, TargetEvidenceRefs: []EvidenceRef{byID["cluster-2"].EvidenceRefs[0]},
+	}}, nil
 }
 
 type blockingStageFourPlanner struct{}
@@ -384,6 +577,22 @@ func validStageFourDraft(clusterKey string, evidence MaterialEvidence) ClusterGe
 			},
 		},
 	}
+}
+
+func appendSecondDraftUnit(draft *ClusterGenerationDraft, evidence MaterialEvidence, title string) {
+	if draft == nil || len(draft.Stages) == 0 {
+		return
+	}
+	stage := &draft.Stages[0]
+	stage.Units = append(stage.Units, ClusterGenerationUnit{
+		LearningTitle: title, LearnerQuestion: "还需要理解哪些补充内容？",
+		LearningOutcome: "能够完成补充理解。",
+		EvidenceRefs: []EvidenceRef{{
+			VideoID: evidence.VideoID, TranscriptGeneration: evidence.TranscriptGeneration,
+			EvidenceID: evidence.EvidenceID, StartMs: evidence.StartMs, EndMs: evidence.EndMs,
+		}},
+		Confidence: 0.85,
+	})
 }
 
 func materialTwoEvidence(material ClusterMaterial) EvidenceRef {

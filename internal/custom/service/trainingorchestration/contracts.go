@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 )
 
@@ -28,15 +29,17 @@ type CatalogSnapshot struct {
 }
 
 type CatalogVideo struct {
-	VideoID              string                        `json:"video_id"`
-	Title                string                        `json:"title"`
-	VideoType            string                        `json:"video_type"`
-	DurationSeconds      int                           `json:"duration_seconds"`
-	TranscriptGeneration string                        `json:"transcript_generation"`
-	SummaryWikiPageID    string                        `json:"summary_wiki_page_id,omitempty"`
-	SummaryVersion       int                           `json:"summary_version,omitempty"`
-	OrchestrationProfile *summary.OrchestrationProfile `json:"orchestration_profile,omitempty"`
-	CompatibilityProfile *summary.OrchestrationProfile `json:"compatibility_profile,omitempty"`
+	VideoID               string                        `json:"video_id"`
+	Title                 string                        `json:"title"`
+	VideoType             string                        `json:"video_type"`
+	DurationSeconds       int                           `json:"duration_seconds"`
+	TranscriptGeneration  string                        `json:"transcript_generation"`
+	SummaryWikiPageID     string                        `json:"summary_wiki_page_id,omitempty"`
+	SummaryVersion        int                           `json:"summary_version,omitempty"`
+	OrchestrationProfile  *summary.OrchestrationProfile `json:"orchestration_profile,omitempty"`
+	CompatibilityProfile  *summary.OrchestrationProfile `json:"compatibility_profile,omitempty"`
+	KnowledgeSignals      []KnowledgeSignal             `json:"knowledge_signals,omitempty"`
+	EvidenceContentHashes map[string]string             `json:"evidence_content_hashes,omitempty"`
 }
 
 type PlanDraft struct {
@@ -77,15 +80,29 @@ type UnselectedVideo struct {
 }
 
 type ClusterMaterial struct {
-	ContractVersion string             `json:"contract_version"`
-	ClusterKey      string             `json:"cluster_key"`
-	SourceVideoIDs  []string           `json:"source_video_ids"`
-	SummaryBlocks   []MaterialBlock    `json:"summary_blocks"`
-	Evidence        []MaterialEvidence `json:"evidence"`
+	ContractVersion  string              `json:"contract_version"`
+	ClusterKey       string              `json:"cluster_key"`
+	SourceVideoIDs   []string            `json:"source_video_ids"`
+	SummaryBlocks    []MaterialBlock     `json:"summary_blocks"`
+	Evidence         []MaterialEvidence  `json:"evidence"`
+	KnowledgeObjects []MaterialKnowledge `json:"-"`
 	// Retrieval metadata is runtime state, not model input. Keep it out of
 	// the generation prompt so a warning can never be mistaken for evidence.
 	RetrievalDegraded          bool   `json:"-"`
 	RetrievalDegradationReason string `json:"-"`
+}
+
+// MaterialKnowledge is runtime-only enrichment loaded from audited Wiki
+// object pages. It is intentionally excluded from model prompts; the model
+// selects evidence, and the assembler derives knowledge references from the
+// immutable evidence-to-object relationship.
+type MaterialKnowledge struct {
+	VideoID           string                  `json:"-"`
+	KnowledgeObjectID string                  `json:"-"`
+	WikiPageID        string                  `json:"-"`
+	KnowledgeType     knowledge.KnowledgeType `json:"-"`
+	Title             string                  `json:"-"`
+	EvidenceIDs       []string                `json:"-"`
 }
 
 type MaterialBlock struct {

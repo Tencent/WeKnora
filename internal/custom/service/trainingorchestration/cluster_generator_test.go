@@ -69,6 +69,19 @@ func TestClusterGeneratorPromptBoundsOutputForProviderLimit(t *testing.T) {
 	}
 }
 
+func TestClusterGeneratorPromptUsesCrossVideoLearningRules(t *testing.T) {
+	plan, material := validClusterGenerationInput()
+	prompt, err := (&ClusterGenerator{}).buildPrompt(plan, material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"主题簇整体必须形成跨视频学习路径", "动作 + 学习对象", "知识对象关系", "证据先后", "coverage_status", "supplementary_needs"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("cluster prompt missing optimized rule %q", expected)
+		}
+	}
+}
+
 func TestClusterGeneratorRejectsUnknownFieldsAndTrailingContent(t *testing.T) {
 	plan, material := validClusterGenerationInput()
 	tests := []struct {

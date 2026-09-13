@@ -201,7 +201,7 @@ func TestBuildDirectContentPromptIncludesSummaryFrameworkAndJSONContract(t *test
 	if err != nil {
 		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
 	}
-	for _, expected := range []string{`"schemaVersion":2`, "videoType", "evidenceChunkIds", "orchestrationProfile", "topicUnits", "contentForms", "skill_method", "process_standard", "这些 summaryBlockIds 对应正文 block 的 evidenceChunkIds 去重后的子集", "一、学习目标、适用对象与前置知识", "六、练习、自测与应用清单", "blocks:[]", "不得使用常识、推测", "不要输出 Markdown"} {
+	for _, expected := range []string{`"schemaVersion":2`, "videoType", "evidenceChunkIds", "orchestrationProfile", "topicUnits", "contentForms", "skill_method", "process_standard", "主题证据由系统根据这些正文块的证据分块 ID 按原始顺序生成", "一、学习目标、适用对象与前置知识", "六、练习、自测与应用清单", "blocks:[]", "不得使用常识、推测", "不要输出 Markdown"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("summary prompt does not contain %q: %s", expected, prompt)
 		}

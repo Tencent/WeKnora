@@ -9,15 +9,23 @@
         <t-icon :name="allExpanded ? 'chevron-up' : 'chevron-down'" />
       </button>
     </div>
-    <div v-if="loading" class="chapters__state"><t-loading text="正在加载章节" /></div>
-    <t-alert v-else-if="error" class="chapters__state" theme="error" :message="error">
+    <t-alert v-if="processingFailure" class="chapters__failure" theme="error" message="章节导航生成失败">
+      <template #operation><t-button size="small" variant="outline" :loading="props.isRetrying" @click="emit('retry')">重试</t-button></template>
+    </t-alert>
+    <div v-if="showSkeleton" class="chapters__skeleton" aria-busy="true" aria-label="正在生成章节导航">
+      <div v-for="n in 5" :key="`chapter-skeleton-${n}`" class="chapters__skeleton-row">
+        <t-skeleton animation="gradient" :row-col="[{ width: '27px', height: '23px', type: 'rect' }, { width: '58%', height: '16px' }, { width: '54px', height: '14px' }]" />
+        <t-skeleton animation="gradient" :row-col="[{ width: '88%', height: '14px' }, { width: '72%', height: '14px' }]" />
+      </div>
+    </div>
+    <t-alert v-else-if="error && !processingFailure" class="chapters__state" theme="error" :message="error">
       <template #operation><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
     </t-alert>
-    <t-empty v-else-if="chapters.length === 0" :description="notGenerated ? '章节尚未生成' : '暂无章节'">
+    <t-empty v-else-if="chapters.length === 0 && !processingFailure" :description="notGenerated ? '章节尚未生成' : '暂无章节'">
       <template #action><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
     </t-empty>
-    <div v-else class="chapters__list">
-      <article v-for="chapter in chapters" :key="chapter.id" :ref="el => setChapterRef(chapter.id, el)" :class="['chapter', { 'chapter--active': chapter.id === activeChapterId, 'chapter--collapsed': !isExpanded(chapter.id) }]">
+    <div v-else-if="chapters.length" class="chapters__list">
+      <article v-for="chapter in visibleChapters" :key="chapter.id" :ref="el => setChapterRef(chapter.id, el)" :class="['chapter', { 'chapter--active': chapter.id === activeChapterId, 'chapter--collapsed': !isExpanded(chapter.id) }]">
         <div class="chapter__header">
           <button class="chapter__main" type="button" @click="$emit('seek', chapter.start_seconds)">
             <span class="chapter__index">{{ chapter.chapter_index }}</span>
@@ -49,16 +57,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, toRef, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import type { Chapter, ContentState, VideoData } from '@/types/videohub'
+import { useFakeReveal } from '@/composables/useFakeReveal'
 
-const props = defineProps<{ video: VideoData; currentSeconds: number; contentState: ContentState<Chapter[]> }>()
-const emit = defineEmits<{ seek: [seconds: number]; reload: [] }>()
+const props = withDefaults(defineProps<{ video: VideoData; currentSeconds: number; contentState: ContentState<Chapter[]>; isGenerating?: boolean; isProcessingFailed?: boolean; isRetrying?: boolean }>(), { isGenerating: false, isProcessingFailed: false, isRetrying: false })
+const emit = defineEmits<{ seek: [seconds: number]; reload: []; retry: [] }>()
 const chapters = computed(() => props.contentState.data)
 const loading = computed(() => props.contentState.status === 'loading')
 const error = computed(() => props.contentState.status === 'error' ? props.contentState.error || '章节加载失败' : '')
 const notGenerated = computed(() => props.contentState.status === 'not_generated')
+const processingFailure = computed(() => props.isProcessingFailed)
+const showSkeleton = computed(() => !processingFailure.value && chapters.value.length === 0 && (loading.value || props.isGenerating))
+const streamSource = computed(() => showSkeleton.value || error.value || notGenerated.value ? [] : chapters.value)
+const { visibleCount } = useFakeReveal(toRef(streamSource), { intervalMs: 85 })
+const visibleChapters = computed(() => chapters.value.slice(0, visibleCount.value))
 const chapterRefs = new Map<string, HTMLElement>()
 const expandedChapterIds = ref(new Set<string>())
 const activeChapterId = computed(() => chapters.value.find(chapter => props.currentSeconds >= chapter.start_seconds && props.currentSeconds < chapter.end_seconds)?.id)
@@ -112,8 +126,11 @@ watch(() => props.video.id, () => chapterRefs.clear())
 .chapters__collapse-all, .chapter__toggle { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--td-radius-medium); background: transparent; color: var(--td-text-color-secondary); cursor: pointer; }
 .chapters__collapse-all:hover, .chapter__toggle:hover { background: var(--td-bg-color-container-hover); color: var(--td-brand-color); }
 .chapters__state, .chapters > :deep(.t-empty) { min-height: 180px; display: grid; place-items: center; }
+.chapters__skeleton { display: grid; gap: 14px; min-height: 300px; padding: 0 16px 24px 12px; }
+.chapters__skeleton-row { display: grid; gap: 8px; padding: 13px 0; border-bottom: 1px solid color-mix(in srgb, var(--td-component-stroke) 72%, transparent); }
+.chapters__skeleton-row :deep(.t-skeleton) { display: flex; gap: 9px; }
 .chapters__list { height: auto; max-height: none; overflow: visible; padding: 0 4px 96px 0; }
-.chapter { margin: 0; padding: 13px 12px; border: 1px solid transparent; border-bottom-color: color-mix(in srgb, var(--td-component-stroke) 72%, transparent); background: transparent; transition: border-color .15s ease, background-color .15s ease; }
+.chapter { margin: 0; padding: 13px 12px; border: 1px solid transparent; border-bottom-color: color-mix(in srgb, var(--td-component-stroke) 72%, transparent); background: transparent; animation: chapter-reveal .24s ease both; transition: border-color .15s ease, background-color .15s ease; }
 .chapter:first-child { border-top-color: color-mix(in srgb, var(--td-component-stroke) 72%, transparent); }
 .chapter:last-child { margin-bottom: 0; }
 .chapter--collapsed + .chapter--collapsed { margin-top: 8px; }
@@ -141,4 +158,6 @@ watch(() => props.video.id, () => chapterRefs.clear())
 .chapter__point-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chapter__point-time { margin-left: auto; color: var(--td-text-color-secondary); font-family: var(--app-font-family-mono, monospace); font-size: 11px; }
 @media (max-width: 680px) { .chapters__list { padding-right: 0; }.chapter__main { grid-template-columns: 27px minmax(0, 1fr); }.chapter__time { grid-column: 2; justify-self: start; }.chapter__body { padding-left: 36px; } }
+@keyframes chapter-reveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .chapter { animation: none; } }
 </style>
