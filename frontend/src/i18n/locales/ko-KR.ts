@@ -2405,7 +2405,7 @@ export default {
       supportsVisionLabel: '비전/멀티모달 지원',
       supportsVisionDesc: '모델의 이미지 등 멀티모달 입력 지원 여부',
       inputModalitiesLabel: '입력 모달리티',
-      inputModalitiesDesc: '이 모델이 지원하는 입력 모달리티를 선택하세요. 텍스트는 모든 모델의 기본 능력이므로 기본 선택되어 있습니다. 모델 목록이 모달리티를 제공하지 않아도 편집이 제한되지 않습니다.',
+      inputModalitiesDesc: '이 모델이 지원하는 입력 모달리티를 선택하세요. 텍스트는 모든 모델의 기본 능력이므로 기본 선택되어 있습니다.',
       modalityText: '텍스트',
       modalityImage: '이미지',
       modalityAudio: '오디오',

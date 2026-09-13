@@ -2407,7 +2407,7 @@ export default {
       supportsVisionLabel: '支持视觉/多模态',
       supportsVisionDesc: '模型是否支持图片等多模态输入',
       inputModalitiesLabel: '输入模态',
-      inputModalitiesDesc: '勾选该模型支持的输入模态；文本为所有模型的基础能力，默认勾选。模型列表未提供模态信息时不限制编辑。',
+      inputModalitiesDesc: '勾选该模型支持的输入模态；文本为所有模型的基础能力，默认勾选。',
       modalityText: '文本',
       modalityImage: '图片',
       modalityAudio: '音频',

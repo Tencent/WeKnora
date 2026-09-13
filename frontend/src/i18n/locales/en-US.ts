@@ -4343,7 +4343,7 @@ export default {
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
       inputModalitiesLabel: 'Input modalities',
-      inputModalitiesDesc: 'Check the input modalities this model supports; text is the baseline capability and is checked by default. Editing is never locked when the model list does not report modalities.',
+      inputModalitiesDesc: 'Check the input modalities this model supports; text is the baseline capability and is checked by default.',
       modalityText: 'Text',
       modalityImage: 'Image',
       modalityAudio: 'Audio',

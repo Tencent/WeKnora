@@ -4343,7 +4343,7 @@ export default {
       supportsVisionLabel: '視覚・マルチモーダルに対応',
       supportsVisionDesc: 'モデルが画像やマルチモーダル入力を受け付けるかどうか',
       inputModalitiesLabel: '入力モダリティ',
-      inputModalitiesDesc: 'このモデルが対応する入力モダリティを選択してください。テキストは全モデルの基本能力のためデフォルトで選択されています。モデル一覧がモダリティを返さない場合も編集は制限されません。',
+      inputModalitiesDesc: 'このモデルが対応する入力モダリティを選択してください。テキストは全モデルの基本能力のためデフォルトで選択されています。',
       modalityText: 'テキスト',
       modalityImage: '画像',
       modalityAudio: '音声',
