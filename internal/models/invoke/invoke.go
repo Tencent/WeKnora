@@ -8,9 +8,11 @@ package invoke
 // fallback conversion (design §6.5).
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -213,6 +215,31 @@ func chatExecute(ctx context.Context, m *ModelConfig, opts *ChatOptions) (*RawRe
 	return defaultExecutor.Do(ctx, key, req)
 }
 
+// headCapture tees the first N bytes of a stream body so a stream that
+// yields no client-visible events can be diagnosed from the log (2026-09-14
+// glm-5.2 report: the provider closed a 2xx stream with zero events and the
+// raw shape was unknowable post-mortem).
+type headCapture struct {
+	r   io.Reader
+	buf bytes.Buffer
+	n   int
+}
+
+func (h *headCapture) Read(p []byte) (int, error) {
+	n, err := h.r.Read(p)
+	if h.n < streamBodyHeadMax {
+		k := n
+		if k > streamBodyHeadMax-h.n {
+			k = streamBodyHeadMax - h.n
+		}
+		h.buf.Write(p[:k])
+		h.n += k
+	}
+	return n, err
+}
+
+const streamBodyHeadMax = 2048
+
 // ChatStream runs a streaming chat call and returns the session-level semantic
 // stream (types.StreamResponse value channel) — caller semantics unchanged
 // from v1. Adapter TranslateStreamEvent yields internal StreamEvents; the
@@ -244,7 +271,9 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 	// emit blocks on delivery but always yields to ctx cancellation, so a
 	// consumer that abandons the stream can never wedge the producer (v1
 	// concurrency_wrapper.go: drain + release on ctx.Done).
+	emitted := 0
 	emit := func(sr types.StreamResponse) {
+		emitted++
 		select {
 		case out <- sr:
 		case <-ctx.Done():
@@ -308,7 +337,8 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 			case <-streamDone:
 			}
 		}()
-		demux := NewDemuxer(result.Header.Get("Content-Type"), result.Stream)
+		head := &headCapture{r: result.Stream}
+		demux := NewDemuxer(result.Header.Get("Content-Type"), head)
 		state := NewStreamBridgeState()
 		a, _ := resolveAdapter(m.Provider)
 		ca, _ := a.(ChatAdapter)
@@ -365,6 +395,14 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 					// that said "stop" and closed cleanly IS a natural stop —
 					// the agent's empty-content guard keys on it); with no
 					// recorded reason the field stays empty, exactly like v1.
+					if emitted == 0 {
+						// Zero-event stream: the provider accepted the call,
+						// sent nothing client-visible and closed. Surface the
+						// raw body head so the shape is diagnosable — silent
+						// empty answers must never be the only trace.
+						logger.Warnf(ctx, "provider stream produced no events: content_type=%s body_head=%q",
+							result.Header.Get("Content-Type"), head.buf.String())
+					}
 					final := types.StreamResponse{
 						ResponseType: types.ResponseTypeAnswer,
 						Done:         true,
