@@ -2783,7 +2783,7 @@ defineExpose({
           <!-- 思考控制（会话级覆盖 design §8.1.3）：未开思考的模型整块隐藏；嵌入页不暴露 -->
           <t-popup v-if="thinkingSupported && !embeddedMode" v-model="showThinkingPanel" trigger="click"
             placement="top-left" :overlay-inner-class-name="'thinking-panel-popup'">
-            <div class="model-display">
+            <div class="model-display model-display--thinking">
               <div class="model-selector-trigger thinking-trigger" :class="{ active: sessionThinkingActive }">
                 <t-icon name="lightbulb" size="14px" />
                 <span class="model-selector-name">{{ sessionThinkingTriggerLabel }}</span>
@@ -2791,9 +2791,13 @@ defineExpose({
             </div>
             <template #content>
               <div class="thinking-panel" @click.stop>
+                <!-- hideToggle：会话 API 只传 thinking_level，强制开关不可传输；
+                     面板即"档位覆盖"选择器（2026-09-14 反馈：开关是死控件，
+                     且把重置按钮拖成永久禁用） -->
                 <ThinkingControls
                   v-model="sessionThinkingValue"
                   edit-mode="single"
+                  hide-toggle
                   :caps="selectedModelThinkingCaps"
                   :chat-shard="selectedModelChatShard"
                 />
@@ -3574,6 +3578,12 @@ const getImgSrc = (url: string) => {
   margin-left: auto;
   flex-shrink: 0;
 
+  /* 思考触发器是右侧第二个元素：两个 auto 边距会把剩余空间从中间平分，
+     造成模型芯片与思考按钮之间的大空洞（2026-09-14 反馈）——改固定间距 */
+  &.model-display--thinking {
+    margin-left: 6px;
+  }
+
   &.agent-controlled {
     .model-selector-trigger {
       cursor: not-allowed;
@@ -3960,15 +3970,40 @@ const getImgSrc = (url: string) => {
 
 <!-- 非 scoped 样式：t-popup 面板渲染到 body 下，scoped 无法命中 -->
 <style lang="less">
-/* 思考面板（会话级思考覆盖 design §8.1.3） */
+/* 思考面板（会话级思考覆盖 design §8.1.3）——排版与全局一致 */
+.thinking-panel-popup {
+  padding: 0;
+  font-size: 13px;
+}
+
 .thinking-panel {
   width: 280px;
   padding: 12px;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+
+  .thinking-controls {
+    gap: 10px;
+  }
+
+  .thinking-controls__label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--td-text-color-secondary);
+  }
+
+  .thinking-controls__desc {
+    margin: 0;
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
 
   .thinking-panel__footer {
     display: flex;
     justify-content: flex-end;
-    margin-top: 8px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--td-component-border, #e7e7e7);
   }
 }
 </style>
