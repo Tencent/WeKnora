@@ -40,20 +40,27 @@
         </div>
       </div>
 
-      <!-- single：档位单选，空 = 跟随模型默认（思考未开启不展示，2026-09-13 反馈 #4） -->
-      <div v-if="editMode === 'single' && (!showToggle || effectiveEnabled)" class="thinking-controls__field">
-        <t-select
-          :model-value="modelValue.level ?? ''"
-          clearable
-          :options="singleLevelOptions"
-          :placeholder="t('thinking.levelPlaceholder')"
-          @change="(v: unknown) => setLevel(String(v ?? ''))"
-        />
-      </div>
+      <!-- 档位区随思考开关折叠（2026-09-13 反馈 #4）。grid-rows 0fr/1fr
+           过渡做平滑开合——直接 v-if 卸载会让抽屉高度突变，观感像回弹 bug。
+           showToggle=false 的宿主面板（无开关）恒展开。 -->
+      <div
+        class="thinking-controls__collapse"
+        :class="{ 'is-collapsed': showToggle && !effectiveEnabled }"
+      >
+        <div class="thinking-controls__collapse-inner">
+          <!-- single：档位单选，空 = 跟随模型默认 -->
+          <div v-if="editMode === 'single'" class="thinking-controls__field">
+            <t-select
+              :model-value="modelValue.level ?? ''"
+              clearable
+              :options="singleLevelOptions"
+              :placeholder="t('thinking.levelPlaceholder')"
+              @change="(v: unknown) => setLevel(String(v ?? ''))"
+            />
+          </div>
 
-      <!-- levels：允许集多选 + 默认档（思考未开启不展示——档位与默认档对
-           关闭思考的模型无意义；showToggle=false 的宿主面板不受影响） -->
-      <template v-else-if="!showToggle || effectiveEnabled">
+          <!-- levels：允许集多选 + 默认档 -->
+          <template v-else>
         <div class="thinking-controls__field">
           <label class="thinking-controls__label">
             {{ t('model.editor.selectedLevelsLabel') }}
@@ -85,7 +92,9 @@
           />
           <p class="thinking-controls__desc">{{ t('model.editor.thinkingLevelDesc') }}</p>
         </div>
-      </template>
+        </template>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -220,6 +229,28 @@ const onSelectedLevelsChange = (value: unknown) => {
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  // 档位区折叠容器：grid-rows 1fr/0fr 过渡实现高度动画（内容保持挂载）
+  &__collapse {
+    display: grid;
+    grid-template-rows: 1fr;
+    transition: grid-template-rows 0.2s ease;
+
+    &.is-collapsed {
+      grid-template-rows: 0fr;
+      visibility: hidden;
+      // visibility 延迟到收起动画结束后再生效，展开时立即恢复
+      transition: grid-template-rows 0.2s ease, visibility 0s 0.2s;
+    }
+  }
+
+  &__collapse-inner {
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
   &__label {
