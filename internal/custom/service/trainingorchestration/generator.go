@@ -60,7 +60,8 @@ func (g *Generator) Generate(ctx context.Context, input InputPackage) (Projectio
 	if g == nil || g.LLM == nil {
 		return ProjectionDocument{}, fmt.Errorf("training orchestration llm is not configured")
 	}
-	input = withoutKnowledgeObjects(input)
+	originalInput := input
+	modelInput := withoutKnowledgeObjects(input)
 	fingerprint, err := SourceFingerprint(input, g.LLM.Model(), g.promptVersion())
 	if err != nil {
 		return ProjectionDocument{}, err
@@ -70,15 +71,16 @@ func (g *Generator) Generate(ctx context.Context, input InputPackage) (Projectio
 		now = g.Now().UTC()
 	}
 	projection := Projection{SchemaVersion: SchemaVersion, OwnerScopeID: input.OwnerScopeID, SourceFingerprint: fingerprint, GeneratedAt: now.Format(time.RFC3339Nano), TopicClusters: []TopicCluster{}, TopicClusterRelations: []TopicClusterRelation{}}
-	if len(input.QualifiedVideos) == 0 {
+	if len(modelInput.QualifiedVideos) == 0 {
 		projection.Statistics = buildStatistics(input, nil, map[string]struct{}{}, nil)
+		ensureGapAnalyses(&projection)
 		doc := ProjectionDocument{TrainingPathProjection: projection}
 		if err := ValidateProjection(doc, input); err != nil {
 			return ProjectionDocument{}, err
 		}
 		return doc, nil
 	}
-	prompt, err := buildPrompt(input)
+	prompt, err := buildPrompt(modelInput)
 	if err != nil {
 		return ProjectionDocument{}, err
 	}
@@ -111,7 +113,8 @@ func (g *Generator) Generate(ctx context.Context, input InputPackage) (Projectio
 	}
 	projection.TopicClusters = generated.TopicClusters
 	projection.TopicClusterRelations = generated.TopicClusterRelations
-	normalizeProjectionKnowledgeFields(&projection)
+	bindProjectionKnowledgeFields(&projection, originalInput)
+	ensureGapAnalyses(&projection)
 	selectedVideos := map[string]struct{}{}
 	unitEvidence := make([]EvidenceRef, 0)
 	for _, cluster := range projection.TopicClusters {

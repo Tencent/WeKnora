@@ -305,6 +305,22 @@ export function parseOutlineWikiPage(content: string, durationSeconds = 0): Chap
 
 const SUMMARY_SCHEMA_VERSIONS = new Set([1, 2])
 const SUMMARY_VIDEO_TYPES = new Set<VideoCategory>(['interview', 'training', 'salon', 'meeting', 'general'])
+const LEGACY_TRAINING_SECTIONS = [
+  { id: 'goals-audience', title: '一、目标与受众' },
+  { id: 'knowledge-map', title: '二、知识地图' },
+  { id: 'core-concepts', title: '三、核心概念' },
+  { id: 'methods-steps', title: '四、方法与步骤' },
+  { id: 'examples-exceptions', title: '五、示例与异常' },
+  { id: 'practice-application', title: '六、练习与应用' },
+] as const
+const CURRENT_TRAINING_SECTIONS = [
+  { id: 'learning-goals-audience-prerequisites', title: '一、学习目标、适用对象与前置知识' },
+  { id: 'training-content-system', title: '二、培训内容体系' },
+  { id: 'knowledge-highlights-quotes', title: '三、核心知识要点与原文金句' },
+  { id: 'methods-steps-criteria', title: '四、方法、操作步骤与判断标准' },
+  { id: 'cases-tools-qa', title: '五、案例、工具使用与互动问答' },
+  { id: 'practice-assessment-application', title: '六、练习、自测与应用清单' },
+] as const
 
 export interface StructuredSummaryResponse {
   schemaVersion?: number
@@ -321,11 +337,12 @@ export function parseSummaryVideoType(response: StructuredSummaryResponse): Vide
 }
 
 export function parseStructuredSummary(response: StructuredSummaryResponse, _previousCategory?: string): SummarySection[] {
-  parseSummaryVideoType(response)
+  const videoType = parseSummaryVideoType(response)
   if (!SUMMARY_SCHEMA_VERSIONS.has(response.schemaVersion ?? 0) || !Array.isArray(response.sections)) {
     throw new Error('智能总结结构不符合当前模板')
   }
-  return response.sections.map((rawSection, sectionIndex) => {
+  const sections = normalizeLegacyTrainingSections(videoType, response.sections)
+  return sections.map((rawSection, sectionIndex) => {
     if (!rawSection || typeof rawSection !== 'object') throw new Error(`智能总结第 ${sectionIndex + 1} 章无效`)
     const section = rawSection as Record<string, unknown>
     if (typeof section.title !== 'string' || !section.title.trim() || typeof section.id !== 'string' || !section.id.trim() || !Array.isArray(section.blocks)) {
@@ -337,6 +354,21 @@ export function parseStructuredSummary(response: StructuredSummaryResponse, _pre
       blocks: section.blocks.map((rawBlock, blockIndex) => parseSummaryBlock(rawBlock, sectionIndex, blockIndex)),
     }
   })
+}
+
+function normalizeLegacyTrainingSections(videoType: VideoCategory, sections: unknown[]): unknown[] {
+  if (videoType !== 'training' || sections.length !== LEGACY_TRAINING_SECTIONS.length) return sections
+  const isLegacy = sections.every((rawSection, index) => {
+    if (!rawSection || typeof rawSection !== 'object') return false
+    const section = rawSection as Record<string, unknown>
+    const expected = LEGACY_TRAINING_SECTIONS[index]
+    return section.id === expected.id && section.title === expected.title
+  })
+  if (!isLegacy) return sections
+  return sections.map((rawSection, index) => ({
+    ...(rawSection as Record<string, unknown>),
+    ...CURRENT_TRAINING_SECTIONS[index],
+  }))
 }
 
 function parseSummaryBlock(rawBlock: unknown, sectionIndex: number, blockIndex: number): SummaryBlock {

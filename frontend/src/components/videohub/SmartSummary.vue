@@ -1,14 +1,22 @@
 <template>
   <article class="smart-summary">
-    <div v-if="loading" class="smart-summary__state"><t-loading text="正在加载智能总结" /></div>
-    <t-alert v-else-if="error" class="smart-summary__state" theme="error" :message="error">
+    <t-alert v-if="processingFailure" class="smart-summary__failure" theme="error" message="智能总结生成失败">
+      <template #operation><t-button size="small" variant="outline" :loading="props.isRetrying" @click="emit('retry')">重试</t-button></template>
+    </t-alert>
+    <div v-if="showSkeleton" class="smart-summary__skeleton" aria-busy="true" aria-label="正在生成智能总结">
+      <t-skeleton animation="gradient" :row-col="[{ width: '42%', height: '18px' }]" />
+      <t-skeleton animation="gradient" :row-col="[{ width: '94%', height: '16px' }, { width: '82%', height: '16px' }, { width: '68%', height: '16px' }]" />
+      <t-skeleton animation="gradient" :row-col="[{ width: '36%', height: '18px' }]" />
+      <t-skeleton animation="gradient" :row-col="[{ width: '88%', height: '16px' }, { width: '76%', height: '16px' }, { width: '58%', height: '16px' }]" />
+    </div>
+    <t-alert v-else-if="error && !processingFailure" class="smart-summary__state" theme="error" :message="error">
       <template #operation><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
     </t-alert>
-    <t-empty v-else-if="sections.length === 0" :description="notGenerated ? '智能总结尚未生成' : '暂无智能总结'">
+    <t-empty v-else-if="sections.length === 0 && !processingFailure" :description="notGenerated ? '智能总结尚未生成' : '暂无智能总结'">
       <template #action><t-button size="small" variant="outline" @click="load">刷新</t-button></template>
     </t-empty>
-    <div v-else class="smart-summary__document">
-        <section v-for="section in sections" :key="section.id" class="smart-summary__section">
+    <div v-else-if="sections.length" class="smart-summary__document">
+        <section v-for="section in visibleSections" :key="section.id" class="smart-summary__section">
           <h2>{{ section.title }}</h2>
           <ul>
             <li v-for="block in section.blocks" :key="block.id" :class="{ 'is-bullet': block.kind === 'bullet' }">
@@ -35,16 +43,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, toRef } from 'vue'
 import EvidencePopover from './EvidencePopover.vue'
 import type { ContentState, SummarySection, VideoData } from '@/types/videohub'
+import { useFakeReveal } from '@/composables/useFakeReveal'
 
-const props = defineProps<{ video: VideoData; contentState: ContentState<SummarySection[]> }>()
-const emit = defineEmits<{ seek: [seconds: number]; reload: [] }>()
+const props = withDefaults(defineProps<{ video: VideoData; contentState: ContentState<SummarySection[]>; isGenerating?: boolean; isProcessingFailed?: boolean; isRetrying?: boolean }>(), { isGenerating: false, isProcessingFailed: false, isRetrying: false })
+const emit = defineEmits<{ seek: [seconds: number]; reload: []; retry: [] }>()
 const sections = computed(() => props.contentState.data)
 const loading = computed(() => props.contentState.status === 'loading')
 const error = computed(() => props.contentState.status === 'error' ? props.contentState.error || '智能总结加载失败' : '')
 const notGenerated = computed(() => props.contentState.status === 'not_generated')
+const processingFailure = computed(() => props.isProcessingFailed)
+const showSkeleton = computed(() => !processingFailure.value && sections.value.length === 0 && (loading.value || props.isGenerating))
+const streamSource = computed(() => showSkeleton.value || error.value || notGenerated.value ? [] : sections.value)
+const { visibleCount } = useFakeReveal(toRef(streamSource), { intervalMs: 90 })
+const visibleSections = computed(() => sections.value.slice(0, visibleCount.value))
 function load() { emit('reload') }
 
 </script>
@@ -52,7 +66,10 @@ function load() { emit('reload') }
 <style scoped>
 .smart-summary { min-height: 360px; background: transparent; }
 .smart-summary__state, .smart-summary > :deep(.t-empty) { min-height: 360px; display: grid; place-items: center; }
+.smart-summary__skeleton { display: grid; gap: 14px; min-height: 360px; padding: 24px 16px 32px 8px; }
+.smart-summary__skeleton :deep(.t-skeleton) { display: grid; gap: 8px; }
 .smart-summary__document { padding: 16px 8px 32px; background: transparent; }
+.smart-summary__section { animation: smart-summary-reveal .24s ease both; }
 .smart-summary__section + .smart-summary__section { margin-top: calc(var(--td-comp-margin-s) * 3.5); }
 .smart-summary h2 { display: flex; align-items: baseline; gap: var(--td-comp-margin-s); margin: 0 0 calc(var(--td-comp-margin-s) * 1.5); color: var(--td-text-color-primary); font-size: 14px; font-weight: 500; line-height: 1.4; }
 .smart-summary ul { display: grid; gap: calc(var(--td-comp-margin-s) / 2); margin: 0; padding: 0; list-style: none; }
@@ -67,4 +84,6 @@ function load() { emit('reload') }
 .smart-summary__evidence-button:hover { background: var(--td-brand-color-light); }
 .smart-summary__evidence-button:focus-visible { outline: 2px solid var(--td-brand-color-focus); outline-offset: 1px; }
 @media (hover: none) { .smart-summary__evidence-button { opacity: 1; visibility: visible; } }
+@keyframes smart-summary-reveal { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .smart-summary__section { animation: none; } }
 </style>

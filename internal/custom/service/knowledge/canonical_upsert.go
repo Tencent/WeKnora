@@ -268,33 +268,10 @@ func mergeCanonicalWikiObject(canonicalContent, incomingContent string) (string,
 	}
 	sort.SliceStable(contributions, func(i, j int) bool { return contributionKey(contributions[i]) < contributionKey(contributions[j]) })
 	base["evidence_contributions"] = contributions
-
-	// First-stage writes intentionally submit an empty relation list. Preserve
-	// existing graph edges for those writes. A later non-empty relation pass
-	// replaces only the active video's evidence contribution on each canonical
-	// source/type/target edge.
-	if incomingRelationItems, ok := incoming["relations"].([]any); ok && len(incomingRelationItems) > 0 {
-		canonicalRelations, err := ParseWikiObjectRelations(canonicalContent)
-		if err != nil {
-			return "", err
-		}
-		incomingRelations, err := ParseWikiObjectRelations(incomingContent)
-		if err != nil {
-			return "", err
-		}
-		if len(incomingContributions) == 0 {
-			return "", fmt.Errorf("relation write requires an active evidence contribution")
-		}
-		activeContribution := incomingContributions[len(incomingContributions)-1]
-		legacyVideoID, legacyGeneration := legacyRelationScope(canonicalContent)
-		base["relations"] = mergeCanonicalRelations(
-			canonicalRelations,
-			incomingRelations,
-			legacyVideoID,
-			legacyGeneration,
-			activeContribution.VideoID,
-			activeContribution.TranscriptGeneration,
-		)
+	// The first extraction stage submits an empty relation list. Keep existing
+	// edges in that case, but persist the validated non-empty second-stage list.
+	if relations, ok := incoming["relations"].([]any); ok && len(relations) > 0 {
+		base["relations"] = relations
 	}
 
 	// First-stage writes intentionally submit an empty relation list. Preserve

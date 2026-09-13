@@ -58,6 +58,17 @@ type staticStageFourRunner struct {
 	calls int
 }
 
+func TestSamePublishedProjectionIgnoresInternalEvidenceText(t *testing.T) {
+	candidate := ProjectionDocument{TrainingPathProjection: Projection{
+		TopicClusters: []TopicCluster{{ClusterID: "cluster-1", EvidenceText: map[string]string{"evidence-1": "source text"}}},
+	}}
+	published := candidate
+	published.TrainingPathProjection.TopicClusters[0].EvidenceText = nil
+	if !samePublishedProjection(published, candidate) {
+		t.Fatal("internal-only evidence text should not invalidate a serialized projection")
+	}
+}
+
 func (r *staticStageFourRunner) Run(context.Context, CatalogSnapshot) (ProjectionDocument, error) {
 	r.calls++
 	return r.doc, nil
@@ -73,9 +84,21 @@ func (w *memoryProjectionWiki) EnsurePage(_ context.Context, _ string, input wek
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.writes++
-	if w.page.ID == "" {
+	if w.page.ID == "" || w.page.Slug != input.Slug {
 		w.page = weknora.WikiPage{ID: "training-wiki-1", Slug: input.Slug, Content: input.Content, Version: 1}
 	}
+	page := w.page
+	return &page, nil
+}
+func (w *memoryProjectionWiki) UpsertPage(_ context.Context, _ string, input weknora.WikiPageWrite) (*weknora.WikiPage, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writes++
+	if w.page.ID == "" {
+		w.page.ID = "training-wiki-1"
+		w.page.Version = 1
+	}
+	w.page.Slug, w.page.Content = input.Slug, input.Content
 	page := w.page
 	return &page, nil
 }
@@ -128,6 +151,15 @@ func TestServicePublishesCurrentVersionAndReusesFingerprint(t *testing.T) {
 	second = waitForTrainingJob(t, service, second.ID)
 	if second.Status != JobSucceeded || !second.Reused || llm.calls != 1 || wiki.writes != 1 {
 		t.Fatalf("fingerprint was not reused: %#v calls=%d writes=%d", second, llm.calls, wiki.writes)
+	}
+
+	overwrite, err := service.StartWithOptions(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overwrite = waitForTrainingJob(t, service, overwrite.ID)
+	if overwrite.Status != JobSucceeded || overwrite.Reused || llm.calls != 2 || wiki.writes != 2 {
+		t.Fatalf("explicit overwrite did not bypass fingerprint reuse: %#v calls=%d writes=%d", overwrite, llm.calls, wiki.writes)
 	}
 
 	doc.TrainingPathProjection.TopicClusters[0].KnowledgeObjectIDs = []string{"tampered-object"}
@@ -189,6 +221,11 @@ func TestServiceUsesStageFourRunnerWhenConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// EvidenceText is an internal-only assembly aid and is intentionally not
+	// serialized to the published Wiki projection.
+	if len(doc.TrainingPathProjection.TopicClusters) > 0 {
+		doc.TrainingPathProjection.TopicClusters[0].EvidenceText = map[string]string{"evidence-1": "source text"}
+	}
 	doc.TrainingPathProjection.RetrievalDegraded = true
 	doc.TrainingPathProjection.RetrievalDegradationReason = "search_unavailable"
 	catalog := &staticCatalogCollector{snapshot: snapshot}
@@ -205,7 +242,7 @@ func TestServiceUsesStageFourRunnerWhenConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	job = waitForTrainingJob(t, service, job.ID)
-	if job.Status != JobSucceeded || job.WarningCode != WarningEvidenceRetrievalDegraded || job.WarningMessage == "" || runner.calls != 1 || catalog.calls != 2 || wiki.writes != 1 {
+	if job.Status != JobSucceeded || job.WarningCode != WarningEvidenceRetrievalDegraded || job.WarningMessage == "" || runner.calls != 1 || catalog.calls != 3 || wiki.writes != 1 {
 		t.Fatalf("stage-four runner was not used: job=%#v runner_calls=%d catalog_calls=%d wiki_writes=%d", job, runner.calls, catalog.calls, wiki.writes)
 	}
 }

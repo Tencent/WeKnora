@@ -316,6 +316,24 @@ func TestPlannerPromptExposesOnlyEvidenceSentenceIDs(t *testing.T) {
 	}
 }
 
+func TestPlannerPromptUsesCrossVideoLearningRulesWithoutChangingContract(t *testing.T) {
+	snapshot := CatalogSnapshot{
+		ContractVersion:   PlanningContractVersion,
+		OwnerScopeID:      "scope",
+		SourceFingerprint: "sha256:test",
+		Videos:            []CatalogVideo{validCatalogVideo("video-1")},
+	}
+	prompt, err := (&StageOnePlanner{LLM: &plannerLLM{}}).buildPrompt(snapshot, snapshot.SourceFingerprint, "request-1", PlannerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"先识别每个视频能够支持的学习目标，再跨视频归并", "概念解释、方法步骤、案例演示和适用边界", "只能包含 topic_clusters 和 unselected_videos", "supplementary_needs", "coverage_status"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("planning prompt missing optimized rule %q", expected)
+		}
+	}
+}
+
 func TestPlannerCorrectionPromptListsAllowedEvidenceSentenceIDs(t *testing.T) {
 	snapshot := CatalogSnapshot{
 		ContractVersion: PlanningContractVersion,
@@ -359,6 +377,9 @@ func TestPlannerCorrectionPromptListsAllowedEvidenceSentenceIDs(t *testing.T) {
 	correctionPrompt := llm.prompts[1]
 	if !strings.Contains(correctionPrompt, "evidence_ids") || !strings.Contains(correctionPrompt, "evs:gen-1:one") {
 		t.Fatalf("correction prompt did not list allowed evidence IDs: %s", correctionPrompt)
+	}
+	if !strings.Contains(correctionPrompt, "exactly one evidence_id") || !strings.Contains(correctionPrompt, "at most one summary_block_id") {
+		t.Fatalf("correction prompt did not enforce minimal immutable references: %s", correctionPrompt)
 	}
 	correctionTail := correctionPrompt[strings.Index(correctionPrompt, "\n\nCORRECTION:\n")+len("\n\nCORRECTION:\n"):]
 	if strings.Contains(correctionTail, "evidenceChunkIds") || strings.Contains(correctionTail, "chunk_id") {
@@ -439,7 +460,7 @@ func TestPlannerCorrectsInvalidStructuredOutputOnce(t *testing.T) {
 	}
 }
 
-func TestPlannerStopsAfterOneUnknownFieldCorrection(t *testing.T) {
+func TestPlannerStopsAfterThreeUnknownFieldCorrections(t *testing.T) {
 	snapshot := CatalogSnapshot{
 		ContractVersion: PlanningContractVersion,
 		OwnerScopeID:    "scope",
@@ -452,8 +473,8 @@ func TestPlannerStopsAfterOneUnknownFieldCorrection(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("expected unknown-field failure after correction, got %v", err)
 	}
-	if len(llm.prompts) != 2 {
-		t.Fatalf("expected exactly one correction call, got %d", len(llm.prompts))
+	if len(llm.prompts) != 4 {
+		t.Fatalf("expected exactly three bounded correction calls, got %d", len(llm.prompts))
 	}
 }
 
@@ -895,7 +916,7 @@ func TestPlannerMergeAllowsOneAdditionalFormatCorrection(t *testing.T) {
 	}
 }
 
-func TestPlannerMergeStopsAfterSecondFormatCorrection(t *testing.T) {
+func TestPlannerMergeStopsAfterThirdFormatCorrection(t *testing.T) {
 	snapshot := CatalogSnapshot{
 		ContractVersion:   PlanningContractVersion,
 		SourceFingerprint: "sha256:test",
@@ -937,7 +958,7 @@ func TestPlannerMergeStopsAfterSecondFormatCorrection(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown field") {
 		t.Fatalf("expected strict unknown-field failure after second correction, got %v", err)
 	}
-	if len(llm.prompts) != 3 {
-		t.Fatalf("expected exactly two bounded corrections, got %d", len(llm.prompts))
+	if len(llm.prompts) != 4 {
+		t.Fatalf("expected exactly three bounded corrections, got %d", len(llm.prompts))
 	}
 }

@@ -24,6 +24,17 @@ var stageOnePlanningPrompt string
 //go:embed prompts/training-orchestration-planning-merge-v1.txt
 var stageOneMergePrompt string
 
+const planningOutputContractReminder = `OUTPUT CONTRACT (STRICT):
+Return exactly one JSON object with exactly these two root keys:
+{"topic_clusters":[...],"unselected_videos":[...]}
+Each topic_clusters item may contain only:
+cluster_key,title,summary,learning_goal,primary_template,scope,inclusion_criteria,exclusion_criteria,source_video_ids,uncertain_video_ids,material_requests,confidence,review_status.
+Each material_requests item may contain only:
+video_id,summary_wiki_page_id,summary_version,transcript_generation,summary_block_ids,evidence_ids.
+Each unselected_videos item may contain only:
+video_id,reason.
+Do not return learning_path, topics, units, stages, relations, coverage_status, supplementary_needs, knowledge_refs, assessment, topic_cluster_relations, or any other key. Do not return Markdown, code fences, explanations, or trailing text.`
+
 const (
 	defaultPlanningMaxInputTokens = 450000
 	defaultPlanningBatchTokens    = 35000
@@ -33,6 +44,7 @@ const (
 	defaultPlanningMergeItems     = 20
 	defaultPlanningMergeDepth     = 8
 	minAcceptedPlanConfidence     = 0.60
+	maxPlanningFormatCorrections  = 3
 )
 
 type Planner interface {
@@ -371,7 +383,7 @@ func (p *StageOnePlanner) buildPrompt(snapshot CatalogSnapshot, fingerprint, req
 	if err != nil {
 		return "", fmt.Errorf("encode planning prompt: %w", err)
 	}
-	return strings.TrimSpace(stageOnePlanningPrompt) + "\n\nINPUT:\n" + string(raw), nil
+	return strings.TrimSpace(stageOnePlanningPrompt) + "\n\n" + planningOutputContractReminder + "\n\nINPUT:\n" + string(raw), nil
 }
 
 func planningCatalogFromSnapshot(snapshot CatalogSnapshot) planningCatalog {
@@ -436,7 +448,7 @@ func planningProfileFromSummary(profile *summary.OrchestrationProfile) *planning
 }
 
 func buildPlanningCorrectionPrompt(prompt string, validationErr error, snapshot CatalogSnapshot) string {
-	return prompt + "\n\nCORRECTION:\n" + validationErr.Error() + "\n" + planningAllowedReferencesPrompt(snapshot) + "\nReturn one corrected JSON object only."
+	return prompt + "\n\nCORRECTION:\n" + validationErr.Error() + "\n" + planningAllowedReferencesPrompt(snapshot) + "\nReturn one corrected JSON object only. Keep only the allowed root and nested fields. For every material_request, copy exactly one evidence_id from the matching video's whitelist and at most one summary_block_id; never invent, shorten, or transform an identifier.\n\n" + planningOutputContractReminder
 }
 
 func planningAllowedReferencesPrompt(snapshot CatalogSnapshot) string {
@@ -521,195 +533,142 @@ func (p *StageOnePlanner) buildMergePrompt(input planningMergeInput, requestID s
 	if err != nil {
 		return "", fmt.Errorf("encode planning merge prompt: %w", err)
 	}
-	return strings.TrimSpace(stageOneMergePrompt) + "\n\nINPUT:\n" + string(raw), nil
+	return strings.TrimSpace(stageOneMergePrompt) + "\n\n" + planningOutputContractReminder + "\n\nINPUT:\n" + string(raw), nil
 }
 
 func (p *StageOnePlanner) completeWithCorrection(ctx context.Context, prompt string, snapshot CatalogSnapshot, config PlannerConfig, budget *int, batch string) (planningModelOutput, error) {
-	correctionUsed := false
 	raw, err := p.completeBudgeted(ctx, prompt, budget, config.BatchMaxInputTokens, "planning", batch)
+	correctionCalls := 0
 	if err != nil {
-		if isInvalidStructuredOutput(err) {
-			correctionUsed = true
-			raw, err = p.completeBudgeted(
-				ctx,
-				buildPlanningCorrectionPrompt(prompt, err, snapshot),
-				budget,
-				config.BatchMaxInputTokens,
-				"planning",
-				batch+"-correction",
-			)
-			if err != nil {
-				return planningModelOutput{}, classifyPlanningError(err)
-			}
-		} else {
+		if !isInvalidStructuredOutput(err) {
+			return planningModelOutput{}, classifyPlanningError(err)
+		}
+		correctionCalls++
+		raw, err = p.completeBudgeted(
+			ctx,
+			buildPlanningCorrectionPrompt(prompt, err, snapshot),
+			budget,
+			config.BatchMaxInputTokens,
+			"planning",
+			batch+"-correction",
+		)
+		if err != nil {
 			return planningModelOutput{}, classifyPlanningError(err)
 		}
 	}
-	if err != nil {
-		return planningModelOutput{}, classifyPlanningError(err)
-	}
-	if tag, ok := unclosedLeadingReasoning(raw); ok {
-		return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: fmt.Errorf("planning model output ended before closing <%s> (output_bytes=%d)", tag, len(raw))}
-	}
-	output, parseErr := parsePlanningOutput(raw)
-	if parseErr != nil && isIncompleteJSONError(parseErr) {
-		return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: parseErr}
-	}
-	if parseErr == nil {
-		output = normalizePlanningIdentity(output, snapshot)
-		output = completePlanningCoverage(output, snapshot)
-		candidate := PlanDraft{ContractVersion: PlanningContractVersion, SourceFingerprint: snapshot.SourceFingerprint, TopicClusters: output.TopicClusters, UnselectedVideos: output.UnselectedVideos}
-		if validateErr := validateCandidate(candidate, snapshot); validateErr == nil {
-			return output, nil
-		} else {
-			parseErr = validateErr
+
+	for {
+		if tag, ok := unclosedLeadingReasoning(raw); ok {
+			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: fmt.Errorf("planning model output ended before closing <%s> (output_bytes=%d)", tag, len(raw))}
 		}
-	}
-	if parseErr == nil {
-		return planningModelOutput{}, fmt.Errorf("planning model returned invalid output")
-	}
-	if correctionUsed {
-		if isPlanningWhitelistError(parseErr) {
+		output, parseErr := parsePlanningOutput(raw)
+		if parseErr != nil && isIncompleteJSONError(parseErr) {
+			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: parseErr}
+		}
+		if parseErr == nil {
+			output = normalizePlanningIdentity(output, snapshot)
+			output = completePlanningCoverage(output, snapshot)
+			candidate := PlanDraft{ContractVersion: PlanningContractVersion, SourceFingerprint: snapshot.SourceFingerprint, TopicClusters: output.TopicClusters, UnselectedVideos: output.UnselectedVideos}
+			if validateErr := validateCandidate(candidate, snapshot); validateErr == nil {
+				return output, nil
+			} else {
+				parseErr = validateErr
+			}
+		}
+		if parseErr == nil {
+			return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: fmt.Errorf("planning model returned invalid output")}
+		}
+		// A provider can preserve the JSON shape while copying one evidence ID
+		// incorrectly. Allow one additional bounded whitelist correction before
+		// failing the task; references are still validated against the snapshot.
+		if correctionCalls >= 2 && isPlanningWhitelistError(parseErr) {
 			return planningModelOutput{}, &GenerationError{Code: "invalid_reference", Err: parseErr}
 		}
 		if isIncompleteJSONError(parseErr) {
 			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: parseErr}
 		}
-		return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: parseErr}
-	}
-	correctionPrompt := buildPlanningCorrectionPrompt(prompt, parseErr, snapshot)
-	raw, retryErr := p.completeBudgeted(ctx, correctionPrompt, budget, config.BatchMaxInputTokens, "planning", batch+"-correction")
-	if retryErr != nil {
-		return planningModelOutput{}, classifyPlanningError(retryErr)
-	}
-	if tag, ok := unclosedLeadingReasoning(raw); ok {
-		return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: fmt.Errorf("planning correction ended before closing <%s> (output_bytes=%d)", tag, len(raw))}
-	}
-	output, retryErr = parsePlanningOutput(raw)
-	if retryErr != nil {
-		if isIncompleteJSONError(retryErr) {
-			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: retryErr}
+		if correctionCalls > 0 && !isPlanningFormatError(parseErr) {
+			return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: parseErr}
 		}
-		return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: retryErr}
-	}
-	output = normalizePlanningIdentity(output, snapshot)
-	output = completePlanningCoverage(output, snapshot)
-	candidate := PlanDraft{ContractVersion: PlanningContractVersion, SourceFingerprint: snapshot.SourceFingerprint, TopicClusters: output.TopicClusters, UnselectedVideos: output.UnselectedVideos}
-	if retryErr = validateCandidate(candidate, snapshot); retryErr != nil {
-		if isPlanningWhitelistError(retryErr) {
-			return planningModelOutput{}, &GenerationError{Code: "invalid_reference", Err: retryErr}
+		if correctionCalls >= maxPlanningFormatCorrections {
+			return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: parseErr}
 		}
-		return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: retryErr}
+		correctionCalls++
+		correctionPrompt := buildPlanningCorrectionPrompt(prompt, parseErr, snapshot)
+		if correctionCalls > 1 {
+			correctionPrompt += "\nThe previous correction still violated the exact output shape. Return only the two allowed root fields: topic_clusters and unselected_videos."
+		}
+		raw, err = p.completeBudgeted(ctx, correctionPrompt, budget, config.BatchMaxInputTokens, "planning", fmt.Sprintf("%s-correction-%d", batch, correctionCalls))
+		if err != nil {
+			return planningModelOutput{}, classifyPlanningError(err)
+		}
 	}
-	return output, nil
 }
 
 func (p *StageOnePlanner) completeMergeWithCorrection(ctx context.Context, prompt string, input planningMergeInput, snapshot CatalogSnapshot, config PlannerConfig, budget *int, batch string) (planningModelOutput, error) {
 	mergeSnapshot := snapshotForClusters(snapshot, input.Clusters)
-	correctionUsed := false
 	raw, err := p.completeBudgeted(ctx, prompt, budget, config.MergeMaxInputTokens, "planning_merge", batch)
+	correctionCalls := 0
 	if err != nil {
-		if isInvalidStructuredOutput(err) {
-			correctionUsed = true
-			raw, err = p.completeBudgeted(
-				ctx,
-				buildPlanningCorrectionPrompt(prompt, err, mergeSnapshot),
-				budget,
-				config.MergeMaxInputTokens,
-				"planning_merge",
-				batch+"-correction",
-			)
-			if err != nil {
-				return planningModelOutput{}, classifyPlanningError(err)
-			}
-		} else {
+		if !isInvalidStructuredOutput(err) {
+			return planningModelOutput{}, classifyPlanningError(err)
+		}
+		correctionCalls++
+		raw, err = p.completeBudgeted(
+			ctx,
+			buildPlanningCorrectionPrompt(prompt, err, mergeSnapshot),
+			budget,
+			config.MergeMaxInputTokens,
+			"planning_merge",
+			batch+"-correction",
+		)
+		if err != nil {
 			return planningModelOutput{}, classifyPlanningError(err)
 		}
 	}
-	if tag, ok := unclosedLeadingReasoning(raw); ok {
-		return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: fmt.Errorf("planning merge output ended before closing <%s> (output_bytes=%d)", tag, len(raw))}
-	}
-	output, parseErr := parsePlanningOutput(raw)
-	if parseErr != nil && isIncompleteJSONError(parseErr) {
-		return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: parseErr}
-	}
-	if parseErr == nil {
-		output = normalizePlanningIdentity(output, snapshot)
-		candidate := PlanDraft{ContractVersion: PlanningContractVersion, SourceFingerprint: snapshot.SourceFingerprint, TopicClusters: output.TopicClusters, UnselectedVideos: output.UnselectedVideos}
-		if validateErr := validateMergeCandidate(candidate, mergeSnapshot); validateErr == nil {
-			return output, nil
-		} else {
-			parseErr = validateErr
+
+	for {
+		if tag, ok := unclosedLeadingReasoning(raw); ok {
+			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: fmt.Errorf("planning merge output ended before closing <%s> (output_bytes=%d)", tag, len(raw))}
 		}
-	}
-	if parseErr == nil {
-		return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: parseErr}
-	}
-	if correctionUsed {
-		if isPlanningWhitelistError(parseErr) {
+		output, parseErr := parsePlanningOutput(raw)
+		if parseErr != nil && isIncompleteJSONError(parseErr) {
+			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: parseErr}
+		}
+		if parseErr == nil {
+			output = normalizePlanningIdentity(output, snapshot)
+			candidate := PlanDraft{ContractVersion: PlanningContractVersion, SourceFingerprint: snapshot.SourceFingerprint, TopicClusters: output.TopicClusters, UnselectedVideos: output.UnselectedVideos}
+			if validateErr := validateMergeCandidate(candidate, mergeSnapshot); validateErr == nil {
+				return output, nil
+			} else {
+				parseErr = validateErr
+			}
+		}
+		if parseErr == nil {
+			return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: fmt.Errorf("planning merge model returned invalid output")}
+		}
+		if correctionCalls >= 2 && isPlanningWhitelistError(parseErr) {
 			return planningModelOutput{}, &GenerationError{Code: "invalid_reference", Err: parseErr}
 		}
 		if isIncompleteJSONError(parseErr) {
 			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: parseErr}
 		}
-		// A provider-side structured-output failure can be followed by a
-		// correction response that is still syntactically JSON but contains an
-		// unknown field or trailing content. Keep the strict parser (unknown
-		// fields are never silently discarded), but spend one bounded extra
-		// correction on this specific format failure before terminating.
-		if isPlanningFormatError(parseErr) {
-			secondCorrectionPrompt := buildPlanningCorrectionPrompt(prompt, parseErr, mergeSnapshot) +
-				"\nThe previous correction still violated the exact output shape. Return only the two allowed root fields: topic_clusters and unselected_videos."
-			raw, retryErr := p.completeBudgeted(ctx, secondCorrectionPrompt, budget, config.MergeMaxInputTokens, "planning_merge", batch+"-correction-2")
-			if retryErr != nil {
-				return planningModelOutput{}, classifyPlanningError(retryErr)
-			}
-			if tag, ok := unclosedLeadingReasoning(raw); ok {
-				return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: fmt.Errorf("planning merge second correction ended before closing <%s> (output_bytes=%d)", tag, len(raw))}
-			}
-			output, retryErr := parsePlanningOutput(raw)
-			if retryErr != nil {
-				if isIncompleteJSONError(retryErr) {
-					return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: retryErr}
-				}
-				return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: retryErr}
-			}
-			output = normalizePlanningIdentity(output, snapshot)
-			candidate := PlanDraft{ContractVersion: PlanningContractVersion, SourceFingerprint: snapshot.SourceFingerprint, TopicClusters: output.TopicClusters, UnselectedVideos: output.UnselectedVideos}
-			if retryErr = validateMergeCandidate(candidate, mergeSnapshot); retryErr != nil {
-				if isPlanningWhitelistError(retryErr) {
-					return planningModelOutput{}, &GenerationError{Code: "invalid_reference", Err: retryErr}
-				}
-				return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: retryErr}
-			}
-			return output, nil
+		if correctionCalls > 0 && !isPlanningFormatError(parseErr) {
+			return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: parseErr}
 		}
-		return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: parseErr}
-	}
-	correctionPrompt := buildPlanningCorrectionPrompt(prompt, parseErr, mergeSnapshot)
-	raw, err = p.completeBudgeted(ctx, correctionPrompt, budget, config.MergeMaxInputTokens, "planning_merge", batch+"-correction")
-	if err != nil {
-		return planningModelOutput{}, classifyPlanningError(err)
-	}
-	if tag, ok := unclosedLeadingReasoning(raw); ok {
-		return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: fmt.Errorf("planning merge correction ended before closing <%s> (output_bytes=%d)", tag, len(raw))}
-	}
-	output, err = parsePlanningOutput(raw)
-	if err != nil {
-		if isIncompleteJSONError(err) {
-			return planningModelOutput{}, &GenerationError{Code: "model_output_truncated", Err: err}
+		if correctionCalls >= maxPlanningFormatCorrections {
+			return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: parseErr}
 		}
-		return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: err}
-	}
-	output = normalizePlanningIdentity(output, snapshot)
-	candidate := PlanDraft{ContractVersion: PlanningContractVersion, SourceFingerprint: snapshot.SourceFingerprint, TopicClusters: output.TopicClusters, UnselectedVideos: output.UnselectedVideos}
-	if err := validateMergeCandidate(candidate, mergeSnapshot); err != nil {
-		if isPlanningWhitelistError(err) {
-			return planningModelOutput{}, &GenerationError{Code: "invalid_reference", Err: err}
+		correctionCalls++
+		correctionPrompt := buildPlanningCorrectionPrompt(prompt, parseErr, mergeSnapshot)
+		if correctionCalls > 1 {
+			correctionPrompt += "\nThe previous correction still violated the exact output shape. Return only the two allowed root fields: topic_clusters and unselected_videos."
 		}
-		return planningModelOutput{}, &GenerationError{Code: "planning_output_invalid", Err: err}
+		raw, err = p.completeBudgeted(ctx, correctionPrompt, budget, config.MergeMaxInputTokens, "planning_merge", fmt.Sprintf("%s-correction-%d", batch, correctionCalls))
+		if err != nil {
+			return planningModelOutput{}, classifyPlanningError(err)
+		}
 	}
-	return output, nil
 }
 
 func validateCandidate(candidate PlanDraft, snapshot CatalogSnapshot) error {

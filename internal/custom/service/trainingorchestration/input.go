@@ -61,6 +61,10 @@ type KnowledgeReader interface {
 	GetKnowledge(context.Context, string) (weknora.ManualKnowledgeResult, error)
 }
 
+type KnowledgePageReader interface {
+	ListAllPages(context.Context, string, string) ([]weknora.WikiPage, error)
+}
+
 type TranscriptReader interface {
 	Read(context.Context, string, string) ([]transcript.Chunk, error)
 }
@@ -143,6 +147,7 @@ type TranscriptSignal struct {
 }
 
 type KnowledgeSignal struct {
+	SourceVideoID     string                  `json:"source_video_id"`
 	KnowledgeObjectID string                  `json:"knowledge_object_id"`
 	WikiPageID        string                  `json:"wiki_page_id"`
 	WikiPageVersion   int                     `json:"wiki_page_version"`
@@ -313,7 +318,9 @@ func (c *Collector) collectCatalogVideo(ctx context.Context, video model.Video, 
 		return result, SkipEvidenceMissing, nil
 	}
 	evidence := make([]EvidenceSignal, 0, len(checkpoints))
+	result.EvidenceContentHashes = make(map[string]string, len(checkpoints))
 	for _, checkpoint := range checkpoints {
+		result.EvidenceContentHashes[checkpoint.EvidenceSentenceID] = strings.TrimSpace(checkpoint.ContentHash)
 		evidence = append(evidence, EvidenceSignal{VideoID: video.ID, TranscriptGeneration: video.TranscriptGeneration, EvidenceID: checkpoint.EvidenceSentenceID, ChunkKnowledgeID: checkpoint.KnowledgeID, StartMs: checkpoint.StartMs, EndMs: checkpoint.EndMs})
 	}
 	if strings.TrimSpace(video.SummaryWikiPageID) != "" && strings.EqualFold(strings.TrimSpace(video.SummaryResultStage), "final_ready") {
@@ -340,9 +347,19 @@ func (c *Collector) collectCatalogVideo(ctx context.Context, video model.Video, 
 		result.SummaryWikiPageID = page.ID
 		result.SummaryVersion = page.Version
 		result.OrchestrationProfile = boundedProfile(document.OrchestrationProfile, summarySignalsFromDocument(document, checkpoints), evidence)
+		if signals, signalErr := c.collectKnowledgeSignals(ctx, video.ID, video.TranscriptGeneration); signalErr != nil {
+			return result, "", signalErr
+		} else {
+			result.KnowledgeSignals = signals
+		}
 		return result, "", nil
 	}
 	result.CompatibilityProfile = compatibilityProfile(nil, evidence)
+	if signals, signalErr := c.collectKnowledgeSignals(ctx, video.ID, video.TranscriptGeneration); signalErr != nil {
+		return result, "", signalErr
+	} else {
+		result.KnowledgeSignals = signals
+	}
 	return result, "", nil
 }
 
@@ -543,7 +560,72 @@ func (c *Collector) collectVideo(ctx context.Context, video model.Video, accessi
 	}
 
 	profile.EvidenceSignals = evidenceSignals(video, requiredEvidence)
+	if signals, signalErr := c.collectKnowledgeSignals(ctx, video.ID, video.TranscriptGeneration); signalErr != nil {
+		return profile, "", signalErr
+	} else {
+		profile.KnowledgeSignals = signals
+	}
 	return profile, "", nil
+}
+
+func (c *Collector) collectKnowledgeSignals(ctx context.Context, videoID, generation string) ([]KnowledgeSignal, error) {
+	reader, ok := c.Wiki.(KnowledgePageReader)
+	if !ok {
+		return []KnowledgeSignal{}, nil
+	}
+	pages, err := reader.ListAllPages(ctx, c.KnowledgeBaseID, "")
+	if err != nil {
+		return nil, fmt.Errorf("list audited knowledge objects for video %s: %w", videoID, err)
+	}
+	result := make([]KnowledgeSignal, 0)
+	for _, page := range pages {
+		if page.PageType != "index" || strings.TrimSpace(page.ID) == "" {
+			continue
+		}
+		validation, validationErr := knowledge.ValidateWikiObjectPage(page.Content, page.PageType, videoID, generation)
+		if validationErr != nil || strings.EqualFold(strings.TrimSpace(validation.AuditStatus), "failed") {
+			continue
+		}
+		evidenceIDs := append([]string(nil), validation.EvidenceIDs...)
+		for _, contribution := range validation.EvidenceContributions {
+			if contribution.VideoID == strings.TrimSpace(videoID) && contribution.TranscriptGeneration == strings.TrimSpace(generation) && strings.EqualFold(strings.TrimSpace(contribution.QualityStatus), "passed") {
+				evidenceIDs = append([]string(nil), contribution.EvidenceIDs...)
+				break
+			}
+		}
+		result = append(result, KnowledgeSignal{
+			SourceVideoID: videoID, KnowledgeObjectID: validation.KnowledgeObjectID,
+			WikiPageID: page.ID, KnowledgeType: validation.KnowledgeType,
+			EntitySubType: validation.EntitySubType, Title: validation.Title,
+			CoreContent: validation.CoreContent, StructureFields: validation.StructureFields,
+			EvidenceIDs: uniqueStrings(evidenceIDs),
+		})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].KnowledgeObjectID != result[j].KnowledgeObjectID {
+			return result[i].KnowledgeObjectID < result[j].KnowledgeObjectID
+		}
+		return result[i].WikiPageID < result[j].WikiPageID
+	})
+	return result, nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func (c *Collector) validateEvidenceManifest(ctx context.Context, video model.Video, chunks []transcript.Chunk) (bool, error) {

@@ -9,6 +9,7 @@ export type TrainingSkipReason = 'processing' | 'processing_failed' | 'knowledge
 export type TrainingNotSelectedReason = 'redundant_evidence' | 'output_limit'
 export type TrainingTopicSource = 'final_summary' | 'normalized_transcript'
 export type TrainingJobStage = 'collecting' | 'planning' | 'materializing' | 'generating' | 'assembling' | 'publishing'
+export type TrainingRefreshMode = 'reused' | 'metadata_patch' | 'availability_filter' | 'incremental' | 'full'
 
 export interface TrainingEvidenceRef {
   video_id: string
@@ -22,6 +23,8 @@ export interface TrainingKnowledgeRef {
   knowledge_object_id: string
   wiki_page_id: string
   knowledge_type: KnowledgeType
+  title: string
+  locator_evidence: TrainingEvidenceRef
 }
 
 export interface TrainingLearningUnit {
@@ -44,6 +47,22 @@ export interface TrainingLearningStage {
   units: TrainingLearningUnit[]
 }
 
+export interface TrainingGapDimension {
+  gap: string
+  recommendation: string
+}
+
+export interface TrainingGapAnalysis {
+  status: 'partial' | 'sufficient'
+  current_depth_summary: string
+  supplement_direction_summary: string
+  dimensions: {
+    knowledge_coverage: TrainingGapDimension
+    workplace_application: TrainingGapDimension
+    independent_task_completion: TrainingGapDimension
+  }
+}
+
 export interface TrainingTopicCluster {
   cluster_id: string
   title: string
@@ -56,6 +75,7 @@ export interface TrainingTopicCluster {
   evidence_refs: TrainingEvidenceRef[]
   confidence: number
   review_status: 'passed'
+  gap_analysis: TrainingGapAnalysis
   path: { path_id: string; primary_template: string; stages: TrainingLearningStage[] }
 }
 
@@ -106,6 +126,11 @@ export interface TrainingJob {
   warning_code?: string
   warning_message?: string
   reused: boolean
+  refresh_mode?: TrainingRefreshMode
+  changed_video_count: number
+  changed_knowledge_count: number
+  changed_evidence_count: number
+  changed_cluster_count: number
 }
 
 export async function fetchCurrentTrainingProjection(): Promise<TrainingProjection | null> {
@@ -116,8 +141,11 @@ export async function fetchCurrentTrainingProjection(): Promise<TrainingProjecti
   return projection as TrainingProjection
 }
 
-export async function generateTrainingProjection(): Promise<TrainingJob> {
-  const response: any = await post('/api/custom/training-orchestration/generate')
+export async function generateTrainingProjection(overwrite = false): Promise<TrainingJob> {
+  const endpoint = overwrite
+    ? '/api/custom/training-orchestration/generate?overwrite=true'
+    : '/api/custom/training-orchestration/generate'
+  const response: any = await post(endpoint)
   return response?.data
 }
 

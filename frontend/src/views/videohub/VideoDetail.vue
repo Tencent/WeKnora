@@ -14,7 +14,7 @@
         </div>
         <t-select class="video-detail-page__switcher" v-model="selectedVideoId" :options="videoOptions" placeholder="切换视频" aria-label="切换视频" @change="switchVideo" />
       </header>
-      <ProcessingStatus v-if="showProcessingStatus" :video-id="video.id" @retry-started="handleRetryStarted" @stage-completed="handleStageCompleted" />
+      <ProcessingStatus ref="processingStatus" v-if="video" :video-id="video.id" @retry-started="handleRetryStarted" @stage-completed="handleStageCompleted" @processing-stages="handleProcessingStages" @processing-failures="handleProcessingFailures" />
       <div v-if="!isPlayable" class="video-detail-page__state">
         <t-empty :description="statusHint">
           <template #action>
@@ -27,17 +27,17 @@
         <div ref="layout" class="video-detail-page__layout">
           <section ref="left" class="video-detail-page__left">
             <VideoPlayer ref="player" :src="video.play_url || video.video_url" :poster="video.cover_url || video.poster_url" :title="video.title" :chapter-label="currentChapterLabel" :duration-hint="video.durationSeconds" :subtitles="video.subtitles" @timeupdate="currentSeconds = $event" />
-            <ChapterNavigation :video="video" :current-seconds="currentSeconds" :content-state="content.outline" @reload="reloadOutline" @seek="seekTo" />
+            <ChapterNavigation :video="video" :current-seconds="currentSeconds" :content-state="content.outline" :is-generating="outlineGenerating" :is-processing-failed="outlineFailed" :is-retrying="retryingStage === 'outline'" @reload="reloadOutline" @retry="retryContentModule('outline')" @seek="seekTo" />
           </section>
           <aside ref="right" class="video-detail-page__right">
             <t-tabs v-model="activeTab">
               <t-tab-panel value="summary">
                 <template #label><span class="video-detail-page__tab-label"><span>智能总结</span></span></template>
-                <SmartSummary :key="video.id" :video="video" :content-state="content.summary" @reload="reloadSummary" @seek="seekTo" />
+                <SmartSummary :key="video.id" :video="video" :content-state="content.summary" :is-generating="summaryGenerating" :is-processing-failed="summaryFailed" :is-retrying="retryingStage === summaryRetryStage" @reload="reloadSummary" @retry="retryContentModule('summary')" @seek="seekTo" />
               </t-tab-panel>
               <t-tab-panel v-if="showRelatedKnowledgeTab" value="related">
                 <template #label><span class="video-detail-page__tab-label"><span>关联知识</span></span></template>
-                <RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" @reload="reloadRelatedKnowledge" @seek="seekTo" @select-video-by-id="onSelectVideoById" />
+                <RelatedKnowledge :key="video.id" :video="video" :content-state="content.relatedKnowledge" :is-generating="relatedGenerating" :is-processing-failed="relatedFailed" :is-retrying="retryingStage === relatedRetryStage" @reload="reloadRelatedKnowledge" @retry="retryContentModule('relatedKnowledge')" @seek="seekTo" @select-video-by-id="onSelectVideoById" />
               </t-tab-panel>
             </t-tabs>
           </aside>
@@ -51,7 +51,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, shouldShowRelatedKnowledgeTab, type VideoContentModule, type VideoContentState } from '@/api/videohub'
+import { contentModuleForStage, createLoadingContentModuleState, createLoadingContentState, fetchVideoContent, fetchVideoContentModule, fetchVideoDetail, fetchVideoOptions, fetchVideoSubtitles, isVideoInitiallyAvailable, retryVideoProcessingStage, shouldShowRelatedKnowledgeTab, type VideoContentModule, type VideoContentState } from '@/api/videohub'
 import type { VideoData } from '@/types/videohub'
 import VideoPlayer from '@/components/videohub/VideoPlayer.vue'
 import ChapterNavigation from '@/components/videohub/ChapterNavigation.vue'
@@ -63,6 +63,7 @@ import ProcessingStatus from '@/components/videohub/ProcessingStatus.vue'
 const route = useRoute()
 const router = useRouter()
 const player = ref<InstanceType<typeof VideoPlayer> | null>(null)
+const processingStatus = ref<InstanceType<typeof ProcessingStatus> | null>(null)
 const page = ref<HTMLElement | null>(null)
 const layout = ref<HTMLElement | null>(null)
 const left = ref<HTMLElement | null>(null)
@@ -75,6 +76,9 @@ const activeTab = ref('summary')
 const loading = ref(true)
 const error = ref('')
 const content = ref<VideoContentState>(createLoadingContentState())
+const processingStages = ref(new Set<string>())
+const processingFailures = ref(new Set<string>())
+const retryingStage = ref('')
 let heightObserver: ResizeObserver | null = null
 let observedLeft: HTMLElement | null = null
 let heightFrame = 0
@@ -82,7 +86,15 @@ let loadSequence = 0
 let contentSequence = 0
 const moduleSequences: Record<VideoContentModule, number> = { outline: 0, summary: 0, relatedKnowledge: 0, transcriptPage: 0 }
 const showRelatedKnowledgeTab = computed(() => shouldShowRelatedKnowledgeTab(content.value.relatedKnowledge))
-const showProcessingStatus = computed(() => Boolean(video.value?.status && !['completed', 'ready'].includes(video.value.status)))
+const foundationGenerating = computed(() => ['transcription', 'subtitle_generate', 'index'].some(stage => processingStages.value.has(stage)))
+const summaryGenerating = computed(() => foundationGenerating.value || processingStages.value.has('summary') || processingStages.value.has('summary_enhance'))
+const outlineGenerating = computed(() => foundationGenerating.value || processingStages.value.has('outline'))
+const relatedGenerating = computed(() => foundationGenerating.value || ['graph', 'related_knowledge'].some(stage => processingStages.value.has(stage)))
+const summaryFailed = computed(() => processingFailures.value.has('summary') || processingFailures.value.has('summary_enhance'))
+const outlineFailed = computed(() => processingFailures.value.has('outline'))
+const relatedFailed = computed(() => processingFailures.value.has('graph'))
+const summaryRetryStage = computed(() => processingFailures.value.has('summary') ? 'summary' : 'summary_enhance')
+const relatedRetryStage = 'graph'
 const currentChapterLabel = computed(() => {
   const chapter = content.value.outline.data.find(item => currentSeconds.value >= item.start_seconds && currentSeconds.value < item.end_seconds)
   return chapter ? `正在播放：${chapter.chapter_index} ${chapter.chapter_title}` : ''
@@ -135,6 +147,9 @@ async function loadVideo(id: string) {
   const sequence = ++loadSequence
   contentSequence++
   loading.value = true; error.value = ''; currentSeconds.value = 0; activeTab.value = 'summary'
+  processingStages.value = new Set()
+  processingFailures.value = new Set()
+  retryingStage.value = ''
   try {
     const nextVideo = await fetchVideoDetail(id)
     if (sequence !== loadSequence) return
@@ -171,7 +186,8 @@ async function loadContent(videoData: VideoData) {
 }
 function markContentModuleLoading(module: VideoContentModule) {
   moduleSequences[module]++
-  content.value = { ...content.value, [module]: createLoadingContentModuleState(module) } as VideoContentState
+  const current = content.value[module]
+  content.value = { ...content.value, [module]: { ...current, status: 'loading' } } as VideoContentState
 }
 async function refreshContentModule(module: VideoContentModule, videoData: VideoData) {
   const sequence = ++moduleSequences[module]
@@ -185,15 +201,26 @@ function handleRetryStarted(stage: string) {
   const module = contentModuleForStage(stage)
   if (module === 'all') {
     for (const contentModule of Object.keys(moduleSequences) as VideoContentModule[]) moduleSequences[contentModule]++
-    content.value = createLoadingContentState()
+    content.value = {
+      outline: { ...content.value.outline, status: 'loading' },
+      summary: { ...content.value.summary, status: 'loading' },
+      relatedKnowledge: { ...content.value.relatedKnowledge, status: 'loading' },
+      transcriptPage: { ...content.value.transcriptPage, status: 'loading' },
+    }
     contentSequence++
   } else if (module && video.value) {
     markContentModuleLoading(module)
   }
 }
+function handleProcessingStages(stages: string[]) {
+  processingStages.value = new Set(stages)
+}
+function handleProcessingFailures(stages: string[]) {
+  processingFailures.value = new Set(stages)
+}
 function handleStageCompleted(stage: string) {
   if (!video.value) return
-  if (stage === 'summary') {
+  if (stage === 'summary' || stage === 'summary_enhance') {
     void refreshCompletedSummary(video.value)
     return
   }
@@ -213,6 +240,30 @@ function reloadContentModule(module: VideoContentModule) {
 function reloadOutline() { reloadContentModule('outline') }
 function reloadSummary() { reloadContentModule('summary') }
 function reloadRelatedKnowledge() { reloadContentModule('relatedKnowledge') }
+async function retryContentModule(module: 'summary' | 'outline' | 'relatedKnowledge') {
+  if (!video.value || retryingStage.value) return
+  const candidates = module === 'summary'
+    ? ['summary', 'summary_enhance']
+    : module === 'outline'
+      ? ['outline']
+      : ['graph']
+  const jobType = candidates.find(stage => processingFailures.value.has(stage))
+  if (!jobType) {
+    reloadContentModule(module)
+    return
+  }
+  retryingStage.value = jobType
+  try {
+    await retryVideoProcessingStage(video.value.id, jobType)
+    handleRetryStarted(jobType)
+    processingFailures.value = new Set([...processingFailures.value].filter(stage => !candidates.includes(stage)))
+    await processingStatus.value?.refresh()
+  } catch {
+    await processingStatus.value?.refresh()
+  } finally {
+    retryingStage.value = ''
+  }
+}
 async function loadVideoOptions() {
   try {
     videoOptions.value = (await fetchVideoOptions()).map(item => ({ label: item.title, value: item.id }))

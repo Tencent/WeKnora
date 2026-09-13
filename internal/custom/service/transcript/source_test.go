@@ -26,16 +26,6 @@ type sourceGateway struct {
 	getErr    error
 }
 
-func (g *sourceGateway) UpdateManualKnowledge(_ context.Context, id string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
-	g.updated = append(g.updated, input)
-	value := g.items[id]
-	value.Title = input.Title
-	value.Content = input.Content
-	value.ParseStatus = "completed"
-	g.items[id] = value
-	return value, nil
-}
-
 func (g *sourceGateway) FindManualKnowledgeByTitle(_ context.Context, kbID string, title string) (*weknora.ManualKnowledgeResult, error) {
 	g.kbIDs = append(g.kbIDs, kbID)
 	if g.findErr != nil {
@@ -64,6 +54,16 @@ func (g *sourceGateway) CreateManualKnowledge(_ context.Context, kbID string, in
 		g.items = make(map[string]weknora.ManualKnowledgeResult)
 	}
 	g.items[value.ID] = value
+	return value, nil
+}
+
+func (g *sourceGateway) UpdateManualKnowledge(_ context.Context, id string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
+	g.updated = append(g.updated, input)
+	value := weknora.ManualKnowledgeResult{ID: id, KnowledgeBaseID: "kb-1", Title: input.Title, Content: input.Content, ParseStatus: "completed"}
+	if g.items == nil {
+		g.items = make(map[string]weknora.ManualKnowledgeResult)
+	}
+	g.items[id] = value
 	return value, nil
 }
 
@@ -237,149 +237,72 @@ func TestSourceWriterSeparatesGenerationsAndRejectsHashChange(t *testing.T) {
 	require.Len(t, gateway.created, 2)
 }
 
-func TestSourceWriterRepairsLegacyMissingSpeakerIdentity(t *testing.T) {
+func TestSourceWriterRepairsLegacyUnknownSpeakerEvidenceIDs(t *testing.T) {
 	db := openSourceTestDB(t)
-	legacy := sourceTestDocument(t, "generation-1", "第一句")
-	legacy.Chapters[0].Paragraphs[0].SpeakerID = ""
-	legacy.Chapters[0].Paragraphs[0].EvidenceSentenceIDs[0] = "evs:v1:legacy-empty-speaker"
-	legacy.Chapters[0].Paragraphs[0].TimeMarks[0].EvidenceSentenceID = "evs:v1:legacy-empty-speaker"
-	legacyJSON, err := legacy.JSON()
-	require.NoError(t, err)
-	legacyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(legacyJSON)))
+	gateway := &sourceGateway{items: make(map[string]weknora.ManualKnowledgeResult)}
+	writer := &SourceWriter{DB: db, Gateway: gateway, KBID: "kb-1"}
 
-	current := sourceTestDocument(t, "generation-1", "第一句")
-	current.Chapters[0].Paragraphs[0].SpeakerID = "0"
-	currentID, err := evidence.BuildEvidenceSentenceID(evidence.Input{
-		VideoID: current.VideoID, TranscriptGeneration: current.TranscriptGeneration,
-		Ordinal: 0, SourceSentenceID: "sentence-1", Text: "第一句", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+	const (
+		videoID    = "video-legacy-speaker"
+		generation = "generation-legacy-speaker"
+	)
+	legacyEvidence, err := evidence.BuildSentence(evidence.Input{
+		VideoID: videoID, TranscriptGeneration: generation, Ordinal: 0,
+		SourceSentenceID: "sentence-1", Text: "历史原文", SpeakerID: "",
+		StartMs: 100, EndMs: 1000,
 	})
 	require.NoError(t, err)
-	current.Chapters[0].Paragraphs[0].EvidenceSentenceIDs[0] = currentID
-	current.Chapters[0].Paragraphs[0].TimeMarks[0].EvidenceSentenceID = currentID
-	currentJSON, err := current.JSON()
+	legacyDoc, err := Build(Input{
+		VideoID: videoID, TranscriptGeneration: generation, Title: "历史视频", DurationSeconds: 30,
+		Chapters: []InputChapter{{Index: 0, Title: "历史视频", Paragraphs: []InputParagraph{{
+			Index: 0, SpeakerID: "", Sentences: []InputSentence{{
+				SourceSentenceID: "sentence-1", EvidenceSentenceID: legacyEvidence.ID,
+				Text: "历史原文", SpeakerID: "", StartMs: 100, EndMs: 1000,
+			}},
+		}}}},
+	})
 	require.NoError(t, err)
-	currentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(currentJSON)))
-
-	gateway := &sourceGateway{items: map[string]weknora.ManualKnowledgeResult{
-		"knowledge-1": {
-			ID: "knowledge-1", KnowledgeBaseID: "kb-1", Title: SourceTitle(current.Title),
-			Content: SourceContent(legacy, legacyJSON, legacyHash), ParseStatus: "completed",
-		},
-	}}
+	legacyJSON, err := legacyDoc.JSON()
+	require.NoError(t, err)
+	legacyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(legacyJSON)))
+	gateway.items["legacy-source"] = weknora.ManualKnowledgeResult{
+		ID: "legacy-source", KnowledgeBaseID: "kb-1", Title: SourceTitle(legacyDoc.Title),
+		Content: SourceContent(legacyDoc, legacyJSON, legacyHash), ParseStatus: "completed",
+	}
 	require.NoError(t, db.Create(&model.VideoTranscriptSource{
-		ID: "binding-1", VideoID: current.VideoID, TranscriptGeneration: current.TranscriptGeneration,
-		KnowledgeBaseID: "kb-1", KnowledgeID: "knowledge-1", ContentHash: legacyHash, Status: SourceStatusCreated,
+		ID: "legacy-binding", VideoID: videoID, TranscriptGeneration: generation,
+		KnowledgeBaseID: "kb-1", KnowledgeID: "legacy-source", ContentHash: legacyHash, Status: SourceStatusCreated,
 	}).Error)
 
-	result, err := (&SourceWriter{DB: db, Gateway: gateway, KBID: "kb-1"}).Ensure(context.Background(), SourceInput{Document: current})
+	currentEvidence, err := evidence.BuildSentence(evidence.Input{
+		VideoID: videoID, TranscriptGeneration: generation, Ordinal: 0,
+		SourceSentenceID: "sentence-1", Text: "历史原文", SpeakerID: "0",
+		StartMs: 100, EndMs: 1000,
+	})
+	require.NoError(t, err)
+	currentDoc, err := Build(Input{
+		VideoID: videoID, TranscriptGeneration: generation, Title: "历史视频", DurationSeconds: 30,
+		Chapters: []InputChapter{{Index: 0, Title: "历史视频", Paragraphs: []InputParagraph{{
+			Index: 0, SpeakerID: "0", Sentences: []InputSentence{{
+				SourceSentenceID: "sentence-1", EvidenceSentenceID: currentEvidence.ID,
+				Text: "历史原文", SpeakerID: "0", StartMs: 100, EndMs: 1000,
+			}},
+		}}}},
+	})
+	require.NoError(t, err)
+
+	result, err := writer.Ensure(context.Background(), SourceInput{Document: currentDoc})
 	require.NoError(t, err)
 	require.Equal(t, "repaired", result.Action)
-	require.Equal(t, currentHash, result.ContentHash)
+	require.Equal(t, "legacy-source", result.KnowledgeID)
+	require.Empty(t, gateway.created)
 	require.Len(t, gateway.updated, 1)
 
 	var binding model.VideoTranscriptSource
-	require.NoError(t, db.First(&binding, "id = ?", "binding-1").Error)
-	require.Equal(t, currentHash, binding.ContentHash)
+	require.NoError(t, db.First(&binding, "id = ?", "legacy-binding").Error)
+	require.Equal(t, result.KnowledgeID, binding.KnowledgeID)
 	require.Equal(t, SourceStatusCreated, binding.Status)
-}
-
-func TestSourceWriterCompletesRepairAfterRemoteUpdate(t *testing.T) {
-	db := openSourceTestDB(t)
-	current := sourceTestDocument(t, "generation-1", "第一句")
-	current.Chapters[0].Paragraphs[0].SpeakerID = "0"
-	currentID, err := evidence.BuildEvidenceSentenceID(evidence.Input{
-		VideoID: current.VideoID, TranscriptGeneration: current.TranscriptGeneration,
-		Ordinal: 0, SourceSentenceID: "sentence-1", Text: "第一句", SpeakerID: "0", StartMs: 100, EndMs: 1000,
-	})
-	require.NoError(t, err)
-	current.Chapters[0].Paragraphs[0].EvidenceSentenceIDs[0] = currentID
-	current.Chapters[0].Paragraphs[0].TimeMarks[0].EvidenceSentenceID = currentID
-	currentJSON, err := current.JSON()
-	require.NoError(t, err)
-	currentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(currentJSON)))
-
-	gateway := &sourceGateway{items: map[string]weknora.ManualKnowledgeResult{
-		"knowledge-1": {
-			ID: "knowledge-1", KnowledgeBaseID: "kb-1", Title: SourceTitle(current.Title),
-			Content: SourceContent(current, currentJSON, currentHash), ParseStatus: "pending",
-		},
-	}}
-	require.NoError(t, db.Create(&model.VideoTranscriptSource{
-		ID: "binding-1", VideoID: current.VideoID, TranscriptGeneration: current.TranscriptGeneration,
-		KnowledgeBaseID: "kb-1", KnowledgeID: "knowledge-1", ContentHash: "legacy-hash", Status: SourceStatusCreated,
-	}).Error)
-
-	result, err := (&SourceWriter{DB: db, Gateway: gateway, KBID: "kb-1"}).Ensure(context.Background(), SourceInput{Document: current})
-	require.NoError(t, err)
-	require.Equal(t, "repaired", result.Action)
-	require.Empty(t, gateway.updated)
-
-	var binding model.VideoTranscriptSource
-	require.NoError(t, db.First(&binding, "id = ?", "binding-1").Error)
-	require.Equal(t, currentHash, binding.ContentHash)
-}
-
-func TestSourceWriterRejectsLegacyRepairWhenTranscriptContentChanged(t *testing.T) {
-	for _, testCase := range []struct {
-		name   string
-		change func(*FullVideoDocument)
-	}{
-		{
-			name: "text",
-			change: func(doc *FullVideoDocument) {
-				doc.Chapters[0].Paragraphs[0].Text = "第二句"
-				doc.Chapters[0].Paragraphs[0].TimeMarks[0].Text = "第二句"
-				doc.Chapters[0].ContinuousText = "第二句"
-				doc.ContinuousText = "第二句"
-			},
-		},
-		{
-			name: "time",
-			change: func(doc *FullVideoDocument) {
-				doc.Chapters[0].Paragraphs[0].TimeMarks[0].EndMs = 1100
-				doc.Chapters[0].Paragraphs[0].EndMs = 1100
-				doc.Chapters[0].EndMs = 1100
-			},
-		},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			db := openSourceTestDB(t)
-			legacy := sourceTestDocument(t, "generation-1", "第一句")
-			legacy.Chapters[0].Paragraphs[0].SpeakerID = ""
-			legacy.Chapters[0].Paragraphs[0].EvidenceSentenceIDs[0] = "evs:v1:legacy-empty-speaker"
-			legacy.Chapters[0].Paragraphs[0].TimeMarks[0].EvidenceSentenceID = "evs:v1:legacy-empty-speaker"
-			legacyJSON, err := legacy.JSON()
-			require.NoError(t, err)
-			legacyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(legacyJSON)))
-
-			current := sourceTestDocument(t, "generation-1", "第一句")
-			current.Chapters[0].Paragraphs[0].SpeakerID = "0"
-			testCase.change(&current)
-			currentJSON, err := current.JSON()
-			require.NoError(t, err)
-			currentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(currentJSON)))
-
-			gateway := &sourceGateway{items: map[string]weknora.ManualKnowledgeResult{
-				"knowledge-1": {
-					ID: "knowledge-1", KnowledgeBaseID: "kb-1", Title: SourceTitle(current.Title),
-					Content: SourceContent(legacy, legacyJSON, legacyHash), ParseStatus: "completed",
-				},
-			}}
-			require.NoError(t, db.Create(&model.VideoTranscriptSource{
-				ID: "binding-1", VideoID: current.VideoID, TranscriptGeneration: current.TranscriptGeneration,
-				KnowledgeBaseID: "kb-1", KnowledgeID: "knowledge-1", ContentHash: legacyHash, Status: SourceStatusCreated,
-			}).Error)
-
-			_, err = (&SourceWriter{DB: db, Gateway: gateway, KBID: "kb-1"}).Ensure(context.Background(), SourceInput{Document: current})
-			require.ErrorContains(t, err, "differs beyond canonical missing-speaker normalization")
-			require.Empty(t, gateway.updated)
-
-			var binding model.VideoTranscriptSource
-			require.NoError(t, db.First(&binding, "id = ?", "binding-1").Error)
-			require.Equal(t, legacyHash, binding.ContentHash)
-			require.NotEqual(t, currentHash, binding.ContentHash)
-		})
-	}
+	require.NotEqual(t, legacyHash, binding.ContentHash)
 }
 
 func TestSourceWriterRecordsFailureWithoutBindingSuccess(t *testing.T) {

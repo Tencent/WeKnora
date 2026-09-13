@@ -35,8 +35,11 @@ const (
 type KnowledgeGateway interface {
 	FindManualKnowledgeByTitle(context.Context, string, string) (*weknora.ManualKnowledgeResult, error)
 	CreateManualKnowledge(context.Context, string, weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error)
-	UpdateManualKnowledge(context.Context, string, weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error)
 	GetKnowledge(context.Context, string) (weknora.ManualKnowledgeResult, error)
+}
+
+type knowledgeUpdater interface {
+	UpdateManualKnowledge(context.Context, string, weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error)
 }
 
 type SourceWriter struct {
@@ -89,7 +92,6 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	videoID := strings.TrimSpace(doc.VideoID)
 	generation := strings.TrimSpace(doc.TranscriptGeneration)
 	result := SourceResult{VideoID: videoID, TranscriptGeneration: generation, KnowledgeBaseID: w.KBID, ContentHash: hash}
-
 	// A process-local lock avoids two workers racing between reconciliation and
 	// creation. The database unique key remains the cross-instance guard.
 	w.mu.Lock()
@@ -232,87 +234,6 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	return logSourceAudit(result, input.TaskID), nil
 }
 
-func (w *SourceWriter) repairLegacySpeakerIdentity(
-	ctx context.Context,
-	binding model.VideoTranscriptSource,
-	doc FullVideoDocument,
-	documentJSON string,
-	hash string,
-) error {
-	if binding.Status != SourceStatusCreated || strings.TrimSpace(binding.KnowledgeID) == "" {
-		return fmt.Errorf("legacy source binding is not ready")
-	}
-	existing, err := w.Gateway.GetKnowledge(ctx, binding.KnowledgeID)
-	if err != nil {
-		return fmt.Errorf("read legacy source knowledge: %w", err)
-	}
-	if err := validateSourceKnowledgeBase(existing.KnowledgeBaseID, w.KBID); err != nil {
-		return err
-	}
-	legacy, err := ParseSourceContent(existing.Content)
-	if err != nil {
-		return fmt.Errorf("parse legacy source knowledge: %w", err)
-	}
-	existingJSON, err := legacy.JSON()
-	if err != nil {
-		return fmt.Errorf("encode legacy source knowledge: %w", err)
-	}
-	if existingJSON != documentJSON {
-		normalized, changed, normalizeErr := normalizeEvidenceIdentity(legacy)
-		if normalizeErr != nil {
-			return fmt.Errorf("normalize legacy source knowledge: %w", normalizeErr)
-		}
-		normalizedJSON, encodeErr := normalized.JSON()
-		if encodeErr != nil {
-			return fmt.Errorf("encode normalized legacy source knowledge: %w", encodeErr)
-		}
-		if !changed || normalizedJSON != documentJSON {
-			return fmt.Errorf("source differs beyond canonical missing-speaker normalization")
-		}
-		wikiEnabled := false
-		updated, updateErr := w.Gateway.UpdateManualKnowledge(ctx, binding.KnowledgeID, weknora.ManualKnowledgeInput{
-			Title: SourceTitle(doc.Title), Content: SourceContent(doc, documentJSON, hash),
-			Status: "publish", Channel: "api", ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
-		})
-		if updateErr != nil {
-			return fmt.Errorf("update legacy source knowledge: %w", updateErr)
-		}
-		if updated.ID != binding.KnowledgeID {
-			return fmt.Errorf("updated source knowledge identity changed")
-		}
-		verified, verifyErr := w.Gateway.GetKnowledge(ctx, binding.KnowledgeID)
-		if verifyErr != nil {
-			return fmt.Errorf("verify repaired source knowledge: %w", verifyErr)
-		}
-		if err := validateSourceKnowledgeBase(verified.KnowledgeBaseID, w.KBID); err != nil {
-			return err
-		}
-		verifiedDoc, validateErr := ValidateSourceContent(verified.Content, doc.VideoID, doc.TranscriptGeneration, doc.DurationSeconds)
-		if validateErr != nil {
-			return fmt.Errorf("validate repaired source knowledge: %w", validateErr)
-		}
-		verifiedJSON, encodeErr := verifiedDoc.JSON()
-		if encodeErr != nil || verifiedJSON != documentJSON {
-			return fmt.Errorf("repaired source knowledge does not match expected document")
-		}
-	}
-	update := w.DB.WithContext(ctx).Model(&model.VideoTranscriptSource{}).
-		Where("id = ? AND content_hash = ?", binding.ID, binding.ContentHash).
-		Updates(map[string]any{
-			"content_hash": hash, "status": SourceStatusCreated, "error_message": "", "updated_at": time.Now().UTC(),
-		})
-	if update.Error != nil {
-		return fmt.Errorf("save repaired source binding: %w", update.Error)
-	}
-	if update.RowsAffected != 1 {
-		return fmt.Errorf("source binding changed concurrently during repair")
-	}
-	slog.Info("transcript source evidence identity repaired", "video_id", doc.VideoID,
-		"transcript_generation", doc.TranscriptGeneration, "knowledge_id", binding.KnowledgeID,
-		"knowledge_base_id", w.KBID, "content_hash", hash)
-	return nil
-}
-
 func logSourceAudit(result SourceResult, inputTaskID string) SourceResult {
 	taskID := strings.TrimSpace(inputTaskID)
 	if taskID == "" {
@@ -366,6 +287,83 @@ func sourceDocumentMatches(content, videoID, generation string, durationSeconds 
 	}
 	actualHash := fmt.Sprintf("%x", sha256.Sum256([]byte(documentJSON)))
 	return actualHash == expectedHash
+}
+
+func (w *SourceWriter) repairLegacySpeakerIdentity(
+	ctx context.Context,
+	binding model.VideoTranscriptSource,
+	doc FullVideoDocument,
+	documentJSON string,
+	hash string,
+) error {
+	if binding.Status != SourceStatusCreated || strings.TrimSpace(binding.KnowledgeID) == "" {
+		return fmt.Errorf("legacy source binding is not ready")
+	}
+	existing, err := w.Gateway.GetKnowledge(ctx, binding.KnowledgeID)
+	if err != nil {
+		return fmt.Errorf("read legacy source knowledge: %w", err)
+	}
+	if err := validateSourceKnowledgeBase(existing.KnowledgeBaseID, w.KBID); err != nil {
+		return err
+	}
+	legacy, err := ParseSourceContent(existing.Content)
+	if err != nil {
+		return fmt.Errorf("parse legacy source knowledge: %w", err)
+	}
+	existingJSON, err := legacy.JSON()
+	if err != nil {
+		return fmt.Errorf("encode legacy source knowledge: %w", err)
+	}
+	if existingJSON != documentJSON {
+		normalized, changed, normalizeErr := normalizeEvidenceIdentity(legacy)
+		if normalizeErr != nil {
+			return fmt.Errorf("normalize legacy source knowledge: %w", normalizeErr)
+		}
+		normalizedJSON, encodeErr := normalized.JSON()
+		if encodeErr != nil || !changed || normalizedJSON != documentJSON {
+			return fmt.Errorf("source differs beyond canonical missing-speaker normalization")
+		}
+		wikiEnabled := false
+		updater, ok := w.Gateway.(knowledgeUpdater)
+		if !ok {
+			return fmt.Errorf("legacy source gateway does not support updates")
+		}
+		updated, updateErr := updater.UpdateManualKnowledge(ctx, binding.KnowledgeID, weknora.ManualKnowledgeInput{
+			Title: SourceTitle(doc.Title), Content: SourceContent(doc, documentJSON, hash), Status: "publish", Channel: "api",
+			ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
+		})
+		if updateErr != nil {
+			return fmt.Errorf("update legacy source knowledge: %w", updateErr)
+		}
+		if updated.ID != binding.KnowledgeID {
+			return fmt.Errorf("updated source knowledge identity changed")
+		}
+		verified, verifyErr := w.Gateway.GetKnowledge(ctx, binding.KnowledgeID)
+		if verifyErr != nil {
+			return fmt.Errorf("verify repaired source knowledge: %w", verifyErr)
+		}
+		if err := validateSourceKnowledgeBase(verified.KnowledgeBaseID, w.KBID); err != nil {
+			return err
+		}
+		verifiedDoc, validateErr := ValidateSourceContent(verified.Content, doc.VideoID, doc.TranscriptGeneration, doc.DurationSeconds)
+		if validateErr != nil {
+			return fmt.Errorf("validate repaired source knowledge: %w", validateErr)
+		}
+		verifiedJSON, encodeErr := verifiedDoc.JSON()
+		if encodeErr != nil || verifiedJSON != documentJSON {
+			return fmt.Errorf("repaired source knowledge does not match expected document")
+		}
+	}
+	update := w.DB.WithContext(ctx).Model(&model.VideoTranscriptSource{}).
+		Where("id = ? AND content_hash = ?", binding.ID, binding.ContentHash).
+		Updates(map[string]any{"content_hash": hash, "status": SourceStatusCreated, "error_message": "", "updated_at": time.Now().UTC()})
+	if update.Error != nil {
+		return fmt.Errorf("save repaired source binding: %w", update.Error)
+	}
+	if update.RowsAffected != 1 {
+		return fmt.Errorf("source binding changed concurrently during repair")
+	}
+	return nil
 }
 
 // legacySourceDocumentEquivalent recognizes the only historical source

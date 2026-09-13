@@ -94,25 +94,164 @@ func (a *ProjectionAssembler) Assemble(input StageFourAssemblyInput) (Projection
 		TopicClusters:              clusters,
 		TopicClusterRelations:      relations,
 	}
-	selectedVideos := make(map[string]struct{})
-	unitEvidence := make([]EvidenceRef, 0)
-	for _, cluster := range clusters {
-		for _, videoID := range cluster.SourceVideoIDs {
-			selectedVideos[videoID] = struct{}{}
-		}
-		for _, stage := range cluster.Path.Stages {
-			for _, unit := range stage.Units {
-				unitEvidence = append(unitEvidence, unit.EvidenceRefs...)
-			}
-		}
+	bindProjectionKnowledgeFields(&projection, validationInput)
+	ensureGapAnalyses(&projection)
+	projection.Statistics = buildStatistics(
+		validationInput,
+		projection.TopicClusters,
+		selectedVideoIDs(projection.TopicClusters),
+		allProjectionEvidence(projection.TopicClusters),
+	)
+	if err := ValidateProjection(ProjectionDocument{TrainingPathProjection: projection}, validationInput); err != nil {
+		return ProjectionDocument{}, fmt.Errorf("validate assembled stage-four projection before publication filtering: %w", err)
 	}
-	projection.Statistics = buildStatistics(validationInput, clusters, selectedVideos, unitEvidence)
-	normalizeProjectionKnowledgeFields(&projection)
+	filterKnowledgeBackedProjection(&projection)
+	bindProjectionKnowledgeFields(&projection, validationInput)
+	ensureGapAnalyses(&projection)
+	projection.Statistics = buildStatistics(
+		validationInput,
+		projection.TopicClusters,
+		selectedVideoIDs(projection.TopicClusters),
+		allProjectionEvidence(projection.TopicClusters),
+	)
 	doc := ProjectionDocument{TrainingPathProjection: projection}
 	if err := ValidateProjection(doc, validationInput); err != nil {
 		return ProjectionDocument{}, fmt.Errorf("validate assembled stage-four projection: %w", err)
 	}
 	return doc, nil
+}
+
+func filterKnowledgeBackedProjection(projection *Projection) {
+	if projection == nil {
+		return
+	}
+	keptClusters := make([]TopicCluster, 0, len(projection.TopicClusters))
+	clusterEvidenceByID := make(map[string]map[string]struct{})
+	for _, cluster := range projection.TopicClusters {
+		filtered, ok := filterKnowledgeBackedCluster(cluster)
+		if !ok {
+			continue
+		}
+		keptClusters = append(keptClusters, filtered)
+		evidenceSet := make(map[string]struct{})
+		for _, ref := range filtered.EvidenceRefs {
+			evidenceSet[evidenceRefKey(ref)] = struct{}{}
+		}
+		clusterEvidenceByID[filtered.ClusterID] = evidenceSet
+	}
+	keptClusterIDs := make(map[string]struct{}, len(keptClusters))
+	for _, cluster := range keptClusters {
+		keptClusterIDs[cluster.ClusterID] = struct{}{}
+	}
+	keptRelations := make([]TopicClusterRelation, 0, len(projection.TopicClusterRelations))
+	for _, relation := range projection.TopicClusterRelations {
+		if _, ok := keptClusterIDs[relation.SourceClusterID]; !ok {
+			continue
+		}
+		if _, ok := keptClusterIDs[relation.TargetClusterID]; !ok {
+			continue
+		}
+		relation.SourceEvidenceRefs = filterEvidenceRefs(relation.SourceEvidenceRefs, clusterEvidenceByID[relation.SourceClusterID])
+		relation.TargetEvidenceRefs = filterEvidenceRefs(relation.TargetEvidenceRefs, clusterEvidenceByID[relation.TargetClusterID])
+		if len(relation.SourceEvidenceRefs) == 0 || len(relation.TargetEvidenceRefs) == 0 {
+			continue
+		}
+		keptRelations = append(keptRelations, relation)
+	}
+	projection.TopicClusters = keptClusters
+	projection.TopicClusterRelations = keptRelations
+}
+
+func filterKnowledgeBackedCluster(cluster TopicCluster) (TopicCluster, bool) {
+	videoOrder := append([]string(nil), cluster.SourceVideoIDs...)
+	memberByVideo := make(map[string]MemberTopic, len(videoOrder))
+	for index, videoID := range videoOrder {
+		if index < len(cluster.MemberTopics) {
+			memberByVideo[strings.TrimSpace(videoID)] = cluster.MemberTopics[index]
+		}
+	}
+	keptVideos := make(map[string]struct{})
+	keptEvidence := make([]EvidenceRef, 0)
+	keptKnowledge := make([]string, 0)
+	filteredStages := make([]LearningStage, 0, len(cluster.Path.Stages))
+	for _, stage := range cluster.Path.Stages {
+		filteredUnits := make([]LearningUnit, 0, len(stage.Units))
+		for _, unit := range stage.Units {
+			if len(unit.KnowledgeRefs) == 0 {
+				continue
+			}
+			unit.Sequence = len(filteredUnits) + 1
+			filteredUnits = append(filteredUnits, unit)
+			for _, ref := range unit.EvidenceRefs {
+				keptVideos[strings.TrimSpace(ref.VideoID)] = struct{}{}
+				keptEvidence = appendUniqueEvidenceRefs(keptEvidence, ref)
+			}
+			for _, ref := range unit.KnowledgeRefs {
+				keptKnowledge = appendUnique(keptKnowledge, ref.KnowledgeObjectID)
+			}
+		}
+		if len(filteredUnits) == 0 {
+			continue
+		}
+		stage.Sequence = len(filteredStages) + 1
+		stage.Units = filteredUnits
+		filteredStages = append(filteredStages, stage)
+	}
+	if len(filteredStages) == 0 {
+		return TopicCluster{}, false
+	}
+	filteredVideoIDs := make([]string, 0, len(videoOrder))
+	filteredMembers := make([]MemberTopic, 0, len(videoOrder))
+	for _, videoID := range videoOrder {
+		videoID = strings.TrimSpace(videoID)
+		if _, ok := keptVideos[videoID]; !ok {
+			continue
+		}
+		filteredVideoIDs = append(filteredVideoIDs, videoID)
+		if member, ok := memberByVideo[videoID]; ok {
+			filteredMembers = append(filteredMembers, member)
+		}
+	}
+	unitCount := 0
+	for _, stage := range filteredStages {
+		unitCount += len(stage.Units)
+	}
+	if len(filteredVideoIDs) == 0 || len(keptEvidence) == 0 || unitCount == 0 {
+		return TopicCluster{}, false
+	}
+	cluster.SourceVideoIDs = filteredVideoIDs
+	cluster.MemberTopics = filteredMembers
+	cluster.EvidenceRefs = keptEvidence
+	cluster.KnowledgeObjectIDs = uniqueSortedStrings(keptKnowledge)
+	cluster.Path.Stages = filteredStages
+	return cluster, true
+}
+
+func appendUniqueEvidenceRefs(values []EvidenceRef, ref EvidenceRef) []EvidenceRef {
+	key := evidenceRefKey(ref)
+	for _, value := range values {
+		if evidenceRefKey(value) == key {
+			return values
+		}
+	}
+	return append(values, ref)
+}
+
+func filterEvidenceRefs(values []EvidenceRef, allowed map[string]struct{}) []EvidenceRef {
+	filtered := make([]EvidenceRef, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		key := evidenceRefKey(value)
+		if _, ok := allowed[key]; !ok {
+			continue
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		filtered = append(filtered, value)
+	}
+	return filtered
 }
 
 func hasRetrievalDegradation(materials []ClusterMaterial) bool {
@@ -308,6 +447,17 @@ func stageFourValidationInput(snapshot CatalogSnapshot, materials []ClusterMater
 			})
 		}
 	}
+	knowledgeByVideo := make(map[string][]KnowledgeSignal)
+	for _, material := range materials {
+		for _, object := range material.KnowledgeObjects {
+			knowledgeByVideo[object.VideoID] = append(knowledgeByVideo[object.VideoID], KnowledgeSignal{
+				SourceVideoID: object.VideoID, KnowledgeObjectID: object.KnowledgeObjectID,
+				WikiPageID: object.WikiPageID, KnowledgeType: object.KnowledgeType,
+				Title:       object.Title,
+				EvidenceIDs: append([]string(nil), object.EvidenceIDs...),
+			})
+		}
+	}
 	for _, video := range snapshot.Videos {
 		source := TopicSourceNormalizedTranscript
 		if video.OrchestrationProfile != nil {
@@ -318,9 +468,34 @@ func stageFourValidationInput(snapshot CatalogSnapshot, materials []ClusterMater
 			VideoID: video.VideoID, Title: video.Title, VideoType: video.VideoType,
 			DurationSeconds: video.DurationSeconds, TranscriptGeneration: video.TranscriptGeneration,
 			TopicSource: source, EvidenceSignals: dedupeEvidenceSignals(evidenceByVideo[video.VideoID]),
+			KnowledgeSignals: dedupeKnowledgeSignals(knowledgeByVideo[video.VideoID]),
 		})
 	}
 	return input
+}
+
+func dedupeKnowledgeSignals(signals []KnowledgeSignal) []KnowledgeSignal {
+	result := make([]KnowledgeSignal, 0, len(signals))
+	seen := make(map[string]struct{}, len(signals))
+	for _, signal := range signals {
+		key := strings.TrimSpace(signal.KnowledgeObjectID) + "\x00" + strings.TrimSpace(signal.WikiPageID)
+		if key == "\x00" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		signal.EvidenceIDs = uniqueStrings(signal.EvidenceIDs)
+		result = append(result, signal)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].KnowledgeObjectID != result[j].KnowledgeObjectID {
+			return result[i].KnowledgeObjectID < result[j].KnowledgeObjectID
+		}
+		return result[i].WikiPageID < result[j].WikiPageID
+	})
+	return result
 }
 
 func dedupeEvidenceSignals(signals []EvidenceSignal) []EvidenceSignal {
@@ -483,6 +658,112 @@ func (o *StageFourOrchestrator) Run(ctx context.Context, snapshot CatalogSnapsho
 		InitialCatalog: plannedCatalog, LatestCatalog: latest, Plan: plan,
 		Materials: materials, Drafts: drafts, Relations: relations,
 	})
+}
+
+type fixedCatalogSnapshotReader struct{ snapshot CatalogSnapshot }
+
+func (r fixedCatalogSnapshotReader) CollectCatalog(context.Context) (CatalogSnapshot, error) {
+	return r.snapshot, nil
+}
+
+// RunIncremental regenerates only clusters that contain changed videos. It
+// preserves relationships between untouched clusters and replaces only edges
+// incident to regenerated clusters.
+func (o *StageFourOrchestrator) RunIncremental(ctx context.Context, snapshot CatalogSnapshot, previous ProjectionDocument, changedVideoIDs []string) (ProjectionDocument, error) {
+	if o == nil || o.RelationGenerator == nil {
+		return ProjectionDocument{}, fmt.Errorf("stage-four incremental dependencies are not configured")
+	}
+	changed := make(map[string]struct{}, len(changedVideoIDs))
+	for _, id := range changedVideoIDs {
+		changed[strings.TrimSpace(id)] = struct{}{}
+	}
+	affectedClusters := make(map[string]struct{})
+	affectedVideos := make(map[string]struct{})
+	unchangedClusters := make([]TopicCluster, 0, len(previous.TrainingPathProjection.TopicClusters))
+	for _, cluster := range previous.TrainingPathProjection.TopicClusters {
+		affected := false
+		for _, id := range cluster.SourceVideoIDs {
+			if _, ok := changed[id]; ok {
+				affected = true
+				break
+			}
+		}
+		if !affected {
+			unchangedClusters = append(unchangedClusters, cluster)
+			continue
+		}
+		affectedClusters[cluster.ClusterID] = struct{}{}
+		for _, id := range cluster.SourceVideoIDs {
+			affectedVideos[id] = struct{}{}
+		}
+	}
+	if len(affectedClusters) == 0 {
+		return ProjectionDocument{}, fmt.Errorf("incremental source change has no affected published cluster")
+	}
+	subset := CatalogSnapshot{ContractVersion: snapshot.ContractVersion, OwnerScopeID: snapshot.OwnerScopeID, Videos: []CatalogVideo{}, SkippedVideos: []SkippedVideo{}}
+	for _, video := range snapshot.Videos {
+		if _, ok := affectedVideos[video.VideoID]; ok {
+			subset.Videos = append(subset.Videos, video)
+		}
+	}
+	for _, video := range snapshot.SkippedVideos {
+		if _, ok := affectedVideos[video.VideoID]; ok {
+			subset.SkippedVideos = append(subset.SkippedVideos, video)
+		}
+	}
+	if len(subset.Videos) == 0 {
+		return ProjectionDocument{}, fmt.Errorf("incremental affected cluster has no available source videos")
+	}
+	clone := *o
+	clone.SnapshotReader = fixedCatalogSnapshotReader{snapshot: subset}
+	regenerated, err := clone.Run(ctx, subset)
+	if err != nil {
+		return ProjectionDocument{}, err
+	}
+	clusters := append(unchangedClusters, regenerated.TrainingPathProjection.TopicClusters...)
+	newClusterIDs := make(map[string]struct{}, len(regenerated.TrainingPathProjection.TopicClusters))
+	for _, cluster := range regenerated.TrainingPathProjection.TopicClusters {
+		newClusterIDs[cluster.ClusterID] = struct{}{}
+	}
+	generatedRelations, err := o.RelationGenerator.Generate(ctx, clusters)
+	if err != nil {
+		return ProjectionDocument{}, stageFourError("incremental relation generation", err)
+	}
+	relations := make([]TopicClusterRelation, 0, len(previous.TrainingPathProjection.TopicClusterRelations)+len(generatedRelations))
+	for _, relation := range previous.TrainingPathProjection.TopicClusterRelations {
+		_, sourceAffected := affectedClusters[relation.SourceClusterID]
+		_, targetAffected := affectedClusters[relation.TargetClusterID]
+		if !sourceAffected && !targetAffected {
+			relations = append(relations, relation)
+		}
+	}
+	for _, relation := range generatedRelations {
+		_, sourceNew := newClusterIDs[relation.SourceClusterID]
+		_, targetNew := newClusterIDs[relation.TargetClusterID]
+		if sourceNew || targetNew {
+			relations = append(relations, relation)
+		}
+	}
+	relations, err = normalizeStageFourRelations(relations)
+	if err != nil {
+		return ProjectionDocument{}, err
+	}
+	projection := previous.TrainingPathProjection
+	projection.SourceFingerprint = snapshot.SourceFingerprint
+	projection.GeneratedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	projection.TopicClusters = clusters
+	projection.TopicClusterRelations = relations
+	input := catalogInputPackage(snapshot)
+	bindProjectionKnowledgeFields(&projection, input)
+	filterKnowledgeBackedProjection(&projection)
+	bindProjectionKnowledgeFields(&projection, input)
+	ensureGapAnalyses(&projection)
+	projection.Statistics = buildStatistics(input, projection.TopicClusters, selectedVideoIDs(projection.TopicClusters), allProjectionEvidence(projection.TopicClusters))
+	doc := ProjectionDocument{TrainingPathProjection: projection}
+	if err := ValidateProjection(doc, input); err != nil {
+		return ProjectionDocument{}, fmt.Errorf("validate incremental projection: %w", err)
+	}
+	return doc, nil
 }
 
 func (o *StageFourOrchestrator) generateClusterPartsWithRetry(ctx context.Context, cluster PlanCluster, part ClusterGenerationPart) ([]ClusterGenerationDraft, error) {

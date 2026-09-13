@@ -68,6 +68,8 @@ type KnowledgeRef struct {
 	KnowledgeObjectID string                  `json:"knowledge_object_id"`
 	WikiPageID        string                  `json:"wiki_page_id"`
 	KnowledgeType     knowledge.KnowledgeType `json:"knowledge_type"`
+	Title             string                  `json:"title"`
+	LocatorEvidence   EvidenceRef             `json:"locator_evidence"`
 }
 
 type MemberTopic struct {
@@ -102,18 +104,41 @@ type LearningPath struct {
 }
 
 type TopicCluster struct {
-	ClusterID           string        `json:"cluster_id"`
-	Title               string        `json:"title"`
-	Summary             string        `json:"summary"`
-	LearningGoal        string        `json:"learning_goal"`
-	LearningContentType string        `json:"learning_content_type"`
-	MemberTopics        []MemberTopic `json:"member_topics"`
-	SourceVideoIDs      []string      `json:"source_video_ids"`
-	KnowledgeObjectIDs  []string      `json:"knowledge_object_ids"`
-	EvidenceRefs        []EvidenceRef `json:"evidence_refs"`
-	Confidence          float64       `json:"confidence"`
-	ReviewStatus        string        `json:"review_status"`
-	Path                LearningPath  `json:"path"`
+	ClusterID           string             `json:"cluster_id"`
+	Title               string             `json:"title"`
+	Summary             string             `json:"summary"`
+	LearningGoal        string             `json:"learning_goal"`
+	LearningContentType string             `json:"learning_content_type"`
+	MemberTopics        []MemberTopic      `json:"member_topics"`
+	SourceVideoIDs      []string           `json:"source_video_ids"`
+	KnowledgeObjectIDs  []string           `json:"knowledge_object_ids"`
+	EvidenceRefs        []EvidenceRef      `json:"evidence_refs"`
+	Confidence          float64            `json:"confidence"`
+	ReviewStatus        string             `json:"review_status"`
+	GapAnalysis         ContentGapAnalysis `json:"gap_analysis"`
+	Path                LearningPath       `json:"path"`
+	EvidenceText        map[string]string  `json:"-"`
+}
+
+// ContentGapAnalysis is an independent assessment of whether the published
+// path is deep enough for the topic's stated capability. It never replaces or
+// mutates the topic, stages, or learning units.
+type ContentGapAnalysis struct {
+	Status                     string        `json:"status"`
+	CurrentDepthSummary        string        `json:"current_depth_summary"`
+	SupplementDirectionSummary string        `json:"supplement_direction_summary"`
+	Dimensions                 GapDimensions `json:"dimensions"`
+}
+
+type GapDimensions struct {
+	KnowledgeCoverage         GapDimension `json:"knowledge_coverage"`
+	WorkplaceApplication      GapDimension `json:"workplace_application"`
+	IndependentTaskCompletion GapDimension `json:"independent_task_completion"`
+}
+
+type GapDimension struct {
+	Gap            string `json:"gap"`
+	Recommendation string `json:"recommendation"`
 }
 
 type TopicClusterRelation struct {
@@ -166,20 +191,109 @@ func normalizeProjectionKnowledgeFields(projection *Projection) {
 	if projection == nil {
 		return
 	}
-	projection.Statistics.SelectedKnowledgeCount = 0
 	for i := range projection.TopicClusters {
 		cluster := &projection.TopicClusters[i]
-		cluster.KnowledgeObjectIDs = []string{}
+		cluster.KnowledgeObjectIDs = uniqueSortedStrings(cluster.KnowledgeObjectIDs)
 		for j := range cluster.Path.Stages {
 			for k := range cluster.Path.Stages[j].Units {
-				cluster.Path.Stages[j].Units[k].KnowledgeRefs = []KnowledgeRef{}
+				cluster.Path.Stages[j].Units[k].KnowledgeRefs = normalizeKnowledgeRefs(cluster.Path.Stages[j].Units[k].KnowledgeRefs)
 			}
 		}
 	}
 	for i := range projection.TopicClusterRelations {
-		projection.TopicClusterRelations[i].SourceKnowledgeRefs = []string{}
-		projection.TopicClusterRelations[i].TargetKnowledgeRefs = []string{}
+		projection.TopicClusterRelations[i].SourceKnowledgeRefs = uniqueSortedStrings(projection.TopicClusterRelations[i].SourceKnowledgeRefs)
+		projection.TopicClusterRelations[i].TargetKnowledgeRefs = uniqueSortedStrings(projection.TopicClusterRelations[i].TargetKnowledgeRefs)
 	}
+}
+
+func ensureGapAnalyses(projection *Projection) {
+	if projection == nil {
+		return
+	}
+	for index := range projection.TopicClusters {
+		cluster := &projection.TopicClusters[index]
+		if strings.TrimSpace(cluster.GapAnalysis.Status) == "" {
+			cluster.GapAnalysis = buildContentGapAnalysis(*cluster)
+		}
+	}
+}
+
+// buildContentGapAnalysis intentionally uses only the already-published path
+// shape. It provides a stable, business-language fallback when an older
+// generator did not emit the independent assessment yet.
+func buildContentGapAnalysis(cluster TopicCluster) ContentGapAnalysis {
+	unitCount := 0
+	evidenceCount := 0
+	for _, stage := range cluster.Path.Stages {
+		for _, unit := range stage.Units {
+			unitCount++
+			evidenceCount += len(unit.EvidenceRefs)
+		}
+	}
+	goal := strings.TrimSpace(cluster.LearningGoal)
+	if goal == "" {
+		goal = strings.TrimSpace(cluster.Title)
+	}
+	return ContentGapAnalysis{
+		Status:                     "partial",
+		CurrentDepthSummary:        fmt.Sprintf("围绕“%s”，当前路径提供 %d 个学习任务和 %d 条证据，已形成从理解到初步运用的学习基础。", goal, unitCount, evidenceCount),
+		SupplementDirectionSummary: fmt.Sprintf("要达到“%s”所要求的能力，还需要用更多边界情境和可验收任务验证迁移。", goal),
+		Dimensions: GapDimensions{
+			KnowledgeCoverage:         GapDimension{Gap: fmt.Sprintf("学习者对“%s”涉及的关键概念和适用边界仍缺少完整判断。", goal), Recommendation: "补充概念辨析、判断条件和反例证据。"},
+			WorkplaceApplication:      GapDimension{Gap: fmt.Sprintf("学习者还不能稳定把“%s”迁移到变化的工作情境。", goal), Recommendation: "补充岗位案例、操作步骤与异常处理练习。"},
+			IndependentTaskCompletion: GapDimension{Gap: fmt.Sprintf("学习者还不能独立交付与“%s”对应且可检查的任务结果。", goal), Recommendation: "补充从输入、执行到验收标准的完整任务。"},
+		},
+	}
+}
+
+// bindProjectionKnowledgeFields is the program-owned knowledge seam. Model
+// output may contain no knowledge IDs (and any such IDs are ignored); audited
+// objects are attached only when their evidence contribution supports the
+// generated unit.
+func bindProjectionKnowledgeFields(projection *Projection, input InputPackage) {
+	if projection == nil {
+		return
+	}
+	objects := make([]MaterialKnowledge, 0)
+	for _, video := range input.QualifiedVideos {
+		for _, signal := range video.KnowledgeSignals {
+			objects = append(objects, MaterialKnowledge{
+				VideoID: video.VideoID, KnowledgeObjectID: signal.KnowledgeObjectID,
+				WikiPageID: signal.WikiPageID, KnowledgeType: signal.KnowledgeType,
+				Title:       signal.Title,
+				EvidenceIDs: append([]string(nil), signal.EvidenceIDs...),
+			})
+		}
+	}
+	for clusterIndex := range projection.TopicClusters {
+		cluster := &projection.TopicClusters[clusterIndex]
+		cluster.KnowledgeObjectIDs = []string{}
+		for stageIndex := range cluster.Path.Stages {
+			for unitIndex := range cluster.Path.Stages[stageIndex].Units {
+				unit := &cluster.Path.Stages[stageIndex].Units[unitIndex]
+				unit.KnowledgeRefs = knowledgeRefsForEvidence(objects, unit.EvidenceRefs)
+				for _, ref := range unit.KnowledgeRefs {
+					cluster.KnowledgeObjectIDs = appendUnique(cluster.KnowledgeObjectIDs, ref.KnowledgeObjectID)
+				}
+			}
+		}
+		cluster.KnowledgeObjectIDs = uniqueSortedStrings(cluster.KnowledgeObjectIDs)
+	}
+	for relationIndex := range projection.TopicClusterRelations {
+		relation := &projection.TopicClusterRelations[relationIndex]
+		relation.SourceKnowledgeRefs = knowledgeIDsForEvidence(objects, relation.SourceEvidenceRefs)
+		relation.TargetKnowledgeRefs = knowledgeIDsForEvidence(objects, relation.TargetEvidenceRefs)
+	}
+	normalizeProjectionKnowledgeFields(projection)
+}
+
+func knowledgeIDsForEvidence(objects []MaterialKnowledge, evidence []EvidenceRef) []string {
+	refs := knowledgeRefsForEvidence(objects, evidence)
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ids = append(ids, ref.KnowledgeObjectID)
+	}
+	return uniqueSortedStrings(ids)
 }
 
 func ValidateProjection(doc ProjectionDocument, input InputPackage) error {
@@ -197,12 +311,17 @@ func ValidateProjection(doc ProjectionDocument, input InputPackage) error {
 		return err
 	}
 	videos, evidence := buildInputWhitelist(input)
+	knowledgeWhitelist := buildKnowledgeWhitelist(input)
 	clusterIDs := make(map[string]struct{}, len(p.TopicClusters))
 	unitIDs := make(map[string]struct{})
 	selectedVideos := make(map[string]struct{})
+	selectedKnowledge := make(map[string]struct{})
 	allUnitEvidence := make([]EvidenceRef, 0)
 	for i, cluster := range p.TopicClusters {
-		if err := validateCluster(cluster, videos, evidence, clusterIDs, unitIDs, selectedVideos, &allUnitEvidence); err != nil {
+		if err := validateGapAnalysis(cluster.GapAnalysis); err != nil {
+			return fmt.Errorf("topic_clusters[%d]: %w", i, err)
+		}
+		if err := validateCluster(cluster, videos, evidence, knowledgeWhitelist, clusterIDs, unitIDs, selectedVideos, selectedKnowledge, &allUnitEvidence); err != nil {
 			return fmt.Errorf("topic_clusters[%d]: %w", i, err)
 		}
 	}
@@ -219,6 +338,7 @@ func ValidateProjection(doc ProjectionDocument, input InputPackage) error {
 		return fmt.Errorf("required_before relations contain a cycle")
 	}
 	expected := buildStatistics(input, p.TopicClusters, selectedVideos, allUnitEvidence)
+	expected.SelectedKnowledgeCount = len(selectedKnowledge)
 	if fmt.Sprintf("%#v", p.Statistics) != fmt.Sprintf("%#v", expected) {
 		return fmt.Errorf("projection statistics do not match the published content")
 	}
@@ -230,27 +350,93 @@ func validateKnowledgeCompatibilityFields(doc ProjectionDocument) error {
 	if p.TopicClusters == nil || p.TopicClusterRelations == nil {
 		return fmt.Errorf("topic arrays must be JSON arrays")
 	}
-	if p.Statistics.SelectedKnowledgeCount != 0 {
-		return fmt.Errorf("selected knowledge count must be zero for this stage")
-	}
 	for _, cluster := range p.TopicClusters {
-		if cluster.KnowledgeObjectIDs == nil || len(cluster.KnowledgeObjectIDs) != 0 {
-			return fmt.Errorf("knowledge object references are disabled for this stage")
+		if cluster.KnowledgeObjectIDs == nil {
+			return fmt.Errorf("topic cluster knowledge_object_ids must be a JSON array")
 		}
 		for _, stage := range cluster.Path.Stages {
 			for _, unit := range stage.Units {
-				if unit.KnowledgeRefs == nil || len(unit.KnowledgeRefs) != 0 {
-					return fmt.Errorf("learning unit knowledge references are disabled for this stage")
+				if unit.KnowledgeRefs == nil {
+					return fmt.Errorf("learning unit knowledge_refs must be a JSON array")
 				}
 			}
 		}
 	}
 	for _, relation := range p.TopicClusterRelations {
-		if relation.SourceKnowledgeRefs == nil || relation.TargetKnowledgeRefs == nil || len(relation.SourceKnowledgeRefs) != 0 || len(relation.TargetKnowledgeRefs) != 0 {
-			return fmt.Errorf("relation knowledge references are disabled for this stage")
+		if relation.SourceKnowledgeRefs == nil || relation.TargetKnowledgeRefs == nil {
+			return fmt.Errorf("relation knowledge references must be JSON arrays")
 		}
 	}
 	return nil
+}
+
+func validateGapAnalysis(analysis ContentGapAnalysis) error {
+	status := strings.TrimSpace(analysis.Status)
+	if status != "partial" && status != "sufficient" {
+		return fmt.Errorf("gap_analysis status must be partial or sufficient")
+	}
+	if strings.TrimSpace(analysis.CurrentDepthSummary) == "" || strings.TrimSpace(analysis.SupplementDirectionSummary) == "" {
+		return fmt.Errorf("gap_analysis summaries are required")
+	}
+	for name, dimension := range map[string]GapDimension{
+		"knowledge_coverage":          analysis.Dimensions.KnowledgeCoverage,
+		"workplace_application":       analysis.Dimensions.WorkplaceApplication,
+		"independent_task_completion": analysis.Dimensions.IndependentTaskCompletion,
+	} {
+		if strings.TrimSpace(dimension.Gap) == "" || strings.TrimSpace(dimension.Recommendation) == "" {
+			return fmt.Errorf("gap_analysis dimension %s is incomplete", name)
+		}
+	}
+	return nil
+}
+
+func normalizeKnowledgeRefs(refs []KnowledgeRef) []KnowledgeRef {
+	result := make([]KnowledgeRef, 0, len(refs))
+	seen := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		ref.KnowledgeObjectID = strings.TrimSpace(ref.KnowledgeObjectID)
+		ref.WikiPageID = strings.TrimSpace(ref.WikiPageID)
+		ref.KnowledgeType = knowledge.KnowledgeType(strings.ToLower(strings.TrimSpace(string(ref.KnowledgeType))))
+		ref.Title = strings.TrimSpace(ref.Title)
+		ref.LocatorEvidence.VideoID = strings.TrimSpace(ref.LocatorEvidence.VideoID)
+		ref.LocatorEvidence.TranscriptGeneration = strings.TrimSpace(ref.LocatorEvidence.TranscriptGeneration)
+		ref.LocatorEvidence.EvidenceID = strings.TrimSpace(ref.LocatorEvidence.EvidenceID)
+		if ref.KnowledgeObjectID == "" || ref.WikiPageID == "" || ref.Title == "" || !knowledge.IsKnowledgeType(ref.KnowledgeType) ||
+			ref.LocatorEvidence.VideoID == "" || ref.LocatorEvidence.TranscriptGeneration == "" || ref.LocatorEvidence.EvidenceID == "" ||
+			ref.LocatorEvidence.StartMs < 0 || ref.LocatorEvidence.EndMs <= ref.LocatorEvidence.StartMs {
+			continue
+		}
+		if _, ok := seen[ref.KnowledgeObjectID]; ok {
+			continue
+		}
+		seen[ref.KnowledgeObjectID] = struct{}{}
+		result = append(result, ref)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].KnowledgeObjectID != result[j].KnowledgeObjectID {
+			return result[i].KnowledgeObjectID < result[j].KnowledgeObjectID
+		}
+		return result[i].WikiPageID < result[j].WikiPageID
+	})
+	return result
+}
+
+func uniqueSortedStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func validateProjectionIDs(p Projection) error {
@@ -296,7 +482,7 @@ func validateProjectionIDs(p Projection) error {
 	return nil
 }
 
-func validateCluster(cluster TopicCluster, videos map[string]VideoTopicProfile, evidence map[string]EvidenceSignal, clusterIDs, unitIDs, selectedVideos map[string]struct{}, allUnitEvidence *[]EvidenceRef) error {
+func validateCluster(cluster TopicCluster, videos map[string]VideoTopicProfile, evidence map[string]EvidenceSignal, knowledgeWhitelist map[string][]MaterialKnowledge, clusterIDs, unitIDs, selectedVideos, selectedKnowledge map[string]struct{}, allUnitEvidence *[]EvidenceRef) error {
 	if !nonEmpty(cluster.ClusterID, cluster.Title, cluster.Summary, cluster.LearningGoal) || cluster.ReviewStatus != "passed" || !validConfidence(cluster.Confidence) {
 		return fmt.Errorf("required cluster fields are invalid")
 	}
@@ -330,6 +516,16 @@ func validateCluster(cluster TopicCluster, videos map[string]VideoTopicProfile, 
 		}
 		clusterVideos[id] = struct{}{}
 		selectedVideos[id] = struct{}{}
+	}
+	if cluster.KnowledgeObjectIDs == nil {
+		return fmt.Errorf("knowledge_object_ids must be a JSON array")
+	}
+	for _, objectID := range cluster.KnowledgeObjectIDs {
+		objectID = strings.TrimSpace(objectID)
+		if objectID == "" {
+			return fmt.Errorf("knowledge_object_ids contains an empty ID")
+		}
+		selectedKnowledge[objectID] = struct{}{}
 	}
 	for _, ref := range cluster.EvidenceRefs {
 		if err := validateEvidenceRef(ref, evidence); err != nil {
@@ -370,6 +566,56 @@ func validateCluster(cluster TopicCluster, videos map[string]VideoTopicProfile, 
 				}
 				*allUnitEvidence = append(*allUnitEvidence, ref)
 			}
+			if unit.KnowledgeRefs == nil {
+				return fmt.Errorf("learning unit knowledge_refs must be a JSON array")
+			}
+			for _, ref := range unit.KnowledgeRefs {
+				key := strings.TrimSpace(ref.KnowledgeObjectID)
+				allowedItems, ok := knowledgeWhitelist[key]
+				if !ok {
+					return fmt.Errorf("learning unit knowledge reference %s is outside the audited knowledge whitelist", key)
+				}
+				matched := false
+				for _, allowed := range allowedItems {
+					if allowed.WikiPageID != strings.TrimSpace(ref.WikiPageID) ||
+						allowed.KnowledgeType != ref.KnowledgeType ||
+						strings.TrimSpace(allowed.Title) != strings.TrimSpace(ref.Title) {
+						continue
+					}
+					for _, evidenceRef := range unit.EvidenceRefs {
+						if evidenceRefKey(evidenceRef) == evidenceRefKey(ref.LocatorEvidence) && contains(allowed.EvidenceIDs, evidenceRef.EvidenceID) && allowed.VideoID == evidenceRef.VideoID {
+							matched = true
+							break
+						}
+					}
+					if matched {
+						break
+					}
+				}
+				if !matched {
+					return fmt.Errorf("learning unit knowledge reference %s has no supporting unit evidence", key)
+				}
+				selectedKnowledge[key] = struct{}{}
+			}
+		}
+	}
+	clusterKnowledge := make(map[string]struct{}, len(cluster.KnowledgeObjectIDs))
+	for _, objectID := range cluster.KnowledgeObjectIDs {
+		clusterKnowledge[strings.TrimSpace(objectID)] = struct{}{}
+	}
+	for objectID := range clusterKnowledge {
+		found := false
+		for _, stage := range cluster.Path.Stages {
+			for _, unit := range stage.Units {
+				for _, ref := range unit.KnowledgeRefs {
+					if strings.TrimSpace(ref.KnowledgeObjectID) == objectID {
+						found = true
+					}
+				}
+			}
+		}
+		if !found {
+			return fmt.Errorf("cluster knowledge object %s is not referenced by a learning unit", objectID)
 		}
 	}
 	return nil
@@ -434,6 +680,27 @@ func buildInputWhitelist(input InputPackage) (map[string]VideoTopicProfile, map[
 	return videos, evidence
 }
 
+func buildKnowledgeWhitelist(input InputPackage) map[string][]MaterialKnowledge {
+	result := make(map[string][]MaterialKnowledge)
+	for _, video := range input.QualifiedVideos {
+		for _, signal := range video.KnowledgeSignals {
+			id := strings.TrimSpace(signal.KnowledgeObjectID)
+			if id == "" {
+				continue
+			}
+			result[id] = append(result[id], MaterialKnowledge{
+				KnowledgeObjectID: id,
+				WikiPageID:        strings.TrimSpace(signal.WikiPageID),
+				KnowledgeType:     signal.KnowledgeType,
+				Title:             strings.TrimSpace(signal.Title),
+				VideoID:           strings.TrimSpace(signal.SourceVideoID),
+				EvidenceIDs:       append([]string(nil), signal.EvidenceIDs...),
+			})
+		}
+	}
+	return result
+}
+
 func validateEvidenceRef(ref EvidenceRef, whitelist map[string]EvidenceSignal) error {
 	allowed, ok := whitelist[evidenceKey(ref.VideoID, ref.TranscriptGeneration, ref.EvidenceID)]
 	if !ok || allowed.StartMs != ref.StartMs || allowed.EndMs != ref.EndMs {
@@ -495,14 +762,51 @@ func hasRequiredBeforeCycle(relations []TopicClusterRelation) bool {
 func buildStatistics(input InputPackage, clusters []TopicCluster, selectedVideos map[string]struct{}, unitEvidence []EvidenceRef) ProjectionStatistics {
 	notSelected := len(input.QualifiedVideos) - len(selectedVideos)
 	learningUnitCount := 0
+	knowledgeObjects := make(map[string]struct{})
 	for _, cluster := range clusters {
+		for _, objectID := range cluster.KnowledgeObjectIDs {
+			if id := strings.TrimSpace(objectID); id != "" {
+				knowledgeObjects[id] = struct{}{}
+			}
+		}
 		for _, stage := range cluster.Path.Stages {
 			learningUnitCount += len(stage.Units)
+			for _, unit := range stage.Units {
+				for _, ref := range unit.KnowledgeRefs {
+					if id := strings.TrimSpace(ref.KnowledgeObjectID); id != "" {
+						knowledgeObjects[id] = struct{}{}
+					}
+				}
+			}
 		}
 	}
-	stats := ProjectionStatistics{ScannedVideos: input.ScannedVideos, QualifiedVideos: len(input.QualifiedVideos), SelectedVideos: len(selectedVideos), NotSelectedVideos: notSelected, SkippedVideos: len(input.SkippedVideos), TopicClusterCount: len(clusters), LearningUnitCount: learningUnitCount, SelectedKnowledgeCount: 0, LearningDurationSecs: mergedEvidenceDurationSeconds(unitEvidence), SkippedReasonCounts: input.SkipReasonCounts, TopicSourceCounts: input.TopicSourceCounts}
+	stats := ProjectionStatistics{ScannedVideos: input.ScannedVideos, QualifiedVideos: len(input.QualifiedVideos), SelectedVideos: len(selectedVideos), NotSelectedVideos: notSelected, SkippedVideos: len(input.SkippedVideos), TopicClusterCount: len(clusters), LearningUnitCount: learningUnitCount, SelectedKnowledgeCount: len(knowledgeObjects), LearningDurationSecs: mergedEvidenceDurationSeconds(unitEvidence), SkippedReasonCounts: input.SkipReasonCounts, TopicSourceCounts: input.TopicSourceCounts}
 	stats.NotSelectedReasonCount.RedundantEvidence = notSelected
 	return stats
+}
+
+func selectedVideoIDs(clusters []TopicCluster) map[string]struct{} {
+	result := make(map[string]struct{})
+	for _, cluster := range clusters {
+		for _, videoID := range cluster.SourceVideoIDs {
+			if id := strings.TrimSpace(videoID); id != "" {
+				result[id] = struct{}{}
+			}
+		}
+	}
+	return result
+}
+
+func allProjectionEvidence(clusters []TopicCluster) []EvidenceRef {
+	result := make([]EvidenceRef, 0)
+	for _, cluster := range clusters {
+		for _, stage := range cluster.Path.Stages {
+			for _, unit := range stage.Units {
+				result = append(result, unit.EvidenceRefs...)
+			}
+		}
+	}
+	return result
 }
 
 func mergedEvidenceDurationSeconds(refs []EvidenceRef) int {

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { buildVideoContentState, classifyContentError, contentModuleForStage, shouldShowRelatedKnowledgeTab } from './contentState'
 import { mapRelatedKnowledgeResponse, parseOutlineResponse, parseOutlineWikiPage, parseOverviewWikiPage, parseStructuredSummary, parseSubtitleFile, parseTimestamp, parseTranscriptPageWikiPage, type CanonicalOutlineResponse } from './contentParsing'
-import { getNewlyCompletedStages } from '../../components/videohub/processingStatusState'
+import { getFailedProcessingStages, getNewlyCompletedStages, getProcessingBannerState, getProcessingStages, shouldPollProcessingStatus } from '../../components/videohub/processingStatusState'
 
 test('parses cross-hour outline timestamps and knowledge evidence', () => {
   const chapters = parseOutlineWikiPage(`---
@@ -123,6 +123,30 @@ test('summary keeps evidence-free template sections empty', () => {
 
   assert.equal(sections.length, titles.length)
   assert.ok(sections.every(section => section.blocks.length === 0))
+})
+
+test('summary migrates legacy training section titles to the current template', () => {
+  const legacyTitles = ['一、目标与受众', '二、知识地图', '三、核心概念', '四、方法与步骤', '五、示例与异常', '六、练习与应用']
+  const currentTitles = ['一、学习目标、适用对象与前置知识', '二、培训内容体系', '三、核心知识要点与原文金句', '四、方法、操作步骤与判断标准', '五、案例、工具使用与互动问答', '六、练习、自测与应用清单']
+  const sections = parseStructuredSummary({
+    schemaVersion: 1,
+    videoType: 'training',
+    sections: legacyTitles.map((title, index) => ({
+      id: ['goals-audience', 'knowledge-map', 'core-concepts', 'methods-steps', 'examples-exceptions', 'practice-application'][index],
+      title,
+      blocks: [],
+    })),
+  })
+
+  assert.deepEqual(sections.map(section => section.title), currentTitles)
+  assert.deepEqual(sections.map(section => section.id), [
+    'learning-goals-audience-prerequisites',
+    'training-content-system',
+    'knowledge-highlights-quotes',
+    'methods-steps-criteria',
+    'cases-tools-qa',
+    'practice-assessment-application',
+  ])
 })
 
 test('summary renders v2 eight-section meetings from the response type even when the previous category is stale', () => {
@@ -391,6 +415,7 @@ test('maps completed processing stages to local content modules', () => {
   assert.equal(contentModuleForStage('outline'), 'outline')
   assert.equal(contentModuleForStage('overview'), null)
   assert.equal(contentModuleForStage('summary'), 'summary')
+  assert.equal(contentModuleForStage('summary_enhance'), 'summary')
   assert.equal(contentModuleForStage('graph'), 'relatedKnowledge')
   assert.equal(contentModuleForStage('assemble'), 'all')
   assert.equal(contentModuleForStage('transcription'), null)
@@ -407,6 +432,39 @@ test('emits a processing stage only when it newly succeeds', () => {
     { job_id: 'job-summary', job_type: 'summary', status: 'succeeded' },
   ] as any
   assert.deepEqual(getNewlyCompletedStages(previous, jobs), ['outline'])
+})
+
+test('tracks only pending and running content stages for skeleton states', () => {
+  assert.deepEqual(getProcessingStages([
+    { job_id: 'summary-1', job_type: 'summary', status: 'running' },
+    { job_id: 'outline-1', job_type: 'outline', status: 'pending' },
+    { job_id: 'graph-1', job_type: 'graph', status: 'succeeded' },
+    { job_id: 'old-1', job_type: 'summary', status: 'failed' },
+  ] as any), ['summary', 'outline'])
+})
+
+test('aggregates processing jobs into the two user-facing detail states', () => {
+  assert.equal(getProcessingBannerState([
+    { job_type: 'transcription', status: 'running' },
+    { job_type: 'summary', status: 'pending' },
+  ] as any), 'transcribing')
+  assert.equal(getProcessingBannerState([
+    { job_type: 'outline', status: 'running' },
+    { job_type: 'graph', status: 'pending' },
+  ] as any), 'ai_generating')
+  assert.equal(getProcessingBannerState([{ job_type: 'assemble', status: 'running' }] as any), null)
+  assert.equal(getProcessingBannerState([{ job_type: 'transcription', status: 'failed' }] as any), 'transcription_failed')
+  assert.equal(getProcessingBannerState([{ job_type: 'summary', status: 'succeeded' }] as any), null)
+})
+
+test('keeps polling whenever any effective job remains active', () => {
+  assert.equal(shouldPollProcessingStatus(null), true)
+  assert.equal(shouldPollProcessingStatus({ status: 'failed', jobs: [{ job_type: 'outline', status: 'running' }] } as any), true)
+  assert.equal(shouldPollProcessingStatus({ status: 'ready', jobs: [] } as any), false)
+  assert.deepEqual(getFailedProcessingStages([
+    { job_type: 'summary', status: 'failed' },
+    { job_type: 'outline', status: 'succeeded' },
+  ] as any), ['summary'])
 })
 
 test('outline parser clamps an overlong final chapter to video duration', () => {

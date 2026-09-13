@@ -122,7 +122,7 @@ func ValidateSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceMa
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d evidence ID differs", ordinal))
 		case strings.TrimSpace(mark.SourceSentenceID) != strings.TrimSpace(item.SourceSentenceID):
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d source sentence ID differs", ordinal))
-		case evidence.NormalizeSpeakerID(mark.SpeakerID) != evidence.NormalizeSpeakerID(item.SpeakerID):
+		case evidenceSpeakerID(mark.SpeakerID) != evidenceSpeakerID(item.SpeakerID):
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d speaker ID differs", ordinal))
 		case mark.StartMs != item.StartMs:
 			return sourceValidation(SourceValidationEvidence, fmt.Sprintf("sentence %d start time differs", ordinal))
@@ -148,9 +148,6 @@ func NormalizeSourceEvidenceManifest(doc FullVideoDocument, manifest []EvidenceM
 	return normalized, changed, nil
 }
 
-// normalizeEvidenceIdentity upgrades the one legacy representation where an
-// omitted speaker was hashed as empty while evidence chunks used the canonical
-// default "0". It changes no source text, timing, ordering, or source IDs.
 func normalizeEvidenceIdentity(doc FullVideoDocument) (FullVideoDocument, bool, error) {
 	changed := false
 	ordinal := 0

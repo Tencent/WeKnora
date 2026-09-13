@@ -328,7 +328,7 @@ func Load() *Config {
 			OwnerScopeID:                    getEnv("CUSTOM_TRAINING_OWNER_SCOPE_ID", "single-account-local"),
 			OutputKnowledgeBaseID:           getEnv("CUSTOM_TRAINING_OUTPUT_KB_ID", getEnv("WEKNORA_KNOWLEDGE_KB_ID", "")),
 			StageFourEnabled:                getEnvBool("CUSTOM_TRAINING_STAGE_FOUR_ENABLED", true),
-			PromptVersion:                   getEnv("CUSTOM_TRAINING_PROMPT_VERSION", "training-orchestration-v3"),
+			PromptVersion:                   getEnv("CUSTOM_TRAINING_PROMPT_VERSION", "training-orchestration-v4"),
 			MaxInputTokens:                  getEnvInt("CUSTOM_TRAINING_MAX_INPUT_TOKENS", 0),
 			PlanningMaxInputTokens:          getEnvInt("CUSTOM_TRAINING_PLANNING_MAX_INPUT_TOKENS", 450000),
 			PlanningMergeMaxInputTokens:     getEnvInt("CUSTOM_TRAINING_PLANNING_MERGE_MAX_INPUT_TOKENS", 35000),

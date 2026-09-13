@@ -602,7 +602,6 @@ func (e *AgentEngine) runReActIteration(
 				state.CompletionFailureReason = "production_graph_missing_audited_wiki_write"
 			} else {
 				state.CompletionStatus = "succeeded"
-				state.CompletionFailureReason = ""
 			}
 			return iterOutcomeBreak, nil
 		}

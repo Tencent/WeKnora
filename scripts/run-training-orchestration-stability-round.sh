@@ -228,6 +228,10 @@ sanitize_generation() {
         elif ((.error // "") | test("cycle"; "i")) then "relation_cycle"
         else (.error_code // "unclassified_failure")
         end;
+      def safe_unknown_field:
+        if .error_code == null then null
+        else ((.error // "") | capture("unknown field \"(?<field>[^\"]+)\"") | .field) // null
+        end;
       {
         schema_version,
         mode,
@@ -281,7 +285,8 @@ sanitize_generation() {
         error: (if .error_code == null then null else {
           code: .error_code,
           class: error_class,
-          reason: safe_reason
+          reason: safe_reason,
+          unknown_field: safe_unknown_field
         } end),
         generation_passed: (.error_code == null and .projection != null)
       }'

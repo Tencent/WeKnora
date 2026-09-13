@@ -234,7 +234,7 @@ func TestNormalizeOrchestrationProfileReferencesProjectsEvidenceFromBlocks(t *te
 		t.Fatalf("NormalizeOrchestrationProfileReferences returned error: %v", err)
 	}
 	unit := document.OrchestrationProfile.TopicUnits[0]
-	if len(unit.EvidenceChunkIDs) != 1 || unit.EvidenceChunkIDs[0] != "chunk-1" {
+	if len(unit.EvidenceChunkIDs) != 2 || unit.EvidenceChunkIDs[0] != "chunk-1" || unit.EvidenceChunkIDs[1] != "chunk-2" {
 		t.Fatalf("unexpected normalized evidence IDs: %#v", unit.EvidenceChunkIDs)
 	}
 	if unit.EvidenceRefs != nil {
@@ -295,13 +295,13 @@ func TestNormalizeOrchestrationProfileReferencesFailsClosed(t *testing.T) {
 
 	document.OrchestrationProfile.TopicUnits[0].SummaryBlockIDs = []string{"block-1"}
 	document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs = []string{"chunk-not-in-block"}
-	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}, "chunk-not-in-block": {}}); err == nil || !strings.Contains(err.Error(), "no evidence") {
-		t.Fatalf("expected empty projected evidence error, got %v", err)
+	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}, "chunk-not-in-block": {}}); err != nil {
+		t.Fatalf("model-provided evidence should be ignored, got %v", err)
 	}
 
-	document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs = []string{"unknown-chunk"}
+	document.Sections[0].Blocks[0].EvidenceChunkIDs = []string{"unknown-chunk"}
 	if err := NormalizeOrchestrationProfileReferences(&document, map[string]struct{}{"chunk-1": {}}); err == nil || !strings.Contains(err.Error(), "unknown evidence chunk") {
-		t.Fatalf("expected unknown evidence error, got %v", err)
+		t.Fatalf("expected unknown block evidence error, got %v", err)
 	}
 }
 

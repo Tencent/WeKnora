@@ -69,9 +69,7 @@ func (g *legacyProcessingSourceGateway) CreateManualKnowledge(_ context.Context,
 
 func (g *legacyProcessingSourceGateway) UpdateManualKnowledge(_ context.Context, id string, input weknora.ManualKnowledgeInput) (weknora.ManualKnowledgeResult, error) {
 	g.updated = append(g.updated, input)
-	g.legacy = weknora.ManualKnowledgeResult{
-		ID: id, KnowledgeBaseID: g.legacy.KnowledgeBaseID, Title: input.Title, Content: input.Content, ParseStatus: "completed",
-	}
+	g.legacy = weknora.ManualKnowledgeResult{ID: id, KnowledgeBaseID: "knowledge-kb", Title: input.Title, Content: input.Content, ParseStatus: "completed"}
 	return g.legacy, nil
 }
 

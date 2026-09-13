@@ -6,6 +6,7 @@ import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
+import { isLegacyPostAuthLanding } from './legacyPostAuthLanding'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -40,15 +41,6 @@ function hasPendingOIDCCallback() {
   if (typeof window === 'undefined') return false
   const hash = window.location.hash || ''
   return hash.includes('oidc_result=') || hash.includes('oidc_error=')
-}
-
-function isLegacyPostAuthLanding(to: RouteLocationNormalized, from: RouteLocationNormalized) {
-  return to.path === '/platform/knowledge-bases' && (
-    from.path === '/login' ||
-    from.path === '/register' ||
-    from.path === '/platform/videos' ||
-    from.path === '/onboarding/workspace'
-  )
 }
 
 const router = createRouter({

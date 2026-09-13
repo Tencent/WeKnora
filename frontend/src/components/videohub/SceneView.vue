@@ -2,6 +2,7 @@
   <section class="scene-view" aria-label="场景视图">
     <t-alert v-if="sceneMode === 'training' && errorMessage" theme="error" :message="errorMessage" />
     <t-alert v-if="sceneMode === 'training' && warningMessage" theme="warning" :message="warningMessage" />
+    <t-alert v-if="sceneMode === 'training' && refreshSummary" theme="info" :message="refreshSummary" />
 
     <nav class="scene-view__modes" role="tablist" aria-label="场景应用">
       <button type="button" role="tab" :aria-selected="sceneMode === 'training'" :class="{ 'is-active': sceneMode === 'training' }" @click="sceneMode = 'training'">培训</button>
@@ -33,8 +34,11 @@
       </div>
 
       <section class="scene-result-summary" aria-label="生成结果说明">
-        <div class="scene-result-summary__counts">
-          <span v-for="item in resultCounts" :key="item.label">{{ item.label }} <strong>{{ item.value }}</strong></span>
+        <div class="scene-result-summary__head">
+          <div class="scene-result-summary__counts">
+            <span v-for="item in resultCounts" :key="item.label">{{ item.label }} <strong>{{ item.value }}</strong></span>
+          </div>
+          <t-button size="small" variant="outline" :loading="generating" @click="refresh">智能刷新</t-button>
         </div>
         <div v-if="topicSourceEntries.length" class="scene-result-summary__line">
           <span>内容来源</span>
@@ -76,8 +80,8 @@
               <strong>{{ edge.otherClusterTitle }}</strong>
             </button>
           </div>
-          <div class="topic-network" :style="{ minHeight: `${networkHeight}px` }">
-            <svg :viewBox="`0 0 900 ${networkHeight}`" preserveAspectRatio="none" aria-label="主题簇关系">
+            <div ref="networkElement" class="topic-network" :style="{ minHeight: `${networkHeight}px` }">
+            <svg :viewBox="`0 0 100 ${networkHeight}`" preserveAspectRatio="none" aria-label="主题簇关系">
               <defs>
                 <marker id="topic-edge-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
                   <path d="M 0 0 L 8 4 L 0 8 z" fill="context-stroke" />
@@ -162,22 +166,21 @@
                   </button>
                   <p>{{ stage.summary }}</p>
                   <div v-if="isStageExpanded(stage.stage_id)" class="path-stage__units">
-                    <button
+                    <div
                       v-for="unit in [...stage.units].sort((a, b) => a.sequence - b.sequence)"
                       :key="unit.unit_id"
-                      type="button"
                       class="path-step"
                       :class="{ 'is-active': selectedUnit === unit.unit_id }"
-                      :aria-expanded="selectedUnit === unit.unit_id"
-                      @click="selectedUnit = selectedUnit === unit.unit_id ? null : unit.unit_id"
                     >
-                      <span class="path-step__heading">
+                      <button type="button" class="path-step__toggle" :aria-expanded="selectedUnit === unit.unit_id" @click="selectedUnit = selectedUnit === unit.unit_id ? null : unit.unit_id">
                         <small>{{ String(unit.sequence).padStart(2, '0') }}</small>
                         <strong>{{ unit.learning_title }}</strong>
-                      </span>
-                      <span><small>你将解决</small>{{ unit.learner_question }}</span>
-                      <em><small>学完可以</small>{{ unit.learning_outcome }}</em>
-                    </button>
+                      </button>
+                      <p class="path-step__question"><small>学习任务</small>{{ unit.learner_question }} 学完可以 {{ unit.learning_outcome }}</p>
+                      <div v-if="unit.knowledge_refs.length" class="path-step__knowledge" aria-label="知识点">
+                        <button v-for="ref in unit.knowledge_refs" :key="`${unit.unit_id}-${ref.knowledge_object_id}`" type="button" class="knowledge-tag" :title="ref.title" @click.stop="selectKnowledge(ref, unit)">{{ ref.title }}</button>
+                      </div>
+                    </div>
                   </div>
                 </section>
               </div>
@@ -187,13 +190,16 @@
                   <span class="path-detail__label">知识入口</span>
                   <button
                     v-for="ref in activeUnit.knowledge_refs"
-                    :key="ref.wiki_page_id"
+                    :key="`${ref.knowledge_object_id}-${ref.wiki_page_id}`"
                     type="button"
                     class="source-link"
-                    @click="emit('selectWiki', { targetPageId: ref.wiki_page_id, title: activeUnit.learning_title })"
+                    @click="emit('selectWiki', { targetPageId: ref.wiki_page_id, title: ref.title })"
                   >
                     <FileIcon />
-                    <span>查看知识 Wiki</span>
+                    <span>
+                      <strong>{{ ref.title }}</strong>
+                      <small>{{ knowledgeTypeLabels[ref.knowledge_type] || ref.knowledge_type }}</small>
+                    </span>
                   </button>
                 </div>
                 <div class="path-detail__group">
@@ -213,6 +219,25 @@
                   </button>
                 </div>
               </div>
+
+              <section v-if="activeCluster.gap_analysis" class="gap-analysis" :class="{ 'is-sufficient': activeCluster.gap_analysis.status === 'sufficient' }">
+                <button type="button" class="gap-analysis__toggle" :aria-expanded="gapAnalysisExpanded" @click="gapAnalysisExpanded = !gapAnalysisExpanded">
+                  <span>
+                    <strong>缺口说明</strong>
+                    <small>{{ activeCluster.gap_analysis.current_depth_summary }}</small>
+                    <small>{{ activeCluster.gap_analysis.supplement_direction_summary }}</small>
+                    <small class="gap-analysis__action">{{ gapAnalysisExpanded ? '收起缺口分析' : '查看缺口分析' }}</small>
+                  </span>
+                  <ChevronDownIcon :class="{ 'is-expanded': gapAnalysisExpanded }" />
+                </button>
+                <div v-if="gapAnalysisExpanded" class="gap-analysis__dimensions">
+                  <article v-for="item in gapDimensions" :key="item.label" class="gap-analysis__dimension">
+                    <strong>{{ item.label }}</strong>
+                    <p>{{ item.value.gap }}</p>
+                    <small>{{ item.value.recommendation }}</small>
+                  </article>
+                </div>
+              </section>
             </div>
           </template>
         </aside>
@@ -223,7 +248,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ChevronDownIcon, FileIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { fetchVideoOptions } from '@/api/videohub'
 import MeetingSceneView from './MeetingSceneView.vue'
@@ -235,6 +260,9 @@ import {
   trainingJobErrorMessage,
   trainingJobWarningMessage,
   type TrainingEvidenceRef,
+  type TrainingGapAnalysis,
+  type TrainingJob,
+  type TrainingLearningUnit,
   type TrainingNotSelectedReason,
   type TrainingProjection,
   type TrainingRelationType,
@@ -254,12 +282,17 @@ const generating = ref(false)
 const jobProgress = ref(0)
 const errorMessage = ref('')
 const warningMessage = ref('')
+const refreshSummary = ref('')
 const selectedCluster = ref('')
 const selectedUnit = ref<string | null>(null)
 const selectedRelation = ref<string | null>(null)
 const previewedRelation = ref<string | null>(null)
 const expandedStages = ref<string[]>([])
+const gapAnalysisExpanded = ref(false)
 const videoTitles = ref<Record<string, string>>({})
+const networkElement = ref<HTMLElement | null>(null)
+const networkWidth = ref(720)
+let networkResizeObserver: ResizeObserver | undefined
 
 const relationTypeLabels: Record<TrainingRelationType, string> = {
   required_before: '必须先学',
@@ -275,6 +308,13 @@ const contentTypeLabels: Record<string, string> = {
   case_analysis: '案例分析',
   humanities_reflection: '人文反思',
   process_standard: '流程规范',
+}
+const knowledgeTypeLabels: Record<string, string> = {
+  entity: '实体',
+  concept: '概念',
+  case: '案例',
+  methodology: '方法论',
+  insight: '洞察',
 }
 const skipReasonLabels: Record<TrainingSkipReason, string> = {
   processing: '处理中',
@@ -293,22 +333,26 @@ const topicSourceLabels: Record<TrainingTopicSource, string> = {
   normalized_transcript: '规范化转写',
 }
 
-const trainingClusterCount = computed(() => projection.value?.topic_clusters.length || 0)
-const networkLayout = computed(() => createTrainingNetworkLayout(trainingClusterCount.value))
+const visibleTopicClusters = computed(() => (projection.value?.topic_clusters || [])
+  .filter(cluster => cluster.path.stages.some(stage => stage.units.length > 0)))
+const trainingClusterCount = computed(() => visibleTopicClusters.value.length)
+const networkLayout = computed(() => createTrainingNetworkLayout(trainingClusterCount.value, networkWidth.value))
 const networkHeight = computed(() => networkLayout.value.height)
-const trainingClusters = computed(() => (projection.value?.topic_clusters || []).map((cluster, index, all) => {
+const trainingClusters = computed(() => visibleTopicClusters.value.map((cluster, index, all) => {
   const position = positionTrainingCluster(index, all.length, networkLayout.value)
+  const stages = [...cluster.path.stages].sort((a, b) => a.sequence - b.sequence)
   return {
     key: cluster.cluster_id,
     title: cluster.title,
-    units: cluster.member_topics.length,
+    units: stages.reduce((total, stage) => total + stage.units.length, 0),
     videos: cluster.source_video_ids.length,
     x: position.x,
     y: position.y,
     description: cluster.summary,
     learningGoal: cluster.learning_goal,
     contentType: cluster.learning_content_type,
-    stages: [...cluster.path.stages].sort((a, b) => a.sequence - b.sequence),
+    gap_analysis: cluster.gap_analysis,
+    stages,
   }
 }))
 const clusterByID = computed(() => new Map(trainingClusters.value.map(cluster => [cluster.key, cluster])))
@@ -316,12 +360,12 @@ const trainingEdges = computed(() => (projection.value?.topic_cluster_relations 
   const source = clusterByID.value.get(relation.source_cluster_id)
   const target = clusterByID.value.get(relation.target_cluster_id)
   if (!source || !target) return []
-  const sourceCenter = { x: source.x * 9, y: source.y * networkHeight.value / 100 }
-  const targetCenter = { x: target.x * 9, y: target.y * networkHeight.value / 100 }
+    const sourceCenter = { x: source.x, y: source.y * networkHeight.value / 100 }
+    const targetCenter = { x: target.x, y: target.y * networkHeight.value / 100 }
   const obstacleCenters = trainingClusters.value
     .filter(cluster => cluster.key !== source.key && cluster.key !== target.key)
-    .map(cluster => ({ x: cluster.x * 9, y: cluster.y * networkHeight.value / 100 }))
-  const route = routeTrainingEdge(sourceCenter, targetCenter, obstacleCenters, { width: 900, height: networkHeight.value })
+    .map(cluster => ({ x: cluster.x, y: cluster.y * networkHeight.value / 100 }))
+  const route = routeTrainingEdge(sourceCenter, targetCenter, obstacleCenters, { width: 100, height: networkHeight.value })
   return [{
     key: relation.relation_id,
     ...route,
@@ -345,6 +389,15 @@ const selectedClusterRelations = computed(() => trainingEdges.value
 const activeUnit = computed(() => activeCluster.value?.stages
   .flatMap(stage => stage.units)
   .find(unit => unit.unit_id === selectedUnit.value) || null)
+const gapDimensions = computed(() => {
+  const analysis = activeCluster.value?.gap_analysis as TrainingGapAnalysis | undefined
+  if (!analysis) return []
+  return [
+    { label: '知识覆盖缺口', value: analysis.dimensions.knowledge_coverage },
+    { label: '工作场景运用缺口', value: analysis.dimensions.workplace_application },
+    { label: '独立任务完成缺口', value: analysis.dimensions.independent_task_completion },
+  ]
+})
 const overviewStats = computed(() => {
   const stats = projection.value?.statistics
   return [
@@ -379,6 +432,7 @@ function selectCluster(key: string) {
   selectedCluster.value = key
   selectedRelation.value = null
   selectedUnit.value = null
+  gapAnalysisExpanded.value = false
   const firstStage = clusterByID.value.get(key)?.stages[0]
   expandedStages.value = firstStage ? [firstStage.stage_id] : []
 }
@@ -388,6 +442,14 @@ function openMeetingVideo(videoID: string, seconds: number) {
 function selectRelation(key: string) {
   selectedRelation.value = key
   selectedUnit.value = null
+}
+function selectKnowledge(ref: { wiki_page_id: string; title: string; locator_evidence?: TrainingEvidenceRef }, unit: TrainingLearningUnit) {
+  const evidence = ref.locator_evidence || unit.evidence_refs.find(item => item.video_id === ref.locator_evidence?.video_id && item.evidence_id === ref.locator_evidence?.evidence_id) || unit.evidence_refs[0]
+  if (evidence) {
+    emit('selectVideo', evidence.video_id, evidence.start_ms / 1000)
+    return
+  }
+  emit('selectWiki', { targetPageId: ref.wiki_page_id, title: ref.title })
 }
 function previewRelation(key: string) {
   previewedRelation.value = key
@@ -420,11 +482,12 @@ async function loadCurrent() {
     if (projection.value?.retrieval_degraded) {
       warningMessage.value = '证据召回降级，已使用规划证据完成生成。'
     }
-    const firstCluster = projection.value?.topic_clusters[0]
-    selectedCluster.value = firstCluster?.cluster_id || ''
+    const firstCluster = trainingClusters.value[0]
+    selectedCluster.value = firstCluster?.key || ''
     selectedRelation.value = null
     selectedUnit.value = null
-    expandedStages.value = firstCluster?.path.stages[0]?.stage_id ? [firstCluster.path.stages[0].stage_id] : []
+    gapAnalysisExpanded.value = false
+    expandedStages.value = firstCluster?.stages[0]?.stage_id ? [firstCluster.stages[0].stage_id] : []
     await loadVideoTitles()
   } catch (cause) {
     errorMessage.value = errorText(cause, '读取培训学习路径失败')
@@ -433,7 +496,7 @@ async function loadCurrent() {
   }
 }
 async function loadVideoTitles() {
-  if (!projection.value?.topic_clusters.length) {
+  if (!trainingClusters.value.length) {
     videoTitles.value = {}
     return
   }
@@ -449,6 +512,7 @@ async function refresh() {
   if (generating.value) return
   generating.value = true
   errorMessage.value = ''
+  refreshSummary.value = ''
   try {
     let job = await generateTrainingProjection()
     jobProgress.value = job.progress
@@ -459,6 +523,7 @@ async function refresh() {
     }
     if (job.status === 'failed') throw new Error(trainingJobErrorMessage(job))
     await loadCurrent()
+    refreshSummary.value = trainingRefreshMessage(job)
     if (!warningMessage.value) {
       warningMessage.value = trainingJobWarningMessage(job)
     }
@@ -467,6 +532,23 @@ async function refresh() {
   } finally {
     generating.value = false
   }
+}
+function trainingRefreshMessage(job: TrainingJob) {
+  const labels: Partial<Record<NonNullable<TrainingJob['refresh_mode']>, string>> = {
+    reused: '当前内容没有变化，已保留现有学习路径。',
+    metadata_patch: '标题或定位信息已更新，学习路径内容保持不变。',
+    availability_filter: '已按视频可用状态更新学习路径。',
+    incremental: '已更新受影响的培训主题。',
+    full: '培训学习路径已重新生成。',
+  }
+  const base = job.refresh_mode ? labels[job.refresh_mode] || '' : ''
+  const counts = [
+    job.changed_video_count ? `${job.changed_video_count} 个视频` : '',
+    job.changed_knowledge_count ? `${job.changed_knowledge_count} 个知识点` : '',
+    job.changed_evidence_count ? `${job.changed_evidence_count} 条证据` : '',
+    job.changed_cluster_count ? `${job.changed_cluster_count} 个培训主题` : '',
+  ].filter(Boolean).join('、')
+  return base && counts ? `${base} 涉及${counts}。` : base
 }
 function delay(ms: number) {
   return new Promise(resolve => window.setTimeout(resolve, ms))
@@ -513,7 +595,15 @@ function formatGeneratedAt(value: string) {
   }).format(date)
 }
 
-onMounted(loadCurrent)
+onMounted(() => {
+  networkWidth.value = networkElement.value?.clientWidth || window.innerWidth
+  if (typeof ResizeObserver !== 'undefined' && networkElement.value) {
+    networkResizeObserver = new ResizeObserver(entries => { networkWidth.value = entries[0]?.contentRect.width || networkWidth.value })
+    networkResizeObserver.observe(networkElement.value)
+  }
+  loadCurrent()
+})
+onBeforeUnmount(() => networkResizeObserver?.disconnect())
 defineExpose({ refresh })
 </script>
 
@@ -530,23 +620,24 @@ defineExpose({ refresh })
 .scene-stat span { display: block; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
 .scene-stat strong { display: block; margin-top: 7px; overflow-wrap: anywhere; font-size: 22px; font-weight: 500; line-height: 28px; }
 .scene-result-summary { display: grid; gap: 8px; padding: 12px 2px; border-top: 1px solid var(--td-component-stroke); border-bottom: 1px solid var(--td-component-stroke); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
+.scene-result-summary__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .scene-result-summary__counts, .scene-result-summary__line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
 .scene-result-summary__counts span, .scene-result-summary__line strong { font-weight: 400; white-space: nowrap; }
 .scene-result-summary__counts strong { color: var(--td-text-color-primary); font-weight: 600; }
 .scene-result-summary__line > span { min-width: 72px; color: var(--td-text-color-placeholder); }
 .scene-result-summary__line strong { color: var(--td-text-color-secondary); }
-.training-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: calc(var(--td-comp-margin-s) * 2); align-items: start; }
+.training-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(var(--td-comp-margin-s) * 2); align-items: start; }
 .scene-panel { min-width: 0; border-radius: var(--td-radius-extraLarge); }
-.topic-network-panel { overflow-x: auto; }
+.topic-network-panel { overflow: hidden; }
 .scene-panel__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 18px; border-bottom: 1px solid color-mix(in srgb, var(--td-component-stroke) 72%, transparent); }
 .scene-panel__head strong { font-size: var(--td-font-size-title-small); }
 .scene-panel__head span { color: var(--td-text-color-secondary); font-size: 11px; text-align: right; }
-.topic-relation-labels { display: flex; gap: 0; min-width: 720px; overflow-x: auto; border-bottom: 1px solid color-mix(in srgb, var(--td-component-stroke) 72%, transparent); }
+.topic-relation-labels { display: flex; gap: 0; overflow-x: auto; border-bottom: 1px solid color-mix(in srgb, var(--td-component-stroke) 72%, transparent); }
 .topic-relation-labels button { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 7px; min-width: 0; padding: 9px 12px; border: 0; border-right: 1px solid color-mix(in srgb, var(--td-component-stroke) 72%, transparent); color: var(--td-text-color-secondary); background: rgba(255,255,255,.2); cursor: pointer; text-align: left; }
 .topic-relation-labels button:hover, .topic-relation-labels button:focus-visible, .topic-relation-labels button.is-selected { color: var(--td-brand-color); background: color-mix(in srgb, var(--td-brand-color-light) 44%, rgba(255,255,255,.54)); }
 .topic-relation-labels span { font-size: 10px; font-weight: 600; white-space: nowrap; }
 .topic-relation-labels strong { max-width: 128px; overflow: hidden; color: var(--td-text-color-primary); font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.topic-network { position: relative; min-width: 720px; min-height: 540px; overflow: hidden; background: radial-gradient(circle, rgba(52,79,65,.11) 1px, transparent 1.5px), rgba(255,255,255,.24); background-size: 28px 28px; }
+.topic-network { position: relative; width: 100%; min-width: 0; /* legacy min-width: 720px; retained only as a regression marker; the 5:5 panel must stay fluid. */ min-height: 540px; overflow: hidden; background: radial-gradient(circle, rgba(52,79,65,.11) 1px, transparent 1.5px), rgba(255,255,255,.24); background-size: 28px 28px; }
 .topic-network svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .topic-edge { cursor: pointer; outline: none; }
 .topic-edge__hit { fill: none; stroke: transparent; stroke-width: 18; pointer-events: stroke; }
@@ -582,12 +673,30 @@ defineExpose({ refresh })
 .path-stage__toggle svg.is-expanded { transform: rotate(180deg); }
 .path-stage > p { margin: 0; color: var(--td-text-color-secondary); font-size: 11px; line-height: 17px; }
 .path-stage__units { display: grid; gap: 7px; }
-.path-step { display: block; width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,.88); border-radius: var(--td-radius-medium); color: inherit; background: rgba(255,255,255,.62); cursor: pointer; text-align: left; }
+.path-step { display: grid; gap: 7px; width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,.88); border-radius: var(--td-radius-medium); color: inherit; background: rgba(255,255,255,.62); }
 .path-step:hover, .path-step.is-active { border-color: color-mix(in srgb, var(--td-brand-color) 36%, transparent); background: color-mix(in srgb, var(--td-brand-color-light) 48%, rgba(255,255,255,.8)); }
-.path-step__heading { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 5px; align-items: start; margin: 0; color: var(--td-text-color-primary); }
-.path-step__heading strong { overflow-wrap: anywhere; font-size: 12px; line-height: 17px; }
-.path-step > span:not(.path-step__heading), .path-step > em { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 5px; margin-top: 7px; overflow-wrap: anywhere; color: var(--td-text-color-secondary); font-size: 10px; font-style: normal; line-height: 15px; }
+.path-step__toggle { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 5px; align-items: start; width: 100%; padding: 0; border: 0; color: var(--td-text-color-primary); background: transparent; cursor: pointer; text-align: left; }
+.path-step__toggle strong { overflow-wrap: anywhere; font-size: 12px; line-height: 17px; }
+.path-step__question { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 5px; margin: 0; overflow-wrap: anywhere; color: var(--td-text-color-secondary); font-size: 10px; line-height: 15px; }
 .path-step small { color: var(--td-text-color-placeholder); font-size: 10px; }
+.path-step__knowledge { display: flex; flex-wrap: wrap; gap: 5px; }
+.knowledge-tag { max-width: 100%; overflow: hidden; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--td-brand-color) 26%, transparent); border-radius: var(--td-radius-round); color: var(--td-brand-color); background: color-mix(in srgb, var(--td-brand-color-light) 60%, rgba(255,255,255,.74)); cursor: pointer; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-tag:hover, .knowledge-tag:focus-visible { border-color: var(--td-brand-color); background: var(--td-brand-color-light); }
+.gap-analysis { margin: 8px 0 14px; border: 1px solid color-mix(in srgb, var(--td-warning-color) 36%, rgba(255,255,255,.82)); border-radius: var(--td-radius-large); background: color-mix(in srgb, var(--td-warning-color) 8%, rgba(255,255,255,.48)); backdrop-filter: blur(18px) saturate(112%); -webkit-backdrop-filter: blur(18px) saturate(112%); }
+.gap-analysis.is-sufficient { border-color: color-mix(in srgb, var(--td-component-stroke) 72%, rgba(255,255,255,.82)); background: rgba(255,255,255,.38); }
+.gap-analysis__toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 11px 12px; border: 0; color: inherit; background: transparent; cursor: pointer; text-align: left; }
+.gap-analysis__toggle > span { display: grid; gap: 3px; min-width: 0; }
+.gap-analysis__toggle strong { color: var(--td-warning-color); font-size: 12px; }
+.gap-analysis.is-sufficient .gap-analysis__toggle strong { color: var(--td-text-color-primary); }
+.gap-analysis__toggle small { overflow-wrap: anywhere; color: var(--td-text-color-secondary); font-size: 10px; line-height: 15px; }
+.gap-analysis__toggle .gap-analysis__action { margin-top: 2px; color: var(--td-brand-color); font-weight: 500; }
+.gap-analysis__toggle svg { flex: none; transition: transform .16s ease; }
+.gap-analysis__toggle svg.is-expanded { transform: rotate(180deg); }
+.gap-analysis__dimensions { display: grid; gap: 8px; padding: 0 12px 12px; }
+.gap-analysis__dimension { padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--td-component-stroke) 65%, transparent); }
+.gap-analysis__dimension strong { font-size: 11px; }
+.gap-analysis__dimension p { margin: 4px 0 2px; color: var(--td-text-color-secondary); font-size: 10px; line-height: 15px; }
+.gap-analysis__dimension small { color: var(--td-text-color-placeholder); font-size: 10px; line-height: 15px; }
 .path-detail { display: grid; gap: 12px; margin-top: 10px; padding: 13px; border-top: 1px solid color-mix(in srgb, var(--td-brand-color) 24%, transparent); background: color-mix(in srgb, var(--td-brand-color-light) 34%, rgba(255,255,255,.82)); }
 .path-detail__group { display: grid; gap: 7px; }
 .path-detail__label { color: var(--td-text-color-secondary); font-size: 10px; }
@@ -598,5 +707,5 @@ defineExpose({ refresh })
 @media (max-width: 980px) { .scene-view__overview { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1050px) { .training-layout { grid-template-columns: 1fr; } }
 @media (max-width: 820px) { .scene-view__overview { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .scene-stat { padding: 12px; }.scene-stat strong { font-size: 20px; }.scene-result-summary__line > span { flex-basis: 100%; }.training-detail { padding: 14px; } }
+@media (max-width: 520px) { .scene-stat { padding: 12px; }.scene-stat strong { font-size: 20px; }.scene-result-summary__head { align-items: flex-start; flex-direction: column; }.scene-result-summary__line > span { flex-basis: 100%; }.training-detail { padding: 14px; } }
 </style>

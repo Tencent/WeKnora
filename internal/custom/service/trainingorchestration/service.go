@@ -1,13 +1,14 @@
 package trainingorchestration
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -49,9 +50,20 @@ type ProjectionGenerator interface {
 type StageFourRunner interface {
 	Run(context.Context, CatalogSnapshot) (ProjectionDocument, error)
 }
+type IncrementalStageFourRunner interface {
+	RunIncremental(context.Context, CatalogSnapshot, ProjectionDocument, []string) (ProjectionDocument, error)
+}
 type ProjectionWiki interface {
 	EnsurePage(context.Context, string, weknora.WikiPageWrite) (*weknora.WikiPage, error)
 	GetPageByID(context.Context, string, string) (*weknora.WikiPage, error)
+}
+
+type projectionOverwriteWiki interface {
+	UpsertPage(context.Context, string, weknora.WikiPageWrite) (*weknora.WikiPage, error)
+}
+
+type projectionSlugReader interface {
+	GetPage(context.Context, string, string) (*weknora.WikiPage, error)
 }
 
 type Service struct {
@@ -72,6 +84,16 @@ type Service struct {
 }
 
 func (s *Service) Start(ctx context.Context) (model.TrainingOrchestrationJob, error) {
+	return s.start(ctx, false)
+}
+
+// StartWithOptions preserves fingerprint reuse by default while allowing an
+// explicit user-triggered overwrite of the currently published result.
+func (s *Service) StartWithOptions(ctx context.Context, overwrite bool) (model.TrainingOrchestrationJob, error) {
+	return s.start(ctx, overwrite)
+}
+
+func (s *Service) start(ctx context.Context, overwrite bool) (model.TrainingOrchestrationJob, error) {
 	if err := s.validate(); err != nil {
 		return model.TrainingOrchestrationJob{}, err
 	}
@@ -95,7 +117,7 @@ func (s *Service) Start(ctx context.Context) (model.TrainingOrchestrationJob, er
 	if s.CompletionGate != nil {
 		s.CompletionGate.Reset()
 	}
-	job := model.TrainingOrchestrationJob{ID: uuid.NewString(), OwnerScopeID: s.OwnerScopeID, Status: JobQueued, Stage: StageCollecting, Progress: 0, Model: s.Model, PromptVersion: s.PromptVersion}
+	job := model.TrainingOrchestrationJob{ID: uuid.NewString(), OwnerScopeID: s.OwnerScopeID, Status: JobQueued, Stage: StageCollecting, Progress: 0, Model: s.Model, PromptVersion: s.PromptVersion, RefreshMode: RefreshModeFull}
 	if err := s.DB.WithContext(ctx).Create(&job).Error; err != nil {
 		return model.TrainingOrchestrationJob{}, fmt.Errorf("create training orchestration job: %w", err)
 	}
@@ -103,7 +125,7 @@ func (s *Service) Start(ctx context.Context) (model.TrainingOrchestrationJob, er
 		s.running = make(map[string]struct{})
 	}
 	s.running[job.ID] = struct{}{}
-	go s.run(job.ID)
+	go s.run(job.ID, overwrite)
 	return job, nil
 }
 
@@ -140,14 +162,33 @@ func (s *Service) GetCurrent(ctx context.Context) (*ProjectionDocument, *model.T
 	if doc.TrainingPathProjection.OwnerScopeID != s.OwnerScopeID || doc.TrainingPathProjection.SourceFingerprint != current.SourceFingerprint || doc.TrainingPathProjection.SchemaVersion != SchemaVersion {
 		return nil, &current, fmt.Errorf("current training orchestration identity is invalid")
 	}
-	normalizeProjectionKnowledgeFields(&doc.TrainingPathProjection)
+	if s.Collector != nil {
+		if input, collectErr := s.Collector.Collect(ctx); collectErr == nil {
+			fingerprint, fingerprintErr := SourceFingerprint(input, s.Model, s.PromptVersion)
+			if fingerprintErr == nil && fingerprint == doc.TrainingPathProjection.SourceFingerprint {
+				bindProjectionKnowledgeFields(&doc.TrainingPathProjection, input)
+				doc.TrainingPathProjection.Statistics = buildStatistics(input, doc.TrainingPathProjection.TopicClusters, selectedVideoIDs(doc.TrainingPathProjection.TopicClusters), allProjectionEvidence(doc.TrainingPathProjection.TopicClusters))
+			} else {
+				// Keep the last validated publication readable while a newer source
+				// is waiting for refresh. The refresh job still rechecks the source
+				// before publishing, so this fallback never promotes stale content.
+				normalizeProjectionKnowledgeFields(&doc.TrainingPathProjection)
+			}
+		}
+	}
+	ensureGapAnalyses(&doc.TrainingPathProjection)
 	if err := validateKnowledgeCompatibilityFields(doc); err != nil {
 		return nil, &current, fmt.Errorf("current training orchestration content is invalid: %w", err)
+	}
+	for index, cluster := range doc.TrainingPathProjection.TopicClusters {
+		if err := validateGapAnalysis(cluster.GapAnalysis); err != nil {
+			return nil, &current, fmt.Errorf("current training orchestration topic %d gap analysis is invalid: %w", index+1, err)
+		}
 	}
 	return &doc, &current, nil
 }
 
-func (s *Service) run(jobID string) {
+func (s *Service) run(jobID string, overwrite bool) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.running, jobID)
@@ -164,7 +205,7 @@ func (s *Service) run(jobID string) {
 		return
 	}
 	if s.CatalogCollector != nil && s.StageFour != nil {
-		s.runStageFour(ctx, jobID)
+		s.runStageFour(ctx, jobID, overwrite)
 		return
 	}
 	input, err := s.Collector.Collect(ctx)
@@ -195,14 +236,36 @@ func (s *Service) run(jobID string) {
 		s.fail(jobID, "source_not_stable", fmt.Errorf("training orchestration sources changed before generation started"))
 		return
 	}
-	inputRefs, _ := json.Marshal(inputReferenceSnapshot(input))
+	currentRefs := inputReferenceSnapshot(stableInput)
+	inputRefs, _ := json.Marshal(currentRefs)
 	_ = s.DB.WithContext(ctx).Model(&model.TrainingOrchestrationJob{}).Where("id = ?", jobID).Updates(map[string]any{"progress": 25, "source_fingerprint": fingerprint, "input_references": string(inputRefs)}).Error
-	var current model.TrainingOrchestrationCurrent
-	if err := s.DB.WithContext(ctx).Where("owner_scope_id = ? AND source_fingerprint = ?", s.OwnerScopeID, fingerprint).First(&current).Error; err == nil {
-		if err := s.succeed(ctx, jobID, current.ResultWikiPageID, true); err != nil {
-			s.fail(jobID, "job_update_failed", err)
+	decision := RefreshDecision{Mode: RefreshModeFull}
+	var previous *ProjectionDocument
+	if !overwrite {
+		var decisionErr error
+		decision, previous, decisionErr = s.refreshDecision(ctx, currentRefs)
+		if decisionErr != nil {
+			s.fail(jobID, "refresh_decision_failed", decisionErr)
+			return
 		}
-		return
+		s.recordRefreshDecision(ctx, jobID, decision)
+		if decision.isLocal() && previous != nil {
+			if err := s.publishLocalRefresh(ctx, jobID, previous, stableInput, fingerprint, decision, false); err != nil {
+				s.fail(jobID, "incremental_refresh_failed", err)
+			}
+			return
+		}
+		if decision.Mode == RefreshModeReused {
+			var current model.TrainingOrchestrationCurrent
+			if err := s.DB.WithContext(ctx).Where("owner_scope_id = ? AND source_fingerprint = ?", s.OwnerScopeID, fingerprint).First(&current).Error; err == nil {
+				if err := s.succeedWithRefresh(ctx, jobID, current.ResultWikiPageID, true, decision); err != nil {
+					s.fail(jobID, "job_update_failed", err)
+				}
+				return
+			}
+			decision.Mode = RefreshModeFull
+			s.recordRefreshDecision(ctx, jobID, decision)
+		}
 	}
 	if err := s.DB.WithContext(ctx).Model(&model.TrainingOrchestrationJob{}).Where("id = ?", jobID).Updates(map[string]any{"stage": StageGenerating, "updated_at": time.Now().UTC()}).Error; err != nil {
 		s.fail(jobID, "job_update_failed", err)
@@ -218,11 +281,14 @@ func (s *Service) run(jobID string) {
 		s.fail(jobID, code, err)
 		return
 	}
+	// Keep knowledge references program-owned even when a compatibility
+	// generator implementation returns a prebuilt document.
+	bindProjectionKnowledgeFields(&doc.TrainingPathProjection, input)
+	ensureGapAnalyses(&doc.TrainingPathProjection)
 	if doc.TrainingPathProjection.SourceFingerprint != fingerprint {
 		s.fail(jobID, "generation_validation_failed", fmt.Errorf("training orchestration generator fingerprint does not match the job input"))
 		return
 	}
-	normalizeProjectionKnowledgeFields(&doc.TrainingPathProjection)
 	if err := ValidateProjection(doc, input); err != nil {
 		s.fail(jobID, "generation_validation_failed", err)
 		return
@@ -250,7 +316,7 @@ func (s *Service) run(jobID string) {
 		s.fail(jobID, "job_update_failed", err)
 		return
 	}
-	page, err := s.Wiki.EnsurePage(ctx, s.KnowledgeBaseID, weknora.WikiPageWrite{Slug: projectionSlug(s.OwnerScopeID, fingerprint), Title: "培训学习路径 " + time.Now().Format("2006-01-02 15:04"), PageType: "index", Status: "published", Content: string(content), Summary: "由当前视频、正式总结或规范化转写与字幕证据生成的培训学习路径", SourceRefs: projectionSourceRefs(input), ChunkRefs: projectionChunkRefs(input)})
+	page, err := s.writeProjectionPage(ctx, overwrite, weknora.WikiPageWrite{Slug: projectionSlug(s.OwnerScopeID, fingerprint), Title: "培训学习路径 " + time.Now().Format("2006-01-02 15:04"), PageType: "index", Status: "published", Content: string(content), Summary: "由当前视频、正式总结或规范化转写与字幕证据生成的培训学习路径", SourceRefs: projectionSourceRefs(input), ChunkRefs: projectionChunkRefs(input)})
 	if err != nil {
 		s.fail(jobID, "wiki_publish_failed", err)
 		return
@@ -264,12 +330,31 @@ func (s *Service) run(jobID string) {
 		s.fail(jobID, "wiki_publish_validation_failed", err)
 		return
 	}
-	normalizeProjectionKnowledgeFields(&published.TrainingPathProjection)
-	if err := ValidateProjection(published, input); err != nil || published.TrainingPathProjection.SourceFingerprint != fingerprint {
+	bindProjectionKnowledgeFields(&published.TrainingPathProjection, input)
+	ensureGapAnalyses(&published.TrainingPathProjection)
+	published.TrainingPathProjection.Statistics = buildStatistics(
+		input,
+		published.TrainingPathProjection.TopicClusters,
+		selectedVideoIDs(published.TrainingPathProjection.TopicClusters),
+		allProjectionEvidence(published.TrainingPathProjection.TopicClusters),
+	)
+	validationErr := ValidateProjection(published, input)
+	if validationErr != nil {
+		slog.Warn("training orchestration published projection validation failed", "job_id", jobID, "reason", validationErr.Error())
+	}
+	if validationErr != nil || published.TrainingPathProjection.SourceFingerprint != fingerprint {
+		err := validationErr
 		if err == nil {
 			err = fmt.Errorf("published training orchestration fingerprint does not match the job input")
 		}
 		s.fail(jobID, "wiki_publish_validation_failed", err)
+		return
+	}
+	if stable, stableErr := s.sourcesStillMatch(ctx, fingerprint); stableErr != nil || !stable {
+		if stableErr == nil {
+			stableErr = fmt.Errorf("training orchestration sources changed after Wiki publication")
+		}
+		s.fail(jobID, "source_changed", stableErr)
 		return
 	}
 	warningCode, warningMessage := projectionWarning(doc)
@@ -282,7 +367,7 @@ func (s *Service) run(jobID string) {
 // runStageFour executes the bounded two-stage pipeline behind the existing
 // HTTP job contract. The legacy path remains available when the new runner is
 // not configured, which keeps local rollback cheap and explicit.
-func (s *Service) runStageFour(ctx context.Context, jobID string) {
+func (s *Service) runStageFour(ctx context.Context, jobID string, overwrite bool) {
 	snapshot, err := s.CatalogCollector.CollectCatalog(ctx)
 	if err != nil {
 		s.fail(jobID, "input_collection_failed", err)
@@ -309,25 +394,61 @@ func (s *Service) runStageFour(ctx context.Context, jobID string) {
 		s.fail(jobID, "source_not_stable", fmt.Errorf("training orchestration sources changed before generation started"))
 		return
 	}
-	refs, _ := json.Marshal(catalogReferenceSnapshot(snapshot))
+	currentRefs := catalogReferenceSnapshot(snapshot)
+	refs, _ := json.Marshal(currentRefs)
 	if err := s.DB.WithContext(ctx).Model(&model.TrainingOrchestrationJob{}).Where("id = ?", jobID).Updates(map[string]any{
 		"progress": 25, "source_fingerprint": fingerprint, "input_references": string(refs), "stage": StagePlanning, "updated_at": time.Now().UTC(),
 	}).Error; err != nil {
 		s.fail(jobID, "job_update_failed", err)
 		return
 	}
-	var current model.TrainingOrchestrationCurrent
-	if err := s.DB.WithContext(ctx).Where("owner_scope_id = ? AND source_fingerprint = ?", s.OwnerScopeID, fingerprint).First(&current).Error; err == nil {
-		if err := s.succeed(ctx, jobID, current.ResultWikiPageID, true); err != nil {
-			s.fail(jobID, "job_update_failed", err)
+	decision := RefreshDecision{Mode: RefreshModeFull}
+	var previous *ProjectionDocument
+	if !overwrite {
+		var decisionErr error
+		decision, previous, decisionErr = s.refreshDecision(ctx, currentRefs)
+		if decisionErr != nil {
+			s.fail(jobID, "refresh_decision_failed", decisionErr)
+			return
 		}
-		return
+		s.recordRefreshDecision(ctx, jobID, decision)
+		if decision.isLocal() && previous != nil {
+			if err := s.publishLocalRefresh(ctx, jobID, previous, catalogInputPackage(snapshot), fingerprint, decision, false); err != nil {
+				s.fail(jobID, "incremental_refresh_failed", err)
+			}
+			return
+		}
+		if decision.Mode == RefreshModeReused {
+			var current model.TrainingOrchestrationCurrent
+			if err := s.DB.WithContext(ctx).Where("owner_scope_id = ? AND source_fingerprint = ?", s.OwnerScopeID, fingerprint).First(&current).Error; err == nil {
+				if err := s.succeedWithRefresh(ctx, jobID, current.ResultWikiPageID, true, decision); err != nil {
+					s.fail(jobID, "job_update_failed", err)
+				}
+				return
+			}
+			decision.Mode = RefreshModeFull
+			s.recordRefreshDecision(ctx, jobID, decision)
+		}
 	}
 	if err := s.DB.WithContext(ctx).Model(&model.TrainingOrchestrationJob{}).Where("id = ?", jobID).Updates(map[string]any{"stage": StageGenerating, "updated_at": time.Now().UTC()}).Error; err != nil {
 		s.fail(jobID, "job_update_failed", err)
 		return
 	}
-	doc, err := s.StageFour.Run(ctx, snapshot)
+	var doc ProjectionDocument
+	snapshot.SourceFingerprint = fingerprint
+	if decision.Mode == RefreshModeIncremental && previous != nil {
+		if runner, ok := s.StageFour.(IncrementalStageFourRunner); ok {
+			incrementalSnapshot := snapshot
+			incrementalSnapshot.SourceFingerprint = fingerprint
+			doc, err = runner.RunIncremental(ctx, incrementalSnapshot, *previous, decision.ChangedVideoIDs)
+		} else {
+			doc, err = s.StageFour.Run(ctx, snapshot)
+			decision.Mode = RefreshModeFull
+			s.recordRefreshDecision(ctx, jobID, decision)
+		}
+	} else {
+		doc, err = s.StageFour.Run(ctx, snapshot)
+	}
 	if err != nil {
 		code := "generation_failed"
 		var generationErr *GenerationError
@@ -354,7 +475,7 @@ func (s *Service) runStageFour(ctx context.Context, jobID string) {
 		s.fail(jobID, "job_update_failed", err)
 		return
 	}
-	page, err := s.Wiki.EnsurePage(ctx, s.KnowledgeBaseID, weknora.WikiPageWrite{
+	page, err := s.writeProjectionPage(ctx, overwrite, weknora.WikiPageWrite{
 		Slug: projectionSlug(s.OwnerScopeID, fingerprint), Title: "培训学习路径 " + time.Now().Format("2006-01-02 15:04"),
 		PageType: "index", Status: "published", Content: string(content),
 		Summary:    "由当前视频、正式总结或规范化转写与字幕证据生成的培训学习路径",
@@ -373,14 +494,91 @@ func (s *Service) runStageFour(ctx context.Context, jobID string) {
 		s.fail(jobID, "wiki_publish_validation_failed", err)
 		return
 	}
-	if published.TrainingPathProjection.SourceFingerprint != fingerprint || published.TrainingPathProjection.OwnerScopeID != s.OwnerScopeID || published.TrainingPathProjection.SchemaVersion != SchemaVersion || !reflect.DeepEqual(published, doc) {
+	if published.TrainingPathProjection.SourceFingerprint != fingerprint || published.TrainingPathProjection.OwnerScopeID != s.OwnerScopeID || published.TrainingPathProjection.SchemaVersion != SchemaVersion {
+		slog.Warn("training orchestration published projection validation failed", "job_id", jobID, "reason", "projection identity does not match the job input")
 		s.fail(jobID, "wiki_publish_validation_failed", fmt.Errorf("published training orchestration identity is invalid"))
+		return
+	}
+	// Compare the serialized contract after clearing internal-only assembly
+	// fields. JSON round-tripping intentionally drops EvidenceText, so an
+	// in-memory deep equality check would reject a valid published document.
+	if !samePublishedProjection(published, doc) {
+		slog.Warn("training orchestration published projection validation failed", "job_id", jobID, "reason", "published projection payload differs from candidate")
+		s.fail(jobID, "wiki_publish_validation_failed", fmt.Errorf("published training orchestration payload differs from candidate"))
+		return
+	}
+	if stable, stableErr := s.sourcesStillMatch(ctx, fingerprint); stableErr != nil || !stable {
+		if stableErr == nil {
+			stableErr = fmt.Errorf("training orchestration sources changed after Wiki publication")
+		}
+		s.fail(jobID, "source_changed", stableErr)
 		return
 	}
 	warningCode, warningMessage := projectionWarning(doc)
 	if err := s.publishCurrent(ctx, jobID, page.ID, fingerprint, warningCode, warningMessage); err != nil {
 		s.fail(jobID, "current_switch_failed", err)
 	}
+}
+
+func samePublishedProjection(published, candidate ProjectionDocument) bool {
+	publishedClusters := append([]TopicCluster(nil), published.TrainingPathProjection.TopicClusters...)
+	candidateClusters := append([]TopicCluster(nil), candidate.TrainingPathProjection.TopicClusters...)
+	for i := range publishedClusters {
+		publishedClusters[i].EvidenceText = nil
+	}
+	for i := range candidateClusters {
+		candidateClusters[i].EvidenceText = nil
+	}
+	published.TrainingPathProjection.TopicClusters = publishedClusters
+	candidate.TrainingPathProjection.TopicClusters = candidateClusters
+	publishedJSON, publishedErr := json.Marshal(published)
+	candidateJSON, candidateErr := json.Marshal(candidate)
+	return publishedErr == nil && candidateErr == nil && bytes.Equal(publishedJSON, candidateJSON)
+}
+
+func (s *Service) writeProjectionPage(ctx context.Context, overwrite bool, input weknora.WikiPageWrite) (*weknora.WikiPage, error) {
+	if overwrite {
+		if wiki, ok := s.Wiki.(projectionOverwriteWiki); ok {
+			return wiki.UpsertPage(ctx, s.KnowledgeBaseID, input)
+		}
+	}
+	page, err := s.Wiki.EnsurePage(ctx, s.KnowledgeBaseID, input)
+	if err != nil || page == nil {
+		return page, err
+	}
+	// A previous run may have created the deterministic slug and then failed
+	// before switching the current pointer. Reuse is valid only when the page
+	// body is the candidate we just validated; otherwise repair that orphan
+	// page through the explicit upsert capability before publish-current.
+	if strings.TrimSpace(page.Content) != strings.TrimSpace(input.Content) {
+		if wiki, ok := s.Wiki.(projectionOverwriteWiki); ok {
+			updated, updateErr := wiki.UpsertPage(ctx, s.KnowledgeBaseID, input)
+			if updateErr != nil {
+				return nil, updateErr
+			}
+			// The write endpoint may return before its read model is refreshed.
+			// Re-read the deterministic page so publication validates the content
+			// that readers will actually receive.
+			if reader, ok := s.Wiki.(projectionSlugReader); ok {
+				for attempt := 0; attempt < 4; attempt++ {
+					if refreshed, readErr := reader.GetPage(ctx, s.KnowledgeBaseID, input.Slug); readErr == nil && refreshed != nil {
+						if strings.TrimSpace(refreshed.Content) == strings.TrimSpace(input.Content) || attempt == 3 {
+							return refreshed, nil
+						}
+					}
+					if attempt < 3 {
+						select {
+						case <-ctx.Done():
+							return updated, ctx.Err()
+						case <-time.After(time.Duration(attempt+1) * 100 * time.Millisecond):
+						}
+					}
+				}
+			}
+			return updated, nil
+		}
+	}
+	return page, nil
 }
 
 func (s *Service) publishCurrent(ctx context.Context, jobID, pageID, fingerprint, warningCode, warningMessage string) error {
@@ -403,10 +601,17 @@ func (s *Service) publishCurrent(ctx context.Context, jobID, pageID, fingerprint
 }
 
 func (s *Service) succeed(ctx context.Context, jobID, pageID string, reused bool) error {
+	return s.succeedWithRefresh(ctx, jobID, pageID, reused, RefreshDecision{Mode: RefreshModeReused})
+}
+
+func (s *Service) succeedWithRefresh(ctx context.Context, jobID, pageID string, reused bool, decision RefreshDecision) error {
 	now := time.Now().UTC()
 	return s.DB.WithContext(ctx).Model(&model.TrainingOrchestrationJob{}).Where("id = ?", jobID).Updates(map[string]any{
 		"status": JobSucceeded, "progress": 100, "result_wiki_page_id": pageID, "reused": reused,
-		"warning_code": "", "warning_message": "",
+		"refresh_mode": decision.Mode, "changed_video_count": decision.ChangedVideoCount,
+		"changed_knowledge_count": decision.ChangedKnowledgeCount, "changed_evidence_count": decision.ChangedEvidenceCount,
+		"changed_cluster_count": decision.ChangedClusterCount,
+		"warning_code":          "", "warning_message": "",
 		"finished_at": now, "updated_at": now,
 	}).Error
 }
@@ -438,16 +643,22 @@ func (s *Service) validate() error {
 }
 
 type inputReference struct {
-	VideoID, TranscriptGeneration, TopicSource, SummaryWikiPageID, TranscriptKnowledgeID, KnowledgeIndexWikiPageID string
-	KnowledgeWikiPageIDs, EvidenceIDs                                                                              []string
+	VideoID, Availability, SkipReason, Title, TranscriptGeneration, TopicSource, SummaryWikiPageID, TranscriptKnowledgeID, KnowledgeIndexWikiPageID string
+	DurationSeconds, SummaryVersion                                                                                                                 int
+	KnowledgeWikiPageIDs, EvidenceIDs                                                                                                               []string
+	MetadataDigest, ContentDigest                                                                                                                   string
+	TopicDigest                                                                                                                                     string
+	EvidenceDigests, EvidenceMetadataDigests, KnowledgeDigests, KnowledgeMetadataDigests                                                            map[string]string
 }
 
 func inputReferenceSnapshot(input InputPackage) []inputReference {
-	out := make([]inputReference, 0, len(input.QualifiedVideos))
+	out := make([]inputReference, 0, len(input.QualifiedVideos)+len(input.SkippedVideos))
 	for _, v := range input.QualifiedVideos {
-		item := inputReference{VideoID: v.VideoID, TranscriptGeneration: v.TranscriptGeneration, TopicSource: string(v.TopicSource)}
+		item := referenceFromVideoProfile(v)
+		item.Availability = "available"
 		if v.Summary != nil {
 			item.SummaryWikiPageID = v.Summary.WikiPageID
+			item.SummaryVersion = v.Summary.Version
 		}
 		if v.Transcript != nil {
 			item.TranscriptKnowledgeID = v.Transcript.KnowledgeID
@@ -455,28 +666,69 @@ func inputReferenceSnapshot(input InputPackage) []inputReference {
 		for _, e := range v.EvidenceSignals {
 			item.EvidenceIDs = append(item.EvidenceIDs, e.EvidenceID)
 		}
+		item.MetadataDigest = referenceMetadataDigest(item)
+		item.ContentDigest = referenceContentDigest(v)
 		out = append(out, item)
 	}
+	for _, skipped := range input.SkippedVideos {
+		ref := inputReference{VideoID: skipped.VideoID, Availability: "unavailable", SkipReason: string(skipped.Reason)}
+		ref.MetadataDigest, ref.ContentDigest = digestValue(struct{ ID string }{skipped.VideoID}), digestValue(struct{ ID string }{skipped.VideoID})
+		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].VideoID < out[j].VideoID })
 	return out
 }
 
 func catalogReferenceSnapshot(snapshot CatalogSnapshot) []inputReference {
-	out := make([]inputReference, 0, len(snapshot.Videos))
+	out := make([]inputReference, 0, len(snapshot.Videos)+len(snapshot.SkippedVideos))
 	for _, video := range snapshot.Videos {
-		item := inputReference{VideoID: video.VideoID, TranscriptGeneration: video.TranscriptGeneration, SummaryWikiPageID: video.SummaryWikiPageID}
+		item := inputReference{VideoID: video.VideoID, Availability: "available", Title: video.Title, DurationSeconds: video.DurationSeconds, TranscriptGeneration: video.TranscriptGeneration, SummaryWikiPageID: video.SummaryWikiPageID, SummaryVersion: video.SummaryVersion}
 		profile := video.OrchestrationProfile
 		if profile == nil {
 			profile = video.CompatibilityProfile
 		}
 		if profile != nil {
+			item.TopicDigest = digestValue(profile.PrimaryTopic)
 			for _, unit := range profile.TopicUnits {
 				for _, ref := range unit.EvidenceRefs {
 					item.EvidenceIDs = appendUnique(item.EvidenceIDs, ref.EvidenceSentenceID)
+					if item.EvidenceMetadataDigests == nil {
+						item.EvidenceMetadataDigests = map[string]string{}
+					}
+					item.EvidenceMetadataDigests[ref.EvidenceSentenceID] = digestValue(struct {
+						ID         string
+						Start, End int
+					}{ref.EvidenceSentenceID, ref.StartMs, ref.EndMs})
 				}
 			}
 		}
+		for _, signal := range video.KnowledgeSignals {
+			if item.KnowledgeDigests == nil {
+				item.KnowledgeDigests = map[string]string{}
+			}
+			item.KnowledgeDigests[signal.KnowledgeObjectID] = digestValue(struct {
+				ID, Core    string
+				Structure   map[string]string
+				EvidenceIDs []string
+			}{signal.KnowledgeObjectID, signal.CoreContent, signal.StructureFields, signal.EvidenceIDs})
+			if item.KnowledgeMetadataDigests == nil {
+				item.KnowledgeMetadataDigests = map[string]string{}
+			}
+			item.KnowledgeMetadataDigests[signal.KnowledgeObjectID] = digestValue(struct {
+				ID, PageID, Title string
+				Version           int
+			}{signal.KnowledgeObjectID, signal.WikiPageID, signal.Title, signal.WikiPageVersion})
+		}
+		item.MetadataDigest = referenceMetadataDigest(item)
+		item.ContentDigest = catalogContentDigest(video)
 		out = append(out, item)
 	}
+	for _, skipped := range snapshot.SkippedVideos {
+		ref := inputReference{VideoID: skipped.VideoID, Availability: "unavailable", SkipReason: string(skipped.Reason)}
+		ref.MetadataDigest, ref.ContentDigest = digestValue(struct{ ID string }{skipped.VideoID}), digestValue(struct{ ID string }{skipped.VideoID})
+		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].VideoID < out[j].VideoID })
 	return out
 }
 

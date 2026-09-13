@@ -5,11 +5,14 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
 	"github.com/google/uuid"
 )
 
@@ -30,6 +33,7 @@ type ClusterGenerationDraft struct {
 	ClusterKey      string                   `json:"cluster_key"`
 	PrimaryTemplate string                   `json:"primary_template"`
 	Stages          []ClusterGenerationStage `json:"stages"`
+	GapAnalysis     ContentGapAnalysis       `json:"gap_analysis"`
 }
 
 type ClusterGenerationStage struct {
@@ -70,7 +74,8 @@ type clusterMaterialFragment struct {
 var clusterGenerationPrompt string
 
 type clusterGenerationModelOutput struct {
-	Stages []clusterGenerationModelStage `json:"stages"`
+	Stages      []clusterGenerationModelStage `json:"stages"`
+	GapAnalysis ContentGapAnalysis            `json:"gap_analysis"`
 }
 
 type clusterGenerationModelStage struct {
@@ -147,16 +152,29 @@ func (g *ClusterGenerator) Generate(ctx context.Context, cluster PlanCluster, ma
 	correctionUsed := false
 	raw, err := gate.Complete(ctx, g.LLM, "cluster_generation", cluster.ClusterKey, prompt, limit, nil)
 	if err != nil {
-		if !isInvalidStructuredOutput(err) {
-			return ClusterGenerationDraft{}, classifyCompletionError("generate cluster training path", err)
+		// A material part with one evidence item cannot be reduced further by
+		// StageFourOrchestrator. Give the model one bounded compact correction
+		// before returning the truncation to the orchestrator. This is a
+		// business-level correction, not a transport retry.
+		if isIrreducibleClusterMaterial(material) && isTruncatedGenerationError(err) {
+			correctionUsed = true
+			raw, err = gate.Complete(
+				ctx, g.LLM, "cluster_generation", cluster.ClusterKey+"-correction",
+				clusterGenerationCorrectionPrompt(prompt, err), limit, nil,
+			)
 		}
-		correctionUsed = true
-		raw, err = gate.Complete(
-			ctx, g.LLM, "cluster_generation", cluster.ClusterKey+"-correction",
-			clusterGenerationCorrectionPrompt(prompt, err), limit, nil,
-		)
 		if err != nil {
-			return ClusterGenerationDraft{}, classifyCompletionError("correct cluster training path", err)
+			if !isInvalidStructuredOutput(err) {
+				return ClusterGenerationDraft{}, classifyCompletionError("generate cluster training path", err)
+			}
+			correctionUsed = true
+			raw, err = gate.Complete(
+				ctx, g.LLM, "cluster_generation", cluster.ClusterKey+"-correction",
+				clusterGenerationCorrectionPrompt(prompt, err), limit, nil,
+			)
+			if err != nil {
+				return ClusterGenerationDraft{}, classifyCompletionError("correct cluster training path", err)
+			}
 		}
 	}
 	if tag, ok := unclosedLeadingReasoning(raw); ok {
@@ -225,8 +243,25 @@ func (g *ClusterGenerator) Generate(ctx context.Context, cluster PlanCluster, ma
 	return draft, nil
 }
 
+func isIrreducibleClusterMaterial(material ClusterMaterial) bool {
+	return len(material.Evidence) <= 1
+}
+
+func isTruncatedGenerationError(err error) bool {
+	var generationErr *GenerationError
+	if errors.As(err, &generationErr) && generationErr.Code == "model_output_truncated" {
+		return true
+	}
+	var incomplete interface{ IncompleteOutput() bool }
+	if errors.As(err, &incomplete) && incomplete.IncompleteOutput() {
+		return true
+	}
+	var closed interface{ ConnectionClosed() bool }
+	return errors.As(err, &closed) && closed.ConnectionClosed()
+}
+
 func clusterGenerationCorrectionPrompt(prompt string, reason error) string {
-	return prompt + "\n\nCORRECTION:\n" + reason.Error() + "\nReturn one corrected JSON object only. Preserve the output contract, use no Markdown or extra text, and use only evidence references from INPUT.material.evidence."
+	return prompt + "\n\nCORRECTION:\n" + reason.Error() + "\nReturn one corrected JSON object only. Preserve the output contract, use no Markdown or extra text, and use only evidence references from INPUT.material.evidence. Because the previous response was incomplete, use an emergency compact result: at most 1 stage and 2 units; keep every title, summary, question, outcome, and gap-analysis sentence under 20 Chinese characters; omit lower-value units rather than truncating. The three gap-analysis dimensions are still mandatory."
 }
 
 func (g *ClusterGenerator) buildPrompt(cluster PlanCluster, material ClusterMaterial) (string, error) {
@@ -487,6 +522,9 @@ func mergeClusterGenerationDrafts(cluster PlanCluster, drafts []ClusterGeneratio
 		if draft.ContractVersion != merged.ContractVersion || draft.ClusterKey != merged.ClusterKey || draft.PrimaryTemplate != merged.PrimaryTemplate {
 			return ClusterGenerationDraft{}, fmt.Errorf("cluster generation draft identity does not match split cluster")
 		}
+		if strings.TrimSpace(merged.GapAnalysis.Status) == "" && validateGapAnalysis(draft.GapAnalysis) == nil {
+			merged.GapAnalysis = draft.GapAnalysis
+		}
 		for stageIndex, stage := range draft.Stages {
 			if stageIndex >= len(merged.Stages) {
 				merged.Stages = append(merged.Stages, ClusterGenerationStage{Title: stage.Title, Summary: stage.Summary, Units: []ClusterGenerationUnit{}})
@@ -558,6 +596,7 @@ func resolveClusterGenerationOutput(cluster PlanCluster, material ClusterMateria
 		ClusterKey:      cluster.ClusterKey,
 		PrimaryTemplate: cluster.PrimaryTemplate,
 		Stages:          make([]ClusterGenerationStage, 0, len(output.Stages)),
+		GapAnalysis:     output.GapAnalysis,
 	}
 	totalUnits := 0
 	for stageIndex, stage := range output.Stages {
@@ -668,25 +707,81 @@ func AssembleClusterGenerationDraft(snapshot CatalogSnapshot, cluster PlanCluste
 		LearningContentType: cluster.PrimaryTemplate, MemberTopics: memberTopics,
 		SourceVideoIDs: append([]string(nil), cluster.SourceVideoIDs...), EvidenceRefs: clusterEvidence,
 		Confidence: cluster.Confidence, ReviewStatus: "passed",
-		Path: LearningPath{PathID: "path-" + clusterID, PrimaryTemplate: cluster.PrimaryTemplate, Stages: []LearningStage{}},
+		GapAnalysis:  draft.GapAnalysis,
+		Path:         LearningPath{PathID: "path-" + clusterID, PrimaryTemplate: cluster.PrimaryTemplate, Stages: []LearningStage{}},
+		EvidenceText: make(map[string]string, len(material.Evidence)),
 	}
+	for _, item := range material.Evidence {
+		result.EvidenceText[item.VideoID+"\x00"+item.EvidenceID] = item.Text
+	}
+	if err := validateGapAnalysis(result.GapAnalysis); err != nil {
+		result.GapAnalysis = buildContentGapAnalysis(result)
+	}
+	clusterKnowledgeIDs := make(map[string]struct{})
 	for stageIndex, stage := range draft.Stages {
 		learningStage := LearningStage{
 			StageID: fmt.Sprintf("stage-%s-%03d", clusterID, stageIndex+1),
 			Title:   stage.Title, Summary: stage.Summary, Sequence: stageIndex + 1, Units: []LearningUnit{},
 		}
 		for unitIndex, unit := range stage.Units {
+			knowledgeRefs := knowledgeRefsForEvidence(material.KnowledgeObjects, unit.EvidenceRefs)
+			for _, ref := range knowledgeRefs {
+				clusterKnowledgeIDs[ref.KnowledgeObjectID] = struct{}{}
+			}
 			learningStage.Units = append(learningStage.Units, LearningUnit{
 				UnitID:        fmt.Sprintf("unit-%s-%03d-%03d", clusterID, stageIndex+1, unitIndex+1),
 				LearningTitle: unit.LearningTitle, LearnerQuestion: unit.LearnerQuestion,
 				LearningOutcome: unit.LearningOutcome, Sequence: unitIndex + 1,
-				KnowledgeRefs: []KnowledgeRef{}, EvidenceRefs: unit.EvidenceRefs,
+				KnowledgeRefs: knowledgeRefs, EvidenceRefs: unit.EvidenceRefs,
 				Confidence: unit.Confidence, ReviewStatus: "passed",
 			})
 		}
 		result.Path.Stages = append(result.Path.Stages, learningStage)
 	}
+	for objectID := range clusterKnowledgeIDs {
+		result.KnowledgeObjectIDs = append(result.KnowledgeObjectIDs, objectID)
+	}
+	sort.Strings(result.KnowledgeObjectIDs)
 	return result, nil
+}
+
+func knowledgeRefsForEvidence(objects []MaterialKnowledge, evidence []EvidenceRef) []KnowledgeRef {
+	result := make([]KnowledgeRef, 0)
+	seen := make(map[string]struct{})
+	for _, object := range objects {
+		var locator EvidenceRef
+		for _, evidenceRef := range evidence {
+			if object.VideoID != strings.TrimSpace(evidenceRef.VideoID) || !contains(object.EvidenceIDs, evidenceRef.EvidenceID) {
+				continue
+			}
+			locator = evidenceRef
+			break
+		}
+		if strings.TrimSpace(locator.EvidenceID) == "" {
+			continue
+		}
+		id := strings.TrimSpace(object.KnowledgeObjectID)
+		if id == "" || strings.TrimSpace(object.WikiPageID) == "" || !containsKnowledgeType(object.KnowledgeType) {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		title := strings.TrimSpace(object.Title)
+		if title == "" {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, KnowledgeRef{
+			KnowledgeObjectID: id, WikiPageID: strings.TrimSpace(object.WikiPageID),
+			KnowledgeType: object.KnowledgeType, Title: title, LocatorEvidence: locator,
+		})
+	}
+	return normalizeKnowledgeRefs(result)
+}
+
+func containsKnowledgeType(value knowledge.KnowledgeType) bool {
+	return knowledge.IsKnowledgeType(value)
 }
 
 func validateGenerationText(value, field string) error {

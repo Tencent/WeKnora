@@ -9,9 +9,10 @@ export interface TrainingNetworkPoint {
   y: number
 }
 
-export function createTrainingNetworkLayout(count: number): TrainingNetworkLayout {
+export function createTrainingNetworkLayout(count: number, width = 720): TrainingNetworkLayout {
   const normalizedCount = Math.max(0, Math.floor(count))
-  const columns = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(normalizedCount))))
+  const maxColumns = width < 520 ? 1 : width < 760 ? 2 : 3
+  const columns = Math.min(maxColumns, Math.max(1, Math.ceil(Math.sqrt(normalizedCount))))
   const rows = Math.max(1, Math.ceil(normalizedCount / columns))
   return { columns, rows, height: Math.max(540, rows * 118 + 72) }
 }
