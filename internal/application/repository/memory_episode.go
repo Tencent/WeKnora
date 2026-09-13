@@ -82,7 +82,7 @@ func (r *memoryRepository) SaveEpisode(
 			episode.FromAt = existing.FromAt
 		}
 		if err := tx.Model(existing).Select(
-			"title", "outcome", "summary", "keywords",
+			"title", "outcome", "summary",
 			"from_at", "to_at", "digest_revision", "updated_at",
 		).Updates(episode).Error; err != nil {
 			return err

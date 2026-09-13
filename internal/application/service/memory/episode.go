@@ -50,11 +50,10 @@ func (s *Service) storeEpisode(
 
 	episode := &types.MemoryEpisode{
 		SessionID: segment.sessionID,
-		Slug:      episodeSlug(response, previous, segment.sessionID),
-		Title:     types.SanitizeMemoryEpisodeTitle(response.Title),
+		Slug:      episodeSlug(response, previous),
+		Title:     episodeTitle(response),
 		Outcome:   types.NormalizeMemoryOutcome(response.Outcome),
 		Summary:   summary,
-		Keywords:  types.SanitizeMemoryEpisodeKeywords(response.Keywords),
 		ToAt:      segment.end,
 	}
 	if len(segment.lines) > 0 {
@@ -83,12 +82,11 @@ func (s *Service) storeEpisode(
 // An existing account keeps its slug regardless of what the model proposed:
 // the digest points at slugs, and a pointer that changes whenever the
 // conversation continues is a pointer that is usually stale. Only a new
-// account gets to be named, and a model that returned nothing usable is named
-// after its conversation rather than rejected — an account nothing can point
-// at is still worth having, because search can reach it.
-func episodeSlug(
-	response episodeResponse, previous *types.MemoryEpisode, sessionID string,
-) string {
+// account gets to be named. Codex falls back to "unknown" when the model
+// returns nothing usable, then distinguishes collisions with a suffix; naming
+// the account after the conversation id made empty chats look like they had
+// a subject.
+func episodeSlug(response episodeResponse, previous *types.MemoryEpisode) string {
 	if previous != nil && previous.Slug != "" {
 		return previous.Slug
 	}
@@ -98,11 +96,16 @@ func episodeSlug(
 	if slug := types.SanitizeMemoryEpisodeSlug(response.Title); slug != "" {
 		return slug
 	}
-	suffix := sessionID
-	if len(suffix) > 8 {
-		suffix = suffix[:8]
+	return "unknown"
+}
+
+// episodeTitle is the human-readable label. Empty title falls back to the
+// slug so the settings list is never a blank row for an account that exists.
+func episodeTitle(response episodeResponse) string {
+	if title := types.SanitizeMemoryEpisodeTitle(response.Title); title != "" {
+		return title
 	}
-	return "conversation-" + suffix
+	return types.SanitizeMemoryEpisodeTitle(response.Slug)
 }
 
 // storeEpisodeNotes records what the user explicitly asked to be remembered.
@@ -308,10 +311,10 @@ func parseEpisodeResponse(content string) (episodeResponse, error) {
 
 // storeEpisodeEmbedding makes an account semantically reachable.
 //
-// The embedded text is the title, the keywords and the account itself, in that
+// The embedded text is the title, the slug and the account itself, in that
 // order. Leading with the handles matters because embedding models weight
-// early tokens more heavily and an account is mostly narrative — a query like
-// "上次那个导入失败" needs to match the keyword, not compete with three
+// early tokens more heavily and an account is mostly narrative — a query
+// like "上次那个导入失败" needs to match the handle, not compete with three
 // paragraphs of history.
 func (s *Service) storeEpisodeEmbedding(
 	ctx context.Context,
@@ -346,6 +349,10 @@ func episodeEmbeddableText(episode *types.MemoryEpisode) string {
 	var text strings.Builder
 	if episode.Title != "" {
 		text.WriteString(episode.Title)
+		text.WriteString("\n")
+	}
+	if episode.Slug != "" {
+		text.WriteString(episode.Slug)
 		text.WriteString("\n")
 	}
 	if len(episode.Keywords) > 0 {

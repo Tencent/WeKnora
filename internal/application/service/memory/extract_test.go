@@ -316,4 +316,38 @@ func TestScheduleExtractionDebouncesPerSubject(t *testing.T) {
 	require.Len(t, enqueuer.tasks, 1, "a second turn inside the interval must not enqueue again")
 }
 
+func TestEpisodeSchemaDoesNotAskForKeywords(t *testing.T) {
+	require.Contains(t, string(episodeSchema), `"slug"`)
+	require.NotContains(t, string(episodeSchema), "keywords",
+		"retrieval handles are not a phase-one field; asking for them produced tag clouds")
+	require.Contains(t, episodeSystemPrompt, "MINIMUM-SIGNAL GATE")
+	require.Contains(t, episodeSystemPrompt, `{"summary":"","title":"","slug":"","outcome":"","notes":[]}`)
+}
+
+func TestEmptyAccountIsNotFiled(t *testing.T) {
+	svc, tenantRepo, messages, models, _ := newExtractionHarness(t)
+	tenantRepo.set(7, &types.MemoryConfig{Enabled: true, WriteMode: types.MemoryWriteAuto})
+	messages.messages = settledConversation("s", "你好", "在吗")
+	models.response = `{"summary":"","title":"打招呼","slug":"greeting","outcome":"uncertain","notes":[]}`
+
+	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
+		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m", ChatModelID: "m1",
+	})))
+
+	scope, err := ResolveScope(enabledCtx(t, tenantRepo, 7, "alice"))
+	require.NoError(t, err)
+	_, total, err := svc.repo.ListEpisodes(context.Background(), scope, 10, 0)
+	require.NoError(t, err)
+	require.Zero(t, total, "an empty summary must not leave a titled row behind")
+}
+
+func TestEpisodeSlugFallsBackToUnknown(t *testing.T) {
+	require.Equal(t, "unknown", episodeSlug(episodeResponse{}, nil))
+	require.Equal(t, "beijing-weather", episodeSlug(episodeResponse{Slug: "beijing-weather"}, nil))
+	require.Equal(t, "kept-slug", episodeSlug(
+		episodeResponse{Slug: "new-slug"},
+		&types.MemoryEpisode{Slug: "kept-slug"},
+	), "a rewrite must not rename an account the index already points at")
+}
+
 var _ = chat.Message{}

@@ -177,10 +177,10 @@ func (s *Service) searchEpisodes(
 
 // lexicalEpisodes is the no-embedding-model fallback.
 //
-// Matching is on the title and the keywords rather than on the account text.
-// The keywords exist precisely because they are the handles a person would
-// search by, and scoring against three paragraphs of narrative would rank the
-// longest account first on any query.
+// Matching is on the title and the slug rather than on the account text.
+// Those are the handles a later search would use; scoring against three
+// paragraphs of narrative would rank the longest account first on any query.
+// Keywords, when an older account still has them, ride along.
 func (s *Service) lexicalEpisodes(
 	ctx context.Context, scope interfaces.MemoryScope, query string,
 ) []*types.MemoryEpisode {
@@ -202,7 +202,7 @@ func (s *Service) lexicalEpisodes(
 		if episode == nil {
 			continue
 		}
-		haystack := strings.ToLower(episode.Title + " " + strings.Join(episode.Keywords, " "))
+		haystack := strings.ToLower(episode.Title + " " + episode.Slug + " " + strings.Join(episode.Keywords, " "))
 		score := 0
 		for _, term := range terms {
 			if strings.Contains(haystack, term) {

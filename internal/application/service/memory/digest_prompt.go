@@ -74,12 +74,12 @@ You are given accounts of the user's past conversations, and the profile you wro
 WHAT THE PROFILE IS FOR
 It is injected at the start of every future conversation this person has. That makes it powerful and dangerous in the same way: a preference stated more broadly than the evidence supports will steer answers to questions it was never about. The user will keep doing related but not identical work, so prefer descriptions that stay true as the work moves on.
 
-The accounts hold the detail. Your job is not to summarize them again — it is to say who this person is, how they work, and which accounts are worth opening for what. Spend most of your space on that index.
+The accounts hold the detail. Your job is not to summarize them again — it is to say who this person is, how they work, and which accounts are worth opening for what. Spend space on preferences and on pointers a later question would actually reopen. Cut the rest.
 
 GROUND EVERY CLAIM
 Use only what the supplied accounts support. Never invent a preference, a decision, or a source. The accounts below are the complete set of sources: if a claim in your previous profile is no longer supported by any of them, drop it — the account behind it was deleted or has aged out, and that is how forgetting works here. Keep claims that still have support, even when their account is only listed compactly.
 
-Put something under 用户偏好 only when it is clearly reusable: the user stated it as a general rule, or it shows up across unrelated tasks. A single request stays with its task in the index. Ordinary assistant behaviour is not a preference. Later evidence supersedes earlier evidence. Preserve the scope the user actually expressed — "在这个项目里" is not "总是".
+Put something under 用户偏好 when the user stated it as about themselves — a like, dislike, standing constraint, or way of working — or when the same thing shows up across unrelated tasks. A one-off request stays with its task in the index. Do not drop a stated preference because the conversation that produced it had no task. Ordinary assistant behaviour is not a preference. Later evidence supersedes earlier evidence. Preserve the scope the user actually expressed — "在这个项目里" is not "总是".
 
 Do not restore anything the user removed. If you are told they edited the profile, their edits are decisions: keep them, and do not reinstate a claim they deleted or corrected.
 
@@ -92,7 +92,7 @@ Return the profile as Markdown and nothing else — no code fence, no commentary
 Who this person is and what they work on, as far as the accounts show. A few lines.
 
 ## 用户偏好
-Reusable ways of working, one per line, each with the scope it was stated at. Omit the section rather than padding it.
+Standing preferences the user stated about themselves, one per line, each with the scope it was stated at. Omit the section rather than padding it.
 
 ## 通用要点
 Conclusions that will stay useful beyond the task that produced them: decisions made, constraints that hold, things established not to work. One per line.
@@ -100,7 +100,8 @@ Conclusions that will stay useful beyond the task that produced them: decisions 
 ## 记忆索引
 Pointers into the accounts, grouped under "### <topic>" headings when there are enough to need it. One line each, in this exact shape:
 - <slug> — <one sentence saying what it contains and when it would matter>（<date>，<outcome>）
-Use the slug exactly as supplied; never invent, normalize or reconstruct one. Order by how likely it is to be needed again. Drop a pointer when the space it takes is not justified by its usefulness, and keep older ones to one short line each.
+Use the slug exactly as supplied; never invent, normalize or reconstruct one. Order by how likely it is to be needed again.
+This is a routing layer, not a recap. Point at accounts a later question would reopen. A standing preference that already lives under 用户偏好 does not also need an index line. Drop greetings, empty chatter, and one-off lookups with no durable residue. Keep older remaining ones to one short line each.
 
 Write in the language the user writes in. Keep the whole document under about 1500 characters — it is paid for on every future turn. If you cannot fit everything, keep the preferences and the pointers and cut the prose.`
 

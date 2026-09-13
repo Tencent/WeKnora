@@ -80,6 +80,22 @@ func TestRecallDegradesToLexicalWhenEmbeddingFails(t *testing.T) {
 	require.Equal(t, "生产库的连接池配置", recall.Episodes[0].Title)
 }
 
+func TestLexicalRecallMatchesASlugWithoutKeywords(t *testing.T) {
+	svc, tenantRepo, models := newVectorHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	models.embedder.fail = true
+	seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-weather", Slug: "beijing-weather", Title: "北京天气",
+		Summary: "用户查了北京今天的天气。",
+		ToAt:    time.Now().Add(-time.Hour),
+	})
+
+	recall := svc.Recall(ctx, "beijing-weather")
+	require.NotEmpty(t, recall.Episodes,
+		"the index points at slugs, so lexical recall has to find one without a keyword list")
+	require.Equal(t, "beijing-weather", recall.Episodes[0].Slug)
+}
+
 func TestRecallDoesNotWaitForeverOnTheEmbedder(t *testing.T) {
 	svc, tenantRepo, models := newVectorHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
