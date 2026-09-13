@@ -189,10 +189,10 @@ func (s *vectorStoreService) DeleteStore(ctx context.Context, tenantID uint64, i
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// tx inherits ctx from WithContext above; no need to re-attach.
 
-		// 1. Lock the store row (PG row-level X-lock; skipped on SQLite).
+		// 1. Lock the store row on PostgreSQL and MySQL; SQLite has no row locks.
 		var store types.VectorStore
 		q := tx.Where("id = ? AND tenant_id = ?", id, tenantID)
-		if s.isPostgres(tx) {
+		if s.isPostgres(tx) || tx.Dialector.Name() == "mysql" {
 			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := q.First(&store).Error; err != nil {
