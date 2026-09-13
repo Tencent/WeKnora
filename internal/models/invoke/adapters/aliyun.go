@@ -566,7 +566,14 @@ func (a *AliyunAdapter) BuildChatRequest(
 				}
 			}
 		}
-		if len(opts.Format) > 0 && !vision {
+		// 结构化输出（裁定 B4，2026-09-13）：v1 兼容层对带图请求照发
+		// response_format + schema hint（openai_request.go:172-177 无 vision
+		// 门控——v1 时代阿里云文本/视觉同走 compatible-mode 单端点）；官方
+		// 文档 §请求体 的 parameters 表为两端点共用，response_format
+		// （json_object/json_schema）无 VL 排除条款且明示"放入 parameters"。
+		// 原生切换时加的 !vision 门控无文档依据，恢复 v1 parity——视觉分支
+		// 照发；若个别 VL 型号拒收，真机清单（方案 doc §六.7）兜底。
+		if len(opts.Format) > 0 {
 			params.ResponseFormat = &aliyunResponseFormat{Type: "json_object"}
 		}
 		applyAliyunThinking(params, ep.ThinkingControl, model, opts, isStream)
@@ -585,7 +592,9 @@ func (a *AliyunAdapter) BuildChatRequest(
 	}
 
 	msgs := convertAliyunMessages(messages, vision)
-	if opts != nil && len(opts.Format) > 0 && !vision && len(msgs) > 0 {
+	// schema hint 恢复视觉分支（裁定 B4）：纯文本追加，appendAliyunSchemaHint
+	// 对 part 数组形态已处理（末个 part 追加），与 response_format 无耦合。
+	if opts != nil && len(opts.Format) > 0 && len(msgs) > 0 {
 		appendAliyunSchemaHint(&msgs[len(msgs)-1], string(opts.Format))
 	}
 	applyAliyunCacheBreakpoints(msgs, model, resolveCacheRetention(opts))

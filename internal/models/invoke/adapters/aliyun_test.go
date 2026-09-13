@@ -876,3 +876,47 @@ func TestAliyunTranslateStreamEventMixed(t *testing.T) {
 	require.Equal(t, invoke.StreamKindAnswer, evs[2].Kind)
 	require.Equal(t, "hi", evs[2].Delta.Text)
 }
+
+// TestAliyunVisionStructuredOutput pins 裁定 B4: a vision (multimodal)
+// request carrying Format keeps v1 parity — response_format json_object
+// rides the native parameters object and the schema hint appends to the
+// last message's trailing text part (the native switch's undocumented
+// !vision gate is gone; doc §请求体 parameters table lists response_format
+// for the shared endpoints with no VL exclusion).
+func TestAliyunVisionStructuredOutput(t *testing.T) {
+	a := newAliyunAdapter()
+	req, err := a.BuildChatRequest(invoke.Endpoint{}, "qwen3-vl-plus", &invoke.ChatOptions{
+		Messages: []invoke.Message{{
+			Role: "user",
+			Content: []invoke.Part{
+				{Image: &invoke.ImageRef{URL: "https://example.com/pic.jpg"}},
+				{Text: "图中有什么？"},
+			},
+		}},
+		MaxCompletionTokens: 128,
+		Format:              json.RawMessage(`{"type":"object"}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation", req.URL)
+
+	var body struct {
+		Input struct {
+			Messages []struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"messages"`
+		} `json:"input"`
+		Parameters struct {
+			ResponseFormat *struct {
+				Type string `json:"type"`
+			} `json:"response_format"`
+		} `json:"parameters"`
+	}
+	require.NoError(t, json.Unmarshal(req.Body, &body))
+	require.NotNil(t, body.Parameters.ResponseFormat, "视觉分支照发 response_format（v1 parity）")
+	require.Equal(t, "json_object", body.Parameters.ResponseFormat.Type)
+	last := body.Input.Messages[0].Content
+	require.NotEmpty(t, last)
+	require.Contains(t, last[len(last)-1].Text, "Use this JSON schema:", "hint 落在末个 text part")
+}
