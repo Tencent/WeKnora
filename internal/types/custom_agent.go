@@ -94,6 +94,30 @@ type CustomAgent struct {
 	CreatorName string `yaml:"-" json:"creator_name,omitempty" gorm:"-"`
 }
 
+// maxAgentAvatarLength mirrors the custom_agents.avatar column limit
+// (varchar(64)). See ValidateAvatar for why this is checked at the API
+// boundary instead of being left to the database.
+const maxAgentAvatarLength = 64
+
+// ValidateAvatar rejects an avatar value the DB column cannot store.
+//
+// Without it, an oversized avatar (a data-URI icon, say) reaches postgres
+// unchecked and comes back as a raw driver error — "ERROR: value too long for
+// type character varying(64) (SQLSTATE 22001)" — which is then forwarded to
+// the client as a 500. That is two problems at once: the caller only learns
+// the real limit from a crash, and internal database details leak into a
+// public API. Checking here turns it into an ordinary 400 that names the
+// limit, like the other request validations.
+func (a *CustomAgent) ValidateAvatar() error {
+	if a == nil {
+		return nil
+	}
+	if n := len([]rune(a.Avatar)); n > maxAgentAvatarLength {
+		return fmt.Errorf("avatar must not exceed %d characters, got %d", maxAgentAvatarLength, n)
+	}
+	return nil
+}
+
 // CustomAgentConfig represents the configuration of a custom agent
 type CustomAgentConfig struct {
 	// ===== Basic Settings =====

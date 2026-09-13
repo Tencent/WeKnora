@@ -247,8 +247,15 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 	return result, nil
 }
 
-// UpdateAgent updates an agent's information
-func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error) {
+// UpdateAgent updates an agent's information.
+//
+// avatar carries the field presence the agent struct cannot: nil means the
+// caller did not send an avatar and the stored one must survive, a pointer to
+// "" is an explicit clear. Assigning agent.Avatar unconditionally made every
+// config-only PUT erase the avatar while still answering 200.
+func (s *customAgentService) UpdateAgent(
+	ctx context.Context, agent *types.CustomAgent, avatar *string,
+) (*types.CustomAgent, error) {
 	if agent.ID == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		return nil, errors.New("agent ID cannot be empty")
@@ -287,7 +294,16 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 	// Update fields
 	existingAgent.Name = agent.Name
 	existingAgent.Description = agent.Description
-	existingAgent.Avatar = agent.Avatar
+	// An absent avatar keeps the stored one; only a sent value replaces it.
+	if avatar != nil {
+		// Second length check, for non-HTTP callers that never pass through
+		// the handler. Same validator, so the varchar(64) bound does not end
+		// up duplicated as two constants.
+		if err := (&types.CustomAgent{Avatar: *avatar}).ValidateAvatar(); err != nil {
+			return nil, err
+		}
+		existingAgent.Avatar = *avatar
+	}
 	existingAgent.Config = agent.Config
 	existingAgent.UpdatedAt = time.Now()
 
