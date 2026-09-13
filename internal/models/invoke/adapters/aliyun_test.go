@@ -947,3 +947,29 @@ func TestAliyunStreamInBandError(t *testing.T) {
 	require.Len(t, events, 1)
 	require.Contains(t, events[0].Delta.Text, "Throttling")
 }
+
+// TestAliyunStreamStringNullFinishReason pins the real DashScope glm-5.2 wire
+// shape (2026-09-14 body-head capture): intermediate frames carry
+// finish_reason as the STRING "null" — they must stream as thinking/answer
+// deltas, NOT terminate; only a real finish frame closes.
+func TestAliyunStreamStringNullFinishReason(t *testing.T) {
+	a := newAliyunAdapter()
+	state := invoke.NewStreamBridgeState()
+
+	// 中间帧：finish_reason 为字符串 "null"，reasoning 增量。
+	interFrame := `{"output":{"choices":[{"message":{"content":"","reasoning_content":"用户",` +
+		`"role":"assistant"},"finish_reason":"null"}]}}`
+	events, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(interFrame)})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, invoke.StreamKindThinking, events[0].Kind)
+	require.Equal(t, "用户", events[0].Delta.Text)
+
+	// 终帧：真实 finish_reason 收流（尾片段折入 Done）。
+	finalFrame := `{"output":{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"你好！"}}]},` +
+		`"usage":{"input_tokens":728,"output_tokens":9,"total_tokens":737}}`
+	events, err = a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(finalFrame)})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.NotNil(t, events[0].Done, "真实 finish 才终止")
+}

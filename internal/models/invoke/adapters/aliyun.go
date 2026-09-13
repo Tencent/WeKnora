@@ -821,11 +821,19 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 		return nil, nil
 	}
 	choice := f.Output.Choices[0]
-	if choice.FinishReason != "" {
-		state.Set(stateAliyunFinish, choice.FinishReason)
+	finish := choice.FinishReason
+	// DashScope quirk (2026-09-14 glm-5.2 report): intermediate streaming
+	// frames carry finish_reason as the STRING "null" — not JSON null. The
+	// decode makes it "null" != "" and the FIRST frame terminated the stream
+	// with an empty answer. Treat the literal as absent.
+	if finish == "null" {
+		finish = ""
+	}
+	if finish != "" {
+		state.Set(stateAliyunFinish, finish)
 		// Shared key: the entry's clean-EOF synthesis reads the vendor's
 		// recorded finish reason (see StreamStateFinishReason).
-		state.Set(invoke.StreamStateFinishReason, choice.FinishReason)
+		state.Set(invoke.StreamStateFinishReason, finish)
 		return []*invoke.StreamEvent{aliyunFlushDone(state, &choice.Message)}, nil
 	}
 	// Multi-event bridge (2026-09-13 裁定): a mixed message emits EVERY

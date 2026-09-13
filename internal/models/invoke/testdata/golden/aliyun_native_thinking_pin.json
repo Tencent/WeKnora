@@ -4,7 +4,7 @@
     "native DashScope generation wire ({model, input, parameters} envelope, 2026-09-12 ruling)",
     "qwen3 family carries enable_thinking on every request; non-stream pins false even with Thinking=true",
     "stream pins false with Thinking=nil (alwaysSend) + X-DashScope-SSE header + incremental_output",
-    "qwen3-max is on the documented explicit-cache list: the sole conversation message carries a cache_control:{type:ephemeral} breakpoint by default (2026-09-13 方案)",
+    "REAL DashScope SSE framing (2026-09-14 body-head capture): data: has NO trailing space; intermediate frames carry finish_reason as the STRING \"null\" — they stream as deltas, only a real finish closes",
     "no [DONE] sentinel — the final frame carries finish_reason + usage and closes the stream"
   ],
   "requests": [
@@ -24,7 +24,9 @@
               "content": [
                 {
                   "text": "你好",
-                  "cache_control": { "type": "ephemeral" }
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             }
@@ -54,7 +56,9 @@
               "content": [
                 {
                   "text": "你好",
-                  "cache_control": { "type": "ephemeral" }
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             }
@@ -70,9 +74,9 @@
     }
   ],
   "sse_response": [
-    "data: {\"request_id\":\"req-1\",\"output\":{\"choices\":[{\"finish_reason\":null,\"message\":{\"role\":\"assistant\",\"content\":\"你好\",\"reasoning_content\":\"\"}}]},\"usage\":null}",
+    "data:{\"request_id\":\"req-1\",\"output\":{\"choices\":[{\"finish_reason\":\"null\",\"message\":{\"role\":\"assistant\",\"content\":\"你好\",\"reasoning_content\":\"\"}}]}},\"usage\":null}",
     "",
-    "data: {\"request_id\":\"req-1\",\"output\":{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"\"}}]},\"usage\":{\"input_tokens\":22,\"output_tokens\":3,\"total_tokens\":25}}",
+    "data:{\"request_id\":\"req-1\",\"output\":{\"choices\":[{\"finish_reason\":\"stop\",\"message\":{\"role\":\"assistant\",\"content\":\"\"}}]},\"usage\":{\"input_tokens\":22,\"output_tokens\":3,\"total_tokens\":25}}",
     ""
   ]
 }
