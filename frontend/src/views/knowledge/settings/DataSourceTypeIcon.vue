@@ -23,6 +23,8 @@ function fallbackText(type: string) {
       return 'N'
     case 'yuque':
       return 'Y'
+    case 'dingtalk':
+      return 'D'
     case 'ima':
       return 'I'
     default:
