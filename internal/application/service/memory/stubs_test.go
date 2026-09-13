@@ -340,7 +340,7 @@ func (a stubChatAdapter) ParseChatResponse(
 
 func (a stubChatAdapter) TranslateStreamEvent(
 	_ *invoke.StreamBridgeState, _ invoke.StreamChunk,
-) (*invoke.StreamEvent, error) {
+) ([]*invoke.StreamEvent, error) {
 	return nil, nil
 }
 

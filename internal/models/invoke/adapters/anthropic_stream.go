@@ -98,9 +98,9 @@ func anthropicText(state *invoke.StreamBridgeState) string {
 // message_stop both finalize the stream.
 func (a *AnthropicAdapter) TranslateStreamEvent(
 	state *invoke.StreamBridgeState, chunk invoke.StreamChunk,
-) (*invoke.StreamEvent, error) {
+) ([]*invoke.StreamEvent, error) {
 	if chunk.Event == "done" {
-		return a.finalEvent(state), nil
+		return []*invoke.StreamEvent{a.finalEvent(state)}, nil
 	}
 	var ev anthropicStreamEvent
 	if err := decodeChunk(chunk.Data, &ev); err != nil {
@@ -109,11 +109,11 @@ func (a *AnthropicAdapter) TranslateStreamEvent(
 	if ev.Error != nil && ev.Error.Message != "" {
 		// v1 aborted the stream on in-band error chunks; the entry stops the
 		// loop once Done is set, so mark the error event as terminal.
-		return &invoke.StreamEvent{
+		return []*invoke.StreamEvent{{
 			Kind:  invoke.StreamKindError,
 			Delta: &invoke.ContentDelta{Text: ev.Error.Message},
 			Done:  &invoke.FinishInfo{},
-		}, nil
+		}}, nil
 	}
 	switch ev.Type {
 	case "message_start":
@@ -122,29 +122,29 @@ func (a *AnthropicAdapter) TranslateStreamEvent(
 		}
 	case "content_block_delta":
 		if ev.Delta != nil && ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
-			return &invoke.StreamEvent{
+			return []*invoke.StreamEvent{{
 				Kind:  invoke.StreamKindAnswer,
 				Delta: &invoke.ContentDelta{Text: ev.Delta.Text},
-			}, nil
+			}}, nil
 		}
 	case "message_delta":
 		if ev.Delta != nil && ev.Delta.StopReason != "" {
 			state.Set("anthropicFinish", ev.Delta.StopReason)
+			state.Set(invoke.StreamStateFinishReason, ev.Delta.StopReason)
 		}
 		if ev.Usage != nil {
 			anthropicState(state).merge(ev.Usage)
 		}
-		// v1 emitted usage only inside the final Done chunk. The contract
-		// allows one event per chunk and message_stop must close the stream,
-		// so usage flows as its own event here (totals identical: this is the
-		// last usage-carrying frame before message_stop). The Done event also
-		// carries Usage for when the entry mapping grows usage-in-Done support.
-		return &invoke.StreamEvent{
+		// v1 emitted usage only inside the final Done chunk. message_stop must
+		// close the stream, so usage flows as its own event here (totals
+		// identical: this is the last usage-carrying frame before
+		// message_stop). The Done event also carries Usage.
+		return []*invoke.StreamEvent{{
 			Kind:  invoke.StreamKindUsage,
 			Usage: anthropicState(state).usage(),
-		}, nil
+		}}, nil
 	case "message_stop":
-		return a.finalEvent(state), nil
+		return []*invoke.StreamEvent{a.finalEvent(state)}, nil
 	}
 	return nil, nil
 }
@@ -188,6 +188,7 @@ func aggregateAnthropicSSE(body []byte) (*invoke.ChatResponse, error) {
 			}
 			if ev.Delta.StopReason != "" {
 				state.Set("anthropicFinish", ev.Delta.StopReason)
+				state.Set(invoke.StreamStateFinishReason, ev.Delta.StopReason)
 			}
 		}
 		if ev.Usage != nil {

@@ -2573,7 +2573,7 @@ export default {
     name: '名前',
     nameDesc: '管理画面の一覧やチャネルの識別に使用します',
     namePlaceholder: '例: Webサイトサポート',
-    nameDefaultHint: 'エージェントを選択すると「{agent} · Web埋め込み」がデフォルトになります。保存時に空欄のままにするとデフォルトの名前が使用されます。',
+    nameDefaultHint: 'デフォルトは「エージェント名 · Web埋め込み」です。編集でき、保存時に空欄の場合はデフォルト名が使用されます。',
     defaultChannelName: 'Web埋め込み',
     defaultChannelNameWithAgent: '{agent} · Web埋め込み',
     welcomeMessage: 'ウェルカムメッセージ',

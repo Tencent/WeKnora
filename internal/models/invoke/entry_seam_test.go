@@ -233,10 +233,9 @@ func TestApplyRawPromptCacheUsage(t *testing.T) {
 // TestStreamBridgeBackfillsCacheUsageOnUsageFrame: the openai-shape bridge
 // captures native counters on usage-only frames (seam ③ stream side).
 func TestStreamBridgeBackfillsCacheUsageOnUsageFrame(t *testing.T) {
-	ev, err := OpenAIStreamBridge{}.TranslateStreamEvent(NewStreamBridgeState(), StreamChunk{Data: []byte(
+	ev := firstEvent(t, OpenAIStreamBridge{}, NewStreamBridgeState(), StreamChunk{Data: []byte(
 		`{"choices":[],"usage":{"prompt_tokens":4096,"completion_tokens":4,` +
 			`"total_tokens":4100,"prompt_cache_hit_tokens":3072,"prompt_cache_miss_tokens":1024}}`)})
-	require.NoError(t, err)
 	require.Equal(t, StreamKindUsage, ev.Kind)
 	require.NotNil(t, ev.Usage)
 	assert.Equal(t, 3072, ev.Usage.CacheReadTokens)

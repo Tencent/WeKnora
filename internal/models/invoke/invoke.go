@@ -328,6 +328,10 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 		// NOT a standalone client chunk — it rides the final Done chunk, or
 		// the interrupted-stream error chunk when the stream breaks first.
 		var pendingUsage *Usage
+		// A4（design §6.6 迁入，2026-09-13 裁定）：v1 流内 Data 生产者
+		// （sandbox write/edit 实时进度、tool_call pending 通知、thinking
+		// 工具 thought 流式）在入口侧等价重建，喂给 agent 的 think.go 消费点。
+		streamMeta := newStreamMetaState()
 		for {
 			chunk, ok := demux.Next()
 			if !ok {
@@ -356,12 +360,19 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 					// on the EOF branch (openai_stream.go:122-135). Without
 					// this the accumulated tool calls and pending usage are
 					// silently dropped and an agent loses the tool round
-					// (2026-09-13 review). FinishReason stays honestly
-					// Incomplete: no terminator frame was ever seen.
+					// (2026-09-13 review). FinishReason mirrors v1: the
+					// vendor's recorded finish_reason frame wins (a vendor
+					// that said "stop" and closed cleanly IS a natural stop —
+					// the agent's empty-content guard keys on it); with no
+					// recorded reason the field stays empty, exactly like v1.
 					final := types.StreamResponse{
 						ResponseType: types.ResponseTypeAnswer,
 						Done:         true,
-						FinishReason: types.FinishReasonIncomplete,
+					}
+					if reason, ok := state.Get(StreamStateFinishReason); ok {
+						if r, _ := reason.(string); r != "" {
+							final.FinishReason = r
+						}
 					}
 					if assembler := toolAssembler(state); assembler != nil {
 						final.ToolCalls = toLLMToolCalls(assembler.Calls())
@@ -374,38 +385,48 @@ func ChatStream(ctx context.Context, m *ModelConfig, opts *ChatOptions) (<-chan 
 				}
 				return
 			}
-			event, err := ca.TranslateStreamEvent(state, chunk)
+			events, err := ca.TranslateStreamEvent(state, chunk)
 			if err != nil {
 				logger.Errorf(ctx, "translate stream event failed: %v", err)
 				continue
 			}
-			if event == nil {
-				continue
-			}
-			if event.Kind == StreamKindUsage {
-				if event.Usage != nil {
-					pendingUsage = event.Usage
+			for _, event := range events {
+				if event == nil {
+					continue
 				}
-				continue
-			}
-			for _, sr := range mapStreamEvent(event) {
-				if event.Done != nil {
-					if pendingUsage != nil {
-						sr.Usage = pendingUsage.usageToTypes()
-					} else if event.Usage != nil {
-						// usage-in-Done seam (anticipated by the anthropic
-						// bridge's final event, activated for gemini P5-1):
-						// the terminator frame carries the final usage itself
-						// when no separate usage frame preceded it.
-						sr.Usage = event.Usage.usageToTypes()
+				if event.Kind == StreamKindUsage {
+					if event.Usage != nil {
+						pendingUsage = event.Usage
 					}
-					pendingUsage = nil
+					continue
 				}
-				observe(sr)
-				emit(sr)
-			}
-			if event.Done != nil {
-				return
+				for _, sr := range mapStreamEvent(event) {
+					if event.Done != nil {
+						if pendingUsage != nil {
+							sr.Usage = pendingUsage.usageToTypes()
+						} else if event.Usage != nil {
+							// usage-in-Done seam (anticipated by the anthropic
+							// bridge's final event, activated for gemini P5-1):
+							// the terminator frame carries the final usage itself
+							// when no separate usage frame preceded it.
+							sr.Usage = event.Usage.usageToTypes()
+						}
+						pendingUsage = nil
+					}
+					observe(sr)
+					emit(sr)
+				}
+				// A4: the v1 stream Data payloads ride ToolCall deltas —
+				// emitted after the delta chunk, mirroring v1 chunk order.
+				if event.Kind == StreamKindToolCall && event.ToolCallDelta != nil {
+					for _, extra := range streamMeta.feedToolCallDelta(event.ToolCallDelta) {
+						observe(extra)
+						emit(extra)
+					}
+				}
+				if event.Done != nil {
+					return
+				}
 			}
 		}
 	}()

@@ -197,19 +197,19 @@ func (a fakeAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*invo
 
 func (a fakeAdapter) TranslateStreamEvent(
 	_ *invoke.StreamBridgeState, chunk invoke.StreamChunk,
-) (*invoke.StreamEvent, error) {
+) ([]*invoke.StreamEvent, error) {
 	var ev invoke.StreamEvent
 	if err := json.Unmarshal(chunk.Data, &ev); err != nil {
-		return &invoke.StreamEvent{
+		return []*invoke.StreamEvent{{
 			Kind:  invoke.StreamKindError,
 			Delta: &invoke.ContentDelta{Text: err.Error()},
 			Done:  &invoke.FinishInfo{},
-		}, nil
+		}}, nil
 	}
 	if ev.Kind == "" {
 		return nil, nil
 	}
-	return &ev, nil
+	return []*invoke.StreamEvent{&ev}, nil
 }
 
 var (

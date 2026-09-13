@@ -144,16 +144,14 @@ func TestAnthropicStreamUsageMergedIntoDone(t *testing.T) {
 	_, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Event: "message_start", Data: []byte(
 		`{"type":"message_start","message":{"usage":{"input_tokens":25,"output_tokens":1}}}`)})
 	require.NoError(t, err)
-	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Event: "message_delta", Data: []byte(
+	ev := firstEvent(t, a, state, invoke.StreamChunk{Event: "message_delta", Data: []byte(
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`)})
-	require.NoError(t, err)
 	require.Equal(t, invoke.StreamKindUsage, ev.Kind)
 	require.Equal(t, 25, ev.Usage.PromptTokens)
 	require.Equal(t, 5, ev.Usage.CompletionTokens)
-	final, err := a.TranslateStreamEvent(state, invoke.StreamChunk{
+	final := firstEvent(t, a, state, invoke.StreamChunk{
 		Event: "message_stop", Data: []byte(`{"type":"message_stop"}`),
 	})
-	require.NoError(t, err)
 	require.NotNil(t, final.Done)
 	require.Equal(t, "end_turn", final.Done.FinishReason)
 	require.Equal(t, 25, final.Usage.PromptTokens)

@@ -570,6 +570,15 @@ func (a *AliyunAdapter) BuildChatRequest(
 			params.ResponseFormat = &aliyunResponseFormat{Type: "json_object"}
 		}
 		applyAliyunThinking(params, ep.ThinkingControl, model, opts, isStream)
+		// 对话 API 文档：「思考模式的模型不支持强制调用某个工具」——
+		// enable_thinking=true 与具名 tool_choice 同发必 400（2026-09-13
+		// 裁定 B3）。仅在真正发 true 时降级：非流式钉 false / 始终思考族
+		// 不发字段的组合不受影响。
+		if params.EnableThinking != nil && *params.EnableThinking {
+			if _, named := params.ToolChoice.(aliyunToolChoice); named {
+				params.ToolChoice = "auto"
+			}
+		}
 	}
 	if isStream {
 		params.IncrementalOutput = true
@@ -755,11 +764,11 @@ func isAliyunDoneSentinel(data []byte) bool {
 // TranslateStreamEvent implements the DashScope native bridge.
 func (a *AliyunAdapter) TranslateStreamEvent(
 	state *invoke.StreamBridgeState, chunk invoke.StreamChunk,
-) (*invoke.StreamEvent, error) {
+) ([]*invoke.StreamEvent, error) {
 	if chunk.Event == "done" || isAliyunDoneSentinel(chunk.Data) {
 		// No native sentinel; tolerate proxies that inject one — flush the
 		// accumulated finish state (mirrors the openai bridge semantics).
-		return aliyunFlushDone(state, nil), nil
+		return []*invoke.StreamEvent{aliyunFlushDone(state, nil)}, nil
 	}
 	var f aliyunStreamFrame
 	if err := decodeChunk(chunk.Data, &f); err != nil {
@@ -773,50 +782,53 @@ func (a *AliyunAdapter) TranslateStreamEvent(
 		// terminator).
 		if f.Usage != nil {
 			u := f.Usage.usage()
-			return &invoke.StreamEvent{Kind: invoke.StreamKindUsage, Usage: &u}, nil
+			return []*invoke.StreamEvent{{Kind: invoke.StreamKindUsage, Usage: &u}}, nil
 		}
 		return nil, nil
 	}
 	choice := f.Output.Choices[0]
 	if choice.FinishReason != "" {
 		state.Set(stateAliyunFinish, choice.FinishReason)
-		return aliyunFlushDone(state, &choice.Message), nil
+		// Shared key: the entry's clean-EOF synthesis reads the vendor's
+		// recorded finish reason (see StreamStateFinishReason).
+		state.Set(invoke.StreamStateFinishReason, choice.FinishReason)
+		return []*invoke.StreamEvent{aliyunFlushDone(state, &choice.Message)}, nil
 	}
+	// Multi-event bridge (2026-09-13 裁定): a mixed message emits EVERY
+	// payload it carries, in the same order as the openai bridge —
+	// tool_calls (one event per delta), reasoning, content. Nothing is
+	// dropped; conforming incremental_output vendors keep the fields on
+	// separate frames, so this only changes mixed-frame behavior.
 	d := choice.Message
-	// One event per frame (bridge contract) — same priority as the openai
-	// bridge: tool_calls > content > reasoning (2026-09-13 review round).
-	// incremental_output keeps reasoning/content on separate frames for
-	// conforming vendors; the priority only matters for mixed frames.
+	var out []*invoke.StreamEvent
 	if len(d.ToolCalls) > 0 {
 		assembler := invoke.ToolCallAssemblerFrom(state)
 		if assembler == nil {
 			assembler = invoke.NewToolCallAssembler()
 			state.Set(invoke.StreamStateToolCalls, assembler)
 		}
-		out := make([]invoke.ToolCallDelta, 0, len(d.ToolCalls))
 		for _, tc := range d.ToolCalls {
 			delta := invoke.ToolCallDelta{
 				Index: tc.Index, ID: tc.ID, Type: tc.Type,
 				Name: tc.Function.Name, Arguments: tc.Function.Arguments,
 			}
 			assembler.Add(delta)
-			out = append(out, delta)
+			out = append(out, &invoke.StreamEvent{Kind: invoke.StreamKindToolCall, ToolCallDelta: &delta})
 		}
-		return &invoke.StreamEvent{Kind: invoke.StreamKindToolCall, ToolCallDelta: &out[0]}, nil
-	}
-	if text := aliyunContentText(d.Content); text != "" {
-		return &invoke.StreamEvent{
-			Kind:  invoke.StreamKindAnswer,
-			Delta: &invoke.ContentDelta{Text: text},
-		}, nil
 	}
 	if d.ReasoningContent != "" {
-		return &invoke.StreamEvent{
+		out = append(out, &invoke.StreamEvent{
 			Kind:  invoke.StreamKindThinking,
 			Delta: &invoke.ContentDelta{Text: d.ReasoningContent},
-		}, nil
+		})
 	}
-	return nil, nil
+	if text := aliyunContentText(d.Content); text != "" {
+		out = append(out, &invoke.StreamEvent{
+			Kind:  invoke.StreamKindAnswer,
+			Delta: &invoke.ContentDelta{Text: text},
+		})
+	}
+	return out, nil
 }
 
 // aliyunFlushDone emits the terminating Done event from the accumulated

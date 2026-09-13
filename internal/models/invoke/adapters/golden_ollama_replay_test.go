@@ -140,10 +140,9 @@ func TestGoldenReplayOllamaStream(t *testing.T) {
 // completion=EvalCount——与非流式的减法口径不同）。
 func TestOllamaStreamDoneCarriesUsage(t *testing.T) {
 	a := &OllamaAdapter{}
-	ev, err := a.TranslateStreamEvent(invoke.NewStreamBridgeState(), invoke.StreamChunk{Data: []byte(
+	ev := firstEvent(t, a, invoke.NewStreamBridgeState(), invoke.StreamChunk{Data: []byte(
 		`{"model":"testmodel","message":{"role":"assistant","content":""},` +
 			`"done_reason":"stop","done":true,"prompt_eval_count":12,"eval_count":7}`)})
-	require.NoError(t, err)
 	require.NotNil(t, ev.Done)
 	require.Equal(t, 12, ev.Usage.PromptTokens)
 	require.Equal(t, 7, ev.Usage.CompletionTokens)

@@ -24,10 +24,14 @@ type ChatAdapter interface {
 	BuildChatRequest(ep Endpoint, model string, opts *ChatOptions) (*Request, error)
 	ParseChatResponse(status int, header http.Header, body []byte) (*ChatResponse, error)
 	// TranslateStreamEvent bridges one demuxed wire chunk to the internal
-	// standard StreamEvent (design §6.2: stream semantics belong to the
+	// standard StreamEvents (design §6.2: stream semantics belong to the
 	// adapter). state carries cross-chunk scratch (tool-call assembly, finish
 	// tracking); stream.go ships the openai-shape default for embedding.
-	TranslateStreamEvent(state *StreamBridgeState, chunk StreamChunk) (*StreamEvent, error)
+	// A chunk may yield SEVERAL events (2026-09-13 裁定：多事件桥) — a mixed
+	// delta carrying tool_calls + reasoning + content emits all of them in
+	// that order instead of silently dropping the tails; a Done event, when
+	// present, is always the LAST element.
+	TranslateStreamEvent(state *StreamBridgeState, chunk StreamChunk) ([]*StreamEvent, error)
 }
 
 // EmbeddingAdapter serves the embedding facet.

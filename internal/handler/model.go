@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/invoke/adapters"
@@ -614,10 +617,13 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 		return
 	}
 
-	// Update model fields if they are provided in the request
-	if req.Name != "" {
-		model.Name = req.Name
-	}
+	// Update model fields — REPLACE semantics (2026-09-13 裁定 C2): the
+	// request body is authoritative; omitted fields are CLEARED, nothing is
+	// silently preserved except the credential secrets below (subresource-
+	// owned, security rule). Callers must send the full configuration: the
+	// UI always does (full-form PUT) and the CLI fetches a baseline first
+	// (cli/cmd/model/update.go "full PUT must fetch baseline").
+	model.Name = req.Name
 	if req.DisplayName != nil {
 		model.DisplayName = secutils.SanitizeForLog(*req.DisplayName)
 	}
@@ -649,61 +655,45 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	newParams := req.Parameters
 	newParams.APIKey = storedAPIKey
 	newParams.AppSecret = storedAppSecret
-	// Preserve backend-managed fields not sent by the frontend either.
-	newParams.ParameterSize = model.Parameters.ParameterSize
-	if newParams.InterfaceType == "" {
-		newParams.InterfaceType = model.Parameters.InterfaceType
-	}
-	if newParams.AppID == "" {
-		newParams.AppID = model.Parameters.AppID
-	}
-	if newParams.ExtraConfig == nil {
-		newParams.ExtraConfig = model.Parameters.ExtraConfig
-	}
+	// Flat-field fold (design §8 write-side is shard-only): the Get* readers
+	// prefer the Chat shard, so the UI's flat context_window /
+	// max_output_tokens/supports_vision writes must fold into the shard or
+	// they are silently shadowed on read-back ("saved but no effect"). Under
+	// REPLACE semantics a caller-provided shard replaces the stored one; the
+	// flat form stays the legacy alias of the same three fields and folds in
+	// wherever non-zero. The fold reads the REQUEST's flat fields directly —
+	// the Get* readers would prefer the shard and fold it onto itself.
+	// Migration-window reads of the REQUEST's flat legacy fields — the Get*
+	// readers would prefer the shard and fold it back onto itself.
+	cw := newParams.ContextWindow   //nolint:staticcheck // SA1019 migration-window fold input
+	mo := newParams.MaxOutputTokens //nolint:staticcheck // SA1019 migration-window fold input
+	sv := newParams.SupportsVision  //nolint:staticcheck // SA1019 migration-window fold input
 	if newParams.Chat == nil {
-		// Flat-field fold (design §8 write-side is shard-only; 2026-09-13
-		// review): the Get* readers prefer the Chat shard, so a caller
-		// writing the flat context_window/max_output_tokens/supports_vision
-		// while a shard exists would save values that are silently shadowed
-		// on read-back ("saved but no effect"). Non-zero flat writes fold
-		// into the shard; with no shard at all, non-zero flat values create
-		// one via EnsureChat. Clearing a shard value stays a replace-vs-patch
-		// semantics question (review finding, pending ruling).
-		newParams.Chat = model.Parameters.Chat
-		// The fold must read the REQUEST's flat legacy fields directly: the
-		// Get* readers prefer the (just-preserved) shard and would fold the
-		// old shard values back onto themselves — a no-op that keeps flat
-		// writes shadowed. Migration-window reads by design.
-		foldContextWindow := newParams.ContextWindow //nolint:staticcheck // SA1019 migration-window fold input
-		foldMaxOutput := newParams.MaxOutputTokens   //nolint:staticcheck // SA1019 migration-window fold input
-		foldVision := newParams.SupportsVision       //nolint:staticcheck // SA1019 migration-window fold input
-		if newParams.Chat == nil {
-			if foldContextWindow > 0 || foldMaxOutput > 0 || foldVision {
-				chat := newParams.EnsureChat()
-				chat.ContextWindow = foldContextWindow
-				chat.MaxOutputTokens = foldMaxOutput
-				if foldVision {
-					chat.InputModalities = append(chat.InputModalities, "image")
+		if cw > 0 || mo > 0 || sv {
+			chat := newParams.EnsureChat()
+			chat.ContextWindow = cw
+			chat.MaxOutputTokens = mo
+			if sv {
+				chat.InputModalities = append(chat.InputModalities, "image")
+			}
+		}
+	} else {
+		if cw > 0 {
+			newParams.Chat.ContextWindow = cw
+		}
+		if mo > 0 {
+			newParams.Chat.MaxOutputTokens = mo
+		}
+		if sv {
+			hasImage := false
+			for _, mod := range newParams.Chat.InputModalities {
+				if mod == "image" {
+					hasImage = true
+					break
 				}
 			}
-		} else {
-			if foldContextWindow > 0 {
-				newParams.Chat.ContextWindow = foldContextWindow
-			}
-			if foldMaxOutput > 0 {
-				newParams.Chat.MaxOutputTokens = foldMaxOutput
-			}
-			if foldVision {
-				hasImage := false
-				for _, mod := range newParams.Chat.InputModalities {
-					if mod == "image" {
-						hasImage = true
-						break
-					}
-				}
-				if !hasImage {
-					newParams.Chat.InputModalities = append(newParams.Chat.InputModalities, "image")
-				}
+			if !hasImage {
+				newParams.Chat.InputModalities = append(newParams.Chat.InputModalities, "image")
 			}
 		}
 	}
@@ -961,6 +951,58 @@ func (h *ModelHandler) GetModelCatalog(c *gin.Context) {
 	}})
 }
 
+// probeBaseURLHostsDiffer reports whether two base URLs point at different
+// hosts — the C4 guard's trigger condition. Unparseable input counts as
+// differing: the guard fails closed.
+func probeBaseURLHostsDiffer(requested, stored string) bool {
+	u1, err1 := url.Parse(strings.TrimSpace(requested))
+	u2, err2 := url.Parse(strings.TrimSpace(stored))
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	return !strings.EqualFold(u1.Host, u2.Host)
+}
+
+// auditModelProbeRedirect durably records a C4 redirect attempt (denied).
+// Details carry hosts only — never secrets. Best-effort: the audit service
+// is nil in lite mode, and an audit failure must not mask the 400.
+func auditModelProbeRedirect(ctx context.Context, c *gin.Context, tenantID uint64, modelID, fromURL, toURL string) {
+	logger.Warnf(ctx,
+		"[remote-catalog][audit] stored-credential probe redirected to a different host (model %s): %s -> %s; denied",
+		secutils.SanitizeForLog(modelID),
+		secutils.SanitizeForLog(fromURL), secutils.SanitizeForLog(toURL))
+	svc := middleware.AuditServiceFromContext(c)
+	if svc == nil {
+		return
+	}
+	actor := types.CallerFromContext(ctx)
+	details, _ := json.Marshal(map[string]string{
+		"from_host": hostOf(fromURL),
+		"to_host":   hostOf(toURL),
+	})
+	_ = svc.Log(ctx, &types.AuditLog{
+		TenantID:      tenantID,
+		ActorUserID:   actor.UserID,
+		Action:        types.AuditActionModelProbeRedirect,
+		ScopeType:     "model",
+		ScopeID:       modelID,
+		TargetType:    "model",
+		TargetID:      modelID,
+		RequestPath:   c.Request.URL.Path,
+		RequestMethod: c.Request.Method,
+		Outcome:       types.AuditOutcomeDenied,
+		Details:       details,
+	})
+}
+
+func hostOf(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
 // ProbeRemoteCatalogRequest carries the connection info for a backend
 // listing probe. APIKey is only present for unsaved configurations; saved
 // models reuse stored credentials via ModelID (design §5.10.2).
@@ -1005,6 +1047,19 @@ func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
 		model, err := h.service.GetModelByID(ctx, req.ModelID)
 		if err != nil || model == nil {
 			_ = c.Error(errors.NewNotFoundError("model not found"))
+			return
+		}
+		if req.BaseURL != "" && probeBaseURLHostsDiffer(req.BaseURL, model.Parameters.BaseURL) {
+			// 2026-09-13 裁定 C4：编辑模式借存量凭证探测时，把 base_url 指向
+			// 与存量不同的主机，等于把（可能由他人配置的）密钥发往调用方
+			// 控制的任意外部主机——强制拒绝，要求显式携带 api_key，并留
+			// 审计日志（不落 secret 值）。SSRF 门禁照常在 invoke.List 生效。
+			// 前端影响：编辑态改 base_url 后的列表探测会降级手输（reason
+			// 透出本拒绝消息），属裁定接受的取舍。
+			auditModelProbeRedirect(ctx, c, tenantID, req.ModelID,
+				model.Parameters.BaseURL, req.BaseURL)
+			_ = c.Error(errors.NewBadRequestError(
+				"base_url 与存量模型主机不一致，不能复用存储凭证探测；请显式携带 api_key 或还原 base_url"))
 			return
 		}
 		apiKey = model.Parameters.APIKey

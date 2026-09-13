@@ -1654,18 +1654,30 @@ type ModelTestRequest struct {
 // actively typing a new key they want to verify. Missing or inaccessible
 // model is treated as a no-op (the connection test will fail downstream
 // with a clearer "missing apiKey" error than we could produce here).
-func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, req *ModelTestRequest) {
+// 返回 error 仅用于 2026-09-13 裁定 C4 的跨主机拒绝：请求把 base_url 指向
+// 与存量模型不同的主机时，存储凭证（api_key/app_secret 都属可外发秘密）
+// 一律不外借，且写审计日志——调用方显式携带的值不受影响，缺什么由后续
+// 测试调用以清晰的"missing apiKey"报出。
+func (h *InitializationHandler) fillSecretsFromStoredModel(
+	ctx context.Context, c *gin.Context, req *ModelTestRequest,
+) error {
 	if req == nil || req.ModelID == "" {
-		return
+		return nil
 	}
 	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil {
-		return
+		return nil
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
 	if err != nil || stored == nil {
 		logger.Warnf(ctx, "test-connection: stored model %s not found, leaving secrets empty: %v",
 			utils.SanitizeForLog(req.ModelID), err)
-		return
+		return nil
+	}
+	if req.BaseURL != "" && probeBaseURLHostsDiffer(req.BaseURL, stored.Parameters.BaseURL) {
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		auditModelProbeRedirect(ctx, c, tenantID, req.ModelID,
+			stored.Parameters.BaseURL, req.BaseURL)
+		return stderrors.New("base_url 与存量模型主机不一致，存储凭证不外借；请显式提供 API Key 或还原 base_url")
 	}
 	if req.APIKey == "" {
 		req.APIKey = stored.Parameters.APIKey
@@ -1676,6 +1688,7 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req.ExtraConfig == nil {
 		req.ExtraConfig = stored.Parameters.ExtraConfig
 	}
+	return nil
 }
 
 // RemoteModelCheckRequest 兼容旧 swagger 定义。
@@ -1766,7 +1779,10 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
@@ -1823,7 +1839,10 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 	if req.Source == "" {
 		req.Source = string(types.ModelSourceRemote)
 	}
@@ -2049,7 +2068,10 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
@@ -2112,7 +2134,10 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required for ASR check")

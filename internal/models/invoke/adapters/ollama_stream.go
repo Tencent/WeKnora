@@ -20,53 +20,54 @@ import (
 // message.thinking → thinking deltas; message.content → answer deltas;
 // tool_calls → complete tool-call events; the done line → Done with usage.
 //
-// Contract ceilings (documented, normalized in the reconciliation tests):
-//   - the one-event-per-chunk contract cannot emit the v1 "thinking phase
-//     closed" marker nor the thinking-tool thought echo (a StreamResponse
-//     with Data metadata) — the P1c caller adaptation owns the difference;
-//   - a single line carrying multiple tool calls emits only the first
-//     (ponytail: ollama streams one call per line in practice; queue across
-//     chunks if a caller ever hits the multi-call-per-line case).
+// Multi-event bridge (2026-09-13 裁定)：一行携带多个 payload 时全部发出
+// （tool_calls 每调用一个事件——多调用/行不再截断，thinking 与 content
+// 混行也依序发出）；Done 恒为末元素。
 func (a *OllamaAdapter) TranslateStreamEvent(
 	_ *invoke.StreamBridgeState, chunk invoke.StreamChunk,
-) (*invoke.StreamEvent, error) {
+) ([]*invoke.StreamEvent, error) {
 	var ev ollamaChatResponse
 	if err := decodeChunk(chunk.Data, &ev); err != nil {
 		// v1 aborted the stream on decode failures; the entry stops once
 		// Done is set.
-		return &invoke.StreamEvent{
+		return []*invoke.StreamEvent{{
 			Kind:  invoke.StreamKindError,
 			Delta: &invoke.ContentDelta{Text: err.Error()},
 			Done:  &invoke.FinishInfo{},
-		}, nil
+		}}, nil
 	}
+	var out []*invoke.StreamEvent
 	if ev.Message.Thinking != "" {
-		return &invoke.StreamEvent{
+		out = append(out, &invoke.StreamEvent{
 			Kind:  invoke.StreamKindThinking,
 			Delta: &invoke.ContentDelta{Text: ev.Message.Thinking},
-		}, nil
-	}
-	if ev.Message.Content != "" {
-		return &invoke.StreamEvent{
-			Kind:  invoke.StreamKindAnswer,
-			Delta: &invoke.ContentDelta{Text: ev.Message.Content},
-		}, nil
+		})
 	}
 	if len(ev.Message.ToolCalls) > 0 {
-		c := ev.Message.ToolCalls[0]
-		args, _ := jsonMarshal(c.Function.Arguments)
-		return &invoke.StreamEvent{
-			Kind: invoke.StreamKindToolCall,
-			ToolCallDelta: &invoke.ToolCallDelta{
-				ID:        tooli2s(c.Function.Index),
-				Type:      "function",
-				Name:      c.Function.Name,
-				Arguments: args,
-			},
-		}, nil
+		for _, c := range ev.Message.ToolCalls {
+			args, _ := jsonMarshal(c.Function.Arguments)
+			out = append(out, &invoke.StreamEvent{
+				Kind: invoke.StreamKindToolCall,
+				ToolCallDelta: &invoke.ToolCallDelta{
+					ID:        tooli2s(c.Function.Index),
+					Type:      "function",
+					Name:      c.Function.Name,
+					Arguments: args,
+				},
+			})
+		}
+	}
+	if ev.Message.Content != "" {
+		out = append(out, &invoke.StreamEvent{
+			Kind:  invoke.StreamKindAnswer,
+			Delta: &invoke.ContentDelta{Text: ev.Message.Content},
+		})
+	}
+	if len(out) > 0 {
+		return out, nil
 	}
 	if ev.Done {
-		return doneEvent(&ev), nil
+		return []*invoke.StreamEvent{doneEvent(&ev)}, nil
 	}
 	return nil, nil
 }

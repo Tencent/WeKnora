@@ -71,7 +71,7 @@ func (f fakeChatAdapter) ParseChatResponse(_ int, _ http.Header, body []byte) (*
 	return &ChatResponse{Content: raw.Content, ReasoningContent: raw.ReasoningContent}, nil
 }
 
-func (f fakeChatAdapter) TranslateStreamEvent(state *StreamBridgeState, chunk StreamChunk) (*StreamEvent, error) {
+func (f fakeChatAdapter) TranslateStreamEvent(state *StreamBridgeState, chunk StreamChunk) ([]*StreamEvent, error) {
 	return OpenAIStreamBridge{}.TranslateStreamEvent(state, chunk)
 }
 

@@ -65,21 +65,34 @@ func TestDemuxerNDJSON(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// firstEvent adapts the multi-event bridge to the single-event fixtures
+// below (single-kind frames yield exactly one event; mixed frames are
+// covered explicitly by TestOpenAIBridgeMixedDelta).
+func firstEvent[B interface {
+	TranslateStreamEvent(state *StreamBridgeState, chunk StreamChunk) ([]*StreamEvent, error)
+}](t *testing.T, b B, state *StreamBridgeState, chunk StreamChunk) *StreamEvent {
+	t.Helper()
+	evs, err := b.TranslateStreamEvent(state, chunk)
+	require.NoError(t, err)
+	if len(evs) == 0 {
+		return nil
+	}
+	return evs[0]
+}
+
 func TestOpenAIBridgeTranslate(t *testing.T) {
 	b := OpenAIStreamBridge{}
 	state := NewStreamBridgeState()
 
 	// Reasoning delta → thinking.
-	ev, err := b.TranslateStreamEvent(state, StreamChunk{Data: []byte(
+	ev := firstEvent(t, b, state, StreamChunk{Data: []byte(
 		`{"choices":[{"delta":{"reasoning_content":"hmm"}}]}`)})
-	require.NoError(t, err)
 	assert.Equal(t, StreamKindThinking, ev.Kind)
 	assert.Equal(t, "hmm", ev.Delta.Text)
 
 	// Answer delta.
-	ev, err = b.TranslateStreamEvent(state, StreamChunk{Data: []byte(
+	ev = firstEvent(t, b, state, StreamChunk{Data: []byte(
 		`{"choices":[{"delta":{"content":"hi"}}]}`)})
-	require.NoError(t, err)
 	assert.Equal(t, StreamKindAnswer, ev.Kind)
 
 	// Tool-call fragments merge across frames (fixtures built via
@@ -90,7 +103,7 @@ func TestOpenAIBridgeTranslate(t *testing.T) {
 		}}})
 		return StreamChunk{Data: data}
 	}
-	_, err = b.TranslateStreamEvent(state, toolChunk(map[string]any{
+	_, err := b.TranslateStreamEvent(state, toolChunk(map[string]any{
 		"index": 0, "id": "c1", "type": "function",
 		"function": map[string]any{"name": "get", "arguments": "{\"q"},
 	}))
@@ -102,21 +115,18 @@ func TestOpenAIBridgeTranslate(t *testing.T) {
 	require.NoError(t, err)
 
 	// finish_reason frame stores state, emits nothing.
-	ev, err = b.TranslateStreamEvent(state, StreamChunk{Data: []byte(
+	ev = firstEvent(t, b, state, StreamChunk{Data: []byte(
 		`{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)})
-	require.NoError(t, err)
 	assert.Nil(t, ev)
 
 	// Usage-only frame.
-	ev, err = b.TranslateStreamEvent(state, StreamChunk{Data: []byte(
+	ev = firstEvent(t, b, state, StreamChunk{Data: []byte(
 		`{"choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`)})
-	require.NoError(t, err)
 	assert.Equal(t, StreamKindUsage, ev.Kind)
 	assert.Equal(t, 7, ev.Usage.TotalTokens)
 
 	// [DONE] closes with stored finish reason + assembled tool calls.
-	ev, err = b.TranslateStreamEvent(state, StreamChunk{Event: "done"})
-	require.NoError(t, err)
+	ev = firstEvent(t, b, state, StreamChunk{Event: "done"})
 	require.NotNil(t, ev.Done)
 	assert.Equal(t, "tool_calls", ev.Done.FinishReason)
 	require.Len(t, ev.Done.ToolCalls, 1)
@@ -301,3 +311,40 @@ func (n *nopReadCloser) Read(p []byte) (int, error) {
 }
 
 func (n *nopReadCloser) Close() error { return nil }
+
+// TestOpenAIBridgeMixedDelta pins the multi-event bridge (2026-09-13 裁定):
+// a mixed delta emits EVERY payload it carries — tool calls (one event per
+// delta), then reasoning, then content — instead of silently dropping the
+// tails (the one-event-per-frame era lost content/tool_calls behind
+// reasoning_content).
+func TestOpenAIBridgeMixedDelta(t *testing.T) {
+	b := OpenAIStreamBridge{}
+	state := NewStreamBridgeState()
+	data, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{
+		"delta": map[string]any{
+			"reasoning_content": "hmm",
+			"content":           "hi",
+			"tool_calls": []any{
+				map[string]any{
+					"index": 0, "id": "c1", "type": "function",
+					"function": map[string]any{"name": "get", "arguments": "{}"},
+				},
+				map[string]any{
+					"index": 1, "id": "c2", "type": "function",
+					"function": map[string]any{"name": "put", "arguments": "{}"},
+				},
+			},
+		},
+	}}})
+	evs, err := b.TranslateStreamEvent(state, StreamChunk{Data: data})
+	require.NoError(t, err)
+	require.Len(t, evs, 4)
+	assert.Equal(t, StreamKindToolCall, evs[0].Kind)
+	assert.Equal(t, "c1", evs[0].ToolCallDelta.ID)
+	assert.Equal(t, StreamKindToolCall, evs[1].Kind)
+	assert.Equal(t, "c2", evs[1].ToolCallDelta.ID)
+	assert.Equal(t, StreamKindThinking, evs[2].Kind)
+	assert.Equal(t, "hmm", evs[2].Delta.Text)
+	assert.Equal(t, StreamKindAnswer, evs[3].Kind)
+	assert.Equal(t, "hi", evs[3].Delta.Text)
+}

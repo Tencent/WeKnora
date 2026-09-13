@@ -12,9 +12,18 @@ import (
 )
 
 const (
-	stateFinishReason = "openai.finish_reason"
+	stateFinishReason = "stream.finish_reason"
 	stateToolCalls    = "openai.tool_calls"
 )
+
+// StreamStateFinishReason is the shared per-stream key under which every
+// bridge records the vendor's finish_reason frame. The entry reads it on a
+// clean EOF (no [DONE] sentinel) to synthesize a terminal chunk whose
+// FinishReason reflects what the vendor actually said — a vendor that sent
+// finish_reason:"stop" and closed is a NATURAL stop (the agent engine's
+// empty-content guard keys on it), not an incomplete stream
+// (2026-09-13 EOF-synthesis regression fix).
+const StreamStateFinishReason = stateFinishReason
 
 // StreamStateToolCalls is the shared per-stream key under which every bridge
 // stores its ToolCallAssembler: the entry's interrupted-stream recovery reads
@@ -58,7 +67,7 @@ type openAIChunk struct {
 }
 
 // TranslateStreamEvent implements the openai-shape bridge.
-func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk StreamChunk) (*StreamEvent, error) {
+func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk StreamChunk) ([]*StreamEvent, error) {
 	if chunk.Event == "done" || isDoneSentinel(chunk.Data) {
 		finish, _ := state.Get(stateFinishReason)
 		reason, _ := finish.(string)
@@ -66,7 +75,7 @@ func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk S
 		if a := toolAssembler(state); a != nil {
 			calls = a.Calls()
 		}
-		return &StreamEvent{Kind: StreamKindAnswer, Done: &FinishInfo{FinishReason: reason, ToolCalls: calls}}, nil
+		return []*StreamEvent{{Kind: StreamKindAnswer, Done: &FinishInfo{FinishReason: reason, ToolCalls: calls}}}, nil
 	}
 	var c openAIChunk
 	if err := decodeJSON(chunk.Data, &c); err != nil {
@@ -78,7 +87,7 @@ func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk S
 			// Native cache counters the generic shape drops (seam ③): deepseek
 			// hit/miss, anthropic-style read/creation, openai details.
 			ApplyRawPromptCacheUsage(chunk.Data, c.Usage)
-			return &StreamEvent{Kind: StreamKindUsage, Usage: c.Usage}, nil
+			return []*StreamEvent{{Kind: StreamKindUsage, Usage: c.Usage}}, nil
 		}
 		return nil, nil
 	}
@@ -89,38 +98,33 @@ func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk S
 		// carries finish_reason yields no user-visible event.
 		return nil, nil
 	}
+	// Multi-event bridge (2026-09-13 裁定): a mixed delta emits EVERY payload
+	// it carries, in the v1 processStreamDelta order — tool_calls (one event
+	// per delta), reasoning, content. Nothing is dropped.
 	d := choice.Delta
-	// One event per frame (bridge contract): a non-conforming vendor that
-	// stuffs several payloads into one delta forces a priority — tool_calls
-	// (agent-critical) > content (answer payload) > reasoning (streaming
-	// nicety). v1 processed all three per delta; the multi-event bridge
-	// refactor is tracked as a follow-up (2026-09-13 review round).
+	var out []*StreamEvent
 	if len(d.ToolCalls) > 0 {
 		a := toolAssembler(state)
 		if a == nil {
 			a = &ToolCallAssembler{byIndex: make(map[int]*ToolCall)}
 			state.Set(stateToolCalls, a)
 		}
-		out := make([]ToolCallDelta, 0, len(d.ToolCalls))
 		for _, tc := range d.ToolCalls {
 			delta := ToolCallDelta{
 				Index: tc.Index, ID: tc.ID, Type: tc.Type,
 				Name: tc.Function.Name, Arguments: tc.Function.Arguments,
 			}
 			a.Add(delta)
-			out = append(out, delta)
+			out = append(out, &StreamEvent{Kind: StreamKindToolCall, ToolCallDelta: &delta})
 		}
-		// Multiple deltas in one frame collapse to the first for the event;
-		// assembly state keeps every fragment for the final Calls().
-		return &StreamEvent{Kind: StreamKindToolCall, ToolCallDelta: &out[0]}, nil
-	}
-	if d.Content != "" {
-		return &StreamEvent{Kind: StreamKindAnswer, Delta: &ContentDelta{Text: d.Content}}, nil
 	}
 	if d.ReasoningContent != "" {
-		return &StreamEvent{Kind: StreamKindThinking, Delta: &ContentDelta{Text: d.ReasoningContent}}, nil
+		out = append(out, &StreamEvent{Kind: StreamKindThinking, Delta: &ContentDelta{Text: d.ReasoningContent}})
 	}
-	return nil, nil
+	if d.Content != "" {
+		out = append(out, &StreamEvent{Kind: StreamKindAnswer, Delta: &ContentDelta{Text: d.Content}})
+	}
+	return out, nil
 }
 
 func toolAssembler(state *StreamBridgeState) *ToolCallAssembler {

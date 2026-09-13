@@ -283,32 +283,44 @@ func TestAliyunParseChatResponse(t *testing.T) {
 	require.True(t, resp.Usage.CacheReported)
 }
 
+// firstEvent adapts the multi-event bridge to the single-event fixtures in
+// this package (single-kind frames yield exactly one event; mixed frames are
+// covered explicitly by TestAliyunTranslateStreamEventMixed).
+func firstEvent[B interface {
+	TranslateStreamEvent(state *invoke.StreamBridgeState, chunk invoke.StreamChunk) ([]*invoke.StreamEvent, error)
+}](t *testing.T, b B, state *invoke.StreamBridgeState, chunk invoke.StreamChunk) *invoke.StreamEvent {
+	t.Helper()
+	evs, err := b.TranslateStreamEvent(state, chunk)
+	require.NoError(t, err)
+	if len(evs) == 0 {
+		return nil
+	}
+	return evs[0]
+}
+
 func TestAliyunTranslateStreamEventSequence(t *testing.T) {
 	a := newAliyunAdapter()
 	state := invoke.NewStreamBridgeState()
 
 	// 思考增量。
-	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+	ev := firstEvent(t, a, state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":null,"message":{"role":"assistant",` +
 			`"content":"","reasoning_content":"想一下"}}]}}`)})
-	require.NoError(t, err)
 	require.NotNil(t, ev)
 	require.Equal(t, invoke.StreamKindThinking, ev.Kind)
 	require.Equal(t, "想一下", ev.Delta.Text)
 
 	// 回答增量。
-	ev, err = a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+	ev = firstEvent(t, a, state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":null,"message":{"role":"assistant",` +
 			`"content":"答案"}}]}}`)})
-	require.NoError(t, err)
 	require.Equal(t, invoke.StreamKindAnswer, ev.Kind)
 	require.Equal(t, "答案", ev.Delta.Text)
 
 	// 末帧：finish_reason + usage → Done 事件自带 usage（无 [DONE] 哨兵）。
-	ev, err = a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+	ev = firstEvent(t, a, state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":"stop","message":{"role":"assistant",` +
 			`"content":""}}]},"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}`)})
-	require.NoError(t, err)
 	require.NotNil(t, ev.Done)
 	require.Equal(t, "stop", ev.Done.FinishReason)
 	require.NotNil(t, ev.Usage)
@@ -322,16 +334,14 @@ func TestAliyunFinishFrameCarriesTailFragment(t *testing.T) {
 	a := newAliyunAdapter()
 	state := invoke.NewStreamBridgeState()
 
-	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+	ev := firstEvent(t, a, state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":null,"message":{"role":"assistant",` +
 			`"content":"I like apple"}}]}}`)})
-	require.NoError(t, err)
 	require.Equal(t, "I like apple", ev.Delta.Text)
 
-	ev, err = a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+	ev = firstEvent(t, a, state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":"stop","message":{"role":"assistant",` +
 			`"content":"."}}]},"usage":{"input_tokens":4,"output_tokens":4,"total_tokens":8}}`)})
-	require.NoError(t, err)
 	require.NotNil(t, ev.Done)
 	require.Equal(t, "stop", ev.Done.FinishReason)
 	require.NotNil(t, ev.Delta, "末帧尾片段必须随 Done 事件透出")
@@ -345,11 +355,10 @@ func TestAliyunFinishFrameToolCallsRideSharedAssembler(t *testing.T) {
 	a := newAliyunAdapter()
 	state := invoke.NewStreamBridgeState()
 
-	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+	ev := firstEvent(t, a, state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant",` +
 			`"content":"","tool_calls":[{"index":0,"id":"call_1","type":"function",` +
 			`"function":{"name":"get_weather","arguments":"{}"}}]}}]}}`)})
-	require.NoError(t, err)
 	require.NotNil(t, ev.Done)
 	require.Equal(t, "tool_calls", ev.Done.FinishReason)
 	require.Len(t, ev.Done.ToolCalls, 1)
@@ -361,9 +370,8 @@ func TestAliyunFinishFrameToolCallsRideSharedAssembler(t *testing.T) {
 func TestAliyunUsageOnlyFrame(t *testing.T) {
 	a := newAliyunAdapter()
 	state := invoke.NewStreamBridgeState()
-	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
+	ev := firstEvent(t, a, state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[]},"usage":{"input_tokens":9,"output_tokens":3,"total_tokens":12}}`)})
-	require.NoError(t, err)
 	require.Equal(t, invoke.StreamKindUsage, ev.Kind)
 	require.Equal(t, 9, ev.Usage.PromptTokens)
 }
@@ -375,8 +383,7 @@ func TestAliyunBareDoneSentinel(t *testing.T) {
 	_, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(
 		`{"output":{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":""}}]}}`)})
 	require.NoError(t, err)
-	ev, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte("[DONE]")})
-	require.NoError(t, err)
+	ev := firstEvent(t, a, state, invoke.StreamChunk{Data: []byte("[DONE]")})
 	require.NotNil(t, ev.Done)
 	require.Equal(t, "stop", ev.Done.FinishReason)
 }
@@ -802,4 +809,70 @@ func TestAliyunUsageCacheFields(t *testing.T) {
 		`"usage":{"input_tokens":3,"output_tokens":1,"total_tokens":4}}`))
 	require.NoError(t, err)
 	require.False(t, resp.Usage.CacheReported, "无缓存计数 = 未上报")
+}
+
+// TestAliyunThinkingToolChoiceMutex pins the B3 ruling (2026-09-13): the
+// generation doc forbids forcing a tool while thinking is on — a named
+// tool_choice degrades to "auto" only when enable_thinking=true actually
+// rides the wire; pinned-false and never-sent combinations keep the name.
+func TestAliyunThinkingToolChoiceMutex(t *testing.T) {
+	a := newAliyunAdapter()
+	build := func(model string, stream bool, thinking *bool) (any, *bool) {
+		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, &invoke.ChatOptions{
+			Messages: []invoke.Message{invoke.TextMessage("user", "hi")},
+			Stream:   stream,
+			Thinking: thinking,
+			// 具名 tool_choice：必须与 Tools 同发才会出现在线上
+			Tools:      []invoke.ToolDef{{Name: "get_weather", Description: "weather"}},
+			ToolChoice: "get_weather",
+		})
+		require.NoError(t, err)
+		var body struct {
+			Parameters struct {
+				ToolChoice     any   `json:"tool_choice"`
+				EnableThinking *bool `json:"enable_thinking"`
+			} `json:"parameters"`
+		}
+		require.NoError(t, json.Unmarshal(req.Body, &body))
+		return body.Parameters.ToolChoice, body.Parameters.EnableThinking
+	}
+
+	on := true
+	// 流式 qwen：enable_thinking=true 与具名 choice 同发 → 降级 auto
+	choice, thinking := build("qwen3-max", true, &on)
+	require.Equal(t, "auto", choice)
+	require.NotNil(t, thinking)
+	require.True(t, *thinking)
+
+	// 非流式 qwen：enable_thinking 钉 false → 具名保留
+	choice, thinking = build("qwen3-max", false, nil)
+	named, ok := choice.(map[string]any)
+	require.True(t, ok, "具名 tool_choice 应保留对象形态")
+	require.Equal(t, "get_weather", named["function"].(map[string]any)["name"])
+	require.NotNil(t, thinking)
+	require.False(t, *thinking)
+
+	// 非思考模型显式开思考 + 具名 → 同样降级
+	choice, _ = build("deepseek-v3.2", false, &on)
+	require.Equal(t, "auto", choice)
+}
+
+// TestAliyunTranslateStreamEventMixed pins the multi-event bridge on the
+// native wire (2026-09-13 裁定): a mixed message frame emits tool calls
+// (one event per delta), then reasoning, then content.
+func TestAliyunTranslateStreamEventMixed(t *testing.T) {
+	a := newAliyunAdapter()
+	state := invoke.NewStreamBridgeState()
+	frame := `{"output":{"choices":[{"message":{"role":"assistant",` +
+		`"reasoning_content":"hmm","content":"hi",` +
+		`"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"get","arguments":"{}"}}]}}]}}`
+	evs, err := a.TranslateStreamEvent(state, invoke.StreamChunk{Data: []byte(frame)})
+	require.NoError(t, err)
+	require.Len(t, evs, 3)
+	require.Equal(t, invoke.StreamKindToolCall, evs[0].Kind)
+	require.Equal(t, "c1", evs[0].ToolCallDelta.ID)
+	require.Equal(t, invoke.StreamKindThinking, evs[1].Kind)
+	require.Equal(t, "hmm", evs[1].Delta.Text)
+	require.Equal(t, invoke.StreamKindAnswer, evs[2].Kind)
+	require.Equal(t, "hi", evs[2].Delta.Text)
 }
