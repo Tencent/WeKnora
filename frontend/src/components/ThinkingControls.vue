@@ -27,15 +27,17 @@
     </p>
 
     <template v-else>
-      <!-- 思考开关 -->
-      <div v-if="showToggle" class="thinking-controls__toggle">
-        <span class="thinking-controls__toggle-label">{{ t('model.editor.thinkingToggleLabel') }}</span>
-        <t-switch
-          :model-value="effectiveEnabled"
-          :disabled="!canDisable"
-          @change="(v: unknown) => setEnabled(v === true)"
-        />
-        <span class="thinking-controls__toggle-desc">{{ t('model.editor.thinkingToggleDesc') }}</span>
+      <!-- 思考开关：标题与其余字段标题同款（__label，上下分布） -->
+      <div v-if="showToggle" class="thinking-controls__field">
+        <label class="thinking-controls__label">{{ t('model.editor.thinkingToggleLabel') }}</label>
+        <div class="thinking-controls__toggle">
+          <t-switch
+            :model-value="effectiveEnabled"
+            :disabled="!canDisable"
+            @change="(v: unknown) => setEnabled(v === true)"
+          />
+          <span class="thinking-controls__toggle-desc">{{ t('model.editor.thinkingToggleDesc') }}</span>
+        </div>
       </div>
 
       <!-- single：档位单选，空 = 跟随模型默认 -->
@@ -206,11 +208,6 @@ const onSelectedLevelsChange = (value: unknown) => {
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-
-  &__toggle-label {
-    font-size: 14px;
-    color: var(--td-text-color-primary);
   }
 
   &__toggle-desc {

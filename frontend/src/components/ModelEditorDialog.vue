@@ -215,30 +215,6 @@
             </div>
           </template>
 
-          <!-- 模型名称 / 模型 ID。远程 chat/vllm 用可搜索下拉（远端列表探测）+ 自由输入。 -->
-          <div class="form-item">
-            <label class="form-label required">{{ $t('model.modelName') }}</label>
-            <t-select
-              v-if="showRemoteModelSelect"
-              v-model="formData.modelName"
-              filterable
-              creatable
-              clearable
-              :loading="probingRemoteModels"
-              :options="remoteModelOptions"
-              :placeholder="getModelNamePlaceholder()"
-              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
-              @create="onRemoteModelCreate"
-            />
-            <t-input v-else v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
-              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
-          </div>
-
-          <div class="form-item">
-            <label class="form-label">{{ $t('model.editor.displayNameLabel') }}</label>
-            <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')" />
-            <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
-          </div>
 
           <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label required">{{ $t('model.editor.baseUrlLabel') }}</label>
@@ -319,6 +295,32 @@
               </div>
             </div>
           </div>
+
+          <!-- 模型名称 / 模型 ID。远程 chat/vllm 用可搜索下拉（远端列表探测）+ 自由输入。 -->
+          <div class="form-item">
+            <label class="form-label required">{{ $t('model.modelName') }}</label>
+            <t-select
+              v-if="showRemoteModelSelect"
+              v-model="formData.modelName"
+              filterable
+              creatable
+              clearable
+              :loading="probingRemoteModels"
+              :options="remoteModelOptions"
+              :placeholder="getModelNamePlaceholder()"
+              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
+              @create="onRemoteModelCreate"
+            />
+            <t-input v-else v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
+              :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
+          </div>
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('model.editor.displayNameLabel') }}</label>
+            <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')" />
+            <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
+          </div>
+
 
           <!--
             Connection test action moved to the drawer footer (footer-left
@@ -870,14 +872,20 @@ const CREDENTIAL_SLOT_KEYS = Object.keys(CREDENTIAL_SLOT_FIELDS) as ModelCredent
 /** 厂商声明的凭证槽位 spec；能力声明未加载（API 兜底路径）时为 undefined。 */
 const providerCredentialSpec = computed(() => activeProviderCaps.value?.credentials)
 
-/** 槽位 label：签名 rerank 专属标注 > spec.label_key > 槽位默认文案。 */
-const credentialLabel = (key: ModelCredentialField, labelKey?: string): string => {
+/**
+ * 槽位 label：签名 rerank 专属标注 > spec.label_key > 槽位默认文案。
+ * api_key 的"（可选）"后缀随 spec 的必填声明走（2026-09-13 反馈 #2）：
+ * required=true → 「API Key」；false → 「API Key（可选）」；spec 未加载
+ * （undefined）→ 中性「API Key」，不声称可选。
+ */
+const credentialLabel = (key: ModelCredentialField, labelKey?: string, required?: boolean): string => {
   if (isSignedRerank.value && key === 'api_key') return signedRerankAccessKeyLabel.value
   if (isSignedRerank.value && key === 'app_secret') return signedRerankSecretKeyLabel.value
   if (labelKey && te(labelKey)) return t(labelKey)
   if (key === 'app_id') return t('model.editor.appIdLabel')
   if (key === 'app_secret') return t('model.editor.appSecretLabel')
-  return t('model.editor.apiKeyOptional')
+  if (required === false) return t('model.editor.apiKeyOptional')
+  return t('model.credentials.apiKey')
 }
 
 const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(() => {
@@ -894,7 +902,10 @@ const credentialFields = computed<CredentialFieldDef<ModelCredentialField>[]>(()
   }
   const fields = spec
     .filter(f => (CREDENTIAL_SLOT_KEYS as string[]).includes(f.key))
-    .map(f => ({ key: f.key as ModelCredentialField, label: credentialLabel(f.key as ModelCredentialField, f.label_key) }))
+    .map(f => ({
+      key: f.key as ModelCredentialField,
+      label: credentialLabel(f.key as ModelCredentialField, f.label_key, f.required),
+    }))
   return fields
 })
 
