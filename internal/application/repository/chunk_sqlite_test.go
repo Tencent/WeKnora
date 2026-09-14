@@ -361,3 +361,63 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
 }
+// TestDeleteChunksByKnowledgeID_HardDeletes guards the whole-document teardown
+// paths against regressing to GORM's soft delete. A soft delete leaves the rows
+// in place forever — nothing purges them and no read path passes Unscoped() —
+// so re-parsing a document repeatedly grows the table without bound.
+func TestDeleteChunksByKnowledgeID_HardDeletes(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	knowledgeID := uuid.New().String()
+	other := uuid.New().String()
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{
+		makeChunk(kbID, knowledgeID, "text"),
+		makeChunk(kbID, knowledgeID, "text"),
+		makeChunk(kbID, other, "text"),
+	}))
+
+	require.NoError(t, repo.DeleteChunksByKnowledgeID(ctx, 1, knowledgeID))
+
+	// Unscoped: the rows must be gone from the table, not just filtered out.
+	var remaining int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).
+		Where("knowledge_id = ?", knowledgeID).Count(&remaining).Error)
+	assert.Zero(t, remaining, "chunks should be hard-deleted, not soft-deleted")
+
+	// Sibling knowledge in the same KB is untouched.
+	var untouched int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).
+		Where("knowledge_id = ?", other).Count(&untouched).Error)
+	assert.EqualValues(t, 1, untouched)
+}
+
+// TestDeleteByKnowledgeList_HardDeletes is the batch variant of the guard above.
+func TestDeleteByKnowledgeList_HardDeletes(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	kbID := uuid.New().String()
+	k1, k2, keep := uuid.New().String(), uuid.New().String(), uuid.New().String()
+
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{
+		makeChunk(kbID, k1, "text"),
+		makeChunk(kbID, k2, "text"),
+		makeChunk(kbID, keep, "text"),
+	}))
+
+	require.NoError(t, repo.DeleteByKnowledgeList(ctx, 1, []string{k1, k2}))
+
+	var remaining int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).
+		Where("knowledge_id IN ?", []string{k1, k2}).Count(&remaining).Error)
+	assert.Zero(t, remaining, "chunks should be hard-deleted, not soft-deleted")
+
+	var total int64
+	require.NoError(t, db.Unscoped().Model(&types.Chunk{}).Count(&total).Error)
+	assert.EqualValues(t, 1, total)
+}
