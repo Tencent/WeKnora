@@ -12,7 +12,6 @@ import (
 	"time"
 
 	milvusRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/milvus"
-	"github.com/milvus-io/milvus/client/v2/entity"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 )
 
@@ -29,11 +28,15 @@ func main() {
 	username := flag.String("username", os.Getenv("MILVUS_USERNAME"), "Milvus 用户名")
 	password := flag.String("password", os.Getenv("MILVUS_PASSWORD"), "Milvus 密码")
 	database := flag.String("database", os.Getenv("MILVUS_DB_NAME"), "Milvus 数据库名")
-	metric := flag.String("metric-type", envOr("MILVUS_METRIC_TYPE", "IP"), "稠密向量距离：IP、COSINE 或 L2")
+	metric := flag.String(
+		"metric-type",
+		strings.TrimSpace(os.Getenv("MILVUS_METRIC_TYPE")),
+		"稠密向量距离：IP、COSINE 或 L2；省略则沿用源 Collection",
+	)
 	batchSize := flag.Int("batch-size", 64, "每批迁移的行数；文本较长时可进一步调小")
 	flag.Parse()
 
-	metricType, err := parseMetricType(*metric)
+	metricType, err := milvusRepo.ParseMetricType(*metric)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -91,17 +94,4 @@ func envOr(name, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func parseMetricType(value string) (entity.MetricType, error) {
-	switch strings.ToUpper(strings.TrimSpace(value)) {
-	case "IP":
-		return entity.IP, nil
-	case "COSINE":
-		return entity.COSINE, nil
-	case "L2":
-		return entity.L2, nil
-	default:
-		return "", fmt.Errorf("不支持的 metric-type %q，只能是 IP、COSINE 或 L2", value)
-	}
 }

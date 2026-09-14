@@ -77,8 +77,14 @@ func multiAnalyzerParams() map[string]any {
 // one analyzer name per document and per query.
 func detectAnalyzerName(text string) string {
 	var hanCount, latinCount int
+	hasJapaneseKana := false
+	hasHangul := false
 	for _, r := range text {
 		switch {
+		case unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r):
+			hasJapaneseKana = true
+		case unicode.Is(unicode.Hangul, r):
+			hasHangul = true
 		case unicode.Is(unicode.Han, r):
 			hanCount++
 		case r <= unicode.MaxASCII && ((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')):
@@ -86,11 +92,13 @@ func detectAnalyzerName(text string) string {
 		}
 	}
 
-	if hanCount == 0 && latinCount == 0 {
+	// Jieba does not preserve Japanese or Korean word boundaries. Route those
+	// scripts to ICU instead of treating shared Han characters as Chinese.
+	if hasJapaneseKana || hasHangul {
 		return milvusAnalyzerDefault
 	}
-	// Any Han character makes the text Chinese-oriented. This is important for
-	// technical queries such as "AI 注意力": choosing the English analyzer just
+	// Any remaining Han character makes the text Chinese-oriented. This is
+	// important for technical queries such as "AI 注意力": choosing English just
 	// because ASCII characters are more numerous would drop the Chinese terms.
 	if hanCount > 0 {
 		return milvusAnalyzerChinese
@@ -99,8 +107,17 @@ func detectAnalyzerName(text string) string {
 		return milvusAnalyzerEnglish
 	}
 
-	// Text without Han or Latin characters uses ICU as a safe fallback.
 	return milvusAnalyzerDefault
+}
+
+func analyzerNameForUpsert(embedding *MilvusVectorEmbedding) string {
+	if embedding == nil {
+		return milvusAnalyzerDefault
+	}
+	if strings.TrimSpace(embedding.Language) == "" {
+		return detectAnalyzerName(embedding.Content)
+	}
+	return normalizeAnalyzerName(embedding.Language)
 }
 
 // normalizeAnalyzerName keeps externally supplied values within the analyzer

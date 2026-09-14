@@ -2,6 +2,7 @@ package milvus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,8 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/index"
 	client "github.com/milvus-io/milvus/client/v2/milvusclient"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -81,9 +83,6 @@ func MigrateLegacyCollections(
 	if options.BatchSize <= 0 {
 		options.BatchSize = defaultMultilingualMigrationBatchSize
 	}
-	if options.MetricType == "" {
-		options.MetricType = entity.IP
-	}
 
 	log := logger.GetLogger(ctx)
 	collections, err := milvusClient.ListCollections(ctx, client.NewListCollectionOption())
@@ -95,7 +94,6 @@ func MigrateLegacyCollections(
 	targetRepo := &milvusRepository{
 		client:             milvusClient,
 		collectionBaseName: targetBase,
-		metricType:         options.MetricType,
 		shardsNum:          options.ShardsNum,
 		replicaNumber:      options.ReplicaNumber,
 	}
@@ -132,6 +130,34 @@ func MigrateLegacyCollections(
 		}
 
 		targetCollectionName := fmt.Sprintf("%s_%d", targetBase, dimension)
+		sourceMetric, err := embeddingMetricFromCollection(ctx, milvusClient, sourceCollectionName)
+		if err != nil {
+			return summary, fmt.Errorf("read metric from source collection %s: %w", sourceCollectionName, err)
+		}
+		metricType, err := resolveMigrationMetric(options.MetricType, sourceMetric)
+		if err != nil {
+			return summary, fmt.Errorf("collection %s: %w", sourceCollectionName, err)
+		}
+		hasTarget, err := milvusClient.HasCollection(ctx, client.NewHasCollectionOption(targetCollectionName))
+		if err != nil {
+			return summary, fmt.Errorf("check target collection %s: %w", targetCollectionName, err)
+		}
+		if hasTarget {
+			targetMetric, err := embeddingMetricFromCollection(ctx, milvusClient, targetCollectionName)
+			if err != nil {
+				return summary, fmt.Errorf("read metric from target collection %s: %w", targetCollectionName, err)
+			}
+			if targetMetric != metricType {
+				return summary, fmt.Errorf(
+					"target collection %s uses metric %s, source collection %s uses %s; choose a new target base",
+					targetCollectionName,
+					targetMetric,
+					sourceCollectionName,
+					metricType,
+				)
+			}
+		}
+		targetRepo.metricType = metricType
 		if err := targetRepo.ensureCollection(ctx, dimension); err != nil {
 			return summary, fmt.Errorf("prepare target collection %s: %w", targetCollectionName, err)
 		}
@@ -184,6 +210,105 @@ func collectionDimensionForBase(collectionName, baseName string) (int, bool) {
 		return 0, false
 	}
 	return dimension, true
+}
+
+func matchesDimensionCollection(collectionName, baseName string) bool {
+	_, ok := collectionDimensionForBase(collectionName, baseName)
+	return ok
+}
+
+// ParseMetricType accepts IP, COSINE, or L2. An empty value means the caller
+// wants the source collection's metric.
+func ParseMetricType(value string) (entity.MetricType, error) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "":
+		return "", nil
+	case "IP":
+		return entity.IP, nil
+	case "COSINE":
+		return entity.COSINE, nil
+	case "L2":
+		return entity.L2, nil
+	default:
+		return "", fmt.Errorf("unsupported metric-type %q, must be IP, COSINE, or L2", value)
+	}
+}
+
+func resolveMigrationMetric(requested, source entity.MetricType) (entity.MetricType, error) {
+	if source == "" {
+		return "", fmt.Errorf("source collection metric is unknown")
+	}
+	if requested == "" || requested == source {
+		return source, nil
+	}
+	return "", fmt.Errorf(
+		"requested metric %s does not match source collection metric %s",
+		requested,
+		source,
+	)
+}
+
+func metricTypeFromIndexParams(params map[string]string) (entity.MetricType, error) {
+	raw := strings.TrimSpace(params[index.MetricTypeKey])
+	if raw == "" {
+		if nested := strings.TrimSpace(params[index.ParamsKey]); nested != "" {
+			var extra map[string]any
+			if err := json.Unmarshal([]byte(nested), &extra); err == nil {
+				if value, ok := extra[index.MetricTypeKey]; ok {
+					raw = fmt.Sprint(value)
+				}
+			}
+		}
+	}
+	if raw == "" {
+		return "", fmt.Errorf("dense vector index is missing metric_type")
+	}
+	return ParseMetricType(raw)
+}
+
+func embeddingMetricFromCollection(
+	ctx context.Context,
+	milvusClient *client.Client,
+	collectionName string,
+) (entity.MetricType, error) {
+	indexNames, err := milvusClient.ListIndexes(
+		ctx,
+		client.NewListIndexOption(collectionName).WithFieldName(fieldEmbedding),
+	)
+	if err != nil {
+		return "", fmt.Errorf("list indexes: %w", err)
+	}
+	if len(indexNames) == 0 {
+		return "", fmt.Errorf("no dense vector index found")
+	}
+	description, err := milvusClient.DescribeIndex(
+		ctx,
+		client.NewDescribeIndexOption(collectionName, indexNames[0]),
+	)
+	if err != nil {
+		return "", fmt.Errorf("describe index %s: %w", indexNames[0], err)
+	}
+	return metricTypeFromIndexParams(description.Params())
+}
+
+func primaryKeyForMigratedRow(
+	document *MilvusVectorEmbeddingWithScore,
+	ids column.Column,
+	rowIndex int,
+) (string, error) {
+	if document != nil && strings.TrimSpace(document.ID) != "" {
+		return document.ID, nil
+	}
+	if ids != nil {
+		id, err := ids.GetAsString(rowIndex)
+		if err != nil {
+			return "", fmt.Errorf("read primary key at row %d: %w", rowIndex, err)
+		}
+		if strings.TrimSpace(id) != "" {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("missing primary key at row %d", rowIndex)
 }
 
 func dimensionFromSchema(schema *entity.Schema) (int, error) {
@@ -266,24 +391,24 @@ func migrateCollectionRows(
 		}
 
 		embeddings := make([]*MilvusVectorEmbedding, 0, len(documents))
-		for index, document := range documents {
+		for rowIndex, document := range documents {
 			if len(document.Embedding) != dimension {
 				return totalCopied, fmt.Errorf(
 					"source collection %s row %d has vector dimension %d, expected %d",
 					sourceCollectionName,
-					index,
+					rowIndex,
 					len(document.Embedding),
 					dimension,
 				)
 			}
-			if document.ID == "" && resultSet.IDs != nil {
-				document.ID, err = resultSet.IDs.GetAsString(index)
-				if err != nil {
-					return totalCopied, fmt.Errorf("read source primary key at iterator batch %d row %d: %w", batchNumber, index, err)
-				}
-			}
-			if document.ID == "" {
-				document.ID = uuid.New().String()
+			document.ID, err = primaryKeyForMigratedRow(document, resultSet.IDs, rowIndex)
+			if err != nil {
+				return totalCopied, fmt.Errorf(
+					"source collection %s at iterator batch %d: %w",
+					sourceCollectionName,
+					batchNumber,
+					err,
+				)
 			}
 			document.Language = detectAnalyzerName(document.Content)
 			embeddings = append(embeddings, &document.MilvusVectorEmbedding)

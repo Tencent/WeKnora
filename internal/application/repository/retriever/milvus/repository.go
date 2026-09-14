@@ -518,8 +518,7 @@ func updateChunkEnabledStatusInCollections(
 ) error {
 	var updateErrs []error
 	for _, collectionName := range collections {
-		if len(collectionName) <= len(collectionBaseName) ||
-			collectionName[:len(collectionBaseName)] != collectionBaseName {
+		if !matchesDimensionCollection(collectionName, collectionBaseName) {
 			continue
 		}
 		if err := update(ctx, collectionName, enabledChunkIDs, true); err != nil {
@@ -626,9 +625,7 @@ func (m *milvusRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(m.collectionBaseName) ||
-			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
+		if !matchesDimensionCollection(collectionName, m.collectionBaseName) {
 			continue
 		}
 		// Update chunks for each tag ID
@@ -830,9 +827,7 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 
 	// Search in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(m.collectionBaseName) ||
-			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
+		if !matchesDimensionCollection(collectionName, m.collectionBaseName) {
 			continue
 		}
 		collectionMode, modeErr := m.collectionAnalyzerMode(ctx, collectionName)
@@ -1110,11 +1105,7 @@ func createUpsert(
 		embeddingsData = append(embeddingsData, embedding.Embedding)
 		contents = append(contents, embedding.Content)
 		if includeLanguage {
-			language := normalizeAnalyzerName(embedding.Language)
-			if strings.TrimSpace(embedding.Language) == "" {
-				language = detectAnalyzerName(embedding.Content)
-			}
-			languages = append(languages, language)
+			languages = append(languages, analyzerNameForUpsert(embedding))
 		}
 		sourceIDs = append(sourceIDs, embedding.SourceID)
 		sourceTypes = append(sourceTypes, int64(embedding.SourceType))

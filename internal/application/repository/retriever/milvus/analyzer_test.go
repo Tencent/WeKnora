@@ -16,7 +16,10 @@ func TestDetectAnalyzerName(t *testing.T) {
 		{name: "Chinese", text: "Transformer中多头注意力的三种使用方式及解码器自注意力掩码原因", want: milvusAnalyzerChinese},
 		{name: "English", text: "How does multi-head attention work", want: milvusAnalyzerEnglish},
 		{name: "ChineseWithTechnicalTerm", text: "AI 注意力", want: milvusAnalyzerChinese},
+		{name: "JapaneseKanjiWithKana", text: "東京都の設定", want: milvusAnalyzerDefault},
+		{name: "KoreanHangul", text: "서울 설정", want: milvusAnalyzerDefault},
 		{name: "Symbols", text: "12345 --", want: milvusAnalyzerDefault},
+		{name: "Empty", text: "", want: milvusAnalyzerDefault},
 	}
 
 	for _, tt := range tests {
@@ -45,6 +48,21 @@ func TestNormalizeAnalyzerName(t *testing.T) {
 	require.Equal(t, milvusAnalyzerEnglish, normalizeAnalyzerName(" EN "))
 	require.Equal(t, milvusAnalyzerChinese, normalizeAnalyzerName("zh"))
 	require.Equal(t, milvusAnalyzerDefault, normalizeAnalyzerName("unknown"))
+}
+
+func TestAnalyzerNameForUpsert(t *testing.T) {
+	require.Equal(t, milvusAnalyzerDefault, analyzerNameForUpsert(nil))
+	require.Equal(t, milvusAnalyzerChinese, analyzerNameForUpsert(&MilvusVectorEmbedding{
+		Content: "AI 注意力",
+	}))
+	require.Equal(t, milvusAnalyzerEnglish, analyzerNameForUpsert(&MilvusVectorEmbedding{
+		Content:  "AI 注意力",
+		Language: "en",
+	}))
+	require.Equal(t, milvusAnalyzerEnglish, analyzerNameForUpsert(&MilvusVectorEmbedding{
+		Content:  "hello",
+		Language: "  ",
+	}))
 }
 
 func TestAnalyzerModeFromSchema(t *testing.T) {
