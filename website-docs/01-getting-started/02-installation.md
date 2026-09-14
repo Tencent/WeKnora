@@ -64,6 +64,29 @@ docker compose ps                 # 等所有服务变成 healthy/running
 
 > 注意：`docker-compose.yml` 的 app 服务使用 `env_file: [.env]`，`.env` 不存在会导致 compose 解析失败。`make docker-run` / `start_all.sh` 会自动 `cp .env.example .env` 或 `touch .env` 兜底。
 
+### Windows 原生一键启动
+
+Windows 无需安装 WSL。先启动 Docker Desktop，等待引擎就绪，再从 PowerShell 或 `cmd.exe` 运行：
+
+```powershell
+# 默认检查/启动本机 Ollama（不可用且 OLLAMA_OPTIONAL=true 时仅警告），再拉取并启动 Docker 服务
+.\scripts\start_all.cmd
+
+# 只启动 Docker 服务，并在启动完成后返回而不是持续跟随日志
+.\scripts\start_all.cmd Docker -NoLogs
+
+# 只使用已有镜像，不主动拉取
+.\scripts\start_all.cmd Docker -NoPull -NoLogs
+
+# 检查 Docker Desktop、Compose、.env、Windows 架构和 Ollama
+.\scripts\start_all.cmd Check
+
+# 停止 Ollama 与 Compose 服务；保留容器和数据卷
+.\scripts\start_all.cmd Stop
+```
+
+`.cmd` 会调用 Windows PowerShell 5.1+ 的 `scripts/start_all.ps1`。其中 `ExecutionPolicy Bypass` 只作用于这个子进程，不修改用户或系统执行策略；也可直接运行 `.\scripts\start_all.ps1 Help` 查看参数。支持的动作包括 `All`（默认）、`Ollama`、`Docker`、`Stop`、`Check`、`Restart <service>`、`List` 和 `Pull`。
+
 ### 版本升级
 
 若已有部署并下载了更新的 release：
@@ -165,6 +188,7 @@ make docker-build-frontend
 | 脚本 | 职责 |
 | --- | --- |
 | `scripts/start_all.sh` | 一键启动：参数 `-o`（仅 Ollama）、`-d`（仅 Docker）、`-a`（全部，默认）、`-s`（停止）、`-c`（检查环境）、`-l`（列容器）、`-p`(拉镜像)；自动探测 compose v1/v2、按 `uname -m` 设定 `PLATFORM`、后台预拉取 sandbox 镜像 |
+| `scripts/start_all.cmd` / `scripts/start_all.ps1` | Windows 原生启动入口：无需 WSL，支持启动/停止/检查/拉取/重启，自动识别 amd64/arm64、校验 Docker Desktop 与 Compose，并按需拉取 sandbox 镜像 |
 | `scripts/dev.sh` | 开发环境编排（见上文），子命令 `start/stop/restart/logs/status/app/frontend` |
 | `scripts/check-env.sh` | 校验 `.env` 必填变量（DB_*、STORAGE_TYPE、REDIS_ADDR、OLLAMA_BASE_URL 等）与 Go/npm/Docker/Air 工具链 |
 | `scripts/build_images.sh` | 构建镜像并注入版本（git tag / commit / build time），支持跨架构 |
