@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -26,18 +27,18 @@ type textBlock struct {
 }
 
 type headingBlock struct {
-	Level int    `json:"level"`
-	Text  string `json:"text"`
+	Level flexibleInt `json:"level"`
+	Text  string      `json:"text"`
 }
 
 type listBlock struct {
 	List struct {
-		Level int `json:"level"`
+		Level flexibleInt `json:"level"`
 	} `json:"list"`
 }
 
 type tableBlock struct {
-	Cells [][]string `json:"cells"`
+	Cells json.RawMessage `json:"cells"`
 }
 
 type inline struct {
@@ -45,7 +46,8 @@ type inline struct {
 	Text        string            `json:"text"`
 	Bold        bool              `json:"bold"`
 	Italic      bool              `json:"italic"`
-	Strike      bool              `json:"stike"`
+	Strike      bool              `json:"strike"`
+	Stike       bool              `json:"stike"` // DingTalk payloads have used this misspelling.
 	Fonts       string            `json:"fonts"`
 	Properties  inlineProperties  `json:"properties"`
 	Children    []json.RawMessage `json:"children"`
@@ -116,7 +118,7 @@ func renderBlock(
 		if text == "" {
 			return
 		}
-		level := value.Heading.Level
+		level := int(value.Heading.Level)
 		if level < 1 {
 			level = 1
 		} else if level > 6 {
@@ -138,11 +140,16 @@ func renderBlock(
 	case "orderedlist", "unorderedlist":
 		text := renderInlines(value.Children, depth+1, unknown)
 		if text == "" {
+			var nested strings.Builder
+			renderChildBlocks(&nested, value.Children, depth, unknown)
+			text = strings.Join(strings.Fields(strings.TrimSpace(nested.String())), " ")
+		}
+		if text == "" {
 			return
 		}
-		level, marker := value.UnorderedList.List.Level, "- "
+		level, marker := int(value.UnorderedList.List.Level), "- "
 		if blockType == "orderedlist" {
-			level, marker = value.OrderedList.List.Level, "1. "
+			level, marker = int(value.OrderedList.List.Level), "1. "
 		}
 		if level < 0 {
 			level = 0
@@ -151,9 +158,16 @@ func renderBlock(
 		}
 		fmt.Fprintf(builder, "%s%s%s\n", strings.Repeat("  ", level), marker, text)
 	case "callout", "columns":
+		if len(value.Children) == 0 {
+			// The Blocks API only returns first-level blocks. A container with
+			// no inlined children is indistinguishable from an empty callout,
+			// so surface it instead of silently dropping nested body text.
+			unknown["nested_blocks_unavailable"] = struct{}{}
+			return
+		}
 		renderChildBlocks(builder, value.Children, depth, unknown)
 	case "table":
-		renderTable(builder, value.Table.Cells)
+		renderTable(builder, parseTableCells(value.Table.Cells))
 	case "":
 		unknown["missing_block_type"] = struct{}{}
 	default:
@@ -237,7 +251,7 @@ func styleText(text string, value inline) string {
 	if value.Italic {
 		text = "*" + text + "*"
 	}
-	if value.Strike {
+	if value.Strike || value.Stike {
 		text = "~~" + text + "~~"
 	}
 	return text
@@ -348,4 +362,80 @@ func codeSpan(value string) string {
 		return delimiter + value + delimiter
 	}
 	return delimiter + " " + value + " " + delimiter
+}
+
+type flexibleInt int
+
+func (f *flexibleInt) UnmarshalJSON(data []byte) error {
+	*f = 0
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(data, &n); err == nil {
+		*f = flexibleInt(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil
+	}
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.TrimPrefix(s, "heading-")
+	s = strings.TrimPrefix(s, "h")
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return nil
+	}
+	*f = flexibleInt(n)
+	return nil
+}
+
+func parseTableCells(raw json.RawMessage) [][]string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var rows [][]string
+	if err := json.Unmarshal(raw, &rows); err == nil {
+		return rows
+	}
+	var generic [][]any
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return nil
+	}
+	out := make([][]string, len(generic))
+	for i, row := range generic {
+		out[i] = make([]string, len(row))
+		for j, cell := range row {
+			out[i][j] = tableCellText(cell)
+		}
+	}
+	return out
+}
+
+func tableCellText(cell any) string {
+	switch value := cell.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	case float64:
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(value)
+	case map[string]any:
+		if text, ok := value["text"].(string); ok && strings.TrimSpace(text) != "" {
+			return text
+		}
+		if children, ok := value["children"].([]any); ok {
+			var builder strings.Builder
+			for _, child := range children {
+				builder.WriteString(tableCellText(child))
+			}
+			return builder.String()
+		}
+		return ""
+	default:
+		return ""
+	}
 }

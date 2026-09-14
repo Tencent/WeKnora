@@ -381,3 +381,63 @@ func TestParseConfigRejectsMissingCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestNodeRevisionPrefersMillisecondTimestamp(t *testing.T) {
+	n := node{ModifiedTime: "2023-05-15T11:29Z", ModifiedTimestamp: 1_684_148_940_123}
+	if n.revision() != "1684148940123" {
+		t.Fatalf("revision() = %q, want millisecond timestamp", n.revision())
+	}
+	if got := n.modifiedAt(); got.UnixMilli() != 1_684_148_940_123 {
+		t.Fatalf("modifiedAt() = %s", got)
+	}
+
+	onlyTime := node{ModifiedTime: "2023-05-15T11:29Z"}
+	if onlyTime.revision() != "2023-05-15T11:29Z" {
+		t.Fatalf("revision() without timestamp = %q", onlyTime.revision())
+	}
+	if onlyTime.modifiedAt().IsZero() {
+		t.Fatal("modifiedAt() rejected documented minute-precision time")
+	}
+}
+
+func TestParseDingTalkTimeAcceptsMinutePrecision(t *testing.T) {
+	parsed := parseDingTalkTime("2023-05-15T11:29Z")
+	if parsed.IsZero() || parsed.UTC().Format("2006-01-02T15:04Z") != "2023-05-15T11:29Z" {
+		t.Fatalf("parseDingTalkTime() = %s", parsed)
+	}
+}
+
+func TestValidateProbesNodeAndDocumentAccess(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "space", RootNodeID: "root"}},
+		nodes: map[string][]node{
+			"root": {syncDocument()},
+		},
+		blocks: map[string][]json.RawMessage{
+			"doc": {rawJSON(`{"blockType":"paragraph","paragraph":{"text":"ok"}}`)},
+		},
+		nodeErrors:  make(map[string]error),
+		blockErrors: make(map[string]error),
+	}
+	if err := testConnector(api).Validate(context.Background(), testConfig()); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if api.blockCalls["doc"] != 1 {
+		t.Fatalf("document probe calls = %#v", api.blockCalls)
+	}
+
+	api.blockErrors["doc"] = errors.New("missing Storage.File.Read")
+	if err := testConnector(api).Validate(context.Background(), testConfig()); err == nil {
+		t.Fatal("Validate() error = nil, want document access failure")
+	}
+
+	api = &fakeAPI{
+		workspaces:  []workspace{{ID: "space", RootNodeID: "root"}},
+		nodes:       map[string][]node{},
+		nodeErrors:  map[string]error{"root": errors.New("missing Wiki.Node.Read")},
+		blockErrors: make(map[string]error),
+	}
+	if err := testConnector(api).Validate(context.Background(), testConfig()); err == nil {
+		t.Fatal("Validate() error = nil, want node access failure")
+	}
+}

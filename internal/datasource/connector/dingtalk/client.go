@@ -102,25 +102,20 @@ func (n node) title() string {
 }
 
 func (n node) revision() string {
-	if revision := strings.TrimSpace(n.ModifiedTime); revision != "" {
-		return revision
-	}
+	// Prefer the millisecond timestamp when present. Official node listings
+	// also return modifiedTime at minute precision (e.g. 2023-05-15T11:29Z),
+	// which would skip same-minute edits during incremental sync.
 	if n.ModifiedTimestamp > 0 {
 		return strconv.FormatInt(n.ModifiedTimestamp, 10)
 	}
-	return ""
+	return strings.TrimSpace(n.ModifiedTime)
 }
 
 func (n node) modifiedAt() time.Time {
-	if value := strings.TrimSpace(n.ModifiedTime); value != "" {
-		if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
-			return parsed
-		}
-	}
 	if n.ModifiedTimestamp > 0 {
 		return time.UnixMilli(n.ModifiedTimestamp)
 	}
-	return time.Time{}
+	return parseDingTalkTime(n.ModifiedTime)
 }
 
 type dingTalkAPI interface {

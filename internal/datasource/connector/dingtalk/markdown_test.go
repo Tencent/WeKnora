@@ -93,3 +93,38 @@ func TestSanitizeFilenameDoesNotSplitUTF8(t *testing.T) {
 		t.Fatalf("sanitizeFilename() retained control character: %q", sanitized)
 	}
 }
+
+func TestRenderDocumentAcceptsOfficialBlockVariants(t *testing.T) {
+	result := renderDocument("Doc", []json.RawMessage{
+		rawJSON(`{"blockType":"heading","heading":{"level":"heading-3","text":"Section"}}`),
+		rawJSON(`{
+			"blockType":"paragraph",
+			"children":[
+				{"elementType":"text","text":"gone","strike":true},
+				{"elementType":"text","text":" also","stike":true}
+			]
+		}`),
+		rawJSON(`{"blockType":"table","table":{"cells":[[{"text":"A"},{"text":"B"}],[{"text":"1"},{"text":"2"}]]}}`),
+		rawJSON(`{
+			"blockType":"unorderedList",
+			"unorderedList":{"list":{"level":"0"}},
+			"children":[{"blockType":"paragraph","paragraph":{"text":"item body"}}]
+		}`),
+		rawJSON(`{"blockType":"callout"}`),
+	})
+	for _, expected := range []string{
+		"### Section",
+		"~~gone~~",
+		"~~ also~~",
+		"| A | B |",
+		"| 1 | 2 |",
+		"- item body",
+	} {
+		if !strings.Contains(result.Markdown, expected) {
+			t.Errorf("Markdown missing %q:\n%s", expected, result.Markdown)
+		}
+	}
+	if !reflect.DeepEqual(result.UnknownTypes, []string{"nested_blocks_unavailable"}) {
+		t.Fatalf("UnknownTypes = %#v", result.UnknownTypes)
+	}
+}

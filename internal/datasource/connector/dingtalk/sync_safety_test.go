@@ -212,3 +212,29 @@ func TestScopeResolutionCancellationDoesNotProduceCursor(t *testing.T) {
 		t.Fatalf("canceled: %#v, %#v, %v", items, next, err)
 	}
 }
+
+func TestFetchAllFromCursorReFetchesAndReconcilesDeletions(t *testing.T) {
+	c, api, cfg, _, _ := twoFolderFixture(t)
+	api.nodes["a"] = []node{syncDocument()}
+	_, cursor, err := c.FetchIncremental(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, next, err := c.FetchAllFromCursor(context.Background(), cfg, cfg.ResourceIDs, cursor)
+	if err != nil || next == nil || len(items) != 1 || len(items[0].Content) == 0 {
+		t.Fatalf("full re-fetch: %#v, %#v, %v", items, next, err)
+	}
+
+	api.nodes["a"] = nil
+	items, err = c.FetchAll(context.Background(), cfg, cfg.ResourceIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoDeletion(t, items)
+
+	items, _, err = c.FetchAllFromCursor(context.Background(), cfg, cfg.ResourceIDs, next)
+	if err != nil || len(items) != 1 || !items[0].IsDeleted {
+		t.Fatalf("full sync deletion: %#v, %v", items, err)
+	}
+}

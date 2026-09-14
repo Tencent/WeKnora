@@ -21,7 +21,10 @@ const (
 	maxTraversalNodes = 1_000_000
 )
 
-var _ datasource.Connector = (*Connector)(nil)
+var (
+	_ datasource.Connector          = (*Connector)(nil)
+	_ datasource.FullSyncWithCursor = (*Connector)(nil)
+)
 
 type apiFactory func(*config) dingTalkAPI
 
@@ -47,14 +50,37 @@ func (c *Connector) Type() string {
 	return types.ConnectorTypeDingTalk
 }
 
-// Validate checks the application credentials and operator access.
+// Validate checks the application credentials and operator access, including
+// node listing and a sample document read when one is visible at the workspace root.
 func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSourceConfig) error {
 	cfg, err := parseConfig(dataSourceConfig)
 	if err != nil {
 		return err
 	}
-	if _, err := c.api(cfg).listWorkspaces(ctx); err != nil {
+	api := c.api(cfg)
+	workspaces, err := api.listWorkspaces(ctx)
+	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
+	}
+	for _, item := range workspaces {
+		rootNodeID := strings.TrimSpace(item.RootNodeID)
+		if rootNodeID == "" {
+			continue
+		}
+		children, err := api.listNodes(ctx, rootNodeID)
+		if err != nil {
+			return fmt.Errorf("validate DingTalk data source: %w", err)
+		}
+		for _, child := range children {
+			if !child.isDocument() {
+				continue
+			}
+			if _, err := api.documentBlocks(ctx, child.ID); err != nil {
+				return fmt.Errorf("validate DingTalk data source: %w", err)
+			}
+			return nil
+		}
+		return nil
 	}
 	return nil
 }
@@ -243,8 +269,29 @@ func (c *Connector) FetchAll(
 	dataSourceConfig *types.DataSourceConfig,
 	resourceIDs []string,
 ) ([]types.FetchedItem, error) {
-	items, _, err := c.sync(ctx, dataSourceConfig, resourceIDs, nil, false)
+	items, _, err := c.sync(ctx, dataSourceConfig, resourceIDs, nil, syncMode{})
 	return items, err
+}
+
+// FetchAllFromCursor re-fetches every document and reconciles deletions against
+// the previous cursor so a scheduled full sync still honours deletion_sync.
+func (c *Connector) FetchAllFromCursor(
+	ctx context.Context,
+	dataSourceConfig *types.DataSourceConfig,
+	resourceIDs []string,
+	cursor *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	if dataSourceConfig == nil {
+		return nil, nil, fmt.Errorf("%w: config is nil", datasource.ErrInvalidConfig)
+	}
+	previous, err := decodeCursor(cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.syncAndEncodeCursor(
+		ctx, dataSourceConfig, resourceIDs, previous,
+		syncMode{reconcileDeletions: true},
+	)
 }
 
 // FetchIncremental reads changed documents and reconciles complete selections.
@@ -260,9 +307,20 @@ func (c *Connector) FetchIncremental(
 	if err != nil {
 		return nil, nil, err
 	}
-	items, next, syncErr := c.sync(
-		ctx, dataSourceConfig, dataSourceConfig.ResourceIDs, previous, true,
+	return c.syncAndEncodeCursor(
+		ctx, dataSourceConfig, dataSourceConfig.ResourceIDs, previous,
+		syncMode{skipUnchanged: true, reconcileDeletions: true},
 	)
+}
+
+func (c *Connector) syncAndEncodeCursor(
+	ctx context.Context,
+	dataSourceConfig *types.DataSourceConfig,
+	resourceIDs []string,
+	previous *cursorState,
+	mode syncMode,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	items, next, syncErr := c.sync(ctx, dataSourceConfig, resourceIDs, previous, mode)
 	if next == nil {
 		return items, nil, syncErr
 	}
@@ -281,6 +339,11 @@ type cursorState struct {
 	SyncedAt   time.Time                    `json:"synced_at"`
 	Resources  map[string]map[string]string `json:"resources"`
 	Workspaces map[string]map[string]string `json:"workspaces,omitempty"`
+}
+
+type syncMode struct {
+	skipUnchanged      bool
+	reconcileDeletions bool
 }
 
 type syncScope struct {
@@ -316,7 +379,7 @@ func (c *Connector) sync(
 	dataSourceConfig *types.DataSourceConfig,
 	resourceIDs []string,
 	previous *cursorState,
-	incremental bool,
+	mode syncMode,
 ) ([]types.FetchedItem, *cursorState, error) {
 	cfg, err := parseConfig(dataSourceConfig)
 	if err != nil {
@@ -363,7 +426,7 @@ func (c *Connector) sync(
 
 	for _, scope := range scopes {
 		oldRevisions := map[string]string{}
-		if incremental && previous != nil {
+		if previous != nil {
 			if stored := previous.Resources[scope.ResourceID]; stored != nil {
 				oldRevisions = stored
 			}
@@ -392,7 +455,7 @@ func (c *Connector) sync(
 			currentDocuments[document.ID] = struct{}{}
 			revision := document.revision()
 			oldRevision, existed := oldRevisions[document.ID]
-			if incremental && revision != "" && existed && revision == oldRevision {
+			if mode.skipUnchanged && revision != "" && existed && revision == oldRevision {
 				newRevisions[document.ID] = revision
 				continue
 			}
@@ -420,7 +483,7 @@ func (c *Connector) sync(
 			newRevisions[document.ID] = revision
 		}
 
-		if incremental {
+		if mode.reconcileDeletions {
 			for documentID, revision := range oldRevisions {
 				if _, exists := currentDocuments[documentID]; exists {
 					continue
@@ -453,7 +516,7 @@ func (c *Connector) sync(
 			ExternalID: candidate.documentID, IsDeleted: true, SourceResourceID: candidate.resourceID,
 		})
 	}
-	if !incremental {
+	if !mode.skipUnchanged && !mode.reconcileDeletions {
 		next = nil
 	}
 	if !complete || failedDocuments > 0 {
@@ -812,11 +875,23 @@ func uniqueIDs(ids []string) []string {
 }
 
 func parseDingTalkTime(value string) time.Time {
-	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
-	if err != nil {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return time.Time{}
 	}
-	return parsed
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04Z07:00",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04Z",
+	} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed
+		}
+	}
+	return time.Time{}
 }
 
 func sanitizeFilename(name string) string {
