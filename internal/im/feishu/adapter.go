@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -124,21 +125,45 @@ func startStreamReaper() {
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ticker.C:
-					cutoff := time.Now().Add(-streamOrphanTTL)
-					feishuStreamsMu.Lock()
-					for id, state := range feishuStreams {
-						if state.createdAt.Before(cutoff) {
-							delete(feishuStreams, id)
-						}
-					}
-					feishuStreamsMu.Unlock()
+				case now := <-ticker.C:
+					reapOrphanStreams(now)
 				case <-reaperStopCh:
 					return
 				}
 			}
 		}()
 	})
+}
+
+func reapOrphanStreams(now time.Time) {
+	feishuStreamsMu.Lock()
+	defer feishuStreamsMu.Unlock()
+	for id, state := range feishuStreams {
+		if state.ownerDone != nil {
+			select {
+			case <-state.ownerDone:
+			default:
+				// Full-output QA can be silent for longer than the orphan TTL.
+				// Keep a grace period after cancellation for final delivery too.
+				state.lastActivityAt = now
+				continue
+			}
+		}
+		if state.lastActivityAt.Before(now.Add(-streamOrphanTTL)) {
+			delete(feishuStreams, id)
+		}
+	}
+}
+
+func lookupStream(streamID string) (*feishuStreamState, bool) {
+	feishuStreamsMu.Lock()
+	defer feishuStreamsMu.Unlock()
+	state, ok := feishuStreams[streamID]
+	if ok {
+		// Attempts count as activity even when the remote API rejects an update.
+		state.lastActivityAt = time.Now()
+	}
+	return state, ok
 }
 
 // StopStreamReaper stops the background stream reaper goroutine.
@@ -505,13 +530,42 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 // type), we retry once via the plain "send message" API so the reply still
 // reaches the user.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
+	for _, text := range splitTextReply(reply.Content) {
+		if err := a.sendTextReply(ctx, incoming, text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Keep even worst-case JSON escaping below 20 KiB, including the surrounding
+// payload, so a long final answer can use the plain-message fallback safely.
+const textReplyChunkBytes = 2 * 1024
+
+func splitTextReply(text string) []string {
+	var parts []string
+	for len(text) > textReplyChunkBytes {
+		cut := textReplyChunkBytes
+		for !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		if newline := strings.LastIndexByte(text[:cut], '\n'); newline >= cut/2 {
+			cut = newline + 1
+		}
+		parts = append(parts, text[:cut])
+		text = text[cut:]
+	}
+	return append(parts, text)
+}
+
+func (a *Adapter) sendTextReply(ctx context.Context, incoming *im.IncomingMessage, text string) error {
 	accessToken, err := a.getTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
 	// Build text message content
-	content, _ := json.Marshal(map[string]string{"text": reply.Content})
+	content, _ := json.Marshal(map[string]string{"text": text})
 
 	// Reply payload (no receive_id — the path message_id locates the chat)
 	replyPayload := map[string]interface{}{
@@ -734,14 +788,16 @@ const (
 type feishuStreamState struct {
 	mu         sync.Mutex
 	content    strings.Builder
-	contentSeq int64     // sequence of the last successfully sent content
-	seq        int64     // strictly incrementing sequence for CardKit API
-	createdAt  time.Time // for orphan stream detection
+	contentSeq int64 // sequence of the last successfully sent content
+	seq        int64 // strictly incrementing sequence for CardKit API
+	// Protected by feishuStreamsMu, independently of content/sequence updates.
+	lastActivityAt time.Time
+	ownerDone      <-chan struct{}
 }
 
 const (
-	// streamOrphanTTL is the maximum lifetime of a stream entry before it's
-	// considered orphaned (e.g., EndStream was never called due to an error).
+	// streamOrphanTTL bounds idle state after its request ends, or when the
+	// caller supplies a context without cancellation. It is not a QA deadline.
 	streamOrphanTTL = 5 * time.Minute
 	// streamReaperInterval is how often the reaper scans for orphaned streams.
 	streamReaperInterval = 1 * time.Minute
@@ -820,7 +876,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 
 	// 3. Track stream state
 	feishuStreamsMu.Lock()
-	feishuStreams[cardID] = &feishuStreamState{createdAt: time.Now()}
+	feishuStreams[cardID] = &feishuStreamState{lastActivityAt: time.Now(), ownerDone: ctx.Done()}
 	feishuStreamsMu.Unlock()
 
 	logger.Infof(ctx, "[%s] Streaming started: card_id=%s", a.region.Label, cardID)
@@ -833,9 +889,7 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 		return nil
 	}
 
-	feishuStreamsMu.Lock()
-	state, ok := feishuStreams[streamID]
-	feishuStreamsMu.Unlock()
+	state, ok := lookupStream(streamID)
 	if !ok {
 		return fmt.Errorf("unknown stream ID: %s", streamID)
 	}
@@ -880,35 +934,37 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 
 // EndStream disables streaming_mode, replaces the temporary summary, and cleans up state.
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
-	feishuStreamsMu.Lock()
-	state, ok := feishuStreams[streamID]
-	delete(feishuStreams, streamID)
-	feishuStreamsMu.Unlock()
+	state, ok := lookupStream(streamID)
+	if !ok {
+		return fmt.Errorf("unknown stream ID: %s", streamID)
+	}
 
 	accessToken, err := a.getTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	var seq int
 	var finalSummary *string
-	if ok {
-		state.mu.Lock()
-		seq = state.nextSeq()
-		preview := cardSummaryPreview(state.content.String())
-		if preview != "" {
-			finalSummary = &preview
-		}
-		state.mu.Unlock()
+	state.mu.Lock()
+	seq := state.nextSeq()
+	preview := cardSummaryPreview(state.content.String())
+	if preview != "" {
+		finalSummary = &preview
 	}
+	state.mu.Unlock()
 
 	// Always close streaming_mode under config (CardKit rejects a top-level
 	// streaming_mode field). Attach a summary only when we have delivered text;
 	// an empty summary would leave the create-time "thinking" preview in place
 	// or blank the chat list unexpectedly.
 	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, finalSummary, seq); err != nil {
-		logger.Warnf(ctx, "[%s] Failed to disable streaming_mode: %v", a.region.Label, err)
+		return fmt.Errorf("disable streaming_mode: %w", err)
 	}
+	feishuStreamsMu.Lock()
+	if feishuStreams[streamID] == state {
+		delete(feishuStreams, streamID)
+	}
+	feishuStreamsMu.Unlock()
 
 	logger.Infof(ctx, "[%s] Streaming ended: card_id=%s", a.region.Label, streamID)
 	return nil
