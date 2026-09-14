@@ -29,6 +29,7 @@ const (
 	WebSearchProviderTypeExa        WebSearchProviderType = "exa"
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
+	WebSearchProviderTypeDoubao     WebSearchProviderType = "doubao"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -361,6 +362,34 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					Type:        "select",
 					Default:     "true",
 					Description: "Request long text summaries and prefer them as result snippets.",
+					Options: []WebSearchProviderConfigFieldOption{
+						{Label: "Enabled", Value: "true"},
+						{Label: "Disabled", Value: "false"},
+					},
+				},
+			},
+		},
+		{
+			ID:             "doubao",
+			Name:           "Volcano Doubao Search",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "Volcano Doubao Search Custom Edition (豆包搜索) — server-side date-range filtering with full markdown content",
+			DocsURL:        "https://www.volcengine.com/product/doubao_search",
+			ConfigFields: []WebSearchProviderConfigField{
+				{
+					Key:         "time_range",
+					Label:       "Time range",
+					Type:        "text",
+					Default:     "",
+					Description: "Server-side date-range filter as YYYY-MM-DD..YYYY-MM-DD; leave empty for no filter.",
+				},
+				{
+					Key:         "need_content",
+					Label:       "Page content",
+					Type:        "select",
+					Default:     "true",
+					Description: "Request full page content in markdown into the unified Content field.",
 					Options: []WebSearchProviderConfigFieldOption{
 						{Label: "Enabled", Value: "true"},
 						{Label: "Disabled", Value: "false"},
