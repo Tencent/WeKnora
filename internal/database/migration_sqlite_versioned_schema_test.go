@@ -12,7 +12,7 @@ import (
 // versionedSQLiteTables is the set of tables that SQLite migrations must
 // create to stay in sync with the versioned (PostgreSQL) migrations:
 // 000041 task queue, 000053 system settings, 000055 processing spans,
-// 000063 knowledge multi-tags, 000093 browser authorization.
+// 000063 knowledge multi-tags, 000093 browser authorization, 000094 learning.
 var versionedSQLiteTables = []string{
 	"memory_extraction_sessions",
 	"task_pending_ops",
@@ -20,6 +20,11 @@ var versionedSQLiteTables = []string{
 	"system_settings",
 	"knowledge_processing_spans",
 	"knowledge_tag_relations",
+	"learning_profiles",
+	"learning_mastery",
+	"learning_quizzes",
+	"learning_questions",
+	"learning_attempts",
 	"browser_devices",
 	"browser_pairings",
 	"browser_task_interruptions",

@@ -205,6 +205,12 @@ make lint            # go vet
 - `tests/miniprogram/miniprogram.test.js` — 小程序客户端的集成测试（Node 测试脚本），是 `tests/` 目前唯一内容；
 - 前端：`cd frontend && npm run type-check`（vue-tsc）与 `npm test`（`tsx --test`，Node test runner）。
 
+### 引导式学习集成测试
+
+完整步骤集中在[引导式学习测试手册](04-guided-learning-testing.md)，包含专用环境、模型密钥、两租户夹具、API 与浏览器命令、人工清单、失败复跑及结果保管。首次人工体验见[使用手册](../03-features/24-guided-learning.md)。
+
+入口脚本为 `scripts/seed-guided-learning.py`、`scripts/test-guided-learning-api.py` 和 `frontend/e2e/guided-learning.spec.mjs`。seed 与真实出题会调用模型；API 验收会清空一次性 `learner_b` 的学习记录。不要连接生产实例，也不要并行执行这些流程。
+
 ## 代码规范与提交流程 {#_5-代码规范与提交流程}
 
 ### Go 代码规范 {#_5-1-go-代码规范}

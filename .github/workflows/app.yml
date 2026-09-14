@@ -26,6 +26,7 @@ on:
       - "internal/textconv/data/**"
       - "scripts/*licenses.sh"
       - "scripts/check-license-bundle.sh"
+      - "scripts/*guided*learning*.py"
       - "cmd/desktop/build/windows/installer/project.nsi"
       - ".github/workflows/app.yml"
   pull_request:
@@ -49,6 +50,7 @@ on:
       - "internal/textconv/data/**"
       - "scripts/*licenses.sh"
       - "scripts/check-license-bundle.sh"
+      - "scripts/*guided*learning*.py"
       - "cmd/desktop/build/windows/installer/project.nsi"
       - ".github/workflows/app.yml"
   workflow_dispatch:
@@ -85,6 +87,9 @@ jobs:
 
       - name: Download modules
         run: go mod download
+
+      - name: Test guided-learning fixtures (offline)
+        run: python3 -B -m unittest discover -s scripts -p 'test_guided_learning_fixtures.py' -v
 
       - name: Verify third-party notices and source bundle
         run: bash ./scripts/check-license-bundle.sh

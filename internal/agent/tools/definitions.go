@@ -6,6 +6,9 @@ const maxFunctionNameLength = 64
 
 // Tool names constants
 const (
+	ToolGetLearningProfile      = "get_learning_profile"
+	ToolRecommendLearningTopics = "recommend_learning_topics"
+	ToolPrepareLearningQuiz     = "prepare_learning_quiz"
 	// Capability-scoped MCP discovery and invocation; not tenant-selectable builtins.
 	ToolDiscoverMCPTools    = "discover_mcp_tools"
 	ToolCallMCPTool         = "call_mcp_tool"
@@ -84,6 +87,9 @@ type AvailableTool struct {
 // Keep this in sync with registered tools in this package.
 func AvailableToolDefinitions() []AvailableTool {
 	return []AvailableTool{
+		{Name: ToolGetLearningProfile, Label: "学习画像", Description: "查看当前用户的测验掌握状态和复习进度"},
+		{Name: ToolRecommendLearningTopics, Label: "学习推荐", Description: "按学习证据推荐下一知识点"},
+		{Name: ToolPrepareLearningQuiz, Label: "准备测验", Description: "为 Wiki 页面准备带来源的个人测验"},
 		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具"},
 		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划"},
 		{Name: ToolGrepChunks, Label: "关键词搜索", Description: "快速定位包含特定关键词的文档和分块"},

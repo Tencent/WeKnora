@@ -9,6 +9,9 @@ export type RelevanceLevel = 'High Relevance' | 'Medium Relevance' | 'Low Releva
 
 // Display types
 export type DisplayType =
+    | 'learning_quiz'
+    | 'learning_profile'
+    | 'learning_recommendations'
     | 'search_results'
     | 'chunk_detail'
     | 'related_chunks'
@@ -402,7 +405,14 @@ export interface ReadSkillData {
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
 // Union type for all tool result data
+export interface LearningToolData {
+    display_type: 'learning_quiz' | 'learning_profile' | 'learning_recommendations';
+    knowledge_base_id: string;
+    quiz_id?: string;
+}
+
 export type ToolResultData =
+    | LearningToolData
     | SearchResultsData
     | ChunkDetailData
     | RelatedChunksData

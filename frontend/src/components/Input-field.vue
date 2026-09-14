@@ -399,19 +399,23 @@ watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newA
 // 最后拿 kb.type === 'faq' 兜底。shared / owned / agent-scope 三路的 KB 响应结构一致。
 const kbToScopeCaps = (kb: any): Partial<ScopeCapabilities> => {
   if (kb?.capabilities) {
+    const wiki = !!kb.capabilities.wiki;
     return {
       vector: !!kb.capabilities.vector,
       keyword: !!kb.capabilities.keyword,
-      wiki: !!kb.capabilities.wiki,
+      wiki,
+      ownedWiki: wiki && kb?.shared !== true,
       graph: !!kb.capabilities.graph,
       faq: !!kb.capabilities.faq,
     };
   }
   const s = kb?.indexing_strategy;
+  const wiki = s ? !!s.wiki_enabled : false;
   return {
     vector: s ? !!s.vector_enabled : false,
     keyword: s ? !!s.keyword_enabled : false,
-    wiki: s ? !!s.wiki_enabled : false,
+    wiki,
+    ownedWiki: wiki && kb?.shared !== true,
     graph: s ? !!s.graph_enabled : false,
     faq: kb?.type === 'faq',
   };
@@ -1268,6 +1272,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           knowledge_count: kb.knowledge_count,
           chunk_count: kb.chunk_count,
           org_name: orgLabel,
+          shared: true,
           capabilities: kb.capabilities,
           indexing_strategy: kb.indexing_strategy,
         }));
@@ -1285,7 +1290,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       }
     } else {
       sharedAgentKbList.value = [];
-      availableKbs = [...knowledgeBases.value];
+      availableKbs = knowledgeBases.value.map((kb: any) => ({ ...kb, shared: false }));
       const sharedList = orgStore.sharedKnowledgeBases || [];
       const sharedKbsForMention = sharedList
         .filter((s: any) => s.knowledge_base != null)
@@ -1296,6 +1301,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           knowledge_count: s.knowledge_base.knowledge_count,
           chunk_count: s.knowledge_base.chunk_count,
           org_name: s.org_name || '',
+          shared: true,
           capabilities: s.knowledge_base.capabilities,
           indexing_strategy: s.knowledge_base.indexing_strategy,
         }));

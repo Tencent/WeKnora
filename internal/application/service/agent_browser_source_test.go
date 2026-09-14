@@ -23,10 +23,14 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 	t.Setenv("BROWSERSKILL_BINARY", "/unused/browser-skill")
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(7))
 	ctx = context.WithValue(ctx, types.UserIDContextKey, "alice")
-	kb := &types.KnowledgeBase{ID: "kb"}
+	ctx = types.WithCaller(ctx, types.Caller{TenantID: 7, UserID: "alice"})
+	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "alice"})
+	kb := &types.KnowledgeBase{ID: "kb", TenantID: 7}
 	kb.IndexingStrategy.VectorEnabled = true
+	kb.IndexingStrategy.WikiEnabled = true
 	svc := &agentService{
 		browserSkill:         browserskill.NewManager(),
+		learningService:      &learningAgentSettings{enabled: true},
 		knowledgeBaseService: &browserSourceKBService{fakeAgentKnowledgeBaseService{kb: kb}},
 		knowledgeService:     &fakeAgentKnowledgeService{},
 		sandboxResolver: stubSandboxResolver{mgr: &capableManager{
@@ -39,9 +43,14 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 		cfg := &types.AgentConfig{
 			LocalBrowserEnabled: selected, WebSearchEnabled: true, SkillsEnabled: true,
 			SandboxConfigID: "sandbox", MCPSelectionMode: "all", KnowledgeBases: []string{"kb"},
-			SearchTargets: types.SearchTargets{&types.SearchTarget{KnowledgeBaseID: "kb", TenantID: 7}},
-			SkillDirs:     []string{t.TempDir()},
-			AllowedTools:  []string{tools.ToolKnowledgeSearch, tools.ToolShellExec, tools.ToolThinking},
+			SearchTargets: types.SearchTargets{&types.SearchTarget{
+				Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 7,
+			}},
+			SkillDirs: []string{t.TempDir()},
+			AllowedTools: []string{
+				tools.ToolKnowledgeSearch, tools.ToolShellExec, tools.ToolThinking,
+				tools.ToolGetLearningProfile, tools.ToolRecommendLearningTopics, tools.ToolPrepareLearningQuiz,
+			},
 		}
 		engine, err := svc.CreateAgentEngine(ctx, cfg, model, nil, nil, "session", "message")
 		require.NoError(t, err)
@@ -50,6 +59,7 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 		require.NoError(t, err)
 		for _, name := range []string{
 			tools.ToolKnowledgeSearch, tools.ToolWebSearch, tools.ToolWebFetch, tools.ToolShellExec,
+			tools.ToolGetLearningProfile, tools.ToolRecommendLearningTopics, tools.ToolPrepareLearningQuiz,
 		} {
 			require.Contains(t, model.lastToolNames, name)
 		}

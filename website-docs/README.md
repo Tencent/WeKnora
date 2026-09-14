@@ -105,6 +105,7 @@ npm run preview  # 预览构建产物
 | [图片与文件的对外访问](03-features/21-file-access.md) | 四种 URL 形式、各渠道怎么取、IM/API 图片不显示的排查表 |
 | [技能目录与沙箱](03-features/22-skills-sandbox.md) | 目录/安装、Docker/Cube/E2B、网络策略、个人变量、生成文件 |
 | [跨会话长期记忆](03-features/23-memory.md) | 空间/个人开关、自动提取、待确认项、主题/文档偏好与整理 |
+| [引导式学习使用手册](03-features/24-guided-learning.md) | 源码启动、仅 Wiki 建库、三题练习、学习 Agent、导出删除与常见问题 |
 
 ### API 参考 {#_04-api-参考}
 
@@ -127,6 +128,7 @@ npm run preview  # 预览构建产物
 | [IM、Embed 与文件](04-api/02-api-channels.md) | IM 回调与渠道、微信扫码、Embed、文件服务 |
 | [沙箱、技能与个人变量](04-api/02-api-sandbox-skills.md) | 配置、模板、库存、安装与进度、目录、个人变量 |
 | [长期记忆](04-api/02-api-memory.md) | 空间配置、个人设置/条目、主题、文档偏好、导出与整理 |
+| [引导式学习](04-api/02-api-learning.md) | 个人学习设置、Wiki 节点状态、推荐、来源测验、导出与删除 |
 
 ### 客户端 {#_05-客户端}
 
@@ -148,6 +150,7 @@ npm run preview  # 预览构建产物
 | [开发指南](06-development/01-dev-guide.md) | 环境要求、Makefile 全目标、开发模式、四条测试线、CI 与代码规范、调试技巧 |
 | [数据库与迁移](06-development/02-database-schema.md) | 40+ 张表结构与 ER 图、golang-migrate 双路径（versioned / sqlite）、新增迁移步骤、故障排查 |
 | [扩展点指南](06-development/03-extension-points.md) | 9 大扩展点：解析器/分块策略/检索引擎/模型 Provider/搜索引擎/数据源连接器/IM 适配器/Agent 工具/存储后端 |
+| [引导式学习测试手册](06-development/04-guided-learning-testing.md) | 专用实例、合成夹具、真实 API、桌面/移动端验收、数据隔离与复跑 |
 
 ## 系统组件速览
 

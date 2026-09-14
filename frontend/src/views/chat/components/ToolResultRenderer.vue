@@ -1,7 +1,8 @@
 <template>
   <div class="tool-result-renderer">
+    <LearningResult v-if="learningReference" :data="learningReference as LearningToolData" />
     <!-- Search Results -->
-    <SearchResults v-if="displayType === 'search_results'" :data="toolData as SearchResultsData"
+    <SearchResults v-else-if="displayType === 'search_results'" :data="toolData as SearchResultsData"
       :arguments="toolArguments" />
 
     <!-- Chunk Detail -->
@@ -88,6 +89,9 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { learningToolReference } from '@/composables/learningHelpers';
+import LearningResult from './tool-results/LearningResult.vue';
+import type { LearningToolData } from '@/types/tool-results';
 import type {
   DisplayType,
   SearchResultsData,
@@ -139,6 +143,9 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), { success: undefined });
+const learningReference = computed(() => learningToolReference(props.output, {
+  ...props.toolData, ...(props.displayType ? { display_type: props.displayType } : {}),
+}, props.success));
 
 const displayType = computed(() => props.displayType);
 const toolData = computed(() => props.toolData || {});

@@ -221,12 +221,12 @@
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
                         :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                     </div>
-                    <div v-else-if="event.output" class="tool-output-wrapper">
+                    <div v-else-if="event.output || event.error" class="tool-output-wrapper">
                       <div class="fallback-header">
                         <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
                       </div>
                       <div class="detail-output-wrapper">
-                        <div class="detail-output">{{ event.output }}</div>
+                        <div class="detail-output">{{ event.output || event.error }}</div>
                       </div>
                     </div>
                     <!-- Raw arguments hidden for user-friendly display -->
@@ -518,12 +518,12 @@
                       :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
                   </div>
 
-                  <div v-else-if="event.output" class="tool-output-wrapper">
+                  <div v-else-if="event.output || event.error" class="tool-output-wrapper">
                     <div class="fallback-header">
                       <span class="fallback-label">{{ $t('chat.rawOutputLabel') }}</span>
                     </div>
                     <div class="detail-output-wrapper">
-                      <div class="detail-output">{{ event.output }}</div>
+                      <div class="detail-output">{{ event.output || event.error }}</div>
                     </div>
                   </div>
 
@@ -609,6 +609,7 @@ import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
 import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
+import { learningToolDisplayType } from '@/composables/learningHelpers';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
@@ -699,6 +700,9 @@ const { t } = useI18n();
 ensureMermaidInitialized();
 
 const TOOL_NAME_KEYS: Record<string, string> = {
+  get_learning_profile: 'learning.tools.profile',
+  recommend_learning_topics: 'learning.tools.recommend',
+  prepare_learning_quiz: 'learning.tools.quiz',
   discover_mcp_tools: 'agentStream.mcp.discoverTools',
   call_mcp_tool: 'agentStream.mcp.callTool',
   search_knowledge: 'agentStream.tools.searchKnowledge',
@@ -1186,6 +1190,8 @@ const formatToolResultContent = (value: unknown): string => {
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  const learningType = learningToolDisplayType(event?.tool_name)
+  if (learningType && event?.success !== false) return learningType
   const mcpType = getMcpToolDisplayType(event?.tool_name)
   if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType

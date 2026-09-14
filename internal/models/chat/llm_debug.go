@@ -112,7 +112,7 @@ func usageString(u types.TokenUsage) string {
 
 // logLLMDebugCall logs a complete non-stream LLM chat call.
 func logLLMDebugCall(ctx context.Context, model string, messages []Message, opts *ChatOptions, resp *types.ChatResponse, callErr error, dur time.Duration) {
-	if !logger.LLMDebugEnabled() {
+	if !logger.LLMDebugEnabled() || types.LLMContentRedacted(ctx) {
 		return
 	}
 
@@ -158,7 +158,7 @@ func logLLMDebugCall(ctx context.Context, model string, messages []Message, opts
 
 // logLLMDebugStream logs a complete stream LLM chat call after all chunks have been received.
 func logLLMDebugStream(ctx context.Context, model string, messages []Message, opts *ChatOptions, fullContent string, toolCalls []types.LLMToolCall, usage *types.TokenUsage, callErr error, dur time.Duration) {
-	if !logger.LLMDebugEnabled() {
+	if !logger.LLMDebugEnabled() || types.LLMContentRedacted(ctx) {
 		return
 	}
 
