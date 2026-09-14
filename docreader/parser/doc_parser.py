@@ -1,5 +1,6 @@
 import logging
 import os
+import signal
 import subprocess
 import time
 import uuid
@@ -75,18 +76,49 @@ class SandboxExecutor:
         if self.proxy:
             logger.info(f"Using proxy: {self.proxy}")
 
+        is_posix = os.name == "posix"
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env,
+            # On POSIX, start a fresh group so a timed-out command can be
+            # terminated together with children it spawned (e.g. soffice.bin).
+            start_new_session=is_posix,
         )
+        # On POSIX start_new_session makes the direct child the group leader, so
+        # retain this ID even if the direct child exits before cleanup starts.
+        process_group_id = process.pid if is_posix else None
 
         try:
             stdout, stderr = process.communicate(timeout=self.default_timeout)
             return stdout, stderr, process.returncode
         except subprocess.TimeoutExpired:
-            process.kill()
+            # Kill the whole POSIX process group, not just the direct child, and
+            # reap stdout/stderr afterwards so neither orphans nor zombies survive.
+            if process_group_id is None:
+                process.kill()
+            else:
+                try:
+                    os.killpg(process_group_id, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass  # process group already gone
+                grace_period = 0.5
+                grace_deadline = time.monotonic() + grace_period
+                try:
+                    process.communicate(timeout=grace_period)
+                except subprocess.TimeoutExpired:
+                    pass
+                remaining_grace_period = grace_deadline - time.monotonic()
+                if remaining_grace_period > 0:
+                    time.sleep(remaining_grace_period)
+                # The direct child can exit after SIGTERM while a descendant
+                # ignores it. Always finish the grace period with SIGKILL.
+                try:
+                    os.killpg(process_group_id, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.communicate()
             raise RuntimeError(
                 f"Command execution timeout after {self.default_timeout} seconds"
             )
