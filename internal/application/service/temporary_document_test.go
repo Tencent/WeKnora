@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // fakeVLM is a minimal VLM stub that records calls and returns a fixed response.
@@ -266,5 +267,81 @@ func TestVisualDocumentQueryDetection(t *testing.T) {
 	}
 	if isVisualDocumentQuery("总结退款政策") {
 		t.Fatal("plain text query should not request visual context")
+	}
+}
+
+// stubEngineReader answers ListEngines from a fixed engine table. The embedded
+// interface stays nil: extensionSupport only calls ListEngines on this path.
+type stubEngineReader struct {
+	interfaces.DocumentReader
+	engines []types.ParserEngineInfo
+}
+
+func (r *stubEngineReader) ListEngines(context.Context, map[string]string) ([]types.ParserEngineInfo, error) {
+	return r.engines, nil
+}
+
+func TestChatAttachmentExtraExtensionsParsing(t *testing.T) {
+	t.Setenv(chatAttachmentExtraExtensionsEnv, " .MSG, seq ,AB1,.exe, ,dll,exe,ps1,vbs,hta")
+	got := chatAttachmentExtraExtensions()
+	want := map[string]struct{}{".msg": {}, ".seq": {}, ".ab1": {}}
+	if len(got) != len(want) {
+		t.Fatalf("parsed extensions = %v, want %v", got, want)
+	}
+	for ext := range want {
+		if _, ok := got[ext]; !ok {
+			t.Fatalf("parsed extensions missing %q: %v", ext, got)
+		}
+	}
+}
+
+func TestChatAttachmentExtraExtensionsEmptyWhenUnset(t *testing.T) {
+	if got := chatAttachmentExtraExtensions(); got != nil {
+		t.Fatalf("unset env should yield nil, got %v", got)
+	}
+	t.Setenv(chatAttachmentExtraExtensionsEnv, " , ,, ")
+	if got := chatAttachmentExtraExtensions(); got != nil {
+		t.Fatalf("blank entries only should yield nil, got %v", got)
+	}
+}
+
+func TestExtensionSupportClassifiesPassthrough(t *testing.T) {
+	// documentReader == nil disables the engine lookup, isolating the
+	// static + extra classification.
+	svc := &temporaryDocumentService{}
+	t.Setenv(chatAttachmentExtraExtensionsEnv, ".msg,.exe")
+
+	cases := []struct {
+		ext                  string
+		supported, passthru  bool
+	}{
+		{".pdf", true, false},  // built-in: parses
+		{".msg", true, true},   // extra only: raw passthrough
+		{".zip", false, false}, // unknown: rejected
+		{".exe", false, false}, // deny-listed: rejected even though listed
+	}
+	for _, tc := range cases {
+		supported, passthrough := svc.extensionSupport(context.Background(), 1, tc.ext)
+		if supported != tc.supported || passthrough != tc.passthru {
+			t.Fatalf("extensionSupport(%q) = (%v, %v), want (%v, %v)",
+				tc.ext, supported, passthrough, tc.supported, tc.passthru)
+		}
+	}
+}
+
+func TestExtensionSupportEngineWinsOverExtraForParsing(t *testing.T) {
+	// A parser engine declaring the extension still parses it, so adding a
+	// type to the extra list doesn't silently downgrade parsing once an
+	// engine learns the format.
+	svc := &temporaryDocumentService{documentReader: &stubEngineReader{
+		engines: []types.ParserEngineInfo{{Name: "anydoc", Available: true, FileTypes: []string{"msg"}}},
+	}}
+	t.Setenv(chatAttachmentExtraExtensionsEnv, ".msg,.ab1")
+
+	if _, passthrough := svc.extensionSupport(context.Background(), 1, ".msg"); passthrough {
+		t.Fatal("engine-declared extension must parse, not passthrough")
+	}
+	if _, passthrough := svc.extensionSupport(context.Background(), 1, ".ab1"); !passthrough {
+		t.Fatal("extra extension without engine support must passthrough")
 	}
 }

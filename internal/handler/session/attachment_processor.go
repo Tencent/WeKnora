@@ -302,6 +302,10 @@ func (p *AttachmentProcessor) applyLineTruncation(ctx context.Context, content s
 
 // isValidFileType reports whether fileName has a supported extension.
 // Kept in sync with the frontend SUPPORTED_TYPES list in AttachmentUpload.vue.
+// The pre-upload chat path additionally accepts the deploy-time extra
+// extensions (WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS, see
+// temporary_document.go); this inline/embed path intentionally does not —
+// those files are raw passthrough and only meaningful to agent sessions.
 func isValidFileType(fileName string) bool {
 	ext := strings.ToLower(filepath.Ext(fileName))
 	if ext == "" {

@@ -18,6 +18,8 @@ services:
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
       - MAX_SKILL_BUNDLE_SIZE_MB=${MAX_SKILL_BUNDLE_SIZE_MB:-256}
       - DEFAULT_LOCALE=${DEFAULT_LOCALE:-}
+      # 聊天附件额外放行的扩展名（逗号分隔，须与 app 同值；注入 config.js 供前端放行）
+      - WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS=${WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS:-}
       - APP_HOST=${APP_HOST:-app}
       # APP_BACKEND_PORT: the port NGINX proxies to (default 8080).
       # For local deployment this is the App container's listening port, independent of host-mapped APP_PORT.
@@ -329,6 +331,10 @@ services:
       - WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC=${WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC:-60}
       - WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY=${WEKNORA_CHAT_ATTACHMENT_OCR_CONCURRENCY:-8}
       - WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES=${WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES:-8}
+      # 聊天附件额外放行的扩展名（逗号分隔，如 ".msg,.seq,.ab1"）：原样透传存进沙箱供 skill/MCP
+      # 读取，不走解析流水线；须与 frontend 服务同值，改后重启两端生效。
+      # 可执行格式（exe/dll/bat 等）在硬黑名单内，配置也不放行。
+      - WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS=${WEKNORA_CHAT_ATTACHMENT_EXTRA_EXTENSIONS:-}
       # Agent LLM call timeout
       - WEKNORA_AGENT_LLM_TIMEOUT=${WEKNORA_AGENT_LLM_TIMEOUT:-}
       - WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT=${WEKNORA_AGENT_TOOL_APPROVAL_TIMEOUT:-}
