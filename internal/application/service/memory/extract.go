@@ -865,7 +865,7 @@ func (s *Service) workspaceChatModelID(ctx context.Context) string {
 	if s.modelService == nil {
 		return ""
 	}
-	models, err := s.modelService.ListModels(ctx)
+	models, err := s.modelService.ListModels(ctx, "")
 	if err != nil {
 		logger.Warnf(ctx, "memory: list models for extraction fallback failed: %v", err)
 		return ""

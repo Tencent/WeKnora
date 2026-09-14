@@ -75,10 +75,13 @@ func TestStreamDropsIncompleteHandleOnCancel(t *testing.T) {
 	cancel()
 
 	// Give the cancellation path time to flush, then assert that only the
-	// meaningful prefix was emitted; the incomplete private handle is dropped.
+	// meaningful prefix carried content; the incomplete private handle is
+	// dropped. The trailing "" is the entry's clean-EOF synthesized terminal
+	// (no provider terminator arrived; it carries no content — the leak
+	// invariant under test is about handles, not chunks).
 	require.Eventually(t, func() bool { return len(bus.finalAnswerContents()) >= 1 }, 2*time.Second, 5*time.Millisecond)
 	time.Sleep(20 * time.Millisecond)
-	require.Equal(t, []string{"hello "}, bus.finalAnswerContents())
+	require.Equal(t, []string{"hello ", ""}, bus.finalAnswerContents())
 }
 
 func TestStreamIgnoresDuplicateTerminalAnswer(t *testing.T) {

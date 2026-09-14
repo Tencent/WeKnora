@@ -165,7 +165,7 @@ type stubModelService struct {
 
 // workspaceModels is what ListModels returns, so a test can reproduce a
 // workspace that has a usable model and one that has none.
-func (s *stubModelService) ListModels(context.Context) ([]*types.Model, error) {
+func (s *stubModelService) ListModels(context.Context, types.ModelType) ([]*types.Model, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.workspaceModels, nil

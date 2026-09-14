@@ -315,7 +315,7 @@ func (s *sessionService) selectChatModelID(
 	}
 
 	// No knowledge bases - try to find any available chat model
-	models, err := s.modelService.ListModels(ctx)
+	models, err := s.modelService.ListModels(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list models: %v", err)
 		return "", fmt.Errorf("failed to list models: %w", err)
@@ -871,7 +871,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Get default models
-	models, err := s.modelService.ListModels(ctx)
+	models, err := s.modelService.ListModels(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get models: %v", err)
 		return nil, err

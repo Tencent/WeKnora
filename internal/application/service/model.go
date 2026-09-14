@@ -307,14 +307,15 @@ func (s *modelService) GetModelByID(ctx context.Context, id string) (*types.Mode
 }
 
 // ListModels returns all models belonging to the tenant
-func (s *modelService) ListModels(ctx context.Context) ([]*types.Model, error) {
+func (s *modelService) ListModels(ctx context.Context, modelType types.ModelType) ([]*types.Model, error) {
 	logger.Info(ctx, "Start listing models")
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 	logger.Infof(ctx, "Listing models for tenant ID: %d", tenantID)
 
-	// List models from repository with no additional filters
-	models, err := s.repo.List(ctx, tenantID, "", "")
+	// modelType is the optional server-side type filter (2026-09-14 裁定 #14:
+	// 已保存模型列表按类型过滤下推到服务端，不再全量拉取后前端过滤)。
+	models, err := s.repo.List(ctx, tenantID, modelType, "")
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,

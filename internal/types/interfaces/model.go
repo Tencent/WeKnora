@@ -15,7 +15,7 @@ type ModelService interface {
 	// GetModelByID gets a model by ID
 	GetModelByID(ctx context.Context, id string) (*types.Model, error)
 	// ListModels lists all models
-	ListModels(ctx context.Context) ([]*types.Model, error)
+	ListModels(ctx context.Context, modelType types.ModelType) ([]*types.Model, error)
 	// UpdateModel updates a model
 	UpdateModel(ctx context.Context, model *types.Model) error
 	// DeleteModel deletes a model

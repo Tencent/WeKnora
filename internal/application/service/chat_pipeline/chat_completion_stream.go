@@ -115,6 +115,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
 		answerCompleted := false
+		// E9 (2026-09-14 裁定): the final usage frame rides the terminal
+		// answer event so the non-agent QA handler can persist it on the
+		// assistant message and carry it in the complete event — previously
+		// non-agent turns threw the counters away.
+		var turnUsage *types.TokenUsage
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -218,6 +223,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					continue
 				}
 
+				if response.Usage != nil {
+					turnUsage = response.Usage
+				}
 				if response.ResponseType == types.ResponseTypeAnswer {
 					// Providers can emit a completion once for finish_reason and again
 					// for their EOF sentinel. A final answer is a terminal event for a
@@ -232,14 +240,18 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						answerCompleted = true
 					}
 					closeThinking()
+					data := event.AgentFinalAnswerData{
+						Content: response.Content,
+						Done:    response.Done,
+					}
+					if response.Done && turnUsage != nil {
+						data.Usage = turnUsage
+					}
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
 						SessionID: chatManage.SessionID,
-						Data: event.AgentFinalAnswerData{
-							Content: response.Content,
-							Done:    response.Done,
-						},
+						Data:      data,
 					})
 				}
 			}

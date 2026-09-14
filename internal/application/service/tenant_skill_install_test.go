@@ -3287,7 +3287,7 @@ func (s *installModelService) GetModelByID(_ context.Context, modelID string) (*
 	return &types.Model{ID: modelID}, nil
 }
 
-func (s *installModelService) ListModels(context.Context) ([]*types.Model, error) {
+func (s *installModelService) ListModels(context.Context, types.ModelType) ([]*types.Model, error) {
 	return []*types.Model{{
 		ID:        "model-1",
 		Type:      types.ModelTypeKnowledgeQA,

@@ -93,9 +93,19 @@ func embedSpecFor(name invoke.ProviderName) openaiEmbedSpec {
 		// azure's URL/auth differ (deployment path + api-key header); the
 		// defaultBaseURL stays empty — v1 REQUIRED a base URL there.
 		return openaiEmbedSpec{encodingFormat: "float"}
-	default:
+	case invoke.ProviderOpenAI:
+		// The one provider whose empty-base fallback is legitimate: it IS
+		// OpenAI, so api.openai.com is its own domain.
 		return openaiEmbedSpec{
 			defaultBaseURL: "https://api.openai.com/v1",
+			encodingFormat: "float",
+			truncate511:    true,
+		}
+	default:
+		// Third-party openai-shape vendors (deepseek/moonshot/generic/...):
+		// NO fallback — falling back would send a vendor's API key to
+		// api.openai.com (2026-09-14 裁定). The builder errors instead.
+		return openaiEmbedSpec{
 			encodingFormat: "float",
 			truncate511:    true,
 		}
@@ -113,6 +123,10 @@ func buildOpenAIShapeEmbedding(
 	base := ep.BaseURL
 	if base == "" {
 		base = spec.defaultBaseURL
+	}
+	if base == "" {
+		return nil, invoke.ClassifyError(fmt.Errorf(
+			"base URL is required for this embedding provider — set it on the model record"))
 	}
 	body := openAIEmbedRequest{
 		Model:          model,

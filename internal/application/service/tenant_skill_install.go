@@ -1983,7 +1983,7 @@ func (s *TenantSkillService) resolveInstallerModel(
 				modelID, err)
 		}
 	}
-	models, err := s.models.ListModels(ctx)
+	models, err := s.models.ListModels(ctx, "")
 	if err != nil {
 		return nil, fmt.Errorf("list models for installer: %w", err)
 	}

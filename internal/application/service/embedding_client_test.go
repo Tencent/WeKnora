@@ -105,7 +105,7 @@ func TestBatchEmbedPoolerSubBatchesAndValidates(t *testing.T) {
 	got, err := p.BatchEmbedWithPool(context.Background(), probe, []string{"a", "b", "c", "d", "e"})
 	require.NoError(t, err)
 	require.Len(t, got, 5)
-	require.Equal(t, 3, probe.calls, "5 inputs / batch size 2 → 3 sub-batches")
+	require.Equal(t, int32(3), probe.calls.Load(), "5 inputs / batch size 2 → 3 sub-batches")
 
 	// Count mismatch from any sub-batch fails the whole batch.
 	bad := &countingEmbedder{reply: func(int) ([][]float32, error) {
@@ -116,7 +116,9 @@ func TestBatchEmbedPoolerSubBatchesAndValidates(t *testing.T) {
 }
 
 type countingEmbedder struct {
-	calls int
+	// atomic: BatchEmbed runs on pool workers concurrently — a bare int was
+	// a data race and flaked the sub-batch count (observed 2 vs 3).
+	calls atomic.Int32
 	reply func(n int) ([][]float32, error)
 }
 
@@ -125,7 +127,7 @@ func (c *countingEmbedder) Embed(context.Context, string) ([]float32, error) {
 }
 
 func (c *countingEmbedder) BatchEmbed(_ context.Context, texts []string) ([][]float32, error) {
-	c.calls++
+	c.calls.Add(1)
 	return c.reply(len(texts))
 }
 

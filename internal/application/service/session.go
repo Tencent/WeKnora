@@ -786,7 +786,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 
 	// Use provided modelID, or fallback to first available KnowledgeQA model
 	if modelID == "" {
-		models, err := s.modelService.ListModels(ctx)
+		models, err := s.modelService.ListModels(ctx, "")
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
 			return "", fmt.Errorf("failed to list models: %w", err)

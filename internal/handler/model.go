@@ -199,7 +199,9 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 		return
 	}
 
-	models, err := h.service.ListModels(ctx)
+	// 服务端类型过滤（2026-09-14 裁定 #14）：?type=chat|embedding|rerank|vllm|asr
+	// 下推到 repo，不再全量拉取后前端过滤。空参 = 全量。
+	models, err := h.service.ListModels(ctx, types.ModelType(strings.TrimSpace(c.Query("type"))))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))

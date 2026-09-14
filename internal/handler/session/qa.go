@@ -992,6 +992,14 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			if data.IsFallback {
 				streamCtx.assistantMessage.IsFallback = true
 			}
+			// E9: the terminal answer carries the turn's token usage — persist
+			// it on the assistant message (message.usage jsonb) and ride the
+			// complete event for live display.
+			if data.Usage != nil {
+				if u, ok := data.Usage.(*types.TokenUsage); ok {
+					streamCtx.assistantMessage.Usage = u
+				}
+			}
 			if data.Done {
 				if completionHandled {
 					return nil
@@ -1004,7 +1012,10 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventAgentComplete,
 					SessionID: sessionID,
-					Data:      event.AgentCompleteData{FinalAnswer: streamCtx.assistantMessage.Content},
+					Data: event.AgentCompleteData{
+						FinalAnswer: streamCtx.assistantMessage.Content,
+						Usage:       streamCtx.assistantMessage.Usage,
+					},
 				})
 			}
 			return nil

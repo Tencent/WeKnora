@@ -56,7 +56,7 @@ func (s *stubModelService) GetModelByID(_ context.Context, id string) (*types.Mo
 	return s.modelsByID[id], nil
 }
 
-func (s *stubModelService) ListModels(context.Context) ([]*types.Model, error) {
+func (s *stubModelService) ListModels(context.Context, types.ModelType) ([]*types.Model, error) {
 	return s.availableModels, nil
 }
 
