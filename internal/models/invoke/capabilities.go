@@ -260,7 +260,13 @@ func defaultCapabilities(name ProviderName, modelTypes []types.ModelType) Capabi
 		}
 	}
 	if serves(types.ModelTypeEmbedding) {
-		caps.Embedding = &EmbeddingCaps{}
+		// CanOverrideDimension defaults true: the toggle itself is the user's
+		// confirmation ("仅在确认该模型支持 dimensions 参数时开启"), and 测试连接
+		// sends the requested dimension and reports the observed one — a vendor
+		// that ignores or rejects the param surfaces at probe time instead of a
+		// dead-end form. Keep per-provider false available as an escape hatch
+		// for APIs that hard-fail on unknown parameters.
+		caps.Embedding = &EmbeddingCaps{CanOverrideDimension: true}
 	}
 	if serves(types.ModelTypeRerank) {
 		caps.Rerank = &RerankCaps{}
