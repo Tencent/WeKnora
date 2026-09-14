@@ -181,7 +181,7 @@ func TestHandleMessageFullOutputShowsPlaceholderWithoutIntermediateUpdates(t *te
 	session := &types.Session{ID: "session-1"}
 
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, "",
 	)
 	if err != nil {
 		t.Fatalf("handleMessageFullOutput() error = %v", err)
@@ -213,7 +213,7 @@ func TestHandleMessageFullOutputReplacesPlaceholderAfterCancel(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- service.handleMessageFullOutput(
-			ctx, msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+			ctx, msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, "",
 		)
 	}()
 
@@ -252,7 +252,7 @@ func TestHandleMessageFullOutputStartStreamErrorFallsBackToPlainReply(t *testing
 	session := &types.Session{ID: "session-1"}
 
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, "",
 	)
 	if err != nil {
 		t.Fatalf("handleMessageFullOutput() error = %v", err)
@@ -280,7 +280,7 @@ func TestHandleMessageFullOutputFinalizeFailureSendsPlainReply(t *testing.T) {
 	session := &types.Session{ID: "session-1"}
 
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, "",
 	)
 	if err != nil {
 		t.Fatalf("successful plain fallback should not return error, got %v", err)
@@ -304,7 +304,7 @@ func TestHandleMessageFullOutputThinkOnlyReplacesWithNoAnswerFallback(t *testing
 	session := &types.Session{ID: "session-1"}
 
 	err := service.handleMessageFullOutput(
-		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil, "",
 	)
 	if err != nil {
 		t.Fatalf("handleMessageFullOutput() error = %v", err)

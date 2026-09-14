@@ -76,6 +76,11 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		return ErrTemplateExecute.WithError(fmt.Errorf("user query contains invalid content"))
 	}
 
+	imageCount := 0
+	if chatManage.ChatModelSupportsVision {
+		imageCount = len(chatManage.Images)
+	}
+
 	// Intent-based no-search path: no retrieval results, but still render
 	// through the context template so runtime metadata (current_time, etc.) is injected.
 	if !chatManage.NeedsRetrieval() {
@@ -97,7 +102,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 		}
 		// Inject attachment content (documents, audio transcripts, etc.)
 		if len(chatManage.Attachments) > 0 {
-			userContent += chatManage.Attachments.BuildPrompt()
+			userContent += chatManage.Attachments.BuildPrompt(imageCount)
 		}
 
 		if tpl := chatManage.SummaryConfig.ContextTemplate; tpl != "" {
@@ -181,7 +186,7 @@ func (p *PluginIntoChatMessage) OnEvent(ctx context.Context,
 	}
 	// Inject attachment content (documents, audio transcripts, etc.)
 	if len(chatManage.Attachments) > 0 {
-		userContent += chatManage.Attachments.BuildPrompt()
+		userContent += chatManage.Attachments.BuildPrompt(imageCount)
 	}
 
 	// Set formatted content back to chat management

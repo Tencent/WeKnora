@@ -41,3 +41,32 @@ func TestMessageAttachmentsBuildPromptUsesGenericTruncationNotice(t *testing.T) 
 		t.Fatalf("line-only truncation note must not be used: %s", prompt)
 	}
 }
+
+func TestAttachmentImageAvailabilityIsPerModelInputAndNotPersisted(t *testing.T) {
+	attachments := MessageAttachments{{
+		FileName: "image.png", IsImage: true, ImageIndex: 1,
+		SourceMessageID: "message", SourceChatID: "chat", ResourceMessageID: "outer", Content: "OCR text",
+	}}
+	if prompt := attachments.BuildPrompt(1); !strings.Contains(prompt, `image index="1"`) ||
+		!strings.Contains(prompt, "original image is included") {
+		t.Fatalf("available original image missing from prompt: %s", prompt)
+	}
+	if prompt := attachments.BuildPrompt(0); !strings.Contains(prompt, "NOT available") ||
+		!strings.Contains(prompt, "OCR") {
+		t.Fatalf("text-only model was told it received an original image: %s", prompt)
+	}
+	stored, err := attachments.Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored MessageAttachments
+	if err := restored.Scan(stored); err != nil {
+		t.Fatal(err)
+	}
+	if restored[0].ImageIndex != 0 ||
+		restored[0].SourceMessageID != "message" ||
+		restored[0].ResourceMessageID != "outer" ||
+		!strings.Contains(restored.BuildPrompt(), "NOT available") {
+		t.Fatal("history lost provenance or reused a previous turn's image index")
+	}
+}

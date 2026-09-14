@@ -38,6 +38,7 @@ type PipelineRequest struct {
 	EnableQueryExpansion bool   `json:"enable_query_expansion"`
 	RewritePromptSystem  string `json:"rewrite_prompt_system"`
 	RewritePromptUser    string `json:"rewrite_prompt_user"`
+	RewriteContext       string `json:"-"` // Materials explicitly included in query understanding
 	// QueryUnderstandModelID, when set, overrides the chat model used for
 	// the query-understanding (rewrite + intent classification) stage only.
 	// Empty means fall back to ChatModelID.
@@ -230,6 +231,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			EnableQueryExpansion:     c.EnableQueryExpansion,
 			RewritePromptSystem:      c.RewritePromptSystem,
 			RewritePromptUser:        c.RewritePromptUser,
+			RewriteContext:           c.RewriteContext,
 			QueryUnderstandModelID:   c.QueryUnderstandModelID,
 			FAQPriorityEnabled:       c.FAQPriorityEnabled,
 			FAQDirectAnswerThreshold: c.FAQDirectAnswerThreshold,

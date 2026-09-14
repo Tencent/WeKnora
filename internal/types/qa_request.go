@@ -60,6 +60,7 @@ type QARequest struct {
 	LocalBrowserEnabled bool               // Explicit browser source preference for this request
 	WebSearchEnabled    bool               // Whether web search is enabled for this request
 	QuotedContext       string             // Quoted message content from IM quote-reply (appended at LLM prompt stage, not used for retrieval)
+	RewriteContext      string             // Feishu materials explicitly included in query understanding
 	Attachments         MessageAttachments // File attachments (processed and ready for prompt injection)
 	// SteerSink, when set, enables mid-run message injection for this run:
 	// the engine drains user-appended messages at every round boundary and

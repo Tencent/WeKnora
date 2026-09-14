@@ -3,10 +3,54 @@ package service
 import (
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPlainPostKeepsConfiguredFixedFallback(t *testing.T) {
+	model := &captureChatModel{}
+	service := &sessionService{modelService: &stubModelService{chatModel: model}}
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query: "公司的报销上限是多少", FallbackStrategy: types.FallbackStrategyFixed,
+			FallbackResponse: "请咨询财务", // A current-only post has no RewriteContext after material preparation.
+		},
+		PipelineContext: types.PipelineContext{EventBus: event.NewEventBus().AsEventBusInterface()},
+	}
+	service.handleFallbackResponse(t.Context(), manage)
+	require.Empty(t, model.lastMessages)
+	require.Equal(t, "请咨询财务", manage.ChatResponse.Content)
+}
+
+func TestFeishuMaterialsRemainAvailableWhenRetrievalFindsNothing(t *testing.T) {
+	for _, strategy := range []types.FallbackStrategy{types.FallbackStrategyFixed, types.FallbackStrategyModel} {
+		t.Run(string(strategy), func(t *testing.T) {
+			model := &captureChatModel{}
+			service := &sessionService{modelService: &stubModelService{chatModel: model}}
+			bus := event.NewEventBus()
+			manage := &types.ChatManage{
+				PipelineRequest: types.PipelineRequest{
+					Query: "这个错误怎么解决", RewriteContext: "Feishu materials",
+					KnowledgeBaseIDs: []string{"kb"}, // Material fallback does not need a KB document listing.
+					FallbackStrategy: strategy, FallbackResponse: "no match",
+					Attachments: types.MessageAttachments{{FileName: "log.txt", Content: "ERROR-7421"}},
+				},
+				PipelineState:   types.PipelineState{QuotedContext: `<message id="source">[附件 1]</message>`},
+				PipelineContext: types.PipelineContext{EventBus: bus.AsEventBusInterface()},
+			}
+			service.handleFallbackResponse(t.Context(), manage)
+			require.NotEmpty(t, model.lastMessages, "a retrieval miss must not discard the supplied material")
+			current := model.lastMessages[len(model.lastMessages)-1]
+			require.Equal(t, "user", current.Role)
+			require.Contains(t, current.Content, "ERROR-7421")
+			require.Contains(t, current.Content, `id="source"`)
+			require.NotContains(t, model.lastMessages[0].Content, "ERROR-7421")
+			require.Equal(t, strategy, manage.FallbackStrategy)
+		})
+	}
+}
 
 // TestBuildFallbackMessages_PrependsSystemAndEndsWithUser guards the model
 // fallback path: the LLM input must start with a system message (the fallback

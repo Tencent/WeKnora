@@ -3281,6 +3281,10 @@ func (s *installSessionService) GenerateTitle(
 func (s *installSessionService) GenerateTitleAsync(context.Context, *types.Session, string, string, *event.EventBus) {
 }
 
+func (*installSessionService) InspectIMMaterialInput(context.Context, *types.QARequest) (bool, bool, error) {
+	panic("unexpected IM material inspection in skill installation")
+}
+
 func (s *installSessionService) KnowledgeQA(context.Context, *types.QARequest, *event.EventBus) error {
 	return nil
 }

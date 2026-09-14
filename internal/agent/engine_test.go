@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -14,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -926,4 +931,172 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	assert.Equal(t, "final answer", finalAnswerEvents[0].Content+finalAnswerEvents[1].Content,
 		"a decoder may hold a short suffix until Done to rule out a split model handle")
 	assert.Equal(t, "final answer", state.FinalAnswer)
+}
+
+func TestFeishuOriginalImagesSurviveAgentFinalSynthesis(t *testing.T) {
+	for _, material := range []bool{false, true} {
+		model := &mockChat{responses: []mockResponse{
+			{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "tool_calls",
+				ToolCalls: []types.LLMToolCall{{
+					ID: "call-1", Type: "function", Function: types.FunctionCall{Name: "count", Arguments: `{}`},
+				}},
+			}}},
+			{chunks: []types.StreamResponse{{
+				ResponseType: types.ResponseTypeAnswer, Content: "final answer", Done: true, FinishReason: "stop",
+			}}},
+		}}
+		engine := newTestEngine(t, model, withMaxIterations(1))
+		engine.toolRegistry = agenttools.NewToolRegistry()
+		engine.toolRegistry.RegisterTool(newCountingTool("count"))
+		query := "比较这两张图片"
+		if material {
+			query += (types.MessageAttachments{
+				{IsImage: true, ImageIndex: 1, SourceMessageID: "source-A"},
+				{IsImage: true, ImageIndex: 2, SourceMessageID: "source-B"},
+			}).BuildPrompt(2)
+		} else {
+			query += "\n" + types.IMImageAvailablePrompt // Plain text is not a generated attachment marker.
+		}
+		images := []string{"image-A", "image-B"}
+		state, err := engine.Execute(t.Context(), "session", "answer", query, nil, images)
+		require.NoError(t, err)
+		require.Equal(t, "final answer", state.FinalAnswer)
+		require.Len(t, model.calls, 2, "one tool round followed by final synthesis")
+		var synthesisImages []string
+		for _, message := range model.calls[1] {
+			synthesisImages = append(synthesisImages, message.Images...)
+		}
+		require.Equal(t, images, synthesisImages, "the live transcript must retain its images without duplication")
+		require.Empty(t, engine.materialImages, "originals must be released when the turn ends")
+	}
+}
+
+func TestFeishuFinalSynthesisRestoresCompactedOriginals(t *testing.T) {
+	for _, retained := range [][]string{nil, {"image-A"}} {
+		model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+			{ResponseType: types.ResponseTypeAnswer, Content: "completed", Done: true},
+		}}}}
+		engine := newTestEngine(t, model)
+		engine.materialImages = []string{"image-A", "image-B"}
+		messages := []chat.Message{
+			{Role: "system", Content: "runtime policy"},
+			{Role: "user", Content: "text-only summary", Images: retained},
+		}
+		require.NoError(t, engine.streamFinalAnswerToEventBus(
+			t.Context(), "compare images", &types.AgentState{}, "session", messages,
+		))
+		require.Len(t, model.calls, 1)
+		var images []string
+		for _, message := range model.calls[0] {
+			images = append(images, message.Images...)
+		}
+		require.Equal(t, engine.materialImages, images)
+		require.Equal(t, retained, messages[1].Images, "synthesis must not mutate the live transcript")
+	}
+}
+
+func TestFeishuFinalSynthesisImageRejectionAfterCompaction(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	images := []string{"data:image/png;base64,YQ==", "data:image/png;base64,Yg=="}
+	for _, retained := range []int{0, 1} {
+		for _, rejectImages := range []bool{false, true} {
+			t.Run(fmt.Sprintf("retained=%d/reject=%t", retained, rejectImages), func(t *testing.T) {
+				var calls atomic.Int32
+				requests := make(chan string, 2)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					body, _ := io.ReadAll(r.Body)
+					requests <- string(body)
+					if calls.Add(1) == 1 && rejectImages {
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = io.WriteString(w,
+							`{"error":{"message":"image unsupported","type":"invalid_request_error"}}`)
+						return
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},"+
+						"\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+				}))
+				defer server.Close()
+				model, err := chat.NewRemoteAPIChat(&chat.ChatConfig{
+					BaseURL: server.URL, ModelName: "test-model", APIKey: "test-key",
+				})
+				require.NoError(t, err)
+				engine := newTestEngine(t, model)
+				engine.materialImages = images
+				attachments := types.MessageAttachments{
+					{IsImage: true, ImageIndex: 1}, {IsImage: true, ImageIndex: 2},
+				}
+				conversation := compaction.Apply([]chat.Message{
+					{Role: "system", Content: "runtime policy"},
+					{Role: "user", Content: "compare images" + attachments.BuildPrompt(2), Images: images},
+				}, &compaction.Preparation{FirstKeptIdx: 2, IsSplitTurn: true}, "text-only summary")
+				if retained > 0 {
+					conversation = append(conversation, chat.Message{
+						Role: "user", Content: attachments[:retained].BuildPrompt(retained), Images: images[:retained],
+					})
+				}
+				var emitted strings.Builder
+				engine.eventBus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+					emitted.WriteString(evt.Data.(event.AgentFinalAnswerData).Content)
+					return nil
+				})
+				state := &types.AgentState{}
+				require.NoError(t, engine.streamFinalAnswerToEventBus(
+					t.Context(), "compare images", state, "session", conversation,
+				))
+				first := <-requests
+				for _, image := range images {
+					require.Equal(t, 1, strings.Count(first, image), "originals must be sent once")
+				}
+				if rejectImages {
+					require.EqualValues(t, 2, calls.Load())
+					retry := <-requests
+					require.NotContains(t, retry, "image_url")
+					require.NotContains(t, retry, types.IMImageAvailablePrompt)
+					require.NotContains(t, retry, "original images from the current Feishu request are attached")
+					require.Contains(t, retry, types.IMImageUnavailablePrompt)
+					require.Contains(t, state.FinalAnswer, "本轮原图未能被模型读取")
+					require.True(t, strings.HasSuffix(state.FinalAnswer, "answer"))
+				} else {
+					require.EqualValues(t, 1, calls.Load())
+					require.Equal(t, "answer", state.FinalAnswer)
+				}
+				require.Equal(t, state.FinalAnswer, emitted.String())
+				require.Empty(t, conversation[1].Images, "the stored summary must remain text-only")
+			})
+		}
+	}
+}
+
+func TestFeishuImagesSurviveCompactedHistoryMerging(t *testing.T) {
+	for _, material := range []bool{false, true} {
+		content := "比较图片"
+		if material {
+			content += (types.MessageAttachments{{
+				IsImage: true, ImageIndex: 1, SourceMessageID: "source",
+			}}).BuildPrompt(1)
+		}
+		images := []string{"current-image"}
+		messages := []chat.Message{
+			{Role: "system", Content: "system"},
+			{Role: "user", Content: "old question"},
+			{Role: "assistant", Content: "old answer"},
+			{Role: "user", Content: content, Images: images},
+		}
+		compacted := compaction.Apply(messages, &compaction.Preparation{FirstKeptIdx: 3}, "old history")
+		result := agenttools.SanitizeMessages(compacted)
+		require.Len(t, result, 2)
+		require.Contains(t, result[1].Content, content)
+		if material {
+			require.Equal(t, images, result[1].Images)
+			require.Contains(t, result[1].Content, "source")
+		} else {
+			require.Empty(t, result[1].Images, "non-material merging must retain its existing behavior")
+		}
+		require.Empty(t, compacted[1].Images, "sanitizing must not modify the stored summary")
+		require.Equal(t, images, messages[3].Images)
+	}
 }

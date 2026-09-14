@@ -49,6 +49,8 @@ type ChatOptions struct {
 	// markers; empty/short is the default 5-minute cache; long requests 1h/24h
 	// where the provider accepts it.
 	CacheRetention CacheRetention `json:"-"`
+	// RequireImages prevents a visual-understanding call from retrying as text-only.
+	RequireImages bool `json:"-"`
 }
 
 // MessageContentPart represents a part of multi-content message
@@ -162,6 +164,22 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 		AppID:          appID,
 		AppSecret:      appSecret,
 	}
+}
+
+// SupportsIMChatImages checks the transport used by GetChatModel, separately
+// from the model's SupportsVision flag. WeKnoraCloud's chat adapter strips images.
+func SupportsIMChatImages(model *types.Model) bool {
+	if model == nil {
+		return false
+	}
+	if model.Source == types.ModelSourceLocal {
+		return true
+	}
+	name := provider.ProviderName(model.Parameters.Provider)
+	if name == "" {
+		name = provider.DetectProvider(model.Parameters.BaseURL)
+	}
+	return name != provider.ProviderWeKnoraCloud
 }
 
 // NewChat 创建聊天实例

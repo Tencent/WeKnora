@@ -2,7 +2,6 @@ package feishu
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -27,12 +26,16 @@ type LongConnClient struct {
 // apiBaseURL overrides the SDK's bootstrap domain (empty uses the region
 // default); set it to a reverse-proxy origin for private/internal deployments.
 // When a message arrives, it converts it to IncomingMessage and calls handler.
-func NewLongConnClient(region Region, appID, appSecret, apiBaseURL string, handler MessageHandler) *LongConnClient {
+func NewLongConnClient(adapter *Adapter, handler MessageHandler) *LongConnClient {
+	region, appID, appSecret, apiBaseURL := adapter.region, adapter.appID, adapter.appSecret, adapter.apiBaseURL
 	// Long connection mode does not require verificationToken or encryptKey;
 	// those are only used for webhook signature verification and decryption.
 	eventHandler := dispatcher.NewEventDispatcher("", "").
 		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			msg := convertEvent(region, event)
+			msg, err := adapter.convertEvent(ctx, event)
+			if err != nil {
+				return err
+			}
 			if msg == nil {
 				return nil
 			}
@@ -106,257 +109,44 @@ func (l *feishuLoggerAdapter) Error(ctx context.Context, args ...interface{}) {
 	logger.Errorf(ctx, "[%s] %s", l.region.Label, fmt.Sprint(args...))
 }
 
-// convertEvent converts a Feishu/Lark SDK event to a unified IncomingMessage.
-// Supports text, file, image and post messages. Returns nil for other types.
-func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingMessage {
+// convertEvent leaves thread-session semantics unchanged; only inbound material
+// parsing and mention validation are shared with the webhook adapter.
+func (a *Adapter) convertEvent(ctx context.Context, event *larkim.P2MessageReceiveV1) (*im.IncomingMessage, error) {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
-		logger.Warnf(context.Background(), "[%s][RX] event dropped: nil event/event/message", region.Label)
-		return nil
+		logger.Warnf(context.Background(), "[%s][RX] event dropped: nil event/event/message", a.region.Label)
+		return nil, nil
 	}
 
 	msg := event.Event.Message
+	loggedContent := ptrStr(msg.Content)
+	if ptrStr(msg.MessageType) == "interactive" {
+		loggedContent = "[card material; body is read by the queue worker]"
+	}
 
 	// Debug: log every raw receive event so we can see exactly what the platform
 	// delivers (or doesn't). This is the single chokepoint for all message
 	// types — adding it here catches text/file/image/post uniformly.
 	logger.Infof(context.Background(),
 		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q",
-		region.Label,
+		a.region.Label,
 		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
 		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
-		ptrStr(msg.ThreadId), ptrStr(msg.Content),
+		ptrStr(msg.ThreadId), loggedContent,
 	)
 
-	if msg.MessageType == nil {
-		return nil
-	}
-
-	msgType := *msg.MessageType
-
-	// Sender info
-	openID := ""
-	if event.Event.Sender != nil && event.Event.Sender.SenderId != nil && event.Event.Sender.SenderId.OpenId != nil {
-		openID = *event.Event.Sender.SenderId.OpenId
-	}
-
-	// Chat type
-	chatType := im.ChatTypeDirect
-	chatID := ""
-	if msg.ChatType != nil && *msg.ChatType == "group" {
-		chatType = im.ChatTypeGroup
-		if msg.ChatId != nil {
-			chatID = *msg.ChatId
+	senderID, senderType := "", ""
+	if event.Event.Sender != nil {
+		senderType = ptrStr(event.Event.Sender.SenderType)
+		if event.Event.Sender.SenderId != nil {
+			senderID = ptrStr(event.Event.Sender.SenderId.OpenId)
 		}
 	}
-
-	// Message ID
-	messageID := ""
-	if msg.MessageId != nil {
-		messageID = *msg.MessageId
-	}
-
-	switch msgType {
-	case "text":
-		return convertTextEvent(region, msg, openID, chatID, chatType, messageID)
-	case "file":
-		return convertFileEvent(region, msg, openID, chatID, chatType, messageID)
-	case "image":
-		return convertImageEvent(region, msg, openID, chatID, chatType, messageID)
-	case "post":
-		return convertPostEvent(region, msg, openID, chatID, chatType, messageID)
-	default:
-		return nil
-	}
-}
-
-// convertTextEvent handles text message type.
-func convertTextEvent(
-	region Region, msg *larkim.EventMessage,
-	openID, chatID string, chatType im.ChatType, messageID string,
-) *im.IncomingMessage {
-	var textContent struct {
-		Text string `json:"text"`
-	}
-	if msg.Content == nil {
-		return nil
-	}
-	if err := json.Unmarshal([]byte(*msg.Content), &textContent); err != nil {
-		return nil
-	}
-
-	content := textContent.Text
-	if chatType == im.ChatTypeGroup {
-		for strings.HasPrefix(content, "@_user_") {
-			idx := strings.Index(content, " ")
-			if idx >= 0 {
-				content = content[idx+1:]
-			} else {
-				break
-			}
-		}
-	}
-
-	return &im.IncomingMessage{
-		Platform:    region.Platform,
-		MessageType: im.MessageTypeText,
-		UserID:      openID,
-		ChatID:      chatID,
-		ChatType:    chatType,
-		Content:     strings.TrimSpace(content),
-		MessageID:   messageID,
-	}
-}
-
-// convertFileEvent handles file message type.
-func convertFileEvent(
-	region Region, msg *larkim.EventMessage,
-	openID, chatID string, chatType im.ChatType, messageID string,
-) *im.IncomingMessage {
-	if msg.Content == nil {
-		return nil
-	}
-	var fileContent struct {
-		FileKey  string `json:"file_key"`
-		FileName string `json:"file_name"`
-	}
-	if err := json.Unmarshal([]byte(*msg.Content), &fileContent); err != nil {
-		return nil
-	}
-	if fileContent.FileKey == "" {
-		return nil
-	}
-
-	return &im.IncomingMessage{
-		Platform:    region.Platform,
-		MessageType: im.MessageTypeFile,
-		UserID:      openID,
-		ChatID:      chatID,
-		ChatType:    chatType,
-		MessageID:   messageID,
-		FileKey:     fileContent.FileKey,
-		FileName:    fileContent.FileName,
-	}
-}
-
-// convertImageEvent handles image message type.
-// Downloads via GetMessageResource API with type=image.
-func convertImageEvent(
-	region Region, msg *larkim.EventMessage,
-	openID, chatID string, chatType im.ChatType, messageID string,
-) *im.IncomingMessage {
-	if msg.Content == nil {
-		return nil
-	}
-	var imageContent struct {
-		ImageKey string `json:"image_key"`
-	}
-	if err := json.Unmarshal([]byte(*msg.Content), &imageContent); err != nil {
-		return nil
-	}
-	if imageContent.ImageKey == "" {
-		return nil
-	}
-
-	return &im.IncomingMessage{
-		Platform:    region.Platform,
-		MessageType: im.MessageTypeImage,
-		UserID:      openID,
-		ChatID:      chatID,
-		ChatType:    chatType,
-		MessageID:   messageID,
-		FileKey:     imageContent.ImageKey,
-		FileName:    imageContent.ImageKey + ".png",
-	}
-}
-
-// convertPostEvent handles rich-text (post) message type.
-// Extracts plain text and the first embedded image so mixed posts can use the
-// same attachment pipeline as standalone image messages.
-func convertPostEvent(
-	region Region, msg *larkim.EventMessage,
-	openID, chatID string, chatType im.ChatType, messageID string,
-) *im.IncomingMessage {
-	if msg.Content == nil {
-		return nil
-	}
-
-	// Post content structure: {"title":"...", "content":[[{"tag":"text","text":"..."},{"tag":"img","image_key":"..."}]]}
-	var postContent struct {
-		Title   string              `json:"title"`
-		Content [][]json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal([]byte(*msg.Content), &postContent); err != nil {
-		return nil
-	}
-
-	var textParts []string
-	imageKey := ""
-	if postContent.Title != "" {
-		textParts = append(textParts, postContent.Title)
-	}
-
-	for _, line := range postContent.Content {
-		var lineText strings.Builder
-		for _, elem := range line {
-			var tag struct {
-				Tag      string `json:"tag"`
-				Text     string `json:"text"`
-				ImageKey string `json:"image_key"`
-			}
-			if err := json.Unmarshal(elem, &tag); err != nil {
-				continue
-			}
-			switch tag.Tag {
-			case "text", "a":
-				lineText.WriteString(tag.Text)
-			case "img":
-				if imageKey == "" {
-					imageKey = tag.ImageKey
-				}
-			case "at":
-				// Skip @mentions
-			}
-		}
-		if t := strings.TrimSpace(lineText.String()); t != "" {
-			textParts = append(textParts, t)
-		}
-	}
-
-	content := strings.Join(textParts, "\n")
-	if chatType == im.ChatTypeGroup {
-		for strings.HasPrefix(content, "@_user_") {
-			idx := strings.Index(content, " ")
-			if idx >= 0 {
-				content = content[idx+1:]
-			} else {
-				break
-			}
-		}
-	}
-
-	content = strings.TrimSpace(content)
-	if content == "" && imageKey == "" {
-		return nil
-	}
-
-	messageType := im.MessageTypeText
-	fileName := ""
-	if imageKey != "" {
-		messageType = im.MessageTypeImage
-		fileName = imageKey + ".png"
-	}
-
-	return &im.IncomingMessage{
-		Platform:    region.Platform,
-		MessageType: messageType,
-		UserID:      openID,
-		ChatID:      chatID,
-		ChatType:    chatType,
-		Content:     content,
-		MessageID:   messageID,
-		FileKey:     imageKey,
-		FileName:    fileName,
-	}
+	return a.parseIncoming(ctx, &feishuMessage{
+		MessageID: ptrStr(msg.MessageId), ParentID: ptrStr(msg.ParentId), RootID: ptrStr(msg.RootId),
+		MessageType: ptrStr(msg.MessageType), ChatType: ptrStr(msg.ChatType), ChatID: ptrStr(msg.ChatId),
+		Content: ptrStr(msg.Content), CreateTime: ptrStr(msg.CreateTime), UpdateTime: ptrStr(msg.UpdateTime),
+		SenderType: senderType, Mentions: msg.Mentions,
+	}, senderID, "")
 }
 
 // ptrStr safely dereferences a *string for logging; returns "" for nil so the

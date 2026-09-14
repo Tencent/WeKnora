@@ -60,6 +60,9 @@ type IncomingMessage struct {
 	ChatType ChatType
 	// Content is the text content of the message (empty for file messages).
 	Content string
+	// SkipCommand keeps newly readable material, such as a code block, out of
+	// the native command entry without changing its text for QA.
+	SkipCommand bool
 	// MessageID is the IM-platform message identifier (for dedup).
 	MessageID string
 	// FileKey is the platform file identifier (for file messages).
@@ -80,6 +83,10 @@ type IncomingMessage struct {
 	// Quote is the quoted/replied message, if any.
 	// Populated by adapters on platforms that support quote-reply.
 	Quote *QuotedMessage
+	// Material preserves the original message layout and references for adapters
+	// whose messages can contain multiple resources or forwarded messages.
+	// References are resolved by the queue worker, never by the callback.
+	Material *MessageMaterial
 	// Extra holds platform-specific fields (e.g., WeCom stream ID).
 	Extra map[string]string
 }
@@ -87,6 +94,11 @@ type IncomingMessage struct {
 // QuotedMessage holds the content and metadata of a quoted/replied message.
 // Populated by platform adapters that support quote-reply (e.g. WeCom long-connection).
 type QuotedMessage struct {
+	// MaterialContext is a bounded, escaped collection prepared by the worker.
+	// Unlike a legacy single-message quote, it must not be truncated to 500 runes.
+	MaterialContext string
+	// MaterialWarnings describe missing inputs and are also shown in the final reply.
+	MaterialWarnings []string
 	// MessageID is the platform message ID of the quoted message.
 	MessageID string
 	// Content is the text content. Empty for non-text message types.
@@ -179,4 +191,50 @@ type FileDownloader interface {
 	// DownloadFile downloads a file resource from the IM platform.
 	// Returns the file content reader, the resolved file name, and any error.
 	DownloadFile(ctx context.Context, msg *IncomingMessage) (io.ReadCloser, string, error)
+}
+
+// MessageMaterial is a message snapshot in a particular resource context.
+// UpperMessageID describes display hierarchy; ResourceMessageID owns downloads.
+type MessageMaterial struct {
+	MessageID         string
+	ParentID          string
+	UpperMessageID    string
+	ResourceMessageID string
+	ChatID            string
+	SenderID          string
+	SenderType        string
+	CreateTime        string
+	UpdateTime        string
+	ReadTime          string
+	SnapshotSource    string
+	Type              string
+	Parts             []MaterialPart
+	Unavailable       string
+	Warnings          []string
+	// RawContent is an ephemeral card event fallback, never a current request
+	// or persisted material. CardStatus describes only the extracted snapshot.
+	RawContent string
+	CardStatus string
+}
+
+// MaterialPart preserves text/image order without putting resource keys in the query.
+type MaterialPart struct {
+	Text     string
+	Type     MessageType // empty for text; image or file for a resource
+	FileKey  string
+	FileName string
+	FileSize int64
+	// Card readers may separate original value bytes from generated formatting.
+	// Nil preserves legacy len(Text) accounting; zero is valid for fixed labels.
+	OriginalTextBytes *int
+}
+
+// MaxCardFormattedTextBytes bounds card fields including generated provenance.
+// Original values still share the existing 32 KiB material text budget.
+const MaxCardFormattedTextBytes = 256 << 10
+
+// MessageReader is an optional adapter capability. A forward may return a flat
+// list of snapshots linked by UpperMessageID, all in the requested context.
+type MessageReader interface {
+	ReadMessage(ctx context.Context, messageID string) ([]*MessageMaterial, error)
 }

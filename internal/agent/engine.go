@@ -66,6 +66,9 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
+
+	// materialImages retains this turn's Feishu originals for final synthesis only.
+	materialImages []string
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -338,6 +341,10 @@ func (e *AgentEngine) Execute(
 	var imgs []string
 	if len(imageURLs) > 0 {
 		imgs = imageURLs[0]
+	}
+	if strings.Contains(query, ">"+types.IMImageAvailablePrompt+"</image>") {
+		e.materialImages = imgs
+		defer func() { e.materialImages = nil }()
 	}
 	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
 	if e.toolRegistry != nil {
