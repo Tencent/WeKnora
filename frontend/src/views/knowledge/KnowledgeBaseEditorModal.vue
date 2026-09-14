@@ -486,6 +486,7 @@ import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
 import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
+import { isGraphExtractConfigComplete } from './graphExtractValidation'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
@@ -1160,6 +1161,12 @@ const validateForm = (): boolean => {
     }
   }
 
+  if (formData.value.type !== 'faq' && !isGraphExtractConfigComplete(formData.value.nodeExtractConfig)) {
+    MessagePlugin.warning(t('graphSettings.completeConfigRequired'))
+    currentSection.value = 'graph'
+    return false
+  }
+
   // 验证模型配置 - embedding 模型仅在检索索引启用时必须
   const needsEmbedding = formData.value.indexingStrategy?.vectorEnabled || formData.value.indexingStrategy?.keywordEnabled
   if (needsEmbedding && !formData.value.modelConfig.embeddingModelId) {
@@ -1319,7 +1326,7 @@ const buildSubmitData = () => {
   // regardless of whether the graph indexing strategy is currently enabled.
   if (formData.value.nodeExtractConfig) {
     data.extract_config = {
-      enabled: !!formData.value.nodeExtractConfig.enabled,
+      enabled: formData.value.type !== 'faq' && !!formData.value.nodeExtractConfig.enabled,
       text: formData.value.nodeExtractConfig.text || '',
       tags: formData.value.nodeExtractConfig.tags || [],
       nodes: formData.value.nodeExtractConfig.nodes || [],
