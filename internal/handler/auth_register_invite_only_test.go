@@ -21,11 +21,11 @@ import (
 // panics via the embedded nil interface.
 type stubRegisterUserService struct {
 	interfaces.UserService
-	userCount      int64
-	adminCount     int64
-	register       func(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
-	updatedAdmin   bool
-	lastUpdated    *types.User
+	userCount    int64
+	adminCount   int64
+	register     func(ctx context.Context, req *types.RegisterRequest) (*types.User, error)
+	updatedAdmin bool
+	lastUpdated  *types.User
 }
 
 func (s *stubRegisterUserService) Register(ctx context.Context, req *types.RegisterRequest) (*types.User, error) {
