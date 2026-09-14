@@ -1159,6 +1159,93 @@ func (h *KnowledgeHandler) RenameKnowledgeFolder(c *gin.Context) {
 	})
 }
 
+// DeleteKnowledgeFolderRequest is the body schema for
+// DELETE /knowledge-bases/:id/knowledge/folders.
+type DeleteKnowledgeFolderRequest struct {
+	Path string `json:"path" binding:"required"`
+}
+
+// DeleteKnowledgeFolder enqueues deletion of every document in a folder and
+// its descendants. Folder nodes are derived from folder_path, so the folder
+// disappears once those documents enter the deletion pipeline.
+func (h *KnowledgeHandler) DeleteKnowledgeFolder(c *gin.Context) {
+	var req DeleteKnowledgeFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters: " + err.Error()))
+		return
+	}
+
+	rawPath := strings.TrimSpace(req.Path)
+	safePath, valid := secutils.ValidateInput(rawPath)
+	folderPath := types.NormalizeKnowledgeFolderPath(safePath)
+	// Destructive paths must already be canonical. In particular, do not let a
+	// traversal-looking value such as ../../docs normalize into and delete docs.
+	if !valid || folderPath == "" || rawPath != folderPath {
+		c.Error(errors.NewBadRequestError("folder path is invalid or empty"))
+		return
+	}
+
+	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, c.Param("id"))
+	if err != nil {
+		c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		c.Error(errors.NewForbiddenError("No permission to delete knowledge"))
+		return
+	}
+	if err := h.requireKBOwnershipOrAdmin(c, kbID); err != nil {
+		c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	knowledgeList, err := h.kgService.ListKnowledgeByKnowledgeBaseID(ctx, kbID)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError("Failed to list folder contents").WithDetails(err.Error()))
+		return
+	}
+
+	selected := knowledgeInFolderSubtree(knowledgeList, folderPath)
+	ids := make([]string, 0, len(selected))
+	for _, knowledge := range selected {
+		if err := access.RejectMovingKnowledge(knowledge); err != nil {
+			c.Error(err)
+			return
+		}
+		ids = append(ids, knowledge.ID)
+	}
+
+	if len(ids) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"deleted_count": 0}})
+		return
+	}
+	taskID, err := h.enqueueKnowledgeListDelete(ctx, effectiveTenantID, kbID, ids)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to enqueue folder delete task: %v", err)
+		c.Error(errors.NewInternalServerError("Failed to enqueue folder delete task"))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Folder delete task submitted",
+		"data":    gin.H{"task_id": taskID, "deleted_count": len(ids), "knowledge_ids": ids},
+	})
+}
+
+func knowledgeInFolderSubtree(rows []*types.Knowledge, folderPath string) []*types.Knowledge {
+	selected := make([]*types.Knowledge, 0)
+	for _, knowledge := range rows {
+		path := types.NormalizeKnowledgeFolderPath(knowledge.FolderPath)
+		if path == folderPath || strings.HasPrefix(path, folderPath+"/") {
+			selected = append(selected, knowledge)
+		}
+	}
+	return selected
+}
+
 // dedupeKnowledgeIDs trims, drops empty and de-duplicates a batch of IDs while
 // preserving the caller's order.
 func dedupeKnowledgeIDs(raw []string) []string {

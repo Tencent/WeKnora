@@ -145,3 +145,16 @@ func TestListKnowledgeFolders_ReturnsTree(t *testing.T) {
 		t.Fatalf("children = %+v, want \"docs/spec\"", body.Data.Folders[0].Children)
 	}
 }
+
+func TestKnowledgeInFolderSubtreeMatchesPathBoundaries(t *testing.T) {
+	rows := []*types.Knowledge{
+		{ID: "direct", FolderPath: "docs"},
+		{ID: "child", FolderPath: "docs/spec"},
+		{ID: "sibling-prefix", FolderPath: "docsets"},
+		{ID: "root", FolderPath: ""},
+	}
+	selected := knowledgeInFolderSubtree(rows, "docs")
+	if len(selected) != 2 || selected[0].ID != "direct" || selected[1].ID != "child" {
+		t.Fatalf("selected = %+v, want docs and docs/spec only", selected)
+	}
+}
