@@ -3,7 +3,8 @@
 // It reads a stored gate config (baseline + per-metric tolerance) and an
 // evaluation result JSON, judges whether any gated metric regressed beyond
 // tolerance, and exits non-zero when the gate fails — so it can gate a merge in
-// CI. See scripts/eval-gate.sh for the full run → judge → report pipeline.
+// CI. The end-to-end "run evaluation → judge → report" pipeline that wraps this
+// CLI lives in scripts/eval-gate.sh, which lands in a follow-up PR.
 //
 // Usage:
 //
@@ -33,23 +34,23 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	configPath := fs.String("config", "", "path to gate config JSON (baseline + thresholds)")
 	resultPath := fs.String("result", "", "path to evaluation result JSON (defaults to stdin)")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: evalgate -config <gate.json> [-result <result.json>]\n")
-		fmt.Fprintf(stderr, "  Reads an evaluation result and judges it against a quality gate.\n")
-		fmt.Fprintf(stderr, "  Exit 0 = pass, 1 = failed (regression), 2 = error.\n\n")
+		_, _ = fmt.Fprintf(stderr, "Usage: evalgate -config <gate.json> [-result <result.json>]\n")
+		_, _ = fmt.Fprintf(stderr, "  Reads an evaluation result and judges it against a quality gate.\n")
+		_, _ = fmt.Fprintf(stderr, "  Exit 0 = pass, 1 = failed (regression), 2 = error.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *configPath == "" {
-		fmt.Fprintln(stderr, "evalgate: -config is required")
+		_, _ = fmt.Fprintln(stderr, "evalgate: -config is required")
 		fs.Usage()
 		return 2
 	}
 
 	cfg, err := evalgate.LoadGateConfig(*configPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "evalgate: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "evalgate: %v\n", err)
 		return 2
 	}
 
@@ -60,13 +61,13 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		raw, err = io.ReadAll(stdin)
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "evalgate: read result: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "evalgate: read result: %v\n", err)
 		return 2
 	}
 
 	flat, err := evalgate.FlattenEvaluationResponse(raw)
 	if err != nil {
-		fmt.Fprintf(stderr, "evalgate: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "evalgate: %v\n", err)
 		return 2
 	}
 
@@ -74,10 +75,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	out, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
-		fmt.Fprintf(stderr, "evalgate: marshal report: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "evalgate: marshal report: %v\n", err)
 		return 2
 	}
-	fmt.Fprintln(stdout, string(out))
+	_, _ = fmt.Fprintln(stdout, string(out))
 	if len(report.Errors) != 0 {
 		return 2
 	}

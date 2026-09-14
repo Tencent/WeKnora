@@ -28,13 +28,14 @@ func sampleConfig() GateConfig {
 }
 
 func TestJudgeGate_Pass(t *testing.T) {
+	// 各指标小幅下滑但都在 tolerance 之内 → 仍应通过。
 	current := map[string]float64{
-		"precision": 0.120,
-		"recall":    0.540,
-		"ndcg3":     0.525,
-		"ndcg10":    0.520,
-		"mrr":       0.515,
-		"map":       0.516,
+		"precision": 0.100, // delta -0.008, tol 0.02
+		"recall":    0.470, // delta -0.030, tol 0.05
+		"ndcg3":     0.460, // delta -0.028, tol 0.05
+		"ndcg10":    0.460,
+		"mrr":       0.455,
+		"map":       0.455,
 	}
 	report := JudgeGate(current, sampleConfig())
 	if !report.Passed {
@@ -91,7 +92,7 @@ func TestJudgeGate_RejectsMetricsMissingBaseline(t *testing.T) {
 		Baseline:   map[string]float64{"recall": 0.5},
 		Thresholds: map[string]float64{"recall": 0.05, "unknown": 0.1},
 	}
-	// "unknown" 在 Thresholds 但不在 Baseline → 跳过，不 fail。
+	// "unknown" 在 Thresholds 但不在 Baseline → 缺基线属数据不可信，fail-closed 判不通过。
 	if report := JudgeGate(map[string]float64{"recall": 0.6}, cfg); report.Passed || len(report.Errors) == 0 {
 		t.Fatalf("missing baseline must fail: %+v", report)
 	}
@@ -102,7 +103,7 @@ func TestJudgeGate_RejectsMetricsMissingFromCurrent(t *testing.T) {
 		Baseline:   map[string]float64{"recall": 0.5, "mrr": 0.5},
 		Thresholds: map[string]float64{"recall": 0.05, "mrr": 0.05},
 	}
-	// current 缺 mrr → 只判定 recall；recall 通过 → 整体通过。
+	// current 缺 mrr → 缺指标属数据不可信，fail-closed 判不通过。
 	if report := JudgeGate(map[string]float64{"recall": 0.55}, cfg); report.Passed || len(report.Errors) == 0 {
 		t.Fatalf("missing current metric must fail: %+v", report)
 	}
