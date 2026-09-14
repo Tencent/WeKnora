@@ -10,11 +10,13 @@ from docreader.parser.opendataloader_parser import (
     OpenDataLoaderParser,
     _collect_images_under_output,
     _find_markdown_file,
+    _minimal_warmup_pdf,
     _normalize_odl_image_url,
     _ping_hybrid,
     _run_convert,
     _rewrite_markdown_image_refs,
     opendataloader_available,
+    warmup_engine,
 )
 
 
@@ -127,6 +129,77 @@ class OpenDataLoaderParserTest(unittest.TestCase):
             ok, msg = opendataloader_available()
         self.assertFalse(ok)
         self.assertIn("Java", msg)
+
+
+class OpenDataLoaderWarmupTest(unittest.TestCase):
+    def test_minimal_warmup_pdf_is_spec_shaped(self):
+        pdf = _minimal_warmup_pdf()
+        self.assertTrue(pdf.startswith(b"%PDF-1.4\n"))
+        self.assertTrue(pdf.rstrip().endswith(b"%%EOF"))
+        self.assertIn(b"xref", pdf)
+        self.assertIn(b"startxref", pdf)
+        self.assertIn(b"/Root 1 0 R", pdf)
+
+    def test_minimal_warmup_pdf_parses_with_pypdf(self):
+        from io import BytesIO
+
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(_minimal_warmup_pdf()))
+        self.assertEqual(1, len(reader.pages))
+
+    @mock.patch(
+        "docreader.parser.opendataloader_parser.opendataloader_available",
+        return_value=(False, "需要 Java 11+"),
+    )
+    def test_warmup_skips_when_engine_unavailable(self, mock_avail):
+        with mock.patch(
+            "docreader.parser.opendataloader_parser._run_convert"
+        ) as mock_convert:
+            ok, msg = warmup_engine()
+
+        self.assertFalse(ok)
+        self.assertIn("Java", msg)
+        mock_convert.assert_not_called()
+
+    @mock.patch(
+        "docreader.parser.opendataloader_parser.opendataloader_available",
+        return_value=(True, ""),
+    )
+    @mock.patch("docreader.parser.opendataloader_parser._run_convert")
+    def test_warmup_runs_tiny_convert_and_reports_elapsed(
+        self, mock_convert, _mock_avail
+    ):
+        seen = {}
+
+        def fake_convert(pdf_path, output_dir, image_dir, overrides=None):
+            with open(pdf_path, "rb") as f:
+                seen["pdf"] = f.read()
+
+        mock_convert.side_effect = fake_convert
+
+        ok, msg = warmup_engine()
+
+        self.assertTrue(ok)
+        self.assertIn("convert finished", msg)
+        self.assertEqual(1, mock_convert.call_count)
+        self.assertTrue(mock_convert.call_args[0][0].endswith("warmup.pdf"))
+        self.assertTrue(seen["pdf"].startswith(b"%PDF-1.4"))
+
+    @mock.patch(
+        "docreader.parser.opendataloader_parser.opendataloader_available",
+        return_value=(True, ""),
+    )
+    @mock.patch(
+        "docreader.parser.opendataloader_parser._run_convert",
+        side_effect=RuntimeError("JVM exploded"),
+    )
+    def test_warmup_swallows_convert_failures(self, _mock_convert, _mock_avail):
+        ok, msg = warmup_engine()
+
+        self.assertFalse(ok)
+        self.assertIn("RuntimeError", msg)
+        self.assertIn("JVM exploded", msg)
 
 
 if __name__ == "__main__":
