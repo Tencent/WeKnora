@@ -1272,6 +1272,11 @@ watch(() => props.visible, (val) => {
     } finally {
       nextTick(() => {
         hydratingForm.value = false
+        // 编辑打开的灌入被 probe watch 跳过（防灌水期逐字段触发），灌完必须
+        // 踢一脚首次探测，否则编辑态模型下拉要等用户改了某个字段才加载
+        // （2026-09-15 真机：点开已存模型下拉为空，清空重输才出现列表）。
+        // 探测函数自带编辑态凭证兜底（model_id）；失败仅置空，与原行为一致。
+        if (showRemoteModelSelect.value && formData.value.provider) void probeRemoteModels()
       })
     }
   }
