@@ -406,7 +406,7 @@ Docker 后端为每个会话提供独立容器，当前隔离和资源配置如�
 
 #### 沙箱镜像
 
-系统使用专用的沙箱镜像 `wechatopenai/weknora-sandbox`，预装了 Python 3.11、Node.js 20、uv 和常用 CLI 工具；技能依赖在技能安装阶段写入各自环境。
+系统使用专用的沙箱镜像 `wechatopenai/weknora-sandbox`，预装了 Python 3.12、Node.js 20、uv 和常用 CLI 工具；技能依赖在技能安装阶段写入各自环境。3.12 才能解析技能源码里带嵌套引号的 f-string（PEP 701）；安装校验用的就是镜像里的解释器。
 
 **预拉取镜像**（推荐在首次部署时执行，避免首次执行脚本时等待下载）：
 
@@ -423,7 +423,7 @@ sh scripts/build_images.sh -s
 > 示例使用 `main`；生产部署应固定已验证的版本标签，并确认镜像与应用版本兼容。
 
 **镜像内置环境**：
-- Python 3.11 + pip、uv；第三方 Python 包由技能安装阶段提供
+- Python 3.12 + pip、uv；第三方 Python 包由技能安装阶段提供
 - Node.js 20 + npm、pnpm
 - CLI 工具：jq、curl、bash、grep、sed、awk 等
 

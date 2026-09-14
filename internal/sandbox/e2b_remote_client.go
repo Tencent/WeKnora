@@ -504,7 +504,7 @@ func (c *E2BRemoteClient) buildStandardTemplate(ctx context.Context) (*RemoteTem
 //
 // The SDK helper generates `while ! ss -tln | grep -q ':6080 '; ...`
 // (template_builder.go:183-186), and ss comes from iproute2, which
-// python:3.11-slim does not ship and Dockerfile.sandbox does not install.
+// python slim does not ship and Dockerfile.sandbox does not install.
 // ss then exits 127 — non-zero — so the loop never terminates and the ready
 // probe hangs instead of failing.
 //

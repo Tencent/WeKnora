@@ -24,7 +24,7 @@ Docker 后端目前**没有**桌面路径；只有 CubeSandbox / E2B 的桌面�
 
 ## 镜像
 
-`docker/Dockerfile.sandbox` 在 CLI runtime（Python 3.11）之上再叠 XFCE：
+`docker/Dockerfile.sandbox` 在 CLI runtime（Python 3.12）之上再叠 XFCE：
 
 | 变体 | 标签 | 用途 |
 | --- | --- | --- |

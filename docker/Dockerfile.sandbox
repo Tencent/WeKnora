@@ -31,7 +31,11 @@ FROM --platform=$TARGETPLATFORM node:20-slim AS node-base
 FROM --platform=$TARGETPLATFORM ghcr.io/astral-sh/uv:0.12.4 AS uv-base
 
 # Stage 2: Runtime image
-FROM --platform=$TARGETPLATFORM python:3.11-slim AS runtime
+#
+# 3.12 is the floor because skill sources commonly use PEP 701 nested quotes
+# in f-strings (f"x={d["k"]}"). Install-time ast.parse runs this interpreter;
+# 3.11 rejects that syntax and the whole skill install fails.
+FROM --platform=$TARGETPLATFORM python:3.12-slim AS runtime
 
 # Copy Node.js from node image (avoids NodeSource install overhead)
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/
@@ -125,7 +129,7 @@ ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
 
 # Stage 4: desktop environment on top of runtime.
 #
-# Debian package names (runtime is python:3.11-slim, not Ubuntu). Do not run
+# Debian package names (runtime is python:3.12-slim, not Ubuntu). Do not run
 # `yes | unminimize` — Debian has no such command. Do not clone noVNC; the
 # WeKnora frontend uses @novnc/novnc and the sandbox only needs websockify.
 # procps supplies pgrep for the start script; util-linux supplies flock.

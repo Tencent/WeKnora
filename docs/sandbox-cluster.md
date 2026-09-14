@@ -17,7 +17,7 @@
 
 标准镜像定义在 `docker/Dockerfile.sandbox`，当前包含：
 
-- Python 3.11；
+- Python 3.12；
 - Node.js 20、npm 与 npx；
 - jq 及基础 Shell 工具；
 - `/workspace` 工作目录；
@@ -27,7 +27,7 @@
 
 ### 镜像变体
 
-`docker/Dockerfile.sandbox` 产出多个 target。CLI 变体内容相同、入口不同；桌面变体在同一套 Python 3.11 runtime 上再叠 XFCE，体积明显更大：
+`docker/Dockerfile.sandbox` 产出多个 target。CLI 变体内容相同、入口不同；桌面变体在同一套 Python 3.12 runtime 上再叠 XFCE，体积明显更大：
 
 | 变体 | 标签 | 用途 |
 | --- | --- | --- |
