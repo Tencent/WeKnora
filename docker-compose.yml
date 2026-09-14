@@ -141,6 +141,7 @@ services:
       - DB_USER=${DB_USER:-}
       - DB_PASSWORD=${DB_PASSWORD:-}
       - DB_NAME=${DB_NAME:-}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
       # SQLite 驱动时使用（DB_DRIVER=sqlite）；postgres 驱动忽略
       # - DB_PATH=${DB_PATH:-}
       # ========== Langfuse (optional observability) ==========

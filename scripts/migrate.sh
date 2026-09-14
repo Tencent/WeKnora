@@ -19,6 +19,7 @@ DB_PORT=${DB_PORT:-5432}
 DB_USER=${DB_USER:-postgres}
 DB_PASSWORD=${DB_PASSWORD:-postgres}
 DB_NAME=${DB_NAME:-WeKnora}
+DB_SSLMODE=${DB_SSLMODE:-disable}
 
 # Use versioned migrations directory
 MIGRATIONS_DIR="${MIGRATIONS_DIR:-migrations/versioned}"
@@ -31,23 +32,21 @@ if ! command -v migrate &> /dev/null; then
 fi
 
 # Construct the database URL
-# If DB_URL is already set in .env, use it but ensure sslmode=disable is set
+# An explicit sslmode in DB_URL takes precedence over DB_SSLMODE.
 # Otherwise, construct it from individual components
 if [ -n "$DB_URL" ]; then
-    # If DB_URL already exists, ensure sslmode=disable is set (unless sslmode is already specified)
-    if [[ "$DB_URL" != *"sslmode="* ]]; then
-        # Add sslmode=disable if not present
+    if [[ "$DB_URL" =~ [\?\&]sslmode=([^\&]*) ]]; then
+        EFFECTIVE_SSLMODE="${BASH_REMATCH[1]}"
+    else
+        EFFECTIVE_SSLMODE="$DB_SSLMODE"
         if [[ "$DB_URL" == *"?"* ]]; then
-            DB_URL="${DB_URL}&sslmode=disable"
+            DB_URL="${DB_URL}&sslmode=${DB_SSLMODE}"
         else
-            DB_URL="${DB_URL}?sslmode=disable"
+            DB_URL="${DB_URL}?sslmode=${DB_SSLMODE}"
         fi
-    elif [[ "$DB_URL" == *"sslmode=require"* ]] || [[ "$DB_URL" == *"sslmode=prefer"* ]]; then
-        # Replace sslmode=require/prefer with sslmode=disable for local dev
-        DB_URL="${DB_URL//sslmode=require/sslmode=disable}"
-        DB_URL="${DB_URL//sslmode=prefer/sslmode=disable}"
     fi
 else
+    EFFECTIVE_SSLMODE="$DB_SSLMODE"
     # Use Python to properly URL encode password if it contains special characters
     # This handles special characters in passwords correctly
     if command -v python3 &> /dev/null; then
@@ -56,8 +55,16 @@ else
         # Fallback: try to use printf for basic encoding (may not work for all special chars)
         ENCODED_PASSWORD="$DB_PASSWORD"
     fi
-    DB_URL="postgres://${DB_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable"
+    DB_URL="postgres://${DB_USER}:${ENCODED_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE}"
 fi
+
+case "$EFFECTIVE_SSLMODE" in
+    disable|require|verify-ca|verify-full) ;;
+    *)
+        echo "Error: invalid PostgreSQL sslmode; expected disable, require, verify-ca, or verify-full" >&2
+        exit 1
+        ;;
+esac
 
 # Execute migration based on command
 case "$1" in
@@ -119,4 +126,4 @@ case "$1" in
         ;;
 esac
 
-echo "Migration command completed successfully" 
+echo "Migration command completed successfully"
