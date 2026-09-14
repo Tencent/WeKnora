@@ -180,6 +180,43 @@ helm install weknora ./helm \
 | `frontend.image.repository` | Image repository | `wechatopenai/weknora-ui` |
 | `frontend.image.tag` | Image tag | `latest` |
 
+### Docreader (Document Parser)
+
+The docreader parses uploaded documents (PDF, Word, etc.) and writes extracted
+images to `/tmp/docreader`. The app reads these images (read-only) for display
+and VLM analysis. Since app and docreader run as **separate Deployments**, the
+shared volume requires a `ReadWriteMany` storage class (e.g., cephfs, NFS).
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `docreader.enabled` | Enable docreader | `true` |
+| `docreader.replicaCount` | Number of replicas | `1` |
+| `docreader.image.repository` | Image repository | `wechatopenai/weknora-docreader` |
+| `docreader.image.tag` | Image tag | `latest` |
+| `docreader.sharedVolume.enabled` | Mount `/tmp/docreader` in both app (RO) and docreader (RW) | `false` |
+| `docreader.sharedVolume.type` | Volume type: `emptyDir` (pod-local) or `pvc` | `emptyDir` |
+| `docreader.sharedVolume.sizeLimit` | emptyDir size limit | `5Gi` |
+| `docreader.sharedVolume.pvcName` | Existing PVC name (empty = auto-create) | `""` |
+| `docreader.sharedVolume.storageClass` | Storage class for auto-created PVC | `""` |
+| `docreader.sharedVolume.accessMode` | Access mode for auto-created PVC | `ReadWriteMany` |
+| `docreader.sharedVolume.size` | Auto-created PVC size | `5Gi` |
+
+> **Note:** `emptyDir` is pod-scoped and **cannot** share data between the app
+> and docreader pods. For cross-pod sharing, set `enabled: true`, `type: pvc`,
+> and a `ReadWriteMany` storage class.
+
+Example (production with cephfs):
+
+```yaml
+docreader:
+  sharedVolume:
+    enabled: true
+    type: pvc
+    storageClass: rook-cephfs
+    accessMode: ReadWriteMany
+    size: 10Gi
+```
+
 ### PostgreSQL (ParadeDB)
 
 | Parameter | Description | Default |
