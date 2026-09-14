@@ -15,6 +15,8 @@ package sandbox
 import (
 	"context"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // SessionShellExecutor executes ad-hoc shell commands inside a session-
@@ -148,6 +150,45 @@ type SessionTerminalManager interface {
 // cannot honour the capability.
 type SessionTerminalProvider interface {
 	SessionTerminalManager() SessionTerminalManager
+}
+
+// SessionDesktopConn is one dialled desktop leg.
+//
+// SandboxID is the sandbox this connection actually reached. It is returned
+// rather than looked up afterwards because a skill install landing between
+// the dial and the lookup would report the new sandbox for a connection held
+// on the old one, and the handler's rebuild check would silently miss.
+type SessionDesktopConn struct {
+	Conn      *websocket.Conn
+	SandboxID string
+
+	// StartTTLRefresh extends the provider idle timeout for as long as ctx
+	// is live. The WebSocket handler must pass the relay ctx (WithoutCancel),
+	// not the HTTP request ctx used to dial. Nil when the backend has no
+	// timeout to refresh (Docker).
+	StartTTLRefresh func(ctx context.Context)
+}
+
+// SessionDesktopManager relays a WebSocket to the graphical desktop of the
+// sandbox bound to a session. Like the terminal it is provider-neutral: the
+// WebSocket handler bridges browser RFB frames to it without knowing whether
+// E2B or Cube serves the session.
+type SessionDesktopManager interface {
+	// OpenSessionDesktop dials the desktop port of the session's currently
+	// bound sandbox. It is lookup-only by design: the caller (the desktop
+	// service) has already provisioned and started the desktop through the
+	// normal execution path, so a missing binding here means the sandbox
+	// disappeared between the two steps, not "please create one".
+	// ErrNoLiveSessionSandbox says exactly that; a backend that cannot relay
+	// desktops returns ErrDesktopUnsupported.
+	OpenSessionDesktop(ctx context.Context, sessionID string, opts RemoteDesktopOptions) (*SessionDesktopConn, error)
+}
+
+// SessionDesktopProvider is implemented by managers that MAY offer a
+// graphical desktop. The accessor returns nil when the current runtime cannot
+// honour the capability.
+type SessionDesktopProvider interface {
+	SessionDesktopManager() SessionDesktopManager
 }
 
 // SessionTurnHolder marks the start and end of one chat turn on a session's

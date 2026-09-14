@@ -236,6 +236,13 @@ func TestMergeSandboxConfigForUpdateNilIncoming(t *testing.T) {
 	require.Nil(t, MergeSandboxConfigForUpdate(nil, &TenantSandboxConfig{}))
 }
 
+func TestMergeSandboxConfigForUpdatePreservesDesktopEnabled(t *testing.T) {
+	incoming := &TenantSandboxConfig{SandboxType: "cube", DesktopEnabled: true}
+	existing := &TenantSandboxConfig{SandboxType: "cube"}
+	merged := MergeSandboxConfigForUpdate(incoming, existing)
+	require.True(t, merged.DesktopEnabled)
+}
+
 func TestMergeSandboxConfigForUpdatePreservesSkillImage(t *testing.T) {
 	existing := &TenantSandboxConfig{
 		E2B:        &E2BSandboxConfig{APIKey: "old-e2b"},

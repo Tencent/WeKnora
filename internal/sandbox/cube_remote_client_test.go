@@ -36,6 +36,7 @@ func TestCubeRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsFilesystemEnumeration: true,
 		SupportsSnapshots:             true,
 		SupportsTerminals:             true,
+		SupportsDesktop:               true,
 	}, client.Capabilities())
 }
 
@@ -667,4 +668,38 @@ func TestNormalizeCubeError(t *testing.T) {
 			require.ErrorIs(t, err, tt.err)
 		})
 	}
+}
+
+func TestCubeDesktopTemplateSpecExposesWebsockifyPort(t *testing.T) {
+	spec := cubeDesktopTemplateSpec(nil)
+
+	require.Equal(t, DefaultCubeDesktopTemplateImage, spec["image"])
+	require.Equal(t, DesktopTemplateName, spec["name"])
+	// exposedPorts must carry BOTH: envd for the build probe, 6080 for
+	// websockify. Dropping 6080 makes the desktop unreachable; dropping envd
+	// makes the template build fail its probe.
+	require.Equal(t, []uint16{CubeEnvdPort, 6080}, spec["exposedPorts"])
+	require.Equal(t, uint16(CubeEnvdPort), spec["probePort"])
+	require.Equal(t, CubeEnvdHealthPath, spec["probePath"])
+	// 1G (the standard value) is too small once XFCE is installed.
+	require.Equal(t, "8G", spec["writableLayerSize"])
+	require.Equal(t, true, spec["allowInternetAccess"])
+	require.Equal(t, []string{"/usr/bin/envd"}, spec["command"])
+	require.Equal(t, []string{"-port", "49983", "-isnotfc"}, spec["args"])
+}
+
+func TestCubeStandardTemplateSpecStillExposesOnlyEnvd(t *testing.T) {
+	// Host ports are a finite resource (CubeVS allocates 20000-29999), so the
+	// extra mapping must stay on the desktop variant only.
+	spec := cubeStandardTemplateSpec(nil)
+	require.Equal(t, []uint16{CubeEnvdPort}, spec["exposedPorts"])
+}
+
+func TestDesktopReadyCmdDoesNotUseSS(t *testing.T) {
+	// e2b.WaitForPort generates `ss -tln`, and iproute2 is not in the image:
+	// ss exits 127, the loop never terminates, and the template build hangs
+	// instead of failing. Keep the python3 probe.
+	require.NotContains(t, desktopReadyCmd, "ss ")
+	require.Contains(t, desktopReadyCmd, "python3")
+	require.Contains(t, desktopReadyCmd, "6080")
 }

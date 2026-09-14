@@ -67,6 +67,7 @@ func ResolveEffectiveConfig(
 	overrideSeconds(&effective.TerminalIdleDisconnect, tenantCfg.TerminalIdleDisconnectSec)
 	effective.TerminalIdleDisconnect = EffectiveTerminalIdleDisconnect(effective.TerminalIdleDisconnect)
 	effective.AllowPrivateEndpoints = tenantCfg.AllowPrivateEndpoints
+	effective.DesktopEnabled = tenantCfg.DesktopEnabled
 	effective.Network = resolveNetworkPolicy(tenantCfg.Network)
 	if tenantCfg.EnvVars != nil {
 		effective.EnvVars = cloneMetadata(tenantCfg.EnvVars)
