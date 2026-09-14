@@ -235,8 +235,6 @@ import {
   INTEGRATION_PREVIEW_ITEMS,
   INTEGRATION_TAB_CAPABILITY,
   INTEGRATION_TAB_MIN_ROLE,
-  INTEGRATION_TABS,
-  type IntegrationTab,
 } from '@/config/integrations'
 import {
   SETTINGS_SECTION_MIN_ROLE,
@@ -298,50 +296,9 @@ type NavGroup = {
 //   viewer 是合理的（contributor 也能浏览模型列表）。
 // - members / orgunits / mcp 已迁至侧栏独立页，不再出现在设置弹窗导航中。
 const SYSTEM_ADMIN_SECTIONS = SYSTEM_ADMIN_SETTINGS_SECTIONS
-const INTEGRATION_SECTION_PREFIX = 'integration-'
-
-const integrationTabFromSection = (section: string): IntegrationTab => {
-  const raw = section.startsWith(INTEGRATION_SECTION_PREFIX)
-    ? section.slice(INTEGRATION_SECTION_PREFIX.length)
-    : section
-  if (INTEGRATION_TABS.includes(raw as IntegrationTab)) {
-    return raw as IntegrationTab
-  }
-  return 'im'
-}
-
-const isIntegrationSection = (section: string) => {
-  return section.startsWith(INTEGRATION_SECTION_PREFIX) &&
-    INTEGRATION_TABS.includes(integrationTabFromSection(section))
-}
-
-const REMOVED_SETTINGS_SECTIONS = new Set([
-  'ollama',
-  'weknoracloud',
-  'integrations',
-  'api',
-  'integration-im',
-  'integration-embed',
-  'integration-api',
-  'integration-chrome',
-  'integration-claw',
-  // 已迁至侧栏独立页；旧 openSettings / deep-link 会落到 general / 由 beforeEnter 重定向。
-  'members',
-  'orgunits',
-  'mcp',
-])
 
 const normalizeSettingsSection = (section: string) => {
-  if (section === 'members' || section === 'orgunits') {
-    return 'general'
-  }
-  if (section === 'mcp') {
-    return 'general'
-  }
-  if (REMOVED_SETTINGS_SECTIONS.has(section) || section.startsWith('integration-')) {
-    return 'models'
-  }
-  return section
+  // members / orgunits / mcp 已迁至侧栏；旧 deep-link 交给 settingsRoute 归一化。
   return normalizeSettingsSectionFromQuery(section, route.query.tab as string | undefined)
 }
 
@@ -436,7 +393,6 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'models_runtime',
       label: t('settings.navGroups.modelsRuntime'),
-      items: pickItems(['models']),
       items: pickItems(['models', 'ollama', 'weknoracloud']),
     },
     {

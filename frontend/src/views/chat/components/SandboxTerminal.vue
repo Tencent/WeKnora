@@ -204,7 +204,7 @@ function mountTerminal() {
     fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
     xterm.open(terminalHost.value);
-    xterm.onData((data) => {
+    xterm.onData((data: string) => {
         echo?.onLocal(data);
         terminal.sendInput(data);
     });

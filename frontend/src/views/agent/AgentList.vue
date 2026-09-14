@@ -809,7 +809,7 @@ import { useMenuStore } from '@/stores/menu'
 import type { SharedAgentInfo, OrganizationSharedAgentItem } from '@/api/organization'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import TenantModelsGuide from '@/components/TenantModelsGuide.vue'
-import { focusAgentEditorSection, markContextualGuideDone } from '@/config/contextualGuides'
+import { markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useUIStore } from '@/stores/ui'
 import AgentAvatar from '@/components/AgentAvatar.vue'
@@ -829,7 +829,6 @@ import {
   getStoredOrgUnitId,
   setStoredOrgUnitId,
 } from '@/api/org-unit'
-import { integrationSectionKey } from '@/config/settingsRoute'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -1108,7 +1107,6 @@ const applyAgentListData = (res: { data: CustomAgent[]; disabled_own_agent_ids: 
     disabled_by_me: disabledOwnIds.includes(agent.id)
   }))
   redirectLegacyEditQuery()
-  void checkAndOpenEditModal()
 }
 
 const fetchList = (force = false) => {
@@ -1119,7 +1117,6 @@ const fetchList = (force = false) => {
     orgStore.fetchSharedAgents({ force }),
   ]).finally(() => { loading.value = false }).then(() => {
     redirectLegacyEditQuery()
-    void checkAndOpenEditModal()
     // 各空间智能体数量已由 GET /organizations 的 resource_counts 带回，存于 orgStore.resourceCounts
     const counts = orgStore.resourceCounts?.agents?.by_organization
     if (counts) spaceAgentCountByOrg.value = { ...counts }
@@ -1131,36 +1128,10 @@ const redirectLegacyEditQuery = () => {
   const editId = route.query.edit as string
   const section = route.query.section as string
   const sourceTenantId = route.query.sourceTenantId as string | undefined
-  if (editId && (section === 'im' || section === 'embed' || section === 'integrations')) {
+  if (editId && (section === 'im' || section === 'embed' || section === 'integrations' || section === 'integration-im' || section === 'integration-embed')) {
     router.replace({
       path: `/platform/agents/${editId}`,
       query: { tab: 'publish' },
-
-// 检查 URL 参数并打开编辑模态框
-const resolveAgentForEdit = (editId: string, sourceTenantId?: string): CustomAgent | null => {
-  const own = agents.value.find(a => a.id === editId)
-  if (own) return own
-  if (sourceTenantId) {
-    const shared = sharedAgents.value.find(
-      s => s.agent?.id === editId && String(s.source_tenant_id) === sourceTenantId,
-    )
-    if (shared?.agent) return shared.agent as CustomAgent
-  }
-  return null
-}
-
-let editOpenGeneration = 0
-
-const checkAndOpenEditModal = async () => {
-  const generation = ++editOpenGeneration
-  const editId = route.query.edit as string
-  const section = route.query.section as string
-  const sourceTenantId = route.query.sourceTenantId as string | undefined
-  if (editId && (section === 'im' || section === 'embed' || section === 'integrations' || section === 'integration-im' || section === 'integration-embed')) {
-    const tab = section === 'embed' || section === 'integration-embed' ? 'embed' : 'im'
-    router.replace({
-      path: '/platform/settings',
-      query: { section: integrationSectionKey(tab), agentId: editId },
     })
     return
   }
@@ -1170,41 +1141,6 @@ const checkAndOpenEditModal = async () => {
     if (route.query.highlight) query.highlight = String(route.query.highlight)
     if (sourceTenantId) query.sourceTenantId = sourceTenantId
     router.replace({ path: `/platform/agents/${editId}`, query })
-    const agent = resolveAgentForEdit(editId, sourceTenantId)
-    // A route change can remove a creator filter before the corresponding
-    // all-agent fetch completes. Keep the deep-link query intact so the list
-    // refresh callback can resolve and open the target instead of losing it.
-    if (!agent) return
-
-    const requestedSection = section || 'basic'
-    const requestedHighlight = (route.query.highlight as string) || ''
-    if (
-      editorVisible.value
-      && editingAgent.value?.id === agent.id
-      && !requestedHighlight
-    ) {
-      // Global Settings may be covering this exact editor. Preserve any
-      // unsaved draft and focus the requested configuration section in place.
-      editorInitialSection.value = requestedSection
-      focusAgentEditorSection(requestedSection)
-    } else {
-      // A global Settings dialog can be opened on top of an existing agent
-      // editor. Flush visible=false before loading the deep-linked target so
-      // AgentEditorModal's visibility watcher rebuilds its form data.
-      editorVisible.value = false
-      await nextTick()
-      if (generation !== editOpenGeneration) return
-      editingAgent.value = agent
-      editorMode.value = 'edit'
-      editorInitialSection.value = requestedSection
-      editorInitialHighlightField.value = requestedHighlight
-      editorVisible.value = true
-    }
-    if (generation !== editOpenGeneration) return
-    // Drop the transient edit/section params but preserve other filter
-    // state (scope / creator / q) so refreshing doesn't reset the view.
-    const { edit: _e, section: _s, highlight: _h, sourceTenantId: _st, ...rest } = route.query
-    router.replace({ path: route.path, query: rest })
   }
 }
 
@@ -1212,10 +1148,6 @@ watch(
   () => route.query.edit,
   (editId) => {
     if (editId) redirectLegacyEditQuery()
-  (v) => {
-    if (v && (agents.value.length > 0 || sharedAgents.value.length > 0)) {
-      void checkAndOpenEditModal()
-    }
   },
 )
 

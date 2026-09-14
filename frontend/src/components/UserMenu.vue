@@ -182,6 +182,7 @@ const canManageModels = computed(() =>
 )
 const canSeeWebSearch = computed(() =>
   authStore.canAccessAllTenants || authStore.hasRole('admin'),
+)
 const canManageSkills = computed(() =>
   authStore.canAccessAllTenants ||
   authStore.isSystemAdmin ||

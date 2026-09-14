@@ -338,7 +338,7 @@ const onServiceCardClick = (event: Event, service: MCPService) => {
 }
 
 // Handle edit button click
-const handleEdit = (service: MCPService) => {
+const handleEdit = (service: MCPService, initialStep: 0 | 1 = 0) => {
   currentService.value = { ...service }
   dialogMode.value = 'edit'
   dialogInitialStep.value = initialStep

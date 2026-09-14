@@ -272,7 +272,7 @@ export async function getAuthConfig(): Promise<AuthConfigResponse> {
     const response = await get('/api/v1/auth/config')
     return response as unknown as AuthConfigResponse
   } catch {
-    return { success: false, registration_mode: 'invite_only' }
+    return { success: false, registration_mode: 'invite_only', complex_password_enabled: false }
   }
 }
 

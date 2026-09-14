@@ -435,7 +435,7 @@ const generatingUsage = ref(false)
 let usageGeneration = 0
 const formRef = ref<FormInstanceFunctions>()
 const submitting = ref(false)
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const authStore = useAuthStore()
 const hasOrgHierarchy = ref(false)
 const canShareMCP = computed(
@@ -462,7 +462,6 @@ const loadOrgHierarchyFlag = async () => {
 onMounted(() => {
   void loadOrgHierarchyFlag()
 })
-const { t, locale } = useI18n()
 const codeImportPlaceholder = `{
   "mcpServers": {
     "my-server": {
