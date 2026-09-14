@@ -1,3 +1,4 @@
+// Package milvus implements the Milvus retrieve engine, including multilingual BM25.
 package milvus
 
 import (

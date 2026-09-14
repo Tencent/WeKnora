@@ -49,8 +49,8 @@ type MultilingualMigrationOptions struct {
 	BatchSize                int
 }
 
-// MilvusMigrationSummary reports the result of a copy-only migration.
-type MilvusMigrationSummary struct {
+// MigrationSummary reports the result of a copy-only migration.
+type MigrationSummary struct {
 	ExaminedCollections int
 	MigratedCollections int
 	MigratedRows        int
@@ -66,10 +66,10 @@ func MigrateLegacyCollections(
 	ctx context.Context,
 	milvusClient *client.Client,
 	options MultilingualMigrationOptions,
-) (MilvusMigrationSummary, error) {
-	var summary MilvusMigrationSummary
+) (MigrationSummary, error) {
+	var summary MigrationSummary
 	if milvusClient == nil {
-		return summary, fmt.Errorf("Milvus client is nil")
+		return summary, fmt.Errorf("milvus client is nil")
 	}
 
 	sourceBase := strings.TrimSpace(options.SourceCollectionBaseName)
@@ -113,7 +113,10 @@ func MigrateLegacyCollections(
 			return summary, fmt.Errorf("describe source collection %s: %w", sourceCollectionName, err)
 		}
 		if analyzerModeFromSchema(sourceCollection.Schema) == collectionAnalyzerMulti {
-			log.Infof("[Milvus] Source collection %s already uses multilingual analyzers, skipping", sourceCollectionName)
+			log.Infof(
+				"[Milvus] Source collection %s already uses multilingual analyzers, skipping",
+				sourceCollectionName,
+			)
 			continue
 		}
 		schemaDimension, err := dimensionFromSchema(sourceCollection.Schema)
@@ -166,7 +169,10 @@ func MigrateLegacyCollections(
 			return summary, fmt.Errorf("inspect target collection %s: %w", targetCollectionName, err)
 		}
 		if mode != collectionAnalyzerMulti {
-			return summary, fmt.Errorf("target collection %s is not multilingual; choose a new target base", targetCollectionName)
+			return summary, fmt.Errorf(
+				"target collection %s is not multilingual; choose a new target base",
+				targetCollectionName,
+			)
 		}
 
 		if err := loadMilvusCollection(ctx, milvusClient, sourceCollectionName); err != nil {
@@ -313,7 +319,7 @@ func primaryKeyForMigratedRow(
 
 func dimensionFromSchema(schema *entity.Schema) (int, error) {
 	if schema == nil {
-		return 0, fmt.Errorf("Milvus collection schema is nil")
+		return 0, fmt.Errorf("collection schema is nil")
 	}
 	for _, field := range schema.Fields {
 		if field == nil || field.Name != fieldEmbedding {
@@ -366,7 +372,11 @@ func migrateCollectionRows(
 			WithBatchSize(batchSize),
 	)
 	if err != nil {
-		return totalCopied, fmt.Errorf("create query iterator for source collection %s: %w", sourceCollectionName, err)
+		return totalCopied, fmt.Errorf(
+			"create query iterator for source collection %s: %w",
+			sourceCollectionName,
+			err,
+		)
 	}
 
 	for {
@@ -375,7 +385,11 @@ func migrateCollectionRows(
 			break
 		}
 		if err != nil {
-			return totalCopied, fmt.Errorf("query source collection %s with iterator: %w", sourceCollectionName, err)
+			return totalCopied, fmt.Errorf(
+				"query source collection %s with iterator: %w",
+				sourceCollectionName,
+				err,
+			)
 		}
 		if resultSet.ResultCount == 0 {
 			break
@@ -384,10 +398,18 @@ func migrateCollectionRows(
 
 		documents, _, err := convertResultSet([]client.ResultSet{resultSet})
 		if err != nil {
-			return totalCopied, fmt.Errorf("decode source collection %s at iterator batch %d: %w", sourceCollectionName, batchNumber, err)
+			return totalCopied, fmt.Errorf(
+				"decode source collection %s at iterator batch %d: %w",
+				sourceCollectionName,
+				batchNumber,
+				err,
+			)
 		}
 		if len(documents) == 0 {
-			return totalCopied, fmt.Errorf("source collection %s returned rows without decodable fields", sourceCollectionName)
+			return totalCopied, fmt.Errorf(
+				"source collection %s returned rows without decodable fields",
+				sourceCollectionName,
+			)
 		}
 
 		embeddings := make([]*MilvusVectorEmbedding, 0, len(documents))
@@ -415,7 +437,12 @@ func migrateCollectionRows(
 		}
 
 		if _, err := milvusClient.Upsert(ctx, createUpsert(targetCollectionName, embeddings, true)); err != nil {
-			return totalCopied, fmt.Errorf("upsert target collection %s at iterator batch %d: %w", targetCollectionName, batchNumber, err)
+			return totalCopied, fmt.Errorf(
+				"upsert target collection %s at iterator batch %d: %w",
+				targetCollectionName,
+				batchNumber,
+				err,
+			)
 		}
 		totalCopied += len(embeddings)
 		log.Infof("[Milvus] Copied %d rows from %s", totalCopied, sourceCollectionName)

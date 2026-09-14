@@ -13,7 +13,11 @@ func TestDetectAnalyzerName(t *testing.T) {
 		text string
 		want string
 	}{
-		{name: "Chinese", text: "Transformer中多头注意力的三种使用方式及解码器自注意力掩码原因", want: milvusAnalyzerChinese},
+		{
+			name: "Chinese",
+			text: "Transformer中多头注意力的三种使用方式及解码器自注意力掩码原因",
+			want: milvusAnalyzerChinese,
+		},
 		{name: "English", text: "How does multi-head attention work", want: milvusAnalyzerEnglish},
 		{name: "ChineseWithTechnicalTerm", text: "AI 注意力", want: milvusAnalyzerChinese},
 		{name: "JapaneseKanjiWithKana", text: "東京都の設定", want: milvusAnalyzerDefault},

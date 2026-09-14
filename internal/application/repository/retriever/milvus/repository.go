@@ -109,7 +109,7 @@ func (m *milvusRepository) collectionAnalyzerMode(
 	}
 	if collection == nil || collection.Schema == nil {
 		return collectionAnalyzerLegacy, fmt.Errorf(
-			"Milvus collection %s has no schema", collectionName,
+			"collection %s has no schema", collectionName,
 		)
 	}
 
@@ -1257,9 +1257,7 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 						return nil, nil, fmt.Errorf("get float vector failed: %w", err)
 					}
 					embedding := make([]float32, len(val))
-					for j, v := range val {
-						embedding[j] = v
-					}
+					copy(embedding, val)
 					docs[i].Embedding = embedding
 				}
 			case *column.ColumnDoubleArray:
