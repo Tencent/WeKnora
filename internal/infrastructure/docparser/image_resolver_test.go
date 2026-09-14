@@ -598,3 +598,20 @@ func TestResolveAndStoreSharedMHTMLContract(t *testing.T) {
 		t.Fatalf("fenced code blank lines changed: %s", out)
 	}
 }
+
+func TestNewStoredImageRecordsDimensions(t *testing.T) {
+	stored := newStoredImage("ref.png", "local://images/ref.png", "image/png", createTestPNG(120, 45))
+	if stored.Width != 120 || stored.Height != 45 {
+		t.Fatalf("newStoredImage() dimensions = %dx%d, want 120x45", stored.Width, stored.Height)
+	}
+	if stored.OriginalRef != "ref.png" || stored.ServingURL != "local://images/ref.png" || stored.MimeType != "image/png" {
+		t.Fatalf("newStoredImage() fields = %+v", stored)
+	}
+}
+
+func TestNewStoredImageUndecodableData(t *testing.T) {
+	stored := newStoredImage("ref.bin", "local://images/ref.bin", "application/octet-stream", []byte("not an image"))
+	if stored.Width != 0 || stored.Height != 0 {
+		t.Fatalf("newStoredImage() dimensions = %dx%d, want 0x0 for undecodable data", stored.Width, stored.Height)
+	}
+}
