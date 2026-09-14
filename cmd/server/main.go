@@ -34,6 +34,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/container"
+	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -67,6 +68,7 @@ func main() {
 		router *gin.Engine,
 		resourceCleaner interfaces.ResourceCleaner,
 		systemSettingSvc interfaces.SystemSettingService,
+		workbenchHandler *handler.WorkbenchHandler,
 	) error {
 		// Create HTTP server
 		server := &http.Server{
@@ -114,6 +116,9 @@ func main() {
 				server.Close()
 			}()
 
+			if err := workbenchHandler.Shutdown(shutdownCtx); err != nil {
+				logger.Errorf(context.Background(), "Workbench consoles forced to shutdown: %v", err)
+			}
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
 				server.Close()

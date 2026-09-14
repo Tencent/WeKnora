@@ -10,6 +10,7 @@ export const DEPLOYMENT_CAPABILITY_KEYS = [
   'settings.storage',
   'settings.sandbox',
   'settings.sandbox.docker',
+  'sandbox.workbench',
 ] as const
 
 export type DeploymentCapabilityKey = typeof DEPLOYMENT_CAPABILITY_KEYS[number]
@@ -39,7 +40,7 @@ export function isDeploymentCapabilitySupported(
   }
   // Docker talks to a local Engine API (often docker.sock = host root), so
   // missing or failed capability probes must not leave the picker visible.
-  if (key === 'settings.sandbox.docker') {
+  if (key === 'settings.sandbox.docker' || key === 'sandbox.workbench') {
     return capabilities[key]?.supported === true
   }
   return capabilities[key]?.supported !== false

@@ -33,6 +33,7 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
+import { isWorkbenchDropTarget } from '@/utils/sandboxWorkbench'
 
 const route = useRoute();
 const router = useRouter();
@@ -121,6 +122,7 @@ const isFileDrag = (event: DragEvent): boolean => {
 
 // 全局拖拽事件处理
 const handleGlobalDragEnter = (event: DragEvent) => {
+    if (excludeWorkbenchDrop(event)) return;
     if (!isFileDrag(event)) return;
     event.preventDefault();
     dragCounter++;
@@ -131,6 +133,7 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 }
 
 const handleGlobalDragOver = (event: DragEvent) => {
+    if (excludeWorkbenchDrop(event)) return;
     if (!isFileDrag(event)) return;
     event.preventDefault();
     if (event.dataTransfer) {
@@ -139,6 +142,7 @@ const handleGlobalDragOver = (event: DragEvent) => {
 }
 
 const handleGlobalDragLeave = (event: DragEvent) => {
+    if (excludeWorkbenchDrop(event)) return;
     if (!isFileDrag(event)) return;
     event.preventDefault();
     dragCounter--;
@@ -148,6 +152,7 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 }
 
 const handleGlobalDrop = async (event: DragEvent) => {
+    if (excludeWorkbenchDrop(event)) return;
     if (!isFileDrag(event)) return;
     event.preventDefault();
     dragCounter = 0;
@@ -175,6 +180,13 @@ const handleGlobalDrop = async (event: DragEvent) => {
     window.dispatchEvent(new CustomEvent('weknora:knowledge-file-drop', {
         detail: { kbId: getCurrentKbId(), files: droppedFiles }
     }));
+}
+
+function excludeWorkbenchDrop(event: DragEvent): boolean {
+    if (!isWorkbenchDropTarget(event.target)) return false;
+    dragCounter = 0;
+    ismask.value = false;
+    return true;
 }
 
 // 组件挂载时添加全局事件监听器
@@ -239,6 +251,13 @@ onUnmounted(() => {
     min-height: 0;
     /* 统一整页背景，让左侧菜单与右侧内容区视觉连贯 */
     background: var(--td-bg-color-container);
+}
+
+@media (max-width: 1199px) {
+    .main:has(.has-workbench-panel) {
+        min-width: 0;
+        overflow: hidden;
+    }
 }
 
 /* 右侧路由区：占满剩余宽度与整列高度，并把 min-height:0 传给子页面以便内部 flex 滚动 */

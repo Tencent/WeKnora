@@ -58,6 +58,7 @@ type RouterParams struct {
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
 	SandboxConfigHandler         *handler.SandboxConfigHandler
 	SandboxSkillHandler          *handler.SandboxSkillHandler
+	WorkbenchHandler             *handler.WorkbenchHandler
 	MeEnvVarHandler              *handler.MeEnvVarHandler
 	EvaluationHandler            *handler.EvaluationHandler
 	AuthHandler                  *handler.AuthHandler
@@ -123,7 +124,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// 基础中间件（不需要认证）
 	r.Use(middleware.RequestID())
 	r.Use(middleware.Language())
-	r.Use(middleware.Logger())
+	r.Use(workbenchAwareRequestLogger())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.ErrorHandler())
 
@@ -175,6 +176,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// Short-lived capability URLs for IM and other clients that cannot attach
 	// WeKnora authentication headers.
 	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver)
+	RegisterWorkbenchPublicRoutes(r, params.WorkbenchHandler)
 
 	// Sandbox terminal WebSocket (self-authenticated via a short-lived
 	// query ticket — see RegisterSandboxTerminalRoutes; browsers cannot set
@@ -277,6 +279,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterFAQRoutes(v1, params.FAQHandler, rbacGuards)
 		RegisterChunkRoutes(v1, params.ChunkHandler, rbacGuards)
 		RegisterSessionRoutes(v1, params.SessionHandler, params.MessageSuggestionHandler, rbacGuards)
+		RegisterWorkbenchRoutes(v1, params.WorkbenchHandler)
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)

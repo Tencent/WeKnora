@@ -133,6 +133,10 @@ instance.interceptors.response.use(
   },
   async (error: any) => {
     const originalRequest = error.config;
+    // Downloads use responseType=blob, including JSON policy/path error bodies.
+    if (error.response?.data instanceof Blob && error.response.data.type.includes('json')) {
+      try { error.response.data = JSON.parse(await error.response.data.text()); } catch { /* Keep non-JSON errors intact. */ }
+    }
     
     if (!error.response) {
       return Promise.reject({ message: t('error.networkError') });
@@ -215,8 +219,9 @@ export function get<T = any>(url: string, config?: any): Promise<WithStatus<T>> 
   return instance.get<T>(url, config) as unknown as Promise<WithStatus<T>>;
 }
 
-export async function getDown(url: string): Promise<Blob> {
+export async function getDown(url: string, config?: { signal?: AbortSignal }): Promise<Blob> {
   const res = await instance.get<Blob>(url, {
+    ...config,
     responseType: "blob",
   }) as unknown as Blob;
   return res
@@ -261,6 +266,6 @@ export function patch<T = any>(url: string, data = {}, config?: any): Promise<Wi
   return instance.patch<T>(url, data, config) as unknown as Promise<WithStatus<T>>;
 }
 
-export function del<T = any>(url: string, data?: any): Promise<WithStatus<T>> {
-  return instance.delete<T>(url, { data }) as unknown as Promise<WithStatus<T>>;
+export function del<T = any>(url: string, data?: any, config?: { signal?: AbortSignal }): Promise<WithStatus<T>> {
+  return instance.delete<T>(url, { ...config, data }) as unknown as Promise<WithStatus<T>>;
 }

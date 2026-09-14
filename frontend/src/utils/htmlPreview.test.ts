@@ -107,7 +107,7 @@ test('bootstrap precedes application scripts while preserving doctype, head and 
 test('only executable artifact previews use the compatibility copy; source and sandbox stay intact', () => {
   const source = readFileSync(new URL('../components/document-preview.vue', import.meta.url), 'utf8')
   const htmlCase = source.slice(source.indexOf("case 'html':"), source.indexOf("case 'docx':"))
-  assert.match(htmlCase, /if \(allowsHtmlScriptPreview\(\)\) \{\s*const previewHtml = buildHtmlPreview\(await blob\.text\(\)\)/)
+  assert.match(htmlCase, /if \(allowsHtmlScriptPreview\(\)\) \{\s*const html = await blob\.text\(\);\s*if \(generation !== previewGeneration \|\| props\.requestSignal\?\.aborted\) return;\s*const previewHtml = buildHtmlPreview\(html\)/)
   assert.match(htmlCase, /new Blob\(\[previewHtml\], \{ type: 'text\/html;charset=utf-8' \}\)/)
   assert.match(htmlCase, /await renderText\(blob, ft \|\| 'html'\)/)
   assert.match(source, /sandbox="allow-scripts"/)

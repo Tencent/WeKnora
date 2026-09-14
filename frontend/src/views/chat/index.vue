@@ -3,9 +3,11 @@
         'is-embedded': embeddedMode,
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
+        'has-workbench-panel': workbenchVisible,
         'has-sandbox-panel': sandboxPanel.visible.value,
     }" :style="{ '--sandbox-panel-width': `${sandboxPanel.width.value}px` }">
-        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
+        <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible"
+            :workbench-visible="workbenchVisible" />
         <!-- 沙箱面板收起时：图标与左侧栏展开按钮同一套，位置镜像会话左上角三个点。 -->
         <div v-if="!embeddedMode && !sandboxPanel.visible.value" class="sandbox-header-toggle">
             <t-tooltip placement="bottom">
@@ -166,16 +168,19 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
     <ChatReferencesDrawer />
     <ChatAttachmentPreviewDrawer />
-    <SandboxSidePanel v-if="!embeddedMode" :session-id="session_id"
+    <SandboxWorkbench v-if="workbenchVisible && !embeddedMode && session_id" ref="workbenchRef"
+        :key="workbenchScopeKey" :session-id="String(session_id)" @close="closeWorkbench" />
+    <SandboxSidePanel v-if="!embeddedMode && !workbenchVisible" :session-id="session_id"
         :agent-id="useSettingsStoreInstance.selectedAgentId"
         :agent-source-tenant-id="useSettingsStoreInstance.selectedAgentSourceTenantId"
         :shifted="referencesDrawerVisible"
+        :workbench-enabled="workbenchEnabled" @open-workbench="openWorkbench"
         :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting" />
 </template>
 <script setup>
 import { makeSteerClientId } from '@/utils/steerId';
 import { storeToRefs } from 'pinia';
-import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed } from 'vue';
+import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed, defineAsyncComponent } from 'vue';
 import { useRoute, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router';
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
@@ -204,6 +209,9 @@ import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
 import ChatQuestionMinimap from '@/components/chat/ChatQuestionMinimap.vue';
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
 import ChatHeader from '@/components/ChatHeader.vue';
+import { useAuthStore } from '@/stores/auth';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+const SandboxWorkbench = defineAsyncComponent(() => import('./components/workbench/SandboxWorkbench.vue'));
 import {
     notifySessionMutation,
     SESSION_MUTATION_EVENT,
@@ -279,6 +287,26 @@ const attachStreamDebugToMessage = (message) => {
 const route = useRoute();
 const session_id = ref(props.session_id || route.params.chatid);
 const currentSession = ref(null);
+const authStore = useAuthStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
+const workbenchEnabled = computed(() => deploymentCapabilities.isSupported('sandbox.workbench'));
+const workbenchVisible = ref(false);
+const workbenchRef = ref(null);
+const workbenchScopeKey = computed(() => JSON.stringify([session_id.value, route.fullPath, authStore.user?.id, authStore.effectiveTenantId, authStore.isLoggedIn]));
+function closeWorkbench() {
+    workbenchRef.value?.dispose();
+    workbenchVisible.value = false;
+}
+function openWorkbench() {
+    if (!workbenchEnabled.value || !session_id.value || props.embeddedMode) return;
+    sandboxPanel.close();
+    referencesDrawer.close();
+    workbenchVisible.value = true;
+}
+watch(workbenchScopeKey, closeWorkbench, { flush: 'sync' });
+watch(workbenchEnabled, enabled => { if (!enabled) closeWorkbench(); }, { flush: 'sync' });
+watch(referencesDrawerVisible, visible => { if (visible) closeWorkbench(); }, { flush: 'sync' });
+watch(sandboxPanel.visible, visible => { if (visible) closeWorkbench(); }, { flush: 'sync' });
 
 // 拉 session 详情，并按其 last_request_state 把输入栏状态恢复到当时的发起态。
 // 嵌入式（embeddedMode）由宿主页面注入 agent/KB，所以跳过整套恢复逻辑，
@@ -1451,6 +1479,7 @@ onMounted(async () => {
     }
 })
 const clearData = () => {
+    closeWorkbench();
     if (!props.embeddedMode) sessionActivity.detach(activitySessionId.value);
     activitySessionId.value = '';
     stopStream();
@@ -1555,6 +1584,22 @@ onBeforeRouteUpdate((to, from, next) => {
         @media (max-width: 1399.98px) and (min-width: 960px) {
             --chat-right-inset: var(--sandbox-panel-width, 420px);
             padding-right: var(--sandbox-panel-width, 420px);
+        }
+    }
+
+    &.has-workbench-panel:not(.is-embedded) {
+        @media (min-width: 1200px) {
+            --chat-right-inset: min(44vw, 600px);
+            padding-right: min(44vw, 600px);
+            box-sizing: border-box;
+
+            .chat_scroll_box {
+                padding-top: 0;
+            }
+
+            .sandbox-header-toggle {
+                right: calc(min(44vw, 600px) + 12px);
+            }
         }
     }
 

@@ -438,6 +438,10 @@ type RemoteSandboxCapabilities struct {
 	// reject terminal features with an unsupported-backend error instead of
 	// failing after the WebSocket is upgraded.
 	SupportsTerminals bool
+
+	// SupportsCommandTerminals advertises isolated command PTYs with explicit
+	// budgets and process cleanup. It does not imply persistent-shell reconnect.
+	SupportsCommandTerminals bool
 }
 
 // RemoteSandboxClient is the contract SessionBoundManager talks to. All

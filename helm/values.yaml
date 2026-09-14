@@ -101,6 +101,8 @@ app:
     # Leave false unless this is a private single-node install that also mounts
     # the daemon socket or points at a remote tcp:// daemon with TLS.
     WEKNORA_SANDBOX_DOCKER_ENABLED: "false"
+    # Workbench also requires an explicit public Origin in app.extraEnv.
+    WEKNORA_SANDBOX_WORKBENCH_ENABLED: "false"
 
   # -- Additional environment variables
   extraEnv: []

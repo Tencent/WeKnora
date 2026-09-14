@@ -1,0 +1,48 @@
+{
+  "title": "From JSON Outline to Downloadable Slides",
+  "subtitle": "Synthetic technical demo: a local presentation workflow in WeKnora",
+  "slides": [
+    {
+      "type": "bullets",
+      "title": "A Small, Inspectable Build Contract",
+      "bullets": [
+        "Read the installed skill instructions through read_file before execution.",
+        "Keep the editable JSON outline in /workspace/deck.json.",
+        "Select presentation-builder with shell_exec to use its Python environment.",
+        "Return the finished PPTX from /workspace/output."
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Files Have Distinct Roles",
+      "headers": ["Location", "Purpose", "Builder behavior"],
+      "rows": [
+        ["/workspace/input", "Original attachments", "Read local images; never modify originals"],
+        ["/workspace/deck.json", "Structured slide outline", "Validate before rendering"],
+        ["Skill assets", "Original bundled resources", "Read only; no remote fetches"],
+        ["/workspace/output", "Downloadable artifacts", "Publish a new PPTX; never overwrite"]
+      ]
+    },
+    {
+      "type": "bullets",
+      "title": "Validation Before Publication",
+      "bullets": [
+        "Require explicit slide types and reject unknown JSON fields.",
+        "Bound slide count, text length, image pixels, and artifact size.",
+        "Reject traversal, symbolic links, and non-regular input files.",
+        "Publish only a completed deck using an unused output basename."
+      ]
+    },
+    {
+      "type": "table",
+      "title": "A Reproducible Verification Pass",
+      "headers": ["Check", "Evidence"],
+      "rows": [
+        ["Package structure", "Valid ZIP with presentation, slide, and relationship parts"],
+        ["Page count", "One cover plus four content slides"],
+        ["Editable content", "Nonempty slide text and native table cells"],
+        ["Offline execution", "Pinned dependencies in a network-disabled runtime"]
+      ]
+    }
+  ]
+}

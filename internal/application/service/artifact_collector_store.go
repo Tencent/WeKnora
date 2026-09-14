@@ -8,15 +8,13 @@ import (
 )
 
 // messageRepoArtifactStore adapts interfaces.MessageRepository to the
-// SessionArtifactStore contract expected by ArtifactCollector. It is a thin
-// projection: KnownArtifacts is documented as best-effort, so we forward
-// repo errors verbatim and let the collector decide how to degrade.
+// historical-reference lookup used by ArtifactCollector.
 type messageRepoArtifactStore struct {
 	repo interfaces.MessageRepository
 }
 
 // NewMessageRepoArtifactStore wraps a MessageRepository so ArtifactCollector
-// can build its de-duplication set from every prior message of the session.
+// can resolve explicit references to artifacts from prior messages.
 func NewMessageRepoArtifactStore(repo interfaces.MessageRepository) SessionArtifactStore {
 	return &messageRepoArtifactStore{repo: repo}
 }

@@ -6,22 +6,38 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/gin-gonic/gin"
 )
 
 func allDeploymentFeaturesAvailable() handler.DeploymentFeatureAvailability {
 	return handler.DeploymentFeatureAvailability{
-		Organizations: true,
-		Agents:        true,
-		IM:            true,
-		Embed:         true,
-		API:           true,
-		MCP:           true,
-		WebSearch:     true,
-		VectorStore:   true,
-		Storage:       true,
-		Sandbox:       true,
+		Organizations:    true,
+		Agents:           true,
+		IM:               true,
+		Embed:            true,
+		API:              true,
+		MCP:              true,
+		WebSearch:        true,
+		VectorStore:      true,
+		Storage:          true,
+		Sandbox:          true,
+		Workbench:        true,
+		WorkbenchEnabled: true,
+	}
+}
+
+func TestDeploymentCapabilitiesFromRouterReflectsWorkbenchEnabled(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_WORKBENCH_ENABLED", "true")
+	t.Setenv("WEKNORA_SANDBOX_WORKBENCH_ORIGINS", "")
+	workbench, err := handler.NewWorkbenchHandler(service.NewWorkbenchService(service.WorkbenchServiceDeps{}))
+	if err != nil {
+		t.Fatalf("new workbench handler: %v", err)
+	}
+	data := deploymentCapabilitiesFromRouter(RouterParams{WorkbenchHandler: workbench})
+	if !data.Capabilities["sandbox.workbench"].Supported {
+		t.Fatal("enabled injected workbench must be advertised")
 	}
 }
 

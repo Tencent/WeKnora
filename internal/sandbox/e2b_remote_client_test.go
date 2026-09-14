@@ -374,6 +374,7 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsSnapshots:             true,
 		SupportsVolumes:               false,
 		SupportsTerminals:             true,
+		SupportsCommandTerminals:      true,
 	}, client.Capabilities())
 }
 
@@ -851,7 +852,6 @@ func TestE2BRemoteClientCreateWritesMetadataAndPauseLifecycle(t *testing.T) {
 	networkPayload, ok := mock.createBody["network"].(map[string]any)
 	require.True(t, ok, "network payload missing: %#v", mock.createBody["network"])
 	require.Equal(t, false, networkPayload["allowPublicTraffic"])
-
 }
 
 func TestE2BRemoteClientCreateValidatesTimeoutAction(t *testing.T) {

@@ -921,11 +921,11 @@ export function isNamedSandboxBackend(type: string): boolean {
 }
 
 /** Returns every sandbox config of the workspace. No config means disabled. */
-export function listSandboxConfigs(): Promise<{
+export function listSandboxConfigs(config?: { signal?: AbortSignal }): Promise<{
   data: SandboxConfigRecord[]
   workspace_scripts_disabled?: boolean
 }> {
-  return get('/api/v1/sandbox-configs') as unknown as Promise<{
+  return get('/api/v1/sandbox-configs', config) as unknown as Promise<{
     data: SandboxConfigRecord[]
     workspace_scripts_disabled?: boolean
   }>

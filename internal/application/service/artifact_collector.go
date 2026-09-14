@@ -14,12 +14,14 @@
 //     sandbox and returns an empty slice when none exists.
 //   - Best-effort: individual errors are logged and skipped, never returned,
 //     so a stray unreadable file cannot block the assistant reply.
-//   - De-duplication by (SourcePath, ModTime): if a prior message in the
-//     same session already recorded the same (path, mtime), skip it.
+//   - Source attribution uses a turn-start filesystem baseline. Files already
+//     present before the agent runs are not artifacts of that turn, even when
+//     they were uploaded or renamed through Workbench.
 package service
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
@@ -40,15 +42,40 @@ type SandboxArtifactSource interface {
 	ReadSessionFile(ctx context.Context, sessionID, path string) ([]byte, error)
 }
 
-// SessionArtifactStore is the minimal repository surface the collector needs
-// to compute the "already recorded" set for a session. In production it is
-// backed by the message repository; in tests it is stubbed with an in-memory
-// map so the collector can be exercised without a database.
+// SessionArtifactStore is the minimal repository surface used to resolve
+// explicit references to artifacts from earlier messages.
 type SessionArtifactStore interface {
-	// KnownArtifacts returns every (SourcePath, ModTime) pair already
-	// attached to any prior message of the session. The returned set is
-	// unordered and safe to mutate by the caller.
+	// KnownArtifacts returns artifacts attached to prior session messages.
 	KnownArtifacts(ctx context.Context, sessionID string) ([]types.MessageArtifact, error)
+}
+
+type artifactFileState struct {
+	modTime time.Time
+	size    int64
+}
+
+// ArtifactTurnBaseline is an immutable snapshot of output files immediately
+// before one agent turn starts. Its fields stay private so callers can only
+// obtain a valid baseline through CaptureTurnBaseline.
+type ArtifactTurnBaseline struct {
+	outputDir string
+	files     map[string]artifactFileState
+	valid     bool
+}
+
+type artifactTurnBaselineContextKey struct{}
+
+// WithArtifactTurnBaseline carries one immutable baseline from stream setup to
+// the completion handler without process-wide or session-persistent state.
+func WithArtifactTurnBaseline(
+	ctx context.Context, baseline ArtifactTurnBaseline,
+) context.Context {
+	return context.WithValue(ctx, artifactTurnBaselineContextKey{}, baseline)
+}
+
+func artifactTurnBaselineFromContext(ctx context.Context) ArtifactTurnBaseline {
+	baseline, _ := ctx.Value(artifactTurnBaselineContextKey{}).(ArtifactTurnBaseline)
+	return baseline
 }
 
 // ArtifactCollectorConfig bounds the collector's I/O and storage footprint.
@@ -167,17 +194,32 @@ func NewArtifactCollectorFromSandboxManager(
 // Returns nil when the session has no pin, which Collect treats as "nothing to
 // attach".
 func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string) SandboxArtifactSource {
-	if c.resolver == nil {
-		return c.source
+	source, _, err := c.resolveSessionSource(ctx, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "[ArtifactCollector] resolve session source failed: %v", err)
+		return nil
 	}
+	return source
+}
+
+// resolveSessionSource also reports whether a sandbox pin existed. A missing
+// pin at turn start is a valid empty baseline: the agent may create and pin
+// its first sandbox later in the same turn.
+func (c *ArtifactCollector) resolveSessionSource(
+	ctx context.Context, sessionID string,
+) (SandboxArtifactSource, bool, error) {
+	if c.resolver == nil {
+		return c.source, c.source != nil, nil
+	}
+	// Shared agents resolve configs in their resource tenant, while the
+	// unchanged SandboxTenantID keeps filesystem reads in the session's binding.
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	configID, err := sandboxConfigForExistingSandbox(ctx, c.pinner, sessionID)
 	if err != nil {
-		logger.Warnf(ctx, "[ArtifactCollector] read sandbox pin failed: %v", err)
-		return nil
+		return nil, false, fmt.Errorf("read sandbox pin: %w", err)
 	}
 	if configID == "" {
-		return nil
+		return nil, false, nil
 	}
 	mgr, err := resolveTenantSandboxForConfig(
 		ctx, c.resolver, c.fallbackMgr, tenantID, configID, nil,
@@ -185,21 +227,25 @@ func (c *ArtifactCollector) sessionSource(ctx context.Context, sessionID string)
 	if err != nil {
 		// Refusing to read is the safe failure: substituting another backend
 		// would look in the wrong provider account and report "no artifacts".
-		logger.Warnf(ctx, "[ArtifactCollector] resolve sandbox failed: %v", err)
-		return nil
+		return nil, true, fmt.Errorf("resolve sandbox: %w", err)
 	}
 	if mgr == nil {
 		// The pin names the deployment-wide default, which has no per-config
 		// manager of its own; the injected process-wide source IS that backend.
-		return c.source
+		if c.source == nil {
+			return nil, true, fmt.Errorf("pinned sandbox has no session filesystem")
+		}
+		return c.source, true, nil
 	}
 	if source, ok := mgr.(SandboxArtifactSource); ok {
-		return source
+		return source, true, nil
 	}
 	if configID == types.SandboxConfigIDGlobalDefault {
-		return c.source
+		if c.source != nil {
+			return c.source, true, nil
+		}
 	}
-	return nil
+	return nil, true, fmt.Errorf("pinned sandbox has no session filesystem")
 }
 
 // newBoundedConfig fills in defaults so callers can pass a zero
@@ -209,6 +255,56 @@ func newBoundedConfig(cfg ArtifactCollectorConfig) ArtifactCollectorConfig {
 		cfg.MaxFileBytes = defaultMaxArtifactFileBytes
 	}
 	return cfg
+}
+
+// CaptureTurnBaseline snapshots output metadata before the agent starts. A
+// session without a pin is a valid empty baseline because its first sandbox
+// can be created later in the turn. Any real lookup failure leaves the
+// baseline invalid so collection fails closed instead of claiming pre-existing
+// Workbench files as agent output.
+func (c *ArtifactCollector) CaptureTurnBaseline(
+	ctx context.Context, sessionID, outputDir string,
+) (ArtifactTurnBaseline, error) {
+	baseline := ArtifactTurnBaseline{}
+	if c == nil || sessionID == "" {
+		return baseline, fmt.Errorf("artifact baseline requires collector and session")
+	}
+	if outputDir == "" {
+		outputDir = c.config.OutputDir
+	}
+	if outputDir == "" {
+		return baseline, fmt.Errorf("artifact baseline requires output directory")
+	}
+	baseline.outputDir = outputDir
+	baseline.files = make(map[string]artifactFileState)
+
+	source, pinned, err := c.resolveSessionSource(ctx, sessionID)
+	if err != nil {
+		return baseline, err
+	}
+	if source == nil {
+		if pinned {
+			return baseline, fmt.Errorf("artifact baseline source unavailable")
+		}
+		baseline.valid = true
+		return baseline, nil
+	}
+
+	entries, err := source.ListSessionFiles(ctx, sessionID, outputDir)
+	if err != nil {
+		return baseline, fmt.Errorf("list artifact baseline: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.Type != sandbox.RemoteEntryFile || entry.Path == "" {
+			continue
+		}
+		baseline.files[entry.Path] = artifactFileState{
+			modTime: entry.ModTime,
+			size:    entry.Size,
+		}
+	}
+	baseline.valid = true
+	return baseline, nil
 }
 
 // Collect scans the session sandbox's output directory and persists any
@@ -229,8 +325,9 @@ func (c *ArtifactCollector) Collect(
 	messageID string,
 	tenantID uint64,
 	outputDir string,
+	baseline ArtifactTurnBaseline,
 ) (types.MessageArtifacts, error) {
-	return c.collect(ctx, sessionID, messageID, tenantID, outputDir, nil)
+	return c.collect(ctx, sessionID, messageID, tenantID, outputDir, baseline, nil)
 }
 
 // CollectWithNotify is Collect plus a progress hook fired after the sandbox
@@ -246,7 +343,8 @@ func (c *ArtifactCollector) CollectWithNotify(
 	outputDir string,
 	notify func(pending int),
 ) (types.MessageArtifacts, error) {
-	return c.collect(ctx, sessionID, messageID, tenantID, outputDir, notify)
+	baseline := artifactTurnBaselineFromContext(ctx)
+	return c.collect(ctx, sessionID, messageID, tenantID, outputDir, baseline, notify)
 }
 
 func (c *ArtifactCollector) collect(
@@ -255,17 +353,11 @@ func (c *ArtifactCollector) collect(
 	messageID string,
 	tenantID uint64,
 	outputDir string,
+	baseline ArtifactTurnBaseline,
 	notify func(pending int),
 ) (artifacts types.MessageArtifacts, err error) {
 	if c == nil || c.fileService == nil {
 		logger.Infof(ctx, "[ArtifactCollector] skipped: collector or dependencies nil (session=%s)", sessionID)
-		return nil, nil
-	}
-	source := c.sessionSource(ctx, sessionID)
-	if source == nil {
-		logger.Infof(ctx,
-			"[ArtifactCollector] skipped: sandbox backend has no session filesystem (session=%s)",
-			sessionID)
 		return nil, nil
 	}
 	if sessionID == "" {
@@ -279,6 +371,19 @@ func (c *ArtifactCollector) collect(
 		// Callers should have resolved this via skills.ArtifactOutputDir
 		// but we guard here anyway to keep Collect self-contained.
 		logger.Infof(ctx, "[ArtifactCollector] skipped: empty outputDir (session=%s)", sessionID)
+		return nil, nil
+	}
+	if !baseline.valid || baseline.outputDir != outputDir {
+		logger.Warnf(ctx,
+			"[ArtifactCollector] skipped: missing or mismatched turn baseline (session=%s dir=%s)",
+			sessionID, outputDir)
+		return nil, nil
+	}
+	source := c.sessionSource(ctx, sessionID)
+	if source == nil {
+		logger.Infof(ctx,
+			"[ArtifactCollector] skipped: sandbox backend has no session filesystem (session=%s)",
+			sessionID)
 		return nil, nil
 	}
 
@@ -309,23 +414,16 @@ func (c *ArtifactCollector) collect(
 		// exactly this branch: either the sandbox was already reaped or
 		// the skill wrote to a different directory. Logging the exact
 		// (session, dir) pair makes it a 30-second grep to confirm.
-		logger.Infof(ctx, "[ArtifactCollector] no entries under %s (session=%s) — sandbox reaped or skill wrote elsewhere",
+		logger.Infof(ctx,
+			"[ArtifactCollector] no entries under %s (session=%s); sandbox reaped or skill wrote elsewhere",
 			outputDir, sessionID)
 		return nil, nil
 	}
 	logger.Infof(ctx, "[ArtifactCollector] listed %d entries under %s (session=%s)", len(entries), outputDir, sessionID)
 
-	// Build a "already recorded" set so we don't double-attach the same
-	// file when several turns share the sandbox. Errors here degrade to an
-	// empty set: attaching duplicates is a soft failure, aborting is not.
-	known := c.loadKnownSet(ctx, sessionID)
-	if len(known) > 0 {
-		logger.Infof(ctx, "[ArtifactCollector] known set size=%d (session=%s)", len(known), sessionID)
-	}
-
 	pending := 0
 	for _, entry := range entries {
-		if c.acceptEntry(entry, known) {
+		if c.acceptEntry(entry, baseline) {
 			pending++
 		}
 	}
@@ -334,43 +432,29 @@ func (c *ArtifactCollector) collect(
 	}
 
 	artifacts = make(types.MessageArtifacts, 0, pending)
+	persisted := make(map[string]struct{}, pending)
 	for _, entry := range entries {
-		art, ok := c.maybePersist(ctx, source, sessionID, messageID, tenantID, entry, known)
+		key := artifactKey(entry.Path, entry.ModTime)
+		if _, duplicate := persisted[key]; duplicate {
+			continue
+		}
+		art, ok := c.maybePersist(
+			ctx, source, sessionID, messageID, tenantID, entry, baseline,
+		)
 		if !ok {
 			continue
 		}
 		artifacts = append(artifacts, art)
-		// Adding to the known set inside the loop protects us against the
-		// pathological case where ListSessionFiles returns the same path
-		// twice (envd hasn't been observed to do so, but future-proofing
-		// the loop is cheap).
-		known[artifactKey(art.SourcePath, art.ModTime)] = struct{}{}
+		persisted[key] = struct{}{}
 	}
 	logger.Infof(ctx, "[ArtifactCollector] done session=%s listed=%d attached=%d",
 		sessionID, len(entries), len(artifacts))
 	return artifacts, nil
 }
 
-// loadKnownSet returns the (source_path, mod_time) tuples already recorded
-// against the session. Empty on error so the caller can proceed.
-func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) map[string]struct{} {
-	set := map[string]struct{}{}
-	if c.store == nil {
-		return set
-	}
-	prev, err := c.store.KnownArtifacts(ctx, sessionID)
-	if err != nil {
-		logger.Warnf(ctx, "[ArtifactCollector] load previous artifacts failed: session=%s err=%v",
-			sessionID, err)
-		return set
-	}
-	for _, p := range prev {
-		set[artifactKey(p.SourcePath, p.ModTime)] = struct{}{}
-	}
-	return set
-}
-
-func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known map[string]struct{}) bool {
+func (c *ArtifactCollector) acceptEntry(
+	entry sandbox.RemoteDirEntry, baseline ArtifactTurnBaseline,
+) bool {
 	if entry.Type != sandbox.RemoteEntryFile {
 		return false
 	}
@@ -380,7 +464,8 @@ func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known map[
 	if entry.Size > c.config.MaxFileBytes {
 		return false
 	}
-	if _, seen := known[artifactKey(entry.Path, entry.ModTime)]; seen {
+	if previous, existed := baseline.files[entry.Path]; existed &&
+		previous.size == entry.Size && previous.modTime.Equal(entry.ModTime) {
 		return false
 	}
 	return true
@@ -388,8 +473,8 @@ func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known map[
 
 // maybePersist runs the per-file pipeline (filter → download → upload →
 // build metadata). Returns ok=false when the entry was skipped for any
-// reason (already known, too large, upload failed). All skip reasons are
-// logged so operators can diagnose empty artifact panels.
+// reason (present in the turn baseline, too large, upload failed). Skip
+// reasons are logged so operators can diagnose empty artifact panels.
 func (c *ArtifactCollector) maybePersist(
 	ctx context.Context,
 	source SandboxArtifactSource,
@@ -397,9 +482,9 @@ func (c *ArtifactCollector) maybePersist(
 	messageID string,
 	tenantID uint64,
 	entry sandbox.RemoteDirEntry,
-	known map[string]struct{},
+	baseline ArtifactTurnBaseline,
 ) (types.MessageArtifact, bool) {
-	if !c.acceptEntry(entry, known) {
+	if !c.acceptEntry(entry, baseline) {
 		if entry.Type == sandbox.RemoteEntryFile && entry.Size > c.config.MaxFileBytes {
 			logger.Warnf(ctx, "[ArtifactCollector] skip oversize artifact: session=%s path=%s size=%d limit=%d",
 				sessionID, entry.Path, entry.Size, c.config.MaxFileBytes)
@@ -439,6 +524,7 @@ func (c *ArtifactCollector) maybePersist(
 		URL:        storagePath,
 		FileName:   entry.Name,
 		FileType:   strings.ToLower(filepath.Ext(entry.Name)),
+		Kind:       types.ArtifactKindForFile(entry.Name),
 		FileSize:   int64(len(data)),
 		SourcePath: entry.Path,
 		ModTime:    entry.ModTime,
@@ -472,7 +558,9 @@ func (c *ArtifactCollector) bindArtifactResource(ctx context.Context, ref, messa
 // ReferencedHistory returns only artifacts from this session explicitly named
 // in the answer. Bind these immutable versions to the new message as well, so
 // deleting their original message cannot invalidate a later reference.
-func (c *ArtifactCollector) ReferencedHistory(ctx context.Context, sessionID, messageID, content string) types.MessageArtifacts {
+func (c *ArtifactCollector) ReferencedHistory(
+	ctx context.Context, sessionID, messageID, content string,
+) types.MessageArtifacts {
 	if c == nil || c.store == nil {
 		return nil
 	}
@@ -500,9 +588,7 @@ func (c *ArtifactCollector) ReferencedHistory(ctx context.Context, sessionID, me
 }
 
 // artifactKey is the string form of the (source_path, mtime) tuple used to
-// de-duplicate artifacts across messages. mtime is normalised to UTC + RFC3339
-// nano so equality is stable across time-zone or precision differences
-// between sandbox envd builds.
+// suppress duplicate entries within one sandbox listing.
 func artifactKey(path string, mod time.Time) string {
 	if mod.IsZero() {
 		return path + "\x00"

@@ -29,6 +29,7 @@ type CubeRemoteClient struct {
 	client        *cubesandbox.Client
 	sandboxDomain string
 	httpTimeout   time.Duration
+	terminalHTTP  *http.Client
 }
 
 // NewCubeRemoteClient constructs a Cube-backed RemoteSandboxClient using the
@@ -95,6 +96,7 @@ func NewCubeRemoteClientWithPool(
 		),
 		sandboxDomain: config.CubeSandboxDomain,
 		httpTimeout:   httpTimeout,
+		terminalHTTP:  httpClient,
 	}, nil
 }
 
@@ -137,6 +139,10 @@ func (h *cubeRemoteHandle) TrafficAccessToken() string {
 
 func (c *CubeRemoteClient) Provider() RemoteProvider { return SandboxTypeCube }
 
+// SupportsPrivateWorkbenchExec stays false while Cube logs lowered stdin.
+// File helpers require a payload-redacted private exec path.
+func (c *CubeRemoteClient) SupportsPrivateWorkbenchExec() bool { return false }
+
 func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{
 		SupportsReconnect:             true,
@@ -152,7 +158,8 @@ func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// snapshots instead, so this stays false.
 		SupportsVolumes: false,
 		// envd exposes an interactive PTY service that the Cube SDK wraps.
-		SupportsTerminals: true,
+		SupportsTerminals:        true,
+		SupportsCommandTerminals: true,
 	}
 }
 
