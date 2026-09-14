@@ -75,17 +75,19 @@ window.__RUNTIME_CONFIG__ = {
 
 ### 3. 域名白名单填什么？
 
-渠道里的「域名白名单」校验的是 **API 请求的 `Origin` 头**，不是「允许哪些网站粘贴脚本」的抽象概念。
+填写**允许嵌入的宿主网站 Origin**：A 网站嵌入 B 上的 WeKnora，就填 A，例如 `https://shop.example.com`，不需要为了聊天 API 再添加 B。
 
-实际要填：
+- 每行一个完整 Origin（协议、域名、可选端口），不能带业务路径、查询参数或用户名。允许末尾 `/`，匹配时会规范化。
+- `*.example.com` 允许 HTTP(S) 子域名及其端口，不包含根域 `example.com`；`*.example.com:8443` 可限定端口。
+- 嵌入 HTML 的 `Content-Security-Policy: frame-ancestors` 由渠道白名单生成，由浏览器检查所有祖先页面；同源管理端预览也允许。
+- iframe 内 API 请求来自 B，正常同源请求不再要求 B 出现在宿主白名单。安全模式下业务后端换取令牌仍需手动发送 `Origin: https://shop.example.com`，与白名单一致。
+- 空白名单、无效或停用渠道拒绝加载；不要用 `*` 作为生产配置。
 
-1. **Embed 页面源站**（必填）——聊天 iframe 内发 API 时浏览器会带这个 Origin  
-   - 同域部署：`https://app.example.com`  
-   - 独立子域：`https://embed.example.com`
-2. **你的业务后端源站**（安全模式时建议填）——你自己写的「取令牌接口」在服务端调用 `POST .../exchange` 时，需带与白名单一致的 `Origin` 头（见 [embed-secure-mode.md](./embed-secure-mode.md)）
+**部署要求**：标准前端 Nginx 的 `/embed/` 必须保留 `auth_request`、内部 `/_embed-frame-policy` 和 CSP 响应头配置。它通过后端 `/api/v1/embed-frame-policy` 获取策略，再直接返回 `embed.html`。后端不可用时拒绝返回嵌入页面。Lite 在 Go 静态页面响应上设置同一策略。自定义网关/CDN 不得移除或缓存该响应头；HTTPS 代理应保留原始 Host（含端口）、协议和 `Sec-Fetch-Site`。
 
-第三方商城 `https://shop.example.com` **通常不用**进白名单（它只是加载脚本，不直接调 embed API）。  
-若你把 embed 反代到商城同域路径下（少见），才需要填商城域名。
+**升级已有渠道**：过去仅填写 WeKnora 的 B 地址的渠道，需改为实际宿主 A；同时更新前端 Nginx 和后端。不会自动猜测或放行未知宿主。安全模式的业务来源配置保持一致。
+
+白名单限制浏览器嵌入，不替代用户认证。直接打开链接或非浏览器客户端仍由 token、会话签名和限流保护；需控制访客身份时使用安全模式。
 
 ## Widget 跨域与 sandbox
 
@@ -98,7 +100,7 @@ A 与 B 同域时保持默认即可，无需 `data-sandbox`。
 - [ ] `EMBED_BASE_URL` 与真实访问地址一致（含 `https`）
 - [ ] embed 子域能打开 `/embed/<渠道ID>` 和 `/weknora-widget.js`
 - [ ] embed 子域 `/api/` 能连到后端
-- [ ] 渠道白名单包含 embed 源站（及安全模式下的业务后端源站）
+- [ ] 渠道白名单包含实际宿主网站 A；安全模式 exchange 声明同一业务 Origin
 - [ ] 管理端复制的 snippet 里 URL 已变为 embed 子域
 
 ## 相关文档

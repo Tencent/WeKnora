@@ -4428,7 +4428,7 @@ export default {
     welcomeMessageDesc: 'Показывается во встроенном чате до первого сообщения посетителя; оставьте пустым, чтобы скрыть',
     showSuggestedQuestions: 'Рекомендуемые вопросы',
     showSuggestedQuestionsDesc: 'Показывать быстрые вопросы до первого сообщения посетителя — из настроек агента и связанных баз знаний',
-    originsHint: 'Один полный origin в строке (напр. https://shop.example.com), минимум один; поддерживаются поддомены *.example.com',
+    originsHint: 'Укажите сайты, которым разрешено встраивание (A), а не адрес WeKnora (B). Один полный Origin на строку, например https://shop.example.com; минимум один. Поддерживается *.example.com.',
     originsRequired: 'Укажите хотя бы один разрешённый домен',
     originsInvalid: 'Неверный домен: {origin}',
     originsWildcardProd: 'В production запрещён wildcard \'*\'',

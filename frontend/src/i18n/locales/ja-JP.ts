@@ -2729,7 +2729,7 @@ export default {
     welcomeMessageDesc: '訪問者が最初のメッセージを送る前に埋め込みチャットに表示されます。空欄にすると非表示になります',
     showSuggestedQuestions: '質問候補',
     showSuggestedQuestionsDesc: '訪問者の最初のメッセージの前に、エージェント設定と連携ナレッジベースをもとにした質問候補を表示します',
-    originsHint: '1行に1つの完全なオリジンを入力します（例: https://shop.example.com）。1件以上必須です。*.example.comのようなサブドメインのワイルドカードに対応しています',
+    originsHint: 'WeKnora の URL（B）ではなく、埋め込みを許可するホストサイト（A）を入力します。1 行に 1 つの Origin（例: https://shop.example.com）。1 件以上必須。*.example.com に対応。',
     originsRequired: '許可オリジンを1件以上入力してください',
     originsInvalid: '無効なオリジン: {origin}',
     originsWildcardProd: '本番環境ではワイルドカードのオリジン「*」は使用できません',

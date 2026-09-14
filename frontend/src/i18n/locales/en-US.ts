@@ -2729,7 +2729,7 @@ export default {
     welcomeMessageDesc: 'Shown in the embed chat before the visitor sends their first message; leave blank to hide',
     showSuggestedQuestions: 'Suggested questions',
     showSuggestedQuestionsDesc: 'Show starter prompts before the first visitor message, from agent config and linked knowledge bases',
-    originsHint: 'One full origin per line (e.g. https://shop.example.com), at least one required; *.example.com subdomain wildcards supported',
+    originsHint: 'Enter the host websites allowed to embed this channel (A), not the WeKnora address (B). One full origin per line, e.g. https://shop.example.com; at least one required. Supports *.example.com.',
     originsRequired: 'At least one allowed origin is required',
     originsInvalid: 'Invalid origin: {origin}',
     originsWildcardProd: 'Wildcard origin \'*\' is not allowed in production',
