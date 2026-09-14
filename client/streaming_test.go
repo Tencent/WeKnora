@@ -37,6 +37,79 @@ func knowledgeSSEEvent(t *testing.T, w io.Writer, resp StreamResponse, eventType
 	fmt.Fprintf(w, "data:%s\n\n", b)
 }
 
+func TestProcessAgentSSEStream_MultilineDataFrame(t *testing.T) {
+	frame := "data: {\"response_type\":\"answer\",\n" +
+		"data: \"content\":\"hello\",\"done\":false}\n\n"
+
+	c := &Client{}
+	var got *AgentStreamResponse
+	err := c.processAgentSSEStream(strings.NewReader(frame), func(resp *AgentStreamResponse) error {
+		got = resp
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("multiline SSE data frame failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("callback was not invoked")
+	}
+	if got.ResponseType != AgentResponseTypeAnswer || got.Content != "hello" {
+		t.Fatalf("response = %#v, want answer content hello", got)
+	}
+}
+
+func TestKnowledgeQAStream_MultilineDataFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data:{\"response_type\":\"answer\",\n")
+		fmt.Fprint(w, "data:\"content\":\"hello\",\"done\":false}\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var got *StreamResponse
+	err := c.KnowledgeQAStream(context.Background(), "sess", &KnowledgeQARequest{Query: "q"},
+		func(e *StreamResponse) error {
+			got = e
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("multiline knowledge SSE data frame failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("callback was not invoked")
+	}
+	if got.ResponseType != ResponseTypeAnswer || got.Content != "hello" {
+		t.Fatalf("response = %#v, want answer content hello", got)
+	}
+}
+
+func TestContinueStream_MultilineDataFrame(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event:message\n")
+		fmt.Fprint(w, "data:{\"response_type\":\"answer\",\n")
+		fmt.Fprint(w, "data:\"content\":\"hello\",\"done\":false}\n\n")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var got *StreamResponse
+	err := c.ContinueStream(context.Background(), "sess", "msg", func(e *StreamResponse) error {
+		got = e
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("multiline continue SSE data frame failed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("callback was not invoked")
+	}
+	if got.ResponseType != ResponseTypeAnswer || got.Content != "hello" {
+		t.Fatalf("response = %#v, want answer content hello", got)
+	}
+}
+
 // TestProcessAgentSSEStream_DataLineLimits locks in the 4 MiB bufio.Scanner
 // cap raised from the 64 KiB default: a `references` event bundling chunk
 // contents reaches hundreds of KiB and previously errored "token too long".
