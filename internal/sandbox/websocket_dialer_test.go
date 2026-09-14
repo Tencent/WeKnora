@@ -26,7 +26,7 @@ func desktopEchoServer(t *testing.T, seen *http.Request) *httptest.Server {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		_, _, _ = conn.NextReader()
 	}))
 }
@@ -53,7 +53,7 @@ func TestWebsocketDialerAttachesInboundTokenAndExtraHeaders(t *testing.T) {
 
 	conn, resp, err := dialer.Dial(context.Background(), "sbx-1", 6080, "/websockify", extra)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
 
 	// Gateway credential, injected from THIS pool's registry.
@@ -90,7 +90,7 @@ func TestWebsocketDialerUsesItsOwnPoolRegistry(t *testing.T) {
 	conn, _, err := privatePool.WebsocketDialerFor(cfg).
 		Dial(context.Background(), "sbx-1", 6080, "/websockify", nil)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	require.Equal(t, "private-token", seen.Header.Get(InboundTokenHeader))
 }
@@ -141,7 +141,7 @@ func TestWebsocketDialerE2BEmptyDomainUsesSDKDefault(t *testing.T) {
 	conn, _, err := pool.WebsocketDialerFor(cfg).
 		Dial(context.Background(), "sbx-1", 6080, "/websockify", nil)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	require.Equal(t, "6080-sbx-1.e2b.app", seen.Host)
 }
 
@@ -162,7 +162,7 @@ func TestWebsocketDialerE2BConfiguredDomainWinsOverDefault(t *testing.T) {
 	conn, _, err := pool.WebsocketDialerFor(cfg).
 		Dial(context.Background(), "sbx-1", 6080, "/websockify", nil)
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	require.Equal(t, "6080-sbx-1.sandbox.internal", seen.Host)
 }
 
@@ -206,7 +206,7 @@ func TestCubeDialDesktopReachesWebsockifyPath(t *testing.T) {
 		&cubeRemoteHandle{sb: &cubesandbox.Sandbox{SandboxID: "sbx-9"}},
 		RemoteDesktopOptions{BasicAuthUser: "weknora", BasicAuthPassword: "s3cret"})
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	require.Equal(t, "/websockify", seen.URL.Path)
 	require.Equal(t, "6080-sbx-9.cube.app", seen.Host)
@@ -247,7 +247,7 @@ func TestCubeDialDesktopUsesHandleTokenWhenRegistryEmpty(t *testing.T) {
 		}},
 		RemoteDesktopOptions{BasicAuthUser: "weknora", BasicAuthPassword: "s3cret"})
 	require.NoError(t, err)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	require.Equal(t, "from-handle", seen.Header.Get(InboundTokenHeader),
 		"websockify dial must carry the handle's traffic token even when the registry is empty")

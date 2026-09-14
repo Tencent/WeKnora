@@ -264,7 +264,9 @@ func TestExecShellCommandWithoutSkipStillBootstraps(t *testing.T) {
 	execs := append([]RemoteExecRequest(nil), client.execRequests...)
 	client.mu.Unlock()
 	require.Len(t, execs, 2)
-	require.Equal(t, workspaceBootstrapCommand(SessionInputRoot, SessionOutputRoot, SessionWorkspaceRoot), execs[0].Command)
+	require.Equal(t,
+		workspaceBootstrapCommand(SessionInputRoot, SessionOutputRoot, SessionWorkspaceRoot),
+		execs[0].Command)
 	require.Equal(t, "echo hi", execs[1].Command)
 }
 

@@ -1,4 +1,4 @@
-// One-shot handshake tickets for the sandbox desktop WebSocket.
+// Package service provides one-shot handshake tickets for the sandbox desktop WebSocket.
 //
 // Unlike the terminal's ticket (sandbox_terminal_ticket.go) this is an opaque
 // random string in a store, not a signed JWT. The desktop ticket must be

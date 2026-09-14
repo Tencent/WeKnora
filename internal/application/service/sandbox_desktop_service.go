@@ -1,4 +1,4 @@
-// Lazy startup and dialling for the sandbox graphical desktop.
+// Package service provides lazy startup and dialling for the sandbox graphical desktop.
 //
 // The desktop is not started with the sandbox: E2B runs envd as init and never
 // executes the image CMD, and Cube's ENTRYPOINT is already envd's. One
@@ -198,7 +198,9 @@ func requireDesktopCapable(mgr any) error {
 // sessionShellOptionsExecutor is SessionBoundManager.ExecShellCommandWithOptions
 // without dragging in SessionInstallShellExecutor's install-mode name.
 type sessionShellOptionsExecutor interface {
-	ExecShellCommandWithOptions(context.Context, string, string, sandbox.ShellExecOptions) (*sandbox.ExecuteResult, error)
+	ExecShellCommandWithOptions(
+		context.Context, string, string, sandbox.ShellExecOptions,
+	) (*sandbox.ExecuteResult, error)
 }
 
 func desktopSkipPrepOpts(timeout time.Duration) sandbox.ShellExecOptions {

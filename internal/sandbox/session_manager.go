@@ -779,7 +779,9 @@ func (m *SessionBoundManager) ExecShellCommandWithOptions(
 				return nil, err
 			}
 		} else {
-			if err := m.prepareSessionDirs(ctx, handle, user, SessionInputRoot, SessionOutputRoot, workDir); err != nil {
+			if err := m.prepareSessionDirs(
+				ctx, handle, user, SessionInputRoot, SessionOutputRoot, workDir,
+			); err != nil {
 				return nil, err
 			}
 		}

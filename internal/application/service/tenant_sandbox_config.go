@@ -742,7 +742,8 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 						if in.ReplaceDesktop {
 							persistErr := s.persistSpawnTemplateID(ctx, tenantID, merged, desktop.ID, oldDesktopIDs)
 							if persistErr != nil {
-								logger.Warnf(ctx, "[sandbox] persist rebuilt desktop template id: %v; keeping previous templates",
+								logger.Warnf(ctx,
+									"[sandbox] persist rebuilt desktop template id: %v; keeping previous templates",
 									persistErr)
 							} else {
 								result.DesktopTemplateID = desktop.ID

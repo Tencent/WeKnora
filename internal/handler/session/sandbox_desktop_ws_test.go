@@ -165,7 +165,8 @@ func TestDesktopSlotCancelsHoldWhenRedisStaysDownPastLease(t *testing.T) {
 	select {
 	case <-hold.Done():
 	case <-time.After(time.Second):
-		t.Fatal("redis down for a full lease must drop the hold; otherwise a recovered replica would still claim exclusivity")
+		t.Fatal("redis down for a full lease must drop the hold; " +
+			"otherwise a recovered replica would still claim exclusivity")
 	}
 }
 
@@ -360,7 +361,8 @@ func TestDesktopRelaySandboxDropReleasesWithoutReadTimeout(t *testing.T) {
 	select {
 	case <-runReturned:
 	case <-time.After(2 * time.Second):
-		t.Fatal("run() still blocked after the sandbox hop dropped; the desktop slot would stay held for desktopReadTimeout")
+		t.Fatal("run() still blocked after the sandbox hop dropped; " +
+			"the desktop slot would stay held for desktopReadTimeout")
 	}
 
 	require.NoError(t, browserClient.SetReadDeadline(time.Now().Add(2*time.Second)))

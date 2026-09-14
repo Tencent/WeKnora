@@ -1,4 +1,4 @@
-// Sandbox desktop WebSocket relay.
+// Package session provides the sandbox desktop WebSocket relay.
 //
 // Browser (noVNC, no credentials)
 //
@@ -571,8 +571,8 @@ type desktopRelay struct {
 
 func (r *desktopRelay) run() {
 	defer r.cancel()
-	defer r.browser.Close()
-	defer r.sandbox.Close()
+	defer func() { _ = r.browser.Close() }()
+	defer func() { _ = r.sandbox.Close() }()
 
 	r.browser.SetReadLimit(desktopBrowserReadLimit)
 	r.sandbox.SetReadLimit(desktopSandboxReadLimit)
@@ -626,7 +626,9 @@ func (r *desktopRelay) pumpBrowserToSandbox() {
 			r.touch()
 		}
 		if parsing && !r.stream.ParsingEnabled() {
-			logger.Warnf(r.ctx, "[sandbox-desktop] RFB client parser disabled; falling back to reported activity session=%s", r.sessionID)
+			logger.Warnf(r.ctx,
+				"[sandbox-desktop] RFB client parser disabled; falling back to reported activity session=%s",
+				r.sessionID)
 		}
 		_ = r.sandbox.SetWriteDeadline(time.Now().Add(desktopWriteTimeout))
 		if err := r.sandbox.WriteMessage(websocket.BinaryMessage, payload); err != nil {

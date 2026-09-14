@@ -30,7 +30,7 @@ type E2BRemoteClient struct {
 	// wsDialer reaches non-envd data-plane ports (the desktop's websockify
 	// on 6080). It is nil on the non-pool construction paths, which is what
 	// DialDesktop reports as unsupported.
-	wsDialer *SandboxWebsocketDialer
+	wsDialer *WebsocketDialer
 
 	// desktopEnabled mirrors Config.DesktopEnabled so template building can
 	// pick buildDesktopTemplate without re-reading a config the client
@@ -83,7 +83,7 @@ func newE2BRemoteClient(
 	cfg *Config,
 	transport http.RoundTripper,
 	inboundTokens *InboundTokenRegistry,
-	wsDialer *SandboxWebsocketDialer,
+	wsDialer *WebsocketDialer,
 ) (*E2BRemoteClient, error) {
 	if cfg == nil {
 		return nil, errors.New("e2b remote client config is required")
@@ -410,10 +410,13 @@ func (c *E2BRemoteClient) EnsureDesktopTemplate(ctx context.Context) (*RemoteTem
 	return c.buildDesktopTemplate(ctx)
 }
 
+// ReplaceDesktopTemplate starts a new desktop-template build from the current
+// spec. Same persist-then-delete contract as ReplaceStandardTemplate.
 func (c *E2BRemoteClient) ReplaceDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	return c.buildDesktopTemplate(ctx)
 }
 
+// DeleteSupersededDesktopTemplates drops desktop templates other than keepID.
 func (c *E2BRemoteClient) DeleteSupersededDesktopTemplates(ctx context.Context, keepID string) error {
 	keepID = strings.TrimSpace(keepID)
 	if keepID == "" {

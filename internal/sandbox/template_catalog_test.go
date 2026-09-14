@@ -33,11 +33,17 @@ func TestIsDesktopTemplateRecognizesProviderScopedName(t *testing.T) {
 func TestClassifyWeKnoraTemplatePrefersNameOverImage(t *testing.T) {
 	standard, desktop := classifyWeKnoraTemplate(DesktopTemplateName, DefaultDockerImage)
 	if standard || !desktop {
-		t.Fatalf("named desktop template must be desktop even if the image repo matches CLI, got standard=%v desktop=%v", standard, desktop)
+		t.Fatalf(
+			"named desktop template must be desktop even if the image repo matches CLI, got standard=%v desktop=%v",
+			standard, desktop,
+		)
 	}
 	standard, desktop = classifyWeKnoraTemplate(StandardTemplateName, DefaultDesktopDockerImage)
 	if !standard || desktop {
-		t.Fatalf("named CLI template must stay CLI even if the image tag is desktop, got standard=%v desktop=%v", standard, desktop)
+		t.Fatalf(
+			"named CLI template must stay CLI even if the image tag is desktop, got standard=%v desktop=%v",
+			standard, desktop,
+		)
 	}
 }
 

@@ -159,7 +159,9 @@ func (s stubDesktopProvider) SessionDesktopManager() sandbox.SessionDesktopManag
 
 type stubDesktopManager struct{}
 
-func (stubDesktopManager) OpenSessionDesktop(context.Context, string, sandbox.RemoteDesktopOptions) (*sandbox.SessionDesktopConn, error) {
+func (stubDesktopManager) OpenSessionDesktop(
+	context.Context, string, sandbox.RemoteDesktopOptions,
+) (*sandbox.SessionDesktopConn, error) {
 	return nil, sandbox.ErrDesktopUnsupported
 }
 

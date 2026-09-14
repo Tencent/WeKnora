@@ -1,4 +1,4 @@
-// RFB (VNC) client-stream parsing for the sandbox desktop relay.
+// Package session provides RFB (VNC) client-stream parsing for the sandbox desktop relay.
 //
 // The relay is transparent — it forwards bytes without rewriting them — but it
 // still has to know where client messages start and end, because idle

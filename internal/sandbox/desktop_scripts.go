@@ -1,4 +1,4 @@
-// Package sandbox: shell fed to the desktop sandbox over Exec.
+// Package sandbox provides the shell fed to the desktop sandbox over Exec.
 //
 // These live as real .sh files rather than Go string literals so they keep
 // shell tooling (shellcheck, `sh -n`, an editor that knows the language) and

@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	// StandardTemplateName is the provider-side name of the CLI template.
 	StandardTemplateName = "weknora"
 
 	// DesktopTemplateName is the provider-side name of the desktop template.
@@ -71,8 +72,15 @@ type RemoteTemplateCatalog interface {
 // RemoteDesktopTemplateCatalog is the desktop sibling of RemoteTemplateCatalog.
 // Cube and E2B implement it; Docker does not (SupportsDesktop stays false).
 type RemoteDesktopTemplateCatalog interface {
+	// EnsureDesktopTemplate returns the cluster's WeKnora desktop template,
+	// building it when absent.
 	EnsureDesktopTemplate(ctx context.Context) (*RemoteTemplate, error)
+	// ReplaceDesktopTemplate applies the current spec to the desktop
+	// template. Callers persist a READY replacement first, then
+	// DeleteSupersededDesktopTemplates.
 	ReplaceDesktopTemplate(ctx context.Context) (*RemoteTemplate, error)
+	// DeleteSupersededDesktopTemplates removes desktop templates other than
+	// keepID after that ID is spawnable and stored on the config.
 	DeleteSupersededDesktopTemplates(ctx context.Context, keepID string) error
 }
 

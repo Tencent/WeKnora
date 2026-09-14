@@ -1,4 +1,4 @@
-// Package sandbox: graphical desktop (VNC over WebSocket) capability.
+// Package sandbox provides graphical desktop (VNC over WebSocket) capability.
 //
 // The desktop is an optional, provider-neutral capability alongside
 // RemoteTerminalManager. It differs from the terminal in one structural way:
@@ -37,7 +37,7 @@ type RemoteDesktopOptions struct {
 func dialSandboxDesktop(
 	ctx context.Context,
 	provider RemoteProvider,
-	dialer *SandboxWebsocketDialer,
+	dialer *WebsocketDialer,
 	handle RemoteSandboxHandle,
 	opts RemoteDesktopOptions,
 ) (*websocket.Conn, error) {

@@ -165,7 +165,11 @@ func TestRFBClientMessageSize(t *testing.T) {
 		{"PointerEvent", append([]byte{5}, make([]byte, 5)...), 6, true, true},
 		{"ClientCutText 5 bytes", append([]byte{6, 0, 0, 0, 0, 0, 0, 5}, make([]byte, 5)...), 13, true, true},
 		// noVNC extendedClipboardNotify: length = toUnsigned32bit(-4).
-		{"ClientCutText extended 4 bytes", append([]byte{6, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFC}, 1, 2, 3, 4), 12, true, true},
+		{
+			"ClientCutText extended 4 bytes",
+			append([]byte{6, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFC}, 1, 2, 3, 4),
+			12, true, true,
+		},
 		{"EnableContinuousUpdates", append([]byte{150}, make([]byte, 9)...), 10, true, true},
 		{"ClientFence 4 bytes", append([]byte{248, 0, 0, 0, 0, 0, 0, 0, 4}, make([]byte, 4)...), 13, true, true},
 		{"SetDesktopSize 1 screen", append([]byte{251, 0, 0, 0, 0, 0, 1, 0}, make([]byte, 16)...), 24, true, true},

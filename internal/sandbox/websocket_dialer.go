@@ -1,4 +1,4 @@
-// Package sandbox: WebSocket dialling for sandbox data-plane ports.
+// Package sandbox provides WebSocket dialling for sandbox data-plane ports.
 //
 // This is the ws:// sibling of gateway_transport.go's RoundTripperFor, and it
 // exists for the same reason: sandbox data-plane traffic is addressed as
@@ -28,9 +28,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// SandboxWebsocketDialer dials one data-plane port of one sandbox over
+// WebsocketDialer dials one data-plane port of one sandbox over
 // WebSocket. Build it with SandboxGatewayTransportPool.WebsocketDialerFor.
-type SandboxWebsocketDialer struct {
+type WebsocketDialer struct {
 	// tokens is the registry of the pool that built this dialer.
 	tokens *InboundTokenRegistry
 	policy OutboundURLPolicy
@@ -52,12 +52,12 @@ type SandboxWebsocketDialer struct {
 // reach a sandbox data-plane port. It is the ws:// sibling of RoundTripperFor
 // and MUST stay the only place that knows how: same gateway target, same
 // SafeDialControlForPolicy guard, same inbound-token registry.
-func (p *SandboxGatewayTransportPool) WebsocketDialerFor(cfg *Config) *SandboxWebsocketDialer {
+func (p *SandboxGatewayTransportPool) WebsocketDialerFor(cfg *Config) *WebsocketDialer {
 	if p == nil {
 		return nil
 	}
 	gatewayURL, _ := gatewayEndpointFor(cfg)
-	d := &SandboxWebsocketDialer{
+	d := &WebsocketDialer{
 		tokens:        p.inboundTokens,
 		policy:        p.policy,
 		scheme:        "wss",
@@ -104,7 +104,7 @@ func sandboxDomainFor(cfg *Config) string {
 // handshake. If an upstream ever selected base64, the bytes on the sandbox
 // side would be base64 text and every byte offset the RFB parser computes
 // would be wrong — silently, and only under load.
-func (d *SandboxWebsocketDialer) Dial(
+func (d *WebsocketDialer) Dial(
 	ctx context.Context,
 	sandboxID string,
 	port int,

@@ -34,7 +34,7 @@ type CubeRemoteClient struct {
 	// wsDialer reaches non-envd data-plane ports (the desktop's websockify
 	// on 6080). It is nil only if construction could not attach a pool
 	// dialer, which DialDesktop reports as unsupported.
-	wsDialer *SandboxWebsocketDialer
+	wsDialer *WebsocketDialer
 
 	// inboundTokens is the same registry wsDialer reads. Cube's SDK already
 	// stamps envd HTTP with Sandbox.TrafficAccessToken, so exec never needed
@@ -331,6 +331,9 @@ func (c *CubeRemoteClient) ReplaceStandardTemplate(ctx context.Context) (*Remote
 	return c.buildStandardTemplate(ctx)
 }
 
+// EnsureDesktopTemplate returns the cluster's WeKnora desktop template,
+// rebuilding a failed one or building it when absent. A cluster may hold
+// both the CLI and desktop templates; the admin picks which ID a config boots.
 func (c *CubeRemoteClient) EnsureDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	items, err := c.ListTemplates(ctx)
 	if err != nil {
@@ -354,6 +357,8 @@ func (c *CubeRemoteClient) EnsureDesktopTemplate(ctx context.Context) (*RemoteTe
 	return c.buildDesktopTemplate(ctx)
 }
 
+// ReplaceDesktopTemplate applies the current spec to the cluster's desktop
+// template. Same persist-then-delete contract as ReplaceStandardTemplate.
 func (c *CubeRemoteClient) ReplaceDesktopTemplate(ctx context.Context) (*RemoteTemplate, error) {
 	items, err := c.ListTemplates(ctx)
 	if err != nil {
@@ -385,6 +390,7 @@ func (c *CubeRemoteClient) ReplaceDesktopTemplate(ctx context.Context) (*RemoteT
 	return c.buildDesktopTemplate(ctx)
 }
 
+// DeleteSupersededDesktopTemplates drops desktop templates other than keepID.
 func (c *CubeRemoteClient) DeleteSupersededDesktopTemplates(ctx context.Context, keepID string) error {
 	keepID = strings.TrimSpace(keepID)
 	if keepID == "" {
