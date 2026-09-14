@@ -290,18 +290,35 @@
               creatable
               clearable
               :loading="probingRemoteModels"
-              :options="remoteModelOptions"
               :placeholder="getModelNamePlaceholder()"
               :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
               @create="onRemoteModelCreate"
-            />
+            >
+              <!-- 选项排版：模型 ID 为主文本，展示名小号灰色辅助（label 仍为
+                   "id · 展示名"，搜索过滤与选中回显不受影响） -->
+              <template v-for="opt in remoteModelOptions" :key="opt.value">
+                <t-option :value="opt.value" :label="opt.label">
+                  <div class="remote-model-option">
+                    <span class="remote-model-option__id">{{ opt.value }}</span>
+                    <span
+                      v-if="opt.display_name"
+                      class="remote-model-option__name"
+                    >{{ opt.display_name }}</span>
+                  </div>
+                </t-option>
+              </template>
+            </t-select>
             <t-input v-else v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
               :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
           </div>
 
           <div class="form-item">
-            <label class="form-label">{{ $t('model.editor.displayNameLabel') }}</label>
-            <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')" />
+            <label class="form-label">
+              {{ $t('model.editor.displayNameLabel') }}
+              <span v-if="prefillBadge('displayName')" class="prefill-source">{{ prefillBadge('displayName') }}</span>
+            </label>
+            <t-input v-model="formData.displayName" :placeholder="$t('model.editor.displayNamePlaceholder')"
+              @change="markManualField('displayName')" />
             <p class="form-desc">{{ $t('model.editor.displayNameDesc') }}</p>
           </div>
         </template>
@@ -669,7 +686,7 @@ const dimensionOverrideDisabled = computed(() =>
 
 // ---- 目录预填（design §5.3 取值链 / ADR 0001 保存即终态） ----
 type PrefillSource = 'catalog' | 'remote'
-const PREFILL_FIELDS = ['contextWindow', 'maxOutputTokens', 'inputModalities', 'selectedLevels', 'thinkingLevel', 'thinkingEnabled'] as const
+const PREFILL_FIELDS = ['contextWindow', 'maxOutputTokens', 'inputModalities', 'selectedLevels', 'thinkingLevel', 'thinkingEnabled', 'displayName'] as const
 type PrefillField = (typeof PREFILL_FIELDS)[number]
 const PREFILL_BADGE_KEYS: Record<PrefillSource, string> = {
   catalog: 'model.editor.sourceCatalog',
@@ -733,11 +750,39 @@ const showRemoteModelSelect = computed(() =>
   && formData.value.provider !== 'weknoracloud'
 )
 
+// #反馈（2026-09-14）：服务端类型过滤只有 aliyun 能力码生效，其余厂商的
+// 目录接口不带类型元数据——按模型名启发式在客户端过滤（creatable 手输
+// 仍是逃逸口）。chat/vllm 做排除式（避免误杀命名特别的对话模型）。
+const REMOTE_MODEL_TYPE_HINTS: Record<string, RegExp> = {
+  embedding: /embed/i,
+  rerank: /rerank/i,
+  asr: /(whisper|paraformer|sensevoice|\basr\b|transcri|speech)/i,
+}
+const remoteModelMatchesType = (id: string, type: string): boolean => {
+  const lower = id.toLowerCase()
+  const isEmbed = /embed/i.test(lower)
+  const isRerank = /rerank/i.test(lower)
+  const isAsrTts = /(whisper|paraformer|sensevoice|asr|transcri|speech|tts|audio)/i.test(lower)
+  switch (type) {
+    case 'embedding':
+      return isEmbed
+    case 'rerank':
+      return isRerank
+    case 'asr':
+      return isAsrTts
+    default: // chat / vllm：排除明确的非对话族
+      return !isEmbed && !isRerank && !isAsrTts
+  }
+}
+
 const remoteModelOptions = computed(() =>
-  remoteModels.value.map(m => ({
-    value: m.id,
-    label: m.display_name ? `${m.id} · ${m.display_name}` : m.id,
-  }))
+  remoteModels.value
+    .filter(m => remoteModelMatchesType(m.id, activeModelType.value))
+    .map(m => ({
+      value: m.id,
+      label: m.display_name ? `${m.id} · ${m.display_name}` : m.id,
+      display_name: m.display_name,
+    }))
 )
 
 const onRemoteModelCreate = (value: string | number) => {
@@ -820,6 +865,12 @@ const prefillForModelId = async (modelId: string) => {
   // 1) 接口元数据（后端已摊平为扁平字段，meta 信封已删除——取值链第 1 级）
   const remoteHit = remoteModels.value.find(m => m.id === id)
   if (remoteHit) applyPrefill(remoteModelPrefill(remoteHit), 'remote')
+  // 展示名 → 显示名称（2026-09-14 反馈）：选模型即带出厂商的展示名；
+  // 手动改过 displayName 的不再覆盖。
+  if (remoteHit?.display_name && !manualFields.value.has('displayName')) {
+    formData.value.displayName = remoteHit.display_name
+    prefillSource.value.displayName = 'remote'
+  }
   // 2) models.json 目录（补齐接口元数据未覆盖的字段）
   await ensureCatalogLoaded(provider)
   const entry = lookupCatalogEntry(provider, id)
@@ -2603,6 +2654,27 @@ defineExpose({ resetAfterSave })
       color: var(--td-brand-color);
     }
   }
+
+.remote-model-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+
+  &__id {
+    font-size: 13px;
+    color: var(--td-text-color-primary);
+    flex-shrink: 0;
+  }
+
+  &__name {
+    font-size: 11px;
+    color: var(--td-text-color-placeholder);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
 
   .provider-option {
     display: flex;
