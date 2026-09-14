@@ -822,7 +822,7 @@ func (m *SessionBoundManager) SessionFileStore() SessionFileStore {
 
 // SessionTerminalManager advertises the interactive-terminal capability while
 // a real remote backend is active and the provider implements PTY streaming
-// (E2B and Cube do; Docker does not).
+// (E2B, Cube, and Docker do).
 func (m *SessionBoundManager) SessionTerminalManager() SessionTerminalManager {
 	if m == nil || m.remoteDisabled() {
 		return nil
@@ -833,13 +833,25 @@ func (m *SessionBoundManager) SessionTerminalManager() SessionTerminalManager {
 	return m
 }
 
+// SupportsTerminalReconnect distinguishes a provider PTY reconnect from a
+// sandbox reconnect. Docker can reconnect its container but cannot attach a
+// second transport to an already-running exec; E2B and Cube can reconnect by
+// provider PTY ID.
+func (m *SessionBoundManager) SupportsTerminalReconnect() bool {
+	if m == nil || m.remoteDisabled() {
+		return false
+	}
+	capabilities := m.client.Capabilities()
+	return capabilities.SupportsTerminals && capabilities.SupportsTerminalReconnect
+}
+
 // OpenSessionTerminal opens a PTY on the sandbox currently bound to the
 // session. It is strictly lookup-only: with no live binding it returns
 // ErrNoLiveSessionSandbox instead of provisioning, because the terminal
 // entry point lacks the config-pin context that agent-driven creation
 // relies on. A bound sandbox that is not confirmed running returns
 // ErrSandboxPaused unless opts.AllowResume is set — Connect would wake a
-// paused instance. A backend that cannot stream PTYs (Docker) returns
+// paused instance. A backend that cannot stream PTYs returns
 // ErrTerminalUnsupported, not "no sandbox".
 func (m *SessionBoundManager) OpenSessionTerminal(
 	ctx context.Context,

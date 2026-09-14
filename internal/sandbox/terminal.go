@@ -31,9 +31,10 @@ type RemoteTerminalOptions struct {
 	// 256-colour value by the adapters so full-screen programs work.
 	Envs map[string]string
 
-	// AttachPID, when non-zero, asks the provider to reattach to an
-	// already-running PTY instead of creating a new shell. A failed
-	// reattach falls back to Create.
+	// AttachPID, when non-zero, asks a provider advertising
+	// SupportsTerminalReconnect to reattach to an already-running PTY instead
+	// of creating a new shell. A failed supported reattach falls back to
+	// Create. Providers without that capability ignore this value.
 	AttachPID uint32
 
 	// AllowResume lets OpenSessionTerminal Connect (and therefore wake) a
@@ -78,9 +79,10 @@ type RemoteTerminalSession interface {
 	// Resize changes the PTY window size.
 	Resize(ctx context.Context, cols, rows uint32) error
 
-	// Close disconnects WeKnora from the PTY without killing the remote
-	// process: the shell stays in the sandbox so a provider-native
-	// reconnect can re-attach. Safe to call more than once.
+	// Close disconnects WeKnora from the PTY. Providers advertising
+	// SupportsTerminalReconnect leave the shell available for a later attach;
+	// other providers may not be able to recover the process after transport
+	// loss. Safe to call more than once.
 	Close() error
 }
 
@@ -224,16 +226,16 @@ func EffectiveTerminalIdleDisconnect(d time.Duration) time.Duration {
 	return d
 }
 
-// terminalTTLRefreshMin is the floor for how often an open terminal
-// refreshes the provider sandbox idle timeout. Tests lower it.
-var terminalTTLRefreshMin = 15 * time.Second
+// terminalTTLRefreshFloor is the production floor for how often an open
+// terminal refreshes the provider sandbox idle timeout.
+const terminalTTLRefreshFloor = 15 * time.Second
 
 const terminalTTLRefreshMax = 2 * time.Minute
 
 func terminalTTLRefreshInterval(ttl time.Duration) time.Duration {
 	interval := ttl / 3
-	if interval < terminalTTLRefreshMin {
-		return terminalTTLRefreshMin
+	if interval < terminalTTLRefreshFloor {
+		return terminalTTLRefreshFloor
 	}
 	if interval > terminalTTLRefreshMax {
 		return terminalTTLRefreshMax
@@ -247,25 +249,58 @@ func startTerminalTTLRefresh(
 	ttl time.Duration,
 	refresh func(context.Context) error,
 ) {
-	if refresh == nil || ttl <= 0 {
+	if ttl <= 0 {
 		return
 	}
-	interval := terminalTTLRefreshInterval(ttl)
+	startTerminalTTLRefreshLoop(
+		ctx, closed, terminalTTLRefreshInterval(ttl), true, refresh,
+	)
+}
+
+// startTerminalTTLRefreshAfterInitialTouch is for providers whose terminal
+// open operation already refreshed activity. It waits for the first normal
+// interval instead of spending another provider round trip immediately.
+func startTerminalTTLRefreshAfterInitialTouch(
+	ctx context.Context,
+	closed <-chan struct{},
+	ttl time.Duration,
+	refresh func(context.Context) error,
+) {
+	if ttl <= 0 {
+		return
+	}
+	startTerminalTTLRefreshLoop(
+		ctx, closed, terminalTTLRefreshInterval(ttl), false, refresh,
+	)
+}
+
+func startTerminalTTLRefreshLoop(
+	ctx context.Context,
+	closed <-chan struct{},
+	interval time.Duration,
+	refreshImmediately bool,
+	refresh func(context.Context) error,
+) {
+	if refresh == nil || interval <= 0 {
+		return
+	}
 	go func() {
 		doRefresh := func() {
 			rctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			_ = refresh(rctx)
 			cancel()
 		}
-		// Cube Connect does not bump idle TTL; refresh immediately so a
-		// terminal opened near expiry is not waiting a full interval.
-		select {
-		case <-closed:
-			return
-		case <-ctx.Done():
-			return
-		default:
-			doRefresh()
+		if refreshImmediately {
+			// Cube Connect does not bump idle TTL; refresh immediately so a
+			// terminal opened near expiry is not waiting a full interval.
+			select {
+			case <-closed:
+				return
+			case <-ctx.Done():
+				return
+			default:
+				doRefresh()
+			}
 		}
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()

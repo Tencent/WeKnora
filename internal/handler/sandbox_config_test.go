@@ -205,6 +205,7 @@ func TestSandboxConfigValidationSentinelsMapTo400(t *testing.T) {
 		{"named backend unsupported", service.ErrNamedSandboxBackendUnsupported},
 		{"unknown backend", fmt.Errorf("%w %q", sandbox.ErrUnsupportedSandboxType, "quantum")},
 		{"unsafe endpoint", fmt.Errorf("%w: host is private", sandbox.ErrUnsafeOutboundURL)},
+		{"short Docker idle TTL", fmt.Errorf("%w: 59s", sandbox.ErrInvalidDockerIdleTTL)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())

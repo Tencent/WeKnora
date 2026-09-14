@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,11 +50,13 @@ type fakeDockerEngine struct {
 	// a test can drive waitUntilRunning itself.
 	startLeavesState bool
 
-	execOptions []client.ExecCreateOptions
-	execStdout  string
-	execStderr  string
-	execExit    int
-	execErr     error
+	execOptions   []client.ExecCreateOptions
+	execStdout    string
+	execStderr    string
+	execExit      int
+	execErr       error
+	resizeOptions []client.ExecResizeOptions
+	resizeErr     error
 	// execNotRunningOnce makes the first ExecCreate fail the way the daemon
 	// does when the container has not reached State.Running yet.
 	execNotRunningOnce bool
@@ -254,6 +257,13 @@ func (f *fakeDockerEngine) ExecInspect(
 	_ context.Context, _ string, _ client.ExecInspectOptions,
 ) (client.ExecInspectResult, error) {
 	return client.ExecInspectResult{ExitCode: f.execExit}, nil
+}
+
+func (f *fakeDockerEngine) ExecResize(
+	_ context.Context, _ string, options client.ExecResizeOptions,
+) (client.ExecResizeResult, error) {
+	f.resizeOptions = append(f.resizeOptions, options)
+	return client.ExecResizeResult{}, f.resizeErr
 }
 
 func (f *fakeDockerEngine) ContainerStatPath(
@@ -1052,6 +1062,9 @@ func TestDockerClientStatMapsEntryType(t *testing.T) {
 func TestDockerClientCapabilities(t *testing.T) {
 	caps := newTestDockerClient(t, newFakeDockerEngine()).Capabilities()
 	require.True(t, caps.SupportsReconnect)
+	require.True(t, caps.SupportsTerminals)
+	require.False(t, caps.SupportsTerminalReconnect,
+		"Docker cannot attach a second transport to an already-running exec")
 	require.True(t, caps.SupportsMetadata)
 	require.True(t, caps.SupportsListSandboxes)
 	require.True(t, caps.SupportsFilesystemEnumeration)
@@ -1152,6 +1165,30 @@ func TestDockerSettingsCarryOutboundPolicy(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, settings.Endpoint.AllowPrivate)
+}
+
+func TestDockerSettingsValidateIdleTTL(t *testing.T) {
+	t.Parallel()
+	for _, seconds := range []int{0, 1, 15, 59, 60, 61, 1800} {
+		seconds := seconds
+		t.Run(strconv.Itoa(seconds), func(t *testing.T) {
+			settings, err := dockerSettingsFromConfig(&Config{
+				Type:          SandboxTypeDocker,
+				DockerImage:   "weknora/sandbox:test",
+				DockerIdleTTL: time.Duration(seconds) * time.Second,
+			})
+			if seconds > 0 && seconds < int(MinDockerIdleTTL/time.Second) {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if seconds == 0 {
+				require.Equal(t, DefaultDockerIdleTTL, settings.IdleTTL)
+			} else {
+				require.Equal(t, time.Duration(seconds)*time.Second, settings.IdleTTL)
+			}
+		})
+	}
 }
 
 func TestValidateDockerNetworkMode(t *testing.T) {

@@ -202,6 +202,7 @@ func respondSandboxConfigServiceError(c *gin.Context, err error) {
 		stderrors.Is(err, sandbox.ErrUnsupportedSandboxType),
 		stderrors.Is(err, sandbox.ErrUnsafeOutboundURL),
 		stderrors.Is(err, sandbox.ErrSandboxConfigIncomplete),
+		stderrors.Is(err, sandbox.ErrInvalidDockerIdleTTL),
 		stderrors.Is(err, sandbox.ErrDockerBackendDisabled):
 		c.Error(apperrors.NewBadRequestError(err.Error()))
 	default:

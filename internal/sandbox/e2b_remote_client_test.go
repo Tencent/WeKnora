@@ -374,6 +374,7 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsSnapshots:             true,
 		SupportsVolumes:               false,
 		SupportsTerminals:             true,
+		SupportsTerminalReconnect:     true,
 	}, client.Capabilities())
 }
 

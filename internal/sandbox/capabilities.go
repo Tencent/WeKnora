@@ -131,6 +131,10 @@ type SessionInstallCapabilityProvider interface {
 // handler bridges browser terminal frames to it without knowing whether
 // E2B or Cube serves the session.
 type SessionTerminalManager interface {
+	// SupportsTerminalReconnect reports whether a later terminal connection
+	// can resume the same remote PTY rather than opening a new shell.
+	SupportsTerminalReconnect() bool
+
 	// OpenSessionTerminal connects to the session's currently bound sandbox
 	// and opens a PTY. It is lookup-only: when no live sandbox is bound it
 	// returns ErrNoLiveSessionSandbox instead of provisioning one, because

@@ -152,7 +152,8 @@ func (c *CubeRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// snapshots instead, so this stays false.
 		SupportsVolumes: false,
 		// envd exposes an interactive PTY service that the Cube SDK wraps.
-		SupportsTerminals: true,
+		SupportsTerminals:         true,
+		SupportsTerminalReconnect: true,
 	}
 }
 
