@@ -599,7 +599,7 @@
           </div>
         </div>
       </div>
-    </t-drawer>
+    </SettingDrawer>
 
     <!-- SystemAdmin-only: reset another user's password (platform-wide API). -->
     <t-dialog
@@ -669,7 +669,6 @@
         </t-form-item>
       </t-form>
     </t-dialog>
-    </SettingDrawer>
   </div>
 </template>
 

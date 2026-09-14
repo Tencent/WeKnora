@@ -76,7 +76,14 @@ export default defineConfig({
     __FRONTEND_VERSION__: JSON.stringify(FRONTEND_VERSION),
     __FRONTEND_COMMIT__: JSON.stringify(FRONTEND_COMMIT),
   },
+  // Production minify already drops // and /* */; keep legalComments none so
+  // /*! @license */ banners never land in /assets/*.js either.
+  esbuild: {
+    legalComments: 'none',
+  },
   build: {
+    minify: 'esbuild',
+    cssMinify: true,
     modulePreload: {
       resolveDependencies(_filename, deps, { hostId }) {
         // Embed iframe bootstraps with token exchange only; defer heavy chat chunks.

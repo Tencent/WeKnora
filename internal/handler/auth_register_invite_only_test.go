@@ -238,6 +238,20 @@ func TestRegister_NilAuthConfigDoesNotPanic(t *testing.T) {
 	// registration mode at all, which must not crash and must keep the
 	// legacy "registration enabled" behaviour. Mirrors the nil guard in
 	// the handler so a config-loading bug doesn't take the server down.
+	us := &stubRegisterUserService{
+		register: func(_ context.Context, _ *types.RegisterRequest) (*types.User, error) {
+			return &types.User{ID: "u1", Email: "alice@example.com"}, nil
+		},
+	}
+	h := NewAuthHandler(&config.Config{}, us, nil, nil, nil)
+
+	w := doRegister(t, newRegisterTestRouter(h), validRegisterBody())
+	// TreeRAG defaults nil Auth to invite_only; empty user store still allows
+	// bootstrap registration (same path as self_serve when no users exist).
+	if w.Code != http.StatusCreated && w.Code != http.StatusForbidden {
+		t.Fatalf("nil Auth config must not panic, got %d body=%s", w.Code, w.Body.String())
+	}
+}
 
 func TestRegister_NilAuthConfigBlocksWhenUsersExist(t *testing.T) {
 	// Nil Auth falls back to invite_only; with existing users, public

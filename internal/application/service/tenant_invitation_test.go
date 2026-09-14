@@ -616,11 +616,11 @@ func TestInvitationService_AcceptByToken_RejectsSecondUser(t *testing.T) {
 func TestInvitationService_AcceptByToken_ReconcilesDirectInvitation(t *testing.T) {
 	svc, repo, _ := newInvitationSvc()
 	ctx := context.Background()
-	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "", "")
 	if err != nil {
 		t.Fatalf("create direct invitation: %v", err)
 	}
-	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "", "")
 	if err != nil {
 		t.Fatalf("create share link: %v", err)
 	}
@@ -648,11 +648,11 @@ func TestInvitationService_AcceptByToken_ReconcilesDirectInvitation(t *testing.T
 func TestInvitationService_AcceptByToken_ReconcilesDirectInvitationForExistingMember(t *testing.T) {
 	svc, repo, memberSvc := newInvitationSvc()
 	ctx := context.Background()
-	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "")
+	direct, err := svc.Create(ctx, 1, "u-alice", types.TenantRoleViewer, nil, "", "")
 	if err != nil {
 		t.Fatalf("create direct invitation: %v", err)
 	}
-	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "")
+	_, plain, err := svc.CreateShareLink(ctx, 1, types.TenantRoleViewer, nil, "", "")
 	if err != nil {
 		t.Fatalf("create share link: %v", err)
 	}

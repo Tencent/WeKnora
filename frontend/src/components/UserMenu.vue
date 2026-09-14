@@ -87,6 +87,7 @@
               stroke-linecap="round" />
           </svg>
           <span>{{ $t('settings.webSearchConfig') }}</span>
+        </div>
         <div v-if="canManageSkills" class="menu-item" @click="handleQuickNav('skills')">
           <t-icon :name="SKILL_ICON" class="menu-icon" />
           <span>{{ $t('settings.skills.title') }}</span>

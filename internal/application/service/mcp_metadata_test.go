@@ -28,7 +28,7 @@ func TestMCPMetadataRefreshAndOfflineEditing(t *testing.T) {
 	repo := repository.NewMCPServiceRepository(db)
 	manager := mcp.NewMCPManager(nil)
 	t.Cleanup(manager.Shutdown)
-	svc := NewMCPServiceService(repo, manager, nil)
+	svc := NewMCPServiceService(repo, manager, nil, nil)
 	metadata := svc.(interfaces.MCPMetadataService)
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 	server := sdkserver.NewMCPServer(

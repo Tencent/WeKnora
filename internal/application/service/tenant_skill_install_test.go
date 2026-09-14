@@ -3097,7 +3097,9 @@ func (s *installCustomAgentService) GetAgentByIDAndTenant(
 	return nil, nil
 }
 
-func (s *installCustomAgentService) ListAgents(context.Context) ([]*types.CustomAgent, error) {
+func (s *installCustomAgentService) ListAgents(
+	context.Context, string,
+) ([]*types.CustomAgent, error) {
 	return nil, nil
 }
 

@@ -4,12 +4,12 @@
 
 预期文件（版本以 `.env` 中 `WEKNORA_VERSION` 为准）：
 
-- `registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-ui_v0.8.21.tar`
-- `registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-app_v0.8.21.tar`
-- `registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-docreader_v0.8.21.tar`
+- `registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-ui_v0.8.22.tar`
+- `registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-app_v0.8.22.tar`
+- `registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-docreader_v0.8.22.tar`
 - `paradedb_paradedb_v0.22.2-pg17.tar`
 - `redis_7.0-alpine.tar`
-- `manifest-v0.8.21.txt`
-- `treerag-images-v0.8.21-linux-amd64.tar.gz`（可选汇总包）
+- `manifest-v0.8.22.txt`
+- `treerag-images-v0.8.22-linux-amd64.tar.gz`（可选汇总包）
 
 内网机执行：`../scripts/load-images.sh`

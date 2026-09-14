@@ -49,6 +49,11 @@ func (s *listAgentsRepoStub) ListNamesBySandboxConfigID(
 ) ([]string, error) {
 	return nil, nil
 }
+func (s *listAgentsRepoStub) ListModelUsages(
+	context.Context, uint64, string,
+) ([]types.ModelUsageResource, error) {
+	return nil, nil
+}
 
 func TestListAgentsPurposeChatAndManage(t *testing.T) {
 	repo := &listAgentsRepoStub{

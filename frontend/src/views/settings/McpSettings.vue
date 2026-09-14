@@ -122,7 +122,7 @@
               </div>
             </div>
           </div>
-        </article>
+        </div>
         <button
           v-if="authStore.hasRole('admin') && !spaceSelectionOrgId"
           type="button"
