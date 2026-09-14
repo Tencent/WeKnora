@@ -627,24 +627,12 @@
                     <div class="section-header-row">
                       <div class="section-header-titlewrap">
                         <h2>{{ $t('organization.share.sharedKnowledgeBase') }}</h2>
-                        <t-popup placement="bottom-start" trigger="hover"
-                          overlay-class-name="org-permissions-popup-overlay"
-                          :overlay-inner-style="permissionsHintPopupInnerStyle">
-                          <button type="button" class="permissions-trigger-btn"
-                            :aria-label="$t('organization.settings.permissionCalcFormula')"
-                            :title="$t('organization.settings.permissionCalcFormula')">
-                            <t-icon name="info-circle" size="16px" />
-                          </button>
-                          <template #content>
-                            <div class="permission-hint-popover">
-                              <p class="permission-hint-title">{{ $t('organization.settings.sharePermissionLabel') }}</p>
-                              <p class="permission-hint-desc">{{ $t('organization.settings.permissionCalcTip') }}</p>
-                            </div>
-                          </template>
-                        </t-popup>
                       </div>
                     </div>
                     <p class="section-description">{{ $t('organization.settings.sharedDesc') }}</p>
+                    <p class="section-description shared-kb-permission-tip">
+                      {{ $t('organization.settings.permissionCalcFormula') }}
+                    </p>
                   </div>
 
                   <div class="shared-resources-wrap">
@@ -671,7 +659,10 @@
                       <t-table row-key="id" :data="sharedKnowledgeBases" :columns="sharedKbColumns" size="medium"
                         hover stripe :loading="sharesLoading" class="shared-kb-table">
                         <template #name="{ row }">
-                          <span class="resource-name" :title="row.knowledge_base_name">{{ row.knowledge_base_name }}</span>
+                          <div class="resource-name-cell">
+                            <span class="resource-name" :title="row.knowledge_base_name">{{ row.knowledge_base_name }}</span>
+                            <span class="knowledge-base-source">{{ knowledgeBaseSourceLabel(row) }}</span>
+                          </div>
                         </template>
                         <template #shared_by="{ row }">
                           <span class="resource-meta">{{ row.shared_by_username || '—' }}</span>
@@ -697,7 +688,7 @@
                                 <template #icon><t-icon name="browse" /></template>
                               </t-button>
                             </t-tooltip>
-                            <t-popconfirm v-if="isAdmin"
+                            <t-popconfirm v-if="isAdmin && !hasAgentSources(row)"
                             :content="$t('organization.settings.removeShareConfirm', { name: row.knowledge_base_name || row.knowledge_base_id })"
                             :confirm-btn="{ content: $t('common.confirm'), theme: 'danger' }"
                             :cancel-btn="{ content: $t('common.cancel') }" placement="left"
@@ -826,11 +817,14 @@ import { copyWithToast } from '@/utils/clipboard'
 import {
   getOrganization,
   listOrgShares,
+  listOrganizationSharedKnowledgeBases,
   listOrgAgentShares,
   listJoinRequests,
   searchTenantsForInvite,
   type OrganizationMember,
   type KnowledgeBaseShare,
+  type OrganizationSharedKnowledgeBaseItem,
+  type SourceFromAgentInfo,
   type AgentShareResponse,
   type JoinRequestResponse,
   type TenantInviteCandidate
@@ -867,7 +861,12 @@ const currentSection = ref('basic')
 const contentWrapperRef = ref<HTMLElement | null>(null)
 const orgInfo = computed(() => orgStore.currentOrganization)
 const members = computed(() => orgStore.currentMembers)
-const sharedKnowledgeBases = ref<KnowledgeBaseShare[]>([])
+type SettingsKnowledgeBaseRow = KnowledgeBaseShare & {
+  is_direct_share: boolean
+  source_from_agents: SourceFromAgentInfo[]
+}
+
+const sharedKnowledgeBases = ref<SettingsKnowledgeBaseRow[]>([])
 const sharedAgents = ref<AgentShareResponse[]>([])
 const joinRequests = ref<JoinRequestResponse[]>([])
 const joinRequestsLoading = ref(false)
@@ -1346,15 +1345,15 @@ const fetchSharedKBs = async () => {
   if (!props.orgId) return
   sharesLoading.value = true
   try {
-    const [kbRes, agentRes] = await Promise.all([
+    const [kbRes, spaceKbRes, agentRes] = await Promise.all([
       listOrgShares(props.orgId),
+      listOrganizationSharedKnowledgeBases(props.orgId),
       listOrgAgentShares(props.orgId)
     ])
-    if (kbRes.success && kbRes.data) {
-      sharedKnowledgeBases.value = kbRes.data.shares || []
-    } else {
-      sharedKnowledgeBases.value = []
-    }
+    const directShares = kbRes.success && kbRes.data ? kbRes.data.shares || [] : []
+    sharedKnowledgeBases.value = spaceKbRes.success && spaceKbRes.data
+      ? toSettingsKnowledgeBaseRows(directShares, spaceKbRes.data)
+      : []
     if (agentRes.success && agentRes.data) {
       sharedAgents.value = agentRes.data.shares || []
     } else {
@@ -1367,6 +1366,59 @@ const fetchSharedKBs = async () => {
   } finally {
     sharesLoading.value = false
   }
+}
+
+const toSettingsKnowledgeBaseRows = (
+  directShares: KnowledgeBaseShare[],
+  items: OrganizationSharedKnowledgeBaseItem[]
+): SettingsKnowledgeBaseRow[] => {
+  const directByKnowledgeBaseID = new Map(directShares.map(share => [share.knowledge_base_id, share]))
+
+  return items.flatMap<SettingsKnowledgeBaseRow>((item) => {
+    if (!item.knowledge_base) return []
+
+    const directShare = directByKnowledgeBaseID.get(item.knowledge_base.id)
+    const sourceFromAgents = item.source_from_agents
+      ?? (item.source_from_agent ? [item.source_from_agent] : [])
+    if (directShare) {
+      return [{
+        ...directShare,
+        is_direct_share: true,
+        source_from_agents: sourceFromAgents
+      }]
+    }
+
+    return [{
+      id: item.share_id || `agent-${sourceFromAgents[0]?.agent_id || 'shared'}-${item.knowledge_base.id}`,
+      knowledge_base_id: item.knowledge_base.id,
+      knowledge_base_name: item.knowledge_base.name,
+      knowledge_base_type: item.knowledge_base.type,
+      knowledge_count: item.knowledge_base.knowledge_count,
+      chunk_count: item.knowledge_base.chunk_count,
+      organization_id: item.organization_id,
+      organization_name: item.org_name,
+      shared_by_user_id: '',
+      source_tenant_id: item.source_tenant_id,
+      permission: item.permission,
+      my_permission: item.permission,
+      created_at: item.shared_at,
+      is_direct_share: Boolean(item.share_id),
+      source_from_agents: sourceFromAgents
+    }]
+  })
+}
+
+const hasAgentSources = (row: SettingsKnowledgeBaseRow) => row.source_from_agents.length > 0
+
+const knowledgeBaseSourceLabel = (row: SettingsKnowledgeBaseRow) => {
+  const agentNames = [...new Set(row.source_from_agents.map(source => source.agent_name))].join('、')
+  if (row.is_direct_share && agentNames) {
+    return t('organization.settings.directAndAgentKbSource', { name: agentNames })
+  }
+  if (agentNames) {
+    return t('organization.settings.agentKbSource', { name: agentNames })
+  }
+  return t('organization.settings.directKbSource')
 }
 
 const orgRoleOptions = [
@@ -1756,13 +1808,13 @@ const handleSearchableToggle = async (value: boolean) => {
   }
 }
 
-const handleShareClick = (share: KnowledgeBaseShare) => {
+const handleShareClick = (share: SettingsKnowledgeBaseRow) => {
   handleClose()
   router.push(`/platform/knowledge-bases/${share.knowledge_base_id}`)
 }
 
-const handleRemoveShare = async (share: KnowledgeBaseShare) => {
-  if (!props.orgId) return
+const handleRemoveShare = async (share: SettingsKnowledgeBaseRow) => {
+  if (!props.orgId || hasAgentSources(share)) return
   try {
     const res = await orgStore.unshareKnowledgeBase(
       share.knowledge_base_id,
@@ -2727,6 +2779,7 @@ watch(addMemberPopupVisible, (visible) => {
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
+
 }
 
 .shared-resources-wrap {
@@ -2749,6 +2802,22 @@ watch(addMemberPopupVisible, (visible) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.resource-name-cell {
+  min-width: 0;
+}
+
+.knowledge-base-source {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--td-text-color-secondary);
+}
+
+.shared-kb-permission-tip {
+  margin-top: 6px;
 }
 
 .resource-meta {
@@ -3214,6 +3283,7 @@ watch(addMemberPopupVisible, (visible) => {
       line-height: 1.55;
       color: var(--td-text-color-secondary);
     }
+
   }
 
   .permissions-compact.permissions-compact--popover {
