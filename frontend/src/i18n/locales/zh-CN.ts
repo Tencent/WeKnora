@@ -2209,6 +2209,7 @@ export default {
         vlm_model: '视觉理解模型',
         asr_model: '语音识别模型',
         wiki_synthesis_model: 'Wiki 综合模型',
+        auto_tag_model: '自动标签模型',
         chat_model: '对话模型',
         rerank_model: '重排序模型',
         query_understand_model: '问题理解模型',

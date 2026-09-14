@@ -83,6 +83,7 @@ func TestListModelUsages_KnowledgeBase(t *testing.T) {
 	allBindings.VLMConfig = types.VLMConfig{Enabled: true, ModelID: modelID}
 	allBindings.ASRConfig = types.ASRConfig{Enabled: true, ModelID: modelID}
 	allBindings.WikiConfig = &types.WikiConfig{SynthesisModelID: modelID}
+	allBindings.AutoTagConfig = &types.AutoTagConfig{Enabled: true, ModelID: modelID}
 	require.NoError(t, db.Create(allBindings).Error)
 
 	vlmOnly := makeKB(nil)
@@ -115,7 +116,23 @@ func TestListModelUsages_KnowledgeBase(t *testing.T) {
 		types.ModelUsageBindingVLMModel,
 		types.ModelUsageBindingASRModel,
 		types.ModelUsageBindingWikiSynthesisModel,
+		types.ModelUsageBindingAutoTagModel,
 	}, usages[1].Bindings)
+}
+
+func TestCountByModelID_KnowledgeBaseAutoTag(t *testing.T) {
+	ctx := context.Background()
+	db := setupModelUsageTestDB(t)
+	repo := NewKnowledgeBaseRepository(db)
+	modelID := "auto-tag-model"
+
+	kb := makeKB(nil)
+	kb.AutoTagConfig = &types.AutoTagConfig{Enabled: true, ModelID: modelID}
+	require.NoError(t, db.Create(kb).Error)
+
+	count, err := repo.CountByModelID(ctx, 1, modelID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), count)
 }
 
 func TestListModelUsages_KnowledgeBaseRespectsLimit(t *testing.T) {

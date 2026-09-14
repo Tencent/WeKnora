@@ -4973,6 +4973,7 @@ export default {
         vlm_model: '視覚モデル',
         asr_model: '音声認識モデル',
         wiki_synthesis_model: 'Wiki生成モデル',
+        auto_tag_model: '自動タグ付けモデル',
         chat_model: 'チャットモデル',
         rerank_model: 'リランクモデル',
         query_understand_model: 'クエリ理解モデル',

@@ -4973,6 +4973,7 @@ export default {
         vlm_model: 'Vision model',
         asr_model: 'Speech recognition model',
         wiki_synthesis_model: 'Wiki synthesis model',
+        auto_tag_model: 'Auto-tagging model',
         chat_model: 'Chat model',
         rerank_model: 'Re-ranking model',
         query_understand_model: 'Query understanding model',
