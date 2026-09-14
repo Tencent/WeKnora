@@ -1,0 +1,40 @@
+# Native Go development image with Delve. This image is intentionally separate
+# from Dockerfile.app: it bind-mounts the source tree and waits for an IDE to
+# attach instead of producing a release artifact.
+FROM golang:1.26-bookworm
+
+WORKDIR /workspace
+
+ARG GOPRIVATE_ARG
+ARG GOPROXY_ARG=https://proxy.golang.org,direct
+ARG GOSUMDB_ARG=off
+ARG DELVE_VERSION=v1.27.1
+
+ENV CGO_ENABLED=1 \
+    CGO_CFLAGS="-Wno-deprecated-declarations -Wno-gnu-folding-constant" \
+    GOPRIVATE=${GOPRIVATE_ARG} \
+    GOPROXY=${GOPROXY_ARG} \
+    GOSUMDB=${GOSUMDB_ARG} \
+    GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        git \
+        libsqlite3-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# go.mod replaces anydoc with a local module, so its manifest must be present
+# before downloading dependencies. Source code itself is mounted by Compose.
+COPY go.mod go.sum ./
+COPY third_party/anydoc-go/go.mod third_party/anydoc-go/go.mod
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download && \
+    go install github.com/go-delve/delve/cmd/dlv@${DELVE_VERSION}
+
+EXPOSE 8080 40000
+
+# Keep the debug binary outside the bind-mounted repository. Delve waits at
+# program entry until a remote client attaches and continues execution.
+CMD ["dlv", "debug", "./cmd/server", "--headless=true", "--listen=:40000", "--api-version=2", "--accept-multiclient", "--output=/tmp/weknora-debug"]

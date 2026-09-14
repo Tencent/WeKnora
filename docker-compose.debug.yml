@@ -1,0 +1,67 @@
+# Overlay for docker-compose.dev.yml. Start it through `make dev-debug` or:
+# docker compose -f docker-compose.dev.yml -f docker-compose.debug.yml up --build app-debug
+services:
+  app-debug:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.debug
+      args:
+        GOPRIVATE_ARG: ${GOPRIVATE:-}
+        GOPROXY_ARG: ${GOPROXY:-https://proxy.golang.org,direct}
+        GOSUMDB_ARG: ${GOSUMDB:-off}
+        DELVE_VERSION: ${DELVE_VERSION:-v1.27.1}
+    container_name: WeKnora-app-debug
+    working_dir: /workspace
+    env_file:
+      - ${WEKNORA_DEBUG_ENV_FILE:-.env}
+    environment:
+      # Host-facing ports may be customized, but container service addresses
+      # are stable on the development Compose network.
+      APP_PORT: "8080"
+      GIN_MODE: debug
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      REDIS_ADDR: redis:6379
+      DOCREADER_ADDR: docreader:50051
+      DOCREADER_TRANSPORT: grpc
+      LOCAL_STORAGE_BASE_DIR: /data/files
+      MINIO_ENDPOINT: minio:9000
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6334"
+      MILVUS_ADDRESS: milvus:19530
+      NEO4J_URI: bolt://neo4j:7687
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      GOLANG_PROTOBUF_REGISTRATION_CONFLICT: warn
+    ports:
+      - "${DEBUG_APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
+      # Delve has no transport authentication. Keep the host binding on
+      # loopback unless the development machine is otherwise isolated.
+      - "${DELVE_BIND:-127.0.0.1}:${DELVE_PORT:-40000}:40000"
+    volumes:
+      - .:/workspace
+      - debug-go-mod-cache:/go/pkg/mod
+      - debug-go-build-cache:/root/.cache/go-build
+      - debug-data-files:/data/files
+      - docreader-tmp-dev:/tmp/docreader:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      docreader:
+        condition: service_healthy
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    init: true
+    networks:
+      - WeKnora-network-dev
+    restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  debug-go-mod-cache:
+  debug-go-build-cache:
+  debug-data-files:
