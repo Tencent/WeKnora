@@ -4121,6 +4121,7 @@ export default {
           max_owned_per_user: 'Max workspaces owned per user',
           self_service_creation_enabled: 'Allow self-service workspace creation',
           default_storage_quota_gb: 'Default storage quota for new workspaces (GB)',
+          default_storage_quota_mb: 'Default storage quota for new workspaces (MB)',
           auto_create_api_key: 'Automatically create an API key for new workspaces',
           auto_accept_invitation: 'Auto-join invited registered users'
         },
@@ -4152,6 +4153,7 @@ export default {
           max_owned_per_user: 'Maximum number of workspaces a non-superuser may own via self-service creation. Read on every workspace creation and takes effect immediately after saving. 0 uses the built-in default of 10; a negative value disables the cap entirely (not recommended on public deployments).',
           self_service_creation_enabled: 'Whether non-superusers may create workspaces themselves. When disabled, regular users can only join existing workspaces by invitation; cross-workspace superusers remain exempt. Takes effect immediately.',
           default_storage_quota_gb: 'Default storage quota (GB) assigned when a new workspace is created, covering vectors, originals, text, indexes, and related data. Read only at creation time — changes apply to newly created workspaces only and do not retroactively update existing workspaces. 0 or a negative value uses the built-in default of 10 GB.',
+          default_storage_quota_mb: 'Includes personal workspaces created at registration. Positive values override the GB setting; zero or negative values use GB. Each setting resolves from database, environment, then built-in default. Changes affect newly created workspaces only.',
           auto_create_api_key: 'Automatically creates a full_access API key for a new workspace and returns its plaintext token in the create response. Use only for integrations that depend on the legacy behavior; it is disabled by default and explicit API-key creation is recommended.',
           auto_accept_invitation: 'When enabled, inviting a registered user by email adds them as a member immediately instead of waiting for inbox confirmation. When off, the invitee must accept from their inbox. Takes effect immediately.'
         },
@@ -4298,8 +4300,8 @@ export default {
         label: 'Apply to all existing workspaces',
         tooltip: 'Saving the value only affects new workspaces by default; click here to also overwrite every existing workspace.',
         confirmBtn: 'Confirm apply',
-        confirmBody: 'Overwrite the storage quota of every existing workspace to {value} GB. Workspaces whose quota was tuned manually by operations will also be overwritten. Continue?',
-        success: 'Updated storage quota for {count} workspaces to {gb} GB',
+        confirmBody: 'Overwrite the storage quota of every existing workspace to {value} {unit}. Workspaces whose quota was tuned manually by operations will also be overwritten. Continue?',
+        success: 'Updated storage quota for {count} workspaces to {value} {unit}',
         failed: 'Failed to apply to all workspaces'
       },
       audit: {

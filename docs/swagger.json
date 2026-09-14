@@ -14818,7 +14818,7 @@
         },
         "/system/admin/tenants/apply-default-storage-quota": {
             "post": {
-                "description": "Reads the current value of `tenant.default_storage_quota_gb`\n(3-tier resolver: DB \u003e ENV \u003e default) and writes that many\nGiB into storage_quota for every row in tenants. Bypasses\nthe per-workspace PUT whitelist, which forbids storage_quota\nedits by Owners. SystemAdmin only.\nIdempotent — running twice with the same setting is a no-op.",
+                "description": "Resolves the MB override or legacy GB default (DB \u003e ENV \u003e default per setting)\nand writes the effective byte quota to every existing workspace. Bypasses\nthe per-workspace PUT whitelist, which forbids storage_quota\nedits by Owners. SystemAdmin only.\nIdempotent — running twice with the same setting is a no-op.",
                 "produces": [
                     "application/json"
                 ],
