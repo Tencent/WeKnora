@@ -1,35 +1,87 @@
 # 知识库与知识管理
 
-知识库是你在 WeKnora 里组织内容的单位：一个知识库装一批相关的资料，并决定这批资料怎么被切分、用哪个向量模型索引、要不要额外生成 Wiki 和知识图谱。库里的每一条内容——一个文件、一个网页 URL、一段手写 Markdown、一组 FAQ——都叫「知识」，上传后会被异步解析成分块并建立索引。
+知识库用于组织相关资料，并统一配置分块、向量模型、检索索引、Wiki 和知识图谱。文件、网页、手写 Markdown 和 FAQ 等内容作为知识条目管理，入库后按配置解析和建立索引。
 
-按知识库分而不是全部堆在一起，主要有三个好处：不同资料可以用不同的分块与模型配置；提问时可以只在指定范围内检索；权限和共享也是按库授予的。
+不同知识库可以使用独立的处理配置。提问时可限定检索范围，成员访问与组织共享也按知识库授权。
 
 <Screenshot
   src="/screenshots/kb-document-list.png"
   caption="知识库文档列表：解析状态、标签与批量操作"
   hint="展示文档列表页，包含解析状态列、标签列、顶部筛选栏与勾选后出现的批量操作栏。" />
 
-## 0. 日常会用到的操作
+## 管理操作入口 {#_0-日常会用到的操作}
 
-| 想做什么 | 在哪里做 |
+| 操作 | 界面入口 |
 | --- | --- |
 | 建库、改分块大小与索引开关 | 知识库编辑弹窗的「分块」「索引策略」页签 |
-| 上传文件 / 导入网页 / 手写一篇 | 文档列表页的上传区，或「新建」下拉 |
-| 用文件夹整理文档 | 文档列表左侧的文件夹树；整目录拖进上传区会保留目录结构（见 §3.4） |
-| 给文档打标签（一篇可多个） | 单篇在详情里改；多篇勾选后用批量操作栏的「标签」（见 §3.5） |
-| 检查解析结果、改错字 | 打开文档 → 分块列表 → 直接编辑分块（见 §3.6） |
-| 补充部门、密级等自定义字段 | 文档详情里的自定义元数据（见 §3.1） |
-| 看谁改过什么 | 知识库设置 → 活动（见 §6） |
-| 整库复制 / 把文档挪到别的库 | 知识库列表的复制，或文档批量操作里的移动（见 §4） |
+| 上传文件、导入网页或编写 Markdown | 文档列表页的上传区，或「新建」下拉 |
+| 用文件夹整理文档 | 文档列表左侧的文件夹树；上传整个目录会保留目录结构（见 [文件夹树](#_3-4-文件夹树)） |
+| 给文档打标签（一篇可多个） | 单篇在详情里改；多篇勾选后用批量操作栏的「标签」（见 [标签（KnowledgeTag）](#_3-5-标签-knowledgetag)） |
+| 检查解析结果、改错字 | 打开文档 → 分块列表 → 直接编辑分块（见 [分块编辑与版本历史](#_3-6-分块编辑与版本历史)） |
+| 补充部门、密级等自定义字段 | 文档详情里的自定义元数据（见 [模型要点](#_3-1-模型要点)） |
+| 查看操作记录 | 知识库设置 → 活动（见 [知识库活动流（KB Activity）](#_6-知识库活动流-kb-activity)） |
+| 复制知识库或跨库移动文档 | 知识库列表的复制，或文档批量操作里的移动（见 [知识库复制与知识移动](#_4-知识库复制与知识移动)） |
 
 <Screenshot
   src="/screenshots/kb-settings.png"
   caption="知识库设置：分块参数与索引策略开关"
   hint="展示分块大小/重叠/父子分块设置，以及向量、关键词、Wiki、图谱四个索引开关。" />
 
-## 1. 知识库模型与配置项
+## 创建知识库并导入资料
 
-### 1.1 KB 类型
+创建知识库时选择内容类型、模型与索引方式，再上传文件、导入网页或编写 Markdown。普通资料使用文档库，标准问答使用 [FAQ 库](17-faq.md)。向量存储创建后不可更改，应在建库前确定。
+
+上传确认页可设置标签和本批文件的解析选项。单次处理选项优先于知识库配置，知识库配置再优先于空间默认值。上传后可在列表查看解析进度；已有文档需要重新解析才能使用修改后的分块参数。
+
+## 整理文件夹与标签
+
+文件夹用于按目录归档，一篇文档只属于一个文件夹。上传整个目录可保留层级结构；在文件夹树中重命名或移动时，子目录路径会一并更新，目标目录已存在时合并内容。文档在同一知识库内移动文件夹只调整归类，不重新解析。
+
+标签用于交叉分类，一篇文档可关联多个标签。上传时可以预设标签，也可勾选文档后批量修改；批量对话框预选所选文档共有的标签。按多个标签筛选时，匹配任一标签的文档即可返回。
+
+开启自动标签后，系统在解析完成时从已有候选标签中选择匹配项。默认每篇最多关联 3 个，已有标签时跳过。配置只影响后续解析，不自动补齐历史文档，模型失败也不会阻塞文档完成。
+
+<Screenshot
+  src="/screenshots/kb-folder-tree.png"
+  caption="文档列表的文件夹树：按目录浏览与重新归类"
+  hint="展示左侧文件夹树、当前目录下的文档列表，以及重命名/移动文件夹的操作入口。" />
+
+<Screenshot
+  src="/screenshots/kb-batch-tag.png"
+  caption="批量打标签：已选文档的共有标签会被预选中"
+  hint="展示勾选多篇文档后打开的标签对话框，含已选标签区、搜索框与可选标签列表。" />
+
+## 编辑分块与补充元数据
+
+在文档详情中编辑文本分块，可修正解析错误并重建索引。每次编辑或回滚都会生成新版本；若其他用户已更新同一分块，界面会提示刷新后重试。索引更新失败时会保留编辑内容并显示失败状态，再次提交可重试。
+
+自定义元数据用于补充部门、密级或版本号等信息，最多 20 项。修改元数据会触发摘要刷新；详细的字段长度和支持类型见参考部分。
+
+<Screenshot
+  src="/screenshots/kb-chunk-edit.png"
+  caption="分块编辑：修改正文、查看版本历史与回滚"
+  hint="展示某个分块的编辑态、版本历史列表（含编辑者与时间）以及回滚入口。" />
+
+## 复制与移动内容
+
+复制知识库可复用已有配置与内容。跨库移动时，可选择复用向量或重新解析：复用要求两库绑定同一向量存储，重新解析允许使用目标库的存储和处理配置。移动为异步任务，可查询进度。
+
+## 查看活动与用量
+
+知识库设置的「活动」记录配置、文档、分块、共享和 Wiki 变更。该入口面向符合资源管理权限的登录用户，API Key 不可访问。
+
+存储配额按工作空间计算，涵盖文件、文本、向量和索引。创建知识库与上传前会检查配额，删除内容后回收对应用量。
+
+<Screenshot
+  src="/screenshots/kb-activity.png"
+  caption="知识库活动流：按时间倒序的操作记录"
+  hint="展示活动列表（操作人、动作、目标文档、时间）与展开后的详情抽屉。" />
+
+## 配置与接口参考
+
+### 知识库模型与配置项 {#_1-知识库模型与配置项}
+
+#### KB 类型 {#_1-1-kb-类型}
 
 `internal/types/knowledgebase.go`：
 
@@ -43,7 +95,7 @@ const (
 
 更新 KB 时会清除与其类型不匹配的配置（如非 FAQ 库的 `FAQConfig`）。`VectorStoreID` 使用 GORM `<-:create` 标签，**创建后不可修改**（防止索引与存储错位）。
 
-### 1.2 配置结构总览
+#### 配置结构总览 {#_1-2-配置结构总览}
 
 ```mermaid
 graph TB
@@ -69,7 +121,7 @@ graph TB
     IS --> GR["graph (默认 false)"]
 ```
 
-### 1.3 ChunkingConfig（分块配置）
+#### ChunkingConfig（分块配置） {#_1-3-chunkingconfig-分块配置}
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
@@ -85,7 +137,7 @@ graph TB
 | `languages` | []string | 自动检测 | 语言提示 |
 | `table_metadata_instructions` | string | - | 表格元数据生成指令 |
 
-### 1.4 IndexingStrategy（索引管线开关）
+#### IndexingStrategy（索引管线开关） {#_1-4-indexingstrategy-索引管线开关}
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -94,7 +146,7 @@ graph TB
 | `wiki_enabled` | false | Wiki 页面生成 |
 | `graph_enabled` | false | 知识图谱提取 |
 
-### 1.5 多模态与富化配置
+#### 多模态与富化配置 {#_1-5-多模态与富化配置}
 
 **VLMConfig（视觉语言模型）**：
 
@@ -129,48 +181,40 @@ graph TB
 
 所有 `custom_instructions` 类字段在更新时经 `validateKnowledgeBasePromptInstructions` 校验长度与合法性（`internal/handler/knowledgebase.go`）。
 
-### 1.6 存储配置
+#### 存储配置 {#_1-6-存储配置}
 
 - **StorageProviderConfig**（新）：`provider ∈ {local, minio, cos, tos, s3, oss, ks3, obs}`；
 - **StorageBackendID**：绑定具体存储后端实例；
 - **StorageConfig**（遗留 `cos_config` 列）：`secret_id / secret_key / region / bucket_name / app_id / path_prefix / provider / endpoint / use_ssl / force_path_style`。
 
-### 1.7 KB 计算字段
+#### KB 计算字段 {#_1-7-kb-计算字段}
 
 列表 / 详情响应附带：`knowledge_count`、`chunk_count`、`is_processing`（FAQ 库）、`processing_count`（文档库处理中知识数）、`share_count`（共享到的组织数）、`creator_name`、`is_pinned` / `pinned_at`（当前用户置顶状态）。
 
 另有一个存储字段 `is_temporary`：标记**临时（ephemeral）知识库**，正常的知识库列表里不展示。它由系统内部使用，典型场景是联网搜索把抓回来的网页缓存成可检索内容。手工建库不会产生临时库。
 
-## 2. KB 路由与权限
+#### 自动标签
 
-（门禁语义见《租户、用户与认证授权》篇；`KBAccessRead/Write` 会解析组织共享路径。）
+在文档知识库的标签相关设置中开启自动标签，先准备好候选标签，再选择聊天模型。解析完成后，系统异步从已有标签里挑选匹配项，不创建新标签。`auto_tag_config` 仅适用于 document 类型：
 
-| 方法 | 路径 | Handler | 门禁 |
-| --- | --- | --- | --- |
-| POST | `/knowledge-bases` | CreateKnowledgeBase | Contributor+ / API Key `manage_kbs` |
-| GET | `/knowledge-bases` | ListKnowledgeBases | Viewer+ / `retrieve` |
-| GET | `/knowledge-bases/:id` | GetKnowledgeBase | Viewer+ + KBAccessRead |
-| PUT | `/knowledge-bases/:id` | UpdateKnowledgeBase | OwnedKBOrAdmin + KBAccessWrite |
-| DELETE | `/knowledge-bases/:id` | DeleteKnowledgeBase | OwnedKBOrAdmin + KBAccessWrite |
-| PUT | `/knowledge-bases/:id/pin` | TogglePinKnowledgeBase | Viewer+ + KBAccessRead |
-| POST/GET | `/knowledge-bases/:id/hybrid-search` | HybridSearch | Viewer+ + KBAccessRead |
-| POST | `/knowledge-bases/copy` | CopyKnowledgeBase | Contributor+ / `manage_kbs` |
-| POST | `/knowledge-bases/:id/duplicate` | DuplicateKnowledgeBase | Contributor+ / `manage_kbs` + KBAccessRead |
-| GET | `/knowledge-bases/copy/progress/:task_id` | GetKBCloneProgress | Viewer+ / `retrieve` 或 `manage_kbs` |
-| GET | `/knowledge-bases/:id/move-targets` | ListMoveTargets | Viewer+ + KBAccessRead |
-| GET | `/knowledge-bases/:id/activity` | ListKnowledgeBaseActivity | OwnedKBOrAdmin + KBAccessRead（仅 JWT） |
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| enabled | false | 开启自动标签 |
+| model_id | 空 | 为空使用知识库 summary_model_id |
+| max_tags | 3 | 每篇最多自动关联的数量，上限 10 |
+| skip_if_tagged | true | 已有标签时跳过，包括人工或数据源添加的标签；false 则增量追加 |
 
-**创建流程**（`internal/handler/knowledgebase.go`）：Contributor 校验 → 租户存储配额检查 → `EmbeddingModelID` 校验 → `VectorStoreID` 绑定校验 → 创建 → 返回 KB + `vector_store_display`。
+配置仅对之后新解析或重新解析的文档生效，不自动回填历史文档。模型失败不阻塞文档完成，异步任务按队列策略重试。候选标签取知识库排序前 500 个；自动关联不删除人工标签。数据源按来源名称添加标签是另一条机制。
 
-**删除级联**：删除 KB 下全部 Knowledge → Chunk → 向量索引 → 关键词索引 → Wiki 页面 → 标签 → 存储文件 → 软删除 KB 本身。共享侧的 editor 无法删除源 KB（删除要求 owner 租户 + Admin 侧权限）。
+### 知识（Knowledge）管理 {#_3-知识-knowledge-管理}
 
-## 3. 知识（Knowledge）管理
-
-### 3.1 模型要点
+#### 模型要点 {#_3-1-模型要点}
 
 `internal/types/knowledge.go`。关键字段：`type`（`manual` 手动 Markdown / `faq` / 文件类型）、`source` / `channel`（摄入渠道）、`parse_status`、`summary_status`、`enable_status`、`file_name/type/size/hash/path`、`storage_size`、`metadata`（JSON，手动知识存 `ManualKnowledgeMetadata{content, format, status(draft/publish), version}`）、`custom_metadata`（JSON，用户自填元数据）、`last_faq_import_result`。
 
-`metadata` 与 `custom_metadata` 刻意分开（migration `000078`）：前者是入库过程写入的内部状态与 ID，后者是用户自己维护的描述性字段（部门、密级、版本号等）。`custom_metadata` 最多 20 个字段，键 1-64 字符，值为字符串/数字/布尔/null 且不超过 1000 字符；`Knowledge.CustomMetadataText()` 把它渲染成稳定排序的 `键: 值` 文本，参与摘要生成与文档级模型上下文。修改元数据会自动触发一次摘要刷新。
+`custom_metadata` 保存用户维护的部门、密级、版本号等描述性字段；`metadata` 保存处理流程的内部状态与 ID。自定义元数据最多 20 项，键为 1–64 字符，值支持字符串、数字、布尔值或 null，长度不超过 1000 字符。修改后会自动刷新摘要。
+
+实现中，`Knowledge.CustomMetadataText()` 按键排序生成 `键: 值` 文本，供摘要生成和文档级模型上下文使用。字段由迁移 `000078` 引入。
 
 摄入渠道常量：`web`、`api`、`browser_extension`、`wechat`、`wecom`、`feishu`、`dingtalk`、`slack`、`im`、`notion`、`yuque`、`rss`。
 
@@ -191,7 +235,7 @@ stateDiagram-v2
 
 摘要独立状态：`summary_status ∈ {none, pending, processing, completed, failed}`。
 
-### 3.2 知识路由
+#### 知识路由 {#_3-2-知识路由}
 
 | 方法 | 路径 | 说明 | 门禁 |
 | --- | --- | --- | --- |
@@ -212,7 +256,7 @@ stateDiagram-v2
 | POST | `/knowledge/move` | 移动知识 | Contributor+ / `ingest` |
 | GET | `/knowledge/move/progress/:task_id` | 移动进度 | Viewer+ |
 
-### 3.3 列表过滤参数
+#### 列表过滤参数 {#_3-3-列表过滤参数}
 
 `internal/types/knowledge.go` 的 `KnowledgeListFilter` + `internal/handler/knowledge.go`：
 
@@ -228,29 +272,24 @@ stateDiagram-v2
 | `folder_path` | 按文件夹筛选。**是否传这个参数决定列表模式**：不传是全库扁平视图，传空字符串是知识库根目录（不含子目录） |
 | `folder_recursive` | 配合 `folder_path` 使用，为 `true` 时连子目录里的文档一起返回 |
 
-### 3.4 文件夹树
+#### 文件夹树 {#_3-4-文件夹树}
 
-文档多了之后平铺列表不好找，知识库因此支持**树形文件夹**，像文件管理器一样组织内容。
+文件夹用于按项目、来源或目录层级组织文档，支持上传时保留目录结构，以及入库后的重命名和移动。
 
-怎么用：
+文件夹操作：
 
-- **整目录拖进上传区**：目录结构会被原样保留，不需要事后手工建文件夹；
+- **上传整个目录**：目录结构会被原样保留，不需要事后手工建文件夹；
 - **新建 / 重命名 / 移动文件夹**：文档列表左侧的文件夹树上操作。重命名会连子目录一起改路径；目标路径已存在时两个文件夹合并；不允许把文件夹移到自己的子目录下；
 - **重新归类文档**：勾选文档后移动到指定文件夹（也可以移回根目录）。这只改归类，不重新解析、不影响索引；
 - **按目录浏览**：列表接口的 `folder_path` 决定视图模式——不传是全库平铺，传空字符串是根目录（不含子目录），配 `folder_recursive=true` 则连子目录一起列。
 
 文件夹与标签解决的是不同问题，可以叠加使用：**文件夹是唯一归属**（一篇文档只在一个目录下，适合按项目/来源归档），**标签是多对多**（一篇文档可带多个标签，适合按主题、密级、状态交叉筛选）。检索时两者都能作为范围限定条件。
 
-实现上，整个目录拖进上传区时，目录结构会被保留下来：路径存在 `knowledges.folder_path` 列（migration `000079`），`file_name` 只留文件名。早期版本把相对路径塞在 `file_name` 里，导致列表标题显示成一长串路径且无法按目录查询，迁移时已自动回填。
+目录路径保存在 `knowledges.folder_path`，`file_name` 仅保存文件名。迁移 `000079` 已从历史文件名中回填目录路径。
 
-界面上文档列表左侧是文件夹树，可以像文件管理器一样浏览、重命名文件夹、把文档拖到别的文件夹。对应接口是 `GET/PUT /knowledge-bases/:id/knowledge/folders` 与 `POST /knowledge/folder`（见 [API 参考](../04-api/02-api-knowledge.md)）。重命名文件夹会连子目录一起改路径，目标已存在时两个文件夹合并。
+文件夹接口为 `GET/PUT /knowledge-bases/:id/knowledge/folders` 与 `POST /knowledge/folder`，详见[知识库 API](../04-api/02-api-knowledge.md)。
 
-<Screenshot
-  src="/screenshots/kb-folder-tree.png"
-  caption="文档列表的文件夹树：按目录浏览与重新归类"
-  hint="展示左侧文件夹树、当前目录下的文档列表，以及重命名/移动文件夹的操作入口。" />
-
-### 3.5 标签（KnowledgeTag）
+#### 标签（KnowledgeTag） {#_3-5-标签-knowledgetag}
 
 `internal/types/tag.go` + `internal/handler/tag.go`：
 
@@ -281,19 +320,9 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 - **批量打标签**：文档列表勾选若干文档后，批量操作栏的「标签」按钮打开 `BatchTagDialog.vue`。对话框会把所选文档**共有**的标签预选中，支持搜索、直接跳转标签管理，提交后刷新列表；
 - **上传时设置标签**：上传确认对话框（`UploadConfirmDialog.vue`）可在文件入库前直接指定标签与解析选项，省去先传后改。
 
-<Screenshot
-  src="/screenshots/kb-batch-tag.png"
-  caption="批量打标签：已选文档的共有标签会被预选中"
-  hint="展示勾选多篇文档后打开的标签对话框，含已选标签区、搜索框与可选标签列表。" />
+#### 分块编辑与版本历史 {#_3-6-分块编辑与版本历史}
 
-### 3.6 分块编辑与版本历史
-
-解析结果不总是完美——表格错行、OCR 串字、公式丢符号。这类问题以前只能重传文档，现在可以在文档详情里直接改分块正文，改完立即重建索引，并且每次修改都留有历史版本可以回滚。
-
-<Screenshot
-  src="/screenshots/kb-chunk-edit.png"
-  caption="分块编辑：修改正文、查看版本历史与回滚"
-  hint="展示某个分块的编辑态、版本历史列表（含编辑者与时间）以及回滚入口。" />
+在文档详情中可以编辑分块正文，修正 OCR、表格或公式的解析错误。保存后会重建索引，并保留历史版本供查看和回滚。
 
 实现上（`internal/application/service/chunk.go`，migration `000078`）：
 
@@ -314,15 +343,21 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 - **乐观并发**：请求可带 `expected_revision`，与当前版本不符返回 409，前端提示刷新后重试；
 - **不能新增图片**：编辑内容中出现源内容里没有的图片 URL 会被拒绝；删除某张图片的 Markdown 引用时，对应的 OCR / caption 子分块被**停用**而非硬删除，这样回滚历史版本可以把它们重新启用；
 - **父子分块一致性**：编辑子块后按偏移量把改动叠加回父块（父块的 `source_content` 保持不可变，替换按倒序应用，长度变化不会打乱坐标系）；
-- **索引失败不假装成功**：重建索引失败时行照常保存，但 `index_status = failed`，界面据此提示；再次提交相同内容会触发重试；
-- **生成问题不丢**：内容编辑后原有的检索问题保留，只是被标记为「与当前正文版本不匹配」，可以单条改写（`PUT /chunks/by-id/:id/questions`）或整体重新生成（`POST /chunks/by-id/:id/questions/regenerate`）；
+- **索引失败处理**：重建索引失败时行照常保存，但 `index_status = failed`，界面据此提示；再次提交相同内容会触发重试；
+- **保留生成问题**：内容编辑后原有的检索问题保留，只是被标记为「与当前正文版本不匹配」，可以单条改写（`PUT /chunks/by-id/:id/questions`）或整体重新生成（`POST /chunks/by-id/:id/questions/regenerate`）；
 - **摘要联动**：内容或启停状态变化会入队一次文档摘要刷新，`summary_status` 转为 `pending`；也可以用 `POST /knowledge/:id/regenerate-summary` 手动触发。
 
 回滚（`POST /chunks/:knowledge_id/:id/revert`）本身也是一次新编辑：目标历史版本的内容被写为当前内容，版本号继续递增，原内容进入历史列表，因此「回滚的回滚」同样可行。
 
 接口清单见 [API 参考：分块与标签](../04-api/02-api-chunks.md)。
 
-### 3.7 下载与预览安全
+#### 手工编辑摘要与分块浏览
+
+在文档内容预览中可编辑摘要并保存，用于修正自动摘要。`PUT /knowledge/:id` 的 description 省略时保持原摘要，显式空字符串清空；更新摘要不会等同于修改原始文档内容。需要重新生成时使用「重新生成摘要」，内容/元数据变化也可能触发摘要刷新。
+
+文档分块按页加载，切换文档和检索跳转会更新分页状态。完整字段见[知识 API](../04-api/02-api-knowledge.md)与[分块 API](../04-api/02-api-chunks.md)。
+
+#### 下载与预览安全 {#_3-7-下载与预览安全}
 
 `GET /knowledge/:id/preview` 的安全机制由 `internal/handler/knowledge_preview_security_test.go` 固化验证：
 
@@ -336,9 +371,9 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 
 测试用例明确验证：即使文件内容是 `<script>alert(1)</script>`，也只会作为二进制附件传输。下载端点（`/knowledge/:id/download`）要求更高的 Contributor+ 且走 KBAccessWrite 门禁。
 
-## 4. 知识库复制与知识移动
+### 知识库复制与知识移动 {#_4-知识库复制与知识移动}
 
-### 4.1 复制（Copy / Duplicate）与 Preflight
+#### 复制（Copy / Duplicate）与 Preflight {#_4-1-复制-copy-duplicate-与-preflight}
 
 `internal/application/service/knowledge_clone_move.go`，preflight 规则由 `internal/handler/knowledgebase_copy_preflight_test.go` 固化：
 
@@ -353,7 +388,7 @@ Preflight（复制前校验，直接同步拒绝）：
 4. **StorageBackend 兼容性**：跨存储后端复制不支持；
 5. API Key 调用时源 / 目标 KB 均须在 allow-list 内。
 
-### 4.2 知识移动门禁（move gate）
+#### 知识移动门禁（move gate） {#_4-2-知识移动门禁-move-gate}
 
 `POST /knowledge/move` 支持两种模式，约束在 **handler 与 service 双层**校验（`internal/handler/knowledge_move_gate_test.go` 与 `internal/application/service/knowledge_move_gate_test.go` 双重佐证）：
 
@@ -372,7 +407,45 @@ nil & nil               → true   (同为 env-store)
 
 `GET /knowledge-bases/:id/move-targets` 返回符合门禁的候选目标库；移动为异步任务，进度查 `GET /knowledge/move/progress/:task_id`。
 
-## 5. 知识处理管线
+### 存储配额与用量 {#_7-存储配额与用量}
+
+配额挂在租户上（`internal/types/tenant.go`）：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `storage_quota` | 10737418240（10GB） | 租户总配额 |
+| `storage_used` | 0 | 已用量（涵盖原始文件、文本、向量与索引占用） |
+
+创建 KB 与上传知识前都会执行配额检查（`internal/handler/knowledgebase.go` 创建校验链），超限拒绝写入；每条知识记录自身 `file_size` 与 `storage_size`，删除时回收用量。
+
+### KB 路由与权限 {#_2-kb-路由与权限}
+
+（门禁语义见《租户、用户与认证授权》篇；`KBAccessRead/Write` 会解析组织共享路径。）
+
+| 方法 | 路径 | Handler | 门禁 |
+| --- | --- | --- | --- |
+| POST | `/knowledge-bases` | CreateKnowledgeBase | Contributor+ / API Key `manage_kbs` |
+| GET | `/knowledge-bases` | ListKnowledgeBases | Viewer+ / `retrieve` |
+| GET | `/knowledge-bases/:id` | GetKnowledgeBase | Viewer+ + KBAccessRead |
+| PUT | `/knowledge-bases/:id` | UpdateKnowledgeBase | OwnedKBOrAdmin + KBAccessWrite |
+| DELETE | `/knowledge-bases/:id` | DeleteKnowledgeBase | OwnedKBOrAdmin + KBAccessWrite |
+| PUT | `/knowledge-bases/:id/pin` | TogglePinKnowledgeBase | Viewer+ + KBAccessRead |
+| POST/GET | `/knowledge-bases/:id/hybrid-search` | HybridSearch | Viewer+ + KBAccessRead |
+| POST | `/knowledge-bases/copy` | CopyKnowledgeBase | Contributor+ / `manage_kbs` |
+| POST | `/knowledge-bases/:id/duplicate` | DuplicateKnowledgeBase | Contributor+ / `manage_kbs` + KBAccessRead |
+| GET | `/knowledge-bases/copy/progress/:task_id` | GetKBCloneProgress | Viewer+ / `retrieve` 或 `manage_kbs` |
+| GET | `/knowledge-bases/:id/move-targets` | ListMoveTargets | Viewer+ + KBAccessRead |
+| GET | `/knowledge-bases/:id/activity` | ListKnowledgeBaseActivity | OwnedKBOrAdmin + KBAccessRead（仅 JWT） |
+
+**创建流程**（`internal/handler/knowledgebase.go`）：Contributor 校验 → 租户存储配额检查 → `EmbeddingModelID` 校验 → `VectorStoreID` 绑定校验 → 创建 → 返回 KB + `vector_store_display`。
+
+**删除级联**：删除 KB 下全部 Knowledge → Chunk → 向量索引 → 关键词索引 → Wiki 页面 → 标签 → 存储文件 → 软删除 KB 本身。共享侧的 editor 无法删除源 KB（删除要求 owner 租户 + Admin 侧权限）。
+
+### 混合检索（Hybrid Search） {#_8-混合检索-hybrid-search}
+
+`POST /knowledge-bases/:id/hybrid-search`（`internal/handler/knowledgebase.go` + `internal/application/service/knowledgebase_search*.go`）按 KB 的 `IndexingStrategy` 组合召回：向量（vector_enabled）+ 关键词 BM25（keyword_enabled），经 rank fusion 融合与重排（rerank），可叠加知识图谱增强（graph_enabled）；多 KB 场景由 `knowledgebase_search_fanout.go` 并发扇出、`knowledgebase_search_fusion.go` 融合；共享 KB 检索路径见 `knowledgebase_search_shared.go`。FAQ 库检索有专门的命中策略（负例过滤 / 迭代召回），见 FAQ 篇。
+
+### 知识处理管线 {#_5-知识处理管线}
 
 `internal/application/service/knowledge_create.go` / `knowledge_process.go` / `knowledge_process_config.go`：
 
@@ -393,14 +466,9 @@ nil & nil               → true   (同为 env-store)
 
 Chunk 类型（`internal/types/chunk.go`）：`text`、`parent_text`、`image_ocr`、`image_caption`、`summary`、`entity`、`relationship`、`faq`、`web_search`、`table_summary`、`table_column`、`wiki_page`；chunk 支持 `is_enabled` 开关与 `flags` 位标志（bit0 = 可推荐）。
 
-## 6. 知识库活动流（KB Activity）
+### 知识库活动流（KB Activity） {#_6-知识库活动流-kb-activity}
 
-活动流回答「这个库最近被谁改了什么」：建库改配置、上传删除文档、编辑分块、共享给谁、Wiki 更新，都会留痕。入口在知识库设置的「活动」页签。
-
-<Screenshot
-  src="/screenshots/kb-activity.png"
-  caption="知识库活动流：按时间倒序的操作记录"
-  hint="展示活动列表（操作人、动作、目标文档、时间）与展开后的详情抽屉。" />
+知识库设置的「活动」页签记录配置修改、文档上传与删除、分块编辑、共享变更和 Wiki 更新，包含操作人、时间与结果。
 
 `internal/application/service/kb_activity.go` 复用审计日志体系（`AuditLog`，scope 为 knowledge_base），通过 `recordKBActivity(ctx, audit, tenantID, kbID, action, targetType, targetID, outcome, details)` 记录：
 
@@ -411,24 +479,9 @@ Chunk 类型（`internal/types/chunk.go`）：`text`、`parent_text`、`image_oc
 
 查询端点：`GET /knowledge-bases/:id/activity`（OwnedKBOrAdmin，仅 JWT 用户，API Key 不可访问）。
 
-## 7. 存储配额与用量
-
-配额挂在租户上（`internal/types/tenant.go`）：
-
-| 字段 | 默认 | 说明 |
-| --- | --- | --- |
-| `storage_quota` | 10737418240（10GB） | 租户总配额 |
-| `storage_used` | 0 | 已用量（涵盖原始文件、文本、向量与索引占用） |
-
-创建 KB 与上传知识前都会执行配额检查（`internal/handler/knowledgebase.go` 创建校验链），超限拒绝写入；每条知识记录自身 `file_size` 与 `storage_size`，删除时回收用量。
-
-## 8. 混合检索（Hybrid Search）
-
-`POST /knowledge-bases/:id/hybrid-search`（`internal/handler/knowledgebase.go` + `internal/application/service/knowledgebase_search*.go`）按 KB 的 `IndexingStrategy` 组合召回：向量（vector_enabled）+ 关键词 BM25（keyword_enabled），经 rank fusion 融合与重排（rerank），可叠加知识图谱增强（graph_enabled）；多 KB 场景由 `knowledgebase_search_fanout.go` 并发扇出、`knowledgebase_search_fusion.go` 融合；共享 KB 检索路径见 `knowledgebase_search_shared.go`。FAQ 库检索有专门的命中策略（负例过滤 / 迭代召回），见 FAQ 篇。
-
 ## 实现参考
 
-想读源码时按下表定位（路径相对仓库根目录）：
+以下路径均相对仓库根目录：
 
 | 层 | 文件 |
 | --- | --- |

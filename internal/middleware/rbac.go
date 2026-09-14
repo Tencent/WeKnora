@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,7 +21,7 @@ import (
 // own 404 — middleware-level 403 would hide real "URL is wrong" failures
 // behind a permissions error, which breaks client diagnostics and
 // operator dashboards.
-var ErrResourceNotFound = errors.New("rbac: resource not found")
+var ErrResourceNotFound = access.ErrResourceNotFound
 
 // CreatorLookup resolves the creator user ID for the resource targeted
 // by the current request, based on whatever is on the gin.Context (URL
@@ -75,7 +76,7 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		role := types.TenantRoleFromContext(ctx)
+		role := types.CallerFromContext(ctx).Role
 		if role.HasPermission(min) {
 			c.Next()
 			return
@@ -100,7 +101,7 @@ func RequireRole(min types.TenantRole, cfg *config.Config) gin.HandlerFunc {
 		// dedup inside the service so probing clients can't fill the
 		// table.
 		if svc := AuditServiceFromContext(c); svc != nil {
-			tenantID, _ := types.TenantIDFromContext(ctx)
+			tenantID := types.CallerFromContext(ctx).TenantID
 			_ = svc.LogDenied(ctx, c, tenantID, uid, string(role), min)
 		}
 		c.JSON(http.StatusForbidden, gin.H{
@@ -175,7 +176,7 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 			uid, c.Request.URL.Path)
 		// Durable audit row for the reject — same dedup as RequireRole.
 		if svc := AuditServiceFromContext(c); svc != nil {
-			tenantID, _ := types.TenantIDFromContext(ctx)
+			tenantID := types.CallerFromContext(ctx).TenantID
 			_ = svc.LogDenied(ctx, c, tenantID, uid, "user", "system_admin")
 		}
 		c.JSON(http.StatusForbidden, gin.H{
@@ -194,7 +195,8 @@ func RequireSystemAdmin(cfg *config.Config) gin.HandlerFunc {
 // is responsible for translating the URL into the resource's creator
 // user ID (see CreatorLookup for the return-value contract).
 //
-// Decision order:
+// API-key principals skip this human ownership gate; route capabilities and
+// allowed KB scope remain mandatory. For human callers, decision order is:
 //  1. role >= min -> allow without running lookup.
 //  2. cross-tenant superuser -> allow without running lookup.
 //  3. enforcement off -> log, allow without running lookup. This is the
@@ -213,81 +215,35 @@ func RequireOwnershipOrRole(min types.TenantRole, lookup CreatorLookup, cfg *con
 	warnOnNilConfig(cfg)
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
-		// API-key principals are authorized solely by the APIKeyGate.
-		// Ownership ("creator OR Admin+") is a human concept that cannot
-		// apply to a machine principal (its synthetic system-user never
-		// matches creator_id), so short-circuit here. KB-scope for API
-		// keys is still enforced by the KBAccess guards + handler checks.
-		if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
-			c.Next()
-			return
+		request := ownershipRequestFromContext(ctx, cfg)
+		var resolveCreator func() (string, error)
+		if lookup != nil {
+			resolveCreator = func() (string, error) { return lookup(c) }
 		}
-		role := types.TenantRoleFromContext(ctx)
-
-		// 1. Fast path: role meets the bar.
-		if role.HasPermission(min) {
-			c.Next()
-			return
-		}
-
-		// 2. Cross-tenant superuser bypass — same reasoning as RequireRole.
-		if IsCrossTenantSuperuser(ctx, cfg) {
-			c.Next()
-			return
-		}
-
-		uid, _ := types.UserIDFromContext(ctx)
-
-		// 3. Fail-open shortcut: when enforcement is off, do NOT run the
-		//    lookup. Running it would add a hidden DB roundtrip on every
-		//    mutating request during the rollout window — see #1318 review.
-		if !rbacEnforcementEnabled(cfg) {
-			logger.Warnf(ctx,
-				"[rbac] ownership/role would be checked (enforcement off, lookup skipped): "+
-					"user=%s have=%s need=%s path=%s",
-				uid, role, min, c.Request.URL.Path)
-			c.Next()
-			return
-		}
-
-		creator, err := lookup(c)
+		decision, err := access.CheckOwnershipOrRole(request, min, resolveCreator)
+		logOwnershipDecision(ctx, request, min, decision, err, c.Request.URL.Path)
 		switch {
-		case errors.Is(err, ErrResourceNotFound):
-			// 4. Hand off to the handler so the client sees a real 404
-			//    rather than a fake "no permission" 403.
+		case err == nil, errors.Is(err, ErrResourceNotFound):
+			// A missing resource remains the handler's responsibility so it
+			// can produce its existing 404 response.
 			c.Next()
 			return
-		case err != nil:
-			// 5. Genuine failure — surface it as 5xx so monitoring catches it.
+		case errors.Is(err, ErrOwnershipForbidden) && !decision.LookupFailed:
+			if svc := AuditServiceFromContext(c); svc != nil {
+				tenantID := types.CallerFromContext(ctx).TenantID
+				_ = svc.LogDenied(ctx, c, tenantID, request.UserID, string(request.Role), min)
+			}
+			c.JSON(http.StatusForbidden, gin.H{
+				"error": "Forbidden: must own the resource or have the required role",
+			})
+		default:
 			logger.Errorf(ctx,
 				"[rbac] creator lookup failed: user=%s path=%s err=%v",
-				uid, c.Request.URL.Path, err)
+				request.UserID, c.Request.URL.Path, err)
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"error": "Service Unavailable: cannot verify resource ownership",
 			})
-			c.Abort()
-			return
 		}
-
-		// 6. Ownership match wins even when role is below min — that's the
-		//    whole point: Contributors can edit their own resources.
-		if creator != "" && creator == uid {
-			c.Next()
-			return
-		}
-
-		// 7-8. Tenant-owned (creator=="") or non-creator with insufficient role.
-		logger.Warnf(ctx,
-			"[rbac] ownership/role insufficient: user=%s have=%s need=%s creator=%q path=%s",
-			uid, role, min, creator, c.Request.URL.Path)
-		// Same durable audit hook as RequireRole — subject to dedup.
-		if svc := AuditServiceFromContext(c); svc != nil {
-			tenantID, _ := types.TenantIDFromContext(ctx)
-			_ = svc.LogDenied(ctx, c, tenantID, uid, string(role), min)
-		}
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": "Forbidden: must own the resource or have the required role",
-		})
 		c.Abort()
 	}
 }
@@ -303,61 +259,55 @@ func rbacEnforcementEnabled(cfg *config.Config) bool {
 
 // ErrOwnershipForbidden is returned by EvaluateOwnershipOrRole when the
 // caller is neither the resource creator nor meets the minimum role.
-var ErrOwnershipForbidden = errors.New("rbac: ownership or role insufficient")
+var ErrOwnershipForbidden = access.ErrOwnershipForbidden
 
-// EvaluateOwnershipOrRole applies the same decision matrix as
-// RequireOwnershipOrRole for handlers that resolve creator_id out-of-band
-// (e.g. KB id carried in a JSON body rather than a URL param).
-//
-// Returns nil when access is allowed. ErrResourceNotFound means the
-// handler should issue its own 404. ErrOwnershipForbidden maps to 403.
-// Any other error is a transient lookup failure (503).
+// EvaluateOwnershipOrRole is the handler adapter for the same lazy decision
+// used by RequireOwnershipOrRole. Body/query-based callers supply a closure so
+// ownership lookup is skipped on exactly the same fast paths as URL routes.
+// Not-found, forbidden and lookup failures remain distinct; each handler maps
+// them to its existing response format and status.
 func EvaluateOwnershipOrRole(
 	ctx context.Context,
 	cfg *config.Config,
 	min types.TenantRole,
-	creatorID string,
-	lookupErr error,
+	lookup func() (string, error),
 ) error {
-	// API-key principals are authorized solely by the APIKeyGate (route
-	// policy) plus the KB allow-list handlers enforce separately
-	// (requireTenantAPIKeyKnowledgeBase(s)). Ownership ("creator OR Admin+")
-	// is a human concept that never applies to a machine principal, so
-	// short-circuit here — exactly as RequireOwnershipOrRole does for the
-	// middleware form. Without this, a scoped key (synthesized as Viewer for
-	// legacy-guard compatibility) would be 403'd by the body-carried-KB
-	// ownership checks even though the gate + allow-list already admitted it.
-	if _, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
-		return nil
+	request := ownershipRequestFromContext(ctx, cfg)
+	decision, err := access.CheckOwnershipOrRole(request, min, lookup)
+	logOwnershipDecision(ctx, request, min, decision, err, "")
+	return err
+}
+
+func ownershipRequestFromContext(ctx context.Context, cfg *config.Config) access.OwnershipRequest {
+	caller := types.CallerFromContext(ctx)
+	_, apiKey := types.TenantAPIKeyScopeFromContext(ctx)
+	return access.OwnershipRequest{
+		UserID:               caller.UserID,
+		Role:                 caller.Role,
+		APIKey:               apiKey,
+		CrossTenantSuperuser: IsCrossTenantSuperuser(ctx, cfg),
+		Enforce:              rbacEnforcementEnabled(cfg),
 	}
-	role := types.TenantRoleFromContext(ctx)
-	if role.HasPermission(min) {
-		return nil
-	}
-	if IsCrossTenantSuperuser(ctx, cfg) {
-		return nil
-	}
-	if !rbacEnforcementEnabled(cfg) {
-		uid, _ := types.UserIDFromContext(ctx)
+}
+
+func logOwnershipDecision(
+	ctx context.Context,
+	request access.OwnershipRequest,
+	required types.TenantRole,
+	decision access.OwnershipDecision,
+	err error,
+	path string,
+) {
+	switch {
+	case decision.EnforcementSkipped:
 		logger.Warnf(ctx,
-			"[rbac] ownership/role would be checked (enforcement off, lookup skipped): user=%s have=%s need=%s",
-			uid, role, min)
-		return nil
+			"[rbac] ownership/role would be checked (enforcement off, lookup skipped): user=%s have=%s need=%s path=%s",
+			request.UserID, request.Role, required, path)
+	case errors.Is(err, ErrOwnershipForbidden) && !decision.LookupFailed:
+		logger.Warnf(ctx,
+			"[rbac] ownership/role insufficient: user=%s have=%s need=%s creator=%q path=%s",
+			request.UserID, request.Role, required, decision.CreatorID, path)
 	}
-	if errors.Is(lookupErr, ErrResourceNotFound) {
-		return ErrResourceNotFound
-	}
-	if lookupErr != nil {
-		return lookupErr
-	}
-	uid, _ := types.UserIDFromContext(ctx)
-	if creatorID != "" && creatorID == uid {
-		return nil
-	}
-	logger.Warnf(ctx,
-		"[rbac] ownership/role insufficient: user=%s have=%s need=%s creator=%q",
-		uid, role, min, creatorID)
-	return ErrOwnershipForbidden
 }
 
 // isCrossTenantSuperuser was moved to access.go (renamed to

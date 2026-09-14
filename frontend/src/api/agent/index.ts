@@ -38,6 +38,7 @@ export interface CustomAgentConfig {
   agent_type?: AgentType;
   system_prompt?: string;           // 统一系统提示词（使用 {{web_search_status}} 占位符动态控制行为）
   system_prompt_id?: string;        // 引用的 prompt template ID（预设会填入此字段）
+  context_template_id?: string;     // Inherit the referenced context template when text is empty
   context_template?: string;        // 上下文模板（普通模式）
 
   // ===== 模型设置 =====

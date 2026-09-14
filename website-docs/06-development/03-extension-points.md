@@ -1,8 +1,8 @@
 # 扩展点指南
 
-WeKnora 在文档解析、分块、检索、模型接入、联网搜索、数据源、IM 渠道、Agent 工具、对象存储九个层面都预留了清晰的扩展点。本章逐个给出：**核心接口定义（真实源码）→ 现有实现列表 → 新增实现步骤（含注册点文件）**。所有接口代码均摘自当前仓库源码。
+WeKnora 的解析器、分块策略、检索引擎、模型 Provider、搜索引擎、数据源、IM 适配器、Agent 工具和存储后端均通过接口接入。新增实现时，先实现对应接口，再在注册入口装配，并验证现有调用链。以下按扩展类型列出接口、已有实现和接入步骤。
 
-## 0. 扩展点总览
+## 扩展点总览 {#_0-扩展点总览}
 
 ```mermaid
 graph LR
@@ -40,7 +40,7 @@ Go 侧绝大多数扩展点的**注册中枢**是 `internal/container/container.
 
 ---
 
-## 1. 新增文档解析器（docreader，Python）
+## 新增文档解析器（docreader，Python） {#_1-新增文档解析器-docreader-python}
 
 ### 接口定义
 
@@ -108,7 +108,7 @@ reg.register(
 
 ---
 
-## 2. 新增分块策略（internal/infrastructure/chunker）
+## 新增分块策略（internal/infrastructure/chunker） {#_2-新增分块策略-internal-infrastructure-chunker}
 
 ### 接口定义
 
@@ -197,7 +197,7 @@ var splitByHeuristics = func(text string, cfg SplitterConfig, _ *DocProfile) []C
 
 ---
 
-## 3. 新增检索引擎（Retriever Engine）
+## 新增检索引擎（Retriever Engine） {#_3-新增检索引擎-retriever-engine}
 
 ### 接口定义
 
@@ -280,7 +280,7 @@ if slices.Contains(retrieveDriver, "postgres") {
 
 ---
 
-## 4. 新增模型 Provider（internal/models/provider）
+## 新增模型 Provider（internal/models/provider） {#_4-新增模型-provider-internal-models-provider}
 
 ### 接口定义
 
@@ -354,7 +354,7 @@ type Reranker interface {
 
 ---
 
-## 5. 新增联网搜索引擎（internal/infrastructure/web_search）
+## 新增联网搜索引擎（internal/infrastructure/web_search） {#_5-新增联网搜索引擎-internal-infrastructure-web-search}
 
 ### 接口定义
 
@@ -406,7 +406,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 
 ---
 
-## 6. 新增数据源连接器（internal/datasource/connector）
+## 新增数据源连接器（internal/datasource/connector） {#_6-新增数据源连接器-internal-datasource-connector}
 
 > 目录内附有实现指南 `internal/datasource/CONNECTOR_IMPLEMENTATION_GUIDE.md`，可对照阅读。
 
@@ -482,7 +482,7 @@ if err := registry.Register(mysourceConnector.NewConnector()); err != nil {
 
 ---
 
-## 7. 新增 IM 平台适配器（internal/im）
+## 新增 IM 平台适配器（internal/im） {#_7-新增-im-平台适配器-internal-im}
 
 ### 接口定义
 
@@ -563,7 +563,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 
 ---
 
-## 8. 新增 Agent 工具（internal/agent/tools）
+## 新增 Agent 工具（internal/agent/tools） {#_8-新增-agent-工具-internal-agent-tools}
 
 ### 接口定义
 
@@ -604,7 +604,7 @@ func (r *ToolRegistry) ListTools() []string
 
 ### 现有实现
 
-工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、`grep_chunks`、`knowledge_search`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、skills 工具（`execute_skill_script`、`read_skill`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_read_source_doc`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）。实现文件与工具同名（如 `grep_chunks.go`、`knowledge_search.go`、`data_analysis.go`、`mcp_tool.go`——后者把 MCP 服务的远程工具包装成 `types.Tool`）。
+工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、`grep_chunks`、`knowledge_search`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、沙箱/技能工具（`shell_exec`、`read_file`、`list_sandbox_files`、`write_sandbox_file`、`edit_sandbox_file`），记忆工具（`search_memory`、`search_conversations`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_read_source_doc`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）。实现文件与工具同名（如 `grep_chunks.go`、`knowledge_search.go`、`data_analysis.go`、`mcp_tool.go`——后者把 MCP 服务的远程工具包装成 `types.Tool`）。
 
 ### 新增步骤
 
@@ -615,7 +615,7 @@ func (r *ToolRegistry) ListTools() []string
 
 ---
 
-## 9. 新增存储后端（对象存储）
+## 新增存储后端（对象存储） {#_9-新增存储后端-对象存储}
 
 ### 接口定义
 

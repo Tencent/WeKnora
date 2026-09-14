@@ -80,36 +80,6 @@ func (s *MCPOAuthSession) withAuthWaitTimeout(seconds int) *MCPOAuthSession {
 	return s
 }
 
-// oauthSessionForRegistration builds an OAuth session for tool discovery at agent startup.
-func oauthSessionForRegistration(ctx context.Context, sess *MCPOAuthSession, retryTimeout time.Duration) *MCPOAuthSession {
-	if sess == nil || sess.EventBus == nil {
-		return nil
-	}
-	approvalCtx := sess.ApprovalCtx
-	if approvalCtx == nil {
-		approvalCtx = ctx
-	}
-	userID := sess.UserID
-	if userID == "" {
-		principal, _ := types.PrincipalFromContext(ctx)
-		userID = principal.StorageID()
-	}
-	requestID := sess.RequestID
-	if requestID == "" {
-		requestID, _ = types.RequestIDFromContext(ctx)
-	}
-	return &MCPOAuthSession{
-		EventBus:               sess.EventBus,
-		SessionID:              sess.SessionID,
-		AssistantMessageID:     sess.AssistantMessageID,
-		UserID:                 userID,
-		RequestID:              requestID,
-		ApprovalCtx:            approvalCtx,
-		ExecTimeout:            retryTimeout,
-		AuthWaitTimeoutSeconds: sess.AuthWaitTimeoutSeconds,
-	}
-}
-
 // oauthWaiter is the subset of the approval gate used to pause while the user
 // completes MCP OAuth. Accessed via type assertion so MCPApproval fakes stay unchanged.
 type oauthWaiter interface {

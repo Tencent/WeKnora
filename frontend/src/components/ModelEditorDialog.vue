@@ -1,18 +1,14 @@
 <template>
   <SettingDrawer :visible="dialogVisible" :title="isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle')"
-    :description="getModalDescription()" :icon="modelTypeIcon" :confirm-loading="saving"
+    :description="getModalDescription()" :icon="modelTypeIcon" :confirm-loading="saving" :cancel-disabled="saving"
+    :confirm-text="$t('model.editor.saveAndClose')"
+    :close-on-overlay-click="!saving" :close-on-esc-keydown="!saving"
     :confirm-disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
     @update:visible="(v: boolean) => dialogVisible = v" @confirm="handleConfirm" @cancel="handleCancel">
 
-    <!--
-      Footer-left slot: connection-test button lives here so it sits next to
-      Save/Cancel — primary actions all aligned along the bottom of the
-      drawer. Avoids the "test, then scroll back down to save" dance.
-      Mirrors the pattern used in WebSearchSettings' provider drawer.
-    -->
     <template v-if="formData.source === 'remote'" #footer-left>
       <t-button variant="outline" @click="checkRemoteAPI" :loading="checking"
-        :disabled="!formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')">
+        :disabled="saving || !formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')">
         <template #icon>
           <t-icon v-if="!checking && remoteChecked && remoteAvailable" name="check-circle-filled"
             class="status-icon available" />
@@ -21,13 +17,32 @@
         </template>
         {{ checking ? $t('model.editor.testing') : $t('model.editor.testConnection') }}
       </t-button>
-      <span v-if="remoteChecked" :class="['footer-test-message', remoteAvailable ? 'success' : 'error']"
-        :title="remoteMessage">
-        {{ remoteMessage }}
+      <span v-if="remoteChecked" :class="['connection-status', remoteAvailable ? 'success' : 'error']">
+        {{ remoteAvailable ? $t('model.editor.connectionSuccess') : $t('model.editor.connectionFailed') }}
       </span>
     </template>
 
-    <t-form ref="formRef" :data="formData" :rules="rules" layout="vertical">
+    <template #footer-extra>
+      <div v-if="saveError" class="connection-result error" role="alert">
+        <strong>{{ $t('modelSettings.toasts.saveFailed') }}</strong>
+        <div class="connection-result__details" tabindex="0">{{ saveError }}</div>
+      </div>
+      <div v-if="formData.source === 'remote'" class="connection-feedback" aria-live="polite">
+        <p class="connection-hint">{{ $t(isEdit ? 'model.editor.testDraftEditHint' : 'model.editor.testDraftHint') }}</p>
+        <p v-if="remoteStale" class="connection-hint">{{ $t('model.editor.testStale') }}</p>
+        <div v-if="remoteChecked && !remoteAvailable" class="connection-result error">
+          <div class="connection-result__header">
+            <strong>{{ $t('model.editor.connectionFailed') }}</strong>
+            <t-button size="small" variant="text" @click="copyWithToast(remoteMessage, 'common.copied')">
+              {{ $t('common.copy') }}
+            </t-button>
+          </div>
+          <div class="connection-result__details" tabindex="0">{{ remoteMessage }}</div>
+        </div>
+      </div>
+    </template>
+
+    <t-form :inert="saving || undefined" ref="formRef" :data="formData" :rules="rules" layout="vertical">
 
       <section v-if="!isEdit" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionType') }}</h4>
@@ -249,7 +264,7 @@
               show/hide eye toggle.
             -->
             <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
-              :meta="credentialMeta" />
+              :meta="credentialMeta" @changed="invalidateConnectionTest()" />
             <t-input v-else v-model="formData.apiKey" :type="showApiKey ? 'text' : 'password'"
               :placeholder="isSignedRerank ? signedRerankAccessKeyPlaceholder : apiKeyPlaceholder"
               class="api-key-input" autocomplete="off" spellcheck="false">
@@ -420,6 +435,7 @@ import {
   type ThinkingControlValue,
 } from '@/utils/thinkingControl'
 import { DEFAULT_MODEL_CONTEXT_WINDOW } from '@/utils/contextWindow'
+import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -466,6 +482,7 @@ interface Props {
   visible: boolean
   modelType: EditorModelType
   modelData?: ModelFormData | null
+  saveModel: (data: ModelFormData & { modelType?: EditorModelType }) => Promise<void>
 }
 
 const { t, te } = useI18n()
@@ -478,7 +495,6 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:visible': [value: boolean]
-  'confirm': [data: ModelFormData & { modelType?: EditorModelType }]
 }>()
 
 const draftModelType = ref<EditorModelType>(props.modelType)
@@ -683,7 +699,9 @@ const providerOptions = computed(() => {
 
 const dialogVisible = computed({
   get: () => props.visible,
-  set: (val) => emit('update:visible', val)
+  set: (val) => {
+    if (!saving.value) emit('update:visible', val)
+  }
 })
 
 const showThinkingControlField = computed(() =>
@@ -825,6 +843,20 @@ const apiKeyPlaceholder = computed(() => t('model.editor.apiKeyPlaceholder'))
 
 const formRef = ref()
 const saving = ref(false)
+const saveError = ref('')
+
+// Settings itself listens on window for Escape. Capture it while saving so
+// the parent cannot unmount this editor before the request finishes.
+const handleSaveEscape = (event: KeyboardEvent) => {
+  if (props.visible && saving.value && (event.key === 'Escape' || event.code === 'Escape')) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }
+}
+watch(() => props.visible && saving.value, (locked) => {
+  if (locked) window.addEventListener('keydown', handleSaveEscape, true)
+  else window.removeEventListener('keydown', handleSaveEscape, true)
+}, { flush: 'sync' })
 // Toggles the create-mode API key input between masked and plain text. Lets
 // the user proofread a freshly pasted secret without losing the password
 // affordance for everyday use. Reset every time the drawer closes (see
@@ -837,6 +869,31 @@ const checking = ref(false)
 const remoteChecked = ref(false)
 const remoteAvailable = ref(false)
 const remoteMessage = ref('')
+const remoteStale = ref(false)
+let connectionRevision = 0
+let applyingDetectedDimension = false
+
+// Invalidate pending responses too, even when the user changes a field back.
+const invalidateConnectionTest = (showStale = true) => {
+  connectionRevision++
+  remoteStale.value = showStale && (remoteStale.value || checking.value || remoteChecked.value)
+  checking.value = false
+  remoteChecked.value = false
+  remoteAvailable.value = false
+  remoteMessage.value = ''
+  dimensionChecked.value = false
+  dimensionSuccess.value = false
+  dimensionMessage.value = ''
+}
+
+const applyDetectedDimension = (dimension: number) => {
+  applyingDetectedDimension = true
+  try {
+    formData.value.dimension = dimension
+  } finally {
+    applyingDetectedDimension = false
+  }
+}
 const dimensionChecked = ref(false)
 const dimensionSuccess = ref(false)
 const dimensionMessage = ref('')
@@ -1121,6 +1178,25 @@ watch(() => props.visible, (val) => {
   }
 })
 
+watch(
+  () => [
+    activeModelType.value, props.modelData?.id, formData.value.source,
+    formData.value.provider, formData.value.modelName, formData.value.baseUrl,
+    formData.value.apiKey, formData.value.appSecret, formData.value.customHeaders,
+    formData.value.dimension, formData.value.supportsDimensionOverride,
+    formData.value.lkeapRegion, formData.value.thinkingControl,
+  ],
+  () => {
+    if (!applyingDetectedDimension) invalidateConnectionTest(props.visible && !hydratingForm.value)
+  },
+  { deep: true, flush: 'sync' },
+)
+
+watch(() => props.visible, () => {
+  invalidateConnectionTest(false)
+  saveError.value = ''
+}, { flush: 'sync' })
+
 // 重置表单
 const resetForm = () => {
   thinkingControlManual.value = false
@@ -1319,10 +1395,12 @@ const checkModelStatus = async () => {
 
 // 检查 Ollama 本地 Embedding 模型维度
 const checkOllamaDimension = async () => {
+  if (checking.value || saving.value) return
   if (!formData.value.modelName || formData.value.source !== 'local' || activeModelType.value !== 'embedding') {
     return
   }
 
+  const revision = ++connectionRevision
   checking.value = true
   dimensionChecked.value = false
   dimensionMessage.value = ''
@@ -1335,11 +1413,12 @@ const checkOllamaDimension = async () => {
       supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
     })
 
+    if (revision !== connectionRevision) return
     dimensionChecked.value = true
     dimensionSuccess.value = result.available || false
 
     if (result.available && result.dimension) {
-      formData.value.dimension = result.dimension
+      applyDetectedDimension(result.dimension)
       dimensionMessage.value = t('model.editor.dimensionDetected', { value: result.dimension })
       MessagePlugin.success(dimensionMessage.value)
     } else {
@@ -1350,24 +1429,28 @@ const checkOllamaDimension = async () => {
       MessagePlugin.warning(dimensionMessage.value)
     }
   } catch (error: any) {
+    if (revision !== connectionRevision) return
     console.error('Ollama dimension check failed:', error)
     dimensionChecked.value = true
     dimensionSuccess.value = false
     dimensionMessage.value = t('model.editor.dimensionFailed')
     MessagePlugin.error(dimensionMessage.value)
   } finally {
-    checking.value = false
+    if (revision === connectionRevision) checking.value = false
   }
 }
 
 // 检查 Remote API 连接（根据模型类型调用不同的接口）
 const checkRemoteAPI = async () => {
+  if (checking.value || saving.value) return
   if (!formData.value.modelName || (!formData.value.baseUrl && formData.value.provider !== 'weknoracloud')) {
     MessagePlugin.warning(t('model.editor.fillModelAndUrl'))
     return
   }
 
+  const revision = ++connectionRevision
   checking.value = true
+  remoteStale.value = false
   remoteChecked.value = false
   remoteMessage.value = ''
 
@@ -1425,10 +1508,8 @@ const checkRemoteAPI = async () => {
           ...headerPayload,
         })
         // 如果测试成功且返回了维度，自动填充
-        if (result.available && result.dimension) {
-          formData.value.dimension = result.dimension
-          MessagePlugin.info(t('model.editor.remoteDimensionDetected', { value: result.dimension }))
-        }
+        if (revision !== connectionRevision) return
+        if (result.available && result.dimension) applyDetectedDimension(result.dimension)
         break
 
       case 'rerank': {
@@ -1488,37 +1569,28 @@ const checkRemoteAPI = async () => {
         return
     }
 
+    if (revision !== connectionRevision) return
     remoteChecked.value = true
     remoteAvailable.value = result.available || false
-    // 之前这里把 backend 的错误 message 只丢到 console.debug，用户只能
-    // 看到通用的 "连接失败" toast，根本看不出是 401 / 404 / 模型不存在
-    // 还是别的什么。改成：成功时用 i18n 通用提示；失败时直接展示后端
-    // 给到的具体原因（已经在后端 classifyConnectionError 中包了一层
-    // 易读的中文 hint + 原始 SDK 报错），方便排查。
-    if (result.available) {
-      remoteMessage.value = t('model.editor.connectionSuccess')
-      MessagePlugin.success(remoteMessage.value)
-    } else {
-      remoteMessage.value = result.message || t('model.editor.connectionFailed')
-      console.debug('Backend message:', result.message)
-      MessagePlugin.error(remoteMessage.value)
-    }
+    remoteMessage.value = result.available
+      ? t('model.editor.connectionSuccess')
+      : result.message || t('model.editor.connectionFailed')
   } catch (error: any) {
-    console.error('Remote API check failed:', error)
+    if (revision !== connectionRevision) return
     remoteChecked.value = true
     remoteAvailable.value = false
-    // 后端 4xx/5xx（如 SSRF 校验失败）会走到这里。axios 拦截器把后端
-    // { error: { message: "..." } } 提到了 error.message，里面已经包含
-    // 易读 hint + 原因，直接展示出来，比通用 "请检查配置" 有用得多。
     remoteMessage.value = error?.message || t('model.editor.connectionConfigError')
-    MessagePlugin.error(remoteMessage.value)
   } finally {
-    checking.value = false
+    if (revision === connectionRevision) checking.value = false
   }
 }
 
 // 确认保存
 const handleConfirm = async () => {
+  if (saving.value) return
+  saving.value = true
+  if (checking.value) invalidateConnectionTest()
+  saveError.value = ''
   try {
     // 手动校验必填字段
     if (!formData.value.modelName || !formData.value.modelName.trim()) {
@@ -1548,30 +1620,30 @@ const handleConfirm = async () => {
     }
 
     // 执行表单验证
-    await formRef.value?.validate()
+    const validation = await formRef.value?.validate()
+    if (validation !== undefined && validation !== true) return
 
     // Credential removal in edit mode is handled inline by the
     // CredentialResource card (it confirms + DELETEs to /credentials), so
     // the main save flow no longer needs to confirm or handle clear flags.
-
-    saving.value = true
 
     // 如果是新增且没有 id，生成一个
     if (!formData.value.id) {
       formData.value.id = generateId()
     }
 
-    emit('confirm', {
+    await props.saveModel({
       ...formData.value,
       ...(isEdit.value ? {} : { modelType: activeModelType.value }),
     })
-    dialogVisible.value = false
+    emit('update:visible', false)
+    invalidateConnectionTest(false)
     // 保存成功后重置草稿，下次打开新增模型时是空白
     resetForm()
     lastOpenedModelId.value = null
     // 移除此处的成功提示，由父组件统一处理
-  } catch (error) {
-    console.error('表单验证失败:', error)
+  } catch (error: any) {
+    saveError.value = error?.message || t('modelSettings.toasts.saveFailed')
   } finally {
     saving.value = false
   }
@@ -1666,6 +1738,8 @@ const startDownload = async (modelName: string) => {
 
 // 组件卸载时清理定时器
 onUnmounted(() => {
+  window.removeEventListener('keydown', handleSaveEscape, true)
+  invalidateConnectionTest(false)
   if (downloadInterval) {
     clearInterval(downloadInterval)
   }
@@ -1713,6 +1787,7 @@ watch(() => formData.value.modelName, () => {
 
 // 取消（点击底部"取消"按钮触发；点遮罩/ESC 不触发，从而保留草稿）
 const handleCancel = () => {
+  if (saving.value) return
   resetForm()
   lastOpenedModelId.value = null
   dialogVisible.value = false
@@ -1953,24 +2028,43 @@ const handleCancel = () => {
   }
 }
 
-// Connection-test message rendered next to the test button in the drawer
-// footer. Truncates with ellipsis so a long backend error doesn't push
-// Save/Cancel off-screen — the full text is in the title attribute.
-.footer-test-message {
+.connection-status {
   font-size: 12px;
-  line-height: 1.4;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  &.success { color: var(--td-brand-color-active); }
+  &.error { color: var(--td-error-color); }
+}
 
-  &.success {
-    color: var(--td-brand-color-active);
+.connection-hint {
+  margin: 0 0 8px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.connection-result {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-error-color-3);
+  border-radius: var(--td-radius-default);
+  background: var(--td-error-color-1);
+  color: var(--td-error-color);
+  font-size: 12px;
+  text-align: left;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
-  &.error {
-    color: var(--td-error-color);
+  &__details {
+    max-height: min(160px, 20vh);
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+    user-select: text;
   }
 }
 

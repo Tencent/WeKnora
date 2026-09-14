@@ -390,6 +390,7 @@ func TestResolveEffectiveConfigAppliesTimeoutsAndTTL(t *testing.T) {
 	tenantCfg.DefaultTimeoutSec = 90
 	tenantCfg.E2B.HTTPTimeoutSec = 15
 	tenantCfg.E2B.E2BSandboxTTLSeconds = 600
+	tenantCfg.TerminalIdleDisconnectSec = 1200
 
 	got, err := ResolveEffectiveConfig(tenantCfg, global)
 
@@ -397,6 +398,36 @@ func TestResolveEffectiveConfigAppliesTimeoutsAndTTL(t *testing.T) {
 	require.Equal(t, 90*time.Second, got.DefaultTimeout)
 	require.Equal(t, 15*time.Second, got.E2BHTTPTimeout)
 	require.Equal(t, 600*time.Second, got.E2BSandboxTTL)
+	require.Equal(t, 20*time.Minute, got.TerminalIdleDisconnect)
+}
+
+func TestResolveEffectiveConfigTerminalIdleFallsBackToBuiltIn(t *testing.T) {
+	global := globalTestConfig()
+	global.TerminalIdleDisconnect = 3 * time.Hour
+
+	got, err := ResolveEffectiveConfig(completeE2BTenantConfig(), global)
+
+	require.NoError(t, err)
+	require.Equal(t, DefaultTerminalIdleDisconnect, got.TerminalIdleDisconnect)
+}
+
+func TestResolveEffectiveConfigCarriesDesktopEnabled(t *testing.T) {
+	tenantCfg := completeCubeTenantConfig()
+	tenantCfg.DesktopEnabled = true
+
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+	require.True(t, effective.DesktopEnabled,
+		"DesktopEnabled must reach the runtime Config; the desktop endpoint reads it")
+}
+
+func TestResolveEffectiveConfigDesktopDisabledByDefault(t *testing.T) {
+	tenantCfg := completeCubeTenantConfig()
+
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+	require.False(t, effective.DesktopEnabled,
+		"desktop must be explicit opt-in: the image costs +1.5GB per sandbox")
 }
 
 // Tuning fields fall back to the built-in constants, never to the deployment's:

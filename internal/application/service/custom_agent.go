@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -246,8 +247,15 @@ func (s *customAgentService) ListAgents(ctx context.Context) ([]*types.CustomAge
 	return result, nil
 }
 
-// UpdateAgent updates an agent's information
-func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error) {
+// UpdateAgent updates an agent's information.
+//
+// avatar carries the field presence the agent struct cannot: nil means the
+// caller did not send an avatar and the stored one must survive, a pointer to
+// "" is an explicit clear. Assigning agent.Avatar unconditionally made every
+// config-only PUT erase the avatar while still answering 200.
+func (s *customAgentService) UpdateAgent(
+	ctx context.Context, agent *types.CustomAgent, avatar *string,
+) (*types.CustomAgent, error) {
 	if agent.ID == "" {
 		logger.Error(ctx, "Agent ID is empty")
 		return nil, errors.New("agent ID cannot be empty")
@@ -286,7 +294,16 @@ func (s *customAgentService) UpdateAgent(ctx context.Context, agent *types.Custo
 	// Update fields
 	existingAgent.Name = agent.Name
 	existingAgent.Description = agent.Description
-	existingAgent.Avatar = agent.Avatar
+	// An absent avatar keeps the stored one; only a sent value replaces it.
+	if avatar != nil {
+		// Second length check, for non-HTTP callers that never pass through
+		// the handler. Same validator, so the varchar(64) bound does not end
+		// up duplicated as two constants.
+		if err := (&types.CustomAgent{Avatar: *avatar}).ValidateAvatar(); err != nil {
+			return nil, err
+		}
+		existingAgent.Avatar = *avatar
+	}
 	existingAgent.Config = agent.Config
 	existingAgent.UpdatedAt = time.Now()
 
@@ -579,7 +596,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	resolvedTags := resolvedSuggestionTagScopes{}
 	if len(scopeTagIDs) > 0 {
 		var err error
-		resolvedTags, err = s.resolveSuggestionTagScopes(ctx, tenantID, tagScopes)
+		resolvedTags, err = s.resolveSuggestionTagScopes(ctx, tagScopes)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"agent_id":      agentID,
@@ -673,7 +690,7 @@ func (s *customAgentService) getSuggestedQuestions(
 	// querying a KB shared from tenant B would hit `tenant_id = A` and get zero
 	// rows back — the symptom is "suggested questions never appear for shared KBs".
 	scopeKBIDs := mergeUniqueStrings(queryKBIDs, resolvedTags.KnowledgeBaseIDs)
-	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, tenantID, scopeKBIDs)
+	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, scopeKBIDs)
 	// Always keep the caller's tenant in the iteration so knowledge_ids-only
 	// requests (no kbIDs) still execute one query under the caller's tenant.
 	if len(scopeKBIDs) == 0 {
@@ -834,7 +851,6 @@ type resolvedSuggestionTagScopes struct {
 // source tenant that owns the tag and chunk rows.
 func (s *customAgentService) resolveSuggestionTagScopes(
 	ctx context.Context,
-	callerTenantID uint64,
 	tagScopes []types.TagScope,
 ) (resolvedSuggestionTagScopes, error) {
 	result := resolvedSuggestionTagScopes{TagIDsByTenant: make(map[uint64][]string)}
@@ -862,7 +878,7 @@ func (s *customAgentService) resolveSuggestionTagScopes(
 	for kbID := range byKB {
 		kbIDs = append(kbIDs, kbID)
 	}
-	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, callerTenantID, kbIDs)
+	kbGroups := s.groupKBIDsByEffectiveTenant(ctx, kbIDs)
 	for tenantID, groupKBIDs := range kbGroups {
 		for _, kbID := range groupKBIDs {
 			requested := mergeUniqueStrings(nil, byKB[kbID])
@@ -1083,9 +1099,9 @@ func wikiSuggestionFromPage(page *types.WikiPage, locale string) string {
 // kbIDs is empty.
 func (s *customAgentService) groupKBIDsByEffectiveTenant(
 	ctx context.Context,
-	callerTenantID uint64,
 	kbIDs []string,
 ) map[uint64][]string {
+	callerTenantID := types.CallerFromContext(ctx).TenantID
 	out := make(map[uint64][]string)
 	if len(kbIDs) == 0 {
 		return out
@@ -1106,20 +1122,13 @@ func (s *customAgentService) groupKBIDsByEffectiveTenant(
 			kbByID[kb.ID] = kb
 		}
 	}
-	callerRole := types.TenantRoleFromContext(ctx)
+	permissions := access.NewKBPermissions(ctx, s.kbShareService)
 	for _, kbID := range kbIDs {
 		kb := kbByID[kbID]
 		if kb == nil {
 			continue
 		}
-		if kb.TenantID == callerTenantID {
-			out[callerTenantID] = append(out[callerTenantID], kbID)
-			continue
-		}
-		if s.kbShareService == nil {
-			continue
-		}
-		ok, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, callerTenantID, callerRole, types.OrgRoleViewer)
+		ok, err := permissions.Check(kbID, kb.TenantID, types.OrgRoleViewer)
 		if err != nil || !ok {
 			continue
 		}

@@ -217,45 +217,25 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	})
 }
 
-func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
-	engine := &AgentEngine{}
+func TestAppendToolResultsKeepsImageOutputPolicyInStableSystemPrefix(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.systemPromptTemplate = "Custom agent prompt."
 	prior := []chat.Message{
-		{Role: "system", Content: "Custom agent prompt."},
+		{Role: "system", Content: engine.buildSystemPrompt(t.Context())},
 		{Role: "user", Content: "解释流程"},
 	}
-	step := types.AgentStep{
-		ToolCalls: []types.ToolCall{{
-			ID:   "call-image",
-			Name: "knowledge_search",
-			Result: &types.ToolResult{
-				Success: true,
-				Output:  "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
-			},
-		}},
-	}
-
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{
+		ID: "call-image", Name: "knowledge_search",
+		Result: &types.ToolResult{Success: true, Output: "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)"},
+	}}}
 	out := engine.appendToolResults(prior, step)
-	require.Len(t, out, 5)
-	assert.Equal(t, "Custom agent prompt.", out[0].Content)
-	assert.NotContains(t, out[0].Content, agentRetrievedImageRequirementMarker)
+	require.Len(t, out, 4)
+	assert.Equal(t, prior[0], out[0], "the system prefix stays stable after retrieval")
+	assert.Contains(t, out[0].Content, types.SourcedAnswerOutputPrompt)
 	assert.Equal(t, "tool", out[3].Role)
-	assert.Contains(t, out[3].Content, "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
-	assert.Equal(t, "user", out[4].Role)
-	assert.Contains(t, out[4].Content, agentRetrievedImageRequirementMarker)
-	assert.Contains(t, out[4].Content, "MUST include at least one relevant Markdown image")
-	assert.Contains(t, out[4].Content, "ASCII half-width parentheses")
-
-	// A later image-bearing step must not duplicate the requirement.
+	assert.Contains(t, out[3].Content, "![流程图](res://0001)")
 	out = engine.appendToolResults(out, step)
-	assert.Equal(t, 1, countImageRequirementMarkers(out))
-}
-
-func countImageRequirementMarkers(messages []chat.Message) int {
-	n := 0
-	for _, message := range messages {
-		n += strings.Count(message.Content, agentRetrievedImageRequirementMarker)
-	}
-	return n
+	require.Len(t, out, 6, "image results append no synthetic user instruction")
 }
 
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
@@ -273,7 +253,8 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 	assert.Contains(t, block, `knowledge_id="kid-1"`)
 	assert.Contains(t, block, `title="Report.pdf"`)
 	assert.Contains(t, block, `file_type="pdf"`)
-	assert.Contains(t, block, "list_knowledge_chunks")
+	assert.NotContains(t, block, "<note>")
+	assert.Contains(t, runtimePromptContract, "Honor the current pinned-document scope")
 	assert.NotContains(t, block, "<must_use>")
 }
 
@@ -521,4 +502,55 @@ func TestExecuteToolCalls_CompleteArgs_StillExecute(t *testing.T) {
 	assert.Equal(t, 1, tool.calls)
 	require.Len(t, step.ToolCalls, 1)
 	assert.True(t, step.ToolCalls[0].Result.Success)
+}
+
+func TestBuildMustUseBlockMCPDirectory(t *testing.T) {
+	block := buildMustUseBlock([]*PinnedMCPServiceInfo{{ID: "orders", Name: "Orders", Discoverable: true}}, nil)
+	assert.Contains(t, block, `discover_mcp_tools(mode="list_tools", server_id="orders")`)
+	assert.Contains(t, block, "call_mcp_tool")
+	assert.NotContains(t, block, "names start with")
+}
+
+func TestMCPProxyTargetDoesNotRewriteModelHistory(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	target := &types.ToolCallTarget{
+		Name:        "mcp_orders_get",
+		Args:        map[string]any{"id": "42"},
+		ServiceName: "Orders",
+		ToolName:    "get",
+	}
+	call := types.ToolCall{
+		ID:     "proxy-call",
+		Name:   "call_mcp_tool",
+		Args:   map[string]any{"tool_ref": "mcpt_ref", "arguments": map[string]any{"id": "42"}},
+		Target: target,
+		Result: &types.ToolResult{Success: true, Output: "ok"},
+	}
+	messages := engine.appendToolResults(nil, types.AgentStep{ToolCalls: []types.ToolCall{call}})
+	require.Len(t, messages, 2)
+	require.Equal(t, "call_mcp_tool", messages[0].ToolCalls[0].Function.Name)
+	require.Contains(t, messages[0].ToolCalls[0].Function.Arguments, "tool_ref")
+	require.Equal(t, "proxy-call", messages[1].ToolCallID)
+	require.Equal(t, "call_mcp_tool", messages[1].Name)
+	require.Equal(t, "mcp_orders_get", call.ExecutionName())
+	require.Equal(t, "42", call.ExecutionArgs()["id"])
+}
+
+func TestMCPDiscoveryCompactionNeverReturnsPartialSchema(t *testing.T) {
+	estimator, err := agenttoken.NewEstimator()
+	require.NoError(t, err)
+	msg := chat.Message{
+		Role:       "tool",
+		Name:       agenttools.ToolDiscoverMCPTools,
+		ToolCallID: "describe-id",
+		Content: `{"input_schema":{"description":"` + strings.Repeat(
+			"schema ",
+			5000,
+		) + `","required":["critical"]}}`,
+	}
+	compacted := compactToolMessage(msg, 300, estimator)
+	require.Equal(t, msg.ToolCallID, compacted.ToolCallID)
+	require.NotContains(t, compacted.Content, "input_schema")
+	require.NotContains(t, compacted.Content, "required")
+	require.Contains(t, compacted.Content, "partial schema")
 }

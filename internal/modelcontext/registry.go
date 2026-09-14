@@ -31,7 +31,9 @@ const resourceHandleProtocolPrompt = `
 ## Resource handle protocol (system-owned)
 Some durable resources and high-entropy Wiki slugs are represented by request-local res://NNNN handles. Wiki issues may use iN handles.
 - Copy supplied handles exactly in links, images, and tool arguments; they refer only to the supplied resource versions.
-- For new or regenerated files, use sandbox:<file name>; never reuse or invent a resource handle.`
+- For downloadable deliverables generated in the session workspace, use sandbox:<file name>; ` +
+	`never reuse or invent a resource handle. This download convention does not apply to ` +
+	`editing installed skill files.`
 
 // Registry is the single request-scoped boundary between durable application
 // identities and temporary model handles.
@@ -41,17 +43,21 @@ Some durable resources and high-entropy Wiki slugs are represented by request-lo
 // protected as one resource-like handle before the embedded document ID can be
 // compacted to dN. Callers therefore cannot accidentally reverse the codecs.
 type Registry struct {
-	sources   *sourceRegistry
-	resources *resourceRegistry
-	issues    *HandleTable
+	sources    *sourceRegistry
+	resources  *resourceRegistry
+	issues     *HandleTable
+	mcpServers *HandleTable
+	mcpTools   *HandleTable
 }
 
 // NewRegistry creates a registry for one model request/Agent execution.
 func NewRegistry(citationsEnabled bool) *Registry {
 	return &Registry{
-		sources:   newSourceRegistry(citationsEnabled),
-		resources: newResourceRegistry(),
-		issues:    NewHandleTable("i", 0, 1),
+		sources:    newSourceRegistry(citationsEnabled),
+		resources:  newResourceRegistry(),
+		issues:     NewHandleTable("i", 0, 1),
+		mcpServers: NewHandleTable("ms", 0, 1),
+		mcpTools:   NewHandleTable("mt", 0, 1),
 	}
 }
 
@@ -60,7 +66,9 @@ func (r *Registry) ProtocolPrompt() string {
 	if r == nil || r.sources == nil {
 		return ""
 	}
-	return r.sources.ProtocolPrompt() + resourceHandleProtocolPrompt
+	return r.sources.ProtocolPrompt() + resourceHandleProtocolPrompt +
+		"\nMCP routing uses request-local msN server IDs and mtN tool references. " +
+		"Copy them exactly from the directory or describe result; never invent them.\n"
 }
 
 // EncodeMessages returns a model-facing copy with every temporary handle
@@ -74,6 +82,9 @@ func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
 	// assistant call. The scan is intentionally order-independent, matching the
 	// source codec's two-pass replay behavior.
 	for i := range messages {
+		if messages[i].Role == "system" || messages[i].Role == "user" {
+			messages[i].Content = r.encodeMCPRoutingText(messages[i].Content)
+		}
 		if messages[i].Role == "tool" {
 			messages[i].Content = r.encodeToolPrivateResult(messages[i].Name, messages[i].Content)
 		}
@@ -101,10 +112,14 @@ func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 			toolCalls[i].ModelArguments = toolCalls[i].Function.Arguments
 		}
 	}
+	normalizeWebFetchItems(toolCalls)
+	normalizeMCPCallArguments(toolCalls)
 	r.resources.DecodeToolCalls(toolCalls)
 	r.sources.DecodeToolCallsWithPolicy(toolCalls, sourceArgumentAllowed)
 	for i := range toolCalls {
 		r.decodeToolPolicies(&toolCalls[i])
+		decodedMCP, unresolvedMCP := r.decodeMCPArguments(toolCalls[i].Function.Name, toolCalls[i].Function.Arguments)
+		toolCalls[i].Function.Arguments = decodedMCP
 		resolved := toolCalls[i].Function.Arguments
 		unresolved := append(
 			r.resources.OrphanHandles(resolved),
@@ -113,6 +128,7 @@ func (r *Registry) DecodeToolCalls(toolCalls []types.LLMToolCall) {
 			)...,
 		)
 		unresolved = append(unresolved, r.unresolvedPrivateToolHandles(toolCalls[i].Function.Name, resolved)...)
+		unresolved = append(unresolved, unresolvedMCP...)
 		toolCalls[i].UnresolvedHandles = uniqueSorted(unresolved)
 		changed := !jsonEquivalent(toolCalls[i].ModelArguments, resolved)
 		switch {
@@ -169,10 +185,12 @@ func (r *Registry) StreamDecoder() *StreamDecoder {
 		return &StreamDecoder{}
 	}
 	return &StreamDecoder{
-		resources: newResourceStreamDecoder(r.resources),
-		sources:   newCitationStreamExpander(r.sources),
-		issues:    NewHandleStreamDecoder(r.issues),
-		orphans:   newOrphanResourceStreamFilter(),
+		resources:  newResourceStreamDecoder(r.resources),
+		sources:    newCitationStreamExpander(r.sources),
+		issues:     NewHandleStreamDecoder(r.issues),
+		mcpServers: NewHandleStreamDecoder(r.mcpServers),
+		mcpTools:   NewHandleStreamDecoder(r.mcpTools),
+		orphans:    newOrphanResourceStreamFilter(),
 	}
 }
 
@@ -190,6 +208,15 @@ func (r *Registry) RegisterChunk(ref ChunkReference) string {
 		return ""
 	}
 	return r.sources.RegisterChunk(ref)
+}
+
+// RegisterContextChunk makes a directory entry addressable by tools without
+// allowing it to substantiate an answer before retrieval.
+func (r *Registry) RegisterContextChunk(ref ChunkReference) string {
+	if r == nil || r.sources == nil {
+		return ""
+	}
+	return r.sources.registerChunk(ref, false)
 }
 
 func (r *Registry) RegisterDocument(id string) string {
@@ -276,6 +303,9 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 	if sourceCompactionAllowed(toolName) {
 		modelOutput = r.sources.CompactKnownText(modelOutput)
 	}
+	if result.Success && (toolName == "call_mcp_tool" || strings.HasPrefix(toolName, "mcp_")) {
+		modelOutput += r.mcpSourceCandidates(result.Output)
+	}
 	return r.resources.EncodeText(modelOutput) + outputFilesPrompt(result)
 }
 
@@ -295,5 +325,5 @@ func (r *Registry) DecodeOutputText(text string) string {
 	text = r.resources.DecodeText(text)
 	text = r.resources.StripOrphanHandles(text)
 	text = r.sources.ExpandText(text)
-	return r.issues.DecodeKnownText(text)
+	return r.mcpTools.DecodeKnownText(r.mcpServers.DecodeKnownText(r.issues.DecodeKnownText(text)))
 }

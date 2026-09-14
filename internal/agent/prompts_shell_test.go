@@ -1,9 +1,10 @@
 package agent
 
 import (
+	"testing"
+
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestToolGuidanceUsesActualCapabilities(t *testing.T) {
@@ -22,4 +23,6 @@ func TestToolGuidanceUsesActualCapabilities(t *testing.T) {
 	require.NotContains(t, formatToolGuidance([]string{"read_file"}), "execute_skill_script")
 	require.Empty(t, formatToolGuidance(nil))
 	require.NotContains(t, formatToolGuidance([]string{"execute_skill_script"}), "execute_skill_script is available")
+	require.NotContains(t, shell, "Browser source:")
+	require.Contains(t, formatToolGuidance([]string{"local_browser"}), "requires no shell command")
 }

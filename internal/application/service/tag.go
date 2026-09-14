@@ -29,6 +29,7 @@ type knowledgeTagService struct {
 	modelService   interfaces.ModelService
 	task           interfaces.TaskEnqueuer
 	kbShareService interfaces.KBShareService
+	tenantRepo     interfaces.TenantRepository
 	audit          interfaces.AuditLogService
 }
 
@@ -43,6 +44,7 @@ func NewKnowledgeTagService(
 	modelService interfaces.ModelService,
 	task interfaces.TaskEnqueuer,
 	kbShareService interfaces.KBShareService,
+	tenantRepo interfaces.TenantRepository,
 	audit interfaces.AuditLogService,
 ) (interfaces.KnowledgeTagService, error) {
 	return &knowledgeTagService{
@@ -55,6 +57,7 @@ func NewKnowledgeTagService(
 		modelService:   modelService,
 		task:           task,
 		kbShareService: kbShareService,
+		tenantRepo:     tenantRepo,
 		audit:          audit,
 	}, nil
 }
@@ -79,26 +82,10 @@ func (s *knowledgeTagService) ListTags(
 		return nil, err
 	}
 
-	// Check access permission
-	tenantID := types.MustTenantIDFromContext(ctx)
-	if kb.TenantID != tenantID {
-		// Get user ID from context
-		userIDVal := ctx.Value(types.UserIDContextKey)
-		if userIDVal == nil {
-			return nil, werrors.NewForbiddenError("无权访问该知识库")
-		}
-		_ = userIDVal.(string)
-		callerTenantRole := types.TenantRoleFromContext(ctx)
-
-		// Check whether the caller's tenant has at least viewer permission via org sharing.
-		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, kbID, tenantID, callerTenantRole, types.OrgRoleViewer)
-		if err != nil || !hasPermission {
-			return nil, werrors.NewForbiddenError("无权访问该知识库")
-		}
+	effectiveTenantID, err := resolveKBReadTenant(ctx, kb, s.kbShareService)
+	if err != nil {
+		return nil, err
 	}
-
-	// Use kb's tenant ID for data access
-	effectiveTenantID := kb.TenantID
 
 	tags, total, err := s.repo.ListByKB(ctx, effectiveTenantID, kbID, page, keyword)
 	if err != nil {
@@ -158,6 +145,10 @@ func (s *knowledgeTagService) CreateTag(
 	if err != nil {
 		return nil, err
 	}
+	ctx, err = requireKBWrite(ctx, kb)
+	if err != nil {
+		return nil, err
+	}
 
 	// Check if tag with same name already exists
 	existingTag, err := s.repo.GetByName(ctx, kb.TenantID, kbID, name)
@@ -202,8 +193,15 @@ func (s *knowledgeTagService) UpdateTag(
 	if id == "" {
 		return nil, werrors.NewBadRequestError("标签ID不能为空")
 	}
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil, werrors.NewForbiddenError("无权修改标签")
+	}
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	_, ctx, err = s.requireTagWrite(ctx, tag)
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +235,22 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 	if id == "" {
 		return werrors.NewBadRequestError("标签ID不能为空")
 	}
-	tenantID := types.MustTenantIDFromContext(ctx)
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return werrors.NewForbiddenError("无权修改标签")
+	}
 	tag, err := s.repo.GetByID(ctx, tenantID, id)
 	if err != nil {
 		return err
 	}
-
-	// Get KB info for embedding model
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, tag.KnowledgeBaseID)
+	kb, ctx, err := s.requireTagWrite(ctx, tag)
+	if err != nil {
+		return err
+	}
+	if err := s.validateTagDeleteExclusions(ctx, kb, excludeIDs); err != nil {
+		return err
+	}
+	ctx, err = withKBWriteTenantInfo(ctx, kb, s.tenantRepo)
 	if err != nil {
 		return err
 	}
@@ -291,9 +297,10 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 		}
 		// Enqueue async task to delete knowledge files
 		payload := types.KnowledgeListDeletePayload{
-			TenantID:     tenantID,
-			KnowledgeIDs: knowledgeIDs,
-			Initiator:    types.TaskInitiatorFromContext(ctx),
+			KnowledgeBaseID: kb.ID,
+			TenantID:        tenantID,
+			KnowledgeIDs:    knowledgeIDs,
+			Initiator:       types.TaskInitiatorFromContext(ctx),
 		}
 		langfuse.InjectTracing(ctx, &payload)
 		payloadBytes, err := json.Marshal(payload)
@@ -473,6 +480,10 @@ func (s *knowledgeTagService) FindOrCreateTagByName(ctx context.Context, kbID st
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return nil, err
+	}
+	ctx, err = requireKBWrite(ctx, kb)
 	if err != nil {
 		return nil, err
 	}

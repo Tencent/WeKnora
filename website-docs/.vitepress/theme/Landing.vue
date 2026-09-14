@@ -9,7 +9,7 @@ const versionLabel = theme.value.weknoraVersion ?? 'unknown'
 const stats = [
   { value: '25', unit: '种', label: '文件格式：文档、网页、扫描件、图片、音频' },
   { value: '26', unit: '家+', label: '模型厂商，也可全部换成本地推理' },
-  { value: '9', unit: '个', label: '使用入口：Web、IM、插件、命令行、MCP' },
+  { value: '10', unit: '个', label: '使用入口：Web、IM、插件、命令行、MCP、dsh' },
   { value: '4', unit: '路', label: '索引同时生效：向量、关键词、Wiki、图谱' },
 ]
 
@@ -18,7 +18,7 @@ const schema = [
     step: '01',
     name: '接入',
     hint: '资料从哪里来',
-    items: ['文件上传', 'URL 抓取', '飞书', 'Notion', '语雀', 'RSS'],
+    items: ['文件上传', 'URL 抓取', '飞书', 'GitLab', 'IMA', 'Notion', '语雀', 'RSS'],
   },
   {
     step: '02',
@@ -80,6 +80,7 @@ const surfaces = [
   { icon: 'mobile', name: '微信小程序', desc: '移动端入口，支持网页收藏入库与提问。' },
   { icon: 'cli', name: '命令行 weknora', desc: '文档管理、检索与带引用的流式问答，默认 JSON 输出，便于脚本化。' },
   { icon: 'api', name: 'REST API 与 Go SDK', desc: '完整 /api/v1 接口；API Key 支持按能力与知识库范围授权。' },
+  { icon: 'cli', name: 'DeepSeek Harness', desc: '在 dsh 中检索知识库、通读文档与调用 WeKnora 问答。' },
   { icon: 'mcp', name: 'MCP Server', desc: '将 WeKnora 暴露为 MCP 工具，供 Claude、Cursor 等客户端检索。' },
 ]
 
@@ -108,7 +109,7 @@ const features = [
   {
     icon: 'mcp',
     title: 'MCP 双向集成',
-    desc: '作为客户端接入外部 MCP 服务，支持 OAuth 授权与工具级人工审批；同时可作为 MCP Server 对外提供检索能力。',
+    desc: '作为客户端接入外部 MCP 服务，支持 OAuth 授权、工具启停与人工审批；同时可作为 MCP Server 对外提供检索能力。',
     href: '/03-features/08-mcp',
     tag: '工具生态',
   },
@@ -136,7 +137,7 @@ const features = [
   {
     icon: 'sync',
     title: '数据源持续同步',
-    desc: '飞书、Notion、语雀与 RSS 绑定一次凭据后按计划自动同步：首次全量，之后按修改时间增量拉取，源端删除的文档同步下架，避免知识库随时间过期。',
+    desc: '飞书/Lark、GitLab、IMA、Notion、语雀与 RSS 按计划同步：首次全量，后续按连接器规则增量更新，支持删除检测的来源可同步下架文档，避免知识库随时间过期。',
     href: '/03-features/10-datasource',
     tag: '数据接入',
   },
@@ -179,7 +180,7 @@ const map = [
     index: '03',
     icon: 'modules',
     title: '功能模块',
-    brief: '二十一项能力的配置项、行为约定与实现路径。',
+    brief: '二十三项能力的配置项、行为约定与实现路径。',
     items: [
       { text: '租户、用户与认证授权', link: '/03-features/01-tenant-auth' },
       { text: '知识库与知识管理', link: '/03-features/02-knowledge-base' },
@@ -202,13 +203,15 @@ const map = [
       { text: '存储后端', link: '/03-features/19-storage-backends' },
       { text: '平台管理与系统管理员', link: '/03-features/20-platform-admin' },
       { text: '图片与文件的对外访问', link: '/03-features/21-file-access' },
+      { text: '技能目录与沙箱', link: '/03-features/22-skills-sandbox' },
+      { text: '跨会话长期记忆', link: '/03-features/23-memory' },
     ],
   },
   {
     index: '04',
     icon: 'api',
     title: 'API 参考',
-    brief: '约 360 个端点，含权限要求、参数表与 curl 示例。',
+    brief: '按资源分组的接口，含权限、参数、响应与 curl 示例。',
     items: [
       { text: 'API 总览', link: '/04-api/01-api-overview' },
       { text: 'Agent、MCP 与技能', link: '/04-api/02-api-agent-mcp' },
@@ -223,13 +226,15 @@ const map = [
       { text: '系统与平台管理', link: '/04-api/02-api-system' },
       { text: '组织与共享', link: '/04-api/02-api-org' },
       { text: '租户与成员', link: '/04-api/02-api-tenant' },
+      { text: '沙箱、技能与个人变量', link: '/04-api/02-api-sandbox-skills' },
+      { text: '长期记忆', link: '/04-api/02-api-memory' },
     ],
   },
   {
     index: '05',
     icon: 'clients',
     title: '客户端',
-    brief: '七种客户端：Web、CLI、SDK、小程序、桌面端、浏览器插件与 Skill。',
+    brief: 'Web、CLI、SDK、小程序、桌面端、浏览器插件、Skill 与 dsh 集成。',
     items: [
       { text: 'Web 前端', link: '/05-clients/01-frontend' },
       { text: '命令行工具 CLI', link: '/05-clients/02-cli' },
@@ -238,6 +243,7 @@ const map = [
       { text: '桌面客户端', link: '/05-clients/05-desktop' },
       { text: 'Chrome 插件', link: '/05-clients/06-chrome-extension' },
       { text: 'Claw Skill', link: '/05-clients/07-claw-skill' },
+      { text: 'DeepSeek Harness 插件', link: '/05-clients/08-deepseek-harness' },
     ],
   },
   {
@@ -276,7 +282,7 @@ const deployments = [
             开源的知识库问答系统
           </h1>
           <p class="lede">WeKnora（维娜拉）将 PDF、Word、网页与飞书 / Notion / 语雀等来源的资料汇入知识库，提供检索增强的问答能力，回答标注可追溯的出处。除基础问答外，还提供 <strong>Wiki 自动成书</strong>、<strong>ReAct Agent 与 MCP 双向集成</strong>、<strong>知识图谱增强检索</strong>，以及面向团队的<strong>多空间隔离、四级 RBAC、作用域 API Key 与审计日志</strong>。支持完整私有部署，模型可全部替换为本地推理。</p>
-          <p class="lede lede-sub">本文档覆盖部署与配置、功能说明、约 360 个 API 端点的接口参考，以及二次开发的扩展点。</p>
+          <p class="lede lede-sub">本文档覆盖部署与配置、功能说明、按资源分类的 API 参考，以及二次开发的扩展点。</p>
           <div class="actions">
             <a class="btn btn-solid" :href="withBase('/01-getting-started/01-introduction')">开始阅读</a>
             <a class="btn btn-ghost" :href="withBase('/02-architecture/01-overview')">系统架构</a>

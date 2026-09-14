@@ -18,6 +18,10 @@ export interface MentionItem {
   serviceName?: string;
   skillName?: string;
   isAgentConfigured?: boolean;
+  /** MCP catalog tool count; omitted when the service has never been synced. */
+  toolCount?: number;
+  catalogStale?: boolean;
+  catalogSynced?: boolean;
 }
 
 export interface MentionRequestItem {

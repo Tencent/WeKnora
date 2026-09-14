@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -36,6 +37,7 @@ type autoTagKnowledgeRepo struct {
 	existing  map[string][]*types.KnowledgeTag
 	added     []string
 	addErr    error
+	writeCtx  context.Context
 }
 
 func (r *autoTagKnowledgeRepo) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
@@ -49,8 +51,9 @@ func (r *autoTagKnowledgeRepo) GetKnowledgeTags(
 }
 
 func (r *autoTagKnowledgeRepo) AddKnowledgeTagRelations(
-	_ context.Context, _ uint64, _, _ string, tagIDs []string,
+	ctx context.Context, _ uint64, _, _ string, tagIDs []string,
 ) error {
+	r.writeCtx = ctx
 	if r.addErr != nil {
 		return r.addErr
 	}
@@ -173,6 +176,9 @@ func TestAutoTagHandleAttachesMatchedTags(t *testing.T) {
 	fixture := newAutoTagFixture(t, `{"matches":[{"index":1,"confidence":0.9}]}`)
 	require.NoError(t, fixture.handle(t))
 	assert.Equal(t, []string{"tag-a"}, fixture.repo.added)
+	require.Zero(t, types.CallerFromContext(fixture.repo.writeCtx).TenantID)
+	require.NoError(t, access.RequireKBWrite(fixture.repo.writeCtx, &types.KnowledgeBase{ID: "kb", TenantID: 7}))
+	require.Error(t, access.RequireKBWrite(fixture.repo.writeCtx, &types.KnowledgeBase{ID: "other", TenantID: 7}))
 }
 
 // A missing confidence must not be read as zero: models frequently omit the

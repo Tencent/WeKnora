@@ -60,7 +60,14 @@ func ResolveEffectiveConfig(
 		effective.Type = resolved
 	}
 	overrideSeconds(&effective.DefaultTimeout, tenantCfg.DefaultTimeoutSec)
+	// Terminal idle is workspace policy, not a deployment default: an omitted
+	// value must fall back to the built-in 15 minutes, never to whatever the
+	// process Config happened to carry.
+	effective.TerminalIdleDisconnect = 0
+	overrideSeconds(&effective.TerminalIdleDisconnect, tenantCfg.TerminalIdleDisconnectSec)
+	effective.TerminalIdleDisconnect = EffectiveTerminalIdleDisconnect(effective.TerminalIdleDisconnect)
 	effective.AllowPrivateEndpoints = tenantCfg.AllowPrivateEndpoints
+	effective.DesktopEnabled = tenantCfg.DesktopEnabled
 	effective.Network = resolveNetworkPolicy(tenantCfg.Network)
 	if tenantCfg.EnvVars != nil {
 		effective.EnvVars = cloneMetadata(tenantCfg.EnvVars)

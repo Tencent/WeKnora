@@ -627,6 +627,17 @@ func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
 	}, nil
 }
 
+// vectorScoreScriptSource scores every document by its cosine similarity to the
+// query vector, floored at 0. Lucene rejects negative final script_score values
+// ("script_score script returned an invalid score ... Must be a non-negative
+// score!"), so an unclamped negative cosine — which occurs whenever any stored
+// vector points away from the query — fails the entire search request with a
+// 400 (all shards failed) instead of merely ranking that document last. The
+// floor keeps the score in the [0, 1] range the shared retriever score
+// normalizer documents for this engine; documents clamped to 0 fall below any
+// positive min_score threshold.
+var vectorScoreScriptSource = "Math.max(cosineSimilarity(params.query_vector,'embedding'), 0.0)"
+
 // buildVectorSearchQuery builds the vector search query JSON
 func (e *elasticsearchRepository) buildVectorSearchQuery(ctx context.Context,
 	params typesLocal.RetrieveParams,
@@ -651,7 +662,7 @@ func (e *elasticsearchRepository) buildVectorSearchQuery(ctx context.Context,
 					},
 				},
 				"script": map[string]interface{}{
-					"source": "cosineSimilarity(params.query_vector,'embedding')",
+					"source": vectorScoreScriptSource,
 					"params": map[string]interface{}{
 						"query_vector": params.Embedding,
 					},

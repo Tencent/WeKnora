@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/gin-gonic/gin"
 )
 
 var _ interfaces.FileService = (*stubFileService)(nil)
@@ -24,7 +24,9 @@ type stubFileService struct {
 }
 
 type stubResourceCatalog struct {
-	resource *types.StoredResource
+	resource     *types.StoredResource
+	fileBindings *types.MessageFileBindings
+	bound        func(context.Context, uint64, string, string) (bool, error)
 }
 
 type stubMessageFileLookup struct {
@@ -56,6 +58,17 @@ func (s *stubSharedAgentFileLookup) GetSharedAgentForTenant(
 	sourceTenantID ...uint64,
 ) (*types.CustomAgent, error) {
 	return s.get(ctx, tenantID, callerTenantRole, agentID, sourceTenantID...)
+}
+
+func (s *stubResourceCatalog) IsReferencedByKnowledgeBase(
+	ctx context.Context,
+	tenant uint64,
+	kb, ref string,
+) (bool, error) {
+	if s.bound == nil {
+		return false, nil
+	}
+	return s.bound(ctx, tenant, kb, ref)
 }
 
 func (s *stubResourceCatalog) Register(
@@ -382,9 +395,8 @@ func TestServeFilesAPIKeyScopeMatrix(t *testing.T) {
 }
 
 // newKBScopedFilesTestEngine wires newKBScopedFileServeHandler behind a
-// middleware that injects effectiveTenantID into the request context, mirroring
-// what RequireKBAccess does after resolving an org-shared KB to its source
-// tenant. This lets the handler be exercised without the full RBAC stack.
+// middleware that carries the exact KB grant and owner execution tenant,
+// mirroring RequireKBAccess without the full RBAC stack.
 func newKBScopedFilesTestEngine(
 	effectiveTenantID uint64,
 	tenantSvc interfaces.TenantService,
@@ -394,10 +406,24 @@ func newKBScopedFilesTestEngine(
 	engine.GET("/knowledge-bases/:id/files",
 		func(c *gin.Context) {
 			ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, effectiveTenantID)
-			c.Request = c.Request.WithContext(ctx)
+			grant := &middleware.KBAccess{
+				KnowledgeBase:     &types.KnowledgeBase{ID: "kb-1", TenantID: effectiveTenantID},
+				Caller:            types.CallerFromContext(ctx),
+				EffectiveTenantID: effectiveTenantID,
+				Permission:        types.OrgRoleViewer,
+			}
+			c.Set(middleware.KBAccessContextKey, grant)
+			c.Request = c.Request.WithContext(grant.Context(ctx))
 			c.Next()
 		},
-		newKBScopedFileServeHandler(tenantSvc, global),
+		newKBScopedFileServeHandlerWithResources(
+			tenantSvc,
+			global,
+			nil,
+			&stubResourceCatalog{bound: func(_ context.Context, _ uint64, kb, ref string) (bool, error) {
+				return kb == "kb-1" && ref == "local://10008/exports/img.jpg", nil
+			}},
+		),
 	)
 	return engine
 }
@@ -515,6 +541,26 @@ func TestKBScopedFilesRequiresFilePath(t *testing.T) {
 	}
 }
 
+func TestKBScopedFilesRejectsUnboundFileBeforeStorage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := newKBScopedFilesTestEngine(10008,
+		&stubTenantService{get: func(context.Context, uint64) (*types.Tenant, error) {
+			t.Fatal("an unbound file must be rejected before resolving storage")
+			return nil, nil
+		}},
+		&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+			t.Fatal("an unbound file must never be opened")
+			return nil, nil
+		}},
+	)
+	w := httptest.NewRecorder()
+	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
+		"/knowledge-bases/kb-1/files?file_path="+url.QueryEscape("local://10008/exports/another-kb.png"), nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want 403", w.Code)
+	}
+}
+
 func newMessageScopedFilesTestEngine(
 	callerTenantID uint64,
 	messageService messageFileLookup,
@@ -555,13 +601,15 @@ func TestMessageScopedFilesServesSharedAgentResource(t *testing.T) {
 		physical       = "local://7/exports/chart.png"
 	)
 	var requestedPath string
+	revoked := false
+	storageCalls := 0
 	engine := newMessageScopedFilesTestEngine(
 		callerTenantID,
 		&stubMessageFileLookup{get: func(_ context.Context, sessionID, messageID string) (*types.Message, error) {
 			if sessionID != "session-1" || messageID != "message-1" {
 				t.Fatalf("unexpected message scope %s/%s", sessionID, messageID)
 			}
-			return &types.Message{AgentID: "agent-1", AgentTenantID: ownerTenantID}, nil
+			return &types.Message{ID: "message-1", AgentID: "agent-1", AgentTenantID: ownerTenantID, Content: ref}, nil
 		}},
 		&stubSharedAgentFileLookup{get: func(
 			_ context.Context,
@@ -573,21 +621,28 @@ func TestMessageScopedFilesServesSharedAgentResource(t *testing.T) {
 			if tenantID != callerTenantID || agentID != "agent-1" || len(sourceTenantID) != 1 || sourceTenantID[0] != ownerTenantID {
 				t.Fatalf("unexpected shared-agent lookup tenant=%d agent=%s source=%v", tenantID, agentID, sourceTenantID)
 			}
+			if revoked {
+				return nil, nil
+			}
 			return &types.CustomAgent{ID: agentID, TenantID: ownerTenantID}, nil
 		}},
 		&stubTenantService{get: func(_ context.Context, id uint64) (*types.Tenant, error) {
 			return &types.Tenant{ID: id}, nil
 		}},
 		&stubFileService{getFile: func(_ context.Context, filePath string) (io.ReadCloser, error) {
+			storageCalls++
 			requestedPath = filePath
 			return io.NopCloser(strings.NewReader("shared-agent-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			TenantID:     ownerTenantID,
-			PhysicalPath: physical,
-			OriginalName: "chart.png",
-			MimeType:     "image/png",
-		}},
+		&stubResourceCatalog{
+			fileBindings: &types.MessageFileBindings{MessageArtifact: true},
+			resource: &types.StoredResource{
+				TenantID:     ownerTenantID,
+				PhysicalPath: physical,
+				OriginalName: "chart.png",
+				MimeType:     "image/png",
+			},
+		},
 		messageKBShareAuthorizer{},
 	)
 
@@ -604,6 +659,15 @@ func TestMessageScopedFilesServesSharedAgentResource(t *testing.T) {
 	}
 	if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "chart.png") {
 		t.Fatalf("Content-Disposition = %q, want original filename chart.png", got)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private, no-store", got)
+	}
+	revoked = true
+	recorder = httptest.NewRecorder()
+	engine.ServeHTTP(recorder, req.Clone(context.Background()))
+	if recorder.Code != http.StatusForbidden || storageCalls != 1 {
+		t.Fatalf("revoked request: status=%d storage calls=%d", recorder.Code, storageCalls)
 	}
 }
 
@@ -623,7 +687,7 @@ func TestMessageScopedFilesServesSameTenantResource(t *testing.T) {
 			if sessionID != "session-1" || messageID != "message-1" {
 				t.Fatalf("unexpected message scope %s/%s", sessionID, messageID)
 			}
-			return &types.Message{AgentTenantID: tenantID}, nil
+			return &types.Message{AgentTenantID: tenantID, Content: ref}, nil
 		}},
 		&stubSharedAgentFileLookup{get: func(
 			context.Context, uint64, types.TenantRole, string, ...uint64,
@@ -690,7 +754,7 @@ func TestMessageScopedFilesRejectsRevokedSharedAgent(t *testing.T) {
 	engine := newMessageScopedFilesTestEngine(
 		42,
 		&stubMessageFileLookup{get: func(context.Context, string, string) (*types.Message, error) {
-			return &types.Message{AgentID: "agent-1", AgentTenantID: 7}, nil
+			return &types.Message{AgentID: "agent-1", AgentTenantID: 7, Content: ref}, nil
 		}},
 		&stubSharedAgentFileLookup{get: func(
 			context.Context, uint64, types.TenantRole, string, ...uint64,
@@ -719,6 +783,56 @@ func TestMessageScopedFilesRejectsRevokedSharedAgent(t *testing.T) {
 	}
 }
 
+func TestMessageScopedFilesRejectsUnreferencedFilesBeforeStorage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	for _, content := range []string{"", ref + "suffix"} {
+		t.Run(content, func(t *testing.T) {
+			engine := newMessageScopedFilesTestEngine(
+				42,
+				&stubMessageFileLookup{get: func(context.Context, string, string) (*types.Message, error) {
+					return &types.Message{
+						AgentID: "agent-1", AgentTenantID: 7, Content: content,
+						AgentSteps: types.AgentSteps{
+							{ToolCalls: []types.ToolCall{{Args: map[string]interface{}{"file": ref}}}},
+						},
+					}, nil
+				}},
+				&stubSharedAgentFileLookup{
+					get: func(context.Context,
+						uint64,
+						types.TenantRole,
+						string,
+						...uint64) (*types.CustomAgent,
+						error,
+					) {
+						t.Fatal("tool arguments and handle prefixes must not authorize a message file")
+						return nil, nil
+					},
+				},
+				&stubTenantService{get: func(context.Context, uint64) (*types.Tenant, error) {
+					t.Fatal("unreferenced files must be denied before resolving storage")
+					return nil, nil
+				}},
+				&stubFileService{getFile: func(context.Context, string) (io.ReadCloser, error) {
+					t.Fatal("unreferenced files must never be opened")
+					return nil, nil
+				}},
+				&stubResourceCatalog{
+					resource: &types.StoredResource{TenantID: 7, PhysicalPath: "local://7/exports/chart.png"},
+				},
+				messageKBShareAuthorizer{},
+			)
+			w := httptest.NewRecorder()
+			engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
+				"/sessions/session-1/messages/message-1/files?file_path="+url.QueryEscape(ref), nil))
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status=%d, want 403", w.Code)
+			}
+		})
+	}
+}
+
 func TestMessageScopedFilesRejectsResourceOutsideMessageTenant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
@@ -726,7 +840,7 @@ func TestMessageScopedFilesRejectsResourceOutsideMessageTenant(t *testing.T) {
 	engine := newMessageScopedFilesTestEngine(
 		42,
 		&stubMessageFileLookup{get: func(context.Context, string, string) (*types.Message, error) {
-			return &types.Message{AgentID: "agent-1", AgentTenantID: 8}, nil
+			return &types.Message{AgentID: "agent-1", AgentTenantID: 8, Content: ref}, nil
 		}},
 		&stubSharedAgentFileLookup{get: func(
 			context.Context, uint64, types.TenantRole, string, ...uint64,
@@ -760,14 +874,11 @@ type stubKBShareGuard struct {
 	) (bool, error)
 }
 
-func (s *stubKBShareGuard) HasTenantKBPermission(
-	ctx context.Context,
-	kbID string,
-	callerTenantID uint64,
-	callerTenantRole types.TenantRole,
-	requiredRole types.OrgMemberRole,
-) (bool, error) {
-	return s.hasPermission(ctx, kbID, callerTenantID, callerTenantRole, requiredRole)
+func (s *stubKBShareGuard) CheckTenantKBPermission(
+	ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
+	allowed, err := s.hasPermission(ctx, kbID, callerTenantID, callerTenantRole, types.OrgRoleViewer)
+	return types.OrgRoleViewer, allowed, err
 }
 
 type stubKBTenantLookup struct {
@@ -861,13 +972,16 @@ func newOrgSharedKBTestEngineFromMessage(
 			requestedPath = path
 			return io.NopCloser(strings.NewReader("shared-kb-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     ownerTenantID,
-			PhysicalPath: physical,
-			OriginalName: "quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     ownerTenantID,
+				PhysicalPath: physical,
+				OriginalName: "quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: shareGuard,
 			KBs:        &stubKBTenantLookup{kbs: kbs},
@@ -999,12 +1113,15 @@ func TestMessageScopedFilesServesLegacyMessageViaOrgSharedKB(t *testing.T) {
 		&stubFileService{getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("legacy-shared-kb-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     ownerTenantID,
-			PhysicalPath: "local://10005/images/quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     ownerTenantID,
+				PhysicalPath: "local://10005/images/quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: &stubKBShareGuard{hasPermission: func(
 				context.Context, string, uint64, types.TenantRole, types.OrgMemberRole,
@@ -1055,12 +1172,15 @@ func TestMessageScopedFilesOrgSharedKBResolvesKnowledgeOwner(t *testing.T) {
 		&stubFileService{getFile: func(_ context.Context, _ string) (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader("resolved-kb-image")), nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     10005,
-			PhysicalPath: "local://10005/images/quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     10005,
+				PhysicalPath: "local://10005/images/quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: &stubKBShareGuard{hasPermission: func(
 				context.Context, string, uint64, types.TenantRole, types.OrgMemberRole,
@@ -1194,12 +1314,15 @@ func TestMessageScopedFilesOrgSharedKBFailsClosedOnShareError(t *testing.T) {
 			t.Fatal("GetFile should not run after share lookup error")
 			return nil, nil
 		}},
-		&stubResourceCatalog{resource: &types.StoredResource{
-			Handle:       "ShArEdKbHaNdLe00000000",
-			TenantID:     10005,
-			PhysicalPath: "local://10005/images/quadrant.jpg",
-			MimeType:     "image/jpeg",
-		}},
+		&stubResourceCatalog{
+			bound: func(context.Context, uint64, string, string) (bool, error) { return true, nil },
+			resource: &types.StoredResource{
+				Handle:       "ShArEdKbHaNdLe00000000",
+				TenantID:     10005,
+				PhysicalPath: "local://10005/images/quadrant.jpg",
+				MimeType:     "image/jpeg",
+			},
+		},
 		messageKBShareAuthorizer{
 			ShareGuard: &stubKBShareGuard{hasPermission: func(
 				context.Context, string, uint64, types.TenantRole, types.OrgMemberRole,
@@ -1249,4 +1372,13 @@ func TestServeFilesForcesActiveContentDownload(t *testing.T) {
 	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
 	}
+}
+
+func (s *stubResourceCatalog) GetMessageFileBindings(
+	context.Context,
+	uint64,
+	string,
+	string,
+) (*types.MessageFileBindings, error) {
+	return s.fileBindings, nil
 }

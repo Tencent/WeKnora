@@ -40,6 +40,15 @@ type cubeMockServer struct {
 	executor                func(sandboxID, cmd string, args []string) (stdout, stderr string, exitCode int)
 	files                   map[string]map[string][]byte // sandboxID → path → content
 	cmdHistory              []commandRecord
+	// ptyHoldAfterStart, when set, keeps the envd PTY stream open and
+	// delays the first output chunk so tests can observe HTTP-client
+	// timeouts that fire while the stream is still alive.
+	ptyHoldAfterStart time.Duration
+	ptyLatePayload    string
+	ptyPID            int
+	ptyStartCount     atomic.Int32
+	ptyConnectCount   atomic.Int32
+	timeoutPOSTs      atomic.Int32
 }
 
 type cubeMockSnapshot struct {
@@ -89,6 +98,8 @@ func (m *cubeMockServer) handle(w http.ResponseWriter, r *http.Request) {
 		m.handleCreate(w, r)
 	case r.URL.Path == "/sandboxes" && r.Method == http.MethodGet:
 		m.handleList(w, r)
+	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/timeout") && r.Method == http.MethodPost:
+		m.handleSetTimeout(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/connect") && r.Method == http.MethodPost:
 		m.handleConnect(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/snapshots") && r.Method == http.MethodPost:
@@ -327,8 +338,17 @@ func (m *cubeMockServer) handleEnvd(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.Contains(r.URL.Path, "/process.Process/Start"):
 		body, _ := io.ReadAll(r.Body)
+		if envdBodyLooksLikePty(body) {
+			m.ptyStartCount.Add(1)
+			m.handlePtyStream(w, r)
+			return
+		}
 		r.Body = io.NopCloser(bytes.NewBuffer(body))
 		m.handleCommandExec(w, r, sandboxID)
+	case strings.Contains(r.URL.Path, "/process.Process/Connect"):
+		m.ptyConnectCount.Add(1)
+		m.handlePtyStream(w, r)
+		return
 	case strings.Contains(r.URL.Path, "/filesystem") && (strings.Contains(r.URL.Path, "Read") || strings.Contains(r.URL.Path, "Stat") || strings.Contains(r.URL.Path, "ListDir")):
 		m.handleFileRead(w, r, sandboxID)
 	case strings.Contains(r.URL.Path, "/filesystem") && strings.Contains(r.URL.Path, "MakeDir"):
@@ -386,6 +406,81 @@ func (m *cubeMockServer) handleCommandExec(w http.ResponseWriter, r *http.Reques
 
 	stdout, stderr, code := exec(sandboxID, cmd, args)
 	writeEnvdCommandResult(w, stdout, stderr, code)
+}
+
+func (m *cubeMockServer) handleSetTimeout(w http.ResponseWriter, r *http.Request) {
+	id := extractSandboxID(r.URL.Path, "/timeout")
+	m.mu.Lock()
+	_, ok := m.sandboxes[id]
+	m.mu.Unlock()
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "sandbox not found"})
+		return
+	}
+	m.timeoutPOSTs.Add(1)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func envdBodyLooksLikePty(body []byte) bool {
+	payload := body
+	if len(body) >= 5 {
+		n := binary.BigEndian.Uint32(body[1:5])
+		if int(n)+5 <= len(body) {
+			payload = body[5 : 5+int(n)]
+		}
+	}
+	var req struct {
+		PTY json.RawMessage `json:"pty"`
+	}
+	return json.Unmarshal(payload, &req) == nil && len(req.PTY) > 0
+}
+
+func (m *cubeMockServer) handlePtyStream(w http.ResponseWriter, r *http.Request) {
+	flusher, _ := w.(http.Flusher)
+	pid := m.ptyPID
+	if pid == 0 {
+		pid = 4321
+	}
+	late := m.ptyLatePayload
+	if late == "" {
+		late = "late-frame"
+	}
+	hold := m.ptyHoldAfterStart
+
+	w.Header().Set("Content-Type", "application/connect+json")
+	w.WriteHeader(http.StatusOK)
+
+	startJSON, _ := json.Marshal(map[string]any{
+		"event": map[string]any{"start": map[string]any{"pid": pid}},
+	})
+	var startBuf bytes.Buffer
+	writeConnectFrame(&startBuf, startJSON)
+	_, _ = w.Write(startBuf.Bytes())
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	if hold > 0 {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(hold):
+		}
+	}
+
+	dataJSON, _ := json.Marshal(map[string]any{
+		"event": map[string]any{
+			"data": map[string]any{"pty": base64Encode(late)},
+		},
+	})
+	var dataBuf bytes.Buffer
+	writeConnectFrame(&dataBuf, dataJSON)
+	_, _ = w.Write(dataBuf.Bytes())
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	<-r.Context().Done()
 }
 
 func (m *cubeMockServer) handleFileWrite(w http.ResponseWriter, r *http.Request, sandboxID string) {

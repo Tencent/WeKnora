@@ -5,6 +5,7 @@ export interface MCPService {
   tenant_id?: number
   name: string
   description: string
+  usage_instructions?: string
   enabled: boolean
   transport_type: 'sse' | 'http-streamable' | 'stdio'
   url?: string // Optional: required for SSE/HTTP Streamable
@@ -46,6 +47,11 @@ export interface MCPService {
   credentials?: Record<McpCredentialField, CredentialFieldMetadata>
   created_at?: string
   updated_at?: string
+  catalog?: {
+    tool_count: number
+    stale: boolean
+    synced_at: string
+  }
 }
 
 export interface MCPTool {
@@ -277,4 +283,31 @@ export async function resolveMCPOAuth(
 
 export async function cancelMCPOAuth(pendingId: string): Promise<void> {
   await post(`/api/v1/agent/mcp-oauth-resolutions/${encodeURIComponent(pendingId)}/cancel`, {})
+}
+
+// Persisted directory: GET never opens an upstream MCP connection.
+export interface MCPMetadata {
+  service_id: string
+  tools: MCPTool[]
+  instructions: string
+  server_name: string
+  server_version: string
+  server_description: string
+  synced_at: string
+  stale: boolean
+}
+
+export async function getMCPMetadata(id: string): Promise<MCPMetadata | null> {
+  const response: any = await get(`/api/v1/mcp-services/${id}/metadata`)
+  return response.data ?? null
+}
+
+export async function refreshMCPMetadata(id: string): Promise<MCPMetadata> {
+  const response: any = await post(`/api/v1/mcp-services/${id}/metadata/refresh`, {})
+  return response.data
+}
+
+export async function generateMCPUsageInstructions(id: string, language: string): Promise<string> {
+  const response: any = await post(`/api/v1/mcp-services/${id}/usage-instructions/generate`, { language }, { timeout: 65000 })
+  return response.data.usage_instructions
 }

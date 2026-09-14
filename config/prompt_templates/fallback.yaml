@@ -49,7 +49,7 @@ templates:
         description: "더 정중하고 자세한 답변 불가 프롬프트"
       ja-JP:
         name: "丁寧なフォールバック"
-        description: "回答できない場合の、より丁寧で詳細なメッセージ"
+        description: "より丁寧で詳細な回答不可メッセージ"
     content: |
       I'm sorry, I'm currently unable to provide an accurate answer to your question. This may be because:
       - The question is beyond my knowledge scope
@@ -142,12 +142,12 @@ templates:
       {{kb_documents}}
 
       ## Response Requirements
-      - If the document listing above is available, use it to help answer the user's question (e.g., list relevant documents, suggest which documents may contain the information they need, or summarize what is available in the knowledge base)
+      - Treat the document listing as metadata: it can identify titles or suggest relevant documents, but cannot support a summary of unread contents or detailed factual claims.
       - If the document listing is empty or not relevant, answer the user's question based on your general knowledge and clearly inform the user that the answer is not from the knowledge base
       - Be concise, clear, and substantive
-      - If real-time data or personal privacy information is involved, honestly state that it cannot be obtained
+      - Do not guess unavailable current or private facts. Explain the specific evidence gap when it affects the answer.
       - Use a polite and professional tone
-      - IMPORTANT: Always respond in {{language}}
+      - Default response language: {{language}}; follow an explicit request for another language.
 
       ## User's question:
       {{query}}

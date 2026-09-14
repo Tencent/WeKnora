@@ -10,16 +10,17 @@ import {
 } from 'vue'
 import {
   activeQuestionId,
-  collectUserQuestions,
+  collectOutlineMessages,
   isChatOverflowing,
   mapQuestionTicks,
   offsetFromScrollContent,
   questionMinimapTrackHeight,
   shouldShowQuestionMinimap,
   viewportBand,
+  visibleMessageIds,
   type ChatMessageLike,
   type QuestionTick,
-  type UserQuestion,
+  type OutlineMessage,
   type ViewportBand,
 } from '@/utils/chatQuestionMinimap'
 
@@ -28,19 +29,21 @@ export function useChatQuestionMinimap(options: {
   messages: ChatMessageLike[] | Ref<ChatMessageLike[]>
 }): {
   visible: ComputedRef<boolean>
-  questions: ComputedRef<UserQuestion[]>
+  questions: ComputedRef<OutlineMessage[]>
   ticks: Ref<QuestionTick[]>
   viewport: Ref<ViewportBand>
   activeId: Ref<string | null>
+  visibleIds: Ref<Set<string>>
   anchoredIds: Ref<Set<string>>
   scrollbarGutterPx: Ref<number>
   trackHeight: Ref<number>
 } {
-  const questions = computed(() => collectUserQuestions(toValue(options.messages)))
+  const questions = computed(() => collectOutlineMessages(toValue(options.messages)))
   const overflowing = ref(false)
   const ticks = ref<QuestionTick[]>([])
   const viewport = ref<ViewportBand>({ topPx: 0, heightPx: 0 })
   const activeId = ref<string | null>(null)
+  const visibleIds = ref<Set<string>>(new Set())
   const anchoredIds = ref<Set<string>>(new Set())
   const scrollbarGutterPx = ref(0)
   const trackHeight = ref(0)
@@ -59,6 +62,7 @@ export function useChatQuestionMinimap(options: {
     ticks.value = []
     viewport.value = { topPx: 0, heightPx: 0 }
     activeId.value = null
+    visibleIds.value = new Set()
     anchoredIds.value = new Set()
     scrollbarGutterPx.value = 0
     trackHeight.value = 0
@@ -90,14 +94,17 @@ export function useChatQuestionMinimap(options: {
     const measured = questions.value.flatMap((question) => {
       const anchor = anchorByMessageId.get(question.id)
       if (!anchor) return []
+      const rect = anchor.getBoundingClientRect()
+      if (rect.height <= 0) return []
 
       return [{
         id: question.id,
         offsetTop: offsetFromScrollContent(
-          anchor.getBoundingClientRect().top,
+          rect.top,
           containerTop,
           el.scrollTop,
         ),
+        offsetBottom: offsetFromScrollContent(rect.bottom, containerTop, el.scrollTop),
       }]
     })
 
@@ -105,6 +112,7 @@ export function useChatQuestionMinimap(options: {
     ticks.value = mapQuestionTicks(measured, trackHeight.value)
     viewport.value = viewportBand(el.scrollTop, el.clientHeight, el.scrollHeight, trackHeight.value)
     activeId.value = activeQuestionId(measured, el.scrollTop)
+    visibleIds.value = visibleMessageIds(measured, el.scrollTop, el.clientHeight)
     anchoredIds.value = new Set(measured.map((item) => item.id))
   }
 
@@ -179,6 +187,7 @@ export function useChatQuestionMinimap(options: {
     ticks,
     viewport,
     activeId,
+    visibleIds,
     anchoredIds,
     scrollbarGutterPx,
     trackHeight,

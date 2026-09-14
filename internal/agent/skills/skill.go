@@ -160,6 +160,8 @@ func (s *Skill) ToMetadata() *SkillMetadata {
 // It handles YAML frontmatter enclosed in --- delimiters
 func ParseSkillFile(content string) (*Skill, error) {
 	skill := &Skill{}
+	// Some editors emit a UTF-8 BOM, which strings.TrimSpace does not remove.
+	content = strings.TrimPrefix(content, "\ufeff")
 
 	// Check for YAML frontmatter
 	if !strings.HasPrefix(strings.TrimSpace(content), "---") {

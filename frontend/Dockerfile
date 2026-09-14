@@ -66,6 +66,7 @@ COPY nginx.conf /etc/nginx/templates/default.conf.template
 # Copied outside templates/ on purpose: envsubst would eat $host and the other
 # nginx variables in it.
 COPY nginx-api-proxy.conf /etc/nginx/api-proxy.conf
+COPY nginx-http.conf /etc/nginx/conf.d/00-weknora-http.conf
 
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

@@ -50,10 +50,6 @@
                 <span v-else>{{ $t('chat.notProvided') }}</span>
               </span>
             </div>
-            <div v-if="item.prompt" class="info-field">
-              <span class="field-label">{{ $t('chat.promptLabel') }}</span>
-              <span class="field-value">{{ item.prompt }}</span>
-            </div>
           </div>
 
           <div v-if="itemError(item)" class="info-section">
@@ -92,6 +88,10 @@
                 <span class="raw-length" v-if="item.content_length">
                   （{{ formatLength(item.content_length) }}）
                 </span>
+              </div>
+              <div v-if="item.offset !== undefined" class="info-field">
+                {{ $t('chat.webFetchContentRange', { start: item.offset, end: item.offset + (item.returned_chars ?? 0), total: item.content_length }) }}
+                <span v-if="item.truncated"> · {{ $t('chat.webFetchPartialContent') }}</span>
               </div>
               <div v-if="isRawExpanded(index)" class="full-content">
                 {{ item.raw_content }}

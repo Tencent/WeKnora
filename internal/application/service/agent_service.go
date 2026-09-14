@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -92,29 +93,30 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 
 // agentService implements agent-related business logic
 type agentService struct {
-	cfg                   *config.Config
-	modelService          interfaces.ModelService
-	mcpServiceService     interfaces.MCPServiceService
-	mcpManager            *mcp.MCPManager
-	eventBus              *event.EventBus
-	db                    *gorm.DB
-	webSearchService      interfaces.WebSearchService
-	knowledgeBaseService  interfaces.KnowledgeBaseService
-	knowledgeService      interfaces.KnowledgeService
-	fileService           interfaces.FileService
-	chunkService          interfaces.ChunkService
-	duckdb                *sql.DB
-	webSearchStateService interfaces.WebSearchStateService
-	wikiPageService       interfaces.WikiPageService
-	tenantService         interfaces.TenantService
-	messageService        interfaces.MessageService
-	memoryService         interfaces.MemoryService
-	storageResolver       interfaces.StorageBackendResolver
-	toolApprovalGate      approval.MCPApproval
-	sandboxMgr            sandbox.Manager
-	sandboxResolver       sandbox.TenantSandboxResolver
-	sandboxPinner         *SessionSandboxPinner
-	sandboxPolicy         WorkspaceSandboxPolicy
+	browserSkill         *browserskill.Manager
+	userRepo             interfaces.UserRepository
+	cfg                  *config.Config
+	modelService         interfaces.ModelService
+	mcpServiceService    interfaces.MCPServiceService
+	mcpManager           *mcp.MCPManager
+	eventBus             *event.EventBus
+	db                   *gorm.DB
+	webSearchService     interfaces.WebSearchService
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	fileService          interfaces.FileService
+	chunkService         interfaces.ChunkService
+	duckdb               *sql.DB
+	wikiPageService      interfaces.WikiPageService
+	tenantService        interfaces.TenantService
+	messageService       interfaces.MessageService
+	memoryService        interfaces.MemoryService
+	storageResolver      interfaces.StorageBackendResolver
+	toolApprovalGate     approval.MCPApproval
+	sandboxMgr           sandbox.Manager
+	sandboxResolver      sandbox.TenantSandboxResolver
+	sandboxPinner        *SessionSandboxPinner
+	sandboxPolicy        WorkspaceSandboxPolicy
 }
 
 // NewAgentService creates a new agent service
@@ -131,7 +133,6 @@ func NewAgentService(
 	db *gorm.DB,
 	webSearchService interfaces.WebSearchService,
 	duckdb *sql.DB,
-	webSearchStateService interfaces.WebSearchStateService,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
 	messageService interfaces.MessageService,
@@ -142,31 +143,34 @@ func NewAgentService(
 	sandboxResolver sandbox.TenantSandboxResolver,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
+	browserSkill *browserskill.Manager,
+	userRepo interfaces.UserRepository,
 ) interfaces.AgentService {
 	return &agentService{
-		cfg:                   cfg,
-		modelService:          modelService,
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		fileService:           fileService,
-		chunkService:          chunkService,
-		mcpServiceService:     mcpServiceService,
-		mcpManager:            mcpManager,
-		eventBus:              eventBus,
-		db:                    db,
-		webSearchService:      webSearchService,
-		duckdb:                duckdb,
-		webSearchStateService: webSearchStateService,
-		wikiPageService:       wikiPageService,
-		tenantService:         tenantService,
-		messageService:        messageService,
-		memoryService:         memoryService,
-		storageResolver:       storageResolver,
-		toolApprovalGate:      toolApprovalGate,
-		sandboxMgr:            sandboxMgr,
-		sandboxResolver:       sandboxResolver,
-		sandboxPinner:         sandboxPinner,
-		sandboxPolicy:         sandboxPolicy,
+		browserSkill:         browserSkill,
+		userRepo:             userRepo,
+		cfg:                  cfg,
+		modelService:         modelService,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		fileService:          fileService,
+		chunkService:         chunkService,
+		mcpServiceService:    mcpServiceService,
+		mcpManager:           mcpManager,
+		eventBus:             eventBus,
+		db:                   db,
+		webSearchService:     webSearchService,
+		duckdb:               duckdb,
+		wikiPageService:      wikiPageService,
+		tenantService:        tenantService,
+		messageService:       messageService,
+		memoryService:        memoryService,
+		storageResolver:      storageResolver,
+		toolApprovalGate:     toolApprovalGate,
+		sandboxMgr:           sandboxMgr,
+		sandboxResolver:      sandboxResolver,
+		sandboxPinner:        sandboxPinner,
+		sandboxPolicy:        sandboxPolicy,
 	}
 }
 
@@ -191,6 +195,11 @@ func (s *agentService) CreateAgentEngine(
 		return nil, fmt.Errorf("chat model is nil after initialization")
 	}
 
+	if config.LocalBrowserEnabled && (!s.browserSkill.Enabled() || config.SkillInstallMode()) {
+		return nil, fmt.Errorf("local browser is unavailable for this turn; " +
+			"enable the browser integration or update the input-bar selection")
+	}
+
 	// 2. Build tool registry
 	toolRegistry := tools.NewToolRegistry()
 	if config.MaxToolOutputChars > 0 {
@@ -199,13 +208,17 @@ func (s *agentService) CreateAgentEngine(
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
-	s.registerMCPTools(ctx, toolRegistry, config, eventBus, sessionID, assistantMessageID)
+	s.registerMCPTools(ctx, toolRegistry, config)
 
 	// Register the shell first: file discovery needs a separate tool only
 	// when no shell is available. File access still follows the sandbox
 	// capability independently of the existing SkillsEnabled execution gate.
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
+	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
+	// Advertise cached service summaries independently of @mentions. Concrete
+	// tool definitions are published after describe, before the next model request.
+	toolRegistry.PrepareMCPTools(ctx)
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
@@ -230,18 +243,16 @@ func (s *agentService) CreateAgentEngine(
 		s.resolvePinnedSkillInfos(config),
 	)
 
-	// Set VLM image describer for MCP tool result image analysis.
-	// When an MCP tool returns images, the engine uses VLM to generate text descriptions
-	// and appends them to the tool result content (since Chat Completions API does not
-	// reliably support images in tool role messages across providers).
+	// Non-vision chat models use the configured VLM to describe tool images.
+	// Vision chat models receive the original images after the tool replies.
 	if config.VLMModelID != "" {
 		if vlmModel, err := s.modelService.GetVLMModel(ctx, config.VLMModelID); err == nil {
 			engine.SetImageDescriber(func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
 				return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 			})
-			logger.Infof(ctx, "VLM image describer set for MCP tool result analysis (model: %s)", config.VLMModelID)
+			logger.Infof(ctx, "VLM image describer set for tool result analysis (model: %s)", config.VLMModelID)
 		} else {
-			logger.Warnf(ctx, "Failed to load VLM model %s for MCP image fallback: %v", config.VLMModelID, err)
+			logger.Warnf(ctx, "Failed to load VLM model %s for tool image fallback: %v", config.VLMModelID, err)
 		}
 	}
 
@@ -268,6 +279,18 @@ func (s *agentService) CreateAgentEngine(
 		}
 	}
 
+	// Browser operations are native BrowserSkill RPCs, independent of shell and sandbox setup.
+	if config.LocalBrowserEnabled && s.browserSkill.Enabled() && !config.SkillInstallMode() {
+		tenant, _ := types.TenantIDFromContext(ctx)
+		user, _ := types.UserIDFromContext(ctx)
+		scope := browserskill.Scope{Tenant: tenant, User: user}
+		instructions, err := s.browserSearchInstructions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		toolRegistry.RegisterTool(tools.NewBrowserSkillTool(s.browserSkill, scope, sessionID, instructions))
+	}
+
 	return engine, nil
 }
 
@@ -276,8 +299,6 @@ func (s *agentService) registerMCPTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
 	config *types.AgentConfig,
-	eventBus *event.EventBus,
-	sessionID, assistantMessageID string,
 ) {
 	tenantID := uint64(0)
 	if tid, ok := types.TenantIDFromContext(ctx); ok {
@@ -325,25 +346,20 @@ func (s *agentService) registerMCPTools(
 		}
 	}
 	if len(enabledServices) > 0 {
-		var regCtx *tools.MCPOAuthSession
-		if eventBus != nil && sessionID != "" && assistantMessageID != "" {
-			regCtx = &tools.MCPOAuthSession{
-				EventBus:               eventBus,
-				SessionID:              sessionID,
-				AssistantMessageID:     assistantMessageID,
-				ApprovalCtx:            ctx,
-				AuthWaitTimeoutSeconds: config.MCPAuthWaitTimeout,
-			}
+		metadataService, ok := s.mcpServiceService.(interfaces.MCPMetadataService)
+		if !ok {
+			logger.Warnf(ctx, "MCP metadata storage is unavailable")
+			return
 		}
 		registered, err := tools.RegisterMCPTools(
-			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate, regCtx,
+			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate,
+			config.MCPAuthWaitTimeout, s.mcpServiceService.GetMCPServiceByID,
+			&tools.MCPMetadataIO{Get: metadataService.GetMCPMetadata, Put: metadataService.PersistMCPMetadata},
 		)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to register MCP tools: %v", err)
-		} else if registered == 0 {
-			logger.Warnf(ctx, "No MCP tools registered from %d enabled service(s)", len(enabledServices))
+			logger.Warnf(ctx, "Failed to register MCP directory: %v", err)
 		} else {
-			logger.Infof(ctx, "Registered %d MCP tool(s) from %d enabled service(s)", registered, len(enabledServices))
+			logger.Infof(ctx, "Registered %d MCP service(s) for on-demand discovery", registered)
 		}
 	}
 }
@@ -919,6 +935,9 @@ func (s *agentService) registerTools(
 		logger.Infof(ctx, "Pure Agent Mode: Knowledge base tools filtered out, remaining: %v", allowedTools)
 	}
 
+	// Web capabilities follow the runtime switch even if a saved allowlist names them.
+	allowedTools = withoutString(allowedTools, tools.ToolWebSearch)
+	allowedTools = withoutString(allowedTools, tools.ToolWebFetch)
 	// If web search is enabled, add web_search to allowedTools
 	if config.WebSearchEnabled {
 		allowedTools = append(allowedTools, tools.ToolWebSearch)
@@ -1052,17 +1071,13 @@ func (s *agentService) registerTools(
 		case tools.ToolWebSearch:
 			toolToRegister = tools.NewWebSearchTool(
 				s.webSearchService,
-				s.knowledgeBaseService,
-				s.knowledgeService,
-				s.webSearchStateService,
-				sessionID,
 				config.WebSearchMaxResults,
 				config.WebSearchProviderID,
 			)
 			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
 
 		case tools.ToolWebFetch:
-			toolToRegister = tools.NewWebFetchTool(chatModel)
+			toolToRegister = tools.NewWebFetchTool()
 			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
 
 		case tools.ToolDataAnalysis:
@@ -1213,7 +1228,7 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 			pageResult, err := s.knowledgeService.ListFAQEntries(metaCtx, kbID, &types.Pagination{
 				Page:     1,
 				PageSize: 10,
-			}, nil, 0, "", "", "")
+			}, nil, 0, "", "", "", nil)
 			if err == nil && pageResult != nil {
 				docCount = int(pageResult.Total)
 				if entries, ok := pageResult.Data.([]*types.FAQEntry); ok {
@@ -1419,6 +1434,7 @@ func (s *agentService) attachPinnedMCPToolNames(
 			continue
 		}
 		info.ToolNames = append([]string(nil), byService[info.ID]...)
+		info.Discoverable = registry.HasMCPServer(info.ID)
 	}
 }
 

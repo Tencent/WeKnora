@@ -33,13 +33,12 @@ func (s *stubKBLookup) GetKnowledgeBaseByID(_ context.Context, id string) (*type
 }
 
 // stubKBShareForGuard implements just the methods the guard touches —
-// CheckTenantKBPermission and GetKBSourceTenant. The other methods on
+// CheckTenantKBPermission. The other methods on
 // the interface panic so any unintended new dependency surfaces
 // immediately.
 type stubKBShareForGuard struct {
 	permission map[string]types.OrgMemberRole
 	shared     map[string]bool
-	source     map[string]uint64
 }
 
 func (s *stubKBShareForGuard) CheckTenantKBPermission(_ context.Context, kbID string, _ uint64, _ types.TenantRole) (types.OrgMemberRole, bool, error) {
@@ -50,48 +49,57 @@ func (s *stubKBShareForGuard) CheckTenantKBPermission(_ context.Context, kbID st
 }
 
 func (s *stubKBShareForGuard) GetKBSourceTenant(_ context.Context, kbID string) (uint64, error) {
-	if v, ok := s.source[kbID]; ok {
-		return v, nil
-	}
-	return 0, errors.New("not found")
+	panic("the loaded KB already carries its authoritative tenant")
 }
 
 func (s *stubKBShareForGuard) ShareKnowledgeBase(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) UpdateSharePermission(context.Context, string, types.OrgMemberRole, string, uint64) error {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharesByKnowledgeBase(context.Context, string, uint64) ([]*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharedKnowledgeBases(context.Context, uint64, types.TenantRole) ([]*types.SharedKnowledgeBaseInfo, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharedKnowledgeBasesInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedKnowledgeBaseItem, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) ListSharedKnowledgeBaseIDsByOrganizations(context.Context, []string, uint64) (map[string][]string, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) GetShare(context.Context, string) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) GetShareByKBAndOrg(context.Context, string, string) (*types.KnowledgeBaseShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) HasTenantKBPermission(context.Context, string, uint64, types.TenantRole, types.OrgMemberRole) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) CountSharesByKnowledgeBaseIDs(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
+
 func (s *stubKBShareForGuard) CountByOrganizations(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
@@ -121,36 +129,47 @@ func (s *stubAgentShareForGuard) TenantCanAccessKBViaSomeSharedAgent(_ context.C
 func (s *stubAgentShareForGuard) ShareAgent(context.Context, string, string, string, uint64, types.OrgMemberRole) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) RemoveShare(context.Context, string, string, uint64) error {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharesByAgent(context.Context, string, uint64) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharesByOrganization(context.Context, string) ([]*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharedAgents(context.Context, uint64, types.TenantRole) ([]*types.SharedAgentInfo, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharedAgentsInOrganization(context.Context, string, uint64, types.TenantRole) ([]*types.OrganizationSharedAgentItem, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) ListSharedAgentsInOrganizations(context.Context, []string, uint64, types.TenantRole) (map[string][]*types.OrganizationSharedAgentItem, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) SetSharedAgentDisabledByMe(context.Context, uint64, string, uint64, bool) error {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShare(context.Context, string) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShareByAgentAndOrg(context.Context, string, string) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) GetShareByAgentIDForTenant(context.Context, uint64, string, uint64) (*types.AgentShare, error) {
 	panic("not implemented")
 }
+
 func (s *stubAgentShareForGuard) CountByOrganizations(context.Context, []string) (map[string]int64, error) {
 	panic("not implemented")
 }
@@ -277,7 +296,6 @@ func TestRequireKBAccess_SharedKB_RewritesTenantContext(t *testing.T) {
 	share := &stubKBShareForGuard{
 		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleEditor},
 		shared:     map[string]bool{"kb-shared": true},
-		source:     map[string]uint64{"kb-shared": 200},
 	}
 	_, c := runGuard(t, 100, "kb-shared",
 		types.OrgRoleEditor,
@@ -297,7 +315,6 @@ func TestRequireKBAccess_SharedKB_PermissionBelowMin_Aborts(t *testing.T) {
 	share := &stubKBShareForGuard{
 		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer},
 		shared:     map[string]bool{"kb-shared": true},
-		source:     map[string]uint64{"kb-shared": 200},
 	}
 	_, c := runGuard(t, 100, "kb-shared",
 		types.OrgRoleEditor, // require Editor
@@ -500,7 +517,6 @@ func TestRequireKBAccess_Forbidden_FailOpenWhenRBACDisabled(t *testing.T) {
 	share := &stubKBShareForGuard{
 		permission: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer},
 		shared:     map[string]bool{"kb-shared": true},
-		source:     map[string]uint64{"kb-shared": 200},
 	}
 	kbsvc := &stubKBLookup{kbs: map[string]*types.KnowledgeBase{
 		"kb-shared": {ID: "kb-shared", TenantID: 200},

@@ -1,6 +1,6 @@
 # API 参考：认证与用户
 
-路由注册：`internal/router/router.go` 的 `RegisterAuthRoutes` 与 `RegisterMyInvitationRoutes`。Handler：`internal/handler/auth.go`、`internal/handler/auth_register_by_invite.go`、`internal/handler/tenant_invitation.go`。
+提供注册、登录、令牌刷新、个人资料和邀请处理接口。认证要求随接口而异，公开接口在各条目中标注。
 
 除特别标注外，本组接口在认证中间件之后仅要求“已登录”（无角色下限）。免认证接口见各条目。
 
@@ -33,7 +33,7 @@ curl -X POST $BASE/api/v1/auth/register -H 'Content-Type: application/json' \
 | `token` | string | 是（`binding:"required"`） | 邀请 token |
 | `email` | string | 是（`binding:"required,email"`） | 邮箱 |
 | `username` | string | 是（`binding:"required"`） | 用户名 |
-| `password` | string | 是（`binding:"required,min=6"`） | 密码（≥6 位） |
+| `password` | string | 是（`binding:"required,min=6"`） | 密码（8–32 位，字母+数字；复杂模式另需大小写和特殊字符） |
 
 响应：201，同 Login（`user/active_tenant/memberships/token/refresh_token`）。
 
@@ -85,7 +85,7 @@ curl -X POST $BASE/api/v1/auth/auto-setup
 
 用途：查询注册模式等认证配置。免认证。Handler: `internal/handler/auth.go`
 
-响应：200 `{"success":true,"registration_mode":"self_serve|invite_only"}`
+响应：200 `{"success":true,"registration_mode":"self_serve|invite_only","complex_password_enabled":false}`
 
 ```bash
 curl $BASE/api/v1/auth/config
@@ -117,6 +117,14 @@ curl -X POST $BASE/api/v1/auth/switch-tenant -H "Authorization: Bearer $TOKEN" \
 
 ```bash
 curl $BASE/api/v1/auth/oidc/config
+```
+
+### GET /api/v1/auth/oidc/start
+
+免登录，直接返回 302 和指向 IdP 的 Location，可供企业门户链接使用。无需先请求 JSON 授权地址；回调由请求 origin 构造为 `/api/v1/auth/oidc/callback`。回调后的登录结果与原 OIDC 链路一致。
+
+```bash
+curl -i "$BASE/api/v1/auth/oidc/start"
 ```
 
 ### GET /api/v1/auth/oidc/url
@@ -183,7 +191,7 @@ curl -X POST $BASE/api/v1/auth/logout -H "Authorization: Bearer $TOKEN"
 
 用途：查询当前调用者身份（用户/空间/成员关系/能力）。需登录；API key 亦可（策略 `apiKeyAny()`，任何有效 key）。Handler: `internal/handler/auth.go`
 
-响应：200 `{"success":true,"data":{"user":{UserInfo},"tenant":{TenantResponse},"memberships":[...],"tenant_required":bool,"capabilities":{"can_create_tenant":bool}}}`
+响应：200 `{"success":true,"data":{"user":{UserInfo},"tenant":{TenantResponse},"memberships":[...],"tenant_required":bool,"capabilities":{"can_create_tenant":bool,"auto_accept_invitation":bool}}}`
 
 ```bash
 curl $BASE/api/v1/auth/me -H "X-API-Key: $API_KEY"
@@ -204,6 +212,8 @@ curl -X PUT $BASE/api/v1/auth/me/preferences -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"last_active_tenant_id":2}'
 ```
 
+密码策略由 `GET /auth/config` 提供。复杂模式允许的特殊字符集为 `!@#$%^&*()_+-=[]{}|;:,.<>?`；不能只根据结构体 binding 的长度标签推导完整校验规则。
+
 ### POST /api/v1/auth/change-password
 
 用途：修改密码。需登录。Handler: `internal/handler/auth.go`
@@ -211,13 +221,25 @@ curl -X PUT $BASE/api/v1/auth/me/preferences -H "Authorization: Bearer $TOKEN" \
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `old_password` | string | 是（`binding:"required"`） | 旧密码 |
-| `new_password` | string | 是（`binding:"required,min=6"`） | 新密码（≥6 位） |
+| `new_password` | string | 是（`binding:"required"`） | 新密码（8–32 位，字母+数字；复杂模式另需大小写和特殊字符） |
 
 响应：200 `{"success":true,"message":"Password changed successfully"}`
 
 ```bash
 curl -X POST $BASE/api/v1/auth/change-password -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"old_password":"old","new_password":"newpass1"}'
+  -H 'Content-Type: application/json' -d '{"old_password":"old","new_password":"NewPass123!"}'
+```
+
+修改密码必须提供正确的旧密码，新密码不能与旧密码相同。成功后撤销全部会话，需要重新登录。默认策略 8–32 位、字母和数字；复杂模式要求大小写字母、数字和特殊字符。错误详情可为 `invalid_old_password`、`password_policy`、`same_password`，均返回 400。
+
+### POST /api/v1/me/invitations/accept-by-token
+
+需登录，仅操作当前用户，无空间的新用户也可调用。请求 `{"token":"<invite-token>"}`；有效共享邀请使当前用户加入对应空间。无效、过期、撤销的链接返回 410；空 token 返回 400。成功响应为 `{success:true,data:{membership:{tenant_id,role,status,joined_at},tenant_name}}`，前端据此切换空间。
+
+```bash
+curl -X POST "$BASE/api/v1/me/invitations/accept-by-token" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"token":"<invite-token>"}'
 ```
 
 ## 我的邀请（/api/v1/me/invitations）
@@ -267,3 +289,7 @@ curl -X POST $BASE/api/v1/me/invitations/12/accept -H "Authorization: Bearer $TO
 ```bash
 curl -X POST $BASE/api/v1/me/invitations/12/decline -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterAuthRoutes` 与 `RegisterMyInvitationRoutes`。Handler：`internal/handler/auth.go`、`internal/handler/auth_register_by_invite.go`、`internal/handler/tenant_invitation.go`。

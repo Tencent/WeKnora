@@ -66,6 +66,13 @@ type UserService interface {
 	// non-home tenant. Falls back to user.TenantID when the claim is
 	// missing (old tokens issued before tenant-level RBAC).
 	ValidateToken(ctx context.Context, token string) (*types.User, uint64, error)
+	// GetAccessTokenByValue looks up the stored access-token row for a JWT
+	// string. The Token field is redacted. Used to bind a sandbox-terminal
+	// ticket to the minting session without putting the JWT in the ticket.
+	GetAccessTokenByValue(ctx context.Context, token string) (*types.AuthToken, error)
+	// GetAccessTokenByID looks up a stored access-token row by primary key.
+	// The Token field is redacted. Used by the sandbox-terminal recheck.
+	GetAccessTokenByID(ctx context.Context, id string) (*types.AuthToken, error)
 	// RefreshToken refreshes access token using refresh token
 	RefreshToken(ctx context.Context, refreshToken string) (accessToken, newRefreshToken string, err error)
 	// RevokeToken revokes a token
@@ -137,6 +144,8 @@ type AuthTokenRepository interface {
 	CreateToken(ctx context.Context, token *types.AuthToken) error
 	// GetTokenByValue gets a token by its value
 	GetTokenByValue(ctx context.Context, tokenValue string) (*types.AuthToken, error)
+	// GetTokenByID gets a token by its primary key
+	GetTokenByID(ctx context.Context, id string) (*types.AuthToken, error)
 	// GetTokensByUserID gets all tokens for a user
 	GetTokensByUserID(ctx context.Context, userID string) ([]*types.AuthToken, error)
 	// UpdateToken updates a token

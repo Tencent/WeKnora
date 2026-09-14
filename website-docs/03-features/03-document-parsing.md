@@ -1,6 +1,6 @@
 # 文档解析服务 docreader
 
-上传一个 PDF 之后，系统要先把它变成能被切分和索引的文本——这件事由独立的解析服务 docreader 完成。作为使用者，你通常只需要知道两件事：**支持哪些格式**，以及**解析不理想时能调什么**。
+文档解析将上传的文件转换为可检索的文本，并提取原始图片引用。WeKnora 支持多种格式，可按文件类型选择解析引擎；扫描件、图片和音频还需要相应的视觉或语音模型。
 
 支持的格式：
 
@@ -17,13 +17,13 @@
 - **PDF 版式还原差、表格错位**：在知识库的解析设置里为 `pdf` 指定其他解析引擎（MarkItDown / OpenDataLoader / MinerU）；
 - **扫描件没识别出文字**：确认已配置视觉模型，必要时强制走扫描件模式；
 - **Excel 首行是列名却被当成数据**：为 `xlsx`/`xls` 打开「首行作为表头」；
-- **个别段落切错**：不必重传整个文档，直接在分块列表里改，见[知识库与知识管理](02-knowledge-base.md)的分块编辑一节。
+- **分块内容需要修正**：在分块列表中编辑正文，见[知识库与知识管理](02-knowledge-base.md#编辑分块与补充元数据)。
 
-以下是 docreader 的完整实现说明，供二次开发与排障参考。
+## 解析机制与配置参考
 
-`docreader/` 是 WeKnora 中独立的 Python 文档解析微服务（gRPC sidecar）。它的唯一职责是：**把各种格式的文件 / URL 转换为 Markdown 文本 + 原始图片引用**，供 Go 主服务（App）完成后续的分块（chunking）、图片持久化、OCR、VLM caption、向量化等流程。
+docreader 是独立的 Python gRPC 服务，负责将文件或 URL 转换为 Markdown 和原始图片引用。Go 主服务随后完成分块、图片存储、OCR、图片描述及向量化。
 
-经过"轻量化重构"后，docreader 本身**不做 OCR、不做 VLM caption、不做分块、不做对象存储上传**——这些全部在 Go 侧完成。`docreader/parser/base_parser.py` 里的接口说明：
+解析服务与后续处理的职责定义在 `docreader/parser/base_parser.py`：
 
 ```python
 class BaseParser(ABC):
@@ -35,11 +35,9 @@ class BaseParser(ABC):
     """
 ```
 
----
+### 服务定位与对外接口 {#_1-服务定位与对外接口}
 
-## 1. 服务定位与对外接口
-
-### 1.1 接口协议：纯 gRPC（无 HTTP）
+#### 接口协议：纯 gRPC（无 HTTP） {#_1-1-接口协议-纯-grpc-无-http}
 
 服务入口是 `docreader/main.py`，只启动一个 gRPC server（`grpc.server` + `ThreadPoolExecutor`），默认监听 `50051` 端口，同时注册标准的 gRPC Health 服务（`grpc_health.v1`）供 K8s / Docker 探活（配合镜像内的 `grpc_health_probe` 二进制）。**没有任何 HTTP 接口**。
 
@@ -63,7 +61,7 @@ service DocReader {
 
 `ListEngines` 保留用于向后兼容——注释明确说明引擎列表现在由 Go 侧 `internal/infrastructure/docparser/engine_registry.go`（`docparser.ListAllEngines`）管理，Go App 已不再调用该 RPC，MinerU 等远程引擎由 Go 原生处理。
 
-### 1.2 认证与 TLS（auth.py）
+#### 认证与 TLS（auth.py） {#_1-2-认证与-tls-auth-py}
 
 `docreader/auth.py` 提供两层安全机制，均通过环境变量开启：
 
@@ -73,7 +71,7 @@ service DocReader {
 
 Go 侧客户端在 `docreader/client/auth.go`（`LoadAuthConfigFromEnv` 读取同名环境变量 `GRPC_TLS_ENABLED/CERT/KEY/CA/SERVER_NAME` 与 `GRPC_AUTH_TOKEN`），`docreader/client/client.go` 的 `NewClient` 构建带 round_robin 负载均衡与 `MAX_FILE_SIZE_MB` 消息上限的连接。
 
-### 1.3 与主服务的交互时序
+#### 与主服务的交互时序 {#_1-3-与主服务的交互时序}
 
 Go App 中 `internal/application/service/knowledge_process.go` 在文档入库流水线的 docreader stage 调用解析（超时由 `docreader_call_timeout` 配置控制，防止挂死的 docreader 长时间占用 worker）。注意：**md/markdown/txt/csv/json/图片/音频由 Go 侧 `SimpleFormatReader` 原生处理，不经过 docreader**（见 `internal/infrastructure/docparser/builtin_converter.go` 的 `simpleFormats`）。
 
@@ -107,9 +105,9 @@ sequenceDiagram
 
 ---
 
-## 2. 解析器注册与调度机制
+### 解析器注册与调度机制 {#_2-解析器注册与调度机制}
 
-### 2.1 引擎注册表（parser/registry.py）
+#### 引擎注册表（parser/registry.py） {#_2-1-引擎注册表-parser-registry-py}
 
 `ParserEngineRegistry` 维护 `引擎名 → {文件扩展名 → 解析器类}` 的两级映射，并支持每个引擎注册 `check_available` 探针（用于 `ListEngines` 汇报可用性与不可用原因）。
 
@@ -123,20 +121,20 @@ sequenceDiagram
 
 调度规则（`get_parser_class`）：请求指定的引擎若不支持该文件类型，**自动回退 `builtin` 引擎**；builtin 也没有则抛 `ValueError("Unsupported file type")`。
 
-### 2.2 门面与文件魔数纠偏（parser/parser.py）
+#### 门面与文件魔数纠偏（parser/parser.py） {#_2-2-门面与文件魔数纠偏-parser-parser-py}
 
 `Parser` 是门面类：`parse_file()` 走注册表，`parse_url()` 固定使用 `WebParser`。其中一个重要防御是 `detect_effective_file_type()`——OOXML `.docx` 实为 ZIP 容器，而老式 `.doc` 是 OLE Compound File；WPS/Word 容忍把 `.doc` 改名成 `.docx`，因此检测到 OLE 魔数（`b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"`）开头的 "docx" 会被强制路由到 DOC 解析器，避免把二进制 OLE 数据喂给 DOCX 解析器。
 
 引擎覆盖参数 `engine_overrides`（来自 proto 的 `parser_engine_overrides`）作为 `**kwargs` 传入解析器构造函数，例如 `pdf_force_scanned` 由 `PDFParser.__init__` 捕获。
 
-### 2.3 链式解析器（parser/chain_parser.py）
+#### 链式解析器（parser/chain_parser.py） {#_2-3-链式解析器-parser-chain-parser-py}
 
 两种"责任链"组合器，均通过类工厂 `create(*parser_classes)` 动态生成子类：
 
 - **`FirstParser`**：按顺序尝试多个解析器，第一个产出 `document.is_valid()`（即 `content != ""`）的结果即返回；异常被捕获后继续尝试下一个。典型用例：`Docx2Parser = FirstParser.create(MarkitdownParser, DocxParser)`。
 - **`PipelineParser`**：流水线，每个解析器的输出文本（重新编码为 bytes）作为下一个的输入，各阶段产生的 `images`/`metadata` 累积合并。典型用例：`MarkdownParser = PipelineParser.create(MarkdownTableFormatter, MarkdownImageBase64)`、`WebParser = PipelineParser.create(StdWebParser, MarkdownParser)`、`MarkitdownParser = PipelineParser.create(StdMarkitdownParser, MarkdownParser)`。
 
-### 2.4 并发模型（parser/concurrency.py 及各处）
+#### 并发模型（parser/concurrency.py 及各处） {#_2-4-并发模型-parser-concurrency-py-及各处}
 
 并发控制分四层：
 
@@ -150,9 +148,9 @@ sequenceDiagram
 
 ---
 
-## 3. 解析器逐一详解
+### 解析器逐一详解 {#_3-解析器逐一详解}
 
-### 3.1 pdf_parser.py — PDFParser / PDFScannedParser（builtin 引擎的 PDF）
+#### pdf_parser.py — PDFParser / PDFScannedParser（builtin 引擎的 PDF） {#_3-1-pdf-parser-py-—-pdfparser-pdfscannedparser-builtin-引擎的-pdf}
 
 **依赖**：`pypdfium2`（+ Pillow）。无需任何外部服务（MinerU / Docling 等），docreader 自身不做 OCR。
 
@@ -172,7 +170,7 @@ sequenceDiagram
 
 **局限**：不做表格结构识别（文本层表格按行输出）；标题识别是字号启发式；扫描页文本完全依赖 Go 侧 OCR。
 
-### 3.2 doc_parser.py — DocParser（.doc 老式 Word）
+#### doc_parser.py — DocParser（.doc 老式 Word） {#_3-2-doc-parser-py-—-docparser-doc-老式-word}
 
 继承 `Docx2Parser`，处理链（依次尝试）：
 
@@ -182,7 +180,7 @@ sequenceDiagram
 
 **依赖**：LibreOffice（soffice）、antiword（镜像内已装）；查找路径支持 `LIBREOFFICE_PATH`/`ANTIWORD_PATH` 环境变量。**局限**：无 LibreOffice 时退化为 antiword 纯文本（无图片、无表格结构）。
 
-### 3.3 docx2_parser.py 与 docx_parser.py 的区别
+#### docx2_parser.py 与 docx_parser.py 的区别 {#_3-3-docx2-parser-py-与-docx-parser-py-的区别}
 
 - **`Docx2Parser`（注册表中 docx 的实际入口）**只有 3 行核心代码：`FirstParser.create(MarkitdownParser, DocxParser)`——**先试 MarkItDown**（快、表格转 Markdown 质量好），失败或产出空内容再回退自研 `DocxParser`。
 - **`DocxParser`（docx_parser.py，1500+ 行）** 是自研的 python-docx 解析器：
@@ -193,7 +191,7 @@ sequenceDiagram
   - 整体失败时回退 `_parse_using_simple_method`（纯 python-docx 顺序提取段落 + 表格行，无图片）。
   - 页数上限 `DOCREADER_DOCX_MAX_PAGES`（默认 0 = 不限制）。
 
-### 3.4 excel_parser.py 及三个辅助模块（.xlsx / .xls）
+#### excel_parser.py 及三个辅助模块（.xlsx / .xls） {#_3-4-excel-parser-py-及三个辅助模块-xlsx-xls}
 
 **`ExcelParser`** 基于 pandas：逐 sheet 读取 DataFrame，删掉全空行，**每行转成 `列名: 值,列名: 值` 的键值对文本**，每行一个 `Chunk`（携带 start/end 位置）。会剔除 WPS `=DISPIMG("ID",mode)` 和 Office 365 `=_xlfn.IMAGE(...)` 这类内嵌图片函数串（`_IMAGE_FUNC_RE`）。不提取图片。
 
@@ -209,18 +207,18 @@ sequenceDiagram
 
 XLSX 读取前统一走 `repair → fill_merged_cells` 预处理，并用 `header=None` + A/B/C 列字母作为稳定列名（xls 则先尝试首行做表头，遇 `Unnamed:` 列回退列字母）。
 
-### 3.5 ppt_convert.py / pptx_media.py（.ppt / .pptx，服务于 markitdown 引擎）
+#### ppt_convert.py / pptx_media.py（.ppt / .pptx，服务于 markitdown 引擎） {#_3-5-ppt-convert-py-pptx-media-py-ppt-pptx-服务于-markitdown-引擎}
 
 PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个模块是它的前后置助手：
 
 - **`ppt_convert.py`**：`normalize_ppt_bytes` 按魔数判断（ZIP=pptx 直通；OLE=老式 ppt 则 LibreOffice `convert-to pptx`，独立 profile + 3 次重试）。无 LibreOffice 时对 .ppt 直接抛错并提示安装。
 - **`pptx_media.py`**：MarkItDown 无法内联的 PPTX 媒体（尤其 WMF/EMF/SVG 矢量图）的补救——解包 `ppt/media/` 下所有资源，按顺序用 Pillow（位图）或 ImageMagick `convert`（矢量，兜底一切格式）栅格化为 PNG，然后把 markdown 里未解析的 `![](...)` 引用按顺序替换为 `images/<uuid>.png` 并内联图片数据。
 
-### 3.6 image_parser.py — ImageParser（独立图片文件）
+#### image_parser.py — ImageParser（独立图片文件） {#_3-6-image-parser-py-—-imageparser-独立图片文件}
 
 最简单的解析器（29 行）：**不做任何 OCR**。把整张图 base64 内联进 `Document.images`，正文只有一行 `![文件名](images/文件名)`。**OCR 引擎在 Go 侧**——docreader 的 Dockerfile 注释明确"已移除 OCR/PaddleOCR 相关依赖"，Go 侧通过 `internal/infrastructure/docparser/paddleocr_vl_converter.go` / `paddleocr_vl_cloud_converter.go`（PaddleOCR-VL）及 `image_multimodal.go` 完成 OCR 与 caption。另外注意：Go 的 `simpleFormats` 已把图片格式收编为 Go 原生处理，docreader 的 ImageParser 主要服务于直接调用 gRPC 的 SDK 场景。
 
-### 3.7 markdown_parser.py — MarkdownParser（.md / .markdown）
+#### markdown_parser.py — MarkdownParser（.md / .markdown） {#_3-7-markdown-parser-py-—-markdownparser-md-markdown}
 
 `PipelineParser.create(MarkdownTableFormatter, MarkdownImageBase64)`：
 
@@ -229,7 +227,7 @@ PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个�
 
 该解析器也是 MarkitdownParser / WebParser 流水线的公共后处理阶段。
 
-### 3.8 web_parser.py — WebParser（URL 模式）
+#### web_parser.py — WebParser（URL 模式） {#_3-8-web-parser-py-—-webparser-url-模式}
 
 `PipelineParser.create(StdWebParser, MarkdownParser)`。`StdWebParser` 用 **Playwright（WebKit 内核）** 渲染页面 + **trafilatura** 抽正文转 Markdown：
 
@@ -239,11 +237,11 @@ PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个�
 - **回退**：trafilatura 抽不出正文时用 Playwright 可见文本（≥50 字符）+ 页面 title 兜底。
 - 代理走 `DOCREADER_EXTERNAL_HTTPS_PROXY`。metadata 提取 `title`。
 
-### 3.9 mhtml_parser.py — MHTMLParser（.mhtml 网页归档）
+#### mhtml_parser.py — MHTMLParser（.mhtml 网页归档） {#_3-9-mhtml-parser-py-—-mhtmlparser-mhtml-网页归档}
 
 用标准库 `email` 解析 MIME 结构：收集全部 `text/html` part，**选最大的非广告 part** 作为正文（按 `googleads`/`doubleclick` 等域名黑名单过滤）；`image/*` part 抽出为 `images/...`（优先用 Content-Location 文件名，冲突加 `_2` 后缀），并按 `Content-Location`/`Content-ID`(`cid:`)/`X-Attachment-Id` 的多种拼写（HTML 转义、URL 编码、basename、相对路径 urljoin）建立别名表回写 `<img src>`。HTML → Markdown 用 BeautifulSoup（去 script/style/noscript/iframe、unwrap 站内链接）+ `markdownify`，再做代码围栏感知的空行规范化。全部失败时退化为 ```` ```html ```` 代码块。metadata：`source_format=mhtml`、`file_size`、`image_count`。
 
-### 3.10 html_parser.py — HTMLParser（.html / .htm 静态网页文件）
+#### html_parser.py — HTMLParser（.html / .htm 静态网页文件） {#_3-10-html-parser-py-—-htmlparser-html-htm-静态网页文件}
 
 用户直接上传的 HTML 文件走这条链路，与 `parse_url()` 的在线抓取分开：`HTMLParser = PipelineParser.create(HTMLToMarkdownParser, MarkdownParser)`。
 
@@ -251,19 +249,19 @@ PPT 系列**没有独立解析器**，由 `MarkitdownParser` 处理，这两个�
 - HTML → Markdown 复用 `MHTMLParser.html_to_markdown()`，但传入 `extract_images=False`（本地 HTML 文件没有 MIME 附件可抽）、`strip_internal_links=False`（保留站内链接）、`fallback_to_raw_html=False`（转换不出内容时返回空而不是塞一整块 ```` ```html ````）；
 - 正文中通过 `<img src="http://...">` 引用的远程图片由 Go 侧补齐：`internal/infrastructure/docparser/image_resolver.go` 会带 SSRF 校验下载这些远程图片并转存到对象存储，再重写引用，使其与本地上传的图片走同一套 OCR / caption 流程。
 
-### 3.11 epub_parser.py — EPUBParser（.epub 电子书）
+#### epub_parser.py — EPUBParser（.epub 电子书） {#_3-11-epub-parser-py-—-epubparser-epub-电子书}
 
 主路径用 **ebooklib**（经临时文件读入）：提取 DC 元数据（title/author/publisher/language/description/date/isbn），优先按 TOC 顺序逐章处理（每章取首个 h1/h2 作章题，输出 `## 章题` + markdownify 转换的正文），`ITEM_IMAGE` 全部抽为 `images/<uuid>.<ext>` 并按路径多变体别名回写 `<img src>`；EPUB 内部链接（章节间跳转、`#fragment`）unwrap 只留文本。ebooklib 失败时回退 **ZIP 直读**：按 `chapter(\d+)` 排序 html/xhtml 文件逐个转换。metadata 含 `chapter_count`/`image_count`。
 
-### 3.12 markitdown_parser.py — MarkitdownParser（markitdown 引擎）
+#### markitdown_parser.py — MarkitdownParser（markitdown 引擎） {#_3-12-markitdown-parser-py-—-markitdownparser-markitdown-引擎}
 
 `PipelineParser.create(StdMarkitdownParser, MarkdownParser)`。`StdMarkitdownParser` 包装微软 **MarkItDown** 库（`markitdown[docx,pdf,xls,xlsx]`）：ppt/pptx 先经 `normalize_ppt_bytes` 归一化；先以 `keep_data_uris=True` 转换（图片留 data URI，交给下游 `MarkdownImageBase64` 抽取），失败再退 `keep_data_uris=False`；pptx 转换后若 markdown 里仍有未解析图片引用则调用 `attach_pptx_media_to_markdown` 补图。整体受 `parser_worker_limit("markitdown", DOCREADER_MARKITDOWN_MAX_WORKERS=1)` 限流。**局限**：MarkItDown 的 PDF 走 pdfminer 文本抽取，对扫描件无能为力（`parse_local.py --scanned` 注释还提到 pdfminer 可能卡死）；表格/版面还原弱于 builtin PDF 路由。
 
-### 3.13 opendataloader_parser.py — OpenDataLoaderParser（opendataloader 引擎，仅 PDF）
+#### opendataloader_parser.py — OpenDataLoaderParser（opendataloader 引擎，仅 PDF） {#_3-13-opendataloader-parser-py-—-opendataloaderparser-opendataloader-引擎-仅-pdf}
 
 包装 Apache-2.0 的 **opendataloader-pdf**（Java 实现的版面分析）：每次 `convert()` 拉起一个 JVM（`parser_worker_limit("opendataloader", 1)` 限流），输出 markdown + 外置图片目录；随后收集输出树下所有图片、构建别名表（尖括号包裹 `<images/foo.png>`、HTML 实体、basename、`imageFileN` 编号对齐）重写 markdown 图片引用。支持 **hybrid 模式**（`DOCREADER_ODL_HYBRID=docling-fast` 等）：调用独立部署的 `opendataloader-pdf-hybrid` HTTP 服务（`DOCREADER_ODL_HYBRID_URL`，默认 `http://127.0.0.1:5002`，Docker 侧对应 `docker/Dockerfile.odl-hybrid`），可用性探针带重试（快速探测 2s×1 次；解析前探测 5s×6 次容忍服务冷启动）。产出文本 <20 字符时判定失败，**回退 builtin 的 `PDFScannedParser`**。可用性检查：`java` 在 PATH（需 Java 11+，镜像装的是 openjdk-17-jre-headless）+ Python 包已装 + hybrid 健康。
 
-### 3.14 解析器选择决策流程
+#### 解析器选择决策流程 {#_3-14-解析器选择决策流程}
 
 ```mermaid
 flowchart TD
@@ -294,7 +292,7 @@ flowchart TD
 
 ---
 
-## 4. 图片处理与多模态分工
+### 图片处理与多模态分工 {#_4-图片处理与多模态分工}
 
 docreader 侧的图片契约非常简单：每个解析器把图片以 `Document.images = {"images/<文件名>": "<base64>"}` 返回，markdown 正文中以 `![...](images/<文件名>)` 相对引用。
 
@@ -307,7 +305,7 @@ Go 侧接手后（`internal/infrastructure/docparser/image_resolver.go`）：将
 
 ---
 
-## 5. splitter/ 分块器与 Go 侧 chunker 的关系
+### splitter/ 分块器与 Go 侧 chunker 的关系 {#_5-splitter-分块器与-go-侧-chunker-的关系}
 
 `docreader/splitter/splitter.py` 的 `TextSplitter` 是一个带保护模式的递归分块器：
 
@@ -319,9 +317,9 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 
 ---
 
-## 6. 配置项全表
+### 配置项全表 {#_6-配置项全表}
 
-### 6.1 config.py（`DocReaderConfig`，启动时打印生效值）
+#### config.py（`DocReaderConfig`，启动时打印生效值） {#_6-1-config-py-docreaderconfig-启动时打印生效值}
 
 | 环境变量（别名） | 默认值 | 说明 |
 | --- | --- | --- |
@@ -344,7 +342,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `DOCREADER_EXTERNAL_HTTP_PROXY` / `DOCREADER_EXTERNAL_HTTPS_PROXY`（`EXTERNAL_HTTP_PROXY`/`EXTERNAL_HTTPS_PROXY`） | 空 | 外网代理（WebParser、DOC 转换子进程） |
 | `DOCREADER_IMAGE_OUTPUT_DIR`（`IMAGE_OUTPUT_DIR`） | `/tmp/docreader` | 临时图片目录（local 模式回退用，当前主链路不写盘） |
 
-### 6.2 PDF 路由细节（pdf_parser.py 模块级环境变量，节选常用项）
+#### PDF 路由细节（pdf_parser.py 模块级环境变量，节选常用项） {#_6-2-pdf-路由细节-pdf-parser-py-模块级环境变量-节选常用项}
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -360,7 +358,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `DOCREADER_PDF_RENDER_VECTOR_FIGURES` | true | 将矢量图表区域渲染为 JPEG |
 | `DOCREADER_PDF_WORD_GAP_WIDTH_RATIO` / `_MARGIN_COL_WIDTH_RATIO` / `_MIN_HEADING_LINE_CHARS` 等 | 0.4 / 0.12 / 8 | 版面重建微调参数（详见源码常量区） |
 
-### 6.3 安全与其他
+#### 安全与其他 {#_6-3-安全与其他}
 
 | 环境变量 | 说明 |
 | --- | --- |
@@ -372,9 +370,9 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 
 ---
 
-## 7. 部署与扩容建议
+### 部署与扩容建议 {#_7-部署与扩容建议}
 
-### 7.1 镜像与系统依赖（docker/Dockerfile.docreader）
+#### 镜像与系统依赖（docker/Dockerfile.docreader） {#_7-1-镜像与系统依赖-docker-dockerfile-docreader}
 
 基础镜像 `python:3.10.18-bookworm`，双阶段构建（builder 用 `uv sync --locked` 装依赖 + `scripts/generate_proto.sh` 生成 pb 代码；runner 拷贝 venv），`EXPOSE 50051`，`CMD ["uv", "run", "-m", "docreader.main"]`。运行阶段系统依赖：
 
@@ -389,7 +387,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 
 Python 依赖（`pyproject.toml` + `uv.lock` 锁定）：`grpcio`、`pypdfium2`、`markitdown[docx,pdf,xls,xlsx]`、`opendataloader-pdf`、`python-docx`、`pandas`/`openpyxl`/`xlrd`、`playwright`、`trafilatura`、`beautifulsoup4`/`markdownify`/`lxml`、`ebooklib`、`pillow`、`pydantic`、`textract`（已禁用路径）等。
 
-### 7.2 扩容与调优
+#### 扩容与调优 {#_7-2-扩容与调优}
 
 - **水平扩展优先**：pdfium 全局锁使**单实例内 PDF 解析串行**，PDF 吞吐主要靠多副本扩展。Go 客户端 dial `dns:///` + `round_robin`，K8s 下用 headless service 即可让多副本均衡分流。
 - **单实例纵向调优**：CPU 富余时调大 `DOCREADER_PDF_RENDER_PARALLELISM`（单文档渲染提速近线性）与 `DOCREADER_GRPC_MAX_WORKERS`（非 PDF 格式可真并发）；内存受限时优先保证 Go 侧走 `ReadStream`（默认行为）。
@@ -400,13 +398,13 @@ Python 依赖（`pyproject.toml` + `uv.lock` 锁定）：`grpcio`、`pypdfium2`�
 
 ---
 
-## 8. anydoc 引擎（Go 进程内解析，不经 docreader）
+### anydoc 引擎（Go 进程内解析，不经 docreader） {#_8-anydoc-引擎-go-进程内解析-不经-docreader}
 
 `anydoc` 是一个 Go 侧的可选解析引擎：它把 [anydoc](https://github.com/firecrawl/anydoc)（Rust 编写的文档转换库）通过 cgo 链接进 WeKnora 主进程，直接把 office 文档转成 Markdown。与本文其余部分描述的 docreader 不同，它**不经过 Python 服务、不跨进程、也不调用外部二进制**——适合不想部署 docreader 的轻量部署，或对解析延迟敏感的场景。
 
 支持的文件类型：`doc`、`docx`、`docm`、`odt`、`rtf`、`ppt`、`pptx`、`pptm`、`odp`、`xls`、`xlsx`、`xlsm`、`ods`、`epub`、`csv`、`pdf`。
 
-### 8.1 启用方式
+#### 启用方式 {#_8-1-启用方式}
 
 解析库是 Rust 静态库，需要 Rust 工具链构建。官方 Docker 镜像（`wechatopenai/weknora-app`）和 `docker compose build` **默认链接** anydoc，设置页可直接选用。本地 `go build` 默认不链接：未加 `-tags anydoc` 时该引擎在「解析引擎」列表里显示为不可用，其它引擎不受影响。
 
@@ -423,16 +421,16 @@ docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=0 -t weknora-app .
 # 或在 .env 里设 WITH_ANYDOC=0 再 docker compose build
 ```
 
-启用后在知识库的解析设置里把对应文件类型指向 `anydoc` 引擎即可。
+显式解析规则优先。未配置规则时，已链接 anydoc 且它支持的复杂格式默认优先走 anydoc；简单格式继续用 Go SimpleFormatReader。未链接 anydoc 的 PPT/PPTX 默认回退 markitdown。需要固定引擎时，可在知识库解析设置中显式指定，而不依赖部署的编译选项。
 
-### 8.2 能力边界
+#### 能力边界 {#_8-2-能力边界}
 
 - **扫描件 PDF**：anydoc 只抽取 PDF 的文字层。没有文字层的扫描件会报「需要 OCR」；若 DocReader（builtin）已连接，AnydocReader 会自动把该文件交给 builtin，按页渲染 JPEG 并标记 `image_source_type=scanned_pdf`，后续仍走 Go 侧 OCR。未连接 DocReader 时转换失败，请改用 `builtin`、`mineru` 或 `paddleocr_vl`。
 - **纵向合并单元格不回填**：docreader 的 `Docx2Parser` 会把纵向合并的值复制到每一行（见 issue #2634），anydoc 只在起始行输出该值，后续行留空。对依赖表格逐行语义的知识库，`builtin` 仍然更稳。
 - **图片位置**：开启图片抽取时，先把文档模型里的嵌入图改写成 `images/image-N.ext` 链接，再交给 anydoc 官方 GFM 序列化，因此图片会留在原段落/表格/列表位置。设置引擎覆盖参数 `anydoc_extract_images=false` 可关闭图片抽取，走更快的纯文本渲染（嵌入图会退化成 alt 文本）。
 - **不处理 URL、图片、音频**：这些仍由 `WebParser`、`SimpleFormatReader` 与 ASR 链路负责。
 
-### 8.3 代码位置
+#### 代码位置 {#_8-3-代码位置}
 
 | 路径 | 作用 |
 | --- | --- |
@@ -443,7 +441,7 @@ docker build -f docker/Dockerfile.app --build-arg WITH_ANYDOC=0 -t weknora-app .
 
 ---
 
-## 附：关键事实速查
+### 附：关键事实速查
 
 - **对外接口**：仅 gRPC，端口 `50051`（`DOCREADER_GRPC_PORT`/`PORT`），RPC：`Read` / `ReadStream` / `ListEngines` + 标准 Health 服务。
 - **docreader 直接支持的文件格式全集**：`pdf`、`docx`、`doc`、`xlsx`、`xls`（markitdown 引擎额外含 `pptx`、`ppt`、`csv`）、`md`/`markdown`、`epub`、`html`/`htm`、`mhtml`、图片 `jpg/jpeg/png/gif/bmp/tiff/webp`，以及 URL 网页抓取；`txt`/`csv`/`json`/图片/音频在主链路中由 Go 侧 `SimpleFormatReader` 原生处理，不经过本服务。

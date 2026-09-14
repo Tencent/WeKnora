@@ -2,15 +2,18 @@ package session
 
 import (
 	stderrors "errors"
-	"io"
 	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -180,12 +183,12 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 		return
 	}
 	if index >= len(msg.Artifacts) {
-		c.Error(errors.NewNotFoundError("artifact index out of range"))
+		_ = c.Error(errors.NewNotFoundError("artifact index out of range"))
 		return
 	}
 	artifact := msg.Artifacts[index]
 	if artifact.URL == "" {
-		c.Error(errors.NewNotFoundError("artifact storage path missing"))
+		_ = c.Error(errors.NewNotFoundError("artifact storage path missing"))
 		return
 	}
 
@@ -193,27 +196,64 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("file service unavailable"))
 		return
 	}
-	reader, err := h.fileService.GetFile(ctx, artifact.URL)
+	file, err := access.ResolveMessageArtifact(ctx, msg, index, h.agentShareService, h.resourceCatalog,
+		access.MessageKBShareAuthorizer{ShareGuard: h.kbShareService, KBs: h.knowledgebaseService})
+	if err != nil {
+		_ = c.Error(errors.NewNotFoundError("artifact not accessible"))
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, file.OwnerTenantID)
+	fileService := h.fileService
+	if h.tenantService != nil {
+		tenant, lookupErr := h.tenantService.GetTenantByID(ctx, file.OwnerTenantID)
+		if lookupErr != nil || tenant == nil {
+			_ = c.Error(errors.NewNotFoundError("artifact workspace unavailable"))
+			return
+		}
+		backendID, providerPath, scoped := types.ParseStorageBackendPath(file.Path)
+		if !scoped {
+			providerPath = file.Path
+		}
+		if file.StorageBackendID != "" {
+			backendID = file.StorageBackendID
+		}
+		var ok bool
+		fileService, _, ok = filesvc.ResolveTenantFileServiceWithFallback(
+			ctx,
+			"artifact download",
+			tenant,
+			backendID,
+			types.ParseProviderScheme(providerPath),
+			storageurl.LocalStorageBaseDir(),
+			h.storageResolver,
+			h.fileService,
+		)
+		if !ok {
+			_ = c.Error(errors.NewNotFoundError("artifact storage unavailable"))
+			return
+		}
+	}
+	reader, err := fileService.GetFile(ctx, file.Path)
 	if err != nil {
 		logger.Warnf(ctx, "artifact download read failed: session=%s message=%s idx=%d err=%v",
 			sessionID, messageID, index, err)
-		c.Error(errors.NewNotFoundError("artifact blob missing"))
+		_ = c.Error(errors.NewNotFoundError("artifact blob missing"))
 		return
 	}
-	defer reader.Close()
-
-	// Force download semantics — artifacts are never rendered inline, matching
-	// the /files endpoint's active-content protection.
-	c.Header("Content-Type", mimeTypeFor(artifact.FileName))
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", buildAttachmentHeader(artifact.FileName))
-	if artifact.FileSize > 0 {
-		c.Header("Content-Length", strconv.FormatInt(artifact.FileSize, 10))
-	}
-	c.Status(http.StatusOK)
-	if _, err := io.Copy(c.Writer, reader); err != nil {
-		logger.Warnf(ctx, "artifact download stream failed: session=%s message=%s idx=%d err=%v",
-			sessionID, messageID, index, err)
+	if err := filetransport.Serve(c.Writer, c.Request, reader, filetransport.Options{
+		Filename: artifact.FileName, Download: true, ContentType: mimeTypeFor(artifact.FileName),
+		Disposition:  buildAttachmentHeader(artifact.FileName),
+		Size:         artifact.FileSize,
+		CacheControl: "private, no-store",
+	}); err != nil {
+		logger.Warnf(
+			ctx,
+			"artifact download stream failed: session=%s message=%s idx=%d err=%v",
+			sessionID,
+			messageID,
+			index,
+			err,
+		)
 	}
 }
 

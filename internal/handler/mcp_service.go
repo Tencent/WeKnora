@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -22,6 +24,7 @@ type MCPServiceHandler struct {
 	mcpServiceService      interfaces.MCPServiceService
 	mcpToolApprovalService interfaces.MCPToolApprovalService
 	toolApprovalGate       *approval.Gate
+	modelService           interfaces.ModelService
 }
 
 // NewMCPServiceHandler creates a new MCP service handler
@@ -29,12 +32,32 @@ func NewMCPServiceHandler(
 	mcpServiceService interfaces.MCPServiceService,
 	mcpToolApprovalService interfaces.MCPToolApprovalService,
 	toolApprovalGate *approval.Gate,
+	modelService interfaces.ModelService,
 ) *MCPServiceHandler {
 	return &MCPServiceHandler{
 		mcpServiceService:      mcpServiceService,
 		mcpToolApprovalService: mcpToolApprovalService,
 		toolApprovalGate:       toolApprovalGate,
+		modelService:           modelService,
 	}
+}
+
+func (h *MCPServiceHandler) mcpServiceResponses(
+	ctx context.Context,
+	tenantID uint64,
+	services []*types.MCPService,
+) []*dto.MCPServiceResponse {
+	resp := dto.NewMCPServiceResponses(ctx, services)
+	if len(services) == 0 {
+		return resp
+	}
+	summaries, err := h.mcpServiceService.ListMCPMetadataSummaries(ctx, tenantID, services)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
+		return resp
+	}
+	dto.AttachMCPCatalogs(resp, services, summaries)
+	return resp
 }
 
 // CreateMCPService godoc
@@ -97,7 +120,7 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 
 // ListMCPServices godoc
 // @Summary      获取MCP服务列表
-// @Description  获取当前空间的所有MCP服务
+// @Description  获取当前空间的所有MCP服务（含已保存工具目录数量）
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -125,7 +148,7 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewMCPServiceResponses(ctx, services),
+		"data":    h.mcpServiceResponses(ctx, tenantID, services),
 	})
 }
 
@@ -164,7 +187,7 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	// so the cross-tenant builtin list does not leak per-tenant config.
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewMCPServiceResponse(ctx, service),
+		"data":    h.mcpServiceResponses(ctx, tenantID, []*types.MCPService{service})[0],
 	})
 }
 
@@ -207,6 +230,17 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 
 	// Track which fields are being updated
 	updateFields := make(map[string]bool)
+
+	if raw, exists := updateData["usage_instructions"]; exists {
+		instructions, ok := raw.(string)
+		instructions = strings.TrimSpace(instructions)
+		if !ok || instructions == "" || utf8.RuneCountInString(instructions) > 16000 {
+			_ = c.Error(errors.NewBadRequestError("Usage instructions must contain between 1 and 16000 characters"))
+			return
+		}
+		service.UsageInstructions = instructions
+		updateFields["usage_instructions"] = true
+	}
 
 	// Map the update data to service struct
 	if name, ok := updateData["name"].(string); ok {
@@ -308,11 +342,13 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		// through the main PUT so a service can be switched to/from OAuth.
 		if authType, ok := authConfig["auth_type"].(string); ok {
 			service.AuthConfig.AuthType = types.MCPAuthType(authType)
+			updateFields["auth_type"] = true
 		}
 		// api_key_header is non-secret structural config (header name for the
 		// api_key strategy); flows through the main PUT like custom_headers.
 		if apiKeyHeader, ok := authConfig["api_key_header"].(string); ok {
 			service.AuthConfig.APIKeyHeader = apiKeyHeader
+			updateFields["api_key_header"] = true
 		}
 		if scopes, ok := authConfig["scopes"].([]interface{}); ok {
 			list := make([]string, 0, len(scopes))
@@ -362,7 +398,7 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    dto.NewMCPServiceResponse(ctx, stored),
+		"data":    h.mcpServiceResponses(ctx, tenantID, []*types.MCPService{stored})[0],
 	})
 }
 

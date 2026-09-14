@@ -254,9 +254,15 @@ func (r *processSyncTenantRepo) GetTenantByID(context.Context, uint64) (*types.T
 
 type processSyncTagService struct {
 	interfaces.KnowledgeTagService
+	ctx context.Context
 }
 
-func (*processSyncTagService) FindOrCreateTagByName(context.Context, string, string) (*types.KnowledgeTag, error) {
+func (s *processSyncTagService) FindOrCreateTagByName(
+	ctx context.Context,
+	_ string,
+	_ string,
+) (*types.KnowledgeTag, error) {
+	s.ctx = ctx
 	return nil, nil
 }
 

@@ -2,6 +2,7 @@ package qdrant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -382,11 +383,15 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 
 	log.Infof("[Qdrant] Batch updating chunk enabled status, count: %d", len(chunkStatusMap))
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get all collections that match our base name pattern
 	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to list collections: %v", err)
-		return fmt.Errorf("failed to list collections: %w", err)
+		return fmt.Errorf("failed to list collections: %w", errors.Join(err, ctx.Err()))
 	}
 
 	// Group chunks by enabled status for batch updates
@@ -401,6 +406,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		}
 	}
 
+	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
 		if !q.matchesCollectionName(collectionName) {
@@ -409,6 +415,9 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 
 		// Update enabled chunks
 		if len(enabledChunkIDs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: true}),
@@ -420,11 +429,15 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update enabled chunks in %s: %v", collectionName, err)
+				updateErr = errors.Join(updateErr, fmt.Errorf("enable chunks in collection %s: %w", collectionName, err))
 			}
 		}
 
 		// Update disabled chunks
 		if len(disabledChunkIDs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: false}),
@@ -436,8 +449,13 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update disabled chunks in %s: %v", collectionName, err)
+				updateErr = errors.Join(updateErr, fmt.Errorf("disable chunks in collection %s: %w", collectionName, err))
 			}
 		}
+	}
+
+	if err := errors.Join(updateErr, ctx.Err()); err != nil {
+		return err
 	}
 
 	log.Infof("[Qdrant] Batch update chunk enabled status completed")
@@ -454,11 +472,15 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 	log.Infof("[Qdrant] Batch updating chunk tag ID, count: %d", len(chunkTagMap))
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get all collections that match our base name pattern
 	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to list collections: %v", err)
-		return fmt.Errorf("failed to list collections: %w", err)
+		return fmt.Errorf("failed to list collections: %w", errors.Join(err, ctx.Err()))
 	}
 
 	// Group chunks by tag ID for batch updates
@@ -467,6 +489,7 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 		tagGroups[tagID] = append(tagGroups[tagID], chunkID)
 	}
 
+	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
 		if !q.matchesCollectionName(collectionName) {
@@ -475,6 +498,9 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 		// Update chunks for each tag ID
 		for tagID, chunkIDs := range tagGroups {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
 				Payload:        newQdrantValueMap(map[string]any{fieldTagID: tagID}),
@@ -486,8 +512,14 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update chunks with tag_id %s in %s: %v", tagID, collectionName, err)
+				updateErr = errors.Join(updateErr,
+					fmt.Errorf("set chunk tag_id %q in collection %s: %w", tagID, collectionName, err))
 			}
 		}
+	}
+
+	if err := errors.Join(updateErr, ctx.Err()); err != nil {
+		return err
 	}
 
 	log.Infof("[Qdrant] Batch update chunk tag ID completed")

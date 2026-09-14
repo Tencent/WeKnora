@@ -97,7 +97,7 @@ func (s *knowledgeBaseService) ResolveEmbeddingModelKeys(ctx context.Context, kb
 	// Resolve each unique (modelID, tenantID) to a model identity key
 	resolvedKeys := make(map[modelRef]string, len(uniqueRefs))
 	for ref := range uniqueRefs {
-		tenantCtx := context.WithValue(ctx, types.TenantIDContextKey, ref.TenantID)
+		tenantCtx := types.WithExecutionTenant(ctx, ref.TenantID)
 		model, err := s.modelService.GetModelByID(tenantCtx, ref.ModelID)
 		if err != nil || model == nil {
 			logger.Warnf(ctx, "ResolveEmbeddingModelKeys: cannot resolve model %s for tenant %d: %v", ref.ModelID, ref.TenantID, err)
@@ -143,7 +143,6 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		searchKBIDs, secutils.SanitizeForLog(params.QueryText))
 
 	tenantInfo, _ := types.TenantInfoFromContext(ctx)
-	requestTenantID := types.MustTenantIDFromContext(ctx)
 
 	// Batch-load every KB in scope. Required for store grouping,
 	// embedding-model consistency validation, and FAQ type detection.
@@ -162,13 +161,13 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, apperrors.NewNotFoundError("knowledge base not found")
 	}
 
-	// Authorize every KB the caller asked for. Same-tenant KBs are
-	// always accessible; foreign-tenant KBs (Organization-shared) must
-	// pass an explicit per-KB permission check. Without this guard, a
+	// Authorize every KB for the original caller, using exact upstream
+	// grants or organization permissions. Execution in a shared tenant
+	// does not grant access to its other KBs. Without this guard, a
 	// caller could pass arbitrary KB UUIDs in params.KnowledgeBaseIDs
 	// and reach foreign tenants' bound vector stores via the per-group
 	// engine resolution downstream.
-	if err := s.authorizeKBAccess(ctx, kbs, requestTenantID); err != nil {
+	if err := s.authorizeKBAccess(ctx, kbs); err != nil {
 		return nil, err
 	}
 

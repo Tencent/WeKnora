@@ -30,6 +30,13 @@ func NewWikiPageRepository(db *gorm.DB) interfaces.WikiPageRepository {
 	return &wikiPageRepository{db: db}
 }
 
+func (r *wikiPageRepository) wikiDialect() string {
+	if r.db == nil || r.db.Dialector == nil {
+		return ""
+	}
+	return r.db.Name()
+}
+
 func (r *wikiPageRepository) wikiCategoryRankOrder() string {
 	if r.db != nil && r.db.Dialector != nil && r.db.Dialector.Name() == "sqlite" {
 		return "CASE WHEN COALESCE(json_array_length(category_path), 0) > 0 THEN 0 ELSE 1 END ASC"
@@ -378,9 +385,15 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	}
 	if wantPath := types.TrimWikiFolderSegments(req.CategoryPath); len(wantPath) > 0 {
 		if encoded, err := json.Marshal([]string(wantPath)); err == nil {
-			if r.db.Dialector != nil && r.db.Dialector.Name() == "postgres" {
+			switch r.wikiDialect() {
+			case "postgres":
 				query = query.Where("category_path::jsonb = ?::jsonb", string(encoded))
-			} else {
+			case "sqlite":
+				// StringArray.Value yields []byte, which SQLite stores as a BLOB;
+				// a BLOB never compares equal to a TEXT bind, so compare the
+				// text form instead.
+				query = query.Where("CAST(category_path AS TEXT) = ?", string(encoded))
+			default:
 				query = query.Where("category_path = ?", string(encoded))
 			}
 		}
@@ -1237,6 +1250,57 @@ func (r *wikiPageRepository) DeleteByID(ctx context.Context, id string) error {
 		return ErrWikiPageNotFound
 	}
 	return nil
+}
+
+// deleteByTenantAndKnowledgeBase deletes model rows for one tenant+KB.
+// The empty-kbID guard prevents a missing predicate from matching every row.
+func (r *wikiPageRepository) deleteByTenantAndKnowledgeBase(
+	ctx context.Context, tenantID uint64, kbID string, model any,
+) error {
+	if kbID == "" {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Delete(model).Error
+}
+
+// DeleteByKnowledgeBaseID soft-deletes all wiki pages in a knowledge base.
+// GORM's Delete on a model with DeletedAt sets deleted_at and subsequent
+// queries auto-filter deleted_at IS NULL, so this is a one-shot UPDATE.
+func (r *wikiPageRepository) DeleteByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) error {
+	return r.deleteByTenantAndKnowledgeBase(ctx, tenantID, kbID, &types.WikiPage{})
+}
+
+// DeleteFoldersByKnowledgeBaseID soft-deletes all wiki folders in a knowledge
+// base, bypassing the emptiness guard that DeleteFolder enforces. The whole
+// KB is being torn down, so non-empty folders must go.
+func (r *wikiPageRepository) DeleteFoldersByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) error {
+	return r.deleteByTenantAndKnowledgeBase(ctx, tenantID, kbID, &types.WikiFolder{})
+}
+
+// DeleteRevisionsByKnowledgeBaseID hard-deletes all wiki page revisions in a
+// knowledge base. wiki_page_revisions has no deleted_at column — it stores
+// immutable snapshots, not soft-deletable rows — so GORM's Delete falls back
+// to a physical DELETE, same as DeleteRevisionsByPage but scoped to the KB
+// via the indexed knowledge_base_id column.
+func (r *wikiPageRepository) DeleteRevisionsByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) error {
+	return r.deleteByTenantAndKnowledgeBase(ctx, tenantID, kbID, &types.WikiPageRevision{})
+}
+
+// DeleteIssuesByKnowledgeBaseID soft-deletes all wiki page issues in a
+// knowledge base. Issues carry DeletedAt, so GORM sets deleted_at and
+// subsequent queries auto-filter them out.
+func (r *wikiPageRepository) DeleteIssuesByKnowledgeBaseID(
+	ctx context.Context, tenantID uint64, kbID string,
+) error {
+	return r.deleteByTenantAndKnowledgeBase(ctx, tenantID, kbID, &types.WikiPageIssue{})
 }
 
 // escapeLikePattern escapes LIKE / ILIKE metacharacters so the returned string

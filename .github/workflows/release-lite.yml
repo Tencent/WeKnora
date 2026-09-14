@@ -110,6 +110,7 @@ jobs:
           ARCHIVE="WeKnora-lite_${{ steps.ver.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}"
           mkdir -p "${ARCHIVE}/web"
           cp WeKnora-lite "${ARCHIVE}/"
+          bash ./scripts/copy-licenses.sh "${ARCHIVE}"
           cp -r web/* "${ARCHIVE}/web/"
           cp .env.lite.example "${ARCHIVE}/"
           cp docs/LITE.md "${ARCHIVE}/README.md"
@@ -233,6 +234,7 @@ jobs:
             NSIS_FLAG="-nsis"
           fi
 
+          bash ./scripts/check-license-bundle.sh
           cd cmd/desktop
           wails build -clean \
             -tags "${BUILD_TAGS}" \
@@ -251,6 +253,7 @@ jobs:
 
           mkdir -p "${RESOURCES}/config"
           mkdir -p "${RESOURCES}/migrations/sqlite"
+          bash ./scripts/copy-licenses.sh "${RESOURCES}"
 
           if [ -f .env.lite.example ]; then
             cp .env.lite.example "${RESOURCES}/.env"
@@ -283,6 +286,7 @@ jobs:
           ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
           mkdir -p "${ARCHIVE}"
           cp "cmd/desktop/build/bin/WeKnora Lite" "${ARCHIVE}/"
+          bash ./scripts/copy-licenses.sh "${ARCHIVE}"
           if [ -f .env.lite.example ]; then
             cp .env.lite.example "${ARCHIVE}/"
           fi
@@ -297,21 +301,18 @@ jobs:
           tar czf "${ARCHIVE}.tar.gz" "${ARCHIVE}"
           shasum -a 256 "${ARCHIVE}.tar.gz" > "${ARCHIVE}.tar.gz.sha256"
 
-      # ── Windows: package NSIS installer or plain exe ──
+      # ── Windows: NSIS installer includes licenses and corresponding source ──
       - name: Package Windows app
         if: runner.os == 'Windows'
         shell: bash
         run: |
           ARCHIVE="WeKnora-Lite-App_${{ steps.ver.outputs.version }}_${{ matrix.arch_label }}"
-          # Wails -nsis generates an installer named {app}-amd64-installer.exe
           INSTALLER="cmd/desktop/build/bin/WeKnora Lite-amd64-installer.exe"
-          if [ -f "$INSTALLER" ]; then
-            cp "$INSTALLER" "${ARCHIVE}_setup.exe"
-            sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
-          else
-            cp "cmd/desktop/build/bin/WeKnora Lite.exe" "${ARCHIVE}.exe"
-            sha256sum "${ARCHIVE}.exe" > "${ARCHIVE}.exe.sha256"
-          fi
+          # Do not publish a bare executable if NSIS was unavailable: the
+          # installer also carries the notices/source and supports auto-update.
+          test -f "$INSTALLER"
+          cp "$INSTALLER" "${ARCHIVE}_setup.exe"
+          sha256sum "${ARCHIVE}_setup.exe" > "${ARCHIVE}_setup.exe.sha256"
 
       - uses: actions/upload-artifact@v7
         with:

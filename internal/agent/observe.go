@@ -280,6 +280,14 @@ func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.E
 	runes := []rune(msg.Content)
 	base := msg
 	base.Content = compactedToolResultMarker(msg.Content)
+	if msg.Name == agenttools.ToolDiscoverMCPTools {
+		// Catalog cursors and parameter schemas are structured protocol data.
+		// A head/tail preview can silently remove required fields or constraints.
+		base.Content = "[MCP directory result omitted to fit the context budget. Use smaller list pages. If " +
+			"a single describe result cannot fit, report that limitation; do not invoke a tool " +
+			"using a partial schema.]"
+		return base
+	}
 	if len(runes) == 0 || estimator.EstimateMessage(&base) >= maxTokens {
 		return base
 	}
@@ -314,6 +322,11 @@ type responseVerdict struct {
 	finalAnswer  string
 	emptyContent bool // LLM returned stop with no tool calls and empty content
 	step         types.AgentStep
+	// answerID is the EventAgentFinalAnswer id to close with Done:true if
+	// this round actually finishes. Natural-stop must not close the stream
+	// before the loop-end steer drain: a pending inject continues the turn,
+	// and a premature Done tells the client the session is idle.
+	answerID string
 }
 
 // isNaturalStopFinishReason reports whether a provider finish reason means the
@@ -408,6 +421,21 @@ func (e *AgentEngine) analyzeResponse(
 			"answer_len": len(response.Content),
 		})
 
+		// An empty natural stop is retryable (the caller nudges the model and
+		// runs another round), so it must not emit any terminal answer event
+		// yet: downstream consumers treat a Done=true EventAgentFinalAnswer as
+		// "the answer is finished" and would finalize (or cancel) while the
+		// retry is still running (#2906). When retries are exhausted the
+		// caller emits the fallback as the sole terminal answer.
+		if response.Content == "" {
+			return responseVerdict{
+				isDone:       true,
+				finalAnswer:  "",
+				emptyContent: true,
+				step:         step,
+			}
+		}
+
 		// Emit the final answer. The answer text reaches the UI by one of two
 		// paths:
 		//   (a) Already streamed live during the think phase — the common case
@@ -436,21 +464,16 @@ func (e *AgentEngine) analyzeResponse(
 				})
 			}
 		}
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        answerID,
-			Type:      event.EventAgentFinalAnswer,
-			SessionID: sessionID,
-			Data: event.AgentFinalAnswerData{
-				Content: "",
-				Done:    true,
-			},
-		})
+		// Do not emit Done:true here. The caller drains any loop-end inject
+		// first; a premature close makes the client think the turn is idle
+		// while the engine is about to continue.
 
 		return responseVerdict{
 			isDone:       true,
 			finalAnswer:  response.Content,
-			emptyContent: response.Content == "",
+			emptyContent: false,
 			step:         step,
+			answerID:     answerID,
 		}
 	}
 
@@ -492,13 +515,9 @@ func escapeXMLAttr(s string) string {
 // conversation history — replayed user turns keep bare Content so stale scope
 // snapshots do not steer follow-up questions.
 //
-// Per-turn communication_instruction and answer_instruction remind the model
-// not to leak internal tool names or IDs in user-visible text, and to end the
-// turn by writing its complete answer as plain assistant text.
-//
 // Emitted as an XML-ish block (not free prose) so it is a visually distinct,
-// non-instruction envelope that is hard to conflate with user text and
-// prompt-injection-safe.
+// data envelope. Escaping preserves its structure; the system source-data
+// contract defines how to treat its contents. This is not an authorization gate.
 func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
@@ -543,13 +562,7 @@ func buildRuntimeContextBlock(
 			}
 		}
 		sb.WriteString("  </pinned_documents>\n")
-		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. ")
-		sb.WriteString("Prioritize retrieving content from these documents (e.g. list_knowledge_chunks with the knowledge_id). ")
-		sb.WriteString("If an earlier turn analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
 	}
-
-	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
-	sb.WriteString("  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not request any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n")
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
@@ -563,6 +576,28 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if svc == nil {
 			continue
 		}
+		if svc.Discoverable && len(svc.ToolNames) > 0 {
+			lines = append(lines, fmt.Sprintf(
+				"Use relevant available MCP functions for service @%s (server_id=%q) before "+
+					"answering. Their descriptions identify the service and original tool names; use "+
+					"discover_mcp_tools if the service needs reconnection or authentication.",
+				sanitizeMustUseField(svc.Name), sanitizeMustUseField(svc.ID)))
+			continue
+		}
+		if svc.Discoverable {
+			lines = append(
+				lines,
+				fmt.Sprintf(
+					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP "+
+						"service @%s. Describe the required tools, then use the offered functions or "+
+						"call_mcp_tool as available before answering; report connection or "+
+						"authentication failures if the service is unavailable.",
+					sanitizeMustUseField(svc.ID),
+					sanitizeMustUseField(svc.Name),
+				),
+			)
+			continue
+		}
 		prefix := mcpToolNamePrefix(svc)
 		if prefix == "" {
 			continue
@@ -571,20 +606,29 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if display == "" {
 			display = sanitizeMustUseField(svc.ID)
 		}
-		lines = append(lines, fmt.Sprintf("Must use MCP tools whose names start with %s (@%s) to answer the question below.", prefix, display))
+		lines = append(lines, fmt.Sprintf(
+			"Must use MCP tools whose names start with %s (@%s) to answer the question below.",
+			prefix, display,
+		))
 	}
 	for _, skill := range skills {
 		if skill == nil || skill.Name == "" {
 			continue
 		}
 		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf("Must call read_file(path=%q) for @Skill %q before answering.", "skill://"+name+"/SKILL.md", name))
+		lines = append(lines, fmt.Sprintf(
+			"Must call read_file(path=%q) for @Skill %q before answering.",
+			"skill://"+name+"/SKILL.md", name,
+		))
 	}
 	if len(lines) == 0 {
 		return ""
 	}
 	return "<must_use>\n" + strings.Join(lines, "\n") +
-		"\nThese selections do not replace research into the task's factual content or exclude other relevant available sources unless the user explicitly restricts them.\n</must_use>"
+		"\nThese selections do not replace research into the task's factual content or exclude other " +
+		"relevant available sources unless the user explicitly restricts them. Apply selections to the " +
+		"relevant parts of the task; an @mention does not authorize unrelated actions. Follow the " +
+		"user's current explicit restrictions if they narrow or cancel a selection.\n</must_use>"
 }
 
 // sanitizeMustUseField strips newlines and angle brackets so an MCP/skill name
@@ -670,7 +714,7 @@ func (e *AgentEngine) registerRuntimeReferences() {
 				if title == "" {
 					title = doc.FileName
 				}
-				e.modelContext.RegisterChunk(modelcontext.ChunkReference{
+				e.modelContext.RegisterContextChunk(modelcontext.ChunkReference{
 					ChunkID:         doc.ChunkID,
 					KnowledgeID:     doc.KnowledgeID,
 					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),
@@ -717,9 +761,18 @@ func listToolNames(ts []chat.Tool) []string {
 	return names
 }
 
+func mcpCatalogDescriptionLen(ts []chat.Tool) int {
+	for _, t := range ts {
+		if t.Function.Name == agenttools.ToolDiscoverMCPTools {
+			return len(t.Function.Description)
+		}
+	}
+	return 0
+}
+
 // buildToolsForLLM builds the tools list for LLM function calling
 func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
-	functionDefs := e.toolRegistry.GetFunctionDefinitions()
+	functionDefs := e.toolRegistry.GetModelFunctionDefinitions()
 	tools := make([]chat.Tool, 0, len(functionDefs))
 	for _, def := range functionDefs {
 		tools = append(tools, chat.Tool{
@@ -732,7 +785,7 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 		})
 	}
 
-	return tools
+	return e.modelContext.EncodeTools(tools)
 }
 
 // appendToolResults adds tool results to the in-turn message history following
@@ -785,13 +838,6 @@ func (e *AgentEngine) appendToolResults(
 		}
 
 		messages = append(messages, toolMsg)
-	}
-
-	if stepContainsMarkdownImage(step) {
-		// Keep the requirement at the end of the current prefix. Editing the
-		// system prompt would invalidate provider prefix cache for tools and
-		// the whole transcript on every later round of this turn.
-		messages = appendAgentRetrievedImageRequirement(messages)
 	}
 
 	return messages

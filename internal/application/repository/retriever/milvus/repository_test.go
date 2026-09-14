@@ -42,3 +42,29 @@ func TestUpdateChunkEnabledStatusInCollectionsPropagatesFailure(t *testing.T) {
 	)
 	require.ErrorIs(t, err, wantErr)
 }
+
+func TestUpdateChunkEnabledStatusInCollectionsIgnoresExtendedPrefix(t *testing.T) {
+	var seen []string
+	seenSet := map[string]bool{}
+	err := updateChunkEnabledStatusInCollections(
+		context.Background(),
+		[]string{
+			"other_collection",
+			"weknora_embeddings_1024",
+			"weknora_embeddings_multilingual_1024",
+			"weknora_embeddings_1024_backup",
+		},
+		"weknora_embeddings",
+		[]string{"chunk-1"},
+		nil,
+		func(_ context.Context, collection string, _ []string, _ bool) error {
+			if !seenSet[collection] {
+				seenSet[collection] = true
+				seen = append(seen, collection)
+			}
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{"weknora_embeddings_1024"}, seen)
+}

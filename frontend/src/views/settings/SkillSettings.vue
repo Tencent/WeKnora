@@ -39,11 +39,11 @@
           'skill-card--idle': liveInstalls(item).length === 0,
         }">
           <div class="skill-card__main">
-            <div class="skill-card__badge" aria-hidden="true">
-              <t-icon :name="SKILL_ICON" size="16px" />
-            </div>
             <div class="skill-card__body">
               <div class="skill-card__header">
+                <div class="skill-card__badge" aria-hidden="true">
+                  <t-icon :name="SKILL_ICON" size="14px" />
+                </div>
                 <div class="skill-card__heading">
                   <h3 class="skill-card__title" :title="item.name">{{ item.name }}</h3>
                   <span v-if="item.version" class="skill-card__type">{{ item.version }}</span>
@@ -158,11 +158,11 @@
 
       <article v-if="addStep > 0 && registeredCatalog" class="skill-card parsed-skill">
         <div class="skill-card__main">
-          <div class="skill-card__badge" aria-hidden="true">
-            <t-icon :name="SKILL_ICON" size="16px" />
-          </div>
           <div class="skill-card__body">
             <div class="skill-card__header">
+              <div class="skill-card__badge" aria-hidden="true">
+                <t-icon :name="SKILL_ICON" size="14px" />
+              </div>
               <h3 class="skill-card__title" :title="registeredCatalog.name">{{ registeredCatalog.name }}</h3>
               <span v-if="registeredCatalog.version" class="skill-card__type">{{ registeredCatalog.version }}</span>
             </div>
@@ -1313,7 +1313,7 @@ onUnmounted(() => {
 
 .skill-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 10px;
   align-items: stretch;
 }
@@ -1347,7 +1347,8 @@ onUnmounted(() => {
     justify-content: center;
     gap: 6px;
     height: 100%;
-    padding: 16px 12px;
+    min-height: 88px;
+    padding: 12px;
     border-style: dashed;
     background: transparent;
     color: var(--td-text-color-placeholder);
@@ -1391,23 +1392,26 @@ onUnmounted(() => {
 .skill-card__main {
   display: flex;
   align-items: stretch;
-  gap: 10px;
-  padding: 10px 12px;
+  padding: 12px;
   min-width: 0;
   flex: 1;
 }
 
 .skill-card__badge {
   flex-shrink: 0;
-  align-self: flex-start;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
+
+  :deep(.t-icon) {
+    display: block;
+    line-height: 1;
+  }
 }
 
 .skill-card__body {
@@ -1415,13 +1419,13 @@ onUnmounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .skill-card__header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   min-height: 28px;
 }
@@ -1440,7 +1444,7 @@ onUnmounted(() => {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 20px;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1466,7 +1470,7 @@ onUnmounted(() => {
   border: 0;
   border-radius: 6px;
   background: none;
-  color: var(--td-text-color-secondary);
+  color: var(--td-text-color-placeholder);
   cursor: pointer;
 
   :deep(svg) {
@@ -1492,9 +1496,9 @@ onUnmounted(() => {
 
 .skill-card__type {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -1506,9 +1510,9 @@ onUnmounted(() => {
   margin: 0;
   overflow: hidden;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
   color: var(--td-text-color-secondary);
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .skill-card__installs {
@@ -1520,7 +1524,7 @@ onUnmounted(() => {
 
 .skill-card__installs-label {
   font-size: 12px;
-  line-height: 20px;
+  line-height: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -1531,15 +1535,15 @@ onUnmounted(() => {
   min-width: 0;
   max-width: 100%;
   margin: 0;
-  padding: 3px 8px 3px 10px;
+  padding: 2px 6px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  line-height: 20px;
+  line-height: 18px;
   text-align: left;
 
   &:hover:not(:disabled) {
@@ -1600,6 +1604,12 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.skill-card button:focus-visible,
+.skill-card--add:focus-visible {
+  outline: 2px solid var(--td-brand-color);
+  outline-offset: -2px;
 }
 
 .skill-card__chip-go,

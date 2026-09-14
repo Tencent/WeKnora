@@ -94,6 +94,30 @@ type CustomAgent struct {
 	CreatorName string `yaml:"-" json:"creator_name,omitempty" gorm:"-"`
 }
 
+// maxAgentAvatarLength mirrors the custom_agents.avatar column limit
+// (varchar(64)). See ValidateAvatar for why this is checked at the API
+// boundary instead of being left to the database.
+const maxAgentAvatarLength = 64
+
+// ValidateAvatar rejects an avatar value the DB column cannot store.
+//
+// Without it, an oversized avatar (a data-URI icon, say) reaches postgres
+// unchecked and comes back as a raw driver error — "ERROR: value too long for
+// type character varying(64) (SQLSTATE 22001)" — which is then forwarded to
+// the client as a 500. That is two problems at once: the caller only learns
+// the real limit from a crash, and internal database details leak into a
+// public API. Checking here turns it into an ordinary 400 that names the
+// limit, like the other request validations.
+func (a *CustomAgent) ValidateAvatar() error {
+	if a == nil {
+		return nil
+	}
+	if n := len([]rune(a.Avatar)); n > maxAgentAvatarLength {
+		return fmt.Errorf("avatar must not exceed %d characters, got %d", maxAgentAvatarLength, n)
+	}
+	return nil
+}
+
 // CustomAgentConfig represents the configuration of a custom agent
 type CustomAgentConfig struct {
 	// ===== Basic Settings =====
@@ -108,12 +132,12 @@ type CustomAgentConfig struct {
 	// System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)
 	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
 	// SystemPromptID references a template ID in prompt_templates/ YAML files.
-	// If set and SystemPrompt is empty, the template content will be resolved at startup.
+	// If set and SystemPrompt is empty, the template content is resolved at request time for saved agents.
 	SystemPromptID string `yaml:"system_prompt_id" json:"system_prompt_id,omitempty"`
 	// Context template for normal mode (how to format retrieved chunks)
 	ContextTemplate string `yaml:"context_template" json:"context_template"`
 	// ContextTemplateID references a template ID in prompt_templates/ YAML files.
-	// If set and ContextTemplate is empty, the template content will be resolved at startup.
+	// If set and ContextTemplate is empty, the template content is resolved at request time for saved agents.
 	ContextTemplateID string `yaml:"context_template_id" json:"context_template_id,omitempty"`
 
 	// ===== Model Settings =====
