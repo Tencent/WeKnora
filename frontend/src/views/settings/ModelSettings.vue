@@ -1075,7 +1075,8 @@ onMounted(() => {
 .model-card {
   position: relative;
   display: flex;
-  align-items: flex-start;
+  // 徽章与两行文本块垂直居中（flex-start 让 logo 顶在标题线上，观感脱节）
+  align-items: center;
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid var(--td-component-stroke);
@@ -1166,7 +1167,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 1px;
 
   // #15：厂商 LOGO 渲染（color 直渲；mono 用 mask 染主色）
   .model-card__badge-img {
@@ -1313,6 +1313,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 2px;
+  // 行居中后操作按钮组仍钉在右上角
+  align-self: flex-start;
 }
 
 .model-card__action-btn {
