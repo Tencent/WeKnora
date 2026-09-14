@@ -464,7 +464,26 @@ func (s *agentShareService) GetSharedAgentForTenant(
 	}
 	if len(sourceTenantID) > 0 && sourceTenantID[0] != 0 {
 		if sourceTenantID[0] == tenantID {
-			return nil, ErrAgentShareNotFound
+			// The selector names the caller's own workspace. Such an agent is
+			// reachable directly and never has a share record for its own
+			// workspace (GetShareByAgentIDForTenant deliberately excludes
+			// source_tenant_id == tenantID), so resolve it locally instead of
+			// reporting a missing share. Clients legitimately echo the owning
+			// workspace back for their own agents, and older links / persisted
+			// session state keep sending it.
+			agent, err := s.agentRepo.GetAgentByID(ctx, agentID, tenantID)
+			if err != nil {
+				if errors.Is(err, repository.ErrCustomAgentNotFound) {
+					return nil, ErrAgentNotFoundForShare
+				}
+				return nil, err
+			}
+			if agent == nil {
+				return nil, ErrAgentNotFoundForShare
+			}
+			types.ApplyBuiltinAgentLocalization(ctx, agent)
+			_ = callerTenantRole
+			return agent, nil
 		}
 		share, err := s.shareRepo.GetShareByAgentIDAndSourceForTenant(ctx, tenantID, agentID, sourceTenantID[0])
 		if err != nil {

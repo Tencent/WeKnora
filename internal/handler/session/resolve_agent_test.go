@@ -189,3 +189,24 @@ func TestTerminalProvisionConfigID_UsesSharedAgentSandboxConfig(t *testing.T) {
 		"lookup-only connects must not resolve an agent config")
 	require.Equal(t, "shared-cfg", h.terminalProvisionConfigID(ctx, c, true))
 }
+
+// A selector naming the caller's own workspace is not a share. The share
+// resolver hands back the caller's own agent for that input (see
+// agentShareService.GetSharedAgentForTenant), and the handler must keep local,
+// writable semantics: effective tenant 0 (= context tenant) and read-only off.
+// Regression guard for chats that deep-link / restore agent_source_tenant_id
+// equal to their own workspace, which used to 404 with "Shared agent not found".
+func TestResolveAgent_TreatsOwnWorkspaceSelectorAsLocalAgent(t *testing.T) {
+	c, ctx := newResolveAgentTestContext(7)
+	ownAgent := &types.CustomAgent{ID: "builtin-smart-reasoning", TenantID: 7, Name: "Own"}
+	h := &Handler{
+		agentShareService:  &resolveAgentShareStub{agent: ownAgent},
+		customAgentService: &resolveOwnAgentStub{agent: ownAgent},
+	}
+
+	agent, effectiveTenantID, sharedReadOnly := h.resolveAgent(ctx, c, "builtin-smart-reasoning", 7)
+
+	require.Equal(t, ownAgent, agent)
+	require.Equal(t, uint64(0), effectiveTenantID)
+	require.False(t, sharedReadOnly)
+}
