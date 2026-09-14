@@ -27,6 +27,7 @@ export const TENANT_MEMBER_AUDIT_ACTIONS = [
   'rbac.invitation_declined',
   'rbac.invitation_revoked',
   'rbac.invitation_expired',
+  'sandbox.terminal_command',
 ] as const
 
 /** Platform control-plane audit events (system settings → audit tab). */

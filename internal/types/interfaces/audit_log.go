@@ -14,13 +14,16 @@ import (
 // Limit is capped at 100 inside the repository regardless of caller
 // input — keeps unbounded scans off the table.
 type AuditLogQuery struct {
-	AfterID      uint64
-	Limit        int
-	Action       types.AuditAction
-	Outcome      types.AuditOutcome
-	ActorUserID  string
-	ScopeType    string
-	ScopeID      string
+	AfterID     uint64
+	Limit       int
+	Action      types.AuditAction
+	Outcome     types.AuditOutcome
+	ActorUserID string
+	ScopeType   string
+	ScopeID     string
+	// Search performs a bounded case-insensitive match against structured
+	// audit details (for example a sanitized terminal command).
+	Search       string
 	UnscopedOnly bool
 }
 

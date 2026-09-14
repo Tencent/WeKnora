@@ -186,6 +186,11 @@ const (
 	AuditActionFAQImportStarted   AuditAction = "faq.import_started"
 	AuditActionFAQImportCompleted AuditAction = "faq.import_completed"
 	AuditActionFAQImportFailed    AuditAction = "faq.import_failed"
+
+	// AuditActionSandboxTerminalCommand records a command completed by the
+	// current interactive session terminal. Details contain only the
+	// server-sanitized command, exit code, backend, and PTY id.
+	AuditActionSandboxTerminalCommand AuditAction = "sandbox.terminal_command"
 )
 
 // AuditOutcome separates asynchronous acceptance from terminal business

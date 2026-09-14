@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -73,6 +74,17 @@ func (r *auditLogRepository) List(
 		}
 		if q.ScopeID != "" {
 			tx = tx.Where("scope_id = ?", q.ScopeID)
+		}
+		if search := strings.TrimSpace(q.Search); search != "" {
+			// CAST(... AS TEXT) works for PostgreSQL JSONB and the SQLite
+			// test store. The handler caps search length; parameters remain
+			// bound, never interpolated into SQL.
+			pattern := strings.NewReplacer(
+				`\`, `\\`,
+				`%`, `\%`,
+				`_`, `\_`,
+			).Replace(strings.ToLower(search))
+			tx = tx.Where("LOWER(CAST(details AS TEXT)) LIKE ? ESCAPE '\\'", "%"+pattern+"%")
 		}
 		if q.UnscopedOnly {
 			tx = tx.Where("scope_type = ''")

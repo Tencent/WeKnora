@@ -246,7 +246,8 @@ export default {
     searchPlaceholder: '按姓名或邮箱搜索',
     audit: {
       tabLabel: '审计日志',
-      description: '记录当前空间的成员变更与访问拒绝事件，按时间倒序展示。一分钟内的重复拒绝会自动去重。',
+      description: '记录当前空间的安全事件、成员变更及脱敏终端命令，按时间倒序展示。一分钟内的重复拒绝会自动去重。',
+      searchPlaceholder: '搜索命令详情',
       refresh: '刷新',
       end: '已经到底了。',
       empty: '暂无审计事件。',
@@ -274,7 +275,8 @@ export default {
         'rbac.invitation_accepted': '接受邀请',
         'rbac.invitation_declined': '拒绝邀请',
         'rbac.invitation_revoked': '撤销邀请',
-        'rbac.invitation_expired': '邀请过期'
+        'rbac.invitation_expired': '邀请过期',
+        'sandbox.terminal_command': '终端命令已完成'
       },
       columns: {
         time: '时间',

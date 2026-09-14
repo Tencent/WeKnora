@@ -1,13 +1,34 @@
 package service
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// SandboxTerminalAuditToken derives the private shell-marker token for one
+// tenant/session pair. It is stable across reconnects and app replicas that
+// share JWT_SECRET, but cannot be selected by the browser.
+func SandboxTerminalAuditToken(tenantID uint64, sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if tenantID == 0 || sessionID == "" {
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(getJwtSecret()))
+	_, _ = mac.Write([]byte("weknora:sandbox-terminal-audit\x00"))
+	_, _ = mac.Write([]byte(strconv.FormatUint(tenantID, 10)))
+	_, _ = mac.Write([]byte{'\x00'})
+	_, _ = mac.Write([]byte(sessionID))
+	sum := mac.Sum(nil)
+	return hex.EncodeToString(sum[:16])
+}
 
 const (
 	sandboxTerminalTicketType = "sandbox_terminal"

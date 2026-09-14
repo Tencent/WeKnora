@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -81,7 +83,7 @@ func TestAuditLogHandler_ReturnsEnvelopeAndCursor(t *testing.T) {
 
 func TestAuditLogHandler_PassesQueryFiltersThrough(t *testing.T) {
 	// The handler must propagate after_id / limit / action / outcome /
-	// actor exactly as the service expects them. A regression here
+	// actor / details search exactly as the service expects them. A regression here
 	// would silently drop a filter and over-return rows on the wire.
 	svc := &stubAuditService{
 		list: func(_ context.Context, _ uint64, q *interfaces.AuditLogQuery) ([]*types.AuditLog, error) {
@@ -100,6 +102,9 @@ func TestAuditLogHandler_PassesQueryFiltersThrough(t *testing.T) {
 			if q.ActorUserID != "u-probing" {
 				t.Fatalf("expected actor=u-probing, got %q", q.ActorUserID)
 			}
+			if q.Search != "echo report" {
+				t.Fatalf("expected search=echo report, got %q", q.Search)
+			}
 			if !q.UnscopedOnly {
 				t.Fatalf("tenant audit feed must exclude resource-scoped activity rows")
 			}
@@ -107,11 +112,26 @@ func TestAuditLogHandler_PassesQueryFiltersThrough(t *testing.T) {
 		},
 	}
 	w := httptest.NewRecorder()
-	q := "after_id=100&limit=25&action=rbac.access_denied&outcome=denied&actor=u-probing"
+	q := "after_id=100&limit=25&action=rbac.access_denied&outcome=denied&actor=u-probing&search=echo+report"
 	req := httptest.NewRequest(http.MethodGet, "/tenants/7/audit-log?"+q, nil)
 	newAuditHandlerTestRouter(svc).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestBoundedAuditSearch_TrimsAndLimitsUnicodeByRune(t *testing.T) {
+	if got := boundedAuditSearch("  echo report  "); got != "echo report" {
+		t.Fatalf("expected surrounding whitespace to be trimmed, got %q", got)
+	}
+
+	raw := strings.Repeat("命", 129)
+	got := boundedAuditSearch(raw)
+	if utf8.RuneCountInString(got) != 128 {
+		t.Fatalf("expected 128 runes, got %d", utf8.RuneCountInString(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("bounded search must not split a UTF-8 sequence")
 	}
 }
 

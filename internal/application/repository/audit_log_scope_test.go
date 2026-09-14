@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,6 +21,16 @@ func TestAuditLogRepositoryListFiltersKnowledgeBaseScope(t *testing.T) {
 	}
 	rows := []*types.AuditLog{
 		{TenantID: 7, Action: types.AuditActionMemberAdded},
+		{
+			TenantID: 7,
+			Action:   types.AuditActionSandboxTerminalCommand,
+			Details:  types.JSON(`{"command":"python Build_Report.py"}`),
+		},
+		{
+			TenantID: 7,
+			Action:   types.AuditActionSandboxTerminalCommand,
+			Details:  types.JSON(`{"command":"printf '%s_' report"}`),
+		},
 		{TenantID: 7, Action: types.AuditActionKBUpdated, ScopeType: "knowledge_base", ScopeID: "kb-a"},
 		{TenantID: 7, Action: types.AuditActionKnowledgeCreated, ScopeType: "knowledge_base", ScopeID: "kb-b"},
 		{TenantID: 8, Action: types.AuditActionKBUpdated, ScopeType: "knowledge_base", ScopeID: "kb-a"},
@@ -45,7 +56,27 @@ func TestAuditLogRepositoryListFiltersKnowledgeBaseScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list unscoped audit logs: %v", err)
 	}
-	if len(unscoped) != 1 || unscoped[0].Action != types.AuditActionMemberAdded {
+	if len(unscoped) != 3 {
 		t.Fatalf("unscoped filter returned unexpected rows: %+v", unscoped)
+	}
+	searched, err := repo.List(context.Background(), 7, &interfaces.AuditLogQuery{
+		UnscopedOnly: true,
+		Search:       "build_report",
+	})
+	if err != nil {
+		t.Fatalf("search audit logs: %v", err)
+	}
+	if len(searched) != 1 || searched[0].Action != types.AuditActionSandboxTerminalCommand {
+		t.Fatalf("detail search returned unexpected rows: %+v", searched)
+	}
+	literalWildcard, err := repo.List(context.Background(), 7, &interfaces.AuditLogQuery{
+		UnscopedOnly: true,
+		Search:       "%s_",
+	})
+	if err != nil {
+		t.Fatalf("search audit logs for literal wildcard: %v", err)
+	}
+	if len(literalWildcard) != 1 || !strings.Contains(string(literalWildcard[0].Details), "%s_") {
+		t.Fatalf("detail search treated SQL wildcards as patterns: %+v", literalWildcard)
 	}
 }

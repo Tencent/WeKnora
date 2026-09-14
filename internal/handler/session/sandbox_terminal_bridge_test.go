@@ -52,6 +52,7 @@ func serveTerminalBridge(
 	t *testing.T,
 	pty *fakeTerminalSession,
 	authCheck func(context.Context) error,
+	configure ...func(*terminalBridge),
 ) *websocket.Conn {
 	t.Helper()
 
@@ -71,6 +72,9 @@ func serveTerminalBridge(
 			idleDisconnect: 0,
 			authCheck:      authCheck,
 		}
+		for _, apply := range configure {
+			apply(bridge)
+		}
 		bridge.run()
 	}))
 	t.Cleanup(server.Close)
@@ -81,6 +85,39 @@ func serveTerminalBridge(
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close() })
 	return client
+}
+
+func TestTerminalBridgeStripsAuditMarkerAndCapturesCommand(t *testing.T) {
+	pty := newFakeTerminalSession()
+	captured := make(chan terminalAuditRecord, 1)
+	token := "bridge-token"
+	client := serveTerminalBridge(t, pty, nil, func(bridge *terminalBridge) {
+		bridge.auditFilter = newTerminalAuditMarkerFilter(token, func(exitCode int, command string) {
+			captured <- terminalAuditRecord{command: command, exitCode: exitCode}
+		})
+	})
+	require.Equal(t, "ready", readTerminalFrame(t, client).Type)
+
+	marker := terminalAuditTestMarker(token, 1, "  9  false")
+	data := append([]byte("\x1b[32mbefore"), marker...)
+	data = append(data, []byte("after\x1b[0m")...)
+	go func() {
+		pty.out <- sandbox.RemoteTerminalEvent{Data: data}
+		pty.out <- sandbox.RemoteTerminalEvent{Exited: true, ExitCode: 0}
+	}()
+
+	require.NoError(t, client.SetReadDeadline(time.Now().Add(5*time.Second)))
+	messageType, output, err := client.ReadMessage()
+	require.NoError(t, err)
+	require.Equal(t, websocket.BinaryMessage, messageType)
+	require.Equal(t, "\x1b[32mbeforeafter\x1b[0m", string(output))
+
+	select {
+	case record := <-captured:
+		require.Equal(t, terminalAuditRecord{command: "false", exitCode: 1}, record)
+	case <-time.After(2 * time.Second):
+		t.Fatal("audit command was not captured")
+	}
 }
 
 func readTerminalFrame(t *testing.T, conn *websocket.Conn) terminalControlFrame {
