@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 // Handler handles all HTTP requests related to conversation sessions
@@ -49,6 +50,11 @@ type Handler struct {
 	// selected agent so the sandbox is created with the same config a
 	// conversation turn would use.
 	terminalService *service.SandboxTerminalService
+	desktopService  *service.SandboxDesktopService
+	desktopTickets  service.SandboxDesktopTicketStore
+	// redis backs the distributed desktop slot. Nil in Lite mode, where the
+	// in-process limiter is the correct degradation.
+	redis *redis.Client
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -76,6 +82,9 @@ func NewHandler(
 	memberService interfaces.TenantMemberService,
 	terminalService *service.SandboxTerminalService,
 	browserSkill *browserskill.Manager,
+	desktopService *service.SandboxDesktopService,
+	desktopTickets service.SandboxDesktopTicketStore,
+	rdb *redis.Client,
 ) *Handler {
 	return &Handler{
 		browserSkill:         browserSkill,
@@ -99,6 +108,9 @@ func NewHandler(
 		userService:          userService,
 		memberService:        memberService,
 		terminalService:      terminalService,
+		desktopService:       desktopService,
+		desktopTickets:       desktopTickets,
+		redis:                rdb,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,

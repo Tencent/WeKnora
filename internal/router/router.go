@@ -181,6 +181,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// auth headers on the WS handshake, so this must precede the global Auth
 	// middleware). The ticket is minted by an authenticated POST.
 	RegisterSandboxTerminalRoutes(r, params.SessionHandler)
+	RegisterSandboxDesktopRoutes(r, params.SessionHandler)
 	r.GET("/api/v1/local-browser/extension", params.SessionHandler.BrowserSkillExtension)
 	r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
 	r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)

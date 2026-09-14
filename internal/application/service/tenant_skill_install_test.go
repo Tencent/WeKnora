@@ -273,8 +273,8 @@ func TestCacheBudgetGuardKeepsSmallWipesBig(t *testing.T) {
 func TestCleanImageScratchCommandShape(t *testing.T) {
 	cmd := cleanImageScratchCommand()
 
-	require.Contains(t, cmd, "rm -rf /workspace/* /tmp/* /workspace/.[!.]* || true",
-		"the scratch wipe covers /tmp too: installers leave archives and locks there")
+	require.Contains(t, cmd, "rm -rf /workspace/* /tmp/* /workspace/.[!.]* /run/desktop || true",
+		"the scratch wipe covers /tmp and /run/desktop: a leftover websockify secret would be reused by every sandbox booted from the snapshot")
 	require.Contains(t, cmd, "mkdir -p")
 	require.Contains(t, cmd, "status=$?")
 	require.Contains(t, cmd, "exit $status")

@@ -325,6 +325,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// the frontend terminal panel. First-use provisioning takes a sandbox
 	// config ID already resolved by the WebSocket handler (own or shared agent).
 	must(container.Provide(service.NewSandboxTerminalService))
+	// One-shot desktop handshake tickets. Falls back to an in-process store
+	// when Redis is absent (Lite mode), same as the binding store.
+	must(container.Provide(service.NewSandboxDesktopTicketStore))
+	// Desktop relay. It rides SandboxTerminalService's resolution path so the
+	// desktop always lands on the session's existing sandbox.
+	must(container.Provide(service.NewSandboxDesktopService))
 
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
