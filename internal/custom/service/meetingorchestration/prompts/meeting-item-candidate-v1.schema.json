@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vidsage.local/prompts/meeting-item-candidate-v1.schema.json",
+  "title": "Meeting item candidate output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["candidates"],
+  "properties": {
+    "candidates": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "$ref": "#/$defs/candidate" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "shortText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "\\S"
+    },
+    "evidenceIds": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "businessObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "scope", "aliases", "evidence_ids"],
+      "properties": {
+        "name": { "$ref": "#/$defs/shortText" },
+        "scope": { "$ref": "#/$defs/shortText" },
+        "aliases": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/shortText" }
+        },
+        "evidence_ids": {
+          "allOf": [
+            { "$ref": "#/$defs/evidenceIds" },
+            { "type": "array", "minItems": 1 }
+          ]
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_refs",
+        "business_object",
+        "specific_question",
+        "work_item_scope",
+        "work_item_scope_evidence_ids",
+        "cycle_signal",
+        "cycle_signal_evidence_ids",
+        "core_level",
+        "reason",
+        "evidence_ids"
+      ],
+      "properties": {
+        "candidate_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/id" }
+        },
+        "business_object": { "$ref": "#/$defs/businessObject" },
+        "specific_question": { "$ref": "#/$defs/shortText" },
+        "work_item_scope": {
+          "anyOf": [
+            { "$ref": "#/$defs/shortText" },
+            { "type": "null" }
+          ]
+        },
+        "work_item_scope_evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "cycle_signal": {
+          "anyOf": [
+            { "$ref": "#/$defs/shortText" },
+            { "type": "null" }
+          ]
+        },
+        "cycle_signal_evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "core_level": { "enum": ["core", "secondary"] },
+        "reason": { "$ref": "#/$defs/shortText" },
+        "evidence_ids": {
+          "allOf": [
+            { "$ref": "#/$defs/evidenceIds" },
+            { "type": "array", "minItems": 1 }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "work_item_scope": { "type": "null" } },
+            "required": ["work_item_scope"]
+          },
+          "then": {
+            "properties": { "work_item_scope_evidence_ids": { "type": "array", "maxItems": 0 } }
+          },
+          "else": {
+            "properties": { "work_item_scope_evidence_ids": { "type": "array", "minItems": 1 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "cycle_signal": { "type": "null" } },
+            "required": ["cycle_signal"]
+          },
+          "then": {
+            "properties": { "cycle_signal_evidence_ids": { "type": "array", "maxItems": 0 } }
+          },
+          "else": {
+            "properties": { "cycle_signal_evidence_ids": { "type": "array", "minItems": 1 } }
+          }
+        }
+      ]
+    }
+  }
+}

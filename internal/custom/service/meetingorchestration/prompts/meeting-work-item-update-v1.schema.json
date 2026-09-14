@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vidsage.local/prompts/meeting-work-item-update-v1.schema.json",
+  "title": "Meeting work item update output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["work_item_updates"],
+  "properties": {
+    "work_item_updates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/workItemUpdate" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "shortText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "\\S"
+    },
+    "longText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1000,
+      "pattern": "\\S"
+    },
+    "nullableShortText": {
+      "anyOf": [
+        { "$ref": "#/$defs/shortText" },
+        { "type": "null" }
+      ]
+    },
+    "nullableLongText": {
+      "anyOf": [
+        { "$ref": "#/$defs/longText" },
+        { "type": "null" }
+      ]
+    },
+    "evidenceIds": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "is_substantive",
+        "change_type",
+        "discussion",
+        "conclusion",
+        "change_from_previous",
+        "current_progress",
+        "evidence_ids",
+        "previous_evidence_ids",
+        "current_evidence_ids"
+      ],
+      "properties": {
+        "is_substantive": { "type": "boolean" },
+        "change_type": {
+          "anyOf": [
+            { "enum": ["added", "supplemented", "adjusted", "confirmed", "replaced", "verified"] },
+            { "type": "null" }
+          ]
+        },
+        "discussion": { "$ref": "#/$defs/nullableLongText" },
+        "conclusion": { "$ref": "#/$defs/nullableLongText" },
+        "change_from_previous": { "$ref": "#/$defs/nullableLongText" },
+        "current_progress": { "$ref": "#/$defs/nullableShortText" },
+        "evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "previous_evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "current_evidence_ids": { "$ref": "#/$defs/evidenceIds" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "is_substantive": { "const": false } },
+            "required": ["is_substantive"]
+          },
+          "then": {
+            "properties": {
+              "change_type": { "type": "null" },
+              "discussion": { "type": "null" },
+              "conclusion": { "type": "null" },
+              "change_from_previous": { "type": "null" },
+              "current_progress": { "type": "null" },
+              "evidence_ids": { "type": "array", "maxItems": 0 },
+              "previous_evidence_ids": { "type": "array", "maxItems": 0 },
+              "current_evidence_ids": { "type": "array", "maxItems": 0 }
+            }
+          },
+          "else": {
+            "properties": {
+              "change_type": { "enum": ["added", "supplemented", "adjusted", "confirmed", "replaced", "verified"] },
+              "discussion": { "$ref": "#/$defs/longText" },
+              "evidence_ids": { "type": "array", "minItems": 1 },
+              "current_evidence_ids": { "type": "array", "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "is_substantive": { "const": true },
+              "change_type": { "const": "added" }
+            },
+            "required": ["is_substantive", "change_type"]
+          },
+          "then": {
+            "properties": {
+              "change_from_previous": { "type": "null" },
+              "previous_evidence_ids": { "type": "array", "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "is_substantive": { "const": true },
+              "change_type": { "enum": ["supplemented", "adjusted", "confirmed", "replaced", "verified"] }
+            },
+            "required": ["is_substantive", "change_type"]
+          },
+          "then": {
+            "properties": {
+              "change_from_previous": { "$ref": "#/$defs/longText" },
+              "previous_evidence_ids": { "type": "array", "minItems": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "importantDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content", "decision_type", "replaces_decision_id", "evidence_ids"],
+      "properties": {
+        "content": { "$ref": "#/$defs/longText" },
+        "decision_type": { "enum": ["confirmed", "rejected", "replaced"] },
+        "replaces_decision_id": {
+          "anyOf": [
+            { "$ref": "#/$defs/id" },
+            { "type": "null" }
+          ]
+        },
+        "evidence_ids": {
+          "allOf": [
+            { "$ref": "#/$defs/evidenceIds" },
+            { "type": "array", "minItems": 1 }
+          ]
+        }
+      },
+      "if": {
+        "properties": { "decision_type": { "const": "replaced" } },
+        "required": ["decision_type"]
+      },
+      "then": {
+        "properties": { "replaces_decision_id": { "$ref": "#/$defs/id" } }
+      },
+      "else": {
+        "properties": { "replaces_decision_id": { "type": "null" } }
+      }
+    },
+    "decisionEffectUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_id", "effect_status_suggestion", "effect_evidence_ids"],
+      "properties": {
+        "decision_id": { "$ref": "#/$defs/id" },
+        "effect_status_suggestion": { "enum": ["replaced", "invalidated", "cancelled"] },
+        "effect_evidence_ids": {
+          "allOf": [
+            { "$ref": "#/$defs/evidenceIds" },
+            { "type": "array", "minItems": 1 }
+          ]
+        }
+      }
+    },
+    "todo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "todo_match_decision",
+        "matched_todo_id",
+        "todo_type",
+        "content",
+        "owner",
+        "due_text",
+        "priority",
+        "todo_status_suggestion",
+        "status_evidence_ids",
+        "evidence_ids"
+      ],
+      "properties": {
+        "todo_match_decision": { "enum": ["same_todo", "possible", "new_todo"] },
+        "matched_todo_id": {
+          "anyOf": [
+            { "$ref": "#/$defs/id" },
+            { "type": "null" }
+          ]
+        },
+        "todo_type": { "enum": ["pending_decision", "action"] },
+        "content": { "$ref": "#/$defs/longText" },
+        "owner": { "$ref": "#/$defs/nullableShortText" },
+        "due_text": { "$ref": "#/$defs/nullableShortText" },
+        "priority": {
+          "anyOf": [
+            { "enum": ["high", "medium", "low"] },
+            { "type": "null" }
+          ]
+        },
+        "todo_status_suggestion": {
+          "anyOf": [
+            { "enum": ["pending", "in_progress", "completed", "cancelled", "replaced"] },
+            { "type": "null" }
+          ]
+        },
+        "status_evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "evidence_ids": {
+          "allOf": [
+            { "$ref": "#/$defs/evidenceIds" },
+            { "type": "array", "minItems": 1 }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "todo_match_decision": { "const": "same_todo" } },
+            "required": ["todo_match_decision"]
+          },
+          "then": {
+            "properties": { "matched_todo_id": { "$ref": "#/$defs/id" } }
+          },
+          "else": {
+            "properties": {
+              "matched_todo_id": { "type": "null" },
+              "todo_status_suggestion": { "type": "null" },
+              "status_evidence_ids": { "type": "array", "maxItems": 0 }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "todo_match_decision": { "const": "same_todo" },
+              "todo_status_suggestion": { "type": "null" }
+            },
+            "required": ["todo_match_decision", "todo_status_suggestion"]
+          },
+          "then": {
+            "properties": { "status_evidence_ids": { "type": "array", "maxItems": 0 } }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "todo_match_decision": { "const": "same_todo" },
+              "todo_status_suggestion": { "enum": ["pending", "in_progress", "completed", "cancelled", "replaced"] }
+            },
+            "required": ["todo_match_decision", "todo_status_suggestion"]
+          },
+          "then": {
+            "properties": { "status_evidence_ids": { "type": "array", "minItems": 1 } }
+          }
+        }
+      ]
+    },
+    "workItemUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "topic_id",
+        "work_item_ref",
+        "current_status",
+        "current_status_evidence_ids",
+        "current_conclusion",
+        "current_conclusion_evidence_ids",
+        "change",
+        "important_decisions",
+        "decision_effect_updates",
+        "todos"
+      ],
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/id" },
+        "topic_id": { "$ref": "#/$defs/id" },
+        "work_item_ref": { "$ref": "#/$defs/id" },
+        "current_status": {
+          "anyOf": [
+            { "enum": ["pending_clarification", "option_available", "under_review", "decided", "in_progress", "verified", "on_hold", "cancelled"] },
+            { "type": "null" }
+          ]
+        },
+        "current_status_evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "current_conclusion": { "$ref": "#/$defs/nullableLongText" },
+        "current_conclusion_evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "change": { "$ref": "#/$defs/change" },
+        "important_decisions": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/importantDecision" }
+        },
+        "decision_effect_updates": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/decisionEffectUpdate" }
+        },
+        "todos": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/todo" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "current_status": { "type": "null" } },
+            "required": ["current_status"]
+          },
+          "then": {
+            "properties": { "current_status_evidence_ids": { "type": "array", "maxItems": 0 } }
+          },
+          "else": {
+            "properties": { "current_status_evidence_ids": { "type": "array", "minItems": 1 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "current_conclusion": { "type": "null" } },
+            "required": ["current_conclusion"]
+          },
+          "then": {
+            "properties": { "current_conclusion_evidence_ids": { "type": "array", "maxItems": 0 } }
+          },
+          "else": {
+            "properties": { "current_conclusion_evidence_ids": { "type": "array", "minItems": 1 } }
+          }
+        }
+      ]
+    }
+  }
+}

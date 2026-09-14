@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vidsage.local/prompts/meeting-work-item-matching-v1.schema.json",
+  "title": "Meeting work item matching output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["matches"],
+  "properties": {
+    "matches": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/match" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "\\S"
+    },
+    "evidenceIds": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "work_item_decision",
+        "matched_work_item_id",
+        "reason",
+        "candidate_evidence_ids",
+        "matched_work_item_evidence_ids"
+      ],
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/id" },
+        "work_item_decision": { "enum": ["same_item", "possible", "new_item"] },
+        "matched_work_item_id": {
+          "anyOf": [
+            { "$ref": "#/$defs/id" },
+            { "type": "null" }
+          ]
+        },
+        "reason": { "$ref": "#/$defs/reason" },
+        "candidate_evidence_ids": {
+          "allOf": [
+            { "$ref": "#/$defs/evidenceIds" },
+            { "type": "array", "minItems": 1 }
+          ]
+        },
+        "matched_work_item_evidence_ids": { "$ref": "#/$defs/evidenceIds" }
+      },
+      "if": {
+        "properties": { "work_item_decision": { "const": "same_item" } },
+        "required": ["work_item_decision"]
+      },
+      "then": {
+        "properties": {
+          "matched_work_item_id": { "$ref": "#/$defs/id" },
+          "matched_work_item_evidence_ids": { "type": "array", "minItems": 1 }
+        }
+      },
+      "else": {
+        "properties": {
+          "matched_work_item_id": { "type": "null" },
+          "matched_work_item_evidence_ids": { "type": "array", "maxItems": 0 }
+        }
+      }
+    }
+  }
+}

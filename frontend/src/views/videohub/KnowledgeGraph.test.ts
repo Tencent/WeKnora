@@ -68,6 +68,18 @@ test('scene relation lines open only the relation type and summary', () => {
   assert.match(scene, /\.topic-edge\.is-contrast \.topic-edge__line \{ stroke-dasharray: 2 5; \}/)
   assert.match(scene, /\.topic-network \{[^}]*min-width: 720px;/)
   assert.match(scene, /@media \(max-width: 1050px\) \{ \.training-layout \{ grid-template-columns: 1fr; \}/)
+  assert.match(scene, /watch\(networkElement, element => observeNetworkElement\(element\)/)
+})
+
+test('scene topic nodes use graph markers and keep full titles visible', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
+  const titleStyles = scene.match(/\.cluster-node strong \{[^}]*\}/)?.[0] || ''
+
+  assert.match(scene, /class="cluster-node__marker" aria-hidden="true"/)
+  assert.match(scene, /border-radius: var\(--td-radius-circle\); background: var\(--node-color/)
+  assert.match(titleStyles, /overflow-wrap: anywhere/)
+  assert.doesNotMatch(titleStyles, /line-clamp|text-overflow|overflow: hidden/)
 })
 
 test('scene view consumes every user-facing training orchestration field group', () => {
@@ -126,10 +138,25 @@ test('meeting todos expose source evidence and a timestamped video jump', () => 
   const here = dirname(fileURLToPath(import.meta.url))
   const meeting = readFileSync(join(here, '../../components/videohub/MeetingSceneView.vue'), 'utf8')
 
-  assert.match(meeting, /原文证据 · \{\{ todo\.timeRange \}\}/)
-  assert.match(meeting, /todo\.evidenceQuote/)
-  assert.match(meeting, /@click="openTodoEvidence\(todo\)"/)
-  assert.match(meeting, /emit\('selectVideo', todo\.videoId, todo\.seconds\)/)
+  assert.match(meeting, /todo\.evidence_refs/)
+  assert.match(meeting, /@click="openEvidence\(todo\.video_id, todo\.evidence_refs\)"/)
+  assert.match(meeting, /emit\('selectVideo', videoId, refs\[0\] \? refs\[0\]\.start_ms \/ 1000 : 0\)/)
+  assert.match(meeting, /簇内事项分支/)
+  assert.match(meeting, /workItemStatusLabel\(item\.status\)/)
+  assert.match(meeting, /v-if="item\.evidence_refs\.length"/)
+})
+
+test('meeting topic network uses the shared ECharts graph renderer', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const meeting = readFileSync(join(here, '../../components/videohub/MeetingTopicGraph.vue'), 'utf8')
+
+  assert.match(meeting, /echarts\/core/)
+  assert.match(meeting, /GraphChart/)
+  assert.match(meeting, /layout: 'none'/)
+  assert.match(meeting, /edgeSymbolSize/)
+  assert.match(meeting, /clientWidth/)
+  assert.match(meeting, /resizeObserver = new ResizeObserver\(\(\) => \{ chart\?\.resize\(\); render\(\) \}\)/)
+  assert.doesNotMatch(meeting, /<svg/)
 })
 
 test('scene evidence jumps preserve sub-second evidence offsets', () => {

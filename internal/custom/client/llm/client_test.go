@@ -143,6 +143,39 @@ func TestCompleteJSONDisablesThinkingAndRequiresCompletedStream(t *testing.T) {
 	}
 }
 
+func TestCompleteJSONWithSystemSeparatesMessagesAndDisablesThinking(t *testing.T) {
+	client := NewClient(config.LLMConfig{BaseURL: "https://llm.example.test/v1", APIKey: "key", Model: "MiniMax-M3", MaxTokens: 8192})
+	client.http.Transport = roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		var payload struct {
+			Messages []Message `json:"messages"`
+			Stream   bool      `json:"stream"`
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(payload.Messages) != 2 || payload.Messages[0] != (Message{Role: "system", Content: "system"}) || payload.Messages[1] != (Message{Role: "user", Content: "user"}) {
+			t.Fatalf("messages = %+v", payload.Messages)
+		}
+		if !payload.Stream || payload.Thinking.Type != "disabled" {
+			t.Fatalf("stream=%v thinking=%q", payload.Stream, payload.Thinking.Type)
+		}
+		stream := "data: " + `{"choices":[{"delta":{"content":"{\"ok\":true}"},"finish_reason":"stop"}]}` + "\n\n"
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(stream))}, nil
+	})
+
+	content, err := client.CompleteJSONWithSystem(t.Context(), "system", "user")
+	if err != nil || content != `{"ok":true}` {
+		t.Fatalf("content=%q err=%v", content, err)
+	}
+}
+
 func TestMiniMaxCompleteJSONUsesSupportedRequestShape(t *testing.T) {
 	client := NewClient(config.LLMConfig{
 		BaseURL: "https://api.minimaxi.com/v1", APIKey: "key", Model: "MiniMax-M3", MaxTokens: 8192,

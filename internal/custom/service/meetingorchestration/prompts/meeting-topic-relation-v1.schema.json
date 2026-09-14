@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vidsage.local/prompts/meeting-topic-relation-v1.schema.json",
+  "title": "Meeting topic relation output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["relations"],
+  "properties": {
+    "relations": {
+      "type": "array",
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/relation" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "\\S"
+    },
+    "evidenceIds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_topic_id",
+        "target_topic_id",
+        "relation_type",
+        "summary",
+        "source_evidence_ids",
+        "target_evidence_ids"
+      ],
+      "properties": {
+        "source_topic_id": { "$ref": "#/$defs/id" },
+        "target_topic_id": { "$ref": "#/$defs/id" },
+        "relation_type": { "enum": ["prerequisite", "conflict_constraint", "shared_support", "result_feedback"] },
+        "summary": { "$ref": "#/$defs/summary" },
+        "source_evidence_ids": { "$ref": "#/$defs/evidenceIds" },
+        "target_evidence_ids": { "$ref": "#/$defs/evidenceIds" }
+      }
+    }
+  }
+}

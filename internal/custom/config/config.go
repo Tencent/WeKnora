@@ -24,6 +24,8 @@ type Config struct {
 	TranscriptionProvider string
 	LLM                   LLMConfig
 	Training              TrainingConfig
+	MeetingPromptDir      string
+	MeetingTimeoutSeconds int
 	Worker                WorkerConfig
 }
 
@@ -344,6 +346,8 @@ func Load() *Config {
 			MaxTotalCalls:                   getEnvInt("CUSTOM_TRAINING_MAX_TOTAL_CALLS", 256),
 			TimeoutSeconds:                  getEnvInt("CUSTOM_TRAINING_TIMEOUT_SECONDS", 1200),
 		},
+		MeetingPromptDir:      getEnv("CUSTOM_MEETING_PROMPT_DIR", ""),
+		MeetingTimeoutSeconds: getEnvInt("CUSTOM_MEETING_TIMEOUT_SECONDS", 1200),
 		Worker: WorkerConfig{
 			PollIntervalSeconds:    getEnvInt("CUSTOM_WORKER_POLL_INTERVAL", 1),
 			MaxAttempts:            getEnvInt("CUSTOM_WORKER_MAX_ATTEMPTS", 3),

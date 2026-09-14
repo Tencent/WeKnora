@@ -33,6 +33,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/migrations"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
+	"github.com/Tencent/WeKnora/internal/custom/service/meetingorchestration"
 	"github.com/Tencent/WeKnora/internal/custom/service/skill"
 	"github.com/Tencent/WeKnora/internal/custom/service/trainingorchestration"
 	transcriptservice "github.com/Tencent/WeKnora/internal/custom/service/transcript"
@@ -217,6 +218,11 @@ func main() {
 
 	// HTTP 服务
 	var trainingService *trainingorchestration.Service
+	meetingPrompts := meetingorchestration.NewPromptBundle(cfg.MeetingPromptDir)
+	meetingService := &meetingorchestration.Service{DB: db, OwnerScopeID: cfg.Training.OwnerScopeID, PromptVersion: cfg.LLM.PromptVersion, Wiki: wikiClient, KnowledgeBaseID: roles.Knowledge, Prompts: meetingPrompts, RunTimeout: time.Duration(cfg.MeetingTimeoutSeconds) * time.Second}
+	if strings.TrimSpace(cfg.LLM.BaseURL) != "" && strings.TrimSpace(cfg.LLM.APIKey) != "" && strings.TrimSpace(cfg.LLM.Model) != "" {
+		meetingService.Generator = &meetingorchestration.AIProjectionGenerator{LLM: llmCli, DB: db, KnowledgeBaseID: roles.Knowledge, SummaryReader: wikiClient, EvidenceReader: transcriptservice.NewReader(db, evidenceWeKnoraCli)}
+	}
 	if kbRoutingErr == nil && minioCli != nil && wikiClient != nil && trainingWikiClient != nil && evidenceWeKnoraCli != nil && knowledgeWeKnoraCli != nil {
 		collector := &trainingorchestration.Collector{
 			DB: db, Wiki: wikiClient, SourceReader: knowledgeWeKnoraCli,
@@ -312,6 +318,7 @@ func main() {
 		DB: db, Cfg: cfg, MinIO: minioCli, Wiki: wikiClient,
 		EvidenceWeKnora: evidenceWeKnoraCli, KnowledgeWeKnora: knowledgeWeKnoraCli, Graph: wikiGraph,
 		TrainingOrchestration: trainingService,
+		MeetingOrchestration:  meetingService,
 	}
 	router := handler.BuildRouterForDeps(routerDeps)
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -371,6 +378,8 @@ func autoMigrateLocalDB(db *gorm.DB) error {
 		&model.WikiIdentityAudit{},
 		&model.TrainingOrchestrationJob{},
 		&model.TrainingOrchestrationCurrent{},
+		&model.MeetingOrchestrationJob{},
+		&model.MeetingOrchestrationCurrent{},
 	)
 }
 

@@ -38,6 +38,7 @@ type Deps struct {
 	WeKnora               *weknora.Client
 	Graph                 knowledgegraph.Store
 	TrainingOrchestration TrainingOrchestrationAPI
+	MeetingOrchestration  MeetingOrchestrationAPI
 }
 
 // NewRouter 构建自研后端路由。
@@ -85,10 +86,11 @@ func BuildRouterForDeps(deps *Deps) *gin.Engine {
 		deps.EvidenceWeKnora = nil
 		deps.KnowledgeWeKnora = nil
 		deps.WeKnora = nil
-			deps.Wiki = nil
-			deps.Graph = nil
-			deps.TrainingOrchestration = nil
-		}
+		deps.Wiki = nil
+		deps.Graph = nil
+		deps.TrainingOrchestration = nil
+		deps.MeetingOrchestration = nil
+	}
 	return buildRouter(deps)
 }
 
@@ -304,6 +306,10 @@ func buildRouter(deps *Deps) *gin.Engine {
 	api.POST("/training-orchestration/generate", trainingHandler.Generate)
 	api.GET("/training-orchestration/jobs/:id", trainingHandler.Job)
 	api.GET("/training-orchestration/current", trainingHandler.Current)
+	meetingHandler := NewMeetingOrchestrationHandler(deps.MeetingOrchestration)
+	api.POST("/meeting-orchestration/generate", meetingHandler.Generate)
+	api.GET("/meeting-orchestration/jobs/:id", meetingHandler.Job)
+	api.GET("/meeting-orchestration/current", meetingHandler.Current)
 
 	if deps.Wiki != nil {
 		ch := NewContentHandler(deps.DB, deps.Wiki, roles.Knowledge)

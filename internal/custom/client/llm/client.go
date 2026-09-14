@@ -162,7 +162,17 @@ func (c *Client) Complete(ctx context.Context, prompt string) (string, error) {
 // Training orchestration uses this path because partial reasoning is not an
 // application result and must never reach its strict JSON validator.
 func (c *Client) CompleteJSON(ctx context.Context, prompt string) (string, error) {
-	content, err := c.stream(ctx, prompt, nil, streamOptions{disableThinking: true, requireCompleted: true})
+	return c.completeJSONMessages(ctx, []Message{{Role: "user", Content: prompt}})
+}
+
+// CompleteJSONWithSystem keeps the output contract in a system message while
+// using the same complete, no-thinking JSON stream as training orchestration.
+func (c *Client) CompleteJSONWithSystem(ctx context.Context, systemPrompt, prompt string) (string, error) {
+	return c.completeJSONMessages(ctx, []Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: prompt}})
+}
+
+func (c *Client) completeJSONMessages(ctx context.Context, messages []Message) (string, error) {
+	content, err := c.streamMessages(ctx, messages, nil, streamOptions{disableThinking: true, requireCompleted: true})
 	if err != nil {
 		var incomplete *IncompleteOutputError
 		if errors.As(err, &incomplete) {
@@ -316,6 +326,10 @@ type streamOptions struct {
 }
 
 func (c *Client) stream(ctx context.Context, prompt string, onDelta func(string) error, options streamOptions) (string, error) {
+	return c.streamMessages(ctx, []Message{{Role: "user", Content: prompt}}, onDelta, options)
+}
+
+func (c *Client) streamMessages(ctx context.Context, messages []Message, onDelta func(string) error, options streamOptions) (string, error) {
 	if strings.TrimSpace(c.cfg.BaseURL) == "" {
 		return "", fmt.Errorf("custom llm base url 未配置")
 	}
@@ -325,10 +339,15 @@ func (c *Client) stream(ctx context.Context, prompt string, onDelta func(string)
 	if strings.TrimSpace(c.cfg.Model) == "" {
 		return "", fmt.Errorf("custom llm model 未配置")
 	}
-	if strings.TrimSpace(prompt) == "" {
-		return "", fmt.Errorf("llm prompt 不能为空")
+	if len(messages) == 0 {
+		return "", fmt.Errorf("llm messages 不能为空")
 	}
-	request := c.newCompletionRequest([]Message{{Role: "user", Content: prompt}}, true)
+	for _, message := range messages {
+		if strings.TrimSpace(message.Content) == "" {
+			return "", fmt.Errorf("llm message 不能为空")
+		}
+	}
+	request := c.newCompletionRequest(messages, true)
 	if options.disableThinking && c.isMiniMaxModel() {
 		request.Thinking = &thinkingConfig{Type: "disabled"}
 	}

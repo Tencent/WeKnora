@@ -684,6 +684,7 @@ func TestClassifyProcessingError(t *testing.T) {
 		{name: "invalid structured output", err: &llmclient.InvalidOutputError{Reason: "invalid JSON syntax"}, category: "response_parse", code: "llm_output_invalid"},
 		{name: "stream idle timeout", err: &llmclient.StreamTimeoutError{Phase: "idle"}, category: "timeout", code: "llm_stream_idle_timeout"},
 		{name: "summary contract", err: errors.New("validate summary output: section count mismatch"), category: "response_parse", code: "summary_contract_invalid"},
+		{name: "summary orchestration contract", err: errors.New(`normalize summary orchestration profile: orchestration profile topic unit 1 references unknown summary block "block-missing"`), category: "response_parse", code: "summary_contract_invalid"},
 		{name: "configuration", err: errors.New("听悟 client 未配置"), category: "configuration_auth", code: "configuration_missing"},
 		{name: "authentication", err: errors.New("tingwu create status 401: InvalidAccessKeyId"), category: "configuration_auth", code: "authentication_failed"},
 		{name: "rate limit", err: errors.New("tingwu create status 429: rate limit exceeded"), category: "external_task", code: "external_task_failed"},
