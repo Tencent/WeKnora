@@ -316,6 +316,9 @@
                 <t-tag v-if="item.standard" theme="primary" variant="outline" size="small">
                   {{ $t('settings.sandbox.recommendedTag') }}
                 </t-tag>
+                <t-tag v-else-if="item.desktop" theme="warning" variant="outline" size="small">
+                  {{ $t('settings.sandbox.desktopTemplateTag') }}
+                </t-tag>
                 <span class="template-row__spacer" />
                 <t-tag :theme="templateStatusTheme(item)" variant="outline" size="small">
                   {{ templateStatusLabel(item) }}
@@ -323,8 +326,10 @@
                 <span v-if="canRebuildTemplate(item)" class="template-row__rebuild" @click.stop>
                   <t-popconfirm
                     theme="warning"
-                    :content="$t('settings.sandbox.replaceStandardTemplateConfirm')"
-                    @confirm="replaceStandardTemplate"
+                    :content="item.desktop
+                      ? $t('settings.sandbox.replaceDesktopTemplateConfirm')
+                      : $t('settings.sandbox.replaceStandardTemplateConfirm')"
+                    @confirm="replaceFirstPartyTemplate(item)"
                   >
                     <t-button variant="text" size="small" :loading="templatesLoading">
                       {{ $t('settings.sandbox.replaceStandardTemplate') }}
@@ -344,7 +349,7 @@
               <p v-else-if="templateFailureReason(item)" class="template-row__hint template-row__hint--error">
                 {{ templateFailureReason(item) }}
               </p>
-              <p v-else-if="isTemplatePending(item) && item.standard" class="template-row__hint">
+              <p v-else-if="isTemplatePending(item) && (item.standard || item.desktop)" class="template-row__hint">
                 {{ $t('settings.sandbox.templateBuildingHint') }}
               </p>
             </div>
@@ -1266,10 +1271,11 @@ function onTemplateCardClick(item: SandboxTemplate) {
 }
 
 function canRebuildTemplate(item: SandboxTemplate): boolean {
-  return Boolean(item.standard && item.id) && !isTemplatePending(item) && !retargetFrozen.value
+  return Boolean((item.standard || item.desktop) && item.id) && !isTemplatePending(item) && !retargetFrozen.value
 }
 
 function templateDisplayName(item: SandboxTemplate): string {
+  if (item.standard) return t('settings.sandbox.weknoraStandardTemplate')
   const name = item.name?.trim() || ''
   const id = item.id?.trim() || ''
   if (!name || name === id) return t('settings.sandbox.templateUnnamed')
@@ -1382,51 +1388,65 @@ function scheduleTemplatePolling() {
   stopTemplatePolling()
   if (!props.visible || currentStepKey.value !== 'template' || !hasPendingTemplates.value) return
   templatePollTimer = setTimeout(() => {
-    void loadTemplates(false, true)
+    void loadTemplates({ silent: true })
   }, 3000)
 }
 
-async function loadTemplates(ensureStandard = false, silent = false, replaceStandard = false): Promise<boolean> {
+async function loadTemplates(opts: {
+  ensureStandard?: boolean
+  ensureDesktop?: boolean
+  silent?: boolean
+  replaceStandard?: boolean
+  replaceDesktop?: boolean
+} = {}): Promise<boolean> {
   if (!hasImageCatalog.value) return true
   if (!connectionReady()) return false
-  if (!silent) templatesLoading.value = true
+  if (!opts.silent) templatesLoading.value = true
   templatesError.value = ''
   try {
+    // Cube/E2B: listing also ensures the published Hub images into provider
+    // templates when they are missing. Docker has no desktop catalog; its
+    // standard pull stays an explicit ensureStandard from the connection step.
+    const ensureFirstParty = isRemoteBackend.value
     const res = await querySandboxTemplates({
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
-      ensure_standard: ensureStandard,
-      replace_standard: replaceStandard,
+      ensure_standard: opts.ensureStandard || (ensureFirstParty && !opts.replaceStandard),
+      ensure_desktop: opts.ensureDesktop || (ensureFirstParty && !opts.replaceDesktop),
+      replace_standard: opts.replaceStandard,
+      replace_desktop: opts.replaceDesktop,
     })
     templates.value = res.data?.templates || []
     templatesLoaded.value = true
     const standardID = res.data?.standard_template_id
+    const desktopID = res.data?.desktop_template_id
     const current = templates.value.find((item) => item.id === currentTemplateId.value)
-    if (replaceStandard && standardID) {
+    if (opts.replaceDesktop && desktopID) {
+      selectTemplate(desktopID)
+    } else if (opts.replaceStandard && standardID) {
       selectTemplate(standardID)
+    } else if (opts.ensureStandard && standardID) {
+      const next = templates.value.find((item) => item.id === standardID)
+      if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
+        selectTemplate(standardID)
+      }
     } else if (
       currentTemplateId.value
       && (!current || (!isTemplateSelectable(current) && !isTemplatePending(current)))
       && !retargetFrozen.value
     ) {
-      if (standardID) {
-        const next = templates.value.find((item) => item.id === standardID)
-        if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
-          selectTemplate(standardID)
-        } else {
-          clearTemplateSelection()
-        }
-      } else {
-        clearTemplateSelection()
-      }
+      clearTemplateSelection()
     }
-    const readyStandard = templates.value.find((item) => item.id === standardID && isTemplateSelectable(item))
-      || templates.value.find((item) => item.standard && isTemplateSelectable(item))
-    if (!currentTemplateId.value && readyStandard) selectTemplate(readyStandard.id)
-    if (res.data?.provisioned && !silent) {
-      MessagePlugin.info(replaceStandard
-        ? t('settings.sandbox.standardTemplateReplaced')
-        : t('settings.sandbox.standardTemplateProvisioning'))
+    if (!currentTemplateId.value && !retargetFrozen.value) {
+      const firstPartyReady = templates.value.filter((item) => (
+        (item.standard || item.desktop) && isTemplateSelectable(item)
+      ))
+      if (firstPartyReady.length === 1) selectTemplate(firstPartyReady[0].id)
+    }
+    if (res.data?.provisioned && !opts.silent && (
+      opts.replaceDesktop || opts.replaceStandard || opts.ensureStandard || opts.ensureDesktop
+    )) {
+      MessagePlugin.info(provisionedTemplateMessage(opts))
     }
     scheduleTemplatePolling()
     return true
@@ -1434,17 +1454,30 @@ async function loadTemplates(ensureStandard = false, silent = false, replaceStan
     templatesError.value = e?.message || t('settings.sandbox.templateLoadFailed')
     return false
   } finally {
-    if (!silent) templatesLoading.value = false
+    if (!opts.silent) templatesLoading.value = false
   }
 }
 
-function createStandardTemplate() {
-  return loadTemplates(true)
+function provisionedTemplateMessage(opts: {
+  ensureStandard?: boolean
+  ensureDesktop?: boolean
+  replaceStandard?: boolean
+  replaceDesktop?: boolean
+}): string {
+  if (opts.replaceDesktop) return t('settings.sandbox.desktopTemplateReplaced')
+  if (opts.ensureDesktop) return t('settings.sandbox.desktopTemplateProvisioning')
+  if (opts.replaceStandard) return t('settings.sandbox.standardTemplateReplaced')
+  return t('settings.sandbox.standardTemplateProvisioning')
 }
 
-function replaceStandardTemplate() {
+function createStandardTemplate() {
+  return loadTemplates({ ensureStandard: true })
+}
+
+function replaceFirstPartyTemplate(item: SandboxTemplate) {
   if (retargetFrozen.value) return
-  return loadTemplates(false, false, true)
+  if (item.desktop) return loadTemplates({ replaceDesktop: true })
+  return loadTemplates({ replaceStandard: true })
 }
 
 // Re-attaches the redaction placeholder to a secret the admin left untouched:
@@ -1452,6 +1485,20 @@ function replaceStandardTemplate() {
 function withStoredSecret<T extends { api_key?: string }>(block: T, stored: boolean): T {
   if (stored && !block.api_key?.trim()) block.api_key = secretPlaceholder
   return block
+}
+
+function collectedDesktopEnabled(): boolean | undefined {
+  if (selectedTemplate.value) {
+    return selectedTemplate.value.desktop || undefined
+  }
+  // Skill snapshots replace template_id with a UUID that is not in the
+  // catalog. Keep the stored bit. If the catalog loaded and this ID is
+  // simply unmatched, do not keep a stale true that could disagree with
+  // template_id.
+  if (templatesLoaded.value && !retargetFrozen.value) {
+    return undefined
+  }
+  return effectiveRecord.value?.config?.desktop_enabled || undefined
 }
 
 function collectPayload(): SandboxConfig {
@@ -1466,6 +1513,7 @@ function collectPayload(): SandboxConfig {
     default_timeout_sec: defaultTimeoutSec.value || undefined,
     terminal_idle_disconnect_sec: terminalIdleDisconnectSec.value || undefined,
     allow_private_endpoints: allowPrivateEndpoints.value || undefined,
+    desktop_enabled: collectedDesktopEnabled(),
     env_vars: envVars,
     skill_rollout: skillRollout.value,
     network: collectNetworkPolicy(),
@@ -1582,7 +1630,7 @@ async function handlePrimaryAction() {
     // Docker's template is the image typed on this step. Kick a background
     // pull so the first session does not block on a cold registry fetch.
     if (backend.value === 'docker') {
-      void loadTemplates(true)
+      void loadTemplates({ ensureStandard: true })
     }
     invalidateCheck()
     wizardStep.value += 1
