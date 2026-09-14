@@ -965,7 +965,7 @@ func (s *Service) dedupCleanupLoop() {
 }
 
 // imImageConfigWarning returns an operator warning when IM channels are active
-// but APP_EXTERNAL_URL is unset. resource:// images then render only if the
+// but neither APP_EXTERNAL_URL nor FRONTEND_BASE_URL is set. resource:// images then render only if the
 // storage backend is itself publicly reachable (e.g. a cloud bucket with a
 // public endpoint); on the default MinIO (internal minio:9000) or local
 // deployment it is not, so images silently break. Advisory only; returns ""
@@ -975,9 +975,9 @@ func imImageConfigWarning(activeChannels int, externalURL string) string {
 	if activeChannels == 0 || strings.TrimSpace(externalURL) != "" {
 		return ""
 	}
-	return fmt.Sprintf("[IM] %d IM channel(s) active but APP_EXTERNAL_URL is unset; "+
+	return fmt.Sprintf("[IM] %d IM channel(s) active but APP_EXTERNAL_URL and FRONTEND_BASE_URL are unset; "+
 		"resource:// images render only if the storage backend is publicly reachable — "+
-		"otherwise set APP_EXTERNAL_URL so they route through nginx /r/",
+		"otherwise set APP_EXTERNAL_URL (or FRONTEND_BASE_URL for a single-origin proxy) so they route through nginx /r/",
 		activeChannels)
 }
 
@@ -991,7 +991,7 @@ func (s *Service) LoadAndStartChannels() error {
 		return fmt.Errorf("load im channels: %w", err)
 	}
 
-	if msg := imImageConfigWarning(len(channels), os.Getenv("APP_EXTERNAL_URL")); msg != "" {
+	if msg := imImageConfigWarning(len(channels), config.ConfiguredExternalURL()); msg != "" {
 		logger.Warnf(ctx, "%s", msg)
 	}
 
