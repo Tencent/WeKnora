@@ -227,6 +227,10 @@ func thinkingCapsFor(name ProviderName) ThinkingCaps {
 			SupportedLevels: []Level{LevelLow, LevelMedium, LevelHigh, LevelXHigh},
 			DefaultLevel:    LevelMedium,
 		}
+	case ProviderOllama:
+		// ollama 的 think 是布尔参数（ollama.go 直通 opts.Thinking），无档位
+		// 概念：SupportedLevels 留空，前端据此渲染纯开关、隐藏档位控件。
+		return ThinkingCaps{Supported: true, CanDisable: true}
 	default:
 		return ThinkingCaps{} // Supported=false
 	}

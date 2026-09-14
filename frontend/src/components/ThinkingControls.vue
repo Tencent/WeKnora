@@ -11,6 +11,8 @@
   内部规则（design §8.1.5）：
     !caps.Supported          → 整块置灰 + 说明（已存值由调用侧保留，不在此清除）
     CanDisable === false     → single 形态：开关锁定为开且禁用；levels 形态：开关不渲染（v1 行为）
+    SupportedLevels 空       → 布尔思考（如 ollama think）：levels 形态 = 开关 + 档位提示；
+                               single 形态 = 纯开关（档位控件不渲染）
     single 档位 options      → (chatShard.selected_levels ?? caps.SupportedLevels) ∩ caps.SupportedLevels
     门控（chat 类型 && remote 来源）属页面逻辑，留在调用侧。
 -->
@@ -19,11 +21,6 @@
     <!-- 不支持思考：置灰说明 -->
     <p v-if="!supported" class="thinking-controls__hint">
       {{ t('thinking.unsupportedHint') }}
-    </p>
-
-    <!-- 支持思考但厂商未声明任何档位（levels 形态 v1 文案） -->
-    <p v-else-if="providerLevels.length === 0" class="thinking-controls__hint">
-      {{ t('model.editor.thinkingLevelsUnsupportedHint') }}
     </p>
 
     <template v-else>
@@ -48,8 +45,14 @@
         :class="{ 'is-collapsed': showToggle && !effectiveEnabled }"
       >
         <div class="thinking-controls__collapse-inner">
-          <!-- single：档位单选，空 = 跟随模型默认 -->
-          <div v-if="editMode === 'single'" class="thinking-controls__field">
+          <!-- levels 形态但厂商未声明任何档位（布尔思考如 ollama think）：
+               开关有效，档位控件以提示替代（v1 是整块只剩提示、连开关都没有）。 -->
+          <p v-if="editMode === 'levels' && providerLevels.length === 0" class="thinking-controls__hint">
+            {{ t('model.editor.thinkingLevelsUnsupportedHint') }}
+          </p>
+
+          <!-- single：档位单选，空 = 跟随模型默认；厂商未声明档位时不渲染 -->
+          <div v-else-if="editMode === 'single' && providerLevels.length > 0" class="thinking-controls__field">
             <t-select
               :model-value="modelValue.level ?? ''"
               clearable
@@ -60,7 +63,7 @@
           </div>
 
           <!-- levels：允许集多选 + 默认档 -->
-          <template v-else>
+          <template v-else-if="editMode === 'levels'">
         <div class="thinking-controls__field">
           <label class="thinking-controls__label">
             {{ t('model.editor.selectedLevelsLabel') }}

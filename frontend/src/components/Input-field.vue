@@ -1070,8 +1070,11 @@ const selectedModelThinkingCaps = computed(() => {
 
 const selectedModelChatShard = computed(() => selectedModel.value?.parameters.chat);
 
-/** 未开思考的模型整块隐藏（触发按钮 + 面板）。 */
-const thinkingSupported = computed(() => selectedModelThinkingCaps.value?.supported === true);
+/** 未开思考的模型整块隐藏（触发按钮 + 面板）。会话 API 只携带 thinking_level，
+    布尔思考（如 ollama think，无档位）无法在会话级表达——同样隐藏。 */
+const thinkingSupported = computed(() =>
+  selectedModelThinkingCaps.value?.supported === true
+  && (selectedModelThinkingCaps.value?.supported_levels?.length ?? 0) > 0);
 
 /** single 档位 options = (分片子集 ?? 厂商枚举) ∩ 厂商枚举（与 ThinkingControls 内规则一致）。 */
 const sessionThinkingLevelOptions = computed(() => {

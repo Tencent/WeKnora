@@ -82,7 +82,12 @@ func TestRegisteredProvidersHaveUsableCapabilities(t *testing.T) {
 			assert.Contains(t, th.SupportedLevels, th.DefaultLevel,
 				"provider %s: DefaultLevel must be in SupportedLevels", info.Name)
 		}
-		assert.NotEmpty(t, th.SupportedLevels,
-			"provider %s: supported thinking must declare levels", info.Name)
+		// SupportedLevels 为空是合法声明：布尔思考厂商（ollama think，
+		// 2026-09-15）无档位概念，前端渲染纯开关；DefaultLevel⊆SupportedLevels
+		// 不变量仍然成立（空集时 DefaultLevel 也必须为空）。
+		if th.DefaultLevel != "" || len(th.SupportedLevels) > 0 {
+			assert.NotEmpty(t, th.SupportedLevels,
+				"provider %s: declared default/levels require a non-empty level set", info.Name)
+		}
 	}
 }

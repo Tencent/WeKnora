@@ -2367,6 +2367,15 @@ defineExpose({ resetAfterSave })
 
 .refresh-btn {
   flex-shrink: 0;
+
+  // 默认插槽里的裸 t-icon（svg 无文本基线）与文本节点按基线对齐会把图标
+  // 顶高（2026-09-15 真机反馈）：内容盒改 flex 居中，flex 会丢弃空白文本
+  // 节点，间距交给 gap。
+  :deep(.t-button__text) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
 }
 
 @keyframes spin {
@@ -2392,6 +2401,13 @@ defineExpose({ resetAfterSave })
 
 .dimension-check-btn {
   flex-shrink: 0;
+
+  // 同 .refresh-btn：裸图标+文本的基线对齐问题
+  :deep(.t-button__text) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
 }
 
 .dimension-hint {
