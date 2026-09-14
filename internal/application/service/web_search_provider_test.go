@@ -6,6 +6,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func TestValidateProviderParametersZhipuPrime(t *testing.T) {
+	if !isValidProviderType(types.WebSearchProviderTypeZhipuPrime) {
+		t.Fatal("Zhipu Prime provider type is not accepted")
+	}
+	for _, key := range []string{"", " ", "coding-plan-key"} {
+		params := types.WebSearchProviderParameters{APIKey: key}
+		err := validateProviderParameters(types.WebSearchProviderTypeZhipuPrime, params)
+		if (err == nil) != (key == "coding-plan-key") {
+			t.Fatalf("unexpected validation for key %q: %v", key, err)
+		}
+	}
+}
+
 func TestValidateProviderParametersZhipu(t *testing.T) {
 	valid := types.WebSearchProviderParameters{
 		APIKey: "key",

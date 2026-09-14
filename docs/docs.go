@@ -22798,6 +22798,7 @@ const docTemplate = `{
                 "searxng",
                 "keenable",
                 "zhipu",
+                "zhipu_prime",
                 "exa",
                 "metaso",
                 "bocha"
@@ -22813,6 +22814,7 @@ const docTemplate = `{
                 "WebSearchProviderTypeSearxng",
                 "WebSearchProviderTypeKeenable",
                 "WebSearchProviderTypeZhipu",
+                "WebSearchProviderTypeZhipuPrime",
                 "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso",
                 "WebSearchProviderTypeBocha"

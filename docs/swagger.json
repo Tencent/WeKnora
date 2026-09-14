@@ -22791,6 +22791,7 @@
                 "searxng",
                 "keenable",
                 "zhipu",
+                "zhipu_prime",
                 "exa",
                 "metaso",
                 "bocha"
@@ -22806,6 +22807,7 @@
                 "WebSearchProviderTypeSearxng",
                 "WebSearchProviderTypeKeenable",
                 "WebSearchProviderTypeZhipu",
+                "WebSearchProviderTypeZhipuPrime",
                 "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso",
                 "WebSearchProviderTypeBocha"

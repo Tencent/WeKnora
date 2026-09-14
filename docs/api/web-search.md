@@ -147,6 +147,32 @@ curl --location --request POST 'http://localhost:8080/api/v1/web-search-provider
 `search_engine` 支持 `search_std`、`search_pro`、`search_pro_sogou` 和
 `search_pro_quark`；`content_size` 支持 `medium` 和 `high`。
 
+### 智谱 GLM Coding Plan 配置
+
+选择 `zhipu_prime` 可通过套餐专属 MCP 服务调用联网搜索，使用 GLM Coding Plan 的搜索额度。
+从[套餐联网搜索文档](https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server)中所指的
+个人或团队套餐页面获取对应 API Key；团队额度需使用团队套餐 Key。
+
+```json
+{
+    "name": "GLM Coding Plan Search",
+    "provider": "zhipu_prime",
+    "parameters": {
+        "api_key": "your-coding-plan-api-key"
+    }
+}
+```
+
+此配置可用于创建提供方，`provider` 和 `parameters` 也可用于 `/web-search-providers/test`。
+Key 沿用现有 AES-GCM 加密落库及 `/credentials` 管理流程，响应不会返回密钥。
+现有 `zhipu` 使用常规 REST API；需要套餐 MCP 搜索时，应选择 `zhipu_prime`，仅更换原配置的 Key 不会切换端点。
+
+该提供方固定访问 `https://open.bigmodel.cn/api/mcp/web_search_prime/mcp`，通过 Bearer 请求头鉴权，
+不需要额外创建 MCP 服务。暂不支持单独配置 `proxy_url`，也不使用 REST 提供方的 `search_engine` / `content_size` 选项。
+每次搜索建立独立会话，执行握手、发现搜索工具、调用并关闭会话。兼容 `webSearchPrime` 与 `web_search_prime` 工具名。
+结果包含标题、链接、摘要及可选日期；结果数量默认 10、最多 50，并在本地截断到请求数量。
+调用失败或返回无法解析的结果时会报告错误，不会回退到按量计费的 REST API。
+
 ## POST `/web-search-providers` - 创建 Provider
 
 **参数说明（请求体）**:
