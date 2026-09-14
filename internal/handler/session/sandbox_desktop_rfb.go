@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync/atomic"
 )
 
 // rfbClientHandshakeBytes is how many bytes the CLIENT sends before the
@@ -226,18 +227,19 @@ func rfbOpcodeCountsAsActivity(opcode byte) bool {
 type rfbClientStream struct {
 	handshakeSeen int
 	buf           []byte
-	disabled      bool
+	disabled      atomic.Bool
 }
 
 // ParsingEnabled reports whether opcode-based activity detection is still
 // live. Once it goes false the connection's idle judgement falls back to the
-// frontend's activity POST for good.
-func (s *rfbClientStream) ParsingEnabled() bool { return !s.disabled }
+// frontend's activity POST for good. Safe to call from the activity POST
+// while Consume runs on the relay goroutine.
+func (s *rfbClientStream) ParsingEnabled() bool { return !s.disabled.Load() }
 
 // Disable stops parsing. Exported to the package so the relay can also switch
 // to the fallback for reasons outside this file.
 func (s *rfbClientStream) Disable() {
-	s.disabled = true
+	s.disabled.Store(true)
 	s.buf = nil
 }
 
@@ -247,7 +249,7 @@ func (s *rfbClientStream) Disable() {
 // Chunk boundaries carry no meaning: a WebSocket frame may hold several
 // messages, and one message may span frames. Both cases are covered by tests.
 func (s *rfbClientStream) Consume(chunk []byte) bool {
-	if s.disabled || len(chunk) == 0 {
+	if s.disabled.Load() || len(chunk) == 0 {
 		return false
 	}
 	// Skip whatever remains of the handshake.

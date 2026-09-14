@@ -52,6 +52,7 @@ type Handler struct {
 	terminalService *service.SandboxTerminalService
 	desktopService  *service.SandboxDesktopService
 	desktopTickets  service.SandboxDesktopTicketStore
+	desktopLast     service.SandboxDesktopLastStore
 	// redis backs the distributed desktop slot. Nil in Lite mode, where the
 	// in-process limiter is the correct degradation.
 	redis *redis.Client
@@ -84,6 +85,7 @@ func NewHandler(
 	browserSkill *browserskill.Manager,
 	desktopService *service.SandboxDesktopService,
 	desktopTickets service.SandboxDesktopTicketStore,
+	desktopLast service.SandboxDesktopLastStore,
 	rdb *redis.Client,
 ) *Handler {
 	return &Handler{
@@ -110,6 +112,7 @@ func NewHandler(
 		terminalService:      terminalService,
 		desktopService:       desktopService,
 		desktopTickets:       desktopTickets,
+		desktopLast:          desktopLast,
 		redis:                rdb,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,

@@ -243,6 +243,14 @@ func TestMergeSandboxConfigForUpdatePreservesDesktopEnabled(t *testing.T) {
 	require.True(t, merged.DesktopEnabled)
 }
 
+func TestMergeSandboxConfigForUpdateClearsDesktopEnabled(t *testing.T) {
+	incoming := &TenantSandboxConfig{SandboxType: "cube", DesktopEnabled: false}
+	existing := &TenantSandboxConfig{SandboxType: "cube", DesktopEnabled: true}
+	merged := MergeSandboxConfigForUpdate(incoming, existing)
+	require.False(t, merged.DesktopEnabled,
+		"selecting the CLI template must persist desktop_enabled=false, not keep a stale true")
+}
+
 func TestMergeSandboxConfigForUpdatePreservesSkillImage(t *testing.T) {
 	existing := &TenantSandboxConfig{
 		E2B:        &E2BSandboxConfig{APIKey: "old-e2b"},

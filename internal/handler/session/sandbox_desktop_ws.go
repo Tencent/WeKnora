@@ -313,14 +313,12 @@ func (h *Handler) SandboxDesktopWS(c *gin.Context) {
 	// A skill install can rebuild the sandbox under a live session
 	// (session_lifecycle.go:190). Closing with SANDBOX_REBUILT tells the
 	// frontend the /workspace scratch is gone instead of silently showing
-	// a blank desktop.
-	if prev, ok := lastDesktopSandbox.Load(sessionID); ok &&
-		prev.(string) != "" && prev.(string) != desktop.SandboxID {
+	// a blank desktop. The previous sandbox ID lives in Redis so a reconnect
+	// on another replica still sees the rebuild.
+	if h.desktopSandboxRebuilt(ctx, sessionID, desktop.SandboxID) {
 		relay.closeWith(desktopErrRebuilt)
-		lastDesktopSandbox.Store(sessionID, desktop.SandboxID)
 		return
 	}
-	lastDesktopSandbox.Store(sessionID, desktop.SandboxID)
 
 	if slotHold != nil {
 		stopRelayWatch := context.AfterFunc(slotHold, func() {
@@ -807,10 +805,15 @@ func (r *desktopRelay) closePeers() {
 }
 
 // TouchFromFrontend records the activity signal the browser POSTs. It is the
-// only source once the opcode parser has fallen back (unknown opcode), and a
-// redundant one otherwise — which is why it cannot be the primary signal: a
-// client that simply stops reporting would ride the TTL for free.
-func (r *desktopRelay) TouchFromFrontend() { r.touch() }
+// only source once the opcode parser has fallen back (unknown opcode). While
+// the parser is healthy this is a no-op: a client that kept posting would
+// otherwise ride the TTL without generating KeyEvent/PointerEvent.
+func (r *desktopRelay) TouchFromFrontend() {
+	if r == nil || r.stream.ParsingEnabled() {
+		return
+	}
+	r.touch()
+}
 
 // ReportSandboxDesktopActivity records browser-side key/mouse activity.
 //
@@ -837,21 +840,31 @@ func (h *Handler) ReportSandboxDesktopActivity(c *gin.Context) {
 // connection in practice, and a miss only costs one skipped touch.
 var activeDesktopRelays sync.Map // sessionID -> *desktopRelay
 
-// lastDesktopSandbox remembers which sandbox each session's desktop last
-// attached to, so a reconnect can tell "the sandbox was rebuilt under you"
-// from an ordinary reconnect.
-//
-// This matters because the trigger is invisible to the user: an admin installs
-// a skill, markConfigSandboxesStale flags the binding, and the next desktop
-// resolve with no AgentQA in flight destroys and recreates immediately
-// (session_lifecycle.go:190). Reconnecting silently into a blank desktop would
-// hide that /workspace scratch is gone.
-var lastDesktopSandbox sync.Map // sessionID -> string
-
 func touchDesktopRelay(sessionID string) {
 	if value, ok := activeDesktopRelays.Load(sessionID); ok {
 		if relay, ok := value.(*desktopRelay); ok {
 			relay.TouchFromFrontend()
 		}
 	}
+}
+
+// desktopSandboxRebuilt records the sandbox this session's desktop just
+// attached to and reports whether it differs from the previous one.
+func (h *Handler) desktopSandboxRebuilt(ctx context.Context, sessionID, sandboxID string) bool {
+	if h == nil || h.desktopLast == nil {
+		return false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	sandboxID = strings.TrimSpace(sandboxID)
+	if sessionID == "" || sandboxID == "" {
+		return false
+	}
+	prev, err := h.desktopLast.Get(ctx, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox-desktop] last-sandbox get failed session=%s: %v", sessionID, err)
+	}
+	if setErr := h.desktopLast.Set(ctx, sessionID, sandboxID); setErr != nil {
+		logger.Warnf(ctx, "[sandbox-desktop] last-sandbox set failed session=%s: %v", sessionID, setErr)
+	}
+	return prev != "" && prev != sandboxID
 }

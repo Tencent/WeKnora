@@ -290,6 +290,22 @@
               <p class="template-row__hint">{{ $t('settings.sandbox.createStandardTemplateHint') }}</p>
             </div>
           </div>
+          <div v-if="canCreateDesktop" class="template-row template-row--offer">
+            <div class="template-row__main">
+              <div class="template-row__head">
+                <span class="template-row__title">{{ $t('settings.sandbox.weknoraDesktopTemplate') }}</span>
+                <t-tag theme="warning" variant="outline" size="small">
+                  {{ $t('settings.sandbox.desktopTemplateTag') }}
+                </t-tag>
+                <span class="template-row__spacer" />
+                <t-button theme="primary" variant="outline" size="small" :loading="templatesLoading"
+                  @click="createDesktopTemplate">
+                  {{ $t('settings.sandbox.createDesktopTemplate') }}
+                </t-button>
+              </div>
+              <p class="template-row__hint">{{ $t('settings.sandbox.createDesktopTemplateHint') }}</p>
+            </div>
+          </div>
           <div
             v-for="item in templates"
             :key="item.id"
@@ -952,8 +968,12 @@ const currentTemplateId = computed(() => (
 )?.trim() || '')
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === currentTemplateId.value))
 const clusterStandardTemplate = computed(() => templates.value.find((item) => item.standard && item.id))
+const clusterDesktopTemplate = computed(() => templates.value.find((item) => item.desktop && item.id))
 const canCreateStandard = computed(() => (
   isRemoteBackend.value && templatesLoaded.value && !clusterStandardTemplate.value && !retargetFrozen.value
+))
+const canCreateDesktop = computed(() => (
+  isRemoteBackend.value && templatesLoaded.value && !clusterDesktopTemplate.value && !retargetFrozen.value
 ))
 const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() => {
   const steps: Array<{ key: SandboxStepKey; title: string }> = [
@@ -1404,15 +1424,15 @@ async function loadTemplates(opts: {
   if (!opts.silent) templatesLoading.value = true
   templatesError.value = ''
   try {
-    // Cube/E2B: listing also ensures the published Hub images into provider
-    // templates when they are missing. Docker has no desktop catalog; its
-    // standard pull stays an explicit ensureStandard from the connection step.
+    // Cube/E2B: listing ensures the published CLI image when it is missing.
+    // Desktop is opt-in: XFCE images are much heavier, so they are created
+    // only when the admin clicks the desktop offer row.
     const ensureFirstParty = isRemoteBackend.value
     const res = await querySandboxTemplates({
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
-      ensure_standard: opts.ensureStandard || (ensureFirstParty && !opts.replaceStandard),
-      ensure_desktop: opts.ensureDesktop || (ensureFirstParty && !opts.replaceDesktop),
+      ensure_standard: opts.ensureStandard || (ensureFirstParty && !opts.replaceStandard && !opts.replaceDesktop && !opts.ensureDesktop),
+      ensure_desktop: Boolean(opts.ensureDesktop),
       replace_standard: opts.replaceStandard,
       replace_desktop: opts.replaceDesktop,
     })
@@ -1425,6 +1445,11 @@ async function loadTemplates(opts: {
       selectTemplate(desktopID)
     } else if (opts.replaceStandard && standardID) {
       selectTemplate(standardID)
+    } else if (opts.ensureDesktop && desktopID) {
+      const next = templates.value.find((item) => item.id === desktopID)
+      if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
+        selectTemplate(desktopID)
+      }
     } else if (opts.ensureStandard && standardID) {
       const next = templates.value.find((item) => item.id === standardID)
       if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
@@ -1474,6 +1499,10 @@ function createStandardTemplate() {
   return loadTemplates({ ensureStandard: true })
 }
 
+function createDesktopTemplate() {
+  return loadTemplates({ ensureDesktop: true })
+}
+
 function replaceFirstPartyTemplate(item: SandboxTemplate) {
   if (retargetFrozen.value) return
   if (item.desktop) return loadTemplates({ replaceDesktop: true })
@@ -1489,14 +1518,16 @@ function withStoredSecret<T extends { api_key?: string }>(block: T, stored: bool
 
 function collectedDesktopEnabled(): boolean | undefined {
   if (selectedTemplate.value) {
-    return selectedTemplate.value.desktop || undefined
+    // Persist false when the CLI card is selected; omitempty on the
+    // server would otherwise keep a stale true from a previous desktop save.
+    return Boolean(selectedTemplate.value.desktop)
   }
   // Skill snapshots replace template_id with a UUID that is not in the
   // catalog. Keep the stored bit. If the catalog loaded and this ID is
   // simply unmatched, do not keep a stale true that could disagree with
   // template_id.
   if (templatesLoaded.value && !retargetFrozen.value) {
-    return undefined
+    return false
   }
   return effectiveRecord.value?.config?.desktop_enabled || undefined
 }

@@ -328,6 +328,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// One-shot desktop handshake tickets. Falls back to an in-process store
 	// when Redis is absent (Lite mode), same as the binding store.
 	must(container.Provide(service.NewSandboxDesktopTicketStore))
+	must(container.Provide(service.NewSandboxDesktopLastStore))
 	// Desktop relay. It rides SandboxTerminalService's resolution path so the
 	// desktop always lands on the session's existing sandbox.
 	must(container.Provide(service.NewSandboxDesktopService))

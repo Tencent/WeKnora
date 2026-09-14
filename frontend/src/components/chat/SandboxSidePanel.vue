@@ -76,7 +76,7 @@
         <!-- 桌面：与终端同样的惰性挂载 + v-show 保活。桌面的重连代价比终端高得多
              （要重跑一遍 3–8 秒的懒启动），切 tab 断开是不可接受的。 -->
         <SandboxDesktop
-          v-if="desktopMounted"
+          v-if="desktopMounted && desktopTabVisible"
           v-show="panel?.activeTab.value === 'desktop'"
           :key="sessionId"
           ref="desktopRef"
@@ -85,7 +85,7 @@
           :agent-source-tenant-id="agentSourceTenantId"
           class="chat-sandbox-panel__desktop"
         />
-        <div v-else-if="panel?.activeTab.value === 'desktop'" class="chat-sandbox-panel__placeholder">
+        <div v-else-if="panel?.activeTab.value === 'desktop' && desktopTabVisible" class="chat-sandbox-panel__placeholder">
           <t-skeleton animation="gradient" :row-col="[{ width: '100%', height: '100%', type: 'rect' }]" />
         </div>
       </div>
@@ -105,6 +105,7 @@ import {
 import SandboxTerminal from '@/views/chat/components/SandboxTerminal.vue'
 import SandboxDesktop from '@/views/chat/components/SandboxDesktop.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
 const props = withDefaults(
@@ -127,12 +128,37 @@ const props = withDefaults(
 
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
+const chatResources = useChatResourcesStore()
+const sandboxConfigsReady = ref(false)
 
-const tabs = computed(() => [
-  { id: 'artifacts' as SandboxPanelTab, icon: 'folder', label: t('chat.sandbox.tabArtifacts') },
-  { id: 'terminal' as SandboxPanelTab, icon: 'terminal', label: t('chat.sandbox.tabTerminal') },
-  { id: 'desktop' as SandboxPanelTab, icon: 'desktop', label: t('chat.sandbox.tabDesktop') },
-])
+// Hide the desktop tab for CLI / Docker configs. Shared agents whose
+// sandbox row is not in this workspace still show the tab and let the
+// backend return DESKTOP_UNSUPPORTED.
+const desktopTabVisible = computed(() => {
+  const agentId = props.agentId?.trim()
+  if (!agentId) return false
+  const agent = chatResources.agents.find((item) => item.id === agentId)
+  if (!agent) {
+    return chatResources.agents.length > 0
+  }
+  const configId = agent.config?.sandbox_config_id?.trim()
+  if (!configId) return false
+  if (!sandboxConfigsReady.value) return false
+  const cfg = chatResources.sandboxConfigs.find((item) => item.id === configId)
+  if (!cfg) return true
+  return Boolean(cfg.config?.desktop_enabled)
+})
+
+const tabs = computed(() => {
+  const list: Array<{ id: SandboxPanelTab; icon: string; label: string }> = [
+    { id: 'artifacts', icon: 'folder', label: t('chat.sandbox.tabArtifacts') },
+    { id: 'terminal', icon: 'terminal', label: t('chat.sandbox.tabTerminal') },
+  ]
+  if (desktopTabVisible.value) {
+    list.push({ id: 'desktop', icon: 'desktop', label: t('chat.sandbox.tabDesktop') })
+  }
+  return list
+})
 
 // 终端 / 桌面惰性挂载（首次切到对应 tab 时），面板关闭即销毁（v-if），
 // 与 ChatReferencesDrawer 的开合行为一致；会话切换时由 :key 重建。
@@ -156,7 +182,7 @@ watch(
       void nextTick(() => terminalRef.value?.focus?.())
       return
     }
-    if (tab === 'desktop') {
+    if (tab === 'desktop' && desktopTabVisible.value) {
       // Same as the terminal tab: mount runs a lookup-only connect. A
       // running sandbox attaches; paused or missing stays on the overlay
       // until the user confirms. Opening the panel must never create or
@@ -166,6 +192,25 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  () => [panel?.visible.value, props.agentId] as const,
+  ([visible]) => {
+    if (!visible) return
+    void chatResources.ensureSandboxConfigs().finally(() => {
+      sandboxConfigsReady.value = true
+    })
+  },
+  { immediate: true },
+)
+
+watch(desktopTabVisible, (show) => {
+  if (show) return
+  if (panel?.activeTab.value === 'desktop') {
+    panel.activeTab.value = 'artifacts'
+  }
+  desktopMounted.value = false
+})
 
 watch(
   () => props.sessionId,

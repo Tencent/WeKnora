@@ -76,7 +76,9 @@ func configHasSkillSnapshot(cfg *types.TenantSandboxConfig) bool {
 }
 
 // skillRetargetWouldChange reports edits that would retarget the environment
-// a skill snapshot is built from: identity, spawn template, or Cube DNS.
+// a skill snapshot is built from: identity, spawn template, Cube DNS, or the
+// desktop/CLI base bit. Flipping DesktopEnabled changes the image generation
+// skills were stacked on, so installed skills must be rebuilt.
 func skillRetargetWouldChange(stored, merged *types.TenantSandboxConfig) bool {
 	if SandboxIdentityChanged(stored, merged) {
 		return true
@@ -84,7 +86,14 @@ func skillRetargetWouldChange(stored, merged *types.TenantSandboxConfig) bool {
 	if spawnTemplateID(stored) != spawnTemplateID(merged) {
 		return true
 	}
+	if desktopEnabledOf(stored) != desktopEnabledOf(merged) {
+		return true
+	}
 	return !sameStrings(cubeDNSServers(stored), cubeDNSServers(merged))
+}
+
+func desktopEnabledOf(cfg *types.TenantSandboxConfig) bool {
+	return cfg != nil && cfg.DesktopEnabled
 }
 
 // spawnTemplateID is the template/image this config would boot without a

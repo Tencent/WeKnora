@@ -17,33 +17,36 @@ test('connection step has no desktop-image switch', () => {
   )
 })
 
-test('desktop templates appear in the catalog like CLI, without a sibling create offer', () => {
+test('desktop templates have a sibling create offer like CLI, and listing does not auto-ensure them', () => {
   const template = source.slice(
     source.indexOf("currentStepKey === 'template'"),
     source.indexOf("currentStepKey === 'runtime'"),
   )
   assert.ok(template.includes('canCreateStandard'), 'CLI create offer remains a fallback if ensure failed')
-  assert.doesNotMatch(
-    template,
-    /canCreateDesktop|createDesktopTemplate|weknoraDesktopTemplate/,
-    'desktop must not have a separate create row; listing ensures it from the Hub image',
-  )
+  assert.ok(template.includes('canCreateDesktop'), 'desktop create offer is opt-in; XFCE images are much heavier')
+  assert.ok(template.includes('createDesktopTemplate'), 'admin must click create to start the desktop Hub build')
+  assert.ok(template.includes('weknoraDesktopTemplate'), 'the offer row names the desktop image')
   assert.ok(
     template.includes('item.desktop'),
     'listed cards still mark the desktop image so picking one can set desktop_enabled',
   )
 })
 
-test('listing Cube/E2B templates ensures the published desktop image', () => {
+test('listing Cube/E2B templates does not auto-ensure the desktop image', () => {
   assert.match(
     source,
-    /ensure_desktop:\s*opts\.ensureDesktop \|\| \(ensureFirstParty && !opts\.replaceDesktop\)/,
-    'catalog load must send ensure_desktop so a missing weknora-desktop is built from Hub',
+    /ensure_desktop:\s*Boolean\(opts\.ensureDesktop\)/,
+    'catalog load must not send ensure_desktop unless the admin clicked create',
   )
   assert.match(
     source,
-    /const ensureFirstParty = isRemoteBackend\.value/,
-    'Docker has no desktop catalog; only Cube/E2B auto-ensure first-party templates',
+    /opts\.ensureDesktop && desktopID/,
+    'clicking create must also select the desktop template so desktop_enabled is saved as true',
+  )
+  assert.doesNotMatch(
+    source,
+    /ensure_desktop:\s*opts\.ensureDesktop \|\| \(ensureFirstParty && !opts\.replaceDesktop\)/,
+    'opening settings must not provision a 4CPU/4GB desktop template as a side effect',
   )
 })
 
@@ -52,6 +55,11 @@ test('saving records desktop_enabled from the selected catalog card', () => {
     source,
     /function collectedDesktopEnabled/,
     'derivation must be a named helper so snapshot vs catalog-miss cannot drift',
+  )
+  assert.match(
+    source,
+    /Boolean\(selectedTemplate\.value\.desktop\)/,
+    'selecting the CLI card must persist desktop_enabled=false, not omit the field',
   )
   assert.match(
     source,

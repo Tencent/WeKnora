@@ -670,15 +670,15 @@ func TestNormalizeCubeError(t *testing.T) {
 	}
 }
 
-func TestCubeDesktopTemplateSpecExposesWebsockifyPort(t *testing.T) {
+func TestCubeDesktopTemplateSpecDoesNotNatWebsockify(t *testing.T) {
 	spec := cubeDesktopTemplateSpec(nil)
 
 	require.Equal(t, DefaultCubeDesktopTemplateImage, spec["image"])
 	require.Equal(t, DesktopTemplateName, spec["name"])
-	// exposedPorts must carry BOTH: envd for the build probe, 6080 for
-	// websockify. Dropping 6080 makes the desktop unreachable; dropping envd
-	// makes the template build fail its probe.
-	require.Equal(t, []uint16{CubeEnvdPort, 6080}, spec["exposedPorts"])
+	// envd stays in exposedPorts so the template probe can reach :49983.
+	// 6080 must not: Cube NATs that list onto the host NIC and bypasses
+	// CubeProxy. The desktop relay dials 6080 through CubeProxy instead.
+	require.Equal(t, []uint16{CubeEnvdPort}, spec["exposedPorts"])
 	require.Equal(t, uint16(CubeEnvdPort), spec["probePort"])
 	require.Equal(t, CubeEnvdHealthPath, spec["probePath"])
 	// 1G (the standard value) is too small once XFCE is installed.
@@ -689,8 +689,8 @@ func TestCubeDesktopTemplateSpecExposesWebsockifyPort(t *testing.T) {
 }
 
 func TestCubeStandardTemplateSpecStillExposesOnlyEnvd(t *testing.T) {
-	// Host ports are a finite resource (CubeVS allocates 20000-29999), so the
-	// extra mapping must stay on the desktop variant only.
+	// Host ports are a finite resource (CubeVS allocates 20000-29999). Neither
+	// the CLI nor the desktop template may NAT extra guest ports onto the host.
 	spec := cubeStandardTemplateSpec(nil)
 	require.Equal(t, []uint16{CubeEnvdPort}, spec["exposedPorts"])
 }

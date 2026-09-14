@@ -984,11 +984,13 @@ export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxIn
 
 /**
  * Fetch templates using the connection currently entered in the drawer.
- * `ensure_standard` / `ensure_desktop` start a provider-side build when that
- * WeKnora template is missing. `replace_standard` / `replace_desktop` rebuild
- * the matching template so a new spec (DNS, image) can take effect; they
- * require `config_id`. The returned building item can be polled through the
- * same endpoint.
+ * `ensure_standard` starts a provider-side CLI build when that WeKnora
+ * template is missing. `ensure_desktop` does the same for the XFCE image, but
+ * the settings UI only sends it when the admin clicks Create — listing must
+ * not provision a desktop template as a side effect. `replace_standard` /
+ * `replace_desktop` rebuild the matching template so a new spec (DNS, image)
+ * can take effect; they require `config_id`. The returned building item can
+ * be polled through the same endpoint.
  */
 export function querySandboxTemplates(payload: {
   config: SandboxConfig

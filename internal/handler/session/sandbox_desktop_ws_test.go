@@ -62,6 +62,26 @@ func TestDesktopRelayFrontendReportKeepsAliveAfterParserFallback(t *testing.T) {
 	require.False(t, relay.isIdle(time.Now()))
 }
 
+func TestDesktopRelayFrontendReportIsIgnoredWhileParserHealthy(t *testing.T) {
+	relay := &desktopRelay{sessionID: "sess-1", idleDisconnect: time.Minute}
+	relay.stream.Consume(append([]byte("RFB 003.008\n"), 1, 1))
+	require.True(t, relay.stream.ParsingEnabled())
+
+	relay.lastActivity = time.Now().Add(-2 * time.Minute)
+	require.True(t, relay.isIdle(time.Now()))
+	relay.TouchFromFrontend()
+	require.True(t, relay.isIdle(time.Now()),
+		"a healthy parser must ignore the activity POST so a client cannot keep the TTL by posting")
+}
+
+func TestDesktopSandboxRebuiltUsesStore(t *testing.T) {
+	h := &Handler{desktopLast: service.NewSandboxDesktopLastStore(nil)}
+	ctx := context.Background()
+	require.False(t, h.desktopSandboxRebuilt(ctx, "sess-1", "sbx-a"))
+	require.True(t, h.desktopSandboxRebuilt(ctx, "sess-1", "sbx-b"))
+	require.False(t, h.desktopSandboxRebuilt(ctx, "sess-1", "sbx-b"))
+}
+
 func TestDesktopSlotIsExclusivePerSession(t *testing.T) {
 	first, ok := sessionDesktopLimiter.acquire("sess-excl")
 	require.True(t, ok)

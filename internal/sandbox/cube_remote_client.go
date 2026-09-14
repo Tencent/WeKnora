@@ -629,16 +629,20 @@ func cubeStandardTemplateSpec(dns []string) map[string]any {
 // It is a separate function rather than a flag on that one so a change to the
 // standard template can never silently alter the desktop's exposed ports.
 //
-// exposedPorts is the load-bearing line. Cube maps it through eBPF static NAT
-// on the host NIC, which bypasses CubeProxy entirely. That is why websockify
-// Basic auth is mandatory, not defence in depth.
+// 6080 is deliberately not in exposedPorts. Cube maps that list through eBPF
+// static NAT on the host NIC, which bypasses CubeProxy. WeKnora already
+// reaches websockify the same way it reaches envd: CubeProxy Host
+// "{port}-{id}.{domain}" plus the inbound token. Publishing 6080 on the host
+// would let anyone who can read /run/desktop/secret (the agent Execs as
+// root) skip the ticket relay, idle disconnect, and audit trail. websockify
+// Basic auth stays as defence in depth on the overlay path.
 func cubeDesktopTemplateSpec(dns []string) map[string]any {
 	spec := map[string]any{
 		"image": DefaultCubeDesktopTemplateImage,
 		"name":  DesktopTemplateName,
 		// The standard 1G is too small once XFCE is installed.
 		"writableLayerSize": "8G",
-		"exposedPorts":      []uint16{CubeEnvdPort, DesktopWebsockifyPort},
+		"exposedPorts":      []uint16{CubeEnvdPort},
 		// The build probe still goes to envd: websockify is lazily started
 		// and is deliberately not running at template-build time.
 		"probePort":           uint16(CubeEnvdPort),

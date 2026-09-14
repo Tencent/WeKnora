@@ -72,9 +72,10 @@ const (
 	// envd (target "desktop-cube"). amd64 only, same reason as the cube target.
 	DefaultCubeDesktopTemplateImage = "wechatopenai/weknora-sandbox:main-desktop-cube"
 
-	// DesktopWebsockifyPort is the only port the desktop exposes outside the
-	// sandbox. x11vnc stays on 127.0.0.1:5900 with no RFB password; the
-	// Basic-auth check lives on websockify.
+	// DesktopWebsockifyPort is websockify inside the sandbox. WeKnora dials
+	// it through the provider gateway (Host "{port}-{id}.{domain}"), not by
+	// publishing the port on the host NIC. x11vnc stays on 127.0.0.1:5900
+	// with no RFB password; the Basic-auth check lives on websockify.
 	DesktopWebsockifyPort = 6080
 
 	// DesktopWebsockifyPath is websockify's WebSocket endpoint. The image
