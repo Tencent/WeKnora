@@ -797,6 +797,7 @@ import ShareKnowledgeBaseDialog from '@/components/ShareKnowledgeBaseDialog.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
+import { permissionCanManageKB } from '@/utils/kbPermission'
 import ContextualGuide from '@/components/ContextualGuide.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
@@ -1352,6 +1353,17 @@ const handleSettings = (kb: KB) => {
 // those as tenant-owned (Admin+ may manage) so existing KBs aren't
 // suddenly unmanageable for everyone.
 function canManageKBCard(kb: KB): boolean {
+  // Shared-space cards carry the org-share permission; when it exists it is
+  // the only signal that counts. A read-only (viewer) or editor share must
+  // not surface Settings/Delete even when the browsing user is an admin of
+  // their own personal workspace — the backend 3-D permission cap would 403
+  // the call anyway (#3098).
+  const sharePermission = (kb as any).permission as string | undefined
+  if (sharePermission) return permissionCanManageKB(sharePermission)
+  // Shared-card shapes that lost their permission field (pin/recents merges)
+  // are marked isMine === false; they must not fall through to the local
+  // admin/creator fallbacks either.
+  if ((kb as any).isMine === false) return false
   const userId = authStore.user?.id || ''
   if (kb.creator_id && userId && kb.creator_id === userId) return true
   return authStore.hasRole('admin')
