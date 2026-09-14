@@ -293,21 +293,7 @@
               :placeholder="getModelNamePlaceholder()"
               :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
               @create="onRemoteModelCreate"
-            >
-              <!-- 选项排版：模型 ID 为主文本，展示名小号灰色辅助（label 仍为
-                   "id · 展示名"，搜索过滤与选中回显不受影响） -->
-              <template v-for="opt in remoteModelOptions" :key="opt.value">
-                <t-option :value="opt.value" :label="opt.label">
-                  <div class="remote-model-option">
-                    <span class="remote-model-option__id">{{ opt.value }}</span>
-                    <span
-                      v-if="opt.display_name"
-                      class="remote-model-option__name"
-                    >{{ opt.display_name }}</span>
-                  </div>
-                </t-option>
-              </template>
-            </t-select>
+            />
             <t-input v-else v-model="formData.modelName" :placeholder="getModelNamePlaceholder()"
               :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'" />
           </div>
@@ -778,11 +764,7 @@ const remoteModelMatchesType = (id: string, type: string): boolean => {
 const remoteModelOptions = computed(() =>
   remoteModels.value
     .filter(m => remoteModelMatchesType(m.id, activeModelType.value))
-    .map(m => ({
-      value: m.id,
-      label: m.display_name ? `${m.id} · ${m.display_name}` : m.id,
-      display_name: m.display_name,
-    }))
+    .map(m => ({ value: m.id, label: m.id }))
 )
 
 const onRemoteModelCreate = (value: string | number) => {
@@ -2654,27 +2636,6 @@ defineExpose({ resetAfterSave })
       color: var(--td-brand-color);
     }
   }
-
-.remote-model-option {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-
-  &__id {
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    flex-shrink: 0;
-  }
-
-  &__name {
-    font-size: 11px;
-    color: var(--td-text-color-placeholder);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
 
   .provider-option {
     display: flex;
