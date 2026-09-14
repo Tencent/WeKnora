@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -10,18 +9,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
-
-func finalAnswerImageRequirement(hasRetrievedImage bool) string {
-	if !hasRetrievedImage {
-		return ""
-	}
-	return `
-5. 工具结果包含 Markdown 图片。除非用户明确要求纯文本输出，或所有图片都明显与答案无关，最终回答必须至少包含一张从工具结果原样复制的相关 Markdown 图片。完整保留其 URL，绝不要改动。必须使用 ASCII 半角括号，格式为 ![alt](url)，绝不要使用全角（或）。将图片紧挨放在其所支撑段落之后。当多张图片分别支撑不同段落时，应在对应段落中分别插入，不要只插第一张就结束。
-6. 结束前请静默检查：只要第 5 条适用，答案中就应包含 Markdown 图片。`
-}
 
 // streamFinalAnswerToEventBus streams the final answer generation through EventBus
 func (e *AgentEngine) streamFinalAnswerToEventBus(
@@ -29,6 +18,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	query string,
 	state *types.AgentState,
 	sessionID string,
+	conversation []chat.Message,
 ) error {
 	totalToolCalls := countTotalToolCalls(state.RoundSteps)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Synthesizing from %d steps, %d tool calls",
@@ -40,56 +30,17 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		"tool_results": totalToolCalls,
 	})
 
-	// Build messages with all context
-	systemPrompt := e.buildSystemPrompt(ctx)
-	userTurn := e.RenderUserTurnContent(sessionID, query)
-
-	messages := []chat.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userTurn},
-	}
-
-	// Add all tool call results as context
-	toolResultCount := 0
-	hasRetrievedImage := false
-	for stepIdx, step := range state.RoundSteps {
-		for toolIdx, toolCall := range step.ToolCalls {
-			toolResultCount++
-			if searchutil.MarkdownImageRegex.MatchString(toolCall.Result.Output) {
-				hasRetrievedImage = true
-			}
-			modelOutput := e.modelContext.ModelToolResultForTool(toolCall.Name, toolCall.Result)
-			messages = append(messages, chat.Message{
-				Role:    "user",
-				Content: fmt.Sprintf("Tool %s returned: %s", toolCall.Name, modelOutput),
-			})
-			logger.Debugf(ctx, "[Agent][FinalAnswer] Added tool result [Step-%d][Tool-%d]: %s (output: %d chars)",
-				stepIdx+1, toolIdx+1, toolCall.Name, len(toolCall.Result.Output))
-		}
-	}
-
-	logger.Debugf(ctx, "[Agent][FinalAnswer] Built context: %d messages, %d tool results",
-		len(messages), toolResultCount)
-
-	imageRequirement := finalAnswerImageRequirement(hasRetrievedImage)
-
-	// Add final answer prompt
-	finalPrompt := fmt.Sprintf(`Based on the above tool call results, generate a complete answer for the user's question.
-
-User question: %s
-
-Requirements:
-1. Answer based on the actually retrieved content
-2. Organize the answer in a structured format
-3. If information is insufficient, honestly state so
-4. IMPORTANT: Respond in the same language as the user's question
-%s
-
-Now generate the final answer:`, query, imageRequirement)
-
+	// Reuse the live transcript, including history, images, compaction and steer
+	// messages. Tool output must retain its role and call ID; never promote it
+	// into user instructions during error recovery or iteration-limit synthesis.
+	messages := append([]chat.Message(nil), conversation...)
 	messages = append(messages, chat.Message{
-		Role:    "user",
-		Content: finalPrompt,
+		Role: "user",
+		Content: "Tool execution has ended for this run. Respond to the current task, including " +
+			"the latest user corrections and source restrictions in the conversation. Base claims on " +
+			"the evidence actually obtained; distinguish completed work from remaining work and explain " +
+			"any missing evidence. Use the user's requested language and format. Do not claim that an " +
+			"unperformed action succeeded.",
 	})
 
 	// Generate a single ID for this entire final answer stream
@@ -97,12 +48,15 @@ Now generate the final answer:`, query, imageRequirement)
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 	answerDoneEmitted := false
 
+	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
 		&chat.ChatOptions{
 			Temperature:         e.config.Temperature,
-			MaxCompletionTokens: e.config.MaxCompletionTokens,
+			MaxCompletionTokens: budget,
+			PromptCacheKey:      sessionID,
+			ToolChoice:          "none",
 		}, // Thinking disabled for final answer synthesis
 		func(chunk *types.StreamResponse, fullContent string) {
 			// Defensive filter: only emit answer content, skip thinking chunks
@@ -147,6 +101,12 @@ Now generate the final answer:`, query, imageRequirement)
 		})
 	}
 
+	// The synthesis call is often the largest of the turn — fold its usage
+	// into the turn aggregate like every ReAct round.
+	if llmResult.Usage != nil {
+		state.TurnUsage.Accumulate(*llmResult.Usage)
+	}
+
 	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Final answer generated: %d characters", len(fullAnswer))
@@ -161,7 +121,7 @@ Now generate the final answer:`, query, imageRequirement)
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
 // without the LLM producing a natural stop. It marks state.IsComplete = true.
 func (e *AgentEngine) handleMaxIterations(
-	ctx context.Context, query string, state *types.AgentState, sessionID string,
+	ctx context.Context, query string, state *types.AgentState, sessionID string, messages []chat.Message,
 ) {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
 	common.PipelineWarn(ctx, "Agent", "max_iterations_reached", map[string]interface{}{
@@ -170,12 +130,12 @@ func (e *AgentEngine) handleMaxIterations(
 	})
 
 	// Stream final answer generation through EventBus
-	if err := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID); err != nil {
+	if err := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, messages); err != nil {
 		logger.Errorf(ctx, "Failed to synthesize final answer: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_failed", map[string]interface{}{
 			"error": err.Error(),
 		})
-		state.FinalAnswer = "抱歉，我未能生成完整回答。"
+		state.FinalAnswer = "Sorry, I was unable to generate a complete answer."
 	}
 	state.IsComplete = true
 }
@@ -184,6 +144,14 @@ func (e *AgentEngine) handleMaxIterations(
 func (e *AgentEngine) emitCompletionEvent(
 	ctx context.Context, state *types.AgentState, sessionID, messageID string, startTime time.Time,
 ) {
+	steps := state.RoundSteps
+	if len(state.PendingSteerMessages) > 0 {
+		// A stop or model failure can arrive after delivery but before the next
+		// response exists. Preserve that boundary without inventing an answer.
+		steps = append(append([]types.AgentStep(nil), steps...), types.AgentStep{
+			Iteration: state.CurrentRound, UserMessagesBefore: state.PendingSteerMessages,
+		})
+	}
 	// Convert knowledge refs to interface{} slice for event data
 	knowledgeRefsInterface := make([]interface{}, 0, len(state.KnowledgeRefs))
 	for _, ref := range state.KnowledgeRefs {
@@ -197,7 +165,8 @@ func (e *AgentEngine) emitCompletionEvent(
 		Data: event.AgentCompleteData{
 			FinalAnswer:     state.FinalAnswer,
 			KnowledgeRefs:   knowledgeRefsInterface,
-			AgentSteps:      state.RoundSteps, // Include detailed execution steps for message storage
+			AgentSteps:      steps,
+			Usage:           turnUsage(state),
 			TotalSteps:      len(state.RoundSteps),
 			TotalDurationMs: time.Since(startTime).Milliseconds(),
 			MessageID:       messageID, // Include message ID for proper message update
@@ -205,4 +174,15 @@ func (e *AgentEngine) emitCompletionEvent(
 	})
 
 	logger.Infof(ctx, "Agent execution completed in %d rounds", state.CurrentRound)
+}
+
+// turnUsage returns the turn's aggregated LLM usage, or nil when no round
+// reported usage so the field stays absent from the completion event and the
+// persisted message alike.
+func turnUsage(state *types.AgentState) *types.TokenUsage {
+	if state == nil || state.TurnUsage.TotalTokens == 0 {
+		return nil
+	}
+	usage := state.TurnUsage
+	return &usage
 }

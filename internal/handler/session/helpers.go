@@ -194,6 +194,7 @@ func buildStreamResponse(evt interfaces.StreamEvent, requestID string) *types.St
 		Content:      evt.Content,
 		Done:         evt.Done,
 		Data:         evt.Data,
+		Usage:        evt.Usage,
 	}
 
 	// Extract session_id and assistant_message_id for agent_query events
@@ -243,18 +244,33 @@ func sendCompletionEvent(c *gin.Context, requestID string) {
 	// which is already sent before this function is called
 }
 
-// createAgentQueryEvent creates a standard agent query event
-func createAgentQueryEvent(sessionID, assistantMessageID string) interfaces.StreamEvent {
+// createAgentQueryEvent creates a standard agent query event.
+// It carries the persisted user/assistant timestamps so the live UI can
+// display the same created_at that history reload will return.
+func createAgentQueryEvent(
+	sessionID, assistantMessageID, userMessageID string,
+	userCreatedAt, assistantCreatedAt time.Time,
+) interfaces.StreamEvent {
+	data := map[string]interface{}{
+		"session_id":           sessionID,
+		"assistant_message_id": assistantMessageID,
+	}
+	if userMessageID != "" {
+		data["user_message_id"] = userMessageID
+	}
+	if !userCreatedAt.IsZero() {
+		data["user_created_at"] = userCreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !assistantCreatedAt.IsZero() {
+		data["assistant_created_at"] = assistantCreatedAt.UTC().Format(time.RFC3339Nano)
+	}
 	return interfaces.StreamEvent{
 		ID:        fmt.Sprintf("query-%d", time.Now().UnixNano()),
 		Type:      types.ResponseTypeAgentQuery,
 		Content:   "",
 		Done:      true,
 		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"session_id":           sessionID,
-			"assistant_message_id": assistantMessageID,
-		},
+		Data:      data,
 	}
 }
 
@@ -399,8 +415,21 @@ func (h *Handler) startStopWatcher(
 }
 
 // writeAgentQueryEvent writes an agent query event to the stream manager
-func (h *Handler) writeAgentQueryEvent(ctx context.Context, sessionID, assistantMessageID string) {
-	agentQueryEvent := createAgentQueryEvent(sessionID, assistantMessageID)
+func (h *Handler) writeAgentQueryEvent(
+	ctx context.Context,
+	sessionID, userMessageID string,
+	userCreatedAt time.Time,
+	assistantMessage *types.Message,
+) {
+	assistantMessageID := ""
+	var assistantCreatedAt time.Time
+	if assistantMessage != nil {
+		assistantMessageID = assistantMessage.ID
+		assistantCreatedAt = assistantMessage.CreatedAt
+	}
+	agentQueryEvent := createAgentQueryEvent(
+		sessionID, assistantMessageID, userMessageID, userCreatedAt, assistantCreatedAt,
+	)
 	if err := h.streamManager.AppendEvent(ctx, sessionID, assistantMessageID, agentQueryEvent); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"session_id": sessionID,

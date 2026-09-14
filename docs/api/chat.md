@@ -21,7 +21,7 @@
 |------|------|------|
 | `resource_urls` | `handle`（默认）/ `public` | `public` 让答案与引用里的图片直接返回可加载的 http(s) 链接，省去逐个调用 `/files` 代理。详见[文件与图片引用](./README.md#文件与图片引用resource-与直链) |
 
-同样适用于下面的 `/agent-chat/:session_id`、`/knowledge-search` 与 `/sessions/continue-stream/:session_id`。
+同样适用于下面的 `/agent-chat/:session_id`、`/knowledge-search`、`/knowledge-bases/:id/hybrid-search` 与 `/sessions/continue-stream/:session_id`。
 
 **请求参数**：
 
@@ -165,6 +165,7 @@ curl --location 'http://localhost:8080/api/v1/agent-chat/ceb9babb-1e30-41d7-817d
 | `tool_result` | 工具调用结果 |
 | `references` | 知识库检索引用 |
 | `answer` | 最终回答内容 |
+| `artifacts_pending` | Skill/沙箱产物正在上传；`data.count` 为待保存文件数。回答可能已经 `done`，文件按钮会在此期间显示加载态，直至 `complete` 带上 `artifacts` |
 | `reflection` | Agent 反思内容 |
 | `session_title` | 自动生成的会话标题 |
 | `error` | 错误信息 |

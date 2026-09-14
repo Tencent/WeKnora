@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -21,60 +19,61 @@ import (
 
 var knowledgeSearchTool = BaseTool{
 	name: ToolKnowledgeSearch,
-	description: `语义/向量搜索工具：按含义、意图与概念相关性检索知识。
+	description: `Semantic/vector search tool for retrieving knowledge by meaning, intent, and conceptual relevance.
 
-本工具使用向量嵌入理解用户查询，并在知识库分块中查找语义相似内容。
+This tool uses embeddings to understand the user's query and find semantically similar content across knowledge base chunks.
 
-## 用途
-适用于高层理解类任务，例如：
-- 概念解释
-- 主题概览
-- 基于推理的信息需求
-- 上下文或意图驱动的检索
-- 无法靠字面关键词匹配回答的问题
+## Purpose
+Designed for high-level understanding tasks, such as:
+- conceptual explanations
+- topic overviews
+- reasoning-based information needs
+- contextual or intent-driven retrieval
+- queries that cannot be answered with literal keyword matching
 
-工具按「含义」而非精确文本搜索，即使措辞不同也能找到概念相关的分块。
+The tool searches by MEANING rather than exact text. It identifies chunks that are conceptually relevant even when the wording differs.
 
-## 本工具不会做的事
-- 不做精确关键词匹配
-- 不专门搜索特定命名实体
-- 不应用于字面查找任务
-- 不应接收长段原始文本或完整用户消息作为查询
-- 不应用于定位特定字符串或错误码
+## What the Tool Does NOT Do
+- Does NOT perform exact keyword matching
+- Does NOT search for specific named entities
+- Should NOT be used for literal lookup tasks
+- Should NOT receive long raw text or user messages as queries
+- Should NOT be used to locate specific strings or error codes
 
-字面/关键词/实体搜索应使用其他工具。
+For literal/keyword/entity search, another tool should be used.
 
-## 必需输入行为
-"queries" 必须包含 **1–5 条简短、表述清晰的语义问题或概念陈述**，明确表达希望检索到的含义。
+## Required Input Behavior
+"queries" must contain **1–5 short, well-formed semantic questions or conceptual statements** that clearly express the meaning the model is trying to retrieve.
 
-每条查询应代表一个**概念、想法、主题、解释或意图**，例如：
-- 抽象主题
-- 定义
-- 机制
-- 最佳实践
-- 对比
-- how/why 类问题
+Each query should represent a **concept, idea, topic, explanation, or intent**, such as:
+- abstract topics
+- definitions
+- mechanisms
+- best practices
+- comparisons
+- how/why questions
 
-避免：
-- 关键词列表
-- 用户消息的原始文本
-- 整段段落
-- 未经处理的输入
+Avoid:
+- keyword lists
+- raw text from user messages
+- full paragraphs
+- unprocessed input
 
-## 合法查询形态示例（非具体内容）：
-- "……的主要思想是什么"
-- "X 总体上如何工作？"
-- "解释……的目的"
-- "……背后的关键原则是什么"
-- "……概览"
+## Examples of valid query shapes (not content):
+- "What is the main idea of..."
+- "How does X work in general?"
+- "Explain the purpose of..."
+- "What are the key principles behind..."
+- "Overview of ..."
 
-## 参数
-- queries（必需）：1–5 条语义问题或概念陈述，应反映希望嵌入模型捕获的含义或主题。
-- knowledge_base_ids（可选）：限制搜索范围。
+## Parameters
+- queries (required): 1–5 semantic questions or conceptual statements.
+  These should reflect the meaning or topic you want embeddings to capture.
+- knowledge_base_ids (optional): limit the search scope.
 
-## 输出
-返回按语义相似度排序的分块（适用时会重排序）。
-每个分块有短 ID cN，并属于文档短 ID dN。结果表示概念相关性，而非字面关键词重叠。文档级后续工具调用请使用 dN。`,
+## Output
+Returns chunks ranked by semantic similarity, reranked when applicable.  
+Each chunk has a short cN source ID and belongs to a dN document ID. Results represent conceptual relevance, not literal keyword overlap. Use dN for document-level follow-up tool calls.`,
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -127,7 +126,6 @@ type KnowledgeSearchTool struct {
 	chunkService         interfaces.ChunkService
 	searchTargets        types.SearchTargets // Pre-computed unified search targets
 	rerankModel          rerank.Reranker
-	chatModel            chat.Chat      // Optional chat model for LLM-based reranking
 	config               *config.Config // Global config for fallback values
 
 	seenMu     sync.Mutex
@@ -141,7 +139,6 @@ func NewKnowledgeSearchTool(
 	chunkService interfaces.ChunkService,
 	searchTargets types.SearchTargets,
 	rerankModel rerank.Reranker,
-	chatModel chat.Chat,
 	cfg *config.Config,
 ) *KnowledgeSearchTool {
 	return &KnowledgeSearchTool{
@@ -151,7 +148,6 @@ func NewKnowledgeSearchTool(
 		chunkService:         chunkService,
 		searchTargets:        searchTargets,
 		rerankModel:          rerankModel,
-		chatModel:            chatModel,
 		config:               cfg,
 		seenChunks:           make(map[string]bool),
 	}
@@ -288,8 +284,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Deduplicate before reranking to reduce processing overhead
 	deduplicatedBeforeRerank := t.deduplicateResults(allResults)
 
-	// Apply ReRank if model is configured
-	// Prefer rerankModel; fall back to chatModel (LLM-based reranking) if unavailable
+	// Apply ReRank if model is configured.
 	// Use first query for reranking (or combine all queries if needed)
 	rerankQuery := ""
 	if len(queries) > 0 {
@@ -303,7 +298,7 @@ func (t *KnowledgeSearchTool) Execute(ctx context.Context, args json.RawMessage)
 	// Variable to hold results through reranking and MMR stages
 	var filteredResults []*searchResultWithMeta
 
-	if (t.rerankModel != nil || t.chatModel != nil) && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
+	if t.rerankModel != nil && len(deduplicatedBeforeRerank) > 0 && rerankQuery != "" {
 		logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying rerank, input: %d results, threshold: %.2f, queries: %v",
 			len(deduplicatedBeforeRerank), t.rerankThreshold(), queries)
 		rerankedResults, err := t.rerankResults(ctx, rerankQuery, deduplicatedBeforeRerank)
@@ -612,48 +607,41 @@ func (t *KnowledgeSearchTool) concurrentSearchByTargets(
 }
 
 // rerankResults applies reranking to all search results (including FAQ entries)
-// using the rerank model or LLM fallback, then filters by threshold and applies
+// using the configured rerank model, then filters by threshold and applies
 // composite scoring so MMR/sorting uses a single score scale.
+//
+// A failed rerank call degrades to the raw retrieval order, mirroring the chat
+// pipeline's api_error_fallback. An empty result after threshold filtering is
+// kept empty: filterRerankRankResults already preserves the top candidate down
+// to agentRerankFallbackMinScore, so reaching zero means even the best match is
+// below that floor. There is deliberately no chat-model re-scoring path here —
+// it mixed the reranker's [0,1] scale with raw RRF scores and could resurrect
+// candidates the reranker had already rejected.
 func (t *KnowledgeSearchTool) rerankResults(
 	ctx context.Context,
 	query string,
 	results []*searchResultWithMeta,
 ) ([]*searchResultWithMeta, error) {
-	if len(results) == 0 {
+	if len(results) == 0 || t.rerankModel == nil {
 		return results, nil
 	}
 
-	var (
-		reranked []*searchResultWithMeta
-		err      error
-	)
-
-	if t.rerankModel != nil {
-		reranked, err = t.rerankWithModel(ctx, query, results)
-		if err != nil || len(reranked) == 0 {
-			if err != nil {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model failed, falling back to chat model: %v", err)
-			} else {
-				logger.Warnf(ctx, "[Tool][KnowledgeSearch] Rerank model returned no results above threshold, falling back to chat model")
-			}
-			err = nil
-			if t.chatModel != nil {
-				reranked, err = t.rerankWithLLM(ctx, query, results)
-			} else if len(reranked) == 0 {
-				reranked = results
-			}
-		}
-	} else if t.chatModel != nil {
-		reranked, err = t.rerankWithLLM(ctx, query, results)
-	} else {
-		return results, nil
-	}
-
+	rankResults, err := t.rerankScores(ctx, query, results)
 	if err != nil {
-		return nil, err
+		logger.Warnf(ctx,
+			"[Tool][KnowledgeSearch] Rerank model failed, using raw retrieval results: %v", err)
+		return results, nil
 	}
 
-	logger.Debugf(ctx, "[Tool][KnowledgeSearch] Rerank produced %d results after threshold filter", len(reranked))
+	threshold := t.rerankThreshold()
+	reranked := t.applyModelRerankScores(
+		results,
+		rankResults,
+		threshold,
+		t.searchTargets.HasRecallThresholdOverride(),
+	)
+	logger.Infof(ctx, "[Tool][KnowledgeSearch] Reranked %d/%d results above threshold %.2f",
+		len(reranked), len(results), threshold)
 	return reranked, nil
 }
 
@@ -689,258 +677,14 @@ func (t *KnowledgeSearchTool) getFAQMetadata(
 	return meta, nil
 }
 
-// rerankWithLLM uses LLM prompt to score and rerank search results
-// Uses batch processing to handle large result sets efficiently
-func (t *KnowledgeSearchTool) rerankWithLLM(
+// rerankScores scores the candidates with the configured rerank model and
+// returns the raw relevance scores, leaving threshold filtering and composite
+// scoring to the caller.
+func (t *KnowledgeSearchTool) rerankScores(
 	ctx context.Context,
 	query string,
 	results []*searchResultWithMeta,
-) ([]*searchResultWithMeta, error) {
-	logger.Infof(ctx, "[Tool][KnowledgeSearch] Using LLM for reranking %d results", len(results))
-
-	if len(results) == 0 {
-		return results, nil
-	}
-
-	// Batch size: process 15 results at a time to balance quality and token usage
-	// This prevents token overflow and improves processing efficiency
-	const batchSize = 15
-	const maxContentLength = 800 // Maximum characters per passage to avoid excessive tokens
-
-	// Process in batches
-	allScores := make([]float64, len(results))
-
-	for batchStart := 0; batchStart < len(results); batchStart += batchSize {
-		batchEnd := batchStart + batchSize
-		if batchEnd > len(results) {
-			batchEnd = len(results)
-		}
-
-		batch := results[batchStart:batchEnd]
-		logger.Debugf(ctx, "[Tool][KnowledgeSearch] Processing rerank batch %d-%d of %d results",
-			batchStart+1, batchEnd, len(results))
-
-		// Build prompt with query and batch passages
-		var passagesBuilder strings.Builder
-		for i, result := range batch {
-			// Get enriched passage (content + image info)
-			enrichedContent := t.getEnrichedPassage(ctx, result.SearchResult)
-			// Truncate content if too long to save tokens
-			content := enrichedContent
-			if len([]rune(content)) > maxContentLength {
-				runes := []rune(content)
-				content = string(runes[:maxContentLength]) + "..."
-			}
-			// Use clear separators to distinguish each passage
-			if i > 0 {
-				passagesBuilder.WriteString("\n")
-			}
-			passagesBuilder.WriteString("─────────────────────────────────────────────────────────────\n")
-			passagesBuilder.WriteString(fmt.Sprintf("Passage %d:\n", i+1))
-			passagesBuilder.WriteString("─────────────────────────────────────────────────────────────\n")
-			passagesBuilder.WriteString(content + "\n")
-		}
-
-		// Optimized prompt focused on retrieval matching and reranking
-		prompt := fmt.Sprintf(
-			`你是搜索结果重排序专家。任务是评估每段检索结果与用户查询及信息需求的匹配程度。
-
-用户查询：%s
-
-任务：按检索相关性对搜索结果重排序——评估每段内容对查询的回答或关联程度。
-
-评分标准（0.0 到 1.0）：
-- 1.0（0.9-1.0）：直接回答查询，包含所需关键信息，高度相关
-- 0.8（0.7-0.8）：强相关，提供大量相关信息
-- 0.6（0.5-0.6）：中等相关，包含部分相关信息但可能不完整
-- 0.4（0.3-0.4）：弱相关，与查询关联很少
-- 0.2（0.1-0.2）：几乎无关，大多不相关
-- 0.0（0.0）：完全无关，与查询无任何关系
-
-评估因素：
-1. 问答应配：该段落是否直接回应用户所问？
-2. 信息完整度：是否提供足够信息以回答查询？
-3. 语义相关性：内容是否在语义上关联查询意图？
-4. 关键词覆盖：是否覆盖查询中的重要术语/概念？
-5. 信息准确性：信息是否准确可信？
-
-检索段落：
-%s
-
-重要：请恰好返回 %d 个分数，每行一个，格式必须严格如下：
-Passage 1: X.XX
-Passage 2: X.XX
-Passage 3: X.XX
-...
-Passage %d: X.XX
-
-只输出分数，不要解释或其他文字。`,
-			query,
-			passagesBuilder.String(),
-			len(batch),
-			len(batch),
-		)
-
-		messages := []chat.Message{
-			{
-				Role:    "system",
-				Content: "你是专注于信息检索的专业搜索结果重排序专家。请评估检索段落与用户查询的匹配程度。关注检索相关性：段落是否回答查询、是否提供所需信息、是否匹配用户信息需求。始终只返回分数，不要解释。",
-			},
-			{
-				Role:    "user",
-				Content: prompt,
-			},
-		}
-
-		// Calculate appropriate max tokens based on batch size
-		// Each score line is ~15 tokens, add buffer for safety
-		maxTokens := len(batch)*20 + 100
-
-		modelCtx := types.WithLLMCallMetadata(ctx, "knowledge_search_rerank", "")
-		response, err := t.chatModel.Chat(modelCtx, messages, &chat.ChatOptions{
-			Temperature: 0.1, // Low temperature for consistent scoring
-			MaxTokens:   maxTokens,
-		})
-		if err != nil {
-			logger.Warnf(ctx, "[Tool][KnowledgeSearch] LLM rerank batch %d-%d failed: %v, using original scores",
-				batchStart+1, batchEnd, err)
-			// Use original scores for this batch on error
-			for i := batchStart; i < batchEnd; i++ {
-				allScores[i] = results[i].Score
-			}
-			continue
-		}
-
-		logger.Infof(ctx, "[Tool][KnowledgeSearch] LLM rerank batch %d-%d response: %s",
-			batchStart+1, batchEnd, response.Content)
-
-		// Parse scores from response
-		batchScores, err := t.parseScoresFromResponse(response.Content, len(batch))
-		if err != nil {
-			logger.Warnf(
-				ctx,
-				"[Tool][KnowledgeSearch] Failed to parse LLM scores for batch %d-%d: %v, using original scores",
-				batchStart+1,
-				batchEnd,
-				err,
-			)
-			// Use original scores for this batch on parsing error
-			for i := batchStart; i < batchEnd; i++ {
-				allScores[i] = results[i].Score
-			}
-			continue
-		}
-
-		// Store scores for this batch
-		for i, score := range batchScores {
-			if batchStart+i < len(allScores) {
-				allScores[batchStart+i] = score
-			}
-		}
-	}
-
-	// Create rerank rank results and apply the same threshold + composite path as the model.
-	rankResults := make([]rerank.RankResult, 0, len(results))
-	for i, score := range allScores {
-		if i >= len(results) {
-			break
-		}
-		rankResults = append(rankResults, rerank.RankResult{
-			Index:          i,
-			RelevanceScore: score,
-		})
-	}
-	sort.Slice(rankResults, func(i, j int) bool {
-		return rankResults[i].RelevanceScore > rankResults[j].RelevanceScore
-	})
-
-	ranked := t.applyModelRerankScores(
-		results,
-		rankResults,
-		t.rerankThreshold(),
-		t.searchTargets.HasRecallThresholdOverride(),
-	)
-	logger.Infof(ctx, "[Tool][KnowledgeSearch] LLM reranked %d/%d results above threshold %.2f",
-		len(ranked), len(results), t.rerankThreshold())
-	return ranked, nil
-}
-
-// parseScoresFromResponse parses scores from LLM response text
-func (t *KnowledgeSearchTool) parseScoresFromResponse(responseText string, expectedCount int) ([]float64, error) {
-	lines := strings.Split(strings.TrimSpace(responseText), "\n")
-	scores := make([]float64, 0, expectedCount)
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Try to extract score from various formats:
-		// "Passage 1: 0.85"
-		// "1: 0.85"
-		// "0.85"
-		// etc.
-		parts := strings.Split(line, ":")
-		var scoreStr string
-		if len(parts) >= 2 {
-			scoreStr = strings.TrimSpace(parts[len(parts)-1])
-		} else {
-			scoreStr = strings.TrimSpace(line)
-		}
-
-		// Remove any non-numeric characters except decimal point
-		scoreStr = strings.TrimFunc(scoreStr, func(r rune) bool {
-			return (r < '0' || r > '9') && r != '.'
-		})
-
-		if scoreStr == "" {
-			continue
-		}
-
-		score, err := strconv.ParseFloat(scoreStr, 64)
-		if err != nil {
-			continue // Skip invalid scores
-		}
-
-		// Clamp score to [0.0, 1.0]
-		if score < 0.0 {
-			score = 0.0
-		}
-		if score > 1.0 {
-			score = 1.0
-		}
-
-		scores = append(scores, score)
-	}
-
-	if len(scores) == 0 {
-		return nil, fmt.Errorf("no valid scores found in response")
-	}
-
-	// If we got fewer scores than expected, pad with last score or 0.5
-	for len(scores) < expectedCount {
-		if len(scores) > 0 {
-			scores = append(scores, scores[len(scores)-1])
-		} else {
-			scores = append(scores, 0.5)
-		}
-	}
-
-	// Truncate if we got more scores than expected
-	if len(scores) > expectedCount {
-		scores = scores[:expectedCount]
-	}
-
-	return scores, nil
-}
-
-// rerankWithModel uses the rerank model for reranking.
-func (t *KnowledgeSearchTool) rerankWithModel(
-	ctx context.Context,
-	query string,
-	results []*searchResultWithMeta,
-) ([]*searchResultWithMeta, error) {
+) ([]rerank.RankResult, error) {
 	passages := make([]string, len(results))
 	for i, result := range results {
 		passages[i] = t.getEnrichedPassage(ctx, result.SearchResult)
@@ -950,21 +694,7 @@ func (t *KnowledgeSearchTool) rerankWithModel(
 	if err != nil {
 		return nil, fmt.Errorf("rerank call failed: %w", err)
 	}
-
-	ranked := t.applyModelRerankScores(
-		results,
-		rerankResp,
-		t.rerankThreshold(),
-		t.searchTargets.HasRecallThresholdOverride(),
-	)
-	logger.Infof(
-		ctx,
-		"[Tool][KnowledgeSearch] Reranked %d/%d results above threshold %.2f",
-		len(ranked),
-		len(results),
-		t.rerankThreshold(),
-	)
-	return ranked, nil
+	return rerankResp, nil
 }
 
 func (t *KnowledgeSearchTool) rerankThreshold() float64 {
@@ -1539,23 +1269,20 @@ func (t *KnowledgeSearchTool) applyMMR(
 		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
 	}
 
-	// MMR selection loop
+	// MMR selection loop, incremental form: maxRedundancy[i] caches candidate i's
+	// maximum jaccard against everything selected so far, so each round only needs
+	// one comparison per remaining candidate instead of one per (candidate, selected)
+	// pair. Selection output is identical to the naive form, including tie-breaking,
+	// because the candidate iteration order is unchanged.
+	selectedTokenSets := make([]map[string]struct{}, 0, k)
+	maxRedundancy := make([]float64, len(candidates))
 	for len(selected) < k && len(candidates) > 0 {
 		bestIdx := 0
 		bestScore := -1.0
 
 		for i, r := range candidates {
-			relevance := r.Score
-			redundancy := 0.0
-
-			// Calculate maximum redundancy with already selected results
-			for _, s := range selected {
-				selectedTokens := t.tokenizeSimple(t.getEnrichedPassage(ctx, s.SearchResult))
-				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTokens))
-			}
-
 			// MMR score: balance relevance and diversity
-			mmr := lambda*relevance - (1.0-lambda)*redundancy
+			mmr := lambda*r.Score - (1.0-lambda)*maxRedundancy[i]
 			if mmr > bestScore {
 				bestScore = mmr
 				bestIdx = i
@@ -1564,20 +1291,27 @@ func (t *KnowledgeSearchTool) applyMMR(
 
 		// Add best candidate to selected and remove from candidates
 		selected = append(selected, candidates[bestIdx])
+		chosenTokens := tokenSets[bestIdx]
+		selectedTokenSets = append(selectedTokenSets, chosenTokens)
 		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		// Remove corresponding token set
+		// Remove corresponding token set and cached redundancy
 		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
+		maxRedundancy = append(maxRedundancy[:bestIdx], maxRedundancy[bestIdx+1:]...)
+
+		// Fold the freshly selected result into every remaining candidate's cache
+		for i := range candidates {
+			maxRedundancy[i] = math.Max(maxRedundancy[i], t.jaccard(tokenSets[i], chosenTokens))
+		}
 	}
 
-	// Compute average redundancy among selected results
+	// Compute average redundancy among selected results, reusing the cached token
+	// sets instead of re-tokenizing every pair
 	avgRed := 0.0
-	if len(selected) > 1 {
+	if len(selectedTokenSets) > 1 {
 		pairs := 0
-		for i := 0; i < len(selected); i++ {
-			for j := i + 1; j < len(selected); j++ {
-				si := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[i].SearchResult))
-				sj := t.tokenizeSimple(t.getEnrichedPassage(ctx, selected[j].SearchResult))
-				avgRed += t.jaccard(si, sj)
+		for i := 0; i < len(selectedTokenSets); i++ {
+			for j := i + 1; j < len(selectedTokenSets); j++ {
+				avgRed += t.jaccard(selectedTokenSets[i], selectedTokenSets[j])
 				pairs++
 			}
 		}

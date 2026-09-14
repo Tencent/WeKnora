@@ -59,10 +59,14 @@ func TestAnthropicChat(t *testing.T) {
 	assert.Equal(t, "test-beta", capturedHeaders.Get("anthropic-beta"))
 	assert.Equal(t, "claude-sonnet-4-5", capturedRequest.Model)
 	assert.Equal(t, 7, capturedRequest.MaxTokens)
-	assert.Equal(t, "You are helpful.", capturedRequest.System)
+	systemText, systemCache := firstTextAndCache(t, capturedRequest.System)
+	assert.Equal(t, "You are helpful.", systemText)
+	require.Equal(t, "ephemeral", systemCache["type"])
 	require.Len(t, capturedRequest.Messages, 1)
 	assert.Equal(t, "user", capturedRequest.Messages[0].Role)
-	assert.Equal(t, "Hi", capturedRequest.Messages[0].Content)
+	userText, userCache := firstTextAndCache(t, capturedRequest.Messages[0].Content)
+	assert.Equal(t, "Hi", userText)
+	require.Equal(t, "ephemeral", userCache["type"])
 	assert.Equal(t, "hello", resp.Content)
 	assert.Equal(t, "end_turn", resp.FinishReason)
 	assert.Equal(t, 3, resp.Usage.PromptTokens)
@@ -274,4 +278,54 @@ func TestNewRemoteChat_AnthropicProvider(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := chat.(*AnthropicChat)
 	assert.True(t, ok)
+}
+
+func TestAnthropicChat_CacheRetentionNoneKeepsPlainStrings(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	var capturedRequest anthropicRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&capturedRequest))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_123","type":"message","role":"assistant",
+			"content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn",
+			"usage":{"input_tokens":3,"output_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	chat, err := NewAnthropicChat(&ChatConfig{
+		Source: types.ModelSourceRemote, BaseURL: server.URL, ModelName: "claude-sonnet-4-5",
+		APIKey: "test-key", Provider: string(provider.ProviderAnthropic),
+	})
+	require.NoError(t, err)
+
+	_, err = chat.Chat(context.Background(), []Message{
+		{Role: "system", Content: "You are helpful."},
+		{Role: "user", Content: "Hi"},
+	}, &ChatOptions{CacheRetention: CacheRetentionNone})
+	require.NoError(t, err)
+
+	assert.Equal(t, "You are helpful.", capturedRequest.System)
+	assert.Equal(t, "Hi", capturedRequest.Messages[0].Content)
+}
+
+func firstTextAndCache(t *testing.T, v any) (string, map[string]any) {
+	t.Helper()
+	switch x := v.(type) {
+	case string:
+		t.Fatalf("expected cache_control content blocks, got plain string %q", x)
+		return "", nil
+	case []any:
+		require.NotEmpty(t, x)
+		block, ok := x[0].(map[string]any)
+		require.True(t, ok)
+		text, _ := block["text"].(string)
+		cache, _ := block["cache_control"].(map[string]any)
+		require.NotNil(t, cache)
+		return text, cache
+	default:
+		t.Fatalf("unexpected content type %T", v)
+		return "", nil
+	}
 }

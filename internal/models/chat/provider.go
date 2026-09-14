@@ -156,7 +156,7 @@ func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *Ch
 	}
 }
 
-// --- Generic (vLLM) / NVIDIA: thinking via chat_template_kwargs ---
+// --- Generic (vLLM) / NVIDIA / LiteLLM: thinking via chat_template_kwargs ---
 
 type genericProvider struct{ baseProvider }
 
@@ -167,6 +167,11 @@ type nvidiaProvider struct{ baseProvider }
 
 func (nvidiaProvider) Name() provider.ProviderName { return provider.ProviderNvidia }
 func (nvidiaProvider) Thinking() ThinkingStrategy  { return chatTemplateKwargs{} }
+
+type liteLLMProvider struct{ baseProvider }
+
+func (liteLLMProvider) Name() provider.ProviderName { return provider.ProviderLiteLLM }
+func (liteLLMProvider) Thinking() ThinkingStrategy  { return chatTemplateKwargs{} }
 
 // --- Gemini OpenAI compatibility: tool thought signatures live in extra_content ---
 
@@ -277,6 +282,7 @@ var providerRegistry = []providerAdapter{
 	lkeapProvider{},
 	deepseekProvider{},
 	genericProvider{},
+	liteLLMProvider{},
 	geminiProvider{},
 	volcengineProvider{},
 	nvidiaProvider{},

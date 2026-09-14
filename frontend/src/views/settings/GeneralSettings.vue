@@ -23,6 +23,7 @@
             <t-option value="en-US" :label="$t('language.enUS')">{{ $t('language.enUS') }}</t-option>
             <t-option value="ru-RU" :label="$t('language.ruRU')">{{ $t('language.ruRU') }}</t-option>
             <t-option value="ko-KR" :label="$t('language.koKR')">{{ $t('language.koKR') }}</t-option>
+            <t-option value="ja-JP" :label="$t('language.jaJP')">{{ $t('language.jaJP') }}</t-option>
           </t-select>
         </div>
       </div>

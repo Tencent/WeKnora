@@ -5,6 +5,7 @@ import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
+import { normalizeSettingsSection } from '@/config/settingsRoute'
 
 const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'
 
@@ -179,10 +180,19 @@ const router = createRouter({
         },
         {
           path: "integrations",
-          redirect: () => ({
-            path: "/platform/settings",
-            query: { section: "models" },
-          }),
+          redirect: (to) => {
+            const tab = typeof to.query.tab === 'string' ? to.query.tab : undefined
+            const incoming = typeof to.query.section === 'string' ? to.query.section : 'integrations'
+            const rest = { ...to.query }
+            delete rest.tab
+            return {
+              path: '/platform/settings',
+              query: {
+                ...rest,
+                section: normalizeSettingsSection(incoming, tab),
+              },
+            }
+          },
           meta: { requiresInit: true, requiresAuth: true }
         },
         {

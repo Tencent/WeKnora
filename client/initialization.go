@@ -26,11 +26,11 @@ type InitializationConfig struct {
 // CLI. Field tags are snake_case (the CLI envelope convention), remapped from
 // the server's camelCase.
 type KBModelConfigView struct {
-	RetrievalReady bool                  `json:"retrieval_ready"` // embedding model bound → KB can embed/retrieve
-	Embedding      ModelSlotView         `json:"embedding"`
-	LLM            ModelSlotView         `json:"llm"`
-	Rerank         RerankSlotView        `json:"rerank"`
-	Multimodal     MultimodalSlotView    `json:"multimodal"`
+	RetrievalReady bool               `json:"retrieval_ready"` // embedding model bound → KB can embed/retrieve
+	Embedding      ModelSlotView      `json:"embedding"`
+	LLM            ModelSlotView      `json:"llm"`
+	Rerank         RerankSlotView     `json:"rerank"`
+	Multimodal     MultimodalSlotView `json:"multimodal"`
 }
 
 // ModelSlotView is one non-secret model slot (embedding / llm).

@@ -11,16 +11,16 @@ import (
 )
 
 // A workspace can point an agent at a named Cube/E2B config while the
-// deployment default stays docker/local. In that combination the agent still
+// deployment default stays disabled. In that combination the agent still
 // registers shell/skill tools against the remote sandbox (initializeSkillsManager
 // resolves the same per-config manager), so gating attachment staging on the
 // process-wide manager would leave those tools running against an empty
 // /workspace/input.
 func TestSessionSandboxInputStoreUsesNamedConfigNotDeploymentDefault(t *testing.T) {
 	// The deployment default advertises no session filesystem, standing in for
-	// docker/local/disabled.
+	// a disabled process-wide manager.
 	deploymentDefault := &stagingSandboxManager{
-		sandboxType:  sandbox.SandboxTypeLocal,
+		sandboxType:  sandbox.SandboxTypeDisabled,
 		disableFiles: true,
 	}
 	// The workspace's named config does advertise one.
@@ -42,7 +42,7 @@ func TestSessionSandboxInputStoreUsesNamedConfigNotDeploymentDefault(t *testing.
 // backend without a session filesystem must not stage anything.
 func TestSessionSandboxInputStoreSkipsWhenDeploymentDefaultHasNoFilesystem(t *testing.T) {
 	deploymentDefault := &stagingSandboxManager{
-		sandboxType:  sandbox.SandboxTypeLocal,
+		sandboxType:  sandbox.SandboxTypeDisabled,
 		disableFiles: true,
 	}
 	svc := &agentService{

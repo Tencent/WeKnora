@@ -88,8 +88,13 @@ type TenantInvitationService interface {
 	LookupByToken(ctx context.Context, plainToken string) (*types.TenantInvitation, error)
 
 	// AcceptByToken creates a tenant_members row binding newUserID to
-	// the share-link's tenant + role, then consumes the link (status
-	// → accepted). A second registration with the same token fails.
+	// the share-link's tenant + role. Unlike Accept, this does NOT flip
+	// the invitation row into a terminal state — share-link rows stay
+	// pending so subsequent invitees can also register through the
+	// same link. Idempotent: if the user already has membership, the
+	// existing row is returned. If the same user also has a pending direct
+	// invitation for the tenant, it is reconciled to accepted so the inbox
+	// cannot offer a second acceptance after membership already exists.
 	AcceptByToken(ctx context.Context, plainToken string, newUserID string) (*types.TenantMember, error)
 
 	// MarkPendingAcceptedIfExists transitions a per-user pending invitation

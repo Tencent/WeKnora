@@ -139,8 +139,8 @@ func (p *SessionSandboxPinner) Clear(ctx context.Context, sessionID string) erro
 		Update("sandbox_config_id", nil).Error
 }
 
-// resolveSandboxForExecution resolves before pinning so stateless workspace
-// backends (docker/local) never leave a permanent session pin. Remote backends
+// resolveSandboxForExecution resolves before pinning so non-remote workspace
+// backends never leave a permanent session pin. Remote backends
 // pin before their first Create; concurrent callers adopt and re-resolve the
 // winning config before executing anything.
 func resolveSandboxForExecution(
@@ -173,7 +173,10 @@ func resolveSandboxForExecution(
 	if err != nil || mgr == nil {
 		return mgr, configID, err
 	}
-	if mgr.GetType() != sandbox.SandboxTypeCube && mgr.GetType() != sandbox.SandboxTypeE2B {
+	// Named backends (Cube, E2B, Docker) all keep a session-scoped sandbox.
+	// Artifact collection and teardown resolve that sandbox from this pin, so
+	// skipping Docker here leaves /workspace/output files uncollected.
+	if !sandbox.IsNamedSandboxBackendType(string(mgr.GetType())) {
 		return mgr, configID, nil
 	}
 	if pinner == nil || strings.TrimSpace(sessionID) == "" {

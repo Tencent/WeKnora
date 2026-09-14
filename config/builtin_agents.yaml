@@ -27,7 +27,7 @@ builtin_agents:
       system_prompt_id: "default_kb"
       context_template_id: "default_context"
       temperature: 0.7
-      max_completion_tokens: 2048
+      max_completion_tokens: 0
       web_search_enabled: true
       web_search_max_results: 5
       multi_turn_enabled: true
@@ -70,7 +70,7 @@ builtin_agents:
       agent_type: "rag-qa"
       system_prompt: ""
       temperature: 0.7
-      max_completion_tokens: 2048
+      max_completion_tokens: 0
       max_iterations: 50
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
@@ -118,7 +118,7 @@ builtin_agents:
       agent_type: "data-analysis"
       system_prompt_id: "data_analyst"
       temperature: 0.3
-      max_completion_tokens: 4096
+      max_completion_tokens: 0
       max_iterations: 30
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
@@ -163,7 +163,7 @@ builtin_agents:
       agent_type: "wiki-qa"
       system_prompt_id: "wiki_researcher"
       temperature: 0.7
-      max_completion_tokens: 4096
+      max_completion_tokens: 0
       max_iterations: 30
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
@@ -207,7 +207,7 @@ builtin_agents:
       agent_type: "custom"
       system_prompt_id: "wiki_fixer"
       temperature: 0.7
-      max_completion_tokens: 4096
+      max_completion_tokens: 0
       max_iterations: 30
       kb_selection_mode: "selected"
       retrieve_kb_only_when_mentioned: false
@@ -232,4 +232,47 @@ builtin_agents:
       vector_threshold: 0.5
       rerank_top_k: 10
       rerank_threshold: 0.3
+
+  - id: "builtin-skill-installer"
+    avatar: "📦"
+    is_builtin: true
+    i18n:
+      default:
+        name: "Skill Installer"
+        description: "Internal agent that installs an uploaded skill and its dependencies into the sandbox image"
+      zh-CN:
+        name: "技能安装器"
+        description: "把上传的技能及其依赖装进沙箱镜像的内部智能体"
+      zh-TW:
+        name: "技能安裝器"
+        description: "把上傳的技能及其相依套件裝進沙箱鏡像的內部智能體"
+      ja-JP:
+        name: "スキルインストーラー"
+        description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールする内部エージェント"
+      ko-KR:
+        name: "스킬 설치 도구"
+        description: "업로드된 스킬과 의존성을 샌드박스 이미지에 설치하는 내부 에이전트"
+    config:
+      agent_mode: "smart-reasoning"
+      agent_type: "custom"
+      system_prompt_id: "skill_installer"
+      temperature: 0.2
+      max_completion_tokens: 24576
+      max_iterations: 30
+      kb_selection_mode: "none"
+      retrieve_kb_only_when_mentioned: false
+      # The install path unions these three in regardless of what is written
+      # here: an install that cannot write its own skill directory cannot
+      # record what it did. They are listed for accuracy, not as the source of
+      # truth. write_skill_file / edit_skill_file reach only the one skill
+      # being installed and are never offered to a tenant-editable agent.
+      allowed_tools:
+        - "shell_exec"
+        - "write_skill_file"
+        - "edit_skill_file"
+      web_search_enabled: false
+      web_search_max_results: 0
+      reflection_enabled: false
+      multi_turn_enabled: true
+      history_turns: 10
 

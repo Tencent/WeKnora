@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -85,7 +86,7 @@ func validRegisterBody() map[string]string {
 	return map[string]string{
 		"username": "alice",
 		"email":    "alice@example.com",
-		"password": "supersecret",
+		"password": "supersecret1",
 	}
 }
 
@@ -210,6 +211,33 @@ func TestRegister_TenantlessProvisioningFromConfig(t *testing.T) {
 		t.Fatalf("tenantless self-serve registration got %d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestGetAuthConfigExposesComplexPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &AuthHandler{
+		configInfo: &config.Config{Auth: &config.AuthConfig{
+			RegistrationMode: config.AuthRegistrationModeSelfServe,
+		}},
+		systemSettingSvc: &tenantPolicySettingService{enabled: true},
+	}
+	r := gin.New()
+	r.GET("/auth/config", h.GetAuthConfig)
+	req := httptest.NewRequest(http.MethodGet, "/auth/config", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"complex_password_enabled":true`) {
+		t.Fatalf("body=%s, want complex_password_enabled true", w.Body.String())
+	}
+}
+
+func TestRegister_NilAuthConfigDoesNotPanic(t *testing.T) {
+	// Defensive: a nil Auth section means the operator hasn't set the
+	// registration mode at all, which must not crash and must keep the
+	// legacy "registration enabled" behaviour. Mirrors the nil guard in
+	// the handler so a config-loading bug doesn't take the server down.
 
 func TestRegister_NilAuthConfigBlocksWhenUsersExist(t *testing.T) {
 	// Nil Auth falls back to invite_only; with existing users, public

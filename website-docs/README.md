@@ -19,9 +19,13 @@ npm run preview  # 预览构建产物
 
 ## 写作约定
 
-- **先讲怎么用，再讲怎么实现。** 每篇功能文档开头回答「这东西解决什么问题、在界面上怎么用」，之后才展开数据模型、流程与源码细节；源码索引统一放在文末的「实现参考」小节。
-- **面向用户的章节**（01 快速开始、03 功能模块、05 客户端）以任务为主线；**面向开发者的章节**（02 架构、04 API、06 开发指南）以结构为主线，可以直接深入细节。
-- 涉及界面操作的地方配截图，用 `<Screenshot>` 组件引用（见下节）。
+- 首段直接说明功能、适用范围和操作结果。使用简洁、客观的表述，减少章节预告、反问、口语化比喻和设计辩解。
+- 快速开始按准备、操作、预期结果组织；功能指南以用户任务为主线，配置影响与限制紧跟相关操作；客户端文档先说明连接和使用方式。
+- API 参考先说明用途、认证和权限，再列请求、响应与错误；架构文档解释组件职责、数据流和设计约束；开发指南保留修改入口、实现步骤与验证方法。
+- 每段围绕一个结论展开。连续段落用于解释行为与原因，列表用于操作步骤，表格用于参数、权限和选项比较。避免用字段清单代替功能说明。
+- 接口、字段和默认值保持准确。功能页中的源码索引放在文末「实现参考」，详细实现与日常操作分节编排；迁移历史集中到开发文档或实现参考。
+- 标题使用明确的主题或动作，避免手工章节编号。修改已有标题时保留原锚点，或同步修正文内链接；不要用「见第几节」代替链接。
+- 涉及界面操作时使用 `<Screenshot>` 组件；只在有助于理解操作时增加截图。
 
 ## 截图
 
@@ -36,41 +40,12 @@ npm run preview  # 预览构建产物
 
 图片文件不存在时，组件会渲染成一个带说明的虚线占位框，标出期望的文件路径与该图应当展示的内容；把同名图片放进 `website-docs/public/screenshots/` 即可自动生效，**不需要改 Markdown**。
 
-当前待补充的截图共 31 张：
+当前待补充的截图共 2 张：
 
 | 文件名（放在 `public/screenshots/` 下） | 出现位置 | 应当展示 |
 | --- | --- | --- |
-| `introduction-overview.png` | 产品介绍 | 登录后的主界面全貌 |
-| `quickstart-register.png` | 快速上手 | 注册页 |
-| `quickstart-init-wizard.png` | 快速上手 | 初始化向导中的模型配置 |
-| `quickstart-upload.png` | 快速上手 | 上传确认对话框 |
-| `quickstart-document-list.png` | 快速上手 | 文档解析完成的列表 |
-| `quickstart-chat.png` | 快速上手 | 一轮带引用的问答 |
-| `settings-members.png` | 租户与认证 | 空间成员与邀请 |
-| `settings-system-admin.png` | 平台管理 | 平台控制台（系统管理员专属分区） |
-| `kb-document-list.png` | 知识库 | 文档列表与批量操作栏 |
-| `kb-settings.png` | 知识库 | 分块参数与索引策略开关 |
-| `kb-chunk-edit.png` | 知识库 | 分块编辑与版本历史 |
-| `kb-batch-tag.png` | 知识库 | 批量打标签对话框 |
-| `kb-activity.png` | 知识库 | 活动流记录 |
 | `kb-folder-tree.png` | 知识库 | 文档列表的文件夹树 |
-| `settings-models.png` | 模型管理 | 模型列表与添加表单 |
-| `agent-editor.png` | Agent 引擎 | 自定义 Agent 配置弹窗 |
-| `agent-chat.png` | Agent 引擎 | Agent 推理过程时间线 |
-| `mcp-services.png` | MCP 集成 | MCP 服务配置与工具清单 |
 | `kg-graph.png` | 知识图谱 | 实体关系图 |
-| `datasource-sync.png` | 数据源导入 | 数据源列表与同步状态 |
-| `im-channels.png` | IM 集成 | IM 渠道配置 |
-| `embed-channel.png` | 网页嵌入 | 渠道配置与挂件效果 |
-| `wiki-browser.png` | Wiki 能力 | Wiki 浏览器目录与页面 |
-| `wiki-graph.png` | Wiki 能力 | Wiki 图谱视图 |
-| `wiki-revision-history.png` | Wiki 能力 | 页面版本历史与回滚 |
-| `chat-references-drawer.png` | 会话与对话体验 | 回答、引用角标与引用面板 |
-| `settings-storage-backends.png` | 存储后端 | 多实例列表与连通性测试 |
-| `chrome-extension.png` | Chrome 插件 | 网页侧边栏问答与剪藏 |
-| `faq-management.png` | FAQ 能力 | FAQ 条目列表与导入 |
-| `queue-dashboard.png` | 可观测性 | 运行时任务队列面板 |
-| `observability-langfuse.png` | 可观测性 | Langfuse 中一条完整调用链 |
 
 仓库 `docs/images/` 下已有一批现成的产品截图（`qa.png`、`knowledgebases.png`、`wiki-browser.png`、`wiki-graph.png`、`settings.png`、`agent-qa.png`、`graph1-3.png`、`langfuse.png`、`rbac-*.png` 等），补图时可以先看看能否直接复用。
 
@@ -84,7 +59,7 @@ npm run preview  # 预览构建产物
 
 ## 目录
 
-### 01 快速开始
+### 快速开始 {#_01-快速开始}
 
 | 文档 | 内容 |
 | --- | --- |
@@ -93,7 +68,7 @@ npm run preview  # 预览构建产物
 | [快速上手](01-getting-started/03-quickstart.md) | 注册 → 初始化向导 → 配置模型 → 建库 → 上传 → 问答的完整路径，含可直接执行的 curl 链路 |
 | [配置详解](01-getting-started/04-configuration.md) | config.yaml 全字段、约 150 个环境变量、prompt 模板、内置模型与内置 Agent 配置 |
 
-### 02 架构
+### 架构 {#_02-架构}
 
 | 文档 | 内容 |
 | --- | --- |
@@ -103,35 +78,37 @@ npm run preview  # 预览构建产物
 | [检索问答流程](02-architecture/04-rag-pipeline.md) | chat_pipeline 插件流水线、跨库检索与融合、重排、流式输出（SSE）与引用生成 |
 | [异步任务系统](02-architecture/05-async-tasks.md) | asynq 队列拓扑、6 个 worker pool、Lite 同步模式、死信与任务巡检、事件总线 |
 
-### 03 功能模块
+### 功能模块 {#_03-功能模块}
 
 | 文档 | 内容 |
 | --- | --- |
 | [租户、用户与认证授权](03-features/01-tenant-auth.md) | 多租户模型、JWT / API Key / OIDC、RBAC 角色矩阵、组织与共享空间 |
-| [知识库与知识管理](03-features/02-knowledge-base.md) | 知识库类型与全部可配置项、树形文件夹、多标签与批量打标、分块编辑与版本历史、自定义元数据、预览安全、复制与移动、活动流、配额 |
+| [知识库与知识管理](03-features/02-knowledge-base.md) | 知识库类型与全部可配置项、树形文件夹、多标签、自动标签与批量打标、分块编辑与版本历史、自定义元数据、预览安全、复制与移动、活动流、配额 |
 | [文档解析服务 docreader](03-features/03-document-parsing.md) | gRPC 接口、三引擎注册表、解析器矩阵（含 HTML / MHTML / Excel 表头模式）、并发模型、部署与扩容 |
 | [分块机制](03-features/04-chunking.md) | 自适应分块架构（heading/heuristic/recursive）、父子分块、语义边界重叠、ContextHeader、调试端点 |
 | [检索引擎与向量存储](03-features/05-retrieval-engines.md) | 各检索引擎（向量/BM25/全文/混合）能力对比、驱动选择、维度管理、打分归一化 |
 | [模型管理](03-features/06-models.md) | 5 类模型、26 个厂商 Provider、内置模型机制、Ollama 本地模型、限流与用量 |
-| [Agent 引擎](03-features/07-agent.md) | ReAct 循环、24 个内置工具、上下文与记忆管理、技能系统与沙箱、自定义 Agent、建议问题 |
-| [MCP 集成](03-features/08-mcp.md) | MCP 客户端管理、OAuth 2.0 + PKCE 全流程、工具审批、WeKnora MCP Server（`tencent-weknora-mcp`，29 个工具） |
+| [Agent 引擎](03-features/07-agent.md) | ReAct 循环、内置与动态工具、上下文与记忆管理、技能系统与沙箱、自定义 Agent、建议问题 |
+| [MCP 集成](03-features/08-mcp.md) | MCP 客户端管理、OAuth 2.0 + PKCE 全流程、工具启停与审批、WeKnora MCP Server（`tencent-weknora-mcp`，31 个工具） |
 | [知识图谱](03-features/09-knowledge-graph.md) | 两级开关、LLM 实体关系抽取、Neo4j 存储、图谱增强检索 |
-| [数据源导入](03-features/10-datasource.md) | 连接器体系（飞书/Lark/Notion/语雀/RSS）、凭据加密、同步调度与增量更新 |
-| [网络搜索与网页抓取](03-features/11-web-search.md) | 9 个搜索引擎、SSRF 防护、web_fetch 双实现、SearXNG 自托管 |
+| [数据源导入](03-features/10-datasource.md) | 连接器体系（飞书/Lark/GitLab/IMA/Notion/语雀/RSS）、凭据加密、同步调度与增量更新 |
+| [网络搜索与网页抓取](03-features/11-web-search.md) | 13 个搜索引擎、SSRF 防护、web_fetch 双实现、SearXNG 自托管 |
 | [IM 集成](03-features/12-im-integration.md) | 10 个 IM 平台适配、消息处理流水线、内置命令、流式渲染、多实例协同 |
 | [网页嵌入 Embed Channel](03-features/13-embed-channel.md) | 嵌入渠道配置、匿名会话与 token 交换、安全模式、webhook、接入示例 |
 | [Wiki 能力](03-features/14-wiki.md) | 基于知识库的 LLM Wiki 站点生成、四阶段管道、slug 机制、人工编辑与版本回滚、issue 闭环、变更并入知识库活动流 |
 | [评估能力](03-features/15-evaluation.md) | 评估任务、Parquet 数据集格式、12 项检索/生成指标 |
 | [可观测性与审计](03-features/16-observability.md) | 日志体系、Langfuse 追踪、审计日志与保留策略、限流、健康检查 |
 | [FAQ 能力](03-features/17-faq.md) | FAQ 条目模型、批量导入与去重、检索命中策略、克隆同步 |
-| [会话与对话体验](03-features/18-chat-experience.md) | 进度条与引用面板、导出对话、会话内临时附件、渠道会话可见性、跨会话历史搜索 |
+| [会话与对话体验](03-features/18-chat-experience.md) | 进度条、问题大纲与引用面板、生成文件、导出对话、会话内临时附件、渠道会话可见性、跨会话历史搜索 |
 | [存储后端](03-features/19-storage-backends.md) | 多实例注册、空间默认与按库绑定、连通性测试、legacy 别名迁移 |
-| [平台管理与系统管理员](03-features/20-platform-admin.md) | 平台级身份与空间 Owner 的边界、首个管理员引导、控制台四分区、运行时系统设置 |
+| [平台管理与系统管理员](03-features/20-platform-admin.md) | 平台级身份与空间 Owner 的边界、首个管理员引导、创建用户、控制台四分区、运行时系统设置 |
 | [图片与文件的对外访问](03-features/21-file-access.md) | 四种 URL 形式、各渠道怎么取、IM/API 图片不显示的排查表 |
+| [技能目录与沙箱](03-features/22-skills-sandbox.md) | 目录/安装、Docker/Cube/E2B、网络策略、个人变量、生成文件 |
+| [跨会话长期记忆](03-features/23-memory.md) | 空间/个人开关、自动提取、待确认项、主题/文档偏好与整理 |
 
-### 04 API 参考
+### API 参考 {#_04-api-参考}
 
-覆盖约 360 个端点，每个端点含权限要求、参数表与 curl 示例。
+按资源分组列出端点、权限、参数、响应与 curl 示例。
 
 | 文档 | 内容 |
 | --- | --- |
@@ -148,20 +125,23 @@ npm run preview  # 预览构建产物
 | [基础设施与数据源](04-api/02-api-infra.md) | 向量存储、存储后端、Web 搜索、数据源 |
 | [Agent 与 MCP](04-api/02-api-agent-mcp.md) | Agent、MCP 服务、OAuth、技能、收藏 |
 | [IM、Embed 与文件](04-api/02-api-channels.md) | IM 回调与渠道、微信扫码、Embed、文件服务 |
+| [沙箱、技能与个人变量](04-api/02-api-sandbox-skills.md) | 配置、模板、库存、安装与进度、目录、个人变量 |
+| [长期记忆](04-api/02-api-memory.md) | 空间配置、个人设置/条目、主题、文档偏好、导出与整理 |
 
-### 05 客户端
+### 客户端 {#_05-客户端}
 
 | 文档 | 内容 |
 | --- | --- |
 | [Web 前端](05-clients/01-frontend.md) | Vue 3 + TDesign 技术栈、页面路由、状态管理、i18n、部署 |
 | [命令行工具 CLI](05-clients/02-cli.md) | 17 个命令组、多 profile 配置、输出格式与退出码、脚本化用法 |
-| [Go SDK](05-clients/03-go-sdk.md) | 约 170 个方法的资源覆盖、流式对话、错误处理、完整示例 |
+| [Go SDK](05-clients/03-go-sdk.md) | 资源与方法覆盖、流式对话、错误处理、完整示例 |
 | [微信小程序](05-clients/04-miniprogram.md) | 页面结构、后端地址与 API Key 配置、构建发布 |
 | [桌面端](05-clients/05-desktop.md) | 单机桌面应用（未正式发布）、数据目录与端口设置、偏好设置与自动更新 |
 | [Chrome 插件](05-clients/06-chrome-extension.md) | 网页侧边栏问答、剪藏与速记，凭证配置与排查 |
 | [Claw Skill](05-clients/07-claw-skill.md) | ClawHub 上的 WeKnora Skill、环境变量配置、与 MCP 的取舍 |
+| [DeepSeek Harness 插件](05-clients/08-deepseek-harness.md) | 安装与凭证、4 个工具、范围选择、引用图片与排查 |
 
-### 06 开发指南
+### 开发指南 {#_06-开发指南}
 
 | 文档 | 内容 |
 | --- | --- |

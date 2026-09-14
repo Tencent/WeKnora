@@ -1,6 +1,6 @@
 # API 参考：知识库与知识
 
-路由注册：`internal/router/routes_knowledge.go` 的 `RegisterKnowledgeBaseRoutes`、`RegisterKnowledgeRoutes`。Handler：`internal/handler/knowledgebase.go`、`internal/handler/knowledge.go`。
+创建知识库，导入与管理文档，并查询处理进度、复制或移动内容。
 
 权限速记：读路由为 Viewer+ 且需对 KB 有 read 权限（自有/组织共享/共享 Agent 可见）；写路由为“KB 创建者 OR Admin+”且需 write 权限。API key：读需 `retrieve`，内容写需 `ingest`，KB 生命周期需 `manage_kbs`（均可被 full-access 覆盖），并受 KB 白名单约束。
 
@@ -31,6 +31,25 @@
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"产品文档","type":"document"}'
+```
+
+### 文档自动标签配置
+
+创建知识库时 `auto_tag_config` 位于顶层；更新时放在 `config.auto_tag_config`。仅 document 知识库支持，默认 enabled=false。
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| enabled | false | 解析后异步从已有标签中选择 |
+| model_id | 空 | 回退知识库 summary_model_id |
+| max_tags | 3 | 最多 10 个 |
+| skip_if_tagged | true | 已有标签则跳过；false 允许补充标签 |
+
+开启后对新解析/重新解析的文档生效，不自动扫描全部旧文档。无候选标签或无可用模型时不阻断入库。更新示例：
+
+```bash
+curl -X PUT "$BASE/api/v1/knowledge-bases/kb-1" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"产品文档","config":{"auto_tag_config":{"enabled":true,"max_tags":3,"skip_if_tagged":true}}}'
 ```
 
 ### GET /api/v1/knowledge-bases
@@ -100,6 +119,8 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 
 用途：KB 内混合检索（向量+关键词）。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
 
+查询参数：`resource_urls=handle|public`（`public` 把结果 `content` / `image_info` 里的 `resource://` 换成可加载直链，详见 [API 总览](./01-api-overview.md)）。
+
 请求体（`types.SearchParams`）：
 
 | 字段 | 类型 | 必填 | 说明 |
@@ -117,7 +138,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 响应：200 `{"success":true,"data":[SearchResult]}`
 
 ```bash
-curl -X POST $BASE/api/v1/knowledge-bases/kb-1/hybrid-search -H "X-API-Key: $API_KEY" \
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/hybrid-search?resource_urls=public" -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"query_text":"退款流程","match_count":5}'
 ```
 
@@ -270,7 +291,7 @@ curl "$BASE/api/v1/knowledge-bases/kb-1/knowledge?page=1&parse_status=completed"
 
 ### GET /api/v1/knowledge-bases/:id/knowledge/folders
 
-用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，早期把路径塞在 `file_name` 里的数据已回填）。权限：Viewer+ + KBAccessRead。
+用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，历史 `file_name` 中的路径已回填到该字段）。权限：Viewer+ + KBAccessRead。
 
 响应：200 `{"success":true,"data":[{FolderNode}]}`
 
@@ -353,7 +374,7 @@ curl -X DELETE $BASE/api/v1/knowledge/k-1 -H "X-API-Key: $API_KEY"
 
 ### PUT /api/v1/knowledge/:id
 
-用途：更新知识元信息。权限同上。请求体（`types.Knowledge` 子集）：`title`、`description`、`tags`、`custom_metadata`（均可选）。
+用途：更新知识元信息。权限同上。请求体（`types.Knowledge` 子集）：`title`、`description`、`tags`、`custom_metadata`（均可选）。description 省略保持原摘要，显式空字符串清空摘要，非空值保存手工摘要；界面可在文档内容页编辑。
 
 `custom_metadata` 是用户自填的描述性元数据（与系统内部使用的 `metadata` 分开存放，migration `000078`），校验规则见 `internal/application/service/knowledge.go`：
 
@@ -562,3 +583,7 @@ curl -X POST $BASE/api/v1/knowledge/move -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
 ```
+
+## 实现参考
+
+路由注册：`internal/router/routes_knowledge.go` 的 `RegisterKnowledgeBaseRoutes`、`RegisterKnowledgeRoutes`。Handler：`internal/handler/knowledgebase.go`、`internal/handler/knowledge.go`。

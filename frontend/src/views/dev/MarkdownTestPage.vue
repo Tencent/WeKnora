@@ -130,15 +130,15 @@ import {
   renderChatMarkdown,
 } from '@/utils/chatMarkdownRenderer';
 import {
+  appendMermaidSvgCache,
   ensureMermaidInitialized,
   enhanceMarkdownContainer,
-  renderMermaidToSvg,
   createMermaidCodeRenderer,
 } from '@/utils/mermaidShared';
 import {
   replaceIncompleteMermaidWithPlaceholder,
   prepareStreamingMermaidMarkdown,
-  extractFirstMermaidCode,
+  extractMermaidCodes,
   injectCachedMermaidSvg,
 } from '@/utils/chatMessageShared';
 
@@ -416,9 +416,8 @@ const streamBuffer = ref('');
 const isStreaming = ref(false);
 const streamSpeed = ref(30);
 const customInput = ref('');
-const streamMermaidSvgHtml = ref('');
+const streamMermaidSvgHtml = ref<string[]>([]);
 let streamTimer: ReturnType<typeof setInterval> | null = null;
-let streamMermaidRenderId = 0;
 let streamMermaidRenderTask: Promise<void> | null = null;
 
 // Pre-render static fixtures once so streaming ticks do not reset other sections.
@@ -436,21 +435,26 @@ const streamHtml = computed(() => renderStreamMarkdown(streamBuffer.value));
 const customHtml = computed(() => render(customInput.value));
 
 const cacheStreamMermaidSvg = async () => {
-  if (streamMermaidSvgHtml.value) return;
-
-  const code = extractFirstMermaidCode(streamBuffer.value);
-  if (!code) return;
+  const codes = extractMermaidCodes(streamBuffer.value);
+  if (codes.length <= streamMermaidSvgHtml.value.length) return;
 
   if (!streamMermaidRenderTask) {
     streamMermaidRenderTask = (async () => {
-      const svg = await renderMermaidToSvg(code, `mermaid-stream-${++streamMermaidRenderId}`);
-      if (svg) streamMermaidSvgHtml.value = svg;
+      streamMermaidSvgHtml.value = await appendMermaidSvgCache(
+        extractMermaidCodes(streamBuffer.value),
+        streamMermaidSvgHtml.value,
+        'mermaid-stream',
+      );
     })().finally(() => {
       streamMermaidRenderTask = null;
     });
   }
 
   await streamMermaidRenderTask;
+
+  if (extractMermaidCodes(streamBuffer.value).length > streamMermaidSvgHtml.value.length) {
+    await cacheStreamMermaidSvg();
+  }
 };
 
 const startStream = () => {
@@ -471,7 +475,7 @@ const startStream = () => {
 const resetStream = () => {
   if (streamTimer) clearInterval(streamTimer);
   streamBuffer.value = '';
-  streamMermaidSvgHtml.value = '';
+  streamMermaidSvgHtml.value = [];
   streamMermaidRenderTask = null;
   isStreaming.value = false;
 };

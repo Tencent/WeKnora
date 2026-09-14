@@ -32,3 +32,23 @@ test('chat markdown links always open in a new tab', () => {
   assert.equal(attributes.get('target'), '_blank');
   assert.equal(attributes.get('rel'), 'noopener noreferrer');
 });
+
+test('protected resource download cards stay in the current tab', () => {
+  const attributes = new Map([
+    ['href', 'blob:http://localhost/file'],
+    ['class', 'protected-resource-card'],
+    ['download', 'deck.pptx'],
+    ['target', '_blank'],
+  ]);
+  const anchor = {
+    tagName: 'A',
+    getAttribute: (name) => attributes.get(name) ?? null,
+    setAttribute: (name, value) => attributes.set(name, value),
+    hasAttribute: (name) => attributes.has(name),
+    removeAttribute: (name) => attributes.delete(name),
+  };
+
+  markdownDomPurifySecurityHooks.afterSanitizeElements(anchor);
+
+  assert.equal(attributes.has('target'), false);
+});

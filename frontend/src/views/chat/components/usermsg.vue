@@ -43,6 +43,11 @@
         <div class="user_msg">
             {{ content }}
         </div>
+        <div v-if="steerFailed" class="steer-failure" role="status">
+            <span>{{ t('input.messages.steerFailed') }}</span>
+            <t-tooltip :content="t('input.steerRetry')"><button type="button" :aria-label="t('input.steerRetry')" @click="emit('retry-steer')"><t-icon name="refresh" /></button></t-tooltip>
+            <t-tooltip :content="t('common.remove')"><button type="button" :aria-label="t('common.remove')" @click="emit('remove-steer')"><t-icon name="close" /></button></t-tooltip>
+        </div>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg" />
     </div>
 </template>
@@ -53,6 +58,8 @@ import picturePreview from '@/components/picture-preview.vue';
 import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
+import { SKILL_ICON } from '@/types/mention';
+const emit = defineEmits(['retry-steer', 'remove-steer']);
 
 const { t } = useI18n();
 
@@ -64,11 +71,12 @@ const mentionTagClass = (item) => {
 const mentionTagIcon = (item) => {
     if (item.type === 'tag') return 'tag';
     if (item.type === 'mcp') return 'tools';
-    if (item.type === 'skill') return 'bookmark';
+    if (item.type === 'skill') return SKILL_ICON;
     return 'file';
 };
 
 const props = defineProps({
+    steerFailed: { type: Boolean, default: false },
     content: {
         type: String,
         required: false
@@ -355,4 +363,11 @@ html[theme-mode="dark"] {
         color: var(--td-text-color-primary);
     }
 }
+</style>
+
+<style scoped>
+.steer-failure { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px; }
+.steer-failure { margin-top: 6px; color: var(--td-error-color); }
+.steer-failure button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.steer-failure button:hover { background: var(--td-bg-color-secondarycontainer); }
 </style>

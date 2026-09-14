@@ -11,7 +11,7 @@ const docTemplate = `{
         "title": "{{.Title}}",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {
-            "name": "TreeRAG Github",
+            "name": "WeKnora Github",
             "url": "https://github.com/Tencent/WeKnora"
         },
         "version": "{{.Version}}"
@@ -19,6 +19,73 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/agent-chat/{session_id}": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "基于Agent的智能问答，支持多轮对话和SSE流式响应",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "Agent问答",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "问答请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_session.CreateKnowledgeQARequest"
+                        }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "问答结果（SSE流）",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/agent/mcp-oauth-resolutions/{pending_id}": {
             "post": {
                 "security": [
@@ -67,13 +134,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
                         "description": "用户尚未完成授权",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -114,7 +181,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -171,13 +238,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "待审批记录不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -215,7 +282,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -262,7 +329,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -373,13 +440,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -433,13 +500,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "无法修改内置智能体",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -484,19 +551,19 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "无法删除内置智能体",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -543,13 +610,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -600,7 +667,7 @@ const docTemplate = `{
                     "403": {
                         "description": "无权限",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -655,7 +722,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "返回数量上限（默认6）",
+                        "description": "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）",
                         "name": "limit",
                         "in": "query"
                     }
@@ -671,13 +738,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "智能体不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -739,13 +806,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.LoginResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse"
                         }
                     },
                     "403": {
                         "description": "非 Lite 版本",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -758,7 +825,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "修改当前用户的登录密码",
+                "description": "修改当前用户的登录密码。新密码须满足 8–32 位且同时包含字母与数字；开启复杂密码后还需包含大小写与特殊字符。成功后所有会话被撤销，需重新登录。",
                 "consumes": [
                     "application/json"
                 ],
@@ -799,7 +866,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -807,7 +874,7 @@ const docTemplate = `{
         },
         "/auth/config": {
             "get": {
-                "description": "返回当前部署的注册模式等公开认证配置，供前端决定是否展示注册入口",
+                "description": "返回当前部署的注册模式与密码复杂度开关，供前端决定是否展示注册入口以及密码校验规则",
                 "consumes": [
                     "application/json"
                 ],
@@ -863,7 +930,7 @@ const docTemplate = `{
                     "410": {
                         "description": "链接无效或已撤销",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -889,7 +956,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.LoginRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginRequest"
                         }
                     }
                 ],
@@ -897,13 +964,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.LoginResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse"
                         }
                     },
                     "401": {
                         "description": "认证失败",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -938,7 +1005,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -973,7 +1040,7 @@ const docTemplate = `{
                     "401": {
                         "description": "未授权",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1019,13 +1086,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
                         "description": "未授权",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1088,8 +1155,22 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OIDCConfigResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OIDCConfigResponse"
                         }
+                    }
+                }
+            }
+        },
+        "/auth/oidc/start": {
+            "get": {
+                "description": "与 /auth/oidc/url 不同，此端点直接 302 重定向到 OIDC Provider 的授权页，\n无需前端 JS 介入。适用于外部平台（如企业门户）直接给出一个链接即可\n触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。",
+                "tags": [
+                    "认证"
+                ],
+                "summary": "发起 OIDC 登录（直接 302）",
+                "responses": {
+                    "302": {
+                        "description": "Found"
                     }
                 }
             }
@@ -1120,19 +1201,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OIDCAuthURLResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OIDCAuthURLResponse"
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "OIDC未启用",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1178,7 +1259,7 @@ const docTemplate = `{
                     "401": {
                         "description": "令牌无效",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1204,7 +1285,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RegisterRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RegisterRequest"
                         }
                     }
                 ],
@@ -1212,19 +1293,19 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RegisterResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RegisterResponse"
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "注册功能已禁用",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1258,25 +1339,25 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.LoginResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse"
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
                         "description": "邮箱已注册",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "410": {
                         "description": "链接无效或已撤销",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1289,7 +1370,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系",
+                "description": "为当前用户在目标空间重新签发访问令牌；要求该用户在目标空间存在 active 成员关系（跨租户超级用户除外）。\n成功换签会把目标空间写入「最近活跃租户」偏好，下次登录与 refresh 都落在该空间（refresh JWT 不含 tenant_id）。\n该偏好是账号级的：一次换签会改变该用户所有设备的下次登录/refresh 落点。偏好写入失败则整次换签失败，不会发出新 token。",
                 "consumes": [
                     "application/json"
                 ],
@@ -1323,19 +1404,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.LoginResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LoginResponse"
                         }
                     },
                     "400": {
                         "description": "参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
-                        "description": "无该空间成员关系",
+                        "description": "无该空间成员关系或偏好写入失败",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1370,7 +1451,7 @@ const docTemplate = `{
                     "401": {
                         "description": "令牌无效",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1480,13 +1561,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1547,13 +1628,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1614,7 +1695,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1659,7 +1740,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1722,13 +1803,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1780,13 +1861,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "分块不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -1817,7 +1898,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.DataSource"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                             }
                         }
                     },
@@ -1851,7 +1932,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     }
                 ],
@@ -1859,7 +1940,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     },
                     "400": {
@@ -1897,7 +1978,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SyncLog"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                         }
                     },
                     "404": {
@@ -1928,7 +2009,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_datasource.ConnectorMetadata"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata"
                             }
                         }
                     }
@@ -2004,7 +2085,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     },
                     "404": {
@@ -2044,7 +2125,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     }
                 ],
@@ -2052,7 +2133,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.DataSource"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DataSource"
                         }
                     },
                     "400": {
@@ -2134,7 +2215,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SyncLog"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                             }
                         }
                     },
@@ -2275,7 +2356,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Resource"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Resource"
                             }
                         }
                     },
@@ -2349,7 +2430,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SyncLog"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                         }
                     },
                     "400": {
@@ -2443,7 +2524,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2490,7 +2571,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2537,7 +2618,7 @@ const docTemplate = `{
                     "404": {
                         "description": "任务不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2845,7 +2926,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2892,7 +2973,7 @@ const docTemplate = `{
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -2946,13 +3027,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3001,7 +3082,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3074,7 +3155,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3123,7 +3204,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3179,7 +3260,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3259,7 +3340,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3306,7 +3387,7 @@ const docTemplate = `{
                     "404": {
                         "description": "任务不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3376,7 +3457,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3433,7 +3514,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3487,7 +3568,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3560,7 +3641,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3609,7 +3690,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3655,7 +3736,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3687,7 +3768,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KnowledgeBase"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBase"
                         }
                     }
                 ],
@@ -3702,7 +3783,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3751,7 +3832,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3798,7 +3879,7 @@ const docTemplate = `{
                     "404": {
                         "description": "任务不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3851,13 +3932,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3911,7 +3992,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -3956,7 +4037,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4026,7 +4107,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4070,7 +4151,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4146,6 +4227,12 @@ const docTemplate = `{
                         "description": "排序方式: asc(按更新时间正序), 默认按更新时间倒序",
                         "name": "sort_order",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "启用状态筛选；不传时返回全部",
+                        "name": "is_enabled",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4159,7 +4246,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4198,7 +4285,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQBatchUpsertPayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQBatchUpsertPayload"
                         }
                     }
                 ],
@@ -4213,7 +4300,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4275,7 +4362,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4328,7 +4415,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4369,7 +4456,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQEntryFieldsBatchUpdate"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsBatchUpdate"
                         }
                     }
                 ],
@@ -4384,7 +4471,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4440,7 +4527,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4494,13 +4581,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "条目不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4546,7 +4633,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQEntryPayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryPayload"
                         }
                     }
                 ],
@@ -4561,7 +4648,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4624,13 +4711,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "条目不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4671,7 +4758,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQEntryPayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryPayload"
                         }
                     }
                 ],
@@ -4686,7 +4773,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4742,13 +4829,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识库不存在或无导入记录",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4789,7 +4876,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQSearchRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQSearchRequest"
                         }
                     }
                 ],
@@ -4804,7 +4891,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4845,8 +4932,19 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SearchParams"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
                         }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4860,7 +4958,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -4899,8 +4997,19 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SearchParams"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchParams"
                         }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4914,7 +5023,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5002,6 +5111,18 @@ const docTemplate = `{
                         "description": "更新时间终点，RFC3339 格式",
                         "name": "end_time",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤",
+                        "name": "folder_path",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "为 true 时同时返回子文件夹内的文档",
+                        "name": "folder_recursive",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -5015,7 +5136,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5060,13 +5181,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5150,7 +5271,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
@@ -5158,6 +5279,113 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/{id}/knowledge/folders": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回知识库内由文件夹上传形成的目录树，包含每个文件夹的直接文档数与含子目录的总数",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "获取知识库文件夹目录树",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "目录树",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "把一个文件夹及其所有子目录改到新路径。目标路径已存在时两个文件夹合并；不能移动到自身子目录下",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "重命名或移动文件夹",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "重命名请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.RenameKnowledgeFolderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "重命名成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5198,7 +5426,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ManualKnowledgePayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload"
                         }
                     }
                 ],
@@ -5213,7 +5441,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5292,7 +5520,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
@@ -5343,13 +5571,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5396,7 +5624,7 @@ const docTemplate = `{
                     "404": {
                         "description": "知识库不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5430,7 +5658,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ListSharesResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListSharesResponse"
                         }
                     }
                 }
@@ -5466,7 +5694,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ShareKnowledgeBaseRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest"
                         }
                     }
                 ],
@@ -5481,7 +5709,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5526,7 +5754,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UpdateSharePermissionRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateSharePermissionRequest"
                         }
                     }
                 ],
@@ -5541,7 +5769,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5584,7 +5812,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5649,7 +5877,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5714,7 +5942,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5777,7 +6005,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5849,7 +6077,134 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-chat/{session_id}": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "基于知识库的问答（使用LLM总结），支持SSE流式响应",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "知识问答",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "问答请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_session.CreateKnowledgeQARequest"
+                        }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "问答结果（SSE流）",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-search": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "在知识库中搜索（不使用LLM总结）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "知识搜索",
+                "parameters": [
+                    {
+                        "description": "搜索请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_session.SearchKnowledgeRequest"
+                        }
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "搜索结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5912,7 +6267,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -5961,13 +6316,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6016,13 +6371,68 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge/folder": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "批量修改知识条目所属文件夹。文件夹由路径推导而来，因此目标路径不存在时会自动创建；空路径表示知识库顶层。仅调整归类，不会重新解析文档",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "移动知识到文件夹",
+                "parameters": [
+                    {
+                        "description": "移动请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.MoveKnowledgeToFolderRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "移动成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6090,7 +6500,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6131,7 +6541,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ManualKnowledgePayload"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload"
                         }
                     }
                 ],
@@ -6146,7 +6556,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6194,7 +6604,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6231,13 +6641,13 @@ const docTemplate = `{
                     "200": {
                         "description": "进度信息",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KnowledgeMoveProgress"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress"
                         }
                     },
                     "404": {
                         "description": "任务不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6272,14 +6682,17 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "minimum": 0,
                         "type": "integer",
-                        "description": "Offset for pagination",
+                        "description": "Offset for pagination (minimum 0)",
                         "name": "offset",
                         "in": "query"
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "Limit for pagination (default 20)",
+                        "description": "Limit for pagination (default 20, maximum 100)",
                         "name": "limit",
                         "in": "query"
                     },
@@ -6313,7 +6726,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6362,7 +6775,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6409,13 +6822,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6429,7 +6842,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "更新知识条目信息",
+                "description": "部分更新知识条目（标题/描述/自定义元数据）；未传字段保持不变，显式传空 description 可清空摘要",
                 "consumes": [
                     "application/json"
                 ],
@@ -6449,12 +6862,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "知识信息",
+                        "description": "更新字段（均可选）",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Knowledge"
+                            "$ref": "#/definitions/internal_handler.UpdateKnowledgeRequest"
                         }
                     }
                 ],
@@ -6469,7 +6882,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6514,7 +6927,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6561,19 +6974,19 @@ const docTemplate = `{
                     "400": {
                         "description": "状态不支持取消",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "知识不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6619,7 +7032,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6668,7 +7081,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6723,13 +7136,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6804,13 +7217,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiFolderListResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6846,7 +7259,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiFolderCreateRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest"
                         }
                     }
                 ],
@@ -6854,19 +7267,19 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiFolder"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6911,7 +7324,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiFolderUpdateRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest"
                         }
                     }
                 ],
@@ -6919,25 +7332,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiFolder"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolder"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "409": {
                         "description": "Conflict",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -6976,13 +7389,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7046,7 +7459,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiGraphData"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphData"
                         }
                     }
                 }
@@ -7098,7 +7511,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiIndexResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexResponse"
                         }
                     }
                 }
@@ -7146,7 +7559,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPageIssue"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageIssue"
                             }
                         }
                     }
@@ -7209,7 +7622,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7243,53 +7656,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_application_service.WikiLintReport"
-                        }
-                    }
-                }
-            }
-        },
-        "/knowledgebase/{kb_id}/wiki/log": {
-            "get": {
-                "security": [
-                    {
-                        "Bearer": []
-                    }
-                ],
-                "description": "Returns a paginated feed of wiki operation events (ingest, retract, ...)\nnewest-first. Pagination is cursor-based: pass ` + "`" + `next_cursor` + "`" + ` from the\nprevious response back as ` + "`" + `cursor` + "`" + ` to fetch the next page.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Wiki"
-                ],
-                "summary": "Get wiki operation log",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Knowledge base ID",
-                        "name": "kb_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Opaque cursor from the previous page (empty = newest)",
-                        "name": "cursor",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "Page size, 1-200 (default 50)",
-                        "name": "limit",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiLogEntryListResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintReport"
                         }
                     }
                 }
@@ -7327,7 +7694,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPageMoveRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest"
                         }
                     }
                 ],
@@ -7335,13 +7702,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7417,13 +7784,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPageListResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageListResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7459,7 +7826,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                         }
                     }
                 ],
@@ -7467,13 +7834,13 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7514,13 +7881,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7531,7 +7898,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Update an existing wiki page by slug",
+                "description": "Partially update a wiki page by slug. Absent fields keep\ntheir stored value. When ` + "`" + `version` + "`" + ` is \u003e 0 it acts as an\noptimistic-lock guard: a mismatch with the stored version\nreturns 409 together with the current version so the client\ncan reload and re-apply.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7558,12 +7925,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Updated wiki page data",
+                        "description": "Fields to update",
                         "name": "page",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest"
                         }
                     }
                 ],
@@ -7571,13 +7938,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7616,7 +7995,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7651,6 +8030,135 @@ const docTemplate = `{
                             "additionalProperties": {
                                 "type": "string"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/wiki/revert": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Rolls the page (slug in the body, like move-page) back to\nthe content of the given stored revision. Applied as a\nregular edit: the pre-revert state is snapshotted and the\nversion advances.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "Revert a wiki page to an earlier revision",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Revert target",
+                        "name": "revert",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledgebase/{kb_id}/wiki/revisions/{slug}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Returns the stored historical snapshots for a page, newest\nfirst (content omitted), plus the current version. Passing\n` + "`" + `version` + "`" + ` returns that single snapshot with full content.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wiki"
+                ],
+                "summary": "List wiki page revisions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Knowledge base ID",
+                        "name": "kb_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Page slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Return this single revision with content",
+                        "name": "version",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (default 50, max 200)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset into the newest-first list",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7699,7 +8207,7 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                             }
                         }
                     }
@@ -7734,7 +8242,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiStats"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats"
                         }
                     }
                 }
@@ -7772,7 +8280,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7804,7 +8312,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPService"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPService"
                         }
                     }
                 ],
@@ -7819,7 +8327,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7900,7 +8408,7 @@ const docTemplate = `{
                     "404": {
                         "description": "服务不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7954,7 +8462,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -7999,7 +8507,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8056,13 +8564,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "服务不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8109,13 +8617,149 @@ const docTemplate = `{
                     "400": {
                         "description": "字段名非法",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "服务不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/metadata": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "只读数据库，不连接上游。未同步时 data 为 null；连接配置变更后 stale 为 true。OAuth 目录按当前授权主体隔离。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "读取已保存的 MCP 工具目录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP服务ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "目录快照",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "OAuth 目录缺少授权主体",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "服务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/metadata/refresh": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "同步 MCP 工具目录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP服务ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "同步后的目录快照",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "目录不完整或校验失败",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "OAuth 目录缺少授权主体",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "静态认证目录需要管理员刷新",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "服务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "刷新期间连接配置已变更",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "元数据存储不可用",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8169,7 +8813,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8288,7 +8932,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8335,7 +8979,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8351,7 +8995,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "为指定 MCP 服务下的某个工具设置/更新审批要求",
+                "description": "为指定 MCP 服务下的某个工具更新启用状态和/或人工审批要求。至少提供 require_approval 或 enabled 之一；省略的字段保持原值。",
                 "consumes": [
                     "application/json"
                 ],
@@ -8361,7 +9005,7 @@ const docTemplate = `{
                 "tags": [
                     "MCP服务"
                 ],
-                "summary": "设置 MCP 工具人工审批策略",
+                "summary": "设置 MCP 工具策略",
                 "parameters": [
                     {
                         "type": "string",
@@ -8378,7 +9022,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "{require_approval: bool}",
+                        "description": "{require_approval?: bool, enabled?: bool}",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -8399,13 +9043,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "MCP 服务或工具不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8452,7 +9096,220 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/me/env-vars": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "List every sandbox config of this workspace with the caller's own config-wide variables and the credentials its skills declared, each reporting whether it is unset, filled in workspace-wide, or filled in by the caller. Values are never returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "List my environment variables",
+                "responses": {
+                    "200": {
+                        "description": "One group per sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/me/env-vars/sandbox": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Store the caller's own value for one variable on a sandbox config. It is injected into every skill script and shell command this caller's turns run on that config.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Set one of my sandbox environment variables",
+                "parameters": [
+                    {
+                        "description": "Sandbox config, variable name and value",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Stored",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Remove the caller's own value for one variable on a sandbox config.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Delete one of my sandbox environment variables",
+                "parameters": [
+                    {
+                        "description": "Sandbox config and variable name",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not set",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/me/env-vars/skill": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Store the caller's own value for one variable the skill declared. It overrides the workspace-wide value for this caller only, and is injected only into executions that name this skill.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Set one of my skill credentials",
+                "parameters": [
+                    {
+                        "description": "Skill, variable name and value",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Stored",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "Remove the caller's own value. The workspace-wide value, if there is one, applies again afterwards.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Me"
+                ],
+                "summary": "Delete one of my skill credentials",
+                "parameters": [
+                    {
+                        "description": "Skill and variable name",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.meEnvVarRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not set",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8487,6 +9344,52 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/me/invitations/accept-by-token": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "已登录用户用共享邀请链接 token 加入空间，不创建新账号；对已是成员的用户幂等。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "我的邀请"
+                ],
+                "summary": "通过共享链接加入空间",
+                "parameters": [
+                    {
+                        "description": "邀请 token",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.acceptInvitationByTokenRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "410": {
+                        "description": "链接无效或已撤销",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8588,6 +9491,574 @@ const docTemplate = `{
                 }
             }
         },
+        "/memory/consolidate": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "合并意思接近的条目、归档到期事项，不等待每日后台整理",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "立刻整理我的记忆",
+                "responses": {
+                    "200": {
+                        "description": "整理结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/documents": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回当前用户回答里反复引用的文档，次数未达习惯门槛的不展示",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "列出常用资料",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "文档列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/documents/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "删除一条文档亲和度计数，之后检索不再因为这份文档而加权",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "停止用某份文档做个性化检索",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "亲和度 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/export": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "以 JSON 导出当前用户的全部记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "导出我的记忆",
+                "responses": {
+                    "200": {
+                        "description": "记忆导出",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "分页返回当前用户的记忆条目，可按状态过滤",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "列出我的记忆",
+                "parameters": [
+                    {
+                        "enum": [
+                            "active",
+                            "superseded",
+                            "archived",
+                            "pending"
+                        ],
+                        "type": "string",
+                        "description": "状态过滤",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "记忆列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "手动添加一条长期记忆",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "新增一条记忆",
+                "parameters": [
+                    {
+                        "description": "记忆内容",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "新增的记忆",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "永久删除当前用户的全部记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "清空我的记忆",
+                "responses": {
+                    "200": {
+                        "description": "清空成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "修改记忆内容与重要度，修改后该条记忆不会被后台抽取覆盖",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "修改一条记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "记忆内容",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的记忆",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "永久删除一条记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "删除一条记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items/{id}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "接受系统推断的记忆，使其开始生效",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "确认一条推断出的记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "确认成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/items/{id}/reject": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "拒绝系统推断的记忆，并记住这次拒绝",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "否决一条推断出的记忆",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "记忆 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "否决成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/settings": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回合并后的记忆开关状态（空间级 + 个人级）与记忆条数",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "获取我的记忆设置",
+                "responses": {
+                    "200": {
+                        "description": "记忆设置",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "开启或关闭当前用户自己的长期记忆",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "更新我的记忆设置",
+                "parameters": [
+                    {
+                        "description": "设置",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "更新后的设置",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/topics": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "返回已计数、尚未提升为长期关注的主题，以及距离阈值还差几次",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "列出正在观察的主题",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 50,
+                        "description": "每页条数",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "偏移量",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "主题列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/topics/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "删除尚未提升的主题计数，并记住这次拒绝，之后不会再自动记为长期关注",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "停止跟踪一个主题",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "主题 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "删除成功",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/memory/topics/{id}/promote": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "不等待剩余次数，把正在观察的主题提升为一条长期关注记忆",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "长期记忆"
+                ],
+                "summary": "立即记为长期关注",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "主题 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "新增的记忆",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/messages/chat-history-stats": {
             "get": {
                 "security": [
@@ -8663,7 +10134,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8710,6 +10181,17 @@ const docTemplate = `{
                         "description": "在此时间之前的消息（RFC3339Nano格式）",
                         "name": "before_time",
                         "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -8723,7 +10205,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8777,7 +10259,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8815,7 +10297,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8862,7 +10344,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8918,14 +10400,14 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "检查当前空间的 TreeRAGCloud 凭证是否完好；needs_reinit=true 表示需要重新保存",
+                "description": "检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "TreeRAGCloud"
+                    "WeKnoraCloud"
                 ],
-                "summary": "检查 TreeRAGCloud 凭证状态",
+                "summary": "检查 WeKnoraCloud 凭证状态",
                 "responses": {
                     "200": {
                         "description": "凭证状态",
@@ -8985,7 +10467,7 @@ const docTemplate = `{
                     "404": {
                         "description": "模型不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9039,7 +10521,7 @@ const docTemplate = `{
                     "404": {
                         "description": "模型不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9081,10 +10563,16 @@ const docTemplate = `{
                             "additionalProperties": true
                         }
                     },
+                    "400": {
+                        "description": "模型仍被知识库、智能体或长期记忆引用",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
                     "404": {
                         "description": "模型不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9109,7 +10597,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ListOrganizationsResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListOrganizationsResponse"
                         }
                     }
                 }
@@ -9138,7 +10626,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.CreateOrganizationRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest"
                         }
                     }
                 ],
@@ -9153,7 +10641,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9184,7 +10672,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.JoinOrganizationRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.JoinOrganizationRequest"
                         }
                     }
                 ],
@@ -9199,7 +10687,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9230,7 +10718,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.JoinByOrganizationIDRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest"
                         }
                     }
                 ],
@@ -9245,7 +10733,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9276,7 +10764,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SubmitJoinRequestRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest"
                         }
                     }
                 ],
@@ -9291,7 +10779,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9332,7 +10820,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9414,7 +10902,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9450,7 +10938,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UpdateOrganizationRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateOrganizationRequest"
                         }
                     }
                 ],
@@ -9465,7 +10953,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9501,7 +10989,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9545,7 +11033,7 @@ const docTemplate = `{
                     "403": {
                         "description": "非组织成员",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9583,7 +11071,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.InviteMemberRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.InviteMemberRequest"
                         }
                     }
                 ],
@@ -9598,13 +11086,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9645,7 +11133,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9686,7 +11174,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9731,7 +11219,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ReviewJoinRequestRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ReviewJoinRequestRequest"
                         }
                     }
                 ],
@@ -9746,7 +11234,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9784,7 +11272,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9818,7 +11306,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ListMembersResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListMembersResponse"
                         }
                     }
                 }
@@ -9863,7 +11351,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UpdateMemberRoleRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest"
                         }
                     }
                 ],
@@ -9878,7 +11366,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9921,7 +11409,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9959,7 +11447,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RequestRoleUpgradeRequest"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RequestRoleUpgradeRequest"
                         }
                     }
                 ],
@@ -9974,7 +11462,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -9987,7 +11475,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "搜索空间（排除已加入的空间）用于邀请加入组织；按空间去重，附带代表用户",
+                "description": "按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重",
                 "produces": [
                     "application/json"
                 ],
@@ -10005,7 +11493,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "搜索关键词（空间名、用户名或邮箱）",
+                        "description": "搜索关键词（空间名）",
                         "name": "q",
                         "in": "query",
                         "required": true
@@ -10029,7 +11517,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10139,7 +11627,1019 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ListSharesResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ListSharesResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List workspace sandbox backend configs with credentials masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "List sandbox configs",
+                "responses": {
+                    "200": {
+                        "description": "Sandbox configs and defaults",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Create a named workspace sandbox backend config. Credentials are masked in the response.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Create sandbox config",
+                "parameters": [
+                    {
+                        "description": "Sandbox backend config",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.sandboxConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve a workspace sandbox backend config with credentials masked.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Get sandbox config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Update a sandbox backend config. Identity-field changes are refused while the config owns live or paused sandboxes.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Update sandbox config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Updated sandbox config",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.sandboxConfigRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated sandbox config",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation failure",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "Live sandboxes or unverifiable inventory",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "423": {
+                        "description": "Sandbox config is being modified by another request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Soft-delete a sandbox backend config. force=true only overrides unverifiable provider inventory, never confirmed live sandboxes.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Delete sandbox config",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Force delete when inventory is unverifiable",
+                        "name": "force",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deletion success",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Live sandboxes or unverifiable inventory",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/sandboxes": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Return live/paused sandbox inventory and affected agent names for one config.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Inspect sandbox config inventory",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Sandbox inventory",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List the agent skills installed onto one sandbox config's image.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "List installed skills",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Installed skills",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Install a skill onto this sandbox config's image. Send a zip\nas multipart form field \"file\", or JSON {\"source\":\"...\"} to\npull a public skill. source is one of: \"@owner/slug\" or a\nslash-free slug (ClawHub), a github.com / gitlab.com /\nskills.sh / clawhub / skillhub URL, a ClawHub skills-sh\ncatalog page (https://clawhub.ai/skills-sh/owner/repo/slug),\na skills-sh:owner/repo/slug locator, or a direct zip/SKILL.md\nURL. Bare \"owner/slug\" is rejected as ambiguous. The source\nmust be readable anonymously. The install boots a sandbox and\nruns for minutes, so the request is only accepted; follow it\nvia the install-events stream.",
+                "consumes": [
+                    "application/json",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Install a skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Skill bundle (zip)",
+                        "name": "file",
+                        "in": "formData"
+                    },
+                    {
+                        "description": "Install from a registry, git host, or archive URL",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.skillSourceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Install accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Missing, oversized or invalid bundle or source",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Sandbox config not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retrieve one installed skill of a sandbox config.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Get an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Installed skill",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Remove a skill from the config's image. The removal rebuilds\nthe image and runs for minutes, so it is only accepted; follow\nit via the install-events stream.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Remove an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Removal accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Show or hide an installed skill and set the workspace-wide values of the environment variables it declared. Either field may be sent, or both. The files stay in the image either way; removal is a separate flow.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Update an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.skillPatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated skill",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/files": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "List files in the stored skill bundle without starting a sandbox.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "List files of an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Skill files",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill or files not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/files/content": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Read one skill file as UTF-8, a small base64 image, or binary.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Read one file of an installed skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill-root-relative file path",
+                        "name": "path",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Skill file",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid path",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill or file not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/install-events": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Server-sent progress for one install or removal. The stream\nalways terminates: with the run's own terminal event, with one\nderived from the durable status, or with a \"detached\" frame\nwhen it stops following a run that is still going.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Follow an install or removal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of progress events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/reinstall": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Retry a failed install from the stored archive; does not re-upload.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Retry a skill install",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Reinstall accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "The stored archive is gone",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/stop": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Abort an in-flight install so the operator can retry or uninstall. After a process restart the row may still say installing with no live process; this rewrites it immediately instead of waiting for the stuck-run reaper. Removal is not stopped.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Stop a skill install",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Stopped skill",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Skill is not installing",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sandbox-configs/{id}/skills/{skillId}/transcript": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Server-sent replay of everything the installer agent did — the\nprompt it was given, its thinking, the commands it ran and\ntheir output — followed live while the install is still\nrunning. Frames are the same shape the chat stream uses, so a\nconsole renders an install with the components it renders a\nchat turn with. 404 once the event log has expired; the\ndurable message history is the fallback.",
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "SandboxConfig"
+                ],
+                "summary": "Follow an install's agent transcript",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill ID",
+                        "name": "skillId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "SSE stream of transcript events",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "204": {
+                        "description": "Install is still preparing; retry once locators exist",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Skill or transcript not found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10209,7 +12709,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10256,7 +12756,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10305,7 +12805,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10346,6 +12846,17 @@ const docTemplate = `{
                         "name": "message_id",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "enum": [
+                            "handle",
+                            "public"
+                        ],
+                        "type": "string",
+                        "default": "handle",
+                        "description": "文件引用形式，public 返回可加载直链",
+                        "name": "resource_urls",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -10359,56 +12870,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话或消息不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
-                        }
-                    }
-                }
-            }
-        },
-        "/sessions/search": {
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "在知识库中搜索（不使用LLM总结）",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "问答"
-                ],
-                "summary": "知识搜索",
-                "parameters": [
-                    {
-                        "description": "搜索请求",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_session.SearchKnowledgeRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "搜索结果",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10455,7 +12917,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10494,7 +12956,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Session"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Session"
                         }
                     }
                 ],
@@ -10509,7 +12971,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10554,7 +13016,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10601,13 +13063,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10651,33 +13113,27 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
             }
         },
-        "/sessions/{session_id}/agent-qa": {
-            "post": {
+        "/sessions/{session_id}/artifacts": {
+            "get": {
                 "security": [
                     {
                         "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
                     }
                 ],
-                "description": "基于Agent的智能问答，支持多轮对话和SSE流式响应",
-                "consumes": [
+                "description": "返回本会话中所有 assistant 消息产生的技能产物元数据（不含 URL）",
+                "produces": [
                     "application/json"
                 ],
-                "produces": [
-                    "text/event-stream"
-                ],
                 "tags": [
-                    "问答"
+                    "会话"
                 ],
-                "summary": "Agent问答",
+                "summary": "列出会话生成的产物文件",
                 "parameters": [
                     {
                         "type": "string",
@@ -10685,88 +13141,33 @@ const docTemplate = `{
                         "name": "session_id",
                         "in": "path",
                         "required": true
-                    },
-                    {
-                        "description": "问答请求",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_session.CreateKnowledgeQARequest"
-                        }
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "问答结果（SSE流）",
+                        "description": "OK",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
                         }
                     },
-                    "400": {
-                        "description": "请求参数错误",
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
             }
         },
-        "/sessions/{session_id}/knowledge-qa": {
-            "post": {
-                "security": [
-                    {
-                        "Bearer": []
-                    },
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "基于知识库的问答（使用LLM总结），支持SSE流式响应",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "text/event-stream"
-                ],
-                "tags": [
-                    "问答"
-                ],
-                "summary": "知识问答",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "会话ID",
-                        "name": "session_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "问答请求",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/internal_handler_session.CreateKnowledgeQARequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "问答结果（SSE流）",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "请求参数错误",
-                        "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
-                        }
-                    }
-                }
+        "/sessions/{session_id}/messages/{message_id}/artifacts": {
+            "get": {
+                "responses": {}
+            }
+        },
+        "/sessions/{session_id}/messages/{message_id}/artifacts/{index}/download": {
+            "get": {
+                "responses": {}
             }
         },
         "/sessions/{session_id}/messages/{message_id}/suggestions": {
@@ -10912,7 +13313,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -10968,7 +13369,7 @@ const docTemplate = `{
                     "404": {
                         "description": "会话或消息不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11067,7 +13468,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11102,7 +13503,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11144,7 +13545,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取所有预装的Agent Skills元数据",
+                "description": "返回指定沙箱配置镜像内、智能体实际能调用的已安装技能（ready 且启用）。不传 sandbox_config_id 时列表为空。",
                 "consumes": [
                     "application/json"
                 ],
@@ -11154,7 +13555,15 @@ const docTemplate = `{
                 "tags": [
                     "Skills"
                 ],
-                "summary": "获取预装Skills列表",
+                "summary": "获取当前沙箱配置上可执行的 Skills",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sandbox config ID",
+                        "name": "sandbox_config_id",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "Skills列表",
@@ -11162,11 +13571,183 @@ const docTemplate = `{
                             "type": "object",
                             "additionalProperties": true
                         }
+                    }
+                }
+            }
+        },
+        "/skills/catalog": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
                     },
-                    "500": {
-                        "description": "服务器错误",
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "Returns every skill definition in this workspace and which sandbox configs it is installed on.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "List workspace skills",
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Records a skill without installing it. Send a zip as multipart field \"file\", or JSON {\"source\":\"...\"}.",
+                "consumes": [
+                    "application/json",
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Add a skill to the workspace catalog",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/skills/catalog/{id}": {
+            "delete": {
+                "description": "Refused while any sandbox still has an installation of this skill.",
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Delete a catalog skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Catalog skill ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/skills/catalog/{id}/files": {
+            "get": {
+                "description": "Lists the stored catalog bundle. Files belong to the skill definition, not a sandbox install.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "List files of a catalog skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Catalog skill ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/skills/catalog/{id}/files/content": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Read one file of a catalog skill",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Catalog skill ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Skill-root-relative file path",
+                        "name": "path",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/skills/catalog/{id}/install": {
+            "post": {
+                "description": "Runs the existing snapshot install onto each named sandbox config.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Install a catalog skill onto sandboxes",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Catalog skill ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -11249,7 +13830,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request, validation, or connectivity test failure",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -11262,7 +13843,7 @@ const docTemplate = `{
                     "409": {
                         "description": "A storage backend with this name already exists",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11311,7 +13892,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request or validation error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -11398,7 +13979,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Storage backend not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11452,7 +14033,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Immutable field change, read-only backend, validation, or connectivity failure",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -11465,7 +14046,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Storage backend not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11507,7 +14088,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Backend is default, bound, read-only, or legacy alias",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -11520,7 +14101,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Storage backend not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11564,7 +14145,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Backend is not active",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -11577,7 +14158,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Storage backend not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11628,7 +14209,7 @@ const docTemplate = `{
                     "404": {
                         "description": "Storage backend not found",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11793,7 +14374,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -11870,7 +14451,7 @@ const docTemplate = `{
                     "200": {
                         "description": "User promoted successfully",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UserInfo"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
                         }
                     },
                     "400": {
@@ -11925,7 +14506,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Privileges revoked successfully",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UserInfo"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
                         }
                     },
                     "400": {
@@ -12130,7 +14711,7 @@ const docTemplate = `{
                     "200": {
                         "description": "the setting row",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SystemSetting"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting"
                         }
                     },
                     "400": {
@@ -12183,7 +14764,7 @@ const docTemplate = `{
                     "200": {
                         "description": "the updated row",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SystemSetting"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SystemSetting"
                         }
                     },
                     "400": {
@@ -12270,6 +14851,74 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/admin/users/create": {
+            "post": {
+                "description": "Provision a new local user account (SystemAdmin only).\nWhen ` + "`" + `password` + "`" + ` is omitted or null, a cryptographically random\npassword is generated (OIDC-style crypto/rand + base64url)\nand returned once in the response body. Any provided value,\nincluding empty string, is policy-checked. Tenant provisioning\nfollows the shared auth.default_tenant_mode policy.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "System Admin"
+                ],
+                "summary": "Create a new user (SystemAdmin)",
+                "parameters": [
+                    {
+                        "description": "User creation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AdminCreateUserRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Identity already exists, returns the existing user",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateSystemUserResponse"
+                        }
+                    },
+                    "201": {
+                        "description": "User created successfully",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateSystemUserResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or weak password",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden: not a system admin",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Email and username refer to conflicting identities",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/system/admin/users/reset-password": {
             "post": {
                 "description": "Replace another user's local password and revoke all of their existing sessions (SystemAdmin only).\nA system administrator cannot reset their own password through this endpoint; self-service password change still requires the old password.",
@@ -12318,6 +14967,27 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "User not found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/system/capabilities": {
+            "get": {
+                "description": "返回当前部署版本及实际注册的后端路由所对应的功能能力；仅 supported=false 表示入口应隐藏",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统"
+                ],
+                "summary": "获取部署能力清单",
+                "responses": {
+                    "200": {
+                        "description": "标准 code/msg/data 包装，data 为 DeploymentCapabilitiesData",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -12429,6 +15099,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/system/sandbox-check": {
+            "post": {
+                "description": "使用当前填写的参数测试沙箱后端，不保存配置；deep=true 会执行临时脚本，远端后端还会创建并销毁一个沙箱",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "系统"
+                ],
+                "summary": "测试沙箱连通性",
+                "parameters": [
+                    {
+                        "description": "沙箱配置",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SandboxCheckRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.SandboxCheckResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/system/storage-engine-check": {
             "post": {
                 "description": "使用当前填写的参数测试 MinIO/COS 连通性，不保存配置",
@@ -12512,7 +15216,7 @@ const docTemplate = `{
                     "500": {
                         "description": "服务器错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12556,7 +15260,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12591,7 +15295,7 @@ const docTemplate = `{
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12629,7 +15333,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12667,7 +15371,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12714,7 +15418,7 @@ const docTemplate = `{
                     "400": {
                         "description": "不支持的键",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12768,7 +15472,7 @@ const docTemplate = `{
                     "400": {
                         "description": "不支持的键",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12834,7 +15538,7 @@ const docTemplate = `{
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12881,13 +15585,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "404": {
                         "description": "空间不存在",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12923,7 +15627,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Tenant"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                         }
                     }
                 ],
@@ -12938,7 +15642,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -12980,7 +15684,7 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13024,13 +15728,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13081,13 +15785,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13140,13 +15844,13 @@ const docTemplate = `{
                     "400": {
                         "description": "请求参数错误",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "403": {
                         "description": "权限不足",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13219,7 +15923,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13285,7 +15989,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Owner 通过邮箱邀请已注册用户加入当前空间；被邀请人需要在 /me/invitations 接受后才会成为成员。",
+                "description": "Owner 通过邮箱邀请已注册用户加入空间。开启 tenant.auto_accept_invitation 后被邀请人立即自动加入（响应为成员结构），否则需在 /me/invitations 接受后成为成员。",
                 "consumes": [
                     "application/json"
                 ],
@@ -13805,7 +16509,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request or validation error",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -13818,7 +16522,7 @@ const docTemplate = `{
                     "409": {
                         "description": "Duplicate endpoint and index",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -13867,7 +16571,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Invalid request",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.AppError"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     },
                     "401": {
@@ -14241,7 +16945,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Provider 详情",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WebSearchProviderEntity"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity"
                         }
                     },
                     "404": {
@@ -14295,7 +16999,7 @@ const docTemplate = `{
                     "200": {
                         "description": "更新后的 Provider",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WebSearchProviderEntity"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity"
                         }
                     },
                     "400": {
@@ -14544,9 +17248,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "TreeRAGCloud"
+                    "WeKnoraCloud"
                 ],
-                "summary": "保存 TreeRAGCloud 凭证",
+                "summary": "保存 WeKnoraCloud 凭证",
                 "parameters": [
                     {
                         "description": "{app_id, app_secret}",
@@ -14579,7 +17283,7 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "github_com_Tencent_TreeRAG_internal_application_service.WikiLintIssue": {
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintIssue": {
             "type": "object",
             "properties": {
                 "auto_fixable": {
@@ -14592,18 +17296,18 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "severity": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_application_service.WikiLintIssueSeverity"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueSeverity"
                 },
                 "target_slug": {
                     "description": "TargetSlug identifies the other page involved in the issue (e.g. the\nbroken link target, or the entity slug for a missing cross-ref). It is\nthe structured field used by AutoFix instead of parsing Description.",
                     "type": "string"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_application_service.WikiLintIssueType"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueType"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_application_service.WikiLintIssueSeverity": {
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueSeverity": {
             "type": "string",
             "enum": [
                 "info",
@@ -14616,7 +17320,7 @@ const docTemplate = `{
                 "SeverityError"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_application_service.WikiLintIssueType": {
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintIssueType": {
             "type": "string",
             "enum": [
                 "orphan_page",
@@ -14635,7 +17339,7 @@ const docTemplate = `{
                 "LintIssueDuplicateSlug"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_application_service.WikiLintReport": {
+        "github_com_Tencent_WeKnora_internal_application_service.WikiLintReport": {
             "type": "object",
             "properties": {
                 "health_score": {
@@ -14645,21 +17349,21 @@ const docTemplate = `{
                 "issues": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_application_service.WikiLintIssue"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintIssue"
                     }
                 },
                 "knowledge_base_id": {
                     "type": "string"
                 },
                 "stats": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiStats"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats"
                 },
                 "summary": {
                     "type": "string"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_datasource.ConnectorMetadata": {
+        "github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata": {
             "type": "object",
             "properties": {
                 "auth_type": {
@@ -14691,11 +17395,11 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_errors.AppError": {
+        "github_com_Tencent_WeKnora_internal_errors.AppError": {
             "type": "object",
             "properties": {
                 "code": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_errors.ErrorCode"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.ErrorCode"
                 },
                 "details": {},
                 "message": {
@@ -14703,7 +17407,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_errors.ErrorCode": {
+        "github_com_Tencent_WeKnora_internal_errors.ErrorCode": {
             "type": "integer",
             "enum": [
                 1000,
@@ -14728,7 +17432,8 @@ const docTemplate = `{
                 2102,
                 2103,
                 2200,
-                2201
+                2201,
+                2300
             ],
             "x-enum-varnames": [
                 "ErrBadRequest",
@@ -14753,10 +17458,11 @@ const docTemplate = `{
                 "ErrAgentInvalidMaxIterations",
                 "ErrAgentInvalidTemperature",
                 "ErrVectorStoreBindingInvalid",
-                "ErrVectorStoreUnavailable"
+                "ErrVectorStoreUnavailable",
+                "ErrModelInUse"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_infrastructure_chunker.DocProfile": {
+        "github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile": {
             "type": "object",
             "properties": {
                 "all_caps_short_line_count": {
@@ -14828,7 +17534,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_infrastructure_chunker.StrategyTier": {
+        "github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier": {
             "type": "string",
             "enum": [
                 "heading",
@@ -14841,18 +17547,18 @@ const docTemplate = `{
                 "TierLegacy"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_infrastructure_chunker.TierRejection": {
+        "github_com_Tencent_WeKnora_internal_infrastructure_chunker.TierRejection": {
             "type": "object",
             "properties": {
                 "reason": {
                     "type": "string"
                 },
                 "tier": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_infrastructure_chunker.StrategyTier"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_models_limiter.RuntimeStat": {
+        "github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat": {
             "type": "object",
             "properties": {
                 "active": {
@@ -14872,7 +17578,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.APIPrincipalMode": {
+        "github_com_Tencent_WeKnora_internal_types.APIPrincipalMode": {
             "type": "string",
             "enum": [
                 "tenant",
@@ -14885,7 +17591,7 @@ const docTemplate = `{
                 "APIPrincipalModeSignedToken"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.ASRConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ASRConfig": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -14900,7 +17606,27 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.AgentStep": {
+        "github_com_Tencent_WeKnora_internal_types.AdminCreateUserRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "username"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string",
+                    "maxLength": 50,
+                    "minLength": 2
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.AgentStep": {
             "type": "object",
             "properties": {
                 "iteration": {
@@ -14923,12 +17649,12 @@ const docTemplate = `{
                     "description": "Tools called in this step (Act phase)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ToolCall"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall"
                     }
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.AnswerStrategy": {
+        "github_com_Tencent_WeKnora_internal_types.AnswerStrategy": {
             "type": "string",
             "enum": [
                 "all",
@@ -14939,7 +17665,7 @@ const docTemplate = `{
                 "AnswerStrategyRandom"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.AuditAction": {
+        "github_com_Tencent_WeKnora_internal_types.AuditAction": {
             "type": "string",
             "enum": [
                 "rbac.member_added",
@@ -14962,6 +17688,7 @@ const docTemplate = `{
                 "system.admin_promoted",
                 "system.admin_revoked",
                 "system.user_password_reset",
+                "system.user_created",
                 "system.api_key_created",
                 "system.api_key_revoked",
                 "system.queue_task_retried",
@@ -15025,6 +17752,7 @@ const docTemplate = `{
                 "AuditActionSystemAdminPromoted",
                 "AuditActionSystemAdminRevoked",
                 "AuditActionSystemUserPasswordReset",
+                "AuditActionSystemUserCreated",
                 "AuditActionSystemAPIKeyCreated",
                 "AuditActionSystemAPIKeyRevoked",
                 "AuditActionSystemQueueTaskRetried",
@@ -15068,11 +17796,11 @@ const docTemplate = `{
                 "AuditActionFAQImportFailed"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.AuditLog": {
+        "github_com_Tencent_WeKnora_internal_types.AuditLog": {
             "type": "object",
             "properties": {
                 "action": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.AuditAction"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AuditAction"
                 },
                 "actor_role": {
                     "type": "string"
@@ -15093,7 +17821,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "outcome": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.AuditOutcome"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AuditOutcome"
                 },
                 "request_method": {
                     "type": "string"
@@ -15121,7 +17849,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.AuditOutcome": {
+        "github_com_Tencent_WeKnora_internal_types.AuditOutcome": {
             "type": "string",
             "enum": [
                 "success",
@@ -15140,7 +17868,25 @@ const docTemplate = `{
                 "AuditOutcomeCanceled"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.COSEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.AutoTagConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "max_tags": {
+                    "type": "integer"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "skip_if_tagged": {
+                    "description": "SkipIfTagged leaves documents that already carry tags untouched, so a\ndeliberate manual classification is not diluted by model guesses. It is\na pointer because the default is true: rows written before this field\nexisted decode to nil and must not silently flip to \"always append\".",
+                    "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.COSEngineConfig": {
             "type": "object",
             "properties": {
                 "app_id": {
@@ -15169,7 +17915,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ChatHistoryConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ChatHistoryConfig": {
             "type": "object",
             "properties": {
                 "embedding_model_id": {
@@ -15186,7 +17932,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ChunkingConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ChunkingConfig": {
             "type": "object",
             "properties": {
                 "child_chunk_size": {
@@ -15217,10 +17963,10 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "parser_engine_rules": {
-                    "description": "ParserEngineRules configures which parser engine to use for each file type.\nWhen empty, the builtin engine is used for all types.",
+                    "description": "ParserEngineRules configures which parser engine to use for each file type.\nWhen empty, DefaultParserEngine is used (builtin/simple routing, except\ntypes that only a specific engine can parse: ppt/pptx fall back to\nmarkitdown). A linked anydoc binding is preferred for every type it\nconverts.",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ParserEngineRule"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
                     }
                 },
                 "separators": {
@@ -15244,7 +17990,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ConnectionConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ConnectionConfig": {
             "type": "object",
             "properties": {
                 "addr": {
@@ -15301,7 +18047,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ContextCompressionStrategy": {
+        "github_com_Tencent_WeKnora_internal_types.ContextCompressionStrategy": {
             "type": "string",
             "enum": [
                 "sliding_window",
@@ -15312,14 +18058,14 @@ const docTemplate = `{
                 "ContextCompressionSmart"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.ContextConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ContextConfig": {
             "type": "object",
             "properties": {
                 "compression_strategy": {
                     "description": "Compression strategy: \"sliding_window\" or \"smart\"",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ContextCompressionStrategy"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextCompressionStrategy"
                         }
                     ]
                 },
@@ -15337,7 +18083,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.CreateOrganizationRequest": {
+        "github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest": {
             "type": "object",
             "required": [
                 "name"
@@ -15367,15 +18113,105 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.CredentialsConfig": {
+        "github_com_Tencent_WeKnora_internal_types.CredentialsConfig": {
             "type": "object",
             "properties": {
                 "weknoracloud": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TreeRAGCloudCredentials"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WeKnoraCloudCredentials"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.CustomAgentConfig": {
+        "github_com_Tencent_WeKnora_internal_types.CubeEgressRule": {
+            "type": "object",
+            "properties": {
+                "audit": {
+                    "description": "Audit is none | metadata | full. Empty uses the server default.",
+                    "type": "string"
+                },
+                "deny": {
+                    "description": "Deny inverts the action, which defaults to allow. A deny rule still\nneeds Host or SNI: the target has to reach CubeEgress for it to answer\nwith a request-level 403 instead of the network layer dropping it.",
+                    "type": "boolean"
+                },
+                "host": {
+                    "type": "string"
+                },
+                "inject": {
+                    "description": "Inject adds credential headers on allowed HTTPS requests.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CubeHeaderInject"
+                    }
+                },
+                "methods": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "scheme": {
+                    "type": "string"
+                },
+                "sni": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.CubeHeaderInject": {
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string"
+                },
+                "header": {
+                    "type": "string"
+                },
+                "secret": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.CubeSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "加密",
+                    "type": "string"
+                },
+                "api_url": {
+                    "type": "string"
+                },
+                "cube_sandbox_ttl_seconds": {
+                    "type": "integer"
+                },
+                "dns_servers": {
+                    "description": "DNSServers are Cube template nameserver IPs. Empty uses Cubelet's default.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "http_timeout_sec": {
+                    "description": "HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.\n0 means use the built-in default (30s), never the deployment's value.",
+                    "type": "integer"
+                },
+                "proxy_url": {
+                    "type": "string"
+                },
+                "sandbox_domain": {
+                    "type": "string"
+                },
+                "template_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.CustomAgentConfig": {
             "type": "object",
             "properties": {
                 "agent_mode": {
@@ -15417,7 +18253,7 @@ const docTemplate = `{
                     "description": "===== Chat Attachment Parsing Settings =====\nChatParserEngineRules selects parser engines for session-scoped chat\nattachments by file type. Takes precedence over the tenant-level\nParserEngineConfig.ChatParserEngineRules; an explicit per-request\nparser_engine still overrides both.",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ParserEngineRule"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
                     }
                 },
                 "citation_enabled": {
@@ -15511,11 +18347,11 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "max_completion_tokens": {
-                    "description": "Maximum completion tokens (only for normal mode)",
+                    "description": "Maximum completion tokens. Quick-answer uses this for the RAG answer.\nSmart-reasoning ReAct rounds send this value as-is (zero becomes\nDefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).",
                     "type": "integer"
                 },
                 "max_iterations": {
-                    "description": "===== Agent Mode Settings =====\nMaximum iterations for ReAct loop (only for agent type)",
+                    "description": "===== Agent Mode Settings =====\nMaximum iterations for the ReAct loop. Zero is unset (filled with a\ndefault). A negative value is unlimited: the loop runs until the model\nstops, the user cancels, or another guard fires.",
                     "type": "integer"
                 },
                 "mcp_auth_wait_timeout": {
@@ -15533,6 +18369,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "memory_enabled": {
+                    "description": "Whether this agent may read the user's long-term memory. Nil inherits\nthe workspace setting; false opts a single agent out of memory even when\nthe workspace has it on. There is no \"on\" that overrides the workspace.",
+                    "type": "boolean"
+                },
                 "model_id": {
                     "description": "===== Model Settings =====\nModel ID to use for conversations",
                     "type": "string"
@@ -15549,7 +18389,7 @@ const docTemplate = `{
                     "description": "===== Conversation Question Suggestions =====\nQuestionSuggestions owns both the static/knowledge-backed prompts shown\nbefore the first user turn and the contextual follow-up questions shown\nafter a completed assistant answer.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.QuestionSuggestionConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig"
                         }
                     ]
                 },
@@ -15581,6 +18421,10 @@ const docTemplate = `{
                     "description": "Rewrite prompt user message template",
                     "type": "string"
                 },
+                "sandbox_config_id": {
+                    "description": "===== Sandbox Settings =====\nSandboxConfigID selects which workspace sandbox config this agent's\nskill scripts run on. Empty means sandbox execution is disabled.\n\nThis references the LOGICAL config, never a specific revision: keeping\nthe indirection here is what would let credential rotation happen\nwithout re-pointing every agent (see the spec's §4.8).",
+                    "type": "string"
+                },
                 "selected_skills": {
                     "description": "Selected skill names (only used when SkillsSelectionMode is \"selected\")",
                     "type": "array",
@@ -15589,7 +18433,7 @@ const docTemplate = `{
                     }
                 },
                 "skills_selection_mode": {
-                    "description": "===== Skills Settings (only for smart-reasoning mode) =====\nSkills selection mode: \"all\" = all preloaded skills, \"selected\" = specific skills, \"none\" = no skills",
+                    "description": "===== Skills Settings (only for smart-reasoning mode) =====\nSkills selection mode: \"all\" = all installed skills, \"selected\" = specific skills, \"none\" = no skills",
                     "type": "string"
                 },
                 "supported_file_types": {
@@ -15645,7 +18489,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.DataSource": {
+        "github_com_Tencent_WeKnora_internal_types.DataSource": {
             "type": "object",
             "properties": {
                 "config": {
@@ -15705,7 +18549,7 @@ const docTemplate = `{
                     "description": "Latest sync log (not stored in DB, populated on query)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SyncLog"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SyncLog"
                         }
                     ]
                 },
@@ -15751,7 +18595,95 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.EmbeddingParameters": {
+        "github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "cpu_limit": {
+                    "description": "CPULimit is the number of CPU cores one sandbox may use. 0 uses the\nbuilt-in default.",
+                    "type": "number"
+                },
+                "host": {
+                    "description": "Host is the daemon endpoint in DOCKER_HOST form. Empty means the local\nunix socket.",
+                    "type": "string"
+                },
+                "http_timeout_sec": {
+                    "description": "HTTPTimeoutSec bounds each Engine API call. 0 uses the built-in default.",
+                    "type": "integer"
+                },
+                "idle_ttl_seconds": {
+                    "description": "IdleTTLSeconds is how long a session container may go unused before it\nis reclaimed. The daemon has no idle timeout of its own, so this is what\nstops an abandoned session from pinning host memory indefinitely.",
+                    "type": "integer"
+                },
+                "image": {
+                    "type": "string"
+                },
+                "memory_limit_mb": {
+                    "description": "MemoryLimitMB caps one sandbox's memory. 0 uses the built-in default.",
+                    "type": "integer"
+                },
+                "network_mode": {
+                    "description": "NetworkMode is the Docker network sandboxes join: \"bridge\" (default) or\n\"none\" for no egress. Nothing else is accepted — host and container:\nmodes share another namespace outright, and a named network is usually\nthe deployment's own compose network, which would put the sandbox next\nto Postgres and Redis.",
+                    "type": "string"
+                },
+                "pids_limit": {
+                    "description": "PidsLimit caps how many processes one sandbox may run. 0 uses the\nbuilt-in default.",
+                    "type": "integer"
+                },
+                "runtime": {
+                    "description": "Runtime selects an alternative OCI runtime such as \"runsc\" (gVisor).\nEmpty uses the daemon default.",
+                    "type": "string"
+                },
+                "tls_cert_path": {
+                    "description": "TLSCertPath is a directory on the WeKnora host containing ca.pem,\ncert.pem and key.pem. Required when Host is a TCP endpoint.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.E2BHostRule": {
+            "type": "object",
+            "properties": {
+                "headers": {
+                    "description": "Headers values are credentials and are encrypted at rest; names stay\nreadable so operators can see which headers are injected.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "host": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.E2BSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "api_key": {
+                    "description": "加密",
+                    "type": "string"
+                },
+                "api_url": {
+                    "type": "string"
+                },
+                "e2b_sandbox_ttl_seconds": {
+                    "type": "integer"
+                },
+                "http_timeout_sec": {
+                    "description": "HTTPTimeoutSec bounds each HTTP call to the sandbox control plane.\n0 means use the built-in default (30s), never the deployment's value.",
+                    "type": "integer"
+                },
+                "proxy_url": {
+                    "description": "ProxyURL is the data-plane gateway that fronts envd. E2B Cloud resolves\n\"\u003cport\u003e-\u003csandboxID\u003e.\u003csandbox_domain\u003e\" through public DNS and TLS, so it\nneeds no value here. Self-hosted E2B-compatible control planes usually\nserve every sandbox from one gateway address and expect the sandbox\nauthority in the Host header; setting this makes WeKnora dial the\ngateway directly instead of requiring wildcard DNS and a certificate\nfor the sandbox domain. An \"http://\" gateway also downgrades the\ndata-plane scheme, which the E2B SDK otherwise pins to https.",
+                    "type": "string"
+                },
+                "sandbox_domain": {
+                    "type": "string"
+                },
+                "template_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EmbeddingParameters": {
             "type": "object",
             "properties": {
                 "dimension": {
@@ -15765,7 +18697,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ExtractConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ExtractConfig": {
             "type": "object",
             "properties": {
                 "custom_instructions": {
@@ -15778,13 +18710,13 @@ const docTemplate = `{
                 "nodes": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.GraphNode"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode"
                     }
                 },
                 "relations": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.GraphRelation"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation"
                     }
                 },
                 "tags": {
@@ -15798,7 +18730,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQBatchUpsertPayload": {
+        "github_com_Tencent_WeKnora_internal_types.FAQBatchUpsertPayload": {
             "type": "object",
             "required": [
                 "entries"
@@ -15811,7 +18743,7 @@ const docTemplate = `{
                 "entries": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQEntryPayload"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryPayload"
                     }
                 },
                 "knowledge_id": {
@@ -15830,32 +18762,32 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQConfig": {
+        "github_com_Tencent_WeKnora_internal_types.FAQConfig": {
             "type": "object",
             "properties": {
                 "index_mode": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQIndexMode"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQIndexMode"
                 },
                 "question_index_mode": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQQuestionIndexMode"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQEntryFieldsBatchUpdate": {
+        "github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsBatchUpdate": {
             "type": "object",
             "properties": {
                 "by_id": {
                     "description": "ByID 按条目ID更新，key为条目ID (seq_id)",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQEntryFieldsUpdate"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate"
                     }
                 },
                 "by_tag": {
                     "description": "ByTag 按Tag批量更新，key为TagID (seq_id)",
                     "type": "object",
                     "additionalProperties": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQEntryFieldsUpdate"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate"
                     }
                 },
                 "exclude_ids": {
@@ -15867,7 +18799,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQEntryFieldsUpdate": {
+        "github_com_Tencent_WeKnora_internal_types.FAQEntryFieldsUpdate": {
             "type": "object",
             "properties": {
                 "is_enabled": {
@@ -15881,14 +18813,14 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQEntryPayload": {
+        "github_com_Tencent_WeKnora_internal_types.FAQEntryPayload": {
             "type": "object",
             "required": [
                 "standard_question"
             ],
             "properties": {
                 "answer_strategy": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.AnswerStrategy"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AnswerStrategy"
                 },
                 "answers": {
                     "type": "array",
@@ -15929,7 +18861,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQIndexMode": {
+        "github_com_Tencent_WeKnora_internal_types.FAQIndexMode": {
             "type": "string",
             "enum": [
                 "question_only",
@@ -15940,7 +18872,7 @@ const docTemplate = `{
                 "FAQIndexModeQuestionAnswer"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQQuestionIndexMode": {
+        "github_com_Tencent_WeKnora_internal_types.FAQQuestionIndexMode": {
             "type": "string",
             "enum": [
                 "combined",
@@ -15951,7 +18883,7 @@ const docTemplate = `{
                 "FAQQuestionIndexModeSeparate"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.FAQSearchRequest": {
+        "github_com_Tencent_WeKnora_internal_types.FAQSearchRequest": {
             "type": "object",
             "required": [
                 "query_text"
@@ -15986,7 +18918,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.FollowUpSuggestionConfig": {
+        "github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig": {
             "type": "object",
             "properties": {
                 "additional_instruction": {
@@ -16027,7 +18959,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.GraphNode": {
+        "github_com_Tencent_WeKnora_internal_types.GraphNode": {
             "type": "object",
             "properties": {
                 "attributes": {
@@ -16047,7 +18979,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.GraphRelation": {
+        "github_com_Tencent_WeKnora_internal_types.GraphRelation": {
             "type": "object",
             "properties": {
                 "node1": {
@@ -16061,7 +18993,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ImageProcessingConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig": {
             "type": "object",
             "properties": {
                 "model_id": {
@@ -16070,7 +19002,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.IndexConfig": {
+        "github_com_Tencent_WeKnora_internal_types.IndexConfig": {
             "type": "object",
             "properties": {
                 "buckets_num": {
@@ -16139,7 +19071,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.IndexingStrategy": {
+        "github_com_Tencent_WeKnora_internal_types.IndexingStrategy": {
             "type": "object",
             "properties": {
                 "graph_enabled": {
@@ -16160,7 +19092,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.InviteMemberRequest": {
+        "github_com_Tencent_WeKnora_internal_types.InviteMemberRequest": {
             "type": "object",
             "required": [
                 "role"
@@ -16174,7 +19106,7 @@ const docTemplate = `{
                     "description": "Role to assign: admin/editor/viewer",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 },
@@ -16188,7 +19120,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.JoinByOrganizationIDRequest": {
+        "github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest": {
             "type": "object",
             "required": [
                 "organization_id"
@@ -16206,13 +19138,13 @@ const docTemplate = `{
                     "description": "Optional: requested role (admin/editor/viewer); default viewer",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.JoinOrganizationRequest": {
+        "github_com_Tencent_WeKnora_internal_types.JoinOrganizationRequest": {
             "type": "object",
             "required": [
                 "invite_code"
@@ -16225,7 +19157,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.KBCloneTaskStatus": {
+        "github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus": {
             "type": "string",
             "enum": [
                 "pending",
@@ -16240,7 +19172,7 @@ const docTemplate = `{
                 "KBCloneStatusFailed"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.KS3EngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.KS3EngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -16263,144 +19195,22 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.Knowledge": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "description": "Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)",
-                    "type": "string"
-                },
-                "created_at": {
-                    "description": "Creation time of the knowledge",
-                    "type": "string"
-                },
-                "deleted_at": {
-                    "description": "Deletion time of the knowledge",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/gorm.DeletedAt"
-                        }
-                    ]
-                },
-                "description": {
-                    "description": "Description of the knowledge",
-                    "type": "string"
-                },
-                "embedding_model_id": {
-                    "description": "ID of the embedding model",
-                    "type": "string"
-                },
-                "enable_status": {
-                    "description": "Enable status of the knowledge",
-                    "type": "string"
-                },
-                "error_message": {
-                    "description": "Error message of the knowledge",
-                    "type": "string"
-                },
-                "file_hash": {
-                    "description": "File hash of the knowledge",
-                    "type": "string"
-                },
-                "file_name": {
-                    "description": "File name of the knowledge",
-                    "type": "string"
-                },
-                "file_path": {
-                    "description": "File path of the knowledge",
-                    "type": "string"
-                },
-                "file_size": {
-                    "description": "File size of the knowledge",
-                    "type": "integer"
-                },
-                "file_type": {
-                    "description": "File type of the knowledge",
-                    "type": "string"
-                },
-                "id": {
-                    "description": "Unique identifier of the knowledge",
-                    "type": "string"
-                },
-                "knowledge_base_id": {
-                    "description": "ID of the knowledge base",
-                    "type": "string"
-                },
-                "knowledge_base_name": {
-                    "description": "Knowledge base name (not stored in database, populated on query)",
-                    "type": "string"
-                },
-                "last_faq_import_result": {
-                    "description": "Last FAQ import result (for FAQ type knowledge only)",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "metadata": {
-                    "description": "Metadata of the knowledge",
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "parse_status": {
-                    "description": "Parse status of the knowledge",
-                    "type": "string"
-                },
-                "pending_subtasks_count": {
-                    "description": "PendingSubtasksCount is the outstanding enrichment subtask count\n(summary + question + graph chunks). Only meaningful while\nParseStatus == \"finalizing\"; defaults to 0 in any terminal state.",
-                    "type": "integer"
-                },
-                "processed_at": {
-                    "description": "Processed time of the knowledge",
-                    "type": "string"
-                },
-                "source": {
-                    "description": "Source of the knowledge (e.g. URL address for url type, \"manual\" for manual type)",
-                    "type": "string"
-                },
-                "storage_size": {
-                    "description": "Storage size of the knowledge",
-                    "type": "integer"
-                },
-                "summary_status": {
-                    "description": "Summary status for async summary generation",
-                    "type": "string"
-                },
-                "tags": {
-                    "description": "Tags holds the tags associated with this knowledge (populated on query, not persisted directly).",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KnowledgeTag"
-                    }
-                },
-                "tenant_id": {
-                    "description": "Workspace ID",
-                    "type": "integer"
-                },
-                "title": {
-                    "description": "Title of the knowledge",
-                    "type": "string"
-                },
-                "type": {
-                    "description": "Type of the knowledge",
-                    "type": "string"
-                },
-                "updated_at": {
-                    "description": "Last updated time of the knowledge",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_Tencent_TreeRAG_internal_types.KnowledgeBase": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBase": {
             "type": "object",
             "properties": {
                 "asr_config": {
                     "description": "ASR config (Automatic Speech Recognition)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ASRConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
+                        }
+                    ]
+                },
+                "auto_tag_config": {
+                    "description": "AutoTagConfig controls asynchronous association of existing tags after parsing.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig"
                         }
                     ]
                 },
@@ -16412,7 +19222,7 @@ const docTemplate = `{
                     "description": "Chunking configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ChunkingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
                         }
                     ]
                 },
@@ -16448,7 +19258,7 @@ const docTemplate = `{
                     "description": "Extract config",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ExtractConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
                         }
                     ]
                 },
@@ -16456,7 +19266,7 @@ const docTemplate = `{
                     "description": "FAQConfig stores FAQ specific configuration such as indexing strategy",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
                         }
                     ]
                 },
@@ -16468,7 +19278,7 @@ const docTemplate = `{
                     "description": "Image processing configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ImageProcessingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"
                         }
                     ]
                 },
@@ -16476,7 +19286,7 @@ const docTemplate = `{
                     "description": "IndexingStrategy controls which indexing pipelines are active for this knowledge base.\nPipelines: vector search, keyword search, wiki generation, knowledge graph extraction.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.IndexingStrategy"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy"
                         }
                     ]
                 },
@@ -16512,7 +19322,7 @@ const docTemplate = `{
                     "description": "QuestionGenerationConfig stores question generation configuration for document knowledge bases",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.QuestionGenerationConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
                         }
                     ]
                 },
@@ -16528,7 +19338,7 @@ const docTemplate = `{
                     "description": "Deprecated: legacy COS config column. Kept for backward compatibility with old data.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.StorageConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageConfig"
                         }
                     ]
                 },
@@ -16536,7 +19346,7 @@ const docTemplate = `{
                     "description": "Storage provider config (new): only stores provider selection; credentials from workspace StorageEngineConfig",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.StorageProviderConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageProviderConfig"
                         }
                     ]
                 },
@@ -16564,7 +19374,7 @@ const docTemplate = `{
                     "description": "VLM config",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.VLMConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
                         }
                     ]
                 },
@@ -16572,20 +19382,28 @@ const docTemplate = `{
                     "description": "WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.KnowledgeBaseConfig": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig": {
             "type": "object",
             "properties": {
+                "auto_tag_config": {
+                    "description": "AutoTagConfig controls optional automatic association of existing KB tags.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AutoTagConfig"
+                        }
+                    ]
+                },
                 "chunking_config": {
                     "description": "Chunking configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ChunkingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
                         }
                     ]
                 },
@@ -16593,7 +19411,7 @@ const docTemplate = `{
                     "description": "FAQ configuration (only for FAQ type knowledge bases)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FAQConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FAQConfig"
                         }
                     ]
                 },
@@ -16601,7 +19419,7 @@ const docTemplate = `{
                     "description": "Image processing configuration",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ImageProcessingConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ImageProcessingConfig"
                         }
                     ]
                 },
@@ -16609,7 +19427,7 @@ const docTemplate = `{
                     "description": "IndexingStrategy controls which indexing pipelines are active.\nnil means \"no change\" when updating (preserves existing strategy).",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.IndexingStrategy"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexingStrategy"
                         }
                     ]
                 },
@@ -16617,13 +19435,13 @@ const docTemplate = `{
                     "description": "Wiki configuration (only for wiki-enabled knowledge bases)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiConfig"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.KnowledgeBaseShareResponse": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShareResponse": {
             "type": "object",
             "properties": {
                 "chunk_count": {
@@ -16679,7 +19497,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.KnowledgeMoveProgress": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeMoveProgress": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -16710,7 +19528,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KBCloneTaskStatus"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KBCloneTaskStatus"
                 },
                 "target_kb_id": {
                     "type": "string"
@@ -16728,20 +19546,20 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.KnowledgeProcessOverrides": {
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides": {
             "type": "object",
             "properties": {
                 "asr_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ASRConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
                 },
                 "chunking_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ChunkingConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChunkingConfig"
                 },
                 "enable_multimodel": {
                     "type": "boolean"
                 },
                 "extract_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ExtractConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ExtractConfig"
                 },
                 "graph_enabled": {
                     "type": "boolean"
@@ -16756,65 +19574,24 @@ const docTemplate = `{
                 "parser_engine_rules": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ParserEngineRule"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
                     }
                 },
                 "question_generation_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.QuestionGenerationConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig"
                 },
                 "vlm_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.VLMConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.KnowledgeTag": {
-            "type": "object",
-            "properties": {
-                "color": {
-                    "description": "Optional display color",
-                    "type": "string"
-                },
-                "created_at": {
-                    "description": "Creation time",
-                    "type": "string"
-                },
-                "id": {
-                    "description": "Unique identifier of the tag (UUID)",
-                    "type": "string"
-                },
-                "knowledge_base_id": {
-                    "description": "Knowledge base ID that this tag belongs to",
-                    "type": "string"
-                },
-                "name": {
-                    "description": "Tag name, unique within the same knowledge base",
-                    "type": "string"
-                },
-                "seq_id": {
-                    "description": "SeqID is an auto-increment integer ID for external API usage",
-                    "type": "integer"
-                },
-                "sort_order": {
-                    "description": "Sort order within the same knowledge base",
-                    "type": "integer"
-                },
-                "tenant_id": {
-                    "description": "Workspace ID",
-                    "type": "integer"
-                },
-                "updated_at": {
-                    "description": "Last updated time",
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_Tencent_TreeRAG_internal_types.ListMembersResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ListMembersResponse": {
             "type": "object",
             "properties": {
                 "members": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrganizationMemberResponse"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrganizationMemberResponse"
                     }
                 },
                 "total": {
@@ -16822,20 +19599,20 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ListOrganizationsResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ListOrganizationsResponse": {
             "type": "object",
             "properties": {
                 "organizations": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrganizationResponse"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrganizationResponse"
                     }
                 },
                 "resource_counts": {
                     "description": "各空间内知识库/智能体数量，供列表侧栏展示",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ResourceCountsByOrgResponse"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ResourceCountsByOrgResponse"
                         }
                     ]
                 },
@@ -16844,13 +19621,13 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ListSharesResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ListSharesResponse": {
             "type": "object",
             "properties": {
                 "shares": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KnowledgeBaseShareResponse"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseShareResponse"
                     }
                 },
                 "total": {
@@ -16858,7 +19635,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.LocalEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.LocalEngineConfig": {
             "type": "object",
             "properties": {
                 "path_prefix": {
@@ -16866,7 +19643,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.LoginRequest": {
+        "github_com_Tencent_WeKnora_internal_types.LoginRequest": {
             "type": "object",
             "required": [
                 "email",
@@ -16882,14 +19659,14 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.LoginResponse": {
+        "github_com_Tencent_WeKnora_internal_types.LoginResponse": {
             "type": "object",
             "properties": {
                 "active_tenant": {
                     "description": "ActiveTenant is the workspace whose ID is encoded in the issued JWT;\nfuture requests are scoped to it until the client calls /auth/switch-tenant.\nDefaults to the user's home workspace on a fresh login.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Tenant"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                         }
                     ]
                 },
@@ -16897,7 +19674,7 @@ const docTemplate = `{
                     "description": "Memberships lists every workspace the user can authenticate into,\nalong with their role in each. Always populated (length 1 for users\nwho only belong to their home workspace) so frontends can render a\nworkspace switcher without a follow-up request. Serialised without\nomitempty so the field is always present as a JSON array (possibly\nempty) — the \"always populated\" contract relies on the server side\nguaranteeing a non-nil slice.",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Membership"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Membership"
                     }
                 },
                 "message": {
@@ -16913,11 +19690,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.User"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.User"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPAdvancedConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig": {
             "type": "object",
             "properties": {
                 "retry_count": {
@@ -16934,7 +19711,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPAuthConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MCPAuthConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -16952,7 +19729,7 @@ const docTemplate = `{
                     "description": "AuthType selects the authentication strategy. Empty (\"\") is treated as\nnone for backward compatibility with rows that pre-date this field.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPAuthType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
                         }
                     ]
                 },
@@ -16974,7 +19751,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPAuthType": {
+        "github_com_Tencent_WeKnora_internal_types.MCPAuthType": {
             "type": "string",
             "enum": [
                 "",
@@ -16989,26 +19766,26 @@ const docTemplate = `{
                 "MCPAuthOAuth"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPEnvVars": {
+        "github_com_Tencent_WeKnora_internal_types.MCPEnvVars": {
             "type": "object",
             "additionalProperties": {
                 "type": "string"
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPHeaders": {
+        "github_com_Tencent_WeKnora_internal_types.MCPHeaders": {
             "type": "object",
             "additionalProperties": {
                 "type": "string"
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPService": {
+        "github_com_Tencent_WeKnora_internal_types.MCPService": {
             "type": "object",
             "properties": {
                 "advanced_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPAdvancedConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAdvancedConfig"
                 },
                 "auth_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPAuthConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthConfig"
                 },
                 "created_at": {
                     "type": "string"
@@ -17026,12 +19803,12 @@ const docTemplate = `{
                     "description": "Environment variables for stdio",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPEnvVars"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPEnvVars"
                         }
                     ]
                 },
                 "headers": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPHeaders"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPHeaders"
                 },
                 "id": {
                     "type": "string"
@@ -17047,7 +19824,7 @@ const docTemplate = `{
                     "description": "Required for stdio transport",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPStdioConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPStdioConfig"
                         }
                     ]
                 },
@@ -17055,7 +19832,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "transport_type": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MCPTransportType"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPTransportType"
                 },
                 "updated_at": {
                     "type": "string"
@@ -17063,10 +19840,14 @@ const docTemplate = `{
                 "url": {
                     "description": "Optional: required for SSE/HTTP Streamable",
                     "type": "string"
+                },
+                "usage_instructions": {
+                    "description": "UsageInstructions is maintained locally and is not overwritten by directory refresh.",
+                    "type": "string"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPStdioConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MCPStdioConfig": {
             "type": "object",
             "properties": {
                 "args": {
@@ -17082,7 +19863,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MCPTransportType": {
+        "github_com_Tencent_WeKnora_internal_types.MCPTransportType": {
             "type": "string",
             "enum": [
                 "sse",
@@ -17105,7 +19886,7 @@ const docTemplate = `{
                 "MCPTransportStdio"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.ManualKnowledgePayload": {
+        "github_com_Tencent_WeKnora_internal_types.ManualKnowledgePayload": {
             "type": "object",
             "properties": {
                 "channel": {
@@ -17115,7 +19896,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "process_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KnowledgeProcessOverrides"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
                 },
                 "status": {
                     "type": "string"
@@ -17131,7 +19912,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MatchType": {
+        "github_com_Tencent_WeKnora_internal_types.MatchType": {
             "type": "integer",
             "enum": [
                 0,
@@ -17177,11 +19958,11 @@ const docTemplate = `{
                 "MatchTypeDataAnalysis"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.Membership": {
+        "github_com_Tencent_WeKnora_internal_types.Membership": {
             "type": "object",
             "properties": {
                 "role": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TenantRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
                 },
                 "tenant_id": {
                     "type": "integer"
@@ -17191,7 +19972,56 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MentionedItem": {
+        "github_com_Tencent_WeKnora_internal_types.MemoryConfig": {
+            "type": "object",
+            "properties": {
+                "embedding_model_id": {
+                    "description": "EmbeddingModelID is the single model used to score memory against a\nquestion. It is pinned per workspace: knowledge bases each have their\nown embedding model, and grabbing whichever one happens to be listed\nfirst would mix incomparable vector spaces. Blank means semantic recall\nis off and matching stays lexical.",
+                    "type": "string"
+                },
+                "enabled": {
+                    "description": "Enabled defaults to false. Memory retains user statements across\nsessions, so a workspace admin has to turn it on deliberately.",
+                    "type": "boolean"
+                },
+                "extract_delay_seconds": {
+                    "description": "ExtractDelaySeconds is how long a finished turn waits before\ndistillation runs. Waiting lets one model call cover the several\nmessages a user usually sends in a row. 0 means the default.",
+                    "type": "integer"
+                },
+                "extract_instructions": {
+                    "description": "ExtractInstructions are workspace-specific rules appended to the\ndistillation prompt, for policies the product cannot guess (\"never record\ncustomer names\", \"always note the environment a question is about\").",
+                    "type": "string"
+                },
+                "extract_min_interval_seconds": {
+                    "description": "ExtractMinIntervalSeconds is the floor between two distillation runs for\nthe same person, and exists purely to bound cost. It never drops a turn:\na turn arriving inside the interval is queued and picked up by the next\nrun. 0 means the default.",
+                    "type": "integer"
+                },
+                "extract_model_id": {
+                    "description": "ExtractModelID is the model used by the background extraction task.\nEmpty means \"use the model the conversation itself used\", which is what\nthe settings UI promises, so the extraction task must never fail merely\nbecause this is blank.",
+                    "type": "string"
+                },
+                "interest_threshold": {
+                    "description": "InterestThreshold is how many separate conversations must touch a topic\nbefore it becomes a stored interest. 0 means the default. Setting it to 1\nrecords every topic on first sight, which is usually too noisy.",
+                    "type": "integer"
+                },
+                "max_items": {
+                    "description": "MaxItems caps active items per subject. 0 means DefaultMemoryMaxItems.",
+                    "type": "integer"
+                },
+                "retrieval_conditioning": {
+                    "description": "RetrievalConditioning lets memory shape retrieval — query rewriting and\nper-document ranking — rather than only being appended to the answer\nprompt. This is where memory earns its keep in a knowledge-base product.",
+                    "type": "boolean"
+                },
+                "vector_recall": {
+                    "description": "VectorRecall adds semantic similarity to memory recall. Nil means on\nwhen an embedding model is reachable.\n\nLexical matching alone cannot find a memory the user has re-worded, which\nis most of them: \"回答直接给结论\" and \"别铺垫那么多\" share no tokens. The\ncost is one embedding call per turn, bounded and degraded to lexical on\nfailure, so the feature never becomes a reason a chat is slow.",
+                    "type": "boolean"
+                },
+                "write_mode": {
+                    "description": "WriteMode is MemoryWriteExplicitOnly or MemoryWriteAuto.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MentionedItem": {
             "type": "object",
             "properties": {
                 "id": {
@@ -17226,7 +20056,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.Message": {
+        "github_com_Tencent_WeKnora_internal_types.Message": {
             "type": "object",
             "properties": {
                 "agent_duration_ms": {
@@ -17241,14 +20071,21 @@ const docTemplate = `{
                     "description": "Agent execution steps (only for assistant messages generated by agent)\nThis contains the detailed reasoning process and tool calls made by the agent\nStored for user history display, but NOT included in LLM context to avoid redundancy",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.AgentStep"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AgentStep"
+                    }
+                },
+                "artifacts": {
+                    "description": "Skill-generated files produced during this assistant turn (assistant messages only).\nPopulated by ArtifactCollector after the sandbox finishes, referenced by the\nartifact download endpoint. Empty for user messages and turns without skills.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageArtifact"
                     }
                 },
                 "attachments": {
                     "description": "Attached files (documents, audio, etc., for user messages)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MessageAttachment"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageAttachment"
                     }
                 },
                 "channel": {
@@ -17279,7 +20116,7 @@ const docTemplate = `{
                     "description": "Attached images with OCR/Caption text (for user messages)",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MessageImage"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MessageImage"
                     }
                 },
                 "is_completed": {
@@ -17298,14 +20135,14 @@ const docTemplate = `{
                     "description": "References to knowledge chunks used in the response",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SearchResult"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SearchResult"
                     }
                 },
                 "mentioned_items": {
                     "description": "Mentioned knowledge bases and files (for user messages)\nStores the @mentioned items when user sends a message",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MentionedItem"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem"
                     }
                 },
                 "model_id": {
@@ -17327,10 +20164,58 @@ const docTemplate = `{
                 "updated_at": {
                     "description": "Last update timestamp",
                     "type": "string"
+                },
+                "usage": {
+                    "description": "LLM token usage aggregated across every round of the turn that produced this\nassistant message. Persisted so history reads can attribute cost after the\nlive stream is gone; NULL (nil) for user messages and pre-feature rows.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TokenUsage"
+                        }
+                    ]
+                },
+                "used_memories": {
+                    "description": "UsedMemories records which long-term memories were injected into this\nanswer, so the chat UI can show them and let the user delete one on the\nspot. Persisted rather than only streamed so reopening a conversation\nstill explains what the answer saw.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UsedMemory"
+                    }
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MessageAttachment": {
+        "github_com_Tencent_WeKnora_internal_types.MessageArtifact": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "description": "When WeKnora persisted the blob",
+                    "type": "string"
+                },
+                "file_name": {
+                    "description": "Original filename inside the sandbox",
+                    "type": "string"
+                },
+                "file_size": {
+                    "description": "File size in bytes",
+                    "type": "integer"
+                },
+                "file_type": {
+                    "description": "File extension (e.g., \".pptx\", \".pdf\")",
+                    "type": "string"
+                },
+                "mod_time": {
+                    "description": "Sandbox-side modification time (used for diff)",
+                    "type": "string"
+                },
+                "source_path": {
+                    "description": "Absolute path inside the sandbox (used for diff)",
+                    "type": "string"
+                },
+                "url": {
+                    "description": "Storage URL (provider://path); persisted, not sent to client",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.MessageAttachment": {
             "type": "object",
             "properties": {
                 "content": {
@@ -17379,7 +20264,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MessageImage": {
+        "github_com_Tencent_WeKnora_internal_types.MessageImage": {
             "type": "object",
             "properties": {
                 "caption": {
@@ -17390,7 +20275,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.MinIOEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig": {
             "type": "object",
             "properties": {
                 "access_key_id": {
@@ -17417,14 +20302,14 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ModelParameters": {
+        "github_com_Tencent_WeKnora_internal_types.ModelParameters": {
             "type": "object",
             "properties": {
                 "api_key": {
                     "type": "string"
                 },
                 "app_id": {
-                    "description": "TreeRAGCloud 厂商专用凭证",
+                    "description": "WeKnoraCloud 厂商专用凭证",
                     "type": "string"
                 },
                 "app_secret": {
@@ -17434,6 +20319,10 @@ const docTemplate = `{
                 "base_url": {
                     "type": "string"
                 },
+                "context_window": {
+                    "description": "ContextWindow is the model's total context window in tokens and\nMaxOutputTokens the most it emits in one response. Both are provider\nfacts the agent cannot discover but has to act on: the context window is\nwhat decides when conversation history gets compacted, and assuming a\nwindow larger than the real one means compaction never fires and the\nprovider rejects the request mid-conversation instead. 0 means unknown,\nwhich falls back to DefaultMaxContextTokens.",
+                    "type": "integer"
+                },
                 "custom_headers": {
                     "description": "CustomHeaders 允许在调用远程模型 API 时附加自定义 HTTP 请求头，\n用途类似 Python OpenAI SDK 的 extra_headers 参数，\n常见场景包括透传企业网关鉴权信息、追踪 ID、路由标识等。\n保留字段（Authorization、api-key、Content-Type、Accept 等）会在运行期被忽略以避免破坏签名/鉴权流程。",
                     "type": "object",
@@ -17442,7 +20331,7 @@ const docTemplate = `{
                     }
                 },
                 "embedding_parameters": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.EmbeddingParameters"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EmbeddingParameters"
                 },
                 "extra_config": {
                     "description": "Provider-specific configuration",
@@ -17456,6 +20345,9 @@ const docTemplate = `{
                 },
                 "max_concurrency": {
                     "description": "MaxConcurrency caps concurrent in-flight BACKGROUND (ingestion /\nenrichment) calls to THIS specific model, keyed by model ID and shared\nacross all replicas. 0 (the default) means \"fall back to the\nprocess-wide model.max_concurrency\". Interactive user-facing calls are\nnever gated. Only chat / vlm / embedding honour this (see limiter.Gate).",
+                    "type": "integer"
+                },
+                "max_output_tokens": {
                     "type": "integer"
                 },
                 "parameter_size": {
@@ -17472,7 +20364,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ModelSource": {
+        "github_com_Tencent_WeKnora_internal_types.ModelSource": {
             "type": "string",
             "enum": [
                 "local",
@@ -17489,6 +20381,7 @@ const docTemplate = `{
                 "siliconflow",
                 "jina",
                 "openrouter",
+                "litellm",
                 "requesty",
                 "nvidia",
                 "novita",
@@ -17501,6 +20394,7 @@ const docTemplate = `{
                 "ModelSourceGemini": "Gemini model",
                 "ModelSourceHunyuan": "Hunyuan model",
                 "ModelSourceJina": "Jina AI model",
+                "ModelSourceLiteLLM": "LiteLLM proxy model",
                 "ModelSourceLocal": "Local model",
                 "ModelSourceMimo": "Mimo model",
                 "ModelSourceMinimax": "Minimax mode",
@@ -17529,6 +20423,7 @@ const docTemplate = `{
                 "SiliconFlow model",
                 "Jina AI model",
                 "OpenRouter model",
+                "LiteLLM proxy model",
                 "Requesty model",
                 "NVIDIA model",
                 "Novita AI model",
@@ -17549,13 +20444,14 @@ const docTemplate = `{
                 "ModelSourceSiliconFlow",
                 "ModelSourceJina",
                 "ModelSourceOpenRouter",
+                "ModelSourceLiteLLM",
                 "ModelSourceRequesty",
                 "ModelSourceNvidia",
                 "ModelSourceNovita",
                 "ModelSourceAzureOpenAI"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.ModelType": {
+        "github_com_Tencent_WeKnora_internal_types.ModelType": {
             "type": "string",
             "enum": [
                 "Embedding",
@@ -17586,7 +20482,7 @@ const docTemplate = `{
                 "ModelTypeASR"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.OBSEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.OBSEngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -17612,7 +20508,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.OIDCAuthURLResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OIDCAuthURLResponse": {
             "type": "object",
             "properties": {
                 "authorization_url": {
@@ -17629,7 +20525,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.OIDCConfigResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OIDCConfigResponse": {
             "type": "object",
             "properties": {
                 "enabled": {
@@ -17643,7 +20539,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.OSSEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.OSSEngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -17675,7 +20571,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.OrgMemberRole": {
+        "github_com_Tencent_WeKnora_internal_types.OrgMemberRole": {
             "type": "string",
             "enum": [
                 "admin",
@@ -17688,7 +20584,7 @@ const docTemplate = `{
                 "OrgRoleViewer"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.OrganizationMemberResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OrganizationMemberResponse": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -17723,7 +20619,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.OrganizationResponse": {
+        "github_com_Tencent_WeKnora_internal_types.OrganizationResponse": {
             "type": "object",
             "properties": {
                 "agent_share_count": {
@@ -17797,14 +20693,14 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ParserEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.ParserEngineConfig": {
             "type": "object",
             "properties": {
                 "chat_parser_engine_rules": {
                     "description": "ChatParserEngineRules selects parser engines for session-scoped chat\ndocuments. Knowledge bases keep their own rules in ChunkingConfig.",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ParserEngineRule"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
                     }
                 },
                 "mineru_api_key": {
@@ -17831,6 +20727,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "mineru_enable_ocr": {
+                    "description": "MinerUEnableOCR is retained for compatibility with configurations saved\nbefore parse_method supported auto/ocr/txt.",
                     "type": "boolean"
                 },
                 "mineru_enable_table": {
@@ -17845,6 +20742,9 @@ const docTemplate = `{
                 },
                 "mineru_model": {
                     "description": "MinerU 自建解析参数",
+                    "type": "string"
+                },
+                "mineru_parse_method": {
                     "type": "string"
                 },
                 "mineru_vlm_server_url": {
@@ -17887,14 +20787,6 @@ const docTemplate = `{
                     "description": "PaddleOCR-VL self-hosted pipeline service (full /layout-parsing API).",
                     "type": "string"
                 },
-                "paddleocr_vl_api_key": {
-                    "description": "Optional Bearer token for gated self-hosted PaddleOCR-VL deployments.",
-                    "type": "string"
-                },
-                "paddleocr_vl_model": {
-                    "description": "e.g. PaddleOCR-VL",
-                    "type": "string"
-                },
                 "paddleocr_vl_use_chart_recognition": {
                     "type": "boolean"
                 },
@@ -17903,7 +20795,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ParserEngineRule": {
+        "github_com_Tencent_WeKnora_internal_types.ParserEngineRule": {
             "type": "object",
             "properties": {
                 "engine": {
@@ -17914,10 +20806,29 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "xlsx_first_row_as_header": {
+                    "description": "XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.\nnil preserves the parser default; an explicit false disables the mode.",
+                    "type": "boolean"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.QuestionGenerationConfig": {
+        "github_com_Tencent_WeKnora_internal_types.PromptCacheStatus": {
+            "type": "string",
+            "enum": [
+                "unsupported",
+                "unreported",
+                "miss",
+                "hit"
+            ],
+            "x-enum-varnames": [
+                "PromptCacheStatusUnsupported",
+                "PromptCacheStatusUnreported",
+                "PromptCacheStatusMiss",
+                "PromptCacheStatusHit"
+            ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig": {
             "type": "object",
             "properties": {
                 "custom_instructions": {
@@ -17933,18 +20844,18 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.QuestionSuggestionConfig": {
+        "github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig": {
             "type": "object",
             "properties": {
                 "follow_ups": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.FollowUpSuggestionConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.FollowUpSuggestionConfig"
                 },
                 "starters": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.StarterSuggestionConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.QueueStat": {
+        "github_com_Tencent_WeKnora_internal_types.QueueStat": {
             "type": "object",
             "properties": {
                 "active": {
@@ -18001,7 +20912,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RegisterRequest": {
+        "github_com_Tencent_WeKnora_internal_types.RegisterRequest": {
             "type": "object",
             "required": [
                 "email",
@@ -18023,7 +20934,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RegisterResponse": {
+        "github_com_Tencent_WeKnora_internal_types.RegisterResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -18033,14 +20944,14 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "tenant": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Tenant"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                 },
                 "user": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.User"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.User"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RequestRoleUpgradeRequest": {
+        "github_com_Tencent_WeKnora_internal_types.RequestRoleUpgradeRequest": {
             "type": "object",
             "required": [
                 "requested_role"
@@ -18055,13 +20966,13 @@ const docTemplate = `{
                     "description": "The role user wants to upgrade to",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.Resource": {
+        "github_com_Tencent_WeKnora_internal_types.Resource": {
             "type": "object",
             "properties": {
                 "description": {
@@ -18103,7 +21014,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ResourceCountsByOrgResponse": {
+        "github_com_Tencent_WeKnora_internal_types.ResourceCountsByOrgResponse": {
             "type": "object",
             "properties": {
                 "agents": {
@@ -18130,7 +21041,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RetrievalConfig": {
+        "github_com_Tencent_WeKnora_internal_types.RetrievalConfig": {
             "type": "object",
             "properties": {
                 "embedding_top_k": {
@@ -18171,14 +21082,14 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RetrieverEngineParams": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams": {
             "type": "object",
             "properties": {
                 "retriever_engine_type": {
                     "description": "Retriever engine type",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RetrieverEngineType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType"
                         }
                     ]
                 },
@@ -18186,13 +21097,13 @@ const docTemplate = `{
                     "description": "Retriever type",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RetrieverType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverType"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RetrieverEngineType": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverEngineType": {
             "type": "string",
             "enum": [
                 "postgres",
@@ -18221,18 +21132,18 @@ const docTemplate = `{
                 "OpenSearchRetrieverEngineType"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.RetrieverEngines": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverEngines": {
             "type": "object",
             "properties": {
                 "engines": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RetrieverEngineParams"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineParams"
                     }
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RetrieverType": {
+        "github_com_Tencent_WeKnora_internal_types.RetrieverType": {
             "type": "string",
             "enum": [
                 "keywords",
@@ -18255,7 +21166,7 @@ const docTemplate = `{
                 "WebSearchRetrieverType"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.ReviewJoinRequestRequest": {
+        "github_com_Tencent_WeKnora_internal_types.ReviewJoinRequestRequest": {
             "type": "object",
             "properties": {
                 "approved": {
@@ -18269,13 +21180,13 @@ const docTemplate = `{
                     "description": "Optional: role to assign when approving; overrides applicant's requested role",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RuntimeTaskAction": {
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction": {
             "type": "string",
             "enum": [
                 "cancel",
@@ -18288,13 +21199,13 @@ const docTemplate = `{
                 "RuntimeTaskActionDelete"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.RuntimeTaskInfo": {
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo": {
             "type": "object",
             "properties": {
                 "allowed_actions": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RuntimeTaskAction"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskAction"
                     }
                 },
                 "completed_at": {
@@ -18352,7 +21263,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "state": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RuntimeTaskState"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskState"
                 },
                 "sync_log_id": {
                     "type": "string"
@@ -18377,7 +21288,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.RuntimeTaskState": {
+        "github_com_Tencent_WeKnora_internal_types.RuntimeTaskState": {
             "type": "string",
             "enum": [
                 "pending",
@@ -18396,7 +21307,7 @@ const docTemplate = `{
                 "RuntimeTaskCompleted"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.S3EngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.S3EngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -18425,7 +21336,48 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.SearchParams": {
+        "github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy": {
+            "type": "object",
+            "properties": {
+                "allow_out": {
+                    "description": "AllowOut accepts IPv4, IPv4 CIDR, a DNS name, or a single-label\nwildcard such as \"*.example.com\". Domain entries are only meaningful\ntogether with a deny-all; see ValidateSandboxNetworkPolicy.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "allow_public_inbound": {
+                    "description": "AllowPublicInbound is accepted on the wire for old payloads and then\ncleared. Inbound is always credential-required; a true value has no\nruntime effect.",
+                    "type": "boolean"
+                },
+                "cube_rules": {
+                    "description": "CubeRules are validated whenever present and consumed only by the Cube\nprovider adapter.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CubeEgressRule"
+                    }
+                },
+                "deny_egress_by_default": {
+                    "description": "DenyEgressByDefault installs a 0.0.0.0/0 deny-all, after which only\nAllowOut (and L7 rule targets) can reach the network. false allows\npublic egress, which is what skill installs need.",
+                    "type": "boolean"
+                },
+                "deny_out": {
+                    "description": "DenyOut accepts IPv4 and IPv4 CIDR only. Neither provider can deny a\ndomain: denial is a pure longest-prefix match on the destination IP.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "e2b_host_rules": {
+                    "description": "E2BHostRules are validated whenever present and consumed only by the E2B\nprovider adapter.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.E2BHostRule"
+                    }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.SearchParams": {
             "type": "object",
             "properties": {
                 "disable_keywords_match": {
@@ -18488,7 +21440,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.SearchResult": {
+        "github_com_Tencent_WeKnora_internal_types.SearchResult": {
             "type": "object",
             "properties": {
                 "chunk_index": {
@@ -18530,6 +21482,10 @@ const docTemplate = `{
                     "description": "KnowledgeChannel indicates through which channel the knowledge was ingested (web, api, wechat, etc.)",
                     "type": "string"
                 },
+                "knowledge_custom_metadata": {
+                    "description": "KnowledgeCustomMetadata is user-authored context safe to expose to models.",
+                    "type": "string"
+                },
                 "knowledge_description": {
                     "description": "KnowledgeDescription is the description of the knowledge document",
                     "type": "string"
@@ -18554,7 +21510,7 @@ const docTemplate = `{
                     "description": "Match type",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MatchType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MatchType"
                         }
                     ]
                 },
@@ -18594,7 +21550,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.Session": {
+        "github_com_Tencent_WeKnora_internal_types.Session": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -18623,12 +21579,16 @@ const docTemplate = `{
                     "description": "LastRequestState records the input-bar state used the last time this\nsession sent a question (agent, model, KB scope, web search, MCPs).\nPersisted on every successful POST to /knowledge-chat or /agent-chat so\nthat reopening the session can restore the original request context to\nthe chat UI. Stored in the legacy sessions.agent_config JSONB column to\navoid a new migration; the shape used today is ` + "`" + `SessionLastRequestState` + "`" + `.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SessionLastRequestState"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SessionLastRequestState"
                         }
                     ]
                 },
                 "pinned_at": {
                     "description": "PinnedAt records when the session was pinned; nil when not pinned.",
+                    "type": "string"
+                },
+                "sandbox_config_id": {
+                    "description": "SandboxConfigID pins which sandbox config this session's CURRENT live\nsandbox was created on. Empty means no live sandbox;\nSandboxConfigIDGlobalDefault means the deployment-wide default config.\n\nThis is an ephemeral pin that dies with the sandbox, not a permanent\nowner: sessions outlive sandboxes by months, so treating it as\npermanent would make \"no session references this config\" never true.",
                     "type": "string"
                 },
                 "tenant_id": {
@@ -18643,12 +21603,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user_id": {
-                    "description": "UserID is the owner scope for this session. TreeRAG user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
+                    "description": "UserID is the owner scope for this session. WeKnora user UUIDs, API\nexternal-user principals, and embed visitor principals all use this column.",
                     "type": "string"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.SessionLastRequestState": {
+        "github_com_Tencent_WeKnora_internal_types.SessionLastRequestState": {
             "type": "object",
             "properties": {
                 "agent_enabled": {
@@ -18678,7 +21638,7 @@ const docTemplate = `{
                 "mentioned_items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MentionedItem"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MentionedItem"
                     }
                 },
                 "model_id": {
@@ -18701,7 +21661,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ShareKnowledgeBaseRequest": {
+        "github_com_Tencent_WeKnora_internal_types.ShareKnowledgeBaseRequest": {
             "type": "object",
             "required": [
                 "organization_id",
@@ -18712,11 +21672,36 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "permission": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.StarterSuggestionConfig": {
+        "github_com_Tencent_WeKnora_internal_types.SkillImageConfig": {
+            "type": "object",
+            "properties": {
+                "base_template_id": {
+                    "description": "BaseTemplateID is the template this chain was originally built from;\nthe rebuild path starts over from it.",
+                    "type": "string"
+                },
+                "built_at": {
+                    "description": "BuiltAt records when this generation was produced.",
+                    "type": "string"
+                },
+                "generation": {
+                    "description": "Generation increments on every successful install/remove, for naming\nand troubleshooting.",
+                    "type": "integer"
+                },
+                "owner_fingerprint": {
+                    "description": "OwnerFingerprint identifies the provider account that owns the snapshot.\nSnapshots are invisible across accounts, so a mismatch means \"fall back\nto the base template\" rather than \"fail\".",
+                    "type": "string"
+                },
+                "snapshot_id": {
+                    "description": "SnapshotID is the currently effective snapshot; empty = base template.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig": {
             "type": "object",
             "properties": {
                 "count": {
@@ -18736,7 +21721,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.StorageBackendConfig": {
+        "github_com_Tencent_WeKnora_internal_types.StorageBackendConfig": {
             "type": "object",
             "properties": {
                 "access_key_id": {
@@ -18780,7 +21765,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.StorageConfig": {
+        "github_com_Tencent_WeKnora_internal_types.StorageConfig": {
             "type": "object",
             "properties": {
                 "app_id": {
@@ -18825,40 +21810,40 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.StorageEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.StorageEngineConfig": {
             "type": "object",
             "properties": {
                 "cos": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.COSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.COSEngineConfig"
                 },
                 "default_provider": {
                     "description": "\"local\", \"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\", \"obs\"",
                     "type": "string"
                 },
                 "ks3": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KS3EngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KS3EngineConfig"
                 },
                 "local": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.LocalEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.LocalEngineConfig"
                 },
                 "minio": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MinIOEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig"
                 },
                 "obs": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OBSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OBSEngineConfig"
                 },
                 "oss": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OSSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OSSEngineConfig"
                 },
                 "s3": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.S3EngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.S3EngineConfig"
                 },
                 "tos": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TOSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TOSEngineConfig"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.StorageProviderConfig": {
+        "github_com_Tencent_WeKnora_internal_types.StorageProviderConfig": {
             "type": "object",
             "properties": {
                 "provider": {
@@ -18867,7 +21852,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.SubmitJoinRequestRequest": {
+        "github_com_Tencent_WeKnora_internal_types.SubmitJoinRequestRequest": {
             "type": "object",
             "required": [
                 "invite_code"
@@ -18886,13 +21871,13 @@ const docTemplate = `{
                     "description": "Optional: role the applicant requests (admin/editor/viewer); default viewer",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.SuggestionAttribution": {
+        "github_com_Tencent_WeKnora_internal_types.SuggestionAttribution": {
             "type": "object",
             "properties": {
                 "question_id": {
@@ -18903,7 +21888,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.SyncLog": {
+        "github_com_Tencent_WeKnora_internal_types.SyncLog": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -18975,7 +21960,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.SystemSetting": {
+        "github_com_Tencent_WeKnora_internal_types.SystemSetting": {
             "type": "object",
             "properties": {
                 "category": {
@@ -19031,7 +22016,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.TOSEngineConfig": {
+        "github_com_Tencent_WeKnora_internal_types.TOSEngineConfig": {
             "type": "object",
             "properties": {
                 "access_key": {
@@ -19060,7 +22045,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.Tenant": {
+        "github_com_Tencent_WeKnora_internal_types.Tenant": {
             "type": "object",
             "properties": {
                 "business": {
@@ -19071,7 +22056,7 @@ const docTemplate = `{
                     "description": "Chat history config: knowledge base configuration for indexing and searching chat messages via vector search",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ChatHistoryConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ChatHistoryConfig"
                         }
                     ]
                 },
@@ -19079,7 +22064,7 @@ const docTemplate = `{
                     "description": "Global Context configuration for this workspace (default for all sessions)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ContextConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextConfig"
                         }
                     ]
                 },
@@ -19088,10 +22073,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "credentials": {
-                    "description": "Credentials config: third-party provider credentials (e.g. TreeRAGCloud AppID/AppSecret)",
+                    "description": "Credentials config: third-party provider credentials (e.g. WeKnoraCloud AppID/AppSecret)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.CredentialsConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CredentialsConfig"
                         }
                     ]
                 },
@@ -19115,6 +22100,14 @@ const docTemplate = `{
                     "description": "ID",
                     "type": "integer"
                 },
+                "memory_config": {
+                    "description": "Memory config: workspace switch for cross-session long-term memory",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MemoryConfig"
+                        }
+                    ]
+                },
                 "name": {
                     "description": "Name",
                     "type": "string"
@@ -19123,7 +22116,7 @@ const docTemplate = `{
                     "description": "Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ParserEngineConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineConfig"
                         }
                     ]
                 },
@@ -19131,7 +22124,7 @@ const docTemplate = `{
                     "description": "Retrieval config: global search/retrieval parameters shared by knowledge search and message search",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RetrievalConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrievalConfig"
                         }
                     ]
                 },
@@ -19139,7 +22132,7 @@ const docTemplate = `{
                     "description": "Retriever engines",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RetrieverEngines"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngines"
                         }
                     ]
                 },
@@ -19151,7 +22144,7 @@ const docTemplate = `{
                     "description": "Storage engine config: parameters for Local, MinIO, COS. Used for document/file storage and docreader.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.StorageEngineConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageEngineConfig"
                         }
                     ]
                 },
@@ -19171,13 +22164,13 @@ const docTemplate = `{
                     "description": "Global WebSearch configuration for this workspace",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WebSearchConfig"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchConfig"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.TenantRole": {
+        "github_com_Tencent_WeKnora_internal_types.TenantRole": {
             "type": "string",
             "enum": [
                 "owner",
@@ -19192,7 +22185,105 @@ const docTemplate = `{
                 "TenantRoleViewer"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.ToolCall": {
+        "github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig": {
+            "type": "object",
+            "properties": {
+                "allow_private_endpoints": {
+                    "description": "AllowPrivateEndpoints permits this workspace config to reach RFC1918 or\nloopback cluster endpoints. Link-local/cloud-metadata addresses remain\nblocked. It is explicit in the UI instead of hidden in process env.",
+                    "type": "boolean"
+                },
+                "cube": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CubeSandboxConfig"
+                },
+                "default_timeout_sec": {
+                    "description": "DefaultTimeoutSec is the per-execution timeout in seconds. 0 uses the\nprogram's built-in default.",
+                    "type": "integer"
+                },
+                "docker": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.DockerSandboxConfig"
+                },
+                "e2b": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.E2BSandboxConfig"
+                },
+                "env_vars": {
+                    "description": "EnvVars are additional environment variables injected into every\nsandbox created for this tenant. 🔒 Values are encrypted at rest.\nThese become visible to all scripts running in the tenant's\nsandboxes — do not place secrets here that scripts must not access.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "network": {
+                    "description": "Network is the outbound/inbound network policy applied to every sandbox\ncreated from this config — chat sessions, skill installs and deep\nconnectivity probes alike. nil and the zero value mean the same thing:\noutbound egress allowed, inbound public access closed.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SandboxNetworkPolicy"
+                        }
+                    ]
+                },
+                "sandbox_type": {
+                    "description": "SandboxType is cube, e2b, or docker; disabled is the hidden policy row.",
+                    "type": "string"
+                },
+                "skill_image": {
+                    "description": "SkillImage points at the snapshot that carries this config's installed\nskills. Empty means \"use the base template\". Written only by the skill\ninstall/remove path: MergeSandboxConfigForUpdate ignores client values\nso a settings-form save cannot wipe or plant the pointer.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SkillImageConfig"
+                        }
+                    ]
+                },
+                "skill_rollout": {
+                    "description": "SkillRollout decides whether sessions that already hold a sandbox of\nthis config rebuild after a skill install or removal. Empty and\nSkillRolloutNextTurn rebuild on the next chat turn. SkillRolloutNewSession\nleaves those sandboxes on the previous image; only sessions that start\nafterwards boot the new snapshot.",
+                    "type": "string"
+                },
+                "terminal_idle_disconnect_sec": {
+                    "description": "TerminalIdleDisconnectSec is how long an interactive terminal may go\nwithout keystrokes or PTY output before WeKnora closes the connection\nso the sandbox can pause on its provider TTL. 0 uses the built-in\ndefault (15 minutes). Not an identity field.",
+                    "type": "integer"
+                },
+                "volume_mount": {
+                    "description": "VolumeMount configures an optional shared volume mounted into every\nsandbox created for this tenant. Currently used for tenant-installed\nskills, but the configuration itself is skill-agnostic and can serve\nany volume-mount use case (shared datasets, pre-installed toolchains,\netc.).",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VolumeMountConfig"
+                        }
+                    ]
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.TokenUsage": {
+            "type": "object",
+            "properties": {
+                "cache_miss_tokens": {
+                    "type": "integer"
+                },
+                "cache_read_tokens": {
+                    "type": "integer"
+                },
+                "cache_reported": {
+                    "type": "boolean"
+                },
+                "cache_status": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PromptCacheStatus"
+                },
+                "cache_write_tokens": {
+                    "type": "integer"
+                },
+                "cached_tokens": {
+                    "description": "CachedTokens is the legacy alias for CacheReadTokens. It remains on the\nwire for compatibility with existing API consumers.",
+                    "type": "integer"
+                },
+                "completion_tokens": {
+                    "type": "integer"
+                },
+                "prompt_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ToolCall": {
             "type": "object",
             "properties": {
                 "args": {
@@ -19216,7 +22307,7 @@ const docTemplate = `{
                     "description": "Provider-specific tool-call state for replay",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ToolCallMetadata"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCallMetadata"
                         }
                     ]
                 },
@@ -19228,13 +22319,21 @@ const docTemplate = `{
                     "description": "Execution result (contains Output)",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ToolResult"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolResult"
+                        }
+                    ]
+                },
+                "target": {
+                    "description": "Target identifies the actual proxy target; Name/Args retain the model call for replay.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCallTarget"
                         }
                     ]
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ToolCallMetadata": {
+        "github_com_Tencent_WeKnora_internal_types.ToolCallMetadata": {
             "type": "object",
             "additionalProperties": {
                 "type": "array",
@@ -19243,7 +22342,25 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.ToolResult": {
+        "github_com_Tencent_WeKnora_internal_types.ToolCallTarget": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "name": {
+                    "type": "string"
+                },
+                "service_name": {
+                    "type": "string"
+                },
+                "tool_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ToolResult": {
             "type": "object",
             "properties": {
                 "data": {
@@ -19272,18 +22389,18 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.UpdateMemberRoleRequest": {
+        "github_com_Tencent_WeKnora_internal_types.UpdateMemberRoleRequest": {
             "type": "object",
             "required": [
                 "role"
             ],
             "properties": {
                 "role": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.UpdateOrganizationRequest": {
+        "github_com_Tencent_WeKnora_internal_types.UpdateOrganizationRequest": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -19317,18 +22434,32 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.UpdateSharePermissionRequest": {
+        "github_com_Tencent_WeKnora_internal_types.UpdateSharePermissionRequest": {
             "type": "object",
             "required": [
                 "permission"
             ],
             "properties": {
                 "permission": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OrgMemberRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OrgMemberRole"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.User": {
+        "github_com_Tencent_WeKnora_internal_types.UsedMemory": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.User": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -19371,7 +22502,7 @@ const docTemplate = `{
                     "description": "Per-user UI/feature preferences.\nStored as JSON (jsonb on Postgres, TEXT on SQLite) via the\ndriver.Valuer / sql.Scanner methods on UserPreferences.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UserPreferences"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences"
                         }
                     ]
                 },
@@ -19379,7 +22510,7 @@ const docTemplate = `{
                     "description": "Association relationship, not stored in the database",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Tenant"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Tenant"
                         }
                     ]
                 },
@@ -19397,7 +22528,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.UserInfo": {
+        "github_com_Tencent_WeKnora_internal_types.UserInfo": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -19422,7 +22553,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "preferences": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UserPreferences"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserPreferences"
                 },
                 "tenant_id": {
                     "type": "integer"
@@ -19435,16 +22566,20 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.UserPreferences": {
+        "github_com_Tencent_WeKnora_internal_types.UserPreferences": {
             "type": "object",
             "properties": {
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
+                    "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Written by the SPA's preferences\nPUT and by service-level SwitchTenant (including when switching\nhome, which stores the home ID). Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome. Refresh JWT claims have no tenant_id, so RefreshToken\nre-resolves from this field.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
                     "type": "integer"
+                },
+                "oidc_only_login": {
+                    "description": "OidcOnlyLogin is set server-side when an account is auto-provisioned\nvia OIDC with a random password the user never received. The profile\nUI hides self-service password rotation until the user sets a known\npassword via ChangePassword (which clears this flag).",
+                    "type": "boolean"
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.VLMConfig": {
+        "github_com_Tencent_WeKnora_internal_types.VLMConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -19479,7 +22614,36 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.TreeRAGCloudCredentials": {
+        "github_com_Tencent_WeKnora_internal_types.VolumeMountConfig": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enabled toggles the volume mount for this tenant.",
+                    "type": "boolean"
+                },
+                "mount_path": {
+                    "description": "MountPath is the sandbox-internal path where the volume is mounted.\nDefault: /weknora/tenant/skills (customizable per use case).",
+                    "type": "string"
+                },
+                "provider": {
+                    "description": "Provider identifies the volume backend. Currently \"e2b\" or \"cube\".",
+                    "type": "string"
+                },
+                "volume_id": {
+                    "description": "VolumeID is the provider-specific volume identifier, populated after\nEnsureVolume / CreateVolume succeeds.",
+                    "type": "string"
+                },
+                "volume_name": {
+                    "description": "VolumeName is the human-readable volume name, e.g.\n\"weknora-tenant-\u003cid\u003e-skills\".",
+                    "type": "string"
+                },
+                "volume_owner_fingerprint": {
+                    "description": "VolumeOwnerFingerprint = sha256(provider + APIKey + APIURL).\nUsed to detect when the tenant switched to a different backend or\nAPI key, at which point the volume is no longer reachable and must\nbe recreated.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WeKnoraCloudCredentials": {
             "type": "object",
             "properties": {
                 "app_id": {
@@ -19490,7 +22654,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WebSearchConfig": {
+        "github_com_Tencent_WeKnora_internal_types.WebSearchConfig": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -19542,7 +22706,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WebSearchProviderEntity": {
+        "github_com_Tencent_WeKnora_internal_types.WebSearchProviderEntity": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -19572,7 +22736,7 @@ const docTemplate = `{
                     "description": "Provider-specific parameters (API key, engine ID, etc.) stored as encrypted JSON",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WebSearchProviderParameters"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters"
                         }
                     ]
                 },
@@ -19580,7 +22744,7 @@ const docTemplate = `{
                     "description": "Provider type: bing, google, duckduckgo, tavily",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WebSearchProviderType"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderType"
                         }
                     ]
                 },
@@ -19593,7 +22757,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WebSearchProviderParameters": {
+        "github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters": {
             "type": "object",
             "properties": {
                 "api_key": {
@@ -19621,9 +22785,10 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WebSearchProviderType": {
+        "github_com_Tencent_WeKnora_internal_types.WebSearchProviderType": {
             "type": "string",
             "enum": [
+                "brave",
                 "bing",
                 "google",
                 "duckduckgo",
@@ -19632,9 +22797,13 @@ const docTemplate = `{
                 "baidu",
                 "searxng",
                 "keenable",
-                "zhipu"
+                "zhipu",
+                "exa",
+                "metaso",
+                "bocha"
             ],
             "x-enum-varnames": [
+                "WebSearchProviderTypeBrave",
                 "WebSearchProviderTypeBing",
                 "WebSearchProviderTypeGoogle",
                 "WebSearchProviderTypeDuckDuckGo",
@@ -19643,10 +22812,13 @@ const docTemplate = `{
                 "WebSearchProviderTypeBaidu",
                 "WebSearchProviderTypeSearxng",
                 "WebSearchProviderTypeKeenable",
-                "WebSearchProviderTypeZhipu"
+                "WebSearchProviderTypeZhipu",
+                "WebSearchProviderTypeExa",
+                "WebSearchProviderTypeMetaso",
+                "WebSearchProviderTypeBocha"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiConfig": {
+        "github_com_Tencent_WeKnora_internal_types.WikiConfig": {
             "type": "object",
             "properties": {
                 "content_instructions": {
@@ -19657,7 +22829,7 @@ const docTemplate = `{
                     "description": "ExtractionGranularity controls how many candidate slugs Pass 0 extracts\nper document. Empty / unknown value is treated as WikiExtractionStandard.",
                     "allOf": [
                         {
-                            "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiExtractionGranularity"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity"
                         }
                     ]
                 },
@@ -19691,7 +22863,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiExtractionGranularity": {
+        "github_com_Tencent_WeKnora_internal_types.WikiExtractionGranularity": {
             "type": "string",
             "enum": [
                 "focused",
@@ -19704,7 +22876,7 @@ const docTemplate = `{
                 "WikiExtractionExhaustive"
             ]
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiFolder": {
+        "github_com_Tencent_WeKnora_internal_types.WikiFolder": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -19742,7 +22914,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiFolderCreateRequest": {
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderCreateRequest": {
             "type": "object",
             "properties": {
                 "name": {
@@ -19753,13 +22925,13 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiFolderListResponse": {
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderListResponse": {
             "type": "object",
             "properties": {
                 "folders": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiFolderNode"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiFolderNode"
                     }
                 },
                 "parent_id": {
@@ -19767,7 +22939,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiFolderNode": {
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderNode": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -19811,7 +22983,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiFolderUpdateRequest": {
+        "github_com_Tencent_WeKnora_internal_types.WikiFolderUpdateRequest": {
             "type": "object",
             "properties": {
                 "move_parent": {
@@ -19825,27 +22997,27 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiGraphData": {
+        "github_com_Tencent_WeKnora_internal_types.WikiGraphData": {
             "type": "object",
             "properties": {
                 "edges": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiGraphEdge"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphEdge"
                     }
                 },
                 "meta": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiGraphMeta"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphMeta"
                 },
                 "nodes": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiGraphNode"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiGraphNode"
                     }
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiGraphEdge": {
+        "github_com_Tencent_WeKnora_internal_types.WikiGraphEdge": {
             "type": "object",
             "properties": {
                 "source": {
@@ -19858,7 +23030,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiGraphMeta": {
+        "github_com_Tencent_WeKnora_internal_types.WikiGraphMeta": {
             "type": "object",
             "properties": {
                 "center": {
@@ -19867,6 +23039,10 @@ const docTemplate = `{
                 },
                 "depth": {
                     "description": "populated in ego mode",
+                    "type": "integer"
+                },
+                "familiar_count": {
+                    "description": "FamiliarCount is how many returned nodes are lit up for this person.",
                     "type": "integer"
                 },
                 "mode": {
@@ -19886,9 +23062,13 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiGraphNode": {
+        "github_com_Tencent_WeKnora_internal_types.WikiGraphNode": {
             "type": "object",
             "properties": {
+                "familiar": {
+                    "description": "Familiar is true when this page was built from a document this person\nkeeps citing in answers. It is a personal overlay, not a property of\nthe page: two people looking at the same wiki see different highlights.",
+                    "type": "boolean"
+                },
                 "link_count": {
                     "description": "Number of inbound + outbound links",
                     "type": "integer"
@@ -19904,7 +23084,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiIndexEntry": {
+        "github_com_Tencent_WeKnora_internal_types.WikiIndexEntry": {
             "type": "object",
             "properties": {
                 "category_path": {
@@ -19936,13 +23116,13 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiIndexGroup": {
+        "github_com_Tencent_WeKnora_internal_types.WikiIndexGroup": {
             "type": "object",
             "properties": {
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiIndexEntry"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexEntry"
                     }
                 },
                 "next_cursor": {
@@ -19956,13 +23136,13 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiIndexResponse": {
+        "github_com_Tencent_WeKnora_internal_types.WikiIndexResponse": {
             "type": "object",
             "properties": {
                 "groups": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiIndexGroup"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiIndexGroup"
                     }
                 },
                 "intro": {
@@ -19973,76 +23153,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiLogEntry": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "description": "Short operation tag: \"ingest\", \"retract\", etc. Matches the ` + "`" + `action` + "`" + `\nargument historically passed to appendLogEntry.",
-                    "type": "string"
-                },
-                "created_at": {
-                    "description": "Server-side timestamp (UTC).",
-                    "type": "string"
-                },
-                "doc_title": {
-                    "description": "Document title at the time of the event. Stored verbatim rather than\njoined at read time so deleted knowledge still has a human-readable\nlabel in the log.",
-                    "type": "string"
-                },
-                "id": {
-                    "description": "Auto-increment identifier. Monotonic within a single database, so\nfrontend pagination uses it as a stable cursor without needing to\ndisambiguate identical created_at values.",
-                    "type": "integer"
-                },
-                "knowledge_base_id": {
-                    "description": "Knowledge base this event belongs to.",
-                    "type": "string"
-                },
-                "knowledge_id": {
-                    "description": "Knowledge ID the event was about (may be empty for KB-level events).",
-                    "type": "string"
-                },
-                "pages_affected": {
-                    "description": "Wiki pages affected by this event. Each ref carries both slug (for\nnavigation) and title (for display) so the log renders human-\nreadable text without a post-hoc slug→title lookup that might fail\nfor now-deleted pages.",
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiLogPageRef"
-                    }
-                },
-                "summary": {
-                    "description": "One-line summary of the change, as it was when the event was logged.",
-                    "type": "string"
-                },
-                "tenant_id": {
-                    "description": "Workspace scope, mirrored from the enclosing knowledge base.",
-                    "type": "integer"
-                }
-            }
-        },
-        "github_com_Tencent_TreeRAG_internal_types.WikiLogEntryListResponse": {
-            "type": "object",
-            "properties": {
-                "entries": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiLogEntry"
-                    }
-                },
-                "next_cursor": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_Tencent_TreeRAG_internal_types.WikiLogPageRef": {
-            "type": "object",
-            "properties": {
-                "slug": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                }
-            }
-        },
-        "github_com_Tencent_TreeRAG_internal_types.WikiPage": {
+        "github_com_Tencent_WeKnora_internal_types.WikiPage": {
             "type": "object",
             "properties": {
                 "aliases": {
@@ -20105,6 +23216,14 @@ const docTemplate = `{
                     "description": "Knowledge base this page belongs to",
                     "type": "string"
                 },
+                "last_edit_source": {
+                    "description": "LastEditSource records who authored the CURRENT version: pipeline |\nagent | user | revert. Empty for legacy rows (treated as pipeline).\nWhen the version is superseded this value travels into the revision\nsnapshot, so each historical version keeps its own author kind.",
+                    "type": "string"
+                },
+                "last_editor_id": {
+                    "description": "LastEditorID is the user id of the caller that produced the current\nversion (empty for background pipeline writes).",
+                    "type": "string"
+                },
                 "out_links": {
                     "description": "Slugs of pages this page links to (outbound links)",
                     "type": "array",
@@ -20120,7 +23239,7 @@ const docTemplate = `{
                     }
                 },
                 "page_type": {
-                    "description": "Page type: summary, entity, concept, index, log, synthesis, comparison",
+                    "description": "Page type: summary, entity, concept, index, synthesis, comparison",
                     "type": "string"
                 },
                 "parent_slug": {
@@ -20172,7 +23291,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiPageIssue": {
+        "github_com_Tencent_WeKnora_internal_types.WikiPageIssue": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -20216,7 +23335,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiPageListResponse": {
+        "github_com_Tencent_WeKnora_internal_types.WikiPageListResponse": {
             "type": "object",
             "properties": {
                 "page": {
@@ -20228,7 +23347,7 @@ const docTemplate = `{
                 "pages": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                     }
                 },
                 "total": {
@@ -20239,7 +23358,7 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiPageMoveRequest": {
+        "github_com_Tencent_WeKnora_internal_types.WikiPageMoveRequest": {
             "type": "object",
             "required": [
                 "slug"
@@ -20253,7 +23372,127 @@ const docTemplate = `{
                 }
             }
         },
-        "github_com_Tencent_TreeRAG_internal_types.WikiStats": {
+        "github_com_Tencent_WeKnora_internal_types.WikiPageRevertRequest": {
+            "type": "object",
+            "required": [
+                "slug",
+                "version"
+            ],
+            "properties": {
+                "slug": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageRevision": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "edit_source": {
+                    "description": "Author of THIS version (same semantics as WikiPage.LastEditSource).",
+                    "type": "string"
+                },
+                "edited_at": {
+                    "description": "When this version was authored (the page's updated_at while current).",
+                    "type": "string"
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "page_id": {
+                    "type": "string"
+                },
+                "page_type": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageRevisionListResponse": {
+            "type": "object",
+            "properties": {
+                "current_version": {
+                    "type": "integer"
+                },
+                "revisions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageRevision"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageUpdateRequest": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "page_type": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version is the optimistic-lock guard: when \u003e 0 the update is rejected\nwith a conflict if the stored version differs (someone else edited the\npage since the client loaded it). 0 skips the check (legacy clients).",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiStats": {
             "type": "object",
             "properties": {
                 "is_active": {
@@ -20283,7 +23522,7 @@ const docTemplate = `{
                     "description": "last N updated pages",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WikiPage"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
                     }
                 },
                 "total_links": {
@@ -20362,7 +23601,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.CustomAgentConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
                 },
                 "description": {
                     "type": "string"
@@ -20391,13 +23630,13 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "parameters": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ModelParameters"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelParameters"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ModelSource"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ModelType"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
                 }
             }
         },
@@ -20410,16 +23649,28 @@ const docTemplate = `{
             ],
             "properties": {
                 "connection_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ConnectionConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ConnectionConfig"
                 },
                 "engine_type": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RetrieverEngineType"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType"
                 },
                 "index_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.IndexConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.IndexConfig"
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_handler.CreateSystemUserResponse": {
+            "type": "object",
+            "properties": {
+                "generated_password": {
+                    "description": "GeneratedPassword is the plaintext password when the server\nauto-generated one. Absent when the caller supplied the password.",
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
                 }
             }
         },
@@ -20778,7 +24029,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "asr_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ASRConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ASRConfig"
                 },
                 "documentSplitting": {
                     "description": "文档分块配置",
@@ -20808,7 +24059,7 @@ const docTemplate = `{
                         "parserEngineRules": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ParserEngineRule"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ParserEngineRule"
                             }
                         },
                         "separators": {
@@ -20858,13 +24109,13 @@ const docTemplate = `{
                         "nodes": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.GraphNode"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphNode"
                             }
                         },
                         "relations": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.GraphRelation"
+                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.GraphRelation"
                             }
                         },
                         "tags": {
@@ -20901,7 +24152,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "vlm_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.VLMConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
                 }
             }
         },
@@ -20911,7 +24162,7 @@ const docTemplate = `{
                 "admins": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.UserInfo"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo"
                     }
                 },
                 "total": {
@@ -21023,6 +24274,28 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.MoveKnowledgeToFolderRequest": {
+            "type": "object",
+            "required": [
+                "kb_id",
+                "knowledge_ids"
+            ],
+            "properties": {
+                "folder_path": {
+                    "description": "FolderPath is the destination folder; the empty string is the knowledge\nbase top level. It is deliberately not ` + "`" + `binding:\"required\"` + "`" + ` so documents\ncan be moved back out of every folder.",
+                    "type": "string"
+                },
+                "kb_id": {
+                    "type": "string"
+                },
+                "knowledge_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_handler.PreviewChunkResult": {
             "type": "object",
             "properties": {
@@ -21052,17 +24325,26 @@ const docTemplate = `{
         "internal_handler.PreviewChunkingPayload": {
             "type": "object",
             "properties": {
+                "child_chunk_size": {
+                    "type": "integer"
+                },
                 "chunk_overlap": {
                     "type": "integer"
                 },
                 "chunk_size": {
                     "type": "integer"
                 },
+                "enable_parent_child": {
+                    "type": "boolean"
+                },
                 "languages": {
                     "type": "array",
                     "items": {
                         "type": "string"
                     }
+                },
+                "parent_chunk_size": {
+                    "type": "integer"
                 },
                 "separators": {
                     "type": "array",
@@ -21099,16 +24381,16 @@ const docTemplate = `{
                     }
                 },
                 "profile": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_infrastructure_chunker.DocProfile"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.DocProfile"
                 },
                 "rejected": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_infrastructure_chunker.TierRejection"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.TierRejection"
                     }
                 },
                 "selected_tier": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_infrastructure_chunker.StrategyTier"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier"
                 },
                 "stats": {
                     "$ref": "#/definitions/internal_handler.PreviewChunkingStats"
@@ -21116,7 +24398,7 @@ const docTemplate = `{
                 "tier_chain": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_infrastructure_chunker.StrategyTier"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_infrastructure_chunker.StrategyTier"
                     }
                 }
             }
@@ -21209,6 +24491,21 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.RenameKnowledgeFolderRequest": {
+            "type": "object",
+            "required": [
+                "from",
+                "to"
+            ],
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.ResetUserPasswordRequest": {
             "type": "object",
             "required": [
@@ -21247,7 +24544,7 @@ const docTemplate = `{
                 "models": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_models_limiter.RuntimeStat"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_models_limiter.RuntimeStat"
                     }
                 },
                 "parse_concurrency": {
@@ -21263,7 +24560,7 @@ const docTemplate = `{
                 "queues": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.QueueStat"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QueueStat"
                     }
                 },
                 "timestamp": {
@@ -21296,7 +24593,7 @@ const docTemplate = `{
                 "tasks": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RuntimeTaskInfo"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RuntimeTaskInfo"
                     }
                 }
             }
@@ -21333,6 +24630,67 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.SandboxCheckItem": {
+            "type": "object",
+            "properties": {
+                "latency_ms": {
+                    "type": "integer"
+                },
+                "message": {
+                    "description": "Message carries free-form provider detail for an executed probe.",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "reason": {
+                    "description": "Reason is a stable code explaining why a probe was skipped. It exists so\nthe UI can phrase the skip in the operator's language instead of echoing\na server-side sentence.",
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.SandboxCheckRequest": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig"
+                },
+                "config_id": {
+                    "description": "ConfigID lets an edit form test stored credentials while overriding only\nthe fields the admin changed in the drawer.",
+                    "type": "string"
+                },
+                "deep": {
+                    "description": "Deep additionally runs a throwaway script. For remote backends this also\ncreates and destroys one sandbox, which is the only way to validate the\ntemplate ID, data plane, in-sandbox execution, and outbound egress. It may\nconsume real sandbox time, so it is opt-in.",
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.SandboxCheckResponse": {
+            "type": "object",
+            "properties": {
+                "capabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "checks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler.SandboxCheckItem"
+                    }
+                },
+                "ok": {
+                    "type": "boolean"
+                },
+                "provider": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.SearchMessagesRequest": {
             "type": "object",
             "required": [
@@ -21364,29 +24722,29 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "cos": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.COSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.COSEngineConfig"
                 },
                 "ks3": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KS3EngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KS3EngineConfig"
                 },
                 "minio": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.MinIOEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MinIOEngineConfig"
                 },
                 "obs": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OBSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OBSEngineConfig"
                 },
                 "oss": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.OSSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.OSSEngineConfig"
                 },
                 "provider": {
                     "description": "\"minio\", \"cos\", \"tos\", \"s3\", \"oss\", \"ks3\", \"obs\"",
                     "type": "string"
                 },
                 "s3": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.S3EngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.S3EngineConfig"
                 },
                 "tos": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TOSEngineConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TOSEngineConfig"
                 }
             }
         },
@@ -21449,7 +24807,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "parameters": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WebSearchProviderParameters"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters"
                 },
                 "provider": {
                     "type": "string"
@@ -21464,10 +24822,10 @@ const docTemplate = `{
             ],
             "properties": {
                 "connection_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ConnectionConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ConnectionConfig"
                 },
                 "engine_type": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.RetrieverEngineType"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.RetrieverEngineType"
                 }
             }
         },
@@ -21500,7 +24858,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.CustomAgentConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
                 },
                 "description": {
                     "type": "string"
@@ -21513,29 +24871,14 @@ const docTemplate = `{
         "internal_handler.UpdateChunkRequest": {
             "type": "object",
             "properties": {
-                "chunk_index": {
-                    "type": "integer"
-                },
                 "content": {
                     "type": "string"
                 },
-                "embedding": {
-                    "type": "array",
-                    "items": {
-                        "type": "number"
-                    }
-                },
-                "end_at": {
+                "expected_revision": {
                     "type": "integer"
-                },
-                "image_info": {
-                    "type": "string"
                 },
                 "is_enabled": {
                     "type": "boolean"
-                },
-                "start_at": {
-                    "type": "integer"
                 }
             }
         },
@@ -21546,12 +24889,29 @@ const docTemplate = `{
             ],
             "properties": {
                 "config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KnowledgeBaseConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeBaseConfig"
                 },
                 "description": {
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.UpdateKnowledgeRequest": {
+            "type": "object",
+            "properties": {
+                "custom_metadata": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "title": {
                     "type": "string"
                 }
             }
@@ -21569,13 +24929,13 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "parameters": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ModelParameters"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelParameters"
                 },
                 "source": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ModelSource"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelSource"
                 },
                 "type": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.ModelType"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelType"
                 }
             }
         },
@@ -21592,7 +24952,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "parameters": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.WebSearchProviderParameters"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WebSearchProviderParameters"
                 }
             }
         },
@@ -21615,6 +24975,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.acceptInvitationByTokenRequest": {
+            "type": "object",
+            "required": [
+                "token"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.addMemberRequest": {
             "type": "object",
             "required": [
@@ -21626,7 +24997,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "role": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TenantRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
                 }
             }
         },
@@ -21655,7 +25026,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "mode": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.APIPrincipalMode"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.APIPrincipalMode"
                 },
                 "require_direct_header": {
                     "type": "boolean"
@@ -21682,7 +25053,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.AuditLog"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.AuditLog"
                     }
                 },
                 "next_cursor": {
@@ -21710,7 +25081,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "process_config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.KnowledgeProcessOverrides"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
                 }
             }
         },
@@ -21728,7 +25099,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "role": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TenantRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
                 }
             }
         },
@@ -21742,7 +25113,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "role": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TenantRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
                 }
             }
         },
@@ -21781,12 +25152,30 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "role": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TenantRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
                 },
                 "tenant_id": {
                     "type": "integer"
                 },
                 "tenant_name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.meEnvVarRequest": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "sandbox_config_id": {
+                    "type": "string"
+                },
+                "skill_id": {
+                    "type": "string"
+                },
+                "value": {
+                    "description": "Value is unused by the delete endpoints. Clearing a value is a delete\nrather than a write of \"\", so a member always has one unambiguous way to\nrevoke.",
                     "type": "string"
                 }
             }
@@ -21843,6 +25232,48 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.sandboxConfigRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "config": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantSandboxConfig"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.skillPatchRequest": {
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "Enabled is a pointer because its absence is not a request to disable the\nskill; a body may carry envs instead.",
+                    "type": "boolean"
+                },
+                "envs": {
+                    "description": "Envs is a pointer to a map because \"sent an empty object\" and \"did not\nmention envs\" are different requests: the first clears what it names,\nthe second must leave every stored value alone.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "internal_handler.skillSourceRequest": {
+            "type": "object",
+            "properties": {
+                "source": {
+                    "description": "Source is exactly one of: \"@owner/slug\" or a slash-free slug (ClawHub),\na github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a\nClawHub skills-sh catalog page or \"skills-sh:owner/repo/slug\" locator, or\na direct zip/SKILL.md URL. Bare \"owner/slug\" is rejected: it is both a\nClawHub id and a GitHub repo. The fetch carries no credential.",
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.storageBackendRequest": {
             "type": "object",
             "required": [
@@ -21851,7 +25282,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "config": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.StorageBackendConfig"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackendConfig"
                 },
                 "name": {
                     "type": "string"
@@ -21886,7 +25317,7 @@ const docTemplate = `{
             ],
             "properties": {
                 "role": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.TenantRole"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.TenantRole"
                 }
             }
         },
@@ -21894,7 +25325,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "last_active_tenant_id": {
-                    "description": "LastActiveTenantID lets the SPA persist \"after a fresh login,\ndrop me back into this workspace\" across devices. Send a positive\nworkspace id to set / replace, or 0 to clear. Membership is validated\nat next login, not here. Nil = field omitted from the PATCH and\nstays untouched.",
+                    "description": "LastActiveTenantID lets clients persist \"after a fresh login,\ndrop me back into this workspace\" across devices. The SPA sends\nthis after every tenant switch; POST /auth/switch-tenant records\nthe same preference server-side. Send a positive workspace id to\nset / replace, or 0 to clear. Membership is validated at next\nlogin, not here. Nil = field omitted from the PATCH and stays\nuntouched.",
                     "type": "integer"
                 }
             }
@@ -21929,6 +25360,10 @@ const docTemplate = `{
                 "agent_id": {
                     "description": "Selected custom agent ID (backend resolves shared agent and its workspace from share relation)",
                     "type": "string"
+                },
+                "agent_source_tenant_id": {
+                    "description": "Optional disambiguator; backend still verifies the share relation",
+                    "type": "integer"
                 },
                 "attachment_ids": {
                     "description": "Pre-uploaded session-scoped document IDs",
@@ -21999,7 +25434,7 @@ const docTemplate = `{
                     }
                 },
                 "suggestion_attribution": {
-                    "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.SuggestionAttribution"
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SuggestionAttribution"
                 },
                 "summary_model_id": {
                     "description": "Optional summary model ID for this request (overrides session default)",
@@ -22041,7 +25476,7 @@ const docTemplate = `{
                     "description": "Messages to use as context for title generation",
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_TreeRAG_internal_types.Message"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Message"
                     }
                 }
             }
@@ -22190,8 +25625,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "",
 	BasePath:         "/api/v1",
 	Schemes:          []string{},
-	Title:            "TreeRAG API",
-	Description:      "TreeRAG 知识库管理系统 API 文档",
+	Title:            "WeKnora API",
+	Description:      "WeKnora 知识库管理系统 API 文档",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -471,8 +471,10 @@
     <!-- Audit log drawer. Only rendered for Admin+ because the backend
          route is g.Admin()-gated; rendering it for lower roles would
          just produce an unhelpful 403. Lazy-loaded on first open. -->
-    <t-drawer v-if="canViewAudit" v-model:visible="auditDrawerVisible" :header="$t('tenantMember.audit.tabLabel')"
-      drawer-class-name="tenant-members-audit-drawer" size="880px" :footer="false" placement="right" destroy-on-close>
+    <SettingDrawer v-if="canViewAudit" v-model:visible="auditDrawerVisible"
+      :title="$t('tenantMember.audit.tabLabel')" width="1120px" :min-width="720" :max-width="1600"
+      storage-key="setting-drawer:width:tenant-members-audit" :hide-footer="true"
+      drawer-class-name="tenant-members-audit-drawer">
       <div class="audit-drawer-inner audit-panel audit-panel--drawer">
         <div class="audit-header">
           <span class="audit-desc">{{ $t('tenantMember.audit.description') }}</span>
@@ -667,6 +669,7 @@
         </t-form-item>
       </t-form>
     </t-dialog>
+    </SettingDrawer>
   </div>
 </template>
 
@@ -675,6 +678,7 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import type { FormInstanceFunctions, FormRule } from 'tdesign-vue-next'
+import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { copyWithToast } from '@/utils/clipboard'
 import { useAuthStore } from '@/stores/auth'
 import { resetUserPassword } from '@/api/system'
@@ -3041,6 +3045,7 @@ watch(
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  max-width: 100vw;
   max-height: 100vh;
   height: 100%;
 }
@@ -3052,5 +3057,10 @@ watch(
   flex-direction: column;
   box-sizing: border-box;
   overflow: hidden !important;
+}
+
+.t-drawer.tenant-members-audit-drawer .setting-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 </style>

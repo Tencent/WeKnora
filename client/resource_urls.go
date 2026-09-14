@@ -17,7 +17,7 @@ const (
 )
 
 // ResourceURLOptions carries the optional resource_urls query parameter shared
-// by chat, message-history, and knowledge-search endpoints.
+// by chat, message-history, knowledge-search, and hybrid-search endpoints.
 type ResourceURLOptions struct {
 	ResourceURLs ResourceURLMode
 }

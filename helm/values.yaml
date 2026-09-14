@@ -97,6 +97,10 @@ app:
     STREAM_MANAGER_TYPE: redis
     CONCURRENCY_POOL_SIZE: "5"
     TZ: UTC
+    # Docker sandbox talks to a local Engine API (often docker.sock = host root).
+    # Leave false unless this is a private single-node install that also mounts
+    # the daemon socket or points at a remote tcp:// daemon with TLS.
+    WEKNORA_SANDBOX_DOCKER_ENABLED: "false"
 
   # -- Additional environment variables
   extraEnv: []

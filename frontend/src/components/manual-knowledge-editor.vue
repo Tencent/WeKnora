@@ -14,7 +14,7 @@ import {
 import { useUploadConfirmStore } from '@/stores/uploadConfirm'
 import { useOrganizationStore } from '@/stores/organization'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
-import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security'
+import { sanitizeHTML, safeMarkdownToHTML, hydrateProtectedFileImages } from '@/utils/security'
 import { useI18n } from 'vue-i18n'
 
 interface KnowledgeBaseOption {
@@ -384,6 +384,7 @@ const toolbarGroups = computed<ToolbarGroup[]>(() => [
   },
 ])
 
+const previewRoot = ref<HTMLElement | null>(null)
 const isPreviewMode = computed(() => activeTab.value === 'preview')
 const viewToggleIcon = computed(() => (isPreviewMode.value ? 'edit-1' : 'browse'))
 const viewToggleLabel = computed(() =>
@@ -419,6 +420,12 @@ const previewHTML = computed(() => {
   const safeMarkdown = safeMarkdownToHTML(form.content)
   const html = marked.parse(safeMarkdown, { async: false })
   return sanitizeHTML(html)
+})
+
+watch([previewHTML, activeTab, () => form.kbId], async () => {
+  await nextTick()
+  if (activeTab.value === 'preview') await hydrateProtectedFileImages(previewRoot.value,
+    mode.value === 'edit' && form.kbId ? { mode: 'knowledgeBase', kbId: form.kbId } : undefined)
 })
 
 const kbDisabled = computed(() => mode.value === 'edit' && !!form.kbId)
@@ -891,7 +898,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="editor-pane editor-pane--preview" v-show="activeTab === 'preview'">
-            <div class="preview-container" v-html="previewHTML" />
+            <div ref="previewRoot" class="preview-container" v-html="previewHTML" />
           </div>
         </div>
       </section>

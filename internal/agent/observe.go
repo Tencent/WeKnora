@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
@@ -18,69 +20,205 @@ import (
 )
 
 const (
-	minCurrentTurnToolTokens     = 8 * 1024
-	maxCurrentTurnToolTokens     = 32 * 1024
-	currentTurnToolTokenFraction = 5 // 20%
+	minToolResultTokens     = 8 * 1024
+	maxToolResultTokens     = 32 * 1024
+	toolResultTokenFraction = 5 // 20%
+
+	// minFreedFraction is the reciprocal of the share of the context a
+	// compaction must reclaim to count as having worked. Below it, the
+	// summarization call costs more than the room it bought.
+	minFreedFraction = 20 // 5%
 )
 
-// manageContextWindow consolidates or compresses messages if approaching the token limit.
-// currentTokens is the caller's best estimate of the current context size (using
-// API-reported Usage when available, falling back to BPE estimation).
-func (e *AgentEngine) manageContextWindow(ctx context.Context, messages []chat.Message, round, currentTokens int) []chat.Message {
-	var trimmed bool
-	messages, trimmed = trimCurrentTurnToolResults(messages, e.tokenEstimator, currentTurnToolResultBudget(e.config.MaxContextTokens))
-	if trimmed {
+// manageContextWindow summarizes older conversation away when the context has
+// grown past the threshold. The bool reports whether the messages changed, so
+// the caller knows when its token estimate is stale.
+//
+// currentTokens is the caller's best estimate of the current context size
+// (API-reported Usage when available, BPE estimation of messages otherwise).
+func (e *AgentEngine) manageContextWindow(
+	ctx context.Context, messages []chat.Message, round, currentTokens int,
+) ([]chat.Message, bool) {
+	settings := e.compactor.Settings()
+	if !settings.ShouldCompact(currentTokens) {
+		return messages, false
+	}
+
+	logger.Infof(ctx, "[Agent][Round-%d] Context at %d tokens, over the %d threshold "+
+		"(window=%d, reserved=%d, keep_recent=%d); compacting",
+		round, currentTokens, settings.Threshold(), settings.MaxContextTokens,
+		settings.ReserveTokens, settings.KeepRecentTokens)
+
+	changed := false
+	if compacted, ok := e.runCompaction(ctx, messages, round, compaction.ReasonThreshold); ok {
+		messages, changed = compacted, true
 		currentTokens = e.tokenEstimator.EstimateMessages(messages)
-		logger.Infof(ctx, "[Agent][Round-%d] Trimmed current-turn tool results to token budget", round)
-	}
-	if e.config.MaxContextTokens <= 0 {
-		return messages
-	}
-
-	beforeLen := len(messages)
-
-	if e.memoryConsolidator != nil && e.memoryConsolidator.ShouldConsolidate(currentTokens) {
-		logger.Infof(ctx, "[Agent][Round-%d] Token threshold exceeded (est=%d), consolidating memory",
-			round, currentTokens)
-		consolidated, consolidateErr := e.memoryConsolidator.Consolidate(ctx, messages)
-		if consolidateErr != nil {
-			logger.Warnf(ctx, "[Agent][Round-%d] Memory consolidation failed: %v, "+
-				"falling back to simple compression", round, consolidateErr)
-		} else {
-			messages = consolidated
-			currentTokens = e.tokenEstimator.EstimateMessages(messages)
+		if !settings.ShouldCompact(currentTokens) {
+			return messages, true
 		}
 	}
 
-	messages = agenttoken.CompressContext(messages, e.tokenEstimator, e.config.MaxContextTokens, currentTokens)
-
-	if len(messages) < beforeLen {
-		logger.Infof(ctx, "[Agent][Round-%d] Context managed: %d → %d messages (max_tokens=%d)",
-			round, beforeLen, len(messages), e.config.MaxContextTokens)
-	}
-
-	return messages
+	// Still over budget after compaction means the weight is inside the
+	// keep-recent window, which the cut point cannot reach — one tool result
+	// large enough to matter on its own. Trimming those is lossy, so it stays
+	// a fallback rather than a routine step.
+	trimmed, ok := e.trimToolResults(ctx, messages, round, settings)
+	return trimmed, changed || ok
 }
 
-func currentTurnToolResultBudget(maxContextTokens int) int {
+// runCompaction performs one compaction and reports whether the context
+// actually got smaller. A false return means no further attempt this turn will
+// help either, and the caller must not keep retrying: a compaction that frees
+// nothing still costs a full summarization round-trip.
+func (e *AgentEngine) runCompaction(
+	ctx context.Context, messages []chat.Message, round int, reason compaction.Reason,
+) ([]chat.Message, bool) {
+	if e.compactor == nil {
+		return messages, false
+	}
+	// The exhausted mark is tied to a message count rather than a bare flag:
+	// once the loop appends new rounds there is new history to summarize, and
+	// the earlier "nothing to compact" no longer describes the context.
+	if e.compactionExhaustedAt > 0 && len(messages) <= e.compactionExhaustedAt {
+		return messages, false
+	}
+
+	result, err := e.compactor.Compact(ctx, messages, reason)
+	if err != nil {
+		if errors.Is(err, compaction.ErrNothingToCompact) {
+			logger.Infof(ctx, "[Agent][Round-%d] Nothing outside the keep-recent budget; "+
+				"skipping compaction", round)
+		} else {
+			logger.Warnf(ctx, "[Agent][Round-%d] Compaction failed: %v", round, err)
+		}
+		e.compactionExhaustedAt = len(messages)
+		return messages, false
+	}
+	// "Freed something" is too weak a test. A compaction that returns 240 of
+	// 26,700 tokens counts as progress by that rule, so the loop keeps paying
+	// for a summarization every round while the context stays where it was.
+	if result.Freed() < result.TokensBefore/minFreedFraction {
+		logger.Warnf(ctx, "[Agent][Round-%d] Compaction freed too little (%d → %d tokens); "+
+			"not attempting again at this size", round, result.TokensBefore, result.TokensAfter)
+		e.compactionExhaustedAt = len(messages)
+		return messages, false
+	}
+
+	logger.Infof(ctx, "[Agent][Round-%d] Compacted (%s): %d → %d tokens, %d → %d messages "+
+		"(split_turn=%v, degraded=%v)",
+		round, result.Reason, result.TokensBefore, result.TokensAfter,
+		result.MessagesBefore, result.MessagesAfter, result.SplitTurn, result.Degraded)
+	// Where the surviving tokens went. If the retained tail is far larger than
+	// keep_recent, the cut point could not reach past one oversized message.
+	logger.Debugf(ctx, "[Agent][Round-%d][ctx] post-compaction: summary=%d tail=%d "+
+		"(keep_recent=%d) | %s",
+		round, e.tokenEstimator.EstimateString(result.Summary),
+		result.TokensAfter-e.tokenEstimator.EstimateString(result.Summary),
+		e.compactor.Settings().KeepRecentTokens,
+		e.breakdownContext(result.Messages, nil))
+	common.PipelineInfo(ctx, "Agent", "context_compacted", map[string]interface{}{
+		"round":         round,
+		"reason":        string(result.Reason),
+		"tokens_before": result.TokensBefore,
+		"tokens_after":  result.TokensAfter,
+		"degraded":      result.Degraded,
+	})
+	e.emitContextCompacted(ctx, result, round)
+
+	// The usage baseline described the pre-compaction context; keeping it
+	// would have the next round estimate against history that no longer
+	// exists and compact again immediately.
+	e.lastUsage = types.TokenUsage{}
+	e.lastSentMsgCount = 0
+
+	return result.Messages, true
+}
+
+func (e *AgentEngine) emitContextCompacted(
+	ctx context.Context, result *compaction.Result, round int,
+) {
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID:        generateEventID("compaction"),
+		Type:      event.EventContextCompacted,
+		SessionID: e.sessionID,
+		Data: event.ContextCompactedData{
+			Reason:         string(result.Reason),
+			Round:          round,
+			TokensBefore:   result.TokensBefore,
+			TokensAfter:    result.TokensAfter,
+			MessagesBefore: result.MessagesBefore,
+			MessagesAfter:  result.MessagesAfter,
+			Summary:        result.Summary,
+			Degraded:       result.Degraded,
+			SplitTurn:      result.SplitTurn,
+		},
+	})
+}
+
+// responseHitContextLimit reports whether the response was shaped by a full
+// context window rather than by the completion budget we asked for.
+func (e *AgentEngine) responseHitContextLimit(response *types.ChatResponse) bool {
+	window := 0
+	if e.config != nil {
+		window = e.config.MaxContextTokens
+	}
+	return compaction.ResponseHitContextLimit(response, window, e.getCompletionTokenBudget())
+}
+
+// forceCompaction compacts regardless of the threshold, for the case where the
+// provider has already told us the window is full and the estimate that let us
+// get here is the thing not to be trusted.
+func (e *AgentEngine) forceCompaction(
+	ctx context.Context, messages []chat.Message, round int,
+) []chat.Message {
+	compacted, ok := e.runCompaction(ctx, messages, round, compaction.ReasonOverflow)
+	if !ok {
+		trimmed, _ := e.trimToolResults(ctx, messages, round, e.compactor.Settings())
+		return trimmed
+	}
+	return compacted
+}
+
+// trimToolResults replaces tool output with previews until it fits a fraction
+// of the window. It is the last resort: unlike compaction, what it removes is
+// gone without a summary standing in for it.
+func (e *AgentEngine) trimToolResults(
+	ctx context.Context, messages []chat.Message, round int, settings compaction.Settings,
+) ([]chat.Message, bool) {
+	trimmed, ok := trimToolResultsToBudget(
+		messages, e.tokenEstimator, toolResultBudget(settings.MaxContextTokens),
+	)
+	if !ok {
+		return messages, false
+	}
+	logger.Infof(ctx, "[Agent][Round-%d] Trimmed tool results to the token budget", round)
+	return trimmed, true
+}
+
+func toolResultBudget(maxContextTokens int) int {
 	if maxContextTokens <= 0 {
-		return maxCurrentTurnToolTokens
+		return maxToolResultTokens
 	}
-	budget := maxContextTokens / currentTurnToolTokenFraction
-	if budget < minCurrentTurnToolTokens {
-		return minCurrentTurnToolTokens
+	budget := maxContextTokens / toolResultTokenFraction
+	if budget < minToolResultTokens {
+		return minToolResultTokens
 	}
-	if budget > maxCurrentTurnToolTokens {
-		return maxCurrentTurnToolTokens
+	if budget > maxToolResultTokens {
+		return maxToolResultTokens
 	}
 	return budget
 }
 
-// trimCurrentTurnToolResults returns a message copy for the next model call.
+// trimToolResultsToBudget returns a message copy for the next model call.
 // It never mutates ToolResult objects used by SSE, diagnostics, or persistence.
-// Assistant tool-call messages remain untouched so every compacted tool result
+// Assistant tool-call messages remain untouched so every trimmed tool result
 // retains its provider-required call/result pairing.
-func trimCurrentTurnToolResults(
+//
+// Every tool result is a candidate. Scoping this to the current turn was how
+// the old implementation defined "recent", but after compaction the retained
+// window is all recent by construction, and the one result big enough to
+// require trimming is as likely to sit at its head as its tail.
+func trimToolResultsToBudget(
 	messages []chat.Message,
 	estimator *agenttoken.Estimator,
 	budget int,
@@ -89,20 +227,9 @@ func trimCurrentTurnToolResults(
 		return messages, false
 	}
 
-	lastUser := -1
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
-			lastUser = i
-			break
-		}
-	}
-	if lastUser < 0 {
-		return messages, false
-	}
-
 	var toolIndexes []int
 	total := 0
-	for i := lastUser + 1; i < len(messages); i++ {
+	for i := range messages {
 		if messages[i].Role == "tool" {
 			toolIndexes = append(toolIndexes, i)
 			total += estimator.EstimateMessage(&messages[i])
@@ -153,6 +280,14 @@ func compactToolMessage(msg chat.Message, maxTokens int, estimator *agenttoken.E
 	runes := []rune(msg.Content)
 	base := msg
 	base.Content = compactedToolResultMarker(msg.Content)
+	if msg.Name == agenttools.ToolDiscoverMCPTools {
+		// Catalog cursors and parameter schemas are structured protocol data.
+		// A head/tail preview can silently remove required fields or constraints.
+		base.Content = "[MCP directory result omitted to fit the context budget. Use smaller list pages. If " +
+			"a single describe result cannot fit, report that limitation; do not invoke a tool " +
+			"using a partial schema.]"
+		return base
+	}
 	if len(runes) == 0 || estimator.EstimateMessage(&base) >= maxTokens {
 		return base
 	}
@@ -187,6 +322,11 @@ type responseVerdict struct {
 	finalAnswer  string
 	emptyContent bool // LLM returned stop with no tool calls and empty content
 	step         types.AgentStep
+	// answerID is the EventAgentFinalAnswer id to close with Done:true if
+	// this round actually finishes. Natural-stop must not close the stream
+	// before the loop-end steer drain: a pending inject continues the turn,
+	// and a premature Done tells the client the session is idle.
+	answerID string
 }
 
 // isNaturalStopFinishReason reports whether a provider finish reason means the
@@ -194,6 +334,18 @@ type responseVerdict struct {
 func isNaturalStopFinishReason(reason string) bool {
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "stop", "end_turn", "stop_sequence":
+		return true
+	default:
+		return false
+	}
+}
+
+// isLengthFinishReason reports whether the provider stopped because the
+// completion-token cap was hit. Truncated tool-call JSON then fails
+// validation (missing path, unexpected end of JSON, etc.).
+func isLengthFinishReason(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "length", "max_tokens", "max_output_tokens":
 		return true
 	default:
 		return false
@@ -297,21 +449,16 @@ func (e *AgentEngine) analyzeResponse(
 				})
 			}
 		}
-		e.eventBus.Emit(ctx, event.Event{
-			ID:        answerID,
-			Type:      event.EventAgentFinalAnswer,
-			SessionID: sessionID,
-			Data: event.AgentFinalAnswerData{
-				Content: "",
-				Done:    true,
-			},
-		})
+		// Do not emit Done:true here. The caller drains any loop-end inject
+		// first; a premature close makes the client think the turn is idle
+		// while the engine is about to continue.
 
 		return responseVerdict{
 			isDone:       true,
 			finalAnswer:  response.Content,
 			emptyContent: response.Content == "",
 			step:         step,
+			answerID:     answerID,
 		}
 	}
 
@@ -353,13 +500,9 @@ func escapeXMLAttr(s string) string {
 // conversation history — replayed user turns keep bare Content so stale scope
 // snapshots do not steer follow-up questions.
 //
-// Per-turn communication_instruction and answer_instruction remind the model
-// not to leak internal tool names or IDs in user-visible text, and to end the
-// turn by writing its complete answer as plain assistant text.
-//
 // Emitted as an XML-ish block (not free prose) so it is a visually distinct,
-// non-instruction envelope that is hard to conflate with user text and
-// prompt-injection-safe.
+// data envelope. Escaping preserves its structure; the system source-data
+// contract defines how to treat its contents. This is not an authorization gate.
 func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
@@ -367,7 +510,7 @@ func buildRuntimeContextBlock(
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
-	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&sb, "  <current_time>%s</current_time>\n", time.Now().Format("2006-01-02"))
 	fmt.Fprintf(&sb, "  <session>%s</session>\n", escapeXMLAttr(sessionID))
 
 	if len(kbs) > 0 {
@@ -404,13 +547,7 @@ func buildRuntimeContextBlock(
 			}
 		}
 		sb.WriteString("  </pinned_documents>\n")
-		sb.WriteString("  <note>The pinned-document set above is authoritative for THIS turn. ")
-		sb.WriteString("Prioritize retrieving content from these documents (e.g. list_knowledge_chunks with the knowledge_id). ")
-		sb.WriteString("If an earlier turn analysed a different document, do NOT reuse that analysis — re-query against the current scope.</note>\n")
 	}
-
-	sb.WriteString("  <communication_instruction>Do not use internal tool names or identifiers in your answers or in Thought. Say \"keyword retrieval\" instead of grep_chunks, \"semantic retrieval\" instead of knowledge_search, \"browse full document\" instead of list_knowledge_chunks; likewise never expose chunk_id, knowledge_id, or other internal IDs—refer to documents by title or name.</communication_instruction>\n")
-	sb.WriteString("  <answer_instruction>When you have gathered enough information, write your complete user-facing answer as your reply and stop—do not request any more tools in that final message. Until then, keep using tools; do not give a partial answer mid-investigation.</answer_instruction>\n")
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
@@ -424,6 +561,28 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if svc == nil {
 			continue
 		}
+		if svc.Discoverable && len(svc.ToolNames) > 0 {
+			lines = append(lines, fmt.Sprintf(
+				"Use relevant available MCP functions for service @%s (server_id=%q) before "+
+					"answering. Their descriptions identify the service and original tool names; use "+
+					"discover_mcp_tools if the service needs reconnection or authentication.",
+				sanitizeMustUseField(svc.Name), sanitizeMustUseField(svc.ID)))
+			continue
+		}
+		if svc.Discoverable {
+			lines = append(
+				lines,
+				fmt.Sprintf(
+					"Use discover_mcp_tools(mode=\"list_tools\", server_id=%q) for the selected MCP "+
+						"service @%s. Describe the required tools, then use the offered functions or "+
+						"call_mcp_tool as available before answering; report connection or "+
+						"authentication failures if the service is unavailable.",
+					sanitizeMustUseField(svc.ID),
+					sanitizeMustUseField(svc.Name),
+				),
+			)
+			continue
+		}
 		prefix := mcpToolNamePrefix(svc)
 		if prefix == "" {
 			continue
@@ -432,19 +591,29 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		if display == "" {
 			display = sanitizeMustUseField(svc.ID)
 		}
-		lines = append(lines, fmt.Sprintf("Must use MCP tools whose names start with %s (@%s) to answer the question below.", prefix, display))
+		lines = append(lines, fmt.Sprintf(
+			"Must use MCP tools whose names start with %s (@%s) to answer the question below.",
+			prefix, display,
+		))
 	}
 	for _, skill := range skills {
 		if skill == nil || skill.Name == "" {
 			continue
 		}
 		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf("Must call read_skill(skill_name=\"%s\") for @Skill \"%s\" before answering.", name, name))
+		lines = append(lines, fmt.Sprintf(
+			"Must call read_file(path=%q) for @Skill %q before answering.",
+			"skill://"+name+"/SKILL.md", name,
+		))
 	}
 	if len(lines) == 0 {
 		return ""
 	}
-	return "<must_use>\n" + strings.Join(lines, "\n") + "\n</must_use>"
+	return "<must_use>\n" + strings.Join(lines, "\n") +
+		"\nThese selections do not replace research into the task's factual content or exclude other " +
+		"relevant available sources unless the user explicitly restricts them. Apply selections to the " +
+		"relevant parts of the task; an @mention does not authorize unrelated actions. Follow the " +
+		"user's current explicit restrictions if they narrow or cancel a selection.\n</must_use>"
 }
 
 // sanitizeMustUseField strips newlines and angle brackets so an MCP/skill name
@@ -530,7 +699,7 @@ func (e *AgentEngine) registerRuntimeReferences() {
 				if title == "" {
 					title = doc.FileName
 				}
-				e.modelContext.RegisterChunk(modelcontext.ChunkReference{
+				e.modelContext.RegisterContextChunk(modelcontext.ChunkReference{
 					ChunkID:         doc.ChunkID,
 					KnowledgeID:     doc.KnowledgeID,
 					KnowledgeBaseID: firstNonEmptyAgent(doc.KnowledgeBaseID, kb.ID),
@@ -577,9 +746,18 @@ func listToolNames(ts []chat.Tool) []string {
 	return names
 }
 
+func mcpCatalogDescriptionLen(ts []chat.Tool) int {
+	for _, t := range ts {
+		if t.Function.Name == agenttools.ToolDiscoverMCPTools {
+			return len(t.Function.Description)
+		}
+	}
+	return 0
+}
+
 // buildToolsForLLM builds the tools list for LLM function calling
 func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
-	functionDefs := e.toolRegistry.GetFunctionDefinitions()
+	functionDefs := e.toolRegistry.GetModelFunctionDefinitions()
 	tools := make([]chat.Tool, 0, len(functionDefs))
 	for _, def := range functionDefs {
 		tools = append(tools, chat.Tool{
@@ -592,7 +770,7 @@ func (e *AgentEngine) buildToolsForLLM() []chat.Tool {
 		})
 	}
 
-	return tools
+	return e.modelContext.EncodeTools(tools)
 }
 
 // appendToolResults adds tool results to the in-turn message history following
@@ -603,13 +781,6 @@ func (e *AgentEngine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
-	if stepContainsMarkdownImage(step) {
-		// Keep the requirement at system priority even when a custom Agent prompt
-		// replaces the built-in template. Appending it once, when image-bearing
-		// evidence first appears, also avoids burdening text-only turns.
-		messages = appendAgentRetrievedImageRequirement(messages)
-	}
-
 	// Add assistant message with tool calls (if any)
 	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
 		assistantMsg := chat.Message{

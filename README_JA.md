@@ -24,6 +24,9 @@
     <a href="https://clawhub.ai/lyingbug/weknora" target="_blank">
         <img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub Skill-TreeRAG-ff6b35">
     </a>
+    <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora" target="_blank">
+        <img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?label=dsh-weknora">
+    </a>
     <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
@@ -78,6 +81,13 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 <table>
   <tr>
+    <td colspan="2" align="center"><b>🛠️ スキルサンドボックス対話 · Word を生成してプレビュー</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="スキルサンドボックス対話：Word 文書の生成とプレビュー" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📦 スキルカタログ · E2B サンドボックスへインストール</b><br/><img src="./docs/images/skill-catalog.png" alt="ワークスペースのスキルカタログ（docx / pptx / pdf を E2B にインストール）" width="100%"></td>
+    <td width="50%" align="center"><b>🤖 Agent モード · 検索、スキル読取、サンドボックスへ書き込み</b><br/><img src="./docs/images/agent-qa.png" alt="Agent が知識ベースを検索し、docx スキルを読み、サンドボックスにスクリプトを書き込む" width="100%"></td>
+  </tr>
+  <tr>
     <td colspan="2" align="center"><b>💬 インテリジェント Q&A 対話</b><br/><img src="./docs/images/qa.png" alt="インテリジェント Q&A 対話" width="100%"></td>
   </tr>
   <tr>
@@ -106,7 +116,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 | 機能 | 詳細 |
 |------|------|
-| インテリジェント推論 | ReACT プログレッシブ・マルチステップ推論、ナレッジ検索・MCP ツール・Web 検索を自律的にオーケストレーション |
+| インテリジェント推論 | ReACT プログレッシブ・マルチステップ推論、ナレッジ検索・MCP ツール・スキルサンドボックス・Web 検索を自律的にオーケストレーション |
 | クイック Q&A | ナレッジベースベースの RAG Q&A、迅速かつ正確な回答 |
 | Wiki モード | Agent主導で生のドキュメントから構造化された相互リンク済みMarkdown Wikiページを自動生成・保守 |
 | ツール呼び出し | 組み込みツール、MCP ツール（OAuth2 リモートサービス・会話中 OAuth 含む）、Web 検索；`@Skill / @MCP` メンションでターン単位に Agent ランタイムを範囲化 |
@@ -133,7 +143,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 | 機能 | 詳細 |
 |------|------|
-| 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / Ollama |
+| 大規模モデル | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / LiteLLM / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 互換 API |
 | ベクトル DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | オブジェクトストレージ | ローカル / MinIO / AWS S3 / 火山引擎 TOS / Alibaba Cloud OSS / 金山雲 KS3 / 華為雲 OBS；**ワークスペースごとに複数のストレージインスタンス**、KB 単位のバインドとデフォルトインスタンス |
@@ -163,6 +173,15 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 - **ドキュメントインポート** — エージェント経由でファイルアップロード、Webページインポート、Markdownナレッジの作成
 - **ハイブリッド検索** — 単一または複数のナレッジベースをベクトル + キーワードで横断検索
 - **ナレッジ管理** — プログラムによるナレッジエントリの閲覧、編集、削除
+
+## 🐋 DeepSeek Harness プラグイン
+
+[**`@wxg-prc-cpg/dsh-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora) は公式の [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）プラグインです（[ドキュメント](./packages/dsh-weknora/README.md)）。harness 自体は検索・埋め込み・ナレッジベースの機能を持たないため、このプラグインがコーディングエージェントに自社ドキュメントを与えます。`dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora` でインストールしてデプロイ先を指定すると、4 つの読み取り専用ツールがエージェントのツールセットに現れます。
+
+- **`weknora_search`** — ハイブリッド検索。原文のパッセージをそのまま返し、各件に再利用可能な `knowledge_id` が付く
+- **`weknora_read_document`** — 1 つのドキュメントのチャンクを順番に再構成、ページング対応
+- **`weknora_ask`** — WeKnora 自身が引用付きで作成した回答（RAG または ReAct パイプライン）
+- **`weknora_list_knowledge_bases`** — ナレッジベースの名前と id。エージェントが自分で検索範囲を絞れる
 
 
 ## 🚀 クイックスタート

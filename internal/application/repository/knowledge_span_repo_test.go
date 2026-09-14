@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -83,6 +84,37 @@ func TestKnowledgeSpanRepo_UpsertAndList(t *testing.T) {
 	require.Len(t, rows, 1, "Upsert must replace, not append")
 	assert.Equal(t, types.SpanStatusDone, rows[0].Status)
 	assert.Equal(t, int64(2000), rows[0].DurationMs)
+}
+
+func TestKnowledgeSpanRepo_UpsertSanitizesErrorFields(t *testing.T) {
+	repo, _ := setupSpanTestRepo(t)
+	now := time.Now()
+	invalid := "prefix " + string([]byte{0xef, 0xbc, 0x2e}) + " suffix"
+
+	require.NoError(t, repo.Upsert(context.Background(), &types.KnowledgeProcessingSpan{
+		KnowledgeID:  "kid-invalid-utf8",
+		Attempt:      1,
+		SpanID:       "span-invalid",
+		Name:         types.StageDocReader,
+		Kind:         types.SpanKindStage,
+		Status:       types.SpanStatusFailed,
+		ErrorCode:    invalid,
+		ErrorMessage: invalid,
+		ErrorDetail:  invalid,
+		StartedAt:    &now,
+	}))
+
+	rows, err := repo.ListByAttempt(context.Background(), "kid-invalid-utf8", 1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	for _, value := range []string{rows[0].ErrorCode, rows[0].ErrorMessage, rows[0].ErrorDetail} {
+		if !utf8.ValidString(value) {
+			t.Fatalf("persisted error field is invalid UTF-8: % x", []byte(value))
+		}
+		if value != "prefix . suffix" {
+			t.Fatalf("persisted error field = %q, want %q", value, "prefix . suffix")
+		}
+	}
 }
 
 // TestKnowledgeSpanRepo_NextAttempt confirms that NextAttempt allocates
@@ -180,6 +212,45 @@ func TestKnowledgeSpanRepo_CancelOpenSpansByName(t *testing.T) {
 	assert.Equal(t, types.SpanStatusCancelled, statusBy["sum-old"])
 	assert.Equal(t, types.SpanStatusDone, statusBy["sum-done"])
 	assert.Equal(t, types.SpanStatusRunning, statusBy["q-old"])
+}
+
+func TestKnowledgeSpanRepo_CancelPathsSanitizeErrorFields(t *testing.T) {
+	repo, _ := setupSpanTestRepo(t)
+	ctx := context.Background()
+	kid := "kid-cancel-invalid-utf8"
+	now := time.Now()
+	for _, r := range []*types.KnowledgeProcessingSpan{
+		{KnowledgeID: kid, Attempt: 1, SpanID: "root", Name: "root", Kind: types.SpanKindRoot, Status: types.SpanStatusRunning, StartedAt: &now},
+		{KnowledgeID: kid, Attempt: 1, SpanID: "descendant", ParentSpanID: "root", Name: "descendant", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},
+		{KnowledgeID: kid, Attempt: 1, SpanID: "bulk", Name: "bulk", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},
+		{KnowledgeID: kid, Attempt: 1, SpanID: "named", Name: "named", Kind: types.SpanKindSubSpan, Status: types.SpanStatusRunning, StartedAt: &now},
+	} {
+		require.NoError(t, repo.Upsert(ctx, r))
+	}
+
+	invalidCode := "CODE " + string([]byte{0xef, 0xbc, 0x2e})
+	invalidReason := "reason " + string([]byte{0xef, 0xbc, 0x2e})
+	_, err := repo.CancelOpenSpansByName(ctx, kid, 1, "named", invalidCode, invalidReason)
+	require.NoError(t, err)
+	_, err = repo.CancelDescendants(ctx, kid, 1, "root", invalidReason)
+	require.NoError(t, err)
+	_, err = repo.CancelAllOpenSpans(ctx, kid, 1, invalidCode, invalidReason)
+	require.NoError(t, err)
+
+	rows, err := repo.ListByAttempt(ctx, kid, 1)
+	require.NoError(t, err)
+	byID := make(map[string]types.KnowledgeProcessingSpan, len(rows))
+	for _, row := range rows {
+		byID[row.SpanID] = row
+	}
+	assert.Equal(t, "UPSTREAM_FAILED", byID["descendant"].ErrorCode)
+	assert.Equal(t, "reason .", byID["descendant"].ErrorMessage)
+	for _, id := range []string{"root", "bulk", "named"} {
+		assert.Equal(t, "CODE .", byID[id].ErrorCode, id)
+		assert.Equal(t, "reason .", byID[id].ErrorMessage, id)
+		assert.True(t, utf8.ValidString(byID[id].ErrorCode), id)
+		assert.True(t, utf8.ValidString(byID[id].ErrorMessage), id)
+	}
 }
 
 // TestKnowledgeSpanRepo_ListAttemptIsolation guarantees that different

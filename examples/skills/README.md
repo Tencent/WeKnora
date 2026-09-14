@@ -86,7 +86,7 @@ Agent 会根据用户请求自动调用：
 
 Agent: 
   1. 识别匹配 pdf-processing 技能
-  2. 调用 read_skill 加载技能内容
-  3. 调用 execute_skill_script 执行 analyze_form.py
+  2. 调用 read_file(path="skill://pdf-processing/SKILL.md") 加载技能内容
+  3. 调用 shell_exec(skill_name="pdf-processing", command=...) 执行 analyze_form.py
   4. 返回表单字段分析结果
 ```

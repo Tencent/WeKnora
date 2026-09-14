@@ -39,7 +39,7 @@ func (r *recordingRoundTripper) RoundTrip(req *http.Request) (*http.Response, er
 
 func TestEnvdCompatTransportAuthenticatesDataPlaneCalls(t *testing.T) {
 	recorder := &recordingRoundTripper{}
-	transport := NewEnvdCompatTransport(recorder, "user")
+	transport := NewEnvdCompatTransport(recorder, DefaultSandboxExecUser)
 
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -50,7 +50,7 @@ func TestEnvdCompatTransportAuthenticatesDataPlaneCalls(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t,
-		"Basic "+base64.StdEncoding.EncodeToString([]byte("user:")),
+		"Basic "+base64.StdEncoding.EncodeToString([]byte(DefaultSandboxExecUser+":")),
 		recorder.request.Header.Get("Authorization"),
 	)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -258,7 +259,30 @@ func (s *messageSuggestionService) generate(
 	message *types.Message,
 	answer string,
 	config types.FollowUpSuggestionConfig,
-) (types.SuggestionItems, types.TokenUsage, error) {
+) (questions types.SuggestionItems, usage types.TokenUsage, err error) {
+	// The LLM call often runs on POST .../suggestions (frontend onTurnComplete)
+	// or after GinMiddleware has already ended the HTTP root. Resume the
+	// originating chat trace so chat.completion nests under that turn instead
+	// of auto-creating an orphan root.
+	ctx = langfuse.AttachTraceparent(ctx, message.ExecutionContext.LangfuseTraceparent)
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name: "follow_up.suggestions",
+		Input: map[string]interface{}{
+			"session_id":           message.SessionID,
+			"assistant_message_id": message.ID,
+			"mode":                 config.Mode,
+		},
+		Metadata: map[string]interface{}{
+			"count":    config.Count,
+			"model_id": config.ModelID,
+		},
+	})
+	defer func() {
+		span.Finish(map[string]interface{}{
+			"question_count": len(questions),
+		}, nil, err)
+	}()
+
 	count := config.Count
 	if count < 1 {
 		count = 3
@@ -269,7 +293,6 @@ func (s *messageSuggestionService) generate(
 	}
 	var generated types.SuggestionItems
 	var knowledge types.SuggestionItems
-	var usage types.TokenUsage
 	var modelErr error
 	if config.Mode == types.SuggestionModeGenerated || config.Mode == types.SuggestionModeHybrid {
 		generated, usage, modelErr = s.generateWithModel(
@@ -329,6 +352,7 @@ func (s *messageSuggestionService) generateWithModel(
 	if err != nil {
 		return nil, types.TokenUsage{}, err
 	}
+	modelCtx = types.WithLLMCallMetadata(modelCtx, "follow_up.suggestions", "")
 	categories := strings.Join(config.Categories, ", ")
 	if categories == "" {
 		categories = "clarify, deepen, action"

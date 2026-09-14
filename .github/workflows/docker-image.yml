@@ -11,7 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: "24"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   REGISTRY: registry.cn-beijing.aliyuncs.com
   IMAGE_NAMESPACE: gov-claw
@@ -28,19 +27,6 @@ jobs:
         run: |
           eval "$(./scripts/get_version.sh env)"
           echo "commit_id=$COMMIT_ID" >> $GITHUB_OUTPUT
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        env:
-          VITE_IS_DOCKER: true
-          VITE_FRONTEND_COMMIT: ${{ steps.version.outputs.commit_id }}
-        run: ./scripts/build_frontend_dist.sh
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -65,6 +51,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           file: frontend/Dockerfile
           context: ./frontend
+          build-args: |
+            VITE_FRONTEND_COMMIT=${{ steps.version.outputs.commit_id }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
           provenance: false
@@ -199,7 +187,7 @@ jobs:
             platform: linux/arm64
             runs: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -248,6 +236,7 @@ jobs:
             ${{ format('COMMIT_ID_ARG={0}', steps.version.outputs.commit_id) }}
             ${{ format('BUILD_TIME_ARG={0}', steps.version.outputs.build_time) }}
             ${{ format('GO_VERSION_ARG={0}', steps.version.outputs.go_version) }}
+            WITH_ANYDOC=1
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/tree-rag-app
           provenance: false

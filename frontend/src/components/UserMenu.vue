@@ -87,6 +87,9 @@
               stroke-linecap="round" />
           </svg>
           <span>{{ $t('settings.webSearchConfig') }}</span>
+        <div v-if="canManageSkills" class="menu-item" @click="handleQuickNav('skills')">
+          <t-icon :name="SKILL_ICON" class="menu-icon" />
+          <span>{{ $t('settings.skills.title') }}</span>
         </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleSettings">
@@ -155,6 +158,7 @@ import { useRoleLabel } from '@/composables/useRoleLabel'
 import { openNewUserGuide } from '@/config/contextualGuides'
 import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
+import { SKILL_ICON } from '@/types/mention'
 
 const { t } = useI18n()
 
@@ -178,6 +182,10 @@ const canManageModels = computed(() =>
 )
 const canSeeWebSearch = computed(() =>
   authStore.canAccessAllTenants || authStore.hasRole('admin'),
+const canManageSkills = computed(() =>
+  authStore.canAccessAllTenants ||
+  authStore.isSystemAdmin ||
+  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills),
 )
 
 const menuRef = ref<HTMLElement>()

@@ -2,6 +2,7 @@ package dingtalk
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
@@ -180,6 +181,201 @@ func TestParseCallbackMessage_TextStillWorks(t *testing.T) {
 	}
 }
 
+func TestParseCallbackMessage_RichTextPreservesTextAndPictureMetadata(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:     "rich-1",
+		Msgtype:   "richText",
+		RobotCode: "robot-123",
+		Content: json.RawMessage(`{
+			"richText":[
+				{"text":"  这个问题示例图如下：  "},
+				{"pictureDownloadCode":"PIC-FALLBACK","downloadCode":"PIC-CODE","type":"picture"},
+				{"text":"通过以上示意图可以明白完整的交互流程"}
+			]
+		}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeImage)
+	}
+	if got.Content != "这个问题示例图如下：\n通过以上示意图可以明白完整的交互流程" {
+		t.Errorf("Content = %q", got.Content)
+	}
+	if got.FileKey != "PIC-CODE" {
+		t.Errorf("FileKey = %q, want PIC-CODE", got.FileKey)
+	}
+	if got.FileName != "rich-1.png" {
+		t.Errorf("FileName = %q, want rich-1.png", got.FileName)
+	}
+	if got.Extra["raw_msgtype"] != "richText" {
+		t.Errorf("raw_msgtype = %q, want richText", got.Extra["raw_msgtype"])
+	}
+	if got.Extra["rich_text_picture_count"] != "1" {
+		t.Errorf("rich_text_picture_count = %q, want 1", got.Extra["rich_text_picture_count"])
+	}
+	if got.Extra["robot_code"] != "robot-123" {
+		t.Errorf("robot_code = %q, want robot-123", got.Extra["robot_code"])
+	}
+}
+
+func TestParseCallbackMessage_RichTextPictureOnlyUsesImagePath(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:   "rich-picture",
+		Msgtype: "richText",
+		Content: json.RawMessage(`{
+			"richText":[{"pictureDownloadCode":"PIC-CODE","type":"picture"}]
+		}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeImage)
+	}
+	if got.Content != "" {
+		t.Errorf("Content = %q, want empty", got.Content)
+	}
+	if got.FileKey != "PIC-CODE" {
+		t.Errorf("FileKey = %q, want PIC-CODE", got.FileKey)
+	}
+}
+
+func TestParseCallbackMessage_RichTextTextOnly(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:   "rich-text",
+		Msgtype: "richText",
+		Content: json.RawMessage(`{"richText":[{"text":"  只发文字  "}]}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeText {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeText)
+	}
+	if got.Content != "只发文字" {
+		t.Errorf("Content = %q, want 只发文字", got.Content)
+	}
+	if got.FileKey != "" {
+		t.Errorf("FileKey = %q, want empty", got.FileKey)
+	}
+}
+
+func TestParseCallbackMessage_RichTextOfficialPictureSample(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:     "official-rich",
+		Msgtype:   "richText",
+		RobotCode: "robot-123",
+		Content: json.RawMessage(`{
+			"richText":[
+				{"text":"你好"},
+				{"downloadCode":"OFFICIAL-PIC","type":"picture"}
+			]
+		}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeImage)
+	}
+	if got.Content != "你好" {
+		t.Errorf("Content = %q, want 你好", got.Content)
+	}
+	if got.FileKey != "OFFICIAL-PIC" {
+		t.Errorf("FileKey = %q, want OFFICIAL-PIC", got.FileKey)
+	}
+}
+
+func TestParseCallbackMessage_RichTextKeepsFirstPictureAndHints(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:   "rich-multi",
+		Msgtype: "richText",
+		Content: json.RawMessage(`{
+			"richText":[
+				{"text":"对比这几张图"},
+				{"downloadCode":"PIC-1","type":"picture"},
+				{"downloadCode":"PIC-2","type":"picture"},
+				{"downloadCode":"PIC-3","type":"picture"}
+			]
+		}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.FileKey != "PIC-1" {
+		t.Errorf("FileKey = %q, want PIC-1", got.FileKey)
+	}
+	if got.Extra["rich_text_picture_count"] != "3" {
+		t.Errorf("rich_text_picture_count = %q, want 3", got.Extra["rich_text_picture_count"])
+	}
+	if !strings.Contains(got.Content, "对比这几张图") || !strings.Contains(got.Content, "共 3 张图片") {
+		t.Errorf("Content = %q, want text plus dropped-picture hint", got.Content)
+	}
+}
+
+func TestParseCallbackMessage_RichTextIgnoresDownloadCodeWithoutPictureType(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:   "rich-notype",
+		Msgtype: "richText",
+		Content: json.RawMessage(`{"richText":[{"text":"hello","downloadCode":"NOT-A-PIC"}]}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeText {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeText)
+	}
+	if got.FileKey != "" {
+		t.Errorf("FileKey = %q, want empty", got.FileKey)
+	}
+}
+
+func TestParseCallbackMessage_RichTextEmptyOrInvalidFallsBackToEmptyText(t *testing.T) {
+	empty := parseCallbackMessage(&callbackMessage{
+		MsgID:   "rich-empty",
+		Msgtype: "richText",
+		Content: json.RawMessage(`{"richText":[]}`),
+	})
+	if empty.MessageType != im.MessageTypeText || empty.Content != "" {
+		t.Errorf("empty richText: type=%q content=%q", empty.MessageType, empty.Content)
+	}
+
+	invalid := parseCallbackMessage(&callbackMessage{
+		MsgID:   "rich-bad",
+		Msgtype: "richText",
+		Content: json.RawMessage(`not-json`),
+	})
+	if invalid.MessageType != im.MessageTypeText || invalid.Content != "" {
+		t.Errorf("invalid richText: type=%q content=%q", invalid.MessageType, invalid.Content)
+	}
+}
+
+func TestParseCallbackMessage_AudioUsesRecognition(t *testing.T) {
+	msg := &callbackMessage{
+		MsgID:   "audio-1",
+		Msgtype: "audio",
+		Content: json.RawMessage(`{"duration":4000,"downloadCode":"AUD-CODE","recognition":"  钉钉，让进步发生  "}`),
+	}
+
+	got := parseCallbackMessage(msg)
+	if got.MessageType != im.MessageTypeText {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeText)
+	}
+	if got.Content != "钉钉，让进步发生" {
+		t.Errorf("Content = %q, want recognition text", got.Content)
+	}
+	if got.Extra["raw_msgtype"] != "audio" {
+		t.Errorf("raw_msgtype = %q, want audio", got.Extra["raw_msgtype"])
+	}
+}
+
+func TestParseCallbackMessage_AudioWithoutRecognitionStaysEmpty(t *testing.T) {
+	got := parseCallbackMessage(&callbackMessage{
+		MsgID:   "audio-empty",
+		Msgtype: "audio",
+		Content: json.RawMessage(`{"duration":1000,"downloadCode":"AUD-CODE"}`),
+	})
+	if got.MessageType != im.MessageTypeText || got.Content != "" {
+		t.Errorf("audio without recognition: type=%q content=%q", got.MessageType, got.Content)
+	}
+}
+
 func TestStreamToIncoming_File(t *testing.T) {
 	data := &chatbot.BotCallbackDataModel{
 		MsgId:            "m3",
@@ -239,5 +435,54 @@ func TestStreamToIncoming_TextStillWorks(t *testing.T) {
 	}
 	if got.Content != "hi" {
 		t.Errorf("Content = %q, want %q", got.Content, "hi")
+	}
+}
+
+func TestStreamToIncoming_RichTextPreservesTextAndPictureMetadata(t *testing.T) {
+	data := &chatbot.BotCallbackDataModel{
+		MsgId:   "stream-rich",
+		Msgtype: "richText",
+		Content: map[string]interface{}{
+			"richText": []interface{}{
+				map[string]interface{}{"text": "这种场景下，AI 去纹身去不干净"},
+				map[string]interface{}{"downloadCode": "STREAM-PIC", "type": "picture"},
+			},
+		},
+	}
+
+	got := streamToIncoming(data, "client-app-key")
+	if got.MessageType != im.MessageTypeImage {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeImage)
+	}
+	if got.Content != "这种场景下，AI 去纹身去不干净" {
+		t.Errorf("Content = %q", got.Content)
+	}
+	if got.FileKey != "STREAM-PIC" {
+		t.Errorf("FileKey = %q, want STREAM-PIC", got.FileKey)
+	}
+	if got.Extra["raw_msgtype"] != "richText" {
+		t.Errorf("raw_msgtype = %q, want richText", got.Extra["raw_msgtype"])
+	}
+	if got.Extra["robot_code"] != "client-app-key" {
+		t.Errorf("robot_code = %q, want client-app-key", got.Extra["robot_code"])
+	}
+}
+
+func TestStreamToIncoming_AudioUsesRecognition(t *testing.T) {
+	data := &chatbot.BotCallbackDataModel{
+		MsgId:   "stream-audio",
+		Msgtype: "audio",
+		Content: map[string]interface{}{
+			"recognition":  "语音转写结果",
+			"downloadCode": "STREAM-AUD",
+		},
+	}
+
+	got := streamToIncoming(data, "client-app-key")
+	if got.MessageType != im.MessageTypeText {
+		t.Fatalf("MessageType = %q, want %q", got.MessageType, im.MessageTypeText)
+	}
+	if got.Content != "语音转写结果" {
+		t.Errorf("Content = %q, want recognition text", got.Content)
 	}
 }

@@ -34,6 +34,10 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 	})
 
 	ctx := c.Request.Context()
+	caller := types.Caller{TenantID: 7, UserID: "u1", Role: types.TenantRoleAdmin}
+	if got := types.CallerFromContext(types.WithExecutionTenant(ctx, 9)); got != caller {
+		t.Fatalf("execution switch changed authenticated caller: %+v", got)
+	}
 	if got, ok := types.TenantIDFromContext(ctx); !ok || got != 7 {
 		t.Fatalf("ctx tenant id = %d, ok=%v", got, ok)
 	}

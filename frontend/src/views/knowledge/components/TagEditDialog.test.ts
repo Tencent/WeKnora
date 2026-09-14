@@ -6,6 +6,7 @@ const component = readFileSync(new URL('./TagEditDialog.vue', import.meta.url), 
 const zhCN = readFileSync(new URL('../../../i18n/locales/zh-CN.ts', import.meta.url), 'utf8')
 const enUS = readFileSync(new URL('../../../i18n/locales/en-US.ts', import.meta.url), 'utf8')
 const koKR = readFileSync(new URL('../../../i18n/locales/ko-KR.ts', import.meta.url), 'utf8')
+const jaJP = readFileSync(new URL('../../../i18n/locales/ja-JP.ts', import.meta.url), 'utf8')
 const ruRU = readFileSync(new URL('../../../i18n/locales/ru-RU.ts', import.meta.url), 'utf8')
 
 test('uses a compact flat dialog with selected and available sections', () => {
@@ -33,7 +34,7 @@ test('uses a compact flat dialog with selected and available sections', () => {
 })
 
 test('defines the short dialog heading in every supported locale', () => {
-  for (const locale of [zhCN, enUS, koKR, ruRU]) {
+  for (const locale of [zhCN, enUS, koKR, jaJP, ruRU]) {
     assert.match(locale, /tagEditDialogHeading:/)
     assert.match(locale, /tagEditSelectedSection:/)
     assert.match(locale, /tagEditAvailableSection:/)

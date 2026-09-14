@@ -398,6 +398,23 @@ func (s *tenantInvitationService) MarkPendingAcceptedIfExists(
 	return s.repo.MarkStatusIfPending(ctx, inv.ID, types.TenantInvitationStatusAccepted, s.now())
 }
 
+// reconcilePendingInvitation closes a per-user invitation after another
+// successful join path (for example a multi-use share link) has already
+// established the membership. This keeps the invitation inbox consistent
+// without turning a bookkeeping failure into a failed join after the member
+// row has already been committed.
+func (s *tenantInvitationService) reconcilePendingInvitation(
+	ctx context.Context,
+	tenantID uint64,
+	inviteeUserID string,
+) {
+	if err := s.MarkPendingAcceptedIfExists(ctx, tenantID, inviteeUserID); err != nil {
+		logger.Warnf(ctx,
+			"failed to reconcile pending invitation for tenant %d user %s: %v",
+			tenantID, inviteeUserID, err)
+	}
+}
+
 // emitInvitationAccepted writes the rbac.invitation_accepted audit row.
 // Actor is the invitee (acting on their own inbox); target is the same
 // user since the action is self-directed.
@@ -779,6 +796,7 @@ func (s *tenantInvitationService) AcceptByToken(
 					Outcome:      types.AuditOutcomeSuccess,
 					Details:      detailsFor(inv.ID, inv.Role, inv.OrgUnitID),
 				})
+				s.reconcilePendingInvitation(ctx, inv.TenantID, newUserID)
 				return existing, nil
 			}
 		}
@@ -793,6 +811,10 @@ func (s *tenantInvitationService) AcceptByToken(
 			"share-link %d accepted_count bump failed (membership still created): %v",
 			inv.ID, incErr)
 	}
+	// A user may have received a direct invitation and then joined through
+	// a share link first. Close that direct invitation now so its notification
+	// cannot be accepted a second time and produce a misleading audit event.
+	s.reconcilePendingInvitation(ctx, inv.TenantID, newUserID)
 	s.emitAudit(ctx, &types.AuditLog{
 		TenantID:     inv.TenantID,
 		ActorUserID:  auditActor(ctx),

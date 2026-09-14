@@ -14,6 +14,10 @@ type ChunkImageInfo struct {
 
 // ChunkRepository defines the interface for chunk repository operations
 type ChunkRepository interface {
+	// ListAllChunksByKnowledgeID includes every type and storage status for
+	// scoped lifecycle operations; UI pagination hides unindexed chunks.
+	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+
 	// CreateChunks creates chunks
 	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
 	// GetChunkByID gets a chunk by id
@@ -28,8 +32,15 @@ type ChunkRepository interface {
 	ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error)
 	// ListChunksBySeqID lists chunks by seq_ids
 	ListChunksBySeqID(ctx context.Context, tenantID uint64, seqIDs []int64) ([]*types.Chunk, error)
-	// ListChunksByKnowledgeID lists chunks by knowledge id
+	// ListChunksByKnowledgeID lists the knowledge's text chunks. Despite the name
+	// it filters to chunk_type = 'text'; reach for ListChunksByKnowledgeIDAndTypes
+	// when summary, parent_text or image chunks are needed too.
 	ListChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+	// ListChunksByKnowledgeIDAndTypes lists the knowledge's chunks restricted to
+	// the given chunk types, ordered by chunk_index.
+	ListChunksByKnowledgeIDAndTypes(
+		ctx context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+	) ([]*types.Chunk, error)
 	// ListPagedChunksByKnowledgeID lists paged chunks by knowledge id.
 	// When tagIDs is non-empty, results are filtered by tag_id (OR semantics).
 	// knowledgeType: "faq" or "manual" - determines sort order and search behavior
@@ -124,6 +135,9 @@ type ChunkRepository interface {
 	ListRecentDocumentChunksWithQuestions(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
 }
 
+// ChunkService mutations require explicit KB write grants and validate persisted
+// document bindings. Trusted processing/rollback code uses ChunkRepository after
+// its own task admission; the execution tenant alone is not a write grant.
 // ChunkService defines the interface for chunk service operations
 type ChunkService interface {
 	// CreateChunks creates chunks

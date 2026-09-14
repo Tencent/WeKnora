@@ -121,18 +121,8 @@
                 </t-dropdown>
               </div>
             </div>
-            <div class="service-card__subtitle">
-              <span class="service-card__type">{{ getTransportTypeLabel(service.transport_type) }}</span>
-              <template v-if="service.description">
-                <span class="service-card__sep">·</span>
-                <span class="service-card__desc" :title="service.description">{{ service.description }}</span>
-              </template>
-            </div>
-            <div v-if="service.url" class="service-card__url" :title="service.url">
-              {{ service.url }}
-            </div>
           </div>
-        </div>
+        </article>
         <button
           v-if="authStore.hasRole('admin') && !spaceSelectionOrgId"
           type="button"
@@ -152,6 +142,7 @@
       v-model:visible="dialogVisible"
       :service="currentService"
       :mode="dialogMode"
+      :initial-step="dialogInitialStep"
       @success="handleDialogSuccess"
       @created="handleDialogCreated"
     />
@@ -220,6 +211,9 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogMode = ref<'add' | 'edit'>('add')
 const currentService = ref<MCPService | null>(null)
+const dialogInitialStep = ref<0 | 1>(0)
+const togglingIds = ref(new Set<string>())
+const serviceUsage = (service: MCPService) => service.usage_instructions?.trim() || service.description?.trim() || ''
 
 function isLocalOrgUnitService(service: MCPService): boolean {
   if (service.is_builtin) return true
@@ -320,6 +314,7 @@ const handleOrgUnitChanged = () => {
 const handleAdd = () => {
   currentService.value = null
   dialogMode.value = 'add'
+  dialogInitialStep.value = 0
   dialogVisible.value = true
 }
 
@@ -346,6 +341,7 @@ const onServiceCardClick = (event: Event, service: MCPService) => {
 const handleEdit = (service: MCPService) => {
   currentService.value = { ...service }
   dialogMode.value = 'edit'
+  dialogInitialStep.value = initialStep
   dialogVisible.value = true
 }
 
@@ -367,24 +363,26 @@ const handleDialogCreated = async (created: MCPService) => {
   dialogMode.value = 'edit'
 }
 
-// Handle toggle enabled/disabled
+// Commit the visible state only after saving; reject duplicate toggles while pending.
 const handleToggleEnabled = async (service: MCPService) => {
-  if (!service || !service.id) return
-
-  const originalState = service.enabled
+  if (!authStore.hasRole('admin') || service.is_builtin || !service.id || togglingIds.value.has(service.id)) return
+  const enabled = !service.enabled
+  togglingIds.value.add(service.id)
   try {
-    await updateMCPService(service.id, { enabled: service.enabled })
-    MessagePlugin.success(service.enabled ? t('mcpSettings.toasts.enabled') : t('mcpSettings.toasts.disabled'))
+    await updateMCPService(service.id, { enabled })
+    service.enabled = enabled
+    MessagePlugin.success(enabled ? t('mcpSettings.toasts.enabled') : t('mcpSettings.toasts.disabled'))
   } catch (error) {
-    service.enabled = originalState
     MessagePlugin.error(t('mcpSettings.toasts.updateStateFailed'))
     console.error('Failed to update MCP service:', error)
+  } finally {
+    togglingIds.value.delete(service.id)
   }
 }
 
 // Handle delete button click
 const handleDelete = (service: MCPService) => {
-  if (!service || !service.id) return
+  if (!authStore.hasRole('admin') || service.is_builtin || !service.id || togglingIds.value.has(service.id)) return
 
   confirmDelete({
     body: t('mcpSettings.deleteConfirmBody', { name: service.name || t('mcpSettings.unnamed') }),
@@ -542,24 +540,6 @@ onUnmounted(() => {
   text-align: center;
 }
 
-.list-section-header {
-  margin-bottom: 16px;
-
-  h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 4px 0;
-  }
-
-  p {
-    font-size: 13px;
-    color: var(--td-text-color-placeholder);
-    margin: 0;
-    line-height: 1.5;
-  }
-}
-
 .empty-state {
   padding: 80px 0;
   text-align: center;
@@ -573,74 +553,46 @@ onUnmounted(() => {
 
 .services-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
-
-  .service-card--add {
-    width: 100%;
-    height: 100%;
-  }
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 10px;
+  align-items: stretch;
 }
 
-// Transport-distinguished card. 与 ModelSettings / WebSearchSettings 同形。
 .service-card {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px 14px 12px;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--td-component-stroke);
   border-radius: 10px;
   background: var(--td-bg-color-container);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-  min-width: 0;
-
-  &--builtin {
-    background: var(--td-bg-color-secondarycontainer);
-  }
-
-  &--clickable {
-    cursor: pointer;
-
-    &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
-  }
-
-  &--builtin:not(.service-card--clickable):hover {
-    box-shadow: none;
-    border-color: var(--td-component-stroke);
-  }
 
   &--add {
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    min-height: 68px;
+    gap: 6px;
+    min-height: 88px;
+    padding: 12px;
     border-style: dashed;
     background: transparent;
     color: var(--td-text-color-placeholder);
     cursor: pointer;
     font: inherit;
     text-align: center;
+    transition: border-color 0.18s ease, background 0.18s ease;
 
     &:hover,
     &:focus-visible {
       color: var(--td-brand-color);
       border-color: var(--td-brand-color);
       background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-      box-shadow: none;
-    }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
+      .service-card--add__icon {
+        background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+        color: var(--td-brand-color);
+      }
     }
 
     &__icon {
@@ -650,8 +602,8 @@ onUnmounted(() => {
       width: 32px;
       height: 32px;
       border-radius: 8px;
-      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      color: var(--td-brand-color);
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-secondary);
       font-size: 18px;
     }
 
@@ -663,35 +615,29 @@ onUnmounted(() => {
   }
 }
 
-.service-card__actions {
-  flex-shrink: 0;
+.service-card__main {
+  display: flex;
+  align-items: stretch;
+  padding: 12px;
+  min-width: 0;
+  flex: 1;
 }
 
 .service-card__badge {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 1px;
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
-}
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
 
-// 三种 transport 的徽章配色：sse 流式 → 绿，http-streamable → 蓝，stdio → 橙
-.service-card--sse .service-card__badge {
-  background: rgba(17, 128, 83, 0.12);
-  color: #118053;
-}
-.service-card--http-streamable .service-card__badge {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
-}
-.service-card--stdio .service-card__badge {
-  background: rgba(184, 92, 0, 0.12);
-  color: #B85C00;
+  :deep(.t-icon) {
+    display: block;
+    line-height: 1;
+  }
 }
 
 .service-card__body {
@@ -699,14 +645,15 @@ onUnmounted(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .service-card__header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
+  min-height: 28px;
 }
 
 .service-card__title {
@@ -715,119 +662,200 @@ onUnmounted(() => {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 20px;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.service-card__pill {
+.service-card__builtin {
   flex-shrink: 0;
-  padding: 1px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 16px;
-  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--td-text-color-placeholder);
+}
 
-  &--warning {
-    color: var(--td-warning-color-7, #B85C00);
-    background: var(--td-warning-color-1, #FEF3E6);
+.service-card__type {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--td-text-color-placeholder);
+}
+
+.service-card__actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.service-card__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+
+  :deep(.t-icon) {
+    display: block;
+    line-height: 1;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--td-text-color-primary);
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &--danger:hover:not(:disabled) {
+    color: var(--td-error-color);
+    background: color-mix(in srgb, var(--td-error-color) 8%, transparent);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
   }
 }
 
-// On/Off 状态徽章 —— 用 dot+文字而非 t-switch，避免误触；翻转启用状态由
-// 三点菜单里的 toggle 项触发，实际 API 调用走 handleToggleEnabled 同一路径。
+.service-card__desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  overflow-wrap: anywhere;
+}
+
+.service-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 0;
+}
+
+.service-card__empty-usage {
+  display: flex;
+  align-items: center;
+  min-height: calc(2 * 12px * 1.5);
+  color: var(--td-text-color-placeholder);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.service-card__add-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover { color: var(--td-brand-color); }
+}
+
+.service-card__metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.service-card__tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+
+  :deep(.t-icon) { flex-shrink: 0; }
+
+  &.is-stale {
+    color: var(--td-warning-color);
+    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
+  }
+
+  &.is-missing {
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+button.service-card__tools {
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+}
+
+.service-card__tools-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .service-card__status {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 1px 8px 1px 6px;
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 16px;
-  border-radius: 10px;
-  background: var(--td-bg-color-secondarycontainer);
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--td-text-color-placeholder);
 
-  &--on {
-    color: var(--td-success-color-7, #118053);
+  &.is-enabled { color: var(--td-success-color); }
+}
 
-    .service-card__status-dot {
-      background: var(--td-success-color, #118053);
-    }
-  }
+button.service-card__status {
+  cursor: pointer;
 
-  &--off {
-    color: var(--td-text-color-placeholder);
-
-    .service-card__status-dot {
-      background: var(--td-gray-color-5);
-    }
-  }
+  &:hover:not(:disabled) { background: var(--td-bg-color-container-hover); }
+  &:disabled { cursor: wait; }
 }
 
 .service-card__status-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
+  background: currentColor;
 }
 
-.service-card__more {
-  flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
-  padding: 2px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-
-  &:hover,
-  &:focus-visible {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
-  }
-}
-
-// switch 始终显示（它是状态锚点）；三点按钮只在 hover/focus 时出现。
-.service-card:hover .service-card__more,
-.service-card:focus-within .service-card__more,
-.service-card__actions:focus-within .service-card__more {
-  opacity: 1;
-}
-
-.service-card__subtitle {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
-  min-width: 0;
-}
-
-.service-card__type {
-  font-weight: 500;
-}
-
-.service-card__sep {
-  color: var(--td-text-color-placeholder);
-}
-
-.service-card__desc {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.service-card__url {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.4;
-  color: var(--td-text-color-placeholder);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
+.service-card button:focus-visible,
+.service-card--add:focus-visible {
+  outline: 2px solid var(--td-brand-color);
+  outline-offset: -2px;
 }
 </style>

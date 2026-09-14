@@ -400,6 +400,10 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 | ---- | ------ | --------- |
 | id   | string | 知识库 ID |
 
+**查询参数**:
+
+- `resource_urls`: `handle`（默认）或 `public`。`public` 把检索结果 `content` / `image_info` 里的 `resource://` 引用换成可加载的 http(s) 链接，详见[文件与图片引用](./README.md#文件与图片引用resource-与直链)
+
 **参数说明（请求体）**:
 
 | 字段                     | 类型     | 必填 | 说明                                                             |
@@ -419,7 +423,7 @@ curl --location --request PUT 'http://localhost:8080/api/v1/knowledge-bases/kb-0
 **请求**:
 
 ```curl
-curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/hybrid-search' \
+curl --location --request POST 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/hybrid-search?resource_urls=public' \
 --header 'X-API-Key: sk-xxxxx' \
 --header 'Content-Type: application/json' \
 --data '{

@@ -104,6 +104,9 @@ func (s *agentShareService) sharedAgentInfo(
 		SharedAt:       share.CreatedAt,
 		SharedByUserID: share.SharedByUserID,
 	}
+	if share.Agent != nil {
+		types.ApplyBuiltinAgentLocalization(ctx, share.Agent)
+	}
 	if share.Organization != nil {
 		info.OrgName = share.Organization.Name
 	}
@@ -474,6 +477,7 @@ func (s *agentShareService) GetSharedAgentForTenant(
 		if err != nil || agent == nil {
 			return nil, ErrAgentNotFoundForShare
 		}
+		types.ApplyBuiltinAgentLocalization(ctx, agent)
 		_ = callerTenantRole
 		return agent, nil
 	}
@@ -491,6 +495,7 @@ func (s *agentShareService) GetSharedAgentForTenant(
 		}
 		return nil, err
 	}
+	types.ApplyBuiltinAgentLocalization(ctx, agent)
 	_ = callerTenantRole
 	return agent, nil
 }
@@ -507,26 +512,8 @@ func (s *agentShareService) TenantCanAccessKBViaSomeSharedAgent(ctx context.Cont
 		return false, err
 	}
 	for _, info := range list {
-		if info.Agent == nil {
-			continue
-		}
-		agent := info.Agent
-		if agent.TenantID != kb.TenantID {
-			continue
-		}
-		mode := agent.Config.KBSelectionMode
-		if mode == "none" {
-			continue
-		}
-		if mode == "all" {
+		if types.SharedAgentIncludesKB(info.Agent, kb) {
 			return true, nil
-		}
-		if mode == "selected" {
-			for _, id := range agent.Config.KnowledgeBases {
-				if id == kb.ID {
-					return true, nil
-				}
-			}
 		}
 	}
 	return false, nil

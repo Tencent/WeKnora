@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"sync"
-	"time"
 )
 
 // DefaultManager implements the Manager interface
@@ -48,37 +47,7 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 		m.sandbox = &disabledSandbox{}
 		return nil
 
-	case SandboxTypeDocker:
-		dockerSandbox := NewDockerSandbox(m.config)
-		if dockerSandbox.IsAvailable(ctx) {
-			m.sandbox = dockerSandbox
-			// Pre-pull the sandbox image asynchronously so it's ready before first use.
-			// Use a 10-minute timeout to prevent the goroutine from hanging indefinitely.
-			go func() {
-				pullCtx, pullCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-				defer pullCancel()
-				if err := dockerSandbox.EnsureImage(pullCtx); err != nil {
-					log.Printf("[sandbox] failed to pre-pull image %s: %v", m.config.DockerImage, err)
-				} else {
-					log.Printf("[sandbox] image %s is ready", m.config.DockerImage)
-				}
-			}()
-			return nil
-		}
-
-		// Fallback to local if enabled
-		if m.config.FallbackEnabled {
-			m.sandbox = NewLocalSandbox(m.config)
-			return nil
-		}
-
-		return fmt.Errorf("docker is not available and fallback is disabled")
-
-	case SandboxTypeLocal:
-		m.sandbox = NewLocalSandbox(m.config)
-		return nil
-
-	case SandboxTypeCube, SandboxTypeE2B:
+	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
 		// Session-scoped remote backends are only reachable through
 		// SessionBoundManager, which owns the authoritative binding.
 		// DefaultManager exposes stateless semantics that cannot preserve
@@ -252,16 +221,14 @@ func (s *disabledSandbox) IsAvailable(ctx context.Context) bool {
 // NewManagerFromType creates a sandbox manager with the specified type.
 // dockerImage is optional; if empty, the default image is used.
 //
-// Session-scoped remote backends (Cube, E2B) route to SessionBoundManager,
-// which keeps one persistent MicroVM per SessionID; stateless backends
-// (Docker, Local, Disabled) route to DefaultManager. Both satisfy Manager.
-func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage string) (Manager, error) {
+// Session-scoped backends (Cube, E2B, Docker) route to SessionBoundManager,
+// which keeps one persistent sandbox per SessionID; Disabled routes to
+// DefaultManager. Both satisfy Manager.
+func NewManagerFromType(sandboxType string, dockerImage string) (Manager, error) {
 	var sType SandboxType
 	switch sandboxType {
 	case "docker":
 		sType = SandboxTypeDocker
-	case "local":
-		sType = SandboxTypeLocal
 	case "cube":
 		sType = SandboxTypeCube
 	case "e2b":
@@ -274,36 +241,36 @@ func NewManagerFromType(sandboxType string, fallbackEnabled bool, dockerImage st
 
 	config := DefaultConfig()
 	config.Type = sType
-	config.FallbackEnabled = fallbackEnabled
 	if dockerImage != "" {
 		config.DockerImage = dockerImage
 	}
 
+	var client RemoteSandboxClient
+	var err error
 	switch sType {
 	case SandboxTypeCube:
-		client, err := NewCubeRemoteClient(config)
-		if err != nil {
+		if client, err = NewCubeRemoteClient(config); err != nil {
 			return nil, fmt.Errorf("sandbox: build Cube client: %w", err)
 		}
-		return NewSessionBoundManager(SessionBoundManagerConfig{
-			Config:  config,
-			Client:  client,
-			Store:   NewMemorySessionSandboxBindingStore(),
-			Checker: PermissiveSessionExistenceChecker{},
-		})
 	case SandboxTypeE2B:
-		client, err := NewE2BRemoteClient(config)
-		if err != nil {
+		if client, err = NewE2BRemoteClient(config); err != nil {
 			return nil, fmt.Errorf("sandbox: build E2B client: %w", err)
 		}
-		return NewSessionBoundManager(SessionBoundManagerConfig{
-			Config:  config,
-			Client:  client,
-			Store:   NewMemorySessionSandboxBindingStore(),
-			Checker: PermissiveSessionExistenceChecker{},
-		})
+	case SandboxTypeDocker:
+		applyDockerRuntimeDefaults(config)
+		if client, err = NewDockerRemoteClient(config); err != nil {
+			return nil, fmt.Errorf("sandbox: build Docker client: %w", err)
+		}
 	}
-	return NewManager(config)
+	if client == nil {
+		return NewManager(config)
+	}
+	return NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:  config,
+		Client:  client,
+		Store:   NewMemorySessionSandboxBindingStore(),
+		Checker: PermissiveSessionExistenceChecker{},
+	})
 }
 
 // NewDisabledManager creates a manager that rejects all execution requests

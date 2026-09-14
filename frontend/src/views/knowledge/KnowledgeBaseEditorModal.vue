@@ -3,6 +3,9 @@
     <Transition name="modal">
       <div v-if="visible" class="settings-overlay" @click.self="handleClose">
         <div class="settings-modal">
+          <div v-if="loading" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
+            <t-loading size="medium" :text="$t('common.loading')" />
+          </div>
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('general.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -454,7 +457,8 @@
                   <t-button theme="default" variant="outline" @click="handleClose">
                     {{ $t('common.cancel') }}
                   </t-button>
-                  <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving">
+                  <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving"
+                    :disabled="loading">
                     {{ saveButtonLabel }}
                   </t-button>
                 </div>
@@ -838,9 +842,19 @@ const loadOrgHierarchyFlag = async () => {
     }
   }
 }
+let kbEditorLoadGeneration = 0
+
+const isCurrentKBLoad = (generation: number, kbId: string) => (
+  generation === kbEditorLoadGeneration
+  && props.visible
+  && activeKbId.value === kbId
+)
 
 // 加载知识库数据（编辑模式）
-const loadKBData = async (kbIdOverride?: string) => {
+const loadKBData = async (
+  kbIdOverride?: string,
+  generation = kbEditorLoadGeneration,
+) => {
   const kbId = kbIdOverride ?? activeKbId.value
   if (editorMode.value !== 'edit' || !kbId) return
   
@@ -850,6 +864,8 @@ const loadKBData = async (kbIdOverride?: string) => {
       getKnowledgeBaseById(kbId),
       listKnowledgeFiles(kbId, { page: 1, page_size: 1 })
     ])
+
+    if (!isCurrentKBLoad(generation, kbId)) return
     
     if (!kbInfo || !kbInfo.data) {
       throw new Error(t('knowledgeEditor.messages.notFound'))
@@ -965,11 +981,14 @@ const loadKBData = async (kbIdOverride?: string) => {
     initialStorageProvider.value = formData.value.storageProvider
     initialIndexingStrategy.value = { ...formData.value.indexingStrategy }
   } catch (error) {
+    if (!isCurrentKBLoad(generation, kbId)) return
     console.error('Failed to load knowledge base data:', error)
     MessagePlugin.error(t('knowledgeEditor.messages.loadDataFailed'))
     handleClose()
   } finally {
-    loading.value = false
+    if (isCurrentKBLoad(generation, kbId)) {
+      loading.value = false
+    }
   }
 }
 
@@ -1557,41 +1576,49 @@ const resetState = () => {
 const handleClose = () => {
   emit('update:visible', false)
   setTimeout(() => {
+    if (props.visible) return
     resetState()
   }, 300)
 }
 
 // 监听弹窗打开/关闭
 watch(() => props.visible, async (newVal) => {
+  const generation = ++kbEditorLoadGeneration
   if (newVal) {
     // 打开弹窗时，先重置状态
     resetState()
+    loading.value = true
+    const targetKbId = props.kbId
     
     // 检查是否有初始 section，如果有则跳转
     if (uiStore.kbEditorInitialSection) {
       currentSection.value = uiStore.kbEditorInitialSection
     }
     
-    // 加载模型列表、组织层级与空间默认存储引擎
+    // 加载模型列表、组织层级、空间默认存储引擎
     await Promise.all([
       loadAllModels(),
       loadTenantDefaultStorageProvider(),
       loadOrgHierarchyFlag(),
     ])
+
+    if (generation !== kbEditorLoadGeneration || !props.visible) return
     
     // 根据模式加载数据
-    if (props.mode === 'edit' && props.kbId) {
-      await loadKBData()
+    if (props.mode === 'edit' && targetKbId) {
+      await loadKBData(targetKbId, generation)
     } else {
       // 创建模式：初始化空表单，并预填空间默认存储引擎
       formData.value = initFormData(props.initialType || 'document')
       formData.value.storageProvider = tenantDefaultStorageProvider.value
       hasFiles.value = false
       applyDefaultModelsIfEmpty()
+      loading.value = false
     }
   } else {
     // 关闭弹窗时，延迟重置状态（等待动画结束）
     setTimeout(() => {
+      if (props.visible) return
       resetState()
       currentSection.value = 'basic' // 重置为默认 section
     }, 300)
@@ -1607,6 +1634,12 @@ watch(
     }
   }
 )
+
+watch(() => chatResources.allModels, (list) => {
+  if (props.visible) {
+    allModels.value = list || []
+  }
+})
 </script>
 
 <style scoped lang="less">
@@ -1637,6 +1670,16 @@ watch(
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.editor-initializing {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--td-bg-color-container);
 }
 
 .close-btn {

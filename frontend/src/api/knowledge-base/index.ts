@@ -426,6 +426,10 @@ export function updateKnowledgeMetadata(knowledgeId: string, customMetadata: Rec
   return put(`/api/v1/knowledge/${knowledgeId}`, { custom_metadata: customMetadata });
 }
 
+export function updateKnowledgeSummary(knowledgeId: string, description: string) {
+  return put(`/api/v1/knowledge/${knowledgeId}`, { description });
+}
+
 export function regenerateKnowledgeSummary(knowledgeId: string) {
   return post(`/api/v1/knowledge/${knowledgeId}/regenerate-summary`, {});
 }
@@ -500,7 +504,14 @@ const buildQuery = (params?: Record<string, any>) => {
 
 export function listFAQEntries(
   kbId: string,
-  params?: { page?: number; page_size?: number; tag_id?: number; tag_ids?: string; keyword?: string },
+  params?: {
+    page?: number
+    page_size?: number
+    tag_id?: number
+    tag_ids?: string
+    keyword?: string
+    is_enabled?: boolean
+  },
 ) {
   const query = buildQuery(params);
   return get(`/api/v1/knowledge-bases/${kbId}/faq/entries${query}`);

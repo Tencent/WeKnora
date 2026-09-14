@@ -11,30 +11,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 var regThinkTags = regexp.MustCompile(`(?s)<think>.*?</think>`)
-
-const retrievedImageOutputRequirement = `
-
-## 检索图片输出要求
-本轮检索上下文包含 Markdown 图片。默认将检索段落附带的图片视为相关。
-- 除非用户明确要求纯文本输出，或所有检索图片都明显与答案无关，最终回答必须至少包含一张从检索上下文原样复制的相关 Markdown 图片。
-- 完整复制 Markdown 图片语法及其 URL，绝不要编造、缩短、规范化或替换 URL。
-- 图片 Markdown 必须使用 ASCII 半角括号，格式为 ![alt](url)，绝不要使用全角（或）。
-- 将每张图片紧挨放在其所支撑段落之后，不要把图片集中到文末。
-- 当多张检索图片分别支撑多段落回答的不同部分时，应在对应段落中分别插入，不要只插第一张就结束。
-- 结束前请静默检查：只要本要求适用，答案中就应包含 Markdown 图片。`
-
-func appendRetrievedImageOutputRequirement(systemPrompt, renderedContexts string) string {
-	if !searchutil.MarkdownImageRegex.MatchString(renderedContexts) {
-		return systemPrompt
-	}
-	return strings.TrimRight(systemPrompt, " \t\r\n") + retrievedImageOutputRequirement
-}
 
 // pipelineInfo logs pipeline info level entries.
 func pipelineInfo(ctx context.Context, stage, action string, fields map[string]interface{}) {
@@ -71,6 +52,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		PromptCacheKey:      chatManage.SessionID,
 	}
 	if opt.Thinking != nil {
 		pipelineInfo(ctx, "Stream", "thinking_option", map[string]interface{}{
@@ -94,7 +76,7 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 		"language": chatManage.Language,
 		"contexts": chatManage.RenderedContexts,
 	})
-	systemPrompt = appendRetrievedImageOutputRequirement(systemPrompt, chatManage.RenderedContexts)
+	systemPrompt += "\n\n" + types.SourceDataBoundaryPrompt + "\n\n" + types.SourcedAnswerOutputPrompt
 	// Memory goes at the end of the system prompt, after the retrieved-context
 	// placeholders have been rendered, so a remembered sentence can never be
 	// substituted into prompt structure.

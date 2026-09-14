@@ -30,6 +30,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,8 +41,9 @@ import (
 // clients. One instance lives for the process; clients built from it come and
 // go.
 type SandboxGatewayTransportPool struct {
-	control http.RoundTripper
-	policy  OutboundURLPolicy
+	control       http.RoundTripper
+	policy        OutboundURLPolicy
+	inboundTokens *InboundTokenRegistry
 
 	// data maps a gateway "host:port" to the transport that dials it.
 	data sync.Map
@@ -60,17 +62,28 @@ func NewSandboxGatewayTransportPoolWithPolicy(
 	if control == nil {
 		control = NewGuardedTransportWithPolicy(policy)
 	}
-	return &SandboxGatewayTransportPool{control: control, policy: policy}
+	return &SandboxGatewayTransportPool{
+		control:       control,
+		policy:        policy,
+		inboundTokens: NewInboundTokenRegistry(),
+	}
+}
+
+// InboundTokens is the registry the data-plane transport consults to attach a
+// sandbox's inbound credential. Adapters register on create / connect.
+func (p *SandboxGatewayTransportPool) InboundTokens() *InboundTokenRegistry {
+	return p.inboundTokens
 }
 
 // RoundTripperFor returns the transport a client built from cfg should use.
 // Configs without a usable gateway URL keep every request on the control
 // transport, matching the SDKs' behaviour when no gateway is configured.
 func (p *SandboxGatewayTransportPool) RoundTripperFor(cfg *Config) http.RoundTripper {
-	gatewayURL, sandboxDomain := gatewayEndpointFor(cfg)
+	gatewayURL, controlURL := gatewayEndpointFor(cfg)
 	split := &gatewaySplitTransport{
-		control:       p.control,
-		sandboxDomain: strings.ToLower(strings.TrimSpace(sandboxDomain)),
+		control:      p.control,
+		controlHost:  hostOfURL(controlURL),
+		inboundToken: p.inboundTokens,
 	}
 	if host, port, scheme, ok := parseProxyURL(gatewayURL); ok {
 		split.data = p.dataTransport(net.JoinHostPort(host, strconv.Itoa(port)))
@@ -79,19 +92,57 @@ func (p *SandboxGatewayTransportPool) RoundTripperFor(cfg *Config) http.RoundTri
 	return split
 }
 
-// gatewayEndpointFor reads the active provider's data-plane fields. Reading
-// them per provider (rather than merging both) keeps a stale sub-struct left
-// behind by an earlier provider switch from routing today's traffic.
-func gatewayEndpointFor(cfg *Config) (gatewayURL, sandboxDomain string) {
+// attachInboundTokenTransport puts inbound-token injection on next. A pool
+// RoundTripperFor result already injects from the same registry and is
+// returned unchanged. nil next becomes the default transport so RoundTrip
+// does not panic.
+func attachInboundTokenTransport(
+	next http.RoundTripper,
+	tokens *InboundTokenRegistry,
+) http.RoundTripper {
+	if tokens == nil {
+		return next
+	}
+	if split, ok := next.(*gatewaySplitTransport); ok && split.inboundToken == tokens {
+		return next
+	}
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	return &gatewaySplitTransport{
+		control:      next,
+		inboundToken: tokens,
+	}
+}
+
+// gatewayEndpointFor reads the active provider's gateway and control-plane
+// endpoints. Reading them per provider (rather than merging both) keeps a stale
+// sub-struct left behind by an earlier provider switch from routing today's
+// traffic.
+func gatewayEndpointFor(cfg *Config) (gatewayURL, controlURL string) {
 	if cfg == nil {
 		return "", ""
 	}
 	switch cfg.Type {
 	case SandboxTypeE2B:
-		return cfg.E2BProxyURL, cfg.E2BSandboxDomain
+		return cfg.E2BProxyURL, cfg.E2BAPIURL
 	default:
-		return cfg.CubeProxyURL, cfg.CubeSandboxDomain
+		return cfg.CubeProxyURL, cfg.CubeAPIURL
 	}
+}
+
+// hostOfURL returns raw's lowercased hostname without its port, or "" when raw
+// is empty or unparseable.
+func hostOfURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
 }
 
 // dataTransport returns the transport dialling target, creating it once.
@@ -132,9 +183,14 @@ func newGatewayDataTransportWithPolicy(target string, policy OutboundURLPolicy) 
 // gatewaySplitTransport routes a request to the control or the data transport
 // by looking at the authority the SDK addressed.
 type gatewaySplitTransport struct {
-	control       http.RoundTripper
-	data          http.RoundTripper
-	sandboxDomain string
+	control http.RoundTripper
+	data    http.RoundTripper
+
+	// controlHost is the API endpoint's hostname. It is an exclusion, not the
+	// routing rule: the rule is the sandbox authority shape, and this only
+	// covers an API host that happens to wear that shape.
+	controlHost  string
+	inboundToken *InboundTokenRegistry
 
 	// dataScheme is the gateway's scheme. When it differs from the scheme the
 	// SDK hardcoded, data-plane requests are rewritten before dialling.
@@ -142,10 +198,36 @@ type gatewaySplitTransport struct {
 }
 
 func (t *gatewaySplitTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = t.withInboundToken(req)
 	if t.data == nil || !t.isDataPlane(req.URL.Hostname()) {
 		return t.control.RoundTrip(req)
 	}
 	return t.data.RoundTrip(t.applyGatewayScheme(req))
+}
+
+// withInboundToken attaches the sandbox's inbound credential when one is
+// registered. It runs before the data/control split because a deployment
+// without a gateway URL keeps sandbox traffic on the control transport, and
+// those requests need the header just as much.
+//
+// An existing header wins: Cube's SDK sets it from the sandbox object, and
+// overwriting that with our copy would turn a fresh token into a stale one.
+func (t *gatewaySplitTransport) withInboundToken(req *http.Request) *http.Request {
+	if t.inboundToken == nil || req.Header.Get(InboundTokenHeader) != "" {
+		return req
+	}
+	sandboxID := sandboxIDFromDataPlaneHost(req.URL.Host)
+	if sandboxID == "" {
+		return req
+	}
+	token := t.inboundToken.Get(sandboxID)
+	if token == "" {
+		return req
+	}
+	// Clone rather than mutate: the caller owns req, and the SDK may retry it.
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set(InboundTokenHeader, token)
+	return cloned
 }
 
 // applyGatewayScheme returns req addressed with the gateway's scheme. The
@@ -162,15 +244,26 @@ func (t *gatewaySplitTransport) applyGatewayScheme(req *http.Request) *http.Requ
 }
 
 // isDataPlane reports whether host addresses a sandbox rather than the control
-// plane. Anything else - including an unset sandbox domain - stays on the
-// control transport, so a misconfiguration cannot silently redirect API calls
-// at the gateway.
+// plane, by the "<port>-<sandboxID>.<domain>" authority shape both SDKs
+// generate — the same test withInboundToken already applies to the same
+// request.
+//
+// It deliberately does NOT compare against the configured sandbox domain.
+// That field is optional for E2B, and go-e2b's envdBaseURL prefers whatever
+// domain the control plane reported over the client-wide one, so the authority
+// actually dialled need not appear anywhere in the config. Matching on it
+// meant a configured gateway was silently never used, and — because the check
+// was a suffix match — that E2B's own defaults (api.e2b.app under sandbox
+// domain e2b.app) sent every control-plane call to the gateway instead.
+//
+// The control host is excluded explicitly because the shape test alone would
+// accept an API host like "8080-api.example.com".
 func (t *gatewaySplitTransport) isDataPlane(host string) bool {
-	if t.sandboxDomain == "" {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" || (t.controlHost != "" && host == t.controlHost) {
 		return false
 	}
-	host = strings.ToLower(host)
-	return host == t.sandboxDomain || strings.HasSuffix(host, "."+t.sandboxDomain)
+	return sandboxIDFromDataPlaneHost(host) != ""
 }
 
 // CloseIdleConnections keeps the SDK's post-rollback reset meaningful. Only

@@ -46,6 +46,11 @@ const HTMLImageSrcURLGroup = 2
 //   - If chunkIDs are parent_text chunks, their children are text chunks
 //     whose children are image chunks → two queries.
 //
+// Disabled children are skipped at both levels. Removing an image from a chunk
+// disables its image_ocr / image_caption children (syncEditedChunkImages), and
+// disabling a text chunk disables them too; honoring that flag here is what
+// keeps a deleted image out of retrieval, summaries and model context.
+//
 // Returns a map of input chunkID → merged image_info JSON string.
 func CollectImageInfoByChunkIDs(
 	ctx context.Context,
@@ -107,6 +112,9 @@ func CollectImageInfoByChunkIDs(
 	textToParent := make(map[string]string)
 
 	for _, child := range children {
+		if !child.IsEnabled {
+			continue
+		}
 		switch child.ChunkType {
 		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
 			addInfo(child.ParentChunkID, child)
@@ -120,6 +128,9 @@ func CollectImageInfoByChunkIDs(
 		grandChildren, err := chunkRepo.ListChunksByParentIDs(ctx, tenantID, textChildIDs)
 		if err == nil {
 			for _, gc := range grandChildren {
+				if !gc.IsEnabled {
+					continue
+				}
 				if gc.ChunkType != types.ChunkTypeImageOCR && gc.ChunkType != types.ChunkTypeImageCaption {
 					continue
 				}
@@ -218,6 +229,39 @@ func MergeImageInfoJSON(perChunk map[string]string) string {
 		return ""
 	}
 	return string(data)
+}
+
+// ClearImageInfoTextMatchingBody removes the OCR or caption field that exactly
+// matches recognized from image_info. Merge re-attaches that body onto Content
+// for image_ocr / image_caption hits; chat enrichment would otherwise inject
+// the same text again from ImageInfo.
+func ClearImageInfoTextMatchingBody(imageInfoJSON, recognized, chunkType string) string {
+	if imageInfoJSON == "" || recognized == "" {
+		return imageInfoJSON
+	}
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &infos); err != nil || len(infos) == 0 {
+		return imageInfoJSON
+	}
+	changed := false
+	for i := range infos {
+		switch chunkType {
+		case string(types.ChunkTypeImageOCR):
+			if infos[i].OCRText == recognized {
+				infos[i].OCRText = ""
+				changed = true
+			}
+		case string(types.ChunkTypeImageCaption):
+			if infos[i].Caption == recognized {
+				infos[i].Caption = ""
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return imageInfoJSON
+	}
+	return marshalImageInfos(infos)
 }
 
 // EnrichContentWithImageInfo embeds image info as XML tags into text content.

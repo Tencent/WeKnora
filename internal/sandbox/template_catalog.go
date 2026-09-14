@@ -32,6 +32,12 @@ type RemoteTemplate struct {
 	// it a failed template is a red badge with no way to tell a registry
 	// credential problem from an out-of-disk node.
 	Error string `json:"error,omitempty"`
+
+	// Cube reports these on GET /templates; other backends leave them empty
+	// and the settings list simply omits the corresponding rows.
+	InstanceType        string `json:"instance_type,omitempty"`
+	NetworkType         string `json:"network_type,omitempty"`
+	AllowInternetAccess *bool  `json:"allow_internet_access,omitempty"`
 }
 
 // RemoteTemplateCatalog is an optional provider capability used by the
@@ -40,6 +46,15 @@ type RemoteTemplate struct {
 type RemoteTemplateCatalog interface {
 	ListTemplates(ctx context.Context) ([]RemoteTemplate, error)
 	EnsureStandardTemplate(ctx context.Context) (*RemoteTemplate, error)
+	// ReplaceStandardTemplate applies the current spec to the cluster's
+	// WeKnora template (DNS, image). A READY template cannot pick those up
+	// any other way. It must not delete a usable template: callers persist
+	// the replacement ID first, then DeleteSupersededStandardTemplates.
+	ReplaceStandardTemplate(ctx context.Context) (*RemoteTemplate, error)
+	// DeleteSupersededStandardTemplates removes WeKnora templates other than
+	// keepID. Call only after keepID is spawnable and has been written onto
+	// every config that still pointed at the previous standard template.
+	DeleteSupersededStandardTemplates(ctx context.Context, keepID string) error
 }
 
 func isStandardTemplate(name string) bool {
@@ -95,6 +110,18 @@ func normalizeImageRepository(image string) string {
 func IsTemplateBuildFailed(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "failed", "failure", "error", "cancelled", "canceled", TemplateStatusUntagged:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsTemplateReady reports whether a template can spawn a sandbox. Rebuild
+// replacements stay listed alongside the previous READY template until this
+// is true, so sessions never lose a spawnable ID mid-build.
+func IsTemplateReady(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready", "available", "complete", "completed", "success", "succeeded":
 		return true
 	default:
 		return false

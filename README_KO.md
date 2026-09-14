@@ -24,6 +24,9 @@
     <a href="https://clawhub.ai/lyingbug/weknora" target="_blank">
         <img alt="ClawHub Skill" src="https://img.shields.io/badge/ClawHub_Skill-TreeRAG-ff6b35">
     </a>
+    <a href="https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora" target="_blank">
+        <img alt="npm @wxg-prc-cpg/dsh-weknora" src="https://img.shields.io/npm/v/@wxg-prc-cpg/dsh-weknora?label=dsh-weknora">
+    </a>
     <a href="https://github.com/Tencent/WeKnora/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
@@ -78,6 +81,13 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 
 <table>
   <tr>
+    <td colspan="2" align="center"><b>🛠️ 스킬 샌드박스 대화 · Word 생성 및 미리보기</b><br/><img src="./docs/images/skill-sandbox-chat.png" alt="스킬 샌드박스 대화: Word 문서 생성 및 미리보기" width="100%"></td>
+  </tr>
+  <tr>
+    <td width="50%" align="center"><b>📦 스킬 카탈로그 · E2B 샌드박스에 설치</b><br/><img src="./docs/images/skill-catalog.png" alt="워크스페이스 스킬 카탈로그: docx / pptx / pdf가 E2B에 설치됨" width="100%"></td>
+    <td width="50%" align="center"><b>🤖 Agent 모드 · 검색, 스킬 읽기, 샌드박스 파일 쓰기</b><br/><img src="./docs/images/agent-qa.png" alt="Agent가 지식베이스를 검색하고 docx 스킬을 읽은 뒤 샌드박스에 스크립트를 씀" width="100%"></td>
+  </tr>
+  <tr>
     <td colspan="2" align="center"><b>💬 지능형 Q&A 대화</b><br/><img src="./docs/images/qa.png" alt="지능형 Q&A 대화" width="100%"></td>
   </tr>
   <tr>
@@ -115,7 +125,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 
 | 기능 | 상세 |
 |------|------|
-| 지능형 추론 | ReACT 점진적 멀티스텝 추론, 지식 검색·MCP 도구·웹 검색을 자율 오케스트레이션 |
+| 지능형 추론 | ReACT 점진적 멀티스텝 추론, 지식 검색·MCP 도구·스킬 샌드박스·웹 검색을 자율 오케스트레이션 |
 | 빠른 Q&A | 지식베이스 기반 RAG Q&A, 빠르고 정확한 답변 |
 | Wiki 모드 | Agent가 주도하여 원본 문서에서 구조화된 마크다운 Wiki 페이지를 자동 생성 및 유지 관리 |
 | 도구 호출 | 내장 도구, MCP 도구(OAuth2 원격 서비스·대화 중 OAuth 포함), 웹 검색; `@Skill / @MCP` 멘션으로 턴 단위 Agent 런타임 범위 지정 |
@@ -142,7 +152,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 
 | 기능 | 상세 |
 |------|------|
-| LLM | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / Ollama |
+| LLM | OpenAI / Azure OpenAI / Anthropic (Claude) / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / Novita AI / SiliconFlow / OpenRouter / Requesty / LiteLLM / Ollama |
 | Embedding | Ollama / BGE / GTE / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | 오브젝트 스토리지 | 로컬 / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS; **워크스페이스당 여러 스토리지 인스턴스**, KB 단위 바인딩 및 기본 인스턴스 |
@@ -173,6 +183,15 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 - **문서 임포트** — 에이전트를 통한 파일 업로드, 웹페이지 임포트, Markdown 지식 작성
 - **하이브리드 검색** — 단일 또는 다중 지식베이스에서 벡터 + 키워드 통합 검색
 - **지식 관리** — 프로그래밍 방식으로 지식 항목 조회, 편집, 삭제
+
+## 🐋 DeepSeek Harness 플러그인
+
+[**`@wxg-prc-cpg/dsh-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora)는 공식 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)(`dsh`) 플러그인입니다([문서](./packages/dsh-weknora/README.md)). harness 자체에는 검색·임베딩·지식베이스 기능이 없으므로, 이 플러그인이 코딩 에이전트에 사내 문서를 제공합니다. `dsh plugin --profile web add @wxg-prc-cpg/dsh-weknora`로 설치하고 배포 주소를 지정하면 네 개의 읽기 전용 도구가 에이전트 도구 목록에 나타납니다.
+
+- **`weknora_search`** — 하이브리드 검색. 원문 구절을 그대로 반환하며 각 항목에 재사용 가능한 `knowledge_id` 포함
+- **`weknora_read_document`** — 한 문서의 청크를 순서대로 재조합, 페이징 지원
+- **`weknora_ask`** — WeKnora가 직접 작성한 인용 포함 답변(RAG 또는 ReAct 파이프라인)
+- **`weknora_list_knowledge_bases`** — 지식베이스 이름과 id로 에이전트가 검색 범위를 스스로 좁힘
 
 
 ## 🚀 시작하기

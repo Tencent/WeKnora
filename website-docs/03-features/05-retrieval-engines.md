@@ -1,29 +1,57 @@
 # 检索引擎与向量存储（Retrieval Engines）
 
-向量存到哪、关键词怎么搜，由「检索引擎」决定。WeKnora 支持 10 种后端，但**绝大多数部署不需要选**：默认的 PostgreSQL（ParadeDB 镜像自带 pgvector + BM25）既能做向量也能做关键词，和业务数据同库，运维成本最低。
+检索引擎负责保存索引并执行向量、关键词或混合检索。默认 PostgreSQL 部署使用 ParadeDB 镜像提供 pgvector 和 BM25，可与业务数据共用数据库。需要独立扩容或复用现有基础设施时，可选择其他后端。
 
-需要换的典型理由：
+选择后端时，结合部署依赖、容量和数据隔离要求：
 
 | 情况 | 考虑 |
 | --- | --- |
-| 单机 / 桌面版，不想跑数据库 | SQLite（内嵌，零依赖） |
-| 向量规模到千万级、要独立扩容 | Qdrant、Milvus |
+| 单机或桌面部署，使用内嵌数据库 | SQLite（内嵌，零依赖） |
+| 需要独立扩容向量检索服务 | Qdrant、Milvus |
 | 公司已有 Elasticsearch / OpenSearch 栈 | 复用现有集群 |
 | 要按知识库分开存放数据 | 保持默认引擎，另在「设置 → 向量存储」注册实例并绑定到指定知识库 |
 
-换引擎需要重建索引，建库之后知识库绑定的向量存储不可更改。下面逐引擎详解检索能力、建索引方式、过滤能力与配置方法，源码位置如下：
+切换引擎需要重建索引。知识库绑定的向量存储在创建后不可修改，应在建库前确定实例。
 
-| 环节 | 源码位置 |
-|------|----------|
-| 引擎注册（env + DB store） | `internal/container/container.go`（`initRetrieveEngineRegistry`）、`engine_factory.go` |
-| 注册表 / 组合引擎 / 工厂 | `internal/application/service/retriever/`（`registry.go`、`composite.go`、`factory.go`、`normalizer.go`） |
-| 各引擎实现 | `internal/application/repository/retriever/{postgres,sqlite,elasticsearch,opensearch,qdrant,milvus,weaviate,doris,tencentvectordb,neo4j}` |
-| 混合检索调度与融合 | `internal/application/service/knowledgebase_search*.go` |
-| 引擎类型常量 | `internal/types/retriever.go` |
-| 租户默认引擎 | `internal/types/tenant.go`（`GetDefaultRetrieverEngines`） |
-| 环境变量清单 | `.env.example`（C1 节）、`docker-compose.yml` |
+## 能力矩阵与选型对比 {#_3-能力矩阵与选型对比}
 
-## 1. 分层架构：Repository → KVHybridRetrieveEngine → Composite → Registry
+| 引擎 | RETRIEVE_DRIVER 值 | 向量检索 | 关键词/全文 | 关键词打分 | 中文分词 | 维度管理 | 阈值下推 | 部署复杂度 | 适用场景 |
+|------|-------------------|----------|------------|-----------|---------|----------|---------|-----------|----------|
+| PostgreSQL | `postgres` | pgvector halfvec + HNSW 表达式索引 | ParadeDB BM25（`\|\|\|`） | BM25（paradedb.score） | ParadeDB tokenizer | 单表混维，表达式索引按维 cast | 距离阈值 SQL 内 | 低（默认镜像内置） | 默认选择；与业务同库，事务一致 |
+| SQLite | `sqlite` | sqlite-vec vec0（cosine） | FTS5 contentless | FTS5 | 应用侧 bigram | 每维一张 vec0 虚表 | 应用侧 | 极低（内嵌） | 桌面版 / 开发 / 微型部署 |
+| Elasticsearch v8 | `elasticsearch_v8` | script_score cosineSimilarity | match（BM25） | BM25 | ES analyzer | dense_vector 单索引 | 应用侧 | 中 | 已有 ES 8 集群 |
+| Elasticsearch v7 | `elasticsearch_v7` | 不支持（Support 仅 keywords） | match（BM25） | BM25 | ES analyzer | — | — | 中 | 存量 ES 7，仅作关键词引擎，需与其他向量引擎组合 |
+| OpenSearch | `opensearch` | k-NN 插件 knn（HNSW） | match（BM25） | BM25 | OS analyzer | knn_vector 声明式 mapping + 指纹校验 | k-NN 原生 | 中 | 需审计/别名/reindex 的生产 ES 系方案；版本 2.11+/3.x |
+| Qdrant | `qdrant` | 原生 HNSW Cosine | 全文索引 MatchText（token OR） | 无打分（Scroll 命中即回，靠 RRF rank） | 多语言 tokenizer | 每维一个 collection | score_threshold 原生 | 中 | 纯向量为主、需 payload 过滤的场景 |
+| Milvus | `milvus` | HNSW（IP/COSINE/） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
+| Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
+| Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
+| 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
+
+> 说明：无论引擎自身是否提供"混合检索"，WeKnora 的混合始终是**上层统一的 RRF 融合**（`knowledgebase_search_fusion.go`）——向量与关键词各自独立检索，按 rank 加权合并（见 [混合检索打分与归一化](#_5-混合检索打分与归一化)），因此各引擎只需分别提供两类单模检索。
+
+## 配置方法汇总 {#_6-配置方法汇总}
+
+核心开关（`.env.example` C1 节、`docker-compose.yml`）：
+
+| 环境变量 | 默认 | 说明 |
+|----------|------|------|
+| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
+| `MULTI_STORE_RETRIEVE_TIMEOUT_SEC` | 30 | 多 store 并行检索每组超时 |
+| `ELASTICSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` | — / `WeKnora` | ES v7/v8 共用 |
+| `OPENSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` / `_INSECURE_SKIP_VERIFY` | — | OpenSearch |
+| `QDRANT_HOST` / `_PORT` / `_COLLECTION` / `_API_KEY` / `_USE_TLS` | `localhost` / 6334 / `weknora_embeddings` | Qdrant（gRPC 端口） |
+| `MILVUS_ADDRESS` / `_COLLECTION` / `_METRIC_TYPE` / `_USERNAME` / `_PASSWORD` / `_DB_NAME` | `localhost:19530` / `weknora_embeddings` / `IP` | metric 改后需重建 collection |
+| `WEAVIATE_HOST` / `_GRPC_ADDRESS` / `_SCHEME` / `_AUTH_ENABLED` / `_API_KEY` / `_COLLECTION` | `weaviate:8080` / `weaviate:50051` / `http` | 容器内用服务名 |
+| `DORIS_ADDR` / `_HTTP_PORT` / `_DATABASE` / `_USERNAME` / `_PASSWORD` / `_TABLE_PREFIX` / `_COMPAT_MODE` | `doris-fe:9030` / 8030 / `weknora` / `root` / — / `weknora_embeddings` / `auto` | Doris 4.1+；compat 模式建表后不可互换 |
+| `TENCENT_VECTORDB_ADDR` / `_USERNAME` / `_API_KEY` / `_DATABASE` / `_COLLECTION` | — | 三项核心缺一跳过注册 |
+| `NEO4J_ENABLE` / `NEO4J_URI` / `_USERNAME` / `_PASSWORD` | `false` / `bolt://neo4j:7687` | 图谱检索（独立于向量引擎体系） |
+
+除环境变量（env store，进程级全局）外，还可在管理端为租户创建 `VectorStore` 记录（DB store）并绑定到具体 KB——同一引擎类型可接多套集群实例，检索时按 KB 绑定自动路由并做租户属主校验（[检索时的引擎选择](#_1-2-检索时的引擎选择)）。
+
+## 引擎实现参考
+
+### 分层架构：Repository → KVHybridRetrieveEngine → Composite → Registry {#_1-分层架构-repository-→-kvhybridretrieveengine-→-composite-→-registry}
 
 每个后端实现 `interfaces.RetrieveEngineRepository`（`EngineType()` / `Support()` / `Save` / `BatchSave` / `Retrieve` / `DeleteBy*` / `CopyIndices` / `BatchUpdateChunkEnabledStatus` / `BatchUpdateChunkTagID` / `EstimateStorageSize`）。其上依次是：
 
@@ -31,7 +59,7 @@
 - **CompositeRetrieveEngine**（`retriever/composite.go`）：组合模式。`Retrieve` 按每个 `RetrieveParams.RetrieverType`（`vector` / `keywords`）路由到第一个支持该类型的引擎并发执行；`Index` / `Delete` / `CopyIndices` 等写操作广播到所有成员引擎；
 - **RetrieveEngineRegistry**（`retriever/registry.go`）：双索引注册表——`byEngineType`（`RETRIEVE_DRIVER` 环境变量驱动的"env store"，每类型仅一个）与 `byStoreID`（数据库 `VectorStore` 表驱动的实例级注册，同一引擎类型可注册多实例，如两个 ES 集群）。
 
-#### 按需重建（rehydrate）
+##### 按需重建（rehydrate）
 
 启动时某个向量存储恰好不可用（后端还没起来、网络抖动），它就不会进入 `byStoreID`；此后所有绑定该 store 的知识库检索、甚至删除知识库都会一直失败。注册表因此支持**按需重建**：
 
@@ -42,11 +70,11 @@
 
 删除知识库时若引擎尚未就绪，也会走这条重建路径重试，而不是直接判失败。
 
-### 1.1 引擎注册：initRetrieveEngineRegistry
+#### 引擎注册：initRetrieveEngineRegistry {#_1-1-引擎注册-initretrieveengineregistry}
 
 `internal/container/container.go`。启动时解析 `RETRIEVE_DRIVER`（逗号分隔），逐驱动构建客户端并 `registry.Register(retriever.NewKVHybridRetrieveEngine(repo, engineType))`；单个驱动初始化失败只记日志不阻断启动。随后 `loadDBStoresIntoRegistry` 从 `vector_stores` 表加载租户自建的向量存储实例，经 `createEngineServiceFromStore`（`engine_factory.go`）构建引擎后 `RegisterWithStoreID` 注册。
 
-### 1.2 检索时的引擎选择
+#### 检索时的引擎选择 {#_1-2-检索时的引擎选择}
 
 检索入口 `HybridSearch`（`knowledgebase_search.go`）按 KB 的绑定关系选择引擎：
 
@@ -82,11 +110,11 @@ flowchart TD
     NORM --> RRF["RRF 加权融合 (vector + keyword)"]
 ```
 
-## 2. 引擎逐个详解
+### 引擎逐个详解 {#_2-引擎逐个详解}
 
 引擎类型常量见 `internal/types/retriever.go`：`postgres`、`elasticsearch`、`opensearch`、`qdrant`、`milvus`、`weaviate`、`doris`、`sqlite`、`tencent_vectordb`（另有 `infinity`、`elasticfaiss` 为遗留枚举，无可部署实现）。除特别注明外，所有引擎的 `Support()` 均返回 `[keywords, vector]` 两类。
 
-### 2.1 PostgreSQL（pgvector + ParadeDB）— 默认引擎
+#### PostgreSQL（pgvector + ParadeDB）— 默认引擎 {#_2-1-postgresql-pgvector-paradedb-—-默认引擎}
 
 `internal/application/repository/retriever/postgres/repository.go`。数据与业务库同库（`embeddings` 表，GORM 管理）。
 
@@ -95,18 +123,18 @@ flowchart TD
 - **过滤**：`knowledge_base_id` / `knowledge_id` / `tag_id` IN 过滤（AND 语义），`is_enabled` 为 NULL 或 true。
 - **建索引**：`BatchSave` + `ON CONFLICT DO NOTHING`；删除按 chunk/source/knowledge ID 物理删除。
 
-### 2.2 SQLite（FTS5 + sqlite-vec）— 轻量单机
+#### SQLite（FTS5 + sqlite-vec）— 轻量单机 {#_2-2-sqlite-fts5-sqlite-vec-—-轻量单机}
 
 `internal/application/repository/retriever/sqlite/repository.go`。零外部依赖的全内嵌方案。
 
 - **向量检索**：`sqlite-vec` 扩展（cgo bindings），**每个维度一张 vec0 虚表**：`CREATE VIRTUAL TABLE ... USING vec0(embedding float[dim] distance_metric=cosine)`；查询 `WHERE v.embedding MATCH ?`（序列化查询向量）`ORDER BY v.distance`，`score = 1 - distance`。启动时 `ensureExistingVecTables` 按已有数据维度补建虚表。
 - **关键词检索**：FTS5 contentless 表 `lite_embeddings_fts`，写入时手动 **bigram 分词**（对中文友好），查询经 `sanitizeFTS5Query` 同样 bigram 化后 `MATCH`。
-- **过滤**：主表 `lite_embeddings` 上的 KB/knowledge/tag/is_enabled 过滤。向量路径的过滤条件必须**先于 top-k 生效**——写成 `v.rowid IN (SELECT ... FROM lite_embeddings filtered WHERE ...)` 的子查询而不是 JOIN 之后再过滤，否则 vec0 先取全局最近的 k 条、再被过滤掉大半，指定知识库或标签时会出现「明明有匹配却召回为空」；
-- **错误传播**：任一检索路径出错直接返回错误，而不是塞一条带 `Error` 字段的空结果继续走——后者会被上层当成「检索成功但没命中」；
+- **过滤**：知识库、文档、标签和启停条件作用于 `lite_embeddings` 主表。向量路径使用 `v.rowid IN (SELECT ... FROM lite_embeddings filtered WHERE ...)`，在 top-k 选择前完成过滤。若先取全局 top-k 再过滤，范围内的有效匹配可能无法召回；
+- **错误传播**：任一检索路径失败即返回错误，避免上层将失败误判为检索成功但无匹配；
 - **阈值**：向量阈值为 0 时视为不过滤，而不是把所有结果都滤掉。
 - 适合桌面版 / 开发环境 / 极小规模部署。
 
-### 2.3 Elasticsearch v8
+#### Elasticsearch v8 {#_2-3-elasticsearch-v8}
 
 `internal/application/repository/retriever/elasticsearch/v8/repository.go`。typed client，单索引（`ELASTICSEARCH_INDEX`，默认 `WeKnora`），文档含 `dense_vector` embedding 字段。
 
@@ -115,11 +143,11 @@ flowchart TD
 - **过滤**：bool filter（KB/knowledge/tag ID terms；`is_enabled` 用 must_not 反向匹配，历史无该字段的数据视为启用）；启动时探测 mapping 决定 ID 字段是否需要 `.keyword` 后缀。
 - **建索引**：Bulk API 批量写入，空向量拒绝。
 
-### 2.4 Elasticsearch v7 — 仅关键词
+#### Elasticsearch v7 — 仅关键词 {#_2-4-elasticsearch-v7-—-仅关键词}
 
 `internal/application/repository/retriever/elasticsearch/v7/repository.go`。注意：**`Support()` 只返回 `[keywords]`**——v7 驱动在 WeKnora 中仅作为 BM25 关键词引擎注册（代码中保留了 `script_score cosineSimilarity` 的向量查询构造，但能力声明不含 vector，Composite 不会把向量请求路由给它）。需向量检索时应搭配其他驱动（如 `RETRIEVE_DRIVER=postgres,elasticsearch_v7`）或升级 v8。
 
-### 2.5 OpenSearch
+#### OpenSearch {#_2-5-opensearch}
 
 `internal/application/repository/retriever/opensearch/`（多文件拆分：`repository.go`、`retrieve.go`、`query.go`、`mapping.go`、`crud.go` 等）。工程化最完整的驱动。
 
@@ -129,7 +157,7 @@ flowchart TD
 - **建索引**：`mapping.go` 声明式 mapping（`knn_vector` 字段带 method/engine 参数），启动时校验 mapping 指纹，漂移报 `ErrConfigInvalid`；别名管理 + `copy.go` 支持 reindex；索引创建/重建事件经 AuditSink 写审计日志。
 - 配置含 `OPENSEARCH_INSECURE_SKIP_VERIFY` 与 SSRF 安全传输层（`transport.go`）。
 
-### 2.6 Qdrant
+#### Qdrant {#_2-6-qdrant}
 
 `internal/application/repository/retriever/qdrant/repository.go`。gRPC 客户端（默认端口 6334）。
 
@@ -139,7 +167,7 @@ flowchart TD
 - **过滤**：`getBaseFilter` 用 `MatchKeywords` 精确过滤 KB/knowledge/tag/is_enabled。
 - 配置：`QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_API_KEY` / `QDRANT_USE_TLS`。
 
-### 2.7 Milvus
+#### Milvus {#_2-7-milvus}
 
 `internal/application/repository/retriever/milvus/repository.go`。
 
@@ -150,7 +178,7 @@ flowchart TD
 - **启停同步**：`BatchUpdateChunkEnabledStatus` 逐 collection 更新，失败用 `errors.Join` 聚合后**返回错误**而不是只打 warn——主库里已停用的分块绝不能因为索引更新静默失败而继续可被检索到。
 - 配置：`MILVUS_ADDRESS` / `MILVUS_USERNAME` / `MILVUS_PASSWORD` / `MILVUS_DB_NAME` / `MILVUS_METRIC_TYPE`（改后需重建 collection）。
 
-### 2.8 Weaviate
+#### Weaviate {#_2-8-weaviate}
 
 `internal/application/repository/retriever/weaviate/repository.go`。HTTP + gRPC 双通道。
 
@@ -160,7 +188,7 @@ flowchart TD
 - **过滤**：GraphQL where 过滤 KB/knowledge/tag/is_enabled。
 - 配置：`WEAVIATE_HOST` / `WEAVIATE_GRPC_ADDRESS` / `WEAVIATE_SCHEME` / `WEAVIATE_AUTH_ENABLED` + `WEAVIATE_API_KEY`。
 
-### 2.9 Apache Doris（4.1+）
+#### Apache Doris（4.1+） {#_2-9-apache-doris-4-1}
 
 `internal/application/repository/retriever/doris/`（`repository.go` 699 行 + `schema.go` + `structs.go`）。MySQL 协议连 FE（9030），HTTP（8030）走 Stream Load（SSRF 安全客户端）。
 
@@ -171,7 +199,7 @@ flowchart TD
 - **写入**：DUPLICATE KEY 表按 id 显式 delete + insert 保持替换语义；enabled/tag 更新经 Stream Load partial update。
 - 配置：`DORIS_ADDR` / `DORIS_HTTP_PORT` / `DORIS_DATABASE` / `DORIS_USERNAME` / `DORIS_PASSWORD` / `DORIS_TABLE_PREFIX` / `DORIS_COMPAT_MODE`。
 
-### 2.10 腾讯云 VectorDB
+#### 腾讯云 VectorDB {#_2-10-腾讯云-vectordb}
 
 `internal/application/repository/retriever/tencentvectordb/repository.go`。RpcClient，EventualConsistency，10s 超时。
 
@@ -180,28 +208,11 @@ flowchart TD
 - **关键词检索**：本地 `encoder.SparseEncoder`（BM25）把查询编码为稀疏向量，对 `sparse_vector` 字段做稀疏检索，遍历匹配维度的所有 collection。
 - 配置：`TENCENT_VECTORDB_ADDR` / `TENCENT_VECTORDB_USERNAME` / `TENCENT_VECTORDB_API_KEY` / `TENCENT_VECTORDB_DATABASE` / `TENCENT_VECTORDB_COLLECTION`。三项核心配置缺一则跳过注册。
 
-### 2.11 Neo4j — 图谱检索（不在 Registry 体系内）
+#### Neo4j — 图谱检索（不在 Registry 体系内） {#_2-11-neo4j-—-图谱检索-不在-registry-体系内}
 
 `internal/application/repository/retriever/neo4j/repository.go` 实现的是 `RetrieveGraphRepository`（`SearchNode(ctx, NameSpace, entities)`），不是向量/关键词引擎：按 `NameSpace{KnowledgeBase, Knowledge}` 检索实体节点与关系，服务于 chat pipeline 的 `ENTITY_SEARCH` 阶段（GraphRAG）。由 `NEO4J_ENABLE=true` + `NEO4J_URI`/`NEO4J_USERNAME`/`NEO4J_PASSWORD` 启用。
 
-## 3. 能力矩阵与选型对比
-
-| 引擎 | RETRIEVE_DRIVER 值 | 向量检索 | 关键词/全文 | 关键词打分 | 中文分词 | 维度管理 | 阈值下推 | 部署复杂度 | 适用场景 |
-|------|-------------------|----------|------------|-----------|---------|----------|---------|-----------|----------|
-| PostgreSQL | `postgres` | pgvector halfvec + HNSW 表达式索引 | ParadeDB BM25（`\|\|\|`） | BM25（paradedb.score） | ParadeDB tokenizer | 单表混维，表达式索引按维 cast | 距离阈值 SQL 内 | 低（默认镜像内置） | 默认选择；与业务同库，事务一致 |
-| SQLite | `sqlite` | sqlite-vec vec0（cosine） | FTS5 contentless | FTS5 | 应用侧 bigram | 每维一张 vec0 虚表 | 应用侧 | 极低（内嵌） | 桌面版 / 开发 / 微型部署 |
-| Elasticsearch v8 | `elasticsearch_v8` | script_score cosineSimilarity | match（BM25） | BM25 | ES analyzer | dense_vector 单索引 | 应用侧 | 中 | 已有 ES 8 集群 |
-| Elasticsearch v7 | `elasticsearch_v7` | 不支持（Support 仅 keywords） | match（BM25） | BM25 | ES analyzer | — | — | 中 | 存量 ES 7，仅作关键词引擎，需与其他向量引擎组合 |
-| OpenSearch | `opensearch` | k-NN 插件 knn（HNSW） | match（BM25） | BM25 | OS analyzer | knn_vector 声明式 mapping + 指纹校验 | k-NN 原生 | 中 | 需审计/别名/reindex 的生产 ES 系方案；版本 2.11+/3.x |
-| Qdrant | `qdrant` | 原生 HNSW Cosine | 全文索引 MatchText（token OR） | 无打分（Scroll 命中即回，靠 RRF rank） | 多语言 tokenizer | 每维一个 collection | score_threshold 原生 | 中 | 纯向量为主、需 payload 过滤的场景 |
-| Milvus | `milvus` | HNSW（IP/COSINE/） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
-| Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
-| Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
-| 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
-
-> 说明：无论引擎自身是否提供"混合检索"，WeKnora 的混合始终是**上层统一的 RRF 融合**（`knowledgebase_search_fusion.go`）——向量与关键词各自独立检索，按 rank 加权合并（见 §5），因此各引擎只需分别提供两类单模检索。
-
-## 4. Embedding 维度管理
+### Embedding 维度管理 {#_4-embedding-维度管理}
 
 WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引擎的维度隔离策略：
 
@@ -215,9 +226,9 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 
 检索侧的一致性由 `validateSameEmbeddingModel`（`knowledgebase_search_shared.go`）保证：一次多库检索中的所有 KB 必须共享同一 embedding 模型身份（`model.Name + BaseURL`，跨租户可等价），否则拒绝——避免跨向量空间的分数不可比。查询向量按模型身份分组只计算一次（`ResolveEmbeddingModelKeys` + `GetQueryEmbedding`），随 `params.QueryEmbedding` 传播到所有 store 组，杜绝重复 embedding API 调用。
 
-## 5. 混合检索打分与归一化
+### 混合检索打分与归一化 {#_5-混合检索打分与归一化}
 
-### 5.1 跨引擎向量分归一化（EngineAwareNormalizer）
+#### 跨引擎向量分归一化（EngineAwareNormalizer） {#_5-1-跨引擎向量分归一化-engineawarenormalizer}
 
 `internal/application/service/retriever/normalizer.go`。多 store fan-out 且结果跨引擎类型时（`hasMixedEngineTypes`），把各引擎的向量分映射到统一 [0,1]：
 
@@ -232,7 +243,7 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 
 **关键词（BM25）分数不归一化**——其值域无上界，压缩会坍缩长尾；下游 RRF 基于 rank，天然免疫尺度差异。`clamp01` 同时消化 NaN/Inf，保护下游排序的严格弱序不变量。同一引擎内部的结果保持原生尺度（直接可比，不做无谓变换）。
 
-### 5.2 RRF 加权融合
+#### RRF 加权融合 {#_5-2-rrf-加权融合}
 
 `knowledgebase_search_fusion.go`。向量与关键词两路都有结果时：
 
@@ -245,28 +256,9 @@ rrfScore = vectorWeight/(rrfK + vectorRank) + keywordWeight/(rrfK + keywordRank)
 - `rrfK`、`vectorWeight`、`keywordWeight` 来自租户 `RetrievalConfig`（`GetEffectiveRRFK` / `GetEffectiveRRFWeights` 提供缺省）；
 - 单路结果时不走 RRF，`deduplicateByScore` 保留每 chunk 最高原始分（对 FAQ 的 embedding 相似度语义很重要，如 `FAQDirectAnswerThreshold` 直接比对该分数）。
 
-融合之后的复合打分（rerank 模型分 0.6 + 检索基础分 0.3 + 来源权重 0.1、MMR、FAQ/Wiki 加权）发生在 chat pipeline 的 `CHUNK_RERANK` 阶段，见《检索问答全流程》文档 §3.4。
+融合之后的复合打分（rerank 模型分 0.6 + 检索基础分 0.3 + 来源权重 0.1、MMR、FAQ/Wiki 加权）发生在 chat pipeline 的 `CHUNK_RERANK` 阶段，见[检索问答流程的重排阶段](../02-architecture/04-rag-pipeline.md#_3-4-chunk-rerank-—-重排、复合打分、mmr、wiki-加权)。
 
-## 6. 配置方法汇总
-
-核心开关（`.env.example` C1 节、`docker-compose.yml`）：
-
-| 环境变量 | 默认 | 说明 |
-|----------|------|------|
-| `RETRIEVE_DRIVER` | `postgres` | 逗号分隔多驱动：`postgres` / `sqlite` / `elasticsearch_v7` / `elasticsearch_v8` / `opensearch` / `qdrant` / `milvus` / `weaviate` / `doris` / `tencent_vectordb`。多驱动时写操作广播到全部，检索按类型路由 |
-| `MULTI_STORE_RETRIEVE_TIMEOUT_SEC` | 30 | 多 store 并行检索每组超时 |
-| `ELASTICSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` | — / `WeKnora` | ES v7/v8 共用 |
-| `OPENSEARCH_ADDR` / `_USERNAME` / `_PASSWORD` / `_INDEX` / `_INSECURE_SKIP_VERIFY` | — | OpenSearch |
-| `QDRANT_HOST` / `_PORT` / `_COLLECTION` / `_API_KEY` / `_USE_TLS` | `localhost` / 6334 / `weknora_embeddings` | Qdrant（gRPC 端口） |
-| `MILVUS_ADDRESS` / `_COLLECTION` / `_METRIC_TYPE` / `_USERNAME` / `_PASSWORD` / `_DB_NAME` | `localhost:19530` / `weknora_embeddings` / `IP` | metric 改后需重建 collection |
-| `WEAVIATE_HOST` / `_GRPC_ADDRESS` / `_SCHEME` / `_AUTH_ENABLED` / `_API_KEY` / `_COLLECTION` | `weaviate:8080` / `weaviate:50051` / `http` | 容器内用服务名 |
-| `DORIS_ADDR` / `_HTTP_PORT` / `_DATABASE` / `_USERNAME` / `_PASSWORD` / `_TABLE_PREFIX` / `_COMPAT_MODE` | `doris-fe:9030` / 8030 / `weknora` / `root` / — / `weknora_embeddings` / `auto` | Doris 4.1+；compat 模式建表后不可互换 |
-| `TENCENT_VECTORDB_ADDR` / `_USERNAME` / `_API_KEY` / `_DATABASE` / `_COLLECTION` | — | 三项核心缺一跳过注册 |
-| `NEO4J_ENABLE` / `NEO4J_URI` / `_USERNAME` / `_PASSWORD` | `false` / `bolt://neo4j:7687` | 图谱检索（独立于向量引擎体系） |
-
-除环境变量（env store，进程级全局）外，还可在管理端为租户创建 `VectorStore` 记录（DB store）并绑定到具体 KB——同一引擎类型可接多套集群实例，检索时按 KB 绑定自动路由并做租户属主校验（§1.2）。
-
-## 7. 检索执行数据流
+### 检索执行数据流 {#_7-检索执行数据流}
 
 ```mermaid
 sequenceDiagram
@@ -301,3 +293,15 @@ sequenceDiagram
     H->>H: FAQ 库: 迭代扩召回 / 负例问题过滤
     H-->>P: SearchResult (截断至 matchCount)
 ```
+
+## 实现参考
+
+| 环节 | 源码位置 |
+|------|----------|
+| 引擎注册（env + DB store） | `internal/container/container.go`（`initRetrieveEngineRegistry`）、`engine_factory.go` |
+| 注册表 / 组合引擎 / 工厂 | `internal/application/service/retriever/`（`registry.go`、`composite.go`、`factory.go`、`normalizer.go`） |
+| 各引擎实现 | `internal/application/repository/retriever/{postgres,sqlite,elasticsearch,opensearch,qdrant,milvus,weaviate,doris,tencentvectordb,neo4j}` |
+| 混合检索调度与融合 | `internal/application/service/knowledgebase_search*.go` |
+| 引擎类型常量 | `internal/types/retriever.go` |
+| 租户默认引擎 | `internal/types/tenant.go`（`GetDefaultRetrieverEngines`） |
+| 环境变量清单 | `.env.example`（C1 节）、`docker-compose.yml` |

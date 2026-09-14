@@ -270,7 +270,8 @@ func convertImageEvent(
 }
 
 // convertPostEvent handles rich-text (post) message type.
-// Extracts all plain text content and treats it as a text query for QA.
+// Extracts plain text and the first embedded image so mixed posts can use the
+// same attachment pipeline as standalone image messages.
 func convertPostEvent(
 	region Region, msg *larkim.EventMessage,
 	openID, chatID string, chatType im.ChatType, messageID string,
@@ -279,7 +280,7 @@ func convertPostEvent(
 		return nil
 	}
 
-	// Post content structure: {"title":"...", "content":[[{"tag":"text","text":"..."},{"tag":"a","href":"...","text":"..."}]]}
+	// Post content structure: {"title":"...", "content":[[{"tag":"text","text":"..."},{"tag":"img","image_key":"..."}]]}
 	var postContent struct {
 		Title   string              `json:"title"`
 		Content [][]json.RawMessage `json:"content"`
@@ -289,6 +290,7 @@ func convertPostEvent(
 	}
 
 	var textParts []string
+	imageKey := ""
 	if postContent.Title != "" {
 		textParts = append(textParts, postContent.Title)
 	}
@@ -297,8 +299,9 @@ func convertPostEvent(
 		var lineText strings.Builder
 		for _, elem := range line {
 			var tag struct {
-				Tag  string `json:"tag"`
-				Text string `json:"text"`
+				Tag      string `json:"tag"`
+				Text     string `json:"text"`
+				ImageKey string `json:"image_key"`
 			}
 			if err := json.Unmarshal(elem, &tag); err != nil {
 				continue
@@ -306,6 +309,10 @@ func convertPostEvent(
 			switch tag.Tag {
 			case "text", "a":
 				lineText.WriteString(tag.Text)
+			case "img":
+				if imageKey == "" {
+					imageKey = tag.ImageKey
+				}
 			case "at":
 				// Skip @mentions
 			}
@@ -328,18 +335,27 @@ func convertPostEvent(
 	}
 
 	content = strings.TrimSpace(content)
-	if content == "" {
+	if content == "" && imageKey == "" {
 		return nil
+	}
+
+	messageType := im.MessageTypeText
+	fileName := ""
+	if imageKey != "" {
+		messageType = im.MessageTypeImage
+		fileName = imageKey + ".png"
 	}
 
 	return &im.IncomingMessage{
 		Platform:    region.Platform,
-		MessageType: im.MessageTypeText,
+		MessageType: messageType,
 		UserID:      openID,
 		ChatID:      chatID,
 		ChatType:    chatType,
 		Content:     content,
 		MessageID:   messageID,
+		FileKey:     imageKey,
+		FileName:    fileName,
 	}
 }
 

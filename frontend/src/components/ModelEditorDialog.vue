@@ -332,6 +332,14 @@
           </div>
         </div>
 
+        <!-- Chat / VLM: context window. Agent compaction sizes itself from this. -->
+        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.contextWindowLabel') }}</label>
+          <t-input v-model.number="formData.contextWindow" type="number" :min="1024" :max="10000000"
+            :placeholder="$t('model.editor.contextWindowPlaceholder', { value: DEFAULT_MODEL_CONTEXT_WINDOW })" />
+          <p class="form-desc">{{ $t('model.editor.contextWindowDesc') }}</p>
+        </div>
+
         <!-- Chat: supports vision toggle (VLLM models are inherently multimodal) -->
         <div v-if="activeModelType === 'chat'" class="form-item">
           <label class="form-label">{{ $t('model.editor.supportsVisionLabel') }}</label>
@@ -399,6 +407,7 @@ import {
   resolveThinkingControl,
   type ThinkingControlValue,
 } from '@/utils/thinkingControl'
+import { DEFAULT_MODEL_CONTEXT_WINDOW } from '@/utils/contextWindow'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -425,6 +434,8 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  /** 对话/VLM 上下文窗口（token）。空/0 表示使用默认 200000。 */
+  contextWindow?: number
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
   maxConcurrency?: number
   /** extra_config.thinking_control — how agent thinking on/off maps to API fields. */
@@ -536,6 +547,17 @@ const fallbackProviderOptions = computed(() => [
     },
     description: t('model.editor.providers.openrouter.description'),
     modelTypes: ['chat', 'embedding']
+  },
+  {
+    value: 'litellm',
+    label: t('model.editor.providers.litellm.label'),
+    defaultUrls: {
+      chat: 'http://your_litellm_proxy/v1',
+      embedding: 'http://your_litellm_proxy/v1',
+      vllm: 'http://your_litellm_proxy/v1'
+    },
+    description: t('model.editor.providers.litellm.description'),
+    modelTypes: ['chat', 'embedding', 'vllm']
   },
   {
     value: 'requesty',
@@ -852,6 +874,7 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
+  contextWindow: undefined,
   maxConcurrency: undefined,
   thinkingControl: defaultThinkingControl('generic', ''),
   customHeaders: [],
@@ -1074,6 +1097,7 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
+    contextWindow: undefined,
     maxConcurrency: undefined,
     thinkingControl: defaultThinkingControl('generic', ''),
     customHeaders: [],

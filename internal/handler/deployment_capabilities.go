@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,6 +21,7 @@ var DeploymentCapabilityKeys = []string{
 	"settings.vectorstore",
 	"settings.storage",
 	"settings.sandbox",
+	"settings.sandbox.docker",
 }
 
 // DeploymentCapability describes whether a deployment exposes a feature route.
@@ -46,6 +48,7 @@ type DeploymentFeatureAvailability struct {
 	VectorStore   bool
 	Storage       bool
 	Sandbox       bool
+	SandboxDocker bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -66,19 +69,29 @@ func BuildDeploymentCapabilities(
 		organizations.Reason = "not_supported_in_lite"
 	}
 
+	sandboxDocker := DeploymentCapability{
+		Supported: available.Sandbox && available.SandboxDocker,
+	}
+	if available.Sandbox && !available.SandboxDocker {
+		sandboxDocker.Reason = "docker_backend_disabled"
+	} else if !available.Sandbox {
+		sandboxDocker.Reason = "route_not_registered"
+	}
+
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
-			"organizations":        organizations,
-			"agents":               supportedDeploymentCapability(available.Agents),
-			"integrations.im":      supportedDeploymentCapability(available.IM),
-			"integrations.embed":   supportedDeploymentCapability(available.Embed),
-			"integrations.api":     supportedDeploymentCapability(available.API),
-			"settings.mcp":         supportedDeploymentCapability(available.MCP),
-			"settings.websearch":   supportedDeploymentCapability(available.WebSearch),
-			"settings.vectorstore": supportedDeploymentCapability(available.VectorStore),
-			"settings.storage":     supportedDeploymentCapability(available.Storage),
-			"settings.sandbox":     supportedDeploymentCapability(available.Sandbox),
+			"organizations":           organizations,
+			"agents":                  supportedDeploymentCapability(available.Agents),
+			"integrations.im":         supportedDeploymentCapability(available.IM),
+			"integrations.embed":      supportedDeploymentCapability(available.Embed),
+			"integrations.api":        supportedDeploymentCapability(available.API),
+			"settings.mcp":            supportedDeploymentCapability(available.MCP),
+			"settings.websearch":      supportedDeploymentCapability(available.WebSearch),
+			"settings.vectorstore":    supportedDeploymentCapability(available.VectorStore),
+			"settings.storage":        supportedDeploymentCapability(available.Storage),
+			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
+			"settings.sandbox.docker": sandboxDocker,
 		},
 	}
 }
@@ -99,6 +112,28 @@ func (h *SystemHandler) GetDeploymentCapabilities(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": 0,
 		"msg":  "success",
-		"data": h.deploymentCapabilities,
+		"data": overlayLiveDockerSandboxCapability(h.deploymentCapabilities),
 	})
+}
+
+// overlayLiveDockerSandboxCapability replaces the startup snapshot's Docker
+// flag with the live 3-tier value so a System Settings toggle is visible
+// without restarting the process.
+func overlayLiveDockerSandboxCapability(data DeploymentCapabilitiesData) DeploymentCapabilitiesData {
+	caps := make(map[string]DeploymentCapability, len(data.Capabilities))
+	for key, capability := range data.Capabilities {
+		caps[key] = capability
+	}
+	sandboxCap := caps["settings.sandbox"]
+	docker := DeploymentCapability{
+		Supported: sandboxCap.Supported && sandbox.DockerBackendEnabled(),
+	}
+	if sandboxCap.Supported && !docker.Supported {
+		docker.Reason = "docker_backend_disabled"
+	} else if !sandboxCap.Supported {
+		docker.Reason = "route_not_registered"
+	}
+	caps["settings.sandbox.docker"] = docker
+	data.Capabilities = caps
+	return data
 }
