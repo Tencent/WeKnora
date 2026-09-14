@@ -290,6 +290,7 @@
               creatable
               clearable
               :loading="probingRemoteModels"
+              :options="remoteModelOptions"
               :placeholder="getModelNamePlaceholder()"
               :disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
               @create="onRemoteModelCreate"
