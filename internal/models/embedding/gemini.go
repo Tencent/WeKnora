@@ -78,7 +78,8 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 		baseURL = strings.TrimSuffix(baseURL, "/openai")
 	}
 
-	timeout := 60 * time.Second
+	runtimeConfig := loadEmbeddingRuntimeConfig()
+	timeout := runtimeConfig.Timeout
 
 	if err := validateEmbeddingBaseURL(baseURL); err != nil {
 		return nil, err
@@ -93,7 +94,7 @@ func NewGeminiEmbedder(apiKey, baseURL, modelName string,
 		modelID:              modelID,
 		httpClient:           newEmbeddingHTTPClient(timeout),
 		timeout:              timeout,
-		maxRetries:           3,
+		maxRetries:           runtimeConfig.MaxRetries,
 		EmbedderPooler:       pooler,
 	}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ type WeKnoraCloudEmbedder struct {
 	dimensions                int
 	supportsDimensionOverride bool
 	client                    *http.Client
+	maxRetries                int
 	EmbedderPooler
 }
 
@@ -50,6 +52,7 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 	if err := validateEmbeddingBaseURL(baseURL); err != nil {
 		return nil, err
 	}
+	runtimeConfig := loadEmbeddingRuntimeConfig()
 	return &WeKnoraCloudEmbedder{
 		modelName:                 config.ModelName,
 		remoteModelName:           remoteModelName,
@@ -59,7 +62,8 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 		baseURL:                   baseURL,
 		dimensions:                config.Dimensions,
 		supportsDimensionOverride: config.SupportsDimensionOverride,
-		client:                    newEmbeddingHTTPClient(60 * time.Second),
+		client:                    newEmbeddingHTTPClient(runtimeConfig.Timeout),
+		maxRetries:                runtimeConfig.MaxRetries,
 	}, nil
 }
 
@@ -98,19 +102,7 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 		return nil, fmt.Errorf("weknoracloud embedder: marshal: %w", err)
 	}
 
-	requestID := uuid.New().String()
-	headers := utils.Sign(e.appID, e.apiKey, requestID, string(bodyBytes))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+weKnoraCloudEmbedPath, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("weknoracloud embedder: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := e.client.Do(req)
+	resp, err := e.doRequestWithRetry(ctx, bodyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("weknoracloud embedder: do request: %w", err)
 	}
@@ -151,6 +143,66 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 		}
 	}
 	return result, nil
+}
+
+func (e *WeKnoraCloudEmbedder) doRequestWithRetry(ctx context.Context, bodyBytes []byte) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+
+	for attempt := 0; attempt <= e.maxRetries; attempt++ {
+		if attempt > 0 {
+			backoffTime := time.Duration(1<<uint(attempt-1)) * time.Second
+			if backoffTime > 10*time.Second {
+				backoffTime = 10 * time.Second
+			}
+			logger.GetLogger(ctx).Infof(
+				"WeKnoraCloudEmbedder retrying request (%d/%d), waiting %v",
+				attempt,
+				e.maxRetries,
+				backoffTime,
+			)
+			select {
+			case <-time.After(backoffTime):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		// The signature contains the request ID, so each retry must create a
+		// fresh ID and signature even though the request body is unchanged.
+		requestID := uuid.New().String()
+		headers := utils.Sign(e.appID, e.apiKey, requestID, string(bodyBytes))
+		req, requestErr := http.NewRequestWithContext(
+			ctx,
+			http.MethodPost,
+			e.baseURL+weKnoraCloudEmbedPath,
+			bytes.NewReader(bodyBytes),
+		)
+		if requestErr != nil {
+			err = requestErr
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+
+		resp, err = e.client.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		logger.GetLogger(ctx).Errorf(
+			"WeKnoraCloudEmbedder request failed (attempt %d/%d): %v",
+			attempt+1,
+			e.maxRetries+1,
+			err,
+		)
+	}
+
+	return nil, err
 }
 
 func (e *WeKnoraCloudEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {

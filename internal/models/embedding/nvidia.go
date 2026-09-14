@@ -68,7 +68,8 @@ func NewNvidiaEmbedder(apiKey, baseURL, modelName string,
 		return nil, fmt.Errorf("model name is required")
 	}
 
-	timeout := 60 * time.Second
+	runtimeConfig := loadEmbeddingRuntimeConfig()
+	timeout := runtimeConfig.Timeout
 
 	if err := validateEmbeddingBaseURL(baseURL); err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func NewNvidiaEmbedder(apiKey, baseURL, modelName string,
 		dimensions:     dimensions,
 		modelID:        modelID,
 		timeout:        timeout,
-		maxRetries:     3, // Maximum retry count
+		maxRetries:     runtimeConfig.MaxRetries,
 	}, nil
 }
 
