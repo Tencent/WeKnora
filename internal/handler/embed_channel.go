@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/embedpolicy"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -91,38 +91,27 @@ func stringOrEmpty(v *string) string {
 	return *v
 }
 
-// validateAllowedOrigins enforces that a public embed channel declares an
-// explicit origin allowlist. An empty list means "allow any origin" in the
-// auth middleware, which is unsafe for a publicly reachable widget, so it is
-// rejected. In production a wildcard ("*") is also rejected; each entry must be
-// a well-formed http(s) origin (optionally a "*." subdomain wildcard).
+// validateAllowedOrigins validates host-page origins before using them in CSP.
 func validateAllowedOrigins(origins []string) error {
-	cleaned := make([]string, 0, len(origins))
-	for _, o := range origins {
-		o = strings.TrimSpace(o)
-		if o == "" {
-			continue
-		}
-		cleaned = append(cleaned, o)
-	}
-	if len(cleaned) == 0 {
+	if len(origins) == 0 {
 		return fmt.Errorf("at least one allowed origin is required")
 	}
-	for _, o := range cleaned {
-		if o == "*" {
-			if isProductionMode() {
-				return fmt.Errorf("wildcard origin '*' is not allowed in production")
-			}
+	count := 0
+	for _, raw := range origins {
+		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		host := o
-		if strings.HasPrefix(o, "*.") {
-			host = "https://" + strings.TrimPrefix(o, "*.")
+		pattern, err := embedpolicy.NormalizePattern(raw)
+		if err != nil {
+			return err
 		}
-		u, err := url.Parse(host)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return fmt.Errorf("invalid allowed origin: %q", o)
+		if pattern == "*" && isProductionMode() {
+			return fmt.Errorf("wildcard origin '*' is not allowed in production")
 		}
+		count++
+	}
+	if count == 0 {
+		return fmt.Errorf("at least one allowed origin is required")
 	}
 	return nil
 }

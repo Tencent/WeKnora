@@ -1,6 +1,6 @@
 # API 参考：模型与初始化
 
-路由注册：`internal/router/router.go` 的 `RegisterModelRoutes`、`RegisterInitializationRoutes`、`RegisterEvaluationRoutes`、`RegisterWeKnoraCloudRoutes`。Handler：`internal/handler/model.go`、`internal/handler/model_credentials.go`、`internal/handler/initialization.go`、`internal/handler/evaluation.go`、`internal/handler/weknoracloud.go`。
+管理模型、测试连接、初始化知识库，并发起评估任务。WeKnoraCloud 接口用于相关云服务接入。
 
 系统信息与系统管理（`/system`、`/system/admin`）接口见[系统与平台管理](./02-api-system.md)。
 
@@ -84,6 +84,30 @@ curl -X PUT $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN" \
 用途：删除模型。权限：Admin+。
 
 响应：200 `{"success":true,"message":"Model deleted"}`
+
+仍被当前空间的知识库、智能体或长期记忆引用时，响应为 HTTP 400；兼容 message 保留，同时 `error.code=2300`，`error.details` 给出具体对象和引用位置：
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": 2300,
+    "message": "model is used by 2 knowledge base(s); reconfigure or remove those references before deleting",
+    "details": {
+      "knowledge_bases": [
+        {"id": "kb-1", "name": "Product docs", "bindings": ["vlm_model"]},
+        {"id": "kb-2", "name": "Engineering", "bindings": ["vlm_model"]}
+      ],
+      "agents": [],
+      "long_term_memory": {"bindings": []},
+      "knowledge_base_total": 2,
+      "agent_total": 0
+    }
+  }
+}
+```
+
+知识库绑定值：`embedding_model`、`summary_model`、`image_processing_model`、`vlm_model`、`asr_model`、`wiki_synthesis_model`；智能体绑定值：`chat_model`、`rerank_model`、`vlm_model`、`asr_model`、`query_understand_model`、`follow_up_model`；长期记忆绑定值：`embedding_model`、`extract_model`。详情包含对象 `id`、`name`、合并后的 `bindings`，以及 `knowledge_base_total` / `agent_total`。列表最多各 50 条，删除守卫以总数为准。
 
 ```bash
 curl -X DELETE $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN"
@@ -354,3 +378,7 @@ curl -X POST $BASE/api/v1/evaluation -H "Authorization: Bearer $TOKEN" \
 ```bash
 curl "$BASE/api/v1/evaluation?task_id=task-1" -H "Authorization: Bearer $TOKEN"
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterModelRoutes`、`RegisterInitializationRoutes`、`RegisterEvaluationRoutes`、`RegisterWeKnoraCloudRoutes`。Handler：`internal/handler/model.go`、`internal/handler/model_credentials.go`、`internal/handler/initialization.go`、`internal/handler/evaluation.go`、`internal/handler/weknoracloud.go`。

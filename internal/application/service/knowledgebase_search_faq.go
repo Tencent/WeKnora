@@ -77,8 +77,11 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 ) ([]*types.IndexWithScore, error) {
 	maxIterations := 5
 	// Start with a larger TopK since we're called when first retrieval wasn't enough
-	// The first retrieval already used matchCount*3, so start from there
-	currentTopK := matchCount * 3
+	// The first retrieval already used matchCount*3, so start from there.
+	// matchCount is caller-supplied, so both the seed and the per-iteration
+	// doubling are bounded by maxRetrievalPoolSize — otherwise a single request
+	// could drive the vector-store query depth arbitrarily deep.
+	currentTopK := min(matchCount*3, maxRetrievalPoolSize)
 	uniqueChunks := make(map[string]*types.IndexWithScore)
 	// Cache chunk data to avoid repeated DB queries across iterations
 	chunkDataCache := make(map[string]*types.Chunk)
@@ -198,8 +201,13 @@ func (s *knowledgeBaseService) iterativeRetrieveWithDeduplication(ctx context.Co
 			break
 		}
 
-		// Increase TopK for next iteration
-		currentTopK *= 2
+		// Increase TopK for next iteration. Once the cap is reached, another
+		// round would re-issue an identical query, so stop instead.
+		if currentTopK >= maxRetrievalPoolSize {
+			logger.Infof(ctx, "Retrieval depth cap %d reached, stopping iteration", maxRetrievalPoolSize)
+			break
+		}
+		currentTopK = min(currentTopK*2, maxRetrievalPoolSize)
 	}
 
 	// Convert map to slice and sort by score

@@ -38,6 +38,58 @@ func TestOIDCDiscoveryRejectsInternalDiscoveredEndpoint(t *testing.T) {
 	}
 }
 
+func TestOIDCDiscoveryFillsJwksAndIssuerWhenEndpointsAreExplicit(t *testing.T) {
+	withOIDCSSRFWhitelist(t, "127.0.0.1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(oidcDiscoveryDocument{
+			Issuer:                "https://idp.example",
+			AuthorizationEndpoint: serverURL(r, "/authorize"),
+			TokenEndpoint:         serverURL(r, "/token"),
+			UserInfoEndpoint:      serverURL(r, "/userinfo"),
+			JwksURI:               serverURL(r, "/keys"),
+		})
+	}))
+	defer server.Close()
+
+	svc := &userService{}
+	cfg := &config.OIDCAuthConfig{
+		DiscoveryURL:          server.URL,
+		AuthorizationEndpoint: server.URL + "/authorize",
+		TokenEndpoint:         server.URL + "/token",
+	}
+	if err := svc.populateOIDCEndpoints(context.Background(), cfg); err != nil {
+		t.Fatalf("populateOIDCEndpoints: %v", err)
+	}
+	if cfg.JwksURI != server.URL+"/keys" {
+		t.Fatalf("JwksURI = %q, want discovery jwks_uri", cfg.JwksURI)
+	}
+	if cfg.IssuerURL != "https://idp.example" {
+		t.Fatalf("IssuerURL = %q, want discovery issuer", cfg.IssuerURL)
+	}
+}
+
+func TestOIDCDiscoveryRejectsInternalJwksURI(t *testing.T) {
+	withOIDCSSRFWhitelist(t, "127.0.0.1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(oidcDiscoveryDocument{
+			Issuer:                "https://idp.example",
+			AuthorizationEndpoint: serverURL(r, "/authorize"),
+			TokenEndpoint:         serverURL(r, "/token"),
+			JwksURI:               "http://169.254.169.254/latest/meta-data/",
+		})
+	}))
+	defer server.Close()
+
+	svc := &userService{}
+	cfg := &config.OIDCAuthConfig{DiscoveryURL: server.URL}
+	err := svc.populateOIDCEndpoints(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "OIDC jwks endpoint failed SSRF validation") {
+		t.Fatalf("populateOIDCEndpoints error = %v, want jwks SSRF validation failure", err)
+	}
+}
+
 func TestOIDCTokenExchangeBlocksRedirectToInternalURL(t *testing.T) {
 	withOIDCSSRFWhitelist(t, "127.0.0.1")
 

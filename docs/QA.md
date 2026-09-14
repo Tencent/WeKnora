@@ -445,5 +445,49 @@ docker run -d -p 8081:8081 weknora-docs
 
 行为变化提醒：工具执行失败时，MCPServer 2.x 返回 `CallToolResult(isError=True)`，不再像旧版低层 API 那样以成功响应返回 `"Error executing …"` 文本前缀。只解析 `content[0].text` 的客户端通常无感，依赖 `isError` 标志的集成方行为会更符合 MCP 规范。
 
+## 45. 升级到 0.8.0 后技能沙箱起不来 / 找不到 Local 后端？
+
+0.8.0 **移除了 Local 宿主机进程沙箱**。技能执行改为会话级常驻沙箱，三个后端共用同一套协议：
+
+- **Docker**（单机 / 私有化）：默认**关闭**。本机 `docker.sock` 等同宿主机 root，需系统管理员在 **设置 → 系统设置 → 网络安全** 打开，或设置 `WEKNORA_SANDBOX_DOCKER_ENABLED=true`。打开后才会出现「添加 Docker 后端」入口；已有配置仍可查看/删除。
+- **E2B**：E2B Cloud，或任意 E2B 兼容控制面（含自托管）。
+- **CubeSandbox**：集群模板 + 网络策略。
+
+原 Local 配置需要按上面任一后端重建。每个空间可配多个沙箱实例，并可为每个配置设置**网络策略**（默认放行出站、关闭公网入站；可改成默认拒绝出站再写允许名单）。详见 [`docs/sandbox-docker-backend.md`](./sandbox-docker-backend.md) 与 [`docs/sandbox-protocol.md`](./sandbox-protocol.md)。
+
+## 46. 技能目录和沙箱配置是什么关系？安装一直转圈怎么办？
+
+0.8.0 把技能做成空间级目录（迁移 `000086_tenant_skills` / `000090_skill_catalog`），再**按沙箱配置安装成快照**：
+
+1. 在 **设置 → 技能沙箱** 建好后端配置；
+2. 从 ClawHub（`@owner/slug`）、SkillHub / skills.sh、GitHub/GitLab URL 或 zip 上传安装；
+3. 安装抽屉会保持打开并显示环形进度；卡住时用「停止安装」，再用「重新安装」走已保存的安装包。
+
+环境变量分两层：**空间级**（Admin，该空间所有人共用）和**个人级**（`/api/v1/me/env-vars`，值永远不会读回）。技能声明的 `WEKNORA_*` 凭据可以按人填写。卸载沙箱里的技能不会删掉目录里的安装包。
+
+## 47. 0.7.1 删了 Neo4j 会话记忆，0.8.0 的「长期记忆」是一回事吗？
+
+不是。0.7.1 去掉的是旧版 **Neo4j episodic conversation memory**；**知识图谱（GraphRAG）仍然用 Neo4j**。0.8.0 的长期记忆是全新产品（迁移 `000084_memory`）：
+
+- 空间管理员先打开，用户还可以再关掉自己的；
+- 类型：`profile` / `preference` / `fact` / `task` / `interest`；
+- 自动抽取的条目先停在「待确认」，不会静默写进提示词；
+- 常驻画像每轮注入，情境记忆按需召回，Agent 也可用 `search_memory`；
+- 反复引用的文档会形成亲和度，检索时加权。
+
+接口在 `/api/v1/memory/*`，只操作当前调用者自己的记忆，需要 full-access API Key 或登录会话。
+
+## 48. 文档解析能否不经过 docreader？anydoc 是什么？
+
+0.8.0 引入进程内 **anydoc** 引擎（`third_party/anydoc-go`）。当绑定已链接时，anydoc 能转换的格式（含 doc/docx/ppt/pptx）会优先走 Go 进程，不再先打到 docreader。PPT/PPTX 在没有引擎规则时仍默认 MarkItDown。官方 app 镜像默认链接 anydoc。解析失败或格式不在 anydoc 覆盖范围时，仍回退到 docreader / MarkItDown / MinerU 等既有引擎。
+
+## 49. OIDC 登录提示签名无效，或想跳过前端直接 302？
+
+0.8.0 会通过 JWKS **校验 ID Token 签名**（#2799），显式配置的 token endpoint 同样走这条路径。请确认 IdP 的 JWKS URL 可达、密钥已轮换到当前 kid。若要做门户级跳转，可调用 `GET /auth/oidc/start` 直接 302 到 IdP，不必先渲染 SPA 握手页。
+
+## 50. 开启复杂密码后注册 / 改密失败？
+
+系统设置或 `WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED=true` 打开后，密码必须同时包含大写、小写、数字和特殊字符（`!@#$%^&*()_+-=[]{}|;:,.<>?`），长度 8–32。注册、个人中心改密、管理员重置走同一套规则。未打开时仍只要求长度。
+
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

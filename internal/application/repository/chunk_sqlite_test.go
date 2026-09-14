@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -61,6 +62,25 @@ func TestCreateChunks_SQLite_SeqIDAutoAssigned(t *testing.T) {
 	for i, c := range saved {
 		assert.Equal(t, int64(i+1), c.SeqID, "chunk %d should have seq_id %d", i, i+1)
 	}
+}
+
+func TestCreateChunks_CleansContextHeaderBeforePersistence(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	chunk := makeChunk(uuid.New().String(), uuid.New().String(), types.ChunkTypeText)
+	chunk.ContextHeader = "# \x00投资评级说明\xff"
+
+	require.NoError(t, repo.CreateChunks(context.Background(), []*types.Chunk{chunk}))
+
+	require.Equal(t, "# 投资评级说明", chunk.ContextHeader)
+	require.NotContains(t, chunk.ContextHeader, "\x00")
+	require.True(t, utf8.ValidString(chunk.ContextHeader))
+
+	var saved types.Chunk
+	require.NoError(t, db.First(&saved, "id = ?", chunk.ID).Error)
+	assert.Equal(t, "# 投资评级说明", saved.ContextHeader)
+	assert.NotContains(t, saved.ContextHeader, "\x00")
+	assert.True(t, utf8.ValidString(saved.ContextHeader))
 }
 
 func TestCreateChunks_SQLite_SeqIDContinuesFromExisting(t *testing.T) {
@@ -237,6 +257,16 @@ func TestListPagedChunksByKnowledgeID_FiltersEnabledState(t *testing.T) {
 	require.Equal(t, int64(1), total)
 	require.Len(t, chunks, 1)
 	assert.Equal(t, enabledChunk.ID, chunks[0].ID)
+
+	disabled := false
+	chunks, total, err = repo.ListPagedChunksByKnowledgeID(
+		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},
+		[]types.ChunkType{types.ChunkTypeFAQ}, nil, "", "", "", types.KnowledgeTypeFAQ, &disabled,
+	)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, chunks, 1)
+	assert.Equal(t, disabledChunk.ID, chunks[0].ID)
 
 	allChunks, allTotal, err := repo.ListPagedChunksByKnowledgeID(
 		ctx, 1, "faq-knowledge", &types.Pagination{Page: 1, PageSize: 20},

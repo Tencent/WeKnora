@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -345,4 +346,38 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchUpdateChunkTagID(
 	chunkTagMap map[string]string,
 ) error {
 	return v.indexRepository.BatchUpdateChunkTagID(ctx, chunkTagMap)
+}
+
+// ValidateKnowledgeIndexMove checks backend support before any mutation.
+func (v *KeywordsVectorHybridRetrieveEngineService) ValidateKnowledgeIndexMove(ctx context.Context) error {
+	if _, ok := v.indexRepository.(interfaces.KnowledgeIndexMover); !ok {
+		return fmt.Errorf("retriever %s does not support moving indices", v.EngineType())
+	}
+	if validator, ok := v.indexRepository.(interface{ ValidateKnowledgeIndexMove(context.Context) error }); ok {
+		return validator.ValidateKnowledgeIndexMove(ctx)
+	}
+
+	return nil
+}
+
+// MoveKnowledgeIndices delegates metadata relocation to the supported backend.
+func (v *KeywordsVectorHybridRetrieveEngineService) MoveKnowledgeIndices(
+	ctx context.Context,
+	sourceKB, targetKB, knowledgeID string,
+	chunkIDs []string,
+	dimension int,
+	knowledgeType string,
+) error {
+	if err := v.ValidateKnowledgeIndexMove(ctx); err != nil {
+		return err
+	}
+	return v.indexRepository.(interfaces.KnowledgeIndexMover).MoveKnowledgeIndices(
+		ctx,
+		sourceKB,
+		targetKB,
+		knowledgeID,
+		chunkIDs,
+		dimension,
+		knowledgeType,
+	)
 }

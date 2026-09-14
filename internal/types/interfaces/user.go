@@ -55,6 +55,9 @@ type UserService interface {
 	// returns the corresponding LoginResponse. The caller's previous
 	// refresh token (passed in for revocation) is invalidated. Membership
 	// is verified via the TenantMember service before tokens are issued.
+	// On success the target is recorded as the user's last-active-tenant
+	// preference (next login and refresh land there). A preference-write
+	// failure fails the switch so no token pair is issued.
 	SwitchTenant(ctx context.Context, user *types.User, targetTenantID uint64, currentRefreshToken string) (*types.LoginResponse, error)
 	// ValidateToken validates an access token. It returns the user
 	// referenced by the token plus the active tenant ID encoded in the
@@ -63,6 +66,13 @@ type UserService interface {
 	// non-home tenant. Falls back to user.TenantID when the claim is
 	// missing (old tokens issued before tenant-level RBAC).
 	ValidateToken(ctx context.Context, token string) (*types.User, uint64, error)
+	// GetAccessTokenByValue looks up the stored access-token row for a JWT
+	// string. The Token field is redacted. Used to bind a sandbox-terminal
+	// ticket to the minting session without putting the JWT in the ticket.
+	GetAccessTokenByValue(ctx context.Context, token string) (*types.AuthToken, error)
+	// GetAccessTokenByID looks up a stored access-token row by primary key.
+	// The Token field is redacted. Used by the sandbox-terminal recheck.
+	GetAccessTokenByID(ctx context.Context, id string) (*types.AuthToken, error)
 	// RefreshToken refreshes access token using refresh token
 	RefreshToken(ctx context.Context, refreshToken string) (accessToken, newRefreshToken string, err error)
 	// RevokeToken revokes a token
@@ -79,6 +89,13 @@ type UserService interface {
 	// callers pass offset/limit to page through results. Used by the
 	// /api/v1/system/admin/list endpoint, gated to SystemAdmin callers.
 	ListSystemAdmins(ctx context.Context, offset, limit int) ([]*types.User, int64, error)
+	// AdminCreateUser provisions a new local user on behalf of a
+	// SystemAdmin. When req.Password is nil, a random password is generated
+	// and returned exactly once as the second result. provisioning is
+	// resolved by the caller from the shared auth.default_tenant_mode policy.
+	AdminCreateUser(
+		ctx context.Context, req *types.AdminCreateUserRequest, provisioning types.TenantProvisioningMode,
+	) (*types.User, string, error)
 	// RevokeSystemAdmin removes system-admin privileges with the
 	// last-admin/self-revoke checks performed atomically.
 	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)
@@ -127,6 +144,8 @@ type AuthTokenRepository interface {
 	CreateToken(ctx context.Context, token *types.AuthToken) error
 	// GetTokenByValue gets a token by its value
 	GetTokenByValue(ctx context.Context, tokenValue string) (*types.AuthToken, error)
+	// GetTokenByID gets a token by its primary key
+	GetTokenByID(ctx context.Context, id string) (*types.AuthToken, error)
 	// GetTokensByUserID gets all tokens for a user
 	GetTokensByUserID(ctx context.Context, userID string) ([]*types.AuthToken, error)
 	// UpdateToken updates a token

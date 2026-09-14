@@ -175,7 +175,33 @@ func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {
 		strings.HasPrefix(s.UserID, PrincipalEmbedSession+":") {
 		return true
 	}
+	// Defence in depth for skill maintenance transcripts: the listing hides
+	// them, and this keeps a leaked session id from being opened by a
+	// non-admin who happens to own the row.
+	if IsSkillMaintenanceDescription(s.Description) {
+		return true
+	}
 	return strings.TrimSpace(imPlatform) != ""
+}
+
+// IsSkillMaintenanceDescription reports whether description is the reserved
+// prefix that hides skill-install sessions from the console list.
+func IsSkillMaintenanceDescription(description string) bool {
+	return strings.HasPrefix(description, SkillMaintenanceSessionMarker)
+}
+
+// SanitizeClientSessionDescription keeps the skill-maintenance marker off
+// client-writable descriptions. A row that is already a maintenance session
+// keeps its stored description so a PUT cannot un-hide it; any other row
+// drops a planted marker rather than accepting it.
+func SanitizeClientSessionDescription(incoming, existing string) string {
+	if IsSkillMaintenanceDescription(existing) {
+		return existing
+	}
+	if IsSkillMaintenanceDescription(incoming) {
+		return ""
+	}
+	return incoming
 }
 
 // SessionListQuery bundles the parameters for listing sessions.
@@ -251,16 +277,17 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // to the frontend by GetSession so the chat input can restore the same agent,
 // model, KB scope, etc. the user had selected last time.
 type SessionLastRequestState struct {
-	AgentID          string         `json:"agent_id,omitempty"`
-	AgentEnabled     bool           `json:"agent_enabled"`
-	ModelID          string         `json:"model_id,omitempty"`
-	KnowledgeBaseIDs []string       `json:"knowledge_base_ids,omitempty"`
-	KnowledgeIDs     []string       `json:"knowledge_ids,omitempty"`
-	TagIDs           []string       `json:"tag_ids,omitempty"`
-	MCPServiceIDs    []string       `json:"mcp_service_ids,omitempty"`
-	SkillNames       []string       `json:"skill_names,omitempty"`
-	MentionedItems   MentionedItems `json:"mentioned_items,omitempty"`
-	WebSearchEnabled bool           `json:"web_search_enabled"`
+	AgentID             string         `json:"agent_id,omitempty"`
+	AgentEnabled        bool           `json:"agent_enabled"`
+	ModelID             string         `json:"model_id,omitempty"`
+	KnowledgeBaseIDs    []string       `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs        []string       `json:"knowledge_ids,omitempty"`
+	TagIDs              []string       `json:"tag_ids,omitempty"`
+	MCPServiceIDs       []string       `json:"mcp_service_ids,omitempty"`
+	SkillNames          []string       `json:"skill_names,omitempty"`
+	MentionedItems      MentionedItems `json:"mentioned_items,omitempty"`
+	LocalBrowserEnabled bool           `json:"local_browser_enabled"`
+	WebSearchEnabled    bool           `json:"web_search_enabled"`
 }
 
 // Value implements driver.Valuer for SessionLastRequestState (JSONB).

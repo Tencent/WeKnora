@@ -1,0 +1,65 @@
+{
+  "name": "@wxg-prc-cpg/dsh-weknora",
+  "version": "0.1.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "description": "WeKnora knowledge retrieval tools for DeepSeek Harness (dsh): semantic search, document reading and RAG/agent answers over your own knowledge bases.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "weknora",
+    "rag",
+    "retrieval",
+    "knowledge-base"
+  ],
+  "license": "MIT",
+  "author": "WeKnora",
+  "homepage": "https://github.com/Tencent/WeKnora/tree/main/packages/dsh-weknora",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tencent/WeKnora.git",
+    "directory": "packages/dsh-weknora"
+  },
+  "bugs": {
+    "url": "https://github.com/Tencent/WeKnora/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "README_CN.md"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"test/*.test.mjs\"",
+    "e2e": "node test/e2e/run-in-dsh.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3"
+  }
+}

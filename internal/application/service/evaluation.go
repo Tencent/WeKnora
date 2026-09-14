@@ -363,7 +363,10 @@ func (e *EvaluationService) EvalDataset(ctx context.Context, detail *types.Evalu
 	// Setup cleanup of temporary resources
 	defer func() {
 		logger.Infof(ctx, "Cleaning up resources - deleting knowledge: %s", knowledge.ID)
-		if err := e.knowledgeService.DeleteKnowledge(ctx, knowledge.ID); err != nil {
+		if err := deleteReferencedKnowledge(ctx,
+			e.knowledgeService,
+			knowledgeBaseID,
+			[]string{knowledge.ID}); err != nil {
 			logger.Errorf(ctx, "Failed to delete knowledge: %v, knowledge ID: %s", err, knowledge.ID)
 		}
 

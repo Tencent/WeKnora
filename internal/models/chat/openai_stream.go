@@ -130,10 +130,15 @@ func (c *RemoteAPIChat) processStream(
 					FinishReason: state.lastFinishReason,
 				}
 			} else {
+				logger.Errorf(ctx, "Stream read error: %v (tool_calls_assembled=%d)",
+					err, len(state.toolCallMap))
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeError,
 					Content:      err.Error(),
 					Done:         true,
+					ToolCalls:    state.buildOrderedToolCalls(),
+					Usage:        state.usage,
+					FinishReason: types.FinishReasonIncomplete,
 				}
 			}
 			return
@@ -181,11 +186,15 @@ func (c *RemoteAPIChat) processRawHTTPStream(
 					Usage:        state.usage,
 				}
 			} else {
-				logger.Errorf(ctx, "Stream read error: %v", err)
+				logger.Errorf(ctx, "Stream read error: %v (tool_calls_assembled=%d)",
+					err, len(state.toolCallMap))
 				streamChan <- types.StreamResponse{
 					ResponseType: types.ResponseTypeError,
 					Content:      err.Error(),
 					Done:         true,
+					ToolCalls:    state.buildOrderedToolCalls(),
+					Usage:        state.usage,
+					FinishReason: types.FinishReasonIncomplete,
 				}
 			}
 			return
@@ -303,8 +312,9 @@ type streamState struct {
 	lastFunctionName map[int]string
 	nameNotified     map[int]bool
 	fieldExtractors  map[int]*jsonFieldExtractor // per tool-call-index extractors for streaming field extraction
-	usage            *types.TokenUsage           // captured from the final stream chunk when include_usage is enabled
-	lastFinishReason string                      // last observed finish_reason for EOF handler fallback
+	fileProgress     map[int]*sandboxFileProgress
+	usage            *types.TokenUsage // captured from the final stream chunk when include_usage is enabled
+	lastFinishReason string            // last observed finish_reason for EOF handler fallback
 
 	// Diagnostic flags (fire-once) used to log earliest signals of tool_call
 	// presence/absence at the OpenAI-protocol level. These are independent of
@@ -325,6 +335,7 @@ func newStreamState() *streamState {
 		lastFunctionName: make(map[int]string),
 		nameNotified:     make(map[int]bool),
 		fieldExtractors:  make(map[int]*jsonFieldExtractor),
+		fileProgress:     make(map[int]*sandboxFileProgress),
 		streamStartedAt:  time.Now(),
 	}
 }
@@ -548,11 +559,39 @@ func (c *RemoteAPIChat) processToolCallsDelta(
 		}
 
 		currName := toolCallEntry.Function.Name
+		var progressArgs map[string]any
+		if isSandboxMutationTool(currName) && argsUpdated && tc.Function.Arguments != "" {
+			prog := state.fileProgress[toolCallIndex]
+			if prog == nil {
+				prog = newSandboxFileProgress(currName)
+				state.fileProgress[toolCallIndex] = prog
+			}
+			if payload, ok := prog.Feed(tc.Function.Arguments); ok {
+				progressArgs = payload
+			}
+		}
+
 		if currName != "" &&
 			currName == state.lastFunctionName[toolCallIndex] &&
 			argsUpdated &&
 			!state.nameNotified[toolCallIndex] &&
 			toolCallEntry.ID != "" {
+			data := map[string]interface{}{
+				"tool_name":    currName,
+				"tool_call_id": toolCallEntry.ID,
+			}
+			if progressArgs != nil {
+				data["arguments"] = progressArgs
+			}
+			streamChan <- types.StreamResponse{
+				ResponseType: types.ResponseTypeToolCall,
+				Content:      "",
+				Done:         false,
+				Data:         data,
+			}
+			state.nameNotified[toolCallIndex] = true
+			progressArgs = nil
+		} else if progressArgs != nil && toolCallEntry.ID != "" && currName != "" {
 			streamChan <- types.StreamResponse{
 				ResponseType: types.ResponseTypeToolCall,
 				Content:      "",
@@ -560,9 +599,9 @@ func (c *RemoteAPIChat) processToolCallsDelta(
 				Data: map[string]interface{}{
 					"tool_name":    currName,
 					"tool_call_id": toolCallEntry.ID,
+					"arguments":    progressArgs,
 				},
 			}
-			state.nameNotified[toolCallIndex] = true
 		}
 
 		state.lastFunctionName[toolCallIndex] = currName

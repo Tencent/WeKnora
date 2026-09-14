@@ -132,7 +132,7 @@ func (c *RemoteAPIChat) shapedRequest(messages []Message, opts *ChatOptions, isS
 // path is required. This is the single place that composes adapter + thinking,
 // replacing the former buildRequestCustomizer plumbing.
 func (c *RemoteAPIChat) buildOutbound(
-	messages []Message, opts *ChatOptions, isStream bool,
+	ctx context.Context, messages []Message, opts *ChatOptions, isStream bool,
 ) (body any, endpoint string, useRawHTTP bool, err error) {
 	req := c.shapedRequest(messages, opts, isStream)
 
@@ -150,8 +150,18 @@ func (c *RemoteAPIChat) buildOutbound(
 	if err != nil {
 		return nil, "", false, err
 	}
+
+	retention := resolveCacheRetention(opts)
+	policy := promptCachePolicyFor(c.provider, c.baseURL)
+	sessionID := promptCacheSessionID(ctx, opts)
+	cachedBody, forceRaw, err := applyPromptCacheToJSONBody(body, policy, sessionID, retention)
+	if err != nil {
+		return nil, "", false, err
+	}
+	body = cachedBody
+
 	endpoint = c.adapter.Endpoint(c.baseURL, c.modelID, isStream)
-	useRawHTTP = useRaw || c.adapter.ForceRawHTTP() || endpoint != ""
+	useRawHTTP = useRaw || c.adapter.ForceRawHTTP() || endpoint != "" || forceRaw
 	return body, endpoint, useRawHTTP, nil
 }
 
@@ -170,12 +180,12 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultChatTimeout)
 	defer cancel()
 
-	body, endpoint, useRawHTTP, err := c.buildOutbound(messages, opts, false)
+	body, endpoint, useRawHTTP, err := c.buildOutbound(timeoutCtx, messages, opts, false)
 	if err != nil {
 		return nil, err
 	}
 	if useRawHTTP {
-		return c.chatWithRawHTTP(timeoutCtx, endpoint, body)
+		return c.chatWithRawHTTP(timeoutCtx, endpoint, body, opts)
 	}
 
 	req := *(body.(*openai.ChatCompletionRequest))
@@ -202,7 +212,7 @@ func (c *RemoteAPIChat) Chat(ctx context.Context, messages []Message, opts *Chat
 }
 
 // chatWithRawHTTP 使用原始 HTTP 请求进行聊天（供自定义请求使用）
-func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, customReq any) (*types.ChatResponse, error) {
+func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, customReq any, opts *ChatOptions) (*types.ChatResponse, error) {
 	jsonData, err := json.Marshal(customReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -227,6 +237,7 @@ func (c *RemoteAPIChat) chatWithRawHTTP(ctx context.Context, endpoint string, cu
 
 	// 注入用户自定义 header（保留头会在工具内部自动跳过）
 	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
+	attachPromptCacheHeaders(httpReq, promptCachePolicyFor(c.provider, c.baseURL), promptCacheSessionID(ctx, opts))
 
 	logger.Infof(ctx, "[LLM Request] Remote HTTP, endpoint=%s, model=%s",
 		endpoint, c.modelName)
@@ -268,13 +279,13 @@ func (c *RemoteAPIChat) ChatStream(ctx context.Context, messages []Message, opts
 	// 因为带思考/推理的模型可能数十秒甚至几分钟才产出首 token。
 	timeoutCtx, cancel := withLLMTimeout(ctx, defaultStreamTimeout)
 
-	body, endpoint, useRawHTTP, err := c.buildOutbound(messages, opts, true)
+	body, endpoint, useRawHTTP, err := c.buildOutbound(timeoutCtx, messages, opts, true)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	if useRawHTTP {
-		ch, err := c.chatStreamWithRawHTTP(timeoutCtx, endpoint, body)
+		ch, err := c.chatStreamWithRawHTTP(timeoutCtx, endpoint, body, opts)
 		return wrapStreamCancel(ch, err, cancel)
 	}
 
@@ -333,7 +344,7 @@ func wrapStreamCancel(in <-chan types.StreamResponse, err error, cancel context.
 }
 
 // chatStreamWithRawHTTP 使用原始 HTTP 请求进行流式聊天
-func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint string, customReq any) (<-chan types.StreamResponse, error) {
+func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint string, customReq any, opts *ChatOptions) (<-chan types.StreamResponse, error) {
 	jsonData, err := json.Marshal(customReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -363,6 +374,7 @@ func (c *RemoteAPIChat) chatStreamWithRawHTTP(ctx context.Context, endpoint stri
 
 	// 注入用户自定义 header（保留头会在工具内部自动跳过）
 	secutils.ApplyCustomHeaders(httpReq, c.customHeaders)
+	attachPromptCacheHeaders(httpReq, promptCachePolicyFor(c.provider, c.baseURL), promptCacheSessionID(ctx, opts))
 
 	resp, err := rawHTTPClient.Do(httpReq)
 	if err != nil {

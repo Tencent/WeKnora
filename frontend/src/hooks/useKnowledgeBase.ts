@@ -6,7 +6,6 @@ import {
   uploadKnowledgeFile,
   listKnowledgeFiles,
   getKnowledgeDetails,
-  delKnowledgeDetails,
   getKnowledgeDetailsCon,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
@@ -95,38 +94,6 @@ export default function (knowledgeBaseId?: string) {
         total.value = totalResult;
       })
       .catch(() => {});
-  };
-  const delKnowledge = (index: number, item: any, onSuccess?: () => void) => {
-    cardList.value[index].isMore = false;
-    moreIndex.value = -1;
-    return delKnowledgeDetails(item.id)
-      .then(async (result: any) => {
-        if (result.success) {
-          MessagePlugin.info(t('knowledgeBase.deleteSuccess'));
-          if (onSuccess) {
-            onSuccess();
-          } else {
-            // 后端已将单条删除放入异步队列，立即拉列表仍可能包含待删项；
-            // 短轮询直到列表与后端一致或超时。
-            const maxPolls = 30;
-            const delayMs = 400;
-            for (let i = 0; i < maxPolls; i++) {
-              await getKnowled();
-              const stillPresent = (cardList.value || []).some((c: any) => c.id === item.id);
-              if (!stillPresent) break;
-              await new Promise<void>((r) => setTimeout(r, delayMs));
-            }
-          }
-          return true;
-        } else {
-          MessagePlugin.error(t('knowledgeBase.deleteFailed'));
-          return false;
-        }
-      })
-      .catch(() => {
-        MessagePlugin.error(t('knowledgeBase.deleteFailed'));
-        return false;
-      });
   };
   const openMore = (index: number) => {
     moreIndex.value = index;
@@ -261,7 +228,6 @@ export default function (knowledgeBaseId?: string) {
     moreIndex,
     getKnowled,
     details,
-    delKnowledge,
     openMore,
     onVisibleChange,
     requestMethod,

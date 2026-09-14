@@ -163,6 +163,15 @@ func (r *sessionRepository) QueryPaged(
 		if q.UserID != "" {
 			db = db.Where("(s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')", q.UserID)
 		}
+		// Skill image maintenance runs in a real session so its transcript can
+		// be read back, but it is not a conversation. Excluding it here rather
+		// than in applySource is deliberate: a source branch only covers its
+		// own bucket, and this row must be absent from all of them, including
+		// the unfiltered listing.
+		db = db.Where(
+			"(s.description IS NULL OR s.description NOT LIKE ?)",
+			types.SkillMaintenanceSessionMarker+"%",
+		)
 		if kw := strings.TrimSpace(q.Keyword); kw != "" {
 			db = db.Where(titleLikeExpr, "%"+escapeLikeKeyword(kw)+"%")
 		}

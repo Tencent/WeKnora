@@ -1,0 +1,268 @@
+name: Build & Publish (dsh-weknora)
+
+# Build, test, and publish the DeepSeek Harness plugin (packages/dsh-weknora/) to npm.
+#
+# Three jobs:
+#   test      typecheck, unit tests, both halves of the contract, and a
+#             packaging check
+#   e2e       install the package into a throwaway dsh profile and drive real
+#             tool calls through the harness agent loop against a mock backend
+#   publish   on a `dsh-weknora-v*` tag only, publish to npm with provenance
+#
+# The e2e job pins the harness version so a plugin change is the only thing that
+# can turn it red. The weekly drift job runs the same check against dsh@latest and
+# is allowed to fail: it exists to notice a harness breaking change early, since
+# dsh is in developer preview.
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "dsh-weknora-v*"
+    paths:
+      - "packages/dsh-weknora/**"
+      - ".github/workflows/dsh-plugin.yml"
+  pull_request:
+    paths:
+      - "packages/dsh-weknora/**"
+      - ".github/workflows/dsh-plugin.yml"
+  schedule:
+    # Monday 03:00 UTC: catch a harness release that breaks the plugin.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The harness release this plugin is verified against. Bump it together with
+  # the compatibility note in packages/dsh-weknora/README.md.
+  DSH_PINNED_SPEC: "@deepseek-ai/dsh@0.1.0-rc.8"
+  # The contract's Go half lives in this repository's module. app.yml runs it
+  # only for a Go diff, so a change to the fixture or to the plugin alone would
+  # otherwise skip the side that checks WeKnora still serves those calls.
+  GO_VERSION: "1.26"
+  # `dsh plugin add` shells out to pnpm to install into the profile, and the
+  # runner image ships only npm and yarn. The profile it writes carries its
+  # settings in pnpm-workspace.yaml, which pnpm 10 is the first to read.
+  PNPM_VERSION: "10"
+
+jobs:
+  test:
+    name: Typecheck, test, pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/dsh-weknora
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/dsh-weknora/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit and contract tests
+        run: node --test "test/*.test.mjs"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Contract tests against WeKnora's Go types
+        working-directory: ${{ github.workspace }}
+        run: go test ./packages/dsh-weknora/contract/...
+
+      - name: Pack and verify the published file list
+        run: |
+          set -e
+          npm pack --dry-run --json > pack.json
+          node -e "
+            const files = require('./pack.json')[0].files.map(f => f.path);
+            const required = ['dist/index.js', 'dist/index.d.ts', 'cordis.patch.yml', 'README.md', 'package.json'];
+            const missing = required.filter(name => !files.includes(name));
+            if (missing.length > 0) {
+              console.error('missing from the tarball: ' + missing.join(', '));
+              process.exit(1);
+            }
+            const leaked = files.filter(name => name.startsWith('test/') || name.startsWith('src/'));
+            if (leaked.length > 0) {
+              console.error('unexpected files in the tarball: ' + leaked.join(', '));
+              process.exit(1);
+            }
+            console.log('tarball contents verified: ' + files.length + ' files');
+          "
+          rm pack.json
+
+  e2e:
+    name: End-to-end inside dsh (pinned)
+    runs-on: ubuntu-latest
+    # Cold cache: npm install @deepseek-ai/dsh takes ~15 min; keep headroom.
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: packages/dsh-weknora
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/dsh-weknora/package-lock.json
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      # The e2e script installs @deepseek-ai/dsh on first run (~15 min uncached).
+      # Reuse the install across workflow runs; bump DSH_PINNED_SPEC to refresh.
+      - name: Cache pinned dsh install
+        uses: actions/cache@v4
+        with:
+          path: .cache/dsh-e2e-install
+          key: dsh-e2e-${{ env.DSH_PINNED_SPEC }}
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Run the plugin inside a real dsh profile
+        env:
+          DSH_PACKAGE_SPEC: ${{ env.DSH_PINNED_SPEC }}
+          DSH_INSTALL_DIR: ${{ github.workspace }}/.cache/dsh-e2e-install
+          DSH_E2E_LOG: ${{ runner.temp }}/dsh-weknora-e2e.log
+        run: node test/e2e/run-in-dsh.mjs
+
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-weknora-e2e-transcript
+          path: ${{ runner.temp }}/dsh-weknora-e2e.log
+          if-no-files-found: ignore
+
+  drift:
+    name: End-to-end inside dsh (latest, advisory)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: packages/dsh-weknora
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: packages/dsh-weknora/package-lock.json
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Week id for dsh@latest cache
+        id: week
+        run: echo "id=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      # dsh@latest moves; refresh the cache weekly.
+      - name: Cache latest dsh install
+        uses: actions/cache@v4
+        with:
+          path: .cache/dsh-e2e-install-latest
+          key: dsh-e2e-latest-${{ steps.week.outputs.id }}
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Run against the latest harness release
+        env:
+          DSH_PACKAGE_SPEC: "@deepseek-ai/dsh@latest"
+          DSH_INSTALL_DIR: ${{ github.workspace }}/.cache/dsh-e2e-install-latest
+        run: node test/e2e/run-in-dsh.mjs
+
+  publish:
+    name: Publish to npm
+    needs: [test, e2e]
+    if: startsWith(github.ref, 'refs/tags/dsh-weknora-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/@wxg-prc-cpg/dsh-weknora
+    defaults:
+      run:
+        working-directory: packages/dsh-weknora
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: packages/dsh-weknora/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Check the tag names the packaged version
+        run: |
+          set -e
+          version="$(node -p "require('./package.json').version")"
+          expected="dsh-weknora-v${version}"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not name the packaged version $version (expected $expected)."
+            echo "::error::Bump packages/dsh-weknora/package.json, or retag — publishing here would ship a version the tag does not name."
+            exit 1
+          fi
+
+      - name: Check whether this version is already published
+        id: check_npm
+        run: |
+          set -e
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          echo "packaged: $name@$version"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::$name $version is already on npm; skipping publish. Bump package.json to release."
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish
+        if: steps.check_npm.outputs.should_publish == 'true'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -13,13 +13,13 @@ import { providerLogo } from '@/views/settings/providerLogos'
 // Vendors we ship a logo for (Docker) win over the generic TDesign glyphs.
 const props = withDefaults(defineProps<{
   type: string
-  size?: 'sm' | 'md'
+  size?: 'xs' | 'sm' | 'md'
 }>(), { size: 'md' })
 
 const logo = computed(() => providerLogo('sandbox', props.type))
 
 const iconName = computed(() => {
-  if (props.type === 'cube' || props.type === 'local') return 'server'
+  if (props.type === 'cube') return 'server'
   if (props.type === 'disabled') return 'minus-circle'
   return 'cloud'
 })
@@ -59,6 +59,13 @@ const badgeStyle = computed((): Record<string, string> => (
   font-size: 14px;
 }
 
+.sandbox-badge--xs {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
 .sandbox-badge--e2b {
   background: rgba(98, 53, 187, 0.1);
   color: #6235bb;
@@ -67,11 +74,6 @@ const badgeStyle = computed((): Record<string, string> => (
 .sandbox-badge--docker {
   background: rgba(29, 99, 237, 0.1);
   color: #1d63ed;
-}
-
-.sandbox-badge--local {
-  background: rgba(17, 128, 83, 0.1);
-  color: #118053;
 }
 
 .sandbox-badge--mono::before {
@@ -95,5 +97,10 @@ const badgeStyle = computed((): Record<string, string> => (
 .sandbox-badge--sm.sandbox-badge--mono::before {
   width: 16px;
   height: 16px;
+}
+
+.sandbox-badge--xs.sandbox-badge--mono::before {
+  width: 10px;
+  height: 10px;
 }
 </style>

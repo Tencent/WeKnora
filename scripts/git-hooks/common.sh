@@ -133,11 +133,16 @@ check_gofmt_files() {
 
 collect_go_packages_from_files() {
   local -a files=("$@")
-  local f dir pkg
+  local f dir pkg module root_module
   local -a pkgs=()
+  # Nested modules (docs/poc, cli, client) are not testable from the root
+  # module, so only keep packages that belong to it.
+  root_module="$(cd "$ROOT" && go list -m 2>/dev/null || true)"
   for f in "${files[@]}"; do
     [[ "$f" == *.go ]] || continue
     dir="$(dirname "$f")"
+    module="$(cd "$ROOT/$dir" && go list -m 2>/dev/null)" || continue
+    [[ "$module" == "$root_module" ]] || continue
     pkg="$(cd "$ROOT/$dir" && go list . 2>/dev/null)" || continue
     pkgs+=("$pkg")
   done

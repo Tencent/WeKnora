@@ -2,15 +2,18 @@ package session
 
 import (
 	stderrors "errors"
-	"io"
 	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -69,14 +72,11 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 		return
 	}
 
-	// Strip the storage URL before serialising to the client; the URL is a
-	// server-side implementation detail (provider:// path) that must never
-	// escape the process. The client references artifacts by index in the
-	// download URL instead.
 	items := make([]artifactListItem, 0, len(artifacts))
 	for i, a := range artifacts {
 		items = append(items, artifactListItem{
 			Index:      i,
+			Handle:     artifactHandle(a),
 			FileName:   a.FileName,
 			FileType:   a.FileType,
 			FileSize:   a.FileSize,
@@ -128,6 +128,7 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 	for i, a := range msg.Artifacts {
 		items = append(items, artifactListItem{
 			Index:      i,
+			Handle:     artifactHandle(a),
 			FileName:   a.FileName,
 			FileType:   a.FileType,
 			FileSize:   a.FileSize,
@@ -182,12 +183,12 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 		return
 	}
 	if index >= len(msg.Artifacts) {
-		c.Error(errors.NewNotFoundError("artifact index out of range"))
+		_ = c.Error(errors.NewNotFoundError("artifact index out of range"))
 		return
 	}
 	artifact := msg.Artifacts[index]
 	if artifact.URL == "" {
-		c.Error(errors.NewNotFoundError("artifact storage path missing"))
+		_ = c.Error(errors.NewNotFoundError("artifact storage path missing"))
 		return
 	}
 
@@ -195,36 +196,78 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("file service unavailable"))
 		return
 	}
-	reader, err := h.fileService.GetFile(ctx, artifact.URL)
+	file, err := access.ResolveMessageArtifact(ctx, msg, index, h.agentShareService, h.resourceCatalog,
+		access.MessageKBShareAuthorizer{ShareGuard: h.kbShareService, KBs: h.knowledgebaseService})
+	if err != nil {
+		_ = c.Error(errors.NewNotFoundError("artifact not accessible"))
+		return
+	}
+	ctx = types.WithExecutionTenant(ctx, file.OwnerTenantID)
+	fileService := h.fileService
+	if h.tenantService != nil {
+		tenant, lookupErr := h.tenantService.GetTenantByID(ctx, file.OwnerTenantID)
+		if lookupErr != nil || tenant == nil {
+			_ = c.Error(errors.NewNotFoundError("artifact workspace unavailable"))
+			return
+		}
+		backendID, providerPath, scoped := types.ParseStorageBackendPath(file.Path)
+		if !scoped {
+			providerPath = file.Path
+		}
+		if file.StorageBackendID != "" {
+			backendID = file.StorageBackendID
+		}
+		var ok bool
+		fileService, _, ok = filesvc.ResolveTenantFileServiceWithFallback(
+			ctx,
+			"artifact download",
+			tenant,
+			backendID,
+			types.ParseProviderScheme(providerPath),
+			storageurl.LocalStorageBaseDir(),
+			h.storageResolver,
+			h.fileService,
+		)
+		if !ok {
+			_ = c.Error(errors.NewNotFoundError("artifact storage unavailable"))
+			return
+		}
+	}
+	reader, err := fileService.GetFile(ctx, file.Path)
 	if err != nil {
 		logger.Warnf(ctx, "artifact download read failed: session=%s message=%s idx=%d err=%v",
 			sessionID, messageID, index, err)
-		c.Error(errors.NewNotFoundError("artifact blob missing"))
+		_ = c.Error(errors.NewNotFoundError("artifact blob missing"))
 		return
 	}
-	defer reader.Close()
-
-	// Force download semantics — artifacts are never rendered inline, matching
-	// the /files endpoint's active-content protection.
-	c.Header("Content-Type", mimeTypeFor(artifact.FileName))
-	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", buildAttachmentHeader(artifact.FileName))
-	if artifact.FileSize > 0 {
-		c.Header("Content-Length", strconv.FormatInt(artifact.FileSize, 10))
-	}
-	c.Status(http.StatusOK)
-	if _, err := io.Copy(c.Writer, reader); err != nil {
-		logger.Warnf(ctx, "artifact download stream failed: session=%s message=%s idx=%d err=%v",
-			sessionID, messageID, index, err)
+	if err := filetransport.Serve(c.Writer, c.Request, reader, filetransport.Options{
+		Filename: artifact.FileName, Download: true, ContentType: mimeTypeFor(artifact.FileName),
+		Disposition:  buildAttachmentHeader(artifact.FileName),
+		Size:         artifact.FileSize,
+		CacheControl: "private, no-store",
+	}); err != nil {
+		logger.Warnf(
+			ctx,
+			"artifact download stream failed: session=%s message=%s idx=%d err=%v",
+			sessionID,
+			messageID,
+			index,
+			err,
+		)
 	}
 }
 
 // artifactListItem is the JSON shape returned by ListSessionArtifacts /
-// ListMessageArtifacts. It intentionally omits the URL: clients reference
-// each artifact through its position in the parent message's Artifacts
-// array so the storage path never leaves the server.
+// ListMessageArtifacts. It carries the resource handle but never the storage
+// path: the handle is the artifact's public identity — it is what the answer
+// body references and what an authorizing proxy resolves — while the physical
+// bucket/key stays server side.
 type artifactListItem struct {
-	Index      int    `json:"index"`
+	Index int `json:"index"`
+	// Handle is the artifact's `resource://<handle>` reference, matching the
+	// destinations in the message body. Empty when the deployment runs without
+	// a resource catalog, in which case the body references files by name.
+	Handle     string `json:"handle,omitempty"`
 	FileName   string `json:"file_name"`
 	FileType   string `json:"file_type"`
 	FileSize   int64  `json:"file_size"`
@@ -304,7 +347,11 @@ func (urlPathEscaper) escape(s string) string {
 	return b.String()
 }
 
-// ensureAssistantOwnsArtifact is a small helper reserved for future
-// authorisation refinements (per-message role checks). It is unused today
-// but kept close to the handlers so future changes stay obvious.
-var _ = types.MessageArtifact{}
+// artifactHandle returns the artifact's `resource://<handle>` reference, or ""
+// when the deployment stores artifacts without a resource catalog.
+func artifactHandle(artifact types.MessageArtifact) string {
+	if handle, ok := types.ParseResourcePath(artifact.URL); ok {
+		return types.BuildResourcePath(handle)
+	}
+	return ""
+}

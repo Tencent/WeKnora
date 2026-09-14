@@ -1,0 +1,81 @@
+name: Anydoc
+
+# Compiles the vendored Rust archive, audits it, and exercises the `anydoc`
+# build tag. That is minutes of rustc + cargo-audit, so this workflow stays
+# off PRs that only touch migrations, frontend, CLI, or unrelated Go packages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "third_party/anydoc-go/**"
+      - "scripts/build-anydoc-lib.sh"
+      - "internal/infrastructure/docparser/**"
+      - ".github/workflows/anydoc.yml"
+  pull_request:
+    paths:
+      - "third_party/anydoc-go/**"
+      - "scripts/build-anydoc-lib.sh"
+      - "internal/infrastructure/docparser/**"
+      - ".github/workflows/anydoc.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  GOPROXY: https://proxy.golang.org,direct
+
+jobs:
+  anydoc:
+    name: anydoc parser engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}
+
+      - name: Install cargo-audit
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked
+
+      # The archive is a build artifact, not a committed blob, so CI is what
+      # keeps the vendored bindings in third_party/anydoc-go compiling.
+      # This also materializes patched-anydoc/ (gitignored); cargo audit below
+      # cannot load the crates-io patch until that tree exists.
+      - name: Build the anydoc static archive
+        run: ./scripts/build-anydoc-lib.sh
+
+      # The vendored bindings pull anydoc and its PDF stack from crates.io, and
+      # WeKnora parses untrusted uploads in-process. A Rust advisory there (as
+      # in RUSTSEC-2026-0187, an uncatchable abort on a hostile PDF) has to
+      # break the build, not wait for someone to notice. Vulnerabilities fail
+      # the job; unmaintained-crate warnings only report, since a transitive
+      # crate going unmaintained is not something this repo can act on.
+      - name: Audit the vendored dependency tree
+        working-directory: third_party/anydoc-go
+        run: cargo audit
+
+      - name: Vet, test, and build with the engine linked in
+        run: |
+          go vet -tags anydoc ./internal/infrastructure/docparser/...
+          go test -tags anydoc -count=1 ./internal/infrastructure/docparser/...
+          go build -tags anydoc ./cmd/server

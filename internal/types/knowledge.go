@@ -136,6 +136,9 @@ type Knowledge struct {
 	Title string `json:"title"`
 	// Description of the knowledge
 	Description string `json:"description"`
+	// DescriptionSpecified distinguishes an explicitly supplied empty description
+	// from an omitted field in partial update requests.
+	DescriptionSpecified bool `json:"-" gorm:"-"`
 	// Source of the knowledge (e.g. URL address for url type, "manual" for manual type)
 	Source string `json:"source"             gorm:"type:varchar(2048)"`
 	// Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)
@@ -332,6 +335,9 @@ func (k *Knowledge) ManualMetadata() (*ManualKnowledgeMetadata, error) {
 	return &metadata, nil
 }
 
+// KnowledgeTransferMetadataKey is reserved for server-owned transfer recovery state.
+const KnowledgeTransferMetadataKey = "_knowledge_transfer"
+
 // SetManualMetadata sets manual knowledge metadata onto the knowledge instance.
 func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	if meta == nil {
@@ -341,6 +347,23 @@ func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	jsonValue, err := meta.ToJSON()
 	if err != nil {
 		return err
+	}
+	// Manual processing may finish before the move worker acknowledges its
+	// task. Preserve the recovery marker when updating manual content/status.
+	old, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if state, ok := old[KnowledgeTransferMetadataKey]; ok {
+		fields, err := jsonValue.Map()
+		if err != nil {
+			return err
+		}
+		fields[KnowledgeTransferMetadataKey] = state
+		jsonValue, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
 	}
 	k.Metadata = jsonValue
 	return nil

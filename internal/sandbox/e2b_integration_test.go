@@ -210,7 +210,6 @@ func e2bIntegrationConfig(t *testing.T) *Config {
 
 	cfg := DefaultConfig()
 	cfg.Type = SandboxTypeE2B
-	cfg.FallbackEnabled = false
 	cfg.E2BAPIKey = apiKey
 	cfg.E2BAPIURL = strings.TrimSpace(os.Getenv("E2B_INTEGRATION_API_URL"))
 	cfg.E2BSandboxDomain = strings.TrimSpace(os.Getenv("E2B_INTEGRATION_SANDBOX_DOMAIN"))

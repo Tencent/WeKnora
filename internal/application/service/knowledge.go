@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -592,7 +593,18 @@ func (s *knowledgeService) MoveKnowledgeToFolder(ctx context.Context,
 	if err != nil {
 		return 0, err
 	}
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	rows, err := loadKnowledgeWriteBatch(ctx, s.repo, s.kbService, ids)
+	if err != nil {
+		return 0, err
+	}
+	ids = make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row.KnowledgeBaseID != kbID {
+			return 0, werrors.NewForbiddenError("knowledge outside target KB")
+		}
+		ids = append(ids, row.ID)
+	}
+	tenantID := rows[0].TenantID
 	affected, err := s.repo.UpdateKnowledgeFolderPath(ctx, tenantID, kbID, ids, normalized)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to move knowledge to folder %q: %v", normalized, err)
@@ -627,7 +639,18 @@ func (s *knowledgeService) RenameKnowledgeFolder(ctx context.Context,
 		return 0, werrors.NewBadRequestError("不能将文件夹移动到它自己的子目录下")
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
+	if err != nil {
+		return 0, err
+	}
+	if kb == nil || kb.ID != kbID {
+		return 0, werrors.NewNotFoundError("knowledge base not found")
+	}
+	ctx, err = requireKBWrite(ctx, kb)
+	if err != nil {
+		return 0, err
+	}
+	tenantID := kb.TenantID
 	affected, err := s.repo.RenameKnowledgeFolderPath(ctx, tenantID, kbID, source, target)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to rename folder %q to %q: %v", source, target, err)
@@ -689,7 +712,10 @@ func (s *knowledgeService) GetKnowledgeFile(ctx context.Context, id string) (io.
 }
 
 func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error {
-	record, err := s.repo.GetKnowledgeByID(ctx, ctx.Value(types.TenantIDContextKey).(uint64), knowledge.ID)
+	if knowledge == nil {
+		return werrors.NewBadRequestError("knowledge cannot be nil")
+	}
+	record, _, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledge.ID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge record: %v", err)
 		return err
@@ -698,7 +724,14 @@ func (s *knowledgeService) UpdateKnowledge(ctx context.Context, knowledge *types
 	if knowledge.Title != "" {
 		record.Title = knowledge.Title
 	}
-	if knowledge.Description != "" {
+	if knowledge.DescriptionSpecified {
+		record.Description = knowledge.Description
+		if record.Description != "" {
+			record.SummaryStatus = types.SummaryStatusCompleted
+		} else {
+			record.SummaryStatus = types.SummaryStatusNone
+		}
+	} else if knowledge.Description != "" {
 		record.Description = knowledge.Description
 	}
 	metadataChanged := false
@@ -762,48 +795,48 @@ func (s *knowledgeService) GetKnowledgeBatchWithSharedAccess(ctx context.Context
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	ownList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
+	permissions := kbReadPermissions(ctx, s.kbShareService)
+	rows, err := s.repo.GetKnowledgeBatch(ctx, tenantID, ids)
 	if err != nil {
 		return nil, err
 	}
+	ownList := make([]*types.Knowledge, 0, len(rows))
 	foundSet := make(map[string]bool)
-	for _, k := range ownList {
+	appendAllowed := func(k *types.Knowledge) {
+		if k == nil || foundSet[k.ID] {
+			return
+		}
+		allowed, err := permissions.Check(k.KnowledgeBaseID, k.TenantID, types.OrgRoleViewer)
+		if err == nil && allowed {
+			ownList = append(ownList, k)
+			foundSet[k.ID] = true
+		}
+	}
+	for _, k := range rows {
+		appendAllowed(k)
 		if k != nil {
 			foundSet[k.ID] = true
 		}
 	}
-	userIDVal := ctx.Value(types.UserIDContextKey)
-	if userIDVal == nil {
-		return ownList, nil
-	}
-	userID, ok := userIDVal.(string)
-	if !ok || userID == "" {
-		return ownList, nil
-	}
-	// Plan 3: shared-KB permission is keyed on (tenant, tenant_role)
-	// rather than user. callerTenantRole drives the 3-D cap.
-	callerTenantRole := types.TenantRoleFromContext(ctx)
 	for _, id := range ids {
 		if foundSet[id] {
 			continue
 		}
 		k, err := s.repo.GetKnowledgeByIDOnly(ctx, id)
-		if err != nil || k == nil || k.KnowledgeBaseID == "" {
-			continue
+		if err != nil && !errors.Is(err, repository.ErrKnowledgeNotFound) {
+			return nil, err
 		}
-		hasPermission, err := s.kbShareService.HasTenantKBPermission(ctx, k.KnowledgeBaseID, tenantID, callerTenantRole, types.OrgRoleViewer)
-		if err != nil || !hasPermission {
-			continue
+		if err == nil {
+			appendAllowed(k)
 		}
-		foundSet[k.ID] = true
-		ownList = append(ownList, k)
+		foundSet[id] = true
 	}
 	return ownList, nil
 }
 
 // SetKnowledgeTags replaces all tags for a single knowledge entry.
 func (s *knowledgeService) SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error {
-	return s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs)
+	return s.UpdateKnowledgeTag(ctx, knowledgeID, tagIDs)
 }
 
 // ListKnowledgeIDsByTagIDs returns document knowledge IDs carrying any of the
@@ -902,11 +935,11 @@ func (s *knowledgeService) GetKnowledgeTags(ctx context.Context, knowledgeIDs []
 
 // UpdateKnowledgeTag updates the tags assigned to a knowledge document.
 func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID string, tagIDs []string) error {
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	knowledge, _, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
 	if err != nil {
 		return err
 	}
+	tenantID := knowledge.TenantID
 
 	// Validate all tag IDs
 	if err := s.validateKnowledgeTagIDs(ctx, tenantID, knowledge.KnowledgeBaseID, tagIDs); err != nil {
@@ -918,29 +951,25 @@ func (s *knowledgeService) UpdateKnowledgeTag(ctx context.Context, knowledgeID s
 
 // UpdateKnowledgeTagBatch updates tags for document knowledge items in batch.
 // authorizedKBID restricts all updates to knowledge items belonging to this KB;
-// pass empty string to skip the check (caller must ensure authorization by other means).
-func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authorizedKBID string, updates map[string][]string) error {
+// an empty value allows multiple KBs only when every KB has an explicit write grant.
+func (s *knowledgeService) UpdateKnowledgeTagBatch(
+	ctx context.Context,
+	authorizedKBID string,
+	updates map[string][]string,
+) error {
 	if len(updates) == 0 {
 		return nil
 	}
-	tenantIDVal := ctx.Value(types.TenantIDContextKey)
-	if tenantIDVal == nil {
-		return werrors.NewUnauthorizedError("workspace ID not found in context")
-	}
-	tenantID, ok := tenantIDVal.(uint64)
-	if !ok {
-		return werrors.NewUnauthorizedError("invalid workspace ID in context")
-	}
-
-	// Get all knowledge items in batch
 	knowledgeIDs := make([]string, 0, len(updates))
-	for knowledgeID := range updates {
-		knowledgeIDs = append(knowledgeIDs, knowledgeID)
+	for id := range updates {
+		knowledgeIDs = append(knowledgeIDs, id)
 	}
-	knowledgeList, err := s.repo.GetKnowledgeBatch(ctx, tenantID, knowledgeIDs)
+	sort.Strings(knowledgeIDs)
+	knowledgeList, err := loadKnowledgeWriteBatch(ctx, s.repo, s.kbService, knowledgeIDs)
 	if err != nil {
 		return err
 	}
+	tenantID := knowledgeList[0].TenantID
 
 	// Validate all requested IDs were found and belong to the authorized KB
 	if authorizedKBID != "" {
@@ -995,15 +1024,15 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 			if !ok {
 				return werrors.NewBadRequestError(fmt.Sprintf("标签 %s 不存在", tagID))
 			}
-			if tag.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+			if tag.TenantID != tenantID || tag.KnowledgeBaseID != knowledge.KnowledgeBaseID {
 				return werrors.NewBadRequestError(fmt.Sprintf("标签 %s 不属于知识库 %s", tagID, knowledge.KnowledgeBaseID))
 			}
 		}
 	}
 
 	// Set tags for each knowledge
-	for knowledgeID, tagIDs := range updates {
-		if err := s.repo.SetKnowledgeTags(ctx, knowledgeID, tagIDs); err != nil {
+	for _, knowledgeID := range knowledgeIDs {
+		if err := s.repo.SetKnowledgeTags(ctx, knowledgeID, updates[knowledgeID]); err != nil {
 			return err
 		}
 	}
@@ -1014,10 +1043,12 @@ func (s *knowledgeService) UpdateKnowledgeTagBatch(ctx context.Context, authoriz
 // SearchKnowledge searches knowledge items by keyword across the tenant and shared knowledge bases.
 // fileTypes: optional list of file extensions to filter by (e.g., ["csv", "xlsx"])
 func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, offset, limit int, fileTypes []string) ([]*types.Knowledge, bool, int64, error) {
-	tenantID, ok := ctx.Value(types.TenantIDContextKey).(uint64)
-	if !ok {
+	caller := types.CallerFromContext(ctx)
+	tenantID := caller.TenantID
+	if tenantID == 0 {
 		return nil, false, 0, werrors.NewUnauthorizedError("Workspace ID not found in context")
 	}
+	ctx = types.WithExecutionTenant(ctx, tenantID)
 
 	scopes := make([]types.KnowledgeSearchScope, 0)
 
@@ -1034,9 +1065,9 @@ func (s *knowledgeService) SearchKnowledge(ctx context.Context, keyword string, 
 	// Shared knowledge bases (document type only). Plan 3 of #1303 keys
 	// the share lookup on (tenantID, callerTenantRole); userID is no
 	// longer load-bearing for org-share access.
-	if userIDVal := ctx.Value(types.UserIDContextKey); userIDVal != nil {
-		if userID, ok := userIDVal.(string); ok && userID != "" {
-			callerTenantRole := types.TenantRoleFromContext(ctx)
+	if s.kbShareService != nil {
+		if caller.UserID != "" {
+			callerTenantRole := caller.Role
 			sharedList, err := s.kbShareService.ListSharedKnowledgeBases(ctx, tenantID, callerTenantRole)
 			if err == nil {
 				for _, info := range sharedList {

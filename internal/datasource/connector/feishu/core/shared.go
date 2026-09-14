@@ -290,11 +290,13 @@ type DocxFetchInput struct {
 	// WeKnora external_id: wiki=node.NodeToken, drive=file.Token
 	DocToken string
 	// Feishu docx document token
-	ObjToken          string
-	Title             string
-	URL               string
-	ResourceID        string
-	EditTime          time.Time
+	ObjToken   string
+	Title      string
+	URL        string
+	ResourceID string
+	EditTime   time.Time
+	// CreateTime is the document creation time in Feishu; zero when unknown.
+	CreateTime        time.Time
 	BaseMeta          map[string]string
 	MultimodalEnabled bool
 }
@@ -364,6 +366,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		FileName:         SanitizeFileName(in.Title) + ".md",
 		URL:              in.URL,
 		UpdatedAt:        in.EditTime,
+		CreatedAt:        in.CreateTime,
 		SourceResourceID: in.ResourceID,
 		Metadata:         in.BaseMeta,
 		ReplacesSubtree:  true, // sweep stale attachment sub-items on re-sync
@@ -414,6 +417,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			FileName:         SanitizeFileName(a.Name),
 			URL:              in.URL,
 			UpdatedAt:        in.EditTime,
+			CreatedAt:        in.CreateTime,
 			SourceResourceID: in.ResourceID,
 			Metadata:         childMeta(),
 		})
@@ -463,6 +467,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			FileName:         "image-" + b.Image.Token + ext,
 			URL:              in.URL,
 			UpdatedAt:        in.EditTime,
+			CreatedAt:        in.CreateTime,
 			SourceResourceID: in.ResourceID,
 			Metadata:         imgMeta(),
 		})
@@ -496,6 +501,7 @@ func exportDocxFallback(ctx context.Context, client *Client, in DocxFetchInput) 
 		FileName:         fileName,
 		URL:              in.URL,
 		UpdatedAt:        in.EditTime,
+		CreatedAt:        in.CreateTime,
 		SourceResourceID: in.ResourceID,
 		Metadata:         in.BaseMeta,
 	}, nil

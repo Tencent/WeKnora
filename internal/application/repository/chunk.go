@@ -42,6 +42,7 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
+		chunk.ContextHeader = common.CleanInvalidUTF8(chunk.ContextHeader)
 		if chunk.SourceContent == "" {
 			chunk.SourceContent = chunk.Content
 		}
@@ -152,6 +153,26 @@ func (r *chunkRepository) ListChunksByKnowledgeID(
 	var chunks []*types.Chunk
 	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_id = ? and chunk_type = ?", tenantID, knowledgeID, "text").
+		Order("chunk_index ASC").
+		Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
+// ListChunksByKnowledgeIDAndTypes lists a knowledge's chunks restricted to the
+// given chunk types. ListChunksByKnowledgeID is text-only by design, so callers
+// that also need summary / parent_text / image chunks come through here rather
+// than widening that query underneath its existing callers.
+func (r *chunkRepository) ListChunksByKnowledgeIDAndTypes(
+	ctx context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	if len(chunkTypes) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN ?", tenantID, knowledgeID, chunkTypes).
 		Order("chunk_index ASC").
 		Find(&chunks).Error; err != nil {
 		return nil, err
@@ -554,7 +575,7 @@ func (r *chunkRepository) DeleteByKnowledgeList(ctx context.Context, tenantID ui
 func (r *chunkRepository) MoveChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string, targetKBID string) error {
 	return r.db.WithContext(ctx).Model(&types.Chunk{}).
 		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
-		Update("knowledge_base_id", targetKBID).Error
+		Updates(map[string]any{"knowledge_base_id": targetKBID, "tag_id": ""}).Error
 }
 
 // DeleteChunksByTagID deletes all chunks with the specified tag ID
@@ -932,30 +953,22 @@ func (r *chunkRepository) UpdateChunkFieldsByTagID(
 	newTagID *string,
 	excludeIDs []string,
 ) ([]string, error) {
-	// First, get the IDs of chunks that will be affected (for is_enabled sync)
+	if isEnabled == nil && setFlags == 0 && clearFlags == 0 && newTagID == nil {
+		return nil, nil
+	}
+	// Return every affected entry, including tag-only and flag-only changes.
+	// Callers use these IDs for index synchronization and subsequent patches.
 	var affectedIDs []string
-	if isEnabled != nil {
-		var chunks []*types.Chunk
-		query := r.db.WithContext(ctx).
-			Select("id").
-			Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?",
-				tenantID, kbID, types.ChunkTypeFAQ)
-		if tagID != "" {
-			query = query.Where("tag_id = ?", tagID)
-		}
-
-		if len(excludeIDs) > 0 {
-			query = query.Where("id NOT IN ?", excludeIDs)
-		}
-
-		// Only get chunks that need to change
-		query = query.Where("is_enabled != ?", *isEnabled)
-		if err := query.Find(&chunks).Error; err != nil {
-			return nil, err
-		}
-		for _, c := range chunks {
-			affectedIDs = append(affectedIDs, c.ID)
-		}
+	selection := r.db.WithContext(ctx).Model(&types.Chunk{}).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND chunk_type = ?", tenantID, kbID, types.ChunkTypeFAQ)
+	if tagID != "" {
+		selection = selection.Where("tag_id = ?", tagID)
+	}
+	if len(excludeIDs) > 0 {
+		selection = selection.Where("id NOT IN ?", excludeIDs)
+	}
+	if err := selection.Pluck("id", &affectedIDs).Error; err != nil {
+		return nil, err
 	}
 
 	// Build update query
@@ -1287,4 +1300,18 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	}
 
 	return chunks, nil
+}
+
+func (r *chunkRepository) ListAllChunksByKnowledgeID(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+) ([]*types.Chunk, error) {
+	var chunks []*types.Chunk
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_id = ?", tenantID, knowledgeID).
+		Order("id ASC").
+		Find(&chunks).
+		Error
+	return chunks, err
 }

@@ -111,3 +111,44 @@ func TestFilterSharedAgentWriteToolsCoversAllWikiMutations(t *testing.T) {
 		require.Empty(t, filtered, "wiki mutation tool %q must be filtered for shared agents", definition.Name)
 	}
 }
+
+func TestSharedAgentInfoLocalizesBuiltinName(t *testing.T) {
+	restore := types.OverrideBuiltinAgentEntriesForTest(map[string]*types.BuiltinAgentEntry{
+		types.BuiltinQuickAnswerID: {
+			ID: types.BuiltinQuickAnswerID,
+			I18n: map[string]types.BuiltinAgentI18n{
+				"default": {Name: "快速问答", Description: "中文 RAG"},
+				"en-US":   {Name: "Quick Answer", Description: "English RAG"},
+			},
+		},
+	})
+	t.Cleanup(restore)
+
+	agent := &types.CustomAgent{
+		ID:          types.BuiltinQuickAnswerID,
+		Name:        "frozen-zh",
+		Description: "frozen-zh-desc",
+		IsBuiltin:   true,
+		TenantID:    1,
+	}
+	svc := &agentShareService{}
+	ctx := context.WithValue(context.Background(), types.LanguageContextKey, "en-US")
+	info := svc.sharedAgentInfo(ctx, &types.AgentShare{
+		Agent:          agent,
+		SourceTenantID: 1,
+	}, types.OrgRoleViewer, map[string]bool{})
+
+	require.Equal(t, "Quick Answer", info.Agent.Name)
+	require.Equal(t, "English RAG", info.Agent.Description)
+}
+
+func TestSharedAgentInfoLeavesCustomAgentName(t *testing.T) {
+	agent := &types.CustomAgent{ID: "custom-1", Name: "Mine", Description: "keep me"}
+	svc := &agentShareService{}
+	info := svc.sharedAgentInfo(context.Background(), &types.AgentShare{
+		Agent:          agent,
+		SourceTenantID: 1,
+	}, types.OrgRoleViewer, map[string]bool{})
+	require.Equal(t, "Mine", info.Agent.Name)
+	require.Equal(t, "keep me", info.Agent.Description)
+}

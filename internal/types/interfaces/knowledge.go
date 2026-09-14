@@ -101,7 +101,8 @@ type KnowledgeService interface {
 	RenameKnowledgeFolder(ctx context.Context, kbID string, from string, to string) (int64, error)
 	// DeleteKnowledge deletes knowledge by ID.
 	DeleteKnowledge(ctx context.Context, id string) error
-	// DeleteKnowledgeList deletes multiple knowledge entries by IDs.
+	// DeleteKnowledgeList requires an explicit write grant for every affected KB.
+	// It validates the complete selection before changing any deletion state.
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
@@ -152,6 +153,7 @@ type KnowledgeService interface {
 		keyword string,
 		searchField string,
 		sortOrder string,
+		isEnabled *bool,
 	) (*types.PageResult, error)
 	// UpsertFAQEntries imports or appends FAQ entries asynchronously.
 	// When DryRun is true, only validates entries without actually importing.
@@ -178,7 +180,7 @@ type KnowledgeService interface {
 	ExportFAQEntriesJSON(ctx context.Context, kbID string) ([]byte, error)
 	// UpdateKnowledgeTagBatch updates tag for document knowledge items in batch.
 	// authorizedKBID restricts all updates to knowledge items belonging to this KB;
-	// pass empty string to skip (caller must ensure authorization by other means).
+	// an empty value still requires an explicit write grant for every affected KB.
 	UpdateKnowledgeTagBatch(ctx context.Context, authorizedKBID string, updates map[string][]string) error
 	// SetKnowledgeTags replaces all tags for a single knowledge entry.
 	SetKnowledgeTags(ctx context.Context, knowledgeID string, tagIDs []string) error
@@ -241,6 +243,10 @@ type KnowledgeRepository interface {
 		tenantID uint64, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 	) ([]*types.Knowledge, int64, error)
 	UpdateKnowledge(ctx context.Context, knowledge *types.Knowledge) error
+	// UpdateKnowledgeForTransfer conditionally persists a transfer checkpoint
+	// and its storage delta in one transaction, without inserting missing rows.
+	UpdateKnowledgeForTransfer(ctx context.Context, before, after *types.Knowledge) error
+
 	// UpdateKnowledgeBatch updates knowledge items in batch
 	UpdateKnowledgeBatch(ctx context.Context, knowledgeList []*types.Knowledge) error
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
@@ -291,7 +297,12 @@ type KnowledgeRepository interface {
 	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
 	// UpdateActiveDeletingKnowledgeColumns updates an active, non-deleted knowledge row
 	// only when it is still in the transient deleting state.
-	UpdateActiveDeletingKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) (bool, error)
+	UpdateActiveDeletingKnowledgeColumns(
+		ctx context.Context,
+		tenantID uint64,
+		kbID, id string,
+		values map[string]interface{},
+	) (bool, error)
 	// FinalizeSubtask atomically decrements pending_subtasks_count for the
 	// given knowledge and promotes parse_status from "finalizing" to
 	// "completed" when the count reaches zero. Returns the post-decrement

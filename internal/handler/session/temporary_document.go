@@ -2,13 +2,12 @@ package session
 
 import (
 	"fmt"
-	"io"
-	"mime"
 	"net/http"
 	"path/filepath"
 	"strings"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -151,25 +150,11 @@ func (h *Handler) PreviewTemporaryDocument(c *gin.Context) {
 		c.Error(apperrors.NewInternalServerError("Failed to retrieve attachment").WithDetails(err.Error()))
 		return
 	}
-	defer file.Close()
-
-	contentType, inline := secutils.SafeContentTypeByFilename(filename)
-	c.Header("Content-Type", contentType)
-	c.Header("X-Content-Type-Options", "nosniff")
-	disposition := "inline"
-	if !inline {
-		disposition = "attachment"
+	if err := filetransport.Serve(c.Writer, c.Request, file, filetransport.Options{
+		Filename: filename, CacheControl: "private, no-store",
+	}); err != nil {
+		logger.Errorf(ctx, "Failed to stream attachment preview: %v", err)
 	}
-	c.Header("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": filename}))
-	c.Header("Cache-Control", "private, max-age=3600")
-
-	c.Stream(func(w io.Writer) bool {
-		if _, err := io.Copy(w, file); err != nil {
-			logger.Errorf(ctx, "Failed to stream attachment preview: %v", err)
-			return false
-		}
-		return false
-	})
 }
 
 func (h *Handler) DeleteTemporaryDocument(c *gin.Context) {

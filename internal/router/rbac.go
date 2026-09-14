@@ -385,6 +385,10 @@ func (a *apiKeyRouteGroup) PUT(rel string, h ...gin.HandlerFunc) gin.IRoutes {
 	return a.handle(http.MethodPut, rel, h...)
 }
 
+func (a *apiKeyRouteGroup) PATCH(rel string, h ...gin.HandlerFunc) gin.IRoutes {
+	return a.handle(http.MethodPatch, rel, h...)
+}
+
 func (a *apiKeyRouteGroup) DELETE(rel string, h ...gin.HandlerFunc) gin.IRoutes {
 	return a.handle(http.MethodDelete, rel, h...)
 }
@@ -542,7 +546,7 @@ func (g *rbacGuards) PathTenantMatch() gin.HandlerFunc {
 // validateAndGetKnowledgeBase helpers that used to be re-implemented
 // in chunk.go, faq.go, tag.go, knowledge.go and knowledgebase.go;
 // the share-fallback logic now lives in exactly one place
-// (middleware/kb_access.go).
+// (application/access/knowledgebase.go).
 
 // KBAccessRead gates a KB-scoped read route on the caller having at
 // least Viewer-level access. The agent-share fallback only activates

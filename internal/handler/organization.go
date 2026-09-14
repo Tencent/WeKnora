@@ -1463,6 +1463,9 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 			Permission: string(s.Permission), MyRoleInOrg: string(myRoleInOrg), MyPermission: string(effectivePerm), CreatedAt: s.CreatedAt,
 		}
 		if s.Agent != nil {
+			// Built-in rows carry display fields frozen in the writer's
+			// language; re-localize for the caller.
+			types.ApplyBuiltinAgentLocalization(ctx, s.Agent)
 			resp.AgentName = s.Agent.Name
 			resp.AgentAvatar = s.Agent.Avatar
 			cfg := &s.Agent.Config

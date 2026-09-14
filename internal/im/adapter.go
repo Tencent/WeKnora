@@ -144,8 +144,9 @@ type Adapter interface {
 }
 
 // StreamSender is an optional interface that adapters can implement to support streaming replies.
-// When an adapter implements StreamSender, the IM service will push answer chunks in real-time
-// instead of waiting for the full answer.
+// In stream output mode the IM service pushes answer chunks in real time. In
+// full output mode it may use the same replaceable message only as a progress
+// placeholder, then replace it once with the completed answer.
 type StreamSender interface {
 	// StartStream initializes a streaming reply session (e.g., creates a streaming card).
 	// Returns a platform-specific stream ID for subsequent chunk/end calls.
@@ -160,6 +161,14 @@ type StreamSender interface {
 
 	// EndStream finalizes a streaming reply.
 	EndStream(ctx context.Context, incoming *IncomingMessage, streamID string) error
+}
+
+// FullOutputProgressSender is an optional capability for adapters whose stream
+// starts with a visible placeholder that can safely be replaced once with the
+// completed answer. Full output never calls UpdateStreamContent.
+type FullOutputProgressSender interface {
+	StreamSender
+	SupportsFullOutputProgress() bool
 }
 
 // FileDownloader is an optional interface that adapters can implement to support

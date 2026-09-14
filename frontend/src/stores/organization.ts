@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type {
   Organization,
   OrganizationMember,
@@ -43,7 +43,12 @@ import {
   reviewJoinRequest as reviewJoinRequestApi,
   requestRoleUpgrade as requestRoleUpgradeApi
 } from '@/api/organization'
+import { getCurrentLanguage } from '@/utils/request'
 import { createVersionedRequestCoordinator } from './versionedRequest'
+import {
+  isLocalizedCacheFresh,
+  shouldForceLocalizedRefetch,
+} from './localizedResourceCache'
 import {
   applyOrganizationResourceDelta,
   upsertById,
@@ -71,6 +76,9 @@ export const useOrganizationStore = defineStore('organization', () => {
   const SEARCHABLE_ORGANIZATION_TTL_MS = 5 * 60_000
   let sharedKbLoadedAt = 0
   let sharedAgentsLoadedAt = 0
+  /** 共享智能体含按请求语言本地化的内置名称；切换 UI 语言后缓存随之失效 */
+  let sharedAgentsLoadedLocale = ''
+  let sharedAgentsInflightLocale = ''
   let searchableOrganizationsQuery = ''
   const searchableOrganizationCache = new Map<
     string,
@@ -491,25 +499,55 @@ export const useOrganizationStore = defineStore('organization', () => {
    * 去重 + 短期缓存。
    */
   const sharedAgentsRequest = createVersionedRequestCoordinator(
-    listSharedAgents,
-    (response) => {
+    async () => {
+      const locale = getCurrentLanguage()
+      sharedAgentsInflightLocale = locale
+      const response = await listSharedAgents()
+      return { response, locale }
+    },
+    ({ response, locale }) => {
       if (response.success && response.data) {
         sharedAgents.value = response.data.filter(s => s.agent != null)
         sharedAgentsLoadedAt = Date.now()
+        sharedAgentsLoadedLocale = locale
       }
     }
   )
 
+  watch(
+    () => getCurrentLanguage(),
+    (locale) => {
+      if (sharedAgentsLoadedLocale && sharedAgentsLoadedLocale !== locale) {
+        sharedAgentsRequest.invalidate()
+        sharedAgentsLoadedAt = 0
+        sharedAgentsLoadedLocale = ''
+        sharedAgentsInflightLocale = ''
+      }
+    },
+  )
+
   async function fetchSharedAgents(options?: { force?: boolean }) {
+    const locale = getCurrentLanguage()
     const force = options?.force ?? false
     if (
       !force &&
-      sharedAgentsLoadedAt > 0 &&
-      Date.now() - sharedAgentsLoadedAt < SHARED_RESOURCE_TTL_MS
+      isLocalizedCacheFresh(
+        sharedAgentsLoadedAt,
+        sharedAgentsLoadedLocale,
+        locale,
+        SHARED_RESOURCE_TTL_MS,
+      )
     ) {
       return sharedAgents.value
     }
-    await sharedAgentsRequest.fetch(force)
+    const mustForce =
+      force ||
+      shouldForceLocalizedRefetch(
+        sharedAgentsRequest.hasInFlightRequest(),
+        sharedAgentsInflightLocale,
+        locale,
+      )
+    await sharedAgentsRequest.fetch(mustForce)
     return sharedAgents.value
   }
 
@@ -542,6 +580,8 @@ export const useOrganizationStore = defineStore('organization', () => {
     if (options.sharedAgents) {
       sharedAgentsRequest.invalidate()
       sharedAgentsLoadedAt = 0
+      sharedAgentsLoadedLocale = ''
+      sharedAgentsInflightLocale = ''
     }
     if (options.searchableOrganizations) {
       invalidateSearchableOrganizations(options.excludeSearchableOrganizationId)
@@ -796,6 +836,8 @@ export const useOrganizationStore = defineStore('organization', () => {
     error.value = null
     sharedKbLoadedAt = 0
     sharedAgentsLoadedAt = 0
+    sharedAgentsLoadedLocale = ''
+    sharedAgentsInflightLocale = ''
     organizationsLoadedAt = 0
     searchableOrganizationsQuery = ''
     searchableOrganizationCache.clear()

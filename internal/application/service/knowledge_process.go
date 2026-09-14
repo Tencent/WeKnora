@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/common"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -31,13 +34,21 @@ func (s *knowledgeService) cloneKnowledge(
 	src *types.Knowledge,
 	targetKB *types.KnowledgeBase,
 ) (err error) {
-	if src.ParseStatus != "completed" {
-		logger.GetLogger(ctx).WithField("knowledge_id", src.ID).Errorf("MoveKnowledge parse status is not completed")
-		return nil
+	sourceKB, err := knowledgeWriteKB(ctx, s.kbService, src)
+	if err != nil {
+		return err
 	}
-	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
+	if err := access.RequireKBTransfer(ctx, sourceKB, targetKB, access.KBTransferClone); err != nil {
+		return err
+	}
+	if src.ParseStatus != types.ParseStatusCompleted {
+		return fmt.Errorf("source knowledge %s is not completed", src.ID)
+	}
+	if _, err := s.transferChunks(ctx, src, sourceKB.ID); err != nil {
+		return err
+	}
 	dst := &types.Knowledge{
-		ID:               uuid.New().String(),
+		ID:               uuid.NewString(),
 		TenantID:         targetKB.TenantID,
 		KnowledgeBaseID:  targetKB.ID,
 		Type:             src.Type,
@@ -54,8 +65,21 @@ func (s *knowledgeService) cloneKnowledge(
 		FileSize:         src.FileSize,
 		FileHash:         src.FileHash,
 		FilePath:         src.FilePath,
-		StorageSize:      src.StorageSize,
+		StorageSize:      0,
 		Metadata:         src.Metadata,
+		CustomMetadata:   src.CustomMetadata,
+	}
+
+	state := knowledgeTransferState{
+		TaskID:    access.TransferTaskID(ctx),
+		Operation: access.KBTransferClone,
+		SourceKB:  sourceKB.ID,
+		TargetKB:  targetKB.ID,
+		SourceID:  src.ID,
+		Phase:     "cloning",
+	}
+	if err := setTransferState(dst, state); err != nil {
+		return err
 	}
 
 	// Deep-copy the source document file into an object owned by the destination
@@ -79,37 +103,52 @@ func (s *knowledgeService) cloneKnowledge(
 	}
 
 	defer func() {
-		if err != nil {
-			if len(copiedFilePaths) > 0 {
-				cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
-			}
-			dst.ParseStatus = "failed"
-			dst.ErrorMessage = err.Error()
-			_ = s.repo.UpdateKnowledge(ctx, dst)
-			logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge failed to move knowledge")
-		} else {
-			dst.ParseStatus = "completed"
-			dst.EnableStatus = "enabled"
-			_ = s.repo.UpdateKnowledge(ctx, dst)
-			logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).Infof("MoveKnowledge move knowledge successfully")
+		if err == nil {
+			return
 		}
+		stored, loadErr := s.repo.GetKnowledgeByID(ctx, dst.TenantID, dst.ID)
+		if errors.Is(loadErr, repository.ErrKnowledgeNotFound) {
+			cleanupCopiedObjects(ctx, s.resolveFileService(ctx, targetKB), copiedFilePaths)
+			return
+		}
+		// An uncertain save/read must not delete objects that may be referenced.
+		if loadErr != nil || stored == nil || validateTransferKnowledge(stored, targetKB) != nil {
+			return
+		}
+		marker, markerErr := transferState(stored)
+		if markerErr != nil || !matchesTransfer(ctx, marker, sourceKB, targetKB, access.KBTransferClone, src.ID, "") ||
+			stored.ParseStatus == types.ParseStatusCompleted {
+			return
+		}
+		before, after := *stored, *stored
+		after.ParseStatus = types.ParseStatusFailed
+		after.ErrorMessage = err.Error()
+		_ = s.repo.UpdateKnowledgeForTransfer(ctx, &before, &after)
 	}()
-
 	if err = s.repo.CreateKnowledge(ctx, dst); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge create knowledge failed")
-		return
+		return err
 	}
-	tenantInfo.StorageUsed += dst.StorageSize
-	if err = s.tenantRepo.AdjustStorageUsed(ctx, tenantInfo.ID, dst.StorageSize); err != nil {
-		logger.GetLogger(ctx).WithField("error", err).Errorf("MoveKnowledge update tenant storage used failed")
-		return
+	// Create timestamps can be rounded by the database before the first CAS.
+	persisted, err := s.repo.GetKnowledgeByID(ctx, dst.TenantID, dst.ID)
+	if err != nil {
+		return err
 	}
+	if err := validateTransferKnowledge(persisted, targetKB); err != nil {
+		return err
+	}
+	dst.UpdatedAt = persisted.UpdatedAt
 	if err = s.CloneChunk(ctx, src, dst); err != nil {
-		logger.GetLogger(ctx).WithField("knowledge_id", dst.ID).
-			WithField("error", err).Errorf("MoveKnowledge move chunks failed")
-		return
+		return err
 	}
-	return
+	before := *dst
+	state.Phase = "done"
+	if err = setTransferState(dst, state); err != nil {
+		return err
+	}
+	dst.ParseStatus = types.ParseStatusCompleted
+	dst.EnableStatus = "enabled"
+	dst.StorageSize = src.StorageSize
+	return s.repo.UpdateKnowledgeForTransfer(ctx, &before, dst)
 }
 
 // processDocumentFromPassage handles asynchronous processing of text passages
@@ -251,6 +290,23 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		options = opts[0]
 	}
 
+	// Parser output and manually supplied passages can contain malformed byte
+	// sequences. Clean them before logging, chunk persistence, or embedding;
+	// the embedding provider and tracing/database drivers expect valid UTF-8.
+	for i := range chunks {
+		chunks[i].Content = common.CleanInvalidUTF8(chunks[i].Content)
+		chunks[i].ContextHeader = common.CleanInvalidUTF8(chunks[i].ContextHeader)
+		for j := range chunks[i].Images {
+			chunks[i].Images[j].URL = common.CleanInvalidUTF8(chunks[i].Images[j].URL)
+			chunks[i].Images[j].Caption = common.CleanInvalidUTF8(chunks[i].Images[j].Caption)
+			chunks[i].Images[j].OCRText = common.CleanInvalidUTF8(chunks[i].Images[j].OCRText)
+			chunks[i].Images[j].OriginalURL = common.CleanInvalidUTF8(chunks[i].Images[j].OriginalURL)
+		}
+	}
+	for i := range options.ParentChunks {
+		options.ParentChunks[i].Content = common.CleanInvalidUTF8(options.ParentChunks[i].Content)
+	}
+
 	// Check if knowledge is being deleted/cancelled before processing.
 	// Both statuses short-circuit identically here — there's nothing to clean
 	// up yet so the branch is purely "stop early".
@@ -276,7 +332,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	logger.Infof(ctx, "Cleaning up existing chunks and index data for knowledge: %s", knowledge.ID)
 
 	// 删除旧的chunks
-	if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 		logger.Warnf(ctx, "Failed to delete existing chunks (may not exist): %v", err)
 		// 不返回错误，继续处理（可能没有旧数据）
 	}
@@ -476,7 +532,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	s.beginStage(ctx, knowledge.ID, types.StageChunking, types.JSONMap{
 		"chunks_planned": len(insertChunks),
 	})
-	if err := s.chunkService.CreateChunks(ctx, insertChunks); err != nil {
+	if err := s.chunkRepo.CreateChunks(ctx, insertChunks); err != nil {
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = err.Error()
 		knowledge.UpdatedAt = time.Now()
@@ -556,7 +612,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) before indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 			}
@@ -571,7 +627,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			s.repo.UpdateKnowledge(ctx, knowledge)
 
 			// delete failed chunks
-			if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+			if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 				logger.Errorf(ctx, "Delete chunks failed: %v", err)
 			}
 
@@ -604,7 +660,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) after indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
-				if err := s.chunkService.DeleteChunksByKnowledgeID(ctx, knowledge.ID); err != nil {
+				if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 					logger.Warnf(ctx, "Failed to cleanup chunks after deletion detected: %v", err)
 				}
 				if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type); err != nil {
@@ -1301,7 +1357,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		}
 
 		// Save summary chunk
-		if err := s.chunkService.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
+		if err := s.chunkRepo.CreateChunks(ctx, []*types.Chunk{summaryChunk}); err != nil {
 			logger.Errorf(ctx, "Failed to create summary chunk: %v", err)
 			summaryErr = err
 			return fmt.Errorf("failed to create summary chunk: %w", err)
@@ -1708,7 +1764,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		}
 
 		// Update chunk in database
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+		if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
 			chunkUpdateFailed++
 			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
 			continue
@@ -2041,7 +2097,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 			logger.Warnf(ctx, "Failed to set document metadata for chunk %s: %v", chunk.ID, err)
 			continue
 		}
-		if err := s.chunkService.UpdateChunk(ctx, chunk); err != nil {
+		if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
 			logger.Warnf(ctx, "Failed to update chunk %s: %v", chunk.ID, err)
 			continue
 		}
@@ -2162,13 +2218,12 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 		return nil, fmt.Errorf("questions can only be generated for text chunks")
 	}
 	generationRevision := chunk.ContentRevision
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, chunk.KnowledgeID)
+	knowledge, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, chunk.KnowledgeID)
 	if err != nil {
 		return nil, err
 	}
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, chunk.KnowledgeBaseID)
-	if err != nil {
-		return nil, err
+	if knowledge.KnowledgeBaseID != chunk.KnowledgeBaseID || chunk.TenantID != knowledge.TenantID {
+		return nil, werrors.NewForbiddenError("chunk does not belong to its knowledge document")
 	}
 	if kb.SummaryModelID == "" {
 		return nil, fmt.Errorf("summary model is required for question generation")
@@ -2182,7 +2237,7 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 			return ""
 		}
 		neighbor, getErr := s.chunkRepo.GetChunkByID(ctx, tenantID, id)
-		if getErr != nil {
+		if getErr != nil || !sameChunkDocument(chunk, neighbor) {
 			return ""
 		}
 		return neighbor.Content
@@ -2340,26 +2395,35 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		return nil, err
 	}
 	if kb.NeedsEmbeddingModel() {
-		found := false
 		maxIndex := 0
-		summaryChunks := make([]*types.Chunk, 0, 1)
 		for _, chunk := range allChunks {
 			if chunk.ChunkIndex > maxIndex {
 				maxIndex = chunk.ChunkIndex
 			}
-			if chunk.ChunkType == types.ChunkTypeSummary {
-				chunk.Content = "# Summary\n" + summary
-				chunk.SourceContent = chunk.Content
-				chunk.IsEnabled = true
-				chunk.UpdatedAt = time.Now()
-				if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
-					return nil, err
-				}
-				summaryChunks = append(summaryChunks, chunk)
-				found = true
-			}
 		}
-		if !found {
+		// allChunks holds text chunks only, so it can never carry the existing
+		// summary chunk. Scanning it for one always came up empty, which left
+		// every refresh appending a new summary chunk beside the stale one --
+		// and a stale summary stays enabled and indexed, so content the user
+		// edited out of the document kept being retrievable through it.
+		existingSummaries, err := s.chunkRepo.ListChunksByKnowledgeIDAndTypes(
+			ctx, tenantID, knowledgeID, []types.ChunkType{types.ChunkTypeSummary},
+		)
+		if err != nil {
+			return nil, err
+		}
+		summaryChunks := make([]*types.Chunk, 0, len(existingSummaries))
+		for _, chunk := range existingSummaries {
+			chunk.Content = "# Summary\n" + summary
+			chunk.SourceContent = chunk.Content
+			chunk.IsEnabled = true
+			chunk.UpdatedAt = time.Now()
+			if err := s.chunkRepo.UpdateChunk(ctx, chunk); err != nil {
+				return nil, err
+			}
+			summaryChunks = append(summaryChunks, chunk)
+		}
+		if len(summaryChunks) == 0 {
 			summaryChunk := &types.Chunk{
 				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
 				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
@@ -2387,12 +2451,13 @@ func (s *knowledgeService) ReparseKnowledge(
 ) (*types.Knowledge, error) {
 	logger.Info(ctx, "Start re-parsing knowledge")
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	existing, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
 	}
+
+	tenantID := existing.TenantID
 
 	// Allocate a fresh span tree attempt up front. Doing this BEFORE
 	// the cleanup + enqueue means: (a) the UI immediately sees a new
@@ -2405,13 +2470,6 @@ func (s *knowledgeService) ReparseKnowledge(
 		reparseAttempt = n
 	} else if err != nil {
 		logger.Warnf(ctx, "[Reparse] OpenAttempt failed for %s: %v (will fall back in worker)", existing.ID, err)
-	}
-
-	// Get knowledge base configuration
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge base for reparse: %v", err)
-		return nil, err
 	}
 
 	// When the caller supplies new overrides (e.g. via the reparse confirm
@@ -2887,6 +2945,11 @@ func (s *knowledgeService) UpdateImageInfo(
 	chunkID string,
 	imageInfo string,
 ) error {
+	knowledge, _, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
+	if err != nil {
+		return err
+	}
+	imageInfo = common.CleanInvalidUTF8(imageInfo)
 	var images []*types.ImageInfo
 	if err := json.Unmarshal([]byte(imageInfo), &images); err != nil {
 		logger.Errorf(ctx, "Failed to unmarshal image info: %v", err)
@@ -2904,6 +2967,11 @@ func (s *knowledgeService) UpdateImageInfo(
 		logger.Errorf(ctx, "Failed to get chunk: %v", err)
 		return err
 	}
+	if chunk == nil || chunk.ID != chunkID || chunk.KnowledgeID != knowledge.ID ||
+		chunk.TenantID != knowledge.TenantID ||
+		chunk.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+		return werrors.NewForbiddenError("chunk does not belong to its knowledge document")
+	}
 	chunk.ImageInfo = imageInfo
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	chunkChildren, err := s.chunkService.ListChunkByParentID(ctx, tenantID, chunkID)
@@ -2913,6 +2981,11 @@ func (s *knowledgeService) UpdateImageInfo(
 			"tenant_id":       tenantID,
 		})
 		return err
+	}
+	for _, child := range chunkChildren {
+		if !sameChunkDocument(chunk, child) {
+			return werrors.NewForbiddenError("image child does not belong to its document")
+		}
 	}
 	logger.Infof(ctx, "Found %d chunks with parent chunk ID: %s", len(chunkChildren), chunkID)
 
@@ -2973,6 +3046,10 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageCaption,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			// CreateChunks inserts with Select("*"), so the gorm default:true never
+			// applies -- an unset IsEnabled lands in the database as false and the
+			// chunk is silently excluded from retrieval and model context.
+			IsEnabled: true,
 		}
 		addChunk = append(addChunk, captionChunk)
 		logger.Infof(ctx, "Created new caption chunk ID: %s for image URL: %s", captionChunk.ID, image.OriginalURL)
@@ -2989,6 +3066,7 @@ func (s *knowledgeService) UpdateImageInfo(
 			ChunkType:       types.ChunkTypeImageOCR,
 			ParentChunkID:   chunk.ID,
 			ImageInfo:       imageInfo,
+			IsEnabled:       true,
 		}
 		addChunk = append(addChunk, ocrChunk)
 		logger.Infof(ctx, "Created new OCR chunk ID: %s for image URL: %s", ocrChunk.ID, image.OriginalURL)
@@ -2996,7 +3074,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	logger.Infof(ctx, "Updated %d chunks out of %d total chunks", len(updateChunk), len(chunkChildren)+1)
 
 	if len(addChunk) > 0 {
-		err := s.chunkService.CreateChunks(ctx, addChunk)
+		err := s.chunkRepo.CreateChunks(ctx, addChunk)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"add_chunk_size": len(addChunk),
@@ -3007,7 +3085,7 @@ func (s *knowledgeService) UpdateImageInfo(
 
 	// Update the chunks
 	for _, c := range updateChunk {
-		err := s.chunkService.UpdateChunk(ctx, c)
+		err := s.chunkRepo.UpdateChunk(ctx, c)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"chunk_id":     c.ID,
@@ -3028,7 +3106,7 @@ func (s *knowledgeService) UpdateImageInfo(
 	}
 
 	// Update the knowledge file hash
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	knowledge, err = s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get knowledge: %v", err)
 		return err
@@ -3055,7 +3133,7 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 
 	ctx = logger.WithRequestID(ctx, payload.RequestId)
 	ctx = logger.WithField(ctx, "manual_process", payload.KnowledgeID)
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
@@ -3072,6 +3150,13 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	if knowledge == nil {
 		logger.Warnf(ctx, "ProcessManualUpdate: knowledge not found: %s", payload.KnowledgeID)
 		return nil
+	}
+
+	if err := validateProcessingKnowledge(knowledge,
+		payload.TenantID,
+		payload.KnowledgeBaseID,
+		payload.KnowledgeID); err != nil {
+		return err
 	}
 
 	// Skip if already completed or being deleted
@@ -3096,6 +3181,13 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		return nil
+	}
+	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
+		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return fmt.Errorf("invalid processing scope: %v: %w", err, asynq.SkipRetry)
 	}
 
 	// Re-check abort status right before marking processing — see the same
@@ -3152,7 +3244,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	ctx = logger.WithRequestID(ctx, payload.RequestId)
 	ctx = logger.WithField(ctx, "document_process", payload.KnowledgeID)
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
@@ -3181,6 +3273,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	if knowledge == nil {
 		return nil
+	}
+
+	if err := validateProcessingKnowledge(knowledge,
+		payload.TenantID,
+		payload.KnowledgeBaseID,
+		payload.KnowledgeID); err != nil {
+		return err
 	}
 
 	// 检查是否正在删除 / 已被用户取消 - 如果是则直接退出
@@ -3227,6 +3326,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
 		return nil
+	}
+	if kb == nil || kb.ID != payload.KnowledgeBaseID || kb.TenantID != payload.TenantID {
+		return fmt.Errorf("processing task KB owner changed: %w", asynq.SkipRetry)
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return fmt.Errorf("invalid processing scope: %v: %w", err, asynq.SkipRetry)
 	}
 
 	processOverrides, _ := knowledge.ProcessOverrides()
@@ -3502,6 +3608,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 3: Split into chunks using Go chunker. Browser textareas normalize
 	// pasted content to LF, so normalize uploaded source text before calculating
 	// chunk boundaries as well.
+	sanitizeReadResult(convertResult)
 	convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
@@ -3556,6 +3663,28 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 
 	return nil
+}
+
+// sanitizeReadResult protects every text field that can cross from a parser
+// into the embedding, storage, or tracing layers. A parser may return a Go
+// string containing arbitrary bytes even though the string type itself does
+// not enforce UTF-8 validity.
+func sanitizeReadResult(result *types.ReadResult) {
+	if result == nil {
+		return
+	}
+	result.MarkdownContent = common.CleanInvalidUTF8(result.MarkdownContent)
+	result.ImageDirPath = common.CleanInvalidUTF8(result.ImageDirPath)
+	result.Error = common.CleanInvalidUTF8(result.Error)
+	for key, value := range result.Metadata {
+		result.Metadata[key] = common.CleanInvalidUTF8(value)
+	}
+	for i := range result.ImageRefs {
+		result.ImageRefs[i].Filename = common.CleanInvalidUTF8(result.ImageRefs[i].Filename)
+		result.ImageRefs[i].OriginalRef = common.CleanInvalidUTF8(result.ImageRefs[i].OriginalRef)
+		result.ImageRefs[i].MimeType = common.CleanInvalidUTF8(result.ImageRefs[i].MimeType)
+		result.ImageRefs[i].StorageKey = common.CleanInvalidUTF8(result.ImageRefs[i].StorageKey)
+	}
 }
 
 // convert handles both file and URL reading using a unified ReadRequest.
@@ -3675,6 +3804,7 @@ func (s *knowledgeService) convert(
 			code, "document read failed", err)
 		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
 	}
+	sanitizeReadResult(result)
 	if result.Error != "" {
 		logger.Errorf(ctx, "[convert] parser returned error kb=%s knowledge=%s file=%q type=%s engine=%q: %s",
 			kb.ID, knowledge.ID, req.FileName, fileType, parserEngine, result.Error)
@@ -3752,41 +3882,23 @@ func isLikelyRateLimitError(err error) bool {
 	return false
 }
 
-// Returns nil when the required service is unavailable.
-func (s *knowledgeService) resolveDocReader(ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string) interfaces.DocReader {
-	switch engine {
-	case docparser.SimpleEngineName:
-		return &docparser.SimpleFormatReader{}
-	case docparser.WeKnoraCloudEngineName:
-		creds := s.tenantService.GetWeKnoraCloudCredentials(ctx)
-		if creds == nil {
-			logger.Warnf(ctx, "[resolveDocReader] WeKnoraCloud: no tenant credentials (fileType=%s)", fileType)
-			return nil
-		}
-		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.AppSecret)
-		if err != nil {
-			logger.Errorf(ctx, "[resolveDocReader] WeKnoraCloud reader init failed: %v", err)
-			return nil
-		}
-		return reader
-	case "mineru":
-		return docparser.NewMinerUReader(overrides)
-	case "mineru_cloud":
-		return docparser.NewMinerUCloudReader(overrides)
-	case "paddleocr_vl":
-		return docparser.NewPaddleOCRVLReader(overrides)
-	case "paddleocr_vl_cloud":
-		return docparser.NewPaddleOCRVLCloudReader(overrides)
-	case "builtin":
-		// 明确指定使用 builtin 引擎（docreader），不使用 simple format 兜底
-		return s.documentReader
-	default:
-		// 未指定引擎时的兜底逻辑：simple format 使用 Go 原生处理，其他使用 docreader
-		if !isURL && docparser.IsSimpleFormat(fileType) {
-			return &docparser.SimpleFormatReader{}
-		}
-		return s.documentReader
+// resolveDocReader picks the reader for one parse request. The engine catalog
+// itself lives in the docparser registry; this only supplies the dependencies
+// the service owns. Returns nil when the chosen engine cannot run — an
+// unconfigured cloud engine, a disconnected docreader — after logging why.
+func (s *knowledgeService) resolveDocReader(
+	ctx context.Context, engine, fileType string, isURL bool, overrides map[string]string,
+) interfaces.DocReader {
+	reader, err := docparser.NewReader(ctx, engine, fileType, isURL, docparser.ReaderDeps{
+		Overrides:               overrides,
+		Remote:                  s.documentReader,
+		WeKnoraCloudCredentials: s.tenantService.GetWeKnoraCloudCredentials,
+	})
+	if err != nil {
+		logger.Warnf(ctx, "[resolveDocReader] engine=%q fileType=%q unusable: %v", engine, fileType, err)
+		return nil
 	}
+	return reader
 }
 
 // failKnowledge marks knowledge as failed (only on last retry) and returns an error.
@@ -3887,6 +3999,11 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 
 	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))
 
+	ctx, ids, err := s.reparseTaskScope(ctx, payload)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+
 	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
@@ -3896,7 +4013,7 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 
-	outcome, err := runKnowledgeListReparseSubmissions(payload.KnowledgeIDs, func(id string) error {
+	outcome, err := runKnowledgeListReparseSubmissions(ids, func(id string) error {
 		_, err := s.ReparseKnowledge(ctx, id, payload.ProcessConfig)
 		return err
 	})

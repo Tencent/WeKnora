@@ -28,14 +28,65 @@ env:
   GOPROXY: https://proxy.golang.org,direct
 
 jobs:
+  # Path filters above start this workflow for any Go change; the matrix still
+  # used to lint all three modules. Detect which modules the PR actually
+  # touches so a root-only change (migrations test, handler, …) does not queue
+  # cli/ and client/ runners. Changing .golangci.yml or this workflow still
+  # lints every module, since they share the root config.
+  changes:
+    name: detect lint modules
+    runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.detect.outputs.modules }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect changed modules
+        id: detect
+        shell: bash
+        run: |
+          diff_range="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
+          modules=()
+          if git diff --name-only --diff-filter=ACMR "$diff_range" -- \
+               .golangci.yml .github/workflows/go-lint.yml | grep -q .; then
+            modules=("." "cli" "client")
+          else
+            if git diff --name-only --diff-filter=ACMR "$diff_range" -- \
+                 '*.go' ':!cli/**' ':!client/**' go.mod go.sum | grep -q .; then
+              modules+=(".")
+            fi
+            if git diff --name-only --diff-filter=ACMR "$diff_range" -- 'cli/**' | grep -q .; then
+              modules+=("cli")
+            fi
+            if git diff --name-only --diff-filter=ACMR "$diff_range" -- 'client/**' | grep -q .; then
+              modules+=("client")
+            fi
+          fi
+          json="["
+          first=1
+          for m in "${modules[@]}"; do
+            if [ "$first" -eq 1 ]; then
+              first=0
+            else
+              json+=","
+            fi
+            json+="\"${m}\""
+          done
+          json+="]"
+          echo "modules=${json}" >> "$GITHUB_OUTPUT"
+          echo "Lint modules: ${json}"
+
   golangci:
     name: golangci-lint (${{ matrix.module }})
+    needs: changes
+    if: needs.changes.outputs.modules != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        module: [".", "cli", "client"]
+        module: ${{ fromJSON(needs.changes.outputs.modules) }}
     steps:
       - uses: actions/checkout@v6
         with:

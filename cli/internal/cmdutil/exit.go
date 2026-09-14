@@ -35,7 +35,7 @@ func GetProfile() string { return globalProfile }
 // ExitCode maps an error to the documented CLI exit code.
 //   - 0  success
 //   - 1  generic / unknown typed error - fallback bucket: resource.already_exists,
-//     resource.locked, local.*, mcp.*, operation.failed, server.session_create_failed
+//     resource.locked, local.*, operation.failed, server.session_create_failed
 //     (workflow-level, see special case below), and any code outside the named
 //     buckets below
 //   - 2  cobra-parse problem (unrecognised flag, arg-count violation) —

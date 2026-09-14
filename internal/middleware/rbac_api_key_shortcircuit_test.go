@@ -108,7 +108,10 @@ func TestEvaluateOwnershipOrRole_ShortCircuitsAPIKey(t *testing.T) {
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
 
 	if err := EvaluateOwnershipOrRole(ctx, cfgRBAC(true),
-		types.TenantRoleAdmin, "some-other-human-user", nil); err != nil {
+		types.TenantRoleAdmin, func() (string, error) {
+			t.Fatal("API-key principals must not query resource ownership")
+			return "some-other-human-user", nil
+		}); err != nil {
 		t.Fatalf("API-key principal should short-circuit EvaluateOwnershipOrRole, got %v", err)
 	}
 }
@@ -118,7 +121,9 @@ func TestEvaluateOwnershipOrRole_ShortCircuitsAPIKey(t *testing.T) {
 func TestEvaluateOwnershipOrRole_JWTViewerStillDenied(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantRoleContextKey, types.TenantRoleViewer)
 	err := EvaluateOwnershipOrRole(ctx, cfgRBAC(true),
-		types.TenantRoleAdmin, "some-other-human-user", nil)
+		types.TenantRoleAdmin, func() (string, error) {
+			return "some-other-human-user", nil
+		})
 	if err == nil {
 		t.Fatal("JWT Viewer with foreign creator must be denied by EvaluateOwnershipOrRole")
 	}

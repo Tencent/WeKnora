@@ -128,3 +128,137 @@ func TestRemoteErrorDiagnostics(t *testing.T) {
 		t.Fatal("expected plain error text")
 	}
 }
+
+func TestIsRemoteDirAlreadyExists(t *testing.T) {
+	t.Parallel()
+
+	cubeSeedErr := NewRemoteError(
+		SandboxTypeCube, "MakeDir", RemoteErrorKindInternal,
+		"failed to make dir /opt/weknora/tenant/skills/sk-1: directory already exists: /opt/weknora/tenant/skills/sk-1",
+		nil,
+	)
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "nil", err: nil, want: false},
+		{name: "cube envd already exists", err: cubeSeedErr, want: true},
+		{
+			name: "wrapped cube error",
+			err:  fmt.Errorf("sandbox: create install directory: %w", cubeSeedErr),
+			want: true,
+		},
+		{
+			name: "e2b conflict already exists",
+			err: NewRemoteError(
+				SandboxTypeE2B, "MakeDir", RemoteErrorKindConflict, "already exists", nil,
+			),
+			want: true,
+		},
+		{
+			name: "unrelated internal",
+			err:  NewRemoteError(SandboxTypeCube, "MakeDir", RemoteErrorKindInternal, "disk full", nil),
+			want: false,
+		},
+		{
+			name: "conflict without already exists",
+			err:  NewRemoteError(SandboxTypeCube, "Delete", RemoteErrorKindConflict, "busy", nil),
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := IsRemoteDirAlreadyExists(tt.err); got != tt.want {
+				t.Fatalf("IsRemoteDirAlreadyExists() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsRemoteConflict(t *testing.T) {
+	t.Parallel()
+
+	if IsRemoteConflict(nil) {
+		t.Fatal("nil is not a conflict")
+	}
+	conflict := NewRemoteError(SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindConflict, "busy", nil)
+	if !IsRemoteConflict(conflict) {
+		t.Fatal("Conflict kind must match")
+	}
+	invalid := NewRemoteError(
+		SandboxTypeE2B, "DeleteSnapshot", RemoteErrorKindInvalidRequest, "bad id", nil,
+	)
+	if IsRemoteConflict(invalid) {
+		t.Fatal("InvalidRequest must not match")
+	}
+}
+
+func TestSnapshotDeleteKindPromotesInUseToConflict(t *testing.T) {
+	t.Parallel()
+
+	inUse := "cannot delete template 'upfvuzpq0q6foo1mkpbkl' because there are paused sandboxes using it"
+	jsonBody := `e2b: status 400: {"code":400,"message":"` + inUse + `"}`
+
+	tests := []struct {
+		name string
+		op   string
+		kind RemoteErrorKind
+		msg  string
+		want RemoteErrorKind
+	}{
+		{
+			name: "e2b paused sandboxes 400",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  inUse,
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "json-wrapped e2b 400",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  jsonBody,
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "cube delete template",
+			op:   "DeleteTemplate",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  "cannot delete template x because there are sandboxes using it",
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "already conflict stays conflict",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindConflict,
+			msg:  "image is in use",
+			want: RemoteErrorKindConflict,
+		},
+		{
+			name: "generic 400 stays invalid",
+			op:   "DeleteSnapshot",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  "invalid snapshot id",
+			want: RemoteErrorKindInvalidRequest,
+		},
+		{
+			name: "other ops are unchanged",
+			op:   "Create",
+			kind: RemoteErrorKindInvalidRequest,
+			msg:  inUse,
+			want: RemoteErrorKindInvalidRequest,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := snapshotDeleteKind(tt.op, tt.kind, tt.msg); got != tt.want {
+				t.Fatalf("snapshotDeleteKind() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

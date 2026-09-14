@@ -1,15 +1,31 @@
 // @ts-nocheck
 <script setup lang="ts">
-import { ref, shallowRef, watch, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
+import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
-import { MessagePlugin } from 'tdesign-vue-next';
+import { downloadArtifact } from '@/api/chat';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
-import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
-import { sanitizeHTML, safeMarkdownToHTML } from '@/utils/security';
+import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
+import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
+import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
+import { buildHtmlPreview } from '@/utils/htmlPreview';
+import { openMermaidFullscreen } from '@/utils/mermaidViewer';
+import { renderMermaidToSvg } from '@/utils/mermaidShared';
+import {
+  FILE_PREVIEW_SNIFF_BYTES,
+  getHighlightLang as resolveHighlightLang,
+  getPreviewMimeType,
+  prettyPrintJson,
+  resolveFilePreviewExt,
+  resolvePreviewKind,
+  shouldPrettyPrintJson,
+  sniffPreview,
+  isValidUTF8,
+  type FilePreviewKind,
+} from '@/utils/filePreview';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
@@ -17,107 +33,180 @@ const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
 const { t } = useI18n();
 
 const props = defineProps<{
+  sourceBlob?: Blob;
   knowledgeId?: string;
   sessionId?: string;
   attachmentId?: string;
+  messageId?: string;
+  artifactIndex?: number;
   fileType: string;
   fileName: string;
   active: boolean;
   fillHeight?: boolean;
+  /** Place preview actions beside the host header's download button. */
+  toolbarTarget?: HTMLElement | null;
 }>();
 
 const loading = ref(false);
 const error = ref('');
-const previewType = ref<'pdf' | 'docx' | 'image' | 'excel' | 'text' | 'markdown' | 'pptx' | 'audio' | 'unsupported'>('unsupported');
+const previewType = ref<FilePreviewKind>('unsupported');
 const blobUrl = ref('');
 const textContent = ref('');
 const highlightedCode = ref('');
 const markdownHtml = ref('');
 const excelHtml = ref('');
+const mermaidSvg = ref('');
+const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
+let pptxSlideCount = 0;
+function onPptxRendered(result: unknown) {
+  if (!isCompletePptxRender(result, pptxSlideCount)) error.value = t('preview.loadFailed');
+}
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
 
 const isFullscreen = ref(false);
+const previewRoot = ref<HTMLElement | null>(null);
+const previewContent = ref<HTMLElement | null>(null);
 
-function toggleFullscreen() {
-  isFullscreen.value = !isFullscreen.value;
-  if (isFullscreen.value) {
-    document.body.style.overflow = 'hidden';
-  } else {
-    document.body.style.overflow = '';
+function focusPreviewContent() {
+  const root = previewRoot.value;
+  if (!props.active || !root?.isConnected) return;
+  // Focus the actual scrolling element so the browser handles arrows, Space,
+  // PageUp/Down and Home/End, including native iframe and media controls.
+  const target = previewContent.value || docxContainer.value || root;
+  target.focus({ preventScroll: true });
+}
+
+watch(
+  () => [props.active, previewRoot.value, getPreviewSourceKey(), props.sourceBlob, htmlViewMode.value, isFullscreen.value],
+  async () => {
+    if (!props.active) return;
+    const previousFocus = document.activeElement;
+    await nextTick();
+    // Do not override a user who moved to another control while rendering.
+    if (document.activeElement !== previousFocus && document.activeElement !== document.body) return;
+    focusPreviewContent();
+  },
+  { flush: 'post' },
+);
+
+watch(
+  () => [previewContent.value, docxContainer.value],
+  () => {
+    // While downloading, focus rests on the preview root. Transfer it only
+    // if it is still there when the content arrives (never steal input focus).
+    if (document.activeElement === previewRoot.value) focusPreviewContent();
+  },
+  { flush: 'post' },
+);
+
+function onPreviewFrameLoad() {
+  if (document.activeElement === previewContent.value || document.activeElement === previewRoot.value) {
+    focusPreviewContent();
   }
 }
 
-
-const fileTypeMap: Record<string, typeof previewType.value> = {};
-['pdf'].forEach(t => fileTypeMap[t] = 'pdf');
-['docx'].forEach(t => fileTypeMap[t] = 'docx');
-['pptx', 'ppt'].forEach(t => fileTypeMap[t] = 'pptx');
-['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tiff', 'svg'].forEach(t => fileTypeMap[t] = 'image');
-['xlsx', 'xls', 'csv'].forEach(t => fileTypeMap[t] = 'excel');
-['md', 'markdown'].forEach(t => fileTypeMap[t] = 'markdown');
-['txt', 'json', 'xml', 'html', 'css', 'js', 'ts', 'py', 'java', 'go',
- 'cpp', 'c', 'h', 'sh', 'yaml', 'yml', 'ini', 'conf', 'log', 'sql', 'rs', 'rb', 'php',
- 'swift', 'kt', 'scala', 'r', 'lua', 'pl', 'toml'].forEach(t => fileTypeMap[t] = 'text');
-['mp3', 'wav', 'm4a', 'flac', 'ogg'].forEach(t => fileTypeMap[t] = 'audio');
-
-const mimeTypeMap: Record<string, string> = {
-  pdf: 'application/pdf',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  doc: 'application/msword',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  ppt: 'application/vnd.ms-powerpoint',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  xls: 'application/vnd.ms-excel',
-  csv: 'text/csv',
-  jpg: 'image/jpeg', jpeg: 'image/jpeg',
-  png: 'image/png', gif: 'image/gif', bmp: 'image/bmp',
-  webp: 'image/webp', tiff: 'image/tiff', svg: 'image/svg+xml',
-  txt: 'text/plain', md: 'text/markdown', markdown: 'text/markdown',
-  json: 'application/json', xml: 'application/xml',
-  html: 'text/html', css: 'text/css',
-  js: 'text/javascript', ts: 'text/typescript',
-  py: 'text/x-python', java: 'text/x-java', go: 'text/x-go',
-  mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
-  flac: 'audio/flac', ogg: 'audio/ogg',
-};
-
-function getMimeType(ft: string): string {
-  return mimeTypeMap[ft?.toLowerCase()] || 'application/octet-stream';
+function toggleFullscreen() {
+  if (isFullscreen.value) {
+    void exitPreviewFullscreen();
+  } else {
+    void enterPreviewFullscreen();
+  }
 }
 
+let fallbackOverflow: string | null = null;
+let fullscreenDisposed = false;
+
+async function enterPreviewFullscreen() {
+  const root = previewRoot.value;
+  if (!props.active || !root?.isConnected) return;
+  // Native fullscreen also handles Escape when focus is inside a PDF viewer
+  // or a sandboxed HTML iframe, whose keyboard events cannot bubble here.
+  if (root.requestFullscreen) {
+    try {
+      await root.requestFullscreen();
+      if (fullscreenDisposed || !props.active) {
+        if (document.fullscreenElement === root) await document.exitFullscreen();
+      } else {
+        syncFullscreen();
+      }
+      return;
+    } catch {
+      // Embedded hosts may disallow the Fullscreen API. Keep page fullscreen
+      // available there, with Escape handled in the parent document.
+    }
+  }
+  if (fullscreenDisposed || !props.active || !root.isConnected) return;
+  if (fallbackOverflow === null) fallbackOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  isFullscreen.value = true;
+}
+
+function clearFallbackFullscreen() {
+  if (fallbackOverflow !== null) {
+    document.body.style.overflow = fallbackOverflow;
+    fallbackOverflow = null;
+  }
+  isFullscreen.value = false;
+}
+
+async function exitPreviewFullscreen() {
+  if (previewRoot.value && document.fullscreenElement === previewRoot.value) {
+    try {
+      await document.exitFullscreen();
+    } catch {
+      // The browser may already have exited in response to Escape.
+    }
+    syncFullscreen();
+    return;
+  }
+  clearFallbackFullscreen();
+}
+
+function syncFullscreen() {
+  if (fallbackOverflow === null) {
+    isFullscreen.value = !!previewRoot.value && document.fullscreenElement === previewRoot.value;
+  }
+}
+
+function onFullscreenEscape(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.isComposing || !isFullscreen.value || !props.active) return;
+  // Consume this Escape before a containing drawer can also close.
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  void exitPreviewFullscreen();
+}
+
+watch(() => props.active, (active) => {
+  if (!active) void exitPreviewFullscreen();
+});
+
+onMounted(() => {
+  document.addEventListener('fullscreenchange', syncFullscreen);
+  window.addEventListener('keydown', onFullscreenEscape, true);
+});
+
+onUnmounted(() => {
+  fullscreenDisposed = true;
+  document.removeEventListener('fullscreenchange', syncFullscreen);
+  window.removeEventListener('keydown', onFullscreenEscape, true);
+  void exitPreviewFullscreen();
+  clearFallbackFullscreen();
+});
+
+
 function ensureBlobType(blob: Blob, ft: string): Blob {
-  const expected = getMimeType(ft);
+  const expected = getPreviewMimeType(ft);
   if (blob.type === expected) return blob;
   return new Blob([blob], { type: expected });
 }
 
-const langMap: Record<string, string> = {
-  js: 'javascript', ts: 'typescript', py: 'python', rb: 'ruby',
-  sh: 'bash', yml: 'yaml', md: 'markdown', rs: 'rust',
-  kt: 'kotlin', pl: 'perl', conf: 'ini', log: 'plaintext',
-};
-
-function resolvePreviewType(ft: string): typeof previewType.value {
-  return fileTypeMap[ft?.toLowerCase()] || 'unsupported';
-}
-
 function getHighlightLang(ft: string): string {
-  const lower = ft?.toLowerCase() || '';
-  return langMap[lower] || lower;
+  return resolveHighlightLang(ft);
 }
-
-const preprocessMathDelimiters = (rawText: string): string => {
-  if (!rawText || typeof rawText !== 'string') {
-    return '';
-  }
-  return rawText
-    .replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
-    .replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$$');
-};
 
 async function renderDocx(blob: Blob) {
   const { renderAsync } = await import('docx-preview');
@@ -138,24 +227,6 @@ async function renderDocx(blob: Blob) {
   }
 }
 
-function isValidUTF8(bytes: Uint8Array): boolean {
-  for (let i = 0; i < bytes.length;) {
-    const b = bytes[i];
-    let remaining = 0;
-    if (b <= 0x7F) { remaining = 0; }
-    else if ((b & 0xE0) === 0xC0) { remaining = 1; }
-    else if ((b & 0xF0) === 0xE0) { remaining = 2; }
-    else if ((b & 0xF8) === 0xF0) { remaining = 3; }
-    else { return false; }
-    if (i + remaining >= bytes.length) return false;
-    for (let j = 1; j <= remaining; j++) {
-      if ((bytes[i + j] & 0xC0) !== 0x80) return false;
-    }
-    i += 1 + remaining;
-  }
-  return true;
-}
-
 function decodeCSVBlob(arrayBuffer: ArrayBuffer): string {
   const bytes = new Uint8Array(arrayBuffer);
   if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
@@ -172,9 +243,13 @@ async function renderExcel(blob: Blob, fileType?: string) {
   const arrayBuffer = await blob.arrayBuffer();
 
   let workbook;
-  if (fileType?.toLowerCase() === 'csv') {
+  const lowerType = fileType?.toLowerCase();
+  if (lowerType === 'csv') {
     const csvText = decodeCSVBlob(arrayBuffer);
     workbook = XLSX.read(csvText, { type: 'string' });
+  } else if (lowerType === 'tsv' || lowerType === 'tab') {
+    const tsvText = decodeCSVBlob(arrayBuffer);
+    workbook = XLSX.read(tsvText, { type: 'string', FS: '\t' });
   } else {
     workbook = XLSX.read(arrayBuffer, { type: 'array' });
   }
@@ -194,7 +269,10 @@ async function renderExcel(blob: Blob, fileType?: string) {
 }
 
 async function renderText(blob: Blob, fileType: string) {
-  const text = await blob.text();
+  let text = await blob.text();
+  if (shouldPrettyPrintJson(fileType)) {
+    text = prettyPrintJson(text);
+  }
   textContent.value = text;
 
   const lang = getHighlightLang(fileType);
@@ -209,7 +287,6 @@ async function renderText(blob: Blob, fileType: string) {
 }
 
 async function renderMarkdown(blob: Blob) {
-  const { marked } = await import('marked');
   const text = await blob.text();
 
   // 校验文本内容是否有效
@@ -218,32 +295,7 @@ async function renderMarkdown(blob: Blob) {
     return;
   }
 
-  marked.use({
-    breaks: true,
-    gfm: true,
-  });
-  marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
-  const renderer = new marked.Renderer();
-  renderer.code = function ({text, lang}) {
-    // 空值校验：防止 text 为 undefined 或 null
-    if (!text || typeof text !== 'string') {
-      text = '';
-    }
-
-    let highlighted = '';
-    if (lang && hljs.getLanguage(lang)) {
-      try { highlighted = hljs.highlight(text, { language: lang }).value; }
-      catch { highlighted = hljs.highlightAuto(text).value; }
-    } else {
-      highlighted = hljs.highlightAuto(text).value;
-    }
-    return `<pre><code class="hljs">${highlighted}</code></pre>`;
-  };
-  marked.use({ renderer });
-  const mathSafeText = preprocessMathDelimiters(text);
-  const safeText = safeMarkdownToHTML(mathSafeText);
-  const rawHtml = marked.parse(safeText) as string;
-  markdownHtml.value = sanitizeHTML(rawHtml);
+  markdownHtml.value = renderDocumentPreviewMarkdown(text);
 }
 
 function onImageLoad(e: Event) {
@@ -253,52 +305,116 @@ function onImageLoad(e: Event) {
 }
 
 function getPreviewSourceKey(): string {
+  if (props.sourceBlob) {
+    return `resource-blob:${props.fileName}:${props.fileType}:${props.sourceBlob.size}:${props.sourceBlob.type}`;
+  }
   if (props.knowledgeId) return `knowledge:${props.knowledgeId}`;
   if (props.sessionId && props.attachmentId) return `attachment:${props.sessionId}:${props.attachmentId}`;
+  if (
+    props.sessionId &&
+    props.messageId &&
+    Number.isInteger(props.artifactIndex) &&
+    (props.artifactIndex as number) >= 0
+  ) {
+    return `artifact:${props.sessionId}:${props.messageId}:${props.artifactIndex}`;
+  }
   return '';
 }
 
+// Skill-generated HTML is often a self-contained chart that needs its own
+// scripts. Knowledge-base files and chat attachments are untrusted uploads:
+// they stay as source, matching the previous text preview.
+function allowsHtmlScriptPreview(): boolean {
+  return getPreviewSourceKey().startsWith('artifact:');
+}
+
 async function fetchPreviewBlob(): Promise<Blob> {
+  if (props.sourceBlob) return props.sourceBlob;
   if (props.knowledgeId) {
     return previewKnowledgeFile(props.knowledgeId);
   }
   if (props.sessionId && props.attachmentId) {
     return previewTemporaryAttachment(props.sessionId, props.attachmentId);
   }
+  if (
+    props.sessionId &&
+    props.messageId &&
+    Number.isInteger(props.artifactIndex) &&
+    (props.artifactIndex as number) >= 0
+  ) {
+    return downloadArtifact(props.sessionId, props.messageId, props.artifactIndex as number);
+  }
   throw new Error('Missing preview source');
+}
+
+async function renderMermaid(blob: Blob) {
+  const text = await blob.text();
+  const svg = await renderMermaidToSvg(text, `file-preview-mermaid-${Date.now()}`);
+  if (svg) {
+    mermaidSvg.value = sanitizeMarkdownHTML(svg);
+    return;
+  }
+  previewType.value = 'text';
+  await renderText(new Blob([text], { type: 'text/plain' }), 'mmd');
+}
+
+async function openMermaid() {
+  const svg = mermaidSvg.value;
+  if (!svg) return;
+  // The diagram viewer mounts on body, outside the native fullscreen element.
+  await exitPreviewFullscreen();
+  if (props.active && previewRoot.value?.isConnected) openMermaidFullscreen(svg);
 }
 
 async function loadPreview() {
   const sourceKey = getPreviewSourceKey();
-  const ft = props.fileType;
-  if (!sourceKey || !ft) return;
+  if (!sourceKey) return;
   if (loadedForId === sourceKey) return;
 
   cleanup();
   loading.value = true;
   error.value = '';
-  previewType.value = resolvePreviewType(ft);
+  htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
 
-  if (previewType.value === 'unsupported') {
-    loading.value = false;
-    return;
-  }
+  let ft = resolveFilePreviewExt(props.fileName, props.fileType);
+  previewType.value = resolvePreviewKind(ft);
 
   try {
     const rawBlob = await fetchPreviewBlob();
+    let kind = resolvePreviewKind(ft);
+    if (kind === 'unsupported') {
+      const sample = new Uint8Array(await rawBlob.slice(0, FILE_PREVIEW_SNIFF_BYTES).arrayBuffer());
+      const sniffed = sniffPreview(sample);
+      kind = sniffed.kind;
+      if (sniffed.ext) ft = sniffed.ext;
+    }
+    previewType.value = kind;
+
+    if (kind === 'unsupported') {
+      loading.value = false;
+      return;
+    }
+
     const blob = ensureBlobType(rawBlob, ft);
     loadedForId = sourceKey;
 
     loading.value = false;
     await nextTick();
 
-    switch (previewType.value) {
-      case 'pdf': {
+    switch (kind) {
+      case 'pdf':
+      case 'image':
+      case 'audio':
+      case 'video': {
         blobUrl.value = URL.createObjectURL(blob);
         break;
       }
-      case 'image': {
-        blobUrl.value = URL.createObjectURL(blob);
+      case 'html': {
+        if (allowsHtmlScriptPreview()) {
+          const previewHtml = buildHtmlPreview(await blob.text());
+          blobUrl.value = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html;charset=utf-8' }));
+        }
+        await renderText(blob, ft || 'html');
         break;
       }
       case 'docx': {
@@ -318,11 +434,14 @@ async function loadPreview() {
         break;
       }
       case 'pptx': {
-        pptxData.value = await blob.arrayBuffer();
+        const prepared = await preparePptxPreview(await blob.arrayBuffer());
+        if (getPreviewSourceKey() !== sourceKey || !props.active) return;
+        pptxSlideCount = prepared.slideCount;
+        pptxData.value = prepared.data;
         break;
       }
-      case 'audio': {
-        blobUrl.value = URL.createObjectURL(blob);
+      case 'mermaid': {
+        await renderMermaid(blob);
         break;
       }
     }
@@ -343,7 +462,10 @@ function cleanup() {
   highlightedCode.value = '';
   markdownHtml.value = '';
   excelHtml.value = '';
+  mermaidSvg.value = '';
+  htmlViewMode.value = 'render';
   pptxData.value = null;
+  pptxSlideCount = 0;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
   loadedForId = '';
@@ -353,7 +475,7 @@ function cleanup() {
 }
 
 watch(
-  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId],
+  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId, props.messageId, props.artifactIndex, props.sourceBlob, props.fileName, props.fileType],
   ([active]) => {
     if (active && getPreviewSourceKey()) {
       loadPreview();
@@ -363,23 +485,35 @@ watch(
 );
 
 onUnmounted(() => {
-  document.body.style.overflow = '';
   cleanup();
 });
 </script>
 
 <template>
-  <div class="document-preview" :class="{ 'is-fullscreen': isFullscreen, 'fill-height': fillHeight }">
+  <div ref="previewRoot" tabindex="-1" :aria-label="fileName" class="document-preview" :class="{ 'is-fullscreen': isFullscreen, 'fill-height': fillHeight }">
     <!-- Toolbar -->
-    <div class="preview-toolbar" v-if="!loading && !error && previewType !== 'unsupported'">
-      <t-space size="small">
-        <t-tooltip :content="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')" placement="bottom">
-          <t-button theme="default" variant="text" shape="square" @click="toggleFullscreen">
+    <Teleport :to="toolbarTarget || 'body'" :disabled="isFullscreen || !toolbarTarget">
+      <div class="preview-toolbar" :class="{ 'is-inline': toolbarTarget && !isFullscreen }" v-if="isFullscreen || (!loading && !error && previewType !== 'unsupported')">
+        <span v-if="isFullscreen" class="preview-toolbar-title" :title="fileName">{{ fileName }}</span>
+        <div class="preview-toolbar-actions">
+          <t-button
+            v-if="previewType === 'html' && allowsHtmlScriptPreview()"
+            theme="default" variant="text" size="small" shape="square"
+            :title="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
+            :aria-label="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
+            @click="htmlViewMode = htmlViewMode === 'render' ? 'source' : 'render'"
+          >
+            <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
+          </t-button>
+          <t-button theme="default" variant="text" size="small" shape="square" :aria-pressed="isFullscreen"
+            :title="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
+            :aria-label="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
+            @click="toggleFullscreen">
             <template #icon><t-icon :name="isFullscreen ? 'fullscreen-exit' : 'fullscreen'" /></template>
           </t-button>
-        </t-tooltip>
-      </t-space>
-    </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- Loading -->
     <div v-if="loading" class="preview-loading">
@@ -405,11 +539,27 @@ onUnmounted(() => {
 
     <!-- PDF -->
     <div v-else-if="previewType === 'pdf' && blobUrl" class="preview-pdf">
-      <iframe :src="blobUrl" class="pdf-iframe" />
+      <iframe ref="previewContent" tabindex="0" :title="fileName" :src="blobUrl" class="pdf-iframe" @load="onPreviewFrameLoad" />
+    </div>
+
+    <!-- HTML: artifacts render in a unique-origin iframe; other sources stay as source. -->
+    <div v-else-if="previewType === 'html'" class="preview-html">
+      <iframe
+        v-if="allowsHtmlScriptPreview() && htmlViewMode === 'render' && blobUrl"
+        ref="previewContent"
+        tabindex="0"
+        :title="fileName"
+        :src="blobUrl"
+        class="html-iframe"
+        sandbox="allow-scripts"
+        referrerpolicy="no-referrer"
+        @load="onPreviewFrameLoad"
+      />
+      <pre v-else-if="!allowsHtmlScriptPreview() || htmlViewMode === 'source'" ref="previewContent" tabindex="0" :aria-label="fileName" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
     </div>
 
     <!-- Image -->
-    <div v-else-if="previewType === 'image' && blobUrl" class="preview-image">
+    <div v-else-if="previewType === 'image' && blobUrl" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-image">
       <div class="image-wrapper">
         <img :src="blobUrl" :alt="fileName" @load="onImageLoad" />
         <div v-if="imageNaturalWidth" class="image-info">
@@ -420,27 +570,32 @@ onUnmounted(() => {
 
     <!-- DOCX -->
     <div v-else-if="previewType === 'docx'" class="preview-docx">
-      <div ref="docxContainer" class="docx-container" />
+      <div ref="docxContainer" tabindex="0" :aria-label="fileName" class="docx-container" />
     </div>
 
     <!-- PPTX -->
-    <div v-else-if="previewType === 'pptx' && pptxData" class="preview-pptx">
-      <vue-office-pptx :src="pptxData" @rendered="() => {}" @error="(e: any) => { error = e?.message || $t('preview.loadFailed'); }" />
+    <div v-else-if="previewType === 'pptx' && pptxData" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-pptx">
+      <vue-office-pptx :key="loadedForId" :src="pptxData" @rendered="onPptxRendered" @error="(e: any) => { error = e?.message || $t('preview.loadFailed'); }" />
     </div>
 
     <!-- Excel -->
     <div v-else-if="previewType === 'excel' && excelHtml" class="preview-excel">
-      <div class="excel-container" v-html="excelHtml" />
+      <div ref="previewContent" tabindex="0" :aria-label="fileName" class="excel-container" v-html="excelHtml" />
     </div>
 
     <!-- Markdown -->
-    <div v-else-if="previewType === 'markdown' && markdownHtml" class="preview-markdown">
+    <div v-else-if="previewType === 'markdown' && markdownHtml" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-markdown">
       <div class="markdown-body" v-html="markdownHtml" />
     </div>
 
     <!-- Text / Code -->
     <div v-else-if="previewType === 'text' && highlightedCode" class="preview-text">
-      <pre class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
+      <pre ref="previewContent" tabindex="0" :aria-label="fileName" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
+    </div>
+
+    <!-- Mermaid -->
+    <div v-else-if="previewType === 'mermaid' && mermaidSvg" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-mermaid" @click="openMermaid">
+      <div class="mermaid-body" v-html="mermaidSvg" />
     </div>
 
     <!-- Audio -->
@@ -448,10 +603,17 @@ onUnmounted(() => {
       <div class="audio-wrapper">
         <t-icon name="sound" size="48px" />
         <p class="audio-filename">{{ fileName }}</p>
-        <audio controls :src="blobUrl" class="audio-element">
+        <audio ref="previewContent" controls :src="blobUrl" class="audio-element">
           {{ $t('preview.audioNotSupported') }}
         </audio>
       </div>
+    </div>
+
+    <!-- Video -->
+    <div v-else-if="previewType === 'video' && blobUrl" class="preview-video">
+      <video ref="previewContent" controls playsinline :src="blobUrl" class="video-element">
+        {{ $t('preview.videoNotSupported') }}
+      </video>
     </div>
   </div>
 </template>
@@ -495,7 +657,8 @@ onUnmounted(() => {
   min-height: 200px;
   position: relative;
 
-  &.fill-height {
+  &.fill-height,
+  &.is-fullscreen {
     height: 100%;
     min-height: 0;
     display: flex;
@@ -508,7 +671,10 @@ onUnmounted(() => {
     .preview-excel,
     .preview-markdown,
     .preview-text,
+    .preview-html,
+    .preview-mermaid,
     .preview-audio,
+    .preview-video,
     .preview-loading,
     .preview-error,
     .preview-unsupported {
@@ -526,11 +692,15 @@ onUnmounted(() => {
       overflow: auto;
     }
 
-    .preview-docx {
+    .preview-docx,
+    .preview-excel,
+    .preview-text {
       display: flex;
       flex-direction: column;
 
-      .docx-container {
+      .docx-container,
+      .excel-container,
+      .code-preview {
         flex: 1;
         min-height: 0;
         max-height: none;
@@ -544,8 +714,18 @@ onUnmounted(() => {
 
     .preview-excel .excel-container,
     .preview-markdown,
-    .preview-text .code-preview {
+    .preview-text .code-preview,
+    .preview-html .code-preview {
       max-height: none;
+    }
+
+    .preview-html .html-iframe {
+      height: 100%;
+    }
+
+    .preview-html {
+      height: auto;
+      min-height: 0;
     }
   }
 }
@@ -559,28 +739,17 @@ onUnmounted(() => {
   z-index: 2001;
   background: var(--td-bg-color-container);
   padding: 0;
-  overflow-y: auto;
+  overflow: hidden;
 
   .preview-toolbar {
-    position: fixed;
-    top: 12px;
-    right: 32px;
-    z-index: 2002;
-  }
-
-  /* Children use height: 100% rather than 100vh because <html> carries a
-     `zoom` multiplier for font-size control; 100vh resolves against the
-     unscaled viewport and then gets scaled, overshooting the screen. The
-     fullscreen container is already inset 0 on all sides, so 100% resolves
-     to the true viewport height. */
-  .preview-pdf {
-    height: 100%;
+    padding: 12px 16px;
+    margin-bottom: 0;
   }
 
   .preview-pptx {
     height: auto;
-    min-height: 100%;
-    overflow: visible;
+    min-height: 0;
+    overflow: auto;
     border: none;
 
     :deep(.pptx-preview-wrapper) {
@@ -589,49 +758,62 @@ onUnmounted(() => {
     }
   }
 
-  .preview-docx {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    .docx-container {
-      max-height: 100%;
-      height: 100%;
-      flex: 1;
-    }
-  }
-
   .preview-image {
-    min-height: 100%;
     display: flex;
     justify-content: center;
     align-items: center;
-    .image-wrapper img {
-      max-height: calc(100% - 80px);
-    }
-  }
-
-  .preview-excel .excel-container,
-  .preview-markdown,
-  .preview-text .code-preview {
-    max-height: 100%;
   }
 }
 
 .preview-toolbar {
-  position: absolute;
-  top: 8px;
-  right: 24px;
-  z-index: 10;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border);
-  border-radius: var(--td-radius-default);
-  box-shadow: var(--td-shadow-1);
-  padding: 4px;
-  opacity: 0.6;
-  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 8px 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid @border-color;
+  background: @bg-white;
+}
 
-  &:hover {
-    opacity: 1;
+.preview-toolbar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: @text-primary;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.preview-toolbar.is-inline {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
+.preview-toolbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+
+  :deep(.t-button) {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    color: @text-secondary;
+  }
+
+  :deep(.t-button__icon) {
+    margin: 0;
+    font-size: 16px;
   }
 }
 
@@ -682,8 +864,58 @@ onUnmounted(() => {
   }
 }
 
+// ── HTML ──
+.preview-html {
+  width: 100%;
+  height: @preview-max-h;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  .html-iframe {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border: 1px solid @border-color;
+    border-radius: @border-radius;
+    background: @bg-white;
+  }
+  .code-preview {
+    .preview-container();
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 16px;
+    background: @bg-subtle;
+    font-size: 13px;
+    line-height: 1.6;
+    code {
+      white-space: pre;
+      word-wrap: normal;
+      display: block;
+      background: transparent;
+    }
+  }
+}
+
+// ── Mermaid ──
+.preview-mermaid {
+  .preview-container();
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px;
+  cursor: zoom-in;
+  .mermaid-body {
+    max-width: 100%;
+    :deep(svg) {
+      max-width: 100%;
+      height: auto;
+    }
+  }
+}
+
 // ── Image ──
 .preview-image {
+  overflow: auto;
   display: flex;
   justify-content: center;
   padding: 20px 0;
@@ -765,6 +997,21 @@ onUnmounted(() => {
     color: @text-secondary;
     .audio-filename { font-size: 14px; color: @text-primary; margin: 0; }
     .audio-element { width: 100%; max-width: 480px; }
+  }
+}
+
+// ── Video ──
+.preview-video {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 16px;
+  min-height: 280px;
+  .video-element {
+    width: 100%;
+    max-height: calc(100vh - 240px);
+    border-radius: @border-radius;
+    background: #000;
   }
 }
 

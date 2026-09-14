@@ -47,6 +47,7 @@ export function defaultThinkingControl(
       return 'thinking_type'
     case 'generic':
     case 'nvidia':
+    case 'litellm':
       return 'chat_template_kwargs'
     case 'volcengine':
       return 'thinking_type'

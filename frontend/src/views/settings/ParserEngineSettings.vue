@@ -478,11 +478,12 @@ const ENGINE_ORDER: Record<string, number> = {
   builtin: 0,
   weknoracloud: 1,
   simple: 2,
-  markitdown: 3,
-  mineru: 4,
-  mineru_cloud: 5,
-  paddleocr_vl: 6,
-  paddleocr_vl_cloud: 7,
+  anydoc: 3,
+  markitdown: 4,
+  mineru: 5,
+  mineru_cloud: 6,
+  paddleocr_vl: 7,
+  paddleocr_vl_cloud: 8,
 }
 
 const sortedEngines = computed(() => {
