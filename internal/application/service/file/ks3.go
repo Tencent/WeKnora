@@ -121,7 +121,11 @@ func joinKS3Key(parts ...string) string {
 	return strings.Join(filtered, "/")
 }
 
+// parseKS3FilePath extracts bucket and object key from: ks3://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/ks3://{bucket}/{objectKey} paths are
+// accepted too (see storageBackendInnerPath, #3151).
 func parseKS3FilePath(filePath string) (bucket, objectKey string, err error) {
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, ks3Scheme) {
 		return "", "", fmt.Errorf("invalid KS3 file path: %s", filePath)
 	}

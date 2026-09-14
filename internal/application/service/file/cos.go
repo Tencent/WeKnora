@@ -162,7 +162,11 @@ func (s *cosFileService) DeleteFile(ctx context.Context, filePath string) error 
 // parseCosObjectName extracts the object name from:
 // - provider scheme: cos://{bucket}/{region}/{objectKey}
 // - legacy URL: https://bucket.cos.region.myqcloud.com/{objectKey}
+// Canonical storage://<backend-id>/cos://... paths are accepted too: the
+// wrapper is stripped first, otherwise the whole canonical form silently falls
+// through to the legacy-URL branch and is returned unchanged (#3151).
 func (s *cosFileService) parseCosObjectName(filePath string) (string, error) {
+	filePath = storageBackendInnerPath(filePath)
 	for _, other := range []string{"local://", "minio://", "s3://", "tos://", "oss://", "ks3://", "obs://"} {
 		if strings.HasPrefix(filePath, other) {
 			return "", fmt.Errorf("cos file service cannot resolve %s path", strings.Split(other, "://")[0])
