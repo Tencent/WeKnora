@@ -15,7 +15,8 @@ func TestRenderDocumentSupportsDocumentedBlocks(t *testing.T) {
 			"children":[
 				{"elementType":"text","text":"bold","bold":true},
 				{"elementType":"text","text":" and 2 * 3 "},
-				{"elementType":"link","properties":{"href":"https://example.com/a"},"children":[{"elementType":"text","text":"link"}]},
+				{"elementType":"link","properties":{"href":"https://example.com/a"},
+				 "children":[{"elementType":"text","text":"link"}]},
 				{"elementType":"image","properties":{"src":"https://example.com/image.png"}}
 			]
 		}`),
@@ -60,7 +61,8 @@ func TestRenderDocumentHandlesUnknownAndUnsafeContent(t *testing.T) {
 		rawJSON(`{
 			"blockType":"paragraph",
 			"children":[
-				{"elementType":"link","properties":{"href":"javascript:alert(1)"},"children":[{"elementType":"text","text":"safe label"}]},
+				{"elementType":"link","properties":{"href":"javascript:alert(1)"},
+				 "children":[{"elementType":"text","text":"safe label"}]},
 				{"elementType":"image","properties":{"src":"data:text/html,unsafe"}},
 				{"elementType":"futureInline","text":"fallback"}
 			]

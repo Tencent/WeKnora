@@ -6538,6 +6538,8 @@ export default {
     hoursAgo: '{n}h ago',
     daysAgo: '{n}d ago',
     syncError: {
+      dingtalk_document_failed: 'DingTalk document could not be read; check access and retry the sync.',
+      dingtalk_resource_failed: 'DingTalk resource is unavailable; check access and the saved selection, then retry.',
       deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',
       deletion_failed: 'Deletion failed; see server logs',
       ingest_failed: 'Ingest failed; see server logs'

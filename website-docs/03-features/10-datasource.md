@@ -102,6 +102,14 @@
 - **抓取**（`walk`，全量/增量共用）：`ListBookDocs` 列文档 → 过滤 `type != "Doc"`（跳过 Sheet/Thread/Board/Table）与 `status != "1"`（跳过草稿）→ 每次 `GetDocDetail` 之间 sleep 300ms 规避限流 → `format` 为 `markdown`/`lake` 时取 `body` Markdown 原文入库（其他格式如 html 防御性跳过并记 `skip_reason`）。
 - **增量逻辑**：游标 `yuqueCursor.BookDocTimes`（`bookID → docID → content_updated_at`），一致则跳过。删除检测：游标里有、当前列表没有 → `IsDeleted`。
 
+#### 钉钉文档（`connector/dingtalk/`）
+
+- **认证**：企业内部应用 Client ID、Client Secret 和有目标知识库访问权限的操作人 Union ID；开通 `Wiki.Workspace.Read`、`Wiki.Node.Read`、`Storage.File.Read` 后发布应用。
+- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown。当前不导入钉钉表格或普通上传附件，也不依赖异步导出回调。
+- **同步**：按文档更新时间增量读取，合并重叠选择；在全部选中范围扫描完成后统一对账删除，避免文档在选中文件夹间移动时误删。
+- **失败与恢复**：资源失效不阻断其他范围；失败范围和正文失败文档保留旧版本以便重试。任一范围无法完整扫描时暂缓删除，并保留待核对记录。失效的单独选择需要检查权限或重新选择。
+- **删除开关**：开启同步删除才移除确认在源端删除的本地知识；不可访问的资源不会直接视为已删除。
+
 #### RSS / Atom（`connector/rss/`）
 
 - **配置**：`feed_urls`（换行/逗号分隔，多条去重）存放在 **Settings**（非机密，UI 可直接编辑）；`auth_headers`（`Name: Value` 每行一条，仅附加在 feed 请求上、绝不发给第三方文章页）存放在 **Credentials** 并加密。`HasConfiguredCredentials` 对 RSS 特判：只有 `auth_headers` 才算已配置凭据。

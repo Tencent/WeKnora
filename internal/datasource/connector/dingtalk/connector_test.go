@@ -242,7 +242,7 @@ func TestIncrementalSyncDoesNotInferDeletionsFromIncompleteTree(t *testing.T) {
 	if !errors.As(err, &partial) {
 		t.Fatalf("FetchIncremental() error = %v, want PartialFetchError", err)
 	}
-	if len(items) != 0 || next == nil {
+	if len(items) != 1 || items[0].Metadata["error_reason_code"] != "dingtalk_resource_failed" || next == nil {
 		t.Fatalf("FetchIncremental() = %#v, %#v; want preserved cursor", items, next)
 	}
 	decoded, decodeErr := decodeCursor(next)
@@ -341,11 +341,13 @@ func TestConnectorRejectsCrossWorkspaceResourcePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = testConnector(api).FetchAll(
+	items, err := testConnector(api).FetchAll(
 		context.Background(), testConfig(resourceID), []string{resourceID},
 	)
-	if err == nil || !strings.Contains(err.Error(), "different workspace") {
-		t.Fatalf("FetchAll() error = %v", err)
+	var partial *datasource.PartialFetchError
+	if !errors.As(err, &partial) || len(items) != 1 ||
+		!strings.Contains(items[0].Metadata["error"], "different workspace") || len(api.blockCalls) != 0 {
+		t.Fatalf("FetchAll() = %#v, %v; want isolated workspace mismatch", items, err)
 	}
 }
 

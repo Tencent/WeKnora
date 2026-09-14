@@ -257,3 +257,52 @@ func TestReadBodyRejectsOversizedResponses(t *testing.T) {
 		t.Fatalf("readBody() error = %v", err)
 	}
 }
+
+func TestDocumentBlocksRejectsIncompleteResponse(t *testing.T) {
+	for _, body := range []string{`{}`, `{"success":false}`, `{"success":true}`, `{"success":true,"result":null}`} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			c := testClient(server)
+			c.token = "cached"
+			c.tokenExpiry = time.Now().Add(time.Hour)
+			blocks, err := c.documentBlocks(context.Background(), "doc")
+			if err == nil || len(blocks) != 0 {
+				t.Fatalf("invalid response accepted: %#v, %v", blocks, err)
+			}
+		})
+	}
+}
+
+func TestDocumentBlocksReadsMultiplePagesAndAcceptsEmptyDocument(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var blocks []json.RawMessage
+		if r.URL.Query().Get("startIndex") == "0" && strings.Contains(r.URL.Path, "/long/") {
+			for i := 0; i < 100; i++ {
+				blocks = append(blocks, json.RawMessage(`{"blockType":"paragraph","paragraph":{"text":"first page"}}`))
+			}
+		} else if strings.Contains(r.URL.Path, "/long/") {
+			if r.URL.Query().Get("startIndex") != "100" {
+				t.Errorf("unexpected page: %s", r.URL.RawQuery)
+			}
+			blocks = []json.RawMessage{json.RawMessage(`{"blockType":"paragraph","paragraph":{"text":"last page"}}`)}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "result": map[string]any{"data": blocks}})
+	}))
+	defer server.Close()
+	c := testClient(server)
+	c.token = "cached"
+	c.tokenExpiry = time.Now().Add(time.Hour)
+	blocks, err := c.documentBlocks(context.Background(), "long")
+	if err != nil || len(blocks) != 101 || calls != 2 {
+		t.Fatalf("long document: %d blocks, %d calls, %v", len(blocks), calls, err)
+	}
+	blocks, err = c.documentBlocks(context.Background(), "empty")
+	if err != nil || len(blocks) != 0 {
+		t.Fatalf("empty document: %#v, %v", blocks, err)
+	}
+}

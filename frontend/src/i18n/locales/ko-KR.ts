@@ -935,6 +935,8 @@ export default {
       loadNotFoundHint: "folder_token이 존재하지 않거나 삭제되었습니다. 페이슈 드라이브 폴더 URL에서 복사한 토큰이 맞는지 확인하세요.",
     },
     syncError: {
+      dingtalk_document_failed: 'DingTalk 문서를 읽을 수 없습니다. 접근 권한을 확인하고 동기화를 다시 시도하세요.',
+      dingtalk_resource_failed: 'DingTalk 리소스를 사용할 수 없습니다. 접근 권한과 선택한 리소스를 확인한 후 다시 시도하세요.',
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
       ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요'

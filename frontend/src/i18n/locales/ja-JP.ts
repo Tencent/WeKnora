@@ -6406,6 +6406,7 @@ export default {
       lark_drive: 'Lark Drive',
       notion: 'Notion',
       yuque: 'Yuque',
+      dingtalk: 'DingTalkドキュメント',
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
       gitlab: 'GitLab'
@@ -6417,6 +6418,7 @@ export default {
       lark_drive: 'Lark Drive（Feishu国際版）のフォルダからドキュメント、スプレッドシート、ファイルを同期します',
       notion: 'Notionからページとデータベースを同期します',
       yuque: 'Yuqueのナレッジベースからドキュメントを同期します',
+      dingtalk: 'DingTalkナレッジベースのオンラインドキュメントを同期',
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
       gitlab: 'GitLabプロジェクトからファイルを同期します'
@@ -6435,6 +6437,10 @@ export default {
       loadNotFoundHint: 'folder_tokenが存在しないか、削除されています。Feishu DriveのフォルダURLからコピーしたトークンを確認してください。',
     },
     field: {
+      clientId: 'Client ID',
+      clientSecret: 'Client Secret',
+      operatorId: '操作ユーザーのUnion ID',
+      operatorIdHint: 'このユーザーの権限でナレッジベースを読み取ります。DingTalkのユーザー詳細APIで取得してください。',
       appId: 'App ID',
       appSecret: 'App Secret',
       integrationToken: 'Integration Token',
@@ -6484,6 +6490,14 @@ export default {
     prereqStep3Brief_lark_drive: 'アプリの権限を設定',
     prereqStep3Desc_lark_drive: 'drive:drive:readonly、drive:export:readonly、docx:document:readonlyの権限を有効にします',
     prereqOpenConsole_yuque: 'Yuqueのトークン設定を開く',
+    prereqBarText_dingtalk: '初めての利用ですか？DingTalkアプリの設定ガイドを確認',
+    prereqStep1Brief_dingtalk: '企業内部アプリを作成',
+    prereqStep1Desc_dingtalk: 'DingTalk開発者プラットフォームで企業内部アプリを作成し、Client IDとClient Secretを取得します。',
+    prereqStep2Brief_dingtalk: 'ナレッジベースの読み取り権限を付与',
+    prereqStep2Desc_dingtalk: 'Wiki.Workspace.Read、Wiki.Node.Read、Storage.File.Readを有効にします。',
+    prereqStep3Brief_dingtalk: '操作ユーザーのUnion IDを入力',
+    prereqStep3Desc_dingtalk: '対象ナレッジベースにアクセスできるDingTalkユーザーのUnion IDを入力します。',
+    prereqOpenConsole_dingtalk: 'DingTalk開発者プラットフォームを開く',
     prereqBarText_ima: '初めてですか？クリックしてTencent IMA OpenAPIの設定ガイドを表示',
     prereqStep1Brief_ima: 'IMAエージェントのOpenAPI利用を申請',
     prereqStep1Desc_ima: 'https://ima.qq.com/agent-interfaceにサインインし、OpenAPIの利用を申請します',
@@ -6524,6 +6538,8 @@ export default {
     hoursAgo: '{n}時間前',
     daysAgo: '{n}日前',
     syncError: {
+      dingtalk_document_failed: 'DingTalkドキュメントを読み取れません。アクセス権限を確認して同期を再試行してください。',
+      dingtalk_resource_failed: 'DingTalkリソースを利用できません。アクセス権限と選択したリソースを確認して再試行してください。',
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',
       deletion_failed: '削除に失敗しました。サーバログを確認してください',
       ingest_failed: '取り込みに失敗しました。サーバログを確認してください'

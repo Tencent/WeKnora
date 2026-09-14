@@ -25,10 +25,12 @@ var _ datasource.Connector = (*Connector)(nil)
 
 type apiFactory func(*config) dingTalkAPI
 
+// Connector imports native DingTalk documents through the Wiki and Blocks APIs.
 type Connector struct {
 	newAPI apiFactory
 }
 
+// NewConnector creates a DingTalk data source connector.
 func NewConnector() *Connector {
 	return &Connector{newAPI: func(cfg *config) dingTalkAPI { return newClient(cfg) }}
 }
@@ -40,10 +42,12 @@ func (c *Connector) api(cfg *config) dingTalkAPI {
 	return newClient(cfg)
 }
 
+// Type returns the registered data source type.
 func (c *Connector) Type() string {
 	return types.ConnectorTypeDingTalk
 }
 
+// Validate checks the application credentials and operator access.
 func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSourceConfig) error {
 	cfg, err := parseConfig(dataSourceConfig)
 	if err != nil {
@@ -55,6 +59,7 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	return nil
 }
 
+// ListResources lazily lists selectable workspaces, folders and documents.
 func (c *Connector) ListResources(
 	ctx context.Context,
 	dataSourceConfig *types.DataSourceConfig,
@@ -124,9 +129,12 @@ func (c *Connector) ListResources(
 		if err != nil {
 			return nil, err
 		}
-		scopes, err := resolveSyncScopes(ctx, api, workspaces, []string{parentID})
+		scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, []string{parentID})
 		if err != nil {
 			return nil, err
+		}
+		if failure := failures[parentID]; failure != nil {
+			return nil, failure
 		}
 		if len(scopes) != 1 || scopes[0].Document != nil {
 			return nil, fmt.Errorf("%w: DingTalk resource %q is not an expandable folder",
@@ -176,6 +184,7 @@ func (c *Connector) ListResources(
 	return resources, nil
 }
 
+// ResolveResourceAncestors restores the paths embedded in saved selections.
 func (c *Connector) ResolveResourceAncestors(
 	ctx context.Context,
 	dataSourceConfig *types.DataSourceConfig,
@@ -228,6 +237,7 @@ func workspaceByID(workspaces []workspace, workspaceID string) (workspace, bool)
 	return workspace{}, false
 }
 
+// FetchAll reads every supported document in the selected scopes.
 func (c *Connector) FetchAll(
 	ctx context.Context,
 	dataSourceConfig *types.DataSourceConfig,
@@ -237,6 +247,7 @@ func (c *Connector) FetchAll(
 	return items, err
 }
 
+// FetchIncremental reads changed documents and reconciles complete selections.
 func (c *Connector) FetchIncremental(
 	ctx context.Context,
 	dataSourceConfig *types.DataSourceConfig,
@@ -321,7 +332,7 @@ func (c *Connector) sync(
 	if err != nil {
 		return nil, nil, err
 	}
-	scopes, err := resolveSyncScopes(ctx, api, workspaces, selected)
+	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -333,7 +344,22 @@ func (c *Connector) sync(
 	}
 	var items []types.FetchedItem
 	failedDocuments := 0
-	var partialDetails []string
+	complete := len(failures) == 0
+	seenDocuments := make(map[string]struct{})
+	type deletionCandidate struct {
+		resourceID string
+		documentID string
+		revision   string
+	}
+	var deletions []deletionCandidate
+	for _, resourceID := range selected {
+		if failure := failures[resourceID]; failure != nil {
+			if previous != nil {
+				next.Resources[resourceID] = cloneRevisions(previous.Resources[resourceID])
+			}
+			items = append(items, failedResource(resourceID, failure))
+		}
+	}
 
 	for _, scope := range scopes {
 		oldRevisions := map[string]string{}
@@ -350,20 +376,20 @@ func (c *Connector) sync(
 			// Never infer deletions from an incomplete tree. Other independent
 			// selections may still complete, while this scope keeps its previous
 			// cursor and is retried on the next run.
+			complete = false
 			next.Resources[scope.ResourceID] = cloneRevisions(oldRevisions)
-			partialDetails = append(partialDetails,
-				fmt.Sprintf("DingTalk resource %q could not be scanned; its previous state was preserved",
-					scope.ResourceID))
+			items = append(items, failedResource(scope.ResourceID, err))
 			continue
 		}
 		newRevisions := make(map[string]string, len(documents))
-		seenDocuments := make(map[string]struct{}, len(documents))
+		currentDocuments := make(map[string]struct{}, len(documents))
 
 		for _, document := range documents {
 			if document.ID == "" {
 				continue
 			}
 			seenDocuments[document.ID] = struct{}{}
+			currentDocuments[document.ID] = struct{}{}
 			revision := document.revision()
 			oldRevision, existed := oldRevisions[document.ID]
 			if incremental && revision != "" && existed && revision == oldRevision {
@@ -395,30 +421,45 @@ func (c *Connector) sync(
 		}
 
 		if incremental {
-			for documentID := range oldRevisions {
-				if _, exists := seenDocuments[documentID]; exists {
+			for documentID, revision := range oldRevisions {
+				if _, exists := currentDocuments[documentID]; exists {
 					continue
 				}
-				items = append(items, types.FetchedItem{
-					ExternalID:       documentID,
-					IsDeleted:        true,
-					SourceResourceID: scope.ResourceID,
-				})
+				deletions = append(deletions, deletionCandidate{scope.ResourceID, documentID, revision})
 			}
 		}
 		next.Resources[scope.ResourceID] = newRevisions
 	}
 
+	// Reconcile the union of all selections. Moving a document between two
+	// selected folders must never generate both an upsert and a deletion.
+	// An unavailable scope could contain a moved document, so defer deletions
+	// and retain their revisions until every scope can be scanned again.
+	sort.Slice(deletions, func(i, j int) bool { return deletions[i].documentID < deletions[j].documentID })
+	deleted := make(map[string]struct{})
+	for _, candidate := range deletions {
+		if _, visible := seenDocuments[candidate.documentID]; visible {
+			continue
+		}
+		if !complete {
+			next.Resources[candidate.resourceID][candidate.documentID] = candidate.revision
+			continue
+		}
+		if _, exists := deleted[candidate.documentID]; exists {
+			continue
+		}
+		deleted[candidate.documentID] = struct{}{}
+		items = append(items, types.FetchedItem{
+			ExternalID: candidate.documentID, IsDeleted: true, SourceResourceID: candidate.resourceID,
+		})
+	}
 	if !incremental {
 		next = nil
 	}
-	if failedDocuments > 0 {
-		partialDetails = append(partialDetails,
-			fmt.Sprintf("%d DingTalk document(s) could not be fetched; they will be retried", failedDocuments),
-		)
-	}
-	if len(partialDetails) > 0 {
-		return items, next, &datasource.PartialFetchError{Details: partialDetails}
+	if !complete || failedDocuments > 0 {
+		// Failure items carry localized reason codes. Returning the same raw
+		// diagnostics in Details would duplicate them as untranslated UI text.
+		return items, next, &datasource.PartialFetchError{}
 	}
 	return items, next, nil
 }
@@ -428,7 +469,7 @@ func resolveSyncScopes(
 	api dingTalkAPI,
 	workspaces []workspace,
 	resourceIDs []string,
-) ([]syncScope, error) {
+) ([]syncScope, map[string]error, error) {
 	byID := make(map[string]workspace, len(workspaces))
 	for _, item := range workspaces {
 		byID[item.ID] = item
@@ -446,74 +487,85 @@ func resolveSyncScopes(
 		return children, nil
 	}
 
-	scopes := make([]syncScope, 0, len(resourceIDs))
-	for _, resourceID := range resourceIDs {
+	resolve := func(resourceID string) (syncScope, error) {
 		ref, err := decodeResourceReference(resourceID)
 		if err != nil {
-			return nil, err
+			return syncScope{}, err
 		}
 		canonicalID, err := encodeResourceReference(ref)
 		if err != nil {
-			return nil, err
+			return syncScope{}, err
 		}
 		item, exists := byID[ref.WorkspaceID]
 		if !exists {
-			return nil, fmt.Errorf("%w: DingTalk workspace %q is unavailable",
+			return syncScope{}, fmt.Errorf("%w: DingTalk workspace %q is unavailable",
 				datasource.ErrResourceNotFound, ref.WorkspaceID)
 		}
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
 		if rootNodeID == "" {
-			return nil, fmt.Errorf("DingTalk workspace %q has no root node", ref.WorkspaceID)
+			return syncScope{}, fmt.Errorf("DingTalk workspace %q has no root node", ref.WorkspaceID)
 		}
 		if ref.NodeID == "" {
-			scopes = append(scopes, syncScope{
+			return syncScope{
 				ResourceID: canonicalID, Reference: ref, StartNodeID: rootNodeID,
-			})
-			continue
+			}, nil
 		}
 
 		parentNodeID := rootNodeID
 		for _, ancestorID := range ref.Ancestors {
 			children, err := listChildren(parentNodeID)
 			if err != nil {
-				return nil, fmt.Errorf("resolve DingTalk resource path: %w", err)
+				return syncScope{}, fmt.Errorf("resolve DingTalk resource path: %w", err)
 			}
 			ancestor, exists := childByID(children, ancestorID)
 			if !exists || !ancestor.isFolder() {
-				return nil, fmt.Errorf("%w: DingTalk ancestor %q is unavailable",
+				return syncScope{}, fmt.Errorf("%w: DingTalk ancestor %q is unavailable",
 					datasource.ErrResourceNotFound, ancestorID)
 			}
 			if ancestor.WorkspaceID != "" && ancestor.WorkspaceID != ref.WorkspaceID {
-				return nil, fmt.Errorf("DingTalk ancestor %q belongs to a different workspace", ancestorID)
+				return syncScope{}, fmt.Errorf("DingTalk ancestor %q belongs to a different workspace", ancestorID)
 			}
 			parentNodeID = ancestor.ID
 		}
 		children, err := listChildren(parentNodeID)
 		if err != nil {
-			return nil, fmt.Errorf("resolve DingTalk resource: %w", err)
+			return syncScope{}, fmt.Errorf("resolve DingTalk resource: %w", err)
 		}
 		selectedNode, exists := childByID(children, ref.NodeID)
 		if !exists {
-			return nil, fmt.Errorf("%w: DingTalk node %q is unavailable",
+			return syncScope{}, fmt.Errorf("%w: DingTalk node %q is unavailable",
 				datasource.ErrResourceNotFound, ref.NodeID)
 		}
 		if selectedNode.WorkspaceID != "" && selectedNode.WorkspaceID != ref.WorkspaceID {
-			return nil, fmt.Errorf("DingTalk node %q belongs to a different workspace", ref.NodeID)
+			return syncScope{}, fmt.Errorf("DingTalk node %q belongs to a different workspace", ref.NodeID)
 		}
 		switch {
 		case selectedNode.isFolder():
-			scopes = append(scopes, syncScope{
+			return syncScope{
 				ResourceID: canonicalID, Reference: ref, StartNodeID: selectedNode.ID,
-			})
+			}, nil
 		case selectedNode.isDocument():
 			document := selectedNode
-			scopes = append(scopes, syncScope{
+			return syncScope{
 				ResourceID: canonicalID, Reference: ref, Document: &document,
-			})
+			}, nil
 		default:
-			return nil, fmt.Errorf("DingTalk node %q is not a supported online document or folder",
+			return syncScope{}, fmt.Errorf("DingTalk node %q is not a supported online document or folder",
 				ref.NodeID)
 		}
+	}
+	var scopes []syncScope
+	failures := make(map[string]error)
+	for _, resourceID := range resourceIDs {
+		scope, err := resolve(resourceID)
+		if err != nil {
+			if isContextError(err) {
+				return nil, nil, err
+			}
+			failures[resourceID] = err
+			continue
+		}
+		scopes = append(scopes, scope)
 	}
 
 	sort.SliceStable(scopes, func(i, j int) bool {
@@ -543,7 +595,7 @@ func resolveSyncScopes(
 			compacted = append(compacted, scope)
 		}
 	}
-	return compacted, nil
+	return compacted, failures, nil
 }
 
 func childByID(children []node, nodeID string) (node, bool) {
@@ -677,8 +729,21 @@ func failedDocument(
 			"workspace_id":      workspaceID,
 			"node_id":           document.ID,
 			"error":             err.Error(),
-			"error_reason_code": "sync_failed",
+			"error_reason_code": "dingtalk_document_failed",
 			"error_reason":      "DingTalk document could not be read; retry on the next sync",
+		},
+	}
+}
+
+func failedResource(resourceID string, err error) types.FetchedItem {
+	return types.FetchedItem{
+		ExternalID:       "dingtalk-resource:" + resourceID,
+		SourceResourceID: resourceID,
+		Metadata: map[string]string{
+			"channel":           types.ChannelDingtalk,
+			"error":             err.Error(),
+			"error_reason_code": "dingtalk_resource_failed",
+			"error_reason":      "DingTalk resource is unavailable; check access and the saved selection, then retry",
 		},
 	}
 }

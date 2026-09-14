@@ -241,7 +241,7 @@ func (c *client) doJSON(
 		}
 
 		responseBody, readErr := readBody(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if readErr != nil {
 			return fmt.Errorf("read DingTalk response: %w", readErr)
 		}
@@ -381,7 +381,7 @@ func (c *client) documentBlocks(ctx context.Context, documentID string) ([]json.
 		}
 		var response struct {
 			Success *bool `json:"success"`
-			Result  struct {
+			Result  *struct {
 				Data []json.RawMessage `json:"data"`
 			} `json:"result"`
 		}
@@ -390,7 +390,7 @@ func (c *client) documentBlocks(ctx context.Context, documentID string) ([]json.
 		if err := c.doJSON(ctx, http.MethodGet, path, nil, true, &response); err != nil {
 			return nil, fmt.Errorf("query DingTalk document blocks: %w", err)
 		}
-		if response.Success != nil && !*response.Success {
+		if response.Success == nil || !*response.Success || response.Result == nil {
 			return nil, errors.New("DingTalk document blocks request was unsuccessful")
 		}
 		all = append(all, response.Result.Data...)
