@@ -297,6 +297,7 @@ func (s *sessionService) buildAgentConfig(
 	customAgent := req.CustomAgent
 	agentConfig := &types.AgentConfig{
 		MaxIterations:               customAgent.Config.MaxIterations,
+		ParallelToolCalls:           customAgent.Config.ParallelToolCalls,
 		Temperature:                 customAgent.Config.Temperature,
 		WebSearchEnabled:            customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
 		LocalBrowserEnabled:         req.LocalBrowserEnabled,
