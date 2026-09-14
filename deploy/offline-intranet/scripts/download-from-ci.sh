@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 从 GitHub Actions「Pack Offline Images」制品下载镜像到 images/
-# 用法: ./scripts/download-from-ci.sh [run_id|v0.8.20]
+# 用法: ./scripts/download-from-ci.sh [run_id|v0.8.21]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +34,7 @@ fi
 
 echo "[download] run_id=${RUN_ID}"
 cd "${TMP_DIR}"
-gh run download "${RUN_ID}" --repo "${REPO}" -n "treerag-offline-images-v0.8.20" \
+gh run download "${RUN_ID}" --repo "${REPO}" -n "treerag-offline-images-v0.8.21" \
   2>/dev/null \
   || gh run download "${RUN_ID}" --repo "${REPO}"
 

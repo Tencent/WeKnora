@@ -9,7 +9,7 @@
 
 services:
   frontend:
-    image: registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-ui:${WEKNORA_VERSION:-v0.8.20}
+    image: registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-ui:${WEKNORA_VERSION:-v0.8.21}
     container_name: TreeRAG-frontend
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-18080}:80"
@@ -26,7 +26,7 @@ services:
     restart: unless-stopped
 
   app:
-    image: registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-app:${WEKNORA_VERSION:-v0.8.20}
+    image: registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-app:${WEKNORA_VERSION:-v0.8.21}
     container_name: TreeRAG-app
     # 仅本机调试用；对外一律走宿主机 Nginx → frontend
     ports:
@@ -102,7 +102,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   docreader:
-    image: registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-docreader:${WEKNORA_VERSION:-v0.8.20}
+    image: registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-docreader:${WEKNORA_VERSION:-v0.8.21}
     container_name: TreeRAG-docreader
     expose:
       - "50051"

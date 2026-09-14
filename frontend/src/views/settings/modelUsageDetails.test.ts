@@ -32,11 +32,16 @@ test('referenced knowledge bases and agents open their relevant configuration pa
   assert.match(source, /uiStore\.openKBSettings\(id, knowledgeBaseSection\)/)
   assert.match(
     agentListSource,
-    /editingAgent\.value\?\.id === agent\.id[\s\S]*focusAgentEditorSection\(requestedSection\)[\s\S]*editorVisible\.value = false\s*await nextTick\(\)\s*if \(generation !== editOpenGeneration\) return[\s\S]*editorVisible\.value = true/,
+    /redirectLegacyEditQuery[\s\S]*path: `\/platform\/agents\/\$\{editId\}`/,
   )
-  assert.match(agentListSource, /const agent = resolveAgentForEdit\([\s\S]*if \(!agent\) return[\s\S]*router\.replace/)
-  assert.match(agentEditorSource, /v-if="editorInitializing"[\s\S]*:disabled="editorInitializing"/)
-  assert.match(agentEditorSource, /generation !== editorInitializationGeneration \|\| !props\.visible/)
+  assert.match(
+    agentListSource,
+    /const redirectLegacyEditQuery = \(\) => \{[\s\S]*router\.replace\(\{\s*path: `\/platform\/agents\/\$\{editId\}`/,
+  )
+  // TreeRAG uses a dedicated agent editor page; modal keeps isInitializing,
+  // not upstream's editorInitializing overlay flag.
+  assert.match(agentEditorSource, /isInitializing\.value = true/)
+  assert.match(agentEditorSource, /isInitializing\.value = false/)
   assert.match(knowledgeBaseEditorSource, /v-if="loading"[\s\S]*:disabled="loading"/)
   assert.match(knowledgeBaseEditorSource, /isCurrentKBLoad\(generation, kbId\)/)
   assert.match(knowledgeBaseEditorSource, /generation !== kbEditorLoadGeneration \|\| !props\.visible/)
