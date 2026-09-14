@@ -189,6 +189,19 @@ func (p *batchEmbedPooler) BatchEmbedWithPool(
 				mu.Unlock()
 				return
 			}
+			// An empty vector (len 0) passes a count check but poisons the
+			// vector-store insert (halfvec rejects 0-dimension rows) — treat
+			// it as a sub-batch failure (2026-09-14 report).
+			for i, vec := range embedding {
+				if len(vec) == 0 {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("embedding model returned an empty vector for input %d", i)
+					}
+					mu.Unlock()
+					return
+				}
+			}
 			mu.Lock()
 			for i, text := range texts {
 				if text == nil {

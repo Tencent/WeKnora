@@ -1105,7 +1105,11 @@ type aliyunEmbedResponse struct {
 	Output struct {
 		Embeddings []struct {
 			Embedding []float32 `json:"embedding"`
-			TextIndex int       `json:"text_index"`
+			// text-embedding 端点用 text_index（通用文本向量API文档 §239）；
+			// multimodal-embedding 端点用 index（多模态向量API详情.md:219）。
+			// 两个都声明，pointer 区分 wire 实际发了哪个。
+			TextIndex int  `json:"text_index"`
+			AltIndex  *int `json:"index,omitempty"`
 		} `json:"embeddings"`
 	} `json:"output"`
 }
@@ -1150,18 +1154,38 @@ func buildAliyunMultimodalEmbedding(
 	}, nil
 }
 
-// parseAliyunEmbedding places vectors by text_index (DashScope may return
-// them out of order), sized by the returned count — the caller-side pooler
-// validates the count against the inputs (v1 batchEmbedder did the same).
+// parseAliyunEmbedding places vectors by their input index (DashScope may
+// return them out of order), sized by the returned count — the caller-side
+// pooler validates the count against the inputs (v1 batchEmbedder did the
+// same). The TWO native embedding endpoints disagree on the index field:
+// text-embedding carries text_index (通用文本向量API文档 §output.embeddings),
+// multimodal-embedding carries index (多模态向量API详情.md:219) — both are
+// decoded, the typed pointer picks the one the wire actually sent. Slots
+// left unfilled (duplicate/missing index) are a HARD error: they used to
+// flow downstream as empty vectors and crash the vector-store insert with
+// "halfvec must have at least 1 dimension" (2026-09-14 report).
 func parseAliyunEmbedding(_ int, _ http.Header, body []byte) (*invoke.EmbeddingResponse, error) {
 	var resp aliyunEmbedResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, invoke.ClassifyError(fmt.Errorf("unmarshal response: %w", err))
 	}
 	embeddings := make([][]float32, len(resp.Output.Embeddings))
+	filled := make([]bool, len(resp.Output.Embeddings))
 	for _, emb := range resp.Output.Embeddings {
-		if emb.TextIndex >= 0 && emb.TextIndex < len(embeddings) {
-			embeddings[emb.TextIndex] = emb.Embedding
+		idx := emb.TextIndex
+		if emb.AltIndex != nil {
+			idx = *emb.AltIndex
+		}
+		if idx >= 0 && idx < len(embeddings) {
+			embeddings[idx] = emb.Embedding
+			filled[idx] = true
+		}
+	}
+	for i, ok := range filled {
+		if !ok {
+			return nil, invoke.ClassifyError(fmt.Errorf(
+				"embedding response has no vector for input %d (%d returned) — index field mismatch or duplicate",
+				i, len(resp.Output.Embeddings)))
 		}
 	}
 	return &invoke.EmbeddingResponse{Vectors: embeddings}, nil

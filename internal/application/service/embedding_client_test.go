@@ -100,7 +100,12 @@ func TestBatchEmbedPoolerSubBatchesAndValidates(t *testing.T) {
 	p := NewBatchEmbedPooler(pool)
 
 	probe := &countingEmbedder{reply: func(n int) ([][]float32, error) {
-		return make([][]float32, n), nil
+		// non-empty vectors — the pooler now rejects empty ones (2026-09-14)
+		vectors := make([][]float32, n)
+		for i := range vectors {
+			vectors[i] = []float32{0.1}
+		}
+		return vectors, nil
 	}}
 	got, err := p.BatchEmbedWithPool(context.Background(), probe, []string{"a", "b", "c", "d", "e"})
 	require.NoError(t, err)
@@ -162,4 +167,26 @@ func TestInvokeEmbedderBatchEmbedRejectsShortResponse(t *testing.T) {
 	_, err := e.BatchEmbed(context.Background(), []string{"a", "b"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "returned 0 embeddings for 2 inputs")
+}
+
+// TestBatchEmbedPoolerRejectsEmptyVectors pins the 2026-09-14 guard: a
+// sub-batch whose vendor response contains an EMPTY vector fails the whole
+// pooler call instead of flowing a 0-dimension row into the vector store.
+func TestBatchEmbedPoolerRejectsEmptyVectors(t *testing.T) {
+	pool, err := ants.NewPool(4)
+	require.NoError(t, err)
+	t.Cleanup(func() { pool.Release() })
+	p := NewBatchEmbedPooler(pool)
+
+	empty := &countingEmbedder{reply: func(n int) ([][]float32, error) {
+		vectors := make([][]float32, n)
+		for i := range vectors {
+			vectors[i] = []float32{0.1, 0.2}
+		}
+		vectors[0] = []float32{} // one empty vector among a full count
+		return vectors, nil
+	}}
+	_, err = p.BatchEmbedWithPool(context.Background(), empty, []string{"a", "b"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "empty vector")
 }

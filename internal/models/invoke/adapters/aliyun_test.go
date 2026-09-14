@@ -973,3 +973,38 @@ func TestAliyunStreamStringNullFinishReason(t *testing.T) {
 	require.Len(t, events, 1)
 	require.NotNil(t, events[0].Done, "真实 finish 才终止")
 }
+
+// TestAliyunMultimodalEmbeddingParse pins the multimodal-embedding response
+// contract: its entries carry "index" (多模态向量API详情.md:219), NOT
+// text_index — the 2026-09-14 report showed every vector decoding to slot 0
+// (silently overwriting) and leaving the rest empty, which then crashed the
+// vector-store insert. The parse must honor both fields and hard-error on
+// unfilled slots.
+func TestAliyunMultimodalEmbeddingParse(t *testing.T) {
+	a := newAliyunAdapter()
+	body := `{"output":{"embeddings":[
+		{"index":0,"embedding":[1,2,3],"type":"text"},
+		{"index":1,"embedding":[4,5,6],"type":"text"},
+		{"index":2,"embedding":[7,8,9],"type":"text"}]},"usage":{"total_tokens":9}}`
+	resp, err := a.ParseEmbeddingResponse(200, nil, []byte(body))
+	require.NoError(t, err)
+	require.Len(t, resp.Vectors, 3)
+	require.Equal(t, []float32{1, 2, 3}, resp.Vectors[0])
+	require.Equal(t, []float32{4, 5, 6}, resp.Vectors[1])
+	require.Equal(t, []float32{7, 8, 9}, resp.Vectors[2])
+
+	// text-embedding 分支的 text_index 字段不受影响
+	textBody := `{"output":{"embeddings":[
+		{"text_index":0,"embedding":[9,9]},{"text_index":1,"embedding":[8,8]}]}}`
+	resp, err = a.ParseEmbeddingResponse(200, nil, []byte(textBody))
+	require.NoError(t, err)
+	require.Equal(t, []float32{9, 9}, resp.Vectors[0])
+	require.Equal(t, []float32{8, 8}, resp.Vectors[1])
+
+	// 槽位洞（重复 index）→ 硬错误，不再静默放行空向量
+	holed := `{"output":{"embeddings":[
+		{"index":0,"embedding":[1]},{"index":0,"embedding":[2]},{"index":0,"embedding":[3]}]}}`
+	_, err = a.ParseEmbeddingResponse(200, nil, []byte(holed))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no vector for input")
+}

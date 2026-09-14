@@ -94,9 +94,23 @@ func (g *pgRepository) BatchSave(
 	ctx context.Context, indexInfoList []*types.IndexInfo, additionalParams map[string]any,
 ) error {
 	logger.GetLogger(ctx).Infof("[Postgres] Batch saving %d indices", len(indexInfoList))
-	indexInfoDBList := make([]*pgVector, len(indexInfoList))
+	indexInfoDBList := make([]*pgVector, 0, len(indexInfoList))
+	skippedEmpty := 0
 	for i := range indexInfoList {
-		indexInfoDBList[i] = toDBVectorEmbedding(indexInfoList[i], additionalParams)
+		row := toDBVectorEmbedding(indexInfoList[i], additionalParams)
+		// 设计注释（knowledge_process.go）："parents go into DB but NOT into
+		// the vector index"——无向量（map 缺位/空向量）的行跳过，不写
+		// embeddings 表；空 halfvec 行会撞 "must have at least 1 dimension"
+		// 拖垮整批（2026-09-14 报告）。
+		if row.Dimension == 0 {
+			skippedEmpty++
+			continue
+		}
+		indexInfoDBList = append(indexInfoDBList, row)
+	}
+	if skippedEmpty > 0 {
+		logger.GetLogger(ctx).Warnf(
+			"[Postgres] skipped %d embedding rows without vectors (parent chunks or embedder gaps)", skippedEmpty)
 	}
 	err := g.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(indexInfoDBList).Error
 	if err != nil {
