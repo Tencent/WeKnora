@@ -772,7 +772,7 @@ function selectType(def: ConnectorDef) {
   step.value = 1
 }
 
-// --- Test connection (stateless, no DB write) ---
+// --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
@@ -791,7 +791,10 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
+    // The main update endpoint ignores credentials. Only use the saved
+    // connection when keeping its credentials; test replacements directly
+    // without persisting them until the user saves the data source.
+    if (isEdit.value && tempDsId.value && !needsConnectionTest()) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,
