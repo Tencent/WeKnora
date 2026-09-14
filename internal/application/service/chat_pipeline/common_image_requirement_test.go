@@ -1,30 +1,22 @@
 package chatpipeline
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
 )
 
-func TestAppendRetrievedImageOutputRequirement(t *testing.T) {
-	base := "Answer from retrieved evidence."
-	withImage := appendRetrievedImageOutputRequirement(
-		base,
-		"context\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
-	)
-	for _, required := range []string{
-		base,
-		"MUST include at least one relevant Markdown image",
-		"Copy the complete Markdown image syntax and its URL verbatim",
-		"ASCII half-width parentheses",
-		"immediately after the paragraph it supports",
-	} {
-		if !strings.Contains(withImage, required) {
-			t.Fatalf("expected %q in dynamic image requirement:\n%s", required, withImage)
-		}
-	}
-
-	withoutImage := appendRetrievedImageOutputRequirement(base, "text-only retrieved context")
-	if withoutImage != base {
-		t.Fatalf("text-only context should not change the user turn: %q", withoutImage)
-	}
+func TestImagePolicyUsesStableSystemPrefixAndPreservesUserRequest(t *testing.T) {
+	cm := &types.ChatManage{}
+	cm.SummaryConfig.Prompt = "Custom prompt"
+	cm.UserContent = "Return JSON only"
+	without := prepareMessagesWithHistory(cm)
+	cm.RenderedContexts = "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)"
+	with := prepareMessagesWithHistory(cm)
+	require.Equal(t, without[0], with[0], "retrieving images must not change the system prefix")
+	require.Contains(t, with[0].Content, types.SourcedAnswerOutputPrompt)
+	require.Contains(t, with[0].Content, "requested format supports images")
+	require.Equal(t, cm.UserContent, with[1].Content,
+		"no generated instruction may masquerade as part of the user request")
 }

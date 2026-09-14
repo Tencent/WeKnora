@@ -5,7 +5,9 @@ import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
 import { useSettingsStore } from '@/stores/settings';
+import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useUIStore } from '@/stores/ui';
+import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
 import { listMCPServices, type MCPService } from '@/api/mcp-service';
@@ -53,6 +55,7 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
+const browserConnection = useBrowserConnectionStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
@@ -852,6 +855,27 @@ const isWebSearchConfigured = computed(() => {
 const isWebSearchReadinessKnown = computed(
   () => !settingsStore.selectedAgentSourceTenantId || selectedSharedAgent.value !== undefined
 );
+
+const browserSourceUnavailableHint = computed(() => {
+  if (!browserConnection.enabled) return 'localBrowser.unavailable';
+  if (browserConnection.device) return 'localBrowser.reconnectHint';
+  return 'localBrowser.settingsHint';
+});
+
+const openBrowserConnectionSettings = () => {
+  uiStore.openSettings('browserconnection');
+};
+
+const toggleBrowserSource = () => {
+  showMention.value = false;
+  showModelSelector.value = false;
+  showAgentModeSelector.value = false;
+  if (browserConnection.knownOffline) {
+    openBrowserConnectionSettings();
+    return;
+  }
+  settingsStore.toggleLocalBrowser(!settingsStore.isLocalBrowserEnabled);
+};
 
 const loadWebSearchConfig = async (force = false) => {
   try {
@@ -1809,6 +1833,8 @@ onMounted(() => {
   // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
   if (props.embeddedMode) return;
 
+  browserConnection.watchStatus();
+
   // 并行拉取；若 platform 已预取且缓存未过期则直接复用
   initChatModelSelection();
   void Promise.all([
@@ -1880,6 +1906,7 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
+  if (!props.embeddedMode) browserConnection.unwatchStatus();
   window.removeEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
@@ -1903,6 +1930,7 @@ watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
   if (prevVisible && !visible) {
     loadWebSearchConfig(true);
     loadChatModels(true);
+    if (!props.embeddedMode) void browserConnection.refresh();
   }
 });
 
@@ -2686,6 +2714,31 @@ defineExpose({
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
+          <t-tooltip v-if="settingsStore.isAgentStreamMode" placement="top" theme="light"
+            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
+            <template #content>
+              <div v-if="!browserConnection.knownOffline" class="browser-source-tooltip">
+                <strong>{{ $t('localBrowser.local') }}</strong>
+                <span>{{ $t('localBrowser.sourceHint') }}</span>
+              </div>
+              <div v-else class="tooltip-with-link">
+                <span>{{ $t(browserSourceUnavailableHint) }}</span>
+                <a href="#" @click.prevent="openBrowserConnectionSettings">{{ $t('localBrowser.openSettings') }}</a>
+              </div>
+            </template>
+            <button type="button" class="control-btn browser-source-btn"
+              :class="{
+                active: settingsStore.isLocalBrowserEnabled && browserConnection.online,
+                disabled: browserConnection.knownOffline,
+              }"
+              :aria-pressed="settingsStore.isLocalBrowserEnabled && browserConnection.online"
+              :aria-disabled="browserConnection.knownOffline"
+              :aria-label="$t('localBrowser.local')"
+              @click.stop="toggleBrowserSource">
+              <BrowserIcon class="control-icon" />
+            </button>
+          </t-tooltip>
+
           <!-- WebSearch 开关按钮（智能体未启用时不显示） -->
           <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
@@ -3280,18 +3333,22 @@ const getImgSrc = (url: string) => {
 
 .kb-btn {
   height: 28px;
-  width: 30px;
+  width: 28px;
   padding: 0;
-  min-width: 30px;
+  min-width: auto;
   position: relative;
+
+  &:hover:not(.disabled):not(.active) {
+    color: var(--td-text-color-primary, #333);
+  }
 
   &.active {
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-brand-color);
-    box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer-hover);
+      color: var(--td-brand-color);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 
@@ -3311,22 +3368,24 @@ const getImgSrc = (url: string) => {
 
 .kb-count {
   position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
-  background: var(--td-brand-color);
-  color: var(--td-text-color-anti, #fff);
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 15px;
-  border: 2px solid var(--td-bg-color-container);
-  border-radius: var(--td-radius-round, 999px);
-  box-sizing: content-box;
-  display: flex;
+  top: -2px;
+  right: -2px;
+  z-index: 1;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
 }
 
 .kb-btn-text {
@@ -3358,8 +3417,8 @@ const getImgSrc = (url: string) => {
   }
 
   &.active {
-    background: rgba(16, 185, 129, 0.1);
-    color: #07C05F;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
   }
 
   .image-count {
@@ -3397,8 +3456,8 @@ const getImgSrc = (url: string) => {
   }
 
   &.active {
-    background: rgba(16, 185, 129, 0.1);
-    color: #07C05F;
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
   }
 
   .attachment-count {
@@ -3461,6 +3520,44 @@ const getImgSrc = (url: string) => {
   }
 }
 
+.browser-source-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+
+  &:hover:not(.disabled):not(.active) {
+    color: var(--td-text-color-primary, #333);
+  }
+
+  &.active {
+    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+
+    &:hover {
+      color: var(--td-brand-color);
+      background: var(--td-bg-color-secondarycontainer);
+    }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+}
+
+.browser-source-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 240px;
+  line-height: 1.5;
+
+  strong {
+    font-weight: 500;
+  }
+}
+
 .websearch-btn {
   width: 28px;
   height: 28px;
@@ -3472,14 +3569,14 @@ const getImgSrc = (url: string) => {
   position: relative;
 
   &.active {
-    background: rgba(16, 185, 129, 0.1);
+    background: var(--td-bg-color-secondarycontainer);
 
     .websearch-icon {
       color: var(--td-brand-color);
     }
 
     &:hover {
-      background: rgba(16, 185, 129, 0.15);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 
@@ -3506,7 +3603,7 @@ const getImgSrc = (url: string) => {
     }
 
     &.active:hover {
-      background: rgba(16, 185, 129, 0.1);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 }

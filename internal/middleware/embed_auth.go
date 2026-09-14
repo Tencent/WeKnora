@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/embedpolicy"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/ratelimit"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -117,7 +118,7 @@ func EmbedAuth(
 		}
 
 		origin := requestOrigin(c)
-		if !originAllowed(origin, ch.AllowedOriginsList()) {
+		if !embedRequestOriginAllowed(c, origin, ch.AllowedOriginsList()) {
 			logger.Warnf(c.Request.Context(), "[embed_auth] origin %q not allowed for channel %s", origin, channelID)
 			c.JSON(http.StatusForbidden, gin.H{"error": "origin not allowed"})
 			c.Abort()
@@ -203,31 +204,40 @@ func requestOrigin(c *gin.Context) string {
 	return u.Scheme + "://" + u.Host
 }
 
-func originAllowed(origin string, allowed []string) bool {
-	// Empty allowlist rejects all origins. Management create/update requires at
-	// least one origin; legacy rows with [] must be fixed before going live.
-	if len(allowed) == 0 {
+// API calls execute inside the embed document, so their browser origin is the
+// embed server, not its parent. Parent restrictions belong to the HTML CSP.
+// Cross-origin API clients and server-side exchanges still use the allowlist.
+func embedRequestOriginAllowed(c *gin.Context, origin string, allowed []string) bool {
+	if embedpolicy.FrameAncestors(allowed) == "frame-ancestors 'none'" {
 		return false
 	}
-	if origin == "" {
+	normalized, originErr := embedpolicy.NormalizeOrigin(origin)
+	// Fetch Metadata is browser-controlled and survives reverse-proxy host/port
+	// rewriting. Non-browser callers can forge it, just as they can forge Origin;
+	// neither replaces the channel token or the rate limits.
+	// A same-origin GET may omit both Origin and Referer under no-referrer.
+	if c.GetHeader("Sec-Fetch-Site") == "same-origin" && (origin == "" || originErr == nil) {
+		return true
+	}
+	if originErr != nil {
 		return false
 	}
-	for _, pattern := range allowed {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-		if pattern == "*" || strings.EqualFold(pattern, origin) {
+	// HTTP deployments and older webviews may omit Fetch Metadata. Compare with
+	// the transport origin; the frontend proxy preserves Host including its port.
+	scheme := "http"
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	if expected, err := embedpolicy.NormalizeOrigin(scheme + "://" + c.Request.Host); err == nil {
+		if normalized == expected {
 			return true
 		}
-		if strings.HasPrefix(pattern, "*.") {
-			suffix := strings.TrimPrefix(pattern, "*")
-			if strings.HasSuffix(origin, suffix) {
-				return true
-			}
-		}
 	}
-	return false
+	return originAllowed(origin, allowed)
+}
+
+func originAllowed(origin string, allowed []string) bool {
+	return embedpolicy.Allows(origin, allowed)
 }
 
 // EmbedChannelFromContext returns the authenticated embed channel, if any.

@@ -68,6 +68,31 @@ func TestWrapLangfuseRemoteClientPreservesTerminalCapability(t *testing.T) {
 	require.NotNil(t, session)
 }
 
+func TestWrapLangfuseRemoteClientPreservesDesktopCapability(t *testing.T) {
+	inner := &desktopFakeClient{fakeRemoteClient: newFakeRemoteClient(SandboxTypeCube)}
+	inner.capabilities.SupportsDesktop = true
+
+	wrapped := wrapLangfuseRemoteClient(inner)
+	mgr, ok := DesktopManagerFrom(wrapped)
+	require.True(t, ok, "wrapping must not hide RemoteDesktopManager from DesktopManagerFrom")
+	require.NotNil(t, mgr)
+
+	_, err := mgr.DialDesktop(context.Background(), nil, RemoteDesktopOptions{})
+	require.NoError(t, err)
+	require.True(t, inner.dialed, "the decorator must delegate, not short-circuit")
+}
+
+func TestWrapLangfuseRemoteClientPreservesDesktopTTLRefresh(t *testing.T) {
+	inner := &desktopFakeClient{fakeRemoteClient: newFakeRemoteClient(SandboxTypeCube)}
+	inner.capabilities.SupportsTimeoutRefresh = true
+
+	wrapped := wrapLangfuseRemoteClient(inner)
+	refresher, ok := DesktopTTLRefresherFrom(wrapped)
+	require.True(t, ok, "wrapping must not hide RemoteDesktopTTLRefresher")
+	refresher.StartDesktopTTLRefresh(context.Background(), nil)
+	require.Equal(t, 1, inner.ttlStarted)
+}
+
 func TestWrapLangfuseRemoteClientDoesNotInventTerminalSupport(t *testing.T) {
 	// Docker advertises no terminal support; wrapping must not fake it.
 	inner := newFakeRemoteClient(SandboxTypeDocker)

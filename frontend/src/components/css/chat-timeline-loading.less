@@ -38,14 +38,16 @@
 // In-progress step / thinking / tool-call titles shimmer while pending. Both the
 // agent timeline (.action-pending) and the RAG pipeline (.is-running) opt in.
 .action-card.action-pending .action-name,
-.action-name.is-running {
+.action-name.is-running,
+.sandbox-command-code.is-running {
   .chat-stream-shimmer-text();
 }
 
 @media (prefers-reduced-motion: reduce) {
 
   .action-card.action-pending .action-name,
-  .action-name.is-running {
+  .action-name.is-running,
+  .sandbox-command-code.is-running {
     animation: none;
     background-image: none;
     -webkit-text-fill-color: var(--td-text-color-secondary);

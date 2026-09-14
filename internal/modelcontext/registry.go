@@ -31,7 +31,9 @@ const resourceHandleProtocolPrompt = `
 ## Resource handle protocol (system-owned)
 Some durable resources and high-entropy Wiki slugs are represented by request-local res://NNNN handles. Wiki issues may use iN handles.
 - Copy supplied handles exactly in links, images, and tool arguments; they refer only to the supplied resource versions.
-- For new or regenerated files, use sandbox:<file name>; never reuse or invent a resource handle.`
+- For downloadable deliverables generated in the session workspace, use sandbox:<file name>; ` +
+	`never reuse or invent a resource handle. This download convention does not apply to ` +
+	`editing installed skill files.`
 
 // Registry is the single request-scoped boundary between durable application
 // identities and temporary model handles.

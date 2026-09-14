@@ -771,6 +771,7 @@ export interface SandboxConfig {
   sandbox_type?: string
   default_timeout_sec?: number
   terminal_idle_disconnect_sec?: number
+  desktop_enabled?: boolean
   allow_private_endpoints?: boolean
   env_vars?: Record<string, string>
   volume_mount?: SandboxVolumeMountConfig
@@ -867,6 +868,8 @@ export interface SandboxTemplate {
   created_at?: string
   updated_at?: string
   standard: boolean
+  /** XFCE sibling of `standard`. The admin picks one ID as this config's boot target. */
+  desktop?: boolean
   /** The provider's own explanation for a failed build, when it reports one. */
   error?: string
   instance_type?: string
@@ -877,6 +880,7 @@ export interface SandboxTemplate {
 export interface SandboxTemplateCatalog {
   templates: SandboxTemplate[]
   standard_template_id?: string
+  desktop_template_id?: string
   provisioned: boolean
 }
 
@@ -980,16 +984,21 @@ export function getSandboxConfigInventory(id: string): Promise<{ data: SandboxIn
 
 /**
  * Fetch templates using the connection currently entered in the drawer.
- * `ensure_standard` starts a provider-side build when no WeKnora template is
- * present. `replace_standard` rebuilds the WeKnora template so a new spec
- * (DNS, image) can take effect; it requires `config_id`. The returned
- * building item can be polled through the same endpoint.
+ * `ensure_standard` starts a provider-side CLI build when that WeKnora
+ * template is missing. `ensure_desktop` does the same for the XFCE image, but
+ * the settings UI only sends it when the admin clicks Create — listing must
+ * not provision a desktop template as a side effect. `replace_standard` /
+ * `replace_desktop` rebuild the matching template so a new spec (DNS, image)
+ * can take effect; they require `config_id`. The returned building item can
+ * be polled through the same endpoint.
  */
 export function querySandboxTemplates(payload: {
   config: SandboxConfig
   config_id?: string
   ensure_standard?: boolean
   replace_standard?: boolean
+  ensure_desktop?: boolean
+  replace_desktop?: boolean
 }): Promise<{ data: SandboxTemplateCatalog }> {
   return post('/api/v1/sandbox-configs/templates/query', payload) as unknown as Promise<{
     data: SandboxTemplateCatalog

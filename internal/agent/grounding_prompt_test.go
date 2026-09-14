@@ -31,7 +31,7 @@ func TestGroundingGuidanceSurvivesTemplateSelection(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prompt := BuildSystemPromptWithOptions(tc.kbs, false, &BuildSystemPromptOptions{Config: cfg}, tc.custom)
-			require.Contains(t, prompt, "Before drafting substantive factual content")
+			require.Contains(t, prompt, "consult relevant available sources before drafting unsupported content")
 			require.Contains(t, prompt, "presentations, reports, tutorials, and technical instructions")
 			require.Contains(t, prompt, "Reading a generator's instructions or successfully running its script does not verify the subject matter")
 			require.Contains(t, prompt, "translation or formatting of supplied content do not require research")

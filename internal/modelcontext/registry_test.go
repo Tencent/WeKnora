@@ -463,3 +463,13 @@ func TestMCPBridgeKeepsExternalSchemasAndArgumentsOpaque(t *testing.T) {
 		)
 	}
 }
+
+func TestCitationPolicyDoesNotSuppressRequestedResourcesOrBreakOutputFormat(t *testing.T) {
+	disabled := NewRegistry(false).ProtocolPrompt()
+	require.Contains(t, disabled, "Source citations are disabled")
+	require.Contains(t, disabled, "a URL explicitly requested by the user")
+	require.Contains(t, disabled, "downloadable deliverables")
+	require.NotContains(t, disabled, "Do not output <ref>, <kb>, <web>, raw source URLs")
+	enabled := NewRegistry(true).ProtocolPrompt()
+	require.Contains(t, enabled, "do not break a required schema")
+}

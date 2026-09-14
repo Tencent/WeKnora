@@ -260,7 +260,7 @@
 
     <!-- 模型编辑器抽屉 -->
     <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
-      @confirm="handleModelSave" />
+      :save-model="handleModelSave" />
     <ModelDebugDrawer v-model:visible="showDebugDrawer" :models="allModels" />
 
   </div>
@@ -547,38 +547,32 @@ const handleModelSave = async (modelData: any) => {
 
   try {
     if (!modelData.modelName || !modelData.modelName.trim()) {
-      MessagePlugin.warning(t('modelSettings.toasts.nameRequired'))
-      return
+      throw new Error(t('modelSettings.toasts.nameRequired'))
     }
 
     if (modelData.modelName.trim().length > 100) {
-      MessagePlugin.warning(t('modelSettings.toasts.nameTooLong'))
-      return
+      throw new Error(t('modelSettings.toasts.nameTooLong'))
     }
 
     if (modelData.displayName && modelData.displayName.trim().length > 100) {
-      MessagePlugin.warning(t('modelSettings.toasts.displayNameTooLong'))
-      return
+      throw new Error(t('modelSettings.toasts.displayNameTooLong'))
     }
 
     if (modelData.source === 'remote') {
       if (!modelData.baseUrl || !modelData.baseUrl.trim()) {
-        MessagePlugin.warning(t('modelSettings.toasts.baseUrlRequired'))
-        return
+        throw new Error(t('modelSettings.toasts.baseUrlRequired'))
       }
 
       try {
         new URL(modelData.baseUrl.trim())
       } catch {
-        MessagePlugin.warning(t('modelSettings.toasts.baseUrlInvalid'))
-        return
+        throw new Error(t('modelSettings.toasts.baseUrlInvalid'))
       }
     }
 
     if (saveType === 'embedding') {
       if (!modelData.dimension || modelData.dimension < 128 || modelData.dimension > 4096) {
-        MessagePlugin.warning(t('modelSettings.toasts.dimensionInvalid'))
-        return
+        throw new Error(t('modelSettings.toasts.dimensionInvalid'))
       }
     }
 
@@ -662,11 +656,10 @@ const handleModelSave = async (modelData: any) => {
       MessagePlugin.success(t('modelSettings.toasts.added'))
     }
 
-    showDialog.value = false
     await loadModels()
   } catch (error: any) {
     console.error('保存模型失败:', error)
-    MessagePlugin.error(error.message || t('modelSettings.toasts.saveFailed'))
+    throw error
   }
 }
 

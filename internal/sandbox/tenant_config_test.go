@@ -411,6 +411,25 @@ func TestResolveEffectiveConfigTerminalIdleFallsBackToBuiltIn(t *testing.T) {
 	require.Equal(t, DefaultTerminalIdleDisconnect, got.TerminalIdleDisconnect)
 }
 
+func TestResolveEffectiveConfigCarriesDesktopEnabled(t *testing.T) {
+	tenantCfg := completeCubeTenantConfig()
+	tenantCfg.DesktopEnabled = true
+
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+	require.True(t, effective.DesktopEnabled,
+		"DesktopEnabled must reach the runtime Config; the desktop endpoint reads it")
+}
+
+func TestResolveEffectiveConfigDesktopDisabledByDefault(t *testing.T) {
+	tenantCfg := completeCubeTenantConfig()
+
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+	require.False(t, effective.DesktopEnabled,
+		"desktop must be explicit opt-in: the image costs +1.5GB per sandbox")
+}
+
 // Tuning fields fall back to the built-in constants, never to the deployment's:
 // "inherits nothing" would be a much weaker rule with an exception here.
 func TestResolveEffectiveConfigTuningFallsBackToBuiltIns(t *testing.T) {

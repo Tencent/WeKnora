@@ -222,6 +222,54 @@ func TestExecShellCommandWithOptionsSelectsMaintenanceBootstrap(t *testing.T) {
 	require.Equal(t, workspaceBootstrapCommand(skillDir), execs[2].Command)
 }
 
+func TestExecShellCommandSkipWorkspacePrepOmitsBootstrap(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{
+		SkipWorkspacePrep: true,
+		Timeout:           time.Second,
+	})
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	execs := append([]RemoteExecRequest(nil), client.execRequests...)
+	client.mu.Unlock()
+	require.Len(t, execs, 1, "desktop-style exec must not mkdir /workspace first")
+	require.Equal(t, "echo hi", execs[0].Command)
+	require.Equal(t, SessionWorkspaceRoot, execs[0].WorkDir)
+	require.Equal(t, DefaultSandboxExecUser, execs[0].User)
+}
+
+func TestExecShellCommandSkipWorkspacePrepStillRejectsWorkDir(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, _ := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{
+		SkipWorkspacePrep: true,
+		WorkDir:           "/etc",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "outside allowed roots")
+}
+
+func TestExecShellCommandWithoutSkipStillBootstraps(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	mgr, client := newSessionManagerExecTestHarness(t)
+
+	_, err := mgr.ExecShellCommandWithOptions(ctx, "sess-1", "echo hi", ShellExecOptions{})
+	require.NoError(t, err)
+
+	client.mu.Lock()
+	execs := append([]RemoteExecRequest(nil), client.execRequests...)
+	client.mu.Unlock()
+	require.Len(t, execs, 2)
+	require.Equal(t,
+		workspaceBootstrapCommand(SessionInputRoot, SessionOutputRoot, SessionWorkspaceRoot),
+		execs[0].Command)
+	require.Equal(t, "echo hi", execs[1].Command)
+}
+
 func TestExecShellCommandKeepsOrdinaryRemoteRequest(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
 	mgr, client := newSessionManagerExecTestHarness(t)
@@ -485,4 +533,18 @@ func TestSessionBoundManagerOpenSessionTerminalUnsupportedBackend(t *testing.T) 
 	_, err := mgr.OpenSessionTerminal(context.Background(), "session-a", RemoteTerminalOptions{})
 	require.ErrorIs(t, err, ErrTerminalUnsupported)
 	require.NotErrorIs(t, err, ErrNoLiveSessionSandbox)
+}
+
+func TestSessionDesktopManagerNilWhenBackendLacksCapability(t *testing.T) {
+	// A backend that cannot relay desktops must not advertise the capability;
+	// the frontend greys the tab out from this signal alone, before any
+	// sandbox exists.
+	mgr, _ := newSessionManagerExecTestHarness(t)
+	require.Nil(t, mgr.SessionDesktopManager())
+}
+
+func TestOpenSessionDesktopUnsupportedBackend(t *testing.T) {
+	mgr, _ := newSessionManagerExecTestHarness(t)
+	_, err := mgr.OpenSessionDesktop(context.Background(), "sess-1", RemoteDesktopOptions{})
+	require.ErrorIs(t, err, ErrDesktopUnsupported)
 }

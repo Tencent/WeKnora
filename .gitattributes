@@ -15,3 +15,6 @@ cli/acceptance/testdata/**/*.json text eol=lf
 # picking either side (task state lives in task.json, not index.md). See
 # .trellis/spec/cli/backend/directory-structure.md for details.
 .trellis/workspace/*/journal-*.md merge=union
+
+# Unified diffs use a space to mark empty context lines.
+patches/browserskill/*.patch whitespace=-blank-at-eol

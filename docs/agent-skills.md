@@ -129,7 +129,7 @@ Sandbox 不再把凭据和模板放进 `WEKNORA_SANDBOX_*`。后端、凭据、�
 
 ### Sandbox 模式
 
-Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准模板，后端会从标准镜像发起创建，用户无需复制模板 ID。
+Docker、CubeSandbox、E2B 均通过同一套空间配置 CRUD、连接检查和智能体选择接口管理。CubeSandbox / E2B 的集群搭建和设置页接入流程见 [WeKnora 沙箱集群与标准模板](sandbox-cluster.md)。设置页会通过当前连接拉取模板目录；若没有 WeKnora 标准（CLI）模板，后端会从标准镜像发起创建，用户无需复制模板 ID。图形桌面模板更重，不会随刷新自动构建，须在模板步骤单独点「创建」，见 [沙箱图形桌面](sandbox-desktop.md)。
 
 | 模式 | 状态 | 说明 |
 |------|------|------|
@@ -406,7 +406,7 @@ Docker 后端为每个会话提供独立容器，当前隔离和资源配置如�
 
 #### 沙箱镜像
 
-系统使用专用的沙箱镜像 `wechatopenai/weknora-sandbox`，预装了 Python 3.11、Node.js 20、uv 和常用 CLI 工具；技能依赖在技能安装阶段写入各自环境。
+系统使用专用的沙箱镜像 `wechatopenai/weknora-sandbox`，预装了 Python 3.12、Node.js 20、uv 和常用 CLI 工具；技能依赖在技能安装阶段写入各自环境。3.12 才能解析技能源码里带嵌套引号的 f-string（PEP 701）；安装校验用的就是镜像里的解释器。
 
 **预拉取镜像**（推荐在首次部署时执行，避免首次执行脚本时等待下载）：
 
@@ -423,7 +423,7 @@ sh scripts/build_images.sh -s
 > 示例使用 `main`；生产部署应固定已验证的版本标签，并确认镜像与应用版本兼容。
 
 **镜像内置环境**：
-- Python 3.11 + pip、uv；第三方 Python 包由技能安装阶段提供
+- Python 3.12 + pip、uv；第三方 Python 包由技能安装阶段提供
 - Node.js 20 + npm、pnpm
 - CLI 工具：jq、curl、bash、grep、sed、awk 等
 

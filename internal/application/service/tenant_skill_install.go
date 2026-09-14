@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -258,6 +259,11 @@ func (s *TenantSkillService) ReinstallSkill(
 func (s *TenantSkillService) runInstall(
 	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle, instructions ...string,
 ) (err error) {
+	ctx, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+		Name:     "skill.install",
+		Metadata: map[string]interface{}{"tenant_id": tenantID, "sandbox_config_id": configID, "skill_id": skillID},
+	})
+	defer func() { span.Finish(nil, nil, err) }()
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = types.WithSandboxTenantID(ctx, tenantID)
 
@@ -1004,7 +1010,10 @@ const skillCacheBudgetMB = 256
 // files, and the wipe takes the base image's own input/output directories with
 // it, so the same command restores them with the ownership the session account
 // needs — the only step of an install that runs with the privileges to do it.
-// That half is strict; failing it fails the install.
+// /run/desktop goes with it: start-desktop.sh writes the websockify Basic
+// password there, and a snapshot that kept it would reuse that password on
+// every later sandbox (Cube's host-port NAT has no other gate). That half is
+// strict; failing it fails the install.
 //
 // The package download caches are the other half, and they are retained rather
 // than wiped: pip, uv, npm and pnpm caches are first trimmed with the tools'
@@ -1038,7 +1047,7 @@ func cleanImageScratchCommand() string {
 	inputRoot := sandbox.ShellQuote(sandbox.SessionInputRoot)
 	outputRoot := sandbox.ShellQuote(sandbox.SessionOutputRoot)
 	var b strings.Builder
-	b.WriteString("rm -rf /workspace/* /tmp/* /workspace/.[!.]* || true")
+	b.WriteString("rm -rf /workspace/* /tmp/* /workspace/.[!.]* /run/desktop || true")
 	fmt.Fprintf(&b, "; mkdir -p %s %s && chmod 775 %s %s; status=$?",
 		inputRoot, outputRoot,
 		inputRoot, outputRoot,

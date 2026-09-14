@@ -3,14 +3,18 @@ package langfuse
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // newTestManager builds a Manager wired to an in-memory span exporter via the
@@ -36,6 +40,94 @@ func newTestManager(t *testing.T) (*Manager, *tracetest.InMemoryExporter) {
 	}
 	t.Cleanup(func() { _ = m.Shutdown(context.Background()) })
 	return m, exp
+}
+
+func TestStartChildSpanSkipsUntracedPolling(t *testing.T) {
+	m, exp := newTestManager(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		for _, name := range []string{"sandbox.connect", "sandbox.exec"} {
+			childCtx, child := m.StartChildSpan(ctx, SpanOptions{Name: name})
+			child.Finish(nil, nil, nil)
+			if childCtx != ctx || oteltrace.SpanContextFromContext(childCtx).IsValid() {
+				t.Fatal("polling without a parent must not create a trace")
+			}
+		}
+	}
+	if spans := exp.GetSpans(); len(spans) != 0 {
+		t.Fatalf("untraced polling exported %d spans", len(spans))
+	}
+}
+
+func TestStartChildSpanPreservesTaskHierarchy(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	// The Docker SDK uses this transport, which obtains its tracer provider
+	// from the active context rather than the global provider.
+	client := &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport,
+		otelhttp.WithSpanNameFormatter(func(_ string, _ *http.Request) string { return "docker.http" }))}
+	for _, async := range []bool{false, true} {
+		t.Run(map[bool]string{false: "agent", true: "async_install"}[async], func(t *testing.T) {
+			m, exp := newTestManager(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			ctx, task := m.StartSpan(ctx, SpanOptions{Name: "task"})
+			if async {
+				ctx = context.WithoutCancel(ctx)
+				cancel()
+			}
+			for _, name := range []string{"sandbox.connect", "sandbox.exec", "sandbox.create_snapshot"} {
+				childCtx, child := m.StartChildSpan(ctx, SpanOptions{Name: name})
+				req, err := http.NewRequestWithContext(childCtx, http.MethodGet, server.URL, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = resp.Body.Close()
+				child.Finish(nil, nil, nil)
+			}
+			task.Finish(nil, nil, nil)
+			cancel()
+			spans := exp.GetSpans()
+			if len(spans) != 8 {
+				t.Fatalf("expected task root, task span and 6 child spans, got %d", len(spans))
+			}
+			children := map[oteltrace.SpanID]bool{}
+			for _, span := range spans {
+				if span.SpanContext.TraceID() != spans[0].SpanContext.TraceID() {
+					t.Fatal("task spans were split across traces")
+				}
+				if strings.HasPrefix(span.Name, "sandbox.") {
+					if span.Parent.SpanID().String() != task.ID {
+						t.Fatalf("%s is not under task", span.Name)
+					}
+					children[span.SpanContext.SpanID()] = true
+				}
+			}
+			for _, span := range spans {
+				if span.Name == "docker.http" && !children[span.Parent.SpanID()] {
+					t.Fatal("Docker SDK span is not under sandbox operation")
+				}
+			}
+		})
+	}
+}
+
+func TestStartChildSpanSupportsOTelParentWithoutLangfuseTrace(t *testing.T) {
+	m, exp := newTestManager(t)
+	ctx, parent := m.Tracer().Start(context.Background(), "upstream")
+	_, child := m.StartChildSpan(ctx, SpanOptions{Name: "sandbox.exec"})
+	child.Finish(nil, nil, nil)
+	parent.End()
+	spans := exp.GetSpans()
+	if len(spans) != 2 || spans[0].Parent.SpanID() != spans[1].SpanContext.SpanID() ||
+		spans[0].SpanContext.TraceID() != spans[1].SpanContext.TraceID() {
+		t.Fatal("OTel parent must be preserved without an extra automatic root")
+	}
 }
 
 // spanAttr returns the string value of a span attribute, or "" if absent.

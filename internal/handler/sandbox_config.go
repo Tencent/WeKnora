@@ -32,12 +32,15 @@ type sandboxTemplateQueryRequest struct {
 	ConfigID        string                     `json:"config_id,omitempty"`
 	EnsureStandard  bool                       `json:"ensure_standard"`
 	ReplaceStandard bool                       `json:"replace_standard"`
+	EnsureDesktop   bool                       `json:"ensure_desktop"`
+	ReplaceDesktop  bool                       `json:"replace_desktop"`
 }
 
 // QueryTemplates returns the templates visible through an unsaved workspace
-// connection. ensure_standard starts a build only when the cluster has no
-// usable WeKnora template; replace_standard rebuilds that template so a
-// new spec (DNS, image) can take effect. replace_standard requires config_id.
+// connection. ensure_standard / ensure_desktop start a build only when that
+// WeKnora template is missing (from the published Hub image); replace_standard
+// / replace_desktop rebuild it so a new spec (DNS, image) can take effect.
+// Replace requires config_id.
 func (h *SandboxConfigHandler) QueryTemplates(c *gin.Context) {
 	var req sandboxTemplateQueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -50,6 +53,8 @@ func (h *SandboxConfigHandler) QueryTemplates(c *gin.Context) {
 			ConfigID:        req.ConfigID,
 			EnsureStandard:  req.EnsureStandard,
 			ReplaceStandard: req.ReplaceStandard,
+			EnsureDesktop:   req.EnsureDesktop,
+			ReplaceDesktop:  req.ReplaceDesktop,
 		})
 	if err != nil {
 		if respondSandboxConfigRefusal(c, err) {

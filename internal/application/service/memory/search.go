@@ -10,14 +10,20 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// searchCandidatePool bounds how many stored items one search ranks over.
+// lexicalPoolSize is how many stored items the lexical ranking scans.
 //
-// It matches the recall pool deliberately. The pool was never what made recall
-// miss things — four hundred candidates is more than almost any subject holds
-// — the output cap of five items was. Widening the pool here would buy little
-// and would put a few thousand embedding reads on a path the user is waiting
-// on.
-const searchCandidatePool = 400
+// It is the workspace capacity cap, which is the most active memories a
+// subject can hold at all — so the pool is no longer a second, invisible limit
+// sitting underneath it. It used to be a fixed 400 while the cap goes up to
+// 2000, which made every memory past the 400th most important one impossible
+// to recall, whatever the question was.
+//
+// The lexical side is bounded at all only because it scores in process.
+// Semantic matching is not bounded by this: it searches the store directly, so
+// a large subject is answered by the index rather than by whatever fits here.
+func lexicalPoolSize(cfg *types.MemoryConfig) int {
+	return cfg.EffectiveMaxItems()
+}
 
 // MemoryAvailable reports whether this request may read memory at all.
 //
@@ -88,7 +94,7 @@ func (s *Service) SearchMemory(
 		limit = types.MemorySearchMaxItems
 	}
 
-	candidates, err := s.repo.ListActiveByKinds(searchCtx, scope, types.MemoryKinds, searchCandidatePool)
+	candidates, err := s.repo.ListActiveByKinds(searchCtx, scope, types.MemoryKinds, lexicalPoolSize(cfg))
 	if err != nil {
 		logger.Warnf(searchCtx, "memory: load search candidates failed: %v", err)
 		searchSpan.Finish(langfuse.SummarizeMemoryRecallOutput(map[string]interface{}{
@@ -98,8 +104,13 @@ func (s *Service) SearchMemory(
 		return interfaces.MemorySearchResult{Available: true}
 	}
 
-	matched, rankTrace := s.selectRecallWithTrace(
-		searchCtx, scope, cfg, query, candidates, limit, types.MemorySearchRuneBudget)
+	matched, rankTrace := s.selectRecallWithTrace(searchCtx, scope, cfg, recallSelection{
+		Query:      query,
+		Candidates: candidates,
+		Kinds:      types.MemoryKinds,
+		MaxItems:   limit,
+		RuneBudget: types.MemorySearchRuneBudget,
+	})
 
 	// A searched memory was read by the model just as surely as an injected
 	// one, so it counts as used. Without this the items only reachable through
@@ -108,14 +119,16 @@ func (s *Service) SearchMemory(
 	s.touchAsync(searchCtx, scope, matched)
 
 	logger.Infof(searchCtx,
-		"memory: search done subject=%s candidates=%d matched=%d mode=%s",
-		scope.SubjectID, len(candidates), len(matched), rankTrace.Mode)
+		"memory: search done subject=%s candidates=%d vector_hits=%d outside_pool=%d matched=%d mode=%s",
+		scope.SubjectID, len(candidates), rankTrace.VectorHits,
+		rankTrace.VectorOutsidePool, len(matched), rankTrace.Mode)
 	searchSpan.Finish(langfuse.SummarizeMemoryRecallOutput(map[string]interface{}{
 		"outcome":         "ok",
 		"subject_id":      scope.SubjectID,
 		"candidate_count": len(candidates),
 		"lexical_hits":    rankTrace.LexicalHits,
 		"vector_hits":     rankTrace.VectorHits,
+		"vector_outside":  rankTrace.VectorOutsidePool,
 		"vector_skip":     rankTrace.VectorSkipReason,
 		"ranking_mode":    rankTrace.Mode,
 		"matched_count":   len(matched),

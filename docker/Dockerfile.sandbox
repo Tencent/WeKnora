@@ -2,20 +2,40 @@
 # Pre-built environment for executing agent skill scripts in Docker sandbox
 # Multi-stage build, minimal dependencies
 #
-# Two targets ship from this file:
-#   runtime (default) - the plain environment. Used by the Docker backend and
-#                       as the base image of E2B templates, whose builder
-#                       injects its own envd.
-#   cube              - the same environment plus Cube's envd daemon. Cube
-#                       builds templates straight from the image and probes
-#                       :49983/health, so an image without envd can only ever
-#                       fail. See docs/sandbox-cluster.md.
+# Targets that ship from this file:
+#   runtime          - the plain environment. Used by the Docker backend and
+#                      as the base image of E2B templates, whose builder
+#                      injects its own envd.
+#   cube             - the same environment plus Cube's envd daemon. Cube
+#                      builds templates straight from the image and probes
+#                      :49983/health, so an image without envd can only ever
+#                      fail. See docs/sandbox-cluster.md.
+#   desktop-runtime  - runtime plus XFCE / x11vnc / websockify. Not a published
+#                      tag; the desktop and desktop-cube targets sit on it.
+#   desktop          - desktop-runtime, tagged for E2B (and a future Docker
+#                      desktop path). The Docker backend does not use this yet.
+#   desktop-cube     - desktop-runtime plus Cube envd. amd64 only, same reason
+#                      as cube.
+#
+# Pin every FROM to TARGETPLATFORM. `docker build --platform` alone is not
+# enough: the legacy builder (DOCKER_BUILDKIT=0) on Apple Silicon still
+# pulls the host's arm64 python/node, then COPY's amd64 envd — Cube probes
+# that mixed image as READY and Exec fails with "exec format error".
+# Default amd64 matches cube/desktop-cube; BuildKit overrides this when
+# --platform is linux/arm64 (sandbox / desktop).
+ARG TARGETPLATFORM=linux/amd64
 
 # Stage 1: Get Node.js binaries
-FROM node:20-slim AS node-base
+FROM --platform=$TARGETPLATFORM node:20-slim AS node-base
+
+FROM --platform=$TARGETPLATFORM ghcr.io/astral-sh/uv:0.12.4 AS uv-base
 
 # Stage 2: Runtime image
-FROM python:3.11-slim AS runtime
+#
+# 3.12 is the floor because skill sources commonly use PEP 701 nested quotes
+# in f-strings (f"x={d["k"]}"). Install-time ast.parse runs this interpreter;
+# 3.11 rejects that syntax and the whole skill install fails.
+FROM --platform=$TARGETPLATFORM python:3.12-slim AS runtime
 
 # Copy Node.js from node image (avoids NodeSource install overhead)
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/
@@ -26,7 +46,7 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # Python package manager: uv (fast pip replacement). Preinstalled because each
 # skill gets its own venv at install time, and building that from a cold pip is
 # what dominates an install's wall clock.
-COPY --from=ghcr.io/astral-sh/uv:0.12.4 /uv /usr/local/bin/uv
+COPY --from=uv-base /uv /usr/local/bin/uv
 RUN ln -s /usr/local/bin/uv /usr/local/bin/uvx
 
 # Node package manager: pnpm
@@ -87,12 +107,18 @@ USER root
 # root by default, matching the runtime stage.
 #
 # This target is linux/amd64 only: cubesandbox-base publishes no arm64 image,
-# which matches Cube itself (PVM is x86_64-only).
-FROM ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cube-base
+# which matches Cube itself (PVM is x86_64-only). Hard-pin the FROM so a
+# forgotten --platform cannot copy an amd64 envd onto an arm64 runtime.
+FROM --platform=linux/amd64 ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cube-base
 
 FROM runtime AS cube
 
+ARG TARGETARCH=amd64
 USER root
+RUN if [ "$TARGETARCH" != "amd64" ]; then \
+        echo "cube is linux/amd64 only (cubesandbox-base has no arm64), got TARGETARCH=$TARGETARCH" >&2; \
+        exit 1; \
+    fi
 COPY --from=cube-base /usr/bin/envd /usr/bin/envd
 COPY --from=cube-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
 
@@ -101,9 +127,87 @@ EXPOSE 49983
 # defines no CMD of its own.
 ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
 
-# Stage 4: default target
+# Stage 4: desktop environment on top of runtime.
+#
+# Debian package names (runtime is python:3.12-slim, not Ubuntu). Do not run
+# `yes | unminimize` — Debian has no such command. Do not clone noVNC; the
+# WeKnora frontend uses @novnc/novnc and the sandbox only needs websockify.
+# procps supplies pgrep for the start script; util-linux supplies flock.
+FROM runtime AS desktop-runtime
+
+USER root
+# DISPLAY is exported by start-desktop.sh when the desktop actually starts.
+# Do not bake it into the image ENV: Cube copies image ENV onto the cubebox
+# and a preset DISPLAY=:0 is the only env the working main-cube templates
+# do not have.
+ENV DEBIAN_FRONTEND=noninteractive
+# XFCE apps (mousepad, xfce4-terminal) decode files with the process locale.
+# python:slim defaults to POSIX/C, which is why the desktop shows mojibake
+# while the WeKnora terminal tab does not: that tab is xterm.js in the
+# browser, and Cube/E2B already stamp LANG/LC_ALL on the envd PTY.
+# C.UTF-8 is built into glibc; do not pull locales-all.
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    procps \
+    util-linux \
+    xvfb \
+    x11-utils \
+    x11-xserver-utils \
+    xauth \
+    dbus \
+    dbus-x11 \
+    xfce4 \
+    xfce4-goodies \
+    x11vnc \
+    websockify \
+    xdotool \
+    scrot \
+    fonts-dejavu-core \
+    fonts-noto-cjk \
+    desktop-base \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* \
+    && rm -f /etc/rcS.d/S??procps /etc/rcS.d/S??x11-common \
+          /etc/rc2.d/S??dbus /etc/rc3.d/S??dbus \
+          /etc/rc4.d/S??dbus /etc/rc5.d/S??dbus
+
+COPY docker/scripts/start-desktop.sh /usr/local/bin/start-desktop.sh
+COPY docker/desktop/xfce4-desktop.xml /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+RUN chmod 0755 /usr/local/bin/start-desktop.sh \
+    && mkdir -p /root/.config/xfce4/xfconf/xfce-perchannel-xml \
+    && cp /etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml \
+          /root/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
+
+# Stage 5: published desktop image (E2B / future Docker desktop).
+FROM desktop-runtime AS desktop
+EXPOSE 6080
+
+# Stage 6: desktop + Cube envd. linux/amd64 only, same constraint as cube.
+FROM desktop-runtime AS desktop-cube
+
+ARG TARGETARCH=amd64
+USER root
+RUN if [ "$TARGETARCH" != "amd64" ]; then \
+        echo "desktop-cube is linux/amd64 only (cubesandbox-base has no arm64), got TARGETARCH=$TARGETARCH" >&2; \
+        exit 1; \
+    fi
+COPY --from=cube-base /usr/bin/envd /usr/bin/envd
+COPY --from=cube-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
+
+# cube-entrypoint.sh redirects envd to /var/log/envd.log. Cube packs this
+# ~1.5GiB image into a 1.5GiB ext4 with no spare blocks; mkdir/write of that
+# log fails under `set -eu`, envd never binds 49983, and the template probe
+# is connection refused. envd as PID 1 (stdio) succeeds on the same rootfs.
+# "-" is the entrypoint's documented "inherit container stdio" value.
+ENV ENVD_LOG_FILE=-
+
+EXPOSE 49983 6080
+ENTRYPOINT ["/usr/local/bin/cube-entrypoint.sh"]
+
+# Stage 7: default target
 #
 # Docker builds the last stage when none is named, and that must stay the plain
 # runtime: a bare `docker build -f docker/Dockerfile.sandbox .` is expected to
-# produce the image the Docker backend runs, not the Cube variant.
+# produce the image the Docker backend runs, not a Cube or desktop variant.
 FROM runtime AS sandbox

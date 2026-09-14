@@ -84,7 +84,9 @@ func (s *resolveOwnAgentStub) GetAgentByIDAndTenant(context.Context, string, uin
 func (s *resolveOwnAgentStub) ListAgents(context.Context) ([]*types.CustomAgent, error) {
 	panic("not implemented")
 }
-func (s *resolveOwnAgentStub) UpdateAgent(context.Context, *types.CustomAgent) (*types.CustomAgent, error) {
+func (s *resolveOwnAgentStub) UpdateAgent(
+	context.Context, *types.CustomAgent, *string,
+) (*types.CustomAgent, error) {
 	panic("not implemented")
 }
 func (s *resolveOwnAgentStub) DeleteAgent(context.Context, string) error {

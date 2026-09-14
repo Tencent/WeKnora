@@ -489,6 +489,9 @@ type KnowledgeCheckParams struct {
 	FileType string
 	FileSize int64
 	FileHash string
+	// When both are set, file deduplication is scoped to this source item.
+	DataSourceID string
+	ExternalID   string
 	// URL parameters
 	URL string
 	// Text passage parameters

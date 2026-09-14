@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
+	"github.com/gorilla/websocket"
 )
 
 const sandboxSpanPreviewRunes = 256
@@ -12,7 +13,8 @@ const sandboxSpanPreviewRunes = 256
 // wrapLangfuseRemoteClient records provider-neutral sandbox RPCs as Langfuse
 // spans (sandbox.exec / sandbox.connect / …) so LiteFuse shows a product-level
 // tree instead of a pile of Docker Engine HTTP calls parented to whatever
-// agent.round happened to be recording. No-op when Langfuse is disabled.
+// agent.round happened to be recording. No-op when Langfuse is disabled or
+// the caller has no parent trace.
 //
 // Snapshot capability is forwarded: wrapping must not hide RemoteSnapshotManager
 // from SnapshotManagerFrom.
@@ -248,7 +250,7 @@ func startSandboxSpan(
 	name string,
 	input, extraMeta map[string]interface{},
 ) (context.Context, *langfuse.Span) {
-	return langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
+	return langfuse.GetManager().StartChildSpan(ctx, langfuse.SpanOptions{
 		Name:     name,
 		Input:    input,
 		Metadata: extraMeta,
@@ -307,8 +309,45 @@ func (c *langfuseRemoteClient) OpenTerminal(
 	return session, err
 }
 
+// DialDesktop forwards the desktop capability so wrapping does not hide
+// RemoteDesktopManager from DesktopManagerFrom.
+//
+// It lives on the base decorator (not on a dedicated one like
+// langfuseSnapshotClient) so *every* wrapping shape exposes the capability:
+// langfuseSnapshotClient embeds this type, so it inherits the method.
+// Whether a backend actually supports desktops stays delegated to the inner
+// client's SupportsDesktop flag, which the *From helpers check.
+func (c *langfuseRemoteClient) DialDesktop(
+	ctx context.Context,
+	handle RemoteSandboxHandle,
+	opts RemoteDesktopOptions,
+) (*websocket.Conn, error) {
+	inner, ok := c.inner.(RemoteDesktopManager)
+	if !ok {
+		return nil, &RemoteError{
+			Kind:    RemoteErrorKindUnsupported,
+			Op:      "DialDesktop",
+			Message: "inner client has no desktop manager",
+		}
+	}
+	ctx, span := startSandboxSpan(ctx, "sandbox.dial_desktop", sandboxHandleOut(handle), nil)
+	conn, err := inner.DialDesktop(ctx, handle, opts)
+	span.Finish(sandboxHandleOut(handle), nil, err)
+	return conn, err
+}
+
+func (c *langfuseRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handle RemoteSandboxHandle) {
+	inner, ok := c.inner.(RemoteDesktopTTLRefresher)
+	if !ok {
+		return
+	}
+	inner.StartDesktopTTLRefresh(ctx, handle)
+}
+
 var (
-	_ RemoteSandboxClient   = (*langfuseRemoteClient)(nil)
-	_ RemoteSnapshotManager = (*langfuseSnapshotClient)(nil)
-	_ RemoteTerminalManager = (*langfuseRemoteClient)(nil)
+	_ RemoteSandboxClient       = (*langfuseRemoteClient)(nil)
+	_ RemoteSnapshotManager     = (*langfuseSnapshotClient)(nil)
+	_ RemoteTerminalManager     = (*langfuseRemoteClient)(nil)
+	_ RemoteDesktopManager      = (*langfuseRemoteClient)(nil)
+	_ RemoteDesktopTTLRefresher = (*langfuseRemoteClient)(nil)
 )

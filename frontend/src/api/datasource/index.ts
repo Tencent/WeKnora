@@ -114,7 +114,7 @@ export function validateConnection(id: string) {
   return post(`/api/v1/datasource/${id}/validate`, {})
 }
 
-// Validate credentials without persisting (for "Test Connection" during creation)
+// Validate credentials without persisting (during creation or credential replacement).
 export function validateCredentials(type: string, credentials: Record<string, any>) {
   return post('/api/v1/datasource/validate-credentials', { type, credentials })
 }

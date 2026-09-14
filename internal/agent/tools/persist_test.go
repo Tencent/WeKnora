@@ -19,6 +19,24 @@ func TestShouldOmitRawToolOutput(t *testing.T) {
 	}
 }
 
+func TestBrowserScreenshotStorageKeepsOneImageWithoutMutatingLiveResult(t *testing.T) {
+	result := &types.ToolResult{
+		Success: true, Output: `{"width":1}`,
+		Data:   map[string]interface{}{"image_base64": "YQ==", "format": "png"},
+		Images: []string{"data:image/png;base64,YQ=="},
+	}
+	steps := []types.AgentStep{{ToolCalls: []types.ToolCall{{Name: "local_browser", Result: result}}}}
+	stored := SanitizeAgentStepsForStorage(steps)[0].ToolCalls[0].Result
+	if len(stored.Images) != 0 || stored.Data["image_base64"] != "YQ==" || len(result.Images) != 1 {
+		t.Fatalf("screenshot storage must retain card data and preserve live model images: %#v", stored)
+	}
+	client := SanitizeToolResultForClient("local_browser", stored)
+	if client["image_base64"] != "YQ==" ||
+		strings.Contains(CompactToolOutputForHistory("local_browser", stored), "YQ==") {
+		t.Fatal("history must show the image in the card without sending base64 as model text")
+	}
+}
+
 func TestSanitizeToolDataForPersist_knowledgeChunksList(t *testing.T) {
 	data := map[string]interface{}{
 		"display_type":    "knowledge_chunks_list",

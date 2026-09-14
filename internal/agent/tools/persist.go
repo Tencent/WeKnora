@@ -127,6 +127,10 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 				continue
 			}
 			result := *tc.Result
+			if tc.Name == "local_browser" {
+				// Screenshot bytes already live in Data for the result card.
+				result.Images = nil
+			}
 			if isSandboxContentTool(tc.Name) {
 				// display_type is for the live card; history still needs the
 				// command, exit, and a head+tail of the streams. Replacing

@@ -96,3 +96,34 @@ test('verification refuses live sends and a finished run reinstalls with instruc
   assert.equal(calls[0][2], 'Install from the official guide')
   assert.deepEqual(h.emitted, ['restarted'])
 })
+
+test('live output renders before tool completion and ignores a previous run', async () => {
+  const progressLogic = source.slice(source.indexOf('const commandOutput ='), source.indexOf('const loading ='))
+  const followLogic = source.slice(source.indexOf('async function follow('), source.indexOf('function wait('))
+  const js = ts.transpileModule(`${progressLogic}\n${followLogic}`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText
+  let handlers
+  const modelChunks = []
+  const h = vm.runInNewContext(`${js}\n({ follow, commandOutput, changeRun: () => { openRun++ } })`, {
+    props: { live: true, configId: 'cfg', skillId: 'skill' },
+    ref: value => ({ value }), computed: get => ({ get value() { return get() } }),
+    watch() {}, onUnmounted() {}, clearInterval() {},
+    getApiBaseUrl: () => '', configSkillTranscriptUrl: () => '/transcript',
+    localStorage: { getItem: () => null }, AbortController,
+    controller: null, openRun: 1, i18n: { global: {} }, generateRandomString: () => 'request',
+    fetchEventSource: async (_url, options) => { handlers = options; await options.onopen({ ok: true }) },
+    applyPrompt() {}, processStreamChunk: frame => modelChunks.push(frame),
+  })
+  assert.equal(await h.follow(1), true)
+  const frame = data => handlers.onmessage({ data: JSON.stringify({ response_type: 'install_output', data }) })
+  const started = new Date('2026-09-10T12:00:00Z').toISOString()
+  frame({ command: 'uv pip install -r requirements.lock', started_at: started, output: 'Downloading numpy', done: false })
+  assert.equal(h.commandOutput.value.output, 'Downloading numpy')
+  assert.equal(modelChunks.length, 0)
+  frame({ command: 'uv pip install -r requirements.lock', started_at: started, output: 'Installed', done: true })
+  assert.equal(h.commandOutput.value.done, true)
+  h.changeRun()
+  frame({ command: 'old command', output: 'late output', done: false })
+  assert.equal(h.commandOutput.value.output, 'Installed')
+})
