@@ -79,6 +79,7 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 			Handle:     artifactHandle(a),
 			FileName:   a.FileName,
 			FileType:   a.FileType,
+			Kind:       a.Kind(),
 			FileSize:   a.FileSize,
 			SourcePath: a.SourcePath,
 			ModTime:    a.ModTime,
@@ -131,6 +132,7 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 			Handle:     artifactHandle(a),
 			FileName:   a.FileName,
 			FileType:   a.FileType,
+			Kind:       a.Kind(),
 			FileSize:   a.FileSize,
 			SourcePath: a.SourcePath,
 			ModTime:    a.ModTime,
@@ -267,11 +269,12 @@ type artifactListItem struct {
 	// Handle is the artifact's `resource://<handle>` reference, matching the
 	// destinations in the message body. Empty when the deployment runs without
 	// a resource catalog, in which case the body references files by name.
-	Handle     string `json:"handle,omitempty"`
-	FileName   string `json:"file_name"`
-	FileType   string `json:"file_type"`
-	FileSize   int64  `json:"file_size"`
-	SourcePath string `json:"source_path"`
+	Handle     string             `json:"handle,omitempty"`
+	FileName   string             `json:"file_name"`
+	FileType   string             `json:"file_type"`
+	Kind       types.ArtifactKind `json:"kind"`
+	FileSize   int64              `json:"file_size"`
+	SourcePath string             `json:"source_path"`
 	// time-typed fields serialise as RFC3339 strings — same convention as
 	// the rest of the messages API.
 	ModTime   any `json:"mod_time"`

@@ -100,6 +100,8 @@ export interface ArtifactMeta {
   handle?: string;
   file_name: string;
   file_type: string;
+  /** Semantic projection derived from file_type by the server. */
+  kind: 'presentation' | 'web_page' | 'spreadsheet' | 'file';
   file_size: number;
   source_path: string;
   mod_time: string;
