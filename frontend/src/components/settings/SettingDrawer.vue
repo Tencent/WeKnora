@@ -43,13 +43,16 @@
       <slot />
     </div>
     <template v-if="!hideFooter" #footer>
+      <div v-if="$slots['footer-extra']" class="setting-drawer__footer-extra">
+        <slot name="footer-extra" />
+      </div>
       <div class="setting-drawer__footer">
         <div class="setting-drawer__footer-left">
           <slot name="footer-left" />
         </div>
         <div class="setting-drawer__footer-right">
           <slot name="footer-right">
-            <t-button theme="default" variant="outline" @click="handleCancel">
+            <t-button theme="default" variant="outline" :disabled="cancelDisabled" @click="handleCancel">
               {{ cancelText || t('common.cancel') }}
             </t-button>
             <t-button theme="primary" :loading="confirmLoading" :disabled="confirmDisabled" @click="handleConfirm">
@@ -100,6 +103,7 @@ interface Props {
    */
   storageKey?: string
   confirmLoading?: boolean
+  cancelDisabled?: boolean
   confirmDisabled?: boolean
   confirmText?: string
   cancelText?: string
@@ -118,6 +122,7 @@ const props = withDefaults(defineProps<Props>(), {
   maxWidth: 1200,
   storageKey: '',
   confirmLoading: false,
+  cancelDisabled: false,
   confirmDisabled: false,
   confirmText: '',
   cancelText: '',
@@ -440,6 +445,12 @@ const handleCancel = () => {
 }
 
 /* ---------- Footer ---------- */
+.setting-drawer__footer-extra {
+  margin-bottom: 12px;
+  min-width: 0;
+  text-align: left;
+}
+
 .setting-drawer__footer {
   display: flex;
   align-items: center;
