@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -59,7 +60,9 @@ func NewOpenAIEmbedder(apiKey, baseURL, modelName string,
 	}
 
 	if truncatePromptTokens == 0 {
-		truncatePromptTokens = 511
+		// 0 表示不发送 truncate_prompt_tokens 参数；默认 511 会破坏不支持该参数
+		// 的模型（如 SiliconFlow Qwen3-VL-Embedding-8B 返回 20015）
+		truncatePromptTokens = 0
 	}
 
 	timeout := 60 * time.Second
@@ -94,14 +97,12 @@ func (e *OpenAIEmbedder) SetSupportsDimensionOverride(supported bool) {
 
 // Embed converts text to vector
 func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
-		if err != nil {
-			return nil, err
-		}
-		if len(embeddings) > 0 {
-			return embeddings[0], nil
-		}
+	embeddings, err := e.BatchEmbed(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+	if len(embeddings) > 0 {
+		return embeddings[0], nil
 	}
 	return nil, fmt.Errorf("no embedding returned")
 }
@@ -151,6 +152,25 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 
 		resp, err = e.httpClient.Do(req)
 		if err == nil {
+			// Rate-limited: honor Retry-After (or a sane default) and retry
+			// without consuming the response body. Any other status (including
+			// 4xx/5xx) is handed back to the caller as-is.
+			if resp.StatusCode == http.StatusTooManyRequests && i < e.maxRetries {
+				wait := 2 * time.Second
+				if ra := resp.Header.Get("Retry-After"); ra != "" {
+					if secs, err := strconv.Atoi(ra); err == nil && secs > 0 {
+						wait = time.Duration(secs) * time.Second
+					}
+				}
+				resp.Body.Close()
+				logger.GetLogger(ctx).Warnf("OpenAIEmbedder rate limited (429), retrying in %v", wait)
+				select {
+				case <-time.After(wait):
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				continue
+			}
 			return resp, nil
 		}
 

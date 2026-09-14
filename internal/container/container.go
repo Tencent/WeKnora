@@ -1127,6 +1127,7 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
 	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
+	rdb *redis.Client,
 ) (interfaces.RetrieveEngineRegistry, error) {
 	// storeRepo and engineFactory let the registry rebuild a store engine that
 	// is absent from this process, which happens when startup skipped it after
@@ -1140,7 +1141,7 @@ func initRetrieveEngineRegistry(
 	auditSink := newAuditSinkAdapter(auditSvc)
 
 	if slices.Contains(retrieveDriver, "postgres") {
-		postgresRepo := postgresRepo.NewPostgresRetrieveEngineRepository(db)
+		postgresRepo := postgresRepo.NewPostgresRetrieveEngineRepository(db, rdb)
 		if err := registry.Register(
 			retriever.NewKVHybridRetrieveEngine(postgresRepo, types.PostgresRetrieverEngineType),
 		); err != nil {
@@ -1433,7 +1434,7 @@ func initRetrieveEngineRegistry(
 	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
-		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
+		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink, rdb)
 	}
 
 	return registry, nil
@@ -1443,6 +1444,7 @@ func initRetrieveEngineRegistry(
 // in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
 func loadDBStoresIntoRegistry(
 	storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config, auditSink openSearchRepo.AuditSink,
+	rdb *redis.Client,
 ) {
 	ctx := context.Background()
 	log := logger.GetLogger(ctx)
@@ -1460,7 +1462,7 @@ func loadDBStoresIntoRegistry(
 
 	log.Infof("Loading %d vector store(s) from database", len(stores))
 	for _, store := range stores {
-		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink)
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink, rdb)
 		if err != nil {
 			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
 			continue

@@ -7,10 +7,30 @@ import (
 	"io"
 	"net/http"
 	"testing"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
+// whitelistAzureTestEndpoint pins the SSRF whitelist to the Azure test host for
+// the duration of one test. The whitelist is cached process-wide behind a
+// sync.Once (see internal/utils/security.go), so the cache must be re-seeded
+// after t.Setenv and restored on cleanup. These tests are deliberately NOT
+// parallel: t.Setenv panics inside parallel tests, and the shared whitelist
+// cache is process-global. This mirrors the established repo convention
+// (internal/models/asr, rerank, vlm, notion, qqbot).
+// In fake-ip proxy environments the Azure example host otherwise resolves to
+// the restricted 198.18.0.0/15 range and the embedder constructor
+// (NewAzureOpenAIEmbedder validates its base URL) fails before the mocked
+// transport is ever installed.
+func whitelistAzureTestEndpoint(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSRF_WHITELIST", "example-resource.openai.azure.com")
+	secutils.ResetSSRFWhitelistForTest()
+	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
+}
+
 func TestAzureOpenAIEmbedderBatchEmbedSendsConfiguredDimensions(t *testing.T) {
-	t.Parallel()
+	whitelistAzureTestEndpoint(t)
 
 	var requestBody map[string]any
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -65,7 +85,7 @@ func TestAzureOpenAIEmbedderBatchEmbedSendsConfiguredDimensions(t *testing.T) {
 }
 
 func TestAzureOpenAIEmbedderBatchEmbedOmitsDimensionsByDefault(t *testing.T) {
-	t.Parallel()
+	whitelistAzureTestEndpoint(t)
 
 	var requestBody map[string]any
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -105,7 +125,7 @@ func TestAzureOpenAIEmbedderBatchEmbedOmitsDimensionsByDefault(t *testing.T) {
 }
 
 func TestAzureOpenAIEmbedderBatchEmbedSendsDimensionsWhenOverrideEnabledRegardlessOfAPIVersion(t *testing.T) {
-	t.Parallel()
+	whitelistAzureTestEndpoint(t)
 
 	var requestBody map[string]any
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {

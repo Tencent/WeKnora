@@ -25,6 +25,9 @@ type pgVector struct {
 	Content         string              `json:"content"           gorm:"column:content;not null"`
 	Dimension       int                 `json:"dimension"         gorm:"column:dimension;not null"`
 	Embedding       pgvector.HalfVector `json:"embedding"         gorm:"column:embedding;not null"`
+	// Embedding3584 holds the leading 3584-dim sub-vector of Embedding for
+	// dimension>4000 rows, used by the partial HNSW index for fast retrieval.
+	Embedding3584 pgvector.HalfVector `json:"embedding_3584"    gorm:"column:embedding_3584"`
 	IsEnabled       bool                `json:"is_enabled"        gorm:"column:is_enabled;default:true;index"`
 }
 
@@ -73,6 +76,9 @@ func toDBVectorEmbedding(indexInfo *types.IndexInfo, additionalParams map[string
 		if embeddingMap, ok := additionalParams["embedding"].(map[string][]float32); ok {
 			pgVector.Embedding = pgvector.NewHalfVector(embeddingMap[indexInfo.SourceID])
 			pgVector.Dimension = len(pgVector.Embedding.Slice())
+			if pgVector.Dimension > maxPgvectorIndexableDim {
+				pgVector.Embedding3584 = pgvector.NewHalfVector(embeddingMap[indexInfo.SourceID][:pgFallbackIndexDim])
+			}
 		}
 	}
 	// Get is_enabled from additionalParams if available
