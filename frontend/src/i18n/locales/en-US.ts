@@ -3393,6 +3393,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '(Attachment)',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
+    usageHint: 'Token usage for this turn (input → output · total · cache hit)',
+    usageCached: 'cached {n}',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',

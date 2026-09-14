@@ -3393,6 +3393,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '（添付ファイル）',
     referenceChunkCount: '{count}件のチャンク',
     fallbackHint: 'ナレッジベースから関連する内容が見つかりませんでした。上記はモデルの直接回答です。',
+    usageHint: 'このターンのトークン使用量（入力 → 出力 · 合計 · キャッシュヒット）',
+    usageCached: 'キャッシュ {n}',
     requestInfoTitle: 'リクエスト情報',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'メッセージID',

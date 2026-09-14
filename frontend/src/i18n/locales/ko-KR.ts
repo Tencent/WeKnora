@@ -3407,6 +3407,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '(첨부)',
     referenceChunkCount: '{count}개 청크',
     fallbackHint: '지식 베이스에서 관련 내용을 찾지 못했습니다. 위는 모델의 직접 응답입니다.',
+    usageHint: '이 턴의 토큰 사용량 (입력 → 출력 · 합계 · 캐시 히트)',
+    usageCached: '캐시 {n}',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',

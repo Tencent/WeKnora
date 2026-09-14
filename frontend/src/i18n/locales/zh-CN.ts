@@ -3409,6 +3409,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '（附件）',
     referenceChunkCount: '{count}个片段',
     fallbackHint: '未从知识库中检索到相关内容，以上为模型直接回答',
+    usageHint: '本轮模型调用的 token 用量（输入 → 输出 · 总计 · 缓存命中）',
+    usageCached: '缓存 {n}',
     requestInfoTitle: '请求信息',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: '消息 ID',

@@ -21,7 +21,13 @@ const monoModules = import.meta.glob('@/assets/img/providers/mono/*/*.svg', {
   import: 'default',
 }) as Record<string, string>;
 
-export type ProviderCategory = 'vectorstore' | 'storage' | 'websearch' | 'parser' | 'sandbox';
+export type ProviderCategory =
+  | 'vectorstore'
+  | 'storage'
+  | 'websearch'
+  | 'parser'
+  | 'sandbox'
+  | 'model'; // 模型厂商（assets/img/providers/{color,mono}/model/<provider>.svg，2026-09-14 #15）
 
 export type LogoMatch = {
   mode: 'color' | 'mono';

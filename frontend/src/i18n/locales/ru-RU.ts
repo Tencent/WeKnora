@@ -3407,6 +3407,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '(Вложение)',
     referenceChunkCount: '{count} фрагмент(ов)',
     fallbackHint: 'В базе знаний не найдено релевантного содержимого. Выше представлен прямой ответ модели.',
+    usageHint: 'Использование токенов за этот ход (вход → выход · всего · попадание в кэш)',
+    usageCached: 'кэш {n}',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',

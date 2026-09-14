@@ -68,8 +68,17 @@
               <t-option v-for="opt in providerOptions" :key="opt.value" :value="opt.value" :label="opt.label"
                 :show-overflow-tooltip="false">
                 <div class="provider-option">
-                  <span class="provider-name">{{ opt.label }}</span>
-                  <span class="provider-desc">{{ opt.description }}</span>
+                  <!-- #15：厂商 LOGO（无资源回落首字母徽章） -->
+                  <img v-if="providerLogoMatch(opt.value)?.mode === 'color'" :src="providerLogoMatch(opt.value)!.url"
+                    :alt="opt.label" class="provider-option__logo" />
+                  <span v-else-if="providerLogoMatch(opt.value)?.mode === 'mono'"
+                    class="provider-option__logo provider-option__logo--mono"
+                    :style="{ '--logo-url': `url('${providerLogoMatch(opt.value)!.url}')` }" />
+                  <span v-else class="provider-option__logo provider-option__logo--badge">{{ opt.label.charAt(0) }}</span>
+                  <span class="provider-option__text">
+                    <span class="provider-name">{{ opt.label }}</span>
+                    <span class="provider-desc">{{ opt.description }}</span>
+                  </span>
                 </div>
               </t-option>
             </t-select>
@@ -239,6 +248,13 @@
             <label class="form-label">{{ $t('model.editor.lkeap.regionLabel') }}</label>
             <t-input v-model="formData.lkeapRegion" :placeholder="$t('model.editor.lkeap.regionPlaceholder')" />
             <p class="form-desc">{{ $t('model.editor.lkeap.regionDesc') }}</p>
+          </div>
+
+          <!-- 厂商动态扩展字段（providers extraFields 下发，如 azure api_version；
+               值进模型 extra_config，测试连接与生产调用同源透传） -->
+          <div v-for="f in activeExtraFields" :key="f.key" class="form-item">
+            <label class="form-label" :class="{ required: f.required }">{{ f.label }}</label>
+            <t-input v-model="formData.extraConfig![f.key]" :placeholder="f.placeholder || f.default" />
           </div>
 
           <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
@@ -433,6 +449,7 @@ import CredentialResource, {
 } from '@/components/credentials/CredentialResource.vue'
 import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
 import ThinkingControls from '@/components/ThinkingControls.vue'
+import { providerLogo } from '@/views/settings/providerLogos'
 
 interface CustomHeaderItem {
   key: string
@@ -474,6 +491,8 @@ interface ModelFormData {
   appSecret?: string
   /** LKEAP Rerank：地域，如 ap-guangzhou */
   lkeapRegion?: string
+  /** 厂商动态扩展字段（provider extraFields → 模型 extra_config，如 azure api_version） */
+  extraConfig?: Record<string, string>
 }
 
 type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
@@ -588,6 +607,24 @@ const hydratingForm = ref(false)
 const activeProviderCaps = computed(() =>
   apiProviderOptions.value.find(p => p.value === formData.value.provider)?.capabilities
 )
+
+// #15：厂商 LOGO 查询（assets/img/providers/*/model/<value>.svg）
+const providerLogoMatch = (value: string) => {
+  try {
+    return providerLogo('model', value)
+  } catch {
+    return undefined
+  }
+}
+
+/** 当前厂商的动态扩展字段（跳过已有专属控件/专属汇入逻辑的键）。 */
+const activeExtraFields = computed(() => {
+  const provider = providerOptions.value.find(p => p.value === formData.value.provider)
+  return (provider?.extraFields ?? []).filter(f => {
+    if (f.key === 'region' && isLkeapRerank.value) return false // lkeapRegion 专属控件
+    return true
+  })
+})
 
 /** Chat 类型远程模型的思考能力声明（选项/开关的渲染依据）。 */
 const chatThinkingCaps = computed(() => (
@@ -897,8 +934,13 @@ const credentialBlockVisible = computed(() => {
   return formData.value.provider !== 'weknoracloud'
 })
 
-const isCredentialRequired = (key: string) =>
-  providerCredentialSpec.value?.find(f => f.key === key)?.required === true
+const isCredentialRequired = (key: string): boolean => {
+  // 签名 rerank（lkeap/volcengine）：app_secret 在 rerank 调用侧必填
+  //（SecretId/SecretKey 缺一即构造失败）；spec 是 provider 级声明、无类型
+  // 维度——类型相关的必填在这里补齐（2026-09-14 裁定）。
+  if (key === 'app_secret' && isSignedRerank.value) return true
+  return providerCredentialSpec.value?.find(f => f.key === key)?.required === true
+}
 
 const credentialValue = (key: string) =>
   formData.value[CREDENTIAL_SLOT_FIELDS[key]] as string | undefined ?? ''
@@ -1258,10 +1300,20 @@ const resetForm = () => {
 const handleProviderChange = (value: string) => {
   const provider = providerOptions.value.find(opt => opt.value === value)
   if (provider && provider.defaultUrls) {
-    // 根据当前模型类型获取对应的默认 URL
+    // 根据当前模型类型获取对应的默认 URL；无默认值时清空——残留上一家
+    // 厂商的地址会把 A 家的 key 发到 B 家的域（2026-09-14 裁定）
     const defaultUrl = provider.defaultUrls[activeModelType.value]
     if (defaultUrl) {
       formData.value.baseUrl = defaultUrl
+    } else if (value !== 'weknoracloud') {
+      formData.value.baseUrl = ''
+    }
+    // 动态扩展字段默认值预填（如 azure api_version 2024-10-21）
+    for (const f of provider.extraFields ?? []) {
+      if (f.default && !formData.value.extraConfig?.[f.key]) {
+        if (!formData.value.extraConfig) formData.value.extraConfig = {}
+        formData.value.extraConfig[f.key] = f.default
+      }
     }
     if (value === 'lkeap' && activeModelType.value === 'rerank' && !formData.value.modelName?.trim()) {
       formData.value.modelName = 'lke-reranker-base'
@@ -1510,6 +1562,10 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          // azure api_version 等动态扩展字段随测试连接透传
+          ...(formData.value.extraConfig && Object.keys(formData.value.extraConfig).length > 0
+            ? { extraConfig: { ...formData.value.extraConfig } }
+            : {}),
         })
         break
 
@@ -1699,10 +1755,9 @@ const handleConfirm = async () => {
       source: isOllamaProvider.value ? 'local' : 'remote',
       ...(isEdit.value ? {} : { modelType: activeModelType.value }),
     })
-    dialogVisible.value = false
-    // 保存成功后重置草稿，下次打开新增模型时是空白
-    resetForm()
-    lastOpenedModelId.value = null
+    // D1（2026-09-14 裁定）：保存失败不关抽屉——关闭与重置改由父组件在
+    // 保存成功后调用 resetAfterSave()（此前 emit 后无条件关闭，校验/API
+    // 失败时用户输入全丢）。
     // 移除此处的成功提示，由父组件统一处理
   } catch (error) {
     console.error('表单验证失败:', error)
@@ -1848,6 +1903,17 @@ const handleCancel = () => {
   lastOpenedModelId.value = null
   dialogVisible.value = false
 }
+
+/**
+ * D1 契约：父组件在保存成功（createModel/updateModel resolve）后调用。
+ * 关抽屉 + 清草稿；失败路径不调用 → 抽屉保持打开、输入保留。
+ */
+const resetAfterSave = () => {
+  dialogVisible.value = false
+  resetForm()
+  lastOpenedModelId.value = null
+}
+defineExpose({ resetAfterSave })
 </script>
 
 <style lang="less" scoped>
@@ -2540,10 +2606,49 @@ const handleCancel = () => {
 
   .provider-option {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
     width: 100%;
     min-width: 0;
+
+    // #15：厂商 LOGO（color 直渲 / mono mask 染色 / 首字母徽章回落）
+    .provider-option__logo {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+
+      &--mono {
+        background-color: currentColor;
+        mask-image: var(--logo-url);
+        mask-size: contain;
+        mask-repeat: no-repeat;
+        mask-position: center;
+        -webkit-mask-image: var(--logo-url);
+        -webkit-mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+      }
+
+      &--badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 5px;
+        background: var(--td-bg-color-secondarycontainer, #f0f0f0);
+        color: var(--td-text-color-secondary);
+        font-size: 11px;
+        font-weight: 600;
+      }
+    }
+
+    .provider-option__text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
 
     .provider-name {
       font-size: 13px;

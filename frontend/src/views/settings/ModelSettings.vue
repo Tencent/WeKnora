@@ -61,7 +61,13 @@
           @click="onModelCardClick($event, model._modelType, model)"
           @keydown.enter="onModelCardClick($event, model._modelType, model)">
           <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
-            <t-icon :name="typeIcon(model._modelType)" size="18px" />
+            <!-- #15：优先厂商 LOGO（assets/img/providers/*/model/<provider>.svg），
+                 无资源回落类型图标 -->
+            <img v-if="modelProviderLogo(model)?.mode === 'color'" :src="modelProviderLogo(model)!.url"
+              :alt="vendorLabel(model)" class="model-card__badge-img" />
+            <span v-else-if="modelProviderLogo(model)?.mode === 'mono'" class="model-card__badge-mono"
+              :style="{ '--logo-url': `url('${modelProviderLogo(model)!.url}')` }" />
+            <t-icon v-else :name="typeIcon(model._modelType)" size="18px" />
           </div>
           <div class="model-card__body">
             <div class="model-card__header">
@@ -259,8 +265,8 @@
     </t-dialog>
 
     <!-- 模型编辑器抽屉 -->
-    <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
-      @confirm="handleModelSave" />
+    <ModelEditorDialog ref="editorDialogRef" v-model:visible="showDialog" :model-type="currentModelType"
+      :model-data="editingModel" @confirm="handleModelSave" />
     <ModelDebugDrawer v-model:visible="showDebugDrawer" :models="allModels" />
 
   </div>
@@ -273,6 +279,7 @@ import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
+import { providerLogo } from './providerLogos';
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
 import {
   listModels,
@@ -314,8 +321,12 @@ const usageConflict = ref<ModelUsageDetails | null>(null)
 const usageConflictModelName = ref('')
 const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
+// D1 契约：保存成功后由父组件通知抽屉关闭+清草稿（失败保持打开）
+const editorDialogRef = ref<InstanceType<typeof ModelEditorDialog> | null>(null)
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
+// 首次加载完成前 tab watch 不触发重拉（初次载入本身已按当前 tab 过滤）
+const loadedOnce = ref(false)
 
 const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
 const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
@@ -335,6 +346,12 @@ watch(
   },
   { immediate: true },
 )
+
+// #14：类型 tab 切换时按类型重新拉取（服务端过滤）。all 拉全量。
+watch(activeTypeFilter, (val, old) => {
+  if (val === old || !loadedOnce.value) return
+  void loadModels()
+})
 
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
@@ -382,6 +399,8 @@ function convertToLegacyFormat(model: ModelConfig) {
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
+    // 厂商动态扩展字段回显（azure api_version 等）
+    extraConfig: model.parameters.extra_config ? { ...model.parameters.extra_config } : {},
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -399,6 +418,15 @@ const filteredModels = computed(() => {
 const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
 
 // 类型徽章图标。沿用 TDesign 自带 icon name，避免再引第三方图标包。
+// #15：卡片厂商 LOGO 查询（无资源返回 undefined → 回落类型图标）
+const modelProviderLogo = (model: any) => {
+  try {
+    return providerLogo('model', model.provider)
+  } catch {
+    return undefined
+  }
+}
+
 const typeIcon = (type: ModelType): string => {
   const map: Record<ModelType, string> = {
     chat: 'chat',
@@ -515,16 +543,23 @@ const emptyHint = computed(() => {
 const loadModels = async () => {
   loading.value = true
   try {
-    const models = await listModels()
+    // #14：类型 tab 下推服务端过滤（all 拉全量；单类型只拉该类型）
+    const models = await listModels(
+      activeTypeFilter.value === 'all' ? undefined : activeTypeFilter.value,
+    )
     allModels.value = models
     // 设置页自己 listModels 之后立刻写回空间级缓存。否则对话输入栏 /
     // 智能体编辑器会继续拿 60s TTL 里的旧 context_window，刷新页面才对。
-    chatResources.replaceModels(models)
+    // 类型过滤加载只更新本页列表——子集不能替换全局缓存（会丢其他类型）。
+    if (activeTypeFilter.value === 'all') {
+      chatResources.replaceModels(models)
+    }
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
     MessagePlugin.error(error.message)
   } finally {
     loading.value = false
+    loadedOnce.value = true
   }
 }
 
@@ -645,6 +680,12 @@ const handleModelSave = async (modelData: any) => {
     if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
     }
+    // 厂商动态扩展字段（azure api_version 等）原样汇入
+    if (modelData.extraConfig) {
+      for (const [k, v] of Object.entries(modelData.extraConfig)) {
+        if (v !== '' && v != null) extraConfig[k] = String(v)
+      }
+    }
     const extraConfigFields = Object.keys(extraConfig).length > 0
       ? { extra_config: extraConfig }
       : {}
@@ -729,7 +770,8 @@ const handleModelSave = async (modelData: any) => {
       MessagePlugin.success(t('modelSettings.toasts.added'))
     }
 
-    showDialog.value = false
+    // D1：保存成功才关抽屉（抽屉内关闭+清草稿）；失败路径抽屉保持打开
+    editorDialogRef.value?.resetAfterSave()
     await loadModels()
   } catch (error: any) {
     console.error('保存模型失败:', error)
@@ -1125,6 +1167,27 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   margin-top: 1px;
+
+  // #15：厂商 LOGO 渲染（color 直渲；mono 用 mask 染主色）
+  .model-card__badge-img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+  }
+
+  .model-card__badge-mono {
+    width: 22px;
+    height: 22px;
+    background-color: var(--td-brand-color);
+    mask-image: var(--logo-url);
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-image: var(--logo-url);
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+  }
   // 默认底色，被 type 修饰覆盖
   background: rgba(0, 82, 217, 0.1);
   color: #0052D9;
