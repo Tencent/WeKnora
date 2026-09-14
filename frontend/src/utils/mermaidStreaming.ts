@@ -1,5 +1,31 @@
 export type CachedMermaidSvgHtml = string | readonly (string | null | undefined)[] | null | undefined;
 
+// A cache slot holds a rendered SVG string, '' while unresolved (mermaid not
+// loaded yet), or — encoded via this marker — a permanent render failure. A
+// fence is only cached once it is complete and mermaid itself has loaded, so
+// an encoded failure is a genuine parse/render error, not "still streaming".
+// The marker is a control character that never appears in real SVG markup,
+// so a slot's meaning is recoverable without widening CachedMermaidSvgHtml
+// (still a plain string) through every caller of appendMermaidSvgCache.
+const MERMAID_ERROR_MARKER = '\u0000mermaid-error\u0000';
+
+export function encodeMermaidRenderError(code: string, message: string): string {
+  return MERMAID_ERROR_MARKER + JSON.stringify({ code, message });
+}
+
+function decodeMermaidRenderError(value: string | null | undefined): { code: string; message: string } | null {
+  if (typeof value !== 'string' || !value.startsWith(MERMAID_ERROR_MARKER)) return null;
+  try {
+    const parsed = JSON.parse(value.slice(MERMAID_ERROR_MARKER.length));
+    if (parsed && typeof parsed.code === 'string' && typeof parsed.message === 'string') {
+      return parsed;
+    }
+  } catch {
+    // Malformed marker payload — treat as no diagnostic available.
+  }
+  return null;
+}
+
 const MERMAID_FENCE_START = '```mermaid';
 const COMPLETE_MERMAID_FENCE_RE = /```mermaid[\s\S]*?```/;
 
@@ -48,8 +74,10 @@ export const extractMermaidCodes = (content: string): string[] => {
   const re = /```mermaid([\s\S]*?)```/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(content)) !== null) {
-    const code = match[1].trim();
-    if (code) codes.push(code);
+    // Keep blank fences: maskMermaidBlocksForStreaming emits one placeholder
+    // per fence, and injectCachedMermaidSvg pairs them by position, so
+    // dropping a fence here would shift every later diagram by one slot.
+    codes.push(match[1].trim());
   }
   return codes;
 };
@@ -75,19 +103,31 @@ const MERMAID_UNRENDERED_CANVAS_RE =
 
 function replaceUnrenderedCanvas(
   match: string,
-  svg: string,
+  innerHtml: string,
+  dataMermaidValue: string = 'cached',
 ): string {
   const openEnd = match.indexOf('>');
   if (openEnd < 0) return match;
-  const openTag = match.slice(0, openEnd + 1).replace(/data-mermaid="false"/, 'data-mermaid="cached"');
-  return `${openTag}${svg}</pre>`;
+  const openTag = match
+    .slice(0, openEnd + 1)
+    .replace(/data-mermaid="false"/, `data-mermaid="${dataMermaidValue}"`);
+  return `${openTag}${innerHtml}</pre>`;
 }
 
-/** Inject trusted Mermaid SVG after DOMPurify, 1:1 with complete mermaid fences. */
+/**
+ * Inject trusted Mermaid SVG after DOMPurify, 1:1 with complete mermaid fences.
+ *
+ * A cache slot may also hold an encoded render failure (see
+ * encodeMermaidRenderError) — a mermaid fence is only ever cached once it is
+ * complete, so a failure here is a genuine syntax error, not "still
+ * streaming"; that slot renders as a visible error (via buildErrorFragment)
+ * instead of leaving the loading skeleton stuck forever.
+ */
 export const injectCachedMermaidSvg = (
   html: string,
   cachedSvgHtml: CachedMermaidSvgHtml,
   buildBlock: (innerHtml: string, preAttrs?: string) => string,
+  buildErrorFragment: (code: string, message: string) => string,
 ): string => {
   if (!html) return html;
   const svgs = normalizeCachedMermaidSvgs(cachedSvgHtml);
@@ -96,11 +136,15 @@ export const injectCachedMermaidSvg = (
   const index = { i: 0 };
   const withLoading = html.replace(STREAMING_MERMAID_LOADING_RE, (match) => {
     const svg = svgs[index.i++];
+    const err = decodeMermaidRenderError(svg);
+    if (err) return buildBlock(buildErrorFragment(err.code, err.message), 'data-mermaid="error"');
     return svg ? buildBlock(svg, 'data-mermaid="cached"') : match;
   });
   if (index.i >= svgs.length) return withLoading;
   return withLoading.replace(MERMAID_UNRENDERED_CANVAS_RE, (match) => {
     const svg = svgs[index.i++];
+    const err = decodeMermaidRenderError(svg);
+    if (err) return replaceUnrenderedCanvas(match, buildErrorFragment(err.code, err.message), 'error');
     return svg ? replaceUnrenderedCanvas(match, svg) : match;
   });
 };

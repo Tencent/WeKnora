@@ -62,11 +62,35 @@ function mermaidCanvasHasSvg(el: Element): boolean {
   return !!el.querySelector('svg');
 }
 
+// Source a failed canvas was rendered from (kept in its collapsible block), or
+// null when the canvas is not in the error state.
+function mermaidCanvasErrorSource(el: Element): string | null {
+  if (el.getAttribute('data-mermaid') !== 'error') return null;
+  return (el.querySelector('.chat-mermaid-block__error-code code')?.textContent ?? '').trim();
+}
+
+function mermaidCanvasSource(el: Element): string {
+  return (el.querySelector('code')?.textContent ?? el.textContent ?? '').trim();
+}
+
 function morphMermaidCanvas(current: Element, next: Element): void {
   // Incoming HTML from marked still has mermaid source. Keep a diagram that
   // was already painted so typewriter / stream ticks cannot flash it back
   // into a fenced code block.
   if (mermaidCanvasHasSvg(current) && !mermaidCanvasHasSvg(next)) {
+    syncAttributes(current, next, new Set(['data-mermaid']));
+    return;
+  }
+  // Likewise keep a rendered error while the incoming source is unchanged;
+  // otherwise every update would reset it to source and re-run the parser.
+  // A changed source falls through so the new text gets a fresh attempt.
+  const erroredSource = mermaidCanvasErrorSource(current);
+  if (
+    erroredSource !== null
+    && !mermaidCanvasHasSvg(next)
+    && next.getAttribute('data-mermaid') === 'false'
+    && mermaidCanvasSource(next) === erroredSource
+  ) {
     syncAttributes(current, next, new Set(['data-mermaid']));
     return;
   }
