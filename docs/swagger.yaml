@@ -2547,6 +2547,7 @@ definitions:
     - jina
     - openrouter
     - litellm
+    - daoxe
     - requesty
     - nvidia
     - novita
@@ -2560,6 +2561,7 @@ definitions:
       ModelSourceHunyuan: Hunyuan model
       ModelSourceJina: Jina AI model
       ModelSourceLiteLLM: LiteLLM proxy model
+      ModelSourceDaoxe: Daoxe model
       ModelSourceLocal: Local model
       ModelSourceMimo: Mimo model
       ModelSourceMinimax: Minimax mode
@@ -2588,6 +2590,7 @@ definitions:
     - Jina AI model
     - OpenRouter model
     - LiteLLM proxy model
+    - Daoxe model
     - Requesty model
     - NVIDIA model
     - Novita AI model
@@ -2608,6 +2611,7 @@ definitions:
     - ModelSourceJina
     - ModelSourceOpenRouter
     - ModelSourceLiteLLM
+    - ModelSourceDaoxe
     - ModelSourceRequesty
     - ModelSourceNvidia
     - ModelSourceNovita
