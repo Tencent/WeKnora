@@ -119,7 +119,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	// oversized avatar used to reach postgres and come back as a raw driver
 	// 500. Reject it here with a 400 that names the limit.
 	if err := agent.ValidateAvatar(); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
@@ -142,7 +142,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		// above, so whatever lands here is a raw repository/driver error.
 		// Its text (SQLSTATE, column types) must not reach the client;
 		// the full detail is already logged above.
-		c.Error(errors.NewInternalServerError("Failed to create agent"))
+		_ = c.Error(errors.NewInternalServerError("Failed to create agent"))
 		return
 	}
 
@@ -195,7 +195,7 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 		// whatever lands here is a raw repository/driver error. Its text
 		// (SQLSTATE, column names) must not reach the client; the full detail
 		// is already logged above.
-		c.Error(errors.NewInternalServerError("Failed to load agent"))
+		_ = c.Error(errors.NewInternalServerError("Failed to load agent"))
 		return
 	}
 
@@ -227,7 +227,7 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		// whatever lands here is a raw repository/driver error. Its text
 		// (SQLSTATE, column names) must not reach the client; the full detail
 		// is already logged above.
-		c.Error(errors.NewInternalServerError("Failed to list agents"))
+		_ = c.Error(errors.NewInternalServerError("Failed to list agents"))
 		return
 	}
 
@@ -380,7 +380,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	if req.Avatar != nil {
 		if err := (&types.CustomAgent{Avatar: *req.Avatar}).ValidateAvatar(); err != nil {
 			logger.Error(ctx, "Invalid avatar", err)
-			c.Error(errors.NewBadRequestError(err.Error()))
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
 			return
 		}
 	}
@@ -420,7 +420,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 			// whatever lands here is a raw repository/driver error. Its text
 			// (SQLSTATE, column names) must not reach the client; the full detail
 			// is already logged above.
-			c.Error(errors.NewInternalServerError("Failed to update agent"))
+			_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
 		}
 		return
 	}
@@ -491,7 +491,7 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 			// whatever lands here is a raw repository/driver error. Its text
 			// (SQLSTATE, column names) must not reach the client; the full detail
 			// is already logged above.
-			c.Error(errors.NewInternalServerError("Failed to delete agent"))
+			_ = c.Error(errors.NewInternalServerError("Failed to delete agent"))
 		}
 		return
 	}
@@ -543,7 +543,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 			// whatever lands here is a raw repository/driver error. Its text
 			// (SQLSTATE, column names) must not reach the client; the full detail
 			// is already logged above.
-			c.Error(errors.NewInternalServerError("Failed to copy agent"))
+			_ = c.Error(errors.NewInternalServerError("Failed to copy agent"))
 		}
 		return
 	}
@@ -566,7 +566,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 			// whatever lands here is a raw repository/driver error. Its text
 			// (SQLSTATE, column names) must not reach the client; the full detail
 			// is already logged above.
-			c.Error(errors.NewInternalServerError("Failed to copy agent"))
+			_ = c.Error(errors.NewInternalServerError("Failed to copy agent"))
 		}
 		return
 	}
@@ -709,7 +709,7 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 		// whatever lands here is a raw repository/driver error. Its text
 		// (SQLSTATE, column names) must not reach the client; the full detail
 		// is already logged above.
-		c.Error(errors.NewInternalServerError("Failed to build suggested questions"))
+		_ = c.Error(errors.NewInternalServerError("Failed to build suggested questions"))
 		return
 	}
 
