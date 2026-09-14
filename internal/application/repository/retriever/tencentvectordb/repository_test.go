@@ -70,6 +70,17 @@ func TestBaseFilterBuildsTencentVectorDBCondition(t *testing.T) {
 	}
 }
 
+func TestBaseFilterCanIncludeDisabled(t *testing.T) {
+	repo := &repository{}
+	filter := repo.baseFilter(types.RetrieveParams{
+		KnowledgeBaseIDs: []string{"kb-1"},
+		IncludeDisabled:  true,
+	})
+
+	assert.NotContains(t, filter.Cond(), fieldIsEnabled)
+	assert.Contains(t, filter.Cond(), "knowledge_base_id")
+}
+
 func TestTencentVectorDBDefaultsToReplicaNumberOne(t *testing.T) {
 	repo := NewTencentVectorDBRetrieveEngineRepository(nil, "", nil).(*repository)
 

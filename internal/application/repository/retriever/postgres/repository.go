@@ -200,11 +200,13 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		Vars: []interface{}{params.Query},
 	})
 
-	// Filter by is_enabled = true or NULL (NULL means enabled for historical data)
-	conds = append(conds, clause.Expr{
-		SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
-		Vars: []interface{}{true},
-	})
+	// Administrative FAQ search may explicitly include disabled entries.
+	if !params.IncludeDisabled {
+		conds = append(conds, clause.Expr{
+			SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
+			Vars: []interface{}{true},
+		})
+	}
 	conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
 		{Column: clause.Column{Name: "score"}, Desc: true},
 	}})
@@ -330,9 +332,11 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 			strings.Join(placeholders, ", ")))
 	}
 
-	// is_enabled filter
-	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
-	allVars = append(allVars, true)
+	// Administrative FAQ search may explicitly include disabled entries.
+	if !params.IncludeDisabled {
+		whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
+		allVars = append(allVars, true)
+	}
 
 	// Build WHERE clause string
 	whereClause := ""

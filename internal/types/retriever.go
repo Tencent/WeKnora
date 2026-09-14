@@ -52,6 +52,8 @@ type RetrieveParams struct {
 	ExcludeKnowledgeIDs []string
 	// Excluded chunk IDs
 	ExcludeChunkIDs []string
+	// IncludeDisabled omits the default enabled-only filter for administrative retrieval.
+	IncludeDisabled bool
 	// Number of results to return
 	TopK int
 	// Similarity threshold

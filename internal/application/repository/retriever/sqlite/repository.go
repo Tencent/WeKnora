@@ -301,7 +301,6 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		FROM lite_embeddings_fts
 		JOIN lite_embeddings e ON e.id = lite_embeddings_fts.rowid
 		WHERE lite_embeddings_fts MATCH ?
-		AND (e.is_enabled IS NULL OR e.is_enabled = 1)
 	`
 
 	args := []interface{}{ftsQuery}
@@ -391,7 +390,7 @@ func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.Retr
 		AND v.rowid IN (
 			SELECT filtered.id
 			FROM lite_embeddings filtered
-			WHERE (filtered.is_enabled IS NULL OR filtered.is_enabled = 1)
+			WHERE 1 = 1
 	`, tbl)
 
 	args := []interface{}{
@@ -548,6 +547,11 @@ type whereClause struct {
 
 func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereClause {
 	var parts []whereClause
+	if !params.IncludeDisabled {
+		parts = append(parts, whereClause{
+			clause: "(" + tableAlias + ".is_enabled IS NULL OR " + tableAlias + ".is_enabled = 1)",
+		})
+	}
 	if len(params.KnowledgeBaseIDs) > 0 {
 		parts = append(parts, whereClause{
 			clause: tableAlias + ".knowledge_base_id IN (" + placeholders(len(params.KnowledgeBaseIDs)) + ")",

@@ -507,7 +507,10 @@ func shouldUseDimensionSuffix(indexCfg *types.IndexConfig) bool {
 }
 
 func (r *repository) baseFilter(params types.RetrieveParams) *tcvectordb.Filter {
-	conditions := []string{fmt.Sprintf("%s=1", fieldIsEnabled)}
+	conditions := make([]string, 0)
+	if !params.IncludeDisabled {
+		conditions = append(conditions, fmt.Sprintf("%s=1", fieldIsEnabled))
+	}
 	if len(params.KnowledgeBaseIDs) > 0 {
 		conditions = append(conditions, tcvectordb.In(fieldKnowledgeBaseID, params.KnowledgeBaseIDs))
 	}

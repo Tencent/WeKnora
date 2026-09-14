@@ -91,7 +91,7 @@ type FAQDeleteRequest struct {
 	IDs []int64 `json:"ids"`
 }
 
-// FAQSearchRequest represents the hybrid FAQ search request.
+// FAQSearchRequest represents the semantic FAQ search request.
 type FAQSearchRequest struct {
 	QueryText            string  `json:"query_text"`
 	VectorThreshold      float64 `json:"vector_threshold"`
@@ -99,6 +99,7 @@ type FAQSearchRequest struct {
 	FirstPriorityTagIDs  []int64 `json:"first_priority_tag_ids"`  // First priority tag seq_ids, highest priority
 	SecondPriorityTagIDs []int64 `json:"second_priority_tag_ids"` // Second priority tag seq_ids, lower than first
 	OnlyRecommended      bool    `json:"only_recommended"`        // Only return recommended entries
+	IncludeDisabled      bool    `json:"include_disabled"`        // Include disabled entries
 }
 
 // FAQEntriesPage contains paginated FAQ results.
@@ -336,7 +337,7 @@ func (c *Client) DeleteFAQEntries(ctx context.Context,
 	return parseResponse(resp, &response)
 }
 
-// SearchFAQEntries performs hybrid FAQ search inside a knowledge base.
+// SearchFAQEntries performs semantic FAQ search inside a knowledge base.
 func (c *Client) SearchFAQEntries(ctx context.Context,
 	knowledgeBaseID string, payload *FAQSearchRequest,
 ) ([]FAQEntry, error) {
@@ -401,24 +402,24 @@ type FAQSuccessEntry struct {
 // FAQImportProgress represents the progress of an async FAQ import task.
 // When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
 type FAQImportProgress struct {
-	TaskID           string           `json:"task_id"`
-	KBID             string           `json:"kb_id"`
-	KnowledgeID      string           `json:"knowledge_id"`
-	Status           string           `json:"status"`
-	Progress         int              `json:"progress"`
-	Total            int              `json:"total"`
-	Processed        int              `json:"processed"`
-	SuccessCount     int              `json:"success_count"`
-	FailedCount      int              `json:"failed_count"`
-	SkippedCount     int              `json:"skipped_count,omitempty"`
+	TaskID           string            `json:"task_id"`
+	KBID             string            `json:"kb_id"`
+	KnowledgeID      string            `json:"knowledge_id"`
+	Status           string            `json:"status"`
+	Progress         int               `json:"progress"`
+	Total            int               `json:"total"`
+	Processed        int               `json:"processed"`
+	SuccessCount     int               `json:"success_count"`
+	FailedCount      int               `json:"failed_count"`
+	SkippedCount     int               `json:"skipped_count,omitempty"`
 	FailedEntries    []FAQFailedEntry  `json:"failed_entries,omitempty"`
-	SuccessEntries   []FAQSuccessEntry `json:"success_entries,omitempty"`   // Successfully imported entries (when count is small)
+	SuccessEntries   []FAQSuccessEntry `json:"success_entries,omitempty"`    // Successful entries for small imports
 	FailedEntriesURL string            `json:"failed_entries_url,omitempty"` // CSV download URL when too many failures
-	Message          string           `json:"message"`
-	Error            string           `json:"error,omitempty"`
-	CreatedAt        int64            `json:"created_at"`
-	UpdatedAt        int64            `json:"updated_at"`
-	DryRun           bool             `json:"dry_run,omitempty"` // Whether this is a dry run validation
+	Message          string            `json:"message"`
+	Error            string            `json:"error,omitempty"`
+	CreatedAt        int64             `json:"created_at"`
+	UpdatedAt        int64             `json:"updated_at"`
+	DryRun           bool              `json:"dry_run,omitempty"` // Whether this is a dry run validation
 
 	// Result fields (populated when Status == "completed")
 	ImportMode     string    `json:"import_mode,omitempty"`

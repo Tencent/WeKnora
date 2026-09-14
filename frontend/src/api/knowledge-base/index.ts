@@ -555,6 +555,7 @@ export function searchFAQEntries(
     query_text: string
     vector_threshold?: number
     match_count?: number
+    include_disabled?: boolean
   }
 ) {
   return post(`/api/v1/knowledge-bases/${kbId}/faq/search`, data);

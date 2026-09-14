@@ -120,10 +120,12 @@ func (w *whereBuilder) build() (string, []any) {
 
 // buildBaseFilter 将 RetrieveParams 中的过滤条件翻译为 whereBuilder。
 // 默认追加 is_enabled = TRUE，与 Qdrant/Milvus/Weaviate 保持一致：
-// 关闭的 chunk 不参与检索。
+// 默认关闭的 chunk 不参与检索；管理场景可以显式包含。
 func buildBaseFilter(params types.RetrieveParams) *whereBuilder {
 	w := &whereBuilder{}
-	w.addEqual(fieldIsEnabled, true)
+	if !params.IncludeDisabled {
+		w.addEqual(fieldIsEnabled, true)
+	}
 
 	if len(params.KnowledgeBaseIDs) > 0 {
 		w.addIn(fieldKnowledgeBaseID, params.KnowledgeBaseIDs)

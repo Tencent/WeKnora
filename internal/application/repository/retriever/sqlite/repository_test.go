@@ -115,6 +115,26 @@ func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 	}
 }
 
+func TestVectorRetrieveCanIncludeDisabled(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	saveSQLiteTestVector(t, repository,
+		sqliteTestIndex("disabled", "kb-target", "knowledge-target", "tag-target", false),
+		[]float32{1, 0},
+	)
+
+	results, err := repository.vectorRetrieve(context.Background(), types.RetrieveParams{
+		Embedding:        []float32{1, 0},
+		KnowledgeBaseIDs: []string{"kb-target"},
+		TopK:             1,
+		RetrieverType:    types.VectorRetrieverType,
+		IncludeDisabled:  true,
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	require.Len(t, results[0].Results, 1)
+	assert.Equal(t, "disabled", results[0].Results[0].ChunkID)
+}
+
 func TestVectorRetrieveZeroThresholdDoesNotFilter(t *testing.T) {
 	repository := newSQLiteRetrieverTestRepository(t)
 	saveSQLiteTestVector(t, repository,
