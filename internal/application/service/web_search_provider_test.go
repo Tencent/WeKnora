@@ -83,3 +83,24 @@ func TestValidateProviderParametersBocha(t *testing.T) {
 		t.Fatal("Bocha provider type is not accepted")
 	}
 }
+
+func TestValidateProviderParametersDoubao(t *testing.T) {
+	valid := types.WebSearchProviderParameters{
+		APIKey:      "sk-test",
+		ExtraConfig: map[string]string{"time_range": "2026-09-12..2026-09-14", "need_content": "true"},
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDoubao, valid); err != nil {
+		t.Fatalf("valid Doubao parameters rejected: %v", err)
+	}
+	invalid := valid
+	invalid.ExtraConfig = map[string]string{"time_range": "2026-09-14..2026-09-12"}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDoubao, invalid); err == nil {
+		t.Fatal("inverted Doubao time_range was accepted")
+	}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDoubao, types.WebSearchProviderParameters{}); err == nil {
+		t.Fatal("missing Doubao API key was accepted")
+	}
+	if !isValidProviderType(types.WebSearchProviderTypeDoubao) {
+		t.Fatal("Doubao provider type is not accepted")
+	}
+}
