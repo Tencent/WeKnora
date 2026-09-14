@@ -124,8 +124,8 @@ func (h *ChunkHandler) ListKnowledgeChunks(c *gin.Context) {
 		pagination.PageSize = 100
 	}
 
-	// Default to text chunks; callers may override via ?chunk_type=image_caption etc.
-	chunkType := []types.ChunkType{types.ChunkTypeText}
+	// Filter by chunk type only when explicitly requested.
+	var chunkType []types.ChunkType
 	if queryTypes := c.QueryArray("chunk_type"); len(queryTypes) > 0 {
 		chunkType = make([]types.ChunkType, 0, len(queryTypes))
 		for _, qt := range queryTypes {
