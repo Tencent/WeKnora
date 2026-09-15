@@ -63,3 +63,9 @@ miniprogram/project.private.config.json
 
 # Locally built BrowserSkill runtime and extension bundles
 /artifacts/browserskill/
+
+# 模型管理设计文档（本地评审用，不入库/不随 PR 提交，2026-09-15 裁定）
+/CONTEXT.md
+/docs/adr/0001-saved-model-config-never-auto-refreshed.md
+/docs/adr/0002-model-level-thinking-levels-catalog-or-user-pick.md
+/docs/adr/0003-scope-model-management-plus-unified-invocation.md
