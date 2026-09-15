@@ -906,11 +906,7 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 					req.FamiliarKnowledgeIDs = append(req.FamiliarKnowledgeIDs, doc.KnowledgeID)
 				}
 			}
-			graph, err = h.wikiService.GetGraph(c.Request.Context(), req)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
+			graph = service.ApplyWikiGraphLearning(graph, req)
 		}
 	}
 

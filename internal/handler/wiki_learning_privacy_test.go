@@ -14,15 +14,18 @@ import (
 
 type learningGraphWikiStub struct {
 	interfaces.WikiPageService
-	request *types.WikiGraphRequest
+	request    *types.WikiGraphRequest
+	graphCalls int
 }
 
 func (s *learningGraphWikiStub) GetGraph(
 	_ context.Context, request *types.WikiGraphRequest,
 ) (*types.WikiGraphData, error) {
+	s.graphCalls++
 	s.request = request
 	return &types.WikiGraphData{Nodes: []types.WikiGraphNode{{
-		Slug: "summary/doc-1", SourceKnowledgeIDs: []string{"doc-1"},
+		Slug: "summary/doc-1", PageType: types.WikiPageTypeSummary,
+		SourceKnowledgeIDs: []string{"doc-1"},
 	}}}, nil
 }
 
@@ -81,6 +84,7 @@ func TestWikiGraphDoesNotLoadLearningProfileAfterPersonalOptOut(t *testing.T) {
 	wiki := invokeLearningGraph(t, memory)
 
 	require.Zero(t, memory.learningCalls)
+	require.Equal(t, 1, wiki.graphCalls)
 	require.Nil(t, wiki.request.LearningDocuments)
 	require.Empty(t, wiki.request.FamiliarKnowledgeIDs)
 }
@@ -90,6 +94,7 @@ func TestWikiGraphLoadsLearningProfileWhenMemoryIsAvailable(t *testing.T) {
 	wiki := invokeLearningGraph(t, memory)
 
 	require.Equal(t, 1, memory.learningCalls)
+	require.Equal(t, 1, wiki.graphCalls)
 	require.Equal(t, "kb-1", memory.requestedKB)
 	require.Equal(t, []string{"doc-1"}, memory.requestedIDs)
 	require.Len(t, wiki.request.LearningDocuments, 1)

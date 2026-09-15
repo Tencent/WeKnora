@@ -585,6 +585,16 @@ func (s *wikiPageService) GetGraph(ctx context.Context, req *types.WikiGraphRequ
 	return computeGraphSubset(pages, req)
 }
 
+// ApplyWikiGraphLearning adds a caller-private learning overlay to an existing
+// graph snapshot. Keeping this step I/O-free lets the HTTP handler first learn
+// the exact source IDs in the bounded graph, then enrich that same snapshot
+// without loading and deserializing every Wiki page a second time.
+func ApplyWikiGraphLearning(
+	graph *types.WikiGraphData, req *types.WikiGraphRequest,
+) *types.WikiGraphData {
+	return applyGraphLearning(graph, req)
+}
+
 // computeGraphSubset is the pure I/O-free core of GetGraph. It takes the
 // full page list and a request description and returns the subgraph the
 // caller asked for. Extracted from GetGraph so tests can exercise the
@@ -605,21 +615,6 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		}
 	}
 	hasTypeFilter := len(typeAllow) > 0
-
-	familiarSet := make(map[string]struct{}, len(req.FamiliarKnowledgeIDs))
-	for _, id := range req.FamiliarKnowledgeIDs {
-		if id = strings.TrimSpace(id); id != "" {
-			familiarSet[id] = struct{}{}
-		}
-	}
-	learningEnabled := req.LearningDocuments != nil
-	learningByKnowledgeID := make(map[string]*types.MemoryDocView, len(req.LearningDocuments))
-	for _, doc := range req.LearningDocuments {
-		if doc == nil || strings.TrimSpace(doc.KnowledgeID) == "" || doc.Hits <= 0 {
-			continue
-		}
-		learningByKnowledgeID[doc.KnowledgeID] = doc
-	}
 
 	pageBySlug := make(map[string]*types.WikiPage, len(pages))
 	linkCount := make(map[string]int, len(pages))
@@ -674,21 +669,11 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	nodes := make([]types.WikiGraphNode, 0, len(selected))
 	for slug := range selected {
 		p := pageBySlug[slug]
-		learning := wikiPageLearning(p, learningByKnowledgeID, learningEnabled)
-		familiar := p.BuiltFrom(familiarSet)
-		if learningEnabled {
-			// A document-level citation is direct evidence for its summary
-			// node only. Lighting every concept generated from that document
-			// would turn one answer into a false claim of broad familiarity.
-			familiar = learning != nil && learning.State == types.WikiLearningStateFamiliar
-		}
 		nodes = append(nodes, types.WikiGraphNode{
 			Slug:               p.Slug,
 			Title:              p.Title,
 			PageType:           p.PageType,
 			LinkCount:          linkCount[slug],
-			Familiar:           familiar,
-			Learning:           learning,
 			SourceKnowledgeIDs: p.SourceKnowledgeIDs(),
 		})
 	}
@@ -738,18 +723,6 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		Returned:  len(nodes),
 		Truncated: len(nodes) < total,
 	}
-	for _, n := range nodes {
-		if n.Familiar {
-			meta.FamiliarCount++
-		}
-		if n.Learning != nil {
-			if n.Learning.EvidenceCount > 0 {
-				meta.LearningEvidenceCount++
-			} else {
-				meta.UnseenCount++
-			}
-		}
-	}
 	if mode == types.WikiGraphModeEgo {
 		meta.Center = req.Center
 		meta.Depth = req.Depth
@@ -758,12 +731,62 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		}
 	}
 
-	return &types.WikiGraphData{
-		Nodes:           nodes,
-		Edges:           edges,
-		Recommendations: wikiLearningRecommendations(nodes, edges, learningEnabled, 5),
-		Meta:            meta,
-	}, nil
+	return applyGraphLearning(&types.WikiGraphData{
+		Nodes: nodes,
+		Edges: edges,
+		Meta:  meta,
+	}, req), nil
+}
+
+func applyGraphLearning(graph *types.WikiGraphData, req *types.WikiGraphRequest) *types.WikiGraphData {
+	if graph == nil || req == nil {
+		return graph
+	}
+	familiarSet := make(map[string]struct{}, len(req.FamiliarKnowledgeIDs))
+	for _, id := range req.FamiliarKnowledgeIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			familiarSet[id] = struct{}{}
+		}
+	}
+	learningEnabled := req.LearningDocuments != nil
+	learningByKnowledgeID := make(map[string]*types.MemoryDocView, len(req.LearningDocuments))
+	for _, doc := range req.LearningDocuments {
+		if doc == nil || strings.TrimSpace(doc.KnowledgeID) == "" || doc.Hits <= 0 {
+			continue
+		}
+		learningByKnowledgeID[doc.KnowledgeID] = doc
+	}
+
+	graph.Meta.FamiliarCount = 0
+	graph.Meta.LearningEvidenceCount = 0
+	graph.Meta.UnseenCount = 0
+	for i := range graph.Nodes {
+		node := &graph.Nodes[i]
+		node.Learning = wikiNodeLearning(node.PageType, node.SourceKnowledgeIDs, learningByKnowledgeID, learningEnabled)
+		node.Familiar = false
+		for _, knowledgeID := range node.SourceKnowledgeIDs {
+			if _, ok := familiarSet[knowledgeID]; ok {
+				node.Familiar = true
+				break
+			}
+		}
+		if learningEnabled {
+			// Document citations are direct evidence for summary nodes only.
+			node.Familiar = node.Learning != nil && node.Learning.State == types.WikiLearningStateFamiliar
+		}
+		if node.Familiar {
+			graph.Meta.FamiliarCount++
+		}
+		if node.Learning != nil {
+			if node.Learning.EvidenceCount > 0 {
+				graph.Meta.LearningEvidenceCount++
+			} else {
+				graph.Meta.UnseenCount++
+			}
+		}
+	}
+	graph.Recommendations = wikiLearningRecommendations(graph.Nodes, graph.Edges, learningEnabled, 5)
+	return graph
 }
 
 // wikiPageLearning maps document-use evidence onto one Wiki page. The score is
@@ -775,7 +798,19 @@ func wikiPageLearning(
 	evidence map[string]*types.MemoryDocView,
 	enabled bool,
 ) *types.WikiNodeLearning {
-	if !enabled || page == nil {
+	if page == nil {
+		return nil
+	}
+	return wikiNodeLearning(page.PageType, page.SourceKnowledgeIDs(), evidence, enabled)
+}
+
+func wikiNodeLearning(
+	pageType string,
+	sourceKnowledgeIDs []string,
+	evidence map[string]*types.MemoryDocView,
+	enabled bool,
+) *types.WikiNodeLearning {
+	if !enabled {
 		return nil
 	}
 	// Answer references identify source documents, not the individual concepts
@@ -783,7 +818,7 @@ func wikiPageLearning(
 	// only Wiki node that can honestly receive this evidence. Other node types
 	// remain explicit blind spots until a future assessment supplies a
 	// concept-level signal.
-	if page.PageType != types.WikiPageTypeSummary {
+	if pageType != types.WikiPageTypeSummary {
 		return &types.WikiNodeLearning{
 			State:        types.WikiLearningStateUnseen,
 			EvidenceKind: "answer_source_use",
@@ -793,7 +828,7 @@ func wikiPageLearning(
 	hits := 0
 	matchedSources := 0
 	var lastUsed time.Time
-	for _, knowledgeID := range page.SourceKnowledgeIDs() {
+	for _, knowledgeID := range sourceKnowledgeIDs {
 		if _, duplicate := seenSources[knowledgeID]; duplicate {
 			continue
 		}
