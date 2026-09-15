@@ -766,6 +766,12 @@ const onRemoteModelCreate = (value: string | number) => {
 
 const probeRemoteModels = async () => {
   if (!showRemoteModelSelect.value || !formData.value.provider) return
+  // Base URL 未填时不发探测（后端只会报 "base URL is required"，纯噪音）；
+  // 清空下拉即可，等地址落定后由 watch 触发真正的探测。
+  if (!(formData.value.baseUrl || '').trim()) {
+    remoteModels.value = []
+    return
+  }
   const seq = ++probeSequence
   probingRemoteModels.value = true
   try {

@@ -18,6 +18,14 @@ func TestOpenAIListURL(t *testing.T) {
 		"https://generativelanguage.googleapis.com/v1beta":  "https://generativelanguage.googleapis.com/v1beta/models",
 		"http://localhost:8000":                             "http://localhost:8000/v1/models",
 		"https://openrouter.ai/api/v1":                      "https://openrouter.ai/api/v1/models",
+		// Any bare v<digits> tail is a version segment (2026-09-15: /api/v3,
+		// /api/plan/v3 style bases previously fell through to /v1/models and
+		// double-versioned the path into a guaranteed 404).
+		"https://ark.cn-beijing.volces.com/api/v3":      "https://ark.cn-beijing.volces.com/api/v3/models",
+		"https://ark.cn-beijing.volces.com/api/plan/v3": "https://ark.cn-beijing.volces.com/api/plan/v3/models",
+		"https://example.com/v4":                        "https://example.com/v4/models",
+		// Non-version tails stay bare-base behavior.
+		"https://proxy.example.com/anth": "https://proxy.example.com/anth/v1/models",
 		// Unparsable URLs fall back to base+"/models" (v1 behavior).
 		"http://ex.com/%zz": "http://ex.com/%zz/models",
 	}

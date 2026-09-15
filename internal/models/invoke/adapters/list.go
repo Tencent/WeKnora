@@ -112,9 +112,13 @@ func anthropicListURL(base string) string {
 	return listURLFor(base, "/v1/models", "/v1")
 }
 
-// listURLFor appends /models to bases already carrying one of versionedSuffixes
-// and /v1/models to bare bases; unparsable bases fall back to base+fallback.
-// The suffix sets and fallbacks are the v1 catalog/remote.go behavior verbatim.
+// listURLFor appends /models to bases already carrying a version path and
+// /v1/models to bare bases; unparsable bases fall back to base+fallback. The
+// suffix sets and fallbacks are the v1 catalog/remote.go behavior verbatim,
+// generalized (2026-09-15): a path ending in any v<digits> segment counts as
+// versioned — /api/v3, /api/plan/v3 style bases previously fell through to
+// /v1/models, producing double-versioned URLs that 404 (Ark /api/v3 hit the
+// frozen "volcengine listing 404" finding the same way).
 func listURLFor(base, fallback string, versionedSuffixes ...string) string {
 	u, err := url.Parse(base)
 	if err != nil {
@@ -127,6 +131,24 @@ func listURLFor(base, fallback string, versionedSuffixes ...string) string {
 			return u.String()
 		}
 	}
+	if last := path[strings.LastIndex(path, "/")+1:]; isVersionSegment(last) {
+		u.Path = path + "/models"
+		return u.String()
+	}
 	u.Path = path + "/v1/models"
 	return u.String()
+}
+
+// isVersionSegment reports whether a path segment is a bare API version
+// (v1, v3, v1beta handled by callers' suffix lists; this catches v2/v3/v4…).
+func isVersionSegment(segment string) bool {
+	if len(segment) < 2 || segment[0] != 'v' {
+		return false
+	}
+	for _, r := range segment[1:] {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
