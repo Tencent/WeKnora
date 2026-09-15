@@ -6,6 +6,7 @@ from PIL import Image
 from docreader.parser.pdf_parser import (
     PDFParser,
     _classify_page,
+    _classify_page_with_text_layer_fallback,
     _filter_reading_columns,
     _group_lines,
     _is_artifact_column,
@@ -53,6 +54,28 @@ class ClassifyPageTest(unittest.TestCase):
     def test_blank_page_is_text(self):
         # No image, no text -> not rendered as an image.
         self.assertEqual(_classify_page(0.0, 0), "text")
+
+    def test_prefer_text_layer_fallback_requires_usable_text(self):
+        usable = " ".join(["meaningfuldocumentcontent"] * 32)
+        self.assertEqual(
+            _classify_page_with_text_layer_fallback(1.0, usable, True),
+            "text",
+        )
+        self.assertEqual(
+            _classify_page_with_text_layer_fallback(1.0, "a b c d e " * 20, True),
+            "scanned",
+        )
+        self.assertEqual(
+            _classify_page_with_text_layer_fallback(1.0, usable, False),
+            "scanned",
+        )
+
+    def test_prefer_text_layer_fallback_supports_cjk_text(self):
+        usable = "这是包含足够内容的中文文本层。" * 8
+        self.assertEqual(
+            _classify_page_with_text_layer_fallback(1.0, usable, True),
+            "text",
+        )
 
 
 class StripRepeatingLinesTest(unittest.TestCase):
