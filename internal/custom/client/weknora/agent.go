@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,43 @@ type AgentClient struct {
 	cfg  config.WeKnoraConfig
 	http *http.Client
 }
+
+// AgentToolResultSummary is deliberately limited to metadata. Tool output can
+// contain transcript text or credentials and must never be persisted as a
+// diagnostic artifact.
+type AgentToolResultSummary struct {
+	ToolName    string `json:"tool_name,omitempty"`
+	Success     bool   `json:"success"`
+	Error       string `json:"error,omitempty"`
+	OutputBytes int    `json:"output_bytes,omitempty"`
+}
+
+// AgentRunDiagnostic is the safe, bounded observability contract for one
+// Agent session. It records enough information to distinguish failure classes
+// without storing prompts, model responses, or tool payloads.
+type AgentRunDiagnostic struct {
+	SessionID      string                   `json:"session_id"`
+	SkillName      string                   `json:"skill_name"`
+	TotalSteps     int                      `json:"total_steps,omitempty"`
+	Rounds         int                      `json:"rounds,omitempty"`
+	Outcome        string                   `json:"outcome,omitempty"`
+	FailureClass   string                   `json:"failure_class,omitempty"`
+	FailureCode    string                   `json:"failure_code,omitempty"`
+	FailureMessage string                   `json:"failure_message,omitempty"`
+	ModelErrors    []string                 `json:"model_errors,omitempty"`
+	ToolErrors     []string                 `json:"tool_errors,omitempty"`
+	ToolResults    []AgentToolResultSummary `json:"tool_results,omitempty"`
+}
+
+// AgentFailure carries the structured diagnostic while preserving the
+// original error for existing retry and classification behavior.
+type AgentFailure struct {
+	Diagnostic AgentRunDiagnostic
+	Err        error
+}
+
+func (e *AgentFailure) Error() string { return e.Err.Error() }
+func (e *AgentFailure) Unwrap() error { return e.Err }
 
 // NewAgentClient 构造
 func NewAgentClient(cfg config.WeKnoraConfig) *AgentClient {
@@ -83,6 +121,13 @@ func (a *AgentClient) TriggerSkill(
 	knowledgeIDs []string,
 	productionJob *contentprovenance.Job,
 ) error {
+	diagnostic := AgentRunDiagnostic{SessionID: sessionID, SkillName: skillName}
+	fail := func(err error) error {
+		diagnostic.FailureMessage = safeDiagnosticText(err.Error())
+		diagnostic.FailureCode = diagnostic.FailureMessage
+		diagnostic.FailureClass = classifyAgentFailure(diagnostic, err)
+		return &AgentFailure{Diagnostic: diagnostic, Err: err}
+	}
 	request := map[string]any{
 		"query":         query,
 		"agent_enabled": true,
@@ -99,7 +144,7 @@ func (a *AgentClient) TriggerSkill(
 	url := fmt.Sprintf("%s/api/v1/agent-chat/%s", a.cfg.BaseURL, sessionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return fail(err)
 	}
 	a.setHeaders(req)
 	if productionJob != nil {
@@ -112,7 +157,7 @@ func (a *AgentClient) TriggerSkill(
 		)
 		encoded, signed, err := contentprovenance.Sign(a.cfg.ContentPipelineAuditSecret, envelope)
 		if err != nil {
-			return fmt.Errorf("sign content pipeline provenance: %w", err)
+			return fail(fmt.Errorf("sign content pipeline provenance: %w", err))
 		}
 		req.Header.Set(contentprovenance.EnvelopeHeader, encoded)
 		req.Header.Set(contentprovenance.SignatureHeader, signed)
@@ -121,12 +166,12 @@ func (a *AgentClient) TriggerSkill(
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := a.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("trigger skill %s: %w", skillName, err)
+		return fail(fmt.Errorf("trigger skill %s: %w", skillName, err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		buf, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("trigger skill status %d: %s", resp.StatusCode, string(buf))
+		return fail(fmt.Errorf("trigger skill status %d: %s", resp.StatusCode, safeDiagnosticText(string(buf))))
 	}
 	// 消费 SSE：只在完成事件或终止错误时结束。Agent 会把单次工具
 	// 调用失败也作为 response_type=error 推送，但该事件 done=false，
@@ -150,7 +195,7 @@ func (a *AgentClient) TriggerSkill(
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 			if data == "[DONE]" {
 				if productionGraph {
-					return fmt.Errorf("agent chat production graph stream ended without a verified completion event")
+					return fail(fmt.Errorf("agent chat production graph stream ended without a verified completion event"))
 				}
 				return nil
 			}
@@ -159,48 +204,153 @@ func (a *AgentClient) TriggerSkill(
 			var evt map[string]any
 			if err := json.Unmarshal([]byte(data), &evt); err == nil {
 				responseType, _ := evt["response_type"].(string)
+				// WeKnora stream events use the top-level `type` field (for
+				// example `complete`), while older gateways exposed
+				// `response_type`. Accept both so terminal events cannot be
+				// silently ignored and leave the producer connection hanging.
+				if strings.TrimSpace(responseType) == "" {
+					responseType, _ = evt["type"].(string)
+				}
 				done, _ := evt["done"].(bool)
+				payload := eventPayload(evt)
+				if round := intValue(payload["round"]); round > diagnostic.Rounds {
+					diagnostic.Rounds = round
+				}
+				if iteration := intValue(payload["iteration"]); iteration > diagnostic.Rounds {
+					diagnostic.Rounds = iteration
+				}
+				if responseType == "tool_result" {
+					summary := AgentToolResultSummary{
+						ToolName: safeDiagnosticText(stringValue(payload["tool_name"])),
+						Success:  boolValue(payload["success"]),
+						Error:    safeDiagnosticText(stringValue(payload["error"])),
+					}
+					if output := stringValue(payload["tool_output"]); output != "" {
+						summary.OutputBytes = len(output)
+					}
+					if len(diagnostic.ToolResults) < 64 {
+						diagnostic.ToolResults = append(diagnostic.ToolResults, summary)
+					}
+					if !summary.Success && summary.Error != "" {
+						diagnostic.ToolErrors = appendBoundedDiagnostic(diagnostic.ToolErrors, summary.Error)
+					}
+				}
 				if responseType == "tool_result" && isAuditedWikiWrite(evt) {
 					sawAuditedWikiWrite = true
 				}
 				if responseType == "complete" && done {
-					completion := eventPayload(evt)
-					outcome, _ := completion["outcome"].(string)
-					if outcome == "failed" {
-						reason, _ := completion["failure_reason"].(string)
-						if reason == "" {
-							reason = "unknown"
-						}
-						return fmt.Errorf("agent chat failed: %s", reason)
+					completion := payload
+					outcome := strings.ToLower(strings.TrimSpace(stringValue(completion["outcome"])))
+					diagnostic.Outcome = outcome
+					diagnostic.TotalSteps = intValue(completion["total_steps"])
+					if reason := safeDiagnosticText(completionFailureReason(completion)); reason != "agent_completion_failed" {
+						diagnostic.ModelErrors = appendBoundedDiagnostic(diagnostic.ModelErrors, reason)
+					}
+					if outcome == "failed" || outcome == "error" || outcome == "canceled" || outcome == "cancelled" {
+						reason := completionFailureReason(completion)
+						return fail(fmt.Errorf("agent chat failed: %s", reason))
 					}
 					if productionGraph && intValue(completion["total_steps"]) <= 0 {
-						return fmt.Errorf("agent chat production graph completed without valid agent steps")
+						return fail(fmt.Errorf("agent chat production graph completed without valid agent steps"))
 					}
 					if productionGraph && !sawAuditedWikiWrite {
-						return fmt.Errorf("agent chat production graph completed without an audited wiki_write_page")
+						return fail(fmt.Errorf("agent chat production graph completed without an audited wiki_write_page"))
 					}
 					return nil
 				}
 				if responseType == "error" && done {
-					return fmt.Errorf("agent chat error: %v", evt["content"])
+					err := fmt.Errorf("agent chat error: %v", evt["content"])
+					diagnostic.ModelErrors = appendBoundedDiagnostic(diagnostic.ModelErrors, safeDiagnosticText(stringValue(evt["content"])))
+					return fail(err)
 				}
 				if evtType, ok := evt["type"].(string); ok && done && (evtType == "error" || evtType == "ERROR") {
-					return fmt.Errorf("agent chat error: %v", evt["message"])
+					err := fmt.Errorf("agent chat error: %v", evt["message"])
+					diagnostic.ModelErrors = appendBoundedDiagnostic(diagnostic.ModelErrors, safeDiagnosticText(stringValue(evt["message"])))
+					return fail(err)
 				}
 				if value, ok := evt["error"]; ok && value != nil && done {
-					return fmt.Errorf("agent chat error: %v", value)
+					err := fmt.Errorf("agent chat error: %v", value)
+					return fail(err)
 				}
 				continue
 			}
 			if eventType == "error" {
-				return fmt.Errorf("agent chat error: %s", data)
+				return fail(fmt.Errorf("agent chat error: %s", data))
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return err
+		return fail(err)
 	}
-	return fmt.Errorf("agent chat stream ended before a terminal event")
+	return fail(fmt.Errorf("agent chat stream ended before a terminal event"))
+}
+
+func classifyAgentFailure(diagnostic AgentRunDiagnostic, err error) string {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(message, "timeout") || strings.Contains(message, "timed out") {
+		return "model_timeout"
+	}
+	if containsAny(message, "context length", "context window", "maximum context", "too many tokens", "max tokens", "token limit") {
+		return "context_limit"
+	}
+	for _, result := range diagnostic.ToolResults {
+		if !result.Success {
+			return "tool_failure"
+		}
+	}
+	if containsAny(message, "production graph", "audited wiki_write_page", "audited_wiki_write", "missing_audited", "contract", "invalid json", "schema", "empty_response", "empty response", "invalid output", "output invalid", "stream ended", "without valid agent steps") {
+		return "output_contract"
+	}
+	if strings.HasPrefix(message, "agent chat failed:") || len(diagnostic.ModelErrors) > 0 {
+		return "model_error"
+	}
+	return "transport_error"
+}
+
+func safeDiagnosticText(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if len(value) > 512 {
+		return value[:512]
+	}
+	return value
+}
+
+func appendBoundedDiagnostic(values []string, value string) []string {
+	value = safeDiagnosticText(value)
+	if value == "" || len(values) >= 16 {
+		return values
+	}
+	return append(values, value)
+}
+
+func containsAny(message string, fragments ...string) bool {
+	for _, fragment := range fragments {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func completionFailureReason(completion map[string]any) string {
+	for _, key := range []string{"failure_reason", "error", "message", "content"} {
+		if value := strings.TrimSpace(stringValue(completion[key])); value != "" {
+			return value
+		}
+	}
+	return "agent_completion_failed"
+}
+
+func stringValue(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
+}
+
+func boolValue(value any) bool {
+	result, _ := value.(bool)
+	return result
 }
 
 func isAuditedWikiWrite(evt map[string]any) bool {

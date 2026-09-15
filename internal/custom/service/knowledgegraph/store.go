@@ -335,14 +335,36 @@ func (s *StoreImpl) ProjectKnowledgeBase(ctx context.Context) error {
 	}
 	var videos []model.Video
 	if err := s.db.WithContext(ctx).
-		Select("id", "transcript_generation").
-		Where("transcript_generation <> ''").
+		Select("id", "transcript_generation", "knowledge_base_wiki_page_id", "knowledge_audit_status").
+		Where("transcript_generation <> '' AND knowledge_base_wiki_page_id <> '' AND knowledge_audit_status = ?", "passed").
 		Find(&videos).Error; err != nil {
 		return fmt.Errorf("list active video generations for knowledge base graph: %w", err)
 	}
+	// A Wiki page can outlive a failed or superseded graph attempt. Only the
+	// latest graph task for the current generation is a publishable scope;
+	// drafts remain in Wiki and are excluded from the rebuildable projection.
+	var graphJobs []model.VideoProcessingJob
+	if err := s.db.WithContext(ctx).
+		Select("id", "video_id", "transcript_generation", "status", "updated_at", "created_at").
+		Where("job_type = ? AND video_id IN ?", "graph", videoIDsFromModels(videos)).
+		Order("video_id ASC, transcript_generation ASC, updated_at DESC, created_at DESC, id DESC").
+		Find(&graphJobs).Error; err != nil {
+		return fmt.Errorf("list graph publication tasks: %w", err)
+	}
+	latestGraphStatus := make(map[string]string, len(graphJobs))
+	for _, graphJob := range graphJobs {
+		key := strings.TrimSpace(graphJob.VideoID) + "\x00" + strings.TrimSpace(graphJob.TranscriptGeneration)
+		if _, exists := latestGraphStatus[key]; !exists {
+			latestGraphStatus[key] = strings.TrimSpace(graphJob.Status)
+		}
+	}
 	activeGenerations := make(map[string]string, len(videos))
 	for _, video := range videos {
-		activeGenerations[video.ID] = strings.TrimSpace(video.TranscriptGeneration)
+		generation := strings.TrimSpace(video.TranscriptGeneration)
+		key := strings.TrimSpace(video.ID) + "\x00" + generation
+		if latestGraphStatus[key] == "succeeded" {
+			activeGenerations[video.ID] = generation
+		}
 	}
 	nodes, edges := buildKnowledgeBaseProjectionForGenerations(pages, activeGenerations)
 
@@ -553,6 +575,16 @@ type relation struct {
 	Confidence           float64
 	SourceVideoID        string
 	TranscriptGeneration string
+}
+
+func videoIDsFromModels(videos []model.Video) []string {
+	ids := make([]string, 0, len(videos))
+	for _, video := range videos {
+		if id := strings.TrimSpace(video.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func buildProjection(video *model.Video, pages []weknora.WikiPage) ([]wikiObject, []relation, error) {

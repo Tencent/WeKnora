@@ -124,6 +124,30 @@ func TestAIProjectionCandidateStageIsolatedPerVideo(t *testing.T) {
 	}
 }
 
+func TestAIProjectionGroupsContentContinuousFragmentsBeforeCandidateExtraction(t *testing.T) {
+	llm := &scriptedMeetingLLM{outputs: []string{`{"candidates":[]}`, `{"relations":[]}`}}
+	snapshot, err := NewPromptBundle("").Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := (&AIProjectionGenerator{LLM: llm, EvidenceReader: meetingEvidenceReader{}}).Generate(context.Background(), []model.Video{
+		{ID: "part1", Title: "任意标题一", TranscriptGeneration: "g1"},
+		{ID: "part2", Title: "完全不同标题", TranscriptGeneration: "g2"},
+	}, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if llm.calls != 2 {
+		t.Fatalf("calls=%d, want one grouped candidate call and one relation call", llm.calls)
+	}
+	if len(projection.MeetingSessions) != 1 || len(projection.MeetingSessions[0].FragmentVideoIDs) != 2 {
+		t.Fatalf("meeting sessions=%+v, want one session with two fragments", projection.MeetingSessions)
+	}
+	if projection.Statistics.MeetingSessionCount != 1 {
+		t.Fatalf("meeting session count=%d, want 1", projection.Statistics.MeetingSessionCount)
+	}
+}
+
 func TestAIProjectionKeepsLocalEvidenceWhenIDsRepeat(t *testing.T) {
 	llm := &scriptedMeetingLLM{outputs: []string{
 		`{"candidates":[]}`,

@@ -424,6 +424,13 @@ func (h *EntityGraphHandler) buildResponse(ctx context.Context, source *knowledg
 			KnowledgeDetail: detail, LinkCount: 0,
 		}
 		if video, ok := videoByID[projected.SourceVideoID]; ok {
+			// Failed or in-progress graph jobs may leave valid-looking Wiki
+			// pages behind. Keep those pages recoverable, but isolate them from
+			// the published graph until the job and its audit contract succeed.
+			if strings.EqualFold(strings.TrimSpace(video.KnowledgeAuditStatus), "failed") {
+				reject(projected, string(projected.KnowledgeType), "graph_not_published", "video graph job has not produced a published result")
+				continue
+			}
 			item.VideoID, item.VideoTitle, item.VideoType = video.ID, video.Title, video.VideoType
 		}
 		evidenceValid := true

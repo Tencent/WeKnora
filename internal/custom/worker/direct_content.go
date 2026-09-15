@@ -100,7 +100,14 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 	if err != nil {
 		return err
 	}
-	prompt, err := buildDirectContentPrompt(video, h.Job, chunks)
+	forcedSummaryType := ""
+	if h.Job == skill.JobSummary {
+		forcedSummaryType, err = h.splitMeetingTypeHint(ctx, video, chunks)
+		if err != nil {
+			return fmt.Errorf("detect split meeting context: %w", err)
+		}
+	}
+	prompt, err := buildDirectContentPromptWithType(video, h.Job, chunks, forcedSummaryType)
 	if err != nil {
 		return err
 	}
@@ -198,7 +205,7 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		if h.Job == skill.JobSummary {
 			// The first summary is routed from the transcript itself. The upload
 			// type is only a weak hint and must not lock the framework.
-			expectedVideoType = ""
+			expectedVideoType = forcedSummaryType
 		}
 		validateSummary := summary.Validate
 		if h.Job == skill.JobSummary && job.ResultStage != "draft" {
@@ -895,6 +902,10 @@ func (h *DirectContentHandler) addEnhancementContext(ctx context.Context, video 
 }
 
 func buildDirectContentPrompt(video *model.Video, jobType string, chunks []transcript.Chunk) (string, error) {
+	return buildDirectContentPromptWithType(video, jobType, chunks, "")
+}
+
+func buildDirectContentPromptWithType(video *model.Video, jobType string, chunks []transcript.Chunk, forcedSummaryType string) (string, error) {
 	var builder strings.Builder
 	builder.WriteString("你是视频内容生产模型。只能依据给定转写生成结果，不得补充转写中没有的事实。请只返回一个 JSON 对象；不要输出 Markdown 代码围栏、解释文字、HTML 或 XML。\n")
 	switch jobType {
@@ -903,7 +914,7 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 		builder.WriteString("章节必须覆盖从 0 秒开始到最后一个有效转写时间点，并按时间顺序排列；视频末尾没有转写内容时，不得伪造章节或时间范围。优先生成 4～8 章，只有主题发生明显转折时才拆章。时间只填数字秒数，不要填格式化时间字符串。每章只保留 1～2 个全片关键知识点，只有存在独立结论、方法或动作时才增加，绝不为覆盖每句转写而切碎；全片最多 12 个。合并同义观点、例子和论据。\n")
 		builder.WriteString("章节核心内容控制在 80 个汉字以内，知识点标题控制在 10 个汉字以内。知识点标题必须是短语或结论式短标题，使用“方法名”“动作+对象”或“核心结论”结构，不写完整句。每个章节必须有核心内容和至少一个知识点；evidence_chunk_ids 必须使用给定转写分块 ID，不要拼接分块序号。\n")
 	case skill.JobSummary:
-		builder.WriteString(summaryPrompt("", false))
+		builder.WriteString(summaryPrompt(forcedSummaryType, false))
 	case skill.JobSummaryEnhance:
 		builder.WriteString(summaryPrompt(video.VideoType, true))
 	default:
@@ -917,6 +928,61 @@ func buildDirectContentPrompt(video *model.Video, jobType string, chunks []trans
 		return "", fmt.Errorf("transcript input exceeds direct llm context limit")
 	}
 	return builder.String(), nil
+}
+
+// splitMeetingTypeHint applies only to explicit split-title groups with strong
+// work-coordination evidence. It prevents independently generated parts of a
+// single work session from drifting between interview/general while leaving
+// ordinary split courses and talks on the normal model routing path.
+func (h *DirectContentHandler) splitMeetingTypeHint(ctx context.Context, video *model.Video, chunks []transcript.Chunk) (string, error) {
+	if h == nil || h.DB == nil || video == nil || !hasSplitVideoTitle(video.Title) || !hasStrongMeetingSignals(chunks) {
+		return "", nil
+	}
+	var siblings []model.Video
+	if err := h.DB.WithContext(ctx).Select("id, title").Where("id <> ? AND deleted_at IS NULL", video.ID).Find(&siblings).Error; err != nil {
+		return "", err
+	}
+	stem := splitVideoTitleStem(video.Title)
+	for _, sibling := range siblings {
+		if siblingStem := splitVideoTitleStem(sibling.Title); stem != "" && siblingStem == stem {
+			return "meeting", nil
+		}
+	}
+	return "", nil
+}
+
+var splitVideoTitlePattern = regexp.MustCompile(`(?i)^(.*?)(?:[ _-]*(?:part|p)[ _-]*0*\d+|[ _-]*第[ _-]*0*\d+[ _-]*部分)\s*$`)
+
+func splitVideoTitleStem(title string) string {
+	matches := splitVideoTitlePattern.FindStringSubmatch(strings.TrimSpace(title))
+	if len(matches) != 2 {
+		return ""
+	}
+	return strings.ToLower(strings.Trim(strings.TrimSpace(matches[1]), "_- "))
+}
+
+func hasSplitVideoTitle(title string) bool { return splitVideoTitleStem(title) != "" }
+
+func hasStrongMeetingSignals(chunks []transcript.Chunk) bool {
+	var text strings.Builder
+	for _, chunk := range chunks {
+		text.WriteString(transcript.OriginalText(chunk.Content))
+		text.WriteByte('\n')
+	}
+	content := text.String()
+	hasScope := containsAnyText(content, "项目", "产品", "方案", "开发", "上线")
+	hasCoordination := containsAnyText(content, "合作", "沟通", "交付", "下一步", "作业安排", "后续安排")
+	hasDecision := containsAnyText(content, "确定", "明确", "评审", "决定", "选择")
+	return hasScope && hasCoordination && hasDecision
+}
+
+func containsAnyText(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(value, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func summaryPrompt(videoType string, enhancement bool) string {
@@ -970,6 +1036,7 @@ func summaryPrompt(videoType string, enhancement bool) string {
 		"每个 section 必须包含 blocks 数组。有可靠原文证据时才生成 block；block.kind 只能是 paragraph 或 bullet，block.text 必须是可直接展示的纯文本，不得包含 Markdown 标记；每个非空 block 必须提供 evidenceChunkIds，且只能引用给定转写分块句柄。一个 block 可以引用多个分块。knowledge_refs 与 evidence_refs 由系统在保存前生成，不要自行编造或输出。\n"+
 		"orchestrationProfile 是正式总结同次生成的有界路由卡片，必须存在且 schemaVersion 为 1；只允许 1 至 5 个 topicUnits。primaryTopic、title、abstract、learningOutcomes 只能来自当前转写，不能补充常识或推断。contentForms 只能使用 skill_method、tool_operation、concept_cognition、case_analysis、humanities_reflection、process_standard；每个单元必须至少包含一个 contentForms、learningOutcomes、summaryBlockIds。summaryBlockIds 必须引用本 JSON sections 中真实存在且全局唯一的 block ID；主题证据由系统根据这些正文块的证据分块 ID 按原始顺序生成，模型不得输出主题证据字段。所有 topicUnits 的 abstract 合计目标为 300 至 500 个汉字，最多 500 个汉字；没有可靠主题依据时不要伪造，返回空卡片会被程序拒绝。\n"+
 		"选择 training 时，以“培训内容体系”为主干，按讲师真实授课顺序详细还原知识；背景引入、理论讲解、案例分析、实操演示、互动问答只是常见顺序，不得强行补齐。保留原文出现的案例细节和工具使用说明；原文金句必须逐字引用，不得改写成讲师引语；方法必须写清原文明示的步骤和判断标准。固定培训章节必须全部保留，原文没有可靠依据的章节必须输出 blocks:[]，不得创建“未提及”“信息不足”“无”等占位内容，不得使用常识、推测或知识增强信息补齐原文不存在的事实。\n"+
+		"会议判型优先看内容的实际工作产出，不看参与人数或对话形式：一对一/多对一的项目辅导、方案评审、产品推进、合作交付、作业安排和后续计划，只要是在推动共同工作并形成决定或行动，就必须选择 meeting。不要把泛化的问答、导师辅导或讨论形式当作 interview；interview 仅适用于以理解某个人的经历、选择和观点为主要产出的内容。若同一主题被拆成多个 part/分段视频，各段必须依据同一整体工作目的保持一致判型。\n"+
 		"不得删除、合并或改名章节。非培训类型的缺失内容按对应模板规则处理。判型置信度低于 0.75 时必须选择 general；会议判型至少引用两段不同位置的转写分块。%s%s\n",
 		mode, strings.Join(frameworkDescriptions, "；"), summary.SchemaVersion, videoTypeContract, classificationContract, orchestrationContract, strings.Join(sectionShape, ","), strings.Join(frameworkDescriptions, "；"), meetingSummaryInstruction(videoType), enhancementInstruction(enhancement))
 }

@@ -62,6 +62,29 @@ func TestServiceGroupsCycleTitleWithSingleBusinessObject(t *testing.T) {
 	}
 }
 
+func TestServiceGroupsProjectMeetingStagesByStableBusinessObject(t *testing.T) {
+	now := time.Now().UTC()
+	videos := []model.Video{
+		{ID: "consumer-loan-demand", Title: "消费贷项目需求沟通会", VideoType: "meeting", UploadedAt: &now},
+		{ID: "consumer-loan-kickoff", Title: "消费贷项目启动会", VideoType: "meeting", UploadedAt: &now},
+		{ID: "consumer-loan-solution", Title: "消费贷项目方案评审会", VideoType: "meeting", UploadedAt: &now},
+		{ID: "consumer-loan-technical", Title: "消费贷项目技术评审会", VideoType: "meeting", UploadedAt: &now},
+		{ID: "consumer-loan-launch", Title: "消费贷项目发布上线沟通会议", VideoType: "meeting", UploadedAt: &now},
+	}
+	service := &Service{OwnerScopeID: "scope"}
+	projection := service.buildProjection(context.Background(), fingerprintVideos(videos), videos)
+	if len(projection.TopicClusters) != 1 {
+		t.Fatalf("clusters = %d, want 1: %#v", len(projection.TopicClusters), projection.TopicClusters)
+	}
+	cluster := projection.TopicClusters[0]
+	if cluster.Title != "消费贷项目" || cluster.BusinessObject != "消费贷项目" {
+		t.Fatalf("stable business object = %q/%q", cluster.Title, cluster.BusinessObject)
+	}
+	if len(cluster.SourceVideoIDs) != len(videos) || len(cluster.WorkItems) != len(videos) || len(cluster.Evolution) != len(videos) {
+		t.Fatalf("project stages were not retained: source=%d items=%d evolution=%d", len(cluster.SourceVideoIDs), len(cluster.WorkItems), len(cluster.Evolution))
+	}
+}
+
 func TestServiceIgnoresNonMeetingVideos(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:meeting-orchestration-test-2?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {

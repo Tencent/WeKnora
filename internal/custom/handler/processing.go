@@ -69,24 +69,25 @@ type RetryableProcessingJob struct {
 }
 
 type ProcessingJobStatus struct {
-	JobID                string     `json:"job_id"`
-	JobType              string     `json:"job_type"`
-	TranscriptGeneration string     `json:"transcript_generation"`
-	Provider             string     `json:"provider,omitempty"`
-	ExternalTaskID       string     `json:"external_task_id,omitempty"`
-	Status               string     `json:"status"`
-	Phase                string     `json:"phase,omitempty"`
-	Progress             int        `json:"progress"`
-	AttemptCount         int        `json:"attempt_count"`
-	MaxAttempts          int        `json:"max_attempts"`
-	InputAvailable       bool       `json:"input_available"`
-	ResultAvailable      bool       `json:"result_available"`
-	ErrorCategory        string     `json:"error_category,omitempty"`
-	ErrorCode            string     `json:"error_code,omitempty"`
-	ErrorMessage         string     `json:"error_message,omitempty"`
-	UpdatedAt            time.Time  `json:"updated_at"`
-	StartedAt            *time.Time `json:"started_at,omitempty"`
-	CompletedAt          *time.Time `json:"completed_at,omitempty"`
+	JobID                string          `json:"job_id"`
+	JobType              string          `json:"job_type"`
+	TranscriptGeneration string          `json:"transcript_generation"`
+	Provider             string          `json:"provider,omitempty"`
+	ExternalTaskID       string          `json:"external_task_id,omitempty"`
+	Status               string          `json:"status"`
+	Phase                string          `json:"phase,omitempty"`
+	Progress             int             `json:"progress"`
+	AttemptCount         int             `json:"attempt_count"`
+	MaxAttempts          int             `json:"max_attempts"`
+	InputAvailable       bool            `json:"input_available"`
+	ResultAvailable      bool            `json:"result_available"`
+	ErrorCategory        string          `json:"error_category,omitempty"`
+	ErrorCode            string          `json:"error_code,omitempty"`
+	ErrorMessage         string          `json:"error_message,omitempty"`
+	AgentDiagnostic      json.RawMessage `json:"agent_diagnostic,omitempty"`
+	UpdatedAt            time.Time       `json:"updated_at"`
+	StartedAt            *time.Time      `json:"started_at,omitempty"`
+	CompletedAt          *time.Time      `json:"completed_at,omitempty"`
 }
 
 type ProcessingStatusResponse struct {
@@ -198,7 +199,8 @@ func (h *ProcessingHandler) Retry(c *gin.Context) {
 			updates := map[string]any{
 				"status": "pending", "progress": 0, "attempt_count": 0,
 				"error_category": "", "error_code": "", "error_message": "",
-				"started_at": nil, "completed_at": nil,
+				"agent_diagnostic": "",
+				"started_at":       nil, "completed_at": nil,
 			}
 			// A failed external task is terminal at the provider. Retrying must
 			// create a fresh provider task so a newly prepared source URL is used;
@@ -690,13 +692,18 @@ func processingResultStageRank(stage string) int {
 }
 
 func processingJobStatus(job model.VideoProcessingJob) ProcessingJobStatus {
+	var diagnostic json.RawMessage
+	if raw := strings.TrimSpace(job.AgentDiagnostic); raw != "" && json.Valid([]byte(raw)) {
+		diagnostic = json.RawMessage(raw)
+	}
 	return ProcessingJobStatus{
 		JobID: job.ID, JobType: job.JobType, TranscriptGeneration: job.TranscriptGeneration,
 		Provider: job.Provider, ExternalTaskID: job.ExternalTaskID,
 		Status: job.Status, Phase: processingJobPhase(job), Progress: job.Progress, AttemptCount: job.AttemptCount, MaxAttempts: job.MaxAttempts,
 		InputAvailable: strings.TrimSpace(job.InputPayload) != "", ResultAvailable: strings.TrimSpace(job.ResultPayload) != "",
 		ErrorCategory: job.ErrorCategory, ErrorCode: job.ErrorCode, ErrorMessage: job.ErrorMessage,
-		UpdatedAt: job.UpdatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt,
+		AgentDiagnostic: diagnostic,
+		UpdatedAt:       job.UpdatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt,
 	}
 }
 

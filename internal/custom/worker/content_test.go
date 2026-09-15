@@ -202,6 +202,22 @@ func TestWikiBaselinePersistsAcrossJobRetries(t *testing.T) {
 	require.Equal(t, 1, listCalls)
 }
 
+func TestGraphRunKeepsPersistedWikiBaselineAfterSeed(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.VideoProcessingJob{}))
+	job := model.VideoProcessingJob{ID: "job-1", VideoID: "video-1", JobType: skill.JobGraph,
+		InputPayload: `{"wiki_page_versions_before_skill":{"versions":{"old-page":7},"job_created_at":"2026-09-15T00:00:00Z"}}`}
+	require.NoError(t, db.Create(&job).Error)
+	h := BaseSkillHandler{DB: db}
+	baseline, err := h.wikiBaseline(t.Context(), &job, job.VideoID)
+	require.NoError(t, err)
+	require.Equal(t, 7, baseline.Versions["old-page"])
+	// A retry must use the persisted snapshot rather than taking a new one
+	// after the graph index seed has been ensured.
+	require.NotNil(t, baseline.Versions)
+}
+
 func TestSkillQueryUsesTranscriptKnowledgeIDAsSourceDocument(t *testing.T) {
 	video := &model.Video{
 		ID:                    "video-1",

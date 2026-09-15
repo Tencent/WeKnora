@@ -356,11 +356,16 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 		if err := h.ensureGraphIndexSeed(ctx, video); err != nil {
 			return err
 		}
-		versions, snapshotErr := h.Orchestrator.SnapshotWikiPageVersions(ctx, video.ID)
-		if snapshotErr != nil {
-			return fmt.Errorf("snapshot graph attempt wiki pages: %w", snapshotErr)
+		// wikiBaseline persists the first-attempt snapshot in input_payload. On
+		// retries, keep that snapshot so pages written by an earlier attempt are
+		// still eligible for validation instead of being treated as historical.
+		if baseline.Versions == nil {
+			versions, snapshotErr := h.Orchestrator.SnapshotWikiPageVersions(ctx, video.ID)
+			if snapshotErr != nil {
+				return fmt.Errorf("snapshot graph attempt wiki pages: %w", snapshotErr)
+			}
+			baseline = skill.WikiPageBaseline{Versions: versions, JobCreatedAt: time.Now().UTC()}
 		}
-		baseline = skill.WikiPageBaseline{Versions: versions, JobCreatedAt: time.Now().UTC()}
 	}
 
 	// 创建 session 并触发 skill
@@ -383,24 +388,46 @@ func (h *BaseSkillHandler) run(ctx context.Context, job *model.VideoProcessingJo
 	if explicitRegeneration {
 		query += "这是用户明确发起的历史总结重生成：允许覆盖旧的用户编辑总结，必须按当前类型化 JSON 契约重新写入；不要跳过写入。"
 	}
+	contractRepairAttempted := false
 	if err := h.AgentClient.TriggerSkill(ctx, sessionID, h.AgentID, contract.SkillName, query, knowledgeIDs, productionJob); err != nil {
 		if !isMissingWikiPageError(err) {
-			return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
-		}
-		slog.Warn("skill stopped on an expected first-run missing wiki page; retrying with recovery instruction",
-			"video_id", video.ID, "job_type", jobType, "error", err)
-		recoverySessionID, sessionErr := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s/%s-recovery/%s", video.ID, productionGeneration, jobType, job.ID))
-		if sessionErr != nil {
-			return fmt.Errorf("trigger skill %s recovery session: %w (initial error: %v)", contract.SkillName, sessionErr, err)
-		}
-		recoveryQuery := query + " 这是首次生成恢复流程：目标产物页可能尚不存在，不要先读取目标 slug；请直接调用创建/覆盖 Wiki 写入。读取返回 not found 不是失败，继续完成写入。"
-		if retryErr := h.AgentClient.TriggerSkill(ctx, recoverySessionID, h.AgentID, contract.SkillName, recoveryQuery, knowledgeIDs, productionJob); retryErr != nil {
-			return fmt.Errorf("trigger skill %s after missing-page recovery: %w (initial error: %v)", contract.SkillName, retryErr, err)
+			if jobType != skill.JobGraph || !isMissingAuditedWikiWriteError(err) {
+				return fmt.Errorf("trigger skill %s: %w", contract.SkillName, err)
+			}
+			// The Agent can exhaust its reasoning rounds without making the
+			// audited write. Reuse the bounded contract-repair path once; other
+			// failure classes must remain terminal and retryable at the job level.
+			if repairErr := h.repairP3KnowledgeOnce(ctx, video, query, knowledgeIDs, baseline, productionJob); repairErr != nil {
+				return fmt.Errorf("trigger skill %s after missing audited write: %w (initial error: %v)", contract.SkillName, repairErr, err)
+			}
+			contractRepairAttempted = true
+		} else {
+			slog.Warn("skill stopped on an expected first-run missing wiki page; retrying with recovery instruction",
+				"video_id", video.ID, "job_type", jobType, "error", err)
+			recoverySessionID, sessionErr := h.AgentClient.CreateSession(ctx, fmt.Sprintf("content-pipeline/%s/%s/%s-recovery/%s", video.ID, productionGeneration, jobType, job.ID))
+			if sessionErr != nil {
+				return fmt.Errorf("trigger skill %s recovery session: %w (initial error: %v)", contract.SkillName, sessionErr, err)
+			}
+			recoveryQuery := query + " 这是首次生成恢复流程：目标产物页可能尚不存在，不要先读取目标 slug；请直接调用创建/覆盖 Wiki 写入。读取返回 not found 不是失败，继续完成写入。"
+			if retryErr := h.AgentClient.TriggerSkill(ctx, recoverySessionID, h.AgentID, contract.SkillName, recoveryQuery, knowledgeIDs, productionJob); retryErr != nil {
+				return fmt.Errorf("trigger skill %s after missing-page recovery: %w (initial error: %v)", contract.SkillName, retryErr, err)
+			}
 		}
 	}
 	if jobType == skill.JobGraph {
-		if err := h.repairP3KnowledgeOnce(ctx, video, query, knowledgeIDs, baseline, productionJob); err != nil {
-			return err
+		if !contractRepairAttempted {
+			if err := h.repairP3KnowledgeOnce(ctx, video, query, knowledgeIDs, baseline, productionJob); err != nil {
+				return err
+			}
+		}
+		if contractRepairAttempted {
+			// The repair call only guarantees that its Agent session completed;
+			// the normal inspection below remains the authoritative publish gate.
+			if _, invalidObjects, inspectErr := h.inspectP3Knowledge(ctx, video.ID, video.TranscriptGeneration, video.Title); inspectErr != nil {
+				return fmt.Errorf("validate repaired P3 knowledge: %w", inspectErr)
+			} else if len(invalidObjects) > 0 {
+				return fmt.Errorf("P3 knowledge object validation failed after contract repair: %s", strings.Join(invalidObjects, "; "))
+			}
 		}
 	}
 
@@ -482,13 +509,13 @@ func (h *BaseSkillHandler) repairP3KnowledgeOnce(
 	if err != nil {
 		return fmt.Errorf("create graph contract repair session: %w", err)
 	}
-	repairQuery := query + " 本轮生成的候选 Wiki 页面未通过后端契约校验。校验结果：" + diagnostics +
-		"。只修复当前视频、当前转写代次的页面；逐页读取现有内容后使用 wiki_write_page 完整覆盖，确保 frontmatter.core_content 为非空的一句话概括，每次调用必须显式提供 slug、title、summary、content、page_type、source_refs 六个必填参数，禁止使用 wiki_replace_text，禁止追加第二段 frontmatter。若校验结果涉及正式关系缺失或关系写入失败，关系阶段是本轮硬性完成门禁：必须完整读取 references/relation-contract.json，重新读取本视频全部规范对象，使用工具返回并回读确认的规范对象 ID 和 Wiki 页面 ID，逐条用 wiki_write_page 完整覆盖需要补写的对象并提交非空 relations；每条关系必须包含 relation_id、relation_type、target_object_id、target_wiki_page_id、evidence_ids、time_range、confidence，且证据必须来自当前视频当前转写代次。不得以 relations: []、related_content: []、正文双链或最终报告代替正式关系；关系补写后必须再次回读并确认至少一条 accepted formal relation，之后才能更新视频索引并结束本轮。修复后再次读取并确认对象页、正式关系与视频索引页均满足原契约。"
+	repairQuery := "仅修复已存在的 Wiki 页面，不要重新抽取知识。视频 ID：" + strings.TrimSpace(video.ID) + "；转写代次：" + strings.TrimSpace(video.TranscriptGeneration) + "。后端校验结果：" + diagnostics +
+		"。这是一次最小范围的契约修复：只处理当前视频、当前转写代次已经存在的规范对象页；禁止读取整篇源文档、字幕分块或其他视频的历史页面，也不要使用源文档知识 ID。先读取视频索引页 video/" + strings.TrimSpace(video.ID) + "，再只读取该索引 related_pages 列出的对象页。禁止创建新对象、改变对象类型、改变标题或 source_video_id/transcript_generation。每次调用必须显式提供 slug、title、summary、content、page_type、source_refs 六个必填参数，禁止使用 wiki_replace_text，禁止追加第二段 frontmatter。若对象页的 relations 为空，先根据该对象页正文中的关联候选、结构字段和当前证据判断是否存在关系契约允许且证据明确支持的对象配对；只有存在明确配对时才补写关系。关系补写必须使用 wiki_write_page 完整覆盖原对象页，保留原有全部字段，只把结构化 relations 写成非空数组；不得以 relations: []、related_content: []、正文双链或最终报告代替正式关系；每条关系必须包含 relation_id、relation_type、target_object_id、target_wiki_page_id、evidence_ids、time_range、confidence，目标身份只能使用已回读确认的规范对象 ID 和 Wiki 页面 ID（即对象页 frontmatter 中的 knowledge_object_id 和真实 Wiki page ID），证据 ID 必须逐字复制当前代次页面已有 evidence_sentence_ids/evidence_ids，不能使用 c1、c2 或自造 ID。关系类型只能来自 references/relation-contract.json，且必须符合源/目标类型矩阵；写入后只回读被修改的对象页和视频索引页，确认至少一条 accepted formal relation；若没有任何证据明确支持的允许配对，返回 review_required 并保持页面不变，不得猜测。"
 	contract, ok := skill.Contract(skill.JobGraph)
 	if !ok {
 		return fmt.Errorf("unknown graph skill contract")
 	}
-	if err := h.AgentClient.TriggerSkill(ctx, repairSessionID, h.AgentID, contract.SkillName, repairQuery, knowledgeIDs, productionJob); err != nil {
+	if err := h.AgentClient.TriggerSkill(ctx, repairSessionID, h.AgentID, contract.SkillName, repairQuery, nil, productionJob); err != nil {
 		return fmt.Errorf("repair generated P3 knowledge contract: %w", err)
 	}
 	return nil
@@ -539,6 +566,17 @@ func isMissingWikiPageError(err error) bool {
 	}
 	message := err.Error()
 	return strings.Contains(message, "Wiki page '") && strings.Contains(message, "' not found")
+}
+
+func isMissingAuditedWikiWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var agentFailure *weknora.AgentFailure
+	if errors.As(err, &agentFailure) {
+		return strings.Contains(strings.ToLower(agentFailure.Diagnostic.FailureCode), "missing_audited_wiki_write")
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "missing_audited_wiki_write")
 }
 
 // waitForWikiPage 轮询等待匹配的 Wiki 产物页出现；避免 skill 返回后 DB/索引延迟导致的误判
@@ -933,6 +971,21 @@ type GraphHandler struct {
 }
 
 func (h *GraphHandler) JobType() string { return skill.JobGraph }
+
+// AfterJobSucceeded rebuilds the published projection only after the graph
+// task has been durably marked succeeded. ProjectKnowledgeBase intentionally
+// ignores running graph jobs, so doing this in Run would self-exclude the
+// current video from the projection.
+func (h *GraphHandler) AfterJobSucceeded(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error {
+	if h.Graph == nil {
+		return fmt.Errorf("graph_projection:unavailable: knowledge graph projection is not configured")
+	}
+	if err := h.Graph.ProjectKnowledgeBase(ctx); err != nil {
+		return fmt.Errorf("publish graph projection after job success: %w", err)
+	}
+	slog.Info("published Wiki graph after successful graph job", "video_id", video.ID, "job_id", job.ID)
+	return nil
+}
 
 // Run graph：知识提取独立执行，不推进基础内容任务。
 //

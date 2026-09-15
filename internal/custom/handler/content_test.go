@@ -14,8 +14,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
+	"gorm.io/gorm"
 )
 
 func TestSummaryEndpointUsesDocumentTypeWhenVideoProjectionLags(t *testing.T) {
@@ -539,6 +542,57 @@ func TestRelatedKnowledgeReturnsCurrentGraphContractFailure(t *testing.T) {
 	require.Equal(t, job.ErrorMessage, payload.ErrorMessage)
 }
 
+func TestRelatedKnowledgeRejectsRunningGraphJob(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1", KnowledgeAuditStatus: "passed"}
+	require.NoError(t, db.Create(&video).Error)
+	require.NoError(t, db.Create(&model.VideoProcessingJob{ID: uuid.NewString(), VideoID: video.ID, JobType: "graph",
+		TranscriptGeneration: video.TranscriptGeneration, Status: "running"}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/related-knowledge", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{}), "kb-1").RelatedKnowledge(context)
+
+	require.Equal(t, http.StatusConflict, recorder.Code, recorder.Body.String())
+	var payload struct {
+		ErrorCode string `json:"error_code"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, "graph_not_published", payload.ErrorCode)
+}
+
+func TestRelatedKnowledgeRejectsProjectedGraphWithoutFormalRelations(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{ID: uuid.NewString(), Title: "video", Status: model.VideoStatusCompleted,
+		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1", KnowledgeAuditStatus: "passed"}
+	require.NoError(t, db.Create(&video).Error)
+	createPublishedGraphJob(t, db, video)
+	server := newContentWikiTestServer(t, video.ID, map[string]weknora.WikiPage{
+		"knowledge-base-1": {ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index",
+			Content: "---\ntype: knowledge_base\nsource_video_id: " + video.ID + "\n---\n知识底座"},
+	})
+	defer server.Close()
+	store := &graphStoreStub{graph: &knowledgegraph.Graph{Nodes: []knowledgegraph.Node{
+		{WikiPageID: "object-1", KnowledgeType: knowledge.TypeConcept, SourceVideoID: video.ID},
+		{WikiPageID: "object-2", KnowledgeType: knowledge.TypeCase, SourceVideoID: video.ID},
+	}}}
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/related-knowledge", nil)
+	NewContentHandler(db, weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: server.URL}), "kb-1", store).RelatedKnowledge(context)
+
+	require.Equal(t, http.StatusConflict, recorder.Code, recorder.Body.String())
+	var payload struct {
+		ErrorCode string `json:"error_code"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Equal(t, "graph_contract_incomplete", payload.ErrorCode)
+}
+
 func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	db := openTestVideoDB(t)
 	video := model.Video{
@@ -548,6 +602,7 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromWikiContent(t *testing.T) {
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatalf("create video: %v", err)
 	}
+	createPublishedGraphJob(t, db, video)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if strings.HasSuffix(request.URL.Path, "/knowledge-base/video-1") {
 			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
@@ -610,6 +665,7 @@ func TestRelatedKnowledgeReturnsAnchorTimelineFromCurrentEvidence(t *testing.T) 
 		TranscriptGeneration: "generation-1", KnowledgeBaseWikiPageID: "knowledge-base-1",
 	}
 	require.NoError(t, db.Create(&video).Error)
+	createPublishedGraphJob(t, db, video)
 	require.NoError(t, db.Create(&model.VideoTranscriptChunk{
 		VideoID: video.ID, Generation: video.TranscriptGeneration, Revision: 1, ChunkIndex: 3,
 		EvidenceSentenceID: "evs:v1:anchor", StartMs: 62300, EndMs: 70100,
@@ -665,6 +721,7 @@ func TestRelatedKnowledgeReturnsTypeFrameworkDetails(t *testing.T) {
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatalf("create video: %v", err)
 	}
+	createPublishedGraphJob(t, db, video)
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/api/v1/knowledgebase/kb-1/wiki/pages/video/"+video.ID {
 			_ = json.NewEncoder(writer).Encode(weknora.WikiPage{
@@ -818,6 +875,7 @@ func TestRelatedKnowledgeReadsOnlyCurrentAuditedSkillPages(t *testing.T) {
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatalf("create video: %v", err)
 	}
+	createPublishedGraphJob(t, db, video)
 
 	pages := []weknora.WikiPage{
 		{ID: "knowledge-base-1", Slug: "video/" + video.ID, PageType: "index"},
@@ -869,4 +927,13 @@ func TestRelatedKnowledgeReadsOnlyCurrentAuditedSkillPages(t *testing.T) {
 			t.Fatalf("%s anchors = %#v", knowledgeType, payload.Anchors[knowledgeType])
 		}
 	}
+}
+
+func createPublishedGraphJob(t *testing.T, db *gorm.DB, video model.Video) {
+	t.Helper()
+	require.NoError(t, db.Model(&model.Video{}).Where("id = ?", video.ID).Update("knowledge_audit_status", "passed").Error)
+	require.NoError(t, db.Create(&model.VideoProcessingJob{
+		ID: uuid.NewString(), VideoID: video.ID, JobType: "graph",
+		TranscriptGeneration: video.TranscriptGeneration, Status: "succeeded",
+	}).Error)
 }

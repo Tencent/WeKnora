@@ -88,6 +88,7 @@ type VideoProcessingJob struct {
 	ErrorCategory        string     `gorm:"type:varchar(50);index" json:"error_category"`
 	ErrorCode            string     `gorm:"type:varchar(100)" json:"error_code"`
 	ErrorMessage         string     `gorm:"type:text" json:"error_message"`
+	AgentDiagnostic      string     `gorm:"type:text" json:"agent_diagnostic,omitempty"`
 	CallbackReceivedAt   *time.Time `json:"callback_received_at"`
 	StartedAt            *time.Time `json:"started_at"`
 	CompletedAt          *time.Time `json:"completed_at"`

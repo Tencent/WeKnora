@@ -237,9 +237,56 @@ func TestSummaryPromptRoutesFromTranscriptInsteadOfUploadType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
 	}
-	for _, expected := range []string{"先依据完整转写判断主类型", "classification", `meeting=[{"id":"meeting-summary","title":"一、会议总结"}`, `{"id":"other","title":"八、其他"}]`, "原则上不超过 140 字", "遵循 SMART 原则", "没有则写‘无’", "禁止混用其他类型章节", "上传时视频类型提示（仅弱提示"} {
+	for _, expected := range []string{"先依据完整转写判断主类型", "classification", `meeting=[{"id":"meeting-summary","title":"一、会议总结"}`, `{"id":"other","title":"八、其他"}]`, "原则上不超过 140 字", "遵循 SMART 原则", "没有则写‘无’", "禁止混用其他类型章节", "上传时视频类型提示（仅弱提示", "一对一/多对一的项目辅导", "interview 仅适用于以理解某个人的经历、选择和观点为主要产出的内容", "多个 part/分段视频", "保持一致判型"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("auto-routing prompt missing %q: %s", expected, prompt)
+		}
+	}
+}
+
+func TestSummaryPromptPrioritizesWorkProgressOverInterviewForm(t *testing.T) {
+	prompt, err := buildDirectContentPrompt(&model.Video{Title: "missimba_part1", VideoType: "training"}, skill.JobSummary, []transcript.Chunk{
+		{ID: "chunk-1", Index: 0, Content: "导师和学员讨论产品方向、合作节奏与下一步作业。"},
+		{ID: "chunk-2", Index: 1, Content: "双方评审方案并确定后续交付安排。"},
+	})
+	if err != nil {
+		t.Fatalf("buildDirectContentPrompt returned error: %v", err)
+	}
+	for _, expected := range []string{"参与人数或对话形式", "形成决定或行动", "必须选择 meeting", "不要把泛化的问答、导师辅导或讨论形式当作 interview"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("summary prompt missing work-progress guard %q: %s", expected, prompt)
+		}
+	}
+}
+
+func TestSplitMeetingTypeHintRequiresSiblingAndStrongWorkSignals(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}))
+	require.NoError(t, db.Create(&model.Video{ID: "video-2", Title: "missimba_part2"}).Error)
+	h := &DirectContentHandler{DB: db}
+	chunks := []transcript.Chunk{
+		{Content: "导师和学员讨论产品方向、合作节奏与下一步作业。"},
+		{Content: "双方评审方案并确定后续交付安排。"},
+	}
+	got, err := h.splitMeetingTypeHint(context.Background(), &model.Video{ID: "video-1", Title: "missimba_part1"}, chunks)
+	require.NoError(t, err)
+	if got != "meeting" {
+		t.Fatalf("splitMeetingTypeHint() = %q, want meeting", got)
+	}
+	got, err = h.splitMeetingTypeHint(context.Background(), &model.Video{ID: "video-1", Title: "missimba_part1"}, []transcript.Chunk{{Content: "课程讲解产品方案和开发步骤。"}})
+	require.NoError(t, err)
+	if got != "" {
+		t.Fatalf("splitMeetingTypeHint() for a course = %q, want empty", got)
+	}
+}
+
+func TestBuildDirectContentPromptWithForcedMeetingTypeUsesMeetingFramework(t *testing.T) {
+	prompt, err := buildDirectContentPromptWithType(&model.Video{Title: "missimba_part1", VideoType: "training"}, skill.JobSummary, []transcript.Chunk{{ID: "chunk-1", Index: 0, Content: "工作推进"}}, "meeting")
+	require.NoError(t, err)
+	for _, expected := range []string{`"videoType":"meeting"`, "一、会议总结", "八、其他"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("forced meeting prompt missing %q: %s", expected, prompt)
 		}
 	}
 }

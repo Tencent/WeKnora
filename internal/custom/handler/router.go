@@ -312,7 +312,7 @@ func buildRouter(deps *Deps) *gin.Engine {
 	api.GET("/meeting-orchestration/current", meetingHandler.Current)
 
 	if deps.Wiki != nil {
-		ch := NewContentHandler(deps.DB, deps.Wiki, roles.Knowledge)
+		ch := NewContentHandler(deps.DB, deps.Wiki, roles.Knowledge, deps.Graph)
 		videos := api.Group("/videos/:id")
 		videos.GET("/related-knowledge", ch.RelatedKnowledge)
 		videos.GET("/outline", ch.Outline)

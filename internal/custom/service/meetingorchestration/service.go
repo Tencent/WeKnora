@@ -111,7 +111,7 @@ func (s *Service) GetCurrent(ctx context.Context) (*Projection, *model.MeetingOr
 		if s.Wiki != nil {
 			if page, err := s.Wiki.GetPageByID(ctx, s.KnowledgeBaseID, current.ResultWikiPageID); err == nil && page != nil {
 				var persisted Projection
-				if json.Unmarshal([]byte(page.Content), &persisted) == nil && persisted.SchemaVersion == SchemaVersion && persisted.SourceFingerprint == current.SourceFingerprint {
+				if json.Unmarshal([]byte(page.Content), &persisted) == nil && (persisted.SchemaVersion == SchemaVersion || persisted.SchemaVersion == LegacySchemaVersion) && persisted.SourceFingerprint == current.SourceFingerprint {
 					if persisted.GeneratedAt.IsZero() {
 						persisted.GeneratedAt = current.UpdatedAt
 					}
@@ -190,6 +190,7 @@ func (s *Service) run(id string) {
 	projection.Statistics.ScannedVideos = len(videos)
 	projection.Statistics.QualifiedVideos = len(qualified)
 	projection.Statistics.SkippedVideos = len(videos) - len(qualified)
+	projection.Statistics.MeetingSessionCount = len(projection.MeetingSessions)
 	if err := projection.Validate(); err != nil {
 		s.fail(id, "projection_invalid", err)
 		return
@@ -293,6 +294,14 @@ func validateProjectionSources(projection Projection, videos []model.Video) erro
 			}
 			seenVideoIDs[videoID] = struct{}{}
 		}
+		for _, contribution := range cluster.VideoContributions {
+			if _, ok := allowedVideos[strings.TrimSpace(contribution.VideoID)]; !ok {
+				return fmt.Errorf("projection contribution video %q is not in current input", contribution.VideoID)
+			}
+			if err := validateProjectionRefsAgainstVideos(contribution.EvidenceRefs, allowedVideos); err != nil {
+				return err
+			}
+		}
 		for _, item := range cluster.WorkItems {
 			if err := validateProjectionRefsAgainstVideos(item.EvidenceRefs, allowedVideos); err != nil {
 				return err
@@ -312,6 +321,16 @@ func validateProjectionSources(projection Projection, videos []model.Video) erro
 			if err := validateProjectionRefsAgainstVideos(todo.EvidenceRefs, allowedVideos); err != nil {
 				return err
 			}
+		}
+	}
+	for _, session := range projection.MeetingSessions {
+		for _, videoID := range session.FragmentVideoIDs {
+			if _, ok := allowedVideos[strings.TrimSpace(videoID)]; !ok {
+				return fmt.Errorf("projection session video %q is not in current input", videoID)
+			}
+		}
+		if err := validateProjectionRefsAgainstVideos(session.GroupingEvidenceRefs, allowedVideos); err != nil {
+			return err
 		}
 	}
 	for _, relation := range projection.TopicRelations {
@@ -346,7 +365,26 @@ func validateProjectionRefsAgainstVideos(refs []EvidenceRef, allowedVideos map[s
 var nonWord = regexp.MustCompile(`[：:，,。！？!?（）()【】\[\]、/\\_\-]+`)
 
 func businessObject(title string) string {
-	runes := []rune(strings.TrimSpace(title))
+	title = strings.TrimSpace(title)
+	// Meeting-stage suffixes describe the conversation, not the managed
+	// business object. Prefer the stable project/product phrase when the title
+	// explicitly names one, so demand, kickoff, review and launch meetings can
+	// share one object cluster in the no-AI fallback path.
+	if projectEnd := strings.Index(title, "项目"); projectEnd >= 2 {
+		return strings.TrimSpace(title[:projectEnd+len("项目")])
+	}
+	stageStripped := false
+	for _, suffix := range []string{"发布上线沟通会议", "发布上线沟通会", "方案评审会", "技术评审会", "需求沟通会", "启动会", "评审会", "沟通会", "会议"} {
+		if strings.HasSuffix(title, suffix) {
+			title = strings.TrimSpace(strings.TrimSuffix(title, suffix))
+			stageStripped = true
+			break
+		}
+	}
+	runes := []rune(title)
+	if stageStripped && len(runes) >= 2 {
+		return title
+	}
 	if len(runes) >= 2 && runes[0] >= '\u4e00' && runes[0] <= '\u9fff' && runes[1] >= '\u4e00' && runes[1] <= '\u9fff' {
 		return string(runes[:2])
 	}
@@ -395,18 +433,23 @@ func (s *Service) buildProjection(ctx context.Context, fingerprint string, video
 	}
 	sort.Strings(keys)
 	clusters := make([]TopicCluster, 0, len(keys))
+	sessions := make([]MeetingSession, 0, len(videos))
 	decisions, todos := 0, 0
-	for i, key := range keys {
+	for _, key := range keys {
 		vs := groups[key]
-		c := TopicCluster{ClusterID: fmt.Sprintf("topic-%02d", i+1), Title: key, BusinessObject: key, Summary: fmt.Sprintf("围绕%s推进的会议事项与决策。", key)}
+		c := TopicCluster{ClusterID: stableClusterID(key, key), Title: key, BusinessObject: key, Summary: fmt.Sprintf("围绕%s推进的会议事项与决策。", key)}
 		for _, v := range vs {
+			sessionID := stableSessionID(v.ID)
+			sessions = append(sessions, MeetingSession{MeetingSessionID: sessionID, FragmentVideoIDs: []string{v.ID}, OrderingBasis: "single_fragment_content_unavailable", GroupingEvidenceRefs: []EvidenceRef{}})
 			c.SourceVideoIDs = append(c.SourceVideoIDs, v.ID)
-			c.Evolution = append(c.Evolution, EvolutionEvent{ID: "event-" + v.ID, VideoID: v.ID, MeetingTitle: v.Title, Summary: "已纳入会议主题簇，等待事项级证据更新。", Change: "新增会议记录"})
+			c.MeetingSessionIDs = append(c.MeetingSessionIDs, sessionID)
+			c.VideoContributions = append(c.VideoContributions, VideoContribution{VideoID: v.ID, MeetingSessionID: sessionID, ContributionType: "meeting_record", EvidenceRefs: []EvidenceRef{}})
+			c.Evolution = append(c.Evolution, EvolutionEvent{ID: "event-" + v.ID, VideoID: v.ID, MeetingSessionID: sessionID, MeetingTitle: v.Title, Summary: "已纳入会议主题簇，等待事项级证据更新。", Change: "新增会议记录"})
 			c.WorkItems = append(c.WorkItems, WorkItem{ID: "item-" + v.ID, Title: v.Title, Status: "unknown"})
 		}
 		clusters = append(clusters, c)
 	}
-	return Projection{SchemaVersion: SchemaVersion, OwnerScopeID: s.OwnerScopeID, SourceFingerprint: fingerprint, GeneratedAt: time.Now().UTC(), Statistics: Statistics{ScannedVideos: len(videos), QualifiedVideos: len(videos), TopicClusterCount: len(clusters), DecisionCount: decisions, TodoCount: todos}, TopicClusters: clusters, TopicRelations: []TopicRelation{}}
+	return Projection{SchemaVersion: SchemaVersion, OwnerScopeID: s.OwnerScopeID, SourceFingerprint: fingerprint, GeneratedAt: time.Now().UTC(), Statistics: Statistics{ScannedVideos: len(videos), QualifiedVideos: len(videos), MeetingSessionCount: len(sessions), TopicClusterCount: len(clusters), DecisionCount: decisions, TodoCount: todos}, MeetingSessions: sessions, TopicClusters: clusters, TopicRelations: []TopicRelation{}}
 }
 
 func (s *Service) businessObjectForVideo(ctx context.Context, video model.Video) string {

@@ -8,6 +8,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/config"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 )
@@ -27,6 +29,12 @@ import (
 type Handler interface {
 	JobType() string
 	Run(ctx context.Context, job *model.VideoProcessingJob, video *model.Video) error
+}
+
+// JobSuccessHook runs after the durable job status changes to succeeded. It is
+// used for publish steps whose projection gate must observe a successful task.
+type JobSuccessHook interface {
+	AfterJobSucceeded(context.Context, *model.VideoProcessingJob, *model.Video) error
 }
 
 // Engine 任务引擎
@@ -321,6 +329,9 @@ func (e *Engine) dispatch(ctx context.Context, job *model.VideoProcessingJob) {
 
 	if err := handler.Run(ctx, job, &video); err != nil {
 		category, code := ClassifyProcessingError(err)
+		if diagnostic := agentDiagnosticJSON(err, category, code); diagnostic != "" {
+			_ = e.db.Model(job).Update("agent_diagnostic", diagnostic).Error
+		}
 		slog.Warn("job run failed",
 			"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
 			"job_type", job.JobType, "transcript_generation", job.TranscriptGeneration,
@@ -338,13 +349,20 @@ func (e *Engine) dispatch(ctx context.Context, job *model.VideoProcessingJob) {
 	}
 
 	e.markSucceeded(job)
+	if hook, ok := handler.(JobSuccessHook); ok {
+		if err := hook.AfterJobSucceeded(ctx, job, &video); err != nil {
+			category, code := ClassifyProcessingError(err)
+			e.markFailed(job, category, code, err.Error(), err)
+			return
+		}
+	}
 }
 
 func (e *Engine) markSucceeded(job *model.VideoProcessingJob) {
 	now := time.Now().UTC()
 	if err := e.db.Model(job).Updates(map[string]any{
 		"status": "succeeded", "progress": 100, "completed_at": now,
-		"error_category": "", "error_code": "", "error_message": "",
+		"error_category": "", "error_code": "", "error_message": "", "agent_diagnostic": "",
 	}).Error; err != nil {
 		slog.Error("job completion update failed",
 			"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
@@ -360,6 +378,51 @@ func (e *Engine) markSucceeded(job *model.VideoProcessingJob) {
 		"component", "content-worker", "video_id", job.VideoID, "job_id", job.ID,
 		"job_type", job.JobType, "transcript_generation", job.TranscriptGeneration,
 		"status", "succeeded", "attempt", job.AttemptCount)
+}
+
+// agentDiagnosticJSON stores a bounded, redacted summary for every failed
+// Agent-backed job. Non-Agent failures still get a stable classification so
+// callers can distinguish output-contract failures from infrastructure errors.
+func agentDiagnosticJSON(err error, category, code string) string {
+	if err == nil {
+		return ""
+	}
+	var agentFailure *weknora.AgentFailure
+	if errors.As(err, &agentFailure) {
+		raw, marshalErr := json.Marshal(agentFailure.Diagnostic)
+		if marshalErr == nil {
+			return string(raw)
+		}
+	}
+	class := "unknown"
+	switch {
+	case category == ErrorCategoryTimeout:
+		class = "model_timeout"
+	case category == ErrorCategoryWikiArtifact || code == "content_contract_failed":
+		class = "output_contract"
+	case category == ErrorCategoryWeKnora:
+		class = "model_error"
+	case category == ErrorCategoryResponseParse:
+		class = "output_contract"
+	}
+	payload := map[string]string{
+		"failure_class":   class,
+		"failure_code":    safeDiagnosticValue(code),
+		"failure_message": safeDiagnosticValue(err.Error()),
+	}
+	raw, marshalErr := json.Marshal(payload)
+	if marshalErr != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func safeDiagnosticValue(value string) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if len(value) > 512 {
+		return value[:512]
+	}
+	return value
 }
 
 // reconcileVideoStatus closes the gap between the content pipeline's artifact
@@ -418,10 +481,14 @@ func assembledVideoReady(video model.Video) bool {
 
 func (e *Engine) markFailed(job *model.VideoProcessingJob, category, code, msg string, cause error) {
 	now := time.Now().UTC()
-	e.db.Model(job).Updates(map[string]any{
+	jobUpdates := map[string]any{
 		"status": "failed", "error_category": category,
 		"error_code": code, "error_message": msg, "completed_at": now,
-	})
+	}
+	if diagnostic := agentDiagnosticJSON(cause, category, code); diagnostic != "" {
+		jobUpdates["agent_diagnostic"] = diagnostic
+	}
+	e.db.Model(job).Updates(jobUpdates)
 	updates := map[string]any{"status": model.VideoStatusFailed, "processing_error_summary": msg}
 	coverDegraded := false
 	if isContentEnhancementJob(job.JobType) {

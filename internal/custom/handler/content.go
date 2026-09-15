@@ -29,15 +29,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/custom/client/weknora"
 	"github.com/Tencent/WeKnora/internal/custom/model"
 	"github.com/Tencent/WeKnora/internal/custom/service/knowledge"
+	"github.com/Tencent/WeKnora/internal/custom/service/knowledgegraph"
 	"github.com/Tencent/WeKnora/internal/custom/service/outline"
 	"github.com/Tencent/WeKnora/internal/custom/service/summary"
 )
 
 // ContentHandler 内容生产聚合 handler
 type ContentHandler struct {
-	DB   *gorm.DB
-	Wiki *weknora.WikiClient
-	KBID string
+	DB    *gorm.DB
+	Wiki  *weknora.WikiClient
+	KBID  string
+	Graph knowledgegraph.Store
 }
 
 var wikiTimestampPattern = regexp.MustCompile(`\b(\d{1,3}:\d{2}(?::\d{2})?)\b`)
@@ -555,8 +557,12 @@ func parseWikiStructuredRelations(value string) []knowledge.StructuredRelation {
 }
 
 // NewContentHandler 构造
-func NewContentHandler(db *gorm.DB, wiki *weknora.WikiClient, kbID string) *ContentHandler {
-	return &ContentHandler{DB: db, Wiki: wiki, KBID: kbID}
+func NewContentHandler(db *gorm.DB, wiki *weknora.WikiClient, kbID string, graph ...knowledgegraph.Store) *ContentHandler {
+	h := &ContentHandler{DB: db, Wiki: wiki, KBID: kbID}
+	if len(graph) > 0 {
+		h.Graph = graph[0]
+	}
+	return h
 }
 
 // loadVideo 从 DB 取 video，404 直接终止
@@ -636,6 +642,14 @@ func (h *ContentHandler) requireKnowledgeBase(c *gin.Context, video *model.Video
 		contentError(c, http.StatusConflict, video.ID, "graph", code, message, latestGraphJob.UpdatedAt)
 		return nil, false
 	}
+	if latestGraphJob.ID == "" && strings.TrimSpace(video.KnowledgeBaseWikiPageID) != "" {
+		contentError(c, http.StatusConflict, video.ID, "graph", "graph_not_published", "graph job status is unavailable", video.UpdatedAt)
+		return nil, false
+	}
+	if latestGraphJob.ID != "" && latestGraphJob.Status != "succeeded" {
+		contentError(c, http.StatusConflict, video.ID, "graph", "graph_not_published", "knowledge graph is not published", latestGraphJob.UpdatedAt)
+		return nil, false
+	}
 	if strings.TrimSpace(video.KnowledgeBaseWikiPageID) == "" {
 		contentError(c, http.StatusNotFound, video.ID, "graph", "not_generated", "knowledge_base wiki page not yet generated", video.UpdatedAt)
 		return nil, false
@@ -671,6 +685,21 @@ func (h *ContentHandler) RelatedKnowledge(c *gin.Context) {
 	if err != nil {
 		contentError(c, http.StatusInternalServerError, video.ID, "graph", "weknora_read_failed", "list knowledge pages: "+err.Error(), video.UpdatedAt)
 		return
+	}
+	if h.Graph != nil {
+		projected, graphErr := h.Graph.Query(ctx, knowledgegraph.Query{VideoID: video.ID, Limit: 500})
+		if graphErr != nil {
+			contentError(c, http.StatusInternalServerError, video.ID, "graph", "graph_projection_read_failed", "read published knowledge graph: "+graphErr.Error(), video.UpdatedAt)
+			return
+		}
+		if projected == nil || len(projected.Nodes) == 0 {
+			contentError(c, http.StatusConflict, video.ID, "graph", "graph_contract_incomplete", "published knowledge graph has no valid objects", video.UpdatedAt)
+			return
+		}
+		if len(projected.Nodes) > 1 && len(projected.Edges) == 0 {
+			contentError(c, http.StatusConflict, video.ID, "graph", "graph_contract_incomplete", "published knowledge graph has no formal relations", video.UpdatedAt)
+			return
+		}
 	}
 	byEvidence, byIndex, err := currentEvidenceChunkIndexes(ctx, h.DB, *video)
 	if err != nil {

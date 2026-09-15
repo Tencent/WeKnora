@@ -57,15 +57,28 @@ type evidenceRecord struct {
 	StartMs, EndMs             int
 }
 type candidateScope struct {
-	video              map[string]any
-	allowedEvidence    map[string]struct{}
-	allowedSections    map[string]struct{}
-	allowedBlocks      map[string]struct{}
-	actionableSections map[string]struct{}
+	video               map[string]any
+	videos              []map[string]any
+	allowedEvidence     map[string]struct{}
+	allowedSections     map[string]struct{}
+	allowedBlocks       map[string]struct{}
+	actionableSections  map[string]struct{}
+	videoID             string
+	openingText         string
+	closingText         string
+	contentText         string
+	boundaryEvidenceIDs []string
+	createdAt           time.Time
 }
 type generatedCluster struct {
-	cluster *TopicCluster
-	allowed map[string]struct{}
+	cluster           *TopicCluster
+	allowed           map[string]struct{}
+	objectScope       string
+	objectAliases     []string
+	objectEvidence    map[string]struct{}
+	objectSignals     []map[string]any
+	meetingSessionIDs map[string]struct{}
+	contributions     map[string]VideoContribution
 }
 
 func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Video, bundle promptreload.Snapshot) (Projection, error) {
@@ -74,7 +87,7 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 	}
 	allowed := map[string]struct{}{}
 	evidence := map[string]evidenceRecord{}
-	scopes := make([]candidateScope, 0, len(videos))
+	videoScopes := make([]candidateScope, 0, len(videos))
 	for _, video := range videos {
 		ids := make([]string, 0, 24)
 		localAllowed := map[string]struct{}{}
@@ -205,22 +218,34 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			}
 		}
 		item["allowed_evidence"] = ids
-		scopes = append(scopes, candidateScope{
-			video:              item,
-			allowedEvidence:    evidenceIDsFromSlice(ids),
-			allowedSections:    allowedSections,
-			allowedBlocks:      allowedBlocks,
-			actionableSections: actionableSections,
+		openingText, closingText, contentText := transcriptWindowText(transcriptChunks)
+		boundaryEvidenceIDs := transcriptBoundaryEvidenceIDs(transcriptChunks)
+		videoScopes = append(videoScopes, candidateScope{
+			video:               item,
+			videos:              []map[string]any{item},
+			allowedEvidence:     evidenceIDsFromSlice(ids),
+			allowedSections:     allowedSections,
+			allowedBlocks:       allowedBlocks,
+			actionableSections:  actionableSections,
+			videoID:             video.ID,
+			openingText:         openingText,
+			closingText:         closingText,
+			contentText:         contentText,
+			boundaryEvidenceIDs: boundaryEvidenceIDs,
+			createdAt:           video.CreatedAt,
 		})
 	}
+	scopes, meetingSessions, possiblePairCount := groupCandidateScopes(videoScopes, evidence)
 	if len(scopes) == 0 {
 		return Projection{}, ErrInsufficientEvidence
 	}
 	var candidates ItemCandidateOutput
+	candidateSessionIDs := make([]string, 0)
 	for _, scope := range scopes {
 		var output ItemCandidateOutput
 		_, err := g.callJSONValidated(ctx, bundle, "meeting-item-candidate-v1.txt", map[string]any{
-			"videos":                  []map[string]any{scope.video},
+			"meeting_session_id":      sessionIDFromScope(scope),
+			"videos":                  scope.videos,
 			"allowed_evidence":        sortedKeys(scope.allowedEvidence),
 			"allowed_section_refs":    sortedKeys(scope.allowedSections),
 			"allowed_block_refs":      sortedKeys(scope.allowedBlocks),
@@ -242,15 +267,31 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			return Projection{}, err
 		}
 		candidates.Candidates = append(candidates.Candidates, output.Candidates...)
+		for range output.Candidates {
+			candidateSessionIDs = append(candidateSessionIDs, sessionIDFromScope(scope))
+		}
 	}
 
 	clusters := make([]generatedCluster, 0, 8)
 	for index, candidate := range candidates.Candidates {
 		candidateID := fmt.Sprintf("candidate-%03d", index+1)
 		candidateInput := candidatePayload(candidate, candidateID)
+		candidateSessionID := ""
+		if index < len(candidateSessionIDs) {
+			candidateSessionID = candidateSessionIDs[index]
+			candidateInput["meeting_session_id"] = candidateSessionID
+		}
 		topicCandidates := make([]map[string]any, 0, len(clusters))
-		for i, current := range clusters {
-			topicCandidates = append(topicCandidates, map[string]any{"topic_id": fmt.Sprintf("topic-%02d", i+1), "business_object": current.cluster.BusinessObject, "scope": current.cluster.Summary, "aliases": []string{}, "allowed_evidence": sortedKeys(current.allowed)})
+		for _, current := range clusters {
+			topicCandidates = append(topicCandidates, map[string]any{
+				"topic_id":         current.cluster.ClusterID,
+				"business_object":  current.cluster.BusinessObject,
+				"scope":            current.objectScope,
+				"aliases":          current.objectAliases,
+				"allowed_evidence": sortedKeys(current.allowed),
+				"object_evidence":  sortedKeys(current.objectEvidence),
+				"object_signals":   current.objectSignals,
+			})
 		}
 		var topicMatch TopicMatchOutput
 		_, callErr := g.callJSONValidated(ctx, bundle, "meeting-topic-cluster-matching-v1.txt", map[string]any{"candidate": candidateInput, "topic_candidates": topicCandidates, "allowed_evidence": sortedKeys(allowed)}, func(raw string) error {
@@ -307,11 +348,44 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			if clusterIndex >= 8 {
 				continue
 			}
-			clusters = append(clusters, generatedCluster{cluster: &TopicCluster{ClusterID: fmt.Sprintf("topic-%02d", clusterIndex+1), Title: candidate.BusinessObject.Name, BusinessObject: candidate.BusinessObject.Name, Summary: candidate.Reason}, allowed: map[string]struct{}{}})
+			objectScope := strings.TrimSpace(candidate.BusinessObject.Scope)
+			if objectScope == "" {
+				objectScope = strings.TrimSpace(candidate.BusinessObject.Name)
+			}
+			clusterID := stableClusterID(candidate.BusinessObject.Name, objectScope)
+			clusters = append(clusters, generatedCluster{
+				cluster:           &TopicCluster{ClusterID: clusterID, Title: candidate.BusinessObject.Name, BusinessObject: candidate.BusinessObject.Name, Summary: candidate.Reason},
+				allowed:           map[string]struct{}{},
+				objectScope:       objectScope,
+				objectAliases:     uniqueStrings(append([]string{candidate.BusinessObject.Name}, candidate.BusinessObject.Aliases...)),
+				objectEvidence:    evidenceIDs(candidate.BusinessObject.EvidenceIDs),
+				objectSignals:     []map[string]any{},
+				meetingSessionIDs: map[string]struct{}{},
+				contributions:     map[string]VideoContribution{},
+			})
 		}
 		current := &clusters[clusterIndex]
-		for id := range evidenceIDs(candidate.EvidenceIDs) {
+		if candidateSessionID != "" {
+			current.meetingSessionIDs[candidateSessionID] = struct{}{}
+		}
+		current.objectSignals = append(current.objectSignals, businessObjectSignal(candidate))
+		current.objectAliases = uniqueStrings(append(append(current.objectAliases, candidate.BusinessObject.Name), candidate.BusinessObject.Aliases...))
+		if current.objectScope == "" && strings.TrimSpace(candidate.BusinessObject.Scope) != "" {
+			current.objectScope = strings.TrimSpace(candidate.BusinessObject.Scope)
+		}
+		for _, id := range candidate.BusinessObject.EvidenceIDs {
+			current.objectEvidence[id] = struct{}{}
+		}
+		for id := range candidateAllowed {
 			current.allowed[id] = struct{}{}
+		}
+		for _, ref := range refsForIDs(candidate.EvidenceIDs, evidence) {
+			contribution := current.contributions[ref.VideoID]
+			contribution.VideoID = ref.VideoID
+			contribution.MeetingSessionID = candidateSessionID
+			contribution.ContributionType = "discussion"
+			contribution.EvidenceRefs = appendUniqueRefs(contribution.EvidenceRefs, ref)
+			current.contributions[ref.VideoID] = contribution
 		}
 		workCandidates := make([]map[string]any, 0, len(current.cluster.WorkItems))
 		for _, item := range current.cluster.WorkItems {
@@ -344,9 +418,10 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			continue
 		}
 		if itemDecision.WorkItemDecision == "same_item" && itemDecision.MatchedWorkItemID != nil {
+			matchedID := resolveWorkItemID(current.cluster.WorkItems, *itemDecision.MatchedWorkItemID)
 			for i := range current.cluster.WorkItems {
-				if current.cluster.WorkItems[i].ID == *itemDecision.MatchedWorkItemID {
-					itemID = *itemDecision.MatchedWorkItemID
+				if current.cluster.WorkItems[i].ID == matchedID {
+					itemID = matchedID
 					break
 				}
 			}
@@ -358,11 +433,11 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			}
 		}
 		if itemID == "" {
-			itemID = fmt.Sprintf("item-%02d-%02d", clusterIndex+1, len(current.cluster.WorkItems)+1)
+			itemID = stableWorkItemID(current.cluster.ClusterID, candidate.SpecificQuestion)
 			current.cluster.WorkItems = append(current.cluster.WorkItems, WorkItem{ID: itemID, Title: candidate.SpecificQuestion, Status: "unknown"})
 			refs := refsForIDs(candidate.EvidenceIDs, evidence)
 			if len(refs) > 0 {
-				current.cluster.Evolution = append(current.cluster.Evolution, EvolutionEvent{ID: fmt.Sprintf("event-%02d", len(current.cluster.Evolution)+1), VideoID: refs[0].VideoID, MeetingTitle: evidence[refs[0].EvidenceID].Title, Summary: candidate.Reason, Change: "added", EvidenceRefs: refs})
+				current.cluster.Evolution = append(current.cluster.Evolution, EvolutionEvent{ID: stableEventID(itemID, "added", refs), VideoID: refs[0].VideoID, MeetingSessionID: candidateSessionID, WorkItemID: itemID, MeetingTitle: evidence[refs[0].EvidenceID].Title, Summary: candidate.Reason, Change: "added", ChangeType: "scope_change", NextState: "未知", EvidenceRefs: refs})
 			}
 		}
 		itemIndex := workItemIndex(current.cluster.WorkItems, itemID)
@@ -377,16 +452,33 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			return Projection{}, callErr
 		}
 		current.cluster.WorkItems[itemIndex].EvidenceRefs = appendUniqueRefs(current.cluster.WorkItems[itemIndex].EvidenceRefs, refsForIDs(candidate.EvidenceIDs, evidence)...)
-		if update.WorkItemUpdates[0].CandidateID != candidateID || update.WorkItemUpdates[0].TopicID != current.cluster.ClusterID || update.WorkItemUpdates[0].WorkItemRef != itemID {
+		if update.WorkItemUpdates[0].CandidateID != candidateID || resolveTopicID(clusters, update.WorkItemUpdates[0].TopicID) != current.cluster.ClusterID || resolveWorkItemID(current.cluster.WorkItems, update.WorkItemUpdates[0].WorkItemRef) != itemID {
 			return Projection{}, fmt.Errorf("work item update identity mismatch")
 		}
-		applyUpdate(current.cluster, itemIndex, update.WorkItemUpdates[0], evidence)
+		applyUpdate(current.cluster, itemIndex, update.WorkItemUpdates[0], evidence, candidateSessionID)
 	}
 
-	projection := Projection{SchemaVersion: SchemaVersion, TopicClusters: make([]TopicCluster, 0, len(clusters)), TopicRelations: []TopicRelation{}}
+	projection := Projection{SchemaVersion: SchemaVersion, MeetingSessions: meetingSessions, TopicClusters: make([]TopicCluster, 0, len(clusters)), TopicRelations: []TopicRelation{}}
+	sessionVideos := make(map[string][]string, len(meetingSessions))
+	for _, session := range meetingSessions {
+		sessionVideos[session.MeetingSessionID] = append([]string(nil), session.FragmentVideoIDs...)
+	}
 	for _, current := range clusters {
 		cluster := current.cluster
-		cluster.SourceVideoIDs = uniqueVideoIDs(*cluster)
+		for sessionID := range current.meetingSessionIDs {
+			for _, videoID := range sessionVideos[sessionID] {
+				contribution := current.contributions[videoID]
+				if contribution.VideoID == "" {
+					contribution.VideoID = videoID
+					contribution.MeetingSessionID = sessionID
+					contribution.ContributionType = "session_fragment"
+				}
+				current.contributions[videoID] = contribution
+			}
+		}
+		cluster.SourceVideoIDs = contributionVideoIDs(current.contributions)
+		cluster.MeetingSessionIDs = sortedSetKeys(current.meetingSessionIDs)
+		cluster.VideoContributions = contributionValues(current.contributions)
 		var selected KnowledgeSelectionOutput
 		_, callErr := g.callJSONValidated(ctx, bundle, "meeting-knowledge-selection-v1.txt", map[string]any{"topic": map[string]any{"topic_id": cluster.ClusterID, "business_object": cluster.BusinessObject, "work_items": cluster.WorkItems, "allowed_evidence": sortedKeys(current.allowed)}, "knowledge_candidates": auditedKnowledgeCandidates(g.KnowledgeCandidates), "allowed_evidence": sortedKeys(allowed)}, func(raw string) error {
 			if err := decodeStrict(raw, &selected); err != nil {
@@ -435,6 +527,8 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 		}
 	}
 	projection.Statistics = projectionStatistics(projection, len(videos), len(scopes))
+	projection.Statistics.MeetingSessionCount = len(meetingSessions)
+	projection.Statistics.PossiblePairCount = possiblePairCount
 	normalizeProjectionArrays(&projection)
 	if err := projection.Validate(); err != nil {
 		return Projection{}, err
@@ -681,6 +775,18 @@ func candidatePayload(c ItemCandidate, id string) map[string]any {
 	}
 	return map[string]any{"candidate_id": id, "candidate_refs": c.CandidateRefs, "business_object": c.BusinessObject, "specific_question": c.SpecificQuestion, "work_item_scope": c.WorkItemScope, "cycle_signal": c.CycleSignal, "core_level": c.CoreLevel, "reason": c.Reason, "allowed_evidence": sortedKeys(candidateAllowed), "evidence_ids": c.EvidenceIDs}
 }
+
+func businessObjectSignal(candidate ItemCandidate) map[string]any {
+	return map[string]any{
+		"name":              candidate.BusinessObject.Name,
+		"scope":             candidate.BusinessObject.Scope,
+		"aliases":           candidate.BusinessObject.Aliases,
+		"specific_question": candidate.SpecificQuestion,
+		"work_item_scope":   candidate.WorkItemScope,
+		"cycle_signal":      candidate.CycleSignal,
+		"reason":            candidate.Reason,
+	}
+}
 func evidenceIDs(ids []string) map[string]struct{} {
 	result := map[string]struct{}{}
 	for _, id := range ids {
@@ -694,6 +800,24 @@ func evidenceIDsFromSlice(ids []string) map[string]struct{} {
 	for _, id := range ids {
 		result[id] = struct{}{}
 	}
+	return result
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	sort.Strings(result)
 	return result
 }
 func evidenceIDsFromRefs(refs []EvidenceRef) []string {
@@ -711,13 +835,37 @@ func sortedKeys(values map[string]struct{}) []string {
 	sort.Strings(result)
 	return result
 }
+
+func sortedSetKeys(values map[string]struct{}) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+	return sortedKeys(values)
+}
 func topicIndex(clusters []generatedCluster, id string) int {
+	return resolveTopicIndex(clusters, id)
+}
+
+func resolveTopicIndex(clusters []generatedCluster, id string) int {
 	for i := range clusters {
 		if clusters[i].cluster.ClusterID == id {
 			return i
 		}
 	}
+	if strings.HasPrefix(id, "topic-") {
+		var ordinal int
+		if _, err := fmt.Sscanf(id, "topic-%d", &ordinal); err == nil && ordinal > 0 && ordinal <= len(clusters) {
+			return ordinal - 1
+		}
+	}
 	return -1
+}
+
+func resolveTopicID(clusters []generatedCluster, id string) string {
+	if index := resolveTopicIndex(clusters, id); index >= 0 {
+		return clusters[index].cluster.ClusterID
+	}
+	return id
 }
 func workItemIndex(items []WorkItem, id string) int {
 	for i := range items {
@@ -726,6 +874,21 @@ func workItemIndex(items []WorkItem, id string) int {
 		}
 	}
 	return len(items) - 1
+}
+
+func resolveWorkItemID(items []WorkItem, id string) string {
+	for _, item := range items {
+		if item.ID == id {
+			return id
+		}
+	}
+	if strings.HasPrefix(id, "item-") {
+		var clusterOrdinal, itemOrdinal int
+		if _, err := fmt.Sscanf(id, "item-%d-%d", &clusterOrdinal, &itemOrdinal); err == nil && itemOrdinal > 0 && itemOrdinal <= len(items) {
+			return items[itemOrdinal-1].ID
+		}
+	}
+	return id
 }
 func allIn(ids []string, allowed map[string]struct{}) bool {
 	for _, id := range ids {
@@ -758,7 +921,7 @@ func refsForIDs(ids []string, evidence map[string]evidenceRecord) []EvidenceRef 
 	}
 	return result
 }
-func applyUpdate(cluster *TopicCluster, itemIndex int, update WorkItemUpdate, evidence map[string]evidenceRecord) {
+func applyUpdate(cluster *TopicCluster, itemIndex int, update WorkItemUpdate, evidence map[string]evidenceRecord, meetingSessionID string) {
 	item := &cluster.WorkItems[itemIndex]
 	if update.CurrentStatus != nil {
 		item.Status = *update.CurrentStatus
@@ -771,7 +934,8 @@ func applyUpdate(cluster *TopicCluster, itemIndex int, update WorkItemUpdate, ev
 	if update.Change.IsSubstantive {
 		refs := refsForIDs(update.Change.CurrentEvidenceIDs, evidence)
 		if len(refs) > 0 {
-			cluster.Evolution = append(cluster.Evolution, EvolutionEvent{ID: fmt.Sprintf("event-%02d", len(cluster.Evolution)+1), VideoID: refs[0].VideoID, MeetingTitle: evidence[refs[0].EvidenceID].Title, Summary: deref(update.Change.Discussion), Change: deref(update.Change.ChangeType), EvidenceRefs: refs})
+			changeType := deref(update.Change.ChangeType)
+			cluster.Evolution = append(cluster.Evolution, EvolutionEvent{ID: stableEventID(cluster.WorkItems[itemIndex].ID, changeType, refs), VideoID: refs[0].VideoID, MeetingSessionID: meetingSessionID, WorkItemID: cluster.WorkItems[itemIndex].ID, MeetingTitle: evidence[refs[0].EvidenceID].Title, Summary: deref(update.Change.Discussion), Change: changeType, ChangeType: changeType, PreviousState: "未知", NextState: cluster.WorkItems[itemIndex].Status, EvidenceRefs: refs})
 		}
 	}
 	for _, decision := range update.ImportantDecisions {
@@ -779,7 +943,7 @@ func applyUpdate(cluster *TopicCluster, itemIndex int, update WorkItemUpdate, ev
 		if len(refs) == 0 {
 			continue
 		}
-		cluster.Decisions = append(cluster.Decisions, Decision{ID: fmt.Sprintf("decision-%02d", len(cluster.Decisions)+1), Text: decision.Content, VideoID: refs[0].VideoID, EvidenceRefs: refs})
+		cluster.Decisions = append(cluster.Decisions, Decision{ID: stableDecisionID(cluster.WorkItems[itemIndex].ID, decision.Content, refs), Text: decision.Content, VideoID: refs[0].VideoID, MeetingSessionID: meetingSessionID, EvidenceRefs: refs})
 	}
 	for _, effect := range update.DecisionEffectUpdates {
 		for index := range cluster.Decisions {
@@ -802,7 +966,7 @@ func applyUpdate(cluster *TopicCluster, itemIndex int, update WorkItemUpdate, ev
 		if len(refs) == 0 {
 			continue
 		}
-		cluster.Todos = append(cluster.Todos, Todo{ID: fmt.Sprintf("todo-%02d", len(cluster.Todos)+1), Title: todo.Content, Owner: deref(todo.Owner), Due: deref(todo.DueText), Status: status, VideoID: refs[0].VideoID, EvidenceRefs: refs})
+		cluster.Todos = append(cluster.Todos, Todo{ID: stableTodoID(cluster.WorkItems[itemIndex].ID, todo.Content, refs), Title: todo.Content, Owner: deref(todo.Owner), Due: deref(todo.DueText), Status: status, VideoID: refs[0].VideoID, MeetingSessionID: meetingSessionID, EvidenceRefs: refs})
 	}
 }
 func appendUniqueRefs(existing []EvidenceRef, refs ...EvidenceRef) []EvidenceRef {
@@ -847,6 +1011,25 @@ func uniqueVideoIDs(cluster TopicCluster) []string {
 	sort.Strings(result)
 	return result
 }
+
+func contributionVideoIDs(contributions map[string]VideoContribution) []string {
+	result := make([]string, 0, len(contributions))
+	for videoID := range contributions {
+		result = append(result, videoID)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func contributionValues(contributions map[string]VideoContribution) []VideoContribution {
+	result := make([]VideoContribution, 0, len(contributions))
+	for _, contribution := range contributions {
+		contribution.EvidenceRefs = append([]EvidenceRef(nil), contribution.EvidenceRefs...)
+		result = append(result, contribution)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].VideoID < result[j].VideoID })
+	return result
+}
 func auditedKnowledgeCandidates(candidates []KnowledgeCandidate) []KnowledgeCandidate {
 	result := make([]KnowledgeCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -862,5 +1045,5 @@ func projectionStatistics(projection Projection, scanned, qualified int) Statist
 		decisions += len(cluster.Decisions)
 		todos += len(cluster.Todos)
 	}
-	return Statistics{ScannedVideos: scanned, QualifiedVideos: qualified, TopicClusterCount: len(projection.TopicClusters), DecisionCount: decisions, TodoCount: todos}
+	return Statistics{ScannedVideos: scanned, QualifiedVideos: qualified, MeetingSessionCount: len(projection.MeetingSessions), TopicClusterCount: len(projection.TopicClusters), DecisionCount: decisions, TodoCount: todos}
 }
