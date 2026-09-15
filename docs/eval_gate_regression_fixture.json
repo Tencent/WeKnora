@@ -1,0 +1,30 @@
+{
+  "_comment": "门禁演示 fixture：模拟一次「降召回」的评测结果——recall 从基线 0.5 掉到 0.42（退化 0.08 > 容忍 0.05），其余检索指标保持在基线附近。用于 CI 里验证门禁会正确阻断并指出 recall 退化，无需真实模型 Key。",
+  "data": {
+    "task": {
+      "id": "fixture-regression",
+      "status": 2,
+      "dataset_id": "default",
+      "total": 30,
+      "finished": 30
+    },
+    "metric": {
+      "retrieval_metrics": {
+        "precision": 0.108,
+        "recall": 0.42,
+        "ndcg3": 0.488,
+        "ndcg10": 0.488,
+        "mrr": 0.483,
+        "map": 0.483
+      },
+      "generation_metrics": {
+        "bleu1": 0.0,
+        "bleu2": 0.0,
+        "bleu4": 0.0,
+        "rouge1": 0.0,
+        "rouge2": 0.0,
+        "rougel": 0.0
+      }
+    }
+  }
+}

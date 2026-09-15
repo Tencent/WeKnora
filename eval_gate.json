@@ -1,0 +1,19 @@
+{
+  "_comment": "质量门禁配置：baseline 为 M1 实测基线（embedding_top_k=5，30 问默认数据集）；thresholds 为各指标允许的最大退化幅度。只对 thresholds 中声明的指标设门禁——检索指标由确定性 embedding 检索产生、波动小，设较紧阈值；生成质量指标（bleu/rouge）受 LLM 随机性影响大，默认不设阈值、仅作展示不参与阻断。",
+  "baseline": {
+    "precision": 0.108,
+    "recall": 0.5,
+    "ndcg3": 0.488,
+    "ndcg10": 0.488,
+    "mrr": 0.483,
+    "map": 0.483
+  },
+  "thresholds": {
+    "precision": 0.02,
+    "recall": 0.05,
+    "ndcg3": 0.05,
+    "ndcg10": 0.05,
+    "mrr": 0.05,
+    "map": 0.05
+  }
+}
