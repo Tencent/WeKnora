@@ -3659,7 +3659,19 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
 
-	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
+	// Step 4: Claim every stored file the body references. An uploaded document
+	// rewrites its images into resource:// handles, and the knowledge-base file
+	// proxy serves a shared file only through an explicit owner_type='knowledge'
+	// binding to a live document — text that merely mentions a handle is never
+	// accepted as ownership evidence. The other ingestion paths (pasted content,
+	// a chat answer saved as a document, temporary documents) already claim what
+	// they store; the document parser was the one entry point that never did,
+	// which left every uploaded image unreachable through the KB-scoped file
+	// route. Best-effort like the other call sites: the document is already
+	// parsed, so a missed claim logs and continues rather than failing the run.
+	s.bindContentResources(ctx, knowledge.TenantID, knowledge.ID, convertResult.MarkdownContent)
+
+	// Step 5: Process chunks (vectorize + index + enqueue async tasks)
 	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 
 	return nil
