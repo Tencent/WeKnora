@@ -2,10 +2,61 @@ package file
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
+
+// capturingRoundTripper records the first HTTP request URL the S3 client
+// would send, without dialing the network. That is the invariant #3269
+// actually cares about: PutObject must hit {bucket}.{host}/{key}, not
+// {host}/{bucket}/{key}. Checking UsePathStyle alone is not enough — PR
+// #3272 set that flag while HostnameImmutable still forced path-style.
+type capturingRoundTripper struct {
+	host string
+	path string
+}
+
+func (c *capturingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if c.host == "" {
+		c.host = req.URL.Host
+		c.path = req.URL.Path
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Etag": []string{`"test"`}},
+		Body:       io.NopCloser(strings.NewReader("")),
+		Request:    req,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+	}, nil
+}
+
+func putObjectWithCapture(t *testing.T, endpoint, region, bucket, key string) (host, path string) {
+	t.Helper()
+	trip := &capturingRoundTripper{}
+	opts := obsS3Options(endpoint, region, "ak", "sk")
+	opts.HTTPClient = &http.Client{Transport: trip}
+	opts.Retryer = aws.NopRetryer{}
+	client := s3.New(opts)
+	_, err := client.PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   strings.NewReader("hello"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+	if trip.host == "" {
+		t.Fatal("PutObject did not issue an HTTP request")
+	}
+	return trip.host, trip.path
+}
 
 func TestObsS3OptionsUseVirtualHostedStyleForDomainEndpoints(t *testing.T) {
 	const endpoint = "https://obs.cn-south-1.myhuaweicloud.com"
@@ -37,6 +88,36 @@ func TestObsS3OptionsKeepPathStyleForIPLiteralEndpoints(t *testing.T) {
 		if opts := obsS3Options(endpoint, "region", "ak", "sk"); !opts.UsePathStyle {
 			t.Fatalf("endpoint %q: expected defensive path-style fallback", endpoint)
 		}
+	}
+}
+
+func TestObsPutObjectUsesVirtualHostedURL(t *testing.T) {
+	host, path := putObjectWithCapture(t,
+		"https://obs.cn-south-1.myhuaweicloud.com",
+		"cn-south-1",
+		"my-bucket",
+		"42/kb/file.pdf",
+	)
+	if host != "my-bucket.obs.cn-south-1.myhuaweicloud.com" {
+		t.Fatalf("PutObject host = %q, want virtual-hosted my-bucket.obs.cn-south-1.myhuaweicloud.com", host)
+	}
+	if path != "/42/kb/file.pdf" {
+		t.Fatalf("PutObject path = %q, want /42/kb/file.pdf (bucket must not be in the path)", path)
+	}
+}
+
+func TestObsPutObjectKeepsPathStyleForIPLiteralEndpoints(t *testing.T) {
+	host, path := putObjectWithCapture(t,
+		"http://192.168.1.10:9000",
+		"region",
+		"my-bucket",
+		"key.bin",
+	)
+	if host != "192.168.1.10:9000" {
+		t.Fatalf("PutObject host = %q, want 192.168.1.10:9000", host)
+	}
+	if path != "/my-bucket/key.bin" {
+		t.Fatalf("PutObject path = %q, want /my-bucket/key.bin", path)
 	}
 }
 
