@@ -4,7 +4,10 @@
         'is-sidebar-collapsed': uiStore.sidebarCollapsed,
         'has-references-panel': referencesDrawerVisible,
         'has-sandbox-panel': sandboxPanel.visible.value,
-    }" :style="{ '--sandbox-panel-width': `${sandboxPanel.width.value}px` }">
+    }" :style="{
+        '--sandbox-panel-width': `${sandboxPanel.width.value}px`,
+        '--chat-composer-space': `${composerSpacePx}px`,
+    }">
         <ChatHeader v-if="!embeddedMode" :session="currentSession" :has-references-panel="referencesDrawerVisible" />
         <!-- 沙箱面板收起时：图标与左侧栏展开按钮同一套，位置镜像会话左上角三个点。 -->
         <div v-if="!embeddedMode && !sandboxPanel.visible.value" class="sandbox-header-toggle">
@@ -147,8 +150,8 @@
                 <t-icon name="chevron-down" size="20px" />
             </div>
         </transition>
-        <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
-            <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount"
+        <div ref="inputContainerRef" class="input-container" :class="{ 'is-embedded': embeddedMode }">
+            <InputField ref="inputFieldRef" :class="{ 'is-docked': !embeddedMode }" :auto-focus="focusComposerOnMount"
                 @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
                 @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                 @promote-steer="handlePromoteSteer"
@@ -302,6 +305,30 @@ const loadSessionAndHydrate = async (sid) => {
     }
 };
 const inputFieldRef = ref();
+const inputContainerRef = ref(null);
+const COMPOSER_SPACE_GAP_PX = 24;
+const composerSpacePx = ref(168);
+let composerSpaceObserver = null;
+
+const syncComposerSpace = (height) => {
+    if (props.embeddedMode) return;
+    composerSpacePx.value = Math.max(120, Math.ceil(height) + COMPOSER_SPACE_GAP_PX);
+};
+
+const bindComposerSpaceObserver = () => {
+    composerSpaceObserver?.disconnect();
+    composerSpaceObserver = null;
+    if (props.embeddedMode) return;
+    const el = inputContainerRef.value;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    composerSpaceObserver = new ResizeObserver((entries) => {
+        const height = entries[0]?.contentRect?.height || el.getBoundingClientRect().height;
+        syncComposerSpace(height);
+    });
+    composerSpaceObserver.observe(el);
+    const height = el.getBoundingClientRect().height;
+    if (height > 0) syncComposerSpace(height);
+};
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
@@ -1424,6 +1451,7 @@ onMounted(async () => {
     window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
     messagesList.splice(0);
     steerQueue.value = [];
+    nextTick(bindComposerSpaceObserver);
 
     // 初始化状态：加载历史消息时不应显示loading
     loading.value = false;
@@ -1466,6 +1494,8 @@ const clearData = () => {
     isImRecovering.value = false;
 }
 onUnmounted(() => {
+    composerSpaceObserver?.disconnect();
+    composerSpaceObserver = null;
     if (!props.embeddedMode) sessionActivity.detach(activitySessionId.value);
     activitySessionId.value = '';
     window.removeEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
@@ -1489,9 +1519,12 @@ onBeforeRouteUpdate((to, from, next) => {
 .chat {
     font-size: 20px;
     // 右侧不留 padding，滚动条贴到内容区最右缘
-    padding: 0 0 20px 20px;
+    padding: 0 0 0 20px;
     // 右侧抽屉让出的宽度。回到底部按钮按「剩余聊天列」居中，而不是整页 50%。
     --chat-right-inset: 0px;
+    // Leave the overlay scrollbar uncovered so the thumb can be dragged
+    // through the composer dock to the viewport bottom.
+    --chat-scrollbar-gutter: 8px;
     box-sizing: border-box;
     flex: 1;
     // The parent .platform-route-outlet is a flex column with min-height:0
@@ -1576,8 +1609,15 @@ onBeforeRouteUpdate((to, from, next) => {
     }
 
     &:not(.is-embedded) :deep(.answers-input) {
-        position: static;
-        transform: translateX(0);
+        position: relative;
+        bottom: auto;
+        left: auto;
+        transform: none;
+        z-index: 1;
+        width: 100%;
+        max-width: 960px;
+        margin: 0 auto;
+        pointer-events: auto;
 
         .t-textarea__inner {
             width: 100% !important;
@@ -1650,23 +1690,42 @@ onBeforeRouteUpdate((to, from, next) => {
     padding-top: 8px;
     box-sizing: border-box;
     overflow-y: auto;
-    // 使用系统原生滚动条（macOS 滚动时自动显示 overlay 滚动条，类似 ChatGPT）
-    scrollbar-width: auto;
-    scrollbar-color: auto;
-}
+    // 只要细滚动条，不要导轨
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.4) transparent;
 
-// 深色模式下 theme.css 对 * 做了 webkit 滚动条着色，这里恢复为系统默认
-:global(:root[theme-mode="dark"]) .chat_scroll_box {
-    &::-webkit-scrollbar-thumb {
-        background-color: initial !important;
-    }
-
-    &::-webkit-scrollbar-thumb:hover {
-        background-color: initial !important;
+    &::-webkit-scrollbar {
+        width: 6px;
     }
 
     &::-webkit-scrollbar-track {
-        background-color: initial !important;
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background-color: rgba(0, 0, 0, 0.4);
+        border-radius: 6px;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(0, 0, 0, 0.55);
+    }
+}
+
+// 深色模式 theme.css 用 !important 着色滚动条，这里盖掉导轨、只留滑块
+:global(:root[theme-mode="dark"]) .chat_scroll_box {
+    scrollbar-color: rgba(255, 255, 255, 0.4) transparent;
+
+    &::-webkit-scrollbar-thumb {
+        background-color: rgba(255, 255, 255, 0.4) !important;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+        background-color: rgba(255, 255, 255, 0.58) !important;
+    }
+
+    &::-webkit-scrollbar-track {
+        background-color: transparent !important;
     }
 }
 
@@ -1674,7 +1733,7 @@ onBeforeRouteUpdate((to, from, next) => {
     position: absolute;
     left: calc((100% - var(--chat-right-inset, 0px)) / 2);
     transform: translateX(-50%);
-    bottom: 140px;
+    bottom: calc(var(--chat-composer-space, 168px) + 8px);
     z-index: 10;
     width: 36px;
     height: 36px;
@@ -1745,15 +1804,36 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 .input-container {
-    min-height: 115px;
     flex-shrink: 0;
-    margin: 0 auto;
-    width: 100%;
-    max-width: 960px;
+    margin: 0;
+    // Must stay auto: with left+right also set, width:100% is over-constrained
+    // and CSS ignores `right`, so the composer would not move when the
+    // sandbox / references panel is resized.
+    width: auto;
+    max-width: none;
     box-sizing: border-box;
-    position: relative;
+    position: absolute;
+    left: 20px;
+    right: var(--chat-right-inset, 0px);
+    bottom: 0;
+    padding-bottom: 16px;
+    min-height: 0;
+    z-index: 5;
+    pointer-events: none;
+    // Opaque dock from the composer top to the viewport bottom so messages
+    // clip at the dialog's top edge. The last gutter stays transparent so
+    // the overlay scrollbar is still visible and draggable to the bottom.
+    background: linear-gradient(
+        to right,
+        var(--td-bg-color-container) calc(100% - var(--chat-scrollbar-gutter, 8px)),
+        transparent calc(100% - var(--chat-scrollbar-gutter, 8px))
+    );
 
     &.is-embedded {
+        position: relative;
+        left: auto;
+        right: auto;
+        bottom: auto;
         max-width: 100%;
         width: 100%;
         margin: 0;
@@ -1761,6 +1841,9 @@ onBeforeRouteUpdate((to, from, next) => {
         min-height: auto;
         box-sizing: border-box;
         overflow-x: hidden;
+        pointer-events: auto;
+        z-index: auto;
+        background: transparent;
     }
 }
 
@@ -1772,6 +1855,12 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     margin: 0 auto;
     width: 100%;
+    padding-bottom: var(--chat-composer-space, 168px);
+    box-sizing: border-box;
+
+    &.is-embedded {
+        padding-bottom: 16px;
+    }
 
     /*
       给每条消息加 layout/style containment：

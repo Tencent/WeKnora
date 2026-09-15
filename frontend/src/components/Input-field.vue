@@ -2965,6 +2965,17 @@ const getImgSrc = (url: string) => {
       max-width: 100%;
     }
   }
+
+  &.is-docked {
+    position: relative;
+    bottom: auto;
+    left: auto;
+    transform: none;
+    z-index: auto;
+    width: 100%;
+    max-width: 960px;
+    pointer-events: auto;
+  }
 }
 
 .steer-queue {
