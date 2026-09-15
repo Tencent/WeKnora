@@ -215,12 +215,9 @@ func (tr *installTranscript) Finish(ctx context.Context, runErr error) {
 	tr.save(ctx)
 }
 
-// RecordPrompt logs a follow-up instruction the installer was given mid-run.
-//
-// The transcript exists so one replay of the event log is the whole
-// conversation. A repair round whose instruction is missing reads as the agent
-// spontaneously deciding to install more packages, which is precisely the
-// moment someone is reading this to find out why.
+// RecordPrompt logs a follow-up instruction the installer was given mid-run,
+// such as the dependency-install prompt after a prompt-sourced skill has been
+// acquired.
 func (tr *installTranscript) RecordPrompt(prompt string) {
 	if tr == nil {
 		return
@@ -271,8 +268,8 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 		}
 	}
 	// One command is one step of the asymptotic progress. Muted runs (after
-	// the first round ends) stop counting so a repair round cannot drag the
-	// bar back under the stage anchors that govern it by then.
+	// the agent phase ends) stop counting so verification cannot drag the
+	// bar back under the 80 stage anchor.
 	steps, lastCmd := 0, ""
 	if !tr.progressMuted {
 		tr.toolCalls++
@@ -388,10 +385,10 @@ func (tr *installTranscript) onError(_ context.Context, evt event.Event) error {
 	return nil
 }
 
-// onComplete records what the round finished with. It deliberately emits no
-// terminal event: an install may run another installer round after
-// verification, and a console that saw "complete" would stop following before
-// that round began. Only Finish closes the stream.
+// onComplete records what the turn finished with. It deliberately emits no
+// terminal event: administrator guidance can continue the same install after
+// the engine reports complete, and a console that saw "complete" would stop
+// following. Only Finish closes the stream.
 func (tr *installTranscript) onComplete(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentCompleteData)
 	if !ok {
@@ -412,8 +409,8 @@ func (tr *installTranscript) onComplete(_ context.Context, evt event.Event) erro
 	if tr.composeAnswerLocked() == "" && data.FinalAnswer != "" {
 		tr.segmentLocked(evt.ID).content = data.FinalAnswer
 	}
-	// Summed rather than overwritten: an install that needed a repair round ran
-	// two engine turns, and its cost is both of them.
+	// Summed rather than overwritten: a turn that continued for administrator
+	// guidance ran more than one engine call, and its cost is all of them.
 	tr.totalSteps += data.TotalSteps
 	tr.totalDurationMs += data.TotalDurationMs
 	tr.mu.Unlock()
@@ -530,10 +527,9 @@ func installToolCallSummary(data event.AgentToolCallData) string {
 }
 
 // muteActivityProgress stops the asymptotic progress wherever it has reached.
-// Called once the first installer round ends: everything after it —
-// verification and any repair rounds — is covered by the explicit stage
-// anchors (agent_done 80, repairing 82), and tool calls from a repair round
-// publishing again would drag the bar back below those anchors.
+// Called once the installer agent stops: everything after it is verification,
+// covered by the agent_done anchor at 80. Further tool events must not drag
+// the bar back below that.
 func (tr *installTranscript) muteActivityProgress() {
 	if tr == nil {
 		return
