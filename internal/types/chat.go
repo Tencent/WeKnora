@@ -17,6 +17,20 @@ const (
 	PromptCacheStatusHit         PromptCacheStatus = "hit"
 )
 
+// ContextUsage attributes the last LLM request's prompt tokens to the kind of
+// content that held them. Totals are estimates (cl100k) unless Calibrate has
+// scaled the buckets to a provider-reported prompt_tokens count. Nested on
+// TokenUsage so it persists in the existing messages.usage JSON column.
+type ContextUsage struct {
+	SystemPrompt int `json:"system_prompt,omitempty"`
+	Tools        int `json:"tools,omitempty"`
+	Conversation int `json:"conversation,omitempty"`
+	MCP          int `json:"mcp,omitempty"`
+	Skills       int `json:"skills,omitempty"`
+	Total        int `json:"total,omitempty"`
+	Window       int `json:"window,omitempty"`
+}
+
 // TokenUsage holds token consumption statistics returned by the model API.
 type TokenUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -30,6 +44,9 @@ type TokenUsage struct {
 	CacheMissTokens  int               `json:"cache_miss_tokens,omitempty"`
 	CacheReported    bool              `json:"cache_reported"`
 	CacheStatus      PromptCacheStatus `json:"cache_status,omitempty"`
+	// Context is the last request's classified prompt breakdown. It is a
+	// snapshot, not a sum: Accumulate keeps the latest non-zero value.
+	Context ContextUsage `json:"context,omitempty"`
 }
 
 // SetPromptCacheUsage normalizes provider-specific cache counters into the
@@ -91,6 +108,9 @@ func (u *TokenUsage) Accumulate(other TokenUsage) {
 	u.CacheWriteTokens += other.CacheWriteTokens
 	u.CacheMissTokens += other.CacheMissTokens
 	u.CacheReported = u.CacheReported || other.CacheReported
+	if other.Context.Total > 0 || other.Context.Window > 0 {
+		u.Context = other.Context
+	}
 	switch {
 	case !u.CacheReported:
 		u.CacheStatus = mergeUnreportedCacheStatus(u.CacheStatus, other.CacheStatus)

@@ -101,11 +101,15 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		})
 	}
 
-	// The synthesis call is often the largest of the turn — fold its usage
-	// into the turn aggregate like every ReAct round.
+	// The synthesis call is often the last request of the turn — fold its
+	// usage into the aggregate and refresh the context snapshot from what
+	// was actually sent (no tool schemas; ToolChoice is "none").
+	promptTokens := 0
 	if llmResult.Usage != nil {
 		state.TurnUsage.Accumulate(*llmResult.Usage)
+		promptTokens = llmResult.Usage.PromptTokens
 	}
+	e.snapshotContextUsage(state, messages, nil, promptTokens)
 
 	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
@@ -180,9 +184,13 @@ func (e *AgentEngine) emitCompletionEvent(
 // reported usage so the field stays absent from the completion event and the
 // persisted message alike.
 func turnUsage(state *types.AgentState) *types.TokenUsage {
-	if state == nil || state.TurnUsage.TotalTokens == 0 {
+	if state == nil {
 		return nil
 	}
 	usage := state.TurnUsage
+	usage.Context = state.ContextUsage
+	if usage.TotalTokens == 0 && usage.Context.Total == 0 && usage.Context.Window == 0 {
+		return nil
+	}
 	return &usage
 }

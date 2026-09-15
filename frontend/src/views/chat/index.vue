@@ -158,6 +158,7 @@
                 @stop-confirmed="handleStopConfirmed"
                 @stop-failed="handleStopFailed" :isReplying="isReplying" :sessionId="session_id"
                 :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
+                :context-usage="latestContextUsage"
                 :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
         </div>
     </div>
@@ -203,6 +204,7 @@ import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
 import ChatQuestionMinimap from '@/components/chat/ChatQuestionMinimap.vue';
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
+import { latestContextUsage as pickLatestContextUsage } from '@/utils/contextUsage';
 import ChatHeader from '@/components/ChatHeader.vue';
 import {
     notifySessionMutation,
@@ -307,6 +309,7 @@ const sessionArtifacts = computed(() => collectSessionArtifacts(messagesList));
 const sessionArtifactsCollecting = computed(() =>
     messagesList.some((message) => isCollectingSkillArtifacts(message)),
 );
+const latestContextUsage = computed(() => pickLatestContextUsage(messagesList));
 const steerQueue = ref([]);
 const isReplying = ref(false);
 const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID

@@ -18083,6 +18083,32 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.ContextUsage": {
+            "type": "object",
+            "properties": {
+                "conversation": {
+                    "type": "integer"
+                },
+                "mcp": {
+                    "type": "integer"
+                },
+                "skills": {
+                    "type": "integer"
+                },
+                "system_prompt": {
+                    "type": "integer"
+                },
+                "tools": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "window": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest": {
             "type": "object",
             "required": [
@@ -22274,6 +22300,14 @@ const docTemplate = `{
                 },
                 "completion_tokens": {
                     "type": "integer"
+                },
+                "context": {
+                    "description": "Context is the last request's classified prompt breakdown. It is a\nsnapshot, not a sum: Accumulate keeps the latest non-zero value.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ContextUsage"
+                        }
+                    ]
                 },
                 "prompt_tokens": {
                     "type": "integer"

@@ -102,6 +102,23 @@ func TestTokenUsageValueScanRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTokenUsageContextRoundTrip(t *testing.T) {
+	original := &TokenUsage{PromptTokens: 80, CompletionTokens: 10, TotalTokens: 90}
+	original.Context = ContextUsage{SystemPrompt: 20, Tools: 10, Conversation: 50, Total: 80, Window: 200000}
+
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var restored TokenUsage
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if restored != *original {
+		t.Fatalf("context round trip diverged: got %+v want %+v", restored, *original)
+	}
+}
+
 func TestTokenUsageValueNilAndScanNull(t *testing.T) {
 	var u *TokenUsage
 	value, err := u.Value()

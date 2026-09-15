@@ -666,6 +666,23 @@ definitions:
         description: 'Summarize threshold: number of messages before summarization'
         type: integer
     type: object
+  github_com_Tencent_WeKnora_internal_types.ContextUsage:
+    properties:
+      conversation:
+        type: integer
+      mcp:
+        type: integer
+      skills:
+        type: integer
+      system_prompt:
+        type: integer
+      tools:
+        type: integer
+      total:
+        type: integer
+      window:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.CreateOrganizationRequest:
     properties:
       avatar:
@@ -4018,6 +4035,12 @@ definitions:
         type: integer
       completion_tokens:
         type: integer
+      context:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ContextUsage'
+        description: |-
+          Context is the last request's classified prompt breakdown. It is a
+          snapshot, not a sum: Accumulate keeps the latest non-zero value.
       prompt_tokens:
         type: integer
       total_tokens:

@@ -4688,6 +4688,18 @@ export default {
     kbLockedByAgent: 'Knowledge base configuration is locked by the current agent',
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
+    contextUsage: {
+      title: 'Использование контекста',
+      used: 'Использовано {used} / {window}',
+      empty: 'Отправьте сообщение, чтобы увидеть разбивку контекста',
+      categories: {
+        system_prompt: 'System Prompt',
+        tools: 'Tools',
+        conversation: 'Conversation',
+        mcp: 'MCP',
+        skills: 'Skills',
+      },
+    },
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
     goToAgentSettings: 'Go to agent settings',
     messages: {

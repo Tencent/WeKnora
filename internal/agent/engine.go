@@ -66,6 +66,10 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
+	// skillsPrompt is the skills directory frozen into this run's system
+	// prompt. Attribution uses this needle so a later skill install cannot
+	// invent a Skills bucket that the model never saw.
+	skillsPrompt string
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -160,10 +164,28 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
+	e.skillsPrompt = ""
 	for _, section := range sections {
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
+		if section.Name == "skills" {
+			e.skillsPrompt = section.Content
+		}
 	}
 	return renderSystemPromptSections(sections)
+}
+
+func (e *AgentEngine) skillsPromptContent() string {
+	if e == nil {
+		return ""
+	}
+	return e.skillsPrompt
+}
+
+func (e *AgentEngine) contextWindowTokens() int {
+	if e != nil && e.config != nil && e.config.MaxContextTokens > 0 {
+		return e.config.MaxContextTokens
+	}
+	return types.DefaultMaxContextTokens
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
@@ -667,6 +689,7 @@ func (e *AgentEngine) runReActIteration(
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
 	e.logContextPrediction(ctx, round, *messagesPtr, tools, currentTokens)
+	e.snapshotContextUsage(state, *messagesPtr, tools, 0)
 	common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 		"iteration":      state.CurrentRound,
 		"round":          round,
@@ -698,6 +721,7 @@ func (e *AgentEngine) runReActIteration(
 			round, resp.FinishReason, resp.Usage.CompletionTokens, e.getCompletionTokenBudget())
 		*messagesPtr = e.forceCompaction(ctx, *messagesPtr, round)
 		e.lastSentMsgCount = len(*messagesPtr)
+		e.snapshotContextUsage(state, *messagesPtr, tools, 0)
 		resp, err = e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID)
 		if err != nil {
 			retErr = err
@@ -712,6 +736,7 @@ func (e *AgentEngine) runReActIteration(
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)
+		state.ContextUsage.Calibrate(response.Usage.PromptTokens)
 		logger.Infof(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d, "+
 			"cache_read=%d, cache_write=%d, cache_hit_rate=%.1f%%, cache_status=%s",
 			round, response.Usage.PromptTokens,

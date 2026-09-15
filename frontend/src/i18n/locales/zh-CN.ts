@@ -4690,6 +4690,18 @@ export default {
     kbLockedByAgent: '当前智能体已锁定知识库配置',
     kbDisabledByAgent: '当前智能体已禁用知识库功能',
     modelLockedByAgent: '当前智能体已锁定模型配置',
+    contextUsage: {
+      title: '上下文用量',
+      used: '已使用 {used} / {window}',
+      empty: '发送一条消息后即可查看上下文占用',
+      categories: {
+        system_prompt: 'System Prompt',
+        tools: 'Tools',
+        conversation: 'Conversation',
+        mcp: 'MCP',
+        skills: 'Skills',
+      },
+    },
     imageUploadDisabledByAgent: '当前智能体未启用图片上传',
     goToAgentSettings: '去设置智能体',
     messages: {
