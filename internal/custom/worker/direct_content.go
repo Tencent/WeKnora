@@ -276,6 +276,14 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 					continue
 				}
 			}
+			if err := summary.BoundOrchestrationProfile(&document); err != nil {
+				validationErr = fmt.Errorf("bound %s orchestration profile: %w", h.Job, err)
+				continue
+			}
+			if err := summary.ValidateOrchestrationProfile(document, knownChunkIDs); err != nil {
+				validationErr = fmt.Errorf("validate resolved %s orchestration profile: %w", h.Job, err)
+				continue
+			}
 			generatedSummaryType = document.VideoType
 			validationErr = nil
 			break

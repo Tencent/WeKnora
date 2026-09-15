@@ -88,6 +88,10 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	videoID := strings.TrimSpace(doc.VideoID)
 	generation := strings.TrimSpace(doc.TranscriptGeneration)
 	result := SourceResult{VideoID: videoID, TranscriptGeneration: generation, KnowledgeBaseID: w.KBID, ContentHash: hash}
+	sourceContent := SourceContent(doc, documentJSON, hash)
+	if len([]byte(sourceContent)) > MaxSourceKnowledgeContentBytes {
+		return result, sourceValidation(SourceValidationTooLarge, fmt.Sprintf("source document exceeds WeKnora manual-knowledge limit: %d bytes", len([]byte(sourceContent))))
+	}
 	legacyRepair := false
 
 	// A process-local lock avoids two workers racing between reconciliation and
@@ -198,7 +202,7 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	if knowledge == nil {
 		wikiEnabled := false
 		value, createErr := w.Gateway.CreateManualKnowledge(ctx, w.KBID, weknora.ManualKnowledgeInput{
-			Title: title, Content: SourceContent(doc, documentJSON, hash), Status: "publish", Channel: "api",
+			Title: title, Content: sourceContent, Status: "publish", Channel: "api",
 			ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
 		})
 		if createErr != nil {
@@ -382,6 +386,6 @@ func evidenceOrdinal(doc FullVideoDocument, chapterIndex, paragraphIndex, markIn
 	return ordinal + markIndex
 }
 
-func SourceContent(doc FullVideoDocument, documentJSON, hash string) string {
-	return fmt.Sprintf("---\ntype: video_transcript_source\nsource_video_id: %s\ntranscript_generation: %s\nschema_version: %d\ncontent_sha256: %s\n---\n\n# %s\n\n```json\n%s\n```\n", doc.VideoID, doc.TranscriptGeneration, doc.SchemaVersion, hash, doc.Title, documentJSON)
+func SourceContent(doc FullVideoDocument, _ string, hash string) string {
+	return fmt.Sprintf("---\ntype: video_transcript_source\nsource_video_id: %s\ntranscript_generation: %s\nschema_version: %d\ncontent_sha256: %s\n---\n\n# %s\n\n```json\n%s\n```\n", doc.VideoID, doc.TranscriptGeneration, doc.SchemaVersion, hash, doc.Title, compactSourceDocumentJSON(doc))
 }
