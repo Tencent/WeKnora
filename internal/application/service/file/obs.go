@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,33 +41,28 @@ func (r *obsEndpointResolver) ResolveEndpoint(region string, options s3.Endpoint
 	}, nil
 }
 
-func NewObsFileService(
-	endpoint, region, accessKeyID, secretAccessKey, bucketName string,
-	pathPrefix string,
-) (interfaces.FileService, error) {
+// newObsClient creates a bare obsFileService with the SDK client initialised.
+// Shared by NewObsFileService and CheckObsConnectivity so tests can inspect
+// client options without contacting a real bucket.
+func newObsClient(endpoint, region, accessKeyID, secretAccessKey, bucketName, pathPrefix string) (*obsFileService, error) {
 	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
 		return nil, fmt.Errorf("unsafe OBS endpoint: %w", err)
 	}
 
+	// Huawei OBS rejected path-style PutObject with 404 NoSuchKey even when
+	// HeadBucket succeeded. Virtual-hosted style is required:
+	// {bucket}.obs.{region}.myhuaweicloud.com/{key}
+	// HostnameImmutable keeps the custom Huawei host from being rewritten.
 	client := s3.New(s3.Options{
 		Region:           region,
 		EndpointResolver: &obsEndpointResolver{url: endpoint},
 		Credentials:      credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
-		UsePathStyle:     true,
-		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
+		UsePathStyle:     false,
+		// OBS is S3-compatible and commonly rejects the SDK's default trailing
+		// checksum negotiation. Match the non-AWS branch in s3.go.
+		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
+		HTTPClient:                 utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
 	})
-
-	_, err := client.HeadBucket(context.Background(), &s3.HeadBucketInput{
-		Bucket: aws.String(bucketName),
-	})
-	if err != nil {
-		_, createErr := client.CreateBucket(context.Background(), &s3.CreateBucketInput{
-			Bucket: aws.String(bucketName),
-		})
-		if createErr != nil {
-			fmt.Printf("Warning: bucket %s may not exist or cannot be created: %v\n", bucketName, createErr)
-		}
-	}
 
 	proxyDomain := strings.TrimSuffix(os.Getenv("OBS_PROXY_DOMAIN"), "/")
 
@@ -80,22 +76,39 @@ func NewObsFileService(
 	}, nil
 }
 
+func NewObsFileService(
+	endpoint, region, accessKeyID, secretAccessKey, bucketName string,
+	pathPrefix string,
+) (interfaces.FileService, error) {
+	svc, err := newObsClient(endpoint, region, accessKeyID, secretAccessKey, bucketName, pathPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = svc.client.HeadBucket(context.Background(), &s3.HeadBucketInput{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		_, createErr := svc.client.CreateBucket(context.Background(), &s3.CreateBucketInput{
+			Bucket: aws.String(bucketName),
+		})
+		if createErr != nil {
+			fmt.Printf("Warning: bucket %s may not exist or cannot be created: %v\n", bucketName, createErr)
+		}
+	}
+
+	return svc, nil
+}
+
 func CheckObsConnectivity(ctx context.Context, endpoint, region, accessKey, secretKey, bucketName string) error {
-	if err := utils.ValidateURLForSSRF(endpoint); err != nil {
-		return fmt.Errorf("unsafe OBS endpoint: %w", err)
+	svc, err := newObsClient(endpoint, region, accessKey, secretKey, bucketName, "")
+	if err != nil {
+		return err
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	client := s3.New(s3.Options{
-		Region:           region,
-		EndpointResolver: &obsEndpointResolver{url: endpoint},
-		Credentials:      credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
-		UsePathStyle:     true,
-		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
-	})
-
-	_, err := client.HeadBucket(checkCtx, &s3.HeadBucketInput{
+	_, err = svc.client.HeadBucket(checkCtx, &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err != nil {
@@ -236,7 +249,24 @@ func (s *obsFileService) GetFileURL(ctx context.Context, filePath string) (strin
 		return s.proxyDomain + "/" + strings.TrimPrefix(objectKey, "/"), nil
 	}
 
-	return fmt.Sprintf("%s/%s/%s", s.endpoint, s.bucketName, strings.TrimPrefix(objectKey, "/")), nil
+	return virtualHostedOBSURL(s.endpoint, s.bucketName, objectKey)
+}
+
+// virtualHostedOBSURL builds {scheme}://{bucket}.{host}/{key} from a regional
+// OBS endpoint such as https://obs.cn-north-4.myhuaweicloud.com.
+func virtualHostedOBSURL(endpoint, bucket, objectKey string) (string, error) {
+	u, err := url.Parse(strings.TrimRight(endpoint, "/"))
+	if err != nil {
+		return "", fmt.Errorf("invalid OBS endpoint: %w", err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("invalid OBS endpoint: %s", endpoint)
+	}
+	u.Host = bucket + "." + u.Host
+	u.Path = "/" + strings.TrimPrefix(objectKey, "/")
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
 }
 
 // CopyFile copies an existing OBS object to a new knowledge-owned object using a
