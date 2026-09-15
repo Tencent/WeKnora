@@ -254,15 +254,28 @@ def _strip_chart_text_debris(text: str) -> str:
     return "\n".join(out)
 
 
-def _strip_arxiv_and_page_num_lines(text: str) -> str:
+def _strip_arxiv_and_page_num_lines(text: str, page_index: int | None = None) -> str:
+    """Strip arXiv banner lines and page numbers.
+
+    A bare 1-3 digit line is only a plausible page number at the first or
+    last non-empty line of a page — mid-body quantities in tables must
+    survive (issue #3223). When ``page_index`` is known, the value must
+    additionally match the page sequence (0- or 1-based); an edge-position
+    number that disagrees with the sequence is kept, erring on the side of
+    preserving body content.
+    """
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    non_empty = [i for i, ln in enumerate(lines) if ln.strip()]
+    edge = {non_empty[0], non_empty[-1]} if non_empty else set()
+    page_values = None if page_index is None else {page_index, page_index + 1}
     kept: list = []
-    for ln in lines:
+    for i, ln in enumerate(lines):
         t = ln.strip()
         if _ARXIV_LINE_RE.match(t):
             continue
-        if _PAGE_NUM_LINE_RE.match(t):
-            continue
+        if _PAGE_NUM_LINE_RE.match(t) and i in edge:
+            if page_values is None or int(t) in page_values:
+                continue
         if "arXiv:" in ln:
             ln = re.sub(r"\s*arXiv:\s*\S+\s*(?:\[[^\]]+\])?\s*[^\n]*", "", ln).strip()
             if not ln:
@@ -313,12 +326,18 @@ def _is_figure_interior_line(text: str) -> bool:
     return False
 
 
-def _postprocess_pdf_text(text: str) -> str:
+def _postprocess_pdf_text(
+    text: str,
+    has_charts: bool = False,
+    page_index: int | None = None,
+) -> str:
     if SANITIZE_PDF_TEXT:
         text = _sanitize_pdf_text(text)
-    text = _strip_arxiv_and_page_num_lines(text)
+    text = _strip_arxiv_and_page_num_lines(text, page_index)
     text = _strip_lines_above_figure_captions(text)
-    if STRIP_CHART_TEXT_DEBRIS:
+    # Chart debris can only originate from vector figures: strip numeric runs
+    # only when the page actually produced chart clips (issue #3223).
+    if STRIP_CHART_TEXT_DEBRIS and has_charts:
         text = _strip_chart_text_debris(text)
     return text
 
@@ -1533,7 +1552,11 @@ class PDFParser(BaseParser):
                             vector_clips[i] = clips
                             for ref_path, b64, _y, _cap in clips:
                                 images[ref_path] = b64
-                    text = _postprocess_pdf_text(text)
+                    text = _postprocess_pdf_text(
+                        text,
+                        has_charts=bool(vector_clips.get(i)),
+                        page_index=i,
+                    )
                     if cls == "text" and vector_clips.get(i):
                         text = _inject_figure_markdown_before_captions(
                             text, vector_clips[i]

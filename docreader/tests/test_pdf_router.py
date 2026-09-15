@@ -229,7 +229,7 @@ class PdfTextSanitizeTest(unittest.TestCase):
             "20-layer\n"
             "Figure 1. Training error on CIFAR-10.\n"
         )
-        out = _postprocess_pdf_text(raw)
+        out = _postprocess_pdf_text(raw, has_charts=True)
         self.assertIn("breakthroughs", out)
         self.assertNotIn("56-layer", out)
         self.assertIn("Figure 1.", out)
@@ -259,6 +259,71 @@ class PdfTextSanitizeTest(unittest.TestCase):
         out = _postprocess_pdf_text(raw)
         self.assertNotIn("arXiv:", out)
         self.assertIn("Body text.", out)
+
+
+class PdfPostprocessGatingTest(unittest.TestCase):
+    """issue #3223: postprocess must not drop body quantities on chart-less pages."""
+
+    def test_keeps_numeric_runs_without_charts(self):
+        from docreader.parser.pdf_parser import _postprocess_pdf_text
+
+        # The issue's isolated repro: no chart anywhere, yet the numeric run
+        # used to be deleted by the chart-debris stripper.
+        raw = "Quantity\n124\n237\n68\n91\nEnd of inventory."
+        out = _postprocess_pdf_text(raw)
+        for n in ("124", "237", "68", "91"):
+            self.assertIn(n, out.splitlines())
+
+    def test_still_strips_axis_run_with_charts(self):
+        from docreader.parser.pdf_parser import _postprocess_pdf_text
+
+        raw = "Body.\n0 1 2 3 4 5 6 0\n10\n20\n30\nTail."
+        out = _postprocess_pdf_text(raw, has_charts=True)
+        self.assertIn("Body.", out.splitlines())
+        self.assertIn("Tail.", out.splitlines())
+        self.assertNotIn("0 1 2 3 4 5 6 0", out)
+        self.assertNotIn("10", out.splitlines())
+        self.assertNotIn("20", out.splitlines())
+
+    def test_table_page_quantities_survive(self):
+        from docreader.parser.pdf_parser import _postprocess_pdf_text
+
+        # Layout reconstruction places table cells on their own lines; the
+        # quantities are bare 1-3 digit lines in mid-body position.
+        raw = (
+            "Inventory sample\n"
+            "FILE-OAK-9357\n"
+            "Item  Quantity\n"
+            "Aster\n124\n"
+            "Willow\n237\n"
+            "Hazel\n68\n"
+            "Rowan\n91\n"
+            "TAIL-5826\n"
+        )
+        out = _postprocess_pdf_text(raw, page_index=0)
+        for token in ("124", "237", "68", "91", "FILE-OAK-9357", "TAIL-5826"):
+            self.assertIn(token, out)
+
+    def test_page_numbers_only_at_page_edges_and_matching_sequence(self):
+        from docreader.parser.pdf_parser import _postprocess_pdf_text
+
+        # Mid-body bare number stays even on a page that has a real page number.
+        out = _postprocess_pdf_text("Body start.\n99\nBody end.", page_index=0)
+        self.assertIn("99", out.splitlines())
+
+        # Leading/trailing numbers matching the page sequence are page numbers.
+        out = _postprocess_pdf_text("2\nBody text.", page_index=1)
+        self.assertNotIn("2", out.splitlines())
+        out = _postprocess_pdf_text("Body text.\n3", page_index=2)
+        self.assertNotIn("3", out.splitlines())
+
+        # Edge position but the value disagrees with the page sequence: keep it.
+        out = _postprocess_pdf_text("Body text.\n91", page_index=2)
+        self.assertIn("91", out.splitlines())
+
+        # Without page context, edge position alone still identifies a page number.
+        out = _postprocess_pdf_text("Body.\n7")
+        self.assertNotIn("7", out.splitlines())
 
 
 class PlainWellFormedTest(unittest.TestCase):
