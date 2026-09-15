@@ -273,6 +273,11 @@
                 :label="configFieldText(option.label_key, option.label)"
               />
             </t-select>
+            <t-input
+              v-else
+              v-model="providerForm.parameters.extra_config[field.key]"
+              :placeholder="configFieldText(field.label_key, field.label)"
+            />
             <p v-if="field.description" class="form-desc">
               {{ configFieldText(field.description_key, field.description) }}
             </p>
