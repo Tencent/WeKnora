@@ -1,27 +1,26 @@
 package tools
 
-import "regexp"
-
-// thinkBlockRe matches <think>…</think> blocks that some models embed in content.
-// Uses (?s) flag so . matches newlines.
-var thinkBlockRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
-
-// StripThinkBlocks removes <think>…</think> blocks from LLM output content.
-// Some models (DeepSeek, Qwen, etc.) embed chain-of-thought reasoning inside
-// <think> tags in the content field. These should be stripped before:
+// StripThinkBlocks removes top-level <think>…</think> blocks from LLM output
+// content. Some models (DeepSeek, Qwen, etc.) embed chain-of-thought reasoning
+// inside <think> tags in the content field. These should be stripped before:
 //   - Displaying content to users
 //   - Storing content in agent state / context manager
 //   - Emitting content via EventBus
+//
+// Think-tag markup inside fenced code blocks (``` / ~~~) or inline code spans
+// is literal document content and is preserved (#3132) — the same rule the
+// streaming ThinkStreamSplitter and the frontend parser apply. An unterminated
+// trailing <think> block is treated as reasoning and dropped as well.
 //
 // Returns the cleaned string, or empty string if input is empty or becomes empty.
 func StripThinkBlocks(content string) string {
 	if content == "" {
 		return ""
 	}
-	cleaned := thinkBlockRe.ReplaceAllString(content, "")
-	// Trim leading/trailing whitespace that may remain after removal
-	result := trimWhitespace(cleaned)
-	return result
+	sp := NewThinkStreamSplitter()
+	_, answer := sp.Feed(content)
+	_, tail := sp.Flush()
+	return trimWhitespace(answer + tail)
 }
 
 // trimWhitespace trims leading and trailing whitespace without importing strings.
