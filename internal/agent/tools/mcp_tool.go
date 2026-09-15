@@ -31,6 +31,8 @@ type MCPTool struct {
 	schemaOnce             sync.Once
 	schema                 *jsonschema.Schema
 	schemaErr              error
+	registeredName         string
+	serverInstructions     string
 }
 
 // NewMCPTool creates a new MCP tool wrapper. authWaitTimeoutSeconds carries the
@@ -58,6 +60,9 @@ func NewMCPTool(
 //
 // Note: OpenAI API requires tool names to match ^[a-zA-Z0-9_-]+$ and max 64 chars.
 func (t *MCPTool) Name() string {
+	if t.registeredName != "" {
+		return t.registeredName
+	}
 	serviceName := sanitizeName(t.service.Name)
 	toolName := sanitizeName(t.mcpTool.Name)
 	name := fmt.Sprintf("mcp_%s_%s", serviceName, toolName)
@@ -102,6 +107,34 @@ func (t *MCPTool) Parameters() json.RawMessage {
 		"type": "object",
 		"properties": {}
 	}`)
+}
+
+// serviceCallTimeout returns the MCP service's configured per-call timeout
+// (advanced_config.timeout, in seconds), or 0 when unset or not positive.
+func (t *MCPTool) serviceCallTimeout() time.Duration {
+	if t.service == nil || t.service.AdvancedConfig == nil || t.service.AdvancedConfig.Timeout <= 0 {
+		return 0
+	}
+	return time.Duration(t.service.AdvancedConfig.Timeout) * time.Second
+}
+
+// callToolTimeout returns the timeout governing the actual MCP CallTool window.
+// The agent engine derives the per-tool budget from a blanket 60s
+// (toolExecutionTimeout in internal/agent), while the service-level
+// advanced_config.timeout was only honored by the transport layers — a service
+// configured with a longer timeout still had every call cancelled at 60s (#3135).
+// The service timeout therefore extends the engine window when it is longer; it
+// never shortens it, so services without an explicit (longer) timeout keep
+// today's behavior and shorter values stay enforced where they already apply
+// (the HTTP transport timeout in internal/mcp/client.go).
+func (t *MCPTool) callToolTimeout(engineTimeout time.Duration) time.Duration {
+	if engineTimeout <= 0 {
+		engineTimeout = 60 * time.Second
+	}
+	if st := t.serviceCallTimeout(); st > engineTimeout {
+		return st
+	}
+	return engineTimeout
 }
 
 // Execute executes the MCP tool
@@ -196,12 +229,9 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				// Approval may have consumed most/all of the per-tool exec budget set by the
 				// agent engine (act.go). Re-derive a fresh tool-exec ctx from ApprovalCtx so
 				// the actual MCP CallTool gets a full timeout window. (issue #1173 follow-up)
+				// callToolTimeout honors the service's advanced_config.timeout (#3135).
 				if meta.ApprovalCtx != nil {
-					freshTimeout := meta.ExecTimeout
-					if freshTimeout <= 0 {
-						freshTimeout = 60 * time.Second
-					}
-					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, freshTimeout)
+					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
 					defer freshCancel()
 					ctx = freshCtx
 				}
@@ -215,6 +245,20 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	toolCallID := ""
 	if meta != nil {
 		toolCallID = meta.ToolCallID
+	}
+
+	// The service's advanced_config.timeout must govern the actual CallTool window
+	// (#3135): the agent engine derives the per-tool ctx from a blanket 60s budget
+	// (toolExecutionTimeout in internal/agent), so calls on services configured
+	// with a longer timeout were silently cancelled mid-flight even though the
+	// transport layers honor the value. Re-derive the window from ApprovalCtx —
+	// the round-level parent without the per-tool deadline. Skipped on the
+	// post-approval path, which already re-derived its window above and whose
+	// swapped ctx no longer carries the exec meta.
+	if meta != nil && meta.ApprovalCtx != nil {
+		callCtx, callCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
+		defer callCancel()
+		ctx = callCtx
 	}
 
 	connectAndCall := func(callCtx context.Context) (*mcp.CallToolResult, error) {
@@ -445,6 +489,58 @@ func sanitizeName(name string) string {
 	return result.String()
 }
 
+// MCPMetadataIO reads persisted directories and optionally writes a snapshot
+// listed from an already-authorized live connection. Put must not be used to
+// publish a partial tools/list.
+type MCPMetadataIO struct {
+	Get func(context.Context, uint64, string) (*types.MCPMetadata, error)
+	Put func(context.Context, uint64, string, []*types.MCPTool, string) error
+}
+
+func loadMCPDirectory(
+	loadCtx context.Context,
+	service *types.MCPService,
+	mcpManager *mcp.MCPManager,
+	gate approval.MCPApproval,
+	oauthSess *MCPOAuthSession,
+	metadata *MCPMetadataIO,
+	live bool,
+) ([]*types.MCPTool, string, error) {
+	if metadata == nil || metadata.Get == nil {
+		return loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+	}
+	tenant, _ := types.TenantIDFromContext(loadCtx)
+	if !live {
+		snapshot, err := metadata.Get(loadCtx, tenant, service.ID)
+		if err != nil {
+			return nil, "", err
+		}
+		if snapshot != nil && snapshot.Stale {
+			return nil, "", fmt.Errorf("MCP directory is stale; refresh Tools in Settings > MCP management")
+		}
+		if snapshot != nil {
+			return snapshot.Tools, snapshot.Instructions, nil
+		}
+	}
+	if service.AuthConfig.IsOAuth() {
+		if _, ok := ToolExecFromContext(loadCtx); !ok {
+			return nil, "", fmt.Errorf("MCP directory is missing; authorize this service, then refresh Tools")
+		}
+	}
+	definitions, instructions, err := loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+	if err != nil {
+		return nil, "", err
+	}
+	if metadata.Put != nil {
+		if persistErr := metadata.Put(loadCtx, tenant, service.ID, definitions, instructions); persistErr != nil {
+			logger.GetLogger(loadCtx).Warnf(
+				"Failed to persist MCP directory for service %s: %v", service.Name, persistErr,
+			)
+		}
+	}
+	return definitions, instructions, nil
+}
+
 // RegisterMCPTools installs a scoped directory and call proxy without connecting
 // to MCP servers or advertising their full schemas. The count is services, not
 // tools: discovery occurs on demand during tool execution.
@@ -456,15 +552,18 @@ func RegisterMCPTools(
 	gate approval.MCPApproval,
 	authWaitTimeoutSeconds int,
 	lookup MCPServiceLookup,
+	metadata *MCPMetadataIO,
 ) (int, error) {
 	catalog := newMCPCatalog(
 		ctx,
 		services,
 		gate,
-		func(loadCtx context.Context, service *types.MCPService) ([]*MCPTool, error) {
+		func(loadCtx context.Context, service *types.MCPService, live bool) ([]*MCPTool, error) {
 			meta, _ := ToolExecFromContext(loadCtx)
 			oauthSess := oauthSessionFromToolExec(loadCtx, meta).withAuthWaitTimeout(authWaitTimeoutSeconds)
-			definitions, err := loadMCPServiceTools(loadCtx, service, mcpManager, gate, oauthSess)
+			definitions, instructions, err := loadMCPDirectory(
+				loadCtx, service, mcpManager, gate, oauthSess, metadata, live,
+			)
 			if err != nil {
 				return nil, err
 			}
@@ -475,7 +574,9 @@ func RegisterMCPTools(
 					continue
 				}
 				seen[definition.Name] = true
-				tools = append(tools, NewMCPTool(service, definition, mcpManager, gate, authWaitTimeoutSeconds))
+				tool := NewMCPTool(service, definition, mcpManager, gate, authWaitTimeoutSeconds)
+				tool.serverInstructions = instructions
+				tools = append(tools, tool)
 			}
 			return tools, nil
 		},
@@ -503,7 +604,7 @@ func loadMCPServiceTools(
 	mcpManager *mcp.MCPManager,
 	gate approval.MCPApproval,
 	regOAuth *MCPOAuthSession,
-) ([]*types.MCPTool, error) {
+) ([]*types.MCPTool, string, error) {
 	const listToolsTimeout = 30 * time.Second
 	toolCallID := "mcp-discover-" + service.ID
 	if meta, ok := ToolExecFromContext(ctx); ok && meta != nil {
@@ -514,7 +615,7 @@ func loadMCPServiceTools(
 	)
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to create MCP client for service %s: %v", service.Name, err)
-		return nil, err
+		return nil, "", err
 	}
 
 	// For stdio transport, ensure connection is released after listing tools
@@ -543,7 +644,7 @@ func loadMCPServiceTools(
 		)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("Failed to reconnect MCP client for service %s: %v", service.Name, err)
-			return nil, err
+			return nil, "", err
 		}
 
 		retryCtx, retryCancel := context.WithTimeout(ctx, listToolsTimeout)
@@ -553,10 +654,14 @@ func loadMCPServiceTools(
 
 	if err != nil {
 		logger.GetLogger(ctx).Errorf("Failed to list tools from MCP service %s: %v", service.Name, err)
-		return nil, err
+		return nil, "", err
 	}
 
-	return mcpTools, nil
+	instructions := ""
+	if provider, ok := client.(interface{ ServerInstructions() string }); ok {
+		instructions = provider.ServerInstructions()
+	}
+	return mcpTools, instructions, nil
 }
 
 // MCPToolNamesByServiceID returns registered MCP tool names grouped by service ID.
@@ -571,6 +676,9 @@ func MCPToolNamesByServiceID(registry *ToolRegistry) map[string][]string {
 			continue
 		}
 		mcpTool, ok := tool.(*MCPTool)
+		if direct, directOK := tool.(*MCPRegisteredTool); directOK {
+			mcpTool, ok = direct.MCPTool, true
+		}
 		if !ok || mcpTool.service == nil {
 			continue
 		}

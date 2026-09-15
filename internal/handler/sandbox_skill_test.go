@@ -64,9 +64,13 @@ type fakeSandboxSkillService struct {
 	installConfig string
 	installBytes  []byte
 
-	reinstallTenant uint64
-	reinstallConfig string
-	reinstallSkill  string
+	reinstallTenant       uint64
+	reinstallConfig       string
+	reinstallSkill        string
+	reinstallInstructions []string
+	guidanceArgs          []string
+	guidanceTenant        uint64
+	guidanceErr           error
 
 	stopTenant uint64
 	stopConfig string
@@ -206,9 +210,10 @@ func (f *fakeSandboxSkillService) InstallSkillFromSource(
 }
 
 func (f *fakeSandboxSkillService) ReinstallSkill(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, tenantID uint64, configID, skillID string, instructions ...string,
 ) (string, error) {
 	f.reinstallTenant, f.reinstallConfig, f.reinstallSkill = tenantID, configID, skillID
+	f.reinstallInstructions = instructions
 	return f.installID, f.reinstallErr
 }
 
@@ -300,6 +305,8 @@ func newSkillTestRouter(h *SandboxSkillHandler) *gin.Engine {
 	r.GET("/sandbox-configs/:id/skills/:skillId/files", h.ListFiles)
 	r.GET("/sandbox-configs/:id/skills/:skillId/files/content", h.GetFile)
 	r.POST("/sandbox-configs/:id/skills/:skillId/reinstall", h.Reinstall)
+	r.POST("/sandbox-configs/:id/skills/:skillId/guidance", h.SteerInstall)
+	r.GET("/sandbox-configs/:id/skills/:skillId/guidance", h.InstallGuidance)
 	r.POST("/sandbox-configs/:id/skills/:skillId/stop", h.Stop)
 	r.PATCH("/sandbox-configs/:id/skills/:skillId", h.Patch)
 	r.DELETE("/sandbox-configs/:id/skills/:skillId", h.Delete)
@@ -975,6 +982,46 @@ func (m *transcriptStreamManager) GetEvents(
 	return out, len(m.events), nil
 }
 
+func (m *transcriptStreamManager) AppendSteerEvents(
+	_ context.Context, _, _ string, _ []interfaces.StreamEvent,
+) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) GetSteerEvents(
+	_ context.Context, _, _ string, from int,
+) ([]interfaces.StreamEvent, int, error) {
+	return nil, from, nil
+}
+
+func (m *transcriptStreamManager) UpdateSteerEventData(
+	context.Context, string, string, string, map[string]interface{},
+) (bool, error) {
+	return false, nil
+}
+
+func (m *transcriptStreamManager) DeleteSteerEvent(
+	context.Context, string, string, string,
+) (bool, error) {
+	return false, nil
+}
+
+func (m *transcriptStreamManager) SetLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) ClaimLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) GetLiveRun(context.Context, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (m *transcriptStreamManager) ClearLiveRun(context.Context, string, string) error {
+	return nil
+}
+
 func (m *transcriptStreamManager) readKey() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1227,4 +1274,72 @@ func TestSandboxSkillGetFileInvalidPathReturns400(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 	require.Equal(t, "../secret", svc.filePath)
+}
+
+func (f *fakeSandboxSkillService) InstallGuidance(
+	context.Context,
+	uint64,
+	string,
+	string,
+) (*service.SkillInstallGuidanceState, error) {
+	return &service.SkillInstallGuidanceState{}, nil
+}
+
+func (f *fakeSandboxSkillService) SteerInstall(
+	_ context.Context,
+	tenantID uint64,
+	configID, skillID, expectedID, steerID, content string,
+) error {
+	f.guidanceTenant = tenantID
+	f.guidanceArgs = []string{configID, skillID, expectedID, steerID, content}
+	return f.guidanceErr
+}
+
+func TestSandboxSkillGuidancePinsTheAuthorizedTargetAndRun(t *testing.T) {
+	svc := &fakeSandboxSkillService{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(
+		w,
+		httptest.NewRequest(
+			http.MethodPost,
+			"/sandbox-configs/cfg-a/skills/skill-1/guidance",
+			strings.NewReader(`{"expected_message_id":"run-1","steer_id":"id-1","content":"Install bsk"}`),
+		),
+	)
+	require.Equal(t, http.StatusAccepted, w.Code)
+	require.Equal(t, testSkillTenantID, svc.guidanceTenant)
+	require.Equal(t, []string{"cfg-a", "skill-1", "run-1", "id-1", "Install bsk"}, svc.guidanceArgs)
+}
+
+func TestSandboxSkillGuidanceRejectsMissingRun(t *testing.T) {
+	svc := &fakeSandboxSkillService{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(
+		w,
+		httptest.NewRequest(
+			http.MethodPost,
+			"/sandbox-configs/cfg-a/skills/skill-1/guidance",
+			strings.NewReader(`{"content":"Install bsk"}`),
+		),
+	)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Empty(t, svc.guidanceArgs)
+}
+
+func TestSandboxSkillReinstallForwardsInstructions(t *testing.T) {
+	svc := &fakeSandboxSkillService{installID: "skill-1"}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(
+		w,
+		httptest.NewRequest(
+			http.MethodPost,
+			"/sandbox-configs/cfg-a/skills/skill-1/reinstall",
+			strings.NewReader(`{"instructions":"Use the official CLI installer"}`),
+		),
+	)
+	require.Equal(t, http.StatusAccepted, w.Code)
+	require.Equal(t, []string{"Use the official CLI installer"}, svc.reinstallInstructions)
 }

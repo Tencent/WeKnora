@@ -16,6 +16,8 @@ import (
 type ToolRegistry struct {
 	tools             map[string]types.Tool
 	deferred          map[string]bool
+	mcpDirect         bool // Full exposure is an explicit compatibility path.
+	mcpPrepared       bool
 	maxToolOutputSize int // maximum chars for tool output (0 = use DefaultMaxToolOutput)
 }
 
@@ -165,6 +167,13 @@ func (r *ToolRegistry) ExecuteTool(
 		}, err
 	}
 
+	if direct, ok := tool.(*MCPRegisteredTool); ok {
+		// Authorization precedes schema validation: even parameter-error details
+		// must not expose another engine principal's registered tool definition.
+		if err := direct.catalog.authorize(ctx); err != nil {
+			return mcpDiscoveryFailure(err, "unavailable")
+		}
+	}
 	return r.execute(ctx, tool, args)
 }
 
@@ -192,6 +201,9 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	}
 	if len(validationErrs) > 0 {
 		errMsg := FormatValidationErrors(validationErrs)
+		if name == ToolCallMCPTool {
+			errMsg += mcpCallArgumentsHint
+		}
 		if name == ToolWriteSandboxFile {
 			errMsg += writeSandboxMissingFieldHint
 		}

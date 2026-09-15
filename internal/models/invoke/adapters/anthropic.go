@@ -73,6 +73,13 @@ type anthropicContentBlock struct {
 	Type         string                 `json:"type"`
 	Text         string                 `json:"text,omitempty"`
 	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
+	// Tool-use shapes (see anthropic_tools.go): tool_use blocks carry
+	// ID/Name/Input; tool_result blocks carry ToolUseID/Content.
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   any             `json:"content,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -81,13 +88,15 @@ type anthropicMessage struct {
 }
 
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	Stream      bool               `json:"stream,omitempty"`
-	System      any                `json:"system,omitempty"`
-	Messages    []anthropicMessage `json:"messages"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	TopP        *float64           `json:"top_p,omitempty"`
+	Model       string               `json:"model"`
+	MaxTokens   int                  `json:"max_tokens"`
+	Stream      bool                 `json:"stream,omitempty"`
+	System      any                  `json:"system,omitempty"`
+	Messages    []anthropicMessage   `json:"messages"`
+	Temperature *float64             `json:"temperature,omitempty"`
+	TopP        *float64             `json:"top_p,omitempty"`
+	Tools       []anthropicTool      `json:"tools,omitempty"`
+	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
 	// Thinking carries the Messages-API thinking block. The API requires
 	// max_tokens > thinking.budget_tokens; BuildChatRequest enforces this.
 	Thinking *anthropicThinkingConfig `json:"thinking,omitempty"`
@@ -100,8 +109,11 @@ type anthropicThinkingConfig struct {
 
 type anthropicResponse struct {
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		ID    string          `json:"id"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
@@ -113,14 +125,17 @@ type anthropicResponse struct {
 }
 
 type anthropicStreamEvent struct {
-	Type    string `json:"type"`
-	Message *struct {
+	Type         string                 `json:"type"`
+	Index        int                    `json:"index"`
+	ContentBlock *anthropicContentBlock `json:"content_block,omitempty"`
+	Message      *struct {
 		Usage anthropicUsageFields `json:"usage"`
 	} `json:"message,omitempty"`
 	Delta *struct {
-		Type       string `json:"type"`
-		Text       string `json:"text"`
-		StopReason string `json:"stop_reason"`
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		StopReason  string `json:"stop_reason"`
+		PartialJSON string `json:"partial_json"`
 	} `json:"delta,omitempty"`
 	Usage *anthropicUsageFields `json:"usage,omitempty"`
 	Error *anthropicErrorFields `json:"error,omitempty"`
@@ -187,24 +202,59 @@ func (a *AnthropicAdapter) BuildChatRequest(
 		}
 	}
 
+	anthropicToolOptions(&req, opts)
+
 	var systemParts []string
 	for _, msg := range opts.Messages {
 		content := strings.TrimSpace(textFromParts(msg.Content))
-		if content == "" {
-			continue
-		}
 		// Anthropic remaps the neutral vocabulary (no system/tool roles on
 		// the wire); a new invoke.Role must be mapped here explicitly, not
-		// silently fall through.
+		// silently fall through. Tool calls ride content blocks (tool_use /
+		// tool_result via anthropic_tools.go), so emptiness is decided
+		// per-case, not by a pre-switch skip: an assistant turn that only
+		// calls tools has no text but must reach the wire, and empty tool
+		// results stay (every tool_use needs a result).
 		//exhaustive:enforce
 		switch msg.Role {
 		case invoke.RoleSystem:
-			systemParts = append(systemParts, content)
+			if content != "" {
+				systemParts = append(systemParts, content)
+			}
 		case invoke.RoleAssistant:
+			if len(msg.ToolCalls) > 0 {
+				req.Messages = append(req.Messages, anthropicMessage{
+					Role:    "assistant",
+					Content: anthropicToolUseBlocks(content, msg.ToolCalls),
+				})
+				continue
+			}
+			if content == "" {
+				continue
+			}
 			req.Messages = append(req.Messages, anthropicMessage{Role: "assistant", Content: content})
-		case invoke.RoleUser, invoke.RoleTool:
+		case invoke.RoleTool:
+			block := anthropicToolResultBlock(msg)
+			// Parallel results share one user message: fold into the previous
+			// message when it is already a tool_result block list.
+			if len(req.Messages) > 0 {
+				if last := &req.Messages[len(req.Messages)-1]; last.Role == "user" {
+					blocks, ok := last.Content.([]anthropicContentBlock)
+					if ok && len(blocks) > 0 && blocks[0].Type == "tool_result" {
+						last.Content = append(blocks, block)
+						continue
+					}
+				}
+			}
+			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: []anthropicContentBlock{block}})
+		case invoke.RoleUser:
+			if content == "" {
+				continue
+			}
 			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
 		default:
+			if content == "" {
+				continue
+			}
 			req.Messages = append(req.Messages, anthropicMessage{Role: "user", Content: content})
 		}
 	}
@@ -347,7 +397,18 @@ func (a *AnthropicAdapter) ParseChatResponse(_ int, header http.Header, body []b
 
 func parseAnthropicResponse(resp *anthropicResponse) *invoke.ChatResponse {
 	parts := make([]string, 0, len(resp.Content))
+	var calls []invoke.ToolCall
 	for _, part := range resp.Content {
+		if part.Type == "tool_use" {
+			calls = append(calls, invoke.ToolCall{
+				ID:   part.ID,
+				Type: "function",
+				Function: invoke.FunctionCall{
+					Name:      part.Name,
+					Arguments: string(part.Input),
+				},
+			})
+		}
 		if part.Type == "text" && part.Text != "" {
 			parts = append(parts, part.Text)
 		}
@@ -358,8 +419,11 @@ func parseAnthropicResponse(resp *anthropicResponse) *invoke.ChatResponse {
 	cacheWrite := valueOrZero(resp.Usage.CacheCreationInputTokens)
 	promptTokens := inputTokens + cacheRead + cacheWrite
 	return &invoke.ChatResponse{
-		Content:      strings.Join(parts, ""),
-		FinishReason: resp.StopReason,
+		Content: strings.Join(parts, ""),
+		// No tools were streamed here, so the empty tool stream folds the
+		// stop reason only (max_tokens → length, "" → incomplete).
+		FinishReason: (anthropicToolStream{}).finishReason(resp.StopReason),
+		ToolCalls:    calls,
 		Usage: invoke.Usage{
 			PromptTokens:     promptTokens,
 			CompletionTokens: outputTokens,

@@ -130,6 +130,42 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 	require.NotContains(t, result.ToolCalls[0].Function.Arguments, "res://")
 }
 
+// Reproduce an MCP-only turn following a property-management answer, with
+// unrelated FAQ entries injected by the bound-KB directory.
+func TestStreamMCPAnswerRejectsUnretrievedKnowledgeCitations(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: `KM文章<ref id="c`},
+		{ResponseType: types.ResponseTypeAnswer, Content: `3"/><ref id="c1"/><ref id="c2"/> 正确来源<ref id="w`},
+		{ResponseType: types.ResponseTypeAnswer, Content: `1"/>`, Done: true, FinishReason: "stop"},
+	}}}}
+	engine := newTestEngine(t, model)
+	engine.knowledgeBasesInfo = []*KnowledgeBaseInfo{{
+		ID: "faq-kb", Name: "FAQ TEST", Type: "faq", RecentDocs: []RecentDocInfo{
+			{ChunkID: "faq-1", Title: "什么是 WeKnora？", FAQStandardQuestion: "什么是 WeKnora？"},
+			{ChunkID: "faq-2", Title: "如何创建知识库？", FAQStandardQuestion: "如何创建知识库？"},
+		},
+	}}
+	userTurn := engine.RenderUserTurnContent("session", "KM上有趣的事情")
+	const article = "https://km.woa.com/articles/show/669504?jumpfrom=kmmcp"
+	toolResult := engine.modelContext.ModelToolResultForTool("call_mcp_tool", &types.ToolResult{
+		Success: true, Output: "标题: AI玩法\n摘要: Computer Use 案例\n链接: " + article,
+	})
+	var emitted strings.Builder
+	result, err := engine.streamLLMToEventBus(context.Background(), []invoke.Message{
+		{Role: "assistant", Content: []invoke.Part{{Text: `物业工作<kb doc="9月13日周报.docx" chunk_id="weekly-report" />`}}},
+		{Role: "user", Content: []invoke.Part{{Text: userTurn}}},
+		{Role: "tool", Name: "call_mcp_tool", Content: []invoke.Part{{Text: toolResult}}},
+	}, nil, func(chunk *types.StreamResponse, _ string) {
+		emitted.WriteString(chunk.Content)
+	})
+	require.NoError(t, err)
+	want := `KM文章 正确来源<web url="` + article + `" title="" />`
+	require.Equal(t, want, result.Content)
+	require.Equal(t, want, emitted.String(), "invalid references must not reach SSE even transiently")
+	require.Contains(t, model.calls[0][2].Text(), `<source id="w1"`)
+	require.Contains(t, model.calls[0][1].Text(), `chunk_id="c1"`, "FAQ handles remain available for retrieval")
+}
+
 // Reproduces the round that ended a 40-round conversation: the stream broke
 // while serializing a large write_sandbox_file call, after a short preamble had
 // already streamed. Treating that as a completed turn let the preamble stand in
@@ -473,11 +509,14 @@ func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
 	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
-func newTestEngine(t *testing.T, fake *invoketest.Fake, opts ...testEngineOption) *AgentEngine {
+func newTestEngine(t *testing.T, seam testLLMSeam, opts ...testEngineOption) *AgentEngine {
 	t.Helper()
-	if fake == nil {
+	switch s := seam.(type) {
+	case nil:
 		// No LLM interaction expected; a bare fake still provides a valid config.
-		fake = invoketest.New(t)
+		seam = invoketest.New(t)
+	case *mockChat:
+		s.start(t) // boots the fake provider + local wire server
 	}
 	cfg := &types.AgentConfig{
 		MaxIterations: 10,
@@ -488,7 +527,7 @@ func newTestEngine(t *testing.T, fake *invoketest.Fake, opts ...testEngineOption
 	}
 	engine := NewAgentEngine(
 		cfg,
-		fake.Config(),
+		seam.Config(),
 		nil,
 		event.NewEventBus(),
 		nil,
@@ -805,7 +844,7 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	})
 
 	state := &types.AgentState{}
-	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1")
+	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1", emptyMessages())
 
 	require.NoError(t, err)
 	require.Len(t, finalAnswerEvents, 2)

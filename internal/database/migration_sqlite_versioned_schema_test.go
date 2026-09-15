@@ -12,18 +12,24 @@ import (
 // versionedSQLiteTables is the set of tables that SQLite migrations must
 // create to stay in sync with the versioned (PostgreSQL) migrations:
 // 000041 task queue, 000053 system settings, 000055 processing spans,
-// 000063 knowledge multi-tags.
+// 000063 knowledge multi-tags, 000093 browser authorization.
 var versionedSQLiteTables = []string{
+	"memory_extraction_sessions",
 	"task_pending_ops",
 	"task_dead_letters",
 	"system_settings",
 	"knowledge_processing_spans",
 	"knowledge_tag_relations",
+	"browser_devices",
+	"browser_pairings",
+	"browser_task_interruptions",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
+	"memory_subjects":    {"extraction_state"},               // 000094
+	"memory_items":       {"replaces_id"},                    // 000094
 	"tenants":            {"api_principal_config"},           // 000064
 	"users":              {"is_system_admin"},                // 000053
 	"knowledges":         {"pending_subtasks_count"},         // 000056
@@ -34,7 +40,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_tool_approvals": {"enabled"},                        // 000091
 }
 
-const expectedSQLiteMigrationVersion = 13
+const expectedSQLiteMigrationVersion = 16
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

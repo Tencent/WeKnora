@@ -3,9 +3,31 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
+import vm from 'node:vm'
+import { computed, reactive } from 'vue'
+import { isAssistantTurnComplete } from '../../../utils/steerStreamFork.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(here, 'AgentStreamDisplay.vue'), 'utf8')
+
+test('streamed responses do not mount a hidden Wiki drawer that steals composer focus', () => {
+  assert.match(source, /<t-drawer v-if="wikiDrawerVisible" v-model:visible="wikiDrawerVisible"/)
+})
+
+test('steer seals animation while keeping the preceding timeline open without completion', () => {
+  const stateBlock = source.slice(source.indexOf('const isConversationDone ='), source.indexOf('const streamingMermaidSvgCache ='))
+  const collapseBlock = source.slice(source.indexOf('const shouldShowCollapsedSteps ='), source.indexOf('// Once the steps collapse'))
+  const props = reactive({ ragMode: false, session: { steerForked: true, is_completed: true } })
+  const state = vm.runInNewContext(`${stateBlock}\n${collapseBlock}\n({ isConversationDone, isSegmentDone, shouldShowCollapsedSteps })`, {
+    props, computed, isAssistantTurnComplete, intermediateStepsCount: { value: 2 },
+  })
+  assert.equal(state.isSegmentDone.value, true)
+  assert.equal(state.isConversationDone.value, false)
+  assert.equal(state.shouldShowCollapsedSteps.value, false)
+  props.session.steerForked = false
+  assert.equal(state.isConversationDone.value, true)
+  assert.equal(state.shouldShowCollapsedSteps.value, true)
+})
 
 test('agent steps use compact muted timeline styling', () => {
   assert.match(source, /--agent-step-text-size:\s*14px/)
@@ -50,7 +72,7 @@ test('streaming tool log uses the same timeline structure', () => {
 test('final done row uses an existing common translation key', () => {
   assert.match(source, /t\('common\.finish'\)/)
   assert.doesNotMatch(source, /\$t\('common\.done'\)/)
-  assert.match(source, /'tree-child-last': !isConversationDone && index === visibleIntermediateEvents\.length - 1/)
+  assert.match(source, /'tree-child-last': !isSegmentDone && index === visibleIntermediateEvents\.length - 1/)
 })
 
 test('tool rows use line icon names instead of legacy asset masks', () => {
@@ -71,7 +93,7 @@ test('tool rows use line icon names instead of legacy asset masks', () => {
 
 test('rag mode delegates pre-answer loading to pipeline and adds no row after answer starts', () => {
   assert.match(source, /if \(props\.ragMode \|\| hasAnswerStarted\.value\) return false/)
-  assert.match(source, /v-if="!ragMode \|\| displayEvents\.length > 0 \|\| showAgentActivityIndicator"/)
+  assert.match(source, /v-if="displayEvents\.length > 0 \|\| showMemoryRow \|\| showAgentActivityIndicator"/)
   assert.doesNotMatch(source, /ChatActivityIndicator/)
 })
 
@@ -119,7 +141,7 @@ test('pending tool rows do not render an extra axis dot', () => {
 })
 
 test('agent mode shows a native placeholder before answer whenever nothing is pending', () => {
-  assert.match(source, /if \(isConversationDone\.value\) return false/)
+  assert.match(source, /if \(isSegmentDone\.value\) return false/)
   assert.match(source, /return !hasPendingStreamingActivity\.value/)
   assert.match(source, /const hasPendingStreamingActivity = computed/)
   assert.match(source, /event\.thinking === true \|\| isThinkingActive\(event\.event_id\)/)

@@ -53,7 +53,10 @@ type CreateKnowledgeQARequest struct {
 	// AgentSourceTenantID disambiguates the share relation; the backend still
 	// verifies it.
 	AgentSourceTenantID uint64 `json:"agent_source_tenant_id,omitempty"`
-	WebSearchEnabled    bool   `json:"web_search_enabled"` // Whether web search is enabled for this request
+	// LocalBrowserEnabled toggles the local-browser source (upstream browser
+	// feature).
+	LocalBrowserEnabled bool `json:"local_browser_enabled"` // Browser source
+	WebSearchEnabled    bool `json:"web_search_enabled"`    // Whether web search is enabled for this request
 	// SummaryModelID overrides the session default summary model.
 	SummaryModelID string `json:"summary_model_id"`
 	// Optional per-request thinking level override (platform vocabulary).

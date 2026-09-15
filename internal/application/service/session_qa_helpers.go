@@ -179,13 +179,14 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	// Ensure defaults are set
 	customAgent.EnsureDefaults()
 
-	// Override summary config fields
-	if customAgent.Config.SystemPrompt != "" {
-		cm.SummaryConfig.Prompt = customAgent.Config.SystemPrompt
+	// Resolve inherited templates at request time; saved custom text remains authoritative.
+	systemPrompt, contextTemplate := s.cfg.ResolveCustomAgentPrompts(customAgent)
+	if systemPrompt != "" {
+		cm.SummaryConfig.Prompt = systemPrompt
 		logger.Infof(ctx, "Using custom agent's system_prompt")
 	}
-	if customAgent.Config.ContextTemplate != "" {
-		cm.SummaryConfig.ContextTemplate = customAgent.Config.ContextTemplate
+	if contextTemplate != "" {
+		cm.SummaryConfig.ContextTemplate = contextTemplate
 		logger.Infof(ctx, "Using custom agent's context_template")
 	}
 	if customAgent.Config.Temperature >= 0 {

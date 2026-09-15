@@ -41,12 +41,16 @@ type MCPServiceService interface {
 	// ListMCPServices lists all MCP services for a tenant
 	ListMCPServices(ctx context.Context, tenantID uint64) ([]*types.MCPService, error)
 
+	// ListMCPMetadataSummaries returns persisted directory counts for the list UI.
+	ListMCPMetadataSummaries(context.Context, uint64, []*types.MCPService) (map[string]*types.MCPMetadataSummary, error)
+
 	// ListMCPServicesByIDs retrieves multiple MCP services by IDs
 	ListMCPServicesByIDs(ctx context.Context, tenantID uint64, ids []string) ([]*types.MCPService, error)
 
 	// UpdateMCPService updates an MCP service. updateFields records presence for
 	// scalar fields whose zero values cannot represent omission. Supported keys
-	// are "name", "description", and "enabled"; a nil map means none of those
+	// are "name", "description", "usage_instructions", "enabled", "auth_type",
+	// and "api_key_header"; a nil map means none of those
 	// scalar fields were provided.
 	UpdateMCPService(
 		ctx context.Context,

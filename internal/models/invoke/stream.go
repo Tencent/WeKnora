@@ -95,8 +95,10 @@ func (OpenAIStreamBridge) TranslateStreamEvent(state *StreamBridgeState, chunk S
 	if choice.FinishReason != "" {
 		state.Set(stateFinishReason, choice.FinishReason)
 		// The Done event is emitted on the [DONE] sentinel; a chunk that only
-		// carries finish_reason yields no user-visible event.
-		return nil, nil
+		// carries finish_reason yields no user-visible event. Fall through all
+		// the same: the frame may ALSO carry tool_calls/content (several
+		// vendors end the tool round in one frame) — dropping them here would
+		// lose the round.
 	}
 	// Multi-event bridge (2026-09-13 裁定): a mixed delta emits EVERY payload
 	// it carries, in the v1 processStreamDelta order — tool_calls (one event

@@ -38,6 +38,7 @@ export interface CustomAgentConfig {
   agent_type?: AgentType;
   system_prompt?: string;           // 统一系统提示词（使用 {{web_search_status}} 占位符动态控制行为）
   system_prompt_id?: string;        // 引用的 prompt template ID（预设会填入此字段）
+  context_template_id?: string;     // Inherit the referenced context template when text is empty
   context_template?: string;        // 上下文模板（普通模式）
 
   // ===== 模型设置 =====
@@ -137,8 +138,7 @@ export interface CustomAgentConfig {
 
   // ===== 上下文模板 / 检索历史 / 数据分析 / FAQ / 联网抓取 / 查询理解 =====
   // （后端 custom_agent.go 全量替换 config——按本接口从零构造会清零这些
-  // 字段，2026-09-13 审查补齐镜像）
-  context_template_id?: string;
+  // 字段，2026-09-13 审查补齐镜像；context_template_id 声明见上方模型设置组）
   retain_retrieval_history?: boolean;
   data_analysis_enabled?: boolean;
   faq_priority_enabled?: boolean;

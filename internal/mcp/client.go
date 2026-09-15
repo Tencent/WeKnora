@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -66,11 +68,13 @@ type ClientConfig struct {
 
 // mcpGoClient wraps mark3labs/mcp-go client to implement our MCPClient interface
 type mcpGoClient struct {
-	service     *types.MCPService
-	client      *client.Client
-	oauth       *oauthRuntime
-	connected   bool
-	initialized bool
+	service      *types.MCPService
+	client       *client.Client
+	oauth        *oauthRuntime
+	connected    atomic.Bool
+	initialized  atomic.Bool
+	metadataMu   sync.RWMutex
+	instructions string
 }
 
 // applyAuthHeaders injects the auth header for the SELECTED strategy only —
@@ -332,7 +336,7 @@ func oauthCall[T any](ctx context.Context, c *mcpGoClient, operation func() (T, 
 
 // Connect establishes connection to the MCP service
 func (c *mcpGoClient) Connect(ctx context.Context) error {
-	if c.connected {
+	if c.connected.Load() {
 		return ErrAlreadyConnected
 	}
 
@@ -345,7 +349,7 @@ func (c *mcpGoClient) Connect(ctx context.Context) error {
 		}
 		return fmt.Errorf("failed to start client: %w", err)
 	}
-	c.connected = true
+	c.connected.Store(true)
 	if c.service.TransportType == types.MCPTransportStdio {
 		logger.GetLogger(ctx).Infof("MCP stdio client connected: %s %v",
 			c.service.StdioConfig.Command, c.service.StdioConfig.Args)
@@ -357,22 +361,21 @@ func (c *mcpGoClient) Connect(ctx context.Context) error {
 
 // Disconnect closes the connection
 func (c *mcpGoClient) Disconnect() error {
-	if !c.connected {
+	if !c.connected.CompareAndSwap(true, false) {
 		return nil
 	}
+	c.initialized.Store(false)
 
 	// Close the client
 	if c.client != nil {
 		c.client.Close()
 	}
-	c.connected = false
-	c.initialized = false
 	return nil
 }
 
 // Initialize performs the MCP initialize handshake
 func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error) {
-	if !c.connected {
+	if !c.connected.Load() {
 		return nil, ErrNotConnected
 	}
 
@@ -399,10 +402,40 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 		return nil, fmt.Errorf("failed to initialize: %w", err)
 	}
 
-	c.initialized = true
+	c.initialized.Store(true)
+	c.metadataMu.Lock()
+	c.instructions = result.Instructions
+	c.metadataMu.Unlock()
+	serviceName := secutils.SanitizeForLog(c.service.Name)
+	logger.Debugf(
+		ctx,
+		"MCP initialize handshake service=%s protocol=%s name=%s version=%s title=%s",
+		serviceName,
+		result.ProtocolVersion,
+		secutils.SanitizeForLog(result.ServerInfo.Name),
+		secutils.SanitizeForLog(result.ServerInfo.Version),
+		secutils.SanitizeForLog(result.ServerInfo.Title),
+	)
+	if result.Instructions == "" && result.ServerInfo.Description == "" {
+		logger.Debugf(
+			ctx,
+			"MCP initialize optional docs absent service=%s description_len=0 instructions_len=0",
+			serviceName,
+		)
+	} else {
+		logger.Debugf(
+			ctx,
+			"MCP initialize docs service=%s description_len=%d instructions_len=%d instructions_preview=%q",
+			serviceName,
+			len(result.ServerInfo.Description),
+			len(result.Instructions),
+			mcpTextPreview(result.Instructions, 240),
+		)
+	}
 
 	return &InitializeResult{
 		ProtocolVersion: result.ProtocolVersion,
+		Instructions:    result.Instructions,
 		ServerInfo: ServerInfo{
 			Name:        result.ServerInfo.Name,
 			Version:     result.ServerInfo.Version,
@@ -412,9 +445,17 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 	}, nil
 }
 
+// ServerInstructions retains server-wide MCP documentation from initialize.
+// It is separate from credentials and can accompany model-facing tools.
+func (c *mcpGoClient) ServerInstructions() string {
+	c.metadataMu.RLock()
+	defer c.metadataMu.RUnlock()
+	return c.instructions
+}
+
 // ListTools retrieves the list of available tools
 func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
-	if !c.initialized {
+	if !c.initialized.Load() {
 		return nil, ErrNotConnected
 	}
 
@@ -509,7 +550,7 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 
 // ListResources retrieves the list of available resources
 func (c *mcpGoClient) ListResources(ctx context.Context) ([]*types.MCPResource, error) {
-	if !c.initialized {
+	if !c.initialized.Load() {
 		return nil, ErrNotConnected
 	}
 
@@ -538,7 +579,7 @@ func (c *mcpGoClient) ListResources(ctx context.Context) ([]*types.MCPResource, 
 
 // CallTool calls a tool on the MCP service
 func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string]interface{}) (*CallToolResult, error) {
-	if !c.initialized {
+	if !c.initialized.Load() {
 		return nil, ErrNotConnected
 	}
 
@@ -582,7 +623,7 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 
 // ReadResource reads a resource from the MCP service
 func (c *mcpGoClient) ReadResource(ctx context.Context, uri string) (*ReadResourceResult, error) {
-	if !c.initialized {
+	if !c.initialized.Load() {
 		return nil, ErrNotConnected
 	}
 
@@ -625,10 +666,22 @@ func (c *mcpGoClient) ReadResource(ctx context.Context, uri string) (*ReadResour
 
 // IsConnected returns true if the client is connected
 func (c *mcpGoClient) IsConnected() bool {
-	return c.connected
+	return c.connected.Load()
 }
 
 // GetServiceID returns the service ID
 func (c *mcpGoClient) GetServiceID() string {
 	return c.service.ID
+}
+
+func mcpTextPreview(s string, maxRunes int) string {
+	s = secutils.SanitizeForLog(s)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "..."
 }

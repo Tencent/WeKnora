@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"html"
+
 	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
 
@@ -38,9 +40,12 @@ func SanitizeMessages(messages []invoke.Message) []invoke.Message {
 		// Verify tool result messages reference a valid tool call
 		if msg.Role == "tool" && msg.ToolCallID != "" {
 			if !hasMatchingToolCall(messages[:i], msg.ToolCallID) {
-				// Orphaned tool result — convert to system message
-				msg.Role = "system"
-				msg.Content = []invoke.Part{{Text: "[Tool result for " + msg.Name + "]: " + msg.Text()}}
+				// Preserve recoverable data without promoting external output
+				// to policy: an orphaned tool result stays user-role content,
+				// wrapped and escaped (upstream 7a98a8e3).
+				msg.Role = invoke.RoleUser
+				msg.Content = []invoke.Part{{Text: "<untrusted_tool_result name=\"" + html.EscapeString(msg.Name) +
+					"\">\n" + html.EscapeString(msg.Text()) + "\n</untrusted_tool_result>"}}
 				msg.ToolCallID = ""
 				msg.Name = ""
 			}

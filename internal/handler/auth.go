@@ -655,10 +655,11 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"user":            userInfo,
-			"tenant":          dto.NewTenantResponse(ctx, tenant),
-			"memberships":     memberships,
-			"tenant_required": tenant == nil,
+			"user":                userInfo,
+			"preference_defaults": gin.H{"browser_search_instructions": types.DefaultBrowserSearchInstructions},
+			"tenant":              dto.NewTenantResponse(ctx, tenant),
+			"memberships":         memberships,
+			"tenant_required":     tenant == nil,
 			"capabilities": gin.H{
 				"can_create_tenant":      canCreateTenant,
 				"auto_accept_invitation": autoAcceptInvitation,
@@ -672,6 +673,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // (preserve existing value) from "explicit false". See
 // types.UserPreferences for the persistence-layer counterpart.
 type updateMyPreferencesRequest struct {
+	BrowserSearchInstructions *string `json:"browser_search_instructions" binding:"omitempty,max=4000"`
 	// LastActiveTenantID lets clients persist "after a fresh login,
 	// drop me back into this workspace" across devices. The SPA sends
 	// this after every tenant switch; POST /auth/switch-tenant records
@@ -713,7 +715,8 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 	}
 
 	patch := types.UserPreferences{
-		LastActiveTenantID: req.LastActiveTenantID,
+		LastActiveTenantID:        req.LastActiveTenantID,
+		BrowserSearchInstructions: req.BrowserSearchInstructions,
 	}
 	prefs, err := h.userService.UpdateUserPreferences(ctx, user.ID, patch)
 	if err != nil {

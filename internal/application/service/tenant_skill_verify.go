@@ -90,7 +90,11 @@ func (s *TenantSkillService) verifySkill(
 	if err := s.verifyDeclaredDependencies(ctx, mgr, sessionID, skillDir, bundle); err != nil {
 		return nil, err
 	}
-	return s.verifyScriptsParse(ctx, mgr, sessionID, skillDir, bundle)
+	notes, err := s.verifyScriptsParse(ctx, mgr, sessionID, skillDir, bundle)
+	if err != nil {
+		return notes, err
+	}
+	return notes, s.verifyRuntimePrerequisites(ctx, mgr, sessionID, skillDir)
 }
 
 // verifySkillTree confirms the files the agent was given are still the files

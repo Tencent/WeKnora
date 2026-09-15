@@ -26,17 +26,51 @@ func startLangfuse(ctx context.Context, name string, m *ModelConfig, opts any) *
 		return &langfuseGen{ctx: ctx}
 	}
 	input, _ := json.Marshal(opts)
+	metadata := map[string]interface{}{
+		"model_id":  m.ModelID,
+		"provider":  m.Provider,
+		"streaming": name == "chat.completion.stream",
+	}
+	// v1 buildLangfuseChatMetadata's tool block (upstream 2026-09). v1's
+	// call_purpose / prompt_prefix_fingerprint keys are wrapper-level caller
+	// knowledge and stay v1-only (recorded delta): the entry cannot know the
+	// call purpose.
+	if chatOpts, ok := opts.(*ChatOptions); ok {
+		for k, v := range buildLangfuseToolMetadata(chatOpts) {
+			metadata[k] = v
+		}
+	}
 	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
-		Name:  name,
-		Model: m.ModelName,
-		Input: json.RawMessage(input),
-		Metadata: map[string]interface{}{
-			"model_id":  m.ModelID,
-			"provider":  m.Provider,
-			"streaming": name == "chat.completion.stream",
-		},
+		Name:     name,
+		Model:    m.ModelName,
+		Input:    json.RawMessage(input),
+		Metadata: metadata,
 	})
 	return &langfuseGen{ctx: genCtx, gen: gen}
+}
+
+const (
+	langfuseDiscoverMCPTool = "discover_mcp_tools"
+	langfuseMCPCatalogRunes = 8000
+)
+
+// buildLangfuseToolMetadata describes the call's tool surface: ordered tool
+// names, plus the MCP catalog — the discover tool's description carries the
+// serialized server catalog, truncated to keep the observation payload bounded.
+func buildLangfuseToolMetadata(opts *ChatOptions) map[string]interface{} {
+	if opts == nil || len(opts.Tools) == 0 {
+		return nil
+	}
+	meta := map[string]interface{}{"has_tools": true}
+	names := make([]string, 0, len(opts.Tools))
+	for _, tool := range opts.Tools {
+		names = append(names, tool.Name)
+		if tool.Name == langfuseDiscoverMCPTool && tool.Description != "" {
+			meta["mcp_catalog"] = truncateRunes(tool.Description, langfuseMCPCatalogRunes)
+		}
+	}
+	meta["tool_names"] = names
+	return meta
 }
 
 // finish closes the observation with the response usage (chat only) or error.

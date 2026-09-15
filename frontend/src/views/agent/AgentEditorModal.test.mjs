@@ -7,7 +7,7 @@ const source = readFileSync(new URL('./AgentEditorModal.vue', import.meta.url), 
 test('editing an agent closes the editor after a successful save', () => {
   assert.match(
     source,
-    /await updateAgent\(formData\.value\.id, formData\.value\);\s*MessagePlugin\.success\(t\('agent\.messages\.updated'\)\);\s*emit\('success'\);\s*handleClose\(\);/
+    /await updateAgent\(formData\.value\.id, payload\);\s*MessagePlugin\.success\(t\('agent\.messages\.updated'\)\);\s*emit\('success'\);\s*handleClose\(\);/
   )
 })
 

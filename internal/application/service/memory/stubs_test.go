@@ -238,7 +238,11 @@ func (s *stubModelService) handle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if s.failNext {
 		s.failNext = false
-		w.WriteHeader(http.StatusInternalServerError)
+		// A provider outage stands in here as a NON-retryable 400: the unified
+		// executor replays retryable (5xx) failures in-process, which would
+		// let the next attempt succeed and swallow the outage the tests below
+		// must observe.
+		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"stub model outage"}}`))
 		return
 	}
@@ -444,3 +448,24 @@ func (e *stubEmbedder) BatchEmbedWithPool(
 func (e *stubEmbedder) GetModelName() string { return "stub-embedder" }
 func (e *stubEmbedder) GetDimensions() int   { return 3 }
 func (e *stubEmbedder) GetModelID() string   { return "embed-1" }
+
+func (s *stubMessageRepo) ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error) {
+	messages, err := s.ListMessagesBySessionAfterTime(ctx, sessionID, time.Time{}, 0)
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(messages, func(i, j int) bool {
+		return (types.MemoryMessageCursor{At: messages[j].CreatedAt, ID: messages[j].ID}).After(types.MemoryMessageCursor{At: messages[i].CreatedAt, ID: messages[i].ID})
+	})
+	var out []*types.Message
+	for _, message := range messages {
+		next := types.MemoryMessageCursor{At: message.CreatedAt, ID: message.ID}
+		if (cursor.At.IsZero() && cursor.ID == "") || next.After(cursor) {
+			out = append(out, message)
+		}
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}

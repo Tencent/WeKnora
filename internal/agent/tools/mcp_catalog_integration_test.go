@@ -81,7 +81,7 @@ func TestMCPProxyHTTPApprovalArgumentsAndImages(t *testing.T) {
 	ctx := catalogTestContext()
 	registry := NewToolRegistry()
 	gate := &proxyApprovalGate{}
-	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil)
+	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil, nil)
 	require.NoError(t, err)
 	require.Zero(t, requests.Load())
 	discoverPage(ctx, t, registry, map[string]any{"mode": "list_servers"})
@@ -90,6 +90,25 @@ func TestMCPProxyHTTPApprovalArgumentsAndImages(t *testing.T) {
 	require.Len(t, page.Tools, 1)
 	require.Positive(t, requests.Load())
 	require.Zero(t, calls.Load())
+	// Listing loads the target, but must not allow execution or approval yet.
+	discovery, _ := registry.GetTool(ToolDiscoverMCPTools)
+	snapshot, _, err := discovery.(*MCPDiscoverTool).catalog.snapshot(ctx, service.ID, false)
+	require.NoError(t, err)
+	premature, _ := json.Marshal(map[string]any{
+		"tool_ref": mcpToolRef(snapshot[0]), "arguments": map[string]any{"count": 2},
+	})
+	blocked, err := registry.ExecuteTool(ctx, ToolCallMCPTool, premature)
+	require.NoError(t, err)
+	require.False(t, blocked.Success)
+	require.Contains(t, blocked.Error, "schema has not been described")
+	require.Nil(t, registry.MCPCallTarget(ctx, ToolCallMCPTool, premature))
+	require.Zero(t, calls.Load())
+	require.Empty(t, gate.request.ToolCallID)
+	described := describeTool(ctx, t, registry, service.ID, page.Tools[0].Name)
+	describedRaw, _ := json.Marshal(map[string]any{
+		"tool_ref": described.ToolRef, "arguments": map[string]any{"count": 2},
+	})
+	require.NotNil(t, registry.MCPCallTarget(ctx, ToolCallMCPTool, describedRaw))
 	ctx = WithToolExecContext(
 		ctx,
 		&ToolExecContext{
@@ -102,7 +121,7 @@ func TestMCPProxyHTTPApprovalArgumentsAndImages(t *testing.T) {
 	)
 	invoke := func(arguments string) *types.ToolResult {
 		raw, _ := json.Marshal(
-			map[string]any{"tool_ref": page.Tools[0].ToolRef, "arguments": json.RawMessage(arguments)},
+			map[string]any{"tool_ref": described.ToolRef, "arguments": json.RawMessage(arguments)},
 		)
 		result, err := registry.ExecuteTool(ctx, ToolCallMCPTool, raw)
 		require.NoError(t, err)

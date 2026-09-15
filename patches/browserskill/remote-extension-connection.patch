@@ -1,0 +1,3758 @@
+diff --git a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
+index 41b6719..ffa4a0b 100644
+--- a/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
++++ b/apps/extension/src/browser-driver/__tests__/chromium-cdp.test.ts
+@@ -29,6 +29,103 @@ function fakeApi() {
+ }
+ 
+ describe("ChromiumCdp", () => {
++  it("configures frame auto-attach once per debugger session and reapplies after detach", async () => {
++    const { api, onDetach } = fakeApi();
++    vi.mocked(api.sendCommand).mockResolvedValue({ frameTree: { frame: { id: "main" } } });
++    const cdp = new ChromiumCdp(api);
++    const calls = () =>
++      vi.mocked(api.sendCommand).mock.calls.filter((c) => c[1] === "Target.setAutoAttach");
++    await cdp.ensureAttached(4);
++    await Promise.all([cdp.getFrameGraph(4), cdp.getFrameGraph(4)]);
++    await cdp.getFrameGraph(4);
++    expect(calls()).toHaveLength(1);
++    onDetach.fire({ tabId: 4 }, "canceled_by_user");
++    await cdp.getFrameGraph(4);
++    expect(calls()).toHaveLength(2);
++    await cdp.detachAll();
++    await cdp.getFrameGraph(4);
++    expect(calls()).toHaveLength(3);
++    cdp.dispose();
++  });
++
++  it("retries frame discovery after a failed configuration", async () => {
++    const { api } = fakeApi();
++    let attempts = 0;
++    vi.mocked(api.sendCommand).mockImplementation(async (_target, method) => {
++      if (method === "Target.setAutoAttach" && ++attempts === 1) throw new Error("transient");
++      return { frameTree: { frame: { id: "main" } } };
++    });
++    const cdp = new ChromiumCdp(api);
++    await cdp.ensureAttached(4);
++    await cdp.getFrameGraph(4);
++    await cdp.getFrameGraph(4);
++    expect(attempts).toBe(2);
++    cdp.dispose();
++  });
++
++  it("does not send another screenshot after a local timeout while Chrome is still working", async () => {
++    vi.useFakeTimers();
++    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
++    const { api } = fakeApi();
++    let finish!: (value: unknown) => void;
++    vi.mocked(api.sendCommand).mockImplementation(async (_target, method) => {
++      if (method === "Page.captureScreenshot")
++        return new Promise((resolve) => {
++          finish = resolve;
++        });
++      return {};
++    });
++    const cdp = new ChromiumCdp(api);
++    try {
++      await cdp.ensureAttached(4);
++      const first = expect(cdp.send(4, "Page.captureScreenshot")).rejects.toThrow("timed out");
++      await vi.advanceTimersByTimeAsync(3000);
++      await first;
++      expect(cdp.hasPendingScreenshot(4)).toBe(true);
++      await expect(cdp.send(4, "Page.captureScreenshot")).rejects.toThrow("still running");
++      expect(
++        vi.mocked(api.sendCommand).mock.calls.filter((c) => c[1] === "Page.captureScreenshot"),
++      ).toHaveLength(1);
++      finish({ data: "late" });
++      await vi.advanceTimersByTimeAsync(0);
++      expect(cdp.hasPendingScreenshot(4)).toBe(false);
++      const next = cdp.send(4, "Page.captureScreenshot");
++      await vi.advanceTimersByTimeAsync(0);
++      finish({ data: "new" });
++      await expect(next).resolves.toEqual({ data: "new" });
++    } finally {
++      cdp.dispose();
++      warning.mockRestore();
++      vi.useRealTimers();
++    }
++  });
++
++  it("emulates activity only for owned task tabs and reapplies after detach", async () => {
++    const { api, onDetach } = fakeApi();
++    const owned = new Set([4]);
++    const cdp = new ChromiumCdp(api, { shouldKeepTaskActive: (id) => owned.has(id) });
++    await Promise.all([cdp.ensureAttached(4), cdp.ensureAttached(4)]);
++    await cdp.ensureAttached(5);
++    const focusCalls = () =>
++      vi
++        .mocked(api.sendCommand)
++        .mock.calls.filter((call) => call[1] === "Emulation.setFocusEmulationEnabled");
++    expect(focusCalls()).toEqual([
++      [{ tabId: 4 }, "Emulation.setFocusEmulationEnabled", { enabled: true }],
++    ]);
++    // A previously observed user tab becomes eligible only once explicitly borrowed.
++    owned.add(5);
++    await cdp.send(5, "Page.getLayoutMetrics");
++    expect(focusCalls()).toHaveLength(2);
++    onDetach.fire({ tabId: 4 }, "canceled_by_user");
++    await cdp.ensureAttached(4);
++    expect(focusCalls()).toHaveLength(3);
++    await cdp.detach(4);
++    await cdp.ensureAttached(4);
++    expect(focusCalls()).toHaveLength(4);
++    cdp.dispose();
++  });
++
+   it("changes attachment identity only across real debugger attachments", async () => {
+     const { api, onEvent, onDetach } = fakeApi();
+     const cdp = new ChromiumCdp(api);
+@@ -429,6 +526,7 @@ describe("ChromiumCdp", () => {
+     expect(api.sendCommand).toHaveBeenCalledWith({ tabId: 3 }, "Page.handleJavaScriptDialog", {
+       accept: true,
+     });
++    await vi.waitFor(() => expect(cdp.dialogsSince(3, cursor)).toHaveLength(1));
+     const dialogs = cdp.dialogsSince(3, cursor);
+     expect(dialogs).toHaveLength(1);
+     expect(dialogs[0]).toMatchObject({
+@@ -478,7 +576,7 @@ describe("ChromiumCdp", () => {
+       url: "https://example.com/",
+     });
+     await Promise.resolve();
+-    expect(cdp.dialogsSince(11, 0)).toHaveLength(1);
++    await vi.waitFor(() => expect(cdp.dialogsSince(11, 0)).toHaveLength(1));
+     await cdp.detach(11);
+     expect(cdp.dialogsSince(11, 0)).toHaveLength(0);
+   });
+diff --git a/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
+new file mode 100644
+index 0000000..796cf76
+--- /dev/null
++++ b/apps/extension/src/browser-driver/__tests__/command-deadline.test.ts
+@@ -0,0 +1,75 @@
++import { afterEach, expect, it, vi } from "vitest";
++import { captureObservationFacts } from "@/tools/vom/capture-coordinator";
++import { CdpReadTimeoutError, runCdpCommand } from "../command-deadline";
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++});
++it("times out stuck snapshots with the actual method and stops fallback reads", async () => {
++  vi.useFakeTimers();
++  vi.spyOn(console, "warn").mockImplementation(() => {});
++  vi.spyOn(console, "debug").mockImplementation(() => {});
++  const send = vi.fn(async (_tab: number, method: string) =>
++    runCdpCommand({ tabId: 4 }, method, () =>
++      method === "DOMSnapshot.captureSnapshot" ? new Promise<never>(() => {}) : Promise.resolve({}),
++    ),
++  );
++  const work = captureObservationFacts({ send: send as never }, 4);
++  const checked = expect(work).rejects.toThrow(
++    "DOMSnapshot.captureSnapshot timed out after 10000ms (tab 4)",
++  );
++  await vi.advanceTimersByTimeAsync(10_000);
++  await checked;
++  expect(send.mock.calls.map((call) => call[1])).toEqual([
++    "DOMSnapshot.captureSnapshot",
++  ]);
++  expect(vi.getTimerCount()).toBe(0);
++});
++it("bounds screenshots and ignores their late reply", async () => {
++  vi.useFakeTimers();
++  vi.spyOn(console, "warn").mockImplementation(() => {});
++  vi.spyOn(console, "debug").mockImplementation(() => {});
++  let finish!: (value: string) => void;
++  const work = runCdpCommand(
++    { tabId: 4 },
++    "Page.captureScreenshot",
++    () =>
++      new Promise<string>((resolve) => {
++        finish = resolve;
++      }),
++  );
++  const checked = expect(work).rejects.toBeInstanceOf(CdpReadTimeoutError);
++  await vi.advanceTimersByTimeAsync(3_000);
++  await checked;
++  finish("late image");
++  await Promise.resolve();
++  expect(vi.getTimerCount()).toBe(0);
++});
++
++it("distinguishes caller timeout from a late Chrome completion", async () => {
++  vi.useFakeTimers();
++  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
++  let finish!: (value: string) => void;
++  const work = runCdpCommand(
++    { tabId: 4 },
++    "Page.captureScreenshot",
++    () =>
++      new Promise<string>((resolve) => {
++        finish = resolve;
++      }),
++  );
++  const checked = expect(work).rejects.toBeInstanceOf(CdpReadTimeoutError);
++  await vi.advanceTimersByTimeAsync(3000);
++  await checked;
++  expect(warning.mock.calls.filter((c) => c[0] === "[bsk cdp] slow command settled")).toHaveLength(
++    0,
++  );
++  await vi.advanceTimersByTimeAsync(5000);
++  finish("image");
++  await vi.advanceTimersByTimeAsync(0);
++  expect(warning).toHaveBeenCalledWith(
++    "[bsk cdp] slow command settled",
++    expect.objectContaining({ elapsedMs: 8000, outcome: "returned", late: true }),
++  );
++});
+diff --git a/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts b/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts
+new file mode 100644
+index 0000000..deed38f
+--- /dev/null
++++ b/apps/extension/src/browser-driver/__tests__/task-focus.browser.test.ts
+@@ -0,0 +1,94 @@
++// @vitest-environment node
++import { describe, expect, it } from "vitest";
++import { captureVomObservation } from "@/tools/observation";
++import { type CdpDebuggerApi, ChromiumCdp } from "../chromium-cdp";
++
++describe.skipIf(!process.env.BSK_GEOMETRY_CHROME)("real background task rendering", () => {
++  it.each([
++    0, 2000,
++  ])("renders a background page with %i repeated controls and restores visibility on detach", async (controlCount) => {
++    // Raw CDP deliberately avoids Playwright, which enables focus emulation by default
++    // and would mask this exact regression even when a Chrome tab is inactive.
++    const { withChrome } = await import(
++      new URL(
++        "../../../../../evals/browser/cases/regression/snapshot-coordinates/chrome.mjs",
++        import.meta.url,
++      ).href
++    );
++    await withChrome(
++      { executable: process.env.BSK_GEOMETRY_CHROME, deviceScale: 1, zoom: 1 },
++      async (send: any) => {
++        const foreground = (await send("Target.getTargets")).targetInfos.find(
++          (t: any) => t.type === "page",
++        );
++        const { sessionId: foregroundSession } = await send("Target.attachToTarget", {
++          targetId: foreground.targetId,
++          flatten: true,
++        });
++        const url =
++          "data:text/html," +
++          encodeURIComponent(
++            '<title>Background task</title><p>Loading</p><script>requestAnimationFrame(()=>document.querySelector("p").textContent="Rendered")</script>' +
++              "<section><h2>Entry</h2><button>Open</button><p>Sample page content</p></section>".repeat(
++                controlCount,
++              ),
++          );
++        const { targetId } = await send("Target.createTarget", { url, background: true });
++        let sessionId = (await send("Target.attachToTarget", { targetId, flatten: true }))
++          .sessionId;
++        const evaluate = async (expression: string, session = sessionId) =>
++          (
++            await send(
++              "Runtime.evaluate",
++              { expression, awaitPromise: true, returnByValue: true },
++              session,
++            )
++          ).result.value;
++        await expect.poll(() => evaluate("document.readyState")).toBe("complete");
++        expect(
++          await evaluate(
++            '({visibility:document.visibilityState,text:document.querySelector("p").textContent})',
++          ),
++        ).toEqual({ visibility: "hidden", text: "Loading" });
++        await send("Target.detachFromTarget", { sessionId });
++        const event = { addListener() {}, removeListener() {} };
++        const api = {
++          attach: async () => {
++            sessionId = (await send("Target.attachToTarget", { targetId, flatten: true }))
++              .sessionId;
++          },
++          detach: async () => {
++            await send("Target.detachFromTarget", { sessionId });
++          },
++          sendCommand: (_target: unknown, method: string, params: object) =>
++            send(method, params, sessionId),
++          onEvent: event,
++          onDetach: event,
++        } as unknown as CdpDebuggerApi;
++        const cdp = new ChromiumCdp(api, { shouldKeepTaskActive: () => true });
++        try {
++          await cdp.ensureAttached(4);
++          expect(
++            await evaluate(
++              'new Promise(resolve=>requestAnimationFrame(()=>resolve(document.querySelector("p").textContent)))',
++            ),
++          ).toBe("Rendered");
++          const observation = await captureVomObservation(cdp, 4, url);
++          expect(observation.text).toContain("Rendered");
++          expect(observation.refs).toHaveLength(controlCount);
++          const image = await cdp.send<{ data: string }>(4, "Page.captureScreenshot", {
++            format: "jpeg",
++            fromSurface: true,
++          });
++          expect(image.data.length).toBeGreaterThan(100);
++          expect(await evaluate("document.visibilityState", foregroundSession)).toBe("visible");
++          await cdp.detach(4);
++          sessionId = (await send("Target.attachToTarget", { targetId, flatten: true })).sessionId;
++          expect(await evaluate("document.visibilityState")).toBe("hidden");
++        } finally {
++          cdp.dispose();
++        }
++      },
++    );
++  }, 20_000);
++});
+diff --git a/apps/extension/src/browser-driver/chromium-cdp.ts b/apps/extension/src/browser-driver/chromium-cdp.ts
+index ddbf5ee..a602adb 100644
+--- a/apps/extension/src/browser-driver/chromium-cdp.ts
++++ b/apps/extension/src/browser-driver/chromium-cdp.ts
+@@ -31,6 +31,7 @@ import type {
+   NetworkEntryKind,
+   NetworkResult,
+ } from "@/transport/types";
++import { runCdpCommand } from "./command-deadline";
+ import {
+   buildFrameGraph,
+   type CdpFrameGraph,
+@@ -140,6 +141,7 @@ interface FrameDiscoveryState {
+   sessions: Set<string>;
+   pending: Set<Promise<void>>;
+   generation: number;
++  enabled: Map<string, Promise<void>>;
+ }
+ 
+ async function settleBeforeDeadline(promises: Promise<void>[], deadline: number): Promise<boolean> {
+@@ -164,6 +166,8 @@ async function settleBeforeDeadline(promises: Promise<void>[], deadline: number)
+ export class ChromiumCdp {
+   private readonly api: CdpDebuggerApi;
+   private readonly attachedTabs = new Set<number>();
++  private readonly pendingScreenshots = new Map<number, Promise<unknown>>();
++  private readonly taskFocus = new Map<number, Promise<void>>();
+   private readonly attachmentIds = new Map<number, string>();
+   private readonly attachInFlight = new Map<number, Promise<void>>();
+   private readonly detachInFlight = new Map<number, Promise<void>>();
+@@ -189,6 +193,8 @@ export class ChromiumCdp {
+     private readonly options: {
+       /** CDP observation alone does not authorize dismissing user dialogs. */
+       shouldAutoAcceptDialog?: (tabId: number) => boolean | Promise<boolean>;
++      /** Only explicitly controlled task tabs may emulate foreground page activity. */
++      shouldKeepTaskActive?: (tabId: number) => boolean;
+     } = {},
+   ) {
+     this.api = api;
+@@ -210,7 +216,10 @@ export class ChromiumCdp {
+     // New observers must wait before opening the next connection to that tab.
+     const detaching = this.detachInFlight.get(tabId);
+     if (detaching) await detaching;
+-    if (this.attachedTabs.has(tabId)) return;
++    if (this.attachedTabs.has(tabId)) {
++      await this.keepTaskActive(tabId);
++      return;
++    }
+     const existing = this.attachInFlight.get(tabId);
+     if (existing) {
+       await existing;
+@@ -219,6 +228,7 @@ export class ChromiumCdp {
+     const attach = (async () => {
+       await this.api.attach({ tabId }, CDP_PROTOCOL_VERSION);
+       try {
++        await this.keepTaskActive(tabId);
+         await this.enablePageDomain(tabId);
+         await this.enableConsoleDomains(tabId);
+         await this.enableNetworkDomainBestEffort(tabId);
+@@ -240,6 +250,7 @@ export class ChromiumCdp {
+         await this.api.detach({ tabId }).catch((detachErr) => {
+           console.debug("[bsk cdp] rollback detach failed", { tabId, detachErr });
+         });
++        this.taskFocus.delete(tabId);
+         throw err;
+       }
+     })()
+@@ -261,11 +272,9 @@ export class ChromiumCdp {
+    * `chrome.runtime.lastError`.
+    */
+   async send<T = unknown>(tabId: number, method: string, params?: object): Promise<T> {
+-    if (!this.attachedTabs.has(tabId)) {
+-      await this.ensureAttached(tabId);
+-    }
++    await this.ensureAttached(tabId);
+     try {
+-      const result = await this.api.sendCommand({ tabId }, method, params ?? {});
++      const result = await this.command({ tabId }, method, params ?? {});
+       return result as T;
+     } catch (err) {
+       throw normalizeError(err);
+@@ -273,11 +282,9 @@ export class ChromiumCdp {
+   }
+ 
+   async sendToTarget<T = unknown>(target: CdpTarget, method: string, params?: object): Promise<T> {
+-    if (!this.attachedTabs.has(target.tabId)) {
+-      await this.ensureAttached(target.tabId);
+-    }
++    await this.ensureAttached(target.tabId);
+     try {
+-      return (await this.api.sendCommand(target, method, params ?? {})) as T;
++      return (await this.command(target, method, params ?? {})) as T;
+     } catch (err) {
+       throw normalizeError(err);
+     }
+@@ -452,6 +459,7 @@ export class ChromiumCdp {
+     if (!this.attachedTabs.has(tabId)) return;
+     this.attachedTabs.delete(tabId);
+     this.attachmentIds.delete(tabId);
++    this.taskFocus.delete(tabId);
+     this.clearDialogState(tabId);
+     this.clearConsoleState(tabId);
+     this.clearNetworkState(tabId);
+@@ -511,6 +519,7 @@ export class ChromiumCdp {
+     this.tabOwners.clear();
+     this.attachedTabs.clear();
+     this.attachmentIds.clear();
++    this.taskFocus.clear();
+     this.dialogBuffers.clear();
+     this.dialogSequences.clear();
+     this.consoleBuffers.clear();
+@@ -521,6 +530,7 @@ export class ChromiumCdp {
+     this.networkDomainsEnabledTabs.clear();
+     this.networkRequestMeta.clear();
+     this.frameDiscovery.clear();
++    this.pendingScreenshots.clear();
+     await Promise.all(
+       tabs.map(async (tabId) => {
+         try {
+@@ -532,8 +542,48 @@ export class ChromiumCdp {
+     );
+   }
+ 
++  hasPendingScreenshot(tabId: number): boolean {
++    return this.pendingScreenshots.has(tabId);
++  }
++
++  private command(target: CdpDebuggee, method: string, params: object): Promise<unknown> {
++    return runCdpCommand(target, method, () => {
++      const tabId = target.tabId;
++      if (method !== "Page.captureScreenshot" || tabId === undefined)
++        return this.api.sendCommand(target, method, params);
++      // A local deadline cannot cancel a Chrome command. Keep this fence until
++      // Chrome actually replies (or detaches), so polling cannot pile up captures.
++      if (this.pendingScreenshots.has(tabId))
++        throw new Error("Previous screenshot is still running in Chrome");
++      const pending = this.api.sendCommand(target, method, params);
++      this.pendingScreenshots.set(tabId, pending);
++      const clear = () => {
++        if (this.pendingScreenshots.get(tabId) === pending) this.pendingScreenshots.delete(tabId);
++      };
++      void pending.then(clear, clear);
++      return pending;
++    });
++  }
++
++  private async keepTaskActive(tabId: number): Promise<void> {
++    if (!this.options.shouldKeepTaskActive?.(tabId)) return;
++    let work = this.taskFocus.get(tabId);
++    if (!work) {
++      // Emulate page visibility/focus without activating a Chrome tab or window.
++      // Chrome resets this per-debugger override when we detach at turn end.
++      work = this.command({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: true })
++        .then(() => {})
++        .catch((error) => {
++          this.taskFocus.delete(tabId);
++          throw error;
++        });
++      this.taskFocus.set(tabId, work);
++    }
++    await work;
++  }
++
+   private async enablePageDomain(tabId: number): Promise<void> {
+-    await this.api.sendCommand({ tabId }, "Page.enable", {});
++    await this.command({ tabId }, "Page.enable", {});
+   }
+ 
+   private async enableConsoleDomains(tabId: number): Promise<void> {
+@@ -546,7 +596,7 @@ export class ChromiumCdp {
+     let failed = false;
+     for (const method of ["Runtime.enable", "Log.enable"]) {
+       try {
+-        await this.api.sendCommand({ tabId }, method, {});
++        await this.command({ tabId }, method, {});
+       } catch (err) {
+         failed = true;
+         console.debug("[bsk cdp] console domain enable failed", { tabId, method, err });
+@@ -559,7 +609,7 @@ export class ChromiumCdp {
+ 
+   private async enableNetworkDomain(tabId: number): Promise<void> {
+     if (this.networkDomainsEnabledTabs.has(tabId)) return;
+-    await this.api.sendCommand({ tabId }, "Network.enable", {});
++    await this.command({ tabId }, "Network.enable", {});
+     this.networkDomainsEnabledTabs.add(tabId);
+   }
+ 
+@@ -571,13 +621,27 @@ export class ChromiumCdp {
+     }
+   }
+ 
+-  private async enableFrameDiscovery(target: CdpTarget): Promise<void> {
+-    await this.api.sendCommand(target, "Target.setAutoAttach", {
++  private enableFrameDiscovery(target: CdpTarget): Promise<void> {
++    const state = this.frameDiscoveryState(target.tabId);
++    const key = target.sessionId ?? "root";
++    const existing = state.enabled.get(key);
++    if (existing) return existing;
++    // Auto-attach remains enabled for this debugger session, including later
++    // navigation and new iframes. Reconfiguring it on every observation adds a
++    // browser round trip and needlessly repeats child-target discovery.
++    const work = this.command(target, "Target.setAutoAttach", {
+       autoAttach: true,
+       waitForDebuggerOnStart: false,
+       flatten: true,
+       filter: [{ type: "iframe", exclude: false }],
+-    });
++    })
++      .then(() => {})
++      .catch((error) => {
++        if (state.enabled.get(key) === work) state.enabled.delete(key);
++        throw error;
++      });
++    state.enabled.set(key, work);
++    return work;
+   }
+ 
+   private bindFrameTargetHandler(): void {
+@@ -591,6 +655,7 @@ export class ChromiumCdp {
+ 
+       if (method === "Target.detachedFromTarget") {
+         const state = this.frameDiscovery.get(tabId);
++        state?.enabled.delete(sessionId);
+         if (state?.sessions.delete(sessionId)) state.generation += 1;
+         return;
+       }
+@@ -657,6 +722,7 @@ export class ChromiumCdp {
+       sessions: new Set(),
+       pending: new Set(),
+       generation: 0,
++      enabled: new Map(),
+     };
+     this.frameDiscovery.set(tabId, created);
+     return created;
+@@ -664,6 +730,7 @@ export class ChromiumCdp {
+ 
+   private clearFrameState(tabId: number): void {
+     this.frameDiscovery.delete(tabId);
++    this.pendingScreenshots.delete(tabId);
+   }
+ 
+   private bindDialogHandler(): void {
+@@ -696,7 +763,7 @@ export class ChromiumCdp {
+       if (parsed.type === "prompt") {
+         handleParams.promptText = parsed.defaultPrompt ?? "";
+       }
+-      await this.api.sendCommand({ tabId }, "Page.handleJavaScriptDialog", handleParams);
++      await this.command({ tabId }, "Page.handleJavaScriptDialog", handleParams);
+       if (!this.attachedTabs.has(tabId) && !this.attachInFlight.has(tabId)) return;
+       const sequence = (this.dialogSequences.get(tabId) ?? 0) + 1;
+       this.dialogSequences.set(tabId, sequence);
+@@ -858,6 +925,7 @@ export class ChromiumCdp {
+       if (typeof source.tabId === "number") {
+         this.attachedTabs.delete(source.tabId);
+         this.attachmentIds.delete(source.tabId);
++        this.taskFocus.delete(source.tabId);
+         this.attachInFlight.delete(source.tabId);
+         this.tabOwners.delete(source.tabId);
+         this.clearDialogState(source.tabId);
+diff --git a/apps/extension/src/browser-driver/command-deadline.ts b/apps/extension/src/browser-driver/command-deadline.ts
+new file mode 100644
+index 0000000..540d804
+--- /dev/null
++++ b/apps/extension/src/browser-driver/command-deadline.ts
+@@ -0,0 +1,78 @@
++import type { CdpDebuggee } from "./chromium-cdp";
++
++// Bound renderer reads, not user-requested waits or mutations. An expired
++// CDP read cannot be cancelled individually; its late reply is ignored and
++// observation must stop rather than issue fallback reads against the same page.
++const READ_COMMANDS = new Set([
++  "Target.setAutoAttach",
++  "DOMSnapshot.enable",
++  "DOMSnapshot.captureSnapshot",
++  "Accessibility.enable",
++  "Accessibility.getFullAXTree",
++  "Page.getLayoutMetrics",
++  "Page.getFrameTree",
++  "DOM.getFrameOwner",
++  "Page.captureScreenshot",
++  "Emulation.setFocusEmulationEnabled",
++]);
++export class CdpReadTimeoutError extends Error {
++  constructor(method: string, tabId: number | undefined, timeout: number) {
++    super(
++      `Browser read ${method} timed out after ${timeout}ms (tab ${tabId}). Do not repeat the same read in a loop; report the timeout and let the browser task release control before retrying.`,
++    );
++    this.name = "CdpReadTimeoutError";
++  }
++}
++
++export async function runCdpCommand<T>(
++  target: CdpDebuggee,
++  method: string,
++  run: () => Promise<T>,
++): Promise<T> {
++  const started = Date.now();
++  const details = () => ({
++    tabId: target.tabId,
++    frameSessionId: target.sessionId,
++    method,
++    elapsedMs: Date.now() - started,
++  });
++  const slow = setTimeout(() => console.warn("[bsk cdp] slow command", details()), 2_000);
++  let deadline: ReturnType<typeof setTimeout> | undefined;
++  let timedOut = false;
++  const settled = (outcome: "returned" | "failed") => {
++    if (Date.now() - started >= 2_000)
++      console.warn("[bsk cdp] slow command settled", { ...details(), outcome, late: timedOut });
++  };
++  try {
++    const pending = run().then(
++      (value) => {
++        settled("returned");
++        return value;
++      },
++      (error) => {
++        settled("failed");
++        throw error;
++      },
++    );
++    if (!READ_COMMANDS.has(method)) return await pending;
++    const timeout = method === "Page.captureScreenshot" ? 3_000 : 10_000;
++    return await Promise.race([
++      pending,
++      new Promise<never>((_, reject) => {
++        deadline = setTimeout(() => {
++          timedOut = true;
++          reject(new CdpReadTimeoutError(method, target.tabId, timeout));
++        }, timeout);
++      }),
++    ]);
++  } catch (error) {
++    console.warn("[bsk cdp] command failed", {
++      ...details(),
++      error: error instanceof Error ? error.message : String(error),
++    });
++    throw error;
++  } finally {
++    clearTimeout(slow);
++    clearTimeout(deadline);
++  }
++}
+diff --git a/apps/extension/src/entrypoints/background.ts b/apps/extension/src/entrypoints/background.ts
+index 72819fa..ec6e0ac 100644
+--- a/apps/extension/src/entrypoints/background.ts
++++ b/apps/extension/src/entrypoints/background.ts
+@@ -1,7 +1,8 @@
++import { TaskActivity } from "@/lib/task-activity";
+ import { i18n } from "@browser-skill/i18n";
+ import { ChromiumCdp } from "@/browser-driver/chromium-cdp";
+ import { ConnectionController } from "@/lib/connection-controller";
+-import { watchDaemonPort } from "@/lib/daemon-port-preference";
++import { watchDaemonConnection } from "@/lib/daemon-connection-preference";
+ import { startHeartbeat } from "@/lib/heartbeat";
+ import {
+   getConnectionEnabled,
+@@ -24,6 +25,7 @@ import {
+ import { POPUP_PORT_NAME, type PopupInbound, type PopupOutbound } from "@/lib/popup-bridge";
+ import { recordFrameCoordinator } from "@/lib/recording/frame-coordinator";
+ import { attachSessionsLiveFlag } from "@/lib/sessions-live-flag";
++import { captureTaskPreview } from "@/lib/task-preview";
+ import { createDisconnectCleanup } from "@/session-manager/disconnect-cleanup";
+ import { attachSessionEventHandler } from "@/session-manager/event-handler";
+ import { isAgentControlledTab, SessionManager } from "@/session-manager/manager";
+@@ -44,28 +46,80 @@ import {
+ } from "@/tools/record";
+ import { chromeTabsApi } from "@/tools/shared";
+ import { chromeTabMutationApi } from "@/tools/tabs";
+-import { resolveDaemonWsUrl } from "@/transport/daemon-endpoint";
+ import { detectBrowserMeta } from "@/transport/handshake";
++import { watchRemoteAuthorization } from "@/transport/remote-authorization";
++import { type RemoteEndpoint, remoteSocket } from "@/transport/remote-endpoint";
++import { getTaskWindowEnabled } from "@/lib/task-window-preference";
+ import type { Transport } from "@/transport/transport";
+ import { WSTransport } from "@/transport/ws-transport";
+ 
+ export default defineBackground(() => {
+   const controller = new ConnectionController();
+-  const transport = new WSTransport({ url: __BSK_DAEMON_WS_URL__ });
+-  const sessions = new SessionManager();
++  let remoteEndpoint: RemoteEndpoint | null = null;
++  const transport = new WSTransport({
++    url: __BSK_DAEMON_WS_URL__,
++    webSocketFactory: (url) =>
++      remoteSocket(
++        url,
++        remoteEndpoint,
++        async (sessionId) => {
++          const task = sessions.get(sessionId);
++          if (!task) throw new Error("Browser task unavailable");
++          const tabId =
++            task.activeTabId !== undefined && isAgentControlledTab(task, task.activeTabId)
++              ? task.activeTabId
++              : [...task.agentCreatedTabs, ...task.borrowedTabs.keys()][0];
++          if (tabId === undefined || !isAgentControlledTab(task, tabId))
++            throw new Error("Task tab unavailable");
++          const tab = await chrome.tabs.get(tabId);
++          await chrome.tabs.update(tabId, { active: true });
++          await chrome.windows.update(tab.windowId, { focused: true });
++        },
++        (sessionId) =>
++          taskActivity.preview(sessionId, () => captureTaskPreview(sessions, cdp, sessionId)),
++        async (sessionId) => {
++          if (!sessions.get(sessionId)) throw new Error("Browser task unavailable");
++          await taskActivity.release(sessionId);
++          return { released: true };
++        },
++      ),
++  });
++  const sessions = new SessionManager({
++    taskTabs: () => remoteEndpoint !== null,
++    taskWindow: getTaskWindowEnabled,
++    taskLabel: () => remoteEndpoint?.serviceName ?? "BrowserSkill",
++  });
+   const cdp = new ChromiumCdp(undefined, {
++    shouldKeepTaskActive: (tabId) => sessions.findByTabId(tabId)?.tabMode === true,
+     shouldAutoAcceptDialog: async (tabId) => {
+       const tab = await chrome.tabs.get(tabId);
+-      return sessions.findByWindowId(tab.windowId) !== null;
++      return (
++        (typeof tab.id === "number" && sessions.findByTabId(tab.id) !== null) ||
++        sessions.findByWindowId(tab.windowId) !== null
++      );
+     },
+   });
++  const taskActivity: TaskActivity = new TaskActivity(sessions, (id) =>
++    dispatcher.releaseTaskControl(id),
++  );
+   const sessionsLive = attachSessionsLiveFlag({ manager: sessions });
+   let overlayGeneration = 0;
+   const controlModes = new Map<string, OverlayMode>();
+ 
+-  const daemonPort = watchDaemonPort((port) => {
+-    const url = resolveDaemonWsUrl(port);
+-    void controller.reconfigureTransport(url, () => {
++  const remoteAuthorization = watchRemoteAuthorization();
++  const daemonPort = watchDaemonConnection((url, remote) => {
++    remoteAuthorization.changed();
++    // Token rotation for the same device must not interrupt a running task.
++    if (
++      remote?.deviceId &&
++      remoteEndpoint?.deviceId === remote.deviceId &&
++      remoteEndpoint.url === remote.url
++    ) {
++      remoteEndpoint = remote;
++      return;
++    }
++    void controller.reconfigureTransport(JSON.stringify([url, remote]), () => {
++      remoteEndpoint = remote;
+       transport.setUrl(url);
+     });
+   });
+@@ -104,8 +158,14 @@ export default defineBackground(() => {
+    */
+   function overlayStateForTab(tabId?: number, windowId?: number): OverlayAgentStateMessage {
+     if (typeof tabId === "number" && typeof windowId === "number") {
+-      const ctx = sessions.findByWindowId(windowId);
+-      if (ctx && isAgentControlledTab(ctx, tabId)) return overlayStateForWindow(windowId);
++      const ctx = sessions.findByTabId(tabId) ?? sessions.findByWindowId(windowId);
++      if (ctx && isAgentControlledTab(ctx, tabId))
++        return {
++          type: OVERLAY_AGENT_STATE,
++          sessionId: ctx.sessionId,
++          mode: controlModes.get(ctx.sessionId) ?? "control",
++          generation: overlayGeneration,
++        };
+     }
+     return {
+       type: OVERLAY_AGENT_STATE,
+@@ -165,7 +225,7 @@ export default defineBackground(() => {
+   }
+ 
+   function pushOverlayStateForAgentWindow(windowId: number): void {
+-    if (!sessions.findByWindowId(windowId)) return;
++    if (!sessions.list().some((ctx) => ctx.agentWindowId === windowId)) return;
+     void pushOverlayStateForWindow(windowId);
+   }
+   chrome.tabs.onActivated.addListener((activeInfo) => {
+@@ -181,11 +241,32 @@ export default defineBackground(() => {
+   // state; it never infers or mutates ownership from event ordering.
+   chrome.tabs.onCreated.addListener((tab) => {
+     if (typeof tab.windowId !== "number" || typeof tab.id !== "number") return;
+-    if (!sessions.findByWindowId(tab.windowId)) return;
++    if (!sessions.list().some((ctx) => ctx.agentWindowId === tab.windowId)) return;
+     void pushOverlayStateForTab(tab.id, tab.windowId);
+   });
++  chrome.tabs.onAttached.addListener((tabId, info) => {
++    const task = sessions.findByTabId(tabId);
++    if (task?.tabMode) void pushOverlayStateForTab(tabId, info.newWindowId);
++  });
+   chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
++    const task = sessions.findByTabId(tabId);
+     sessions.forgetClosedTab(tabId, { isWindowClosing: removeInfo.isWindowClosing });
++    if (task?.tabMode && !task.stopping && !task.agentCreatedTabs.size && !task.borrowedTabs.size) {
++      task.stopping = true;
++      void cdp
++        .detachSession(task.sessionId)
++        .then(() => sessions.stop(task.sessionId, { dropOnly: true }))
++        .then(() => {
++          onOverlaySessionStateChanged();
++          transport.send({
++            event: "session.window_closed",
++            payload: { session_id: task.sessionId, reason: "user_closed_window" },
++          });
++        })
++        .catch(() => {
++          /* Connection cleanup also drops the task if disconnected. */
++        });
++    }
+   });
+   // Re-sync the storage.session flag on SW startup so a previous SW's
+   // stale `true` does not keep waking us on every page load until the
+@@ -227,6 +308,7 @@ export default defineBackground(() => {
+   attachRecordQueryListener(recordDeps);
+ 
+   const dispatcher = new ToolDispatcher({
++    taskActivity,
+     transport,
+     sessions,
+     cdp,
+@@ -247,6 +329,7 @@ export default defineBackground(() => {
+           // Resolve i18n strings per-borrow so language switches take effect
+           // without re-creating the dispatcher.
+           notificationCopy: makeBorrowNotificationCopy(),
++          focusOnRequest: !remoteEndpoint,
+         },
+       }),
+     helpNotificationCopy: () => ({
+@@ -355,7 +438,7 @@ export default defineBackground(() => {
+ 
+     if (msg.kind === OVERLAY_MSG_WHO_AM_I) {
+       const windowId = sender.tab?.windowId;
+-      const ctx = typeof windowId === "number" ? sessions.findByWindowId(windowId) : null;
++      const ctx = sender.tab?.id !== undefined ? sessions.findByTabId(sender.tab.id) : null;
+       sendResponse({ sessionId: ctx?.sessionId ?? null });
+       return false;
+     }
+@@ -372,7 +455,11 @@ export default defineBackground(() => {
+     if (msg.kind === OVERLAY_MSG_INTERRUPT) {
+       const req = msg as OverlayInterruptRequest;
+       const ctx = sessions.get(req.sessionId);
+-      if (ctx) setControlMode(req.sessionId, "interrupting");
++      if (!ctx || sender.tab?.id === undefined || !isAgentControlledTab(ctx, sender.tab.id)) {
++        sendResponse({ ok: false, error: "Task tab is not authorized" });
++        return false;
++      }
++      setControlMode(req.sessionId, "interrupting");
+       void handleOverlayInterrupt(transport, req.sessionId).then((reply) => {
+         if (reply.ok && sessions.get(req.sessionId)) {
+           setControlMode(req.sessionId, "paused");
+diff --git a/apps/extension/src/entrypoints/popup/App.tsx b/apps/extension/src/entrypoints/popup/App.tsx
+index 29ee388..2ea435f 100644
+--- a/apps/extension/src/entrypoints/popup/App.tsx
++++ b/apps/extension/src/entrypoints/popup/App.tsx
+@@ -13,6 +13,8 @@ import { PROTOCOL_VERSION } from "@/transport/handshake";
+ import functionIconUrl from "../../../assets/function.svg";
+ import { ConnectionStatusIndicator } from "./connection-status-indicator";
+ import { POPUP_FEATURES, type PopupView } from "./features";
++import { RemoteConnection } from "./remote-connection";
++import { TaskWindowMode } from "./task-window-mode";
+ import { Switch } from "./switch";
+ import { type PopupStatusState, useConnectionState } from "./use-connection-state";
+ import { useControlHintsHidden } from "./use-control-hints-hidden";
+@@ -54,6 +56,7 @@ export function App() {
+     dirty: daemonPortDirty,
+     error: daemonPortError,
+   } = useDaemonPort();
++  const [remoteConfigured, setRemoteConfigured] = useState(false);
+   const [view, setView] = useState<PopupView>("main");
+   const [copiedInstanceId, setCopiedInstanceId] = useState(false);
+   const [purposeDraft, setPurposeDraft] = useState("");
+@@ -275,9 +278,12 @@ export function App() {
+             </div>
+           </section>
+ 
++          <RemoteConnection onRemoteChange={setRemoteConfigured} />
++          {remoteConfigured && <TaskWindowMode />}
+           <section
+             className="rounded-xl border border-border/80 bg-card/60 px-3 py-2.5"
+             data-slot="popup-daemon-port-card"
++            hidden={remoteConfigured}
+           >
+             <div className="flex items-center justify-between gap-2">
+               <span className="flex min-w-0 items-center gap-1">
+diff --git a/apps/extension/src/entrypoints/popup/remote-connection.tsx b/apps/extension/src/entrypoints/popup/remote-connection.tsx
+new file mode 100644
+index 0000000..c9085ec
+--- /dev/null
++++ b/apps/extension/src/entrypoints/popup/remote-connection.tsx
+@@ -0,0 +1,113 @@
++import { useTranslation } from "@browser-skill/i18n/react";
++import { Button, Input, Label } from "@browser-skill/ui";
++import { useEffect, useState } from "react";
++import {
++  parseRemoteEndpoint,
++  REMOTE_ENDPOINT_KEY,
++  readRemoteEndpoint,
++} from "@/transport/remote-endpoint";
++
++export function RemoteConnection({
++  onRemoteChange,
++}: {
++  onRemoteChange?: (remote: boolean) => void;
++}) {
++  const { t } = useTranslation("extension");
++  const [draft, setDraft] = useState("");
++  const [server, setServer] = useState<string | null>(null);
++  const [ready, setReady] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const [error, setError] = useState(false);
++  useEffect(() => {
++    let alive = true;
++    let revision = 0;
++    const read = async () => {
++      const current = ++revision;
++      const values = await chrome.storage.local.get(REMOTE_ENDPOINT_KEY);
++      if (!alive || current !== revision) return;
++      const remote = readRemoteEndpoint(values[REMOTE_ENDPOINT_KEY]);
++      setServer(remote?.url ?? null);
++      onRemoteChange?.(remote !== null);
++      setReady(true);
++    };
++    const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
++      if (area === "local" && changes[REMOTE_ENDPOINT_KEY])
++        void read().catch(() => alive && setError(true));
++    };
++    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
++    chrome.storage.onChanged.addListener(changed);
++    void read().catch(() => {
++      if (alive) {
++        setError(true);
++        setReady(true);
++      }
++    });
++    return () => {
++      alive = false;
++      chrome.storage.onChanged.removeListener(changed);
++    };
++  }, [onRemoteChange]);
++  async function save(disconnect = false) {
++    if (busy) return;
++    setBusy(true);
++    setError(false);
++    try {
++      const reply = (await chrome.runtime.sendMessage({
++        kind: "bsk-remote-authorization",
++        pairing: disconnect ? null : draft,
++      })) as { url: string | null; error?: string };
++      if (reply.error) throw new Error(reply.error);
++      setServer(reply.url);
++      onRemoteChange?.(reply.url !== null);
++      setDraft("");
++    } catch {
++      setError(true);
++    } finally {
++      setBusy(false);
++    }
++  }
++  let destination = server;
++  try {
++    if (draft.trim()) destination = parseRemoteEndpoint(draft).url;
++  } catch {
++    /* Invalid drafts cannot be saved. */
++  }
++  return (
++    <details className="rounded-xl border border-border/80 bg-card/60 px-3 py-2.5">
++      <summary className="cursor-pointer text-sm font-medium">{t("popup.remoteTitle")}</summary>
++      <div className="mt-3 space-y-2">
++        <p className="break-all text-xs text-muted-foreground">
++          {destination ?? t("popup.remoteLocal")}
++        </p>
++        <Label htmlFor="remote-pairing">{t("popup.remotePairing")}</Label>
++        <Input
++          id="remote-pairing"
++          type="password"
++          autoComplete="off"
++          value={draft}
++          disabled={!ready || busy}
++          onChange={(e) => setDraft(e.target.value)}
++        />
++        <p className="text-xs text-muted-foreground">{t("popup.remoteHint")}</p>
++        <div className="flex gap-2">
++          <Button size="sm" disabled={!ready || busy || !draft.trim()} onClick={() => void save()}>
++            {t("popup.remoteSave")}
++          </Button>
++          <Button
++            size="sm"
++            variant="outline"
++            disabled={!ready || busy || (!server && !error)}
++            onClick={() => void save(true)}
++          >
++            {t("popup.remoteLocal")}
++          </Button>
++        </div>
++        {error && (
++          <p role="alert" className="text-xs text-destructive">
++            {t("popup.remoteError")}
++          </p>
++        )}
++      </div>
++    </details>
++  );
++}
+diff --git a/apps/extension/src/entrypoints/popup/task-window-mode.test.tsx b/apps/extension/src/entrypoints/popup/task-window-mode.test.tsx
+new file mode 100644
+index 0000000..bfcf50e
+--- /dev/null
++++ b/apps/extension/src/entrypoints/popup/task-window-mode.test.tsx
+@@ -0,0 +1,55 @@
++import { i18n } from "@browser-skill/i18n";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, expect, it, vi } from "vitest";
++import { getTaskWindowEnabled, TASK_WINDOW_KEY } from "@/lib/task-window-preference";
++import { TaskWindowMode } from "./task-window-mode";
++
++let data: Record<string, unknown>;
++let write: ReturnType<typeof vi.fn>;
++beforeEach(async () => {
++  await i18n.changeLanguage("zh-CN");
++  data = {};
++  write = vi.fn(async (values: object) => {
++    Object.assign(data, values);
++  });
++  vi.stubGlobal("chrome", { storage: { local: { get: async () => ({ ...data }), set: write } } });
++});
++afterEach(() => {
++  cleanup();
++  vi.unstubAllGlobals();
++});
++it("defaults to a separate window and preserves an explicit tab preference across popup remounts", async () => {
++  const view = render(<TaskWindowMode />);
++  const select = screen.getByRole("combobox") as HTMLSelectElement;
++  await waitFor(() => expect(select.disabled).toBe(false));
++  expect(select.value).toBe("window");
++  fireEvent.change(select, { target: { value: "tabs" } });
++  await waitFor(() => expect(select.value).toBe("tabs"));
++  expect(await getTaskWindowEnabled()).toBe(false);
++  expect(write).toHaveBeenCalledWith({ [TASK_WINDOW_KEY]: false });
++  view.unmount();
++  render(<TaskWindowMode />);
++  await waitFor(() =>
++    expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("tabs"),
++  );
++});
++it("retains the default mode and exposes a failed write", async () => {
++  render(<TaskWindowMode />);
++  const select = screen.getByRole("combobox") as HTMLSelectElement;
++  await waitFor(() => expect(select.disabled).toBe(false));
++  write.mockRejectedValueOnce(new Error("storage unavailable"));
++  fireEvent.change(select, { target: { value: "tabs" } });
++  await screen.findByRole("alert");
++  expect(select.value).toBe("window");
++  expect(await getTaskWindowEnabled()).toBe(true);
++});
++
++it("loads an explicitly saved separate-window preference", async () => {
++  data[TASK_WINDOW_KEY] = true;
++  render(<TaskWindowMode />);
++  const select = screen.getByRole("combobox") as HTMLSelectElement;
++  await waitFor(() => expect(select.disabled).toBe(false));
++  expect(select.value).toBe("window");
++  expect(await getTaskWindowEnabled()).toBe(true);
++  expect(write).not.toHaveBeenCalled();
++});
+diff --git a/apps/extension/src/entrypoints/popup/task-window-mode.tsx b/apps/extension/src/entrypoints/popup/task-window-mode.tsx
+new file mode 100644
+index 0000000..7894c9b
+--- /dev/null
++++ b/apps/extension/src/entrypoints/popup/task-window-mode.tsx
+@@ -0,0 +1,62 @@
++import { useTranslation } from "@browser-skill/i18n/react";
++import { useEffect, useState } from "react";
++import { getTaskWindowEnabled, setTaskWindowEnabled } from "@/lib/task-window-preference";
++
++export function TaskWindowMode() {
++  const { t } = useTranslation("extension");
++  const [enabled, setEnabled] = useState(true);
++  const [loaded, setLoaded] = useState(false);
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState(false);
++  useEffect(() => {
++    let cancelled = false;
++    getTaskWindowEnabled()
++      .then((value) => {
++        if (!cancelled) {
++          setEnabled(value);
++          setLoaded(true);
++        }
++      })
++      .catch(() => {
++        if (!cancelled) setError(true);
++      });
++    return () => {
++      cancelled = true;
++    };
++  }, []);
++  async function update(value: boolean) {
++    setSaving(true);
++    setError(false);
++    try {
++      await setTaskWindowEnabled(value);
++      setEnabled(value);
++    } catch {
++      setError(true);
++    } finally {
++      setSaving(false);
++    }
++  }
++  return (
++    <section className="rounded-xl border border-border/80 bg-card/60 px-3 py-2.5">
++      <label htmlFor="bsk-task-window-mode" className="text-sm font-medium">
++        {t("popup.taskWindowTitle")}
++      </label>
++      <select
++        id="bsk-task-window-mode"
++        value={enabled ? "window" : "tabs"}
++        disabled={!loaded || saving}
++        onChange={(event) => void update(event.target.value === "window")}
++        className="mt-2 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
++      >
++        <option value="window">{t("popup.taskWindowVisible")}</option>
++        <option value="tabs">{t("popup.taskWindowTabs")}</option>
++      </select>
++      <p className="mt-2 text-xs leading-snug text-muted-foreground">{t("popup.taskWindowHint")}</p>
++      {error && (
++        <p role="alert" className="mt-2 text-xs text-destructive">
++          {t("popup.taskWindowError")}
++        </p>
++      )}
++    </section>
++  );
++}
+diff --git a/apps/extension/src/lib/__tests__/daemon-connection-preference.test.ts b/apps/extension/src/lib/__tests__/daemon-connection-preference.test.ts
+new file mode 100644
+index 0000000..5c61936
+--- /dev/null
++++ b/apps/extension/src/lib/__tests__/daemon-connection-preference.test.ts
+@@ -0,0 +1,50 @@
++import { afterEach, expect, it, vi } from "vitest";
++import { watchDaemonConnection } from "../daemon-connection-preference";
++
++afterEach(() => vi.unstubAllGlobals());
++it("a late startup read cannot overwrite newer credentials", async () => {
++  let changed: (values: unknown, area: string) => void = () => {};
++  const resolvers: Array<(value: unknown) => void> = [];
++  vi.stubGlobal("chrome", {
++    storage: {
++      local: { get: () => new Promise((resolve) => resolvers.push(resolve)) },
++      onChanged: {
++        addListener: (fn: typeof changed) => {
++          changed = fn;
++        },
++        removeListener: vi.fn(),
++      },
++    },
++  });
++  const callback = vi.fn();
++  const watch = watchDaemonConnection(callback);
++  changed({ bsk_remote_endpoint: {} }, "local");
++  const remote = { url: "wss://example.com/bsk", token: "a".repeat(43) };
++  resolvers[1]({ bsk_remote_endpoint: remote });
++  await Promise.resolve();
++  resolvers[0]({ bsk_daemon_port: 1234 });
++  await watch.ready;
++  expect(callback).toHaveBeenCalledTimes(1);
++  expect(callback).toHaveBeenCalledWith(remote.url, remote);
++  watch.dispose();
++});
++it("disposal prevents pending reads from configuring a connection", async () => {
++  let finish: (value: unknown) => void = () => {};
++  vi.stubGlobal("chrome", {
++    storage: {
++      local: {
++        get: () =>
++          new Promise((resolve) => {
++            finish = resolve;
++          }),
++      },
++      onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
++    },
++  });
++  const callback = vi.fn();
++  const watch = watchDaemonConnection(callback);
++  watch.dispose();
++  finish({});
++  await watch.ready;
++  expect(callback).not.toHaveBeenCalled();
++});
+diff --git a/apps/extension/src/lib/__tests__/task-activity.test.ts b/apps/extension/src/lib/__tests__/task-activity.test.ts
+new file mode 100644
+index 0000000..5fe54f2
+--- /dev/null
++++ b/apps/extension/src/lib/__tests__/task-activity.test.ts
+@@ -0,0 +1,93 @@
++import { describe, expect, it, vi } from "vitest";
++import type { SessionManager } from "@/session-manager/manager";
++import { TaskActivity } from "../task-activity";
++
++function deferred() {
++  let resolve!: () => void;
++  const promise = new Promise<void>((r) => {
++    resolve = r;
++  });
++  return { promise, resolve };
++}
++function fixture() {
++  const tasks = new Map<string, object>([
++    ["one", { tabMode: true }],
++    ["two", { tabMode: true }],
++  ]);
++  const manager = { get: (id: string) => tasks.get(id) } as unknown as SessionManager;
++  const detach = vi.fn(async (_id: string) => {});
++  return { tasks, detach, activity: new TaskActivity(manager, detach) };
++}
++describe("task debugging lifecycle", () => {
++  it("drains an in-flight screenshot before detach and rejects later preview attachment", async () => {
++    const { activity, detach, tasks } = fixture();
++    const shot = deferred();
++    const capture = activity.preview("one", () => shot.promise);
++    const release = activity.release("one");
++    await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
++    await Promise.resolve();
++    expect(detach).not.toHaveBeenCalled();
++    shot.resolve();
++    await Promise.all([capture, release]);
++    expect(detach).toHaveBeenCalledWith("one");
++    expect(tasks.has("one")).toBe(true);
++    await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
++  });
++  it("waits for automation even if turn end arrives before the operation begins", async () => {
++    const { activity, detach } = fixture();
++    const op = deferred();
++    const running = activity.run("one", false, () => op.promise);
++    const release = activity.release("one");
++    await Promise.resolve();
++    expect(detach).not.toHaveBeenCalled();
++    op.resolve();
++    await Promise.all([running, release]);
++    expect(detach).toHaveBeenCalledTimes(1);
++  });
++  it("a new turn waits for detach then resumes capture without deleting tabs", async () => {
++    const { activity, detach } = fixture();
++    const gate = deferred();
++    detach.mockImplementationOnce(() => gate.promise);
++    const release = activity.release("one");
++    const op = vi.fn(async () => {});
++    const next = activity.run("one", false, op);
++    await Promise.resolve();
++    expect(op).not.toHaveBeenCalled();
++    gate.resolve();
++    await Promise.all([release, next]);
++    expect(op).toHaveBeenCalledOnce();
++    await expect(activity.preview("one", async () => "frame")).resolves.toBe("frame");
++  });
++  it("stop fences previews before closing tabs", async () => {
++    const { activity, detach } = fixture();
++    await activity.run("one", true, async () => {
++      expect(detach).toHaveBeenCalledWith("one");
++      await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
++    });
++    await expect(activity.preview("one", async () => {})).rejects.toThrow("idle");
++  });
++  it("failed captures do not prevent release or interfere with another task", async () => {
++    const { activity, detach } = fixture();
++    const capture = activity.preview("one", async () => {
++      throw new Error("failed capture");
++    });
++    const release = activity.release("one");
++    await expect(capture).rejects.toThrow("failed capture");
++    await release;
++    await expect(activity.preview("two", async () => "live")).resolves.toBe("live");
++    expect(detach).toHaveBeenCalledTimes(1);
++  });
++  it("does not resume a deleted session after waiting for release", async () => {
++    const { activity, tasks, detach } = fixture();
++    const gate = deferred();
++    detach.mockImplementationOnce(() => gate.promise);
++    const release = activity.release("one");
++    const op = vi.fn(async () => {});
++    const next = activity.run("one", false, op);
++    tasks.delete("one");
++    gate.resolve();
++    await release;
++    await expect(next).rejects.toThrow("Task ended");
++    expect(op).not.toHaveBeenCalled();
++  });
++});
+diff --git a/apps/extension/src/lib/__tests__/task-preview.test.ts b/apps/extension/src/lib/__tests__/task-preview.test.ts
+new file mode 100644
+index 0000000..fc0b8d3
+--- /dev/null
++++ b/apps/extension/src/lib/__tests__/task-preview.test.ts
+@@ -0,0 +1,131 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
++import { runCdpCommand } from "@/browser-driver/command-deadline";
++import type { SessionManager } from "@/session-manager/manager";
++import { TaskActivity } from "../task-activity";
++import { captureTaskPreview } from "../task-preview";
++
++vi.mock("@/lib/capture-suppress-bridge", () => ({
++  withExtensionOverlayHidden: (_tab: number, run: () => unknown) => run(),
++}));
++afterEach(() => {
++  vi.unstubAllGlobals();
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++});
++function fixture() {
++  const task = {
++    tabMode: true,
++    activeTabId: 5,
++    agentCreatedTabs: new Set([5]),
++    borrowedTabs: new Map(),
++  };
++  const manager = { get: () => task } as unknown as SessionManager;
++  const cdp = {
++    trackSessionTab: vi.fn(),
++    hasPendingScreenshot: vi.fn(() => false),
++    ensureAttached: vi.fn(async () => {}),
++    send: vi.fn(async (_tab, method) =>
++      method === "Page.getLayoutMetrics"
++        ? { cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 1280, clientHeight: 720 } }
++        : { data: btoa("jpeg") },
++    ),
++  } as unknown as ChromiumCdp;
++  const draw = vi.fn();
++  const close = vi.fn();
++  const sizes: number[] = [];
++  vi.stubGlobal("chrome", {
++    tabs: { get: vi.fn(async () => ({ id: 5, windowId: 10, title: "task" })) },
++  });
++  vi.stubGlobal(
++    "createImageBitmap",
++    vi.fn(async () => ({ width: 1280, height: 720, close })),
++  );
++  vi.stubGlobal(
++    "OffscreenCanvas",
++    class {
++      width: number;
++      height: number;
++      constructor(w: number, h: number) {
++        this.width = w;
++        this.height = h;
++        sizes.push(w, h);
++      }
++      getContext() {
++        return { drawImage: draw };
++      }
++      async convertToBlob() {
++        return new Blob(["thumbnail"]);
++      }
++    },
++  );
++  return { task, manager, cdp, sizes, close };
++}
++describe("independent task preview", () => {
++  it("lets turn-end release finish after a stuck screenshot times out", async () => {
++    vi.useFakeTimers();
++    vi.spyOn(console, "warn").mockImplementation(() => {});
++    vi.spyOn(console, "debug").mockImplementation(() => {});
++    const f = fixture();
++    const original = vi.mocked(f.cdp.send).getMockImplementation()!;
++    vi.mocked(f.cdp.send).mockImplementation((tab, method, params) =>
++      method === "Page.captureScreenshot"
++        ? runCdpCommand({ tabId: tab }, method, () => new Promise<never>(() => {}))
++        : original(tab, method, params),
++    );
++    const detach = vi.fn(async () => {});
++    const activity = new TaskActivity(f.manager, detach);
++    const frame = activity.preview("stuck", () => captureTaskPreview(f.manager, f.cdp, "stuck"));
++    const checked = expect(frame).rejects.toThrow("Page.captureScreenshot timed out");
++    const released = activity.release("stuck");
++    await vi.advanceTimersByTimeAsync(3_000);
++    await checked;
++    await released;
++    expect(detach).toHaveBeenCalledWith("stuck");
++    expect(vi.getTimerCount()).toBe(0);
++    vi.mocked(f.cdp.send).mockImplementation(original);
++    await expect(
++      activity.run("stuck", false, () => captureTaskPreview(f.manager, f.cdp, "stuck")),
++    ).resolves.toMatchObject({ tab_id: 5 });
++  });
++
++  it("coalesces captures and bounds the physical bitmap on HiDPI screens", async () => {
++    const f = fixture();
++    const first = captureTaskPreview(f.manager, f.cdp, "one");
++    expect(captureTaskPreview(f.manager, f.cdp, "one")).toBe(first);
++    const frame = await first;
++    expect(frame).toMatchObject({ tab_id: 5, format: "jpeg", image_base64: btoa("thumbnail") });
++    expect(f.sizes).toEqual([640, 360]);
++    expect(f.close).toHaveBeenCalled();
++    expect(f.cdp.send).toHaveBeenCalledExactlyOnceWith(5, "Page.captureScreenshot", {
++      format: "jpeg",
++      quality: 50,
++      fromSurface: true,
++      captureBeyondViewport: false,
++    });
++  });
++  it("skips polling before any browser work when Chrome still has a screenshot pending", async () => {
++    const f = fixture();
++    vi.mocked(f.cdp.hasPendingScreenshot).mockReturnValue(true);
++    await expect(captureTaskPreview(f.manager, f.cdp, "pending")).rejects.toThrow("still running");
++    expect(f.cdp.ensureAttached).not.toHaveBeenCalled();
++    expect(f.cdp.send).not.toHaveBeenCalled();
++  });
++  it("does not capture an unowned active user tab", async () => {
++    const f = fixture();
++    f.task.agentCreatedTabs.clear();
++    await expect(captureTaskPreview(f.manager, f.cdp, "empty")).rejects.toThrow(
++      "Task tab unavailable",
++    );
++    expect(f.cdp.send).not.toHaveBeenCalled();
++  });
++  it("discards the result if authorization ends during capture", async () => {
++    const f = fixture();
++    vi.mocked(f.cdp.ensureAttached).mockImplementation(async () => {
++      f.task.agentCreatedTabs.clear();
++    });
++    await expect(captureTaskPreview(f.manager, f.cdp, "ended")).rejects.toThrow(
++      "Task ended during capture",
++    );
++  });
++});
+diff --git a/apps/extension/src/lib/daemon-connection-preference.ts b/apps/extension/src/lib/daemon-connection-preference.ts
+new file mode 100644
+index 0000000..f021fe8
+--- /dev/null
++++ b/apps/extension/src/lib/daemon-connection-preference.ts
+@@ -0,0 +1,39 @@
++import { normalizeDaemonPort, resolveDaemonWsUrl } from "@/transport/daemon-endpoint";
++import {
++  REMOTE_ENDPOINT_KEY,
++  type RemoteEndpoint,
++  readRemoteEndpoint,
++} from "@/transport/remote-endpoint";
++import { STORAGE_KEYS } from "./instance-id";
++
++/** Keep the port and remote credential in one snapshot. Invalid remote state never falls back locally. */
++export function watchDaemonConnection(
++  onChange: (url: string, remote: RemoteEndpoint | null) => void,
++) {
++  let disposed = false;
++  let revision = 0;
++  const read = async () => {
++    const current = ++revision;
++    const values = await chrome.storage.local.get([STORAGE_KEYS.DAEMON_PORT, REMOTE_ENDPOINT_KEY]);
++    if (disposed || revision !== current) return;
++    const remote = readRemoteEndpoint(values[REMOTE_ENDPOINT_KEY]);
++    onChange(
++      remote?.url ?? resolveDaemonWsUrl(normalizeDaemonPort(values[STORAGE_KEYS.DAEMON_PORT])),
++      remote,
++    );
++  };
++  const changed = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
++    if (area === "local" && (changes[STORAGE_KEYS.DAEMON_PORT] || changes[REMOTE_ENDPOINT_KEY])) {
++      // Invalid writes are not supported; do not redirect the active connection to localhost.
++      void read().catch(() => console.error("[connection] invalid connection preference"));
++    }
++  };
++  chrome.storage.onChanged.addListener(changed);
++  return {
++    ready: read(),
++    dispose: () => {
++      disposed = true;
++      chrome.storage.onChanged.removeListener(changed);
++    },
++  };
++}
+diff --git a/apps/extension/src/lib/task-activity.ts b/apps/extension/src/lib/task-activity.ts
+new file mode 100644
+index 0000000..3f5018d
+--- /dev/null
++++ b/apps/extension/src/lib/task-activity.ts
+@@ -0,0 +1,86 @@
++import type { SessionManager } from "@/session-manager/manager";
++
++interface Activity {
++  idle: boolean;
++  pending: Set<Promise<unknown>>;
++  releasing?: Promise<void>;
++}
++
++/** Coordinates UI captures with turn-end release and native session stop.
++ * State follows the session object, so deleted sessions cannot retain frames or fences. */
++export class TaskActivity {
++  private readonly states = new WeakMap<object, Activity>();
++  constructor(
++    private readonly manager: SessionManager,
++    private readonly detach: (sessionId: string) => Promise<void>,
++  ) {}
++
++  private state(sessionId: string): Activity | undefined {
++    const task = this.manager.get(sessionId);
++    if (!task?.tabMode) return undefined;
++    let state = this.states.get(task);
++    if (!state) {
++      state = { idle: false, pending: new Set() };
++      this.states.set(task, state);
++    }
++    return state;
++  }
++
++  private track<T>(state: Activity, run: () => Promise<T>): Promise<T> {
++    const work = Promise.resolve().then(run);
++    state.pending.add(work);
++    void work.then(
++      () => state.pending.delete(work),
++      () => state.pending.delete(work),
++    );
++    return work;
++  }
++
++  preview<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
++    const state = this.state(sessionId);
++    if (!state || state.idle) return Promise.reject(new Error("Task preview is idle"));
++    return this.track(state, run);
++  }
++
++  async run<T>(
++    sessionId: string | undefined,
++    stopping: boolean,
++    run: () => Promise<T>,
++  ): Promise<T> {
++    if (!sessionId) return run();
++    const task = this.manager.get(sessionId);
++    const state = this.state(sessionId);
++    if (!state) return run();
++    if (stopping) {
++      await this.release(sessionId);
++      return run();
++    }
++    if (state.releasing) await state.releasing;
++    if (this.manager.get(sessionId) !== task) throw new Error("Task ended before operation");
++    state.idle = false;
++    return this.track(state, run);
++  }
++
++  release(sessionId: string): Promise<void> {
++    const state = this.state(sessionId);
++    if (!state) return Promise.resolve();
++    if (state.releasing) return state.releasing;
++    state.idle = true;
++    const work = (async () => {
++      // A screenshot's send() can auto-attach. Let every in-flight operation
++      // finish before detaching, and reject new previews throughout release.
++      await Promise.allSettled([...state.pending]);
++      await this.detach(sessionId);
++    })();
++    state.releasing = work;
++    void work.then(
++      () => {
++        state.releasing = undefined;
++      },
++      () => {
++        state.releasing = undefined;
++      },
++    );
++    return work;
++  }
++}
+diff --git a/apps/extension/src/lib/task-preview.ts b/apps/extension/src/lib/task-preview.ts
+new file mode 100644
+index 0000000..8f8331d
+--- /dev/null
++++ b/apps/extension/src/lib/task-preview.ts
+@@ -0,0 +1,83 @@
++import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
++import { withExtensionOverlayHidden } from "@/lib/capture-suppress-bridge";
++import { isAgentControlledTab, type SessionManager } from "@/session-manager/manager";
++
++const captures = new Map<string, Promise<unknown>>();
++/** UI-only capture, outside the automation queue (including human-help waits).
++ * Captures only the task's concrete tab; never activates it or reads a user tab. */
++export function captureTaskPreview(
++  manager: SessionManager,
++  cdp: ChromiumCdp,
++  sessionId: string,
++): Promise<unknown> {
++  const pending = captures.get(sessionId);
++  if (pending) return pending;
++  const work = capture(manager, cdp, sessionId).finally(() => captures.delete(sessionId));
++  captures.set(sessionId, work);
++  return work;
++}
++async function capture(manager: SessionManager, cdp: ChromiumCdp, sessionId: string) {
++  const task = manager.get(sessionId);
++  if (!task) throw new Error("Task unavailable");
++  const tabId =
++    task.activeTabId !== undefined && isAgentControlledTab(task, task.activeTabId)
++      ? task.activeTabId
++      : [...task.agentCreatedTabs, ...task.borrowedTabs.keys()][0];
++  if (tabId === undefined || !isAgentControlledTab(task, tabId))
++    throw new Error("Task tab unavailable");
++  if (cdp.hasPendingScreenshot(tabId))
++    throw new Error("Previous screenshot is still running in Chrome");
++  const tab = await chrome.tabs.get(tabId);
++  cdp.trackSessionTab(sessionId, tabId);
++  await cdp.ensureAttached(tabId);
++  const shot = await withExtensionOverlayHidden(
++    tabId,
++    async () => {
++      // captureBeyondViewport=false already limits the image to the viewport.
++      // Avoid a separate layout read on every UI poll; resize the bitmap below.
++      return cdp.send<{ data: string }>(tabId, "Page.captureScreenshot", {
++        format: "jpeg",
++        quality: 50,
++        fromSurface: true,
++        captureBeyondViewport: false,
++      });
++    },
++    (id, message) => chrome.tabs.sendMessage(id, message),
++  );
++  if (manager.get(sessionId) !== task || !isAgentControlledTab(task, tabId))
++    throw new Error("Task ended during capture");
++  // Viewport screenshots may use physical display pixels; HiDPI displays can
++  // return larger bitmaps. Bound the actual encoded image to the preview width.
++  let data = shot.data;
++  const bitmap = await createImageBitmap(
++    new Blob([Uint8Array.from(atob(data), (c) => c.charCodeAt(0))], { type: "image/jpeg" }),
++  );
++  try {
++    if (bitmap.width > 640) {
++      const canvas = new OffscreenCanvas(
++        640,
++        Math.max(1, Math.round((bitmap.height * 640) / bitmap.width)),
++      );
++      const context = canvas.getContext("2d");
++      if (!context) throw new Error("Preview canvas unavailable");
++      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
++      const jpeg = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.5 });
++      data = btoa(
++        Array.from(new Uint8Array(await jpeg.arrayBuffer()), (b) => String.fromCharCode(b)).join(
++          "",
++        ),
++      );
++    }
++  } finally {
++    bitmap.close();
++  }
++  if (manager.get(sessionId) !== task || !isAgentControlledTab(task, tabId))
++    throw new Error("Task ended during capture");
++  return {
++    image_base64: data,
++    format: "jpeg",
++    tab_id: tabId,
++    title: tab.title ?? "",
++    captured_at: new Date().toISOString(),
++  };
++}
+diff --git a/apps/extension/src/lib/task-window-preference.ts b/apps/extension/src/lib/task-window-preference.ts
+new file mode 100644
+index 0000000..09a4eef
+--- /dev/null
++++ b/apps/extension/src/lib/task-window-preference.ts
+@@ -0,0 +1,11 @@
++export const TASK_WINDOW_KEY = "bsk.remoteTaskWindowEnabled";
++
++/** Read when a new remote task starts; existing tasks keep their original mode. */
++export async function getTaskWindowEnabled(): Promise<boolean> {
++  const stored = await chrome.storage.local.get(TASK_WINDOW_KEY);
++  return stored[TASK_WINDOW_KEY] !== false;
++}
++
++export async function setTaskWindowEnabled(enabled: boolean): Promise<void> {
++  await chrome.storage.local.set({ [TASK_WINDOW_KEY]: enabled });
++}
+diff --git a/apps/extension/src/session-manager/__tests__/task-popups.test.ts b/apps/extension/src/session-manager/__tests__/task-popups.test.ts
+new file mode 100644
+index 0000000..ce40618
+--- /dev/null
++++ b/apps/extension/src/session-manager/__tests__/task-popups.test.ts
+@@ -0,0 +1,135 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { SessionManager } from "../manager";
++import { withTaskPopups } from "../task-popups";
++
++describe("page-created task tabs", () => {
++  let manager: SessionManager;
++  let tabs: Map<number, any>;
++  let listeners: Set<(event: { sourceTabId: number; tabId: number }) => void>;
++  let api: any;
++  let activations: Set<(event: { tabId: number }) => void>;
++  beforeEach(() => {
++    listeners = new Set();
++    activations = new Set();
++    tabs = new Map([
++      [1, { id: 1, windowId: 10, active: true }],
++      [2, { id: 2, windowId: 10, active: false }],
++    ]);
++    let id = 10;
++    api = {
++      onActivated: {
++        addListener: (fn: any) => activations.add(fn),
++        removeListener: (fn: any) => activations.delete(fn),
++      },
++      query: vi.fn(async () => [...tabs.values()].filter((t) => t.active)),
++      get: vi.fn(async (id: number) => {
++        if (!tabs.has(id)) throw new Error("closed");
++        return tabs.get(id);
++      }),
++      create: vi.fn(async (props: any) => {
++        const tab = { id: ++id, ...props };
++        tabs.set(tab.id, tab);
++        return tab;
++      }),
++      update: vi.fn(async (id: number, props: any) => {
++        if (props.active) for (const tab of tabs.values()) tab.active = false;
++        return Object.assign(tabs.get(id), props);
++      }),
++      group: vi.fn(async () => 7),
++      ungroup: vi.fn(async (id: number) => { tabs.get(id).groupId = -1; }),
++      move: vi.fn(async (id: number, props: any) => Object.assign(tabs.get(id), props)),
++      remove: vi.fn(async (id: number) => {
++        tabs.delete(id);
++        manager.forgetClosedTab(id);
++      }),
++    };
++    vi.stubGlobal("chrome", {
++      tabs: api,
++      tabGroups: { update: vi.fn() },
++      windows: { getAll: vi.fn(async () => [{ id: 10, focused: true }]), remove: vi.fn() },
++      webNavigation: {
++        onCreatedNavigationTarget: {
++          addListener: (fn: any) => listeners.add(fn),
++          removeListener: (fn: any) => listeners.delete(fn),
++        },
++      },
++    });
++    manager = new SessionManager({ taskTabs: () => true });
++  });
++  afterEach(() => vi.unstubAllGlobals());
++  const notify = (sourceTabId: number, tabId: number) => {
++    for (const fn of listeners) fn({ sourceTabId, tabId });
++  };
++  it("claims noopener and nested popups and closes every owned tab, preserving user and other-task tabs", async () => {
++    const task = await manager.start("one"),
++      other = await manager.start("two");
++    const start = task.activeTabId!;
++    await withTaskPopups(manager, { session_id: task.sessionId }, async () => {
++      // No openerTabId: webNavigation is the authoritative source link.
++      tabs.set(20, { id: 20, windowId: 10, active: true, groupId: 7 });
++      notify(start, 20);
++      tabs.set(21, { id: 21, windowId: 10, active: false });
++      notify(20, 21);
++      // Being dragged into the same group must not grant ownership.
++      tabs.set(22, { id: 22, windowId: 10, active: false, groupId: 7 });
++      notify(1, 22);
++    });
++    expect(task.agentCreatedTabs).toEqual(new Set([start, 20, 21]));
++    expect(task.activeTabId).toBe(21);
++    expect(tabs.get(1).active).toBe(true);
++    expect(api.group).toHaveBeenCalledWith({ tabIds: [20], groupId: 7 });
++    expect(listeners.size).toBe(0);
++    await manager.stop(task.sessionId);
++    expect([...tabs.keys()].sort((a, b) => a - b)).toEqual([1, 2, other.activeTabId!, 22]);
++    expect(chrome.windows.remove).not.toHaveBeenCalled();
++  });
++  it("does not take tabs from other tasks or override a user's later tab switch", async () => {
++    const task = await manager.start("one"),
++      other = await manager.start("two");
++    await withTaskPopups(manager, { session_id: task.sessionId }, async () => {
++      tabs.set(20, { id: 20, windowId: 10, active: false });
++      notify(task.activeTabId!, 20);
++      tabs.get(1).active = false;
++      tabs.get(2).active = true;
++      notify(other.activeTabId!, other.activeTabId!);
++    });
++    expect(api.update).not.toHaveBeenCalled();
++    expect(task.agentCreatedTabs.has(other.activeTabId!)).toBe(false);
++    expect(tabs.get(2).active).toBe(true);
++  });
++  it("restores focus even when Chrome activates after the navigation event", async () => {
++    const task = await manager.start("one");
++    await withTaskPopups(manager, { session_id: task.sessionId }, async () => {
++      tabs.set(20, { id: 20, windowId: 10, active: false });
++      notify(task.activeTabId!, 20);
++      await new Promise((resolve) => setTimeout(resolve, 10));
++      tabs.get(1).active = false;
++      tabs.get(20).active = true;
++      for (const fn of activations) fn({ tabId: 20 });
++    });
++    expect(tabs.get(1).active).toBe(true);
++    expect(activations.size).toBe(0);
++  });
++  it("keeps a popup claim when its visual group is removed and drains events after cancelled input", async () => {
++    const task = await manager.start("one");
++    api.group.mockRejectedValueOnce(new Error("group removed"));
++    await expect(
++      withTaskPopups(manager, { session_id: task.sessionId }, async () => {
++        tabs.set(20, { id: 20, windowId: 10, active: false });
++        notify(task.activeTabId!, 20);
++        throw new Error("input cancelled");
++      }),
++    ).rejects.toThrow("input cancelled");
++    expect(listeners.size).toBe(0);
++    expect(task.agentCreatedTabs.has(20)).toBe(true);
++    await manager.stop(task.sessionId);
++    expect(tabs.has(20)).toBe(false);
++  });
++  it("does not attribute later manual navigation to completed input", async () => {
++    const task = await manager.start("one");
++    await withTaskPopups(manager, { session_id: task.sessionId }, async () => {});
++    tabs.set(20, { id: 20, windowId: 10, active: true });
++    notify(task.activeTabId!, 20);
++    expect(task.agentCreatedTabs.has(20)).toBe(false);
++  });
++});
+diff --git a/apps/extension/src/session-manager/__tests__/task-tabs.test.ts b/apps/extension/src/session-manager/__tests__/task-tabs.test.ts
+new file mode 100644
+index 0000000..6b65d8a
+--- /dev/null
++++ b/apps/extension/src/session-manager/__tests__/task-tabs.test.ts
+@@ -0,0 +1,201 @@
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { enforceAgentWindow, resolveTargetTab } from "@/tools/shared";
++import {
++  handleTabBorrow,
++  handleTabCreate,
++  handleTabList,
++  handleTabReturn,
++  handleTabSelect,
++} from "@/tools/tabs";
++import { SessionManager } from "../manager";
++
++describe("remote task tabs", () => {
++  let manager: SessionManager;
++  let tabs: Map<number, any>;
++  let api: any;
++  beforeEach(() => {
++    tabs = new Map([
++      [1, { id: 1, windowId: 10, active: true, index: 0, url: "https://chat.example" }],
++    ]);
++    let id = 10;
++    api = {
++      get: vi.fn(async (id: number) => {
++        if (!tabs.has(id)) throw new Error("missing");
++        return tabs.get(id);
++      }),
++      query: vi.fn(async () => [...tabs.values()]),
++      create: vi.fn(async (props: any) => {
++        const tab = { id: ++id, index: tabs.size, ...props };
++        tabs.set(tab.id, tab);
++        return tab;
++      }),
++      update: vi.fn(async (id: number, props: any) => Object.assign(tabs.get(id), props)),
++      remove: vi.fn(async (id: number) => {
++        tabs.delete(id);
++      }),
++      move: vi.fn(),
++      group: vi.fn(async ({ tabIds }: { tabIds: number[] }) => {
++        for (const tabId of tabIds) tabs.get(tabId).groupId = 7;
++        return 7;
++      }),
++      ungroup: vi.fn(async (tabId: number) => { tabs.get(tabId).groupId = -1; }),
++    };
++    vi.stubGlobal("chrome", {
++      tabs: api,
++      windows: {
++        getAll: vi.fn(async () => [{ id: 10, focused: true, type: "normal" }]),
++        create: vi.fn(async () => ({ id: 20, tabs: [await api.create({ windowId: 20, active: true })] })),
++        remove: vi.fn(),
++      },
++      tabGroups: { update: vi.fn() },
++    });
++    manager = new SessionManager({ taskTabs: () => true, taskLabel: () => "WeKnora" });
++  });
++  afterEach(() => vi.unstubAllGlobals());
++  it("opens opted-in tasks in a visible window and only selects tabs inside it", async () => {
++    manager = new SessionManager({ taskTabs: () => true, taskWindow: async () => true });
++    const task = await manager.start("visible");
++    expect(chrome.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: true }));
++    expect(task).toMatchObject({ taskWindow: true, tabMode: true, agentWindowId: 20 });
++    expect(task.taskGroupId).toBeUndefined();
++    expect(api.group).not.toHaveBeenCalled();
++    const home = task.activeTabId!;
++    await handleTabCreate(manager, { session_id: task.sessionId }, { tabs: api });
++    expect(api.create).toHaveBeenLastCalledWith(expect.objectContaining({ windowId: 20, active: true }));
++    await handleTabSelect(manager, { session_id: task.sessionId, tab_id: home }, { tabs: api });
++    expect(api.update).toHaveBeenCalledWith(home, { active: true });
++    // A tab explicitly borrowed from the chat window must never be activated.
++    task.borrowedTabs.set(1, { originalWindowId: 10, originalIndex: 0 } as never);
++    api.update.mockClear();
++    await handleTabSelect(manager, { session_id: task.sessionId, tab_id: 1 }, { tabs: api });
++    expect(api.update).not.toHaveBeenCalled();
++    // User tabs moved into the task window are not owned by the task.
++    tabs.set(99, { id: 99, windowId: 20, active: false });
++    await manager.stop(task.sessionId);
++    expect([...tabs.keys()].sort()).toEqual([1, 99]);
++    expect(chrome.windows.remove).not.toHaveBeenCalled();
++  });
++  it("reads the preference for new tasks without moving existing tasks", async () => {
++    let visible = false;
++    manager = new SessionManager({ taskTabs: () => true, taskWindow: async () => visible });
++    const first = await manager.start("first");
++    visible = true;
++    expect(manager.get("first")).toBe(first);
++    const second = await manager.start("second");
++    expect(first.agentWindowId).toBe(10);
++    expect(second.agentWindowId).toBe(20);
++  });
++  it("cleans up only its own tab when visible-window startup fails", async () => {
++    manager = new SessionManager({ taskTabs: () => true, taskWindow: () => true });
++    const controller = new AbortController();
++    chrome.windows.create = vi.fn(async () => {
++      const home = await api.create({ windowId: 20, active: true });
++      tabs.set(99, { id: 99, windowId: 20 });
++      controller.abort();
++      return { id: 20, tabs: [home], focused: true, alwaysOnTop: false, incognito: false };
++    });
++    await expect(manager.start("failed", { signal: controller.signal })).rejects.toThrow();
++    expect([...tabs.keys()].sort()).toEqual([1, 99]);
++    expect(chrome.windows.remove).not.toHaveBeenCalled();
++  });
++  it("shares a host window, labels owned tabs, and never closes chat or another task", async () => {
++    const a = await manager.start("task-a"),
++      b = await manager.start("task-b");
++    expect(a.agentWindowId).toBe(b.agentWindowId);
++    expect(api.create).toHaveBeenCalledWith(
++      expect.objectContaining({ active: false, windowId: 10 }),
++    );
++    expect(chrome.tabGroups.update).toHaveBeenCalledWith(
++      7,
++      expect.objectContaining({ title: "WeKnora" }),
++    );
++    expect(manager.findByWindowId(10)).toBeNull();
++    expect(manager.findByTabId(a.activeTabId!)).toBe(a);
++    expect(await resolveTargetTab(manager, a, 1, api)).toMatchObject({ code: "permission_denied" });
++    expect(await resolveTargetTab(manager, a, b.activeTabId, api)).toMatchObject({
++      code: "not_found",
++    });
++    expect(enforceAgentWindow(a, { tabId: 1, windowId: 10 }, "click")).toMatchObject({
++      code: "permission_denied",
++    });
++    await manager.stop(a.sessionId);
++    expect(tabs.has(1)).toBe(true);
++    expect(tabs.has(b.activeTabId!)).toBe(true);
++    expect(chrome.windows.remove).not.toHaveBeenCalled();
++  });
++  it("ungroups owned tabs before closing and preserves user tabs in the same group", async () => {
++    const task = await manager.start("cleanup");
++    const owned = task.activeTabId!;
++    tabs.set(99, { id: 99, windowId: 10, groupId: task.taskGroupId });
++    await manager.stop(task.sessionId);
++    expect(api.ungroup).toHaveBeenCalledExactlyOnceWith(owned);
++    expect(api.ungroup.mock.invocationCallOrder[0]).toBeLessThan(api.remove.mock.invocationCallOrder[0]);
++    expect(tabs.get(99).groupId).toBe(7);
++    expect(tabs.has(1)).toBe(true);
++  });
++  it("ungroups the startup tab if labeling the group fails", async () => {
++    vi.mocked(chrome.tabGroups.update).mockRejectedValueOnce(new Error("label failed"));
++    await expect(manager.start("failed-label")).rejects.toThrow("label failed");
++    expect(api.ungroup).toHaveBeenCalledTimes(1);
++    expect([...tabs.keys()]).toEqual([1]);
++  });
++  it("keeps failed cleanup retryable instead of reporting the task stopped", async () => {
++    const task = await manager.start("retry");
++    api.ungroup.mockRejectedValueOnce(new Error("busy"));
++    await expect(manager.stop(task.sessionId)).rejects.toThrow("busy");
++    expect(manager.get(task.sessionId)).toBe(task);
++    expect(api.remove).not.toHaveBeenCalled();
++    await manager.stop(task.sessionId);
++    expect(manager.get(task.sessionId)).toBeNull();
++  });
++  it("selects task tabs logically without activating the user tab bar", async () => {
++    const task = await manager.start("task-a");
++    const made = await handleTabCreate(
++      manager,
++      { session_id: task.sessionId, url: "https://example.com" },
++      { tabs: api },
++    );
++    expect(made).toHaveProperty("tab_id");
++    await handleTabSelect(
++      manager,
++      { session_id: task.sessionId, tab_id: task.activeTabId! },
++      { tabs: api },
++    );
++    expect(api.update).not.toHaveBeenCalled();
++    const target = await resolveTargetTab(manager, task, undefined, api);
++    expect(target).toMatchObject({ tabId: task.activeTabId, active: false });
++    const listed = await handleTabList(manager, { session_id: task.sessionId, scope: "user" }, api);
++    expect(listed).toMatchObject({ tabs: [expect.objectContaining({ tab_id: 1, scope: "user" })] });
++  });
++  it("requires approval for an existing tab and returns it without moving it", async () => {
++    const task = await manager.start("task-a");
++    const deny = await handleTabBorrow(
++      manager,
++      { session_id: task.sessionId, tab_id: 1 },
++      { tabs: api, approveBorrow: async () => false },
++    );
++    expect(deny).toHaveProperty("code");
++    expect(task.borrowedTabs.has(1)).toBe(false);
++    const allowed = await handleTabBorrow(
++      manager,
++      { session_id: task.sessionId, tab_id: 1 },
++      { tabs: api, approveBorrow: async () => true },
++    );
++    expect(allowed).toHaveProperty("tab_id", 1);
++    expect(api.move).not.toHaveBeenCalled();
++    expect(api.update).not.toHaveBeenCalled();
++    expect(enforceAgentWindow(task, { tabId: 1, windowId: 10 }, "click")).toBeNull();
++    await handleTabReturn(
++      manager,
++      { session_id: task.sessionId, tab_id: 1 },
++      {
++        tabs: api,
++        agentOverlayReset: { resetAgentOverlays: async () => {} },
++        cdp: { releaseSessionTab: async () => {} },
++      },
++    );
++    expect(api.move).not.toHaveBeenCalled();
++    expect(task.borrowedTabs.has(1)).toBe(false);
++    expect(tabs.get(1).active).toBe(true);
++  });
++});
+diff --git a/apps/extension/src/session-manager/event-handler.ts b/apps/extension/src/session-manager/event-handler.ts
+index 5afe53c..7709ba3 100644
+--- a/apps/extension/src/session-manager/event-handler.ts
++++ b/apps/extension/src/session-manager/event-handler.ts
+@@ -49,45 +49,46 @@ export function attachSessionEventHandler(options: SessionEventHandlerOptions):
+   const events = options.windowEvents ?? chromeWindowEvents();
+ 
+   const onRemoved = (windowId: number): void => {
+-    const ctx = manager.findByWindowId(windowId);
+-    if (!ctx) return;
+-    const returnFailures = Array.from(ctx.borrowedTabs.keys()).map((tabId) => ({
+-      tab_id: tabId,
+-      code: "cdp_failed",
+-      message: "Agent Window was closed before borrowed tab could be returned",
+-    }));
+-    if (returnFailures.length > 0) {
+-      console.warn(
+-        `[bh] Agent Window ${windowId} closed with borrowed tabs that could not be returned`,
+-        returnFailures,
+-      );
+-    }
+-    const detach = options.cdp
+-      ? options.cdp.detachSession(ctx.sessionId).catch((err) => {
+-          console.debug("[bh] session-event cdp detach failed", err);
++    const affected = manager.list().filter((ctx) => !ctx.tabMode && ctx.agentWindowId === windowId);
++    for (const ctx of affected) {
++      const returnFailures = Array.from(ctx.borrowedTabs.keys()).map((tabId) => ({
++        tab_id: tabId,
++        code: "cdp_failed",
++        message: "Agent Window was closed before borrowed tab could be returned",
++      }));
++      if (returnFailures.length > 0) {
++        console.warn(
++          `[bh] Agent Window ${windowId} closed with borrowed tabs that could not be returned`,
++          returnFailures,
++        );
++      }
++      const detach = options.cdp
++        ? options.cdp.detachSession(ctx.sessionId).catch((err) => {
++            console.debug("[bh] session-event cdp detach failed", err);
++          })
++        : Promise.resolve();
++      void detach
++        .then(() => manager.stop(ctx.sessionId, { dropOnly: true }))
++        .then(() => {
++          onSessionsChanged?.();
++          const event: EventFrame = {
++            event: "session.window_closed",
++            payload: {
++              session_id: ctx.sessionId,
++              reason: "user_closed_window",
++              ...(returnFailures.length > 0 ? { return_failures: returnFailures } : {}),
++            },
++          };
++          try {
++            transport.send(event);
++          } catch (err) {
++            console.warn("[bh] could not push session.window_closed event", err);
++          }
+         })
+-      : Promise.resolve();
+-    void detach
+-      .then(() => manager.stop(ctx.sessionId, { dropOnly: true }))
+-      .then(() => {
+-        onSessionsChanged?.();
+-        const event: EventFrame = {
+-          event: "session.window_closed",
+-          payload: {
+-            session_id: ctx.sessionId,
+-            reason: "user_closed_window",
+-            ...(returnFailures.length > 0 ? { return_failures: returnFailures } : {}),
+-          },
+-        };
+-        try {
+-          transport.send(event);
+-        } catch (err) {
+-          console.warn("[bh] could not push session.window_closed event", err);
+-        }
+-      })
+-      .catch((err) => {
+-        console.warn("[bh] session-event handler failed", err);
+-      });
++        .catch((err) => {
++          console.warn("[bh] session-event handler failed", err);
++        });
++    }
+   };
+ 
+   events.addListener(onRemoved);
+diff --git a/apps/extension/src/session-manager/manager.ts b/apps/extension/src/session-manager/manager.ts
+index 97982e3..f62e500 100644
+--- a/apps/extension/src/session-manager/manager.ts
++++ b/apps/extension/src/session-manager/manager.ts
+@@ -4,6 +4,13 @@ import { RefStore } from "./ref-store";
+ export interface SessionContext {
+   sessionId: string;
+   agentWindowId: number;
++  /** Remote tasks retain explicit per-tab ownership, including in a dedicated window. */
++  tabMode?: boolean;
++  /** A dedicated task window may select its own tabs without focusing the window. */
++  taskWindow?: boolean;
++  stopping?: boolean;
++  activeTabId?: number;
++  taskGroupId?: number;
+   refStore: RefStore;
+   borrowedTabs: Map<number, BorrowedTab>;
+   /**
+@@ -24,6 +31,7 @@ export interface BorrowedTab {
+   tabId: number;
+   originalWindowId: number;
+   originalIndex: number;
++  stationary?: boolean;
+ }
+ 
+ export interface BorrowReservation {
+@@ -34,6 +42,9 @@ export interface BorrowReservation {
+ export interface SessionManagerOptions {
+   agentWindow?: AgentWindowApi;
+   now?: () => number;
++  taskTabs?: () => boolean;
++  taskWindow?: () => boolean | Promise<boolean>;
++  taskLabel?: () => string;
+ }
+ 
+ /** Options for starting a session's Agent Window. */
+@@ -94,10 +105,16 @@ export class SessionManager {
+   private readonly borrowReservations = new Map<number, string>();
+   private readonly agentWindow: AgentWindowApi;
+   private readonly now: () => number;
++  private readonly taskTabs: () => boolean;
++  private readonly taskWindow: () => boolean | Promise<boolean>;
++  private readonly taskLabel: () => string;
+ 
+   constructor(options: SessionManagerOptions = {}) {
+     this.agentWindow = options.agentWindow ?? chromeAgentWindowApi;
+     this.now = options.now ?? Date.now;
++    this.taskTabs = options.taskTabs ?? (() => false);
++    this.taskWindow = options.taskWindow ?? (() => false);
++    this.taskLabel = options.taskLabel ?? (() => "BrowserSkill");
+   }
+ 
+   has(sessionId: string): boolean {
+@@ -113,6 +130,10 @@ export class SessionManager {
+     return id ? (this.sessions.get(id) ?? null) : null;
+   }
+ 
++  findByTabId(tabId: number): SessionContext | null {
++    return this.list().find((ctx) => isAgentControlledTab(ctx, tabId)) ?? null;
++  }
++
+   list(): SessionContext[] {
+     return Array.from(this.sessions.values());
+   }
+@@ -126,7 +147,7 @@ export class SessionManager {
+     this.borrowReservations.delete(tabId);
+     for (const ctx of this.sessions.values()) {
+       ctx.agentCreatedTabs.delete(tabId);
+-      if (!isWindowClosing) ctx.borrowedTabs.delete(tabId);
++      if (ctx.tabMode || !isWindowClosing) ctx.borrowedTabs.delete(tabId);
+     }
+   }
+ 
+@@ -198,6 +219,78 @@ export class SessionManager {
+     }
+     throwIfSessionStartAborted(opts.signal);
+ 
++    if (this.taskTabs()) {
++      const dedicated = await this.taskWindow();
++      throwIfSessionStartAborted(opts.signal);
++      let hostId: number;
++      let home: chrome.tabs.Tab;
++      if (dedicated) {
++        // Explicitly opted-in visible mode. Bring the new window forward once;
++        // later task-tab changes must not focus the window or the user's tabs.
++        const host = await chrome.windows.create({
++          url: AGENT_WINDOW_HOME,
++          type: "normal",
++          focused: true,
++          width: opts.size?.width ?? 1100,
++          height: opts.size?.height ?? 800,
++        });
++        if (host.id === undefined) throw new Error("Could not create task window");
++        hostId = host.id;
++        const initial = host.tabs?.[0];
++        if (initial?.id === undefined) {
++          await chrome.windows.remove(hostId);
++          throw new Error("Could not create task tab");
++        }
++        home = initial;
++      } else {
++        const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
++        const host =
++          windows.find((w) => w.focused && !w.incognito) ?? windows.find((w) => !w.incognito);
++        if (host?.id === undefined)
++          throw new Error("Open a normal Chrome window before starting a browser task");
++        hostId = host.id;
++        home = await chrome.tabs.create({
++          windowId: hostId,
++          url: AGENT_WINDOW_HOME,
++          active: false,
++        });
++      }
++      if (home.id === undefined) throw new Error("Could not create task tab");
++      try {
++        throwIfSessionStartAborted(opts.signal);
++        // A dedicated window already groups the task visually. Avoid creating
++        // another Chrome group that can be auto-saved to the bookmarks bar.
++        let groupId: number | undefined;
++        if (!dedicated) {
++          groupId = await chrome.tabs.group({ tabIds: [home.id] });
++          await chrome.tabGroups.update(groupId, {
++            title: this.taskLabel().slice(0, 48),
++            color: "green",
++            collapsed: false,
++          });
++        }
++        throwIfSessionStartAborted(opts.signal);
++        const ctx: SessionContext = {
++          sessionId,
++          agentWindowId: hostId,
++          tabMode: true,
++          ...(dedicated ? { taskWindow: true } : {}),
++          activeTabId: home.id,
++          taskGroupId: groupId,
++          refStore: new RefStore(),
++          borrowedTabs: new Map(),
++          agentCreatedTabs: new Set([home.id]),
++          createdAtMs: this.now(),
++        };
++        this.sessions.set(sessionId, ctx);
++        return ctx;
++      } catch (err) {
++        // Only remove our tab: a user may have moved other tabs into the window
++        // while startup was in progress. Chrome closes an empty window itself.
++        await this.closeTaskTab(home.id);
++        throw err;
++      }
++    }
+     let windowId: number | null = null;
+     try {
+       const { signal: _signal, ...createOptions } = opts;
+@@ -246,13 +339,35 @@ export class SessionManager {
+     const ctx = this.sessions.get(sessionId);
+     if (!ctx) return null;
+     if (!options.dropOnly) {
+-      await this.agentWindow.remove(ctx.agentWindowId);
++      ctx.stopping = true;
++      if (ctx.tabMode) {
++        // Never close the shared user window, even when queries/cleanup fail.
++        for (const tabId of ctx.agentCreatedTabs) {
++          await this.closeTaskTab(tabId);
++        }
++      } else await this.agentWindow.remove(ctx.agentWindowId);
+     }
+     this.sessions.delete(sessionId);
+-    this.windowIndex.delete(ctx.agentWindowId);
++    if (!ctx.tabMode) this.windowIndex.delete(ctx.agentWindowId);
+     return ctx;
+   }
+ 
++  private async closeTaskTab(tabId: number): Promise<void> {
++    let tab: chrome.tabs.Tab;
++    try {
++      tab = await chrome.tabs.get(tabId);
++    } catch {
++      return;
++    }
++    // Remove only owned tabs from their group before closing. Closing a
++    // saved group directly can keep it in Chrome's saved-group menu.
++    // Never ungroup the whole group: the user may have added their tabs.
++    if (tab.groupId !== undefined && tab.groupId >= 0) {
++      await chrome.tabs.ungroup(tabId);
++    }
++    await chrome.tabs.remove(tabId);
++  }
++
+   /**
+    * Best-effort cleanup of every live session (emergency brake / SW
+    * shutdown). Returns the set of `session_id`s that were removed.
+diff --git a/apps/extension/src/session-manager/task-popups.ts b/apps/extension/src/session-manager/task-popups.ts
+new file mode 100644
+index 0000000..c089468
+--- /dev/null
++++ b/apps/extension/src/session-manager/task-popups.ts
+@@ -0,0 +1,96 @@
++import { isAgentControlledTab, type SessionManager } from "./manager";
++
++/** Track page-created tabs only while dispatching input to a known task tab.
++ * Group membership and tabs.onCreated alone are never ownership evidence.
++ * webNavigation also supplies sourceTabId for rel=noopener links.
++ */
++export async function withTaskPopups<T>(
++  manager: SessionManager,
++  params: { session_id?: string; tab_id?: number },
++  run: () => Promise<T>,
++  onClaimed?: (tabId: number, windowId: number) => void,
++): Promise<T> {
++  const task = params.session_id ? manager.get(params.session_id) : null;
++  const source = params.tab_id ?? task?.activeTabId;
++  if (
++    !task?.tabMode ||
++    task.stopping ||
++    source === undefined ||
++    !isAgentControlledTab(task, source)
++  )
++    return run();
++
++  const [foreground] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
++  const sources = new Set([source]);
++  const pending = new Set<Promise<void>>();
++  const popups = new Set<number>();
++  const track = (work: Promise<void>) => {
++    pending.add(work);
++    void work.finally(() => pending.delete(work));
++  };
++  const restore = async (tabId: number) => {
++    try {
++      const tab = await chrome.tabs.get(tabId);
++      if (task.taskWindow && tab.windowId === task.agentWindowId) return;
++      if (foreground?.id !== undefined && tab.active)
++        await chrome.tabs.update(foreground.id, { active: true });
++    } catch {
++      /* The popup or previous foreground tab may have closed. */
++    }
++  };
++  const activated = ({ tabId }: { tabId: number }) => {
++    if (popups.has(tabId)) track(restore(tabId));
++  };
++  const created = ({ sourceTabId, tabId }: { sourceTabId: number; tabId: number }) => {
++    if (
++      !sources.has(sourceTabId) ||
++      task.stopping ||
++      manager.get(task.sessionId) !== task ||
++      manager.findByTabId(tabId)
++    )
++      return;
++    // Claim synchronously, before grouping/focus work or a concurrent stop.
++    task.agentCreatedTabs.add(tabId);
++    task.activeTabId = tabId;
++    sources.add(tabId);
++    popups.add(tabId);
++    const work = (async () => {
++      try {
++        let tab = await chrome.tabs.get(tabId);
++        // Chrome activates renderer-created tabs before extension events. Restore
++        // only if that popup still owns focus; never override a later user switch.
++        await restore(tabId);
++        if (task.stopping || manager.get(task.sessionId) !== task) return;
++        if (tab.windowId !== task.agentWindowId) {
++          await chrome.tabs.move(tabId, { windowId: task.agentWindowId, index: -1 });
++          tab = await chrome.tabs.get(tabId);
++        }
++        if (task.taskGroupId !== undefined) {
++          try {
++            await chrome.tabs.group({ tabIds: [tabId], groupId: task.taskGroupId });
++          } catch {
++            /* A removed group never releases the ownership claim. */
++          }
++        }
++        if (task.taskWindow) await chrome.tabs.update(tabId, { active: true });
++        onClaimed?.(tabId, tab.windowId);
++      } catch (error) {
++        // Preserve ownership if Chrome races with cleanup so stop can retry.
++        console.warn("[bsk] task popup setup failed", error);
++      }
++    })();
++    track(work);
++  };
++  chrome.tabs.onActivated.addListener(activated);
++  chrome.webNavigation.onCreatedNavigationTarget.addListener(created);
++  try {
++    return await run();
++  } finally {
++    // Renderer navigation events can follow the CDP input acknowledgement.
++    // Drain that bounded tail before releasing this input's source attribution.
++    await new Promise((resolve) => setTimeout(resolve, 100));
++    chrome.webNavigation.onCreatedNavigationTarget.removeListener(created);
++    while (pending.size) await Promise.all(pending);
++    chrome.tabs.onActivated.removeListener(activated);
++  }
++}
+diff --git a/apps/extension/src/tools/__tests__/human-loop.test.ts b/apps/extension/src/tools/__tests__/human-loop.test.ts
+index d695233..74c18db 100644
+--- a/apps/extension/src/tools/__tests__/human-loop.test.ts
++++ b/apps/extension/src/tools/__tests__/human-loop.test.ts
+@@ -86,6 +86,22 @@ describe("handleRequestHelp", () => {
+     vi.unstubAllGlobals();
+   });
+ 
++  it("remote task help never activates a tab or window", async () => {
++    const manager = fakeManager("abcd", 99, 5);
++    const ctx = {
++      ...manager.get("abcd")!,
++      tabMode: true,
++      activeTabId: 5,
++      agentCreatedTabs: new Set([5]),
++    };
++    manager.get = (id) => (id === "abcd" ? ctx : null);
++    const deps = baseDeps();
++    const result = await handleRequestHelp(manager, baseParams({ tab_id: 5 }), deps);
++    expect(result).toMatchObject({ outcome: "continued" });
++    expect(deps.windows.update).not.toHaveBeenCalled();
++    expect(deps.activateTab).not.toHaveBeenCalled();
++  });
++
+   it("rejects unknown session", async () => {
+     const res = await handleRequestHelp(
+       fakeManager("abcd", 99, 5),
+diff --git a/apps/extension/src/tools/borrow-confirmation.ts b/apps/extension/src/tools/borrow-confirmation.ts
+index b575084..066bd2f 100644
+--- a/apps/extension/src/tools/borrow-confirmation.ts
++++ b/apps/extension/src/tools/borrow-confirmation.ts
+@@ -89,6 +89,7 @@ export interface RequestBorrowConfirmationDeps {
+   /** Returns `true` when `windowId` belongs to *any* live session's Agent Window. */
+   isAgentWindowId?: (windowId: number) => boolean;
+   notificationCopy?: BorrowNotificationCopy;
++  focusOnRequest?: boolean;
+ }
+ 
+ export interface RequestBorrowConfirmationOptions {
+@@ -483,9 +484,10 @@ export async function requestBorrowConfirmation(
+     // Bring the user window to the front so the overlay is visible even
+     // when the Agent Window has stolen focus. This is fire-and-forget: if
+     // it fails the overlay / OS notification still give the user a path.
+-    void windowsApi.update(notificationAnchor.windowId, { focused: true }).catch((err) => {
+-      console.debug("[bsk borrow] proactive focus of user window failed", err);
+-    });
++    if (options.deps?.focusOnRequest !== false)
++      void windowsApi.update(notificationAnchor.windowId, { focused: true }).catch((err) => {
++        console.debug("[bsk borrow] proactive focus of user window failed", err);
++      });
+ 
+     // Surface the OS notification *before* messaging any candidate so the
+     // user has a parallel signal even if every content script is missing.
+diff --git a/apps/extension/src/tools/dispatcher.ts b/apps/extension/src/tools/dispatcher.ts
+index f29ed5e..54604da 100644
+--- a/apps/extension/src/tools/dispatcher.ts
++++ b/apps/extension/src/tools/dispatcher.ts
+@@ -1,3 +1,5 @@
++import type { TaskActivity } from "@/lib/task-activity";
++import { withTaskPopups } from "@/session-manager/task-popups";
+ import { OVERLAY_AUTOMATION_BYPASS } from "@/lib/overlay-bridge";
+ import type { SessionManager } from "@/session-manager/manager";
+ import type { Transport } from "@/transport/transport";
+@@ -121,6 +123,7 @@ interface HoverLatchScope {
+ }
+ 
+ export interface DispatcherDeps {
++  taskActivity?: TaskActivity;
+   transport: Transport;
+   sessions: SessionManager;
+   cdp?: DispatcherCdpRunner;
+@@ -159,6 +162,7 @@ export interface DispatcherDeps {
+  * takes the fast path.
+  */
+ export class ToolDispatcher {
++  private readonly taskActivity?: TaskActivity;
+   private readonly transport: Transport;
+   private readonly sessions: SessionManager;
+   private readonly cdp?: DispatcherCdpRunner;
+@@ -180,6 +184,7 @@ export class ToolDispatcher {
+   readonly inflightAbortControllers = new Map<string, AbortController>();
+ 
+   constructor(deps: DispatcherDeps) {
++    this.taskActivity = deps.taskActivity;
+     this.transport = deps.transport;
+     this.sessions = deps.sessions;
+     this.cdp = deps.cdp;
+@@ -252,7 +257,33 @@ export class ToolDispatcher {
+     try {
+       const sessionId = sessionIdForBrowserControlMethod(req);
+       if (sessionId) this.onBrowserControlResumed?.(sessionId);
+-      const result = await this.invoke(req, ac.signal);
++      const popupInput = new Set([
++        "tool.click",
++        "tool.press",
++        "tool.evaluate",
++        "tool.navigate",
++        "tool.reload",
++        "tool.navigate_back",
++        "tool.navigate_forward",
++        "tool.fill",
++        "tool.select",
++      ]).has(req.method);
++      const invoke = () =>
++        popupInput
++          ? withTaskPopups(
++              this.sessions,
++              (req.params ?? {}) as { session_id?: string; tab_id?: number },
++              () => this.invoke(req, ac.signal),
++              this.onAgentTabClaimed,
++            )
++          : this.invoke(req, ac.signal);
++      const result = this.taskActivity
++        ? await this.taskActivity.run(
++            (req.params as { session_id?: string } | undefined)?.session_id,
++            req.method === "tool.session_stop",
++            invoke,
++          )
++        : await invoke();
+       if (isRpcError(result)) {
+         body = { id: req.id, error: classifyCdpError(result) };
+       } else {
+@@ -794,6 +825,12 @@ export class ToolDispatcher {
+     );
+   }
+ 
++  async releaseTaskControl(sessionId: string): Promise<void> {
++    await this.releaseHoverLatch(sessionId);
++    this.sessions.get(sessionId)?.refStore.clear();
++    await this.cdp?.detachSession(sessionId);
++  }
++
+   private async releaseHoverLatch(sessionId?: string, tabId?: number): Promise<void> {
+     const matchesScope = (entrySessionId: string, entryTabId: number): boolean => {
+       if (sessionId !== undefined && entrySessionId !== sessionId) return false;
+diff --git a/apps/extension/src/tools/human-loop.ts b/apps/extension/src/tools/human-loop.ts
+index c50916e..ce8d829 100644
+--- a/apps/extension/src/tools/human-loop.ts
++++ b/apps/extension/src/tools/human-loop.ts
+@@ -331,7 +331,7 @@ async function findHelpForTab(
+     const windowId = tab.windowId;
+     if (typeof windowId !== "number") return null;
+     for (const help of activeHelpRequests.values()) {
+-      if (!help.settled && help.ctx.agentWindowId === windowId) return help;
++      if (!help.settled && !help.ctx.tabMode && help.ctx.agentWindowId === windowId) return help;
+     }
+   } catch {
+     return null;
+@@ -681,8 +681,10 @@ export async function handleRequestHelp(
+     { scrollIntoView: true },
+   );
+ 
+-  await deps.windows.update(target.windowId, { focused: true }).catch(() => {});
+-  await deps.activateTab(tabId).catch(() => {});
++  if (!ctx.tabMode) {
++    await deps.windows.update(target.windowId, { focused: true }).catch(() => {});
++    await deps.activateTab(tabId).catch(() => {});
++  }
+ 
+   const requestId = makeRequestId(tabId);
+   const notificationId = `bsk-help:${requestId}`;
+diff --git a/apps/extension/src/tools/observation.ts b/apps/extension/src/tools/observation.ts
+index ea99ddf..bea0029 100644
+--- a/apps/extension/src/tools/observation.ts
++++ b/apps/extension/src/tools/observation.ts
+@@ -242,6 +242,16 @@ async function captureFullTabPng(
+   signal?: AbortSignal,
+ ): Promise<string | RpcError> {
+   if (signal?.aborted) return cancelled("screenshot");
++  if (ctx.tabMode) {
++    if (!deps.cdp) return { code: "unsupported", message: "Task tab preview requires CDP" };
++    deps.cdp.trackSessionTab?.(ctx.sessionId, target.tabId);
++    await deps.cdp.ensureAttachedToUrl?.(target.tabId, target.url);
++    const shot = await deps.cdp.send<{ data: string }>(target.tabId, "Page.captureScreenshot", {
++      format: "png",
++      fromSurface: true,
++    });
++    return shot.data;
++  }
+   try {
+     const dataUrl = await deps.captureApi.captureVisibleTab(target.windowId, { format: "png" });
+     if (signal?.aborted) return cancelled("screenshot");
+@@ -343,7 +353,7 @@ export async function handleScreenshot(
+     });
+   }
+ 
+-  if (!target.active) {
++  if (!target.active && !ctx.tabMode) {
+     return rpcError(
+       "invalid_params",
+       "tab_not_active",
+@@ -891,10 +901,19 @@ export async function captureVomObservation(
+   url: string | undefined,
+   options: CaptureVomObservationOptions = {},
+ ): Promise<CaptureVomObservationResult> {
++  const startedAt = performance.now();
++  let stageStartedAt = startedAt;
++  const timings: Record<string, number> = {};
++  const stage = (name: string) => {
++    const now = performance.now();
++    timings[name] = Math.round(now - stageStartedAt);
++    stageStartedAt = now;
++  };
+   throwIfAborted(options.signal, "observation");
+   await cdp.ensureAttachedToUrl?.(tabId, url);
+   throwIfAborted(options.signal, "observation");
+   const facts = await captureObservationFacts<CdpAxNode>(cdp, tabId, options.signal, url);
++  stage("capture");
+   const { captured, documents: normalizedDocuments } = semanticCapture(facts);
+   throwIfAborted(options.signal, "observation");
+   const semanticGraph = buildSemanticGraph({
+@@ -904,6 +923,7 @@ export async function captureVomObservation(
+     excludedBackendNodeIds: captured.excludedBackendNodeIds,
+   });
+   const staticSemantics = resolveSemanticGraph(semanticGraph, { identifierFallback: false });
++  stage("semantic_graph");
+   const hoverProbes = await runHoverProbes(
+     cdp,
+     tabId,
+@@ -913,6 +933,7 @@ export async function captureVomObservation(
+     options,
+   );
+   throwIfAborted(options.signal, "observation");
++  stage("hover");
+   const scene = projectSemanticGraph(
+     normalizeSemanticStructure(
+       resolveSemanticGraph(semanticGraph, { supplementalNames: hoverProbes.tooltipNames }),
+@@ -924,6 +945,7 @@ export async function captureVomObservation(
+     captured,
+     hoverProbes.surfaceProbes,
+   );
++  stage("projection");
+   // Reserve space using the renderer's character-based token estimate. Like VOM
+   // headers, this integrity notice remains visible even under a tiny token budget.
+   const notices: string[] = [];
+@@ -960,9 +982,10 @@ export async function captureVomObservation(
+     redactValues: options.redactValues,
+     activeRegionPolicy: options.activeRegionPolicy,
+   });
++  stage("render");
+   if (captureNotice) rendered.text += `\n${captureNotice}`;
+   throwIfAborted(options.signal, "observation");
+-  return projectRecordSafeObservation({
++  const result = projectRecordSafeObservation({
+     rootFrameId: captured.rootFrameId ?? normalizedDocuments[0]?.frameId ?? "root",
+     frameDocuments: normalizedDocuments,
+     rendered,
+@@ -972,6 +995,18 @@ export async function captureVomObservation(
+       revealedContent: hoverProbes.revealedContent,
+     },
+   });
++  stage("record_projection");
++  const elapsedMs = Math.round(performance.now() - startedAt);
++  if (elapsedMs >= 2_000) {
++    console.warn("[bsk observe] slow observation completed", {
++      tabId,
++      elapsedMs,
++      timings,
++      nodes: semanticGraph.nodes.size,
++      refs: result.refs.length,
++    });
++  }
++  return result;
+ }
+ 
+ async function handleVomObservation(
+diff --git a/apps/extension/src/tools/session.ts b/apps/extension/src/tools/session.ts
+index b6fe38f..4c2d94b 100644
+--- a/apps/extension/src/tools/session.ts
++++ b/apps/extension/src/tools/session.ts
+@@ -281,6 +281,8 @@ export async function handleSessionStop(
+     return { code: "cancelled", message: "session_stop aborted before window close" };
+   }
+ 
++  ctx.stopping = true;
++
+   // Step 4: close every tab explicitly created by the agent, including the
+   // home tab. `tabsApi` is a
+   // TabMutationApi (remove only); `queryApi` is a separate read-only
+@@ -303,6 +305,13 @@ export async function handleSessionStop(
+     }
+   }
+ 
++  if (ctx.tabMode) {
++    // Finish closing explicitly owned tabs, surfacing failures. The shared
++    // host window and every user/other-task tab must always survive cleanup.
++    await manager.stop(params.session_id);
++    return result;
++  }
++
+   // Step 5: decide whether to release (keep) the window or close it.
+   let shouldRelease = false;
+   if (queryApi) {
+diff --git a/apps/extension/src/tools/shared.ts b/apps/extension/src/tools/shared.ts
+index 7ae9fda..096b21f 100644
+--- a/apps/extension/src/tools/shared.ts
++++ b/apps/extension/src/tools/shared.ts
+@@ -8,7 +8,11 @@
+ 
+ import type { CdpDebuggee, DialogCursor } from "@/browser-driver/chromium-cdp";
+ import type { CdpFrameGraph, CdpTarget } from "@/browser-driver/frame-graph";
+-import type { SessionContext, SessionManager } from "@/session-manager/manager";
++import {
++  isAgentControlledTab,
++  type SessionContext,
++  type SessionManager,
++} from "@/session-manager/manager";
+ import { normaliseRef } from "@/session-manager/ref-store";
+ import type { ConsoleResult, JavaScriptDialogInfo, RpcError } from "@/transport/types";
+ import { rpcError } from "./errors";
+@@ -180,6 +184,15 @@ export async function resolveTargetTab(
+   tabId: number | undefined,
+   api: ChromeTabsApi,
+ ): Promise<ResolvedTargetTab | RpcError> {
++  if (tabId === undefined && ctx.tabMode) {
++    const owned = [...ctx.agentCreatedTabs, ...ctx.borrowedTabs.keys()];
++    tabId =
++      ctx.activeTabId !== undefined && isAgentControlledTab(ctx, ctx.activeTabId)
++        ? ctx.activeTabId
++        : owned[0];
++    if (tabId === undefined)
++      return { code: "not_found", message: "No task tab remains; create a tab to continue" };
++  }
+   if (tabId !== undefined) {
+     if (!Number.isSafeInteger(tabId) || tabId <= 0) {
+       return {
+@@ -202,13 +215,18 @@ export async function resolveTargetTab(
+         message: `tab ${tabId} not found`,
+       };
+     }
+-    const owner = manager.findByWindowId(tab.windowId);
++    const owner = manager.findByTabId?.(tab.id) ?? manager.findByWindowId(tab.windowId);
+     if (owner && owner.sessionId !== ctx.sessionId) {
+       return {
+         code: "not_found",
+         message: `tab ${tabId} not found in session scope`,
+       };
+     }
++    if (ctx.tabMode && !isAgentControlledTab(ctx, tab.id))
++      return {
++        code: "permission_denied",
++        message: "Authorize this tab with tab_borrow before reading or operating it",
++      };
+     return { tabId: tab.id, windowId: tab.windowId, active: tab.active === true, url: tab.url };
+   }
+   const tabs = await api.query({ active: true, windowId: ctx.agentWindowId });
+@@ -318,6 +336,7 @@ export async function resolveCdpAccessibleTargetTab(
+ 
+   const tabs = await api.query({ windowId: ctx.agentWindowId });
+   for (const tab of tabs) {
++    if (ctx.tabMode && (tab.id === undefined || !isAgentControlledTab(ctx, tab.id))) continue;
+     const candidate = resolvedTargetFromChromeTab(tab, ctx.agentWindowId);
+     if (!candidate) continue;
+     if (!enforceCdpAccessibleTarget(candidate, toolName)) return candidate;
+@@ -338,7 +357,9 @@ export function enforceAgentWindow(
+   target: { tabId: number; windowId: number },
+   toolName: string,
+ ): RpcError | null {
+-  if (target.windowId !== ctx.agentWindowId) {
++  if (
++    ctx.tabMode ? !isAgentControlledTab(ctx, target.tabId) : target.windowId !== ctx.agentWindowId
++  ) {
+     return rpcError(
+       "permission_denied",
+       "agent_window_scope",
+@@ -358,6 +379,6 @@ export function enforceToolTargetScope(
+   effect: ToolEffect,
+   toolName: string,
+ ): RpcError | null {
+-  if (effect === "passive_read") return null;
++  if (effect === "passive_read" && !ctx.tabMode) return null;
+   return enforceAgentWindow(ctx, target, toolName);
+ }
+diff --git a/apps/extension/src/tools/tabs.ts b/apps/extension/src/tools/tabs.ts
+index feb9763..e6dd265 100644
+--- a/apps/extension/src/tools/tabs.ts
++++ b/apps/extension/src/tools/tabs.ts
+@@ -246,7 +246,7 @@ export async function handleTabList(
+   // per-tab classification is O(1).
+   const otherAgentWindowIds = new Set<number>();
+   for (const s of manager.list()) {
+-    if (s.sessionId !== params.session_id) {
++    if (s.sessionId !== params.session_id && !s.tabMode) {
+       otherAgentWindowIds.add(s.agentWindowId);
+     }
+   }
+@@ -258,8 +258,16 @@ export async function handleTabList(
+   for (const t of allTabs) {
+     if (typeof t.id !== "number") continue;
+     const winId = typeof t.windowId === "number" ? t.windowId : -1;
++    const owner = manager.findByTabId?.(t.id);
++    if (owner && owner.sessionId !== ctx.sessionId) continue;
+     if (otherAgentWindowIds.has(winId)) continue;
+-    const tabScope: "user" | "agent" = winId === myAgentWindowId ? "agent" : "user";
++    const tabScope: "user" | "agent" = (
++      ctx.tabMode
++        ? ctx.agentCreatedTabs.has(t.id) || ctx.borrowedTabs.has(t.id)
++        : winId === myAgentWindowId
++    )
++      ? "agent"
++      : "user";
+     if (scope === "user" && tabScope !== "user") continue;
+     if (scope === "agent" && tabScope !== "agent") continue;
+     tabs.push({
+@@ -361,7 +369,7 @@ function buildCreateProps(
+   const createProps: chrome.tabs.CreateProperties = {
+     windowId: ctx.agentWindowId,
+     url: params.url ?? NEW_TAB_DEFAULT_URL,
+-    active: params.active ?? true,
++    active: ctx.tabMode ? ctx.taskWindow === true : (params.active ?? true),
+   };
+   if (params.index !== undefined) createProps.index = params.index;
+   return createProps;
+@@ -392,6 +400,15 @@ async function createTabAndCleanup(
+   // Claim the concrete id returned by Chrome. Ownership never depends on
+   // matching this request to an asynchronous onCreated event.
+   ctx.agentCreatedTabs.add(tab.id);
++  if (ctx.tabMode) {
++    ctx.activeTabId = tab.id;
++    try {
++      if (ctx.taskGroupId !== undefined)
++        await chrome.tabs.group({ tabIds: [tab.id], groupId: ctx.taskGroupId });
++    } catch {
++      /* Group may have been removed by the user; tab ownership still applies. */
++    }
++  }
+   if (aborted(deps.signal, "tab_create")) {
+     try {
+       await getTabsApi(deps).remove(tab.id);
+@@ -485,7 +502,11 @@ async function authoriseAgentTab(
+       `${toolName}: tab ${tabId} is borrowed by session ${otherBorrower}`,
+     );
+   }
+-  if (tab.windowId === ctx.agentWindowId) {
++  if (
++    ctx.tabMode
++      ? ctx.agentCreatedTabs.has(tabId) || ctx.borrowedTabs.has(tabId)
++      : tab.windowId === ctx.agentWindowId
++  ) {
+     return tab;
+   }
+   return rpcError(
+@@ -575,7 +596,12 @@ export async function handleTabSelect(
+     return { code: "cancelled", message: "tab_select aborted" };
+   }
+   try {
+-    await getTabsApi(deps).update(params.tab_id, { active: true });
++    if (ctx.tabMode) {
++      // Borrowed/user-moved tabs retain their original foreground behavior.
++      if (ctx.taskWindow && tabOrErr.windowId === ctx.agentWindowId)
++        await getTabsApi(deps).update(params.tab_id, { active: true });
++      ctx.activeTabId = params.tab_id;
++    } else await getTabsApi(deps).update(params.tab_id, { active: true });
+   } catch (err) {
+     return {
+       code: "protocol_error",
+@@ -638,14 +664,19 @@ async function validateBorrowTarget(
+   if (typeof tab.id !== "number" || typeof tab.windowId !== "number") {
+     return { code: "not_found", message: `tab ${tabId} not found` };
+   }
+-  if (tab.windowId === ctx.agentWindowId) {
++  if (ctx.tabMode ? ctx.agentCreatedTabs.has(tabId) : tab.windowId === ctx.agentWindowId) {
+     return {
+       code: "invalid_params",
+       message: `tab_borrow: tab ${tabId} already lives in the Agent Window`,
+     };
+   }
+   for (const s of manager.list()) {
+-    if (s.sessionId !== ctx.sessionId && s.agentWindowId === tab.windowId) {
++    if (
++      s.sessionId !== ctx.sessionId &&
++      (s.tabMode
++        ? s.agentCreatedTabs.has(tabId) || s.borrowedTabs.has(tabId)
++        : s.agentWindowId === tab.windowId)
++    ) {
+       return rpcError(
+         "permission_denied",
+         "agent_window_scope",
+@@ -754,6 +785,8 @@ async function executeBorrowCore(
+   );
+   if (approvalErr) return approvalErr;
+ 
++  if (p.ctx.tabMode) return { originalWindowId, originalIndex };
++
+   const moveErr = await moveTabForBorrow(
+     p.tabsApi,
+     p.tabId,
+@@ -816,6 +849,7 @@ export async function handleTabBorrow(
+ 
+     try {
+       reservation.commit({
++        ...(ctx.tabMode ? { stationary: true } : {}),
+         tabId: params.tab_id,
+         originalWindowId: coreResult.originalWindowId,
+         originalIndex: coreResult.originalIndex,
+@@ -829,7 +863,8 @@ export async function handleTabBorrow(
+     }
+     // Activate after commit so overlay/event observers see the tab as claimed.
+     try {
+-      await tabsApi.update(params.tab_id, { active: true });
++      if (ctx.tabMode) ctx.activeTabId = params.tab_id;
++      else await tabsApi.update(params.tab_id, { active: true });
+     } catch (err) {
+       console.debug("[bsk tab_borrow] activate after move failed", err);
+     }
+@@ -994,6 +1029,15 @@ export async function returnBorrowedTab(
+   const alreadyCancelled = aborted(deps.signal, "tab_return");
+   if (alreadyCancelled) return alreadyCancelled;
+ 
++  if (entry.stationary) {
++    await releaseReturnedTabState(ctx, tabId, deps);
++    return {
++      tabId,
++      toWindowId: entry.originalWindowId,
++      toIndex: entry.originalIndex,
++      fallback: false,
++    };
++  }
+   let targetWindowId = entry.originalWindowId;
+   let targetIndex = entry.originalIndex;
+   let fallback = false;
+diff --git a/apps/extension/src/tools/vom/__tests__/capture.test.ts b/apps/extension/src/tools/vom/__tests__/capture.test.ts
+index 503dd21..5f9f4a5 100644
+--- a/apps/extension/src/tools/vom/__tests__/capture.test.ts
++++ b/apps/extension/src/tools/vom/__tests__/capture.test.ts
+@@ -212,7 +212,7 @@ function nestedHoverTriggerSnapshotReply() {
+ function makeCdp(snapshot: unknown) {
+   return {
+     send: vi.fn(async (_tab: number, method: string) => {
+-      if (method === "DOMSnapshot.enable") return {};
++      if (method === "DOMSnapshot.enable") throw new Error("DOM mutation tracking must stay disabled");
+       if (method === "DOMSnapshot.captureSnapshot") return snapshot;
+       if (method === "Page.getLayoutMetrics") {
+         return {
+@@ -254,9 +254,11 @@ function makeCdp(snapshot: unknown) {
+ 
+ describe("snapshot capture and hover", () => {
+   it("parses nodes, attrs, rects, paint order and styles", async () => {
++    const cdp = makeCdp(fakeSnapshotReply());
+     const { nodes, viewport } = semanticCapture(
+-      await captureObservationFacts(makeCdp(fakeSnapshotReply()), 4),
++      await captureObservationFacts(cdp, 4),
+     ).captured;
++    expect(cdp.send).not.toHaveBeenCalledWith(4, "DOMSnapshot.enable", expect.anything());
+     expect(viewport).toEqual({ width: 1000, height: 800 });
+     const div = nodes.find((n) => n.backendNodeId === 12);
+     expect(div).toMatchObject({ tag: "div", position: "fixed", parentBackendNodeId: 11 });
+diff --git a/apps/extension/src/tools/vom/capture-abort.ts b/apps/extension/src/tools/vom/capture-abort.ts
+index 7ca65bf..429c373 100644
+--- a/apps/extension/src/tools/vom/capture-abort.ts
++++ b/apps/extension/src/tools/vom/capture-abort.ts
+@@ -4,11 +4,13 @@ function captureAbortError(): Error {
+   return error;
+ }
+ 
++// Timed-out renderer reads are terminal too: AX/geometry fallback must not
++// keep issuing reads after the renderer has stopped answering.
+ export function isAbortError(error: unknown): boolean {
+   return (
+     typeof error === "object" &&
+     error !== null &&
+-    (error as { name?: string }).name === "AbortError"
++    ["AbortError", "CdpReadTimeoutError"].includes((error as { name?: string }).name ?? "")
+   );
+ }
+ 
+diff --git a/apps/extension/src/tools/vom/capture-coordinator.ts b/apps/extension/src/tools/vom/capture-coordinator.ts
+index c5ecf53..a5dbc19 100644
+--- a/apps/extension/src/tools/vom/capture-coordinator.ts
++++ b/apps/extension/src/tools/vom/capture-coordinator.ts
+@@ -121,8 +121,10 @@ export async function captureObservationFacts<T extends FrameOwnedAxNode>(
+       const scoped = cdpRunnerForTarget(cdp, batch.target);
+       try {
+         throwCaptureAborted(signal);
+-        await scoped.send(tabId, "DOMSnapshot.enable", {});
+-        throwCaptureAborted(signal);
++        // captureSnapshot works without enabling the DOMSnapshot domain. Enabling
++        // it installs persistent DOM mutation instrumentation (including script
++        // origin stack collection), which we do not need for a one-shot read.
++        // It also adds a renderer round trip before every snapshot.
+         batch.snapshotAttachmentId = cdp.getAttachmentId?.(tabId);
+         const snapshot = await scoped.send<SnapshotReply>(tabId, "DOMSnapshot.captureSnapshot", {
+           computedStyles: REQUESTED_STYLES,
+diff --git a/apps/extension/src/tools/window.ts b/apps/extension/src/tools/window.ts
+index ccec54e..773d252 100755
+--- a/apps/extension/src/tools/window.ts
++++ b/apps/extension/src/tools/window.ts
+@@ -53,6 +53,8 @@ export async function handleWindowResize(
+   const ctxOrErr = lookupSession(manager, params, "window_resize");
+   if (isRpcError(ctxOrErr)) return ctxOrErr;
+   const ctx = ctxOrErr;
++  if (ctx.tabMode)
++    return { code: "unsupported", message: "Task tabs cannot resize the user window" };
+ 
+   const sizeOrErr = validateWindowSize(params.width, params.height);
+   if (isRpcError(sizeOrErr)) return sizeOrErr;
+diff --git a/apps/extension/src/transport/__tests__/remote-authorization.test.ts b/apps/extension/src/transport/__tests__/remote-authorization.test.ts
+new file mode 100644
+index 0000000..ac613dd
+--- /dev/null
++++ b/apps/extension/src/transport/__tests__/remote-authorization.test.ts
+@@ -0,0 +1,91 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import {
++  activateRemoteEndpoint,
++  renewRemoteAuthorization,
++  updateRemoteConnection,
++} from "../remote-authorization";
++import { REMOTE_ENDPOINT_KEY, type RemoteEndpoint } from "../remote-endpoint";
++
++let values: Record<string, unknown>;
++const endpoint: RemoteEndpoint = {
++  url: "wss://gateway.example/api/v1/local-browser/extension",
++  token: "a".repeat(43),
++  deviceId: "a".repeat(32),
++  expiresAt: "2099-01-01T00:00:00Z",
++  renewAfter: "2020-01-01T00:00:00Z",
++};
++const response = () =>
++  new Response(
++    JSON.stringify({
++      device_id: endpoint.deviceId,
++      expires_at: "2099-02-01T00:00:00Z",
++      renew_after: "2099-01-01T00:00:00Z",
++    }),
++    { status: 200 },
++  );
++beforeEach(() => {
++  values = { [REMOTE_ENDPOINT_KEY]: { ...endpoint } };
++  vi.stubGlobal("chrome", {
++    storage: {
++      local: {
++        get: vi.fn(async () => ({ ...values })),
++        set: vi.fn(async (next) => {
++          Object.assign(values, next);
++        }),
++      },
++    },
++  });
++  vi.stubGlobal(
++    "fetch",
++    vi.fn(async () => response()),
++  );
++});
++describe("durable remote authorization", () => {
++  it("exchanges a pairing link over HTTPS without putting credentials in the URL", async () => {
++    const result = await activateRemoteEndpoint({ url: endpoint.url, token: endpoint.token });
++    const [url, options] = vi.mocked(fetch).mock.calls[0];
++    expect(String(url)).toBe("https://gateway.example/api/v1/local-browser/extension/authorize");
++    expect(options?.redirect).toBe("error");
++    expect(options?.credentials).toBe("omit");
++    expect(options?.headers).toEqual(
++      expect.objectContaining({ Authorization: `Bearer ${endpoint.token}` }),
++    );
++    expect(result.token).not.toBe(endpoint.token);
++    expect(result.deviceId).toBe(endpoint.deviceId);
++    expect(JSON.parse(String(options?.body)).next_token).toBe(result.token);
++  });
++  it("retains the candidate after a lost response and retries the same rotation", async () => {
++    vi.mocked(fetch).mockRejectedValueOnce(new Error("connection lost"));
++    await expect(renewRemoteAuthorization()).rejects.toThrow("connection lost");
++    const pending = values[REMOTE_ENDPOINT_KEY] as RemoteEndpoint;
++    expect(pending.token).toBe(endpoint.token);
++    expect(pending.pendingToken).toHaveLength(43);
++    await renewRemoteAuthorization();
++    expect((values[REMOTE_ENDPOINT_KEY] as RemoteEndpoint).token).toBe(pending.pendingToken);
++    expect((values[REMOTE_ENDPOINT_KEY] as RemoteEndpoint).pendingToken).toBeUndefined();
++    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).next_token).toBe(
++      JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body)).next_token,
++    );
++  });
++  it("does not renew a current authorization", async () => {
++    values[REMOTE_ENDPOINT_KEY] = { ...endpoint, renewAfter: "2099-01-01T00:00:00Z" };
++    await renewRemoteAuthorization();
++    expect(fetch).not.toHaveBeenCalled();
++  });
++  it("serializes disconnect with rotation so an old response cannot restore credentials", async () => {
++    let resolve!: (value: Response) => void;
++    vi.mocked(fetch).mockImplementationOnce(
++      () =>
++        new Promise<Response>((r) => {
++          resolve = r;
++        }),
++    );
++    const renewing = renewRemoteAuthorization();
++    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
++    const disconnecting = updateRemoteConnection(null);
++    resolve(response());
++    await renewing;
++    await disconnecting;
++    expect(values[REMOTE_ENDPOINT_KEY]).toBeNull();
++  });
++});
+diff --git a/apps/extension/src/transport/__tests__/remote-endpoint.test.ts b/apps/extension/src/transport/__tests__/remote-endpoint.test.ts
+new file mode 100644
+index 0000000..3877ab1
+--- /dev/null
++++ b/apps/extension/src/transport/__tests__/remote-endpoint.test.ts
+@@ -0,0 +1,46 @@
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { parseRemoteEndpoint, readRemoteEndpoint, remoteSocket } from "../remote-endpoint";
++
++const token = "a".repeat(43);
++afterEach(() => vi.unstubAllGlobals());
++describe("remote pairing boundary", () => {
++  it("strips the pairing credential from the network URL", () => {
++    expect(parseRemoteEndpoint(`wss://gateway.example/bsk#${token}`)).toEqual({
++      url: "wss://gateway.example/bsk",
++      token,
++    });
++  });
++  it.each([
++    `ws://example.com/bsk#${token}`,
++    `https://example.com/#${token}`,
++    `wss://user:pass@example.com/#${token}`,
++    `wss://example.com/?token=secret#${token}`,
++    "wss://example.com/#short",
++  ])("rejects unsafe pairing %s", (input) => {
++    expect(() => parseRemoteEndpoint(input)).toThrow();
++  });
++  it.each(["localhost", "127.0.0.1", "[::1]"])("permits local development on %s", (host) => {
++    expect(parseRemoteEndpoint(`ws://${host}:8080/bsk#${token}`).url).toBe(`ws://${host}:8080/bsk`);
++  });
++  it("does not turn a corrupt remote preference into a local connection", () => {
++    expect(readRemoteEndpoint(null)).toBeNull();
++    expect(() => readRemoteEndpoint({ url: "ws://public.example", token })).toThrow();
++  });
++  it("sends credentials only to the paired endpoint via the subprotocol", () => {
++    const calls: unknown[][] = [];
++    vi.stubGlobal(
++      "WebSocket",
++      class {
++        constructor(...args: unknown[]) {
++          calls.push(args);
++        }
++      },
++    );
++    const remote = parseRemoteEndpoint(`wss://gateway.example/bsk#${token}`);
++    remoteSocket(remote.url, remote);
++    remoteSocket("ws://localhost:52800", null);
++    expect(calls).toEqual([[remote.url, [`bsk-auth.${token}`]], ["ws://localhost:52800"]]);
++    expect(() => remoteSocket("wss://other.example/bsk", remote)).toThrow();
++    expect(calls).toHaveLength(2);
++  });
++});
+diff --git a/apps/extension/src/transport/remote-authorization.ts b/apps/extension/src/transport/remote-authorization.ts
+new file mode 100644
+index 0000000..438893d
+--- /dev/null
++++ b/apps/extension/src/transport/remote-authorization.ts
+@@ -0,0 +1,149 @@
++import {
++  parseRemoteEndpoint,
++  REMOTE_ENDPOINT_KEY,
++  type RemoteEndpoint,
++  readRemoteEndpoint,
++} from "./remote-endpoint";
++
++function newToken(): string {
++  const bytes = crypto.getRandomValues(new Uint8Array(32));
++  return btoa(String.fromCharCode(...bytes))
++    .replaceAll("+", "-")
++    .replaceAll("/", "_")
++    .replaceAll("=", "");
++}
++
++async function authorize(
++  endpoint: RemoteEndpoint,
++  action: "pair" | "renew",
++  nextToken: string,
++): Promise<RemoteEndpoint> {
++  const url = new URL(endpoint.url);
++  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
++  url.pathname = url.pathname.replace(/\/$/, "") + "/authorize";
++  const response = await fetch(url, {
++    method: "POST",
++    redirect: "error",
++    credentials: "omit",
++    cache: "no-store",
++    headers: { Authorization: `Bearer ${endpoint.token}`, "Content-Type": "application/json" },
++    body: JSON.stringify({ action, next_token: nextToken, label: "Chrome · BrowserSkill" }),
++    signal: AbortSignal.timeout(10000),
++  });
++  if (!response.ok) throw new Error("Browser authorization failed; reconnect or pair again");
++  const data = (await response.json()) as {
++    device_id: string;
++    service_name?: string;
++    expires_at: string;
++    renew_after: string;
++  };
++  if (
++    typeof data.device_id !== "string" ||
++    !data.device_id ||
++    !Number.isFinite(Date.parse(data.expires_at)) ||
++    !Number.isFinite(Date.parse(data.renew_after))
++  ) {
++    throw new Error("Invalid browser authorization response");
++  }
++  return {
++    url: endpoint.url,
++    token: nextToken,
++    deviceId: data.device_id,
++    serviceName:
++      typeof data.service_name === "string" ? data.service_name.slice(0, 48) : endpoint.serviceName,
++    expiresAt: data.expires_at,
++    renewAfter: data.renew_after,
++  };
++}
++
++export async function activateRemoteEndpoint(endpoint: RemoteEndpoint): Promise<RemoteEndpoint> {
++  return authorize(endpoint, "pair", newToken());
++}
++
++let writes: Promise<unknown> = Promise.resolve();
++function serialized<T>(action: () => Promise<T>): Promise<T> {
++  const result = writes.then(action, action);
++  writes = result.catch(() => undefined);
++  return result;
++}
++export function updateRemoteConnection(pairing: string | null): Promise<string | null> {
++  return serialized(async () => {
++    const endpoint =
++      pairing === null ? null : await activateRemoteEndpoint(parseRemoteEndpoint(pairing));
++    await chrome.storage.local.set({ [REMOTE_ENDPOINT_KEY]: endpoint });
++    return endpoint?.url ?? null;
++  });
++}
++let renewing = false;
++/** Persist the candidate before rotating. A lost HTTP response can be retried
++ * using the same old/new pair after service-worker or server restart. */
++export async function renewRemoteAuthorization(): Promise<void> {
++  if (renewing) return;
++  renewing = true;
++  try {
++    await serialized(renewRemote);
++  } finally {
++    renewing = false;
++  }
++}
++async function renewRemote(): Promise<void> {
++  {
++    const stored = await chrome.storage.local.get(REMOTE_ENDPOINT_KEY);
++    const endpoint = readRemoteEndpoint(stored[REMOTE_ENDPOINT_KEY]);
++    if (
++      !endpoint?.deviceId ||
++      !endpoint.renewAfter ||
++      (!endpoint.pendingToken && Date.now() < Date.parse(endpoint.renewAfter))
++    )
++      return;
++    const nextToken = endpoint.pendingToken ?? newToken();
++    const pending = { ...endpoint, pendingToken: nextToken };
++    await chrome.storage.local.set({ [REMOTE_ENDPOINT_KEY]: pending });
++    const updated = await authorize(endpoint, "renew", nextToken);
++    const latest = readRemoteEndpoint(
++      (await chrome.storage.local.get(REMOTE_ENDPOINT_KEY))[REMOTE_ENDPOINT_KEY],
++    );
++    // A settings change during the request must not resurrect an old connection.
++    if (
++      latest?.url === endpoint.url &&
++      latest.token === endpoint.token &&
++      latest.deviceId === endpoint.deviceId &&
++      latest.pendingToken === nextToken
++    ) {
++      await chrome.storage.local.set({ [REMOTE_ENDPOINT_KEY]: updated });
++    }
++  }
++}
++
++export function watchRemoteAuthorization() {
++  // Content scripts do not need the gateway credential.
++  void chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
++  chrome.runtime.onMessage.addListener((message, sender, reply) => {
++    if (message?.kind !== "bsk-remote-authorization") return false;
++    if (
++      sender.url !== chrome.runtime.getURL("popup.html") ||
++      sender.id !== chrome.runtime.id ||
++      (message.pairing !== null && typeof message.pairing !== "string")
++    ) {
++      reply({ error: "Invalid authorization request" });
++      return false;
++    }
++    void updateRemoteConnection(message.pairing).then(
++      (url) => reply({ url }),
++      () => reply({ error: "Unable to pair; copy a new pairing link and try again" }),
++    );
++    return true;
++  });
++  const run = () => {
++    void renewRemoteAuthorization().catch(() => {
++      /* Retry the same candidate on the next alarm; never log credentials. */
++    });
++  };
++  const listener = (alarm: chrome.alarms.Alarm) => {
++    if (alarm.name === "bsk-remote-authorization") run();
++  };
++  chrome.alarms.onAlarm.addListener(listener);
++  void chrome.alarms.create("bsk-remote-authorization", { periodInMinutes: 1 });
++  run();
++  return { changed: run, dispose: () => chrome.alarms.onAlarm.removeListener(listener) };
++}
+diff --git a/apps/extension/src/transport/remote-endpoint.ts b/apps/extension/src/transport/remote-endpoint.ts
+new file mode 100644
+index 0000000..f87604c
+--- /dev/null
++++ b/apps/extension/src/transport/remote-endpoint.ts
+@@ -0,0 +1,114 @@
++/** A gateway issues a pairing URL; the fragment never becomes part of the request URL. */
++export interface RemoteEndpoint {
++  url: string;
++  token: string;
++  deviceId?: string;
++  serviceName?: string;
++  expiresAt?: string;
++  renewAfter?: string;
++  pendingToken?: string;
++}
++
++export const REMOTE_ENDPOINT_KEY = "bsk_remote_endpoint";
++export const REMOTE_AUTH_PROTOCOL_PREFIX = "bsk-auth.";
++
++export function parseRemoteEndpoint(input: string): RemoteEndpoint {
++  const url = new URL(input.trim());
++  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
++  if (url.protocol !== "wss:" && !(url.protocol === "ws:" && loopback)) {
++    throw new Error("Remote connections require WSS (WS is allowed only on loopback)");
++  }
++  if (url.username || url.password || url.search) {
++    throw new Error("Credentials and query parameters are not allowed in the server URL");
++  }
++  const token = url.hash.slice(1);
++  if (!/^[A-Za-z0-9_-]{32,256}$/.test(token)) {
++    throw new Error("A pairing credential of 32–256 base64url characters is required");
++  }
++  url.hash = "";
++  return { url: url.toString(), token };
++}
++
++export function readRemoteEndpoint(value: unknown): RemoteEndpoint | null {
++  if (value === undefined || value === null) return null;
++  if (typeof value !== "object") throw new Error("Invalid stored remote connection");
++  const { url, token } = value as Partial<RemoteEndpoint>;
++  if (typeof url !== "string" || typeof token !== "string") {
++    throw new Error("Invalid stored remote connection");
++  }
++  const endpoint = parseRemoteEndpoint(`${url}#${token}`);
++  const extra = value as Partial<RemoteEndpoint>;
++  if (extra.deviceId !== undefined) {
++    if (
++      typeof extra.deviceId !== "string" ||
++      !/^[a-f0-9]{32}$/.test(extra.deviceId) ||
++      typeof extra.expiresAt !== "string" ||
++      typeof extra.renewAfter !== "string" ||
++      !Number.isFinite(Date.parse(extra.expiresAt)) ||
++      !Number.isFinite(Date.parse(extra.renewAfter))
++    )
++      throw new Error("Invalid stored device authorization");
++    endpoint.deviceId = extra.deviceId;
++    endpoint.expiresAt = extra.expiresAt;
++    endpoint.renewAfter = extra.renewAfter;
++  }
++  if (typeof extra.serviceName === "string") endpoint.serviceName = extra.serviceName.slice(0, 48);
++  if (extra.pendingToken !== undefined) {
++    if (typeof extra.pendingToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(extra.pendingToken))
++      throw new Error("Invalid pending device credential");
++    endpoint.pendingToken = extra.pendingToken;
++  }
++  return endpoint;
++}
++
++export function remoteSocket(
++  url: string,
++  endpoint: RemoteEndpoint | null,
++  focusWindow?: (sessionId: string) => Promise<void>,
++  preview?: (sessionId: string) => Promise<unknown>,
++  idle?: (sessionId: string) => Promise<unknown>,
++): WebSocket {
++  // Never attach a remote credential to a different endpoint, including a local fallback.
++  if (endpoint && endpoint.url !== url) throw new Error("Remote endpoint changed");
++  const socket = endpoint
++    ? new WebSocket(url, [REMOTE_AUTH_PROTOCOL_PREFIX + endpoint.token])
++    : new WebSocket(url);
++  if (endpoint && focusWindow)
++    socket.addEventListener("message", (event) => {
++      let request: { id?: string; method?: string; params?: { session_id?: string } };
++      try {
++        request = JSON.parse(event.data);
++      } catch {
++        return;
++      }
++      if (
++        !["gateway.task_focus", "gateway.task_preview", "gateway.task_idle"].includes(
++          request.method ?? "",
++        )
++      )
++        return;
++      event.stopImmediatePropagation();
++      if (!request.id || !request.params?.session_id) return;
++      const work =
++        request.method === "gateway.task_idle"
++          ? idle
++            ? idle(request.params.session_id)
++            : Promise.reject(new Error("Idle unavailable"))
++          : request.method === "gateway.task_preview"
++            ? preview
++              ? preview(request.params.session_id)
++              : Promise.reject(new Error("Preview unavailable"))
++            : focusWindow(request.params.session_id).then(() => ({ focused: true }));
++      void work.then(
++        (result) => {
++          if (socket.readyState === WebSocket.OPEN)
++            socket.send(JSON.stringify({ id: request.id, result }));
++        },
++        () => {
++          if (socket.readyState === WebSocket.OPEN)
++            socket.send(JSON.stringify({ id: request.id, error: { code: "window_unavailable" } }));
++        },
++      );
++    });
++  return socket;
++}
+diff --git a/apps/extension/wxt.config.ts b/apps/extension/wxt.config.ts
+index ff4fc53..4ae452c 100644
+--- a/apps/extension/wxt.config.ts
++++ b/apps/extension/wxt.config.ts
+@@ -34,6 +34,7 @@ export default defineConfig({
+       "idle",
+       "notifications",
+       "tabs",
++      "tabGroups",
+       "storage",
+       "webNavigation",
+       "windows",
+diff --git a/docs/remote-extension-connection.md b/docs/remote-extension-connection.md
+new file mode 100644
+index 0000000..f279d80
+--- /dev/null
++++ b/docs/remote-extension-connection.md
+@@ -0,0 +1,123 @@
++# Connecting an extension through an authenticated gateway
++
++This opt-in extension mode addresses the browser-side connection portion of
++[issue #50](https://github.com/Tencent/BrowserSkill/issues/50). The default remains
++the local daemon and its configurable port. This does not expose the daemon to
++the internet or implement a remote CLI server.
++
++Open the extension popup, expand **Remote connection**, and paste a gateway-issued
++pairing link:
++
++```text
++wss://gateway.example/browser/extension#<base64url-credential>
++```
++
++The destination is shown before saving. Saving uses the existing connection
++controller: finish session cleanup and return borrowed tabs before switching the
++transport. If cleanup fails, the controller retains the failure rather than
++silently abandoning borrowed tabs. **Use local daemon** removes the remote
++preference and goes through the same cleanup path.
++
++## Gateway authorization contract
++
++This consumer patch adds a proposed HTTP exchange before the native handshake.
++Saving a pairing link sends POST to the WebSocket path plus `/authorize` (HTTPS
++for WSS), using `Authorization: Bearer <pairing-token>` and JSON
++`{ "action": "pair", "next_token": "<client-generated-256-bit-token>", "label": "Chrome · BrowserSkill" }`.
++The gateway atomically consumes the one-use pairing token and returns
++`device_id`, `expires_at` and `renew_after` (ISO date strings), plus an optional
++`service_name` used for the visible task-group label (up to 48 characters; defaults
++to BrowserSkill). It stores only a
++hash of the next token. HTTP redirects are rejected; cookies are omitted.
++
++The extension stores device metadata and its token in trusted extension-local
++storage. At renewal time it persists a candidate token, then uses the same
++endpoint with action `renew` and the current device token as Bearer authorization.
++The gateway must handle repeated old/new token pairs idempotently, allowing a
++lost response to be retried after restart. The consumer gateway uses a 5-minute
++pairing lifetime, 90-day device lifetime and renewal after 30 days. First-time
++activation response loss requires a new pairing link. Renewal of the same device
++does not tear down active sessions.
++
++## WebSocket contract
++
++- The extension strips the fragment before opening the WebSocket. It offers one
++  subprotocol, `bsk-auth.<credential>`. The credential must be 32–256 base64url
++  characters. A gateway must validate it before forwarding any browser traffic,
++  and select the offered subprotocol when accepting the WebSocket.
++- Non-loopback connections require WSS. Query parameters and URL userinfo are
++  rejected. Do not log WebSocket subprotocol headers: this is a bearer credential.
++- After upgrade, the first application frame remains `system.handshake`. Native
++  BrowserSkill automation RPC methods and payloads remain unchanged. Forward the native handshake and
++  frames to the authorized daemon connection without the credential subprotocol.
++- Authenticate and isolate each user's daemon/routing context. The BrowserSkill
++  compatibility handshake is not account authentication.
++- Expiry and revocation are gateway responsibilities; renewal follows the HTTP contract above. Close an existing
++  connection on revocation. Never replay commands on reconnect.
++- A token authorizes the server to create and operate background task tabs. Existing
++  user tabs still use BrowserSkill's original borrow confirmation and return flow.
++
++The stored remote endpoint uses `chrome.storage.local`, not sync storage. The
++popup displays the server URL, not the saved credential. A configured remote
++connection never silently falls back to localhost after a transport failure.
++
++For local gateway development only, `ws://127.0.0.1`, `ws://localhost`, and
++`ws://[::1]` are accepted. This exception does not allow plaintext LAN endpoints.
++
++## Validation
++
++The extension tests cover unsafe endpoint rejection, credential destination
++binding, out-of-order storage reads and disposal. Existing controller tests cover
++session teardown and reconnect generations. An integration consumer additionally
++tested a released v0.2.1 daemon and the built extension in isolated Chromium:
++popup pairing, session start, navigation, Chinese text input, click, snapshot,
++screenshot, pause/resume and session stop. The gateway is external to this patch.
++
++The subprotocol convention is proposed for upstream review; it is not an existing
++published BrowserSkill remote-auth standard.
++
++## Optional gateway UI messages
++
++The extension intercepts `gateway.task_focus` and `gateway.task_preview` before
++native transport dispatch. These are proposed optional gateway messages, not
++published native BrowserSkill RPCs. Both require an existing `session_id` from
++the authenticated gateway's own task mapping. Focus locates that task's current
++tab; it cannot start or resume a task or select an arbitrary browser tab.
++Preview is described below. A gateway should expose focus only as a user action.
++
++## Remote task tabs and preview
++
++Remote gateway sessions use background task tabs in an existing non-incognito
++Chrome window, grouped and labeled for the integration. The local-daemon mode
++retains dedicated Agent Windows. Tab groups are visual only: explicit created
++and borrowed tab IDs define ownership. A shared window is never a permission
++boundary for remote tasks; other sessions' tabs remain invisible and even passive
++page reads require an owned/borrowed tab. Existing tabs are borrowed in place
++after the original confirmation, then released without moving or closing them.
++Stopping a remote task closes only its created tabs, never the shared user window.
++
++Logical task-tab selection does not activate Chrome's visible tab. Remote human
++help and borrow requests preserve the original confirmation/notification UI but
++do not proactively focus a window. Explicit user notification clicks and the
++consumer's `gateway.task_focus` message can locate the task tab.
++
++The optional `gateway.task_preview` UI message captures the authorized task tab through
++CDP outside the automation queue. It returns a JPEG (`image_base64`, `format`,
++`tab_id`, `title`, `captured_at`); final bitmap width is limited to 640 pixels,
++including on HiDPI screens. Concurrent captures for the same task are coalesced.
++The gateway consumer should rate-limit, authenticate, and scope preview requests,
++and the viewer should stop requesting images while hidden. This is low-frame-rate
++preview, not a video streaming API. Both UI messages are optional gateway
++proposals and must not be represented as published native BrowserSkill RPCs.
++
++Validation includes task-tab ownership/cleanup, rejected unapproved reads,
++borrowing without moving user tabs, non-focusing human help, preview capture
++coalescing/HiDPI bounds, and an external integration test using the released
++v0.2.1 daemon plus headed Chromium. No cloud gateway implementation is shipped
++in this repository.
++
++`gateway.task_idle` releases the task's debugger attachments after an agent turn
++without closing its tabs. It fences new previews and waits for already-started
++operations and captures before detaching. The next native tool operation resumes
++control. Session stop uses the same preview fence. The gateway retains the last
++preview while idle rather than causing background screenshots to reattach CDP.
+diff --git a/packages/i18n/src/locales/en-US/extension.json b/packages/i18n/src/locales/en-US/extension.json
+index fe51cc8..8af2c72 100644
+--- a/packages/i18n/src/locales/en-US/extension.json
++++ b/packages/i18n/src/locales/en-US/extension.json
+@@ -23,6 +23,11 @@
+       "disabled": "Off"
+     },
+     "connectionToggleTitle": "BrowserSkill connection",
++    "taskWindowTitle": "Task display",
++    "taskWindowTabs": "Background tab group",
++    "taskWindowVisible": "Separate window (default, keep visible)",
++    "taskWindowHint": "Applies to the next new task. A separate window opens in front; later tab changes stay within it. Keep it alongside chat: covering or minimizing it may still slow reads.",
++    "taskWindowError": "Could not load or save this setting. Reopen the extension and try again.",
+     "controlHintsToggleTitle": "Control hints",
+     "controlHintsToggleHint": "Show the status pill and orange glow while the Agent controls a page.",
+     "controlHintsInfoLabel": "About control hints",
+@@ -66,7 +71,13 @@
+       "copied": "Copied",
+       "hintDisconnected": "Available when connected",
+       "promptTemplate": "Use BrowserSkill's `bsk` CLI to record the browser actions I'm about to demonstrate.\n\nSteps:\n1. Run: {{command}}\n2. Once you confirm it's started, I'll operate in the opened window myself.\n3. After I click Finish, read the written `./trace` bundle (`trace.json` + `states/`) and summarize what I did."
+-    }
++    },
++    "remoteTitle": "Remote connection",
++    "remoteLocal": "Use local daemon",
++    "remotePairing": "Pairing link",
++    "remoteHint": "Paste a pairing link from a trusted server. Saving switches connections and ends existing sessions. The server can operate Agent Windows; borrowing existing tabs still requires your confirmation.",
++    "remoteSave": "Connect",
++    "remoteError": "Could not save. Check the pairing link and storage access."
+   },
+   "controlOverlay": {
+     "status": "Agent controlling",
+diff --git a/packages/i18n/src/locales/ko-KR/extension.json b/packages/i18n/src/locales/ko-KR/extension.json
+index c6870bc..5c7ac30 100644
+--- a/packages/i18n/src/locales/ko-KR/extension.json
++++ b/packages/i18n/src/locales/ko-KR/extension.json
+@@ -23,6 +23,11 @@
+       "disabled": "꺼짐"
+     },
+     "connectionToggleTitle": "BrowserSkill 연결",
++    "taskWindowTitle": "작업 표시 방식",
++    "taskWindowTabs": "백그라운드 탭 그룹",
++    "taskWindowVisible": "별도 창 (기본값, 보이도록 유지)",
++    "taskWindowHint": "다음 새 작업부터 적용됩니다. 별도 창이 앞으로 열리고 이후에는 작업 창 안의 탭만 전환합니다. 채팅 창 옆에 두세요. 완전히 가리거나 최소화하면 여전히 느려질 수 있습니다.",
++    "taskWindowError": "설정을 읽거나 저장하지 못했습니다. 확장 프로그램을 다시 열고 재시도하세요.",
+     "controlHintsToggleTitle": "제어 표시",
+     "controlHintsToggleHint": "에이전트가 페이지를 제어하는 동안 상태 표시와 주황색 테두리를 표시합니다.",
+     "controlHintsInfoLabel": "제어 표시에 관하여",
+@@ -66,7 +71,13 @@
+       "copied": "복사됨",
+       "hintDisconnected": "연결 후 사용할 수 있습니다",
+       "promptTemplate": "BrowserSkill의 `bsk` CLI를 사용해 지금부터 제가 수행할 브라우저 작업을 기록하세요.\n\n단계:\n1. 다음을 실행하세요: {{command}}\n2. 기록이 시작됐다고 알려주면, 열린 창에서 제가 직접 작업하겠습니다.\n3. 제가 완료를 누른 후 생성된 `./trace` 번들(`trace.json` + `states/`)을 읽고 제가 수행한 작업을 요약하세요."
+-    }
++    },
++    "remoteTitle": "원격 연결",
++    "remoteLocal": "로컬 데몬 사용",
++    "remotePairing": "페어링 링크",
++    "remoteHint": "신뢰하는 서버의 페어링 링크를 붙여 넣으세요. 저장하면 연결이 전환되고 기존 세션이 종료됩니다. 기존 탭을 빌리려면 여전히 확인이 필요합니다.",
++    "remoteSave": "연결",
++    "remoteError": "저장하지 못했습니다. 페어링 링크와 저장소 접근을 확인하세요."
+   },
+   "controlOverlay": {
+     "status": "에이전트가 제어 중",
+diff --git a/packages/i18n/src/locales/zh-CN/extension.json b/packages/i18n/src/locales/zh-CN/extension.json
+index 46c56fa..201dde0 100644
+--- a/packages/i18n/src/locales/zh-CN/extension.json
++++ b/packages/i18n/src/locales/zh-CN/extension.json
+@@ -23,6 +23,11 @@
+       "disabled": "Off"
+     },
+     "connectionToggleTitle": "BrowserSkill 连接",
++    "taskWindowTitle": "任务打开方式",
++    "taskWindowTabs": "后台标签组",
++    "taskWindowVisible": "独立窗口（默认，保持可见）",
++    "taskWindowHint": "下一个新任务生效。独立窗口会打开到前台，之后仅切换窗口内的任务标签。请与聊天窗口并排放置；完全遮挡或最小化仍可能变慢。",
++    "taskWindowError": "设置读写失败，请重新打开扩展后再试。",
+     "controlHintsToggleTitle": "控制提示",
+     "controlHintsToggleHint": "Agent 控制页面时显示提示条和橙色闪光。",
+     "controlHintsInfoLabel": "控制提示说明",
+@@ -66,7 +71,13 @@
+       "copied": "已复制",
+       "hintDisconnected": "连接后可用",
+       "promptTemplate": "用 BrowserSkill 的 `bsk` CLI 录制我接下来的浏览器操作。\n\n步骤：\n1. 执行：{{command}}\n2. 你确认已开始后，我会在打开的窗口里自己操作。\n3. 我点“结束”后，读取写出的 `./trace` 目录包（`trace.json` + `states/`），总结我做了什么。"
+-    }
++    },
++    "remoteTitle": "远程连接",
++    "remoteLocal": "使用本机服务",
++    "remotePairing": "配对链接",
++    "remoteHint": "粘贴可信服务器提供的配对链接。保存后会切换连接并结束现有任务。服务器可操作 Agent Window；借用已有标签页仍需你确认。",
++    "remoteSave": "连接",
++    "remoteError": "保存失败，请检查配对链接及存储权限。"
+   },
+   "controlOverlay": {
+     "status": "Agent 正在控制",
+diff --git a/packages/vom/src/__tests__/render.test.ts b/packages/vom/src/__tests__/render.test.ts
+index a064df6..34e835a 100644
+--- a/packages/vom/src/__tests__/render.test.ts
++++ b/packages/vom/src/__tests__/render.test.ts
+@@ -29,6 +29,32 @@ function coreRefs(refs: ReturnType<typeof renderVom>["refs"]) {
+ }
+ 
+ describe("renderVom single-layer page", () => {
++  it("does not rescan every earlier row for repeated action context", () => {
++    const count = 600;
++    let nameReads = 0;
++    const nodes = [node({ id: 1, role: "RootWebArea" })];
++    for (let i = 0; i < count; i++) {
++      const label = node({ id: 2 + i * 2, parentId: 1, role: "StaticText" });
++      Object.defineProperty(label, "name", {
++        enumerable: true,
++        get() {
++          nameReads++;
++          return `Record ${i}`;
++        },
++      });
++      nodes.push(
++        label,
++        node({ id: 3 + i * 2, parentId: 1, tag: "button", role: "button", name: "Open" }),
++      );
++    }
++    const out = renderVom(scene(nodes));
++    expect(out.refs).toHaveLength(count);
++    expect(out.refs[0].ctx).toBe("Record 0");
++    expect(out.refs[count - 1].ctx).toBe(`Record ${count - 3}`);
++    // Count semantic reads rather than asserting a machine-dependent duration.
++    expect(nameReads).toBeLessThan(count * 100);
++  });
++
+   it("does not derive handle context across frame scopes", () => {
+     const out = renderVom(
+       scene([
+diff --git a/packages/vom/src/render.ts b/packages/vom/src/render.ts
+index c7c4164..af63b75 100644
+--- a/packages/vom/src/render.ts
++++ b/packages/vom/src/render.ts
+@@ -614,11 +614,32 @@ function collectSameContainerContext(
+   let guard = 0;
+   while (parentId !== null && guard <= state.parentMap.size) {
+     const siblings = state.children.get(parentId) ?? [];
+-    for (const sibling of siblings) {
+-      if (sibling.id === childId) break;
+-      collectWeakLabelsFromSubtree(sibling, node, nodeName, state, labels);
+-      while (labels.length > MAX_HANDLE_CONTEXT_ITEMS) labels.shift();
++    const end = state.siblingIndex.get(childId) ?? siblings.length;
++    let cache = state.siblingContextCache.get(parentId);
++    if (!cache) {
++      cache = new Map();
++      state.siblingContextCache.set(parentId, cache);
+     }
++    // The subtree collector depends on scope, target name and incoming labels.
++    // Include all three so descendants arriving from different containers retain
++    // the original context semantics. DFS visits sibling prefixes in order.
++    const key = JSON.stringify([node.contextScopeId, nodeName, labels]);
++    let prefix = cache.get(key);
++    if (!prefix || prefix.nextIndex > end) prefix = { nextIndex: 0, labels: [...labels] };
++    for (; prefix.nextIndex < end; prefix.nextIndex++) {
++      collectWeakLabelsFromSubtree(
++        siblings[prefix.nextIndex],
++        node,
++        nodeName,
++        state,
++        prefix.labels,
++      );
++      while (prefix.labels.length > MAX_HANDLE_CONTEXT_ITEMS) prefix.labels.shift();
++    }
++    labels.splice(0, labels.length, ...prefix.labels);
++    // Bound retained variants on pages with many distinct action names.
++    if (!cache.has(key) && cache.size >= 64) cache.delete(cache.keys().next().value!);
++    cache.set(key, prefix);
+ 
+     const parent = state.nodesById.get(parentId);
+     if (!parent || !sharesContextScope(node, parent) || isContextBoundary(parent)) break;
+@@ -787,6 +808,8 @@ interface RenderState {
+   truncated: boolean;
+   stopped: boolean;
+   children: Map<number | null, VomNode[]>;
++  siblingIndex: Map<number, number>;
++  siblingContextCache: Map<number, Map<string, { nextIndex: number; labels: string[] }>>;
+   parentMap: Map<number, number | null>;
+   nodesById: Map<number, VomNode>;
+   domContextIndex: DomContextIndex;
+@@ -896,7 +919,14 @@ function renderNodes(
+   activeScopeBlocks: ActiveScopeBlock[] = [],
+ ): RenderState {
+   const children = buildChildren(nodes);
++  const siblingIndex = new Map<number, number>();
++  for (const siblings of children.values()) {
++    for (let index = 0; index < siblings.length; index++)
++      siblingIndex.set(siblings[index].id, index);
++  }
+   const state: RenderState = {
++    siblingIndex,
++    siblingContextCache: new Map(),
+     lines: [...initialLines],
+     refs: [],
+     nextRef: 1,

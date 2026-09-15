@@ -233,7 +233,7 @@
               </div>
             </div>
           </section>
-          <section v-if="hasTranscript(managedSkill)" class="skill-manage__section">
+          <section v-if="hasTranscript(managedSkill)" class="skill-manage__section skill-manage__section--transcript">
             <div class="skill-manage__section-head">
               <h4>{{ $t('settings.sandbox.skillTranscriptTitle') }}</h4>
               <div v-if="managedSkill.status === 'installing'" class="skill-manage__progress">
@@ -255,6 +255,8 @@
               :session-id="managedSkill.install_session_id || ''"
               :message-id="managedSkill.install_message_id || ''"
               :live="managedSkill.status === 'installing'"
+              :can-retry="managedSkill.status === 'ready' || managedSkill.status === 'failed'"
+              @restarted="loadSkills()"
             />
           </section>
         </template>
@@ -495,6 +497,8 @@
                               :session-id="skill.install_session_id || ''"
                               :message-id="skill.install_message_id || ''"
                               :live="skill.status === 'installing'"
+                              :can-retry="skill.status === 'ready' || skill.status === 'failed'"
+                              @restarted="loadSkills()"
                             />
                           </div>
                         </div>
@@ -1658,7 +1662,30 @@ onUnmounted(() => {
 }
 
 .sandbox-skills-panel--focused {
+  display: flex;
+  flex: 1;
   min-height: 0;
+
+  > :deep(.t-loading__parent) {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .skill-manage,
+  .skill-manage__section--transcript,
+  :deep(.skill-timeline) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  :deep(.skill-timeline__guidance) {
+    // Include the drawer's 18px side padding and 16px bottom padding.
+    --skill-guidance-gutter: 30px;
+    --skill-guidance-bottom-gap: 16px;
+    margin-bottom: -12px;
+    padding-bottom: 12px;
+  }
 }
 
 .skill-header-uninstall {
@@ -2155,6 +2182,10 @@ onUnmounted(() => {
 </style>
 
 <style lang="less">
+.setting-drawer__body:has(> .sandbox-skills-panel--focused) {
+  min-height: 100%;
+}
+
 .skill-transcript-popup,
 .skill-env-popup {
   z-index: 3200 !important;

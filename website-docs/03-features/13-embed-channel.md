@@ -99,11 +99,17 @@ publish token 只保存在业务后端，页面通过 `data-token-endpoint` 指�
 
 1. 按 `channel_id` 查渠道，校验 token 与 `publish_token` 匹配，或在 Redis（key `embed:session:{token}`）中查到 session token 归属该渠道；
 2. 校验渠道 `enabled`；
-3. 校验请求 `Origin` 命中 `allowed_origins`（空列表拒绝一切；`*` 仅开发模式；`*.example.com` 后缀通配；其余精确匹配、大小写不敏感）；
+3. 允许 iframe 内的同源 API 请求；跨源 API 请求及安全模式服务端 exchange 的 `Origin` 需命中 `allowed_origins`。空白名单仍拒绝一切；宿主限制由嵌入 HTML 的 CSP 执行；
 4. 限流（Redis Lua 脚本，滑动窗口）：
    - 单 IP 每分钟 ≤ `RateLimitPerMinute`；
    - 渠道全局每分钟 ≤ `max(RateLimitPerMinute × 20, 120)`——防止攻击者轮换 IP 绕过单 IP 限流；
    - 渠道每日总量 ≤ `RateLimitPerDay`。
+
+### 宿主来源与部署
+
+A 网站嵌入 B 的 WeKnora 时，白名单填 A。标准 Nginx 使用 `/api/v1/embed-frame-policy` 获取渠道策略（无需 token，仅返回 CSP，不返回渠道配置），并在 `/embed/:channelId` 的 HTML 响应中设置 `frame-ancestors`；Lite 使用同一策略。该页面不缓存，策略获取失败时不返回嵌入 HTML。
+
+升级时，过去仅填 B 的渠道需改填实际宿主 A，并同时更新前后端。自定义反向代理需保留 CSP、原始 Host（含端口）、协议及 `Sec-Fetch-Site`；详见 [embed-subdomain.md](../../docs/embed-subdomain.md)。白名单限制浏览器嵌入，不能代替访客认证或阻止持有 token 的非浏览器客户端；此类访问控制使用安全模式和限流。
 
 ### Token 交换（安全模式核心）
 
@@ -185,7 +191,7 @@ type EmbedChannel struct {
 | `name` | string | — | 渠道显示名称 |
 | `enabled` | bool | `true` | 渠道开关，关闭后所有公开接口拒绝访问 |
 | `agent_id` | string | `builtin-quick-answer` | 绑定的 Agent，决定知识库范围与对话能力 |
-| `allowed_origins` | string[] | — | **必填至少一项**。支持三种形式：完整 `http(s)://` Origin、子域名通配 `*.example.com`、全通配 `*`（仅开发模式允许，生产环境拒绝） |
+| `allowed_origins` | string[] | — | **必填至少一项，填写嵌入宿主 A，不是 WeKnora 地址 B**。支持三种形式：完整 `http(s)://` Origin、子域名通配 `*.example.com`、全通配 `*`（仅开发模式允许，生产环境拒绝） |
 | `welcome_message` | string | 空 | 打开挂件时的欢迎语 |
 | `rate_limit_per_minute` | int | `30` | 单 IP 每分钟请求上限 |
 | `rate_limit_per_day` | int | `10000` | 渠道级每日请求总量上限 |
@@ -284,7 +290,7 @@ sequenceDiagram
 
 ### 安全要点小结
 
-- **Origin 白名单**：`allowed_origins` 为空时拒绝所有请求；`*` 通配仅开发模式可用；支持 `*.example.com` 子域名通配。
+- **宿主白名单**：嵌入 HTML 设置渠道级 `CSP frame-ancestors`，限制所有祖先页面；iframe 内同源 API 正常放行。`allowed_origins` 为空时拒绝所有请求；`*` 仅开发模式可用；支持 `*.example.com` 子域名通配。同源管理端预览允许。
 - **双 token 体系**：安全模式下 publish token 不出服务端，浏览器只持有 30 分钟短效 `ems_` token。
 - **会话签名**：`X-Embed-Session` HMAC 签名把会话绑定到（渠道、会话、当前 publish token）三元组，轮换 token 即可全量吊销。
 - **三层限流**：单 IP/分钟、渠道/分钟（20 倍单 IP、下限 120）、渠道/天，Redis Lua 原子实现。

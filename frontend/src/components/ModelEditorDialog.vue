@@ -1,18 +1,14 @@
 <template>
   <SettingDrawer :visible="dialogVisible" :title="isEdit ? $t('model.editor.editTitle') : $t('model.editor.addTitle')"
-    :description="getModalDescription()" :icon="modelTypeIcon" :confirm-loading="saving"
+    :description="getModalDescription()" :icon="modelTypeIcon" :confirm-loading="saving" :cancel-disabled="saving"
+    :confirm-text="$t('model.editor.saveAndClose')"
+    :close-on-overlay-click="!saving" :close-on-esc-keydown="!saving"
     :confirm-disabled="formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured'"
     @update:visible="(v: boolean) => dialogVisible = v" @confirm="handleConfirm" @cancel="handleCancel">
 
-    <!--
-      Footer-left slot: connection-test button lives here so it sits next to
-      Save/Cancel — primary actions all aligned along the bottom of the
-      drawer. Avoids the "test, then scroll back down to save" dance.
-      Mirrors the pattern used in WebSearchSettings' provider drawer.
-    -->
     <template v-if="formData.source === 'remote'" #footer-left>
       <t-button variant="outline" @click="checkRemoteAPI" :loading="checking"
-        :disabled="!formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')">
+        :disabled="saving || !formData.modelName || (!formData.baseUrl && formData.provider !== 'weknoracloud') || (formData.provider === 'weknoracloud' && wkcCredentialState !== 'configured')">
         <template #icon>
           <t-icon v-if="!checking && remoteChecked && remoteAvailable" name="check-circle-filled"
             class="status-icon available" />
@@ -21,9 +17,8 @@
         </template>
         {{ checking ? $t('model.editor.testing') : $t('model.editor.testConnection') }}
       </t-button>
-      <span v-if="remoteChecked" :class="['footer-test-message', remoteAvailable ? 'success' : 'error']"
-        :title="remoteMessage">
-        {{ remoteMessage }}
+      <span v-if="remoteChecked" :class="['connection-status', remoteAvailable ? 'success' : 'error']">
+        {{ remoteAvailable ? $t('model.editor.connectionSuccess') : $t('model.editor.connectionFailed') }}
       </span>
     </template>
 
@@ -446,6 +441,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import { DEFAULT_MODEL_CONTEXT_WINDOW } from '@/utils/contextWindow'
+import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -602,7 +598,9 @@ const providerOptions = computed(() => {
 
 const dialogVisible = computed({
   get: () => props.visible,
-  set: (val) => emit('update:visible', val)
+  set: (val) => {
+    if (!saving.value) emit('update:visible', val)
+  }
 })
 /** 正在从 modelData 灌入表单，忽略厂商/来源控件的程序化 change 副作用 */
 const hydratingForm = ref(false)
@@ -658,12 +656,6 @@ const onThinkingManual = (field: 'enabled' | 'selectedLevels' | 'level') => {
   markManualField(field === 'enabled' ? 'thinkingEnabled' : field === 'level' ? 'thinkingLevel' : 'selectedLevels')
 }
 
-// 输入模态自由编辑（2026-09-13 裁定 #2/#3）：模型列表/目录未提供模态
-// 时不限制用户勾选；LLM 默认勾选文本（所有模型的基础能力）。supportsVision
-// 保持与模态数组同步（payload 的 vllm 扁平字段与列表页图标消费它）。
-watch(() => formData.value.inputModalities, (mods) => {
-  formData.value.supportsVision = !!mods?.includes('image')
-})
 
 const dimensionOverrideDisabled = computed(() =>
   activeModelType.value === 'embedding'
@@ -1033,6 +1025,31 @@ const checking = ref(false)
 const remoteChecked = ref(false)
 const remoteAvailable = ref(false)
 const remoteMessage = ref('')
+const remoteStale = ref(false)
+let connectionRevision = 0
+let applyingDetectedDimension = false
+
+// Invalidate pending responses too, even when the user changes a field back.
+const invalidateConnectionTest = (showStale = true) => {
+  connectionRevision++
+  remoteStale.value = showStale && (remoteStale.value || checking.value || remoteChecked.value)
+  checking.value = false
+  remoteChecked.value = false
+  remoteAvailable.value = false
+  remoteMessage.value = ''
+  dimensionChecked.value = false
+  dimensionSuccess.value = false
+  dimensionMessage.value = ''
+}
+
+const applyDetectedDimension = (dimension: number) => {
+  applyingDetectedDimension = true
+  try {
+    formData.value.dimension = dimension
+  } finally {
+    applyingDetectedDimension = false
+  }
+}
 const dimensionChecked = ref(false)
 const dimensionSuccess = ref(false)
 const dimensionMessage = ref('')
@@ -1287,6 +1304,13 @@ const isOllamaProvider = computed(() => formData.value.provider === 'ollama')
 
 // source 派生自 provider（含灌入期——存量 local 记录若 provider 不一致会被
 // 纠正为派生值，payload 出口再兜底一次）。
+// 输入模态自由编辑（2026-09-13 裁定 #2/#3）：模型列表/目录未提供模态
+// 时不限制用户勾选；LLM 默认勾选文本（所有模型的基础能力）。supportsVision
+// 保持与模态数组同步（payload 的 vllm 扁平字段与列表页图标消费它）。
+watch(() => formData.value.inputModalities, (mods) => {
+  formData.value.supportsVision = !!mods?.includes('image')
+})
+
 watch(() => formData.value.provider, (p) => {
   formData.value.source = p === 'ollama' ? 'local' : 'remote'
 })
@@ -1410,7 +1434,30 @@ watch(showThinkingSection, (supported) => {
   }
 })
 
-// 监听来源变化，重置校验状态（已合并到下面的 watch）
+// 连接字段编辑即失效旧结果（上游 fbad5b37 语义）：displayName 等展示字段
+// 不失效；检测回填维度（applyingDetectedDimension）期间不失效，防自触发。
+watch(
+  () => [
+    activeModelType.value, props.modelData?.id, formData.value.source,
+    formData.value.provider, formData.value.modelName, formData.value.baseUrl,
+    formData.value.apiKey, formData.value.appSecret, formData.value.customHeaders,
+    formData.value.dimension, formData.value.supportsDimensionOverride,
+    formData.value.lkeapRegion,
+    // (main's list also had formData.thinkingControl — that field exists only
+    // in main's ModelFormData; our thinking config rides
+    // thinkingEnabled/thinkingLevel/selectedLevels below.)
+  ],
+  () => {
+    if (!applyingDetectedDimension) invalidateConnectionTest(props.visible && !hydratingForm.value)
+  },
+  { deep: true, flush: 'sync' },
+)
+
+watch(() => props.visible, () => {
+  invalidateConnectionTest(false)
+}, { flush: 'sync' })
+
+
 
 // 生成唯一ID
 const generateId = () => {
@@ -1512,10 +1559,12 @@ const checkModelStatus = async () => {
 
 // 检查 Ollama 本地 Embedding 模型维度
 const checkOllamaDimension = async () => {
+  if (checking.value || saving.value) return
   if (!formData.value.modelName || formData.value.source !== 'local' || activeModelType.value !== 'embedding') {
     return
   }
 
+  const revision = ++connectionRevision
   checking.value = true
   dimensionChecked.value = false
   dimensionMessage.value = ''
@@ -1528,11 +1577,12 @@ const checkOllamaDimension = async () => {
       supportsDimensionOverride: formData.value.supportsDimensionOverride ?? false,
     })
 
+    if (revision !== connectionRevision) return
     dimensionChecked.value = true
     dimensionSuccess.value = result.available || false
 
     if (result.available && result.dimension) {
-      formData.value.dimension = result.dimension
+      applyDetectedDimension(result.dimension)
       dimensionMessage.value = t('model.editor.dimensionDetected', { value: result.dimension })
       MessagePlugin.success(dimensionMessage.value)
     } else {
@@ -1543,24 +1593,28 @@ const checkOllamaDimension = async () => {
       MessagePlugin.warning(dimensionMessage.value)
     }
   } catch (error: any) {
+    if (revision !== connectionRevision) return
     console.error('Ollama dimension check failed:', error)
     dimensionChecked.value = true
     dimensionSuccess.value = false
     dimensionMessage.value = t('model.editor.dimensionFailed')
     MessagePlugin.error(dimensionMessage.value)
   } finally {
-    checking.value = false
+    if (revision === connectionRevision) checking.value = false
   }
 }
 
 // 检查 Remote API 连接（根据模型类型调用不同的接口）
 const checkRemoteAPI = async () => {
+  if (checking.value || saving.value) return
   if (!formData.value.modelName || (!formData.value.baseUrl && formData.value.provider !== 'weknoracloud')) {
     MessagePlugin.warning(t('model.editor.fillModelAndUrl'))
     return
   }
 
+  const revision = ++connectionRevision
   checking.value = true
+  remoteStale.value = false
   remoteChecked.value = false
   remoteMessage.value = ''
 
@@ -1622,10 +1676,8 @@ const checkRemoteAPI = async () => {
           ...headerPayload,
         })
         // 如果测试成功且返回了维度，自动填充
-        if (result.available && result.dimension) {
-          formData.value.dimension = result.dimension
-          MessagePlugin.info(t('model.editor.remoteDimensionDetected', { value: result.dimension }))
-        }
+        if (revision !== connectionRevision) return
+        if (result.available && result.dimension) applyDetectedDimension(result.dimension)
         break
 
       case 'rerank': {
@@ -1685,37 +1737,27 @@ const checkRemoteAPI = async () => {
         return
     }
 
+    if (revision !== connectionRevision) return
     remoteChecked.value = true
     remoteAvailable.value = result.available || false
-    // 之前这里把 backend 的错误 message 只丢到 console.debug，用户只能
-    // 看到通用的 "连接失败" toast，根本看不出是 401 / 404 / 模型不存在
-    // 还是别的什么。改成：成功时用 i18n 通用提示；失败时直接展示后端
-    // 给到的具体原因（已经在后端 classifyConnectionError 中包了一层
-    // 易读的中文 hint + 原始 SDK 报错），方便排查。
-    if (result.available) {
-      remoteMessage.value = t('model.editor.connectionSuccess')
-      MessagePlugin.success(remoteMessage.value)
-    } else {
-      remoteMessage.value = result.message || t('model.editor.connectionFailed')
-      console.debug('Backend message:', result.message)
-      MessagePlugin.error(remoteMessage.value)
-    }
+    remoteMessage.value = result.available
+      ? t('model.editor.connectionSuccess')
+      : result.message || t('model.editor.connectionFailed')
   } catch (error: any) {
-    console.error('Remote API check failed:', error)
+    if (revision !== connectionRevision) return
     remoteChecked.value = true
     remoteAvailable.value = false
-    // 后端 4xx/5xx（如 SSRF 校验失败）会走到这里。axios 拦截器把后端
-    // { error: { message: "..." } } 提到了 error.message，里面已经包含
-    // 易读 hint + 原因，直接展示出来，比通用 "请检查配置" 有用得多。
     remoteMessage.value = error?.message || t('model.editor.connectionConfigError')
-    MessagePlugin.error(remoteMessage.value)
   } finally {
-    checking.value = false
+    if (revision === connectionRevision) checking.value = false
   }
 }
 
 // 确认保存
 const handleConfirm = async () => {
+  if (saving.value) return
+  saving.value = true
+  if (checking.value) invalidateConnectionTest()
   try {
     // 手动校验必填字段
     if (!formData.value.modelName || !formData.value.modelName.trim()) {
@@ -1781,8 +1823,6 @@ const handleConfirm = async () => {
     // Credential removal in edit mode is handled inline by the
     // CredentialResource card (it confirms + DELETEs to /credentials), so
     // the main save flow no longer needs to confirm or handle clear flags.
-
-    saving.value = true
 
     // 如果是新增且没有 id，生成一个
     if (!formData.value.id) {
@@ -1899,6 +1939,7 @@ const startDownload = async (modelName: string) => {
 
 // 组件卸载时清理定时器
 onUnmounted(() => {
+  invalidateConnectionTest(false)
   if (downloadInterval) {
     clearInterval(downloadInterval)
   }
@@ -1938,6 +1979,7 @@ watch(() => formData.value.modelName, () => {
 
 // 取消（点击底部"取消"按钮触发；点遮罩/ESC 不触发，从而保留草稿）
 const handleCancel = () => {
+  if (saving.value) return
   resetForm()
   lastOpenedModelId.value = null
   dialogVisible.value = false
@@ -2189,24 +2231,43 @@ defineExpose({ resetAfterSave })
   }
 }
 
-// Connection-test message rendered next to the test button in the drawer
-// footer. Truncates with ellipsis so a long backend error doesn't push
-// Save/Cancel off-screen — the full text is in the title attribute.
-.footer-test-message {
+.connection-status {
   font-size: 12px;
-  line-height: 1.4;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  &.success { color: var(--td-brand-color-active); }
+  &.error { color: var(--td-error-color); }
+}
 
-  &.success {
-    color: var(--td-brand-color-active);
+.connection-hint {
+  margin: 0 0 8px;
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.connection-result {
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-error-color-3);
+  border-radius: var(--td-radius-default);
+  background: var(--td-error-color-1);
+  color: var(--td-error-color);
+  font-size: 12px;
+  text-align: left;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
-  &.error {
-    color: var(--td-error-color);
+  &__details {
+    max-height: min(160px, 20vh);
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+    user-select: text;
   }
 }
 

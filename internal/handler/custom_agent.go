@@ -64,10 +64,14 @@ type CreateAgentRequest struct {
 
 // UpdateAgentRequest defines the request body for updating an agent
 type UpdateAgentRequest struct {
-	Name        string                  `json:"name"`
-	Description string                  `json:"description"`
-	Avatar      string                  `json:"avatar"`
-	Config      types.CustomAgentConfig `json:"config"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Avatar travels as a pointer so an omitted field can be told apart from
+	// an explicit clear: nil keeps the stored avatar, a pointer to "" wipes
+	// it. As a plain string the two cases were indistinguishable, so a caller
+	// that PUT only a config silently zeroed the avatar and still got a 200.
+	Avatar *string                 `json:"avatar"`
+	Config types.CustomAgentConfig `json:"config"`
 }
 
 // CreateAgent godoc
@@ -111,6 +115,13 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 		Config:      req.Config,
 	}
 	agent.EnsureDefaults()
+	// The DB column (varchar(64)) has no application-level guard, so an
+	// oversized avatar used to reach postgres and come back as a raw driver
+	// 500. Reject it here with a 400 that names the limit.
+	if err := agent.ValidateAvatar(); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
@@ -127,7 +138,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 			c.Error(errors.NewBadRequestError(err.Error()))
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError
+		// above, so whatever lands here is a raw repository/driver error.
+		// Its text (SQLSTATE, column types) must not reach the client;
+		// the full detail is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to create agent"))
 		return
 	}
 
@@ -176,7 +191,11 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 			c.Error(appErr)
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError above, so
+		// whatever lands here is a raw repository/driver error. Its text
+		// (SQLSTATE, column names) must not reach the client; the full detail
+		// is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to load agent"))
 		return
 	}
 
@@ -204,7 +223,11 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 	agents, err := h.service.ListAgents(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError above, so
+		// whatever lands here is a raw repository/driver error. Its text
+		// (SQLSTATE, column names) must not reach the client; the full detail
+		// is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to list agents"))
 		return
 	}
 
@@ -350,12 +373,24 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		return
 	}
 
-	// Build agent object
+	// Only a sent avatar is validated: nil means the caller never touched the
+	// field, so there is no value to bound. Checking the length here is what
+	// turns an oversized avatar into a 400 that names the limit, instead of
+	// the 500 that used to carry the database's own varchar(64) complaint.
+	if req.Avatar != nil {
+		if err := (&types.CustomAgent{Avatar: *req.Avatar}).ValidateAvatar(); err != nil {
+			logger.Error(ctx, "Invalid avatar", err)
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+	}
+
+	// Build agent object. Avatar is deliberately absent here — it reaches the
+	// service as a separate pointer, so that "not sent" survives the trip.
 	agent := &types.CustomAgent{
 		ID:          id,
 		Name:        req.Name,
 		Description: req.Description,
-		Avatar:      req.Avatar,
 		Config:      req.Config,
 	}
 	agent.EnsureDefaults()
@@ -368,7 +403,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
 	// Update the agent
-	updatedAgent, err := h.service.UpdateAgent(ctx, agent)
+	updatedAgent, err := h.service.UpdateAgent(ctx, agent, req.Avatar)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"agent_id": id,
@@ -381,7 +416,11 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		case service.ErrAgentNameRequired:
 			c.Error(errors.NewBadRequestError(err.Error()))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to update agent"))
 		}
 		return
 	}
@@ -448,7 +487,11 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 		case service.ErrCannotDeleteBuiltin:
 			c.Error(errors.NewForbiddenError("Cannot delete built-in agent"))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to delete agent"))
 		}
 		return
 	}
@@ -496,7 +539,11 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 		case service.ErrAgentNotFound:
 			c.Error(errors.NewNotFoundError("Agent not found"))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to copy agent"))
 		}
 		return
 	}
@@ -515,7 +562,11 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 		case service.ErrAgentNotFound:
 			c.Error(errors.NewNotFoundError("Agent not found"))
 		default:
-			c.Error(errors.NewInternalServerError(err.Error()))
+			// Reached only after the typed sentinels and *errors.AppError above, so
+			// whatever lands here is a raw repository/driver error. Its text
+			// (SQLSTATE, column names) must not reach the client; the full detail
+			// is already logged above.
+			_ = c.Error(errors.NewInternalServerError("Failed to copy agent"))
 		}
 		return
 	}
@@ -654,7 +705,11 @@ func (h *CustomAgentHandler) GetSuggestedQuestions(c *gin.Context) {
 			c.Error(appErr)
 			return
 		}
-		c.Error(errors.NewInternalServerError(err.Error()))
+		// Reached only after the typed sentinels and *errors.AppError above, so
+		// whatever lands here is a raw repository/driver error. Its text
+		// (SQLSTATE, column names) must not reach the client; the full detail
+		// is already logged above.
+		_ = c.Error(errors.NewInternalServerError("Failed to build suggested questions"))
 		return
 	}
 

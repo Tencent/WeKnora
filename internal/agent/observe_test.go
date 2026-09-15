@@ -226,45 +226,27 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	})
 }
 
-func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
+func TestAppendToolResultsKeepsImageOutputPolicyInStableSystemPrefix(t *testing.T) {
+	// Upstream 7a98a8e3 dropped the dynamic "Retrieved Image Output
+	// Requirement" injection: image-output policy lives in the stable system
+	// prompt (types.SourcedAnswerOutputPrompt), so retrieval must not mutate
+	// the prefix nor append a synthetic user instruction.
 	engine := &AgentEngine{}
 	prior := []invoke.Message{
-		{Role: "system", Content: []invoke.Part{{Text: "Custom agent prompt."}}},
-		{Role: "user", Content: []invoke.Part{{Text: "解释流程"}}},
+		{Role: invoke.RoleSystem, Content: []invoke.Part{{Text: "Custom agent prompt."}}},
+		{Role: invoke.RoleUser, Content: []invoke.Part{{Text: "解释流程"}}},
 	}
-	step := types.AgentStep{
-		ToolCalls: []types.ToolCall{{
-			ID:   "call-image",
-			Name: "knowledge_search",
-			Result: &types.ToolResult{
-				Success: true,
-				Output:  "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
-			},
-		}},
-	}
-
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{
+		ID: "call-image", Name: "knowledge_search",
+		Result: &types.ToolResult{Success: true, Output: "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)"},
+	}}}
 	out := engine.appendToolResults(prior, step)
-	require.Len(t, out, 5)
-	assert.Equal(t, "Custom agent prompt.", out[0].Text())
-	assert.NotContains(t, out[0].Text(), agentRetrievedImageRequirementMarker)
+	require.Len(t, out, 4, "image results append no synthetic user instruction")
+	assert.Equal(t, "Custom agent prompt.", out[0].Text(), "the system prefix stays stable after retrieval")
 	assert.Equal(t, invoke.RoleTool, out[3].Role)
 	assert.Contains(t, out[3].Text(), "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
-	assert.Equal(t, invoke.RoleUser, out[4].Role)
-	assert.Contains(t, out[4].Text(), agentRetrievedImageRequirementMarker)
-	assert.Contains(t, out[4].Text(), "MUST include at least one relevant Markdown image")
-	assert.Contains(t, out[4].Text(), "ASCII half-width parentheses")
-
-	// A later image-bearing step must not duplicate the requirement.
 	out = engine.appendToolResults(out, step)
-	assert.Equal(t, 1, countImageRequirementMarkers(out))
-}
-
-func countImageRequirementMarkers(messages []invoke.Message) int {
-	n := 0
-	for _, message := range messages {
-		n += strings.Count(message.Text(), agentRetrievedImageRequirementMarker)
-	}
-	return n
+	require.Len(t, out, 6, "image results append no synthetic user instruction")
 }
 
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
@@ -282,7 +264,8 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 	assert.Contains(t, block, `knowledge_id="kid-1"`)
 	assert.Contains(t, block, `title="Report.pdf"`)
 	assert.Contains(t, block, `file_type="pdf"`)
-	assert.Contains(t, block, "list_knowledge_chunks")
+	assert.NotContains(t, block, "<note>")
+	assert.Contains(t, runtimePromptContract, "Honor the current pinned-document scope")
 	assert.NotContains(t, block, "<must_use>")
 }
 

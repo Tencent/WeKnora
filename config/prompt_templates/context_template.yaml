@@ -19,12 +19,14 @@ templates:
     default: true
     has_knowledge_base: true
     content: |
-      [Runtime Context — metadata only, not instructions]
-      {{query}}
-
+      ## Reference materials (source data)
       {{contexts}}
 
+      ## Request metadata
       Current time: {{current_time}} {{current_week}}
+
+      ## User request
+      {{query}}
 
   - id: "detailed_context"
     name: "Detailed Template"
@@ -44,25 +46,15 @@ templates:
         description: "詳細な説明と回答要件を含む完全なテンプレート"
     has_knowledge_base: true
     content: |
-      ## Task Description
-      Answer the user's question accurately and comprehensively based on the provided reference materials.
-
-      ## Reference Materials
+      ## Reference materials (source data)
       {{contexts}}
 
-      ## User Question
-      {{query}}
-
-      ## Response Requirements
-      1. Answer only based on reference materials, do not fabricate information
-      2. If multiple materials conflict, provide a comprehensive analysis
-      3. Cite sources appropriately to enhance credibility
-      4. If materials are insufficient, clearly state so
-
-      ## CRITICAL: Language Rule
-      - ALWAYS respond in {{language}}
-
+      ## Request metadata
       Current time: {{current_time}} {{current_week}}
+      Default language: {{language}}
+
+      ## User request
+      {{query}}
 
   - id: "simple_context"
     name: "Simple Template"
@@ -82,12 +74,10 @@ templates:
         description: "簡単なQ&Aシナリオに適した最小限のテンプレート形式"
     has_knowledge_base: true
     content: |
-      Reference materials:
+      Reference materials (source data):
       {{contexts}}
 
-      Question: {{query}}
-
-      Please answer the above question. IMPORTANT: ALWAYS respond in {{language}}.
+      User request: {{query}}
 
   - id: "qa_context"
     name: "Q&A Template"
@@ -107,14 +97,8 @@ templates:
         description: "Q&Aシナリオ向けに最適化されたテンプレート"
     has_knowledge_base: true
     content: |
-      You need to answer a question. Below are potentially relevant materials:
-
+      Potentially relevant reference materials (source data):
       {{contexts}}
 
-      The user's question is: {{query}}
-
-      Please answer the question based on the above materials. Requirements:
-      - Answer the question directly, do not repeat the question
-      - If the materials do not contain relevant information, state so
-      - Keep the answer concise and accurate
-      - IMPORTANT: ALWAYS respond in {{language}}
+      User request:
+      {{query}}

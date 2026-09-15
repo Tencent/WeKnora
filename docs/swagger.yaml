@@ -2077,6 +2077,10 @@ definitions:
       url:
         description: 'Optional: required for SSE/HTTP Streamable'
         type: string
+      usage_instructions:
+        description: UsageInstructions is maintained locally and is not overwritten
+          by directory refresh.
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.MCPStdioConfig:
     properties:
@@ -3269,9 +3273,9 @@ definitions:
         type: array
       allow_public_inbound:
         description: |-
-          AllowPublicInbound exposes the sandbox's public URL without a
-          credential. false requires every inbound request to carry the
-          per-sandbox traffic access token.
+          AllowPublicInbound is accepted on the wire for old payloads and then
+          cleared. Inbound is always credential-required; a true value has no
+          runtime effect.
         type: boolean
       cube_rules:
         description: |-
@@ -3978,6 +3982,13 @@ definitions:
           leaves those sandboxes on the previous image; only sessions that start
           afterwards boot the new snapshot.
         type: string
+      terminal_idle_disconnect_sec:
+        description: |-
+          TerminalIdleDisconnectSec is how long an interactive terminal may go
+          without keystrokes or PTY output before WeKnora closes the connection
+          so the sandbox can pause on its provider TTL. 0 uses the built-in
+          default (15 minutes). Not an identity field.
+        type: integer
       volume_mount:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.VolumeMountConfig'
@@ -4038,12 +4049,29 @@ definitions:
         allOf:
         - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolResult'
         description: Execution result (contains Output)
+      target:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCallTarget'
+        description: Target identifies the actual proxy target; Name/Args retain the
+          model call for replay.
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolCallMetadata:
     additionalProperties:
       items:
         type: integer
       type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ToolCallTarget:
+    properties:
+      args:
+        additionalProperties: true
+        type: object
+      name:
+        type: string
+      service_name:
+        type: string
+      tool_name:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolResult:
     properties:
@@ -4386,6 +4414,7 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WebSearchProviderType:
     enum:
+    - brave
     - bing
     - google
     - duckduckgo
@@ -4400,6 +4429,7 @@ definitions:
     - bocha
     type: string
     x-enum-varnames:
+    - WebSearchProviderTypeBrave
     - WebSearchProviderTypeBing
     - WebSearchProviderTypeGoogle
     - WebSearchProviderTypeDuckDuckGo
@@ -9107,6 +9137,10 @@ paths:
         in: query
         name: sort_order
         type: string
+      - description: 启用状态筛选；不传时返回全部
+        in: query
+        name: is_enabled
+        type: boolean
       produces:
       - application/json
       responses:
@@ -11925,6 +11959,92 @@ paths:
       summary: 移除 MCP 服务的单个凭据字段
       tags:
       - MCP服务
+  /mcp-services/{id}/metadata:
+    get:
+      consumes:
+      - application/json
+      description: 只读数据库，不连接上游。未同步时 data 为 null；连接配置变更后 stale 为 true。OAuth 目录按当前授权主体隔离。
+      parameters:
+      - description: MCP服务ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 目录快照
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: OAuth 目录缺少授权主体
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 服务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 读取已保存的 MCP 工具目录
+      tags:
+      - MCP服务
+  /mcp-services/{id}/metadata/refresh:
+    post:
+      consumes:
+      - application/json
+      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
+      parameters:
+      - description: MCP服务ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 同步后的目录快照
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 目录不完整或校验失败
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "401":
+          description: OAuth 目录缺少授权主体
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 静态认证目录需要管理员刷新
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 服务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 刷新期间连接配置已变更
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 元数据存储不可用
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 同步 MCP 工具目录
+      tags:
+      - MCP服务
   /mcp-services/{id}/oauth/authorize-url:
     post:
       consumes:
@@ -12068,7 +12188,8 @@ paths:
     put:
       consumes:
       - application/json
-      description: 为指定 MCP 服务下的某个工具设置/更新审批要求
+      description: 为指定 MCP 服务下的某个工具更新启用状态和/或人工审批要求。至少提供 require_approval 或 enabled
+        之一；省略的字段保持原值。
       parameters:
       - description: MCP 服务 ID
         in: path
@@ -12080,7 +12201,7 @@ paths:
         name: tool_name
         required: true
         type: string
-      - description: '{require_approval: bool}'
+      - description: '{require_approval?: bool, enabled?: bool}'
         in: body
         name: request
         required: true
@@ -12106,7 +12227,7 @@ paths:
       security:
       - Bearer: []
       - ApiKeyAuth: []
-      summary: 设置 MCP 工具人工审批策略
+      summary: 设置 MCP 工具策略
       tags:
       - MCP服务
   /mcp-services/{id}/tools:

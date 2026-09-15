@@ -120,7 +120,12 @@ func (a *AnthropicAdapter) TranslateStreamEvent(
 		if ev.Message != nil {
 			anthropicState(state).merge(&ev.Message.Usage)
 		}
+	case "content_block_start", "content_block_stop":
+		// tool_use blocks open/assemble/close across these frames
+		// (anthropic_tools.go); text-only streams ignore them.
+		anthropicToolState(state).consume(ev)
 	case "content_block_delta":
+		anthropicToolState(state).consume(ev)
 		if ev.Delta != nil && ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
 			return []*invoke.StreamEvent{{
 				Kind:  invoke.StreamKindAnswer,
@@ -149,13 +154,19 @@ func (a *AnthropicAdapter) TranslateStreamEvent(
 	return nil, nil
 }
 
-// finalEvent closes the stream: answer Done with the merged usage and the
-// captured stop_reason (v1 Done-chunk shape).
+// finalEvent closes the stream: answer Done with the merged usage, the
+// assembled tool calls (Done.ToolCalls is what the entry mapping replays) and
+// the stop reason folded through the tool stream ("max_tokens" → "length",
+// unclosed blocks → incomplete; v1 Done-chunk shape).
 func (a *AnthropicAdapter) finalEvent(state *invoke.StreamBridgeState) *invoke.StreamEvent {
+	tools := anthropicToolState(state)
 	return &invoke.StreamEvent{
 		Kind:  invoke.StreamKindAnswer,
 		Usage: anthropicState(state).usage(),
-		Done:  &invoke.FinishInfo{FinishReason: anthropicFinishReason(state)},
+		Done: &invoke.FinishInfo{
+			FinishReason: tools.finishReason(anthropicFinishReason(state)),
+			ToolCalls:    tools.calls(),
+		},
 	}
 }
 
@@ -179,6 +190,8 @@ func aggregateAnthropicSSE(body []byte) (*invoke.ChatResponse, error) {
 		if ev.Error != nil && ev.Error.Message != "" {
 			return nil, fmt.Errorf("API stream error: %s", ev.Error.Message)
 		}
+		tools := anthropicToolState(state)
+		tools.consume(ev)
 		if ev.Message != nil {
 			anthropicState(state).merge(&ev.Message.Usage)
 		}
@@ -196,9 +209,11 @@ func aggregateAnthropicSSE(body []byte) (*invoke.ChatResponse, error) {
 		}
 	}
 	acc := anthropicState(state)
+	tools := anthropicToolState(state)
 	return &invoke.ChatResponse{
 		Content:      anthropicText(state),
-		FinishReason: anthropicFinishReason(state),
+		ToolCalls:    tools.calls(),
+		FinishReason: tools.finishReason(anthropicFinishReason(state)),
 		Usage:        *acc.usage(),
 	}, nil
 }

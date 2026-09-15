@@ -125,7 +125,8 @@ curl "$BASE/api/v1/agents/agent-1/suggested-questions?limit=6" -H "X-API-Key: $A
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `name` | string | 是 | 名称 |
-| `description` | string | 否 | 描述 |
+| `description` | string | 否 | 旧版描述，兼容保留；管理界面统一编辑 `usage_instructions` |
+| `usage_instructions` | string | 配置完成时必填 | 服务用途、适用场景和关键约束；第一步仅保存连接时可省略 |
 | `enabled` | bool | 否 | 启用 |
 | `transport_type` | string | 是 | `sse` / `http-streamable` / `stdio` |
 | `url` | *string | 否 | 服务 URL（SSE/HTTP） |
@@ -162,12 +163,24 @@ curl $BASE/api/v1/mcp-services/mcp-1 -H "Authorization: Bearer $TOKEN"
 
 用途：部分更新（map 语义；`auth_config` 中不可携带 api_key/token）。权限：Admin+。字段同创建（均可选）。
 
+提交 `usage_instructions` 时必须为去除首尾空白后非空的字符串，最长 16000 字符。仅修改连接或启用状态时可省略该字段，原值保持不变。
+
 响应：200 `{"success":true,"data":{MCPServiceResponse}}`
 
 ```bash
 curl -X PUT $BASE/api/v1/mcp-services/mcp-1 -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"enabled":false}'
 ```
+
+### POST /api/v1/mcp-services/:id/usage-instructions/generate
+
+用途：根据已同步、未过期的 MCP 工具目录生成精简使用说明。权限：Admin+；API key 需要 `manage_mcp_services` 或 full。
+
+请求：`{"language":"zh-CN"}`。支持 `zh-CN`、`en-US`、`ja-JP`、`ko-KR`、`ru-RU`，默认中文。
+
+优先使用空间默认的可用对话模型，否则使用首个可用对话模型。输入包括服务名称、服务端说明和已启用工具的名称、描述；OAuth 目录沿用当前用户的授权范围。不会连接 MCP、调用工具或自动保存生成结果。
+
+响应：200 `{"success":true,"data":{"usage_instructions":"按模块和时间范围查询远程日志；已有查询 ID 时读取对应日志。"}}`。生成目标为 2–3 句简短说明，最多 500 字符；用户可编辑后通过 PUT 保存。目录未同步、过期、无启用工具或无可用对话模型时返回 400。
 
 ### DELETE /api/v1/mcp-services/:id
 

@@ -94,7 +94,7 @@ func TestMCPCatalogPreservesAndValidatesRawSchemaOverHTTP(t *testing.T) {
 	}
 	ctx, registry := catalogTestContext(), NewToolRegistry()
 	gate := &modifiedArgsGate{}
-	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil)
+	_, err := RegisterMCPTools(ctx, registry, []*types.MCPService{service}, manager, gate, 0, nil, nil)
 	require.NoError(t, err)
 	page := discoverPage(ctx, t, registry, map[string]any{"mode": "list_tools", "server_id": "test"})
 	require.Len(t, page.Tools, 2, "read every protocol page")
@@ -143,7 +143,7 @@ func TestMCPCatalogPreservesAndValidatesRawSchemaOverHTTP(t *testing.T) {
 	newSchema, _ := json.Marshal(changed)
 	server.AddTool(sdkmcp.Tool{Name: "contact", RawInputSchema: newSchema}, handler)
 	page = discoverPage(ctx, t, registry, map[string]any{"mode": "list_tools", "server_id": "test", "refresh": true})
-	require.NotEqual(t, described.ToolRef, page.Tools[0].ToolRef)
+	require.NotEqual(t, described.ToolRef, describeTool(ctx, t, registry, "test", page.Tools[0].Name).ToolRef)
 	require.False(t, invoke(described.ToolRef, `{"email":"x"}`).Success)
 	require.EqualValues(t, 1, calls.Load())
 }
@@ -179,7 +179,7 @@ func TestMCPCatalogPolicyQueriesAreBounded(t *testing.T) {
 	ctx, registry, catalog, _, _ := catalogFixture(t, 1000)
 	gate := &countingCatalogPolicy{catalogPolicy: catalogPolicy{disabled: map[string]bool{}}}
 	catalog.gate = gate
-	page := discoverPage(ctx, t, registry, map[string]any{"mode": "list_tools", "server_id": "server-1", "limit": 1})
+	discoverPage(ctx, t, registry, map[string]any{"mode": "list_tools", "server_id": "server-1", "limit": 1})
 	require.Equal(t, 1, gate.batches)
 	require.Zero(t, gate.checks)
 	result, err := registry.ExecuteTool(ctx, ToolDiscoverMCPTools, json.RawMessage(`{
@@ -190,9 +190,11 @@ func TestMCPCatalogPolicyQueriesAreBounded(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Success, result.Error)
 	require.Equal(t, 1, gate.checks)
+	var described mcpToolSummary
+	require.NoError(t, json.Unmarshal([]byte(result.Output), &described))
 	proxy, err := registry.GetTool(ToolCallMCPTool)
 	require.NoError(t, err)
-	raw, _ := json.Marshal(map[string]any{"tool_ref": page.Tools[0].ToolRef, "arguments": map[string]any{"count": 1}})
+	raw, _ := json.Marshal(map[string]any{"tool_ref": described.ToolRef, "arguments": map[string]any{"count": 1}})
 	_, _, err = proxy.(*MCPCallTool).resolve(ctx, raw)
 	require.NoError(t, err)
 	require.Equal(t, 2, gate.checks)
