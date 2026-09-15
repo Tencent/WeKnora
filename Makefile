@@ -105,6 +105,7 @@ run: build
 
 # Run tests
 test:
+	bash scripts/docker-entrypoint_test.sh
 	go test -v ./...
 
 # Clean build artifacts
@@ -348,5 +349,4 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
-
 
