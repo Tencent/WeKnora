@@ -191,3 +191,22 @@ func TestTerminalProvisionConfigID_UsesSharedAgentSandboxConfig(t *testing.T) {
 		"lookup-only connects must not resolve an agent config")
 	require.Equal(t, "shared-cfg", h.terminalProvisionConfigID(ctx, c, true))
 }
+
+func TestResolveAgent_ResolvesOwnAgentWhenSourceSelectorIsSelfTenant(t *testing.T) {
+	// Regression for #3161: a request that echoes the caller's own tenant as
+	// the agent source must resolve the own agent, not die as a missing share.
+	c, ctx := newResolveAgentTestContext(7)
+	localAgent := &types.CustomAgent{ID: "builtin-smart-reasoning", TenantID: 7, Name: "Local"}
+	h := &Handler{
+		// The share stub returns (nil, nil): with the old code the self
+		// selector never reached a local lookup; with the fix it must.
+		agentShareService:  &resolveAgentShareStub{},
+		customAgentService: &resolveOwnAgentStub{agent: localAgent},
+	}
+
+	agent, effectiveTenantID, sharedReadOnly := h.resolveAgent(ctx, c, "builtin-smart-reasoning", 7)
+
+	require.Equal(t, localAgent, agent)
+	require.Equal(t, uint64(0), effectiveTenantID)
+	require.False(t, sharedReadOnly)
+}

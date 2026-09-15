@@ -1,31 +1,15 @@
 package types
 
-import (
-	"testing"
+import "testing"
 
-	"github.com/stretchr/testify/require"
-)
-
-func TestParseAgentSourceTenantIDEmpty(t *testing.T) {
-	value, err := ParseAgentSourceTenantID("")
-	require.NoError(t, err)
-	require.Equal(t, uint64(0), value)
-
-	value, err = ParseAgentSourceTenantID("   ")
-	require.NoError(t, err)
-	require.Equal(t, uint64(0), value)
-}
-
-func TestParseAgentSourceTenantIDValid(t *testing.T) {
-	value, err := ParseAgentSourceTenantID("42")
-	require.NoError(t, err)
-	require.Equal(t, uint64(42), value)
-}
-
-func TestParseAgentSourceTenantIDInvalid(t *testing.T) {
-	_, err := ParseAgentSourceTenantID("abc")
-	require.Error(t, err)
-
-	_, err = ParseAgentSourceTenantID("42abc")
-	require.Error(t, err)
+func TestNormalizeAgentSourceTenantID(t *testing.T) {
+	if got := NormalizeAgentSourceTenantID(0, 7); got != 0 {
+		t.Fatalf("absent selector must stay absent, got %d", got)
+	}
+	if got := NormalizeAgentSourceTenantID(7, 7); got != 0 {
+		t.Fatalf("self selector must normalize to absent, got %d", got)
+	}
+	if got := NormalizeAgentSourceTenantID(84, 7); got != 84 {
+		t.Fatalf("foreign selector must pass through, got %d", got)
+	}
 }

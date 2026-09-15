@@ -565,6 +565,11 @@ func (h *Handler) resolveAgent(
 	var sharedAgentReadOnly bool
 	userIDVal, _ := c.Get(types.UserIDContextKey.String())
 	currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
+	// A self-referential selector ("the agent from my own workspace") needs no
+	// share: normalize it to the absent selector so the request resolves
+	// through the own-agent path instead of dying as a missing share (#3161).
+	// A rejected *foreign* selector still must not fall back to a local agent.
+	sourceTenantID = types.NormalizeAgentSourceTenantID(sourceTenantID, currentTenantID)
 	if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
 		callerTenantRole := types.TenantRoleFromContext(ctx)
 		var agent *types.CustomAgent
