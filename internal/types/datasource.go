@@ -39,6 +39,7 @@ const (
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
 	ConnectorTypeSeafile     = "seafile"
+	ConnectorTypeLocalFolder = "local_folder"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
@@ -228,6 +229,13 @@ type DataSourceConfig struct {
 
 	// Connector-specific configuration
 	Settings map[string]interface{} `json:"settings"`
+
+	// ManualTrigger reports that the current sync run was requested by a user
+	// rather than the scheduler. The service populates it before each fetch from
+	// the sync payload; it is never persisted. The local folder connector uses
+	// it to skip its quiet period, so a file saved just before "sync now" is not
+	// deferred to the next run.
+	ManualTrigger bool `json:"-"`
 }
 
 // HasCredentials reports whether the credentials map carries any value at
@@ -266,6 +274,14 @@ func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
 	switch connectorType {
 	case ConnectorTypeRSS:
 		delete(d.Credentials, "feed_urls")
+		if len(d.Credentials) == 0 {
+			d.Credentials = nil
+		}
+	case ConnectorTypeLocalFolder:
+		// The folder and patterns are non-secret and live in settings.
+		for _, key := range []string{"root_path", "include", "exclude"} {
+			delete(d.Credentials, key)
+		}
 		if len(d.Credentials) == 0 {
 			d.Credentials = nil
 		}
@@ -372,6 +388,12 @@ type FetchedItem struct {
 	// nil and empty are equivalent here; the omitempty tag is for API/debug
 	// exposure only and must not be relied on to distinguish "unset" from "empty".
 	SubtreeKeep []string `json:"subtree_keep,omitempty"`
+
+	// UpdateInPlace, when true, updates an existing file knowledge with this
+	// item's content via KnowledgeService.ReplaceKnowledgeFile, keeping its
+	// knowledge ID, instead of the default delete-and-recreate. Unchanged
+	// content is skipped without re-parsing. Connectors opt in explicitly.
+	UpdateInPlace bool `json:"update_in_place,omitempty"`
 }
 
 // SubtreeChildID builds the external_id of a sub-item fanned out from a parent
