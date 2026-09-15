@@ -737,11 +737,72 @@ const maxSessionTitleRunes = 100
 // happened so the caller can log it.
 func sanitizeGeneratedTitle(raw string) (string, bool) {
 	title := strings.TrimSpace(strings.TrimPrefix(raw, "<think>\n\n</think>"))
+	title = strings.TrimSpace(strings.Trim(title, "\"'“”‘’「」『』"))
 	runes := []rune(title)
 	if len(runes) <= maxSessionTitleRunes {
 		return title, false
 	}
 	return strings.TrimSpace(string(runes[:maxSessionTitleRunes])), true
+}
+
+// looksLikeLeakedAnswer reports whether a generated "title" reads like the
+// answer to the conversation's question instead of a title for it. Some
+// instruction-weak models answer the question instead of titling it, and
+// nothing else in the pipeline rejects that — the title is user-visible in
+// the sidebar, where a bare "42" or "Yes, they were both American." leaks
+// the reply before the conversation is even opened. The patterns are kept
+// conservative so legitimate titles never match.
+func looksLikeLeakedAnswer(title string) bool {
+	title = strings.TrimSpace(title)
+	title = strings.Trim(title, "\"'“”‘’「」『』")
+	if title == "" {
+		return false
+	}
+	// A bare equation ("6×7=42") is an answer, never a title.
+	if strings.ContainsRune(title, '=') {
+		return true
+	}
+	// Mostly a number, optionally with a short unit suffix ("42", "8848米",
+	// "3.14", "98%"): reject when everything after the leading digits is
+	// punctuation/whitespace plus at most two unit runes — a real topic title
+	// like "2026年规划" keeps a longer tail and stays legitimate.
+	if r := []rune(title)[0]; (r >= '0' && r <= '9') || r == '.' || r == '-' {
+		rest := strings.TrimLeft(title, "0123456789.,-· ")
+		runes := []rune(rest)
+		if len(runes) <= 2 {
+			return true
+		}
+	}
+	// A bare yes/no, or a short sentence that opens with one ("Yes.",
+	// "Yes, they were both American.", "是的").
+	lower := strings.ToLower(title)
+	for _, lead := range []string{"yes", "no", "是的", "不是", "对的", "错的"} {
+		if lower == lead || strings.HasPrefix(lower, lead+",") || strings.HasPrefix(lower, lead+".") ||
+			strings.HasPrefix(lower, lead+"，") || strings.HasPrefix(lower, lead+"。") ||
+			strings.HasPrefix(lower, lead+" ") || strings.HasPrefix(lower, lead+"! ") {
+			return true
+		}
+	}
+	return false
+}
+
+// fallbackSessionTitleFromQuestion derives a guaranteed-title-shaped fallback
+// from the question itself: first line, trimmed and rune-truncated. Used when
+// the model answered instead of titling, so the sidebar never shows a leaked
+// answer.
+func fallbackSessionTitleFromQuestion(question string) string {
+	if idx := strings.IndexAny(question, "\r\n"); idx >= 0 {
+		question = question[:idx]
+	}
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return ""
+	}
+	runes := []rune(question)
+	if len(runes) <= maxSessionTitleRunes {
+		return question
+	}
+	return strings.TrimSpace(string(runes[:maxSessionTitleRunes]))
 }
 
 // GenerateTitle generates a title for the current conversation content
@@ -847,6 +908,15 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 			"Generated session title exceeded %d runes and was truncated, session=%s, model=%s",
 			maxSessionTitleRunes, session.ID, modelID,
 		)
+	}
+	// The model answered the question instead of titling it: fall back to the
+	// question itself rather than leaking the reply into the sidebar (#3108).
+	if looksLikeLeakedAnswer(title) {
+		logger.Warnf(ctx,
+			"Generated session title looks like an answer, falling back to the question, session=%s, model=%s, title=%q",
+			session.ID, modelID, title,
+		)
+		title = fallbackSessionTitleFromQuestion(message.Content)
 	}
 	session.Title = title
 
