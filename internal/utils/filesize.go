@@ -39,6 +39,28 @@ func GetMaxFileSizeMB() int64 {
 	return envSizeMB("MAX_FILE_SIZE_MB", defaultMaxFileSizeMB)
 }
 
+// GetMaxFileURLSizeMB returns the maximum remote file size accepted by the
+// file-URL import path, in MB.
+//
+// MAX_FILE_URL_SIZE_MB is optional. When unset, the URL import path follows
+// MAX_FILE_SIZE_MB so raising the deploy-time upload cap also unblocks URL
+// imports (the path previously hard-coded 10MB, which operators could not
+// raise without a code change). Set MAX_FILE_URL_SIZE_MB explicitly to keep
+// URL downloads tighter than local uploads.
+func GetMaxFileURLSizeMB() int64 {
+	if sizeStr := os.Getenv("MAX_FILE_URL_SIZE_MB"); sizeStr != "" {
+		if size, err := strconv.ParseInt(sizeStr, 10, 64); err == nil && size > 0 {
+			return size
+		}
+	}
+	return GetMaxFileSizeMB()
+}
+
+// GetMaxFileURLSize returns the file-URL import cap in bytes.
+func GetMaxFileURLSize() int64 {
+	return GetMaxFileURLSizeMB() * 1024 * 1024
+}
+
 // GetMaxSkillBundleSize is the compressed zip / source-download cap for
 // skills. Knowledge uploads stay on GetMaxFileSize: packages such as
 // ppt-master exceed 50MB, but raising the document limit would also
