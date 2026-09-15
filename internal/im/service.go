@@ -2639,6 +2639,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		mergeIMAgentAnswerBuffers(&answerBuilder, &answerOuter, &agentLiveAnswer, data.FinalAnswer)
 		bufMu.Unlock()
 		closeComplete()
+		closeDone()
 		return nil
 	})
 
