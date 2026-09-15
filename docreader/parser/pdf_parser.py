@@ -104,6 +104,11 @@ LAYOUT_ORDERING = _env_bool("DOCREADER_PDF_LAYOUT_ORDERING", True)
 # search text layers), insert a space if the horizontal gap exceeds this
 # multiple of the line's median glyph width.
 WORD_GAP_WIDTH_RATIO = _env_float("DOCREADER_PDF_WORD_GAP_WIDTH_RATIO", 0.4)
+# …but never infer a word space from a gap narrower than this share of the
+# line's median glyph height: letter tracking stays below it (issue #3223
+# rendered "124" as "1 24" when narrow glyphs dragged the width median down),
+# while true word gaps in space-less text layers sit above it.
+MIN_WORD_GAP_HEIGHT_RATIO = _env_float("DOCREADER_PDF_MIN_WORD_GAP_HEIGHT_RATIO", 0.35)
 # Promote visually larger lines to markdown headings (font-size proxy = rect
 # height relative to the page's median line height).
 DETECT_HEADINGS = _env_bool("DOCREADER_PDF_DETECT_HEADINGS", True)
@@ -113,6 +118,12 @@ FILTER_HIDDEN_TEXT = _env_bool("DOCREADER_PDF_FILTER_HIDDEN_TEXT", True)
 # Narrow side strips (arXiv watermarks, page labels) narrower than this share of
 # page width are dropped when they look like vertical / single-glyph noise.
 MARGIN_COL_WIDTH_RATIO = _env_float("DOCREADER_PDF_MARGIN_COL_WIDTH_RATIO", 0.12)
+# A split whose narrower side spans less than this share of the page width is a
+# table cell column (not a reading column) when its short cell lines line up
+# with rows of the other side — such pages stay unsplit so line grouping emits
+# row-wise "name quantity" lines (issue #3223).
+TABLE_COLUMN_MAX_WIDTH_RATIO = _env_float("DOCREADER_PDF_TABLE_COLUMN_MAX_WIDTH_RATIO", 0.25)
+TABLE_ROW_ALIGN_FRACTION = _env_float("DOCREADER_PDF_TABLE_ROW_ALIGN_FRACTION", 0.6)
 # Minimum characters on a line before font-size heuristics may promote it to a
 # markdown heading (avoids ``### C`` from margin glyphs).
 MIN_HEADING_LINE_CHARS = _env_int("DOCREADER_PDF_MIN_HEADING_LINE_CHARS", 8)
@@ -712,6 +723,14 @@ def _split_columns(chars: list, scale: float, width: float, depth: int = 0) -> l
     right = [c for c in chars if (c["x0"] + c["x1"]) / 2 >= cut]
     if not left or not right:
         return [chars]
+    # Row-aligned narrow sides are table cell columns, not reading columns:
+    # keep the page unsplit so line grouping emits row-wise "name quantity"
+    # lines instead of deleting the quantity column as margin noise and
+    # losing the row correspondence (issue #3223).
+    if _is_table_cell_side(left, right, width, scale) or _is_table_cell_side(
+        right, left, width, scale
+    ):
+        return [chars]
     return _split_columns(left, scale, width, depth + 1) + _split_columns(
         right, scale, width, depth + 1
     )
@@ -721,6 +740,34 @@ def _column_x_span(chars: list) -> float:
     if not chars:
         return 0.0
     return max(c["x1"] for c in chars) - min(c["x0"] for c in chars)
+
+
+def _is_table_cell_side(side: list, other: list, width: float, scale: float) -> bool:
+    """True when ``side`` is a table cell column aligned with ``other``'s rows.
+
+    Geometry only: narrow, short cell-like lines, most of which line up with
+    lines of the other side of the cut. Reading-order columns of prose are
+    never this narrow; vertical watermark stacks (one glyph per line) are
+    noise, not row-aligned cells, and stay excluded. A table's quantity
+    column is typically as tall as the page — height is not a discriminator,
+    per-line glyph count is.
+    """
+    lines = _group_lines(side)
+    if len(lines) < 2:
+        return False
+    if _column_x_span(side) >= width * TABLE_COLUMN_MAX_WIDTH_RATIO:
+        return False
+    median_len = statistics.median(len(ln["text"]) for ln in lines)
+    if median_len <= 1 or median_len > 10:
+        return False
+    other_ycs = [ln["yc"] for ln in _group_lines(other)]
+    tol = 0.75 * scale
+    aligned = sum(
+        1
+        for ln in lines
+        if any(abs(ln["yc"] - yc) <= tol for yc in other_ycs)
+    )
+    return aligned / len(lines) >= TABLE_ROW_ALIGN_FRACTION
 
 
 def _column_single_line_fraction(lines: list) -> float:
@@ -801,7 +848,16 @@ def _join_line_glyphs(ln_sorted: list) -> str:
         return ""
     widths = [c["x1"] - c["x0"] for c in ln_sorted if c["x1"] > c["x0"]]
     med_w = statistics.median(widths) if widths else 1.0
-    gap_threshold = med_w * WORD_GAP_WIDTH_RATIO
+    heights = [c["y1"] - c["y0"] for c in ln_sorted if c["y1"] > c["y0"]]
+    med_h = statistics.median(heights) if heights else 0.0
+    # Narrow glyphs (i, l, 1, punctuation) drag the width median down until
+    # ordinary letter tracking counts as a word gap ("124" -> "1 24", issue
+    # #3223); the height term keeps tracked letters glued while real word
+    # gaps — always a sizable share of the font size — still split.
+    gap_threshold = max(
+        med_w * WORD_GAP_WIDTH_RATIO,
+        med_h * MIN_WORD_GAP_HEIGHT_RATIO,
+    )
 
     parts: list[str] = []
     for i, cur in enumerate(ln_sorted):
@@ -821,7 +877,13 @@ def _join_line_glyphs(ln_sorted: list) -> str:
 
 
 def _group_lines(chars: list) -> list:
-    """Group a column's glyphs into lines (top-to-bottom, glyphs sorted by x)."""
+    """Group a column's glyphs into lines (top-to-bottom, glyphs sorted by x).
+
+    Lines are decided by vertical interval overlap, not glyph-center
+    distance: ascender/descender boxes shift centers by a third of the font
+    size while sharing the x-height band, and the old center rule split
+    "Inventory sample" into "Inventor sam le" + "y p" (issue #3223).
+    """
     if not chars:
         return []
     heights = [c["y1"] - c["y0"] for c in chars if c["y1"] - c["y0"] > 0]
@@ -830,16 +892,29 @@ def _group_lines(chars: list) -> list:
     ordered = sorted(chars, key=lambda c: -(c["y0"] + c["y1"]) / 2)
     lines: list = []
     cur: list = []
-    ref = None
+    cur_top = cur_bottom = None
     for c in ordered:
-        yc = (c["y0"] + c["y1"]) / 2
-        if ref is None or abs(yc - ref) <= 0.5 * med_h:
+        y0, y1 = c["y0"], c["y1"]
+        if cur_top is None:
+            cur, cur_top, cur_bottom = [c], y1, y0
+            continue
+        line_h = max(cur_top - cur_bottom, 0.0)
+        glyph_h = y1 - y0
+        overlap = min(cur_top, y1) - max(cur_bottom, y0)
+        smaller = max(min(line_h, glyph_h), 1e-6)
+        # Degenerate (zero-height space) glyphs join when they sit inside the
+        # line's band; normal glyphs join on a meaningful interval overlap.
+        if glyph_h < 0.1 * med_h:
+            joins = cur_bottom - 1e-9 <= (y0 + y1) / 2 <= cur_top + 1e-9
+        else:
+            joins = overlap > 0.25 * smaller
+        if joins:
             cur.append(c)
-            ref = yc if ref is None else ref
+            cur_top = max(cur_top, y1)
+            cur_bottom = min(cur_bottom, y0)
         else:
             lines.append(cur)
-            cur = [c]
-            ref = yc
+            cur, cur_top, cur_bottom = [c], y1, y0
     if cur:
         lines.append(cur)
 
@@ -850,7 +925,11 @@ def _group_lines(chars: list) -> list:
         if not text:
             continue
         hs = [c["y1"] - c["y0"] for c in ln_sorted if c["y1"] - c["y0"] > 0]
-        out.append({"h": statistics.median(hs) if hs else med_h, "text": text})
+        out.append({
+            "h": statistics.median(hs) if hs else med_h,
+            "text": text,
+            "yc": (min(c["y0"] for c in ln_sorted) + max(c["y1"] for c in ln_sorted)) / 2,
+        })
     return out
 
 
