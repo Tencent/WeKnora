@@ -1012,6 +1012,7 @@ func snapshotEvaluationModel(role string, model *types.Model) types.EvaluationMo
 		BaseURL              string            `json:"base_url"`
 		ParameterSize        string            `json:"parameter_size"`
 		ExtraConfig          map[string]string `json:"extra_config,omitempty"`
+		CustomHeaders        map[string]string `json:"custom_headers,omitempty"`
 		SupportsVision       bool              `json:"supports_vision"`
 		ContextWindow        int               `json:"context_window"`
 		MaxOutputTokens      int               `json:"max_output_tokens"`
@@ -1025,6 +1026,7 @@ func snapshotEvaluationModel(role string, model *types.Model) types.EvaluationMo
 		BaseURL:              model.Parameters.BaseURL,
 		ParameterSize:        model.Parameters.ParameterSize,
 		ExtraConfig:          nonSecretEvaluationModelConfig(model.Parameters.ExtraConfig),
+		CustomHeaders:        nonSecretEvaluationModelConfig(model.Parameters.CustomHeaders),
 		SupportsVision:       model.Parameters.SupportsVision,
 		ContextWindow:        model.Parameters.ContextWindow,
 		MaxOutputTokens:      model.Parameters.MaxOutputTokens,

@@ -558,6 +558,10 @@ const backendTypeToModelType: Record<string, ModelType> = {
 function convertToLegacyFormat(model: ModelConfig) {
   return {
     id: model.id!,
+    // Keep the complete non-secret parameter payload on the legacy-shaped
+    // editor model. The save path uses it as the base when replacing
+    // extra_config, so provider-specific routing options survive an edit.
+    parameters: model.parameters,
     name: model.name,
     displayName: model.display_name || '',
     source: model.source,

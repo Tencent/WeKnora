@@ -33,12 +33,10 @@ func (o *observableEmbedder) BatchEmbed(ctx context.Context, texts []string) ([]
 func (o *observableEmbedder) BatchEmbedWithPool(
 	ctx context.Context, _ Embedder, texts []string,
 ) ([][]float32, error) {
-	startedAt := time.Now()
-	// Pass the raw inner model to avoid observing provider-internal sub-batch
-	// callbacks twice.
-	vectors, err := o.inner.BatchEmbedWithPool(ctx, o.inner, texts)
-	o.observe(ctx, startedAt, err)
-	return vectors, err
+	// Thread the observer into the pooler so every BatchEmbed callback records
+	// one real provider round-trip. Do not emit an aggregate observation here:
+	// it would both hide fan-out and double-count the request.
+	return o.inner.BatchEmbedWithPool(ctx, o, texts)
 }
 
 func (o *observableEmbedder) observe(ctx context.Context, startedAt time.Time, err error) {

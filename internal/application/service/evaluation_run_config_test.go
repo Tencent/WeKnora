@@ -29,8 +29,11 @@ func TestSnapshotEvaluationModelExcludesCredentials(t *testing.T) {
 		Type: types.ModelTypeEmbedding, Source: types.ModelSourceRemote, UpdatedAt: updatedAt,
 		Parameters: types.ModelParameters{
 			APIKey: "secret-one", AppSecret: "secret-two", Provider: "openai",
-			CustomHeaders: map[string]string{"Authorization": "secret-three"},
-			BaseURL:       "https://deployment-a.example/v1",
+			CustomHeaders: map[string]string{
+				"Authorization": "secret-three",
+				"X-Route":       "deployment-a",
+			},
+			BaseURL: "https://deployment-a.example/v1",
 			ExtraConfig: map[string]string{
 				"thinking_control": "enabled", "access_token": "secret-four",
 			},
@@ -47,6 +50,10 @@ func TestSnapshotEvaluationModelExcludesCredentials(t *testing.T) {
 	require.Equal(t, "embedding", first.Role)
 	require.Equal(t, 1024, first.Dimensions)
 	require.NotContains(t, first.ConfigFingerprint, "secret")
+	model.Parameters.CustomHeaders["X-Route"] = "deployment-b"
+	headerRouteChanged := snapshotEvaluationModel("embedding", model)
+	require.NotEqual(t, first.ConfigFingerprint, headerRouteChanged.ConfigFingerprint)
+	model.Parameters.CustomHeaders["X-Route"] = "deployment-a"
 
 	model.Parameters.BaseURL = "https://deployment-b.example/v1"
 	baseURLChanged := snapshotEvaluationModel("embedding", model)
