@@ -128,6 +128,17 @@ type KnowledgeService interface {
 		knowledgeID string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// ReplaceKnowledgeFile replaces the source file of an existing file knowledge
+	// while preserving its ID, then re-parses it. A path-qualified customFileName
+	// also sets the folder; metadata entries are merged into the stored metadata.
+	// Identical content returns a DuplicateKnowledgeError without re-parsing.
+	ReplaceKnowledgeFile(
+		ctx context.Context,
+		knowledgeID string,
+		file *multipart.FileHeader,
+		customFileName string,
+		metadata map[string]string,
+	) (*types.Knowledge, error)
 	// CancelKnowledgeParse marks an in-progress parse as cancelled by the
 	// user. The knowledge row and any partially written chunks/index are
 	// kept; downstream queued tasks for the same knowledge are best-effort
