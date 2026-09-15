@@ -266,7 +266,6 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		} else {
 			imgOut["ocr_prompt"] = "default"
 		}
-		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
