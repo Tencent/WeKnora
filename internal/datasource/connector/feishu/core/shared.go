@@ -363,7 +363,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		Title:            in.Title,
 		Content:          md,
 		ContentType:      "text/markdown",
-		FileName:         SanitizeFileName(in.Title) + ".md",
+		FileName:         NestedFileName(in.Title, SanitizeFileName(in.Title)+".md"),
 		URL:              in.URL,
 		UpdatedAt:        in.EditTime,
 		CreatedAt:        in.CreateTime,
@@ -414,7 +414,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			Title:            a.Name,
 			Content:          data,
 			ContentType:      "application/octet-stream",
-			FileName:         SanitizeFileName(a.Name),
+			FileName:         NestedFileName(in.Title, SanitizeFileName(a.Name)),
 			URL:              in.URL,
 			UpdatedAt:        in.EditTime,
 			CreatedAt:        in.CreateTime,
@@ -464,7 +464,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			Title:            fmt.Sprintf("%s（内嵌图片）", in.Title),
 			Content:          data,
 			ContentType:      contentType,
-			FileName:         "image-" + b.Image.Token + ext,
+			FileName:         NestedFileName(in.Title, ImageRelName(b.Image.Token, ext)),
 			URL:              in.URL,
 			UpdatedAt:        in.EditTime,
 			CreatedAt:        in.CreateTime,
@@ -472,6 +472,8 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			Metadata:         imgMeta(),
 		})
 	}
+
+	items, keep = appendBoardItems(ctx, client, in, blocks, items, keep)
 
 	main.SubtreeKeep = keep
 	return items, nil

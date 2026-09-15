@@ -61,6 +61,9 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 			return
 		}
 		gotPath = r.URL.Path
+		if r.URL.Query().Get("valueRenderOption") != "FormattedValue" {
+			t.Errorf("valueRenderOption = %q, want FormattedValue", r.URL.Query().Get("valueRenderOption"))
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
 			"valueRange": map[string]any{"values": [][]any{{"名称", "数量"}, {"苹果", 3}, {"梨", nil}}},
 		}})
@@ -79,6 +82,55 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 		t.Errorf("did not expect truncation for 3 rows")
 	}
 	if len(rows) != 3 || rows[0][0] != "名称" || rows[1][1] != "3" || rows[2][1] != "" {
+		t.Errorf("rows = %+v", rows)
+	}
+}
+
+// FormattedValue returns rich-text cells as segment arrays, not plain strings.
+// cellToString must concatenate segment.text — fmt.Sprintf("%v") yields "[{...}]".
+func TestCellToString_FormattedValueRichText(t *testing.T) {
+	rich := []any{
+		map[string]any{
+			"type":         "text",
+			"text":         "架构：",
+			"segmentStyle": map[string]any{"bold": true},
+		},
+		map[string]any{"type": "text", "text": "零信任；纯三层"},
+	}
+	if got := cellToString(rich); got != "架构：零信任；纯三层" {
+		t.Errorf("rich text: got %q, want %q", got, "架构：零信任；纯三层")
+	}
+	if got := cellToString("纯字符串"); got != "纯字符串" {
+		t.Errorf("string: got %q", got)
+	}
+	if got := cellToString(map[string]any{"formattedValue": "12.00", "value": 12}); got != "12.00" {
+		t.Errorf("formula object: got %q, want 12.00", got)
+	}
+}
+
+func TestReadSheetRange_RichTextCell(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+			"valueRange": map[string]any{"values": [][]any{
+				{"列"},
+				{[]any{
+					map[string]any{"type": "text", "text": "架构：", "segmentStyle": map[string]any{"bold": true}},
+					map[string]any{"type": "text", "text": "零信任；纯三层"},
+				}},
+			}},
+		}})
+	}))
+	defer srv.Close()
+	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
+	rows, _, err := c.readSheetRange(context.Background(), "sht_x_0")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(rows) != 2 || rows[1][0] != "架构：零信任；纯三层" {
 		t.Errorf("rows = %+v", rows)
 	}
 }

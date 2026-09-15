@@ -67,10 +67,17 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 				writePara(&sb, inlineTable(ctx, client, b.Bitable.Token, "bitable"))
 			}
 		case BlockTypeImage:
-			// Emit a token-free placeholder: images carry no retrievable text, and
-			// leaking the internal media token would pollute embeddings. A neutral
-			// marker preserves surrounding context (e.g. "如下图所示").
-			writePara(&sb, "![图片]()")
+			name := "image.png"
+			if b.Image != nil && b.Image.Token != "" {
+				name = ImageRelName(b.Image.Token, ".png")
+			}
+			writePara(&sb, fmt.Sprintf("![图片](%s)", name))
+		case BlockTypeBoard:
+			name := "board.png"
+			if b.Board != nil && b.Board.Token != "" {
+				name = BoardRelName(b.Board.Token, ".png")
+			}
+			writePara(&sb, fmt.Sprintf("![画板](%s)", name))
 		case BlockTypeTodo:
 			if t := plainText(textBearingField(b)); t != "" {
 				writePara(&sb, "- [ ] "+t)
@@ -156,7 +163,7 @@ func tableDescendants(blocks []DocxBlock, byID map[string]DocxBlock) map[string]
 		// Attachment/media blocks nested in a cell must still be collected (and
 		// their reference emitted) by the main loop — the table renderer only
 		// extracts text — so do not consume them, only their text structure.
-		if b.BlockType == BlockTypeFile || b.BlockType == BlockTypeImage {
+		if b.BlockType == BlockTypeFile || b.BlockType == BlockTypeImage || b.BlockType == BlockTypeBoard {
 			return
 		}
 		consumed[id] = true
