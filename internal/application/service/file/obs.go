@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,16 +30,32 @@ type obsFileService struct {
 	proxyDomain string
 }
 
-type obsEndpointResolver struct {
-	url string
+// obsUsePathStyle reports whether the OBS client should keep path-style
+// addressing for this endpoint. Huawei Cloud OBS rejects path-style bucket
+// addressing on domain endpoints since 2023-12-30, so domain endpoints use
+// virtual-hosted style ({bucket}.{host}); IP-literal or unparseable endpoints
+// have no DNS label to prefix and keep path-style. See issue #3269.
+func obsUsePathStyle(endpoint string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return true
+	}
+	return net.ParseIP(u.Hostname()) != nil
 }
 
-func (r *obsEndpointResolver) ResolveEndpoint(region string, options s3.EndpointResolverOptions) (aws.Endpoint, error) {
-	return aws.Endpoint{
-		URL:               r.url,
-		SigningRegion:     region,
-		HostnameImmutable: true,
-	}, nil
+// obsS3Options builds the S3 client options shared by the file service and the
+// connectivity check.
+func obsS3Options(endpoint, region, accessKey, secretAccessKey string) s3.Options {
+	return s3.Options{
+		Region:       region,
+		BaseEndpoint: aws.String(endpoint),
+		Credentials:  credentials.NewStaticCredentialsProvider(accessKey, secretAccessKey, ""),
+		// OBS is S3-compatible but commonly rejects the SDK's default
+		// trailing checksum negotiation; align with the S3 driver (s3.go).
+		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
+		UsePathStyle:               obsUsePathStyle(endpoint),
+		HTTPClient:                 utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
+	}
 }
 
 func NewObsFileService(
@@ -48,13 +66,7 @@ func NewObsFileService(
 		return nil, fmt.Errorf("unsafe OBS endpoint: %w", err)
 	}
 
-	client := s3.New(s3.Options{
-		Region:           region,
-		EndpointResolver: &obsEndpointResolver{url: endpoint},
-		Credentials:      credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, ""),
-		UsePathStyle:     true,
-		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
-	})
+	client := s3.New(obsS3Options(endpoint, region, accessKeyID, secretAccessKey))
 
 	_, err := client.HeadBucket(context.Background(), &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
@@ -87,13 +99,7 @@ func CheckObsConnectivity(ctx context.Context, endpoint, region, accessKey, secr
 	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	client := s3.New(s3.Options{
-		Region:           region,
-		EndpointResolver: &obsEndpointResolver{url: endpoint},
-		Credentials:      credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
-		UsePathStyle:     true,
-		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
-	})
+	client := s3.New(obsS3Options(endpoint, region, accessKey, secretKey))
 
 	_, err := client.HeadBucket(checkCtx, &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
@@ -236,7 +242,19 @@ func (s *obsFileService) GetFileURL(ctx context.Context, filePath string) (strin
 		return s.proxyDomain + "/" + strings.TrimPrefix(objectKey, "/"), nil
 	}
 
-	return fmt.Sprintf("%s/%s/%s", s.endpoint, s.bucketName, strings.TrimPrefix(objectKey, "/")), nil
+	// Mirror the client addressing so generated URLs stay reachable: OBS
+	// rejects path-style on domain endpoints (issue #3269), so serve
+	// {bucket}.{endpoint-host}/{key}; IP-literal endpoints keep path-style.
+	if obsUsePathStyle(s.endpoint) {
+		return fmt.Sprintf("%s/%s/%s", s.endpoint, s.bucketName, strings.TrimPrefix(objectKey, "/")), nil
+	}
+	endpointURL, err := url.Parse(s.endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid OBS endpoint %q: %w", s.endpoint, err)
+	}
+	endpointURL.Host = s.bucketName + "." + endpointURL.Host
+	endpointURL.Path = "/" + strings.TrimPrefix(objectKey, "/")
+	return endpointURL.String(), nil
 }
 
 // CopyFile copies an existing OBS object to a new knowledge-owned object using a
