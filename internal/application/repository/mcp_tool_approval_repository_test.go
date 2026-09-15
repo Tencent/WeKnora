@@ -18,6 +18,15 @@ func newMCPToolApprovalTestRepo(t *testing.T) interfaces.MCPToolApprovalReposito
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=5000", t.Name())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	// One connection, as knowledge_create_test.go and knowledge_finalize_test.go
+	// do: the concurrent-patch test runs two upserts at once, and on a
+	// shared-cache in-memory database a second connection meets
+	// SQLITE_LOCKED ("database table is locked"), which busy_timeout does
+	// not cover. Serialising the pool keeps the concurrency in the test and
+	// the lock out of it.
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&types.MCPToolApproval{}))
 	return NewMCPToolApprovalRepository(db)
 }
