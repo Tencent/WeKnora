@@ -62,19 +62,27 @@ func (s *tenantAPIKeyService) CreateAPIKey(
 	if scopeType == types.APIKeyScopeTenant {
 		tenantID = &req.TenantID
 	}
+	ids, perms := types.NormalizeKnowledgeBasePermissions(
+		types.StringArray(req.KnowledgeBaseIDs),
+		req.KnowledgeBasePermissions,
+		capabilities,
+		req.FullAccess,
+	)
 	key := &types.TenantAPIKey{
-		TenantID:         tenantID,
-		ScopeType:        scopeType,
-		Name:             name,
-		KeyHash:          hashTenantAPIKey(token),
-		APIKey:           token,
-		FullAccess:       req.FullAccess,
-		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
-		Capabilities:     capabilities,
-		ExpiresAt:        expiresAt,
+		TenantID:                 tenantID,
+		ScopeType:                scopeType,
+		Name:                     name,
+		KeyHash:                  hashTenantAPIKey(token),
+		APIKey:                   token,
+		FullAccess:               req.FullAccess,
+		KnowledgeBaseIDs:         ids,
+		KnowledgeBasePermissions: perms,
+		Capabilities:             capabilities,
+		ExpiresAt:                expiresAt,
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil
+		key.KnowledgeBasePermissions = nil
 		key.Capabilities = nil
 	}
 	if err := s.repo.CreateAPIKey(ctx, key); err != nil {
@@ -154,15 +162,23 @@ func (s *tenantAPIKeyService) UpdateAPIKey(
 		utc := expiresAt.UTC()
 		expiresAt = &utc
 	}
+	ids, perms := types.NormalizeKnowledgeBasePermissions(
+		types.StringArray(req.KnowledgeBaseIDs),
+		req.KnowledgeBasePermissions,
+		capabilities,
+		req.FullAccess,
+	)
 	key := &types.TenantAPIKey{
-		Name:             name,
-		FullAccess:       req.FullAccess,
-		KnowledgeBaseIDs: normalizeAPIKeyIDs(req.KnowledgeBaseIDs),
-		Capabilities:     capabilities,
-		ExpiresAt:        expiresAt,
+		Name:                     name,
+		FullAccess:               req.FullAccess,
+		KnowledgeBaseIDs:         ids,
+		KnowledgeBasePermissions: perms,
+		Capabilities:             capabilities,
+		ExpiresAt:                expiresAt,
 	}
 	if key.FullAccess {
 		key.KnowledgeBaseIDs = nil
+		key.KnowledgeBasePermissions = nil
 		key.Capabilities = nil
 	}
 	return s.repo.UpdateAPIKey(ctx, req.TenantID, req.APIKeyID, key)
@@ -216,21 +232,4 @@ func generateTenantAPIKeyToken() (string, error) {
 func hashTenantAPIKey(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
-}
-
-func normalizeAPIKeyIDs(in []string) types.StringArray {
-	out := types.StringArray{}
-	seen := map[string]struct{}{}
-	for _, id := range in {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
 }

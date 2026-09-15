@@ -20,6 +20,21 @@ export interface KnowledgeBaseSummary {
   id?: string
   name?: string
   description?: string
+  type?: string
+  knowledge_count?: number
+  chunk_count?: number
+  capabilities?: {
+    vector?: boolean
+    keyword?: boolean
+    wiki?: boolean
+    graph?: boolean
+    faq?: boolean
+  }
+  permission?: {
+    read?: boolean
+    write?: boolean
+    manage?: boolean
+  }
   [key: string]: unknown
 }
 

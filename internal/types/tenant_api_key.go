@@ -24,6 +24,11 @@ type TenantAPIKey struct {
 	APIKey           string          `json:"api_key" gorm:"column:api_key;type:text;not null;default:''"`
 	FullAccess       bool            `json:"full_access" gorm:"not null;default:false"`
 	KnowledgeBaseIDs StringArray     `json:"knowledge_base_ids" gorm:"type:jsonb;not null;default:'[]'"`
+	// KnowledgeBasePermissions is an optional per-KB overlay on top of
+	// Capabilities. Keys are knowledge-base IDs; values are subsets of
+	// retrieve / ingest / manage_kbs. An empty map means every allow-listed
+	// KB inherits the key's global capabilities.
+	KnowledgeBasePermissions KnowledgeBasePermissionMap `json:"knowledge_base_permissions" gorm:"type:jsonb;not null;default:'{}'"`
 	// Capabilities are bounded grants for non-full-access keys. Each
 	// capability maps to an integration persona (retrieval, chat, ingest,
 	// tenant infrastructure management, and history access). KB scoping
@@ -267,11 +272,12 @@ func (k *TenantAPIKey) AfterFind(tx *gorm.DB) error {
 
 // TenantAPIKeyScope is the request-context projection used by middleware.
 type TenantAPIKeyScope struct {
-	KeyID            uint64
-	ScopeType        APIKeyScopeType
-	FullAccess       bool
-	KnowledgeBaseIDs StringArray
-	Capabilities     StringArray
+	KeyID                    uint64
+	ScopeType                APIKeyScopeType
+	FullAccess               bool
+	KnowledgeBaseIDs         StringArray
+	KnowledgeBasePermissions KnowledgeBasePermissionMap
+	Capabilities             StringArray
 }
 
 func WithTenantAPIKeyScope(ctx context.Context, scope TenantAPIKeyScope) context.Context {
@@ -290,12 +296,16 @@ func TenantAPIKeyScopeFromContext(ctx context.Context) (TenantAPIKeyScope, bool)
 }
 
 func (s TenantAPIKeyScope) Normalize() TenantAPIKeyScope {
+	ids, perms := NormalizeKnowledgeBasePermissions(
+		s.KnowledgeBaseIDs, s.KnowledgeBasePermissions, s.Capabilities, s.FullAccess,
+	)
 	return TenantAPIKeyScope{
-		KeyID:            s.KeyID,
-		ScopeType:        NormalizeAPIKeyScopeType(s.ScopeType),
-		FullAccess:       s.FullAccess,
-		KnowledgeBaseIDs: normalizeIDArray(s.KnowledgeBaseIDs),
-		Capabilities:     NormalizeAPIKeyCapabilities(s.Capabilities),
+		KeyID:                    s.KeyID,
+		ScopeType:                NormalizeAPIKeyScopeType(s.ScopeType),
+		FullAccess:               s.FullAccess,
+		KnowledgeBaseIDs:         ids,
+		KnowledgeBasePermissions: perms,
+		Capabilities:             NormalizeAPIKeyCapabilities(s.Capabilities),
 	}
 }
 
@@ -352,6 +362,34 @@ func (s TenantAPIKeyScope) AllowsKnowledgeBases(kbIDs []string) bool {
 		}
 	}
 	return true
+}
+
+// AllowsKnowledgeBaseCapability reports whether this scope may use cap against
+// kbID. Global capabilities are always the ceiling; an empty permissions map
+// inherits that ceiling for every allow-listed KB.
+func (s TenantAPIKeyScope) AllowsKnowledgeBaseCapability(kbID string, cap APIKeyCapability) bool {
+	s = s.Normalize()
+	cap = storedKBPermissionCapability(cap)
+	if cap == "" || !isKBPermissionCapability(cap) {
+		return false
+	}
+	if s.FullAccess {
+		return true
+	}
+	if !knowledgeBasePermissionCeiling(s.Capabilities, cap) {
+		return false
+	}
+	if !s.IsKnowledgeBaseRestricted() {
+		return true
+	}
+	if !s.AllowsKnowledgeBase(kbID) {
+		return false
+	}
+	grants, ok := s.KnowledgeBasePermissions[strings.TrimSpace(kbID)]
+	if !ok {
+		return true
+	}
+	return grantsContainCapability(grants, cap)
 }
 
 func normalizeIDArray(in StringArray) StringArray {
@@ -428,17 +466,50 @@ func FilterKnowledgeBasesForTenantAPIKeyScope(
 		if !scope.AllowsKnowledgeBases(requestedKBIDs) {
 			return nil, errors.NewForbiddenError("API key scope does not allow one or more knowledge bases")
 		}
+		if knowledgeBasePermissionCeiling(scope.Capabilities, APIKeyCapabilityRetrieve) {
+			for _, id := range requestedKBIDs {
+				if !scope.AllowsKnowledgeBaseCapability(id, APIKeyCapabilityRetrieve) {
+					return nil, errors.NewForbiddenError("API key scope does not allow one or more knowledge bases")
+				}
+			}
+		}
 		return resolvedKBIDs, nil
-	}
-	allowed := make(map[string]struct{}, len(scope.KnowledgeBaseIDs))
-	for _, id := range scope.KnowledgeBaseIDs {
-		allowed[id] = struct{}{}
 	}
 	filtered := make([]string, 0, len(resolvedKBIDs))
 	for _, id := range resolvedKBIDs {
-		if _, ok := allowed[id]; ok {
-			filtered = append(filtered, id)
+		if !scope.AllowsKnowledgeBase(id) {
+			continue
 		}
+		if knowledgeBasePermissionCeiling(scope.Capabilities, APIKeyCapabilityRetrieve) &&
+			!scope.AllowsKnowledgeBaseCapability(id, APIKeyCapabilityRetrieve) {
+			continue
+		}
+		filtered = append(filtered, id)
 	}
 	return filtered, nil
+}
+
+// AuthorizeTenantAPIKeyKnowledgeBaseCapability rejects KB-restricted API key
+// callers that lack cap on kbID. JWT callers and unrestricted keys pass
+// through (route-level APIKeyGate still applies).
+func AuthorizeTenantAPIKeyKnowledgeBaseCapability(ctx context.Context, kbID string, cap APIKeyCapability) error {
+	return AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability(ctx, kbID, cap)
+}
+
+// AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability allows the request when any
+// of the listed capabilities is granted on kbID.
+func AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability(ctx context.Context, kbID string, caps ...APIKeyCapability) error {
+	scope, ok := TenantAPIKeyScopeFromContext(ctx)
+	if !ok {
+		return nil
+	}
+	if len(caps) == 0 {
+		return nil
+	}
+	for _, cap := range caps {
+		if scope.AllowsKnowledgeBaseCapability(kbID, cap) {
+			return nil
+		}
+	}
+	return errors.NewForbiddenError("API key scope does not allow this operation on the knowledge base")
 }

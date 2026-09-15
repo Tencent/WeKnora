@@ -60,3 +60,17 @@ func TestValidateTenantAPIKeyKnowledgeBaseOwnership(t *testing.T) {
 		t.Fatal("expected missing knowledge base to be rejected")
 	}
 }
+
+func TestValidateTenantAPIKeyRequestRejectsPermissionsAboveCeiling(t *testing.T) {
+	err := validateTenantAPIKeyRequest(context.Background(), nil, 1, tenantAPIKeyCreateRequest{
+		Name:             "integration",
+		Capabilities:     []string{"retrieve"},
+		KnowledgeBaseIDs: []string{"kb-1"},
+		KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{
+			"kb-1": types.StringArray{"retrieve", "ingest"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected validation error when per-KB ingest exceeds global capabilities")
+	}
+}
