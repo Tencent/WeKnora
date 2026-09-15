@@ -318,6 +318,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}
       # File size limit (in MB)
       - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      # Local folder data source: container directories (":"-separated) that a
+      # local_folder data source may read. Empty disables it. Bind-mount the host
+      # folder read-only first, e.g. /path/to/vault:/data/local-folders/vault:ro
+      - WEKNORA_LOCAL_FOLDER_ROOTS=${WEKNORA_LOCAL_FOLDER_ROOTS:-}
       # Skill zip / GitHub source download cap (in MB); the GitHub zipball is the whole repo, not the skill subtree
       - MAX_SKILL_BUNDLE_SIZE_MB=${MAX_SKILL_BUNDLE_SIZE_MB:-256}
       # 文档处理任务总超时（Go duration，默认 2h）

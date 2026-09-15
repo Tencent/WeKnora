@@ -719,6 +719,12 @@ export default {
     connectionFailed: '连接失败',
     isRequired: '为必填项',
     credentialsLabel: '凭证',
+    localFolder: {
+      title: '本地文件夹', rootPath: '文件夹路径',
+      rootPathHint: 'WeKnora 服务器或容器内的绝对路径（不是你当前电脑上的路径），必须位于 WEKNORA_LOCAL_FOLDER_ROOTS 允许的目录下（例如只读挂载进来的 Obsidian 库）。',
+      include: '包含规则', exclude: '排除规则',
+      patternsHint: '每行一条 glob 规则，相对于该文件夹（** 匹配任意层目录）。留空使用默认规则，涵盖常见文档格式（Markdown、文本、PDF、Office、CSV、HTML、EPUB）。图片和音频需要 VLM/ASR，需自行添加规则；WeKnora 不支持导入的格式会被跳过。',
+    },
     gitlab: {
       baseUrl: 'GitLab 地址',
       accessToken: '个人访问令牌',
@@ -873,7 +879,8 @@ export default {
       dingtalk: '同步钉钉知识库中的在线文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
-      gitlab: '同步 GitLab 项目中的文件'
+      gitlab: '同步 GitLab 项目中的文件',
+      local_folder: '同步服务器上的文件夹，例如挂载进来的 Obsidian 库'
     },
     connector: {
       feishu: '飞书',
@@ -886,7 +893,8 @@ export default {
       dingtalk: '钉钉文档',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      local_folder: '本地文件夹'
     },
     logDetail: {
       startTime: '开始时间',
@@ -6615,6 +6623,7 @@ export default {
     channelYuque: '语雀',
     channelGitLab: 'GitLab',
     channelIma: '腾讯 IMA',
+    channelLocalFolder: '本地文件夹',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',

@@ -670,6 +670,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	// Surface the KB's multimodal/VLM state to the connector so it only extracts
 	// embedded images for OCR when the KB can actually ingest them (never persisted).
 	config.MultimodalEnabled = kb.IsMultimodalEnabled()
+	config.ManualTrigger = payload.Trigger == "manual"
 
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
@@ -930,7 +931,9 @@ func (s *DataSourceService) applyFetchedItem(
 		return
 	}
 
-	if len(item.Content) == 0 && item.URL == "" {
+	// An in-place item may be empty on purpose: its source file was emptied, and
+	// the existing knowledge must be updated instead of keeping the old content.
+	if len(item.Content) == 0 && item.URL == "" && !item.UpdateInPlace {
 		// Check if this is an error item from the connector (failed to fetch content)
 		if errMsg, hasErr := item.Metadata["error"]; hasErr {
 			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", item.Title, item.ExternalID, errMsg)
@@ -1271,7 +1274,8 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 }
 
 // ingestItem writes a single FetchedItem into the knowledge base.
-// If a knowledge item with the same external_id already exists, it is deleted first (update = delete + re-create).
+// If a knowledge item with the same external_id already exists, it is deleted first (update = delete + re-create),
+// unless the item sets UpdateInPlace, in which case an existing file knowledge keeps its ID (see replaceItemInPlace).
 //
 // Routing logic:
 //   - Has Content bytes → CreateKnowledgeFromFile (走完整的文档解析 pipeline)
@@ -1320,6 +1324,8 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 		if err != nil {
 			logger.Warnf(ctx, "failed to check existing knowledge for external_id=%s: %v", item.ExternalID, err)
 			// Non-fatal: proceed with creation (may produce duplicate)
+		} else if existing != nil && item.UpdateInPlace && existing.Type == "file" {
+			return true, s.replaceItemInPlace(ctx, existing, item, metadata)
 		} else if existing != nil {
 			logger.Infof(ctx, "found existing knowledge %s for external_id=%s, deleting for update", existing.ID, item.ExternalID)
 			if err := s.knowledgeService.DeleteKnowledge(ctx, existing.ID); err != nil {
@@ -1405,6 +1411,21 @@ func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource
 	}
 
 	return isUpdate, fmt.Errorf("item has neither content nor URL")
+}
+
+// replaceItemInPlace updates an existing file knowledge with the item's content,
+// keeping its knowledge ID. Unchanged content surfaces as a
+// DuplicateKnowledgeError, which applyFetchedItem counts as skipped.
+func (s *DataSourceService) replaceItemInPlace(
+	ctx context.Context, existing *types.Knowledge, item *types.FetchedItem, metadata map[string]string,
+) error {
+	logger.Infof(ctx, "updating knowledge %s in place for external_id=%s", existing.ID, item.ExternalID)
+	fh, err := bytesToFileHeader(item.Content, item.FileName)
+	if err != nil {
+		return fmt.Errorf("build file header: %w", err)
+	}
+	_, err = s.knowledgeService.ReplaceKnowledgeFile(ctx, existing.ID, fh, item.FileName, metadata)
+	return err
 }
 
 // dupIsSameNode reports whether a duplicate-content error means the parent still
