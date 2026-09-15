@@ -63,16 +63,17 @@ func TestObsS3OptionsUseVirtualHostedStyleForDomainEndpoints(t *testing.T) {
 	opts := obsS3Options(endpoint, "cn-south-1", "ak", "sk")
 
 	if opts.UsePathStyle {
-		t.Fatal("domain endpoint must use virtual-hosted addressing; Huawei Cloud rejects path-style since 2023-12-30 (issue #3269)")
+		t.Fatal("domain endpoint must use virtual-hosted addressing (issue #3269)")
 	}
 	if opts.BaseEndpoint == nil || *opts.BaseEndpoint != endpoint {
 		t.Fatalf("BaseEndpoint = %v, want %q", opts.BaseEndpoint, endpoint)
 	}
 	if opts.RequestChecksumCalculation != aws.RequestChecksumCalculationWhenRequired {
-		t.Fatalf("RequestChecksumCalculation = %v, want WhenRequired (aligned with the S3 driver)", opts.RequestChecksumCalculation)
+		t.Fatalf("RequestChecksumCalculation = %v, want WhenRequired", opts.RequestChecksumCalculation)
 	}
+	//nolint:staticcheck // v1 resolver must stay unset; HostnameImmutable pinned path-style
 	if opts.EndpointResolver != nil {
-		t.Fatal("the deprecated custom resolver must stay dropped; its HostnameImmutable=true forced path-style addressing")
+		t.Fatal("deprecated custom resolver must stay dropped")
 	}
 	if opts.HTTPClient == nil {
 		t.Fatal("SSRF-safe HTTP client must be configured")
@@ -98,11 +99,12 @@ func TestObsPutObjectUsesVirtualHostedURL(t *testing.T) {
 		"my-bucket",
 		"42/kb/file.pdf",
 	)
-	if host != "my-bucket.obs.cn-south-1.myhuaweicloud.com" {
-		t.Fatalf("PutObject host = %q, want virtual-hosted my-bucket.obs.cn-south-1.myhuaweicloud.com", host)
+	wantHost := "my-bucket.obs.cn-south-1.myhuaweicloud.com"
+	if host != wantHost {
+		t.Fatalf("PutObject host = %q, want virtual-hosted %q", host, wantHost)
 	}
 	if path != "/42/kb/file.pdf" {
-		t.Fatalf("PutObject path = %q, want /42/kb/file.pdf (bucket must not be in the path)", path)
+		t.Fatalf("PutObject path = %q, want /42/kb/file.pdf", path)
 	}
 }
 
