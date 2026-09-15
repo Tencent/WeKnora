@@ -32,25 +32,26 @@ description: 先依据当前完整转写判断内容主类型，再按人物访�
 ### 一、类型确定
 
 1. 先阅读当前转写代次的完整原文，再结合可选知识增强输入分析内容的主类型、次类型、分类理由、置信度和判型证据；不得先按上传类型选择模板。
-2. 以推进具体工作为目标，并出现议题、决策、待决策事项、约束或行动项的内容归为 `meeting`；公开分享或观点交流为主、没有明确工作推进目标的内容仍归为 `salon`。
+2. 以推进具体工作为目标，并出现议题、决策、待决策事项、约束或行动项的内容归为 `meeting`；参与人数和对话形式不改变判定，一对一/多对一的项目辅导、方案评审、产品推进、合作交付、作业安排或后续计划，只要工作推进为主要产出，也归为 `meeting`。`interview` 仅适用于以理解某个人的经历、选择和观点为主要产出的内容；公开分享或观点交流为主、没有明确工作推进目标的内容仍归为 `salon`。
 3. 置信度低于 `0.75`、类型证据不足或前两候选差距小于 `0.10` 时采用 `general`；标题、文件名和上传类型只能作为同分时的弱提示。会议判型至少引用分布在不同位置的两段原文。
+4. 同一主题被拆成多个 `part`/分段视频时，依据整体工作目的保持各段判型一致；不得因某一段采用问答、辅导或复盘形式而改判为 `interview`。
 
 ### 二、内容组织
 
-4. 使用可选知识增强输入补充结构维度，不得因其缺失阻塞初版总结。
-5. 按对应框架的标准二级标题和顺序组织知识；标题文案不得自由改写，只可在标准标题下增加三级小节。利用知识原子的结构维度组织正文：方法论的 `steps`/`criteria` 直接支撑方法章节，案例的 `context`/`outcome` 支撑案例章节，概念的 `definition`/`distinction` 支撑概念解释，洞察的 `claim`/`qualifications` 支撑观点呈现和适用边界。
-6. 明确区分原文观点、忠实概括、跨段归纳和分析推断。
+5. 使用可选知识增强输入补充结构维度，不得因其缺失阻塞初版总结。
+6. 按对应框架的标准二级标题和顺序组织知识；标题文案不得自由改写，只可在标准标题下增加三级小节。利用知识原子的结构维度组织正文：方法论的 `steps`/`criteria` 直接支撑方法章节，案例的 `context`/`outcome` 支撑案例章节，概念的 `definition`/`distinction` 支撑概念解释，洞察的 `claim`/`qualifications` 支撑观点呈现和适用边界。
+7. 明确区分原文观点、忠实概括、跨段归纳和分析推断。
 
 ### 三、输出
 
-7. LLM 只能返回结构化 JSON：`schemaVersion`、`videoType`、`classification`、`orchestrationProfile`、`sections`。`videoType` 必须是依据转写选出的主类型；`classification` 至少包含 `confidence`、`reason` 和 `evidenceChunkIds`。正式总结的 `orchestrationProfile` 必须包含 `schemaVersion: 1`、`primaryTopic` 和 1 至 5 个 `topicUnits`；每个单元必须包含 `title`、`abstract`、`contentForms`、`learningOutcomes`、`summaryBlockIds`、`evidenceChunkIds`。`contentForms` 只能使用 `skill_method`、`tool_operation`、`concept_cognition`、`case_analysis`、`humanities_reflection`、`process_standard`。摘要总量目标为 300 至 500 个汉字，上限 500；主题块和证据只能引用同一份 JSON 中真实存在的 block 与给定转写分块 ID。
-8. 后端根据真实转写分块回填原文、起止时间和时间戳，校验通过后将带 `evidence` 的规范化 JSON 保存为 WeKnora 内容页。页面 frontmatter 必须含 `type: typed_summary`、`source_video_id` 与 `transcript_generation`。知识增强阶段不得改变基础总结的编排卡片；模型漏返回时由后端原样继承，模型改动时拒绝发布。
+8. LLM 只能返回结构化 JSON：`schemaVersion`、`videoType`、`classification`、`orchestrationProfile`、`sections`。`videoType` 必须是依据转写选出的主类型；`classification` 至少包含 `confidence`、`reason` 和 `evidenceChunkIds`。正式总结的 `orchestrationProfile` 必须包含 `schemaVersion: 1`、`primaryTopic` 和 1 至 5 个 `topicUnits`；每个单元必须包含 `title`、`abstract`、`contentForms`、`learningOutcomes`、`summaryBlockIds`、`evidenceChunkIds`。`contentForms` 只能使用 `skill_method`、`tool_operation`、`concept_cognition`、`case_analysis`、`humanities_reflection`、`process_standard`。摘要总量目标为 300 至 500 个汉字，上限 500；主题块和证据只能引用同一份 JSON 中真实存在的 block 与给定转写分块 ID。
+9. 后端根据真实转写分块回填原文、起止时间和时间戳，校验通过后将带 `evidence` 的规范化 JSON 保存为 WeKnora 内容页。页面 frontmatter 必须含 `type: typed_summary`、`source_video_id` 与 `transcript_generation`。知识增强阶段不得改变基础总结的编排卡片；模型漏返回时由后端原样继承，模型改动时拒绝发布。
 
 ### 四、审计
 
-9. 校验总结：确认 JSON Schema、主类型模板、证据分块和转写代次完整；校验失败时不得将总结标记为完成。
-10. 审计发现事实缺失、来源不足或模板偏差时，通过 **标记 Wiki 问题** 在总结页面标记问题详情。
-11. 审计通过后，通过 **更新 Wiki 问题** 将上游遗留问题状态更新为已解决。
+10. 校验总结：确认 JSON Schema、主类型模板、证据分块和转写代次完整；校验失败时不得将总结标记为完成。
+11. 审计发现事实缺失、来源不足或模板偏差时，通过 **标记 Wiki 问题** 在总结页面标记问题详情。
+12. 审计通过后，通过 **更新 Wiki 问题** 将上游遗留问题状态更新为已解决。
 
 ## 强制规则
 
