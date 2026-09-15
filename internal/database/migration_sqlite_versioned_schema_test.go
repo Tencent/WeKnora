@@ -12,9 +12,18 @@ import (
 // versionedSQLiteTables is the set of tables that SQLite migrations must
 // create to stay in sync with the versioned (PostgreSQL) migrations:
 // 000041 task queue, 000053 system settings, 000055 processing spans,
-// 000063 knowledge multi-tags, 000093 browser authorization.
+// 000063 knowledge multi-tags, 000093 browser authorization,
+// 000096 document memory.
 var versionedSQLiteTables = []string{
 	"memory_extraction_sessions",
+	// The document memory store. Listed because the previous store's tables
+	// are dropped in the same migration: if these are not created on Lite,
+	// memory has nowhere to write and nothing to read, which is a state the
+	// server starts up happily in.
+	"memory_episodes",
+	"memory_episode_embeddings",
+	"memory_digests",
+	"memory_notes",
 	"task_pending_ops",
 	"task_dead_letters",
 	"system_settings",
@@ -29,7 +38,6 @@ var versionedSQLiteTables = []string{
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
 	"memory_subjects":    {"extraction_state"},               // 000094
-	"memory_items":       {"replaces_id"},                    // 000094
 	"tenants":            {"api_principal_config"},           // 000064
 	"users":              {"is_system_admin"},                // 000053
 	"knowledges":         {"pending_subtasks_count"},         // 000056
@@ -40,7 +48,20 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_tool_approvals": {"enabled"},                        // 000091
 }
 
-const expectedSQLiteMigrationVersion = 16
+const expectedSQLiteMigrationVersion = 17
+
+// retiredSQLiteTables are tables later migrations drop. They are asserted
+// absent rather than simply left out of the list above, because a dropped
+// table that survives on Lite is worse than one that was never created: the
+// code that wrote to it is gone, so the rows stay at whatever they last said
+// and read as current.
+var retiredSQLiteTables = []string{
+	"memory_topic_stats",     // 000017
+	"memory_doc_affinity",    // 000017
+	"memory_items",           // 000017
+	"memory_item_embeddings", // 000017
+	"memory_tombstones",      // 000017
+}
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -67,6 +88,11 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 				column,
 			)
 		}
+	}
+
+	for _, table := range retiredSQLiteTables {
+		require.Falsef(t, sqliteTableExists(t, db, table),
+			"SQLite migrations must drop retired table %s", table)
 	}
 
 	assertSQLiteShareLinkInvitationsWork(t, db)
@@ -111,6 +137,10 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 
 	for _, table := range versionedSQLiteTables {
 		require.Truef(t, sqliteTableExists(t, db, table), "upgraded SQLite DB must have table %s", table)
+	}
+	for _, table := range retiredSQLiteTables {
+		require.Falsef(t, sqliteTableExists(t, db, table),
+			"an upgrade must drop retired table %s, not leave its rows behind", table)
 	}
 	for table, columns := range versionedSQLiteColumns {
 		for _, column := range columns {

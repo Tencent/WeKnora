@@ -38,7 +38,7 @@ func TestMemoryConsistencyPostgres(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, sqlDB.Close()) }()
 
-	testMemoryConsistencyMigration(t, db, "postgres")
+	execMemoryMigration(t, db, "../../../../migrations/versioned/000084_memory.up.sql")
 	execMemoryMigration(t, db, "../../../../migrations/versioned/000094_memory_consistency.up.sql")
 	repo := repository.NewMemoryRepository(db)
 	ctx := context.Background()
@@ -80,45 +80,4 @@ func TestMemoryConsistencyPostgres(t *testing.T) {
 	pending, err := repo.HasPendingExtraction(ctx, scope)
 	require.NoError(t, err)
 	require.False(t, pending)
-
-	old := &types.MemoryItem{
-		ID: uuid.NewString(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
-		Kind: types.MemoryKindFact, Content: "old", Topic: "job", NormalizedKey: "job",
-		Status: types.MemoryStatusActive, ValidFrom: time.Now(),
-	}
-	require.NoError(t, repo.SaveItem(ctx, scope, old, ""))
-	// Seed two competing proposals to exercise confirmation itself, including legacy duplicates.
-	ids := []string{uuid.NewString(), uuid.NewString()}
-	for _, id := range ids {
-		require.NoError(t, db.Create(&types.MemoryItem{
-			ID: id, TenantID: scope.TenantID, SubjectID: scope.SubjectID,
-			Kind: types.MemoryKindFact, Content: id, Topic: "job", NormalizedKey: "job",
-			Status: types.MemoryStatusPending, ReplacesID: old.ID, ValidFrom: time.Now(),
-		}).Error)
-	}
-	results := make(chan error, 2)
-	for _, id := range ids {
-		wg.Add(1)
-		go func(id string) {
-			defer wg.Done()
-			results <- repo.ConfirmPendingItem(ctx, scope, id)
-		}(id)
-	}
-	wg.Wait()
-	close(results)
-	successes := 0
-	for err := range results {
-		if err == nil {
-			successes++
-		} else {
-			require.ErrorIs(t, err, types.ErrMemoryConflict)
-		}
-	}
-	require.Equal(t, 1, successes)
-	var active int64
-	require.NoError(t, db.Model(&types.MemoryItem{}).
-		Where("tenant_id = ? AND subject_id = ? AND status = ?",
-			scope.TenantID, scope.SubjectID, types.MemoryStatusActive).
-		Count(&active).Error)
-	require.EqualValues(t, 1, active)
 }

@@ -15,7 +15,7 @@ import (
 // silently discarded from the second turn onward.
 func TestAgentMemoryLandsInTheSystemPrompt(t *testing.T) {
 	engine := newTestEngine(t, nil)
-	engine.SetMemoryPrompt(types.WrapMemoryForPrompt("Preferences:\n- 回答请用中文", ""))
+	engine.SetMemoryPrompt(types.WrapMemoryDocumentForPrompt("Preferences:\n- 回答请用中文", nil, nil))
 
 	systemPrompt := engine.buildSystemPrompt(t.Context())
 	require.Contains(t, systemPrompt, "回答请用中文")
@@ -46,7 +46,7 @@ func TestAgentMemoryPromptIsAppendedNotSubstituted(t *testing.T) {
 	baseline := newTestEngine(t, nil).buildSystemPrompt(t.Context())
 
 	engine := newTestEngine(t, nil)
-	engine.SetMemoryPrompt(types.WrapMemoryForPrompt("About the user:\n- 在做医疗影像", ""))
+	engine.SetMemoryPrompt(types.WrapMemoryDocumentForPrompt("About the user:\n- 在做医疗影像", nil, nil))
 	withMemory := engine.buildSystemPrompt(t.Context())
 
 	require.Greater(t, len(withMemory), len(baseline))

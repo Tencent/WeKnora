@@ -2,213 +2,270 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
-	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
-// newConsolidationHarness gives the service a model, because consolidation is
-// the model's decision: without one there is nothing to test but the refusal.
-func newConsolidationHarness(t *testing.T) (*Service, *stubTenantRepo, *stubModelService) {
+// rewrittenProfile is what the model returns when it is asked to rewrite the
+// profile. It only has to carry a heading, which is what the read path takes
+// sections out of.
+const rewrittenProfile = "## 用户画像\n- 在做医学影像的后端\n\n## 用户偏好\n- 回答直接给结论\n"
+
+// newProfileRewriteHarness gives the service a chat model, because rewriting
+// the profile is a model call and without one there is nothing to observe.
+func newProfileRewriteHarness(t *testing.T) (*Service, *stubTenantRepo, *stubModelService) {
 	t.Helper()
 	svc, _, tenantRepo := newMemoryHarness(t)
 	models := &stubModelService{
 		workspaceModels: []*types.Model{
 			{ID: "chat-1", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
 		},
-		response: `{"statement":"回答直接给结论，不要铺垫"}`,
+		response: rewrittenProfile,
 	}
 	svc.modelService = models
 	return svc, tenantRepo, models
 }
 
-func seedItem(
-	t *testing.T, svc *Service, ctx context.Context, scope interfaces.MemoryScope,
-	kind, topic, content, key string,
-) {
+// seedSettledProfile leaves the subject in the state the background pass
+// declines to act on: a profile that was written moments ago, and accounts it
+// has already read.
+func seedSettledProfile(t *testing.T, svc *Service, ctx context.Context) {
 	t.Helper()
-	require.NoError(t, svc.repo.CreateItem(ctx, &types.MemoryItem{
-		ID: uuid.New().String(), TenantID: scope.TenantID, SubjectID: scope.SubjectID,
-		Kind: kind, Topic: topic, Content: content, NormalizedKey: key,
-		Status: types.MemoryStatusActive, Origin: types.MemoryOriginManual,
-		Importance: 3, ValidFrom: time.Now(),
-	}))
-}
-
-func seedSimilarPreferences(t *testing.T, svc *Service, ctx context.Context, scope interfaces.MemoryScope) {
-	t.Helper()
-	seedItem(t, svc, ctx, scope, types.MemoryKindPreference, "回答风格", "回答直接给结论不要铺垫", "k-a")
-	seedItem(t, svc, ctx, scope, types.MemoryKindPreference, "回答风格", "回答直接给结论不用铺垫", "k-b")
-}
-
-func TestConsolidateNowMergesNearDuplicatesWithoutWaiting(t *testing.T) {
-	svc, tenantRepo, _ := newConsolidationHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	seedDigest(t, svc, ctx, "## 用户画像\n- 在做后端\n")
 	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
+
+	ids := make([]string, 0, 2)
+	for _, episode := range []*types.MemoryEpisode{
+		{
+			SessionID: "s-import", Slug: "knowledge-import-413", Title: "知识库批量入库报 413",
+			Summary:  "用户批量导入时反复报 413，把单批大小调到 20 才通过。",
+			Keywords: types.MemoryEpisodeTokens{"入库", "413"},
+			ToAt:     time.Now().Add(-24 * time.Hour),
+		},
+		{
+			SessionID: "s-style", Slug: "answer-style", Title: "回答直接给结论",
+			Summary:  "用户要求回答直接给结论。",
+			Keywords: types.MemoryEpisodeTokens{"回答风格"},
+			ToAt:     time.Now().Add(-time.Hour),
+		},
+	} {
+		ids = append(ids, seedEpisode(t, svc, ctx, episode).ID)
+	}
+
+	digest, err := svc.repo.GetDigest(ctx, scope)
 	require.NoError(t, err)
-	require.NoError(t, svc.repo.MarkConsolidated(ctx, scope))
-	seedSimilarPreferences(t, svc, ctx, scope)
+	require.NoError(t, svc.repo.MarkEpisodesConsolidated(ctx, scope, ids, digest.Revision))
+}
+
+// The background pass runs at the tail of every extraction, and new material
+// is now the only bar it has to clear, so that check is the only thing
+// standing between a quiet store and a whole-profile model call per
+// conversation. An account a rewrite has already read must therefore stop
+// counting as new the moment it is folded in.
+func TestAccountsAProfileAlreadyReadStopCountingAsNewMaterial(t *testing.T) {
+	svc, tenantRepo, models := newProfileRewriteHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	seedDigest(t, svc, ctx, "## 用户画像\n- 在做后端\n")
+	scope := scopeFor(t, ctx)
+
+	const accounts = 3
+	ids := make([]string, 0, accounts)
+	for i := 0; i < accounts; i++ {
+		episode := seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+			SessionID: fmt.Sprintf("s-%d", i),
+			Slug:      fmt.Sprintf("conversation-%d", i),
+			Title:     fmt.Sprintf("第 %d 次对话", i),
+			Summary:   "用户问了一个问题，得到了答案。",
+			Keywords:  types.MemoryEpisodeTokens{"提问"},
+			ToAt:      time.Now().Add(-time.Duration(i) * time.Hour),
+		})
+		ids = append(ids, episode.ID)
+	}
+
+	digest, err := svc.repo.GetDigest(ctx, scope)
+	require.NoError(t, err)
+	require.True(t, svc.digestIsDue(ctx, scope),
+		"accounts no profile has read are exactly what a rewrite is for")
+
+	require.NoError(t, svc.repo.MarkEpisodesConsolidated(ctx, scope, ids, digest.Revision))
+
+	require.False(t, svc.digestIsDue(ctx, scope),
+		"a profile built from these accounts must not be immediately due again, "+
+			"or every extraction run pays for a rewrite that reads the same thing")
+	require.Zero(t, models.callCount())
+}
+
+// An account rewritten after the profile read it is new material again: the
+// conversation continued, so the text the profile summarized is gone.
+func TestARewrittenAccountIsNewMaterialAgain(t *testing.T) {
+	svc, _, tenantRepo := newMemoryHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	seedDigest(t, svc, ctx, "## 用户画像\n- 在做后端\n")
+	scope := scopeFor(t, ctx)
+
+	episode := seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-import", Slug: "knowledge-import-413", Title: "知识库批量入库报 413",
+		Summary:  "用户批量导入时报 413。",
+		Keywords: types.MemoryEpisodeTokens{"入库"},
+		ToAt:     time.Now().Add(-2 * time.Hour),
+	})
+	digest, err := svc.repo.GetDigest(ctx, scope)
+	require.NoError(t, err)
+	require.NoError(t, svc.repo.MarkEpisodesConsolidated(
+		ctx, scope, []string{episode.ID}, digest.Revision))
+
+	awaiting, err := svc.repo.CountEpisodesAwaitingDigest(ctx, scope)
+	require.NoError(t, err)
+	require.Zero(t, awaiting)
+
+	// The same conversation, summarized again after it carried on.
+	seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-import", Slug: "knowledge-import-413", Title: "知识库批量入库报 413",
+		Summary:  "用户批量导入时报 413，把单批大小调到 20 才通过。",
+		Keywords: types.MemoryEpisodeTokens{"入库", "413"},
+		ToAt:     time.Now(),
+	})
+
+	awaiting, err = svc.repo.CountEpisodesAwaitingDigest(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), awaiting,
+		"the profile summarized text that no longer describes the conversation")
+}
+
+// The whole point of the button is to overrule the background pass's judgement.
+// That pass declines when it has already read every account, which is the
+// common case and a correct one for something that spends a large call on a
+// document that usually barely changes — and no reason to refuse the person
+// who just pressed the button because the profile reads wrong to them.
+func TestAskingForAProfileRewriteOverrulesTheScheduleThatWouldDeclineIt(t *testing.T) {
+	svc, tenantRepo, models := newProfileRewriteHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	seedSettledProfile(t, svc, ctx)
+	scope := scopeFor(t, ctx)
+
+	require.False(t, svc.digestIsDue(ctx, scope),
+		"this only means anything while the background pass would have said no")
+
+	before, err := svc.repo.GetDigest(ctx, scope)
+	require.NoError(t, err)
 
 	result, err := svc.ConsolidateNow(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, result.Merged, "an explicit review must merge even if the daily pass just ran")
 	require.Empty(t, result.Skipped)
+	require.Equal(t, 2, result.Reviewed,
+		"the person who asked has to be told how much the rewrite read")
+	require.Equal(t, 1, models.callCount())
 
-	_, total, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
+	after, err := svc.repo.GetDigest(ctx, scope)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), total)
-
-	_, superseded, err := svc.ListItems(ctx, types.MemoryStatusSuperseded, 10, 0)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, superseded, int64(1))
+	require.Greater(t, after.Revision, before.Revision)
+	require.Contains(t, after.Body, "医学影像",
+		"a rewrite that reports success has to have replaced the profile")
 }
 
-// The pair that prompted this: two profiles that contradict each other share
-// 0.50 of their tokens, just under the bar the unattended pass uses, so the
-// button reported "nothing to do" in milliseconds without the model ever
-// seeing the one contradiction a person would want resolved.
-func TestAReviewSomeoneAskedForShowsTheModelBorderlinePairs(t *testing.T) {
-	svc, tenantRepo, models := newConsolidationHarness(t)
-	models.response = `{"statement":"我叫wizardchen，我是一个作家"}`
+// The endpoint is Viewer-level and each press is worth a whole-profile model
+// call, so the button must not be scriptable into a stream of them.
+func TestASecondProfileRewriteRightAwayIsRefused(t *testing.T) {
+	svc, tenantRepo, models := newProfileRewriteHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
-	require.NoError(t, err)
-	seedItem(t, svc, ctx, scope, types.MemoryKindProfile, "", "我叫wizard，我是一个画家", "p-a")
-	seedItem(t, svc, ctx, scope, types.MemoryKindProfile, "职业", "我叫wizardchen，我是一个作家", "p-b")
-
-	items, _, err := svc.repo.ListItems(ctx, scope, types.MemoryStatusActive, 50, 0)
-	require.NoError(t, err)
-	require.Empty(t, clusterSimilar(items),
-		"this pair is below the unattended bar; that is what makes it worth asking about")
-
-	result, err := svc.ConsolidateNow(ctx)
-	require.NoError(t, err)
-	require.Equal(t, 1, result.Candidates)
-	require.Equal(t, 1, result.Merged)
-	require.Equal(t, 2, result.Reviewed)
-}
-
-// Candidate selection is recall, not judgement. The model is asked about every
-// group and says so when the records are different things, and that answer has
-// to survive as "we looked" rather than "nothing looked alike".
-func TestTheModelGetsTheFinalSayOnWhatIsADuplicate(t *testing.T) {
-	svc, tenantRepo, models := newConsolidationHarness(t)
-	models.response = `{"statement":""}`
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
-	require.NoError(t, err)
-	seedSimilarPreferences(t, svc, ctx, scope)
-
-	result, err := svc.ConsolidateNow(ctx)
-	require.NoError(t, err)
-	require.Equal(t, 0, result.Merged)
-	require.Equal(t, 1, result.Candidates)
-	require.Equal(t, types.MemoryConsolidationSkipModelDeclined, result.Skipped)
-
-	_, total, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(2), total, "the model said these are different things")
-}
-
-// Merging supersedes wordings the user gave us. Doing that on a token overlap
-// because the model was unreachable would destroy information on the strength
-// of a heuristic that was never meant to decide anything.
-func TestAnUnreachableModelStopsTheReviewInsteadOfGuessing(t *testing.T) {
-	svc, tenantRepo, _ := newConsolidationHarness(t)
-	svc.modelService = nil
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
-	require.NoError(t, err)
-	seedSimilarPreferences(t, svc, ctx, scope)
-
-	result, err := svc.ConsolidateNow(ctx)
-	require.NoError(t, err)
-	require.Equal(t, 0, result.Merged)
-	require.Equal(t, types.MemoryConsolidationSkipModelUnavailable, result.Skipped)
-
-	_, total, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(2), total)
-}
-
-// Zeroes are the normal outcome, so a review that changed nothing has to say
-// which kind of nothing it was.
-func TestAReviewThatChangesNothingSaysWhy(t *testing.T) {
-	svc, tenantRepo, _ := newConsolidationHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
-	require.NoError(t, err)
-	seedItem(t, svc, ctx, scope, types.MemoryKindInterest, "小微SDK设备接入", "小微SDK设备接入", "i-a")
-	seedItem(t, svc, ctx, scope, types.MemoryKindInterest, "WeKnora混合检索", "WeKnora混合检索", "i-b")
-
-	result, err := svc.ConsolidateNow(ctx)
-	require.NoError(t, err)
-	require.Equal(t, types.MemoryConsolidationSkipNoCandidates, result.Skipped)
-	require.Equal(t, 2, result.Reviewed)
-}
-
-// The button is Viewer-level and each press is worth up to forcedMaxClusters
-// model calls, which a store the model keeps declining would repeat forever.
-func TestASecondReviewRightAwayIsRefused(t *testing.T) {
-	svc, tenantRepo, models := newConsolidationHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
-	require.NoError(t, err)
-	seedSimilarPreferences(t, svc, ctx, scope)
+	seedSettledProfile(t, svc, ctx)
 
 	first, err := svc.ConsolidateNow(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, first.Merged)
+	require.Empty(t, first.Skipped)
 	callsAfterFirst := models.callCount()
 
 	second, err := svc.ConsolidateNow(ctx)
 	require.NoError(t, err)
 	require.Equal(t, types.MemoryConsolidationSkipTooSoon, second.Skipped)
 	require.Equal(t, callsAfterFirst, models.callCount(),
-		"a refused review must not reach the model at all")
+		"a refused rewrite must not reach the model at all")
 }
 
-// The two clocks are separate so that the maintenance pass, which runs on its
-// own schedule and marks the subject consolidated, cannot make the button
-// report that the person only just asked for something they never asked for.
-func TestTheDailyPassDoesNotRateLimitTheButton(t *testing.T) {
-	svc, tenantRepo, _ := newConsolidationHarness(t)
+// Turning memory off has to stop everything that reads or writes it, including
+// the one action a person can trigger by hand.
+func TestAProfileRewriteIsRefusedWhenMemoryIsOff(t *testing.T) {
+	svc, tenantRepo, models := newProfileRewriteHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
-	require.NoError(t, err)
-	seedSimilarPreferences(t, svc, ctx, scope)
+	seedSettledProfile(t, svc, ctx)
 
-	svc.consolidateIfDue(ctx, scope, svc.workspaceConfig(ctx, 1), "chat-1")
+	tenantRepo.set(1, &types.MemoryConfig{})
+
+	result, err := svc.ConsolidateNow(ctx)
+	require.ErrorIs(t, err, ErrMemoryDisabled)
+	require.Nil(t, result)
+	require.Zero(t, models.callCount())
+}
+
+// Zeroes are the normal outcome of a rewrite, so one that changed nothing has
+// to say which kind of nothing it was.
+func TestAProfileRewriteWithTooLittleToReadSaysSo(t *testing.T) {
+	svc, tenantRepo, models := newProfileRewriteHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 
 	result, err := svc.ConsolidateNow(ctx)
 	require.NoError(t, err)
-	require.NotEqual(t, types.MemoryConsolidationSkipTooSoon, result.Skipped)
-	require.Equal(t, 1, result.Merged)
+	require.Equal(t, types.MemoryConsolidationSkipTooFewItems, result.Skipped)
+	require.Zero(t, result.Reviewed)
+	require.Zero(t, models.callCount(),
+		"there is nothing to write a profile from, so no call is worth making")
 }
 
-func TestScheduledConsolidationIgnoresAHandfulOfMemories(t *testing.T) {
-	svc, tenantRepo, models := newConsolidationHarness(t)
+// One conversation is enough for a first profile. It used to take two, on the
+// reasoning that a profile built from one conversation is a profile of that
+// conversation — true, and self-correcting, because the next rewrite replaces
+// the whole document. Waiting is not self-correcting: until the second
+// conversation exists the person gets nothing injected at all, and whatever
+// the first one established about them sits in an account that only a
+// semantically similar question would ever reach.
+func TestAFirstProfileIsWrittenFromOneConversation(t *testing.T) {
+	svc, tenantRepo, models := newProfileRewriteHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	scope := scopeFor(t, ctx)
-	_, err := svc.repo.EnsureSubject(ctx, scope)
-	require.NoError(t, err)
-	seedSimilarPreferences(t, svc, ctx, scope)
+	seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-intro", Slug: "self-introduction", Title: "自我介绍",
+		Summary:  "用户说自己是 wizard，是程序员。",
+		Keywords: types.MemoryEpisodeTokens{"自我介绍"},
+		ToAt:     time.Now().Add(-time.Hour),
+	})
+	models.response = "## 用户画像\n用户是程序员，自称 wizard。\n"
 
-	svc.consolidateIfDue(ctx, scope, svc.workspaceConfig(ctx, 1), "chat-1")
-	require.Zero(t, models.callCount(),
-		"the daily pass must not spend a model call on a handful of items")
-	_, total, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
+	result, err := svc.ConsolidateNow(ctx)
 	require.NoError(t, err)
-	require.Equal(t, int64(2), total)
+	require.Empty(t, result.Skipped)
+	require.Equal(t, 1, result.Reviewed)
+
+	digest, err := svc.repo.GetDigest(context.Background(), scopeFor(t, ctx))
+	require.NoError(t, err)
+	require.NotNil(t, digest)
+	require.Positive(t, digest.Revision)
+	require.Contains(t, digest.Body, "程序员",
+		"what the one conversation established has to reach the injected profile")
+}
+
+// The model is the part of this most likely to be briefly unreachable, and a
+// person who pressed a button needs to be told to try again rather than shown
+// a failed request.
+func TestAnUnreachableModelLeavesTheProfileAloneAndSaysWhy(t *testing.T) {
+	svc, tenantRepo, models := newProfileRewriteHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	seedSettledProfile(t, svc, ctx)
+	scope := scopeFor(t, ctx)
+	models.failNext = true
+
+	before, err := svc.repo.GetDigest(ctx, scope)
+	require.NoError(t, err)
+
+	result, err := svc.ConsolidateNow(ctx)
+	require.NoError(t, err)
+	require.Equal(t, types.MemoryConsolidationSkipModelUnavailable, result.Skipped)
+
+	after, err := svc.repo.GetDigest(ctx, scope)
+	require.NoError(t, err)
+	require.Equal(t, before.Revision, after.Revision)
+	require.Equal(t, before.Body, after.Body,
+		"a failed rewrite keeps the working profile rather than replacing it with nothing")
 }

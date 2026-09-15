@@ -74,10 +74,6 @@
               <span class="legend-dot" style="background: #d54941"></span>
               {{ $t('knowledgeEditor.wikiBrowser.filterComparison') }}
             </div>
-            <div v-if="graphFamiliarCount > 0" class="legend-item">
-              <span class="legend-familiar-ring"></span>
-              {{ $t('knowledgeEditor.wikiBrowser.legendFamiliar') }}
-            </div>
           </div>
           <div class="legend-divider"></div>
           <div class="legend-actions">
@@ -1431,8 +1427,6 @@ const graphFrontierCount = computed(() => {
   }
   return count
 })
-
-const graphFamiliarCount = computed(() => graphData.value?.meta?.familiar_count || 0)
 
 // graphStatusCard drives the little summary panel below the legend.
 //
@@ -3335,8 +3329,6 @@ function mergeGraphData(
     if (!existing) {
       nodeBySlug.set(n.slug, n)
       bloomGenerations.set(n.slug, gen)
-    } else if (n.familiar) {
-      existing.familiar = true
     }
   }
   const edgeKey = (e: { source: string; target: string }) => `${e.source}→${e.target}`
@@ -3351,7 +3343,6 @@ function mergeGraphData(
     if (!edgeSeen.has(k)) { edgeSeen.add(k); edges.push(e) }
   }
   const nodes = Array.from(nodeBySlug.values())
-  const familiarCount = nodes.filter((n) => n.familiar).length
   return {
     nodes,
     edges,
@@ -3361,7 +3352,6 @@ function mergeGraphData(
       // hint still reflects the KB-wide total.
       ...incoming.meta,
       returned: nodes.length,
-      familiar_count: familiarCount || undefined,
     },
   }
 }
@@ -3711,7 +3701,6 @@ interface GNode {
   x: number; y: number; vx: number; vy: number
   slug: string; title: string; type: string
   linkCount: number; pinned: boolean
-  familiar: boolean
 }
 
 // Persistent graph state so it survives re-renders
@@ -3863,7 +3852,6 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       x, y, vx, vy,
       slug: n.slug, title: n.title, type: n.page_type,
       linkCount: n.link_count || 0, pinned,
-      familiar: !!n.familiar,
     }
     nodeMap.set(n.slug, node)
     return node
@@ -4005,21 +3993,6 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     expansionRing.style.transition = 'opacity 0.2s'
     expansionRing.classList.add('node-expansion-ring')
     g.appendChild(expansionRing)
-
-    // Solid outer ring: this page was built from a document the current
-    // person keeps citing. Distinct from the dashed expansion ring so
-    // "I use this" and "there are more neighbors" do not look the same.
-    if (n.familiar) {
-      const familiarRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-      familiarRing.setAttribute('r', String(r + 7))
-      familiarRing.setAttribute('fill', 'none')
-      familiarRing.setAttribute('stroke', '#0052d9')
-      familiarRing.setAttribute('stroke-width', '2')
-      familiarRing.setAttribute('pointer-events', 'none')
-      familiarRing.style.opacity = '0.9'
-      familiarRing.classList.add('node-familiar-ring')
-      g.appendChild(familiarRing)
-    }
 
     // Pulse ring for selected state
     const activeRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
@@ -6266,17 +6239,6 @@ onUnmounted(() => {
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
-}
-
-.legend-familiar-ring {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  border: 2px solid #0052d9;
-  background: transparent;
 }
 
 .legend-divider {

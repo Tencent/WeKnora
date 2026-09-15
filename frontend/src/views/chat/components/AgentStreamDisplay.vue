@@ -20,11 +20,12 @@
       <div v-if="showIntermediateSteps" class="tree-children">
         <ChatMemoryStep
           v-if="hasMemory"
-          :memories="memoryItems"
+          :memories="recalledMemories"
           :expanded="memoryExpanded"
           :forgetting-id="memoryForgettingId"
           @toggle="toggleMemory"
           @forget="forgetMemory"
+          @open-profile="openMemoryProfile"
         />
         <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
           <div v-if="event && event.type" class="tree-child"
@@ -264,12 +265,13 @@
       <ChatMemoryStep
         v-if="showMemoryRow"
         class="event-item"
-        :memories="memoryItems"
+        :memories="recalledMemories"
         :expanded="memoryExpanded"
         :is-last="memoryIsLast"
         :forgetting-id="memoryForgettingId"
         @toggle="toggleMemory"
         @forget="forgetMemory"
+        @open-profile="openMemoryProfile"
       />
       <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
         <div v-if="event && event.type" class="event-item" :class="{
@@ -981,12 +983,13 @@ const showRequestInfo = computed(
 );
 
 const {
-  memoryItems,
+  recalledMemories,
   hasMemory,
   expanded: memoryExpanded,
   forgettingId: memoryForgettingId,
   toggle: toggleMemory,
   forget: forgetMemory,
+  openProfile: openMemoryProfile,
 } = useChatMemoryRow(() => props.session?.used_memories as UsedMemory[] | undefined);
 
 const resolveAssistantMessageId = (session?: SessionData) =>

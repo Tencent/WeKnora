@@ -1971,140 +1971,105 @@ export default {
   },
   memorySettings: {
     title: 'マイメモリ',
-    description: '会話をまたいでアシスタントが記憶しているあなたの情報です。ここで内容の確認・編集・削除ができます。削除したメモリが再び使われることはありません。',
-    workspaceDisabled: 'このワークスペースでは長期メモリが無効です。この切り替えは、管理者が有効にした後に反映されます。',
-    enableLabel: '自分の長期メモリを使用する',
-    enableDescription: 'オフにすると、アシスタントはあなたのメモリを読み取ることも追加することもありません。既存のメモリは保持され、再度オンにすると使用が再開されます。',
-    agentDisabledHint: '個々のエージェントが自分だけ長期メモリを無効にすることもできます。そのエージェントとの会話ではあなたのメモリは読み取られず追加もされませんが、他のエージェントには影響しません。',
+    description: 'アシスタントが会話をまたいで覚えているあなたに関する内容です。全体像をまとめたプロフィール、会話ごとの記録、そして一字一句そのまま覚えるよう頼んだ文が含まれます。いつでも確認・編集・削除できます。',
+    workspaceDisabled: 'このワークスペースでは長期メモリが無効です。管理者が有効にすると、このスイッチが効くようになります。',
+    enableLabel: '自分に長期メモリを使う',
+    enableDescription: 'オフにすると、アシスタントはあなたのメモリを読みも書きもしません。保存済みの内容は残り、再びオンにすれば続きから使えます。',
+    agentDisabledHint: '個々のエージェントも長期メモリを個別にオフにできます。オフのエージェントとの会話では読み取りも追加も行われません。他のエージェントには影響しません。',
     usage: {
-      title: 'メモリが使われるタイミング',
-      iconHint: '会話で使われるメモリを確認',
-      intro: '会話で使われるのは「有効」なメモリのみです。',
+      title: 'メモリが使われるとき',
+      iconHint: '会話で使われるメモリを確認する',
+      intro: '3 種類の内容は、それぞれ違う形で会話に入ります。',
       rows: {
-        alwaysOn: {
-          label: '毎回のやり取り',
-          text: 'プロフィール、好み、覚えておくよう依頼した内容'
+        profile: {
+          label: '毎回のやり取りで',
+          text: 'プロフィールは毎回のやり取りに丸ごと含まれます'
         },
-        situational: {
-          label: '関連するとき',
-          text: '事実と進行中のタスク'
+        episodes: {
+          label: '関連するときだけ',
+          text: '会話の記録は今の質問に応じて呼び出されます。使われるほど再び見つかりやすくなります'
         },
-        interest: {
-          label: 'よく話す話題',
-          text: '長期的な関心。毎回のやり取りで必ず引用されるわけではありません'
-        },
-        tracking: {
-          label: 'まず観察',
-          text: '繰り返し出る話題はまず回数が数えられ、しきい値に達してから長期的な関心になります'
-        },
-        documents: {
-          label: 'よく使う情報源',
-          text: '回答が繰り返し参照しているドキュメント。検索でわずかに優先されます'
-        },
-        pending: {
-          label: '確認した後',
-          text: '確認待ちの推測項目'
-        },
-        inactive: {
-          label: '使用しない',
-          text: '置き換えられた項目とアーカイブ済みの項目'
+        notes: {
+          label: '原文のまま',
+          text: '覚えるよう頼んだ文。モデルが書き換えることはありません'
         }
       }
     },
-    listTitle: 'メモリ',
-    listCount: '全{count}件',
-    statusActive: '有効',
-    statusSuperseded: '置き換え済み',
-    statusArchived: 'アーカイブ済み',
-    statusPending: '要確認',
-    statusTracking: '観察中',
-    statusDocuments: 'よく使う情報源',
-    confirmGuess: 'はい',
-    rejectGuess: 'いいえ',
-    pendingHint: 'これらはあなたの質問から推測された項目です。確認するまでは使用されません。',
-    trackingHint: 'これらは繰り返し質問している話題ですが、長期的な関心になるしきい値にはまだ達していません。それまでは会話で使用されません。',
-    documentsHint: 'これらのドキュメントは回答に繰り返し登場するため、検索でわずかに優先されます。観察を終了すると優先されなくなりますが、さらに2回引用されると再び表示されます。',
-    supersededHint: 'これらは新しいメモリに置き換えられました。変更の履歴として保持されており、会話では使用されません。',
-    archivedHint: 'アーカイブされたメモリは会話で使用されません。1人あたりの上限に達すると、使用頻度の低い項目から自動的にアーカイブされます。',
-    pendingEmptyTitle: '確認する項目はありません',
-    pendingEmptyDescription: 'あなたの質問から何かが推測されると、ここで確認を待ちます。',
-    trackingEmptyTitle: '観察中の話題はありません',
-    trackingEmptyDescription: '自動抽出を有効にすると、よく質問する内容の回数が数えられ、十分に繰り返された時点で長期的な関心になります。',
-    documentsEmptyTitle: 'よく使う情報源はまだありません',
-    documentsEmptyDescription: '回答で2回以上引用されたドキュメントがここに表示されます。',
-    supersededEmptyTitle: 'まだ置き換えられた項目はありません',
-    supersededEmptyDescription: '同じ話題を新しい表現で記録すると、古い表現がここに残ります。このページで項目を編集した場合はその場で更新され、履歴の行は作成されません。',
-    archivedEmptyTitle: 'まだアーカイブされた項目はありません',
-    archivedEmptyDescription: '有効なメモリが上限（デフォルトは200件）を超えると、使用頻度の低いものからアーカイブされます。期限付きのタスクも、期限が切れるとここに入ります。',
-    documentsHits: '{hits}回引用',
-    untitledDocument: '無題のドキュメント',
-    openDocument: 'ドキュメントを開く',
-    openDocumentUnavailable: '開けません: ナレッジベースが見つかりません',
-    stopTrackingDocument: '観察を終了',
-    stopTrackingDocumentConfirm: 'このドキュメントをパーソナライズ検索に使用しないようにしますか？さらに2回引用されると再び表示されます。',
-    stopTrackingDocumentSuccess: 'この情報源の観察を終了しました',
-    stopTrackingDocumentFailed: '観察の終了に失敗しました',
-    trackingProgress: 'これまで{hits}回質問しています。{threshold}回で長期的な関心になります',
-    trackingReady: 'しきい値に達しました。長期的な関心として保存できます',
-    trackingAliases: '他の言い方: {aliases}',
-    promoteTopic: '関心として保存',
-    dismissTopic: '観察を終了',
-    dismissTopicConfirm: 'この話題の観察を終了しますか？今後同じ話題を質問しても、自動的に長期的な関心として保存されなくなります。',
-    promoteSuccess: '長期的な関心として保存しました',
-    promoteFailed: '関心としての保存に失敗しました',
-    dismissSuccess: 'この話題の観察を終了しました',
-    dismissFailed: '観察の終了に失敗しました',
-    confirmSuccess: '確認しました',
-    confirmFailed: '確認に失敗しました',
-    rejectSuccess: '却下しました。今後推測されることはありません。',
-    rejectFailed: '却下に失敗しました',
+    listTitle: '保存されている内容',
+    tabs: {
+      profile: 'プロフィール',
+      episodes: '会話の記録',
+      notes: '原文メモ'
+    },
     export: 'エクスポート',
-    consolidate: '整理',
-    consolidateConfirm: '内容がほぼ重複する項目が統合されます。古い表現は「置き換え済み」に残ります。続行しますか？',
-    consolidateSuccess: '整理しました: {merged}グループを統合し、期限切れの{expired}件をアーカイブし、古いタスク{demoted}件を降格しました',
-    consolidateNothing: '整理が必要な項目はありませんでした',
-    consolidateTooFewItems: 'メモリが少ないため、まだ整理する必要はありません',
-    consolidateNoCandidates: '統合できるほど内容が近いメモリは見つかりませんでした',
-    consolidateModelDeclined: 'モデルが確認した結果、これらは別の内容と判断されたため、統合は行われませんでした',
-    consolidateTooSoon: '整理を実行したばかりです。しばらくしてから再試行してください。',
-    consolidateModelUnavailable: 'モデルを利用できなかったため、誤った統合を避けて何も変更しませんでした',
-    consolidateFailed: '整理に失敗しました',
+    exportTruncated: '保存量が多いため、エクスポートには一部のみが含まれます。',
+    rewrite: 'プロフィールを書き直す',
+    rewriteConfirm: '最近の会話の記録からプロフィールを作り直します。現在の文章（手で編集した部分を含む）は置き換わります。続けますか？',
+    rewriteSuccess: '会話の記録 {count} 件を読み、プロフィールを書き直しました',
+    rewriteNothing: 'プロフィールは変更されませんでした',
+    rewriteTooSoon: '書き直した直後です。少し時間をおいて試してください。',
+    rewriteTooFewEpisodes: '会話の記録がまだ少ないため、書き直せません',
+    rewriteModelUnavailable: 'モデルを利用できなかったため、プロフィールは変更していません',
+    rewriteFailed: 'プロフィールの書き直しに失敗しました',
     clear: 'すべて削除',
-    clearConfirm: 'すべてのメモリ、観察中の話題、よく使う情報源が完全に削除され、元に戻せません。続行しますか？',
-    deleteConfirm: 'このメモリを完全に削除しますか？',
-    add: '追加',
-    addPlaceholder: 'アシスタントに覚えておいてほしいことを1文で入力してください',
-    addTitle: 'メモリを追加',
-    addKindLabel: '種類',
-    addContentLabel: '内容',
-    emptyTitle: 'メモリはまだありません',
-    emptyDescription: '会話で「...を覚えておいて」と伝えるか、上の入力欄から直接追加してください。',
+    clearConfirm: 'プロフィール、すべての会話の記録、すべての原文メモを完全に削除します。元に戻せません。続けますか？',
+    profile: {
+      description: 'アシスタントが捉えているあなたの全体像で、毎回のやり取りに含まれます。文章はここで直接編集できます。',
+      placeholder: '## で見出しを書き、その下に内容を書きます',
+      emptyTitle: 'プロフィールはまだありません',
+      emptyDescription: '会話がいくつか貯まると、それらをもとにプロフィールが書かれます。作成後はここでいつでも編集できます。',
+      revision: '第 {revision} 版',
+      builtFrom: '{count} 件の会話から作成',
+      updatedAt: '更新: {time}',
+      userEdited: 'このプロフィールはあなたが編集しています。次に書き直すと、あなたの文章はモデルが書いた内容に置き換わります。',
+      length: '{count}/{max} 文字',
+      saved: 'プロフィールを保存しました',
+      delete: 'プロフィールを削除',
+      deleteConfirm: 'プロフィール全体を削除しますか？以降の会話には含まれなくなります。',
+      deleted: 'プロフィールを削除しました'
+    },
+    episodes: {
+      description: '会話が落ち着くと、その内容が記録としてまとめられます。以降は関連する質問のときだけ呼び出されます。',
+      emptyTitle: '会話の記録はまだありません',
+      emptyDescription: '会話が終わってしばらく静かになると、その内容がまとめられてここに並びます。',
+      useCount: '{count} 回使用',
+      outcomes: {
+        success: '解決済み',
+        partial: '一部解決',
+        fail: '未解決',
+        uncertain: '不明'
+      },
+      summaryEmpty: 'この記録には本文がありません。',
+      summaryFailed: '記録を読み込めませんでした。',
+      deleteConfirm: 'この会話の記録を削除しますか？',
+      deleted: '会話の記録を削除しました'
+    },
+    notes: {
+      description: 'あなたが明示的に覚えるよう頼んだ文です。原文のまま保存され、モデルが書き換えることはありません。',
+      placeholder: '一字一句そのまま覚えてほしい内容を書いてください',
+      add: '追加',
+      added: '追加しました',
+      count: '{count}/{max} 件',
+      full: '原文メモは最大 {max} 件です。追加するには 1 件削除してください。',
+      emptyTitle: '原文メモはまだありません',
+      emptyDescription: '会話で「……を覚えて」と伝えるか、上から直接追加してください。',
+      deleteConfirm: 'この原文メモを削除しますか？',
+      deleted: '削除しました'
+    },
     kinds: {
-      profile: 'あなたについて',
-      preference: '好み',
-      fact: '事実',
-      task: '進行中のタスク',
-      interest: '長期的な関心'
+      digest: 'プロフィール',
+      note: '原文',
+      episode: '会話の記録'
     },
     kindHints: {
-      profile: '以降のすべてのやり取りに含まれます',
-      preference: '以降のすべてのやり取りに含まれます',
-      fact: '質問が関連する場合にのみ使用されます',
-      task: '質問が関連する場合にのみ使用されます',
-      interest: 'あなたがよく尋ねる内容の理解に役立ちます。毎回のやり取りで必ず引用されるわけではありません'
-    },
-    origins: {
-      explicit: '依頼による',
-      extracted: '自動抽出',
-      manual: '手動追加'
+      digest: 'プロフィールの内容。毎回のやり取りに含まれます',
+      note: '一字一句そのまま覚えるよう頼んだ文',
+      episode: '過去の会話の記録'
     },
     toasts: {
       enabled: '長期メモリを有効にしました',
       disabled: '長期メモリを無効にしました',
-      added: '追加しました',
-      updated: '更新しました',
-      deleted: '削除しました',
-      cleared: 'メモリを{count}件削除しました',
+      cleared: '{count} 件のメモリを削除しました',
       saveFailed: '操作に失敗しました: {message}'
     }
   },
@@ -2184,13 +2149,13 @@ export default {
     embeddingModelDescription: '意味によるリコールはこのモデルのみを使用し、ナレッジベースが紐づけている埋め込みモデルとは独立しています。空欄の場合は字句のみの照合になります。変更すると、新しいメモリはすぐに新しいモデルを使用し、既存のメモリは再度埋め込まれるまで字句のみの照合のままです。',
     conditioningLabel: 'メモリを検索に反映する',
     conditioningDescription: 'メモリを回答用プロンプトに付け加えるだけでなく、クエリのリライトやドキュメントのランキングにも利用します。ナレッジベース製品でメモリが最も効果を発揮する部分です。',
-    interestThresholdLabel: '関心として記録するまでの質問回数',
-    interestThresholdDescription: '同じ話題がこの回数だけ質問されて初めて記録されます。1にするとその場限りの質問もすべて記録されるため、通常はノイズが多くなりすぎます。',
+    interestThresholdLabel: '繰り返しとみなす会話の回数',
+    interestThresholdDescription: '同じキーワードがこれだけ別々の会話に現れて初めて、その人が繰り返し戻ってくる話題とみなされます。1 にするとその場限りの質問もすべて数えるため、通常はノイズが多くなりすぎます。',
     instructionsLabel: 'カスタム抽出ルール',
     instructionsDescription: '抽出プロンプトに追加されるワークスペースのルールです。「顧客名は記録しない」など、製品側では判断できないポリシーを指定します。',
     instructionsPlaceholder: '1行に1つのルール。例: 顧客名は記録しない',
-    maxItemsLabel: 'メンバーあたりのメモリ上限',
-    maxItemsDescription: 'これを超えると、重要度と新しさに基づいて下位のメモリがアーカイブされます。アーカイブされたメモリは「マイメモリ」で引き続き確認できます。',
+    maxEpisodesLabel: 'メンバーあたりの会話記録の上限',
+    maxEpisodesDescription: 'これを超えると、使われていない記録から削除されます。プロフィールと原文メモには影響しません。',
     toasts: {
       saveSuccess: '長期メモリの設定を保存しました',
       saveFailed: '保存に失敗しました: {message}'
@@ -3135,7 +3100,6 @@ export default {
       filterConcept: '概念',
       filterSynthesis: '総合',
       filterComparison: '比較',
-      legendFamiliar: 'よく使う資料',
       emptyTitle: 'Wikiページはまだありません',
       emptyDesc: 'Wikiを有効にしてドキュメントをアップロードすると、ナレッジページが自動生成されます',
       selectPageHint: '左側からページを選択すると内容が表示されます',
@@ -3512,7 +3476,11 @@ export default {
     memoryForget: 'このメモリを削除',
     memoryForgotten: 'メモリを削除しました',
     memoryForgetFailed: '削除に失敗しました',
-    memoryHint: 'この回答が参照した長期メモリです。削除すると以降は使用されません。',
+    memoryHint: 'この回答が参照した長期メモリです。削除すると以降は使用されません。プロフィールは「マイメモリ」で全体を編集します。',
+    memoryOpenProfile: 'マイプロフィールを開く',
+    memoryEpisodeLoading: 'この記録を読み込んでいます…',
+    memoryEpisodeEmpty: 'この記録には本文がありません。',
+    memoryEpisodeFailed: '記録を読み込めませんでした。',
     suggestedQuestions: 'こんな質問ができます',
     followUpQuestions: '続けて質問',
     followUpQuestionsLoading: '質問候補を読み込み中',

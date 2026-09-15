@@ -18,28 +18,38 @@ import (
 
 type memoryFailureService struct{ interfaces.MemoryService }
 
-func (memoryFailureService) ConfirmItem(context.Context, string) (*types.MemoryItem, error) {
-	return nil, fmt.Errorf("confirm: %w", types.ErrMemoryConflict)
+func (memoryFailureService) GetEpisode(context.Context, string) (*types.MemoryEpisode, error) {
+	return nil, fmt.Errorf("load: %w", memory.ErrNotFound)
 }
 
-func (memoryFailureService) UpdateItem(context.Context, string, string, int) (*types.MemoryItem, error) {
-	return nil, fmt.Errorf("edit: %w", memory.ErrSensitiveContent)
+func (memoryFailureService) AddNote(context.Context, string) (*types.MemoryNote, error) {
+	return nil, fmt.Errorf("add: %w", memory.ErrNotesFull)
 }
 
-func TestMemoryConsistencyHTTPFailures(t *testing.T) {
+func (memoryFailureService) SaveProfile(context.Context, string) (int64, error) {
+	return 0, fmt.Errorf("save: %w", memory.ErrContentTooLong)
+}
+
+// A refusal the user can act on has to arrive as a 4xx. A full note store and
+// an over-long profile are both states they can fix themselves, and reporting
+// either as a server error would send them to support instead.
+func TestMemoryRefusalsReachTheCallerAsClientErrors(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.ErrorHandler())
 	handler := NewMemoryHandler(memoryFailureService{})
-	router.POST("/memory/items/:id/confirm", handler.ConfirmItem)
-	router.PUT("/memory/items/:id", handler.UpdateItem)
+	router.GET("/memory/episodes/:id", handler.GetEpisode)
+	router.POST("/memory/notes", handler.CreateNote)
+	router.PUT("/memory/profile", handler.SaveProfile)
 	for _, tc := range []struct {
+		name               string
 		method, path, body string
 		status             int
 	}{
-		{http.MethodPost, "/memory/items/stale/confirm", "", http.StatusConflict},
-		{http.MethodPut, "/memory/items/item", `{"content":"sensitive"}`, http.StatusBadRequest},
+		{"another subject's episode", http.MethodGet, "/memory/episodes/someone-else", "", http.StatusNotFound},
+		{"note store full", http.MethodPost, "/memory/notes", `{"content":"我只用中文"}`, http.StatusBadRequest},
+		{"profile too long", http.MethodPut, "/memory/profile", `{"body":"很长的画像"}`, http.StatusBadRequest},
 	} {
-		t.Run(tc.method, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			request.Header.Set("Content-Type", "application/json")

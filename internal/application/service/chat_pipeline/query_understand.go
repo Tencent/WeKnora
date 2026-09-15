@@ -349,9 +349,6 @@ func (p *PluginQueryUnderstand) memoryBackground(ctx context.Context, chatManage
 	if len(memCtx.Interests) > 0 {
 		b.WriteString("\n长期关注：" + strings.Join(memCtx.Interests, "、"))
 	}
-	if len(memCtx.Documents) > 0 {
-		b.WriteString("\n常查资料：" + strings.Join(memCtx.Documents, "、"))
-	}
 	b.WriteString("\n</asker_background>")
 
 	// Deliberately does not add to chatManage.UsedMemories. What this reads is
@@ -363,8 +360,6 @@ func (p *PluginQueryUnderstand) memoryBackground(ctx context.Context, chatManage
 	fields := map[string]interface{}{
 		"session_id": chatManage.SessionID,
 		"interests":  len(memCtx.Interests),
-		"documents":  len(memCtx.Documents),
-		"items":      len(memCtx.Items),
 	}
 	if len(memCtx.Interests) > 0 {
 		fields["interest_previews"] = memCtx.Interests

@@ -1,31 +1,5 @@
 import { get, put, post, del } from '@/utils/request'
 
-// Kinds mirror internal/types/memory.go. profile and preference make up the
-// block injected on every turn; fact and task are pulled in only when the
-// current question matches them.
-export type MemoryKind = 'profile' | 'preference' | 'fact' | 'task' | 'interest'
-export type MemoryStatus = 'active' | 'superseded' | 'archived' | 'pending'
-export type MemoryOrigin = 'explicit' | 'extracted' | 'manual'
-
-export interface MemoryItem {
-  id: string
-  kind: MemoryKind
-  content: string
-  topic: string
-  importance: number
-  origin: MemoryOrigin
-  status: MemoryStatus
-  source_session_id: string
-  source_message_id: string
-  valid_from: string
-  invalid_at: string | null
-  superseded_by: string
-  last_used_at: string | null
-  use_count: number
-  created_at: string
-  updated_at: string
-}
-
 // MemorySettings is already merged server-side, so the UI never has to combine
 // a workspace switch with a personal one itself.
 export interface MemorySettings {
@@ -33,22 +7,22 @@ export interface MemorySettings {
   user_enabled: boolean
   effective: boolean
   write_mode: string
-  item_count: number
-  max_items: number
+  episode_count: number
+  max_episodes: number
 }
 
 export interface MemoryConfig {
   enabled: boolean
   write_mode: 'explicit_only' | 'auto'
   extract_model_id: string
-  max_items: number
+  max_episodes: number
   /** Debounce before distillation runs, in seconds. */
   extract_delay_seconds: number
   /** Floor between two distillation runs for one person, in seconds. */
   extract_min_interval_seconds: number
   /** Workspace-specific rules appended to the distillation prompt. */
   extract_instructions: string
-  /** How many conversations must touch a topic before it becomes an interest. */
+  /** How many separate conversations a subject must appear in to count as a recurring one. */
   interest_threshold: number
   /** Whether memory may shape retrieval, not only the answer prompt. */
   retrieval_conditioning: boolean
@@ -57,6 +31,63 @@ export interface MemoryConfig {
   /** Whether recall also matches on meaning, not only on wording. */
   vector_recall: boolean
 }
+
+/** The single consolidated document about a person, injected on every turn. */
+export interface MemoryDigest {
+  body: string
+  /** Bumped on every rewrite and on every save from this page. */
+  revision: number
+  /** How many conversation accounts the current body was written from. */
+  episode_count: number
+  /** Set once a human has edited the body; a rewrite would discard that wording. */
+  user_edited_at: string | null
+  generated_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Whether the conversation reached an answer, as judged when it was written up. */
+/**
+ * What the conversation achieved. A later reader needs it to know whether an
+ * approach recorded in an account is one to repeat, since "we did X" and "we
+ * tried X and it did not work" are the same text with opposite meanings. An
+ * account that does not say how it ended is `uncertain`, never `success`.
+ */
+export type MemoryEpisodeOutcome = 'success' | 'partial' | 'fail' | 'uncertain'
+
+/** One conversation written up as a narrative account, once it went quiet. */
+export interface MemoryEpisode {
+  id: string
+  session_id: string
+  slug: string
+  title: string
+  outcome: MemoryEpisodeOutcome
+  summary: string
+  keywords: string[]
+  from_at: string
+  to_at: string
+  use_count: number
+  last_used_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** A sentence the user asked to have kept, stored word for word. */
+export interface MemoryNote {
+  id: string
+  content: string
+  source_session_id: string
+  source_message_id: string
+  created_at: string
+  updated_at: string
+}
+
+/** The profile body is capped server-side; the editor surfaces the same number. */
+export const MEMORY_PROFILE_MAX_LENGTH = 2400
+/** Per-note length cap, enforced server-side. */
+export const MEMORY_NOTE_MAX_LENGTH = 300
+/** How many notes one person may hold at once. */
+export const MEMORY_NOTE_MAX_COUNT = 20
 
 // ---------------------------------------------------------------------------
 // Personal memory. Every endpoint operates on the caller's own memory space,
@@ -72,119 +103,86 @@ export function updateMemoryEnabled(enabled: boolean) {
   return put<{ success: boolean; data: MemorySettings }>('/api/v1/memory/settings', { enabled })
 }
 
-export function listMemoryItems(params: { status?: MemoryStatus; limit?: number; offset?: number } = {}) {
+/** Resolves with `data: null` while too few conversations exist to write one. */
+export function getMemoryProfile() {
+  return get<{ success: boolean; data: MemoryDigest | null }>('/api/v1/memory/profile')
+}
+
+export function updateMemoryProfile(body: string) {
+  return put<{ success: boolean; data: { revision: number } }>('/api/v1/memory/profile', { body })
+}
+
+export function deleteMemoryProfile() {
+  return del<{ success: boolean }>('/api/v1/memory/profile')
+}
+
+export function listMemoryEpisodes(params: { limit?: number; offset?: number } = {}) {
   const query = new URLSearchParams()
-  if (params.status) query.set('status', params.status)
   if (params.limit != null) query.set('limit', String(params.limit))
   if (params.offset != null) query.set('offset', String(params.offset))
   const suffix = query.toString() ? `?${query.toString()}` : ''
-  return get<{ success: boolean; data: MemoryItem[]; total: number }>(`/api/v1/memory/items${suffix}`)
-}
-
-/** Accept a memory the system inferred, so it starts being used. */
-export function confirmMemoryItem(id: string) {
-  return post<{ success: boolean; data: MemoryItem }>(`/api/v1/memory/items/${id}/confirm`, {})
-}
-
-/** Decline an inference. The refusal is remembered, so it is not re-proposed. */
-export function rejectMemoryItem(id: string) {
-  return post<{ success: boolean }>(`/api/v1/memory/items/${id}/reject`, {})
-}
-
-export function createMemoryItem(payload: { kind: MemoryKind; content: string; importance?: number }) {
-  return post<{ success: boolean; data: MemoryItem }>('/api/v1/memory/items', payload)
-}
-
-export function updateMemoryItem(id: string, payload: { content: string; importance: number }) {
-  return put<{ success: boolean; data: MemoryItem }>(
-    `/api/v1/memory/items/${encodeURIComponent(id)}`,
-    payload,
+  return get<{ success: boolean; data: MemoryEpisode[]; total: number }>(
+    `/api/v1/memory/episodes${suffix}`,
   )
 }
 
-export function deleteMemoryItem(id: string) {
-  return del<{ success: boolean }>(`/api/v1/memory/items/${encodeURIComponent(id)}`)
+/** The list carries titles only; the narrative itself has to be asked for. */
+export function getMemoryEpisode(id: string) {
+  return get<{ success: boolean; data: MemoryEpisode }>(
+    `/api/v1/memory/episodes/${encodeURIComponent(id)}`,
+  )
 }
 
-export function clearMemoryItems() {
-  return del<{ success: boolean; removed: number }>('/api/v1/memory/items')
+export function deleteMemoryEpisode(id: string) {
+  return del<{ success: boolean }>(`/api/v1/memory/episodes/${encodeURIComponent(id)}`)
 }
 
-export function exportMemoryItems() {
-  return get<{ success: boolean; total: number; data: MemoryItem[] }>('/api/v1/memory/export')
+export function listMemoryNotes(params: { limit?: number } = {}) {
+  const suffix = params.limit != null ? `?limit=${params.limit}` : ''
+  return get<{ success: boolean; data: MemoryNote[] }>(`/api/v1/memory/notes${suffix}`)
 }
 
-/** Why a review changed nothing. Empty when it did change something. */
-export type MemoryConsolidationSkip =
-  | 'too_few_items'
-  | 'no_candidates'
-  | 'model_unavailable'
-  | 'model_declined'
+export function createMemoryNote(content: string) {
+  return post<{ success: boolean; data: MemoryNote }>('/api/v1/memory/notes', { content })
+}
+
+export function deleteMemoryNote(id: string) {
+  return del<{ success: boolean }>(`/api/v1/memory/notes/${encodeURIComponent(id)}`)
+}
+
+/** Drops the profile, every account and every note in one call. */
+export function clearAllMemories() {
+  return del<{ success: boolean; removed: number }>('/api/v1/memory/all')
+}
+
+export interface MemoryExport {
+  profile: MemoryDigest | null
+  episodes: MemoryEpisode[]
+  notes: MemoryNote[]
+}
+
+export function exportMemories() {
+  return get<{ success: boolean; total: number; truncated: boolean; data: MemoryExport }>(
+    '/api/v1/memory/export',
+  )
+}
+
+/** Why a rewrite left the profile as it was. Empty when it did rewrite it. */
+export type MemoryConsolidationSkip = 'too_soon' | 'too_few_items' | 'model_unavailable'
 
 export interface MemoryConsolidationResult {
   merged: number
   demoted: number
   expired: number
+  /** How many conversation accounts the rewrite read. */
   reviewed: number
   candidates: number
   skipped?: MemoryConsolidationSkip
 }
 
-/** Merge near-duplicates now, without waiting for the daily distillation pass. */
+/** Rewrite the consolidated profile now, without waiting for the scheduled pass. */
 export function consolidateMemory() {
   return post<{ success: boolean; data: MemoryConsolidationResult }>('/api/v1/memory/consolidate', {})
-}
-
-export interface MemoryTopic {
-  id: string
-  topic: string
-  aliases: string[]
-  hits: number
-  threshold: number
-  last_seen_at: string
-}
-
-export function listMemoryTopics(params: { limit?: number; offset?: number } = {}) {
-  const query = new URLSearchParams()
-  if (params.limit != null) query.set('limit', String(params.limit))
-  if (params.offset != null) query.set('offset', String(params.offset))
-  const suffix = query.toString() ? `?${query.toString()}` : ''
-  return get<{ success: boolean; data: MemoryTopic[]; total: number }>(`/api/v1/memory/topics${suffix}`)
-}
-
-/** Promote a counted topic into a long-term interest without waiting. */
-export function promoteMemoryTopic(id: string) {
-  return post<{ success: boolean; data: MemoryItem }>(
-    `/api/v1/memory/topics/${encodeURIComponent(id)}/promote`,
-    {},
-  )
-}
-
-/** Stop tracking a topic. The refusal is remembered so it is not auto-promoted later. */
-export function deleteMemoryTopic(id: string) {
-  return del<{ success: boolean }>(`/api/v1/memory/topics/${encodeURIComponent(id)}`)
-}
-
-export interface MemoryDoc {
-  id: string
-  knowledge_id: string
-  knowledge_base_id: string
-  title: string
-  hits: number
-  last_used_at: string
-}
-
-export function listMemoryDocuments(params: { limit?: number; offset?: number } = {}) {
-  const query = new URLSearchParams()
-  if (params.limit != null) query.set('limit', String(params.limit))
-  if (params.offset != null) query.set('offset', String(params.offset))
-  const suffix = query.toString() ? `?${query.toString()}` : ''
-  return get<{ success: boolean; data: MemoryDoc[]; total: number }>(`/api/v1/memory/documents${suffix}`)
-}
-
-/** Stop using one document as a personal retrieval signal. */
-export function deleteMemoryDocument(id: string) {
-  return del<{ success: boolean }>(`/api/v1/memory/documents/${encodeURIComponent(id)}`)
 }
 
 // ---------------------------------------------------------------------------

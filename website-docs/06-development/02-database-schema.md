@@ -151,14 +151,14 @@ SQLite 版本号独立演进，不能与 PostgreSQL 数字一一对应：
 
 | 表 | 用途与关键字段 |
 | --- | --- |
-| `memory_subjects` | (tenant_id,subject_id) 唯一；个人 enabled、常驻 block_text、item_count、extract_cursor/pending_sessions/extract_scheduled_at、整理时间 |
-| `memory_items` | kind/content/topic/normalized_key、importance/origin/status、来源会话/消息、valid_from/invalid_at/expires_at、superseded_by |
-| `memory_tombstones` | 删除/拒绝的主题与内容指纹，用于抑制重复抽取，不保存原正文 |
-| `memory_topic_stats` | topic/aliases、hits、last_seen_at/promoted_at |
-| `memory_doc_affinity` | knowledge_id/knowledge_base_id/title、hits/last_used_at |
-| `memory_item_embeddings` | item_id、model_id、dims、vector；与条目分表存储 |
+| `memory_subjects` | (tenant_id,subject_id) 唯一；个人 enabled、last_extracted_at、extraction_state、extract_cursor/pending_sessions/extract_scheduled_at、consolidated_at/forced_consolidated_at |
+| `memory_episodes` | 每段对话一份叙述（000096）；session_id、slug（人内唯一，改写时不变）、title、outcome（success/partial/fail/uncertain）、summary、keywords（JSONB）、from_at/to_at、use_count/last_used_at、digest_revision |
+| `memory_episode_embeddings` | episode_id、model_id、dims、vector（BYTEA），有 pgvector 时另建 embedding halfvec 列；与叙述分表存储 |
+| `memory_digests` | 常驻画像，PK (tenant_id,subject_id)；body/previous_body、revision、episode_count、user_edited_at/generated_at、lease_id/leased_until |
+| `memory_notes` | 用户要求记住的原话；content、source_session_id/source_message_id，按 (tenant_id,subject_id,created_at DESC) 索引 |
+| `memory_extraction_sessions` | 按会话记录抽取进度（000094）；PK (tenant_id,subject_id,session_id)、cursor_at/cursor_id、pending、failure_count/failure_code、failed_from_*/failed_to_*/failed_at |
 
-subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。向量记录不放进条目列表，也不改变原知识库的访问权。
+subject_id 使用 Principal.StorageID()，与 tenant_id 共同隔离身份。一段对话只有一份 `memory_episodes` 行，由 (tenant_id,subject_id,session_id) 的部分唯一索引约束，session_id 为空的叙述不参与该约束。`digest_revision` 为 0 表示还没有画像读过这份叙述，既是整理的脏标记，也让刚写下的叙述不被 `max_episodes` 裁掉。向量记录不放进叙述列表，也不改变原知识库的访问权。
 
 ### 跨租户协作（组织） {#_3-5-跨租户协作-组织}
 

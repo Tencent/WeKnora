@@ -31,6 +31,34 @@ func userMessage(sessionID, content string, at time.Time) *types.Message {
 	}
 }
 
+// accountResponse is what a well-behaved account-writing call returns. Tests
+// that are about the pipeline rather than about the account itself use it so
+// that a run reaches the end of the write path.
+func accountResponse(title, summary string, notes ...string) string {
+	body, err := json.Marshal(map[string]any{
+		"summary": summary,
+		"title":   title,
+		"outcome": "success",
+		"notes":   notes,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return string(body)
+}
+
+// settledConversation builds a conversation an account is due for: enough of
+// the user in it to be worth writing about, and quiet for long enough that the
+// idle window has passed.
+func settledConversation(sessionID string, lines ...string) []*types.Message {
+	base := time.Now().Add(-episodeIdleWindow - time.Hour)
+	messages := make([]*types.Message, 0, len(lines))
+	for i, line := range lines {
+		messages = append(messages, userMessage(sessionID, line, base.Add(time.Duration(i)*time.Minute)))
+	}
+	return messages
+}
+
 // drainExtractions runs every task the service queued, plus any follow-ups
 // those runs queue, until the queue is empty. Bounded so a scheduling bug
 // shows up as a failure rather than a hang.
@@ -59,7 +87,7 @@ func TestEveryTurnIsEventuallyRead(t *testing.T) {
 		Enabled: true, WriteMode: types.MemoryWriteAuto,
 		ExtractDelaySeconds: 5, ExtractMinIntervalSeconds: 1,
 	})
-	models.response = `{"memories":[]}`
+	models.response = accountResponse("十二句话", "用户连着说了十二句话。")
 
 	base := time.Now().Add(-time.Hour)
 	var transcript []*types.Message
@@ -87,7 +115,7 @@ func TestTurnsDuringARunAreNotLost(t *testing.T) {
 	tenantRepo.set(1, &types.MemoryConfig{
 		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 5,
 	})
-	models.response = `{"memories":[]}`
+	models.response = accountResponse("两句话", "用户说了两句话。")
 
 	base := time.Now().Add(-time.Hour)
 	messages.set("session-1", []*types.Message{userMessage("session-1", "第一句", base)})
@@ -111,34 +139,6 @@ func TestTurnsDuringARunAreNotLost(t *testing.T) {
 	require.Contains(t, seen, "第二句")
 }
 
-// TestMessagesBeyondOneRunsCapAreFollowedUp covers a subject who said more in
-// one window than a single run is allowed to read.
-func TestMessagesBeyondOneRunsCapAreFollowedUp(t *testing.T) {
-	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	tenantRepo.set(1, &types.MemoryConfig{
-		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 5,
-	})
-	models.response = `{"memories":[]}`
-
-	base := time.Now().Add(-time.Hour)
-	total := extractMaxMessagesPerRun*2 + 5
-	var transcript []*types.Message
-	for i := 0; i < total; i++ {
-		transcript = append(transcript,
-			userMessage("session-1", fmt.Sprintf("消息%d号", i), base.Add(time.Duration(i)*time.Second)))
-	}
-	messages.set("session-1", transcript)
-	svc.ScheduleExtraction(ctx, "session-1", "message-last", "model-1")
-
-	runs := drainExtractions(t, svc, enqueuer)
-	require.Greater(t, runs, 1, "a backlog larger than one run must produce follow-up runs")
-
-	seen := models.seenTranscripts()
-	require.Contains(t, seen, "消息0号", "the oldest unread message must not be skipped")
-	require.Contains(t, seen, fmt.Sprintf("消息%d号", total-1))
-}
-
 // TestParallelSessionsAreAllRead: a person talking in two conversations must
 // not have one of them ignored because the other triggered the run.
 func TestParallelSessionsAreAllRead(t *testing.T) {
@@ -147,11 +147,10 @@ func TestParallelSessionsAreAllRead(t *testing.T) {
 	tenantRepo.set(1, &types.MemoryConfig{
 		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 5,
 	})
-	models.response = `{"memories":[]}`
+	models.response = accountResponse("两个会话", "用户同时开了两个会话。")
 
-	base := time.Now().Add(-time.Hour)
-	messages.set("session-a", []*types.Message{userMessage("session-a", "会话A说的话", base)})
-	messages.set("session-b", []*types.Message{userMessage("session-b", "会话B说的话", base.Add(time.Second))})
+	messages.set("session-a", settledConversation("session-a", "会话A说的话", "会话A的后一句"))
+	messages.set("session-b", settledConversation("session-b", "会话B说的话", "会话B的后一句"))
 
 	svc.ScheduleExtraction(ctx, "session-a", "message-a", "model-1")
 	svc.ScheduleExtraction(ctx, "session-b", "message-b", "model-1")
@@ -162,39 +161,44 @@ func TestParallelSessionsAreAllRead(t *testing.T) {
 	require.Contains(t, seen, "会话B说的话")
 }
 
-// TestAlreadyReadMessagesAreNotReread keeps the guarantee from degenerating
-// into "read everything every time", which would make cost grow with history.
-func TestAlreadyReadMessagesAreNotReread(t *testing.T) {
+// A conversation has one account, revised as the conversation grows. The
+// revision is shown what it concluded last time, because otherwise it re-reads
+// the early turns cold and its judgement of them wanders between runs — the
+// same afternoon would be described differently every time somebody spoke.
+func TestARewriteIsShownItsPreviousAccount(t *testing.T) {
 	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 	tenantRepo.set(1, &types.MemoryConfig{
 		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 5,
 	})
-	models.response = `{"memories":[]}`
+	scope, err := ResolveScope(ctx)
+	require.NoError(t, err)
 
-	base := time.Now().Add(-time.Hour)
-	messages.set("session-1", []*types.Message{userMessage("session-1", "旧的一句", base)})
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
-	drainExtractions(t, svc, enqueuer)
-	require.Equal(t, 1, models.calls)
-
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "旧的一句", base),
-		userMessage("session-1", "新的一句", base.Add(time.Minute)),
-	})
+	transcript := settledConversation("session-1", "先问入库失败", "再问批量大小")
+	messages.set("session-1", transcript)
+	models.response = accountResponse("入库失败", "用户在排查入库失败，先怀疑是批量太大。")
 	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	require.Equal(t, 2, models.calls)
-	// The earlier message may appear as read-only context, but it must not be
-	// inside the block the model extracts from, or it would be re-derived into
-	// a memory on every run.
-	transcript := transcriptBlock(models.lastPrompt)
-	require.Contains(t, transcript, "新的一句")
-	require.NotContains(t, transcript, "旧的一句",
-		"a message already behind the watermark must not be extracted from twice")
-	require.Contains(t, models.lastPrompt, "context only",
-		"the earlier turn should still be visible as context")
+	transcript = append(transcript,
+		userMessage("session-1", "调到 20 就过了", transcript[1].CreatedAt.Add(time.Minute)))
+	messages.set("session-1", transcript)
+	models.response = accountResponse("入库失败", "用户把批量调到 20 后入库通过。")
+	svc.ScheduleExtraction(ctx, "session-1", "message-3", "model-1")
+	drainExtractions(t, svc, enqueuer)
+
+	require.Contains(t, models.lastPromptContaining(episodeTranscriptHeading), "用户在排查入库失败",
+		"the rewrite has to see what it concluded about the earlier turns")
+
+	stored, err := svc.repo.EpisodeBySession(context.Background(), scope, "session-1")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, "用户把批量调到 20 后入库通过。", stored.Summary,
+		"the account is revised in place, not appended to")
+
+	_, total, err := svc.repo.ListEpisodes(context.Background(), scope, 10, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total, "one conversation, one account")
 }
 
 // TestFailedRunLeavesMessagesUnread: a model error must not consume the
@@ -206,18 +210,17 @@ func TestFailedRunLeavesMessagesUnread(t *testing.T) {
 		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 5,
 	})
 
-	base := time.Now().Add(-time.Hour)
-	messages.set("session-1", []*types.Message{userMessage("session-1", "重要的一句", base)})
+	messages.set("session-1", settledConversation("session-1", "重要的一句", "还有一句"))
 	models.failNext = true
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
+	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
 
 	task := enqueuer.pop()
 	require.NotNil(t, task)
 	require.Error(t, svc.Handle(context.Background(), task))
 
 	// The next turn schedules a fresh run, which must see the message again.
-	models.response = `{"memories":[]}`
-	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
+	models.response = accountResponse("重要的话", "用户说了两句要紧的话。")
+	svc.ScheduleExtraction(ctx, "session-1", "message-3", "model-1")
 	drainExtractions(t, svc, enqueuer)
 	require.Contains(t, models.seenTranscripts(), "重要的一句")
 }
@@ -245,7 +248,7 @@ func TestMinIntervalDefersInsteadOfDropping(t *testing.T) {
 		Enabled: true, WriteMode: types.MemoryWriteAuto,
 		ExtractDelaySeconds: 5, ExtractMinIntervalSeconds: 600,
 	})
-	models.response = `{"memories":[]}`
+	models.response = accountResponse("两句话", "用户说了两句话。")
 
 	base := time.Now().Add(-time.Hour)
 	messages.set("session-1", []*types.Message{userMessage("session-1", "第一句", base)})
@@ -285,51 +288,21 @@ func TestNothingIsScheduledWhileMemoryIsOff(t *testing.T) {
 	require.Zero(t, models.calls)
 }
 
-// transcriptBlock returns just the part of the prompt the model is asked to
-// extract from, so a test can distinguish "shown as context" from "extracted".
+// transcriptBlock returns just the conversation the model is asked to describe,
+// so a test can distinguish what was shown as instruction from what was shown
+// as data.
 func transcriptBlock(prompt string) string {
-	start := strings.Index(prompt, "<transcript>")
-	end := strings.Index(prompt, "</transcript>")
-	if start < 0 || end <= start {
+	start := strings.LastIndex(prompt, episodeTranscriptHeading)
+	if start < 0 {
 		return ""
 	}
-	return prompt[start:end]
+	return prompt[start:]
 }
 
 var (
 	_ = json.Marshal
 	_ asynq.Task
 )
-
-// Distillation runs on a worker whose context carries no principal — its scope
-// travels in the task payload. Anything the distiller calls therefore has to be
-// handed that scope explicitly. When topic counting re-derived the scope from
-// the context instead, it silently counted nothing: extraction looked healthy,
-// memories were written, and interests never appeared.
-func TestTopicsAreCountedOnTheBackgroundWorker(t *testing.T) {
-	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	tenantRepo.set(1, &types.MemoryConfig{
-		Enabled: true, WriteMode: types.MemoryWriteAuto,
-		ExtractDelaySeconds: 1, InterestThreshold: 2,
-	})
-	models.response = `{"memories":[],"topics":["医学影像分割"]}`
-
-	base := time.Now().Add(-time.Hour)
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "分割模型怎么调参", base),
-	})
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
-	drainExtractions(t, svc, enqueuer)
-
-	scope, err := ResolveScope(ctx)
-	require.NoError(t, err)
-	stats, err := svc.repo.TopTopics(context.Background(), scope, 10)
-	require.NoError(t, err)
-	require.Len(t, stats, 1, "the worker must be able to count topics without a request context")
-	require.Equal(t, "医学影像分割", stats[0].Topic)
-	require.Equal(t, 1, stats[0].Hits)
-}
 
 // A model that returns nothing must not be mistaken for a conversation with
 // nothing in it.
@@ -349,10 +322,8 @@ func TestATruncatedRunDoesNotSwallowTheMessages(t *testing.T) {
 	// Truncate every attempt, including the retry with more room.
 	models.truncateUntilCall = 99
 
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "我在做医疗影像的后端", time.Now().Add(-time.Hour)),
-	})
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
+	messages.set("session-1", settledConversation("session-1", "我在做医疗影像的后端", "主要是分割模型"))
+	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
 
 	task := enqueuer.pop()
 	require.NotNil(t, task)
@@ -361,21 +332,20 @@ func TestATruncatedRunDoesNotSwallowTheMessages(t *testing.T) {
 
 	scope, err := ResolveScope(ctx)
 	require.NoError(t, err)
-	subject, err := svc.repo.GetSubject(context.Background(), scope)
+	pending, err := svc.repo.HasPendingExtraction(context.Background(), scope)
 	require.NoError(t, err)
-	require.True(t, subject.ExtractCursor == nil || subject.ExtractCursor.IsZero(),
+	require.True(t, pending,
 		"the watermark must not advance over messages the model never read")
 
-	// The same message is still there to be read once the model can answer.
+	// The same conversation is still there to be read once the model can answer.
 	models.truncateUntilCall = 0
-	models.response = `{"memories":[{"action":"add","kind":"profile","topic":"职业",` +
-		`"content":"在做医疗影像的后端","importance":4,"source":1}]}`
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
+	models.response = accountResponse("医疗影像后端", "用户在做医疗影像的后端，主要是分割模型。")
+	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	_, total, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
+	stored, err := svc.repo.EpisodeBySession(context.Background(), scope, "session-1")
 	require.NoError(t, err)
-	require.Equal(t, int64(1), total, "the message must still be distilled after the model recovers")
+	require.NotNil(t, stored, "the conversation must still be distilled after the model recovers")
 }
 
 // A model that only needs more room gets it, without the caller ever seeing a
@@ -387,21 +357,20 @@ func TestTruncationIsRetriedWithMoreRoom(t *testing.T) {
 		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 1,
 	})
 	models.truncateUntilCall = 1
-	models.response = `{"memories":[{"action":"add","kind":"profile","topic":"职业",` +
-		`"content":"在做医疗影像的后端","importance":4,"source":1}]}`
+	models.response = accountResponse("医疗影像后端", "用户在做医疗影像的后端，主要是分割模型。")
 
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "我在做医疗影像的后端", time.Now().Add(-time.Hour)),
-	})
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
+	messages.set("session-1", settledConversation("session-1", "我在做医疗影像的后端", "主要是分割模型"))
+	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	require.Greater(t, models.lastBudgetAsked(), extractBudgetTokens,
+	require.Greater(t, models.lastCallContaining(episodeTranscriptHeading).budget, episodeBudgetTokens,
 		"the retry has to offer more room than the attempt that ran out of it")
 
-	_, total, err := svc.ListItems(ctx, types.MemoryStatusActive, 10, 0)
+	scope, err := ResolveScope(ctx)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), total)
+	stored, err := svc.repo.EpisodeBySession(context.Background(), scope, "session-1")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
 }
 
 // Every other structured-output call in this codebase disables thinking. The
@@ -413,12 +382,10 @@ func TestExtractionDoesNotAskTheModelToThink(t *testing.T) {
 	tenantRepo.set(1, &types.MemoryConfig{
 		Enabled: true, WriteMode: types.MemoryWriteAuto, ExtractDelaySeconds: 1,
 	})
-	models.response = `{"memories":[]}`
+	models.response = accountResponse("随便聊聊", "用户随便聊了两句。")
 
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "随便说点什么", time.Now().Add(-time.Hour)),
-	})
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
+	messages.set("session-1", settledConversation("session-1", "随便说点什么", "再随便说一句"))
+	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
 	thinking := models.lastThinkingAsked()
@@ -439,13 +406,11 @@ func TestNoAvailableModelDoesNotConsumeTheMessages(t *testing.T) {
 		ExtractModelID: "", ExtractDelaySeconds: 1,
 	})
 
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "我在做医疗影像的后端", time.Now().Add(-time.Hour)),
-	})
+	messages.set("session-1", settledConversation("session-1", "我在做医疗影像的后端", "主要是分割模型"))
 	// Schedule with no conversation model either, which is what the QA path
 	// actually passes: the effective model is resolved inside the pipeline and
 	// never written back onto the message.
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "")
+	svc.ScheduleExtraction(ctx, "session-1", "message-2", "")
 
 	task := enqueuer.pop()
 	require.NotNil(t, task)
@@ -453,53 +418,7 @@ func TestNoAvailableModelDoesNotConsumeTheMessages(t *testing.T) {
 
 	scope, err := ResolveScope(ctx)
 	require.NoError(t, err)
-	subject, err := svc.repo.GetSubject(context.Background(), scope)
+	pending, err := svc.repo.HasPendingExtraction(context.Background(), scope)
 	require.NoError(t, err)
-	require.True(t, subject.ExtractCursor == nil || subject.ExtractCursor.IsZero(),
-		"messages no model ever read must not be marked as read")
-}
-
-// The model tier of topic resolution has to use the same fallback the
-// extraction call does. While it read the configured model directly, a default
-// workspace lost the tier entirely — and losing it looks exactly like the
-// symptom that led here: several wordings of one subject, each in its own row,
-// each stuck at one hit, none ever reaching the threshold.
-func TestTopicResolutionUsesTheSameModelFallbackAsExtraction(t *testing.T) {
-	svc, tenantRepo, messages, models, enqueuer := newExtractionHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	tenantRepo.set(1, &types.MemoryConfig{
-		Enabled: true, WriteMode: types.MemoryWriteAuto,
-		ExtractModelID: "", ExtractDelaySeconds: 1, InterestThreshold: 3,
-	})
-	scope, err := ResolveScope(ctx)
-	require.NoError(t, err)
-
-	models.responseFor = map[string]string{
-		"你在维护一个人的关注主题列表": `{"resolutions":[{"index":0,"same_as":0}]}`,
-	}
-	models.response = `{"memories":[],"topics":["订单接口限流"]}`
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "参赛选手名单在哪查", time.Now().Add(-2*time.Hour)),
-	})
-	svc.ScheduleExtraction(ctx, "session-1", "message-1", "conversation-model")
-	drainExtractions(t, svc, enqueuer)
-
-	// A second, lexically distant wording of the same subject. Only the model
-	// tier can resolve it, and it only runs if the fallback is applied.
-	models.response = `{"memories":[],"topics":["orders接口限流阈值"]}`
-	messages.set("session-1", []*types.Message{
-		userMessage("session-1", "参赛选手名单在哪查", time.Now().Add(-2*time.Hour)),
-		userMessage("session-1", "决赛参赛人数是多少", time.Now().Add(-time.Hour)),
-	})
-	svc.ScheduleExtraction(ctx, "session-1", "message-2", "conversation-model")
-	drainExtractions(t, svc, enqueuer)
-
-	stats, err := svc.repo.TopTopics(context.Background(), scope, 10)
-	require.NoError(t, err)
-	require.Len(t, stats, 1, "both wordings are one subject, so there is one row")
-	// The exact count depends on how the run happened to segment the
-	// transcript, which is not what this test is about. What matters is that a
-	// second wording advanced the count instead of starting its own row.
-	require.GreaterOrEqual(t, stats[0].Hits, 2,
-		"the count has to move, or nothing is ever promoted")
+	require.True(t, pending, "messages no model ever read must not be marked as read")
 }

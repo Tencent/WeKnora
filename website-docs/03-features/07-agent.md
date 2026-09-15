@@ -181,7 +181,7 @@ Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAg
 | `ToolRegistry` | `internal/agent/tools/registry.go` | 工具注册、查找、参数校验、执行、输出截断、资源清理 |
 | 内置工具集 | `internal/agent/tools/*.go` | 按能力注册的内置工具 + 动态 MCP 工具 |
 | Token 估算与压缩 | `internal/agent/token/` + `internal/agent/compaction/` | `Estimator`（BPE 估算）与长轮次上下文压缩（sandbox 工具历史） |
-| 记忆整合 | `internal/application/service/memory/` | 跨会话长期记忆：抽取、召回、主题提升、文档亲和度、整理 |
+| 记忆整合 | `internal/application/service/memory/` | 跨会话长期记忆：会话叙述抽取、召回、常驻画像整合 |
 | 技能系统 | `internal/agent/skills/` | SKILL.md 的发现、加载与脚本执行（Progressive Disclosure） |
 | 执行沙箱 | `internal/sandbox/` | 技能脚本与 `shell_exec` 的 Docker / Cube / E2B 会话级隔离执行与安全校验 |
 | 工具审批 | `internal/agent/approval/gate.go` | MCP 危险工具的人工审批（HITL）与会话内 OAuth 授权 |

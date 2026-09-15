@@ -61,6 +61,29 @@ func (s *stubMessageRepo) set(sessionID string, messages []*types.Message) {
 	s.bySession[sessionID] = messages
 }
 
+// GetRecentMessagesBySession returns the tail of a conversation, oldest first,
+// which is the order the real repository hands back and the order an account
+// has to be written from.
+func (s *stubMessageRepo) GetRecentMessagesBySession(
+	_ context.Context, sessionID string, limit int,
+) ([]*types.Message, error) {
+	s.mu.Lock()
+	source := s.bySession[sessionID]
+	if source == nil {
+		source = s.messages
+	}
+	snapshot := append([]*types.Message(nil), source...)
+	s.mu.Unlock()
+
+	sort.SliceStable(snapshot, func(i, j int) bool {
+		return snapshot[i].CreatedAt.Before(snapshot[j].CreatedAt)
+	})
+	if limit > 0 && len(snapshot) > limit {
+		snapshot = snapshot[len(snapshot)-limit:]
+	}
+	return snapshot, nil
+}
+
 func (s *stubMessageRepo) GetMessagesBySessionBeforeTime(
 	_ context.Context, sessionID string, beforeTime time.Time, limit int,
 ) ([]*types.Message, error) {
@@ -115,6 +138,16 @@ func (s *stubMessageRepo) ListMessagesBySessionAfterTime(
 	return out, nil
 }
 
+// modelCall is one request the stub received, kept whole so an assertion about
+// the budget or the schema can be scoped to the same call as the prompt it is
+// reasoning about.
+type modelCall struct {
+	prompt   string
+	budget   int
+	format   json.RawMessage
+	thinking *bool
+}
+
 // stubModelService hands out a chat model that replays a canned response and
 // records what it was asked.
 type stubModelService struct {
@@ -122,9 +155,9 @@ type stubModelService struct {
 
 	mu       sync.Mutex
 	response string
-	// responseFor lets one stub answer two different prompts. Distillation and
-	// topic adjudication both go through this model, and a test that pins one
-	// must not accidentally pin the other.
+	// responseFor lets one stub answer two different prompts. Writing an
+	// account and rewriting the profile both go through this model, and a test
+	// that pins one must not accidentally pin the other.
 	responseFor map[string]string
 	// finishReason is reported on every reply, so a test can simulate a model
 	// that ran out of completion budget.
@@ -144,10 +177,12 @@ type stubModelService struct {
 	requestedModelID string
 	requestedEmbedID string
 	lastPrompt       string
-	// prompts records every transcript the model was asked about, so a test
-	// can assert that no message went unread across several runs.
-	prompts []string
-	calls   int
+	// recorded is every request the model received, in order. Scalars above
+	// only describe whichever call ran last, and one extraction run makes two
+	// different calls — the account, then the profile it triggers — so a test
+	// that means the account has to be able to name it.
+	recorded []modelCall
+	calls    int
 	// failNext makes the next call fail, standing in for a provider outage.
 	failNext bool
 	// lastFormat records the response schema the caller asked for.
@@ -172,6 +207,21 @@ func (s *stubModelService) GetEmbeddingModel(
 		return nil, errors.New("no embedding model configured")
 	}
 	return s.embedder, nil
+}
+
+// GetModelByID reports what a model declares about itself. Account writing
+// sizes the transcript from the context window, so this has to answer even for
+// a model no test registered — a lookup that failed would quietly exercise the
+// unknown-window fallback instead of the path being tested.
+func (s *stubModelService) GetModelByID(_ context.Context, id string) (*types.Model, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, model := range s.workspaceModels {
+		if model != nil && model.ID == id {
+			return model, nil
+		}
+	}
+	return &types.Model{ID: id}, nil
 }
 
 func (s *stubModelService) GetChatModel(_ context.Context, modelID string) (chat.Chat, error) {
@@ -203,25 +253,55 @@ func (s *stubModelService) lastThinkingAsked() *bool {
 }
 
 // lastPromptContaining returns the most recent prompt carrying a marker, so a
-// test can pin the extraction call specifically. One run can also make topic
-// adjudication and consolidation calls, and whichever ran last would otherwise
-// be what an assertion measured.
+// test can pin the account-writing call specifically. One run can also rewrite
+// the profile, and whichever call ran last would otherwise be what an
+// assertion measured.
 func (s *stubModelService) lastPromptContaining(marker string) string {
+	return s.lastCallContaining(marker).prompt
+}
+
+// lastCallContaining is the same idea for everything else a call carries. It
+// returns a zero call when the marker never appeared, which reads as an empty
+// prompt and a zero budget at the assertion.
+func (s *stubModelService) lastCallContaining(marker string) modelCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := len(s.prompts) - 1; i >= 0; i-- {
-		if strings.Contains(s.prompts[i], marker) {
-			return s.prompts[i]
+	for i := len(s.recorded) - 1; i >= 0; i-- {
+		if strings.Contains(s.recorded[i].prompt, marker) {
+			return s.recorded[i]
 		}
 	}
-	return ""
+	return modelCall{}
+}
+
+// callsContaining counts the calls carrying a marker, for a test that means
+// "the account was written once" rather than "the model was used once".
+func (s *stubModelService) callsContaining(marker string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, call := range s.recorded {
+		if strings.Contains(call.prompt, marker) {
+			count++
+		}
+	}
+	return count
+}
+
+// promptsSeen is every prompt the model received, in order.
+func (s *stubModelService) promptsSeen() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prompts := make([]string, 0, len(s.recorded))
+	for _, call := range s.recorded {
+		prompts = append(prompts, call.prompt)
+	}
+	return prompts
 }
 
 // seenTranscripts concatenates every prompt the model received.
 func (s *stubModelService) seenTranscripts() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return strings.Join(s.prompts, "\n---\n")
+	return strings.Join(s.promptsSeen(), "\n---\n")
 }
 
 type stubChatModel struct {
@@ -240,12 +320,16 @@ func (m *stubChatModel) Chat(
 	defer m.owner.mu.Unlock()
 	m.owner.calls++
 	m.owner.lastPrompt = prompt.String()
+	call := modelCall{prompt: prompt.String()}
 	if opts != nil {
 		m.owner.lastFormat = opts.Format
 		m.owner.lastBudget = opts.MaxCompletionTokens
 		m.owner.lastThinking = opts.Thinking
+		call.format = opts.Format
+		call.budget = opts.MaxCompletionTokens
+		call.thinking = opts.Thinking
 	}
-	m.owner.prompts = append(m.owner.prompts, prompt.String())
+	m.owner.recorded = append(m.owner.recorded, call)
 	if m.owner.failNext {
 		m.owner.failNext = false
 		return nil, errors.New("stub model outage")

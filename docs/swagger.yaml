@@ -258,6 +258,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
+      intermediate_answer:
+        description: |-
+          IntermediateAnswer preserves a plain answer followed by a loop-end steer.
+          The canonical final answer is still stored in Message.Content.
+        type: boolean
       iteration:
         description: Iteration number (0-indexed)
         type: integer
@@ -278,6 +283,13 @@ definitions:
         description: Tools called in this step (Act phase)
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall'
+        type: array
+      user_messages_before:
+        description: |-
+          UserMessagesBefore records consumed steer rows in delivery order, before
+          this model response. Unlike timestamps, this remains unambiguous on replay.
+        items:
+          type: string
         type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.AnswerStrategy:
@@ -829,7 +841,7 @@ definitions:
       context_template_id:
         description: |-
           ContextTemplateID references a template ID in prompt_templates/ YAML files.
-          If set and ContextTemplate is empty, the template content will be resolved at startup.
+          If set and ContextTemplate is empty, the template content is resolved at request time for saved agents.
         type: string
       data_analysis_enabled:
         description: |-
@@ -1030,7 +1042,7 @@ definitions:
       system_prompt_id:
         description: |-
           SystemPromptID references a template ID in prompt_templates/ YAML files.
-          If set and SystemPrompt is empty, the template content will be resolved at startup.
+          If set and SystemPrompt is empty, the template content is resolved at request time for saved agents.
         type: string
       temperature:
         description: Temperature for LLM (0-1)
@@ -2180,6 +2192,18 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.MemoryConfig:
     properties:
+      consolidate_model_id:
+        description: |-
+          ConsolidateModelID is the model that rewrites the profile injected into
+          every conversation. Empty means use the extraction model.
+
+          Worth separating from the above because the two phases are not the same
+          job. Describing one conversation faithfully is work a small model does
+          well and does often; deciding which of a person's requests generalize
+          into preferences happens rarely, is read on every future turn, and is
+          the one a weak model gets embarrassingly wrong. Codex splits these for
+          the same reason.
+        type: string
       embedding_model_id:
         description: |-
           EmbeddingModelID is the single model used to score memory against a
@@ -2221,12 +2245,17 @@ definitions:
         type: string
       interest_threshold:
         description: |-
-          InterestThreshold is how many separate conversations must touch a topic
-          before it becomes a stored interest. 0 means the default. Setting it to 1
-          records every topic on first sight, which is usually too noisy.
+          InterestThreshold is how many separate accounts must carry the same
+          keyword before it counts as a subject this person keeps returning to and
+          is allowed to shape their retrieval. 0 means the default. Setting it to
+          1 treats every single question as a standing interest, which is usually
+          too noisy to condition retrieval on.
         type: integer
-      max_items:
-        description: MaxItems caps active items per subject. 0 means DefaultMemoryMaxItems.
+      max_episodes:
+        description: |-
+          MaxEpisodes caps how many accounts one subject keeps. 0 means
+          DefaultMemoryMaxEpisodes. Beyond it the least-read accounts are dropped,
+          which is the only automatic forgetting in the system.
         type: integer
       retrieval_conditioning:
         description: |-
@@ -3517,6 +3546,8 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        type: boolean
       mcp_service_ids:
         items:
           type: string
@@ -4218,6 +4249,10 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.UserPreferences:
     properties:
+      browser_search_instructions:
+        description: BrowserSearchInstructions customizes browser search for this
+          user. Nil/empty uses the platform default.
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID remembers the last workspace the user actively
@@ -4621,10 +4656,6 @@ definitions:
       depth:
         description: populated in ego mode
         type: integer
-      familiar_count:
-        description: FamiliarCount is how many returned nodes are lit up for this
-          person.
-        type: integer
       mode:
         type: string
       returned:
@@ -4639,12 +4670,6 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.WikiGraphNode:
     properties:
-      familiar:
-        description: |-
-          Familiar is true when this page was built from a document this person
-          keeps citing in answers. It is a personal overlay, not a property of
-          the page: two people looking at the same wiki see different highlights.
-        type: boolean
       link_count:
         description: Number of inbound + outbound links
         type: integer
@@ -6255,6 +6280,9 @@ definitions:
     type: object
   internal_handler.updateMyPreferencesRequest:
     properties:
+      browser_search_instructions:
+        maxLength: 4000
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID lets clients persist "after a fresh login,
@@ -6321,6 +6349,9 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        description: Browser source
+        type: boolean
       mcp_service_ids:
         description: Per-request MCP services selected via @mention
         items:
@@ -6440,6 +6471,30 @@ definitions:
         items:
           type: string
         type: array
+    required:
+    - query
+    type: object
+  internal_handler_session.SteerMessageRequest:
+    properties:
+      channel:
+        type: string
+      delivery:
+        description: Delivery is "after" (default) or "inject". See the constants
+          above.
+        type: string
+      expected_assistant_message_id:
+        description: |-
+          Optional for older clients. New clients pin delivery to the run they see
+          and supply a stable ID so a consume event may precede the HTTP response.
+        type: string
+      mentioned_items:
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
+      query:
+        type: string
+      steer_id:
+        type: string
     required:
     - query
     type: object
@@ -11747,7 +11802,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前空间的所有MCP服务
+      description: 获取当前空间的所有MCP服务（含已保存工具目录数量）
       produces:
       - application/json
       responses:
@@ -12000,7 +12055,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
+      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要
+        Admin。
       parameters:
       - description: MCP服务ID
         in: path
@@ -12534,9 +12590,25 @@ paths:
       summary: 获取我的待处理邀请数
       tags:
       - 我的邀请
+  /memory/all:
+    delete:
+      description: 永久删除当前用户的常驻画像、全部会话记忆与原话记忆
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 清空成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 清空我的记忆
+      tags:
+      - 长期记忆
   /memory/consolidate:
     post:
-      description: 合并意思接近的条目、归档到期事项，不等待每日后台整理
+      description: 立刻用最近的会话记忆重写一次常驻画像，不等待后台整理
       produces:
       - application/json
       responses:
@@ -12550,11 +12622,11 @@ paths:
       summary: 立刻整理我的记忆
       tags:
       - 长期记忆
-  /memory/documents:
+  /memory/episodes:
     get:
-      description: 返回当前用户回答里反复引用的文档，次数未达习惯门槛的不展示
+      description: 分页返回每段对话的记忆档案，按时间倒序
       parameters:
-      - default: 50
+      - default: 20
         description: 每页条数
         in: query
         name: limit
@@ -12567,20 +12639,20 @@ paths:
       - application/json
       responses:
         "200":
-          description: 文档列表
+          description: 会话记忆列表
           schema:
             additionalProperties: true
             type: object
       security:
       - Bearer: []
-      summary: 列出常用资料
+      summary: 列出我的会话记忆
       tags:
       - 长期记忆
-  /memory/documents/{id}:
+  /memory/episodes/{id}:
     delete:
-      description: 删除一条文档亲和度计数，之后检索不再因为这份文档而加权
+      description: 永久删除一段对话的记忆档案
       parameters:
-      - description: 亲和度 ID
+      - description: 会话记忆 ID
         in: path
         name: id
         required: true
@@ -12595,12 +12667,33 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 停止用某份文档做个性化检索
+      summary: 删除一段会话记忆
+      tags:
+      - 长期记忆
+    get:
+      description: 返回一段对话的完整记忆档案
+      parameters:
+      - description: 会话记忆 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 会话记忆
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 读取一段会话记忆
       tags:
       - 长期记忆
   /memory/export:
     get:
-      description: 以 JSON 导出当前用户的全部记忆
+      description: 以 JSON 导出当前用户的常驻画像、会话记忆与原话记忆
       produces:
       - application/json
       responses:
@@ -12614,42 +12707,13 @@ paths:
       summary: 导出我的记忆
       tags:
       - 长期记忆
-  /memory/items:
-    delete:
-      description: 永久删除当前用户的全部记忆
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 清空成功
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 清空我的记忆
-      tags:
-      - 长期记忆
+  /memory/notes:
     get:
-      description: 分页返回当前用户的记忆条目，可按状态过滤
+      description: 返回用户明确要求记住的原话，按时间倒序
       parameters:
-      - description: 状态过滤
-        enum:
-        - active
-        - superseded
-        - archived
-        - pending
-        in: query
-        name: status
-        type: string
-      - default: 50
-        description: 每页条数
+      - description: 条数上限
         in: query
         name: limit
-        type: integer
-      - description: 偏移量
-        in: query
-        name: offset
         type: integer
       produces:
       - application/json
@@ -12661,13 +12725,13 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 列出我的记忆
+      summary: 列出我要求记住的内容
       tags:
       - 长期记忆
     post:
       consumes:
       - application/json
-      description: 手动添加一条长期记忆
+      description: 手动添加一条原话记忆，下一轮对话即生效
       parameters:
       - description: 记忆内容
         in: body
@@ -12685,14 +12749,14 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 新增一条记忆
+      summary: 新增一条我要求记住的内容
       tags:
       - 长期记忆
-  /memory/items/{id}:
+  /memory/notes/{id}:
     delete:
-      description: 永久删除一条记忆
+      description: 永久删除一条原话记忆
       parameters:
-      - description: 记忆ID
+      - description: 记忆 ID
         in: path
         name: id
         required: true
@@ -12707,20 +12771,46 @@ paths:
             type: object
       security:
       - Bearer: []
-      summary: 删除一条记忆
+      summary: 删除一条我要求记住的内容
+      tags:
+      - 长期记忆
+  /memory/profile:
+    delete:
+      description: 清空常驻画像，会话记忆保留，下次后台整理会重新生成
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 删除成功
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 删除我的记忆画像
+      tags:
+      - 长期记忆
+    get:
+      description: 返回每轮对话都会注入的常驻画像，尚未生成时返回 null
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 记忆画像
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: 获取我的记忆画像
       tags:
       - 长期记忆
     put:
       consumes:
       - application/json
-      description: 修改记忆内容与重要度，修改后该条记忆不会被后台抽取覆盖
+      description: 用用户自己写的内容替换常驻画像，后台整理时会保留这次修改
       parameters:
-      - description: 记忆ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 记忆内容
+      - description: 画像正文
         in: body
         name: request
         required: true
@@ -12730,62 +12820,18 @@ paths:
       - application/json
       responses:
         "200":
-          description: 更新后的记忆
+          description: 画像版本号
           schema:
             additionalProperties: true
             type: object
       security:
       - Bearer: []
-      summary: 修改一条记忆
-      tags:
-      - 长期记忆
-  /memory/items/{id}/confirm:
-    post:
-      description: 接受系统推断的记忆，使其开始生效
-      parameters:
-      - description: 记忆 ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 确认成功
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 确认一条推断出的记忆
-      tags:
-      - 长期记忆
-  /memory/items/{id}/reject:
-    post:
-      description: 拒绝系统推断的记忆，并记住这次拒绝
-      parameters:
-      - description: 记忆 ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 否决成功
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 否决一条推断出的记忆
+      summary: 修改我的记忆画像
       tags:
       - 长期记忆
   /memory/settings:
     get:
-      description: 返回合并后的记忆开关状态（空间级 + 个人级）与记忆条数
+      description: 返回合并后的记忆开关状态（空间级 + 个人级）与会话记忆条数
       produces:
       - application/json
       responses:
@@ -12821,76 +12867,6 @@ paths:
       security:
       - Bearer: []
       summary: 更新我的记忆设置
-      tags:
-      - 长期记忆
-  /memory/topics:
-    get:
-      description: 返回已计数、尚未提升为长期关注的主题，以及距离阈值还差几次
-      parameters:
-      - default: 50
-        description: 每页条数
-        in: query
-        name: limit
-        type: integer
-      - description: 偏移量
-        in: query
-        name: offset
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 主题列表
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 列出正在观察的主题
-      tags:
-      - 长期记忆
-  /memory/topics/{id}:
-    delete:
-      description: 删除尚未提升的主题计数，并记住这次拒绝，之后不会再自动记为长期关注
-      parameters:
-      - description: 主题 ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 删除成功
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 停止跟踪一个主题
-      tags:
-      - 长期记忆
-  /memory/topics/{id}/promote:
-    post:
-      description: 不等待剩余次数，把正在观察的主题提升为一条长期关注记忆
-      parameters:
-      - description: 主题 ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: 新增的记忆
-          schema:
-            additionalProperties: true
-            type: object
-      security:
-      - Bearer: []
-      summary: 立即记为长期关注
       tags:
       - 长期记忆
   /messages/{session_id}/{id}:
@@ -14791,6 +14767,73 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
+  /sessions/{id}/steer:
+    get:
+      description: 刷新页面后用来恢复输入框上方的队列。没有正在运行的 turn 时返回空列表。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出当前运行中尚未消费的排队消息
+      tags:
+      - 问答
+  /sessions/{id}/steer/{steer_id}:
+    delete:
+      description: 从当前运行的排队列表里去掉一条，不再注入也不再作为 follow-up 发出。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除一条排队中的消息
+      tags:
+      - 问答
   /sessions/{session_id}/artifacts:
     get:
       description: 返回本会话中所有 assistant 消息产生的技能产物元数据（不含 URL）
@@ -14916,6 +14959,89 @@ paths:
       summary: 置顶会话
       tags:
       - 会话
+  /sessions/{session_id}/steer:
+    post:
+      consumes:
+      - application/json
+      description: 向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 追加消息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.SteerMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 会话不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 向运行中的对话追加消息
+      tags:
+      - 问答
+  /sessions/{session_id}/steer/{steer_id}/inject:
+    post:
+      description: 把一条 delivery=after 的排队消息改为 inject，运行中的 agent 会在下一轮边界读到它。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 将排队消息改为立即注入
+      tags:
+      - 问答
   /sessions/{session_id}/stop:
     post:
       consumes:

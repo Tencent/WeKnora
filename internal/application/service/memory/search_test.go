@@ -3,124 +3,113 @@ package memory
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+// newEpisodeSearchHarness gives the service an embedding model, because
+// reaching an account by what a question means rather than by which characters
+// it shares is the whole reason search exists.
+func newEpisodeSearchHarness(
+	t *testing.T, vectors map[string][]float32,
+) (*Service, *stubTenantRepo) {
+	t.Helper()
+	svc, tenantRepo, models := newVectorHarness(t)
+	models.embedder = &stubEmbedder{vectors: vectors}
+	return svc, tenantRepo
+}
 
 // The reason search exists at all: recall is ranked once, against the question
 // the user opened with. An agent that works its way from that question to a
 // different sub-problem is holding memories chosen for a query it has left
 // behind, and nothing in the turn's budget can fix that.
 func TestSearchFindsWhatTheOpeningQuestionDidNotMatch(t *testing.T) {
-	svc, _, tenantRepo := newMemoryHarness(t)
+	svc, tenantRepo := newEpisodeSearchHarness(t, map[string][]float32{
+		"连接池":  {1, 0, 0},
+		"数据库":  {1, 0, 0},
+		"部署":   {0, 1, 0},
+		"蓝绿发布": {0, 1, 0},
+	})
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 
-	for _, item := range []types.MemoryItem{
-		{Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产数据库用的是 PostgreSQL"},
-		{Kind: types.MemoryKindFact, Topic: "部署", Content: "部署走的是蓝绿发布"},
-	} {
-		_, err := svc.Remember(ctx, item)
-		require.NoError(t, err)
-	}
+	seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-db", Slug: "postgres-pool", Title: "生产数据库连接池",
+		Summary:  "用户在调生产库的连接池，最后定在 200。",
+		Keywords: types.MemoryEpisodeTokens{"数据库", "连接池"},
+		ToAt:     time.Now().Add(-48 * time.Hour),
+	})
+	seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-deploy", Slug: "blue-green-deploy", Title: "部署走蓝绿发布",
+		Summary:  "用户的服务用蓝绿发布上线，切流前要跑一轮回归。",
+		Keywords: types.MemoryEpisodeTokens{"部署", "蓝绿发布"},
+		ToAt:     time.Now().Add(-24 * time.Hour),
+	})
 
-	// The turn opened with a database question, so that is what recall ranked
-	// against and the deployment memory is nowhere in the prompt.
+	// The turn opened with a database question, so that is what recall matched
+	// against and the deployment conversation is nowhere in the prompt.
 	recall := svc.Recall(ctx, "帮我看看数据库连接池的配置")
-	require.Contains(t, recall.Prompt, "PostgreSQL")
+	require.Contains(t, recall.Prompt, "生产数据库连接池")
 	require.NotContains(t, recall.Prompt, "蓝绿发布")
 
 	// Several iterations later the agent is looking at deployment instead.
-	result := svc.SearchMemory(ctx, "部署方式", 10)
+	result := svc.SearchMemory(ctx, "部署方式", 5)
 	require.True(t, result.Available)
-	require.Len(t, result.Items, 1)
-	require.Equal(t, "部署走的是蓝绿发布", result.Items[0].Content)
+	require.Len(t, result.Episodes, 1)
+	require.Equal(t, "部署走蓝绿发布", result.Episodes[0].Title)
 }
 
-// The other half of the gap: recall admits five situational items no matter
-// how many matched, because it is paid for on every turn. A search is paid for
-// only when the model asked for it, so it can afford to answer properly.
-func TestSearchReachesPastTheFiveItemTurnBudget(t *testing.T) {
-	svc, _, tenantRepo := newMemoryHarness(t)
+// The other half of the gap: recall admits a couple of excerpts no matter how
+// many conversations matched, because it is paid for on every turn. A search is
+// paid for only when the model asked for it, so it can afford to answer
+// properly — and it answers with whole accounts rather than excerpts.
+func TestSearchReachesPastTheTurnBudget(t *testing.T) {
+	svc, tenantRepo := newEpisodeSearchHarness(t, map[string][]float32{"网关": {1, 0, 0}})
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 
-	for i := 0; i < 8; i++ {
-		_, err := svc.Remember(ctx, types.MemoryItem{
-			Kind:    types.MemoryKindFact,
-			Topic:   fmt.Sprintf("配置项-%d", i),
-			Content: fmt.Sprintf("网关配置第 %d 项已经调过", i),
+	for i := 0; i < 5; i++ {
+		seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+			SessionID: fmt.Sprintf("s-%d", i),
+			Slug:      fmt.Sprintf("gateway-config-%d", i),
+			Title:     fmt.Sprintf("网关配置第 %d 项", i),
+			Summary:   fmt.Sprintf("用户调了网关配置的第 %d 项。", i),
+			Keywords:  types.MemoryEpisodeTokens{"网关配置"},
+			ToAt:      time.Now().Add(-time.Duration(i+1) * time.Hour),
 		})
-		require.NoError(t, err)
 	}
 
 	recall := svc.Recall(ctx, "网关配置")
-	require.Len(t, recall.Items, types.MemoryRecallMaxItems)
+	require.Len(t, recall.Episodes, types.MemoryRecallMaxExcerpts)
 
-	result := svc.SearchMemory(ctx, "网关配置", 8)
+	result := svc.SearchMemory(ctx, "网关配置", 5)
 	require.True(t, result.Available)
-	require.Len(t, result.Items, 8)
-}
-
-// Resident kinds are in the block rather than in situational recall, and the
-// block has its own rune budget. Search covers them too, or the tool would be
-// unable to answer "what do you know about my preferences" for anyone whose
-// block is full.
-func TestSearchCoversTheResidentKindsToo(t *testing.T) {
-	svc, _, tenantRepo := newMemoryHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-
-	_, err := svc.Remember(ctx, types.MemoryItem{
-		Kind: types.MemoryKindPreference, Topic: "代码风格", Content: "代码注释统一用英文",
-	})
-	require.NoError(t, err)
-
-	result := svc.SearchMemory(ctx, "代码注释", 10)
-	require.True(t, result.Available)
-	require.Len(t, result.Items, 1)
-	require.Equal(t, types.MemoryKindPreference, result.Items[0].Kind)
-}
-
-// A statement a later one replaced is exactly what the supersede machinery
-// exists to keep out of an answer. Reaching it through search would undo that
-// and hand the model a fact the user has already corrected.
-func TestSearchDoesNotResurrectReplacedMemories(t *testing.T) {
-	svc, _, tenantRepo := newMemoryHarness(t)
-	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-
-	_, err := svc.Remember(ctx, types.MemoryItem{
-		Kind: types.MemoryKindFact, Topic: "生产数据库", Content: "生产数据库用的是 MySQL",
-	})
-	require.NoError(t, err)
-	_, err = svc.Remember(ctx, types.MemoryItem{
-		Kind: types.MemoryKindFact, Topic: "生产数据库", Content: "生产数据库已经迁到 PostgreSQL",
-	})
-	require.NoError(t, err)
-
-	result := svc.SearchMemory(ctx, "生产数据库", 10)
-	require.True(t, result.Available)
-	require.Len(t, result.Items, 1)
-	require.Contains(t, result.Items[0].Content, "PostgreSQL")
+	require.Len(t, result.Episodes, 5)
+	require.NotEmpty(t, result.Episodes[0].Summary,
+		"a tool call is the model asking, so it gets the account rather than a sentence of it")
 }
 
 // "Switched off" and "nothing stored" have to stay distinguishable all the way
 // out to the caller. Collapsing them would have the agent tell someone who
 // disabled memory that it remembers nothing about them.
 func TestSearchTellsDisabledApartFromEmpty(t *testing.T) {
-	svc, _, tenantRepo := newMemoryHarness(t)
+	svc, tenantRepo := newEpisodeSearchHarness(t, map[string][]float32{"数据库": {1, 0, 0}})
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	_, err := svc.Remember(ctx, types.MemoryItem{
-		Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产数据库用的是 PostgreSQL",
+	seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "s-db", Slug: "postgres-pool", Title: "生产数据库连接池",
+		Summary:  "用户在调生产库的连接池。",
+		Keywords: types.MemoryEpisodeTokens{"数据库"},
+		ToAt:     time.Now().Add(-time.Hour),
 	})
-	require.NoError(t, err)
 
-	empty := svc.SearchMemory(ctx, "完全无关的题目", 10)
+	empty := svc.SearchMemory(ctx, "完全无关的题目", 5)
 	require.True(t, empty.Available, "memory is on, this user simply has no match")
-	require.Empty(t, empty.Items)
+	require.Empty(t, empty.Episodes)
 
 	disabled := false
-	off := svc.SearchMemory(types.ApplyAgentMemoryPreference(ctx, &disabled), "数据库", 10)
+	off := svc.SearchMemory(types.ApplyAgentMemoryPreference(ctx, &disabled), "数据库", 5)
 	require.False(t, off.Available, "an agent opting out must not be able to search either")
-	require.Empty(t, off.Items)
+	require.Empty(t, off.Episodes)
 }
 
 // MemoryAvailable is what lets a caller decide not to offer a memory feature
@@ -152,10 +141,12 @@ func TestMemoryAvailableTracksAllThreeSwitches(t *testing.T) {
 func TestMemoryAvailableAgreesWithSearch(t *testing.T) {
 	svc, _, tenantRepo := newMemoryHarness(t)
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
-	_, err := svc.Remember(ctx, types.MemoryItem{
-		Kind: types.MemoryKindFact, Topic: "数据库", Content: "生产数据库用的是 PostgreSQL",
+	seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+		SessionID: "session-1", Slug: "database-choice", Title: "选数据库",
+		Summary:  "用户决定生产数据库用 PostgreSQL。",
+		Keywords: types.MemoryEpisodeTokens{"数据库"},
+		ToAt:     time.Now(),
 	})
-	require.NoError(t, err)
 
 	require.Equal(t, svc.MemoryAvailable(ctx), svc.SearchMemory(ctx, "数据库", 10).Available)
 
@@ -175,19 +166,21 @@ func TestSearchWithoutPrincipalIsUnavailable(t *testing.T) {
 }
 
 func TestSearchClampsAnAbsurdLimit(t *testing.T) {
-	svc, _, tenantRepo := newMemoryHarness(t)
+	svc, tenantRepo := newEpisodeSearchHarness(t, map[string][]float32{"网关": {1, 0, 0}})
 	ctx := enabledCtx(t, tenantRepo, 1, "alice")
 
-	for i := 0; i < types.MemorySearchMaxItems+10; i++ {
-		_, err := svc.Remember(ctx, types.MemoryItem{
-			Kind:    types.MemoryKindFact,
-			Topic:   fmt.Sprintf("网关-%d", i),
-			Content: fmt.Sprintf("网关配置第 %d 项已经调过", i),
+	for i := 0; i < types.MemorySearchMaxEpisodes+10; i++ {
+		seedEpisode(t, svc, ctx, &types.MemoryEpisode{
+			SessionID: fmt.Sprintf("s-%d", i),
+			Slug:      fmt.Sprintf("gateway-config-%d", i),
+			Title:     fmt.Sprintf("网关配置第 %d 项", i),
+			Summary:   fmt.Sprintf("用户调了网关配置的第 %d 项。", i),
+			Keywords:  types.MemoryEpisodeTokens{"网关配置"},
+			ToAt:      time.Now().Add(-time.Duration(i+1) * time.Hour),
 		})
-		require.NoError(t, err)
 	}
 
 	result := svc.SearchMemory(ctx, "网关配置", 10_000)
 	require.True(t, result.Available)
-	require.LessOrEqual(t, len(result.Items), types.MemorySearchMaxItems)
+	require.LessOrEqual(t, len(result.Episodes), types.MemorySearchMaxEpisodes)
 }

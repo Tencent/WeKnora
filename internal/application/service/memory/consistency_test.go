@@ -11,52 +11,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMemoryConsistencyPendingMustNotReplaceActive(t *testing.T) {
-	s, _, tr := newMemoryHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	scope := scopeFor(t, ctx)
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "我是后端工程师", Origin: types.MemoryOriginManual})
-	require.NoError(t, err)
-	proposal, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "可能是产品经理", Origin: types.MemoryOriginExtracted, Inferred: true})
-	require.NoError(t, err)
-	require.Equal(t, types.MemoryStatusPending, proposal.Status)
-	current, err := s.repo.GetItem(ctx, scope, old.ID)
-	require.NoError(t, err)
-	require.Equal(t, types.MemoryStatusActive, current.Status, "unconfirmed inference must not retire a confirmed fact")
-}
-func TestMemoryConsistencyUpdateTargetMustWinOverChangedTopic(t *testing.T) {
-	s, _, tr := newMemoryHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	scope := scopeFor(t, ctx)
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindFact, Topic: "生产数据库", Content: "线上使用 MySQL"})
-	require.NoError(t, err)
-	zero := 0
-	require.NoError(t, s.applyDecisions(ctx, scope, s.workspaceConfig(ctx, 1), transcriptSegment{lines: []transcriptLine{{sessionID: "s", messageID: "m", content: "迁移到 PostgreSQL"}}}, []*types.MemoryItem{old}, []extractionDecision{{Action: "update", Target: &zero, Kind: types.MemoryKindFact, Topic: "数据库选型", Content: "线上已迁移到 PostgreSQL"}}))
-	_, total, err := s.ListItems(ctx, types.MemoryStatusActive, 20, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), total, "indexed update must not leave contradictory old memory active")
-}
 func TestMemoryConsistencyCappedSessionsMustBeFollowedUp(t *testing.T) {
 	s, tr, msg, model, q := newExtractionHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
-	model.response = `{"memories":[]}`
-	base := time.Now().Add(-time.Hour)
+	model.response = accountResponse("一个会话", "用户在这个会话里说了两句话。")
 	for i := 0; i < 4; i++ {
 		id := fmt.Sprintf("session-%d", i)
-		msg.set(id, []*types.Message{userMessage(id, fmt.Sprintf("unique-session-marker-%d", i), base.Add(time.Duration(i)*time.Minute))})
+		marker := fmt.Sprintf("unique-session-marker-%d", i)
+		msg.set(id, settledConversation(id, marker, marker+"的后一句"))
 		s.ScheduleExtraction(ctx, id, "m", "model")
 	}
 	drainExtractions(t, s, q)
-	require.True(t, strings.Contains(model.seenTranscripts(), "unique-session-marker-3"), "fourth claimed session must survive the three-segment cap")
+	require.True(t, strings.Contains(model.seenTranscripts(), "unique-session-marker-3"), "fourth claimed session must survive the per-run call cap")
 }
 func TestMemoryConsistencyRetryMustKeepAllClaimedSessions(t *testing.T) {
 	s, tr, msg, model, q := newExtractionHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
-	model.response = `{"memories":[]}`
-	base := time.Now().Add(-time.Hour)
+	model.response = accountResponse("一个会话", "用户在这个会话里说了两句话。")
 	for i := 0; i < 2; i++ {
 		id := fmt.Sprintf("session-%d", i)
-		msg.set(id, []*types.Message{userMessage(id, fmt.Sprintf("retry-session-marker-%d", i), base.Add(time.Duration(i)*time.Minute))})
+		marker := fmt.Sprintf("retry-session-marker-%d", i)
+		msg.set(id, settledConversation(id, marker, marker+"的后一句"))
 		s.ScheduleExtraction(ctx, id, "m", "model")
 	}
 	task := q.pop()
@@ -68,96 +43,12 @@ func TestMemoryConsistencyRetryMustKeepAllClaimedSessions(t *testing.T) {
 	require.True(t, strings.Contains(model.seenTranscripts(), "retry-session-marker-1"), "retry must retain the second drained session")
 }
 
-func TestMemoryConsistencyManualEditMustRefreshEmbedding(t *testing.T) {
-	s, tr, _ := newVectorHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	scope := scopeFor(t, ctx)
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindFact, Content: "回答直接给结论"})
-	require.NoError(t, err)
-	_, err = s.UpdateItem(ctx, old.ID, "生产环境需要调大连接池", 3)
-	require.NoError(t, err)
-	s.backfillEmbeddings(ctx, scope, s.workspaceConfig(ctx, 1))
-	vectors, err := s.repo.ItemEmbeddings(ctx, scope, []string{old.ID}, "embed-1")
-	require.NoError(t, err)
-	require.Equal(t, []float32{0, 1, 0}, vectors[old.ID], "edit and maintenance must not leave the old semantic vector")
-}
-
-func TestMemoryConsistencyProposalConfirmationAndRejection(t *testing.T) {
-	for _, confirm := range []bool{false, true} {
-		t.Run(fmt.Sprint(confirm), func(t *testing.T) {
-			s, _, tr := newMemoryHarness(t)
-			ctx := enabledCtx(t, tr, 1, "alice")
-			scope := scopeFor(t, ctx)
-			old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "我是工程师", Origin: types.MemoryOriginManual})
-			require.NoError(t, err)
-			proposal, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "可能是经理", Inferred: true})
-			require.NoError(t, err)
-			require.Equal(t, old.ID, proposal.ReplacesID)
-			if confirm {
-				_, err = s.ConfirmItem(ctx, proposal.ID)
-				require.NoError(t, err)
-				_, err = s.ConfirmItem(ctx, proposal.ID)
-				require.NoError(t, err, "confirmation is idempotent")
-			} else {
-				require.NoError(t, s.RejectItem(ctx, proposal.ID))
-			}
-			current, err := s.repo.GetItem(ctx, scope, old.ID)
-			require.NoError(t, err)
-			if confirm {
-				require.Equal(t, types.MemoryStatusSuperseded, current.Status)
-				require.Equal(t, proposal.ID, current.SupersededBy)
-			} else {
-				require.Equal(t, types.MemoryStatusActive, current.Status)
-			}
-			_, total, err := s.ListItems(ctx, types.MemoryStatusActive, 20, 0)
-			require.NoError(t, err)
-			require.Equal(t, int64(1), total)
-		})
-	}
-}
-
-func TestMemoryConsistencyEditInvalidatesOldProposals(t *testing.T) {
-	s, _, tr := newMemoryHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "我是工程师"})
-	require.NoError(t, err)
-	proposal, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "可能是经理", Inferred: true})
-	require.NoError(t, err)
-	_, err = s.UpdateItem(ctx, old.ID, "我是设计师", 4)
-	require.NoError(t, err)
-	_, err = s.ConfirmItem(ctx, proposal.ID)
-	require.ErrorIs(t, err, types.ErrMemoryConflict)
-	items, _, err := s.ListItems(ctx, types.MemoryStatusActive, 20, 0)
-	require.NoError(t, err)
-	require.Len(t, items, 1)
-	require.Equal(t, "我是设计师", items[0].Content)
-}
-
-func TestMemoryConsistencyReplacingProposalKeepsOriginalTarget(t *testing.T) {
-	s, _, tr := newMemoryHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "我是工程师"})
-	require.NoError(t, err)
-	first, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "可能是经理", Inferred: true})
-	require.NoError(t, err)
-	second, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindProfile, Topic: "职业", Content: "可能是设计师", Inferred: true})
-	require.NoError(t, err)
-	require.Equal(t, old.ID, second.ReplacesID)
-	_, err = s.ConfirmItem(ctx, first.ID)
-	require.ErrorIs(t, err, types.ErrMemoryConflict)
-	_, err = s.ConfirmItem(ctx, second.ID)
-	require.NoError(t, err)
-	_, total, err := s.ListItems(ctx, types.MemoryStatusActive, 20, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), total)
-}
-
 func TestMemoryConsistencyTimestampTiesAndLargePendingQueue(t *testing.T) {
 	for _, manySessions := range []bool{false, true} {
 		t.Run(fmt.Sprint(manySessions), func(t *testing.T) {
 			s, tr, msg, model, q := newExtractionHarness(t)
 			ctx := enabledCtx(t, tr, 1, "alice")
-			model.response = `{"memories":[]}`
+			model.response = accountResponse("很多话", "用户说了很多话。")
 			at := time.Now().Add(-time.Hour)
 			var rows []*types.Message
 			for i := 0; i < 85; i++ {
@@ -166,31 +57,30 @@ func TestMemoryConsistencyTimestampTiesAndLargePendingQueue(t *testing.T) {
 				if manySessions {
 					session = id
 				}
-				row := userMessage(session, id, at)
 				if manySessions {
-					msg.set(session, []*types.Message{row})
+					msg.set(session, []*types.Message{userMessage(session, id, at), userMessage(session, id+"-后一句", at.Add(time.Second))})
 				} else {
-					rows = append(rows, row)
+					rows = append(rows, userMessage(session, id, at))
 					msg.set(session, rows)
 				}
 				s.ScheduleExtraction(ctx, session, id, "model")
 			}
 			drainExtractions(t, s, q)
 			var seen string
-			for _, prompt := range model.prompts {
+			for _, prompt := range model.promptsSeen() {
 				seen += transcriptBlock(prompt)
 			}
 			for i := 0; i < 85; i++ {
-				require.Equal(t, 1, strings.Count(seen, fmt.Sprintf("marker-%03d", i)), "each message must appear exactly once as extractable input")
+				require.Contains(t, seen, fmt.Sprintf("marker-%03d", i), "every message must reach the model, whether the turns tie on time or pile up in one conversation")
 			}
 		})
 	}
 }
 
-func TestMemoryConsistencyGapDoesNotSkipNextSegment(t *testing.T) {
+func TestMemoryConsistencyGapDoesNotSkipLaterTurns(t *testing.T) {
 	s, tr, msg, model, q := newExtractionHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
-	model.response = `{"memories":[]}`
+	model.response = accountResponse("断断续续的一天", "用户断断续续问了一整天。")
 	at := time.Now().Add(-24 * time.Hour)
 	var rows []*types.Message
 	for i := 0; i < 7; i++ {
@@ -200,11 +90,11 @@ func TestMemoryConsistencyGapDoesNotSkipNextSegment(t *testing.T) {
 	s.ScheduleExtraction(ctx, "s", "m", "model")
 	drainExtractions(t, s, q)
 	var seen string
-	for _, prompt := range model.prompts {
+	for _, prompt := range model.promptsSeen() {
 		seen += transcriptBlock(prompt)
 	}
 	for i := 0; i < 7; i++ {
-		require.Equal(t, 1, strings.Count(seen, fmt.Sprintf("gap-marker-%d", i)))
+		require.Contains(t, seen, fmt.Sprintf("gap-marker-%d", i), "a two-hour silence is part of the conversation, not the end of it")
 	}
 }
 
@@ -239,27 +129,4 @@ func TestMemoryConsistencyLeaseAndConcurrentEnqueue(t *testing.T) {
 	empty, err := s.repo.ClaimPendingSessions(ctx, scope, "s", "duplicate", time.Minute)
 	require.NoError(t, err)
 	require.Nil(t, empty, "redelivering a finished task must be a no-op")
-}
-
-func TestMemoryConsistencyEmbeddingFailureAndStaleCompletion(t *testing.T) {
-	s, tr, model := newVectorHarness(t)
-	ctx := enabledCtx(t, tr, 1, "alice")
-	scope := scopeFor(t, ctx)
-	old, err := s.Remember(ctx, types.MemoryItem{Kind: types.MemoryKindFact, Content: "回答直接给结论"})
-	require.NoError(t, err)
-	model.embedder.fail = true
-	_, err = s.UpdateItem(ctx, old.ID, "生产环境需要调大连接池", 3)
-	require.NoError(t, err)
-	vectors, err := s.repo.ItemEmbeddings(ctx, scope, []string{old.ID}, "embed-1")
-	require.NoError(t, err)
-	require.Empty(t, vectors, "failed refresh must not leave a stale vector searchable")
-	model.embedder.fail = false
-	s.storeItemEmbedding(ctx, scope, s.workspaceConfig(ctx, 1), old)
-	vectors, err = s.repo.ItemEmbeddings(ctx, scope, []string{old.ID}, "embed-1")
-	require.NoError(t, err)
-	require.Empty(t, vectors, "a slow embedding of old content must be discarded")
-	require.Equal(t, 1, s.backfillEmbeddings(ctx, scope, s.workspaceConfig(ctx, 1)))
-	vectors, err = s.repo.ItemEmbeddings(ctx, scope, []string{old.ID}, "embed-1")
-	require.NoError(t, err)
-	require.Equal(t, []float32{0, 1, 0}, vectors[old.ID])
 }

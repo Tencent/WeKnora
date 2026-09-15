@@ -1843,8 +1843,9 @@ func (h *TenantHandler) updateTenantMemoryConfigInternal(c *gin.Context) {
 		c.Error(errors.NewBadRequestError("write_mode must be explicit_only or auto"))
 		return
 	}
-	if cfg.MaxItems < 0 || cfg.MaxItems > 2000 {
-		c.Error(errors.NewBadRequestError("max_items must be between 0 and 2000"))
+	if cfg.MaxEpisodes < 0 || cfg.MaxEpisodes > types.MemoryEpisodeMaxPerSubject {
+		c.Error(errors.NewBadRequestError(fmt.Sprintf(
+			"max_episodes must be between 0 and %d", types.MemoryEpisodeMaxPerSubject)))
 		return
 	}
 	if cfg.ExtractDelaySeconds < 0 || cfg.ExtractDelaySeconds > types.MaxMemoryExtractDelaySeconds {
