@@ -7,6 +7,7 @@ import (
 
 const (
 	defaultMaxFileSizeMB        = 50
+	defaultMaxFileURLSizeMB     = 10
 	defaultMaxSkillBundleSizeMB = 256
 	// maxSkillBundleSizeMBCeiling matches the install-time uncompressed
 	// archive cap: a download larger than that cannot become a valid skill.
@@ -61,6 +62,25 @@ func GetMaxSkillBundleSizeMB() int64 {
 		return maxSkillBundleSizeMBCeiling
 	}
 	return skillMB
+}
+
+// GetMaxFileURLSize is the maximum remote file size for knowledge-base URL
+// import, in bytes. Default is 10MB, configurable via MAX_FILE_URL_SIZE_MB.
+// The value is capped at MAX_FILE_SIZE_MB: a URL-imported file goes through
+// the same docreader pipeline as an uploaded file, so raising the URL limit
+// beyond the upload limit would only move the failure downstream.
+func GetMaxFileURLSize() int64 {
+	return GetMaxFileURLSizeMB() * 1024 * 1024
+}
+
+// GetMaxFileURLSizeMB returns the URL-import size cap in MB. Same caveat as
+// GetMaxFileSizeMB — a deploy-time-only env knob, read on every use.
+func GetMaxFileURLSizeMB() int64 {
+	urlMB := envSizeMB("MAX_FILE_URL_SIZE_MB", defaultMaxFileURLSizeMB)
+	if fileMB := GetMaxFileSizeMB(); urlMB > fileMB {
+		return fileMB
+	}
+	return urlMB
 }
 
 func envSizeMB(key string, fallback int64) int64 {
