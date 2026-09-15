@@ -2680,8 +2680,8 @@ defineExpose({
             </span>
           </span>
           <span class="mention-chip__name" :title="item.name">{{ item.name }}</span>
-          <button type="button" class="mention-chip__remove" @click.stop="removeSelectedItem(item)"
-            :aria-label="`${$t('common.remove')} ${item.name}`" :title="$t('common.remove')">×</button>
+          <span class="mention-chip__remove" @click.stop="removeSelectedItem(item)"
+            :aria-label="$t('common.remove')">×</span>
         </span>
       </div>
 
@@ -3059,16 +3059,15 @@ const getImgSrc = (url: string) => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 32px;
-  max-width: 100%;
-  padding: 3px 4px 3px 8px;
+  min-height: 26px;
+  padding: 3px 7px 3px 6px;
   border-radius: var(--td-radius-medium, 6px);
   box-sizing: border-box;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
   cursor: default;
   transition: background 0.15s, border-color 0.15s;
-  line-height: 20px;
+  line-height: 18px;
 
   &:hover {
     .chat-resource-chip-hover();
@@ -3080,14 +3079,14 @@ const getImgSrc = (url: string) => {
   display: inline-flex;
   width: 16px;
   height: 16px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
   align-items: center;
   justify-content: center;
 }
 
 .mention-chip__icon {
-  font-size: 14px;
+  font-size: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3116,8 +3115,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip__name {
-  min-width: 0;
-  max-width: 160px;
+  max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3128,19 +3126,15 @@ const getImgSrc = (url: string) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  width: 14px;
+  height: 14px;
   margin-left: 1px;
   border-radius: 50%;
-  font-family: inherit;
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1;
   font-weight: 400;
   cursor: pointer;
-  opacity: 0.75;
+  opacity: 0.5;
   transition: opacity 0.15s, background 0.15s, color 0.15s;
   color: currentColor;
   flex-shrink: 0;
@@ -3150,16 +3144,10 @@ const getImgSrc = (url: string) => {
   opacity: 0.85;
 }
 
-.mention-chip__remove:hover,
-.mention-chip__remove:focus-visible {
+.mention-chip__remove:hover {
   opacity: 1;
   background: var(--td-bg-color-component);
   color: var(--td-text-color-primary, #1f2937);
-}
-
-.mention-chip__remove:focus-visible {
-  outline: 2px solid var(--td-brand-color);
-  outline-offset: 1px;
 }
 
 /* 标签表面保持中性，仅用图标颜色表达资源类型。 */
