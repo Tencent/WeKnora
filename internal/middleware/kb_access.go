@@ -252,6 +252,18 @@ func RequireKBAccess(
 			return
 		}
 
+		if err := authorizeAPIKeyKBCapability(ctx, c, kbID, requiredPermission); err != nil {
+			if !enforcing {
+				logger.Warnf(ctx, "[rbac] kb-access would 403 api-key overlay (enforcement off): kb=%s required=%s",
+					kbID, requiredPermission)
+				c.Next()
+				return
+			}
+			_ = c.Error(err)
+			c.Abort()
+			return
+		}
+
 		// Stash the resolution and rewrite the request to carry the
 		// effective tenant id. Handlers reading tenant from context now
 		// see the source-tenant for shared KBs (so retrieval queries
@@ -307,4 +319,49 @@ func resolveKBAccess(
 		return nil, err
 	}
 	return access.ResolveKB(ctx, request, kb, requiredPermission, kbShareService, agentShareService)
+}
+
+func authorizeAPIKeyKBCapability(
+	ctx context.Context,
+	c *gin.Context,
+	kbID string,
+	requiredPermission types.OrgMemberRole,
+) error {
+	caps := apiKeyKBCapabilitiesForAccess(requiredPermission, c)
+	if len(caps) == 0 {
+		return nil
+	}
+	return types.AuthorizeTenantAPIKeyKnowledgeBaseAnyCapability(ctx, kbID, caps...)
+}
+
+func apiKeyKBCapabilitiesForAccess(required types.OrgMemberRole, c *gin.Context) []types.APIKeyCapability {
+	if required == types.OrgRoleViewer {
+		return []types.APIKeyCapability{types.APIKeyCapabilityRetrieve}
+	}
+	policy, hasPolicy := APIKeyRoutePolicyFromContext(c)
+	if hasPolicy {
+		hasIngest := routePolicyHasCapability(policy, types.APIKeyCapabilityIngest)
+		hasManage := routePolicyHasCapability(policy, types.APIKeyCapabilityManageKnowledgeBases)
+		switch {
+		case hasManage && !hasIngest:
+			return []types.APIKeyCapability{types.APIKeyCapabilityManageKnowledgeBases}
+		case hasIngest && !hasManage:
+			return []types.APIKeyCapability{types.APIKeyCapabilityIngest}
+		case hasManage && hasIngest:
+			return []types.APIKeyCapability{types.APIKeyCapabilityIngest, types.APIKeyCapabilityManageKnowledgeBases}
+		}
+	}
+	if required == types.OrgRoleAdmin {
+		return []types.APIKeyCapability{types.APIKeyCapabilityManageKnowledgeBases}
+	}
+	return []types.APIKeyCapability{types.APIKeyCapabilityIngest}
+}
+
+func routePolicyHasCapability(policy APIKeyRoutePolicy, cap types.APIKeyCapability) bool {
+	for _, existing := range policy.Capabilities {
+		if existing == cap {
+			return true
+		}
+	}
+	return false
 }

@@ -548,11 +548,12 @@ func attachAPIKeyAuthContext(
 	}
 	if key != nil {
 		session.APIKeyScope = &types.TenantAPIKeyScope{
-			KeyID:            key.ID,
-			ScopeType:        key.ScopeType,
-			FullAccess:       fullAccess,
-			KnowledgeBaseIDs: key.KnowledgeBaseIDs,
-			Capabilities:     key.Capabilities,
+			KeyID:                    key.ID,
+			ScopeType:                key.ScopeType,
+			FullAccess:               fullAccess,
+			KnowledgeBaseIDs:         key.KnowledgeBaseIDs,
+			KnowledgeBasePermissions: key.KnowledgeBasePermissions,
+			Capabilities:             key.Capabilities,
 		}
 	}
 	applyAuthSession(c, session)

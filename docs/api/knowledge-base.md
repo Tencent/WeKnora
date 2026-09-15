@@ -251,7 +251,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
 --header 'X-API-Key: sk-xxxxx'
 ```
 
-**响应**: `data` 为数组，每个元素的字段结构同 `POST /knowledge-bases` 响应，并额外携带 `knowledge_count` / `chunk_count` / `processing_count` / `share_count` / `is_pinned` / `pinned_at` 这些聚合与状态字段。
+**响应**: `data` 为数组，每个元素的字段结构同 `POST /knowledge-bases` 响应，并额外携带 `knowledge_count` / `chunk_count` / `processing_count` / `share_count` / `is_pinned` / `pinned_at` / `capabilities` / `permission`。`permission` 为当前调用方对该库的权限：`{ "read": bool, "write": bool, "manage": bool }`（可读 / 可写 / 可管理）。API Key 按该 Key 的全局能力与分库 overlay 计算；登录用户按空间角色（Contributor 仅对自己创建的库有写/管理）。
 
 > **注意（Phase 2）**：列表接口不包含 `vector_store_name` / `vector_store_source` / `vector_store_engine_type` / `vector_store_status` 这四个解析后的元数据字段（避免 N+1 查询）；仅 `vector_store_id` 来自数据库本身。需要展示存储名称时请单独调用详情接口或 `/vector-stores/:id`。
 
@@ -279,7 +279,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
 --header 'X-API-Key: sk-xxxxx'
 ```
 
-**响应**: 字段结构同 `POST /knowledge-bases` 响应（包含 Phase 2 的 `vector_store_*` 元数据字段），并附 `is_pinned` / `pinned_at` / `knowledge_count` / `chunk_count` / `processing_count` 状态字段。通过共享智能体访问时还会附加 `my_permission`；同时 `vector_store_name` / `vector_store_engine_type` 会被隐藏（`vector_store_source` 返回 `"shared"`），避免跨空间泄漏存储展示名。
+**响应**: 字段结构同 `POST /knowledge-bases` 响应（包含 Phase 2 的 `vector_store_*` 元数据字段），并附 `is_pinned` / `pinned_at` / `knowledge_count` / `chunk_count` / `processing_count` / `permission`。`permission` 同列表接口。通过共享智能体访问时还会附加 `my_permission`；同时 `vector_store_name` / `vector_store_engine_type` 会被隐藏（`vector_store_source` 返回 `"shared"`），避免跨空间泄漏存储展示名。
 
 ## PUT `/knowledge-bases/:id` - 更新知识库
 

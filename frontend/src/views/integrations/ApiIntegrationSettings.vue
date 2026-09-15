@@ -149,7 +149,7 @@
                       </td>
                       <td>
                         <span class="api-key-knowledge-scope">
-                          {{ formatKeyKnowledgeScope(key.knowledge_base_ids) }}
+                          {{ formatKeyKnowledgeScope(key) }}
                         </span>
                       </td>
                       <td>
@@ -559,6 +559,37 @@
             :options="knowledgeBaseOptions"
             :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
           />
+          <div v-if="apiKeyForm.knowledge_base_ids.length" class="kb-permission-matrix">
+            <div class="kb-permission-matrix__head">
+              <span>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</span>
+              <span>{{ $t('integrations.api.kbPermissionRead') }}</span>
+              <span>{{ $t('integrations.api.kbPermissionEdit') }}</span>
+              <span>{{ $t('integrations.api.kbPermissionManage') }}</span>
+            </div>
+            <div
+              v-for="kbID in apiKeyForm.knowledge_base_ids"
+              :key="kbID"
+              class="kb-permission-matrix__row"
+            >
+              <span class="kb-permission-matrix__name" :title="knowledgeBaseName(kbID)">{{ knowledgeBaseName(kbID) }}</span>
+              <t-checkbox
+                :model-value="hasKBPermission(apiKeyForm, selectedCapabilityValues, kbID, 'retrieve')"
+                :disabled="!kbPermissionColumnEnabled(selectedCapabilityValues, 'retrieve')"
+                @change="setKBPermission(apiKeyForm, selectedCapabilityValues, kbID, 'retrieve', $event)"
+              />
+              <t-checkbox
+                :model-value="hasKBPermission(apiKeyForm, selectedCapabilityValues, kbID, 'ingest')"
+                :disabled="!kbPermissionColumnEnabled(selectedCapabilityValues, 'ingest')"
+                @change="setKBPermission(apiKeyForm, selectedCapabilityValues, kbID, 'ingest', $event)"
+              />
+              <t-checkbox
+                :model-value="hasKBPermission(apiKeyForm, selectedCapabilityValues, kbID, 'manage_kbs')"
+                :disabled="!kbPermissionColumnEnabled(selectedCapabilityValues, 'manage_kbs')"
+                @change="setKBPermission(apiKeyForm, selectedCapabilityValues, kbID, 'manage_kbs', $event)"
+              />
+            </div>
+          </div>
+          <p class="scope-hint">{{ $t('integrations.api.apiKeyKnowledgePermissionsHint') }}</p>
         </div>
       </div>
     </SettingDrawer>
@@ -662,6 +693,36 @@
             :options="knowledgeBaseOptions"
             :placeholder="$t('integrations.api.apiKeyKnowledgeScopePlaceholder')"
           />
+          <div v-if="editingAPIKeyForm.knowledge_base_ids.length" class="kb-permission-matrix">
+            <div class="kb-permission-matrix__head">
+              <span>{{ $t('integrations.api.apiKeyKnowledgeScope') }}</span>
+              <span>{{ $t('integrations.api.kbPermissionRead') }}</span>
+              <span>{{ $t('integrations.api.kbPermissionEdit') }}</span>
+              <span>{{ $t('integrations.api.kbPermissionManage') }}</span>
+            </div>
+            <div
+              v-for="kbID in editingAPIKeyForm.knowledge_base_ids"
+              :key="kbID"
+              class="kb-permission-matrix__row"
+            >
+              <span class="kb-permission-matrix__name" :title="knowledgeBaseName(kbID)">{{ knowledgeBaseName(kbID) }}</span>
+              <t-checkbox
+                :model-value="hasKBPermission(editingAPIKeyForm, editingSelectedCapabilities, kbID, 'retrieve')"
+                :disabled="!kbPermissionColumnEnabled(editingSelectedCapabilities, 'retrieve')"
+                @change="setKBPermission(editingAPIKeyForm, editingSelectedCapabilities, kbID, 'retrieve', $event)"
+              />
+              <t-checkbox
+                :model-value="hasKBPermission(editingAPIKeyForm, editingSelectedCapabilities, kbID, 'ingest')"
+                :disabled="!kbPermissionColumnEnabled(editingSelectedCapabilities, 'ingest')"
+                @change="setKBPermission(editingAPIKeyForm, editingSelectedCapabilities, kbID, 'ingest', $event)"
+              />
+              <t-checkbox
+                :model-value="hasKBPermission(editingAPIKeyForm, editingSelectedCapabilities, kbID, 'manage_kbs')"
+                :disabled="!kbPermissionColumnEnabled(editingSelectedCapabilities, 'manage_kbs')"
+                @change="setKBPermission(editingAPIKeyForm, editingSelectedCapabilities, kbID, 'manage_kbs', $event)"
+              />
+            </div>
+          </div>
           <p class="scope-hint">{{ $t('integrations.api.editApiKeyScopeHint') }}</p>
         </div>
       </div>
@@ -700,7 +761,16 @@ import {
   TENANT_API_KEY_CAPABILITY_GROUPS,
   type ApiKeyCapabilityGroup,
 } from '@/config/apiKeyCapabilities'
-import { normalizeAPIKeyKnowledgeBaseIDs } from './apiKeyScope'
+import {
+  buildKnowledgeBasePermissionsPayload,
+  defaultKnowledgeBaseGrants,
+  knowledgeBaseGrantsForID,
+  normalizeAPIKeyKnowledgeBaseIDs,
+  normalizeKnowledgeBasePermissions,
+  summarizeKnowledgeBasePermissions,
+  type KnowledgeBasePermissionCapability,
+  type KnowledgeBasePermissionMap,
+} from './apiKeyScope'
 import { consumeApiPlaygroundSSE } from './apiPlaygroundSSE'
 
 const { t } = useI18n()
@@ -770,6 +840,7 @@ const editingCapabilitySelections = reactive<Record<TenantAPIKeyCapability, bool
 const editingAPIKeyForm = reactive({
   name: '',
   knowledge_base_ids: [] as string[],
+  knowledge_base_permissions: {} as KnowledgeBasePermissionMap,
   tenant_full_enabled: false,
   expires_at_unix: undefined as number | undefined,
 })
@@ -790,7 +861,10 @@ const editingKnowledgeScopeApplies = computed(() => (
 ))
 
 watch(editingKnowledgeScopeApplies, (applies) => {
-  if (!applies) editingAPIKeyForm.knowledge_base_ids = []
+  if (!applies) {
+    editingAPIKeyForm.knowledge_base_ids = []
+    editingAPIKeyForm.knowledge_base_permissions = {}
+  }
 })
 
 function editingCapabilityGroupAllSelected(group: ApiKeyCapabilityGroup): boolean {
@@ -806,6 +880,7 @@ function toggleEditingCapabilityGroup(group: ApiKeyCapabilityGroup, selected: bo
 const apiKeyForm = reactive({
   name: '',
   knowledge_base_ids: [] as string[],
+  knowledge_base_permissions: {} as KnowledgeBasePermissionMap,
   // Tenant-full keys already cover every capability. Scoped keys default to
   // retrieval + chat + agent reads so a fresh integration can ask questions
   // and present an agent picker immediately.
@@ -828,14 +903,83 @@ const apiKeyKnowledgeScopeApplies = computed(() => (
 watch(() => apiKeyForm.tenant_full_enabled, (enabled) => {
   if (enabled) {
     apiKeyForm.knowledge_base_ids = []
+    apiKeyForm.knowledge_base_permissions = {}
   }
 })
 
 watch(apiKeyKnowledgeScopeApplies, (applies) => {
   if (!applies) {
     apiKeyForm.knowledge_base_ids = []
+    apiKeyForm.knowledge_base_permissions = {}
   }
 })
+
+function knowledgeBaseName(kbID: string) {
+  return knowledgeBases.value.find((kb) => kb.id === kbID)?.name || kbID
+}
+
+function kbPermissionColumnEnabled(
+  capabilities: readonly TenantAPIKeyCapability[],
+  cap: KnowledgeBasePermissionCapability,
+) {
+  if (cap === 'retrieve') return capabilities.includes('retrieve') || capabilities.includes('chat')
+  return capabilities.includes(cap)
+}
+
+function hasKBPermission(
+  form: { knowledge_base_ids: string[]; knowledge_base_permissions: KnowledgeBasePermissionMap },
+  capabilities: readonly TenantAPIKeyCapability[],
+  kbID: string,
+  cap: KnowledgeBasePermissionCapability,
+) {
+  return knowledgeBaseGrantsForID(
+    kbID,
+    form.knowledge_base_ids,
+    form.knowledge_base_permissions,
+    capabilities,
+  ).includes(cap)
+}
+
+function setKBPermission(
+  form: { knowledge_base_ids: string[]; knowledge_base_permissions: KnowledgeBasePermissionMap },
+  capabilities: readonly TenantAPIKeyCapability[],
+  kbID: string,
+  cap: KnowledgeBasePermissionCapability,
+  checked: unknown,
+) {
+  const enabled = Boolean(checked)
+  if (cap === 'retrieve' && !enabled) {
+    form.knowledge_base_ids = form.knowledge_base_ids.filter((id) => id !== kbID)
+    const next = { ...form.knowledge_base_permissions }
+    delete next[kbID]
+    form.knowledge_base_permissions = next
+    return
+  }
+  const defaults = defaultKnowledgeBaseGrants(capabilities)
+  const current = new Set(
+    knowledgeBaseGrantsForID(kbID, form.knowledge_base_ids, form.knowledge_base_permissions, capabilities),
+  )
+  if (enabled) current.add(cap)
+  else current.delete(cap)
+  const nextGrants = defaults.filter((item) => current.has(item))
+  form.knowledge_base_permissions = {
+    ...form.knowledge_base_permissions,
+    [kbID]: nextGrants,
+  }
+}
+
+function permissionsPayload(
+  form: { knowledge_base_ids: string[]; knowledge_base_permissions: KnowledgeBasePermissionMap },
+  capabilities: readonly TenantAPIKeyCapability[],
+  applies: boolean,
+) {
+  if (!applies) return {}
+  return buildKnowledgeBasePermissionsPayload(
+    form.knowledge_base_ids,
+    form.knowledge_base_permissions,
+    capabilities,
+  )
+}
 
 function selectedCapabilities(): TenantAPIKeyCapability[] {
   return selectedCapabilityValues.value
@@ -1437,6 +1581,7 @@ function openApiDoc() {
 function openCreateAPIKeyDialog() {
   apiKeyForm.name = ''
   apiKeyForm.knowledge_base_ids = []
+  apiKeyForm.knowledge_base_permissions = {}
   apiKeyForm.tenant_full_enabled = false
   API_KEY_CAPABILITIES.forEach((capability) => {
     capabilitySelections[capability] = DEFAULT_API_KEY_CAPABILITIES.has(capability)
@@ -1461,6 +1606,11 @@ async function createScopedAPIKey() {
       full_access: apiKeyFullAccessEnabled.value,
       // KB scoping only applies to capabilities that touch knowledge bases.
       knowledge_base_ids: apiKeyKnowledgeScopeApplies.value ? apiKeyForm.knowledge_base_ids : [],
+      knowledge_base_permissions: permissionsPayload(
+        apiKeyForm,
+        selectedCapabilities(),
+        apiKeyKnowledgeScopeApplies.value,
+      ),
       // Capabilities only matter below full access; full access already covers them all.
       capabilities: apiKeyFullAccessEnabled.value ? [] : selectedCapabilities(),
     })
@@ -1484,6 +1634,7 @@ function openEditAPIKeyScope(key: TenantAPIKey) {
   editingAPIKeyForm.name = key.name
   editingAPIKeyForm.tenant_full_enabled = key.full_access
   editingAPIKeyForm.knowledge_base_ids = normalizeAPIKeyKnowledgeBaseIDs(key.knowledge_base_ids)
+  editingAPIKeyForm.knowledge_base_permissions = normalizeKnowledgeBasePermissions(key.knowledge_base_permissions)
   const expiresAt = key.expires_at ? Date.parse(key.expires_at) : Number.NaN
   editingAPIKeyForm.expires_at_unix = Number.isNaN(expiresAt)
     ? undefined
@@ -1515,6 +1666,11 @@ async function saveAPIKeyConfiguration() {
       full_access: editingAPIKeyFullAccessEnabled.value,
       capabilities: editingAPIKeyFullAccessEnabled.value ? [] : editingSelectedCapabilities.value,
       knowledge_base_ids: editingKnowledgeScopeApplies.value ? editingAPIKeyForm.knowledge_base_ids : [],
+      knowledge_base_permissions: permissionsPayload(
+        editingAPIKeyForm,
+        editingSelectedCapabilities.value,
+        editingKnowledgeScopeApplies.value,
+      ),
       expires_at_unix: editingAPIKeyForm.expires_at_unix,
     })
     if (!resp.success || !resp.data) {
@@ -1555,11 +1711,19 @@ async function deleteScopedAPIKey(id: number) {
   await loadAPIKeys()
 }
 
-function formatKeyKnowledgeScope(ids: readonly string[] | null | undefined) {
-  const normalizedIDs = normalizeAPIKeyKnowledgeBaseIDs(ids)
+function formatKeyKnowledgeScope(key: TenantAPIKey) {
+  const normalizedIDs = normalizeAPIKeyKnowledgeBaseIDs(key.knowledge_base_ids)
   if (!normalizedIDs.length) return t('integrations.api.allKnowledgeBases')
-  const names = normalizedIDs.map((id) => knowledgeBases.value.find((kb) => kb.id === id)?.name || id)
-  return names.join(', ')
+  const summary = summarizeKnowledgeBasePermissions(
+    normalizedIDs,
+    key.knowledge_base_permissions,
+    key.capabilities || [],
+  )
+  return t('integrations.api.apiKeyKnowledgeScopeSummary', {
+    total: summary.total,
+    editable: summary.editable,
+    manageable: summary.manageable,
+  })
 }
 
 function formatKeyMaskedValue(key: TenantAPIKey) {
@@ -2166,6 +2330,45 @@ onBeforeUnmount(stopPlayground)
   color: var(--td-text-color-placeholder);
   font-size: 12px;
   line-height: 18px;
+}
+
+.kb-permission-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 8px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.kb-permission-matrix__head,
+.kb-permission-matrix__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px 64px 64px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+}
+
+.kb-permission-matrix__head {
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.kb-permission-matrix__row + .kb-permission-matrix__row {
+  border-top: 1px solid var(--td-component-stroke);
+}
+
+.kb-permission-matrix__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--td-text-color-primary);
+  font-size: 13px;
 }
 
 .principal-section {

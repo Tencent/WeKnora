@@ -72,6 +72,151 @@ func TestScopeHasCapability(t *testing.T) {
 	}
 }
 
+func TestAllowsKnowledgeBaseCapabilityInheritsGlobalWhenMapEmpty(t *testing.T) {
+	s := TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1", "kb-2"},
+		Capabilities:     StringArray{"retrieve", "ingest", "manage_kbs"},
+	}
+	if !s.AllowsKnowledgeBaseCapability("kb-1", APIKeyCapabilityIngest) {
+		t.Fatal("empty permissions map should inherit ingest for every allow-listed KB")
+	}
+	if !s.AllowsKnowledgeBaseCapability("kb-2", APIKeyCapabilityManageKnowledgeBases) {
+		t.Fatal("empty permissions map should inherit manage_kbs for every allow-listed KB")
+	}
+}
+
+func TestAllowsKnowledgeBaseCapabilitySubtractsIngestOnOneKB(t *testing.T) {
+	s := TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1", "kb-2"},
+		Capabilities:     StringArray{"retrieve", "ingest"},
+		KnowledgeBasePermissions: KnowledgeBasePermissionMap{
+			"kb-1": StringArray{"retrieve"},
+		},
+	}
+	if s.AllowsKnowledgeBaseCapability("kb-1", APIKeyCapabilityIngest) {
+		t.Fatal("kb-1 should not allow ingest after the overlay removed it")
+	}
+	if !s.AllowsKnowledgeBaseCapability("kb-1", APIKeyCapabilityRetrieve) {
+		t.Fatal("kb-1 should still allow retrieve")
+	}
+	if !s.AllowsKnowledgeBaseCapability("kb-2", APIKeyCapabilityIngest) {
+		t.Fatal("kb-2 with no overlay entry should inherit ingest")
+	}
+}
+
+func TestAllowsKnowledgeBaseCapabilityGlobalCeiling(t *testing.T) {
+	s := TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1"},
+		Capabilities:     StringArray{"retrieve"},
+		KnowledgeBasePermissions: KnowledgeBasePermissionMap{
+			"kb-1": StringArray{"retrieve", "ingest"},
+		},
+	}
+	if s.AllowsKnowledgeBaseCapability("kb-1", APIKeyCapabilityIngest) {
+		t.Fatal("ingest overlay must not exceed the global capability ceiling")
+	}
+}
+
+func TestAllowsKnowledgeBaseCapabilityChatCountsAsReadCeiling(t *testing.T) {
+	s := TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1"},
+		Capabilities:     StringArray{"chat", "ingest"},
+	}
+	if !s.AllowsKnowledgeBaseCapability("kb-1", APIKeyCapabilityRetrieve) {
+		t.Fatal("chat should satisfy the per-KB read ceiling")
+	}
+}
+
+func TestAllowsKnowledgeBaseCapabilityManageWithoutIngest(t *testing.T) {
+	s := TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1"},
+		Capabilities:     StringArray{"retrieve", "ingest", "manage_kbs"},
+		KnowledgeBasePermissions: KnowledgeBasePermissionMap{
+			"kb-1": StringArray{"retrieve", "manage_kbs"},
+		},
+	}
+	if s.AllowsKnowledgeBaseCapability("kb-1", APIKeyCapabilityIngest) {
+		t.Fatal("manage-only overlay must not grant ingest")
+	}
+	if !s.AllowsKnowledgeBaseCapability("kb-1", APIKeyCapabilityManageKnowledgeBases) {
+		t.Fatal("manage overlay should grant manage_kbs")
+	}
+}
+
+func TestAllowsKnowledgeBaseCapabilityFullAccessAndUnrestricted(t *testing.T) {
+	full := TenantAPIKeyScope{FullAccess: true}
+	if !full.AllowsKnowledgeBaseCapability("kb-any", APIKeyCapabilityIngest) {
+		t.Fatal("full-access keys skip the per-KB overlay")
+	}
+	unrestricted := TenantAPIKeyScope{Capabilities: StringArray{"ingest"}}
+	if !unrestricted.AllowsKnowledgeBaseCapability("kb-any", APIKeyCapabilityIngest) {
+		t.Fatal("unrestricted keys follow global capabilities only")
+	}
+}
+
+func TestAuthorizeTenantAPIKeyKnowledgeBaseCapabilityRejectsWrite(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1"},
+		Capabilities:     StringArray{"retrieve", "ingest"},
+		KnowledgeBasePermissions: KnowledgeBasePermissionMap{
+			"kb-1": StringArray{"retrieve"},
+		},
+	})
+	if err := AuthorizeTenantAPIKeyKnowledgeBaseCapability(ctx, "kb-1", APIKeyCapabilityIngest); err == nil {
+		t.Fatal("expected forbidden ingest on a read-only KB overlay")
+	}
+	if err := AuthorizeTenantAPIKeyKnowledgeBaseCapability(ctx, "kb-1", APIKeyCapabilityRetrieve); err != nil {
+		t.Fatalf("retrieve should pass, got %v", err)
+	}
+}
+
+func TestFilterKnowledgeBasesForTenantAPIKeyScopeDropsUnreadKBs(t *testing.T) {
+	ctx := WithTenantAPIKeyScope(context.Background(), TenantAPIKeyScope{
+		KnowledgeBaseIDs: StringArray{"kb-1", "kb-2"},
+		Capabilities:     StringArray{"retrieve", "ingest"},
+		KnowledgeBasePermissions: KnowledgeBasePermissionMap{
+			"kb-2": StringArray{"ingest"},
+		},
+	})
+	got, err := FilterKnowledgeBasesForTenantAPIKeyScope(ctx, nil, []string{"kb-1", "kb-2"})
+	if err != nil {
+		t.Fatalf("FilterKnowledgeBasesForTenantAPIKeyScope returned error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "kb-1" {
+		t.Fatalf("filtered = %#v, want only kb-1 (kb-2 has no retrieve)", got)
+	}
+}
+
+func TestKnowledgeBasePermissionsExceedCeiling(t *testing.T) {
+	if KnowledgeBasePermissionsExceedCeiling(
+		KnowledgeBasePermissionMap{"kb-1": StringArray{"ingest"}},
+		StringArray{"retrieve"},
+	) != true {
+		t.Fatal("ingest grant without global ingest should exceed the ceiling")
+	}
+	if KnowledgeBasePermissionsExceedCeiling(
+		KnowledgeBasePermissionMap{"kb-1": StringArray{"retrieve"}},
+		StringArray{"retrieve", "chat"},
+	) {
+		t.Fatal("retrieve under a retrieve/chat key should not exceed the ceiling")
+	}
+}
+
+func TestNormalizeKnowledgeBasePermissionsDropsEmptyGrantRows(t *testing.T) {
+	ids, perms := NormalizeKnowledgeBasePermissions(
+		StringArray{"kb-1", "kb-2"},
+		KnowledgeBasePermissionMap{"kb-1": StringArray{}},
+		StringArray{"retrieve", "ingest"},
+		false,
+	)
+	if len(ids) != 1 || ids[0] != "kb-2" {
+		t.Fatalf("ids = %#v, want [kb-2]", ids)
+	}
+	if len(perms) != 0 {
+		t.Fatalf("perms = %#v, want empty inherit map", perms)
+	}
+}
+
 func TestNormalizeAPIKeyCapabilities(t *testing.T) {
 	got := NormalizeAPIKeyCapabilities(StringArray{
 		" Retrieve ",

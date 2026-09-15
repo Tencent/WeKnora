@@ -189,7 +189,7 @@ graph TB
 
 #### KB 计算字段 {#_1-7-kb-计算字段}
 
-列表 / 详情响应附带：`knowledge_count`、`chunk_count`、`is_processing`（FAQ 库）、`processing_count`（文档库处理中知识数）、`share_count`（共享到的组织数）、`creator_name`、`is_pinned` / `pinned_at`（当前用户置顶状态）。
+列表 / 详情响应附带：`knowledge_count`、`chunk_count`、`is_processing`（FAQ 库）、`processing_count`（文档库处理中知识数）、`share_count`（共享到的组织数）、`creator_name`、`is_pinned` / `pinned_at`（当前用户置顶状态）、`capabilities`（向量/关键词/wiki/图谱/FAQ）、`permission`（当前调用方对该库的 `read` / `write` / `manage`）。
 
 另有一个存储字段 `is_temporary`：标记**临时（ephemeral）知识库**，正常的知识库列表里不展示。它由系统内部使用，典型场景是联网搜索把抓回来的网页缓存成可检索内容。手工建库不会产生临时库。
 
