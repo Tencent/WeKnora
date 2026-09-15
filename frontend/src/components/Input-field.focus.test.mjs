@@ -27,6 +27,7 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       // The unified-thinking emit adds a 6th argument read from these refs
       // (declared outside the sliced region); false sends an empty level.
       sessionThinkingActive: { value: false },
+      sessionThinkingTouched: { value: false },
       sessionThinking: { value: { enabled: false, level: '' } },
       emit: name => effects.push([name]),
       clearvalue: () => effects.push(['clear']),

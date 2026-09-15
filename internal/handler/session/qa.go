@@ -53,6 +53,7 @@ type qaRequestContext struct {
 	skillNames            []string
 	summaryModelID        string
 	thinkingLevel         string // our per-request thinking level override
+	thinking              *bool  // our per-request thinking on/off override (nil = follow agent)
 	localBrowserEnabled   bool   // upstream browser source
 	webSearchEnabled      bool
 	mentionedItems        types.MentionedItems
@@ -104,6 +105,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		AssistantMessageID:  rc.assistantMessage.ID,
 		SummaryModelID:      rc.summaryModelID,
 		ThinkingLevel:       rc.thinkingLevel,
+		Thinking:            rc.thinking,
 		CustomAgent:         rc.customAgent,
 		SharedAgentReadOnly: rc.sharedAgentReadOnly,
 		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
@@ -412,6 +414,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		thinkingLevel:         request.ThinkingLevel,
+		thinking:              request.Thinking,
 		webSearchEnabled:      request.WebSearchEnabled,
 		localBrowserEnabled:   request.LocalBrowserEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),

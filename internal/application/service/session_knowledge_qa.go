@@ -161,6 +161,11 @@ func (s *sessionService) KnowledgeQA(
 	if req.ThinkingLevel != "" {
 		chatManage.SummaryConfig.ThinkingLevel = req.ThinkingLevel
 	}
+	// Per-request thinking on/off wins over the agent default (design §4.2
+	// session panel: the toggle is a first-class override, nil = follow).
+	if req.Thinking != nil {
+		chatManage.SummaryConfig.Thinking = req.Thinking
+	}
 
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall

@@ -1093,7 +1093,10 @@ const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
 });
 
-// ---- 会话级思考覆盖（design §8.1.3）：内存态不持久化，随 QA 请求发送 thinking_level ----
+// ---- 会话级思考覆盖（design §8.1.3）：内存态不持久化。面板初始展示智能体
+// 的思考设置；用户改动（touched）后才随 QA 请求发送 thinking（布尔，缺省
+// 跟随智能体/全局默认）与 thinking_level——未触碰时不发送任何思考字段。 ----
+const sessionThinkingTouched = ref(false);
 const sessionThinking = ref<{ enabled: boolean; level: string }>({ enabled: false, level: '' });
 const showThinkingPanel = ref(false);
 const chatProviderOptions = ref<ModelProviderOption[]>([]);
@@ -1114,11 +1117,11 @@ const selectedModelThinkingCaps = computed(() => {
 
 const selectedModelChatShard = computed(() => selectedModel.value?.parameters.chat);
 
-/** 未开思考的模型整块隐藏（触发按钮 + 面板）。会话 API 只携带 thinking_level，
-    布尔思考（如 ollama think，无档位）无法在会话级表达——同样隐藏。 */
+/** 未声明思考的模型整块隐藏（触发按钮 + 面板）。布尔思考（SupportedLevels
+    空，如 ollama think）同样支持——会话 API 已传输 thinking 布尔，面板渲染
+    纯开关（ThinkingControls single 形态对空档位不渲染选择器）。 */
 const thinkingSupported = computed(() =>
-  selectedModelThinkingCaps.value?.supported === true
-  && (selectedModelThinkingCaps.value?.supported_levels?.length ?? 0) > 0);
+  selectedModelThinkingCaps.value?.supported === true);
 
 /** single 档位 options = (分片子集 ?? 厂商枚举) ∩ 厂商枚举（与 ThinkingControls 内规则一致）。 */
 const sessionThinkingLevelOptions = computed(() => {
@@ -1127,44 +1130,68 @@ const sessionThinkingLevelOptions = computed(() => {
   return shard.length ? levels.filter(l => shard.includes(l)) : levels;
 });
 
-const sessionThinkingActive = computed(() => sessionThinking.value.enabled && !!sessionThinking.value.level);
+/** 智能体侧的思考默认（自定义智能体 config；内置普通模式回落关闭）。 */
+const agentThinkingDefault = computed(() => ({
+  enabled: selectedAgent.value?.config?.thinking === true,
+  level: selectedAgent.value?.config?.thinking_level || '',
+}));
+
+/** 展示态：未触碰 = 智能体默认（档位缺省回落厂商 default_level，且必须在
+    当前可选集合内，否则回落"跟随模型默认"占位）；触碰后 = 用户的选择。 */
+const displayedThinking = computed(() => {
+  if (sessionThinkingTouched.value) return sessionThinking.value;
+  const options = sessionThinkingLevelOptions.value;
+  const capsDefault = selectedModelThinkingCaps.value?.default_level || '';
+  const level = options.includes(agentThinkingDefault.value.level) ? agentThinkingDefault.value.level
+    : options.includes(capsDefault) ? capsDefault : '';
+  return { enabled: agentThinkingDefault.value.enabled, level };
+});
+
+const sessionThinkingEffectiveEnabled = computed(() => displayedThinking.value.enabled);
+const sessionThinkingActive = computed(() => sessionThinkingEffectiveEnabled.value);
 
 const sessionThinkingTriggerLabel = computed(() => {
-  if (!sessionThinkingActive.value) return t('thinking.levelLabel');
-  const level = sessionThinking.value.level;
+  if (!sessionThinkingEffectiveEnabled.value) return t('thinking.levelLabel');
+  const level = displayedThinking.value.level;
+  if (!level) return t('thinking.levelLabel');
   const key = `model.editor.thinkingLevels.${level}`;
   return `${t('thinking.levelLabel')} · ${te(key) ? t(key) : level}`;
 });
 
 const sessionThinkingValue = computed({
-  get: () => ({ enabled: sessionThinking.value.enabled, level: sessionThinking.value.level }),
+  get: () => ({ enabled: sessionThinkingEffectiveEnabled.value, level: displayedThinking.value.level }),
   set: (v) => {
-    sessionThinking.value.enabled = v.enabled ?? false;
-    sessionThinking.value.level = v.level || '';
+    sessionThinkingTouched.value = true;
+    sessionThinking.value = { enabled: v.enabled ?? false, level: v.level || '' };
   },
 });
 
-/** 重置为跟随智能体/模型默认（空 = 不发 thinking_level）。 */
-const resetSessionThinking = () => {
+/** 清回"跟随智能体/模型默认"（未触碰态：不发任何思考字段）。 */
+const clearSessionThinking = () => {
+  sessionThinkingTouched.value = false;
   sessionThinking.value = { enabled: false, level: '' };
 };
 
-// 会话中切模型：已选档位 ∉ 新模型集合 → 清空 + toast（同 §8.1.2 规则）；
-// 切到不支持思考的模型同样清空——面板因 thinkingSupported=false 隐藏后，
-// 残留档位仍会随请求发出，用户既看不见也无法清除（2026-09-13 审查）。
+// 会话中切模型：触碰过的档位 ∉ 新模型集合 → 清回默认态 + toast；
+// 面板隐藏（模型不支持思考）时残留覆盖同样会随请求发出且用户不可见，一并清。
 watch(selectedModelId, () => {
-  const level = sessionThinking.value.level;
-  if (!level) return;
+  if (!sessionThinkingTouched.value) return;
   const options = sessionThinkingLevelOptions.value;
-  if (options.length === 0 || !options.includes(level)) {
-    resetSessionThinking();
+  if (sessionThinking.value.level
+    && (options.length === 0 || !options.includes(sessionThinking.value.level))) {
+    clearSessionThinking();
     MessagePlugin.warning(t('input.thinkingLevelResetToast'));
   }
 });
 
+// 切智能体：面板默认展示跟随新智能体的思考设置。
+watch(selectedAgentId, () => {
+  clearSessionThinking();
+});
+
 // 会话切换：会话级覆盖是内存态，不跨会话携带
 watch(() => props.sessionId, () => {
-  resetSessionThinking();
+  clearSessionThinking();
 });
 
 // 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
@@ -2024,7 +2051,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], thinkingLevel?: string): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], thinkingLevel?: string, thinkingEnabled?: boolean): void;
   (e: 'stop-generation'): void;
   (e: 'stop-confirmed'): void;
   (e: 'stop-failed'): void;
@@ -2160,7 +2187,8 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
   // before unmount); sending must keep focus — the composer restores/keeps
   // it across the DOM update (upstream focus contract).
   emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles,
-    sessionThinkingActive.value ? sessionThinking.value.level : '');
+    sessionThinkingTouched.value && sessionThinking.value.enabled ? sessionThinking.value.level : '',
+    sessionThinkingTouched.value ? sessionThinking.value.enabled : undefined);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2947,22 +2975,14 @@ defineExpose({
             </div>
             <template #content>
               <div class="thinking-panel" @click.stop>
-                <!-- hideToggle：会话 API 只传 thinking_level，强制开关不可传输；
-                     面板即"档位覆盖"选择器（2026-09-14 反馈：开关是死控件，
-                     且把重置按钮拖成永久禁用） -->
+                <!-- 开关可传输（会话 API thinking 布尔覆盖）：初始展示智能体
+                     的思考设置，用户改动后随请求发送。 -->
                 <ThinkingControls
                   v-model="sessionThinkingValue"
                   edit-mode="single"
-                  hide-toggle
                   :caps="selectedModelThinkingCaps"
                   :chat-shard="selectedModelChatShard"
                 />
-                <div class="thinking-panel__footer">
-                  <t-button variant="text" size="small" :disabled="!sessionThinkingActive"
-                    @click="resetSessionThinking">
-                    {{ $t('thinking.reset') }}
-                  </t-button>
-                </div>
               </div>
             </template>
           </t-popup>

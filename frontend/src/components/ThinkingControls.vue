@@ -128,8 +128,6 @@ interface Props {
   /** 所选模型记录的 chat 分片（模型 API 已透出），用于档位交集。 */
   chatShard?: ThinkingShard
   modelValue: ThinkingControlsValue
-  /** 会话级覆盖面板：会话 API 只收 thinking_level，强制开关不可传输——隐藏 */
-  hideToggle?: boolean
 }
 
 interface Emits {
@@ -149,10 +147,10 @@ const { t, te } = useI18n()
 const supported = computed(() => props.caps?.supported === true)
 const canDisable = computed(() => props.caps?.can_disable !== false)
 
-/** levels 形态沿用 v1：强制思考模型不渲染开关；single 形态渲染锁定开关。
-    hideToggle：宿主显式隐藏（会话级覆盖面板——开关不可传输）。 */
+/** levels 形态沿用 v1：强制思考模型不渲染开关；single 形态渲染开关（会话
+    API 已支持 thinking 布尔覆盖，开关可传输）。 */
 const showToggle = computed(() =>
-  !props.hideToggle && (props.editMode === 'levels' ? canDisable.value : true))
+  props.editMode === 'levels' ? canDisable.value : true)
 
 const effectiveEnabled = computed(() =>
   props.editMode === 'single' && !canDisable.value ? true : props.modelValue.enabled === true,

@@ -336,6 +336,10 @@ func (s *sessionService) buildAgentConfig(
 	if req.ThinkingLevel != "" {
 		agentConfig.ThinkingLevel = req.ThinkingLevel
 	}
+	// Session-level thinking on/off likewise wins over the agent config.
+	if req.Thinking != nil {
+		agentConfig.Thinking = req.Thinking
+	}
 
 	// Configure skills based on CustomAgentConfig
 	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)

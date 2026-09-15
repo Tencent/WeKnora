@@ -61,6 +61,9 @@ type CreateKnowledgeQARequest struct {
 	SummaryModelID string `json:"summary_model_id"`
 	// Optional per-request thinking level override (platform vocabulary).
 	ThinkingLevel string `json:"thinking_level,omitempty"`
+	// Optional per-request thinking on/off override. Nil = follow the agent
+	// (or global) default; true/false forces the thinking param on the wire.
+	Thinking *bool `json:"thinking,omitempty"`
 	// Per-request MCP services / Skills / @mentions (tag IDs are display and
 	// debug only; scoped via MentionedItems).
 	MCPServiceIDs  []string               `json:"mcp_service_ids"`
