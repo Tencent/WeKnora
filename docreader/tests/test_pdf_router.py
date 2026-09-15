@@ -1,4 +1,6 @@
 import io
+import pathlib
+import re
 import unittest
 
 from PIL import Image
@@ -190,10 +192,127 @@ class MarginColumnFilterTest(unittest.TestCase):
         self.assertEqual(cols[0][0]["ch"], "L")
 
     def test_keeps_real_two_column_layout(self):
-        left = [_char("L", 50, 150, 700 - i * 12, 712 - i * 12) for i in range(4)]
-        right = [_char("R", 400, 500, 700 - i * 12, 712 - i * 12) for i in range(4)]
+        # Realistic two-column geometry: each side spans ~40% of the page
+        # with a full-height gutter; both sides are prose-wide, so the table
+        # veto must not merge them even though the baselines coincide.
+        left = [_char("L", 40, 290, 700 - i * 12, 712 - i * 12) for i in range(4)]
+        right = [_char("R", 330, 580, 700 - i * 12, 712 - i * 12) for i in range(4)]
         cols = _filter_reading_columns(left + right, scale=12.0, width=600.0)
         self.assertEqual(len(cols), 2)
+
+
+class LayoutTablePreservationTest(unittest.TestCase):
+    """issue #3223: row-aligned narrow sides are table cells, not margin noise."""
+
+    @staticmethod
+    def _table_page():
+        # Two-column table: names around x=100, quantities around x=480,
+        # every cell sharing its row baseline.
+        chars: list = []
+        for name, y in (("AA", 700), ("BB", 660), ("CC", 620)):
+            for k, ch in enumerate(name):
+                chars.append(_char(ch, 100 + k * 10, 108 + k * 10, y, y + 12))
+        for digits, y in zip(("12", "7", "345"), (700, 660, 620)):
+            for k, ch in enumerate(digits):
+                chars.append(_char(ch, 480 + k * 10, 488 + k * 10, y, y + 12))
+        return chars
+
+    def test_table_quantity_column_survives_and_rows_merge(self):
+        from docreader.parser.pdf_parser import _chars_to_layout_markdown
+
+        md = _chars_to_layout_markdown(self._table_page(), 12.0, 600.0)
+        for cell in ("AA 12", "BB 7", "CC 345"):
+            self.assertIn(cell, md)
+
+    def test_vertical_watermark_stack_still_dropped(self):
+        # One glyph per line (vertical watermark) must stay excluded from the
+        # table veto even when the stack is narrow and spans the body rows.
+        body = [
+            _char("L", 200, 210, 700 - i * 14, 712 - i * 14)
+            for i in range(4)
+        ]
+        stack = [
+            _char(c, 40, 48, 700 - i * 14, 712 - i * 14)
+            for i, c in enumerate("9753")
+        ]
+        cols = _filter_reading_columns(body + stack, scale=12.0, width=600.0)
+        self.assertEqual(len(cols), 1)
+        self.assertEqual(cols[0][0]["ch"], "L")
+
+
+class LineGroupingOverlapTest(unittest.TestCase):
+    """issue #3223: ascender/descender boxes must not split a visual line."""
+
+    def test_descenders_stay_on_their_line(self):
+        # 'y' has a descender box whose center sits well below 'I'/'n';
+        # the old center-distance rule split "Iny" into "In" + "y".
+        chars = [
+            _char("I", 100, 108, 100, 114),
+            _char("n", 110, 117, 102, 112),
+            _char("y", 119, 127, 96, 114),
+        ]
+        lines = _group_lines(chars)
+        self.assertEqual([ln["text"] for ln in lines], ["Iny"])
+
+    def test_distinct_rows_stay_separate(self):
+        # Tight but non-overlapping rows must still split into two lines.
+        chars = [
+            _char("a", 100, 108, 100, 114),
+            _char("b", 100, 108, 80, 92),
+        ]
+        lines = _group_lines(chars)
+        self.assertEqual([ln["text"] for ln in lines], ["a", "b"])
+
+
+class TrackedGlyphsTest(unittest.TestCase):
+    """issue #3223: letter tracking must not become word spaces."""
+
+    def test_tracked_digits_stay_glued(self):
+        # Digits letter-spaced ~0.32em ("124" rendered as "1 24" before).
+        chars = [
+            _char("1", 0, 4.4, 0, 12),
+            _char("2", 8.2, 16.4, 0, 12),
+            _char("4", 17.6, 26.1, 0, 12),
+        ]
+        self.assertEqual(_join_line_glyphs(chars), "124")
+
+    def test_word_gap_still_splits(self):
+        # A true word gap (over half the font height) still infers a space.
+        chars = [
+            _char("c", 0, 10, 0, 14),
+            _char("f", 18.1, 28, 0, 14),
+        ]
+        self.assertEqual(_join_line_glyphs(chars), "c f")
+
+
+class Issue3223FixtureTest(unittest.TestCase):
+    FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "issue_3223_table_quantities.pdf"
+
+    @unittest.skipIf(not FIXTURE.exists(), "issue #3223 fixture not generated")
+    def test_table_quantities_survive_end_to_end(self):
+        from docreader.parser.pdf_parser import PDFParser
+
+        doc = PDFParser(
+            file_name="C26-file-sample.pdf", file_type="pdf"
+        ).parse_into_text(self.FIXTURE.read_bytes())
+        content = doc.content
+        for n in (124, 237, 68, 91):
+            self.assertTrue(
+                re.search(rf"(?<!\d){n}(?!\d)", content),
+                f"quantity {n} dropped or split",
+            )
+        for word in (
+            "Aster",
+            "Willow",
+            "Hazel",
+            "Rowan",
+            "FILE-OAK-9357",
+            "TAIL-5826",
+            "Inventory sample",
+        ):
+            self.assertIn(word, content)
+        for row in (r"Aster\s+124", r"Willow\s+237", r"Hazel\s+68", r"Rowan\s+91"):
+            self.assertTrue(re.search(row, content), f"row correspondence lost: {row}")
 
 
 class PunctuationMergeTest(unittest.TestCase):
