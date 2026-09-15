@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"unicode/utf8"
 
@@ -360,4 +362,58 @@ func TestListRecentDocumentChunksWithQuestions_UnionsExplicitKBAndKnowledge(t *t
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.ElementsMatch(t, []string{fromExplicitKB.ID, fromExplicitDocument.ID}, []string{got[0].ID, got[1].ID})
+}
+
+// TestCreateChunks_SQLite_ConcurrentSeqIDAssignment reproduces #2473: several
+// concurrent document parses calling CreateChunks at the same time must never
+// collide on chunks.seq_id, even though SeqIDs are assigned from MAX(seq_id)
+// in the application layer. The connection pool is capped at 1 exactly like
+// container.go does for SQLite, which is what makes the old untransacted
+// SELECT MAX / INSERT pair interleave.
+func TestCreateChunks_SQLite_ConcurrentSeqIDAssignment(t *testing.T) {
+	db := setupChunkTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { sqlDB.Close() })
+	sqlDB.SetMaxOpenConns(1)
+
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	const workers = 32
+	const perWorker = 8
+	kbID := uuid.NewString()
+
+	var wg sync.WaitGroup
+	errs := make([]error, workers)
+	start := make(chan struct{})
+	for i := range workers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			chunks := make([]*types.Chunk, 0, perWorker)
+			for j := range perWorker {
+				chunks = append(chunks, makeChunk(kbID, fmt.Sprintf("k-%d-%d", i, j), types.ChunkTypeText))
+			}
+			errs[i] = repo.CreateChunks(ctx, chunks)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		require.NoError(t, err, "worker %d failed", i)
+	}
+
+	var saved []types.Chunk
+	require.NoError(t, db.Order("seq_id").Find(&saved).Error)
+	require.Len(t, saved, workers*perWorker)
+
+	seen := map[int64]bool{}
+	for _, c := range saved {
+		require.NotZero(t, c.SeqID, "chunk %s must get a non-zero seq_id", c.ID)
+		require.False(t, seen[c.SeqID], "seq_id %d assigned twice", c.SeqID)
+		seen[c.SeqID] = true
+	}
 }

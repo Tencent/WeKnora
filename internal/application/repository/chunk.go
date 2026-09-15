@@ -53,13 +53,37 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 
 	db := r.db.WithContext(ctx)
 
-	// SQLite doesn't support autoIncrement on non-PK columns,
-	// so we must pre-assign SeqIDs manually (safe: single connection).
+	// SQLite doesn't support autoIncrement on non-PK columns, so SeqIDs are
+	// pre-assigned from MAX(seq_id). That read-modify-write must be atomic:
+	// SetMaxOpenConns(1) only serializes individual statements, so without a
+	// transaction two goroutines can both read the same MAX(seq_id) between
+	// the SELECT and their INSERT and write overlapping seq_ids
+	// (UNIQUE constraint failed: chunks.seq_id, #2473). The transaction pins
+	// the whole assign+insert sequence to a single connection; the bounded
+	// retry is defense-in-depth for deployments running a larger pool, where
+	// two immediate write transactions could still collide once.
 	// PostgreSQL / MySQL use DB sequences — skip to avoid duplicate key
 	// races under concurrent inserts.
 	if db.Dialector.Name() == "sqlite" {
-		if err := types.AssignChunkSeqIDs(db, chunks); err != nil {
-			return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+		for attempt := 0; ; attempt++ {
+			txErr := db.Transaction(func(tx *gorm.DB) error {
+				// Reset so a retried attempt re-assigns from the fresh MAX
+				// instead of reusing the conflicted numbers.
+				for _, c := range chunks {
+					c.SeqID = 0
+				}
+				if err := types.AssignChunkSeqIDs(tx, chunks); err != nil {
+					return err
+				}
+				return tx.Select("*").CreateInBatches(chunks, 100).Error
+			})
+			if txErr == nil {
+				return nil
+			}
+			if attempt < sqliteSeqIDRetryLimit && isSQLiteSeqIDDuplicateErr(txErr) {
+				continue
+			}
+			return txErr
 		}
 	}
 
@@ -67,6 +91,19 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	// explicitly inserted, bypassing GORM's default value behavior.
 	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
 	return db.Select("*").CreateInBatches(chunks, 100).Error
+}
+
+// sqliteSeqIDRetryLimit bounds the seq_id conflict retry in CreateChunks.
+const sqliteSeqIDRetryLimit = 3
+
+// isSQLiteSeqIDDuplicateErr reports whether err is the SQLite unique-key
+// collision on chunks.seq_id caused by two concurrent MAX(seq_id) readers.
+func isSQLiteSeqIDDuplicateErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") && strings.Contains(msg, "seq_id")
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID
