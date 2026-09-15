@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +118,57 @@ func TestRunRemoveFallsBackToBaseTemplateWhenNoSkillsRemain(t *testing.T) {
 	require.Equal(t, types.SkillSnapshotStateSuperseded, rows[0].State)
 	require.Equal(t, "snap-old", rows[0].SnapshotID)
 	require.Empty(t, fx.deletedSnapshots)
+}
+
+// A provider that reclaims the image a config points at - `docker image prune
+// -a` on the host takes every daemon-local skill commit - leaves the config
+// booting an image that is gone, and every later install and removal fails on
+// it. Removal is the only flow that can move the pointer off that snapshot
+// without booting it, so it must, instead of retrying a boot that cannot
+// succeed.
+func TestRunRemoveClearsThePointerWhenTheProviderLostTheImage(t *testing.T) {
+	fx := newInstallFixture(t)
+	fx.seedInstalledSkill("sk-1", "snap-old", 2)
+	// The second skill is what makes the run boot the image at all: with sk-1
+	// alone the flow falls back to the base template and never touches it.
+	fx.seedInstalledSkill("sk-2", "snap-old", 2)
+	seedReadySibling(t, fx, "sk-2")
+	fx.removeDirErr = fmt.Errorf("resolve remote sandbox for session: %w",
+		sandbox.ErrSkillSnapshotMissing)
+
+	require.NoError(t, fx.svc.runRemove(context.Background(), 7, "cfg-1", "sk-1"),
+		"a removal that cleared the pointer did happen, whatever the boot said")
+
+	require.Empty(t, fx.configRepo.saved.Config.SkillImage.SnapshotID,
+		"the pointer has to leave the image the provider no longer has, or every "+
+			"later install and removal of this config fails the same way")
+	require.Equal(t, 3, fx.configRepo.saved.Config.SkillImage.Generation)
+
+	removed, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
+	require.NoError(t, err)
+	require.Nil(t, removed, "the operator asked for this skill to be gone, and it is")
+
+	lost, err := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-2")
+	require.NoError(t, err)
+	require.NotNil(t, lost, "a skill that lost its files with the image keeps its row")
+	require.Equal(t, types.SkillStatusFailed, lost.Status,
+		"ready would point the agent at files no sandbox carries")
+	require.Equal(t, errSkillImageLost.Error(), lost.Error)
+	require.Empty(t, lost.InstalledSnapshotID)
+}
+
+// seedReadySibling flips a seeded row to the state a real sibling is in.
+// seedInstalledSkill seeds the row a removal is about to flip, so every row it
+// writes is "removing"; a sibling the recovery has to act on is installed and
+// serving, which is the only status that path touches.
+func seedReadySibling(t *testing.T, fx *installFixture, skillID string) {
+	t.Helper()
+	ctx := context.Background()
+	skill, err := fx.skillRepo.GetSkill(ctx, 7, "cfg-1", skillID)
+	require.NoError(t, err)
+	require.NotNil(t, skill)
+	skill.Status = types.SkillStatusReady
+	require.NoError(t, fx.skillRepo.UpdateSkill(ctx, skill))
 }
 
 // A snapshot that the live credentials cannot resolve is not a snapshot this
