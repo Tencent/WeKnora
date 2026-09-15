@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -125,6 +126,21 @@ func (s *TenantSkillService) runRemove(
 			return
 		}
 		if !s.skillRunStillBound(tenantID, configID, skillID, handle) {
+			return
+		}
+		// The provider no longer has the image the config points at. Retrying is
+		// hopeless by construction - every attempt boots that same image - so the
+		// pointer is moved off it and the removal is finished, instead of putting
+		// the row back for a retry that would fail the same way.
+		if errors.Is(err, sandbox.ErrSkillSnapshotMissing) {
+			// A recovered removal is a removal: the row is gone and the config
+			// boots the base template again. Reporting the boot failure would
+			// leave the log claiming the skill is still there.
+			if recoverErr := s.abandonReclaimedImage(
+				cleanupBase, tenantID, configID, skillID, err,
+			); recoverErr == nil {
+				err = nil
+			}
 			return
 		}
 		// A half-removed skill is worse than a kept one: the image still has
@@ -460,6 +476,90 @@ func (s *TenantSkillService) restoreSkillAfterFailedRemoval(
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
 		Percent: 100, Stage: "failed", Status: status, Log: cause.Error(),
 	})
+}
+
+// errSkillImageLost is what a row marked failed by a reclaimed image carries.
+// It is the text the operator reads in the skill card, so it says what happened
+// and what to do rather than naming the pointer that stopped resolving.
+var errSkillImageLost = errors.New(
+	"the sandbox image this skill was installed from is no longer on the provider; install it again",
+)
+
+// abandonReclaimedImage unwedges a config whose image the provider reclaimed.
+//
+// Skill images are daemon-local commits, so anything that reclaims unused
+// images on the host - a `docker image prune -a`, an image-store reset, a move
+// to another daemon - takes them without WeKnora being told. The config then
+// points at an image no sandbox can boot, and every install and removal of that
+// config fails on the same missing image.
+//
+// Removal is the only flow that can break the cycle, because it is the only one
+// that can move the pointer off the lost snapshot without booting it. So the
+// pointer goes back to the base template and the skills that lived in the image
+// are marked failed for the operator to reinstall.
+//
+// Only ready skills are touched. An installing row belongs to a run that will
+// snapshot whatever the config boots from once the pointer has moved, so
+// stamping it failed here would discard an install that can still land.
+func (s *TenantSkillService) abandonReclaimedImage(
+	cleanupBase context.Context, tenantID uint64, configID, removedSkillID string, cause error,
+) error {
+	ctx, cancel := s.cleanupContext(cleanupBase)
+	defer cancel()
+
+	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
+	if err != nil {
+		return fmt.Errorf("re-read sandbox config %s: %w", configID, err)
+	}
+	if cfgEntity == nil || cfgEntity.Config == nil {
+		return fmt.Errorf("sandbox config %s disappeared during the removal", configID)
+	}
+
+	if err := s.failSkillsLostWithImage(ctx, tenantID, configID, removedSkillID); err != nil {
+		return err
+	}
+	if err := s.clearImagePointer(
+		ctx, tenantID, configID, currentGeneration(cfgEntity)+1,
+	); err != nil {
+		return err
+	}
+	// Nothing points at a snapshot any more, so the ledger is closed the same way
+	// a last-skill removal closes it.
+	s.markPreviousSnapshotsSuperseded(ctx, tenantID, configID, "")
+	logger.Warnf(ctx,
+		"[skill] config %s pointed at a skill image the provider no longer has; "+
+			"the pointer now boots the base template (%v)", configID, cause)
+
+	return s.finishRemoval(cleanupBase, tenantID, configID, removedSkillID, true)
+}
+
+// failSkillsLostWithImage marks every ready skill of the config as failed, the
+// one being removed aside. They were installed into the image that is gone, so
+// their files went with it, and a ready status would point the agent at files
+// no sandbox carries.
+func (s *TenantSkillService) failSkillsLostWithImage(
+	ctx context.Context, tenantID uint64, configID, removedSkillID string,
+) error {
+	skills, err := s.skills.ListSkillsByConfig(ctx, tenantID, configID)
+	if err != nil {
+		return fmt.Errorf("list skills of config %s: %w", configID, err)
+	}
+	for _, skill := range skills {
+		if skill == nil || skill.ID == removedSkillID ||
+			skill.Status != types.SkillStatusReady {
+			continue
+		}
+		if err := s.updateSkillFields(ctx, tenantID, configID, skill.ID,
+			func(e *types.TenantSkillEntity) {
+				e.Status = types.SkillStatusFailed
+				e.Error = errSkillImageLost.Error()
+				e.InstallingSince = nil
+				e.InstalledSnapshotID = ""
+			}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // removeStillOwnsTheRow is the lock-side counterpart of RemoveSkill's

@@ -51,6 +51,8 @@ import (
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
+
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // dockerActivityMarker is touched by every exec and read by the idle sweeper.
@@ -1177,14 +1179,33 @@ func dockerEntryType(findType string) RemoteDirEntryType {
 // a cold pull of the sandbox image takes minutes, and the settings wizard
 // starts that pull in the background so a later Create usually just inspects.
 func (c *DockerRemoteClient) ensureImage(ctx context.Context, image string) error {
-	if _, err := c.api.ImageInspect(ctx, image); err == nil {
+	_, inspectErr := c.api.ImageInspect(ctx, image)
+	if inspectErr == nil {
 		return nil
 	}
 	// Skill snapshots are daemon-local commits, not registry tags. Pulling
 	// one would hit Docker Hub for a name we minted and never pushed, and a
 	// miss here means "this daemon does not have the image", not "fetch it".
 	if dockerIsSkillSnapshotRef(image) {
-		return dockerInvalidRequest("Create", "skill snapshot image "+image+" is not on this daemon")
+		// Only a daemon that answered "no such image" has lost the snapshot the
+		// skill layer recovers from by clearing its config's pointer. A daemon
+		// that is unreachable or too slow fails this inspect with its own error,
+		// and reporting that as a lost image would clear a pointer to an image
+		// that is still on disk.
+		if !cerrdefs.IsNotFound(inspectErr) {
+			return dockerError("Create",
+				fmt.Errorf("inspect skill snapshot image %s: %w", image, inspectErr))
+		}
+		// The Kind stays InvalidRequest (dockerErrorKind maps a missing image on
+		// Create the same way, for the lifecycle reason it documents), but the
+		// Cause names the one invalid request the skill layer can recover from:
+		// a config whose image was reclaimed outside WeKnora, which the removal
+		// flow clears instead of retrying a boot that can never succeed.
+		return NewRemoteError(
+			SandboxTypeDocker, "Create", RemoteErrorKindInvalidRequest,
+			"skill snapshot image "+image+" is not on this daemon",
+			ErrSkillSnapshotMissing,
+		)
 	}
 	pullCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dockerImagePullBudget)
 	defer cancel()

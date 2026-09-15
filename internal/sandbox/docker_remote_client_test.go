@@ -73,6 +73,10 @@ type fakeDockerEngine struct {
 	images       []image.Summary
 	imagePresent map[string]bool
 	pulled       []string
+	// imageInspectErr answers every inspect with this error instead of the
+	// presence map, which is how a daemon that is unreachable or too slow is
+	// told apart from one that answered "no such image".
+	imageInspectErr error
 
 	committed          []client.ContainerCommitOptions
 	commitID           string
@@ -277,6 +281,9 @@ func (f *fakeDockerEngine) ContainerStatPath(
 func (f *fakeDockerEngine) ImageInspect(
 	_ context.Context, imageID string, _ ...client.ImageInspectOption,
 ) (client.ImageInspectResult, error) {
+	if f.imageInspectErr != nil {
+		return client.ImageInspectResult{}, f.imageInspectErr
+	}
 	if f.imagePresent[imageID] {
 		return client.ImageInspectResult{}, nil
 	}
@@ -498,6 +505,44 @@ func TestDockerClientCreatePullsMissingImage(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"weknora/sandbox:test"}, engine.pulled)
+}
+
+// A skill snapshot is a daemon-local commit, so a miss means the daemon lost
+// it, not that it should be fetched from a registry that never had it. The
+// skill layer keys its recovery off the sentinel, and the Kind stays
+// InvalidRequest because the lifecycle must not read a missing image on Create
+// as a binding it may replace.
+func TestDockerClientCreateReportsAMissingSkillSnapshot(t *testing.T) {
+	engine := newFakeDockerEngine()
+	docker := newTestDockerClient(t, engine)
+
+	_, err := docker.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "weknora-skill/weknora-sk-t7-cfg-1-g2-abcd1234",
+	})
+
+	require.ErrorIs(t, err, ErrSkillSnapshotMissing)
+	require.False(t, IsRemoteNotFound(err),
+		"a missing image on Create must not invite the lifecycle to rebind")
+	require.Empty(t, engine.pulled, "our own snapshot tag was never on a registry")
+}
+
+// A daemon that cannot answer the inspect has not lost the image, and saying it
+// did would let the skill layer clear a pointer to an image that is still on
+// disk. Only a real "no such image" earns the sentinel.
+func TestDockerClientCreateDoesNotReadAnUnreachableDaemonAsALostSnapshot(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.imageInspectErr = context.DeadlineExceeded
+	docker := newTestDockerClient(t, engine)
+
+	_, err := docker.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "weknora-skill/weknora-sk-t7-cfg-1-g2-abcd1234",
+	})
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrSkillSnapshotMissing,
+		"a slow daemon is not a reclaimed image")
+	require.False(t, IsRemoteNotFound(err))
+	require.Empty(t, engine.pulled)
 }
 
 // A container that cannot start is a leak waiting to happen: nothing binds it,
