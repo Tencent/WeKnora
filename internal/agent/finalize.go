@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -43,43 +45,65 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			"unperformed action succeeded.",
 	})
 
+	// The last tool results and synthesis instructions have no next reasoning
+	// round to run the context check; reserve the full answer budget here.
+	messages, _ = e.manageContextWindow(ctx, messages, state.CurrentRound,
+		e.tokenEstimator.EstimateMessages(messages))
+	budget, err := e.finalAnswerBudget(messages)
+	if err != nil {
+		return err
+	}
+
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
 	logger.Debugf(ctx, "[Agent][FinalAnswer] AnswerID: %s", answerID)
 	answerDoneEmitted := false
+	answerStarted := false
 
-	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
-	llmResult, err := e.streamLLMToEventBus(
-		ctx,
-		messages,
-		&chat.ChatOptions{
+	emitAnswer := func(chunk *types.StreamResponse, _ string) {
+		// Defensive filter: only emit answer content, skip thinking chunks
+		if chunk.ResponseType == types.ResponseTypeThinking {
+			return
+		}
+		if chunk.Content != "" {
+			answerStarted = true
+			logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
+			e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: chunk.Content,
+					Done:    chunk.Done,
+				},
+			})
+			if chunk.Done {
+				answerDoneEmitted = true
+			}
+		}
+	}
+	streamAnswer := func(messages []chat.Message, budget int) (*streamLLMResult, error) {
+		return e.streamLLMToEventBus(ctx, messages, &chat.ChatOptions{
 			Temperature:         e.config.Temperature,
 			MaxCompletionTokens: budget,
 			PromptCacheKey:      sessionID,
 			ToolChoice:          "none",
-		}, // Thinking disabled for final answer synthesis
-		func(chunk *types.StreamResponse, fullContent string) {
-			// Defensive filter: only emit answer content, skip thinking chunks
-			if chunk.ResponseType == types.ResponseTypeThinking {
-				return
+		}, emitAnswer) // Thinking disabled for final answer synthesis
+	}
+	llmResult, err := streamAnswer(messages, budget)
+	// Provider tokenization may exceed the estimate. Retry once only after
+	// shrinking the request and before any answer text has reached consumers.
+	if err != nil && ctx.Err() == nil && !answerStarted && compaction.IsOverflowError(err) {
+		before := e.tokenEstimator.EstimateMessages(messages)
+		compacted := e.forceCompaction(ctx, messages, state.CurrentRound)
+		if e.tokenEstimator.EstimateMessages(compacted) < before {
+			budget, prepErr := e.finalAnswerBudget(compacted)
+			if prepErr != nil {
+				return prepErr
 			}
-			if chunk.Content != "" {
-				logger.Debugf(ctx, "[Agent][FinalAnswer] Emitting answer chunk: %d chars", len(chunk.Content))
-				e.eventBus.Emit(ctx, event.Event{
-					ID:        answerID,
-					Type:      event.EventAgentFinalAnswer,
-					SessionID: sessionID,
-					Data: event.AgentFinalAnswerData{
-						Content: chunk.Content,
-						Done:    chunk.Done,
-					},
-				})
-				if chunk.Done {
-					answerDoneEmitted = true
-				}
-			}
-		},
-	)
+			llmResult, err = streamAnswer(compacted, budget)
+		}
+	}
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][FinalAnswer] Final answer generation failed: %v", err)
 		common.PipelineError(ctx, "Agent", "final_answer_stream_failed", map[string]interface{}{
@@ -116,6 +140,18 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	})
 	state.FinalAnswer = fullAnswer
 	return nil
+}
+
+func (e *AgentEngine) finalAnswerBudget(messages []chat.Message) (int, error) {
+	tokens := e.tokenEstimator.EstimateMessages(messages)
+	budget := e.getCompletionTokenBudget()
+	if e.config != nil && e.config.MaxContextTokens > 0 &&
+		tokens+budget+contextSafetyTokens > e.config.MaxContextTokens {
+		return 0, fmt.Errorf("final answer context exceeds budget after compaction: "+
+			"input=%d, output=%d, safety=%d, window=%d",
+			tokens, budget, contextSafetyTokens, e.config.MaxContextTokens)
+	}
+	return budget, nil
 }
 
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
