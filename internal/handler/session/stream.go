@@ -139,9 +139,14 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 
 	// Check if stream is already completed
 	streamCompleted := false
+	streamErrored := false
 	for _, evt := range events {
 		if evt.Type == "complete" {
 			streamCompleted = true
+			break
+		}
+		if evt.Type == types.ResponseTypeError && evt.Done {
+			streamErrored = true
 			break
 		}
 	}
@@ -152,7 +157,11 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		emitStreamEvent(ctx, c, evt, message.RequestID, resourceRewriter)
 	}
 
-	// If stream is already completed, send final event and return
+	// If stream is already terminal, return after replaying the terminal event.
+	if streamErrored {
+		logger.Infof(ctx, "Stream already ended with terminal error, session ID: %s, message ID: %s", sessionID, messageID)
+		return
+	}
 	if streamCompleted {
 		logger.Infof(ctx, "Stream already completed, session ID: %s, message ID: %s", sessionID, messageID)
 		sendCompletionEvent(c, message.RequestID)
@@ -181,10 +190,14 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 
 			// Send new events
 			streamCompletedNow := false
+			streamErroredNow := false
 			for _, evt := range newEvents {
 				// Check for completion event
 				if evt.Type == "complete" {
 					streamCompletedNow = true
+				}
+				if evt.Type == types.ResponseTypeError && evt.Done {
+					streamErroredNow = true
 				}
 
 				emitStreamEvent(ctx, c, evt, message.RequestID, resourceRewriter)
@@ -192,6 +205,12 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 
 			// Update offset
 			currentOffset = newOffset
+
+			// A terminal error already carries Done=true and is the final event.
+			if streamErroredNow {
+				logger.Infof(ctx, "Stream ended with terminal error, session ID: %s, message ID: %s", sessionID, messageID)
+				return
+			}
 
 			// If stream completed, send final event and exit
 			if streamCompletedNow {
@@ -364,6 +383,7 @@ func (h *Handler) handleAgentEventsForSSE(
 
 			// Send any new events
 			streamCompleted := false
+			streamErrored := false
 			titleReceived := false
 			for _, evt := range events {
 				// Check for stop event
@@ -404,6 +424,9 @@ func (h *Handler) handleAgentEventsForSSE(
 				if evt.Type == "complete" {
 					streamCompleted = true
 				}
+				if evt.Type == types.ResponseTypeError && evt.Done {
+					streamErrored = true
+				}
 
 				// Check for title event
 				if evt.Type == types.ResponseTypeSessionTitle {
@@ -424,6 +447,14 @@ func (h *Handler) handleAgentEventsForSSE(
 
 			// Update offset
 			lastOffset = newOffset
+
+			// A terminal error is the final stream event. The error payload
+			// already carries Done=true, so close the SSE loop without adding a
+			// misleading completion event.
+			if streamErrored {
+				log.Infof("Stream ended with terminal error for session=%s, message=%s", sessionID, assistantMessageID)
+				return
+			}
 
 			// Check if stream is completed - wait for title event only if needed and not already received
 			if streamCompleted {

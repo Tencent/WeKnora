@@ -4,9 +4,73 @@ import {
   buildReferenceSections,
   buildReferenceList,
   getDomainFromUrl,
+  mergeReferenceSources,
   normalizeReferenceUrl,
   resolveReferenceHighlightKey,
 } from './referenceSources.ts'
+
+test('mergeReferenceSources combines message and tool references', () => {
+  const merged = mergeReferenceSources(
+    [
+      {
+        id: 'chunk-a',
+        knowledge_id: 'doc-1',
+        knowledge_title: 'Policy',
+        content: 'first retrieval',
+      },
+    ],
+    [
+      {
+        id: 'chunk-b',
+        knowledge_id: 'doc-1',
+        knowledge_title: 'Policy',
+        content: 'second retrieval',
+      },
+    ],
+  )
+
+  assert.deepEqual(merged.map((item) => item.id), ['chunk-a', 'chunk-b'])
+})
+
+test('mergeReferenceSources deduplicates chunk ids and normalized web urls', () => {
+  const merged = mergeReferenceSources(
+    [
+      { id: 'chunk-a', knowledge_id: 'doc-1' },
+      {
+        id: 'https://example.com/article#section',
+        chunk_type: 'web_search',
+        metadata: { url: 'https://example.com/article#section' },
+      },
+    ],
+    [
+      { id: 'chunk-a', knowledge_id: 'doc-1', content: 'duplicate chunk' },
+      { id: 'chunk-b', knowledge_id: 'doc-1', content: 'new chunk' },
+      {
+        id: 'https://example.com/article/',
+        chunk_type: 'web_search',
+        metadata: { url: 'https://example.com/article/' },
+      },
+    ],
+  )
+
+  assert.deepEqual(merged.map((item) => item.id), [
+    'chunk-a',
+    'https://example.com/article#section',
+    'chunk-b',
+  ])
+})
+
+test('mergeReferenceSources accepts raw chunk_id fields', () => {
+  const merged = mergeReferenceSources(
+    [{ chunk_id: 'chunk-a', knowledge_id: 'doc-1' }],
+    [
+      { chunk_id: 'chunk-a', knowledge_id: 'doc-1' },
+      { chunk_id: 'chunk-b', knowledge_id: 'doc-1' },
+    ],
+  )
+
+  assert.deepEqual(merged.map((item) => item.chunk_id), ['chunk-a', 'chunk-b'])
+})
 
 test('buildReferenceList separates web and document references', () => {
   const items = buildReferenceList([

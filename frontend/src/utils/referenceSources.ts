@@ -2,6 +2,7 @@ export type ReferenceItemKind = 'web' | 'document' | 'tool'
 
 export type KnowledgeReferenceLike = {
   id?: string
+  chunk_id?: string
   chunk_ids?: string[]
   knowledge_id?: string
   knowledge_title?: string
@@ -57,6 +58,50 @@ export function getWebSearchUrl(item: KnowledgeReferenceLike): string {
     return item.id
   }
   return ''
+}
+
+/**
+ * Merge references collected at message level with references replayed from
+ * Agent tool calls. Message references are kept first so their richer
+ * persisted metadata wins when the same source appears in both streams.
+ */
+export function mergeReferenceSources(
+  ...sources: Array<KnowledgeReferenceLike[] | null | undefined>
+): KnowledgeReferenceLike[] {
+  const merged: KnowledgeReferenceLike[] = []
+  const seenChunkIds = new Set<string>()
+  const seenUrls = new Set<string>()
+
+  for (const source of sources) {
+    if (!Array.isArray(source)) continue
+
+    for (const item of source) {
+      if (!item || typeof item !== 'object') continue
+
+      const url = getWebSearchUrl(item)
+      if (url) {
+        const key = normalizeReferenceUrl(url)
+        if (key && seenUrls.has(key)) continue
+        if (key) seenUrls.add(key)
+        merged.push(item)
+        continue
+      }
+
+      const chunkIds = Array.from(new Set([
+        ...(item.chunk_id ? [item.chunk_id] : []),
+        ...(Array.isArray(item.chunk_ids) ? item.chunk_ids : []),
+        ...(item.id ? [item.id] : []),
+      ].map((value) => String(value).trim()).filter(Boolean)))
+
+      if (chunkIds.length && chunkIds.every((chunkId) => seenChunkIds.has(chunkId))) {
+        continue
+      }
+      for (const chunkId of chunkIds) seenChunkIds.add(chunkId)
+      merged.push(item)
+    }
+  }
+
+  return merged
 }
 
 export function getDomainFromUrl(url: string): string {
@@ -159,7 +204,7 @@ function buildWebItem(item: KnowledgeReferenceLike, index: number): ReferenceLis
 }
 
 function buildDocumentItem(item: KnowledgeReferenceLike, index: number): ReferenceListItem {
-  const chunkId = item.id || `${item.knowledge_id || 'doc'}-${item.chunk_index ?? index}`
+  const chunkId = item.chunk_id || item.id || `${item.knowledge_id || 'doc'}-${item.chunk_index ?? index}`
   const title = item.knowledge_title || item.knowledge_filename || item.knowledge_id || 'Document'
   const documentKey =
     item.knowledge_id ||
@@ -209,7 +254,11 @@ function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeRefer
   refs.forEach((item, index) => {
     const key = getDocumentGroupKey(item, index)
     const content = String(item.content || '').trim()
-    const chunkIds = Array.from(new Set([...(item.chunk_ids || []), ...(item.id ? [item.id] : [])]))
+    const chunkIds = Array.from(new Set([
+      ...(item.chunk_id ? [item.chunk_id] : []),
+      ...(item.chunk_ids || []),
+      ...(item.id ? [item.id] : []),
+    ]))
     const existing = groups.get(key)
 
     if (!existing) {

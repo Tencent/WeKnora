@@ -125,13 +125,16 @@ func (r *NvidiaReranker) Rerank(ctx context.Context, query string, documents []s
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
-	ret := make([]RankResult, len(response.Results))
-	for i, result := range response.Results {
-		ret[i] = RankResult{
+	ret := make([]RankResult, 0, len(response.Results))
+	for _, result := range response.Results {
+		if result.Index < 0 || result.Index >= len(documents) {
+			continue
+		}
+		ret = append(ret, RankResult{
 			Index:          result.Index,
 			Document:       DocumentInfo{Text: documents[result.Index]},
 			RelevanceScore: normalizeNvidiaLogit(result.Logit),
-		}
+		})
 	}
 	return ret, nil
 }
