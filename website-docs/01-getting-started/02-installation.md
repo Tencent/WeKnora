@@ -69,12 +69,14 @@ docker compose ps                 # 等所有服务变成 healthy/running
 若已有部署并下载了更新的 release：
 
 ```bash
-# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 0.7.0），或保持 latest
+# 在 .env 中将 WEKNORA_VERSION 设为目标版本（如 v0.7.0），或保持 latest
 docker compose pull
 docker compose up -d
 ```
 
 > 仅执行 `docker compose up -d` 会复用本地缓存镜像，可能导致 Web UI 显示版本与下载的 release 不一致。
+
+已有数据的生产部署请按[版本升级指南](./05-upgrade.md)先完成备份、配置合并、迁移验收和回滚准备。
 
 ### 核心服务（默认启动）
 
