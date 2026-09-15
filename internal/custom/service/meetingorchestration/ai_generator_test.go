@@ -25,8 +25,22 @@ type flakyMeetingLLM struct {
 
 type meetingEvidenceReader struct{}
 
+type scopedMeetingEvidenceReader struct{}
+type duplicateEvidenceReader struct{}
+
 func (meetingEvidenceReader) Read(context.Context, string, string) ([]transcript.Chunk, error) {
 	return []transcript.Chunk{{EvidenceSentenceID: "e1", Content: "客户权限审批流进入执行阶段。", StartMs: 1000, EndMs: 2500}}, nil
+}
+
+func (scopedMeetingEvidenceReader) Read(_ context.Context, videoID, _ string) ([]transcript.Chunk, error) {
+	if videoID == "v1" {
+		return []transcript.Chunk{{EvidenceSentenceID: "e1", Content: "客户权限审批流进入执行阶段。", StartMs: 1000, EndMs: 2500}}, nil
+	}
+	return []transcript.Chunk{{EvidenceSentenceID: "e2", Content: "数据迁移进入验证阶段。", StartMs: 3000, EndMs: 4500}}, nil
+}
+
+func (duplicateEvidenceReader) Read(context.Context, string, string) ([]transcript.Chunk, error) {
+	return []transcript.Chunk{{EvidenceSentenceID: "shared-evidence", Content: "当前会议证据。", StartMs: 1000, EndMs: 2500}}, nil
 }
 
 func (s *scriptedMeetingLLM) CompleteJSONWithSystem(_ context.Context, _, input string) (string, error) {
@@ -79,6 +93,61 @@ func TestAIProjectionMapsUpdatesToSeekableFacts(t *testing.T) {
 	}
 	if len(cluster.Evolution) != 2 || cluster.Evolution[1].VideoID != "v1" {
 		t.Fatalf("evolution was not mapped: %+v", cluster.Evolution)
+	}
+}
+
+func TestAIProjectionCandidateStageIsolatedPerVideo(t *testing.T) {
+	llm := &scriptedMeetingLLM{outputs: []string{
+		`{"candidates":[]}`,
+		`{"candidates":[]}`,
+		`{"relations":[]}`,
+	}}
+	snapshot, err := NewPromptBundle("").Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (&AIProjectionGenerator{LLM: llm, EvidenceReader: scopedMeetingEvidenceReader{}}).Generate(context.Background(), []model.Video{
+		{ID: "v1", Title: "客户项目会议", TranscriptGeneration: "g1"},
+		{ID: "v2", Title: "数据迁移会议", TranscriptGeneration: "g2"},
+	}, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(llm.inputs) != 3 {
+		t.Fatalf("calls = %d, want two candidate calls and one relation call", len(llm.inputs))
+	}
+	if strings.Contains(llm.inputs[0], "e2") || !strings.Contains(llm.inputs[0], "e1") {
+		t.Fatalf("first candidate input was not isolated: %s", llm.inputs[0])
+	}
+	if strings.Contains(llm.inputs[1], "e1") || !strings.Contains(llm.inputs[1], "e2") {
+		t.Fatalf("second candidate input was not isolated: %s", llm.inputs[1])
+	}
+}
+
+func TestAIProjectionKeepsLocalEvidenceWhenIDsRepeat(t *testing.T) {
+	llm := &scriptedMeetingLLM{outputs: []string{
+		`{"candidates":[]}`,
+		`{"candidates":[]}`,
+		`{"relations":[]}`,
+	}}
+	snapshot, err := NewPromptBundle("").Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (&AIProjectionGenerator{LLM: llm, EvidenceReader: duplicateEvidenceReader{}}).Generate(context.Background(), []model.Video{
+		{ID: "v1", Title: "第一场会议", TranscriptGeneration: "g1"},
+		{ID: "v2", Title: "第二场会议", TranscriptGeneration: "g2"},
+	}, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(llm.inputs) != 3 {
+		t.Fatalf("calls = %d, want two candidate calls and one relation call", len(llm.inputs))
+	}
+	for index := 0; index < 2; index++ {
+		if !strings.Contains(llm.inputs[index], "shared-evidence") {
+			t.Fatalf("candidate input %d lost its local evidence: %s", index+1, llm.inputs[index])
+		}
 	}
 }
 
@@ -146,6 +215,18 @@ func TestValidateItemCandidatesRejectsSummaryBlockReference(t *testing.T) {
 	err := validateItemCandidates(output, map[string]struct{}{"e1": {}}, map[string]struct{}{"action-items": {}}, true)
 	if err == nil || !strings.Contains(err.Error(), "not in whitelist") {
 		t.Fatalf("summary block reference was not rejected: %v", err)
+	}
+}
+
+func TestValidateItemCandidatesAcceptsWhitelistedSummaryBlockReference(t *testing.T) {
+	output := ItemCandidateOutput{Candidates: []ItemCandidate{{
+		CandidateRefs:    []string{"block-action-items-1"},
+		BusinessObject:   BusinessObject{Name: "客户项目", Scope: "客户项目", Aliases: []string{}, EvidenceIDs: []string{"e1"}},
+		SpecificQuestion: "权限审批流改造", CoreLevel: "core", Reason: "会议明确推进", EvidenceIDs: []string{"e1"},
+	}}}
+	err := validateItemCandidates(output, map[string]struct{}{"e1": {}}, map[string]struct{}{"action-items": {}, "block-action-items-1": {}}, true)
+	if err != nil {
+		t.Fatalf("whitelisted summary block reference rejected: %v", err)
 	}
 }
 

@@ -86,7 +86,7 @@ func isCorrectableMeetingValidationError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	for _, marker := range []string{"whitelist", "identity mismatch", "unknown topic", "unknown item", "wrong topic side", "out of scope", "references unknown"} {
+	for _, marker := range []string{"identity mismatch", "unknown topic", "unknown item", "wrong topic side", "out of scope", "references unknown"} {
 		if strings.Contains(message, marker) {
 			return false
 		}

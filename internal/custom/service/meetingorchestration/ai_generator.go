@@ -56,6 +56,13 @@ type evidenceRecord struct {
 	VideoID, Generation, Title string
 	StartMs, EndMs             int
 }
+type candidateScope struct {
+	video              map[string]any
+	allowedEvidence    map[string]struct{}
+	allowedSections    map[string]struct{}
+	allowedBlocks      map[string]struct{}
+	actionableSections map[string]struct{}
+}
 type generatedCluster struct {
 	cluster *TopicCluster
 	allowed map[string]struct{}
@@ -67,18 +74,21 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 	}
 	allowed := map[string]struct{}{}
 	evidence := map[string]evidenceRecord{}
-	items := make([]map[string]any, 0, len(videos))
-	allowedSections := map[string]struct{}{}
-	actionableSections := map[string]struct{}{}
+	scopes := make([]candidateScope, 0, len(videos))
 	for _, video := range videos {
 		ids := make([]string, 0, 24)
+		localAllowed := map[string]struct{}{}
+		allowedSections := map[string]struct{}{}
+		allowedBlocks := map[string]struct{}{}
+		actionableSections := map[string]struct{}{}
 		addEvidence := func(id string, record evidenceRecord) {
 			id = strings.TrimSpace(id)
 			if id == "" {
 				return
 			}
-			if _, exists := allowed[id]; !exists {
+			if _, exists := localAllowed[id]; !exists {
 				ids = append(ids, id)
+				localAllowed[id] = struct{}{}
 			}
 			allowed[id] = struct{}{}
 			if record.VideoID == "" {
@@ -123,7 +133,7 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 				if len(bounded) == 24 {
 					break
 				}
-				if _, ok := allowed[chunk.EvidenceSentenceID]; !ok {
+				if _, ok := localAllowed[chunk.EvidenceSentenceID]; !ok {
 					continue
 				}
 				bounded = append(bounded, map[string]any{"evidence_id": chunk.EvidenceSentenceID, "start_ms": chunk.StartMs, "end_ms": chunk.EndMs, "text": truncateEvidence(chunk.Content, 600)})
@@ -159,6 +169,11 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 							}
 							if summaryBlockCount < 24 && strings.TrimSpace(block.Text) != "" && len(blockEvidenceIDs) > 0 {
 								blocks = append(blocks, map[string]any{"block_ref": block.ID, "text": truncateEvidence(block.Text, 1200), "evidence_ids": blockEvidenceIDs})
+								// Candidate references may point to the section or to a
+								// concrete evidence-backed block shown in that section.
+								// Keep both forms in the same per-video whitelist so a
+								// precise block citation is not mistaken for a foreign ref.
+								allowedBlocks[block.ID] = struct{}{}
 								if isActionableMeetingSection(section.ID) {
 									actionableSections[section.ID] = struct{}{}
 								}
@@ -190,20 +205,43 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			}
 		}
 		item["allowed_evidence"] = ids
-		items = append(items, item)
+		scopes = append(scopes, candidateScope{
+			video:              item,
+			allowedEvidence:    evidenceIDsFromSlice(ids),
+			allowedSections:    allowedSections,
+			allowedBlocks:      allowedBlocks,
+			actionableSections: actionableSections,
+		})
 	}
-	if len(items) == 0 {
+	if len(scopes) == 0 {
 		return Projection{}, ErrInsufficientEvidence
 	}
 	var candidates ItemCandidateOutput
-	_, err := g.callJSONValidated(ctx, bundle, "meeting-item-candidate-v1.txt", map[string]any{"videos": items, "allowed_evidence": sortedKeys(allowed), "allowed_section_refs": sortedKeys(allowedSections), "actionable_section_refs": sortedKeys(actionableSections)}, func(raw string) error {
-		if err := decodeStrict(raw, &candidates); err != nil {
-			return err
+	for _, scope := range scopes {
+		var output ItemCandidateOutput
+		_, err := g.callJSONValidated(ctx, bundle, "meeting-item-candidate-v1.txt", map[string]any{
+			"videos":                  []map[string]any{scope.video},
+			"allowed_evidence":        sortedKeys(scope.allowedEvidence),
+			"allowed_section_refs":    sortedKeys(scope.allowedSections),
+			"allowed_block_refs":      sortedKeys(scope.allowedBlocks),
+			"actionable_section_refs": sortedKeys(scope.actionableSections),
+		}, func(raw string) error {
+			if err := decodeStrict(raw, &output); err != nil {
+				return err
+			}
+			allowedRefs := make(map[string]struct{}, len(scope.allowedSections)+len(scope.allowedBlocks))
+			for ref := range scope.allowedSections {
+				allowedRefs[ref] = struct{}{}
+			}
+			for ref := range scope.allowedBlocks {
+				allowedRefs[ref] = struct{}{}
+			}
+			return validateItemCandidates(output, scope.allowedEvidence, allowedRefs, len(scope.actionableSections) > 0)
+		})
+		if err != nil {
+			return Projection{}, err
 		}
-		return validateItemCandidates(candidates, allowed, allowedSections, len(actionableSections) > 0)
-	})
-	if err != nil {
-		return Projection{}, err
+		candidates.Candidates = append(candidates.Candidates, output.Candidates...)
 	}
 
 	clusters := make([]generatedCluster, 0, 8)
@@ -396,7 +434,7 @@ func (g *AIProjectionGenerator) Generate(ctx context.Context, videos []model.Vid
 			return Projection{}, callErr
 		}
 	}
-	projection.Statistics = projectionStatistics(projection, len(videos), len(items))
+	projection.Statistics = projectionStatistics(projection, len(videos), len(scopes))
 	normalizeProjectionArrays(&projection)
 	if err := projection.Validate(); err != nil {
 		return Projection{}, err
@@ -645,6 +683,14 @@ func candidatePayload(c ItemCandidate, id string) map[string]any {
 }
 func evidenceIDs(ids []string) map[string]struct{} {
 	result := map[string]struct{}{}
+	for _, id := range ids {
+		result[id] = struct{}{}
+	}
+	return result
+}
+
+func evidenceIDsFromSlice(ids []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		result[id] = struct{}{}
 	}

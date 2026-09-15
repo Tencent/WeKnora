@@ -112,6 +112,9 @@ func (s *Service) GetCurrent(ctx context.Context) (*Projection, *model.MeetingOr
 			if page, err := s.Wiki.GetPageByID(ctx, s.KnowledgeBaseID, current.ResultWikiPageID); err == nil && page != nil {
 				var persisted Projection
 				if json.Unmarshal([]byte(page.Content), &persisted) == nil && persisted.SchemaVersion == SchemaVersion && persisted.SourceFingerprint == current.SourceFingerprint {
+					if persisted.GeneratedAt.IsZero() {
+						persisted.GeneratedAt = current.UpdatedAt
+					}
 					normalizeProjectionArrays(&persisted)
 					if err := persisted.Validate(); err == nil {
 						return &persisted, &current, nil
@@ -173,6 +176,7 @@ func (s *Service) run(id string) {
 		projection.OwnerScopeID = s.OwnerScopeID
 		projection.SourceFingerprint = fingerprint
 		projection.SchemaVersion = SchemaVersion
+		projection.GeneratedAt = now
 	} else {
 		if len(qualified) > 0 {
 			s.fail(id, "model_not_configured", errors.New("meeting AI generator is not configured"))
