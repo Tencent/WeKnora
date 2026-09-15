@@ -310,7 +310,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
         </div>
 
         <div class="cell cell-name">
-          <span class="row-file-icon-wrap">
+          <span class="row-file-icon-wrap" :data-file-icon="getFileIcon(item)">
             <t-icon :name="getFileIcon(item)" />
           </span>
           <div class="row-file-text">
@@ -483,6 +483,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 </template>
 
 <style scoped lang="less">
+@import '@/components/css/file-type-colors.less';
 @keyframes doc-list-fade-in {
   from {
     opacity: 0;
@@ -656,6 +657,10 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   font-size: 16px;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
+}
+
+.row-file-icon-wrap[data-file-icon] {
+  .file-type-colors();
 }
 
 .row-file-text {

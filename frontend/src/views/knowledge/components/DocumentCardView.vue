@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, onBeforeUnmount, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { formatFileSize } from '@/utils/files';
+import { formatFileSize, getFileIcon } from '@/utils/files';
 import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
@@ -609,7 +609,8 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
               </div>
             </template>
           </div>
-          <div class="card-type">
+          <div class="card-type" :data-file-icon="getFileIcon(item)">
+            <t-icon :name="getFileIcon(item)" aria-hidden="true" />
             <span>{{ getKnowledgeType(item) }}</span>
           </div>
         </div>
@@ -686,6 +687,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 </template>
 
 <style scoped lang="less">
+@import '@/components/css/file-type-colors.less';
 @keyframes contentFadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -992,14 +994,21 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   }
 
   .card-type {
+    .file-type-colors();
+
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     flex-shrink: 0;
-    color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
     font-size: 11px;
     font-weight: 500;
-    padding: 0;
-    background: transparent;
+    line-height: 18px;
+    padding: 1px 5px;
+    border-radius: 4px;
     letter-spacing: 0.02em;
+
+    .t-icon { font-size: 13px; }
   }
 }
 

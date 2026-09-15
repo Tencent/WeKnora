@@ -1,0 +1,28 @@
+// Share file-type colors between knowledge cards and list icons.
+.file-type-tone(@icon, @light, @dark) {
+  &[data-file-icon="@{icon}"] {
+    --file-type-color: @light;
+
+    :root[theme-mode="dark"] & {
+      --file-type-color: @dark;
+    }
+  }
+}
+
+.file-type-colors() {
+  --file-type-color: var(--td-text-color-secondary);
+
+  .file-type-tone(file-pdf, #b52a35, #f28b94);
+  .file-type-tone(file-word, #245bb2, #82b2ff);
+  .file-type-tone(file-excel, #187449, #6dcea0);
+  .file-type-tone(file-powerpoint, #ad4d17, #f5ad77);
+  .file-type-tone(code, #7250ad, #baa0ee);
+  .file-type-tone(image, #8f4090, #df9bde);
+  .file-type-tone(sound, #0e747b, #74cdd3);
+  .file-type-tone(video, #654bbb, #b7a1ff);
+  .file-type-tone(link, #245bb2, #82b2ff);
+  .file-type-tone(edit, #0e747b, #74cdd3);
+
+  color: var(--file-type-color);
+  background: color-mix(in srgb, var(--file-type-color) 10%, var(--td-bg-color-container));
+}
