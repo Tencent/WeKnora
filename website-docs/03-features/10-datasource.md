@@ -22,7 +22,7 @@
 
 ## 选择连接器
 
-飞书、Lark、Notion 和语雀用于同步协作文档，GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章。各连接器支持的格式、认证与删除检测见参考部分。
+飞书、Lark、Notion 和语雀用于同步协作文档，GitLab 用于同步仓库中的文档目录，IMA 用于同步可访问的知识库与笔记，RSS 用于订阅文章，本地文件夹用于持续同步挂载到服务器上的目录（如 Obsidian 库）。各连接器支持的格式、认证与删除检测见参考部分。
 
 ## 检查变更与失败
 
@@ -75,6 +75,39 @@
 
 ```json
 {"credentials":{"base_url":"https://gitlab.example.com","access_token":"<token>"},"settings":{"projects":[{"project_id":"123","ref":"main","paths":["docs"]}]}}
+```
+
+#### 本地文件夹（`connector/localfolder/`）
+
+把 **WeKnora 服务端（容器）能访问到的一个目录**持续同步到知识库，例如只读挂载进容器的 Obsidian 库。本地目录是唯一真相源，WeKnora 中的解析结果、分块与索引都可以重建。
+
+- **`root_path` 是服务端路径，不是浏览器所在电脑的路径**：这一点最容易踩坑。在自己的笔记本上填 `D:\notes` 或 `/Users/me/notes` 不会生效——除非该目录已经挂载进 WeKnora 容器，否则服务端根本看不到它。填写的必须是 WeKnora 进程视角下的绝对路径。
+- **启用与安全边界**：部署时设置 `WEKNORA_LOCAL_FOLDER_ROOTS`（容器内目录，多个用 `:` 分隔），未设置时连接器拒绝任何配置。它是允许读取范围的安全边界：`settings.root_path` 必须是绝对路径，解析符号链接后仍需落在允许目录内；遍历与读取经由 `os.Root`，符号链接一律跳过，不会越出根目录。多租户部署中，这个白名单由运维决定，能被任何有数据源管理权限的用户读取，因此只放该实例可以公开给知识库的目录。
+- **Docker 部署需要显式挂载**：容器默认看不到宿主机目录，必须先 bind mount，再把挂载点写进 `WEKNORA_LOCAL_FOLDER_ROOTS`。**建议源目录用只读（`:ro`）方式挂载**：连接器只读取、从不写回源目录，只读挂载可以从部署层面杜绝任何意外写入。
+- **范围**：`settings.include` / `settings.exclude` 为 doublestar glob（`**` 匹配任意层目录），每行一条或字符串数组；默认包含 `**/*.{md,markdown,txt,pdf,docx,doc,pptx,ppt,xlsx,xls,csv,html,htm,epub}`，排除 `.obsidian/**`、`.git/**`、`.trash/**`。图片与音频需要 VLM/ASR，默认不包含，需要时自行添加规则。文件扩展名匹配不区分大小写（`REPORT.PDF` 匹配 `**/*.pdf`），目录名仍区分大小写。无论规则如何，只同步 WeKnora 支持导入的扩展名，其余文件静默跳过；解析引擎是否可用由知识库决定，解析失败会显示在文档状态中。
+- **身份**：`ExternalID` 为 `local_folder:<相对路径>`，并按数据源隔离；不同目录下的同名文件互不冲突，内容相同的文件也各自入库。
+- **增量**：游标记录每个文件的 mtime、大小与 SHA-256。mtime 与大小都未变的文件不读取；有变化时再比对 SHA-256，内容真正变化才更新。已存在的文件通过 `ReplaceKnowledgeFile` 原地替换并重新解析，知识 ID 不变；游标中有而目录中已不存在的文件按 sync_deletions 删除。定时同步会把 10 秒内刚修改的文件推迟到下次同步，避免编辑过程中反复解析；手动触发的"立即同步"不设静默期。原本有内容的文件被清空时，知识 ID 保持不变，旧的分块与索引被清理，状态为完成且无分块；新建的空文件不入库，写入内容后再同步。
+- **防误删**：根目录不可访问、扫描出错，或上次同步过文件而本次一个都扫描不到（例如挂载失效）时，本次同步失败且不删除任何知识。
+- **全量同步**：实现 `FetchAllFromCursor`，重新提交全部文件（内容未变的在入库时跳过、不重新解析），同时对照游标删除，可用于重试上次入库失败的文件。
+- **存储占用：文件会被复制一份**：本连接器沿用 WeKnora 既有的入库流程与 `FileService`，文件在入库时**复制到 WeKnora 管理的存储**（`STORAGE_TYPE` 指定的本地目录或对象存储），而不是就地引用源文件。因此源目录依然是唯一真相源，但同一份内容会同时存在两份，另有分块、向量与索引的额外开销；按源目录规模规划磁盘容量。反过来，删除数据源或知识时 WeKnora 只清理自己那一份，源目录不受影响。
+
+docker-compose 示例：
+
+```yaml
+services:
+  app:
+    volumes:
+      # 源目录只读挂载进容器；冒号左边是宿主机路径，右边是容器内路径
+      - /srv/obsidian-vault:/data/local-folders/vault:ro
+    environment:
+      # 允许 local_folder 读取的容器内目录（安全边界），多个用 ":" 分隔
+      - WEKNORA_LOCAL_FOLDER_ROOTS=/data/local-folders
+```
+
+数据源配置（`root_path` 填容器内路径）：
+
+```json
+{"settings":{"root_path":"/data/local-folders/vault","include":"**/*.md","exclude":".obsidian/**\n.git/**\n.trash/**"}}
 ```
 
 #### 腾讯 IMA（`connector/ima/`）
@@ -340,9 +373,10 @@ registry.Register(dingtalkConnector.NewConnector())                            /
 registry.Register(imaConnector.NewConnector())                                 // ima
 registry.Register(rssConnector.NewConnector())                                 // rss
 registry.Register(gitlabConnector.NewConnector())                              // gitlab
+registry.Register(localfolderConnector.NewConnector())                         // local_folder
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`local_folder`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

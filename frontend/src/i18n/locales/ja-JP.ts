@@ -638,6 +638,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelLocalFolder: 'ローカルフォルダ',
     channelUpload: 'アップロード',
     channelManual: '手動作成',
     channelUrl: 'Web',
@@ -6523,6 +6524,12 @@ export default {
     connectionFailed: '接続に失敗しました',
     isRequired: 'は必須です',
     credentialsLabel: '認証情報',
+    localFolder: {
+      title: 'ローカルフォルダ', rootPath: 'フォルダパス',
+      rootPathHint: 'WeKnora サーバーまたはコンテナ内の絶対パス（お使いのパソコンのパスではありません）。WEKNORA_LOCAL_FOLDER_ROOTS で許可されたディレクトリ配下である必要があります（例: 読み取り専用でマウントした Obsidian Vault）。',
+      include: '含めるパターン', exclude: '除外するパターン',
+      patternsHint: '1行に1つの glob パターン（フォルダからの相対パス、** は任意の階層に一致）。空欄の場合は既定値（Markdown、テキスト、PDF、Office、CSV、HTML、EPUB などの一般的な文書形式）を使用します。画像と音声は VLM/ASR が必要なため、パターンを明示的に追加してください。WeKnora で取り込めない形式はスキップされます。',
+    },
     gitlab: {
       baseUrl: 'GitLab URL', accessToken: 'パーソナルアクセストークン', projects: 'GitLabプロジェクト',
       projectsHint: 'プロジェクトIDまたはネームスペースのパス（例: group/project）を入力します。ブランチとディレクトリは任意です。',
@@ -6602,7 +6609,8 @@ export default {
       dingtalk: 'DingTalkドキュメント',
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      local_folder: 'ローカルフォルダ'
     },
     connectorDesc: {
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
@@ -6615,7 +6623,8 @@ export default {
       dingtalk: 'DingTalkナレッジベースのオンラインドキュメントを同期',
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
-      gitlab: 'GitLabプロジェクトからファイルを同期します'
+      gitlab: 'GitLabプロジェクトからファイルを同期します',
+      local_folder: 'マウントした Obsidian Vault など、サーバー上のフォルダからファイルを同期します'
     },
     drive: {
       folderTokenLabel: 'Driveフォルダトークン',
