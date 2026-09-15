@@ -1,6 +1,7 @@
 package milvus
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -795,11 +796,7 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 		log.Errorf("[Milvus] Failed to convert result set: %v", err)
 		return nil, fmt.Errorf("failed to convert result set: %w", err)
 	}
-	var results []*types.IndexWithScore
-	for i, set := range sets {
-		set.Score = scores[i]
-		results = append(results, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeEmbedding))
-	}
+	results := scoredHits(sets, scores, types.MatchTypeEmbedding)
 	if len(results) == 0 {
 		log.Warnf("[Milvus] No vector matches found that meet threshold %.4f", params.Threshold)
 	} else {
@@ -864,21 +861,22 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 			log.Errorf("[Milvus] Keywords search failed: %v", err)
 			continue
 		}
-		sets, _, err := convertResultSet(resultSet)
+		sets, scores, err := convertResultSet(resultSet)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to convert result set: %v", err)
 			continue
 		}
-		for _, set := range sets {
-			set.Score = 1.0
-			allResults = append(allResults, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeKeywords))
-		}
+		// Keep the BM25 score Milvus returned. It used to be overwritten with
+		// 1.0, left over from before keyword search had a score of its own:
+		// every keyword hit tied, and wherever results are ordered by score
+		// they crowded out the vector hits.
+		allResults = append(allResults, scoredHits(sets, scores, types.MatchTypeKeywords)...)
 	}
 
-	// Limit results to topK
-	if len(allResults) > params.TopK {
-		allResults = allResults[:params.TopK]
-	}
+	// Hits arrive one collection after another. Rank them by score before
+	// truncating, so topK keeps the best hits across collections and RRF
+	// fusion, which ranks by position, sees them in score order.
+	allResults = topKByScore(allResults, params.TopK)
 
 	if len(allResults) == 0 {
 		log.Warnf("[Milvus] No keyword matches found for query: %s", params.Query)
@@ -1062,6 +1060,34 @@ func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[st
 		}
 	}
 	return vector
+}
+
+// scoredHits pairs each converted result with the score Milvus returned for it.
+func scoredHits(
+	sets []*MilvusVectorEmbeddingWithScore,
+	scores []float64,
+	matchType types.MatchType,
+) []*types.IndexWithScore {
+	hits := make([]*types.IndexWithScore, 0, len(sets))
+	for i, set := range sets {
+		if i < len(scores) {
+			set.Score = scores[i]
+		}
+		hits = append(hits, fromMilvusVectorEmbedding(set.ID, set, matchType))
+	}
+	return hits
+}
+
+// topKByScore orders hits by score, highest first, and keeps at most topK.
+// Ties keep their arrival order, which is the order Milvus returned them in.
+func topKByScore(hits []*types.IndexWithScore, topK int) []*types.IndexWithScore {
+	slices.SortStableFunc(hits, func(a, b *types.IndexWithScore) int {
+		return cmp.Compare(b.Score, a.Score)
+	})
+	if len(hits) > topK {
+		return hits[:topK]
+	}
+	return hits
 }
 
 // fromMilvusVectorEmbedding converts Milvus result to IndexWithScore domain model
