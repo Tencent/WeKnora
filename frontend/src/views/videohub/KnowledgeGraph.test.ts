@@ -131,15 +131,25 @@ test('meeting todos expose source evidence and a timestamped video jump', () => 
   assert.match(meeting, /v-if="item\.evidence_refs\.length"/)
 })
 
-test('meeting topic network uses the shared ECharts graph renderer', () => {
+test('meeting topic network uses an isolated native ECharts force renderer', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const meeting = readFileSync(join(here, '../../components/videohub/MeetingTopicGraph.vue'), 'utf8')
+  const meetingScene = readFileSync(join(here, '../../components/videohub/MeetingSceneView.vue'), 'utf8')
+  const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
 
+  assert.match(meetingScene, /import MeetingTopicGraph/)
+  assert.match(scene, /import GraphCanvas/)
   assert.match(meeting, /echarts\/core/)
   assert.match(meeting, /GraphChart/)
-  assert.match(meeting, /layout: 'none'/)
+  assert.match(meeting, /layout: 'force'/)
+  assert.match(meeting, /scaleLimit: \{ min: 0\.4, max: 3 \}/)
+  assert.match(meeting, /force:\s*\{/)
+  assert.match(meeting, /roam: true/)
+  assert.match(meeting, /edgeLabel:\s*\{/)
+  assert.match(meeting, /symbolSize: Math\.min\(42, 10 \+ Math\.sqrt\(/)
+  assert.match(meeting, /borderColor: 'rgba\(255, 255, 255, \.86\)'/)
+  assert.match(meeting, /emphasis: \{[\s\S]*focus: 'adjacency'/)
   assert.match(meeting, /edgeSymbolSize/)
-  assert.match(meeting, /clientWidth/)
   assert.match(meeting, /resizeObserver = new ResizeObserver\(\(\) => \{ chart\?\.resize\(\); render\(\) \}\)/)
   assert.doesNotMatch(meeting, /<svg/)
 })
