@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -51,6 +52,16 @@ func NewQdrantRetrieveEngineRepository(client *qdrant.Client, indexCfg *types.In
 // getCollectionName returns the collection name for a specific dimension
 func (q *qdrantRepository) getCollectionName(dimension int) string {
 	return fmt.Sprintf("%s_%d", q.collectionBaseName, dimension)
+}
+
+// matchesCollectionName accepts only names generated for a positive dimension.
+func (q *qdrantRepository) matchesCollectionName(collectionName string) bool {
+	suffix, ok := strings.CutPrefix(collectionName, q.collectionBaseName+"_")
+	if !ok {
+		return false
+	}
+	dimension, err := strconv.Atoi(suffix)
+	return err == nil && dimension > 0 && suffix == strconv.Itoa(dimension)
 }
 
 // ensureCollection ensures the collection exists for the given dimension
@@ -398,9 +409,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			continue
 		}
 
@@ -483,9 +492,7 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			continue
 		}
 
@@ -674,9 +681,7 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 	// Search in all matching collections
 	for _, collectionName := range collections {
 		log.Debugf("[Qdrant] Checking collection: %s", collectionName)
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(q.collectionBaseName) ||
-			collectionName[:len(q.collectionBaseName)] != q.collectionBaseName {
+		if !q.matchesCollectionName(collectionName) {
 			log.Debugf("[Qdrant] Skipping collection %s (doesn't match base name %s)", collectionName, q.collectionBaseName)
 			continue
 		}
