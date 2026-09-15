@@ -37,3 +37,17 @@ func TestConnectorRegistryIncludesSeafile(t *testing.T) {
 		t.Fatal("Seafile connector must implement datasource.FullStreamingConnector")
 	}
 }
+
+func TestConnectorRegistryIncludesLocalFolder(t *testing.T) {
+	registry, err := initConnectorRegistry()
+	if err != nil {
+		t.Fatalf("initConnectorRegistry() error = %v", err)
+	}
+	connector, err := registry.Get(types.ConnectorTypeLocalFolder)
+	if err != nil {
+		t.Fatalf("local folder connector is not registered: %v", err)
+	}
+	if connector.Type() != types.ConnectorTypeLocalFolder {
+		t.Fatalf("connector.Type() = %q", connector.Type())
+	}
+}
