@@ -132,6 +132,46 @@ func TestProcessingStatusReportsFailedStageAndRetryableJob(t *testing.T) {
 	}
 }
 
+func TestProcessingStatusReportsSummaryContractFailure(t *testing.T) {
+	db := openTestVideoDB(t)
+	video := model.Video{
+		ID:                   uuid.NewString(),
+		Title:                "summary contract failure",
+		Status:               model.VideoStatusFailed,
+		TranscriptGeneration: "generation-1",
+	}
+	require.NoError(t, db.Create(&video).Error)
+	job := model.VideoProcessingJob{
+		ID:                   uuid.NewString(),
+		VideoID:              video.ID,
+		JobType:              "summary",
+		TranscriptGeneration: video.TranscriptGeneration,
+		Status:               "failed",
+		ErrorCategory:        "response_parse",
+		ErrorCode:            "summary_contract_invalid",
+		ErrorMessage:         `normalize summary orchestration profile: orchestration profile topic unit 1 references unknown summary block "block-missing"`,
+		IdempotencyKey:       "summary:" + video.ID,
+		UpdatedAt:            time.Now().UTC(),
+	}
+	require.NoError(t, db.Create(&job).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Params = gin.Params{{Key: "id", Value: video.ID}}
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/custom/videos/"+video.ID+"/processing-status", nil)
+
+	NewProcessingHandler(db).Status(context)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload ProcessingStatusResponse
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.NotNil(t, payload.Failure)
+	require.Equal(t, "summary", payload.Failure.JobType)
+	require.Equal(t, "response_parse", payload.Failure.Category)
+	require.Equal(t, "summary_contract_invalid", payload.Failure.Code)
+	require.Equal(t, job.ErrorMessage, payload.Failure.Message)
+}
+
 func TestDraftContentStagesUseDraftArtifacts(t *testing.T) {
 	video := model.Video{OutlineDraftWikiPageID: "outline-draft", SummaryDraftWikiPageID: "summary-draft"}
 	require.True(t, stageArtifactAvailable(video, model.VideoProcessingJob{JobType: "outline", ResultStage: "draft"}))

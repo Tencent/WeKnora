@@ -109,4 +109,11 @@ func TestEmbeddedMigrationsAreComplete(t *testing.T) {
 	if !strings.Contains(string(evidenceMigration), "CREATE UNIQUE INDEX") || !strings.Contains(string(evidenceMigration), "evidence_sentence_id <> ''") {
 		t.Error("evidence sentence migration must enforce one-to-one IDs for populated mappings")
 	}
+	meetingPromptVersionMigration, err := fs.ReadFile(FS, "000027_meeting_prompt_version.up.sql")
+	if err != nil {
+		t.Fatalf("read meeting prompt version migration: %v", err)
+	}
+	if !strings.Contains(string(meetingPromptVersionMigration), "prompt_version TYPE VARCHAR(96)") {
+		t.Error("meeting prompt version migration must fit the sha256-prefixed bundle fingerprint")
+	}
 }

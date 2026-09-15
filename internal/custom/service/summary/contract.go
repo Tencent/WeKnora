@@ -893,6 +893,55 @@ func ResolveEvidence(document *Document, chunks []transcript.Chunk) error {
 	return nil
 }
 
+// BoundOrchestrationProfile keeps the routing card below its serialized size
+// limit after evidence references have been resolved. The full summary blocks
+// retain every evidence reference; the profile is only a bounded projection,
+// so it may keep the earliest references from each topic unit while preserving
+// at least one reference per unit.
+func BoundOrchestrationProfile(document *Document) error {
+	if document == nil || document.OrchestrationProfile == nil {
+		return nil
+	}
+	profile := document.OrchestrationProfile
+	for index, unit := range profile.TopicUnits {
+		if len(unit.EvidenceChunkIDs) != len(unit.EvidenceRefs) {
+			return fmt.Errorf("orchestration profile topic unit %d has mismatched evidence refs", index+1)
+		}
+	}
+	profileSize := func() (int, error) {
+		encoded, err := json.Marshal(profile)
+		if err != nil {
+			return 0, fmt.Errorf("encode orchestration profile: %w", err)
+		}
+		return len(encoded), nil
+	}
+	for {
+		size, err := profileSize()
+		if err != nil {
+			return err
+		}
+		if size <= maxOrchestrationProfileBytes {
+			return nil
+		}
+		trimIndex := -1
+		for index, unit := range profile.TopicUnits {
+			if len(unit.EvidenceChunkIDs) <= 1 {
+				continue
+			}
+			if trimIndex < 0 || len(unit.EvidenceChunkIDs) > len(profile.TopicUnits[trimIndex].EvidenceChunkIDs) {
+				trimIndex = index
+			}
+		}
+		if trimIndex < 0 {
+			return fmt.Errorf("orchestration profile exceeds %d bytes after retaining one evidence per topic unit", maxOrchestrationProfileBytes)
+		}
+		unit := &profile.TopicUnits[trimIndex]
+		last := len(unit.EvidenceChunkIDs) - 1
+		unit.EvidenceChunkIDs = unit.EvidenceChunkIDs[:last]
+		unit.EvidenceRefs = unit.EvidenceRefs[:last]
+	}
+}
+
 func containsMarkup(value string) bool {
 	return summaryMarkupPattern.MatchString(value)
 }

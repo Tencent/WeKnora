@@ -191,6 +191,52 @@ func TestValidateOrchestrationProfileAcceptsBoundedReferences(t *testing.T) {
 	}
 }
 
+func TestBoundOrchestrationProfileAfterEvidenceResolution(t *testing.T) {
+	const chunkCount = 181
+	chunks := make([]transcript.Chunk, 0, chunkCount)
+	chunkIDs := make([]string, 0, chunkCount)
+	for index := 0; index < chunkCount; index++ {
+		chunkID := fmt.Sprintf("knowledge-%s-%03d", strings.Repeat("chunk", 8), index)
+		chunkIDs = append(chunkIDs, chunkID)
+		chunks = append(chunks, transcript.Chunk{
+			ID: chunkID, EvidenceSentenceID: fmt.Sprintf("evidence-%s-%03d", strings.Repeat("sentence", 8), index),
+			StartMs: index * 1000, EndMs: index*1000 + 900, Content: "原文",
+		})
+	}
+	document := Document{
+		SchemaVersion: SchemaVersion, VideoType: "general",
+		Sections: []Section{{ID: "positioning-problem", Title: "一、定位与问题", Blocks: []Block{{
+			ID: "block-1", Kind: BlockKindParagraph, Text: "内容", EvidenceChunkIDs: chunkIDs,
+		}}}},
+		OrchestrationProfile: &OrchestrationProfile{
+			SchemaVersion: OrchestrationProfileSchemaVersion, PrimaryTopic: "主题",
+			TopicUnits: []OrchestrationTopicUnit{{
+				Title: "主题单元", Abstract: "摘要", ContentForms: []string{"concept_cognition"},
+				LearningOutcomes: []string{"结果"}, SummaryBlockIDs: []string{"block-1"}, EvidenceChunkIDs: chunkIDs,
+			}},
+		},
+	}
+	if err := ResolveEvidence(&document, chunks); err != nil {
+		t.Fatalf("ResolveEvidence returned error: %v", err)
+	}
+	if err := BoundOrchestrationProfile(&document); err != nil {
+		t.Fatalf("BoundOrchestrationProfile returned error: %v", err)
+	}
+	encoded, err := json.Marshal(document.OrchestrationProfile)
+	if err != nil {
+		t.Fatalf("marshal bounded profile: %v", err)
+	}
+	if len(encoded) > maxOrchestrationProfileBytes {
+		t.Fatalf("bounded profile is still too large: %d bytes", len(encoded))
+	}
+	if len(document.OrchestrationProfile.TopicUnits[0].EvidenceChunkIDs) == 0 || len(document.OrchestrationProfile.TopicUnits[0].EvidenceRefs) == 0 {
+		t.Fatal("bounded profile lost all evidence for its topic unit")
+	}
+	if err := ValidateOrchestrationProfile(document, nil); err != nil {
+		t.Fatalf("bounded profile is invalid: %v", err)
+	}
+}
+
 func TestValidateGeneratedRequiresOrchestrationProfile(t *testing.T) {
 	document := emptyFrameworkDocument(SchemaVersion, "general", frameworks["general"])
 	document.Classification = validClassification("general")

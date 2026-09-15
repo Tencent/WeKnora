@@ -28,6 +28,7 @@ import (
 
 type recordingDirectContentLLM struct {
 	output        string
+	jsonOutputs   []string
 	jsonErrors    []error
 	jsonPrompts   []string
 	completeCalls int
@@ -46,6 +47,9 @@ func (f *recordingDirectContentLLM) CompleteJSON(_ context.Context, prompt strin
 	f.jsonPrompts = append(f.jsonPrompts, prompt)
 	if callIndex < len(f.jsonErrors) && f.jsonErrors[callIndex] != nil {
 		return "", f.jsonErrors[callIndex]
+	}
+	if callIndex < len(f.jsonOutputs) {
+		return f.jsonOutputs[callIndex], nil
 	}
 	return f.output, nil
 }
@@ -436,6 +440,82 @@ func TestSummaryDraftUsesCompleteJSONForStrictStructuredOutput(t *testing.T) {
 	require.Zero(t, completion.streamCalls)
 	require.Contains(t, completion.jsonPrompts[1], "上一轮总结未通过严格校验")
 	require.Contains(t, completion.jsonPrompts[1], "model returned invalid JSON")
+}
+
+func TestSummaryTaskRepairsOrchestrationBlockReferences(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Video{}, &model.VideoTranscriptChunk{}, &model.VideoProcessingJob{}))
+
+	video := &model.Video{ID: "video-orchestration-repair", Title: "编排纠偏", VideoType: "general", TranscriptGeneration: "generation-1"}
+	require.NoError(t, db.Create(video).Error)
+	transcriptionPayload, err := json.Marshal(map[string]any{"mps_result": mps.Result{Segments: []mps.Segment{{
+		SourceSegmentID: "mps:test:000000", Text: "讲解方法并确定下一步。", StartMs: 0, EndMs: 10_000, SpeakerID: "speaker-1",
+	}}}})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.VideoProcessingJob{
+		ID: "transcription-orchestration-repair", VideoID: video.ID, JobType: "transcription",
+		IdempotencyKey: "transcription-orchestration-repair", ResultPayload: string(transcriptionPayload),
+	}).Error)
+	job := &model.VideoProcessingJob{
+		ID: "summary-orchestration-repair", VideoID: video.ID, JobType: skill.JobSummary, ResultStage: "draft",
+		TranscriptGeneration: video.TranscriptGeneration, IdempotencyKey: "summary-orchestration-repair",
+		InputPayload: `{"transcription_job_id":"transcription-orchestration-repair"}`,
+	}
+	require.NoError(t, db.Create(job).Error)
+
+	document := summary.Document{
+		SchemaVersion: summary.SchemaVersion, VideoType: "general",
+		Classification: &summary.Classification{Confidence: 0.9, Reason: "转写内容属于通用方法讲解", EvidenceChunkIDs: []string{"mps:test:000000"}},
+	}
+	framework, ok := summary.Framework("general")
+	require.True(t, ok)
+	for index, section := range framework {
+		document.Sections = append(document.Sections, summary.Section{ID: section.ID, Title: section.Title, Blocks: []summary.Block{{
+			ID: fmt.Sprintf("block-%d", index+1), Kind: summary.BlockKindParagraph, Text: "原文内容", EvidenceChunkIDs: []string{"mps:test:000000"},
+		}}})
+	}
+	document.OrchestrationProfile = &summary.OrchestrationProfile{SchemaVersion: summary.OrchestrationProfileSchemaVersion, PrimaryTopic: "方法讲解", TopicUnits: []summary.OrchestrationTopicUnit{{
+		Title: "方法单元", Abstract: "基于转写的主题摘要", ContentForms: []string{"concept_cognition"}, LearningOutcomes: []string{"能够复述方法"},
+		SummaryBlockIDs: []string{"block-not-in-summary"}, EvidenceChunkIDs: []string{"mps:test:000000"},
+	}}}
+	invalidOutput, err := json.Marshal(document)
+	require.NoError(t, err)
+	validOutput, err := json.Marshal(map[string]any{"orchestrationProfile": map[string]any{
+		"schemaVersion": 1,
+		"primaryTopic":  "方法讲解",
+		"topicUnit": map[string]any{
+			"title": "方法单元", "abstract": "基于转写的主题摘要", "contentForms": []string{"concept_cognition"}, "learningOutcomes": []string{"能够复述方法"},
+		},
+	}})
+	require.NoError(t, err)
+	completion := &recordingDirectContentLLM{jsonOutputs: []string{string(invalidOutput), string(validOutput)}}
+
+	wikiServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusCreated)
+		_, _ = writer.Write([]byte(`{"id":"summary-draft-repaired","slug":"summary/video-orchestration-repair/draft","version":1}`))
+	}))
+	defer wikiServer.Close()
+	wiki := weknora.NewWikiClient(config.WeKnoraConfig{BaseURL: wikiServer.URL, KBID: "content-kb"})
+	evidenceClient := weknora.New(config.WeKnoraConfig{BaseURL: wikiServer.URL, KBID: "evidence-kb"})
+	handler := &DirectContentHandler{
+		DB: db, LLM: completion, WeKnora: evidenceClient, Wiki: wiki,
+		Orchestrator: skill.NewOrchestrator(db, wiki, "content-kb"), KnowledgeKBID: "content-kb", Job: skill.JobSummary,
+	}
+
+	require.NoError(t, handler.Run(t.Context(), job, video))
+	require.Equal(t, 2, completion.jsonCalls)
+	require.Contains(t, completion.jsonPrompts[1], "block-1")
+	require.Contains(t, completion.jsonPrompts[1], "block-5")
+	require.Contains(t, completion.jsonPrompts[1], "只修正 orchestrationProfile")
+	var updated model.Video
+	require.NoError(t, db.First(&updated, "id = ?", video.ID).Error)
+	require.Equal(t, "summary-draft-repaired", updated.SummaryDraftWikiPageID)
 }
 
 func TestFinalOutlineRetriesInvalidJSONThroughStructuredCompletion(t *testing.T) {

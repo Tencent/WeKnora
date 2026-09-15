@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vidsage.local/prompts/meeting-knowledge-selection-v1.schema.json",
+  "title": "Meeting knowledge selection output v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["knowledge_refs"],
+  "properties": {
+    "knowledge_refs": {
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/knowledgeRef" }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "pattern": "\\S"
+    },
+    "evidenceIds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "knowledgeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topic_id", "knowledge_object_id", "relation_summary", "evidence_ids"],
+      "properties": {
+        "topic_id": { "$ref": "#/$defs/id" },
+        "knowledge_object_id": { "$ref": "#/$defs/id" },
+        "relation_summary": { "$ref": "#/$defs/summary" },
+        "evidence_ids": { "$ref": "#/$defs/evidenceIds" }
+      }
+    }
+  }
+}

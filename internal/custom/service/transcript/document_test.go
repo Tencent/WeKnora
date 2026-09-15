@@ -1,6 +1,7 @@
 package transcript
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -158,6 +159,56 @@ func TestValidateSourceContentRejectsEmptyOversizeIdentityAndDuration(t *testing
 	}
 	if _, err := ValidateSourceContent(content, doc.VideoID, doc.TranscriptGeneration, doc.DurationSeconds+1); err == nil || !strings.Contains(err.Error(), SourceValidationDuration) {
 		t.Fatalf("expected duration validation error, got %v", err)
+	}
+}
+
+func TestSourceContentCompactsLargeTranscriptAndRoundTrips(t *testing.T) {
+	paragraphs := make([]InputParagraph, 181)
+	for index := range paragraphs {
+		sourceID := fmt.Sprintf("mps:%s:%06d", strings.Repeat("source", 12), index)
+		evidenceID := fmt.Sprintf("evidence:%s:%06d", strings.Repeat("evidence", 8), index)
+		paragraphs[index] = InputParagraph{
+			Index:       index,
+			SpeakerID:   "0",
+			ParagraphID: sourceID,
+			Sentences: []InputSentence{{
+				SourceSentenceID:   sourceID,
+				EvidenceSentenceID: evidenceID,
+				Text:               strings.Repeat("课程内容", 10),
+				SpeakerID:          "0",
+				StartMs:            index * 10000,
+				EndMs:              index*10000 + 9000,
+			}},
+		}
+	}
+	doc, err := Build(Input{
+		VideoID: "video-large", TranscriptGeneration: "generation-large", Title: "长视频",
+		DurationSeconds: 1810,
+		Chapters:        []InputChapter{{Index: 0, Title: "完整转写", Paragraphs: paragraphs}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	documentJSON, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := SourceContent(doc, documentJSON, "hash")
+	if got := len([]byte(content)); got >= 190000 {
+		t.Fatalf("source content must stay below the remote manual-knowledge limit: %d", got)
+	}
+	parsed, err := ValidateSourceContent(content, doc.VideoID, doc.TranscriptGeneration, doc.DurationSeconds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ContinuousText != doc.ContinuousText {
+		t.Fatal("continuous transcript text changed during source round trip")
+	}
+	if got, want := parsed.Chapters[0].Paragraphs[90].TimeMarks[0], doc.Chapters[0].Paragraphs[90].TimeMarks[0]; got != want {
+		t.Fatalf("time mark changed during source round trip: got=%+v want=%+v", got, want)
+	}
+	if got, want := parsed.Chapters[0].Paragraphs[90].EvidenceSentenceIDs[0], doc.Chapters[0].Paragraphs[90].EvidenceSentenceIDs[0]; got != want {
+		t.Fatalf("evidence mapping changed during source round trip: got=%s want=%s", got, want)
 	}
 }
 

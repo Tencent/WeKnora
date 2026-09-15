@@ -10,6 +10,10 @@ import (
 
 const MaxSourceDocumentBytes = 8 << 20
 
+// MaxSourceKnowledgeContentBytes leaves room below WeKnora's 200000-character
+// manual-knowledge limit for encoding differences and future frontmatter.
+const MaxSourceKnowledgeContentBytes = 190000
+
 const (
 	SourceValidationEmpty       = "source_empty"
 	SourceValidationTooLarge    = "source_too_large"
@@ -59,10 +63,118 @@ func ParseSourceContent(content string) (FullVideoDocument, error) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(content[start:start+end])), &doc); err != nil {
 		return FullVideoDocument{}, sourceValidation(SourceValidationInvalidJSON, fmt.Sprintf("decode source document JSON: %v", err))
 	}
+	normalizeSourceDocument(&doc)
 	if err := Validate(doc); err != nil {
 		return FullVideoDocument{}, sourceValidation(SourceValidationInvalid, err.Error())
 	}
 	return doc, nil
+}
+
+// normalizeSourceDocument restores fields that are deterministically derived
+// from time marks. New source documents omit these repeated fields to stay
+// below WeKnora's manual-knowledge limit; older full documents pass through
+// unchanged and still receive the same validation.
+func normalizeSourceDocument(doc *FullVideoDocument) {
+	if doc == nil {
+		return
+	}
+	for chapterIndex := range doc.Chapters {
+		chapter := &doc.Chapters[chapterIndex]
+		for paragraphIndex := range chapter.Paragraphs {
+			paragraph := &chapter.Paragraphs[paragraphIndex]
+			if len(paragraph.TimeMarks) == 0 {
+				continue
+			}
+			if len(paragraph.SourceSentenceIDs) == 0 {
+				paragraph.SourceSentenceIDs = make([]string, 0, len(paragraph.TimeMarks))
+				for _, mark := range paragraph.TimeMarks {
+					paragraph.SourceSentenceIDs = append(paragraph.SourceSentenceIDs, mark.SourceSentenceID)
+				}
+			}
+			if len(paragraph.EvidenceSentenceIDs) == 0 {
+				paragraph.EvidenceSentenceIDs = make([]string, 0, len(paragraph.TimeMarks))
+				for _, mark := range paragraph.TimeMarks {
+					paragraph.EvidenceSentenceIDs = append(paragraph.EvidenceSentenceIDs, mark.EvidenceSentenceID)
+				}
+			}
+			if paragraph.Text == "" {
+				paragraph.Text = joinTranscriptText(timeMarkTexts(paragraph.TimeMarks))
+			}
+			if paragraph.StartMs == 0 {
+				paragraph.StartMs = paragraph.TimeMarks[0].StartMs
+			}
+			if paragraph.EndMs == 0 {
+				paragraph.EndMs = paragraph.TimeMarks[len(paragraph.TimeMarks)-1].EndMs
+			}
+		}
+		if chapter.ContinuousText == "" {
+			chapter.ContinuousText = joinTranscriptText(paragraphTexts(chapter.Paragraphs))
+		}
+		if len(chapter.Paragraphs) > 0 {
+			if chapter.StartMs == 0 {
+				chapter.StartMs = chapter.Paragraphs[0].StartMs
+			}
+			if chapter.EndMs == 0 {
+				chapter.EndMs = chapter.Paragraphs[len(chapter.Paragraphs)-1].EndMs
+			}
+		}
+	}
+	if doc.ContinuousText == "" {
+		doc.ContinuousText = joinTranscriptText(chapterTexts(doc.Chapters))
+	}
+}
+
+type compactSourceDocument struct {
+	SchemaVersion        int                    `json:"schema_version"`
+	VideoID              string                 `json:"video_id"`
+	TranscriptGeneration string                 `json:"transcript_generation"`
+	Title                string                 `json:"title"`
+	DurationSeconds      int                    `json:"duration_seconds"`
+	Chapters             []compactSourceChapter `json:"chapters"`
+	ContinuousText       string                 `json:"continuous_text"`
+}
+
+type compactSourceChapter struct {
+	Index          int                      `json:"index"`
+	Title          string                   `json:"title"`
+	StartMs        int                      `json:"start_ms"`
+	EndMs          int                      `json:"end_ms"`
+	Paragraphs     []compactSourceParagraph `json:"paragraphs"`
+	ContinuousText string                   `json:"continuous_text"`
+}
+
+type compactSourceParagraph struct {
+	ParagraphID         string     `json:"paragraph_id,omitempty"`
+	Index               int        `json:"index"`
+	SpeakerID           string     `json:"speaker_id,omitempty"`
+	EvidenceSentenceIDs []string   `json:"evidence_sentence_ids"`
+	TimeMarks           []TimeMark `json:"time_marks"`
+}
+
+func compactSourceDocumentJSON(doc FullVideoDocument) string {
+	compact := compactSourceDocument{
+		SchemaVersion: doc.SchemaVersion, VideoID: doc.VideoID,
+		TranscriptGeneration: doc.TranscriptGeneration, Title: doc.Title,
+		DurationSeconds: doc.DurationSeconds, ContinuousText: doc.ContinuousText,
+		Chapters: make([]compactSourceChapter, 0, len(doc.Chapters)),
+	}
+	for _, chapter := range doc.Chapters {
+		item := compactSourceChapter{
+			Index: chapter.Index, Title: chapter.Title, StartMs: chapter.StartMs,
+			EndMs: chapter.EndMs, ContinuousText: chapter.ContinuousText,
+			Paragraphs: make([]compactSourceParagraph, 0, len(chapter.Paragraphs)),
+		}
+		for _, paragraph := range chapter.Paragraphs {
+			item.Paragraphs = append(item.Paragraphs, compactSourceParagraph{
+				ParagraphID: paragraph.ParagraphID, Index: paragraph.Index,
+				SpeakerID: paragraph.SpeakerID, EvidenceSentenceIDs: paragraph.EvidenceSentenceIDs,
+				TimeMarks: paragraph.TimeMarks,
+			})
+		}
+		compact.Chapters = append(compact.Chapters, item)
+	}
+	encoded, _ := json.Marshal(compact)
+	return string(encoded)
 }
 
 // ValidateSourceContent applies the runtime contract before a Wiki task can

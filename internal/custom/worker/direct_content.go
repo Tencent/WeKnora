@@ -192,10 +192,26 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 		}
 		var document summary.Document
 		var validationErr error
+		var previousDocument *summary.Document
+		repairOrchestration := false
+		expectedVideoType := video.VideoType
+		if h.Job == skill.JobSummary {
+			// The first summary is routed from the transcript itself. The upload
+			// type is only a weak hint and must not lock the framework.
+			expectedVideoType = ""
+		}
+		validateSummary := summary.Validate
+		if h.Job == skill.JobSummary && job.ResultStage != "draft" {
+			validateSummary = summary.ValidateGenerated
+		}
 		for attempt := 0; attempt < 2; attempt++ {
 			generationPrompt := prompt
 			if attempt > 0 {
-				generationPrompt = prompt + fmt.Sprintf("\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：%s。字段名必须严格使用 schemaVersion、videoType、classification、sections、evidenceChunkIds，禁止使用 schema_version、video_type、evidence_chunk_ids；schemaVersion 必须为数字 %d。classification 必须包含 confidence、reason 和 evidenceChunkIds；先确认 videoType，再从候选模板中逐项复制该类型的全部 section.id 和 section.title，禁止使用其他类型的章节、禁止改名、禁止遗漏；只能从上文转写分块列表复制判型和正文 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。", validationErr.Error(), summary.SchemaVersion)
+				if repairOrchestration && previousDocument != nil {
+					generationPrompt = summaryOrchestrationRetryPrompt(validationErr, *previousDocument)
+				} else {
+					generationPrompt = summaryRetryPrompt(prompt, validationErr, previousDocument)
+				}
 			}
 			raw, err = h.LLM.CompleteJSON(ctx, generationPrompt)
 			if err != nil {
@@ -205,30 +221,39 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 				}
 				return validationErr
 			}
-			document = summary.Document{}
-			if err := parseLLMJSONResponse(raw, &document); err != nil {
-				validationErr = fmt.Errorf("parse %s output: %w", h.Job, err)
-				continue
-			}
-			summary.NormalizeEvidenceChunkIDs(&document, chunks)
-			if h.Job == skill.JobSummary {
-				if err := summary.NormalizeOrchestrationProfileReferences(&document, knownChunkIDs); err != nil {
-					validationErr = fmt.Errorf("normalize %s orchestration profile: %w", h.Job, err)
+			if repairOrchestration && previousDocument != nil {
+				var correction summaryOrchestrationCorrection
+				if err := parseLLMJSONResponse(raw, &correction); err != nil {
+					validationErr = fmt.Errorf("parse %s orchestration correction: %w", h.Job, err)
+					continue
+				}
+				document = *previousDocument
+				if err := applySummaryOrchestrationCorrection(&document, correction); err != nil {
+					validationErr = fmt.Errorf("validate %s orchestration correction: %w", h.Job, err)
+					continue
+				}
+			} else {
+				document = summary.Document{}
+				if err := parseLLMJSONResponse(raw, &document); err != nil {
+					validationErr = fmt.Errorf("parse %s output: %w", h.Job, err)
+					previousDocument = nil
+					repairOrchestration = false
 					continue
 				}
 			}
-			expectedVideoType := video.VideoType
+			summary.NormalizeEvidenceChunkIDs(&document, chunks)
+			previous := document
+			previousDocument = &previous
 			if h.Job == skill.JobSummary {
-				// The first summary is routed from the transcript itself. The upload
-				// type is only a weak hint and must not lock the framework.
-				expectedVideoType = ""
-			}
-			validateSummary := summary.Validate
-			if h.Job == skill.JobSummary && job.ResultStage != "draft" {
-				validateSummary = summary.ValidateGenerated
+				if err := summary.NormalizeOrchestrationProfileReferences(&document, knownChunkIDs); err != nil {
+					validationErr = fmt.Errorf("normalize %s orchestration profile: %w", h.Job, err)
+					repairOrchestration = summaryBodyValid(document, expectedVideoType, knownChunkIDs)
+					continue
+				}
 			}
 			if err := validateSummary(document, expectedVideoType, knownChunkIDs); err != nil {
 				validationErr = fmt.Errorf("validate %s output: %w", h.Job, err)
+				repairOrchestration = h.Job == skill.JobSummary && document.OrchestrationProfile != nil && summaryBodyValid(document, expectedVideoType, knownChunkIDs)
 				continue
 			}
 			if h.Job == skill.JobSummary {
@@ -250,6 +275,14 @@ func (h *DirectContentHandler) Run(ctx context.Context, job *model.VideoProcessi
 					validationErr = fmt.Errorf("validate %s structure: %w", h.Job, err)
 					continue
 				}
+			}
+			if err := summary.BoundOrchestrationProfile(&document); err != nil {
+				validationErr = fmt.Errorf("bound %s orchestration profile: %w", h.Job, err)
+				continue
+			}
+			if err := summary.ValidateOrchestrationProfile(document, knownChunkIDs); err != nil {
+				validationErr = fmt.Errorf("validate resolved %s orchestration profile: %w", h.Job, err)
+				continue
 			}
 			generatedSummaryType = document.VideoType
 			validationErr = nil
@@ -939,6 +972,125 @@ func summaryPrompt(videoType string, enhancement bool) string {
 		"选择 training 时，以“培训内容体系”为主干，按讲师真实授课顺序详细还原知识；背景引入、理论讲解、案例分析、实操演示、互动问答只是常见顺序，不得强行补齐。保留原文出现的案例细节和工具使用说明；原文金句必须逐字引用，不得改写成讲师引语；方法必须写清原文明示的步骤和判断标准。固定培训章节必须全部保留，原文没有可靠依据的章节必须输出 blocks:[]，不得创建“未提及”“信息不足”“无”等占位内容，不得使用常识、推测或知识增强信息补齐原文不存在的事实。\n"+
 		"不得删除、合并或改名章节。非培训类型的缺失内容按对应模板规则处理。判型置信度低于 0.75 时必须选择 general；会议判型至少引用两段不同位置的转写分块。%s%s\n",
 		mode, strings.Join(frameworkDescriptions, "；"), summary.SchemaVersion, videoTypeContract, classificationContract, orchestrationContract, strings.Join(sectionShape, ","), strings.Join(frameworkDescriptions, "；"), meetingSummaryInstruction(videoType), enhancementInstruction(enhancement))
+}
+
+type summaryOrchestrationCorrection struct {
+	OrchestrationProfile *summaryOrchestrationCorrectionProfile `json:"orchestrationProfile"`
+}
+
+type summaryOrchestrationCorrectionProfile struct {
+	SchemaVersion int                                `json:"schemaVersion"`
+	PrimaryTopic  string                             `json:"primaryTopic"`
+	TopicUnit     summaryOrchestrationCorrectionUnit `json:"topicUnit"`
+}
+
+type summaryOrchestrationCorrectionUnit struct {
+	Title            string   `json:"title"`
+	Abstract         string   `json:"abstract"`
+	ContentForms     []string `json:"contentForms"`
+	LearningOutcomes []string `json:"learningOutcomes"`
+}
+
+func summaryBodyValid(document summary.Document, expectedVideoType string, knownChunkIDs map[string]struct{}) bool {
+	document.OrchestrationProfile = nil
+	return summary.Validate(document, expectedVideoType, knownChunkIDs) == nil
+}
+
+func applySummaryOrchestrationCorrection(document *summary.Document, correction summaryOrchestrationCorrection) error {
+	if document == nil || correction.OrchestrationProfile == nil {
+		return fmt.Errorf("orchestrationProfile is required")
+	}
+	blockIDs := make([]string, 0)
+	for _, section := range document.Sections {
+		for _, block := range section.Blocks {
+			if blockID := strings.TrimSpace(block.ID); blockID != "" {
+				blockIDs = append(blockIDs, blockID)
+			}
+		}
+	}
+	if len(blockIDs) == 0 {
+		return fmt.Errorf("summary contains no blocks for orchestration correction")
+	}
+	profile := correction.OrchestrationProfile
+	document.OrchestrationProfile = &summary.OrchestrationProfile{
+		SchemaVersion: profile.SchemaVersion,
+		PrimaryTopic:  profile.PrimaryTopic,
+		TopicUnits: []summary.OrchestrationTopicUnit{{
+			Title: profile.TopicUnit.Title, Abstract: profile.TopicUnit.Abstract,
+			ContentForms: profile.TopicUnit.ContentForms, LearningOutcomes: profile.TopicUnit.LearningOutcomes,
+			SummaryBlockIDs: blockIDs,
+		}},
+	}
+	return nil
+}
+
+func summaryOrchestrationRetryPrompt(validationErr error, document summary.Document) string {
+	type blockInput struct {
+		ID               string   `json:"id"`
+		Text             string   `json:"text"`
+		EvidenceChunkIDs []string `json:"evidenceChunkIds"`
+	}
+	type topicUnitInput struct {
+		Title            string   `json:"title"`
+		Abstract         string   `json:"abstract"`
+		ContentForms     []string `json:"contentForms"`
+		LearningOutcomes []string `json:"learningOutcomes"`
+		SummaryBlockIDs  []string `json:"summaryBlockIds"`
+	}
+	type profileInput struct {
+		SchemaVersion int              `json:"schemaVersion"`
+		PrimaryTopic  string           `json:"primaryTopic"`
+		TopicUnits    []topicUnitInput `json:"topicUnits"`
+	}
+
+	blocks := make([]blockInput, 0)
+	for _, section := range document.Sections {
+		for _, block := range section.Blocks {
+			blocks = append(blocks, blockInput{
+				ID: strings.TrimSpace(block.ID), Text: strings.TrimSpace(block.Text), EvidenceChunkIDs: block.EvidenceChunkIDs,
+			})
+		}
+	}
+	profile := profileInput{}
+	if document.OrchestrationProfile != nil {
+		profile.SchemaVersion = document.OrchestrationProfile.SchemaVersion
+		profile.PrimaryTopic = document.OrchestrationProfile.PrimaryTopic
+		for _, unit := range document.OrchestrationProfile.TopicUnits {
+			profile.TopicUnits = append(profile.TopicUnits, topicUnitInput{
+				Title: unit.Title, Abstract: unit.Abstract, ContentForms: unit.ContentForms,
+				LearningOutcomes: unit.LearningOutcomes, SummaryBlockIDs: unit.SummaryBlockIDs,
+			})
+		}
+	}
+	blocksJSON, _ := json.Marshal(blocks)
+	profileJSON, _ := json.Marshal(profile)
+	return fmt.Sprintf("任务：只修正 orchestrationProfile，不要重写总结正文。只返回一个 JSON 对象，不要输出 Markdown、代码围栏、解释或尾随内容。\n"+
+		"上一轮卡片错误：%s。上一轮卡片：%s。可用正文块白名单：%s。\n"+
+		"纠偏输出固定降级为一个覆盖整份合法总结的主题单元。返回格式必须为 {\"orchestrationProfile\":{\"schemaVersion\":1,\"primaryTopic\":\"主主题\",\"topicUnit\":{\"title\":\"主题单元\",\"abstract\":\"主题摘要\",\"contentForms\":[\"concept_cognition\"],\"learningOutcomes\":[\"学习结果\"]}}}。"+
+		"不要输出 topicUnits、summaryBlockIds、evidenceChunkIds 或 evidenceRefs；后端将按正文顺序逐字复制全部白名单 block ID，并确定性生成主题证据。primaryTopic、title、abstract 和 learningOutcomes 只能概括给定正文，不得补充常识；abstract 不得超过 500 个 Unicode 字符；contentForms 只能使用 skill_method、tool_operation、concept_cognition、case_analysis、humanities_reflection、process_standard。",
+		validationErr.Error(), string(profileJSON), string(blocksJSON))
+}
+
+func summaryRetryPrompt(prompt string, validationErr error, previous *summary.Document) string {
+	allowed := make([]string, 0)
+	if previous != nil {
+		seen := make(map[string]struct{})
+		for _, section := range previous.Sections {
+			for _, block := range section.Blocks {
+				id := strings.TrimSpace(block.ID)
+				if id == "" {
+					continue
+				}
+				if _, exists := seen[id]; exists {
+					continue
+				}
+				seen[id] = struct{}{}
+				allowed = append(allowed, id)
+			}
+		}
+	}
+	allowedJSON, _ := json.Marshal(allowed)
+	return prompt + fmt.Sprintf("\n上一轮总结未通过严格校验，必须修正后重新输出完整 JSON。校验错误：%s。字段名必须严格使用 schemaVersion、videoType、classification、sections、evidenceChunkIds，禁止使用 schema_version、video_type、evidence_chunk_ids；schemaVersion 必须为数字 %d。classification 必须包含 confidence、reason 和 evidenceChunkIds；先确认 videoType，再从候选模板中逐项复制该类型的全部 section.id 和 section.title，禁止使用其他类型的章节、禁止改名、禁止遗漏；只能从上文转写分块列表复制判型和正文 evidenceChunkIds，不得创造、猜测或引用不存在的 ID；可以使用纯知识 ID或带 |分片序号的显示 ID，系统会归一化。上一轮结果中真实存在的 summary block ID 白名单为 %s；本轮 orchestrationProfile.topicUnits[].summaryBlockIds 只能逐字复制此白名单中的 ID，禁止引用白名单之外的 ID。", validationErr.Error(), summary.SchemaVersion, string(allowedJSON))
 }
 
 func meetingSummaryInstruction(videoType string) string {

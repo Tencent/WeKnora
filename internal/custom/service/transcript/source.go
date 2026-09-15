@@ -92,6 +92,10 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	videoID := strings.TrimSpace(doc.VideoID)
 	generation := strings.TrimSpace(doc.TranscriptGeneration)
 	result := SourceResult{VideoID: videoID, TranscriptGeneration: generation, KnowledgeBaseID: w.KBID, ContentHash: hash}
+	sourceContent := SourceContent(doc, documentJSON, hash)
+	if len([]byte(sourceContent)) > MaxSourceKnowledgeContentBytes {
+		return result, sourceValidation(SourceValidationTooLarge, fmt.Sprintf("source document exceeds WeKnora manual-knowledge limit: %d bytes", len([]byte(sourceContent))))
+	}
 	// A process-local lock avoids two workers racing between reconciliation and
 	// creation. The database unique key remains the cross-instance guard.
 	w.mu.Lock()
@@ -107,7 +111,7 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	}
 	if err == nil {
 		if binding.ContentHash != hash {
-			if repairErr := w.repairLegacySpeakerIdentity(ctx, binding, doc, documentJSON, hash); repairErr != nil {
+			if repairErr := w.repairLegacySpeakerIdentity(ctx, binding, doc, documentJSON, hash, sourceContent); repairErr != nil {
 				return result, fmt.Errorf("transcript source content hash mismatch for generation %s: %w", generation, repairErr)
 			}
 			result.KnowledgeID = binding.KnowledgeID
@@ -190,7 +194,7 @@ func (w *SourceWriter) Ensure(ctx context.Context, input SourceInput) (SourceRes
 	if knowledge == nil {
 		wikiEnabled := false
 		value, createErr := w.Gateway.CreateManualKnowledge(ctx, w.KBID, weknora.ManualKnowledgeInput{
-			Title: title, Content: SourceContent(doc, documentJSON, hash), Status: "publish", Channel: "api",
+			Title: title, Content: sourceContent, Status: "publish", Channel: "api",
 			ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
 		})
 		if createErr != nil {
@@ -295,6 +299,7 @@ func (w *SourceWriter) repairLegacySpeakerIdentity(
 	doc FullVideoDocument,
 	documentJSON string,
 	hash string,
+	sourceContent string,
 ) error {
 	if binding.Status != SourceStatusCreated || strings.TrimSpace(binding.KnowledgeID) == "" {
 		return fmt.Errorf("legacy source binding is not ready")
@@ -329,7 +334,7 @@ func (w *SourceWriter) repairLegacySpeakerIdentity(
 			return fmt.Errorf("legacy source gateway does not support updates")
 		}
 		updated, updateErr := updater.UpdateManualKnowledge(ctx, binding.KnowledgeID, weknora.ManualKnowledgeInput{
-			Title: SourceTitle(doc.Title), Content: SourceContent(doc, documentJSON, hash), Status: "publish", Channel: "api",
+			Title: SourceTitle(doc.Title), Content: sourceContent, Status: "publish", Channel: "api",
 			ProcessConfig: &types.KnowledgeProcessOverrides{WikiEnabled: &wikiEnabled},
 		})
 		if updateErr != nil {
@@ -451,6 +456,6 @@ func evidenceOrdinal(doc FullVideoDocument, chapterIndex, paragraphIndex, markIn
 	return ordinal + markIndex
 }
 
-func SourceContent(doc FullVideoDocument, documentJSON, hash string) string {
-	return fmt.Sprintf("---\ntype: video_transcript_source\nsource_video_id: %s\ntranscript_generation: %s\nschema_version: %d\ncontent_sha256: %s\n---\n\n# %s\n\n```json\n%s\n```\n", doc.VideoID, doc.TranscriptGeneration, doc.SchemaVersion, hash, doc.Title, documentJSON)
+func SourceContent(doc FullVideoDocument, _ string, hash string) string {
+	return fmt.Sprintf("---\ntype: video_transcript_source\nsource_video_id: %s\ntranscript_generation: %s\nschema_version: %d\ncontent_sha256: %s\n---\n\n# %s\n\n```json\n%s\n```\n", doc.VideoID, doc.TranscriptGeneration, doc.SchemaVersion, hash, doc.Title, compactSourceDocumentJSON(doc))
 }

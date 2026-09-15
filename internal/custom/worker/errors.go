@@ -56,7 +56,7 @@ func ClassifyProcessingError(err error) (string, string) {
 		return ErrorCategoryResponseParse, "transcript_source_validation"
 	}
 	switch {
-	case containsAny(message, "validate summary output", "validate summary classification", "resolve summary evidence"):
+	case containsAny(message, "validate summary output", "validate summary classification", "resolve summary evidence", "normalize summary orchestration profile"):
 		return ErrorCategoryResponseParse, "summary_contract_invalid"
 	case containsAny(message, "timeout", "deadline exceeded", "超时"):
 		return ErrorCategoryTimeout, "timeout"

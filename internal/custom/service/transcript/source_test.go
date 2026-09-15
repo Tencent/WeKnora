@@ -303,6 +303,11 @@ func TestSourceWriterRepairsLegacyUnknownSpeakerEvidenceIDs(t *testing.T) {
 	require.Equal(t, result.KnowledgeID, binding.KnowledgeID)
 	require.Equal(t, SourceStatusCreated, binding.Status)
 	require.NotEqual(t, legacyHash, binding.ContentHash)
+	currentJSON, err := currentDoc.JSON()
+	require.NoError(t, err)
+	currentHash := fmt.Sprintf("%x", sha256.Sum256([]byte(currentJSON)))
+	require.Equal(t, SourceContent(currentDoc, currentJSON, currentHash), gateway.updated[0].Content)
+	require.LessOrEqual(t, len([]byte(gateway.updated[0].Content)), MaxSourceKnowledgeContentBytes)
 }
 
 func TestSourceWriterRecordsFailureWithoutBindingSuccess(t *testing.T) {

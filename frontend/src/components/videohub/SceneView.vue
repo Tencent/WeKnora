@@ -9,7 +9,7 @@
       <button type="button" role="tab" :aria-selected="sceneMode === 'meeting'" :class="{ 'is-active': sceneMode === 'meeting' }" @click="sceneMode = 'meeting'">会议</button>
     </nav>
 
-    <MeetingSceneView v-if="sceneMode === 'meeting'" @select-video="openMeetingVideo" />
+    <MeetingSceneView v-if="sceneMode === 'meeting'" ref="meetingSceneRef" @select-video="openMeetingVideo" @select-wiki="selectWiki" />
     <template v-else>
 
     <div v-if="loading && !projection" class="scene-view__state">
@@ -27,32 +27,25 @@
       </div>
 
       <div class="scene-view__overview" aria-label="场景概览">
-        <div v-for="stat in overviewStats" :key="stat.label" class="scene-stat">
+        <div v-for="stat in overviewStats" :key="stat.label" class="scene-stat" :class="{ 'scene-stat--generated': stat.key === 'generatedAt' }">
           <span>{{ stat.label }}</span>
-          <strong>{{ stat.value }}</strong>
+          <div v-if="stat.key === 'generatedAt'" class="scene-stat__value-row">
+            <strong>{{ stat.value }}</strong>
+            <t-button
+              size="small"
+              variant="text"
+              shape="square"
+              :loading="generating"
+              aria-label="刷新培训学习路径"
+              title="刷新培训学习路径"
+              @click="refresh"
+            >
+              <RefreshIcon />
+            </t-button>
+          </div>
+          <strong v-else>{{ stat.value }}</strong>
         </div>
       </div>
-
-      <section class="scene-result-summary" aria-label="生成结果说明">
-        <div class="scene-result-summary__head">
-          <div class="scene-result-summary__counts">
-            <span v-for="item in resultCounts" :key="item.label">{{ item.label }} <strong>{{ item.value }}</strong></span>
-          </div>
-          <t-button size="small" variant="outline" :loading="generating" @click="refresh">智能刷新</t-button>
-        </div>
-        <div v-if="topicSourceEntries.length" class="scene-result-summary__line">
-          <span>内容来源</span>
-          <strong v-for="item in topicSourceEntries" :key="item.label">{{ item.label }} {{ item.value }}</strong>
-        </div>
-        <div v-if="notSelectedReasonEntries.length" class="scene-result-summary__line">
-          <span>未入选原因</span>
-          <strong v-for="item in notSelectedReasonEntries" :key="item.label">{{ item.label }} {{ item.value }}</strong>
-        </div>
-        <div v-if="skipReasonEntries.length" class="scene-result-summary__line">
-          <span>跳过原因</span>
-          <strong v-for="item in skipReasonEntries" :key="item.label">{{ item.label }} {{ item.value }}</strong>
-        </div>
-      </section>
 
       <div v-if="!trainingClusters.length" class="scene-view__state scene-panel">
         <t-empty description="当前合格视频尚未形成可发布的学习主题" />
@@ -80,55 +73,22 @@
               <strong>{{ edge.otherClusterTitle }}</strong>
             </button>
           </div>
-            <div ref="networkElement" class="topic-network" :style="{ minHeight: `${networkHeight}px` }">
-            <svg :viewBox="`0 0 100 ${networkHeight}`" preserveAspectRatio="none" aria-label="主题簇关系">
-              <defs>
-                <marker id="topic-edge-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
-                  <path d="M 0 0 L 8 4 L 0 8 z" fill="context-stroke" />
-                </marker>
-              </defs>
-              <g
-                v-for="edge in trainingEdges"
-                :key="edge.key"
-                class="topic-edge"
-                :class="[`is-${edge.relationType}`, { 'is-selected': selectedRelation === edge.key, 'is-connected': edge.connectedToSelection }]"
-                role="button"
-                tabindex="0"
-                :aria-label="`${relationTypeLabels[edge.relationType]}：${edge.summary}`"
-                @click="selectRelation(edge.key)"
-                @keydown.enter="selectRelation(edge.key)"
-                @keydown.space.prevent="selectRelation(edge.key)"
-                @mouseenter="previewRelation(edge.key)"
-                @mouseleave="clearRelationPreview(edge.key)"
-                @focus="previewRelation(edge.key)"
-                @blur="clearRelationPreview(edge.key)"
-              >
-                <title>{{ relationTypeLabels[edge.relationType] }}：{{ edge.summary }}</title>
-                <path class="topic-edge__hit" :d="edge.path" />
-                <path
-                  class="topic-edge__line"
-                  :d="edge.path"
-                  :marker-end="isDirectedRelation(edge.relationType) ? 'url(#topic-edge-arrow)' : undefined"
-                />
-              </g>
-            </svg>
-            <button
-              v-for="cluster in trainingClusters"
-              :key="cluster.key"
-              type="button"
-              class="cluster-node"
-              :class="{ 'is-selected': selectedCluster === cluster.key }"
-              :style="{ left: `${cluster.x}%`, top: `${cluster.y}%` }"
-              @click="selectCluster(cluster.key)"
-            >
-              <strong>{{ cluster.title }}</strong>
-              <span>{{ cluster.units }} 个单元 · {{ cluster.videos }} 个视频</span>
-            </button>
-            <div v-if="relationPreview" class="topic-network__relation-preview" role="status">
-              <strong>{{ relationTypeLabels[relationPreview.relationType] }}</strong>
-              <span>{{ relationPreview.summary }}</span>
+            <div class="topic-network" aria-label="培训主题簇原生力导图">
+              <GraphCanvas
+                :nodes="graphNodes"
+                :edges="graphEdges"
+                :selected-node-id="selectedCluster"
+                :full-labels="true"
+                label-position="left"
+                :centered="true"
+                :show-legend="false"
+                :relation-labels="relationTypeLabels"
+                :show-relation-labels="true"
+                :show-relation-arrows="true"
+                :relation-arrow-types="directedTrainingRelations"
+                @node-click="selectGraphNode"
+              />
             </div>
-          </div>
         </section>
 
         <aside v-if="activeCluster" class="scene-panel training-detail" aria-live="polite">
@@ -248,10 +208,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { ChevronDownIcon, FileIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { ChevronDownIcon, FileIcon, PlayCircleIcon, RefreshIcon } from 'tdesign-icons-vue-next'
 import { fetchVideoOptions } from '@/api/videohub'
 import MeetingSceneView from './MeetingSceneView.vue'
+import GraphCanvas from './GraphCanvas.vue'
+import type { GraphEdge, GraphNode } from '@/types/videohub'
 import { createTrainingNetworkLayout, positionTrainingCluster, routeTrainingEdge } from './trainingOrchestrationView'
 import {
   fetchCurrentTrainingProjection,
@@ -263,11 +225,8 @@ import {
   type TrainingGapAnalysis,
   type TrainingJob,
   type TrainingLearningUnit,
-  type TrainingNotSelectedReason,
   type TrainingProjection,
   type TrainingRelationType,
-  type TrainingSkipReason,
-  type TrainingTopicSource,
 } from '@/api/videohub/trainingOrchestration'
 
 const emit = defineEmits<{
@@ -276,6 +235,7 @@ const emit = defineEmits<{
 }>()
 
 const sceneMode = ref<'training' | 'meeting'>('training')
+const meetingSceneRef = ref<{ refresh: () => Promise<void> } | null>(null)
 const projection = ref<TrainingProjection | null>(null)
 const loading = ref(true)
 const generating = ref(false)
@@ -294,12 +254,33 @@ const networkElement = ref<HTMLElement | null>(null)
 const networkWidth = ref(720)
 let networkResizeObserver: ResizeObserver | undefined
 
+function observeNetworkElement(element: HTMLElement | null) {
+  networkResizeObserver?.disconnect()
+  networkResizeObserver = undefined
+  if (!element || typeof ResizeObserver === 'undefined') return
+  networkWidth.value = element.clientWidth || networkWidth.value
+  networkResizeObserver = new ResizeObserver(entries => {
+    const width = entries[0]?.contentRect.width
+    if (width) networkWidth.value = width
+  })
+  networkResizeObserver.observe(element)
+}
+
 const relationTypeLabels: Record<TrainingRelationType, string> = {
   required_before: '必须先学',
   recommended_before: '推荐先学',
   application: '用于实践',
   complementary: '补充理解',
   contrast: '对照理解',
+}
+const directedTrainingRelations = ['required_before', 'recommended_before', 'application']
+const canvasContentTypeMap: Record<string, string> = {
+  skill_method: 'methodology',
+  tool_operation: 'entity',
+  concept_cognition: 'concept',
+  case_analysis: 'case',
+  humanities_reflection: 'insight',
+  process_standard: 'concept',
 }
 const contentTypeLabels: Record<string, string> = {
   skill_method: '技能方法',
@@ -309,6 +290,14 @@ const contentTypeLabels: Record<string, string> = {
   humanities_reflection: '人文反思',
   process_standard: '流程规范',
 }
+const contentTypeColors: Record<string, string> = {
+  skill_method: '--color-data-4',
+  tool_operation: '--color-data-1',
+  concept_cognition: '--color-data-2',
+  case_analysis: '--color-data-3',
+  humanities_reflection: '--color-data-5',
+  process_standard: '--color-data-2',
+}
 const knowledgeTypeLabels: Record<string, string> = {
   entity: '实体',
   concept: '概念',
@@ -316,23 +305,6 @@ const knowledgeTypeLabels: Record<string, string> = {
   methodology: '方法论',
   insight: '洞察',
 }
-const skipReasonLabels: Record<TrainingSkipReason, string> = {
-  processing: '处理中',
-  processing_failed: '处理失败',
-  knowledge_not_ready: '正式内容未完成',
-  knowledge_audit_failed: '正式内容未通过校验',
-  evidence_missing: '缺少有效证据',
-  inaccessible: '已不可访问',
-}
-const notSelectedReasonLabels: Record<TrainingNotSelectedReason, string> = {
-  redundant_evidence: '内容重复',
-  output_limit: '输出容量',
-}
-const topicSourceLabels: Record<TrainingTopicSource, string> = {
-  final_summary: '正式总结',
-  normalized_transcript: '规范化转写',
-}
-
 const visibleTopicClusters = computed(() => (projection.value?.topic_clusters || [])
   .filter(cluster => cluster.path.stages.some(stage => stage.units.length > 0)))
 const trainingClusterCount = computed(() => visibleTopicClusters.value.length)
@@ -351,6 +323,7 @@ const trainingClusters = computed(() => visibleTopicClusters.value.map((cluster,
     description: cluster.summary,
     learningGoal: cluster.learning_goal,
     contentType: cluster.learning_content_type,
+    nodeColor: `var(${contentTypeColors[cluster.learning_content_type] || '--color-data-2'})`,
     gap_analysis: cluster.gap_analysis,
     stages,
   }
@@ -377,6 +350,25 @@ const trainingEdges = computed(() => (projection.value?.topic_cluster_relations 
       || selectedCluster.value === relation.target_cluster_id,
   }]
 }))
+const graphNodes = computed<GraphNode[]>(() => trainingClusters.value.map(cluster => {
+  const graphType = canvasContentTypeMap[cluster.contentType] || 'concept'
+  return {
+    id: cluster.key,
+    name: cluster.title,
+    label: cluster.title,
+    attributes: [graphType],
+    type: graphType,
+    link_count: cluster.videos,
+  }
+}))
+const graphEdges = computed<GraphEdge[]>(() => trainingEdges.value.map(edge => ({
+  id: edge.key,
+  source: edge.sourceClusterID,
+  target: edge.targetClusterID,
+  type: edge.relationType,
+  source_title: clusterByID.value.get(edge.sourceClusterID)?.title,
+  target_title: clusterByID.value.get(edge.targetClusterID)?.title,
+})))
 const activeCluster = computed(() => clusterByID.value.get(selectedCluster.value) || trainingClusters.value[0] || null)
 const activeRelation = computed(() => trainingEdges.value.find(edge => edge.key === selectedRelation.value) || null)
 const relationPreview = computed(() => trainingEdges.value.find(edge => edge.key === (previewedRelation.value || selectedRelation.value)) || null)
@@ -401,33 +393,13 @@ const gapDimensions = computed(() => {
 const overviewStats = computed(() => {
   const stats = projection.value?.statistics
   return [
-    { label: '培训主题', value: String(stats?.topic_cluster_count || 0) },
-    { label: '培训视频', value: String(stats?.selected_videos || 0) },
-    { label: '引用知识', value: String(stats?.selected_knowledge_count || 0) },
-    { label: '学习时长', value: formatDuration(stats?.learning_duration_seconds || 0) },
-    { label: '上次生成', value: projection.value ? formatGeneratedAt(projection.value.generated_at) : '-' },
+    { key: 'topicCount', label: '培训主题', value: String(stats?.topic_cluster_count || 0) },
+    { key: 'videoCount', label: '培训视频', value: String(stats?.selected_videos || 0) },
+    { key: 'knowledgeCount', label: '引用知识', value: String(stats?.selected_knowledge_count || 0) },
+    { key: 'duration', label: '学习时长', value: formatDuration(stats?.learning_duration_seconds || 0) },
+    { key: 'generatedAt', label: '上次生成', value: projection.value ? formatGeneratedAt(projection.value.generated_at) : '-' },
   ]
 })
-const resultCounts = computed(() => {
-  const stats = projection.value?.statistics
-  return [
-    { label: '已分析', value: stats?.scanned_videos || 0 },
-    { label: '符合条件', value: stats?.qualified_videos || 0 },
-    { label: '已入选', value: stats?.selected_videos || 0 },
-    { label: '未入选', value: stats?.not_selected_videos || 0 },
-    { label: '已跳过', value: stats?.skipped_videos || 0 },
-  ]
-})
-const topicSourceEntries = computed(() => positiveEntries(projection.value?.statistics.topic_source_counts, topicSourceLabels))
-const notSelectedReasonEntries = computed(() => positiveEntries(projection.value?.statistics.not_selected_reason_counts, notSelectedReasonLabels))
-const skipReasonEntries = computed(() => positiveEntries(projection.value?.statistics.skipped_reason_counts, skipReasonLabels))
-
-function positiveEntries<Key extends string>(counts: Record<Key, number> | undefined, labels: Record<Key, string>) {
-  if (!counts) return []
-  return (Object.keys(labels) as Key[])
-    .map(key => ({ label: labels[key], value: Number(counts[key]) || 0 }))
-    .filter(item => item.value > 0)
-}
 function selectCluster(key: string) {
   selectedCluster.value = key
   selectedRelation.value = null
@@ -436,8 +408,14 @@ function selectCluster(key: string) {
   const firstStage = clusterByID.value.get(key)?.stages[0]
   expandedStages.value = firstStage ? [firstStage.stage_id] : []
 }
+function selectGraphNode(node: GraphNode) {
+  selectCluster(node.id)
+}
 function openMeetingVideo(videoID: string, seconds: number) {
   emit('selectVideo', videoID, seconds)
+}
+function selectWiki(target: { targetPageId: string; title: string }) {
+  emit('selectWiki', target)
 }
 function selectRelation(key: string) {
   selectedRelation.value = key
@@ -509,6 +487,10 @@ async function loadVideoTitles() {
   }
 }
 async function refresh() {
+  if (sceneMode.value === 'meeting') {
+    await meetingSceneRef.value?.refresh()
+    return
+  }
   if (generating.value) return
   generating.value = true
   errorMessage.value = ''
@@ -596,13 +578,9 @@ function formatGeneratedAt(value: string) {
 }
 
 onMounted(() => {
-  networkWidth.value = networkElement.value?.clientWidth || window.innerWidth
-  if (typeof ResizeObserver !== 'undefined' && networkElement.value) {
-    networkResizeObserver = new ResizeObserver(entries => { networkWidth.value = entries[0]?.contentRect.width || networkWidth.value })
-    networkResizeObserver.observe(networkElement.value)
-  }
   loadCurrent()
 })
+watch(networkElement, element => observeNetworkElement(element), { flush: 'post' })
 onBeforeUnmount(() => networkResizeObserver?.disconnect())
 defineExpose({ refresh })
 </script>
@@ -619,13 +597,9 @@ defineExpose({ refresh })
 .scene-stat { min-width: 0; padding: 14px 16px; border-radius: var(--td-radius-medium); }
 .scene-stat span { display: block; color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
 .scene-stat strong { display: block; margin-top: 7px; overflow-wrap: anywhere; font-size: 22px; font-weight: 500; line-height: 28px; }
-.scene-result-summary { display: grid; gap: 8px; padding: 12px 2px; border-top: 1px solid var(--td-component-stroke); border-bottom: 1px solid var(--td-component-stroke); color: var(--td-text-color-secondary); font-size: var(--td-font-size-body-small); }
-.scene-result-summary__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.scene-result-summary__counts, .scene-result-summary__line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
-.scene-result-summary__counts span, .scene-result-summary__line strong { font-weight: 400; white-space: nowrap; }
-.scene-result-summary__counts strong { color: var(--td-text-color-primary); font-weight: 600; }
-.scene-result-summary__line > span { min-width: 72px; color: var(--td-text-color-placeholder); }
-.scene-result-summary__line strong { color: var(--td-text-color-secondary); }
+.scene-stat__value-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.scene-stat__value-row strong { min-width: 0; }
+.scene-stat__value-row .t-button { flex: none; margin-top: 5px; }
 .training-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(var(--td-comp-margin-s) * 2); align-items: start; }
 .scene-panel { min-width: 0; border-radius: var(--td-radius-extraLarge); }
 .topic-network-panel { overflow: hidden; }
@@ -647,11 +621,13 @@ defineExpose({ refresh })
 .topic-edge.is-contrast .topic-edge__line { stroke-dasharray: 2 5; }
 .topic-edge.is-connected .topic-edge__line { stroke: color-mix(in srgb, var(--td-brand-color) 72%, var(--td-text-color-secondary)); stroke-width: 2.25; }
 .topic-edge:hover .topic-edge__line, .topic-edge:focus-visible .topic-edge__line, .topic-edge.is-selected .topic-edge__line { stroke: var(--td-brand-color); stroke-width: 3; }
-.cluster-node { position: absolute; z-index: 1; width: 148px; height: 92px; padding: 14px 14px 12px 18px; transform: translate(-50%, -50%); overflow: hidden; border: 1px solid rgba(255,255,255,.92); border-radius: var(--td-radius-medium); color: var(--td-text-color-primary); background: rgba(255,255,255,.92); box-shadow: var(--td-shadow-1); cursor: pointer; text-align: left; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
-.cluster-node::before { position: absolute; top: 0; bottom: 0; left: 0; width: 4px; border-radius: var(--td-radius-medium) 0 0 var(--td-radius-medium); background: var(--td-brand-color); content: ''; }
-.cluster-node:hover, .cluster-node.is-selected { transform: translate(-50%, -50%) scale(1.03); border-color: color-mix(in srgb, var(--td-brand-color) 48%, transparent); box-shadow: var(--td-shadow-2); }
-.cluster-node strong { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; font-size: var(--td-font-size-body-medium); font-weight: 600; line-height: 18px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.cluster-node span { display: block; margin-top: 7px; color: var(--td-text-color-secondary); font-size: 10px; line-height: 15px; }
+.cluster-node { position: absolute; z-index: 1; display: inline-flex; width: max-content; max-width: min(270px, calc(100% - 18px)); align-items: flex-start; gap: 10px; padding: 0; transform: translate(-50%, -50%); overflow: visible; border: 0; color: var(--td-text-color-primary); background: transparent; cursor: pointer; text-align: left; transition: transform .16s ease, filter .16s ease; }
+.cluster-node__marker { width: 24px; height: 24px; flex: none; margin-top: 2px; border: 2px solid rgba(255,255,255,.92); border-radius: var(--td-radius-circle); background: var(--node-color, var(--td-brand-color)); box-shadow: 0 0 0 1px rgba(0,0,0,.12); transition: transform .16s ease, box-shadow .16s ease; }
+.cluster-node__label { display: grid; min-width: 0; max-width: 228px; gap: 2px; }
+.cluster-node:hover, .cluster-node.is-selected { transform: translate(-50%, -50%) scale(1.03); filter: drop-shadow(0 2px 4px rgba(0,0,0,.12)); }
+.cluster-node.is-selected .cluster-node__marker, .cluster-node:hover .cluster-node__marker { transform: scale(1.16); box-shadow: 0 0 0 4px color-mix(in srgb, var(--node-color, var(--td-brand-color)) 22%, transparent); }
+.cluster-node strong { display: block; overflow-wrap: anywhere; font-size: var(--td-font-size-body-medium); font-weight: 500; line-height: 20px; }
+.cluster-node__meta { display: block; overflow-wrap: anywhere; color: var(--td-text-color-secondary); font-size: 10px; line-height: 15px; }
 .topic-network__relation-preview { position: absolute; z-index: 2; right: 12px; bottom: 12px; left: 12px; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 10px; padding: 9px 11px; border: 1px solid rgba(255,255,255,.9); border-radius: var(--td-radius-medium); color: var(--td-text-color-secondary); background: rgba(255,255,255,.88); backdrop-filter: blur(12px); font-size: 11px; line-height: 16px; }
 .topic-network__relation-preview strong { color: var(--td-brand-color); }
 .topic-network__relation-preview span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
@@ -707,5 +683,5 @@ defineExpose({ refresh })
 @media (max-width: 980px) { .scene-view__overview { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1050px) { .training-layout { grid-template-columns: 1fr; } }
 @media (max-width: 820px) { .scene-view__overview { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .scene-stat { padding: 12px; }.scene-stat strong { font-size: 20px; }.scene-result-summary__head { align-items: flex-start; flex-direction: column; }.scene-result-summary__line > span { flex-basis: 100%; }.training-detail { padding: 14px; } }
+@media (max-width: 520px) { .scene-stat { padding: 12px; }.scene-stat strong { font-size: 20px; }.training-detail { padding: 14px; } }
 </style>

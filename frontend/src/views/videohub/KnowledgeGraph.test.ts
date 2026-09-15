@@ -21,20 +21,18 @@ test('graph page exposes a URL-addressable scene view without blocking on graph 
 
   assert.match(source, /import SceneView from '@\/components\/videohub\/SceneView\.vue'/)
   assert.match(source, /route\.query\.view === 'scene'/)
-  assert.match(source, /<SceneView v-else-if="activeView === 'scene'" ref="sceneViewRef" @select-wiki="selectGraphNode" @select-video="openVideo" \/>/)
+  assert.match(source, /<SceneView v-else-if="activeView === 'scene'" @select-wiki="selectGraphNode" @select-video="openVideo" \/>/)
   assert.match(source, /activeView === 'knowledge' && !payload/)
 })
 
-test('graph page keeps one refresh action and removes partial status banners', () => {
+test('scene view keeps one refresh entry point and removes partial status banners', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const source = readFileSync(join(here, 'KnowledgeGraph.vue'), 'utf8')
   const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
 
-  assert.equal(source.match(/>刷新<\/t-button>/g)?.length, 1)
   assert.doesNotMatch(source, /class="knowledge-graph__status is-partial"/)
-  assert.match(source, /refreshCurrentView/)
-  assert.match(source, /await loadGraph\(\)/)
-  assert.match(source, /sceneViewRef\.value\?\.refresh\(\)/)
+  assert.match(scene, /aria-label="刷新培训学习路径"/)
+  assert.match(scene, /@click="refresh"/)
   assert.match(scene, /defineExpose\(\{ refresh \}\)/)
 })
 
@@ -48,29 +46,36 @@ test('graph page shows actual canvas node counts only in filters', () => {
   assert.match(source, /\[attribute\]: next\.nodes\.length/)
 })
 
-test('scene relation lines open only the relation type and summary', () => {
+test('scene relation graph uses the shared canvas and opens relation summaries', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
 
-  assert.match(scene, /class="topic-edge"/)
+  assert.match(scene, /import GraphCanvas from '\.\/GraphCanvas\.vue'/)
+  assert.match(scene, /<GraphCanvas/)
+  assert.match(scene, /:relation-labels="relationTypeLabels"/)
+  assert.match(scene, /:show-relation-labels="true"/)
+  assert.match(scene, /:show-relation-arrows="true"/)
+  assert.match(scene, /@node-click="selectGraphNode"/)
   assert.match(scene, /@click="selectRelation\(edge\.key\)"/)
-  assert.match(scene, /@keydown\.enter="selectRelation\(edge\.key\)"/)
-  assert.match(scene, /@keydown\.space\.prevent="selectRelation\(edge\.key\)"/)
   assert.match(scene, /v-if="activeRelation"/)
   assert.match(scene, /relationTypeLabels\[activeRelation\.relationType\]/)
   assert.match(scene, /activeRelation\.summary/)
-  assert.match(scene, /function selectCluster\(key: string\) \{[\s\S]*?selectedCluster\.value = key[\s\S]*?selectedRelation\.value = null/)
-  assert.doesNotMatch(scene, /关系依据|起点主题簇|终点主题簇/)
-  assert.doesNotMatch(scene, /项目会议|meetingTopics|meeting-layout/)
-  assert.match(scene, /id="topic-edge-arrow"/)
-  assert.match(scene, /isDirectedRelation\(edge\.relationType\)/)
-  assert.match(scene, /\.topic-edge\.is-complementary \.topic-edge__line \{ stroke-dasharray: 8 6; \}/)
-  assert.match(scene, /\.topic-edge\.is-contrast \.topic-edge__line \{ stroke-dasharray: 2 5; \}/)
-  assert.match(scene, /\.topic-network \{[^}]*min-width: 720px;/)
-  assert.match(scene, /@media \(max-width: 1050px\) \{ \.training-layout \{ grid-template-columns: 1fr; \}/)
+  assert.match(scene, /function selectCluster\(key: string\) \{[\s\S]*?selectedRelation\.value = null/)
+  assert.doesNotMatch(scene, /<svg/)
 })
 
-test('scene view consumes every user-facing training orchestration field group', () => {
+test('scene topic nodes use the shared graph canvas and keep full titles visible', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
+  const canvas = readFileSync(join(here, '../../components/videohub/GraphCanvas.vue'), 'utf8')
+
+  assert.match(scene, /:full-labels="true"/)
+  assert.match(scene, /label-position="left"/)
+  assert.match(canvas, /overflow: props\.fullLabels \? 'break' : 'truncate'/)
+  assert.match(canvas, /function labelLayout\(\)/)
+})
+
+test('scene view consumes the current training projection and evidence fields', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const scene = readFileSync(join(here, '../../components/videohub/SceneView.vue'), 'utf8')
   const api = readFileSync(join(here, '../../api/videohub/trainingOrchestration.ts'), 'utf8')
@@ -78,17 +83,11 @@ test('scene view consumes every user-facing training orchestration field group',
   for (const label of ['培训主题', '培训视频', '引用知识', '学习时长', '上次生成']) {
     assert.match(scene, new RegExp(label))
   }
-  for (const field of ['scanned_videos', 'qualified_videos', 'selected_videos', 'not_selected_videos', 'skipped_videos']) {
+  for (const field of ['selected_videos', 'selected_knowledge_count', 'learning_duration_seconds', 'generated_at', 'topic_clusters', 'topic_cluster_relations']) {
     assert.match(scene, new RegExp(field))
   }
-  assert.match(scene, /topic_source_counts/)
-  assert.match(scene, /not_selected_reason_counts/)
-  assert.match(scene, /skipped_reason_counts/)
   assert.match(scene, /units: stages\.reduce\(\(total, stage\) => total \+ stage\.units\.length, 0\)/)
   assert.match(scene, /filter\(cluster => cluster\.path\.stages\.some\(stage => stage\.units\.length > 0\)\)/)
-  assert.doesNotMatch(scene, /isSingleVideoSingleUnitCandidate/)
-  assert.match(scene, /const firstCluster = trainingClusters\.value\[0\]/)
-  assert.match(scene, /cluster\.units \}\} 个单元 · \{\{ cluster\.videos \}\} 个视频/)
   assert.match(scene, /String\(unit\.sequence\)\.padStart\(2, '0'\)/)
   assert.match(scene, /学习任务/)
   assert.match(scene, /学完可以/)
@@ -96,16 +95,14 @@ test('scene view consumes every user-facing training orchestration field group',
   assert.match(api, /title: string/)
   assert.match(scene, /selectedClusterRelations/)
   assert.match(scene, /edge\.connectedToSelection/)
-  assert.match(scene, /routeTrainingEdge\(sourceCenter, targetCenter, obstacleCenters/)
-  assert.match(scene, /@focus="previewRelation\(edge\.key\)"/)
-  assert.match(scene, /relationPreview\.summary/)
-  assert.match(scene, /<title>\{\{ relationTypeLabels\[edge\.relationType\] \}\}：\{\{ edge\.summary \}\}<\/title>/)
   assert.match(scene, /fetchVideoOptions/)
   assert.match(scene, /videoTitle\(ref\.video_id\)/)
   assert.match(scene, /formatTimeRange\(ref\.start_ms, ref\.end_ms\)/)
-  assert.match(api, /not_selected_reason_counts: Record<TrainingNotSelectedReason, number>/)
-  assert.match(api, /skipped_reason_counts: Record<TrainingSkipReason, number>/)
-  assert.match(api, /topic_source_counts: Record<TrainingTopicSource, number>/)
+  assert.match(api, /selected_videos: number/)
+  assert.match(api, /selected_knowledge_count: number/)
+  assert.match(api, /learning_duration_seconds: number/)
+  assert.match(api, /topic_clusters: TrainingTopicCluster\[\]/)
+  assert.match(api, /topic_cluster_relations:/)
   assert.match(api, /assertSupportedTrainingProjection\(projection\)/)
 })
 
@@ -126,10 +123,25 @@ test('meeting todos expose source evidence and a timestamped video jump', () => 
   const here = dirname(fileURLToPath(import.meta.url))
   const meeting = readFileSync(join(here, '../../components/videohub/MeetingSceneView.vue'), 'utf8')
 
-  assert.match(meeting, /原文证据 · \{\{ todo\.timeRange \}\}/)
-  assert.match(meeting, /todo\.evidenceQuote/)
-  assert.match(meeting, /@click="openTodoEvidence\(todo\)"/)
-  assert.match(meeting, /emit\('selectVideo', todo\.videoId, todo\.seconds\)/)
+  assert.match(meeting, /todo\.evidence_refs/)
+  assert.match(meeting, /@click="openEvidence\(todo\.video_id, todo\.evidence_refs\)"/)
+  assert.match(meeting, /emit\('selectVideo', videoId, refs\[0\] \? refs\[0\]\.start_ms \/ 1000 : 0\)/)
+  assert.match(meeting, /簇内事项分支/)
+  assert.match(meeting, /workItemStatusLabel\(item\.status\)/)
+  assert.match(meeting, /v-if="item\.evidence_refs\.length"/)
+})
+
+test('meeting topic network uses the shared ECharts graph renderer', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const meeting = readFileSync(join(here, '../../components/videohub/MeetingTopicGraph.vue'), 'utf8')
+
+  assert.match(meeting, /echarts\/core/)
+  assert.match(meeting, /GraphChart/)
+  assert.match(meeting, /layout: 'none'/)
+  assert.match(meeting, /edgeSymbolSize/)
+  assert.match(meeting, /clientWidth/)
+  assert.match(meeting, /resizeObserver = new ResizeObserver\(\(\) => \{ chart\?\.resize\(\); render\(\) \}\)/)
+  assert.doesNotMatch(meeting, /<svg/)
 })
 
 test('scene evidence jumps preserve sub-second evidence offsets', () => {
@@ -149,7 +161,7 @@ test('scene view loads and refreshes the real training orchestration API without
   assert.match(scene, /generateTrainingProjection/)
   assert.match(scene, /fetchTrainingJob/)
   assert.match(scene, /while \(job\.status === 'queued' \|\| job\.status === 'running'\)/)
-	assert.match(scene, /智能刷新/)
+  assert.match(scene, /刷新培训学习路径/)
 	assert.match(scene, /generateTrainingProjection\(\)/)
   assert.match(scene, /@click="emit\('selectWiki'/)
   assert.match(scene, /@click="emit\('selectVideo'/)
@@ -245,8 +257,8 @@ test('graph controls keep stable height and dense labels do not overlap', () => 
   const filters = readFileSync(join(here, '../../components/videohub/filterTabs.css'), 'utf8')
   const theme = readFileSync(join(here, '../../assets/theme/theme.css'), 'utf8')
 
-  assert.match(canvas, /label:\s*\{\s*show:\s*true[^}]*overflow:\s*'truncate'/)
-  assert.match(canvas, /labelLayout:\s*\{\s*hideOverlap:\s*false,\s*moveOverlap:\s*'shiftY'/)
+  assert.match(canvas, /label:\s*\{\s*show:\s*true[^}]*overflow:\s*props\.fullLabels \? 'break' : 'truncate'/)
+  assert.match(canvas, /function labelLayout\(\)[\s\S]*?moveOverlap: 'shiftY'/)
   assert.doesNotMatch(canvas, /link_count[^\n]*>=\s*3/)
   assert.match(canvas, /graph-canvas__legend/)
   assert.doesNotMatch(canvas, /graph-canvas__legend-dot[^}]*box-shadow/s)
