@@ -2639,7 +2639,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		mergeIMAgentAnswerBuffers(&answerBuilder, &answerOuter, &agentLiveAnswer, data.FinalAnswer)
 		bufMu.Unlock()
 		closeComplete()
-		closeDone()
+		// Execute can emit EventError after Complete. The AgentQA return path
+		// closes done after those errors have been collected for finalization.
 		return nil
 	})
 

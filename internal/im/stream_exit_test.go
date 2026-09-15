@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -29,49 +30,72 @@ func streamExitAgent() *types.CustomAgent {
 	return &types.CustomAgent{Config: types.CustomAgentConfig{AgentMode: types.AgentModeSmartReasoning}}
 }
 
-func TestHandleMessageStreamCompletionStopsProducer(t *testing.T) {
-	producerStopped := make(chan struct{})
-	sessionSvc := &streamExitSessionService{run: func(ctx context.Context, bus *event.EventBus) error {
-		defer close(producerStopped)
-		if err := bus.Emit(ctx, event.Event{
-			Type: event.EventAgentComplete, Data: event.AgentCompleteData{FinalAnswer: "complete-only answer"},
-		}); err != nil {
-			return err
+func TestHandleMessageStreamCompletionWaitsForProducerReturn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		releaseReturn := make(chan struct{})
+		producerStopped := make(chan struct{})
+		var producerCtx context.Context
+		sessionSvc := &streamExitSessionService{run: func(ctx context.Context, bus *event.EventBus) error {
+			producerCtx = ctx
+			defer close(producerStopped)
+			if err := bus.Emit(ctx, event.Event{
+				Type: event.EventAgentComplete, Data: event.AgentCompleteData{FinalAnswer: "complete-only answer"},
+			}); err != nil {
+				return err
+			}
+			// Complete is emitted while the producer unwinds. It must be allowed
+			// to finish, including any subsequent execution-error events.
+			select {
+			case <-releaseReturn:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}}
+		service := &Service{
+			sessionService: sessionSvc, messageService: &fullOutputMessageService{},
+			streamManager: &fullOutputStreamManager{},
 		}
-		// Completion must end the stream even if the caller is still unwinding.
-		<-ctx.Done()
-		return nil
-	}}
-	service := &Service{
-		sessionService: sessionSvc, messageService: &fullOutputMessageService{},
-		streamManager: &fullOutputStreamManager{},
-	}
-	sender := &recordingStreamSender{}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	returned := make(chan error, 1)
-	go func() {
-		returned <- runStreamExitHandler(ctx, service, sender, streamExitAgent())
-	}()
-	select {
-	case err := <-returned:
-		if err != nil {
-			t.Fatal(err)
+		sender := &recordingStreamSender{}
+		returned := make(chan error, 1)
+		go func() {
+			returned <- runStreamExitHandler(ctx, service, sender, streamExitAgent())
+		}()
+		synctest.Wait()
+		select {
+		case err := <-returned:
+			t.Fatalf("Complete finalized the stream before AgentQA returned: %v", err)
+		default:
 		}
-	case <-time.After(time.Second):
-		cancel()
-		<-returned
-		t.Fatal("completion event did not end the stream")
-	}
-	select {
-	case <-producerStopped:
-	case <-time.After(time.Second):
-		t.Fatal("stream return did not cancel the QA context")
-	}
-	_, final, ended := sender.snapshot()
-	if !ended || final != "complete-only answer" {
-		t.Fatalf("final=%q, ended=%v", final, ended)
-	}
+		if producerCtx == nil || producerCtx.Err() != nil {
+			t.Fatal("Complete must leave the QA context active")
+		}
+
+		close(releaseReturn)
+		synctest.Wait()
+		select {
+		case err := <-returned:
+			if err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatal("AgentQA return did not end the stream")
+		}
+		select {
+		case <-producerStopped:
+		default:
+			t.Fatal("QA producer did not stop")
+		}
+		if producerCtx.Err() == nil {
+			t.Fatal("stream return did not cancel the QA context")
+		}
+		_, final, ended := sender.snapshot()
+		if !ended || final != "complete-only answer" {
+			t.Fatalf("final=%q, ended=%v", final, ended)
+		}
+	})
 }
 
 func TestHandleMessageStreamPreservesTerminalPaths(t *testing.T) {
