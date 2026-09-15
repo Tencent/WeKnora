@@ -23,10 +23,10 @@
         v-for="tick in ticks"
         :key="tick.id"
         class="question-minimap__tick"
-        :class="{ 'question-minimap__tick--active': tick.id === peakId }"
+        :class="{ 'question-minimap__tick--active': highlightedIds.has(tick.id) }"
         :style="{
           top: `${tick.yPx}px`,
-          transform: `translateY(-50%) scaleX(${tickDisplayScale(tick.yPx, mountainPointerY, tick.id === peakId)})`,
+          transform: `translateY(-50%) scaleX(${tickDisplayScale(tick.yPx, mountainPointerY, highlightedIds.has(tick.id))})`,
         }"
       />
     </button>
@@ -65,7 +65,7 @@ import {
   questionDisplayText,
   tickDisplayScale,
   type ChatMessageLike,
-  type UserQuestion,
+  type OutlineMessage,
 } from '@/utils/chatQuestionMinimap'
 
 const CLOSE_DELAY_MS = 150
@@ -94,6 +94,7 @@ const {
   questions,
   ticks,
   activeId,
+  visibleIds,
   anchoredIds,
   trackHeight,
 } = useChatQuestionMinimap({
@@ -114,6 +115,11 @@ const peakId = computed(() => {
 const peakTurn = computed(() => (
   questions.value.find((question) => question.id === peakId.value) ?? null
 ))
+const highlightedIds = computed(() => {
+  const ids = new Set(visibleIds.value)
+  if ((hoveredId.value || keyboardIndex.value >= 0) && peakId.value) ids.add(peakId.value)
+  return ids
+})
 const peakYPx = computed(() => {
   const tick = ticks.value.find((item) => item.id === peakId.value)
   return tick?.yPx ?? 0
@@ -125,11 +131,13 @@ const mountainPointerY = computed(() => {
 
 let closeTimer: number | null = null
 
-const questionText = (question: UserQuestion) => (
-  questionDisplayText(question.content, t('chat.questionMinimapAttachmentPlaceholder'))
+const questionText = (question: OutlineMessage) => (
+  question.role === 'assistant'
+    ? answerPreviewText(question.content) || t('chat.thinking')
+    : questionDisplayText(question.content, t('chat.questionMinimapAttachmentPlaceholder'))
 )
 
-const answerText = (question: UserQuestion) => (
+const answerText = (question: OutlineMessage) => (
   answerPreviewText(question.answerContent)
 )
 

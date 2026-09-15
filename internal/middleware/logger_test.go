@@ -12,6 +12,12 @@ func TestSanitizeBody(t *testing.T) {
 		want string
 	}{
 		{
+			name: "browser device credentials",
+			in: `{"pairing_link":"wss://example.com/#secret",` +
+				`"next_token":"new-secret","deviceToken":"device-secret"}`,
+			want: `{"pairing_link":"***","next_token":"***","deviceToken":"***"}`,
+		},
+		{
 			name: "camelCase apiKey",
 			in:   `{"modelName":"gpt-5.2","apiKey":"sk-secret-123","provider":"azure_openai"}`,
 			want: `{"modelName":"gpt-5.2","apiKey":"***","provider":"azure_openai"}`,

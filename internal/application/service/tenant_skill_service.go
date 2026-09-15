@@ -171,7 +171,10 @@ func NewTenantSkillService(
 func (s *TenantSkillService) withConfigLock(
 	ctx context.Context, tenantID uint64, configID string, fn func(context.Context) error,
 ) error {
-	key := skillImageLockKey(tenantID, configID)
+	return s.withSkillLock(ctx, skillImageLockKey(tenantID, configID), fn)
+}
+
+func (s *TenantSkillService) withSkillLock(ctx context.Context, key string, fn func(context.Context) error) error {
 	if s.redis == nil {
 		release, err := s.localLocks.lock(ctx, key)
 		if err != nil {

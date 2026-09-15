@@ -18,10 +18,11 @@ import (
 
 const mcpDiscoveryDescription = "" +
 	"Discover authorized MCP tools without loading every schema. If a server_id is " +
-	"already listed in this tool's source summaries, call list_tools or describe " +
+	"already listed in this tool's source summaries, call list_tools or search " +
 	"directly; do not call list_servers first. Use list_servers only when this " +
-	"description says further services are available, or to paginate. After you " +
-	"have a server_id, list_tools (or search), then describe an exact tool. " +
+	"description says further services are available, or to paginate. Describe tools, " +
+	"not servers; use describe directly only with an exact tool name already returned " +
+	"by this directory. Never infer tool names from server summaries. " +
 	"Server IDs and tool names must come from this directory. Only describe returns " +
 	"a callable tool_ref. Call call_mcp_tool with that tool_ref and arguments " +
 	"matching input_schema. Wait for each discovery result before issuing dependent calls. " +

@@ -578,7 +578,7 @@ func (e *AgentEngine) callLLMWithRetry(
 				"steps":      len(state.RoundSteps),
 				"tool_calls": totalTC,
 			})
-			if synthErr := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID); synthErr != nil {
+			if synthErr := e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, messages); synthErr != nil {
 				logger.Errorf(ctx, "[Agent] Final answer synthesis also failed: %v", synthErr)
 				return nil, fmt.Errorf("LLM call failed: %w (synthesis also failed: %v)", err, synthErr)
 			}

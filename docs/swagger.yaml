@@ -9137,6 +9137,10 @@ paths:
         in: query
         name: sort_order
         type: string
+      - description: 启用状态筛选；不传时返回全部
+        in: query
+        name: is_enabled
+        type: boolean
       produces:
       - application/json
       responses:

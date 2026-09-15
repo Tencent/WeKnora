@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -13,10 +14,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 // Handler handles all HTTP requests related to conversation sessions
 type Handler struct {
+	browserSkill         *browserskill.Manager
 	messageService       interfaces.MessageService // Service for managing messages
 	suggestionService    interfaces.MessageSuggestionService
 	sessionService       interfaces.SessionService       // Service for managing sessions
@@ -47,6 +50,12 @@ type Handler struct {
 	// selected agent so the sandbox is created with the same config a
 	// conversation turn would use.
 	terminalService *service.SandboxTerminalService
+	desktopService  *service.SandboxDesktopService
+	desktopTickets  service.SandboxDesktopTicketStore
+	desktopLast     service.SandboxDesktopLastStore
+	// redis backs the distributed desktop slot. Nil in Lite mode, where the
+	// in-process limiter is the correct degradation.
+	redis *redis.Client
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -73,8 +82,14 @@ func NewHandler(
 	userService interfaces.UserService,
 	memberService interfaces.TenantMemberService,
 	terminalService *service.SandboxTerminalService,
+	browserSkill *browserskill.Manager,
+	desktopService *service.SandboxDesktopService,
+	desktopTickets service.SandboxDesktopTicketStore,
+	desktopLast service.SandboxDesktopLastStore,
+	rdb *redis.Client,
 ) *Handler {
 	return &Handler{
+		browserSkill:         browserSkill,
 		sessionService:       sessionService,
 		messageService:       messageService,
 		suggestionService:    suggestionService,
@@ -95,6 +110,10 @@ func NewHandler(
 		userService:          userService,
 		memberService:        memberService,
 		terminalService:      terminalService,
+		desktopService:       desktopService,
+		desktopTickets:       desktopTickets,
+		desktopLast:          desktopLast,
+		redis:                rdb,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
@@ -378,6 +397,8 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), []string{id})
+
 	// Return success message
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -462,6 +483,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 			c.Error(errors.NewInternalServerError(err.Error()))
 			return
 		}
+		h.browserSkill.ForgetAll(browserSkillScope(ctx))
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "All sessions deleted successfully",
@@ -499,6 +521,7 @@ func (h *Handler) BatchDeleteSessions(c *gin.Context) {
 		return
 	}
 
+	h.browserSkill.Forget(browserSkillScope(ctx), sanitizedIDs)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Sessions deleted successfully",

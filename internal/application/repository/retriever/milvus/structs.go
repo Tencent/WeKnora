@@ -16,11 +16,14 @@ type milvusRepository struct {
 	replicaNumber      int // 0 = use Milvus default (1); set at LoadCollection time
 	// Cache for initialized collections (dimension -> true)
 	initializedCollections sync.Map
+	// Cache for collection analyzer modes (collection name -> collectionAnalyzerMode).
+	collectionAnalyzerModes sync.Map
 }
 
 type MilvusVectorEmbedding struct {
 	ID              string    `json:"id"`
 	Content         string    `json:"content"`
+	Language        string    `json:"language"`
 	SourceID        string    `json:"source_id"`
 	SourceType      int       `json:"source_type"`
 	ChunkID         string    `json:"chunk_id"`

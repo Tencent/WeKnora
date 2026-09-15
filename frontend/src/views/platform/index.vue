@@ -29,6 +29,7 @@ import GlobalInvitationBell from '@/components/GlobalInvitationBell.vue'
 import NewUserGuide from '@/components/NewUserGuide.vue'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useUIStore } from '@/stores/ui'
 import { getKnowledgeBaseById } from '@/api/knowledge-base/index'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -37,6 +38,7 @@ import { collectDroppedFiles } from './collectDroppedFiles'
 const route = useRoute();
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
+const uiStore = useUIStore();
 let ismask = ref(false)
 const { t } = useI18n();
 
@@ -119,10 +121,25 @@ const isFileDrag = (event: DragEvent): boolean => {
     return Array.from(types).includes('Files')
 }
 
+const shouldHandleGlobalFileDrag = (event: DragEvent): boolean => {
+    if (!isFileDrag(event)) return false;
+    // Keep the browser from opening dropped files, even outside upload pages.
+    event.preventDefault();
+    // Settings and its teleported skill drawers own their uploads. This runs
+    // in document capture, before a local drop handler can stop propagation.
+    const enabled = !uiStore.showSettingsModal && (
+        isChatDropRoute() || (route.name === 'knowledgeBaseDetail' && !!getCurrentKbId())
+    );
+    if (!enabled) {
+        dragCounter = 0;
+        ismask.value = false;
+    }
+    return enabled;
+}
+
 // 全局拖拽事件处理
 const handleGlobalDragEnter = (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     dragCounter++;
     if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = 'all';
@@ -131,16 +148,14 @@ const handleGlobalDragEnter = (event: DragEvent) => {
 }
 
 const handleGlobalDragOver = (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     if (event.dataTransfer) {
         event.dataTransfer.dropEffect = 'copy';
     }
 }
 
 const handleGlobalDragLeave = (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     dragCounter--;
     if (dragCounter === 0) {
         ismask.value = false;
@@ -148,8 +163,7 @@ const handleGlobalDragLeave = (event: DragEvent) => {
 }
 
 const handleGlobalDrop = async (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
+    if (!shouldHandleGlobalFileDrag(event)) return;
     dragCounter = 0;
     ismask.value = false;
 

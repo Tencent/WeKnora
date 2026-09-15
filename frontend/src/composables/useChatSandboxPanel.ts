@@ -38,6 +38,7 @@ export type ChatSandboxPanelContext = {
   setWidth: (width: number) => void
   artifactFocus: Ref<ArtifactPanelFocusState | null>
   open: (tab?: SandboxPanelTab, focus?: ArtifactPanelFocus) => void
+  toggleArtifacts: (messageId: string) => void
   close: () => void
   clearArtifactFocus: () => void
 }
@@ -71,6 +72,18 @@ export function provideChatSandboxPanel(): ChatSandboxPanelContext {
     artifactFocus.value = null
   }
 
+  const toggleArtifacts = (messageId: string) => {
+    if (
+      visible.value &&
+      activeTab.value === 'artifacts' &&
+      artifactFocus.value?.messageId === messageId
+    ) {
+      close()
+      return
+    }
+    open('artifacts', { messageId })
+  }
+
   const clearArtifactFocus = () => {
     artifactFocus.value = null
   }
@@ -82,6 +95,7 @@ export function provideChatSandboxPanel(): ChatSandboxPanelContext {
     setWidth,
     artifactFocus,
     open,
+    toggleArtifacts,
     close,
     clearArtifactFocus,
   }

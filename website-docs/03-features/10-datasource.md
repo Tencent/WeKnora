@@ -102,6 +102,16 @@
 - **抓取**（`walk`，全量/增量共用）：`ListBookDocs` 列文档 → 过滤 `type != "Doc"`（跳过 Sheet/Thread/Board/Table）与 `status != "1"`（跳过草稿）→ 每次 `GetDocDetail` 之间 sleep 300ms 规避限流 → `format` 为 `markdown`/`lake` 时取 `body` Markdown 原文入库（其他格式如 html 防御性跳过并记 `skip_reason`）。
 - **增量逻辑**：游标 `yuqueCursor.BookDocTimes`（`bookID → docID → content_updated_at`），一致则跳过。删除检测：游标里有、当前列表没有 → `IsDeleted`。
 
+#### 钉钉文档（`connector/dingtalk/`）
+
+- **认证**：企业内部应用 Client ID、Client Secret 和有目标知识库访问权限的操作人 Union ID；开通 `Wiki.Workspace.Read`、`Wiki.Node.Read`、`Storage.File.Read` 后发布应用。
+- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown。当前不导入钉钉表格或普通上传附件，也不依赖异步导出回调。
+- **同步**：按文档 `modifiedTimestamp`（毫秒）增量读取，缺失时回退 `modifiedTime`；合并重叠选择。全量同步也会对照上次游标对账删除，避免 `sync_mode=full` 漏删。目录遍历不完整时暂缓删除。
+- **正文**：公开 Blocks API 只返回文档根下的一级块；高亮块等容器若响应里带有 `children` 会继续渲染，否则在元数据中标记 `nested_blocks_unavailable`，避免把残缺正文当成完整成功。
+- **校验**：测试连接会列出知识库、探测根节点列表，并在根下存在在线文档时试读 Blocks，以便尽早发现缺少 `Wiki.Node.Read` / `Storage.File.Read`。
+- **失败与恢复**：资源失效不阻断其他范围；失败范围和正文失败文档保留旧版本以便重试。任一范围无法完整扫描时暂缓删除，并保留待核对记录。失效的单独选择需要检查权限或重新选择。
+- **删除开关**：开启同步删除才移除确认在源端删除的本地知识；不可访问的资源不会直接视为已删除。
+
 #### RSS / Atom（`connector/rss/`）
 
 - **配置**：`feed_urls`（换行/逗号分隔，多条去重）存放在 **Settings**（非机密，UI 可直接编辑）；`auth_headers`（`Name: Value` 每行一条，仅附加在 feed 请求上、绝不发给第三方文章页）存放在 **Credentials** 并加密。`HasConfiguredCredentials` 对 RSS 特判：只有 `auth_headers` 才算已配置凭据。
@@ -311,7 +321,7 @@ type StreamingConnector interface {
 }
 ```
 
-任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark 和 GitLab 连接器均实现了 `StreamingConnector`。
+任务超时后可从最近的 checkpoint 继续处理。Asynq 同步任务超时为 2 小时，流式路径按条目推进，避免缓存全部文件正文。Feishu/Lark 和 GitLab 连接器均实现了 `StreamingConnector`。钉钉目前走 batch `FetchAll`/`FetchIncremental`/`FetchAllFromCursor`，超大知识库建议使用增量模式以免一次装入全部 Markdown。
 
 #### ConnectorRegistry：注册与查找
 
@@ -320,14 +330,17 @@ type StreamingConnector interface {
 ```go
 registry.Register(feishuConnector.NewConnector(feishuConnector.RegionFeishu))  // feishu
 registry.Register(feishuConnector.NewConnector(feishuConnector.RegionLark))    // lark（国际版，同一实现不同 Region）
+registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive))             // feishu_drive
+registry.Register(drive.NewDriveConnector(core.RegionLarkDrive))               // lark_drive
 registry.Register(notionConnector.NewConnector())                              // notion
 registry.Register(yuqueConnector.NewConnector())                               // yuque
+registry.Register(dingtalkConnector.NewConnector())                            // dingtalk
+registry.Register(imaConnector.NewConnector())                                 // ima
 registry.Register(rssConnector.NewConnector())                                 // rss
 registry.Register(gitlabConnector.NewConnector())                              // gitlab
-registry.Register(imaConnector.NewConnector())                                 // ima
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 为前端展示定义了更多连接器元数据（Confluence、GitHub、Google Drive、OneDrive、DingTalk、Web Crawler、Slack、IMAP 等），但**当前代码库中实际注册可用的连接器有 7 个类型：`feishu`、`lark`、`notion`、`yuque`、`rss`、`gitlab`、`ima`**（其中 feishu/lark 共用同一份实现）。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（Confluence、GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

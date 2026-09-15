@@ -44,6 +44,7 @@ const (
 	ModelUsageBindingVLMModel             ModelUsageBinding = "vlm_model"
 	ModelUsageBindingASRModel             ModelUsageBinding = "asr_model"
 	ModelUsageBindingWikiSynthesisModel   ModelUsageBinding = "wiki_synthesis_model"
+	ModelUsageBindingAutoTagModel         ModelUsageBinding = "auto_tag_model"
 	ModelUsageBindingChatModel            ModelUsageBinding = "chat_model"
 	ModelUsageBindingRerankModel          ModelUsageBinding = "rerank_model"
 	ModelUsageBindingQueryUnderstandModel ModelUsageBinding = "query_understand_model"

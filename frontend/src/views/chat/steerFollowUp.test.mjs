@@ -84,7 +84,7 @@ test('follow-up attaches persisted users by request_id', () => {
 // an explicit new_run (no live turn) starts a normal AgentQA.
 test('steer lookup failure does not start a second turn', () => {
   const start = source.indexOf('const handleSteerMsg = async')
-  const end = source.indexOf('const handlePromoteSteer = async', start)
+  const end = source.indexOf('const handleRetrySteer = async', start)
   assert.notEqual(start, -1)
   assert.notEqual(end, -1)
   const fn = source.slice(start, end)
@@ -102,7 +102,7 @@ test('steer lookup failure does not start a second turn', () => {
 
 test('new_run while a stream is live does not abort it', () => {
   const start = source.indexOf('const handleSteerMsg = async')
-  const end = source.indexOf('const handlePromoteSteer = async', start)
+  const end = source.indexOf('const handleRetrySteer = async', start)
   const fn = source.slice(start, end)
   const newRun = fn.indexOf("if (res?.status === 'new_run')")
   const catchIdx = fn.indexOf('} catch (e) {')
@@ -130,7 +130,7 @@ test('remaining overlay after-items chain after a follow-up stream ends', () => 
   // startStream awaits the whole SSE. The follow-up's onTurnComplete therefore
   // runs while attachingSteerFollowUp is still true and would no-op. Remaining
   // after-items have to be retried once that guard drops.
-  assert.match(finallyBlock, /steerQueue\.value\.length/)
+  assert.match(finallyBlock, /steerQueue\.value\.some\(item => !item\.failed\)/)
   assert.match(finallyBlock, /void attachSteerFollowUp\(/)
 })
 

@@ -31,7 +31,9 @@ const resourceHandleProtocolPrompt = `
 ## Resource handle protocol (system-owned)
 Some durable resources and high-entropy Wiki slugs are represented by request-local res://NNNN handles. Wiki issues may use iN handles.
 - Copy supplied handles exactly in links, images, and tool arguments; they refer only to the supplied resource versions.
-- For new or regenerated files, use sandbox:<file name>; never reuse or invent a resource handle.`
+- For downloadable deliverables generated in the session workspace, use sandbox:<file name>; ` +
+	`never reuse or invent a resource handle. This download convention does not apply to ` +
+	`editing installed skill files.`
 
 // Registry is the single request-scoped boundary between durable application
 // identities and temporary model handles.
@@ -208,6 +210,15 @@ func (r *Registry) RegisterChunk(ref ChunkReference) string {
 	return r.sources.RegisterChunk(ref)
 }
 
+// RegisterContextChunk makes a directory entry addressable by tools without
+// allowing it to substantiate an answer before retrieval.
+func (r *Registry) RegisterContextChunk(ref ChunkReference) string {
+	if r == nil || r.sources == nil {
+		return ""
+	}
+	return r.sources.registerChunk(ref, false)
+}
+
 func (r *Registry) RegisterDocument(id string) string {
 	if r == nil || r.sources == nil {
 		return ""
@@ -291,6 +302,9 @@ func (r *Registry) ModelToolResultForTool(toolName string, result *types.ToolRes
 	// built-ins; dynamic MCP output remains fully opaque.
 	if sourceCompactionAllowed(toolName) {
 		modelOutput = r.sources.CompactKnownText(modelOutput)
+	}
+	if result.Success && (toolName == "call_mcp_tool" || strings.HasPrefix(toolName, "mcp_")) {
+		modelOutput += r.mcpSourceCandidates(result.Output)
 	}
 	return r.resources.EncodeText(modelOutput) + outputFilesPrompt(result)
 }

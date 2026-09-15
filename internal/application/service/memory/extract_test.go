@@ -171,17 +171,17 @@ func TestExtractionAppliesUpdateAndDeleteDecisions(t *testing.T) {
 	require.Equal(t, int64(2), superseded)
 }
 
-func TestExtractionToleratesUnparsableModelOutput(t *testing.T) {
-	svc, tenantRepo, messages, models, _ := newExtractionHarness(t)
+func TestExtractionPreservesWorkOnUnparsableModelOutput(t *testing.T) {
+	svc, tenantRepo, messages, models, queue := newExtractionHarness(t)
 	tenantRepo.set(7, &types.MemoryConfig{Enabled: true, WriteMode: types.MemoryWriteAuto})
 	messages.messages = []*types.Message{{Role: "user", Content: "随便说点什么"}}
 	models.response = "抱歉，我不太明白你的意思。"
 
-	// Garbage is the model's fault, not a transient failure, so returning an
-	// error would just re-run the same prompt until the retry budget is gone.
+	// The first malformed output retains the range and queues a retry.
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m", ChatModelID: "m1",
 	})))
+	require.NotNil(t, queue.pop())
 	_, total, err := svc.ListItems(enabledCtx(t, tenantRepo, 7, "alice"), "", 10, 0)
 	require.NoError(t, err)
 	require.Zero(t, total)

@@ -356,7 +356,7 @@ func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
 
 	// The injected message belongs between the round it interrupted and the
 	// round it caused, not bolted onto either end.
-	assert.Equal(t, chat.Message{Role: "user", Content: "also check B"}, got[2])
+	assert.Equal(t, chat.Message{Role: "user", Content: types.SteerMessageContent("also check B")}, got[2])
 
 	assert.Equal(t, "assistant", got[3].Role)
 	assert.Equal(t, "tool", got[4].Role)
@@ -390,7 +390,7 @@ func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
 
 	got := buildTurnBodyMessages(assistant, midRun)
 	require.Len(t, got, 4)
-	assert.Equal(t, chat.Message{Role: "user", Content: "and keep it short"}, got[2])
+	assert.Equal(t, chat.Message{Role: "user", Content: types.SteerMessageContent("and keep it short")}, got[2])
 	assert.Equal(t, chat.Message{Role: "assistant", Content: "Here you go."}, got[3])
 }
 
@@ -473,4 +473,28 @@ func TestMCPProxyHistoryRetainsProtocolCallAndTarget(t *testing.T) {
 	require.Equal(t, "call_mcp_tool", history[0].ToolCalls[0].Function.Name)
 	require.Contains(t, history[0].ToolCalls[0].Function.Arguments, "tool_ref")
 	require.Equal(t, "proxy-id", history[1].ToolCallID)
+}
+
+func TestBuildTurnBodyMessages_ReplaysExplicitBoundariesAndIntermediateAnswers(t *testing.T) {
+	// Identical (and deliberately misleading) timestamps must not move updates
+	// ahead of work the model already did. IDs, not text, distinguish repeats.
+	now := time.Now()
+	users := []*types.Message{
+		{ID: "u2", Content: "revise", CreatedAt: now},
+		{ID: "u1", Content: "revise", CreatedAt: now},
+	}
+	assistant := &types.Message{Content: "final", AgentSteps: types.AgentSteps{
+		{Thought: "first draft", IntermediateAnswer: true, Timestamp: now.Add(time.Second)},
+		{Thought: "second draft", IntermediateAnswer: true, UserMessagesBefore: []string{"u1"}},
+		{Thought: "final", UserMessagesBefore: []string{"u2"}},
+	}}
+	got := buildTurnBodyMessages(assistant, users)
+	require.Len(t, got, 5)
+	assert.Equal(t, []chat.Message{
+		{Role: "assistant", Content: "first draft"},
+		{Role: "user", Content: types.SteerMessageContent("revise")},
+		{Role: "assistant", Content: "second draft"},
+		{Role: "user", Content: types.SteerMessageContent("revise")},
+		{Role: "assistant", Content: "final"},
+	}, got)
 }

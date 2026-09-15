@@ -453,3 +453,24 @@ func TestInstallTranscriptWithoutActivityPublisherStaysSilent(t *testing.T) {
 	require.Equal(t, []types.ResponseType{types.ResponseTypeToolCall, types.ResponseTypeComplete},
 		streams.types(), "the transcript itself is unchanged by progress being unwired")
 }
+
+func TestInstallTranscriptProjectsOutputWithoutCompletingTool(t *testing.T) {
+	streams := &transcriptStreams{}
+	bus := event.NewEventBus()
+	tr := newInstallTranscript(context.Background(), bus, streams, nil, "session", "message", nil)
+	tr.Subscribe()
+	require.NoError(t, bus.Emit(context.Background(), event.Event{
+		ID: "chunk", Type: event.EventAgentCommandOutput,
+		Data: event.CommandOutputData{ToolCallID: "tool", Output: "Downloading polars", Done: false},
+	}))
+	require.Len(t, streams.events, 1)
+	require.Equal(t, types.ResponseTypeInstallOutput, streams.events[0].Type)
+	require.Equal(t, "tool", streams.events[0].Data["tool_call_id"])
+	require.Equal(t, "Downloading polars", streams.events[0].Data["output"])
+	require.False(t, streams.events[0].Done)
+	tr.closed = true
+	require.NoError(t, tr.onInstallOutput(context.Background(), event.Event{
+		Data: event.CommandOutputData{Output: "late"},
+	}))
+	require.Len(t, streams.events, 1)
+}

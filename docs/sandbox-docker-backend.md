@@ -160,6 +160,7 @@ socket 改成非 root 组的 `660`。
 - **域名级出网策略**：Docker 只有 L3/L4。`RemoteNetworkPolicy` 里的域名 allow/deny 在这个后端
   只能表达成「全开」或「全关」，要按域名放行得在部署侧加 egress proxy。
 - **卷挂载**：`SupportsVolumes` 目前是 false，租户级共享卷还没有映射到 Docker named volume。
+- **图形桌面**：`desktop` 镜像变体尚未接到 Docker 后端。对话侧栏在 Docker 配置上不显示「桌面」tab；Cube / E2B 见 [沙箱图形桌面](./sandbox-desktop.md)。
 
 ## 快照
 

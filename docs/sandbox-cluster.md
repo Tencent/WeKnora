@@ -17,7 +17,7 @@
 
 标准镜像定义在 `docker/Dockerfile.sandbox`，当前包含：
 
-- Python 3.11；
+- Python 3.12；
 - Node.js 20、npm 与 npx；
 - jq 及基础 Shell 工具；
 - `/workspace` 工作目录；
@@ -25,16 +25,18 @@
 
 生产环境应使用与 WeKnora 相同的版本标签，不建议长期指向 `latest`。Skills 新增系统依赖时，应先更新标准镜像并重新注册模板，再切换集群的默认模板 ID。
 
-### 两个镜像变体
+### 镜像变体
 
-`docker/Dockerfile.sandbox` 产出两个 target，内容相同、入口不同：
+`docker/Dockerfile.sandbox` 产出多个 target。CLI 变体内容相同、入口不同；桌面变体在同一套 Python 3.12 runtime 上再叠 XFCE，体积明显更大：
 
 | 变体 | 标签 | 用途 |
 | --- | --- | --- |
-| `sandbox`（默认） | `wechatopenai/weknora-sandbox:<版本>` | Docker 后端的会话容器镜像；同时作为 E2B 模板的基础镜像 |
-| `cube` | `wechatopenai/weknora-sandbox:<版本>-cube` | CubeSandbox 模板 |
+| `sandbox`（默认） | `wechatopenai/weknora-sandbox:<版本>` | Docker 后端的会话容器镜像；同时作为 E2B CLI 模板的基础镜像 |
+| `cube` | `wechatopenai/weknora-sandbox:<版本>-cube` | CubeSandbox CLI 模板 |
+| `desktop` | `wechatopenai/weknora-sandbox:<版本>-desktop` | E2B 图形桌面模板的基础镜像 |
+| `desktop-cube` | `wechatopenai/weknora-sandbox:<版本>-desktop-cube` | CubeSandbox 图形桌面模板 |
 
-区别在于 Cube 变体额外注入了 envd。Cube 直接把 OCI 镜像变成模板，并以 `GET :49983/health` 探活，这个端点只有 envd 提供；不带 envd 的镜像建模板必然以 `connection refused` 失败。E2B 不需要这个变体，因为它的构建流程会自行注入 envd；Docker 后端则完全不需要 envd。详见 [Cube 自带镜像接入](https://cubesandbox.com/zh/guide/tutorials/bring-your-own-image.html)。
+区别在于 Cube 变体额外注入了 envd。Cube 直接把 OCI 镜像变成模板，并以 `GET :49983/health` 探活，这个端点只有 envd 提供；不带 envd 的镜像建模板必然以 `connection refused` 失败。E2B 不需要这个变体，因为它的构建流程会自行注入 envd；Docker 后端则完全不需要 envd，也**尚未**使用 `desktop` 变体。详见 [Cube 自带镜像接入](https://cubesandbox.com/zh/guide/tutorials/bring-your-own-image.html)。图形桌面的中继、票据与安全约束见 [沙箱图形桌面](./sandbox-desktop.md)。
 
 Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` 没有 arm64，Cube 自身的 PVM 形态也只支持 x86_64。变体内 envd 以 root 运行，脚本按请求指定的账号执行；WeKnora 默认显式指定 root。
 
@@ -63,12 +65,12 @@ Cube 变体只发布 linux/amd64——envd 的来源镜像 `cubesandbox-base` �
 
 1. 按 [CubeSandbox Quick Start](https://github.com/TencentCloud/CubeSandbox/blob/master/docs/zh/guide/quickstart.md) 完成控制面、计算节点、CubeProxy 与域名解析。生产环境还需按官方文档完成鉴权、TLS、网络策略与多节点部署。
 2. 在 WeKnora 的空间设置中填写 CubeAPI、CubeProxy、sandbox domain 和可选 API Key。需要自定义 guest DNS 时填写「DNS 服务器」（须为 IP）；留空则使用集群默认。若这些端点位于 RFC1918/loopback 网络，显式打开“允许访问私网集群地址”。
-3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并列出集群模板。**不会自动创建**。没有 WeKnora 标准模板时在占位卡片上点「创建」，会从 `wechatopenai/weknora-sandbox:main-cube` 发起构建。改 DNS 或需要换镜像时在 weknora 卡片上点「重建」：优先对现有标准模板做 in-place rebuild（模板 ID 不变）；只有 redo 被拒绝时才先建新模板、成功后再删旧的。已安装 Skill 的配置（以及同一集群上其它已装 Skill 的配置）不能重建。失败模板同样用「重建」（CubeMaster 拒绝 redo、错误码 130400 时尤其需要）。
+3. 点击“连接并继续”。WeKnora 先验证控制面地址与凭据，通过后才进入模板步骤并列出集群模板。**不会自动创建桌面模板**。没有 WeKnora 标准（CLI）模板时在占位卡片上点「创建」，会从 `wechatopenai/weknora-sandbox:main-cube` 发起构建。需要图形桌面时再点桌面占位卡片上的「创建」（XFCE 镜像更重，E2B 为 4CPU/4GB，Cube 可写层 8G）。改 DNS 或需要换镜像时在对应卡片上点「重建」：优先对现有模板做 in-place rebuild（模板 ID 不变）；只有 redo 被拒绝时才先建新模板、成功后再删旧的。已安装 Skill 的配置（以及同一集群上其它已装 Skill 的配置）不能重建，也不能在 CLI / 桌面之间切换。失败模板同样用「重建」（CubeMaster 拒绝 redo、错误码 130400 时尤其需要）。
 4. 模板构建状态会自动刷新。状态变为 `READY` 后才可选择并进入运行配置；界面显示模板名称、状态和版本，配置内部才保存该集群自己的 `template_id`。
 
 标准模板保留 uid 1000 的 `user` 兼容账号；WeKnora 默认显式以 root 执行脚本与文件操作。模板应提供可写的 `/workspace`，运行前会准备 `input`、`output` 和本次工作目录。技能安装的维护调用只准备其工作目录。自定义只读挂载仍限制 root 的写入。
 
-多实例 WeKnora 必须配置 Redis，以共享 session 到 sandbox 的绑定。只有单实例开发环境才应使用内存绑定。
+多实例 WeKnora 必须配置 Redis，以共享 session 到 sandbox 的绑定，以及桌面中继的「上次 sandbox ID」（技能安装重建后跨副本仍能发出 `SANDBOX_REBUILT`）。只有单实例开发环境才应使用内存绑定。
 
 ### 验证
 
@@ -113,7 +115,7 @@ E2B 官方托管服务、自建 E2B Infrastructure，以及任意实现 E2B 协�
 1. 打开“设置 → 沙箱后端”，点击“添加沙箱后端”。
 2. 填写该集群自己的 API、Proxy、sandbox domain 和凭据；这些值只保存在当前空间配置中，不读取 Sandbox 环境变量。
 3. 点击“连接并继续”，验证控制面地址和凭据；连接通过后才加载模板列表。
-4. 没有标准模板时点占位卡片上的「创建」，或选择集群已有的兼容模板；改 DNS / 镜像后在 weknora 卡片上点「重建」。**该配置已安装 Skill 时不能更换或重建模板**——技能环境绑在快照上，新底模不会进去；请新建一份沙箱再装 Skill。构建中的模板不可选择，状态会自动刷新。
+4. 没有标准模板时点占位卡片上的「创建」，或选择集群已有的兼容模板；需要图形界面时再单独创建桌面模板。改 DNS / 镜像后在对应卡片上点「重建」。**该配置已安装 Skill 时不能更换或重建模板，也不能把 CLI 底模改成桌面（或反过来）**——技能环境绑在快照上，新底模不会进去；请新建一份沙箱再装 Skill。构建中的模板不可选择，状态会自动刷新。
 5. 配置运行参数；上线前可执行一次“完整验证”。完整验证会真实创建、执行并销毁一个沙箱。
 6. 保存后，在智能体 Skills 配置中选择该后端。对配置的修改只影响之后新建的沙箱；已有会话仍固定使用创建时的配置。
 

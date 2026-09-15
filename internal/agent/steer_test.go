@@ -98,9 +98,10 @@ func TestDrainSteerMessagesInjectsIntoTail(t *testing.T) {
 
 	require.Len(t, messages, 5)
 	assert.Equal(t, "user", messages[4].Role)
-	assert.Equal(t, "再补充一点：也对比一下成本", messages[4].Content)
+	assert.Equal(t, types.SteerMessageContent("再补充一点：也对比一下成本"), messages[4].Content)
 	// Tool result pairing is untouched — the tool message stays where it was.
 	assert.Equal(t, "tool", messages[3].Role)
+	assert.Equal(t, []string{"user-row-for-再补充一点：也对比一下成本"}, state.PendingSteerMessages)
 
 	require.Len(t, sink.persisted, 1)
 	assert.Equal(t, "再补充一点：也对比一下成本", sink.persisted[0])
@@ -136,8 +137,8 @@ func TestDrainSteerMessagesEmptyAndOffset(t *testing.T) {
 	}
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
 	assert.Len(t, messages, 3)
-	assert.Equal(t, "first", messages[1].Content)
-	assert.Equal(t, "second", messages[2].Content)
+	assert.Equal(t, types.SteerMessageContent("first"), messages[1].Content)
+	assert.Equal(t, types.SteerMessageContent("second"), messages[2].Content)
 	require.Len(t, sink.persisted, 2)
 
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
@@ -178,7 +179,7 @@ func TestDrainSteerMessagesBlankContentSkipped(t *testing.T) {
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
 
 	require.Len(t, messages, 2)
-	assert.Equal(t, "real instruction", messages[1].Content)
+	assert.Equal(t, types.SteerMessageContent("real instruction"), messages[1].Content)
 	require.Len(t, sink.persisted, 1)
 }
 
@@ -206,14 +207,15 @@ func TestExecuteLoopInjectsBeforeNextLLMCall(t *testing.T) {
 	engine := newTestEngine(t, model)
 	engine.eventBus = event.NewEventBus()
 
-	sink := &fakeSteerSink{}
-	engine.SetSteerSink(sink)
-
-	// Simulate the user queueing a message while round 1 runs: it is in the
-	// queue before the loop's second drain point executes.
-	sink.queued = []map[string]interface{}{
-		steerEntry("s1", "focus on the cost angle"),
+	// Deliver only after round 1 so this exercises continuation with existing
+	// tool results, rather than adding guidance before any work has started.
+	sink := &delayedSteerSink{
+		fakeSteerSink: fakeSteerSink{
+			queued: []map[string]interface{}{steerEntry("s1", "focus on the cost angle")},
+		},
+		hideUntil: 2,
 	}
+	engine.SetSteerSink(sink)
 
 	engine.toolRegistry = agentRegistryForTest(t, "counting_tool")
 
@@ -230,20 +232,28 @@ func TestExecuteLoopInjectsBeforeNextLLMCall(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, model.calls, 2)
 
-	// Round 2's call must contain the injected steer text. SanitizeMessages
-	// merges consecutive same-role messages, so the injected user message
-	// may be concatenated onto the original "start" user turn — that is the
-	// desired end state (the model reads it as the user adding instructions
-	// mid-task).
+	for _, msg := range model.calls[0] {
+		assert.NotContains(t, msg.Content, "focus on the cost angle")
+	}
+	// Continue with the original task and tool result exactly once; steering
+	// needs neither a restarted run nor an extra model call to interpret it.
 	second := model.calls[1]
-	found := false
+	steerCount, taskCount, toolCount := 0, 0, 0
 	for _, msg := range second {
+		if msg.Role == "user" && msg.Content == "start" {
+			taskCount++
+		}
+		if msg.Role == "tool" && msg.ToolCallID == "tc1" {
+			toolCount++
+		}
 		if msg.Role == "user" && strings.Contains(msg.Content, "focus on the cost angle") {
-			found = true
-			break
+			steerCount++
+			assert.Contains(t, msg.Content, "<continue_task>")
 		}
 	}
-	assert.True(t, found, "injected steer text missing from round 2 LLM call: %+v", second)
+	assert.Equal(t, 1, taskCount)
+	assert.Equal(t, 1, toolCount)
+	assert.Equal(t, 1, steerCount)
 	require.Len(t, sink.persisted, 1)
 }
 
@@ -485,4 +495,11 @@ func agentRegistryForTest(t *testing.T, name string) *agenttools.ToolRegistry {
 	tool := newCountingTool(name)
 	registry.RegisterTool(tool)
 	return registry
+}
+
+func TestSteerGuidanceAppliesToCustomAgentPrompt(t *testing.T) {
+	prompt := BuildSystemPromptWithOptions(nil, false, nil, "Custom agent instructions.")
+	assert.Contains(t, prompt, "Custom agent instructions.")
+	assert.Contains(t, prompt, steerGuidance)
+	assert.Contains(t, prompt, "Preserve unfinished objectives")
 }

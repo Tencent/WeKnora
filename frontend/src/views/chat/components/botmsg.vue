@@ -115,6 +115,7 @@ import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
+import { persistedAssistantId } from '@/utils/steerStreamFork';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import {
     artifactIndexFromEventTarget,
@@ -233,9 +234,9 @@ const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifac
 const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session));
 const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
 const messageIdForArtifacts = computed(() => {
-    // Prefer the persistent message ID; fall back to request_id for the
-    // in-flight path where the SSE stream still identifies rows by request.
-    return String((props.session && (props.session.id || props.session.request_id)) || '');
+    // Steered segments have synthetic row IDs; artifact APIs address the
+    // persisted assistant. Keep request_id as the in-flight fallback.
+    return persistedAssistantId(props.session) || String(props.session?.request_id || '');
 });
 // Set when the drawer is opened by clicking an inline artifact card, so it
 // lands directly on that file's preview instead of the list.
@@ -243,10 +244,14 @@ const artifactPreviewIndex = ref(null);
 function openArtifactDrawer(previewIndex = null) {
     if (!hasArtifacts.value) return;
     if (sandboxPanel && !props.embeddedMode) {
-        sandboxPanel.open('artifacts', {
-            messageId: messageIdForArtifacts.value,
-            previewIndex,
-        });
+        if (previewIndex == null) {
+            sandboxPanel.toggleArtifacts(messageIdForArtifacts.value);
+        } else {
+            sandboxPanel.open('artifacts', {
+                messageId: messageIdForArtifacts.value,
+                previewIndex,
+            });
+        }
         return;
     }
     artifactPreviewIndex.value = previewIndex;
@@ -531,6 +536,8 @@ onBeforeUnmount(() => {
     font-size: 16px;
     // padding: 10px 12px;
     margin-right: auto;
+    width: 100%;
+    min-width: 0;
     max-width: 100%;
     box-sizing: border-box;
 }

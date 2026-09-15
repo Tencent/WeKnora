@@ -1,4 +1,5 @@
 import type { ArtifactMeta } from '@/api/chat'
+import { persistedAssistantId } from './steerStreamFork'
 
 /** Artifact metadata plus the assistant message that owns the download index. */
 export type SessionArtifactItem = ArtifactMeta & {
@@ -11,7 +12,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function readMessageId(message: Record<string, unknown>): string {
-  return String(message.id || message.request_id || '')
+  return persistedAssistantId(message) || String(message.request_id || '')
 }
 
 /**

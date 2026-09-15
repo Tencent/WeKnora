@@ -127,14 +127,26 @@ func (e *AgentEngine) SetPinnedMentions(mcpServices []*PinnedMCPServiceInfo, ski
 
 func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromptOptions {
 	opts := &BuildSystemPromptOptions{
-		Language: types.LanguageNameFromContext(ctx),
-		Config:   e.appConfig,
+		Language:         types.LanguageNameFromContext(ctx),
+		Config:           e.appConfig,
+		SkillInstallMode: e.config.SkillInstallMode(),
+		MemoryPrompt:     e.memoryPrompt,
+		ProtocolPrompt:   e.modelContext.ProtocolPrompt(),
 	}
 	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
 		opts.SkillsMetadata = e.skillsManager.GetAllMetadata()
 	}
 	if e.toolRegistry != nil {
 		opts.SelectedTools = e.toolRegistry.ListTools()
+		if _, err := e.toolRegistry.GetTool("local_browser"); err == nil {
+			metadata := make([]*skills.SkillMetadata, 0, len(opts.SkillsMetadata))
+			for _, item := range opts.SkillsMetadata {
+				if item != nil && item.Name != "browser" && item.Name != "browser-skill" {
+					metadata = append(metadata, item)
+				}
+			}
+			opts.SkillsMetadata = metadata
+		}
 		_, err := e.toolRegistry.GetTool(agenttools.ToolShellExec)
 		opts.ShellExecEnabled = err == nil
 	}
@@ -142,16 +154,16 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 }
 
 func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
-	prompt := BuildSystemPromptWithOptions(
+	sections := BuildSystemPromptSections(
 		e.knowledgeBasesInfo,
 		e.config.WebSearchEnabled,
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
-	// Memory has to ride in the system prompt: buildMessagesWithLLMContext
-	// drops system messages coming from history, so a separate memory message
-	// would be silently discarded from the second turn onward.
-	return strings.TrimRight(prompt, " \t\r\n") + e.memoryPrompt + e.modelContext.ProtocolPrompt()
+	for _, section := range sections {
+		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
+	}
+	return renderSystemPromptSections(sections)
 }
 
 // SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
@@ -504,7 +516,7 @@ loop:
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
 				logger.Infof(ctx, "[Agent] Synthesizing final answer from %d existing tool results",
 					totalTC)
-				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID)
+				_ = e.streamFinalAnswerToEventBus(ctx, query, state, sessionID, messages)
 				state.IsComplete = true
 			}
 			return state, ctx.Err()
@@ -545,7 +557,7 @@ loop:
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
 	if !state.IsComplete && ctx.Err() == nil {
-		e.handleMaxIterations(ctx, query, state, sessionID)
+		e.handleMaxIterations(ctx, query, state, sessionID, messages)
 	}
 
 	return state, nil
@@ -731,12 +743,14 @@ func (e *AgentEngine) runReActIteration(
 
 	// Create agent step
 	step := types.AgentStep{
-		Iteration:        state.CurrentRound,
-		Thought:          response.Content,
-		ReasoningContent: response.ReasoningContent,
-		ToolCalls:        make([]types.ToolCall, 0),
-		Timestamp:        time.Now(),
+		UserMessagesBefore: state.PendingSteerMessages,
+		Iteration:          state.CurrentRound,
+		Thought:            response.Content,
+		ReasoningContent:   response.ReasoningContent,
+		ToolCalls:          make([]types.ToolCall, 0),
+		Timestamp:          time.Now(),
 	}
+	state.PendingSteerMessages = nil
 
 	// If the request was cancelled while the LLM was streaming (e.g. the
 	// user pressed "stop"), the stream driver still returns a usable
@@ -751,7 +765,7 @@ func (e *AgentEngine) runReActIteration(
 	if ctx.Err() != nil {
 		logger.Warnf(ctx, "[Agent][Round-%d] Context cancelled during LLM call; preserving partial step",
 			round)
-		if step.Thought != "" || len(step.ToolCalls) > 0 {
+		if step.Thought != "" || len(step.ToolCalls) > 0 || len(step.UserMessagesBefore) > 0 {
 			state.RoundSteps = append(state.RoundSteps, step)
 		}
 		return iterOutcomeBreak, nil
@@ -766,6 +780,7 @@ func (e *AgentEngine) runReActIteration(
 		if verdict.emptyContent {
 			*emptyRetries++
 			if *emptyRetries <= maxEmptyResponseRetries {
+				state.PendingSteerMessages = step.UserMessagesBefore
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
 					round, *emptyRetries, maxEmptyResponseRetries)
 				*messagesPtr = append(*messagesPtr, chat.Message{
@@ -774,10 +789,33 @@ func (e *AgentEngine) runReActIteration(
 				})
 				return iterOutcomeContinue, nil
 			}
-			// Retries exhausted — use fallback message rather than empty answer
+			// Retries exhausted — use fallback message rather than empty answer.
+			// analyzeResponse emitted nothing for the empty rounds (they were
+			// retryable), so the fallback must be emitted here as the turn's
+			// sole terminal answer event (#2906).
 			logger.Warnf(ctx, "[Agent][Round-%d] Empty content after %d retries - using fallback",
 				round, maxEmptyResponseRetries)
-			state.FinalAnswer = "I'm sorry, I was unable to generate a response. Please try again."
+			fallback := "I'm sorry, I was unable to generate a response. Please try again."
+			answerID := generateEventID("answer")
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: fallback,
+					Done:    false,
+				},
+			})
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content: "",
+					Done:    true,
+				},
+			})
+			state.FinalAnswer = fallback
 			state.IsComplete = true
 			state.RoundSteps = append(state.RoundSteps, verdict.step)
 			e.closeAnswerStream(ctx, sessionID, verdict.answerID)
@@ -799,6 +837,7 @@ func (e *AgentEngine) runReActIteration(
 				})
 				injected := e.drainSteerMessages(ctx, state, messagesPtr, sessionID, assistantMessageID)
 				if injected > 0 {
+					verdict.step.IntermediateAnswer = true
 					state.RoundSteps = append(state.RoundSteps, verdict.step)
 					if !e.withinIterationBudget(nextRound) {
 						e.steerOverruns++
@@ -833,6 +872,7 @@ func (e *AgentEngine) runReActIteration(
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)
 	*messagesPtr = e.appendToolResults(*messagesPtr, step)
+	*messagesPtr = e.appendToolImages(ctx, *messagesPtr, step)
 	common.PipelineInfo(ctx, "Agent", "round_end", map[string]interface{}{
 		"iteration":   state.CurrentRound,
 		"round":       round,
@@ -889,7 +929,9 @@ func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs []string
 			logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
 			continue
 		}
-		descriptions = append(descriptions, strings.TrimSpace(desc))
+		if desc = strings.TrimSpace(desc); desc != "" {
+			descriptions = append(descriptions, desc)
+		}
 	}
 	return descriptions
 }

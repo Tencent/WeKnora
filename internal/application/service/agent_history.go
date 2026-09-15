@@ -137,22 +137,39 @@ func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Messag
 	}
 
 	out := make([]chat.Message, 0, len(assistant.AgentSteps)*2+len(midRunUsers)+1)
+	usersByID := make(map[string]*types.Message, len(midRunUsers))
+	for _, user := range midRunUsers {
+		usersByID[user.ID] = user
+	}
+	hasBoundaries := false
+	for _, step := range assistant.AgentSteps {
+		hasBoundaries = hasBoundaries || len(step.UserMessagesBefore) > 0
+	}
+	appendUser := func(user *types.Message) {
+		msg := buildUserHistoryMessage(user)
+		msg.Content = types.SteerMessageContent(msg.Content)
+		out = append(out, msg)
+		delete(usersByID, user.ID)
+	}
 	next := 0
 	for _, step := range assistant.AgentSteps {
-		stepMsgs := buildAgentStepMessages(step)
-		if len(stepMsgs) == 0 {
-			continue
+		for _, id := range step.UserMessagesBefore {
+			if user := usersByID[id]; user != nil {
+				appendUser(user)
+			}
 		}
-		for next < len(midRunUsers) &&
+		for !hasBoundaries && next < len(midRunUsers) &&
 			!step.Timestamp.IsZero() &&
 			midRunUsers[next].CreatedAt.Before(step.Timestamp) {
-			out = append(out, buildUserHistoryMessage(midRunUsers[next]))
+			appendUser(midRunUsers[next])
 			next++
 		}
-		out = append(out, stepMsgs...)
+		out = append(out, buildAgentStepMessages(step)...)
 	}
-	for ; next < len(midRunUsers); next++ {
-		out = append(out, buildUserHistoryMessage(midRunUsers[next]))
+	for _, user := range midRunUsers {
+		if usersByID[user.ID] != nil {
+			appendUser(user)
+		}
 	}
 
 	if final := finalAnswerHistoryMessage(assistant); final != nil {
@@ -203,6 +220,9 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 func buildAgentStepMessages(step types.AgentStep) []chat.Message {
 	nonTerminalCalls := filterNonTerminalToolCalls(step.ToolCalls)
 	if len(nonTerminalCalls) == 0 {
+		if step.IntermediateAnswer && strings.TrimSpace(step.Thought) != "" {
+			return []chat.Message{{Role: "assistant", Content: step.Thought, ReasoningContent: step.ReasoningContent}}
+		}
 		return nil
 	}
 	assistantMsg := chat.Message{

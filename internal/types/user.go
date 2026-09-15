@@ -22,6 +22,9 @@ import (
 //
 // No DB DDL is required — preferences is a single jsonb column.
 type UserPreferences struct {
+	// BrowserSearchInstructions customizes browser search for this user. Nil/empty uses the platform default.
+	BrowserSearchInstructions *string `json:"browser_search_instructions,omitempty"`
+
 	// LastActiveTenantID remembers the last workspace the user actively
 	// switched into, so a fresh login (new device, cleared browser, new
 	// refresh token) lands them back in that workspace instead of always

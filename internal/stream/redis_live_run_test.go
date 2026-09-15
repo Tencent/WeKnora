@@ -150,3 +150,35 @@ func TestMemorySetLiveRunRejectsADifferentAssistant(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "assist-2", id)
 }
+
+func TestAppendSteerEventsDeduplicatesClientIDs(t *testing.T) {
+	redisManager, _ := newTestRedisStreamManager(t, time.Hour)
+	for name, manager := range map[string]interfaces.StreamManager{
+		"memory": NewMemoryStreamManager(), "redis": redisManager,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			evt := interfaces.StreamEvent{
+				ID: "same-client-id", Content: "do this next", Data: map[string]interface{}{"delivery": "after"},
+			}
+			errs := make(chan error, 8)
+			for i := 0; i < 8; i++ {
+				go func() { errs <- manager.AppendSteerEvents(ctx, "session", "run", []interfaces.StreamEvent{evt}) }()
+			}
+			for i := 0; i < 8; i++ {
+				require.NoError(t, <-errs)
+			}
+			events, _, err := manager.GetSteerEvents(ctx, "session", "run", 0)
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			_, err = manager.UpdateSteerEventData(ctx, "session", "run", evt.ID,
+				map[string]interface{}{"consumed": true})
+			require.NoError(t, err)
+			require.NoError(t, manager.AppendSteerEvents(ctx, "session", "run", []interfaces.StreamEvent{evt}))
+			events, _, err = manager.GetSteerEvents(ctx, "session", "run", 0)
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, true, events[0].Data["consumed"])
+		})
+	}
+}

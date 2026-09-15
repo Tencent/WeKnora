@@ -601,6 +601,23 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/document/development/knowledge-base-overview',
+    permissionDocUrl: 'https://open.dingtalk.com/document/development/get-knowledge-base-list',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+      'Storage.File.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: 'dingxxxxxxxx' },
+      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
+      { key: 'operator_id', labelKey: 'datasource.field.operatorId', placeholder: '', hintKey: 'datasource.field.operatorIdHint' },
+    ],
+  },
+  {
     // Tencent IMA (ima.qq.com). Uses the OpenAPI at /openapi/wiki/v1 with two
     // static headers (ima-openapi-clientid + ima-openapi-apikey); no OAuth.
     type: 'ima',
@@ -772,7 +789,7 @@ function selectType(def: ConnectorDef) {
   step.value = 1
 }
 
-// --- Test connection (stateless, no DB write) ---
+// --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return
@@ -791,7 +808,10 @@ async function testConnection() {
   testResult.value = ''
   testErrorMsg.value = ''
   try {
-    if (isEdit.value && tempDsId.value) {
+    // The main update endpoint ignores credentials. Only use the saved
+    // connection when keeping its credentials; test replacements directly
+    // without persisting them until the user saves the data source.
+    if (isEdit.value && tempDsId.value && !needsConnectionTest()) {
       await updateDataSource(tempDsId.value, {
         ...form.value,
         knowledge_base_id: props.kbId,

@@ -187,8 +187,14 @@ func TestEndStreamFinalizesCardSummary(t *testing.T) {
 	if requests[2].method != http.MethodPatch || requests[2].path != "/open-apis/cardkit/v1/cards/"+cardID+"/settings" {
 		t.Errorf("final request = %s %s", requests[2].method, requests[2].path)
 	}
-	if requests[2].statePresent {
-		t.Error("stream state still present when final settings were sent")
+	if !requests[2].statePresent {
+		t.Error("stream state removed before final settings were delivered")
+	}
+	feishuStreamsMu.Lock()
+	_, remaining := feishuStreams[cardID]
+	feishuStreamsMu.Unlock()
+	if remaining {
+		t.Error("stream state retained after successful final settings")
 	}
 
 	var settings struct {
@@ -209,15 +215,11 @@ func TestEndStreamFinalizesCardSummary(t *testing.T) {
 		t.Errorf("summary = %q, want %q", settings.Config.Summary.Content, "最终 回答 ✅")
 	}
 
-	if err := adapter.EndStream(ctx, nil, "missing-card"); err != nil {
-		t.Fatalf("EndStream missing state: %v", err)
+	if err := adapter.EndStream(ctx, nil, "missing-card"); err == nil {
+		t.Fatal("EndStream missing state succeeded")
 	}
-	if len(requests) != 4 {
-		t.Fatalf("request count after missing state = %d, want 4", len(requests))
-	}
-	assertStreamingClosed(t, requests[3].settings, "")
-	if requests[3].sequence != 0 {
-		t.Errorf("missing-state sequence = %d, want 0", requests[3].sequence)
+	if len(requests) != 3 {
+		t.Fatalf("missing state must not send a guessed sequence: request count = %d", len(requests))
 	}
 }
 

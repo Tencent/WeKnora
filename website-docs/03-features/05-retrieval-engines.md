@@ -171,12 +171,12 @@ flowchart TD
 
 `internal/application/repository/retriever/milvus/repository.go`。
 
-- **集合管理**：每维度一个 collection（`{MILVUS_COLLECTION|weknora_embeddings}_{dim}`）。schema 含稠密向量 `embedding`（HNSW 索引，M=16 efConstruction=128，metric 由 `MILVUS_METRIC_TYPE` 决定：IP 默认 / COSINE /）与稀疏向量 `content_sparse` —— 通过 **内建 BM25 Function**（`entity.FunctionTypeBM25`）由 content 自动生成，配 `AutoIndex(BM25)`。
+- **集合管理**：每维度一个 collection（`{MILVUS_COLLECTION|weknora_embeddings}_{dim}`）。schema 含稠密向量 `embedding`（HNSW 索引，M=16 efConstruction=128，metric 由 `MILVUS_METRIC_TYPE` 决定：IP 默认 / COSINE / L2）与稀疏向量 `content_sparse` —— 通过 **内建 BM25 Function**（`entity.FunctionTypeBM25`）由 content 自动生成，配 `AutoIndex(BM25)`。新建 Collection 的 `content` 使用 Milvus 多语言分析器：英文 `english`、中文 `chinese`（内置 Jieba）、未知语言 `default`（ICU），并以 `language` 字段选择分析器。
 - **向量检索**：`Search` + `WithANNSField(embedding)`，COSINE 模式原始值域 [-1,1]，是唯一需要 `(score+1)/2` 归一化的引擎。
-- **关键词检索**：对 `content_sparse` 做 BM25 稀疏向量检索（Milvus 2.5+ 原生全文检索）。
+- **关键词检索**：对 `content_sparse` 做 BM25 稀疏向量检索（Milvus 2.5+ 原生全文检索），查询时根据问题文本的语言传入 `analyzer_name`。
 - **过滤**：`filter.go` 构造布尔表达式（kb/knowledge/tag/is_enabled）。
 - **启停同步**：`BatchUpdateChunkEnabledStatus` 逐 collection 更新，失败用 `errors.Join` 聚合后**返回错误**而不是只打 warn——主库里已停用的分块绝不能因为索引更新静默失败而继续可被检索到。
-- 配置：`MILVUS_ADDRESS` / `MILVUS_USERNAME` / `MILVUS_PASSWORD` / `MILVUS_DB_NAME` / `MILVUS_METRIC_TYPE`（改后需重建 collection）。
+- 配置：`MILVUS_ADDRESS` / `MILVUS_USERNAME` / `MILVUS_PASSWORD` / `MILVUS_DB_NAME` / `MILVUS_METRIC_TYPE`（改后需重建 collection）。旧 Collection 的 schema 不能直接改成多语言分析器；可运行 `go run ./cmd/milvus-migrate --source <旧前缀> --target <新前缀>` 复用已有稠密向量并沿用源 Collection 的 metric，确认检索正常后把 `MILVUS_COLLECTION` 改为新前缀。
 
 #### Weaviate {#_2-8-weaviate}
 

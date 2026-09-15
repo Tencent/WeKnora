@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { expandSteerForksInHistory, forkAfterInjectedUser } from './steerStreamFork.ts'
+import { expandSteerForksInHistory, forkAfterInjectedUser, resetSteerTurnForReplay, steerStepEvents, isAssistantTurnComplete, previewSteerMessage, discardSteerPreview } from './steerStreamFork.ts'
 
 test('inject forks later events onto a new assistant below the user bubble', () => {
   const assistant = {
@@ -218,4 +218,93 @@ test('expanding an already split transcript is a no-op', () => {
   assert.equal(twice[1].steerForked, true)
   assert.equal(twice[3].assistant_message_id, 'a0')
   assert.equal(twice[3].id, once[3].id)
+})
+
+test('explicit boundaries preserve drafts, repeated inputs and delivery order despite equal timestamps', () => {
+  const users = ['u2', 'u1'].map(id => ({ id, role: 'user', request_id: 'r', content: 'revise', created_at: '1970-01-01T00:00:00Z' }))
+  const assistant = { id: 'a', role: 'assistant', request_id: 'r', content: 'final', is_completed: true,
+    used_memories: [{ id: 'memory' }], agentEventStream: [
+      { type: 'answer', content: 'first draft', done: true, intermediate_answer: true },
+      { type: 'user_message_injected', user_message_id: 'u1' },
+      { type: 'answer', content: 'second draft', done: true, intermediate_answer: true },
+      { type: 'user_message_injected', user_message_id: 'u2' },
+      { type: 'answer', content: 'final', done: true },
+    ] }
+  const out = expandSteerForksInHistory([assistant, ...users])
+  assert.deepEqual(out.map(m => m.content), ['first draft', 'revise', 'second draft', 'revise', 'final'])
+  assert.equal(out[1].id, 'u1')
+  assert.equal(out[3].id, 'u2')
+  assert.equal(out[1].isSteer, true)
+  assert.equal(out.filter(m => m.used_memories?.length).length, 1)
+})
+
+test('sealing a draft finishes its text stream without discarding the draft', () => {
+  const source = { id: 'a', role: 'assistant', request_id: 'r', content: 'draft', agentEventStream: [{ type: 'answer', content: 'draft', done: false }] }
+  const list = [source]
+  forkAfterInjectedUser(list, source, { id: 'u1', role: 'user', request_id: 'r', content: 'revise' }, 's1')
+  assert.equal(source.content, 'draft')
+  assert.equal(source.agentEventStream[0].done, true)
+})
+
+test('replay walks successive existing segments rather than duplicating earlier events on the tail', () => {
+  const a = { id: 'a', role: 'assistant', request_id: 'r', steerForked: true, content: 'draft', agentEventStream: [{ type: 'answer', content: 'draft' }] }
+  const u1 = { id: 'u1', role: 'user', request_id: 'r', content: 'one' }
+  const middle = { id: 'a:1', role: 'assistant', request_id: 'r', steerForked: true, agentEventStream: [] }
+  const u2 = { id: 'u2', role: 'user', request_id: 'r', content: 'two' }
+  const tail = { id: 'a:2', role: 'assistant', request_id: 'r', is_completed: false, agentEventStream: [] }
+  const list = [a, u1, middle, u2, tail]
+  let cursor = resetSteerTurnForReplay(list, 'r')
+  assert.equal(cursor, a)
+  cursor.agentEventStream.push({ type: 'answer', content: 'draft' })
+  cursor = forkAfterInjectedUser(list, cursor, u1, 's1')
+  assert.equal(cursor, middle)
+  cursor.agentEventStream.push({ type: 'thinking', content: 'work' })
+  cursor = forkAfterInjectedUser(list, cursor, u2, 's2')
+  assert.equal(cursor, tail)
+  assert.equal(list.length, 5)
+  assert.equal(a.agentEventStream.length, 1)
+  assert.equal(middle.agentEventStream.length, 1)
+  assert.equal(tail.agentEventStream.length, 0)
+  assert.equal(a.is_completed, true)
+  assert.equal(middle.is_completed, true)
+  assert.equal(tail.is_completed, false)
+})
+
+test('step boundary events retain the server delivery order', () => {
+  assert.deepEqual(steerStepEvents({ user_messages_before: ['u2', 'u1'] }).map(e => e.user_message_id), ['u2', 'u1'])
+})
+
+test('only run completion ends the task; draft completion and sealed prefixes do not', () => {
+  assert.equal(isAssistantTurnComplete({ is_completed: false, agentEventStream: [{ type: 'answer', done: true }] }), false)
+  assert.equal(isAssistantTurnComplete({ is_completed: true, steerForked: true }), false)
+  assert.equal(isAssistantTurnComplete({ agentEventStream: [{ type: 'agent_complete' }] }), true)
+  assert.equal(isAssistantTurnComplete({ agentEventStream: [{ type: 'stop' }] }), true)
+  assert.equal(isAssistantTurnComplete({ is_completed: true }), true)
+})
+
+
+test('inject appears immediately and the delivery receipt reuses its bubble', () => {
+  const assistant = { id: 'a', role: 'assistant', request_id: 'r', is_completed: false, agentEventStream: [{ type: 'thinking', done: false }] }
+  const list = [assistant]
+  const preview = previewSteerMessage(list, { steer_id: 's', content: '补充' })
+  assert.equal(list[1], preview)
+  assert.equal(assistant.is_completed, false)
+  assert.equal(assistant.agentEventStream[0].done, false)
+  assert.equal(previewSteerMessage(list, { steer_id: 's', content: '补充' }), preview)
+  assert.equal(list.length, 2)
+  forkAfterInjectedUser(list, assistant, preview, 's')
+  assert.equal(list.length, 3)
+  assert.equal(list[1], preview)
+  assert.equal(preview._steerPending, undefined)
+  discardSteerPreview(list, 's')
+  assert.equal(list.length, 3, 'removal must never discard a consumed message')
+})
+
+test('failed promotion can restore its queue without leaving a duplicate bubble', () => {
+  const list = []
+  previewSteerMessage(list, { steer_id: 's', content: '补充' })
+  discardSteerPreview(list, 's')
+  assert.equal(list.length, 0)
+  previewSteerMessage(list, { steer_id: 's', content: '补充' })
+  assert.equal(list.length, 1)
 })
