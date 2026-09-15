@@ -92,6 +92,13 @@ func anthropicText(state *invoke.StreamBridgeState) string {
 	return ""
 }
 
+func anthropicThinking(state *invoke.StreamBridgeState) string {
+	if v, ok := state.Get("anthropicThinking"); ok {
+		return v.(string)
+	}
+	return ""
+}
+
 // TranslateStreamEvent bridges one demuxed SSE frame. The executor's Demuxer
 // yields Event="<anthropic event name>" frames; dispatch follows the decoded
 // JSON "type" like v1 did. The [DONE] sentinel (Event="done") and
@@ -126,6 +133,16 @@ func (a *AnthropicAdapter) TranslateStreamEvent(
 		anthropicToolState(state).consume(ev)
 	case "content_block_delta":
 		anthropicToolState(state).consume(ev)
+		if ev.Delta != nil && ev.Delta.Thinking != "" && ev.Delta.Type == "thinking_delta" {
+			// Extended-thinking blocks surface as their own stream kind so the
+			// entry maps them to ResponseTypeThinking (dropped them and the UI
+			// never sees a thinking panel even when the vendor thinks —
+			// 2026-09-15 real-machine report).
+			return []*invoke.StreamEvent{{
+				Kind:  invoke.StreamKindThinking,
+				Delta: &invoke.ContentDelta{Text: ev.Delta.Thinking},
+			}}, nil
+		}
 		if ev.Delta != nil && ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
 			return []*invoke.StreamEvent{{
 				Kind:  invoke.StreamKindAnswer,
@@ -199,6 +216,9 @@ func aggregateAnthropicSSE(body []byte) (*invoke.ChatResponse, error) {
 			if ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
 				state.Set("anthropicText", anthropicText(state)+ev.Delta.Text)
 			}
+			if ev.Delta.Type == "thinking_delta" && ev.Delta.Thinking != "" {
+				state.Set("anthropicThinking", anthropicThinking(state)+ev.Delta.Thinking)
+			}
 			if ev.Delta.StopReason != "" {
 				state.Set("anthropicFinish", ev.Delta.StopReason)
 				state.Set(invoke.StreamStateFinishReason, ev.Delta.StopReason)
@@ -210,10 +230,14 @@ func aggregateAnthropicSSE(body []byte) (*invoke.ChatResponse, error) {
 	}
 	acc := anthropicState(state)
 	tools := anthropicToolState(state)
-	return &invoke.ChatResponse{
+	out := &invoke.ChatResponse{
 		Content:      anthropicText(state),
 		ToolCalls:    tools.calls(),
 		FinishReason: tools.finishReason(anthropicFinishReason(state)),
 		Usage:        *acc.usage(),
-	}, nil
+	}
+	if thinking := anthropicThinking(state); thinking != "" {
+		out.Thinking = &thinking
+	}
+	return out, nil
 }

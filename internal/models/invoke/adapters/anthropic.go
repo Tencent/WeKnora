@@ -109,11 +109,12 @@ type anthropicThinkingConfig struct {
 
 type anthropicResponse struct {
 	Content []struct {
-		Type  string          `json:"type"`
-		Text  string          `json:"text"`
-		ID    string          `json:"id"`
-		Name  string          `json:"name"`
-		Input json.RawMessage `json:"input"`
+		Type     string          `json:"type"`
+		Text     string          `json:"text"`
+		Thinking string          `json:"thinking"`
+		ID       string          `json:"id"`
+		Name     string          `json:"name"`
+		Input    json.RawMessage `json:"input"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
@@ -134,6 +135,7 @@ type anthropicStreamEvent struct {
 	Delta *struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
 		StopReason  string `json:"stop_reason"`
 		PartialJSON string `json:"partial_json"`
 	} `json:"delta,omitempty"`
@@ -398,7 +400,11 @@ func (a *AnthropicAdapter) ParseChatResponse(_ int, header http.Header, body []b
 func parseAnthropicResponse(resp *anthropicResponse) *invoke.ChatResponse {
 	parts := make([]string, 0, len(resp.Content))
 	var calls []invoke.ToolCall
+	var thinking strings.Builder
 	for _, part := range resp.Content {
+		if part.Type == "thinking" && part.Thinking != "" {
+			thinking.WriteString(part.Thinking)
+		}
 		if part.Type == "tool_use" {
 			calls = append(calls, invoke.ToolCall{
 				ID:   part.ID,
@@ -418,7 +424,7 @@ func parseAnthropicResponse(resp *anthropicResponse) *invoke.ChatResponse {
 	cacheRead := valueOrZero(resp.Usage.CacheReadInputTokens)
 	cacheWrite := valueOrZero(resp.Usage.CacheCreationInputTokens)
 	promptTokens := inputTokens + cacheRead + cacheWrite
-	return &invoke.ChatResponse{
+	out := &invoke.ChatResponse{
 		Content: strings.Join(parts, ""),
 		// No tools were streamed here, so the empty tool stream folds the
 		// stop reason only (max_tokens → length, "" → incomplete).
@@ -437,6 +443,11 @@ func parseAnthropicResponse(resp *anthropicResponse) *invoke.ChatResponse {
 			CacheReported:    resp.Usage.CacheReadInputTokens != nil || resp.Usage.CacheCreationInputTokens != nil,
 		},
 	}
+	if thinking.Len() > 0 {
+		thinkingText := thinking.String()
+		out.Thinking = &thinkingText
+	}
+	return out
 }
 
 func valueOrZero(v *int) int {

@@ -83,6 +83,12 @@ func buildOptionsSection(opts *ChatOptions) string {
 	if len(opts.Format) > 0 {
 		parts = append(parts, "ResponseFormat=json_object")
 	}
+	// The thinking boolean must be visible in the black box: "was the param
+	// requested at all" is the first question every no-thinking debug starts
+	// with (ThinkingLevel alone cannot answer it).
+	if opts.Thinking != nil {
+		parts = append(parts, fmt.Sprintf("Thinking=%v", *opts.Thinking))
+	}
 	if opts.ThinkingLevel != "" {
 		parts = append(parts, "ThinkingLevel="+opts.ThinkingLevel)
 	}
