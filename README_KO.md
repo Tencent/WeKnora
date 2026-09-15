@@ -203,6 +203,9 @@ Feishu, GitLab, Tencent IMA, Notion, Yuque 등 외부 플랫폼에서 지식 자
 - **`weknora_ask`** — WeKnora가 직접 작성한 인용 포함 답변(RAG 또는 ReAct 파이프라인)
 - **`weknora_list_knowledge_bases`** — 지식베이스 이름과 id로 에이전트가 검색 범위를 스스로 좁힘
 
+## 📦 opencode 플러그인
+
+[**`@wxg-prc-cpg/opencode-weknora`**](https://www.npmjs.com/package/@wxg-prc-cpg/opencode-weknora)는 공식 [opencode](https://opencode.ai) 플러그인입니다([문서](./packages/opencode-weknora/README.md)). dsh-weknora에서 포팅한 동일한 네 개의 읽기 전용 도구를 제공합니다. opencode 자체 도구는 워크스페이스와 인터넷만 읽지만, 이 플러그인은 지식베이스를 추가합니다. `opencode.json`에 `"plugin": [["@wxg-prc-cpg/opencode-weknora", { "baseUrl": "https://weknora.example.com", "apiKey": "sk-..." }]]`를 추가하면 에이전트가 배포 대상에 대해 구절 검색, 전체 문서 읽기, 인용 포함 질의응답을 수행할 수 있습니다.
 
 ## 🚀 시작하기
 
