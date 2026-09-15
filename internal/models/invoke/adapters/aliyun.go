@@ -338,12 +338,16 @@ func aliyunIsDashScopeHybridThinkingModel(modelName string) bool {
 
 // aliyunIsDashScopeAlwaysThinkingModel 检查「始终开启思考」的 DashScope 模型：
 // enable_thinking 仅支持 true，传入 false 会导致 API 请求失败（文档原文）。
-// 覆盖智谱直供 ZHIPU/GLM-5.3(-Flash) 与 kimi-k3（含 kimi/kimi-k3 直供前缀）。
-// 这类模型不发 enable_thinking（服务端默认即开）——模型级 CanDisable=false
-// 的运行时落点；目录（models.json）预填时同样标 can_disable=false。
+// 覆盖 GLM-5.3 全部直供形态（阿里云裸名 glm-5.3/glm-5.3-flash 与智谱直供
+// ZHIPU/GLM-5.3）与 kimi-k3（含 kimi/kimi-k3 直供前缀）。这类模型不发
+// enable_thinking（服务端默认即开）——模型级 CanDisable=false 的运行时
+// 落点；目录（models.json）预填时同样标 can_disable=false。
+// 2026-09-15 真机：谓词原先只匹配 ZHIPU/ 前缀形态，裸名 glm-5.3（标题生成
+// 的显式 thinking=false）落进混合族被照发 enable_thinking=false，厂商 400
+// "enable_thinking ... restricted to True"。
 func aliyunIsDashScopeAlwaysThinkingModel(modelName string) bool {
 	lower := strings.ToLower(modelName)
-	return strings.Contains(lower, "zhipu/glm-5.3") ||
+	return strings.Contains(lower, "glm-5.3") ||
 		strings.Contains(lower, "kimi-k3")
 }
 

@@ -607,7 +607,12 @@ func TestAliyunThinkingPredicates(t *testing.T) {
 	require.False(t, aliyunIsDashScopeHybridThinkingModel("qwen2.5-72b"))
 
 	require.True(t, aliyunIsDashScopeAlwaysThinkingModel("ZHIPU/GLM-5.3-Flash"))
+	// 裸名直供形态同样命中（2026-09-15 真机：glm-5.3 标题生成照发
+	// enable_thinking=false 被厂商 400 "restricted to True"）。
+	require.True(t, aliyunIsDashScopeAlwaysThinkingModel("glm-5.3"))
+	require.True(t, aliyunIsDashScopeAlwaysThinkingModel("glm-5.3-flash"))
 	require.True(t, aliyunIsDashScopeAlwaysThinkingModel("kimi/kimi-k3"))
+	require.True(t, aliyunIsDashScopeAlwaysThinkingModel("kimi-k3"))
 	require.False(t, aliyunIsDashScopeAlwaysThinkingModel("glm-5.1"))
 }
 
