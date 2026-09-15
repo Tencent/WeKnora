@@ -195,8 +195,10 @@ type promptCachePolicy struct {
 
 func promptCachePolicyFor(name provider.ProviderName, baseURL string) promptCachePolicy {
 	switch name {
-	case provider.ProviderOpenAI, provider.ProviderAzureOpenAI, provider.ProviderOpenRouter:
+	case provider.ProviderOpenAI, provider.ProviderOpenRouter:
 		return promptCachePolicy{sendKey: true, sendAffinity: true}
+	case provider.ProviderAzureOpenAI:
+		return promptCachePolicy{sendAffinity: true}
 	case provider.ProviderAliyun:
 		return promptCachePolicy{sendCacheControl: true}
 	case provider.ProviderAnthropic:
