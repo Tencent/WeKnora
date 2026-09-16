@@ -48,6 +48,8 @@ spec:
           env:
             - name: STORAGE_TYPE
               value: {{ .Values.docreader.env.STORAGE_TYPE | quote }}
+            - name: MAX_FILE_SIZE_MB
+              value: {{ .Values.global.maxFileSizeMB | quote }}
           resources:
             {{- toYaml .Values.docreader.resources | nindent 12 }}
           # gRPC health check using grpc_health_probe

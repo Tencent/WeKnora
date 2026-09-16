@@ -2639,6 +2639,8 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 		mergeIMAgentAnswerBuffers(&answerBuilder, &answerOuter, &agentLiveAnswer, data.FinalAnswer)
 		bufMu.Unlock()
 		closeComplete()
+		// Execute can emit EventError after Complete. The AgentQA return path
+		// closes done after those errors have been collected for finalization.
 		return nil
 	})
 
@@ -2785,6 +2787,13 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 	// Run QA async
 	go func() {
+		// AgentQA returns after all synchronous events, including errors emitted
+		// after EventAgentComplete. KnowledgeQA starts an asynchronous stream,
+		// so its return must not end the reply.
+		if useAgent {
+			defer closeDone()
+			defer closeComplete()
+		}
 		var err error
 		req := buildIMQARequest(session, msg.Content, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, msg.Quote, attachments)
 		req.ImageURLs = imageURLs
@@ -3062,6 +3071,12 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 
 	// Run QA async
 	go func() {
+		// Match the streaming path: a returned AgentQA cannot produce more
+		// events, while KnowledgeQA may still be consuming its answer stream.
+		if useAgent {
+			defer closeDone()
+			defer closeComplete()
+		}
 		var err error
 		req := buildIMQARequest(session, query, assistantMsg.ID, userMsg.ID, customAgent, kbIDs, quote, attachments)
 		req.ImageURLs = imageURLs

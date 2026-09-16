@@ -20,6 +20,11 @@ global:
   imagePullSecrets: []
   # - name: regcred
 
+  # -- Maximum upload size in MB, applied to the frontend (nginx
+  # client_max_body_size), the app (upload limit) and docreader (gRPC message
+  # limit). Same knob as MAX_FILE_SIZE_MB in docker-compose.yml.
+  maxFileSizeMB: 50
+
   # -- Default security context for all pods
   # Note: Official images (nginx, postgres, redis) run as root by default
   # Enable runAsNonRoot only if using non-root compatible images
