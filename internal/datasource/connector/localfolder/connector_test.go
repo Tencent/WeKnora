@@ -358,6 +358,36 @@ func TestEmptiedRootIsNotTreatedAsMassDeletion(t *testing.T) {
 	}
 }
 
+func TestManualSyncReconcilesIntentionallyEmptiedRoot(t *testing.T) {
+	root, cfg := newVault(t)
+	writeFile(t, root, "a.md", "a", time.Hour)
+	writeFile(t, root, "b.md", "b", time.Hour)
+	_, cursor := syncFolder(t, cfg, nil)
+
+	for _, name := range []string{"a.md", "b.md"} {
+		if err := os.Remove(filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Clicking "sync now" is the user confirming this folder's current state.
+	cfg.ManualTrigger = true
+	items, next, err := NewConnector().FetchIncremental(context.Background(), cfg, cursor)
+	if err != nil {
+		t.Fatalf("manual sync of an emptied root: %v", err)
+	}
+
+	got := byExternalID(t, items)
+	assertItems(t, got, "local_folder:a.md", "local_folder:b.md")
+	for id, item := range got {
+		if !item.IsDeleted {
+			t.Fatalf("%s should be reported deleted: %+v", id, item)
+		}
+	}
+	if files := decodeCursor(next); len(files) != 0 {
+		t.Fatalf("cursor should be empty after the folder was emptied: %v", files)
+	}
+}
+
 func TestInaccessibleRootFailsWithoutDeletions(t *testing.T) {
 	root, cfg := newVault(t)
 	writeFile(t, root, "a.md", "a", time.Hour)

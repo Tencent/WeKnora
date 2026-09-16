@@ -153,6 +153,7 @@ type config struct {
 	include []string
 	exclude []string
 	quiet   time.Duration
+	manual  bool // this run was requested by a user, not the scheduler
 }
 
 func parseConfig(ds *types.DataSourceConfig) (*config, error) {
@@ -172,8 +173,8 @@ func parseConfig(ds *types.DataSourceConfig) (*config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := &config{root: root, include: include, exclude: exclude, quiet: quietPeriod}
-	if ds.ManualTrigger {
+	cfg := &config{root: root, include: include, exclude: exclude, quiet: quietPeriod, manual: ds.ManualTrigger}
+	if cfg.manual {
 		cfg.quiet = 0 // the user asked to sync now, including files saved moments ago
 	}
 	return cfg, nil
@@ -274,10 +275,15 @@ func (cfg *config) sync(
 		// A partial listing would make every unlisted file look deleted.
 		return nil, nil, fmt.Errorf("scan root_path: %w", err)
 	}
-	if reportDeletions && len(files) == 0 && len(prev) > 0 {
-		// An unmounted or emptied bind mount looks exactly like "all files deleted".
+	if reportDeletions && !cfg.manual && len(files) == 0 && len(prev) > 0 {
+		// A scheduled sync cannot tell an emptied folder from a mount that broke
+		// or was replaced by an empty directory, so it fails instead of deleting
+		// everything. A manual sync is the user pointing at this folder and asking
+		// for it to be reconciled now, so it goes through and an intentionally
+		// emptied folder is applied (deletions still honour sync_deletions).
 		return nil, nil, fmt.Errorf(
-			"root_path has no matching files but %d were synced before; refusing to delete them all", len(prev))
+			"root_path has no matching files but %d were synced before; refusing to delete them all. "+
+				"Use \"sync now\" to confirm an intentionally emptied folder", len(prev))
 	}
 
 	settledBefore := time.Now().Add(-cfg.quiet)
