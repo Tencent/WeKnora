@@ -146,6 +146,20 @@ func TestMemoryAvailableTracksAllThreeSwitches(t *testing.T) {
 	require.False(t, svc.MemoryAvailable(ctx), "the workspace switched memory off")
 }
 
+func TestLearningAvailableRequiresCitationEvidenceRecording(t *testing.T) {
+	svc, _, tenantRepo := newMemoryHarness(t)
+	ctx := enabledCtx(t, tenantRepo, 1, "alice")
+	require.True(t, svc.LearningAvailable(ctx))
+
+	disabled := false
+	tenantRepo.set(1, &types.MemoryConfig{
+		Enabled: true, WriteMode: types.MemoryWriteAuto,
+		RetrievalConditioning: &disabled,
+	})
+	require.True(t, svc.MemoryAvailable(ctx))
+	require.False(t, svc.LearningAvailable(ctx))
+}
+
 // The predicate and the search must never disagree: anything that reports
 // available has to be searchable, and anything unavailable has to say so
 // rather than come back looking like an empty store.
