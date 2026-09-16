@@ -23,14 +23,6 @@
             </t-tooltip>
         </div>
         <div class="chat_thread">
-            <t-alert
-                v-if="forkNotice"
-                :theme="forkNoticeTheme"
-                class="chat-fork-notice"
-                :message="forkNotice"
-                close
-                @close="forkNotice = ''"
-            />
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
                 <div class="msg_list" :class="{ 'is-embedded': embeddedMode }">
                     <!-- 消息列表骨架屏 -->
@@ -194,7 +186,6 @@ import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
-import { forkDegradeMessage, forkSuccessMessage } from './forkNotice';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
@@ -325,16 +316,12 @@ function forkAffordanceOf(messageId) {
 }
 
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
-const FORK_NOTICE_KEY = 'weknora:fork-notice'
-const forkNotice = ref('')
-const forkNoticeTheme = ref('warning')
 let forkInFlight = false
 
-function stashForkLanding(sessionId, text, notice, noticeTheme) {
-    const payload = JSON.stringify({ sessionId, text, notice, noticeTheme })
+function stashForkLanding(sessionId, text) {
+    const payload = JSON.stringify({ sessionId, text })
     try {
         sessionStorage.setItem(FORK_PREFILL_KEY, payload)
-        sessionStorage.setItem(FORK_NOTICE_KEY, payload)
     } catch {
         // sessionStorage can throw in private mode; landing still navigates.
     }
@@ -342,15 +329,13 @@ function stashForkLanding(sessionId, text, notice, noticeTheme) {
 
 function readForkLanding() {
     try {
-        const raw = sessionStorage.getItem(FORK_PREFILL_KEY) || sessionStorage.getItem(FORK_NOTICE_KEY)
+        const raw = sessionStorage.getItem(FORK_PREFILL_KEY)
         if (!raw) return null
         const parsed = JSON.parse(raw)
         if (!parsed || typeof parsed !== 'object') return null
         return {
             sessionId: String(parsed.sessionId || ''),
             text: String(parsed.text || ''),
-            notice: String(parsed.notice || ''),
-            noticeTheme: parsed.noticeTheme === 'info' ? 'info' : 'warning',
         }
     } catch {
         return null
@@ -360,7 +345,6 @@ function readForkLanding() {
 function clearForkLanding() {
     try {
         sessionStorage.removeItem(FORK_PREFILL_KEY)
-        sessionStorage.removeItem(FORK_NOTICE_KEY)
     } catch {
         // ignore
     }
@@ -373,12 +357,6 @@ function applyForkLanding() {
     }
     clearForkLanding()
     inputFieldRef.value?.prefill(landed.text)
-    // A degrade banner must not be replaced by the success note if both land.
-    if (forkNotice.value && forkNoticeTheme.value === 'warning' && landed.noticeTheme !== 'warning') {
-        return true
-    }
-    forkNotice.value = landed.notice
-    forkNoticeTheme.value = landed.noticeTheme || 'warning'
     return true
 }
 
@@ -399,16 +377,7 @@ async function handleFork(messageId) {
         // Carry the question across navigation in sessionStorage: the chat view
         // is reused across chat/:chatid, and history reload / composer reset
         // would clobber an in-memory prefill if we applied it too early.
-        const degraded = Boolean(data.degraded)
-        const notice = degraded
-            ? forkDegradeMessage(String(data.reason || 'UNKNOWN'))
-            : forkSuccessMessage()
-        stashForkLanding(
-            data.session_id,
-            String(source.content ?? ''),
-            notice,
-            degraded ? 'warning' : 'info',
-        )
+        stashForkLanding(data.session_id, String(source.content ?? ''))
 
         const now = new Date().toISOString()
         const sourceTitle = currentSession.value?.title || t('menu.newSession')
@@ -470,9 +439,7 @@ const hasMoreHistory = ref(true);
 // get clobbered by composer reset / history mount.
 watch(historyLoading, (loading) => {
     if (loading) return
-    if (!applyForkLanding()) {
-        forkNotice.value = ''
-    }
+    applyForkLanding()
 }, { flush: 'post' })
 let fullContent = ref('')
 const scrollContainer = ref(null)
@@ -689,8 +656,6 @@ watch([() => route.params], async (newvalue) => {
         steerQueue.value = [];
         session_id.value = newvalue[0].chatid;
         currentSession.value = null;
-        forkNotice.value = ''
-        forkNoticeTheme.value = 'warning';
         clearCitationChunkCache();
 
         // 切换会话时，重置状态
@@ -1740,14 +1705,6 @@ onBeforeRouteUpdate((to, from, next) => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-}
-
-.chat-fork-notice {
-    flex-shrink: 0;
-    width: 100%;
-    max-width: 960px;
-    margin: 8px auto 0;
-    box-sizing: border-box;
 }
 
 // 沙箱面板入口：chrome 对齐会话左上角三个点（毛玻璃底 + 24px 图标按钮），
