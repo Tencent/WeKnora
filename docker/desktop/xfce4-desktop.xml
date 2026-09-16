@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-desktop" version="1.0">
+  <property name="backdrop" type="empty">
+    <property name="screen0" type="empty">
+      <property name="monitor0" type="empty">
+        <property name="image-style" type="int" value="5"/>
+        <property name="last-image" type="string" value="/usr/share/images/desktop-base/desktop-background"/>
+        <property name="workspace0" type="empty">
+          <property name="image-style" type="int" value="5"/>
+          <property name="last-image" type="string" value="/usr/share/images/desktop-base/desktop-background"/>
+        </property>
+      </property>
+      <property name="monitorVirtual1" type="empty">
+        <property name="image-style" type="int" value="5"/>
+        <property name="last-image" type="string" value="/usr/share/images/desktop-base/desktop-background"/>
+        <property name="workspace0" type="empty">
+          <property name="image-style" type="int" value="5"/>
+          <property name="last-image" type="string" value="/usr/share/images/desktop-base/desktop-background"/>
+        </property>
+      </property>
+    </property>
+  </property>
+</channel>

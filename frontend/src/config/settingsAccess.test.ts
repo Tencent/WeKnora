@@ -17,6 +17,7 @@ test('management shortcuts are stricter than read-only settings pages', () => {
 test('the skill catalog is admin-only like the sandbox it installs into', () => {
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, 'admin')
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, SETTINGS_SECTION_MIN_ROLE.sandbox)
+  assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills, 'admin')
 })
 
 test('personal skill environment variables are visible to every member', () => {

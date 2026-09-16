@@ -14,6 +14,10 @@ type ChunkImageInfo struct {
 
 // ChunkRepository defines the interface for chunk repository operations
 type ChunkRepository interface {
+	// ListAllChunksByKnowledgeID includes every type and storage status for
+	// scoped lifecycle operations; UI pagination hides unindexed chunks.
+	ListAllChunksByKnowledgeID(ctx context.Context, tenantID uint64, knowledgeID string) ([]*types.Chunk, error)
+
 	// CreateChunks creates chunks
 	CreateChunks(ctx context.Context, chunks []*types.Chunk) error
 	// GetChunkByID gets a chunk by id
@@ -131,6 +135,9 @@ type ChunkRepository interface {
 	ListRecentDocumentChunksWithQuestions(ctx context.Context, tenantID uint64, kbIDs []string, knowledgeIDs []string, limit int) ([]*types.Chunk, error)
 }
 
+// ChunkService mutations require explicit KB write grants and validate persisted
+// document bindings. Trusted processing/rollback code uses ChunkRepository after
+// its own task admission; the execution tenant alone is not a write grant.
 // ChunkService defines the interface for chunk service operations
 type ChunkService interface {
 	// CreateChunks creates chunks

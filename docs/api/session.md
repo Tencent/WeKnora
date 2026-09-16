@@ -18,6 +18,9 @@
 | POST   | `/sessions/:session_id/pin`                | 置顶会话                      |
 | DELETE | `/sessions/:id/pin`                        | 取消置顶会话                  |
 | GET    | `/sessions/continue-stream/:session_id`    | 继续未完成的流式响应          |
+| POST   | `/sessions/:session_id/sandbox/desktop-ticket` | 签发一次性桌面 WebSocket 票据 |
+| POST   | `/sessions/:session_id/sandbox/desktop/activity` | 上报桌面键鼠活动（parser 降级时续 TTL） |
+| GET    | `/sessions/:id/sandbox/desktop`            | 沙箱桌面 RFB WebSocket 中继（query `ticket`） |
 
 > **路由命名说明**：置顶接口的 POST 与 DELETE 使用了不同的路径参数名（POST 用 `:session_id`，DELETE 用 `:id`）。这是由于 gin 路由器为每个 HTTP 方法维护独立的 radix tree，且既有树中的通配符命名不同，必须保留以避免注册时的 `wildcard conflicts` panic。两者语义上都指会话 ID。
 
@@ -475,3 +478,45 @@ curl --location 'http://localhost:8080/api/v1/sessions/continue-stream/ceb9babb-
 **响应格式**:
 
 服务器端事件流（Server-Sent Events），事件结构与 `/knowledge-chat/:session_id`、`/agent-chat/:session_id` 返回结果一致。若该消息当前在流中已无事件返回 `404 No stream events found`；若消息记录不存在返回 `404 Incomplete message not found`。
+
+## POST `/sessions/:session_id/sandbox/desktop-ticket` - 签发桌面票据
+
+为沙箱图形桌面 WebSocket 签发一次性握手票据。访问 JWT 只出现在这次已认证 POST 上，不会进入 WS URL。票据 TTL 为 2 分钟，消费时 `GETDEL`，用过、过期、未知均返回同一类未授权错误。
+
+这些端点与终端 WebSocket 一样**未进入 Swagger**。行为说明见 [沙箱图形桌面](../sandbox-desktop.md)。
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/sessions/ceb9babb-1e30-41d7-817d-fd584954304b/sandbox/desktop-ticket' \
+--header 'Authorization: Bearer <access_token>'
+```
+
+**响应**:
+
+```json
+{
+    "success": true,
+    "data": {
+        "ticket": "hex-encoded-32-byte-id",
+        "expires_in": 120
+    }
+}
+```
+
+## GET `/sessions/:id/sandbox/desktop` - 桌面 RFB WebSocket
+
+浏览器 noVNC 将上一步的 `ticket` 放在 query 上升级为 WebSocket。该路由注册在全局 JWT 中间件之前，只认一次性票据。每个会话同一时刻只允许一条中继。
+
+沙箱未绑定、已暂停、镜像不支持桌面、启动失败等状态会先 upgrade 再以 close reason 断开（`SANDBOX_NOT_BOUND` / `SANDBOX_PAUSED` / `DESKTOP_UNSUPPORTED` / `DESKTOP_START_FAILED` 等），因为 JS WebSocket API 拿不到失败握手的 HTTP 状态。
+
+**请求**:
+
+```
+GET /api/v1/sessions/ceb9babb-1e30-41d7-817d-fd584954304b/sandbox/desktop?ticket=<ticket>
+Upgrade: websocket
+```
+
+## POST `/sessions/:session_id/sandbox/desktop/activity` - 上报桌面活动
+
+浏览器在键鼠事件时 POST。这是 RFB parser 遇到未知 opcode 时的降级续命；parser 健康时服务端忽略该请求，避免仅靠轮询延长沙箱 TTL。

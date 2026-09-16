@@ -21,6 +21,15 @@ const DOCUMENTS = [
     ],
   },
   {
+    knowledge_id: 'doc-architecture',
+    knowledge_title: '系统架构图.md',
+    knowledge_base_id: 'kb-product',
+    description: '检索与生成两层的系统架构示意图。',
+    chunks: [
+      '系统由检索与生成两层组成，整体结构见架构图。\n\n![系统架构](resource://AbCdEfGhIjKlMnOpQrStUv)',
+    ],
+  },
+  {
     knowledge_id: 'doc-deployment',
     knowledge_title: 'WeKnora 部署手册.md',
     knowledge_base_id: 'kb-ops',
@@ -57,6 +66,15 @@ const KNOWLEDGE_BASES = [
   { id: 'kb-product', name: 'Product docs', description: 'WeKnora 产品与检索文档' },
   { id: 'kb-ops', name: 'Ops runbooks', description: '部署与运维手册' },
 ]
+
+const ARCH_HANDLE = 'resource://AbCdEfGhIjKlMnOpQrStUv'
+const ARCH_PUBLIC = 'https://cdn.example.com/architecture.png'
+
+/** Mirror WeKnora's `resource_urls=public` rewrite of `resource://` handles. */
+function rewriteResources(value, publicMode) {
+  if (!publicMode) return value
+  return JSON.parse(JSON.stringify(value).replaceAll(ARCH_HANDLE, ARCH_PUBLIC))
+}
 
 /**
  * Score a passage by character-bigram overlap. The real backend scores with
@@ -122,6 +140,8 @@ function answerFor(query, results) {
  * @param options.apiKey - when set, requests must carry it as `X-API-Key`.
  * @param options.streamError - make the chat routes stream an `error` event.
  * @param options.streamTruncated - end the chat stream mid-answer, with no `complete`.
+ * @param options.forbidPublicResourceUrls - reject `resource_urls=public` with the
+ *   403 WeKnora returns for a knowledge-base-restricted API key.
  * @returns the base URL, the recorded requests, and a close function.
  */
 export async function startMockWeknora(options = {}) {
@@ -160,6 +180,16 @@ export async function startMockWeknora(options = {}) {
         json(401, { success: false, error: { message: 'invalid api key' } })
         return
       }
+
+      if (options.forbidPublicResourceUrls === true && url.searchParams.get('resource_urls') === 'public') {
+        json(403, {
+          success: false,
+          error: { message: 'resource_urls=public is not available for a knowledge-base-restricted API key' },
+        })
+        return
+      }
+
+      const publicMode = url.searchParams.get('resource_urls') === 'public'
 
       const forced = failures.get(url.pathname)
       if (forced !== undefined) {
@@ -223,7 +253,10 @@ export async function startMockWeknora(options = {}) {
         }
         json(200, {
           success: true,
-          data: searchResults(body.query, body.knowledge_base_ids ?? [], body.knowledge_ids ?? []),
+          data: rewriteResources(
+            searchResults(body.query, body.knowledge_base_ids ?? [], body.knowledge_ids ?? []),
+            publicMode,
+          ),
         })
         return
       }
@@ -280,9 +313,12 @@ export async function startMockWeknora(options = {}) {
         // Retrieving here anyway would hide an unscoped ask from the tests. The
         // agent route does have a server-side default, its KBSelectionMode.
         const scoped = (body.knowledge_base_ids ?? []).length > 0 || (body.knowledge_ids ?? []).length > 0
-        const results = route === 'agent-chat' || scoped
-          ? searchResults(body.query ?? '', body.knowledge_base_ids ?? [], [])
-          : []
+        const results = rewriteResources(
+          route === 'agent-chat' || scoped
+            ? searchResults(body.query ?? '', body.knowledge_base_ids ?? [], [])
+            : [],
+          publicMode,
+        )
         if (route === 'agent-chat') {
           send({
             id: 't1',
@@ -329,4 +365,4 @@ export async function startMockWeknora(options = {}) {
   }
 }
 
-export { DOCUMENTS, KNOWLEDGE_BASES }
+export { ARCH_HANDLE, ARCH_PUBLIC, DOCUMENTS, KNOWLEDGE_BASES }

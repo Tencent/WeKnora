@@ -4,18 +4,39 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 type fakeRemoteHandle struct {
-	id       string
-	provider RemoteProvider
-	metadata map[string]string
+	id                 string
+	provider           RemoteProvider
+	metadata           map[string]string
+	trafficAccessToken string
 }
 
 func (h *fakeRemoteHandle) ID() string               { return h.id }
 func (h *fakeRemoteHandle) Provider() RemoteProvider { return h.provider }
 func (h *fakeRemoteHandle) Metadata() map[string]string {
+	return cloneStringMap(h.metadata)
+}
+func (h *fakeRemoteHandle) TrafficAccessToken() string { return h.trafficAccessToken }
+
+// fakeTokenlessHandle models Docker, whose handle deliberately does not
+// implement RemoteInboundTokenCarrier because the backend has no inbound
+// credential at all. InboundTokenOf therefore returns "" for a reason that is
+// not "the credential was lost".
+type fakeTokenlessHandle struct {
+	id       string
+	provider RemoteProvider
+	metadata map[string]string
+}
+
+func (h *fakeTokenlessHandle) ID() string               { return h.id }
+func (h *fakeTokenlessHandle) Provider() RemoteProvider { return h.provider }
+func (h *fakeTokenlessHandle) Metadata() map[string]string {
 	return cloneStringMap(h.metadata)
 }
 
@@ -42,9 +63,25 @@ type fakeRemoteClient struct {
 
 	createCount int
 	connectIDs  []string
+	connects    []RemoteConnectRequest
 	getIDs      []string
 	deleteIDs   []string
 	listCount   int
+
+	trafficAccessToken string
+
+	// reissuesTokenOnConnect models a provider that hands the inbound token
+	// back on reconnect. E2B and Cube issue it only at create time, so the
+	// default false is the realistic behaviour.
+	reissuesTokenOnConnect bool
+
+	// connectTrafficToken, when set, is returned on Connect even if the
+	// request already carried a token — the provider-wins case.
+	connectTrafficToken string
+
+	// omitsInboundTokenCarrier makes handles skip
+	// RemoteInboundTokenCarrier, the way Docker's do.
+	omitsInboundTokenCarrier bool
 
 	createErr   error
 	connectErrs map[string]error
@@ -66,7 +103,7 @@ type fakeRemoteClient struct {
 }
 
 func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
-	return &fakeRemoteClient{
+	client := &fakeRemoteClient{
 		provider: provider,
 		capabilities: RemoteSandboxCapabilities{
 			SupportsReconnect:             true,
@@ -79,6 +116,36 @@ func newFakeRemoteClient(provider RemoteProvider) *fakeRemoteClient {
 		getErrs:     make(map[string]error),
 		deleteErrs:  make(map[string]error),
 	}
+	// Cube and E2B issue the inbound token at create. DefaultConfig closes
+	// public inbound, so a tokenless fake would fail createAndBind the same
+	// way a real provider that omitted the token does. Tests that want that
+	// failure must clear trafficAccessToken explicitly.
+	if provider == RemoteProvider(SandboxTypeCube) || provider == RemoteProvider(SandboxTypeE2B) {
+		client.trafficAccessToken = "test-inbound-token"
+	}
+	return client
+}
+
+func TestFakeRemoteClientConnectRestoresRequestedTrafficToken(t *testing.T) {
+	client := newFakeRemoteClient(RemoteProvider(SandboxTypeCube))
+	client.trafficAccessToken = "provider-issued-token"
+
+	created, err := client.Create(context.Background(), RemoteCreateRequest{})
+	require.NoError(t, err)
+	require.Equal(t, "provider-issued-token", InboundTokenOf(created))
+
+	reconnected, err := client.Connect(context.Background(), RemoteConnectRequest{
+		SandboxID: created.ID(),
+	})
+	require.NoError(t, err)
+	require.Empty(t, InboundTokenOf(reconnected))
+
+	reconnected, err = client.Connect(context.Background(), RemoteConnectRequest{
+		SandboxID:          created.ID(),
+		TrafficAccessToken: "restored-token",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "restored-token", InboundTokenOf(reconnected))
 }
 
 func (c *fakeRemoteClient) Provider() RemoteProvider { return c.provider }
@@ -123,7 +190,7 @@ func (c *fakeRemoteClient) Create(
 		startedAt:  time.Now().UTC(),
 	}
 	c.sandboxes[id] = record
-	handle := c.handle(record)
+	handle := c.handle(record, c.trafficAccessToken)
 	afterCreate := c.afterCreate
 	c.mu.Unlock()
 	if afterCreate != nil {
@@ -134,14 +201,16 @@ func (c *fakeRemoteClient) Create(
 
 func (c *fakeRemoteClient) Connect(
 	ctx context.Context,
-	sandboxID string,
+	request RemoteConnectRequest,
 ) (RemoteSandboxHandle, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	sandboxID := request.SandboxID
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.connectIDs = append(c.connectIDs, sandboxID)
+	c.connects = append(c.connects, request)
 	if err := c.connectErrs[sandboxID]; err != nil {
 		return nil, err
 	}
@@ -155,7 +224,13 @@ func (c *fakeRemoteClient) Connect(
 			nil,
 		)
 	}
-	return c.handle(record), nil
+	token := request.TrafficAccessToken
+	if c.connectTrafficToken != "" {
+		token = c.connectTrafficToken
+	} else if token == "" && c.reissuesTokenOnConnect {
+		token = c.trafficAccessToken
+	}
+	return c.handle(record, token), nil
 }
 
 func (c *fakeRemoteClient) Get(
@@ -383,11 +458,22 @@ func (c *fakeRemoteClient) hasSandbox(id string) bool {
 	return ok
 }
 
-func (c *fakeRemoteClient) handle(record *fakeRemoteRecord) RemoteSandboxHandle {
+func (c *fakeRemoteClient) handle(
+	record *fakeRemoteRecord,
+	trafficAccessToken string,
+) RemoteSandboxHandle {
+	if c.omitsInboundTokenCarrier {
+		return &fakeTokenlessHandle{
+			id:       record.id,
+			provider: c.provider,
+			metadata: cloneStringMap(record.metadata),
+		}
+	}
 	return &fakeRemoteHandle{
-		id:       record.id,
-		provider: c.provider,
-		metadata: cloneStringMap(record.metadata),
+		id:                 record.id,
+		provider:           c.provider,
+		metadata:           cloneStringMap(record.metadata),
+		trafficAccessToken: trafficAccessToken,
 	}
 }
 

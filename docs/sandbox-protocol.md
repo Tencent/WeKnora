@@ -60,9 +60,9 @@
 - 认证：envd 要求 `Authorization: Basic base64("<user>:")`，SDK 发的是 `X-User-ID` 头。E2B Cloud 对此宽容，其他实现直接返回 `unauthenticated: no user specified`。
 - 文件上传：envd 的 `POST /files` 只接受 `multipart/form-data`，SDK 发的是裸 `application/octet-stream`，会得到 500。
 
-另外健康探针改用 `GET /v2/sandboxes`：旧的 `GET /sandboxes` 已不在客户端其他调用路径上，部分 E2B 兼容实现也只实现了 v2，用旧接口探活会把健康的后端判成不可用。文件操作现在也显式声明执行账号（`user`），与脚本运行账号保持一致，而不是依赖各实现的默认值。
+另外健康探针改用 `GET /v2/sandboxes`：旧的 `GET /sandboxes` 已不在客户端其他调用路径上，部分 E2B 兼容实现也只实现了 v2，用旧接口探活会把健康的后端判成不可用。文件操作显式声明执行账号（默认 `root`，见 `DefaultSandboxExecUser`），与脚本运行账号保持一致，而不是依赖各实现的默认值。
 
-模板镜像需要提供 `user` 账号（uid 1000），这是 E2B 模板的既定约定；WeKnora 以该账号执行脚本与文件操作。写权限只保证在 `/workspace/output`（产物目录，执行前由 WeKnora 创建并授权）与 `/workspace/input`（附件暂存）下，脚本不应假设 `/workspace` 根目录可写。
+标准模板保留 `user` 账号（uid 1000）供兼容工具显式选用；WeKnora 默认以 `root` 执行脚本与文件操作。模板应提供可写的 `/workspace`，普通调用会准备 `/workspace/output`、`/workspace/input` 和本次工作目录，维护调用只准备其工作目录。工作目录参数的前缀检查不是 root 命令的文件系统隔离边界；自定义只读挂载也不会因为使用 root 而变成可写。
 
 ## 一致性测试
 

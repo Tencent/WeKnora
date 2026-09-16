@@ -3,6 +3,7 @@ package agentcmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -81,7 +82,7 @@ func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	svc := &fakeEditSvc{
 		getResp: &sdk.Agent{
-			ID: "ag_abc", Name: "Original", Description: "Keep me",
+			ID: "ag_abc", Name: "Original", Description: "Keep me", Avatar: "🤖",
 			Config: &sdk.AgentConfig{ModelID: "model-x", Temperature: 0.7, KnowledgeBases: []string{"kb_a"}},
 		},
 		updateResp: &sdk.Agent{ID: "ag_abc"},
@@ -96,6 +97,11 @@ func TestEdit_FetchThenUpdate_PreservesUntouchedFields(t *testing.T) {
 	require.NotNil(t, svc.updateReq)
 	assert.Equal(t, "Original", svc.updateReq.Name, "Name must round-trip unchanged")
 	assert.Equal(t, "Updated", svc.updateReq.Description)
+	body, err := json.Marshal(svc.updateReq)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &fields))
+	assert.NotContains(t, fields, "avatar", "an unrelated edit must not clear the avatar")
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "model-x", svc.updateReq.Config.ModelID, "ModelID must round-trip")
 	assert.Equal(t, []string{"kb_a"}, svc.updateReq.Config.KnowledgeBases, "KBs must round-trip")

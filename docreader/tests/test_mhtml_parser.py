@@ -1,10 +1,12 @@
 import base64
+import email
 import json
 import unittest
+from email.header import Header
 from email.message import EmailMessage
 from pathlib import Path
 
-from docreader.parser.mhtml_parser import MHTMLParser
+from docreader.parser.mhtml_parser import MHTMLParser, _header_str
 from docreader.parser.registry import registry
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -82,6 +84,60 @@ def _mhtml_with_table_image_and_caption() -> bytes:
     root.attach(image)
 
     return root.as_bytes()
+
+
+def _mhtml_with_8bit_utf8_headers() -> bytes:
+    """Browser-style MHTML: raw UTF-8 bytes in MIME headers, not RFC 2047."""
+    html_loc = "https://example.com/测试页面.html".encode("utf-8")
+    ad_loc = "https://googleads.example/广告.html".encode("utf-8")
+    image_loc = "https://example.com/图片.png".encode("utf-8")
+    content_id = "<图片@local>".encode("utf-8")
+    attachment_id = "图片".encode("utf-8")
+    main_html = (
+        "<html><body><h1>中文主文</h1>"
+        '<img alt="绝对" src="https://example.com/图片.png">'
+        '<img alt="相对" src="图片.png">'
+        '<img alt="cid" src="cid:图片@local">'
+        "</body></html>"
+    ).encode("utf-8")
+    ad_html = "<html><body><h1>广告正文</h1></body></html>".encode("utf-8")
+    png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    return b"".join(
+        [
+            b"MIME-Version: 1.0\r\n",
+            b'Content-Type: multipart/related; boundary="----=_Next"\r\n',
+            b"\r\n",
+            b"------=_Next\r\n",
+            b'Content-Type: text/html; charset="utf-8"\r\n',
+            b"Content-Transfer-Encoding: 8bit\r\n",
+            b"Content-Location: ",
+            html_loc,
+            b"\r\n\r\n",
+            main_html,
+            b"\r\n",
+            b"------=_Next\r\n",
+            b'Content-Type: text/html; charset="utf-8"\r\n',
+            b"Content-Transfer-Encoding: 8bit\r\n",
+            b"Content-Location: ",
+            ad_loc,
+            b"\r\n\r\n",
+            ad_html,
+            b"\r\n",
+            b"------=_Next\r\n",
+            b"Content-Type: image/png\r\n",
+            b"Content-Transfer-Encoding: base64\r\n",
+            b"Content-Location: ",
+            image_loc,
+            b"\r\nContent-ID: ",
+            content_id,
+            b"\r\nX-Attachment-Id: ",
+            attachment_id,
+            b"\r\n\r\n",
+            base64.b64encode(png),
+            b"\r\n",
+            b"------=_Next--\r\n",
+        ]
+    )
 
 
 class MHTMLParserTest(unittest.TestCase):
@@ -230,6 +286,34 @@ class MHTMLParserTest(unittest.TestCase):
         self.assertIn("```\nline1\n\n\nline2\n```", document.content)
         self.assertIn("* parent\n  + child", document.content)
         self.assertIn("alpha  \nbeta", document.content)
+
+    def test_header_str_recovers_unknown_8bit_utf8(self):
+        raw = (
+            b"Content-Type: text/plain\r\n"
+            b"Content-Location: https://example.com/"
+            + "图片.png".encode("utf-8")
+            + b"\r\n\r\nbody\r\n"
+        )
+        value = email.message_from_bytes(raw).get("Content-Location")
+        self.assertIsInstance(value, Header)
+        self.assertEqual(_header_str(value), "https://example.com/图片.png")
+        self.assertEqual(_header_str(None), "")
+        self.assertEqual(_header_str("ascii-location"), "ascii-location")
+        self.assertEqual(_header_str("已是unicode"), "已是unicode")
+
+    def test_parse_8bit_utf8_headers_rewrites_images_without_crashing(self):
+        document = MHTMLParser(
+            file_name="article.mhtml", file_type="mhtml"
+        ).parse_into_text(_mhtml_with_8bit_utf8_headers())
+
+        self.assertIn("中文主文", document.content)
+        self.assertNotIn("广告正文", document.content)
+        self.assertIn("images/图片.png", document.images)
+        self.assertIn("images/图片.png", document.content)
+        self.assertEqual(document.content.count("images/图片.png"), 3)
+        self.assertNotIn("cid:图片@local", document.content)
+        self.assertNotIn("\ufffd", document.content)
+        self.assertTrue(all("\ufffd" not in key for key in document.images))
 
     def test_registry_resolves_mhtml(self):
         self.assertIs(registry.get_parser_class("", "mhtml"), MHTMLParser)

@@ -1,41 +1,39 @@
 # 分块机制（Chunking）
 
-检索的准确度很大程度上取决于文档被切成什么样：切太碎，单块信息不完整、答不全；切太大，一块里混了好几个主题，向量表达不准。分块就是这一步。
+分块将文档划分为检索单元。较小的分块有助于聚焦主题，较大的分块可保留更多上下文；分块大小和重叠范围需要结合文档结构与检索结果调整。
 
-大多数情况下用默认值就行（分块 512 字、重叠 80 字、自适应策略），需要调的时候按下面这张表判断：
+可先使用界面默认配置（分块 512 字符、重叠 80 字符、自适应策略），再根据以下现象调整：
 
 | 遇到的情况 | 建议 |
 | --- | --- |
-| 回答缺上下文、经常答半句 | 调大 `chunk_size`，或开启父子分块（子块检索、父块回答） |
+| 回答缺上下文、信息不完整 | 调大 `chunk_size`，或开启父子分块（子块检索、父块回答） |
 | 检索命中的块跟问题关系不大 | 调小 `chunk_size`，让每块主题更集中 |
 | 资料是条目式的（FAQ、字典、参数表） | 重叠设为 0，避免相邻条目互相污染 |
-| 资料是长篇叙述（报告、论文） | 重叠调到 150–200，保住跨块的语义连贯 |
-| 想先看看会切成什么样 | 用分块预览接口 `POST /api/v1/chunker/preview` 试切，不落库 |
+| 资料是长篇叙述（报告、论文） | 重叠调到 150–200，保留跨块语义联系 |
+| 预览分块结果 | 使用 `POST /api/v1/chunker/preview` 预览，不写入数据库 |
 
-改完分块配置需要对已有文档重新解析才会生效。下面是完整机制。
+修改分块配置后，已有文档需要重新解析才能使用新配置。
+
+## 参数速查与调优建议 {#_10-参数速查与调优建议}
+
+| 场景 | strategy | chunk_size | chunk_overlap | 其他 |
+|------|----------|------------|---------------|------|
+| 通用文档（推荐起点） | `auto` | 512 | 80 | — |
+| 结构化技术文档 / 手册 | `auto`（会命中 heading） | 512–1024 | 80 | 面包屑自动生效 |
+| OCR PDF / 纯文本书籍 | `auto`（会命中 heuristic） | 512–1024 | 80–150 | `languages` 指定语种可减少误判 |
+| 长叙事 / 论证型文档 | `auto` | 1000–2000 | 150–200 | 可叠加父子分块 |
+| 精确检索 + 长上下文 | 任意 | — | — | `enable_parent_child=true`，parent 4096 / child 384 |
+| FAQ / 原子记录 | 不适用（FAQ KB 逐条成块） | — | 0 | `FAQIndexMode` 控制答案是否入索引 |
+| 严格 token 上限的 embedding 模型 | 任意 | — | — | 设 `token_limit`，自动换算字符预算 |
+| 复现旧版本行为 | `legacy` | 原值 | 显式设 64 | 见 [ChunkingConfig（KB 级，可被单次上传覆盖）](#_1-1-chunkingconfig-kb-级-可被单次上传覆盖) 迁移注意 |
+
+## 分块机制参考
 
 WeKnora 的分块在 **Go 侧**完成（`internal/infrastructure/chunker` 包），采用"文档画像 → 分层策略 → 结果校验 → 逐级回退"的自适应架构；Python 侧 `docreader/splitter/` 保留了同源的递归分块器供 docreader sidecar 使用（生产主路径是 Go 实现，`docreader/splitter/splitter.py` 注释明确说明二者默认值已对齐）。
 
-涉及源码：
+### 配置模型 {#_1-配置模型}
 
-| 模块 | 文件 |
-|------|------|
-| 策略入口与回退链 | `internal/infrastructure/chunker/strategy.go` |
-| 文档画像 | `internal/infrastructure/chunker/profiler.go` |
-| Tier 1 标题分块 | `internal/infrastructure/chunker/heading_splitter.go`、`heading_hierarchy.go` |
-| Tier 2 启发式分块 | `internal/infrastructure/chunker/heuristic_splitter.go`、`patterns.go` |
-| Tier 3 递归分块（legacy） | `internal/infrastructure/chunker/splitter.go` |
-| 表头追踪 | `internal/infrastructure/chunker/header_tracker.go` |
-| 结果校验 | `internal/infrastructure/chunker/validator.go` |
-| Token 估算 | `internal/infrastructure/chunker/tokens.go` |
-| 配置结构 | `internal/types/knowledgebase.go`（`ChunkingConfig`）、`internal/types/indexing_strategy.go` |
-| 管线接入 | `internal/application/service/knowledge_process.go`（`buildSplitterConfigFromChunking` / `buildParentChildConfigs` / `processChunks`） |
-| 调试端点 | `internal/handler/chunker_debug.go`（`POST /api/v1/chunker/preview`） |
-| Python 侧 | `docreader/splitter/splitter.py`、`docreader/splitter/header_hook.py` |
-
-## 1. 配置模型
-
-### 1.1 ChunkingConfig（KB 级，可被单次上传覆盖）
+#### ChunkingConfig（KB 级，可被单次上传覆盖） {#_1-1-chunkingconfig-kb-级-可被单次上传覆盖}
 
 `internal/types/knowledgebase.go`：
 
@@ -44,10 +42,10 @@ WeKnora 的分块在 **Go 侧**完成（`internal/infrastructure/chunker` 包）
 | `chunk_size` | int | 512（字符） | 单块目标大小。约 100–130 英文 token / 300 中文 token。FAQ 式原子内容建议 200–400，长叙事文档 1000–2000 |
 | `chunk_overlap` | int | 80（约 15%） | 相邻块重叠字符数。原子数据可设 0，长叙事可 150–200。超过 `chunk_size/2` 会被钳制到一半 |
 | `separators` | []string | `["\n\n", "\n", "。"]` | 递归分块的分隔符优先级序列 |
-| `strategy` | string | `""`（= legacy） | 分块策略：`auto` / `heading` / `heuristic` / `recursive` / `legacy`，见 §2 |
+| `strategy` | string | `""`（= legacy） | 分块策略：`auto` / `heading` / `heuristic` / `recursive` / `legacy`，见 [自适应策略：三个 Tier 与回退链](#_2-自适应策略-三个-tier-与回退链) |
 | `token_limit` | int | 0（不启用） | 以近似 token 数上限约束块大小；>0 时按语言换算字符预算并取更小者（0.9 安全系数） |
 | `languages` | []string | 空（自动检测） | 启发式模式的语言提示，如 `["zh"]`、`["en","de"]` |
-| `enable_parent_child` | bool | false | 启用父子（两级）分块，见 §5 |
+| `enable_parent_child` | bool | false | 启用父子（两级）分块，见 [父子分块（Parent-Child / 多粒度）](#_5-父子分块-parent-child-多粒度) |
 | `parent_chunk_size` | int | 4096 | 父块大小（仅父子模式） |
 | `child_chunk_size` | int | 384 | 子块大小（仅父子模式），子块 overlap 固定为 `child_size/5`（约 20%） |
 | `parser_engine_rules` | []ParserEngineRule | 空 | 文件类型 → 解析引擎路由，附带解析器级开关如 `xlsx_first_row_as_header`（属于解析而非分块，但同在此结构） |
@@ -64,14 +62,14 @@ const (
 
 > 迁移注意（源码注释原文）：历史上 Go DefaultConfig 用 64、knowledge.go 用 50、Python docreader 用 100 三种 overlap 默认值，现已统一为 80。存量 KB 若 DB 中存的是 `ChunkOverlap=0`，重建索引时会取 80，embedding 与旧值不再逐位一致。
 
-### 1.2 SplitterConfig（运行时配置）
+#### SplitterConfig（运行时配置） {#_1-2-splitterconfig-运行时配置}
 
 服务层通过 `buildSplitterConfigFromChunking`（`knowledge_process.go`）把 `ChunkingConfig` 映射为 `chunker.SplitterConfig{ChunkSize, ChunkOverlap, Separators, Strategy, TokenLimit, Languages}`；chunker 包内 `ensureDefaults` 再做兜底：
 
 - `TokenLimit > 0` 时：`charBudget = CharsForTokenLimit(TokenLimit, lang)`，若小于 `ChunkSize` 则取代之（`tokens.go`，字符/Token 比：en 4.0、de 4.5、zh 1.7、mixed 3.0，附 0.9 安全系数——确保块不超过 embedding 模型的 token 上限）；
 - `ChunkOverlap > ChunkSize/2` 时钳制为 `ChunkSize/2`。
 
-### 1.3 IndexingStrategy 与分块的关系
+#### IndexingStrategy 与分块的关系 {#_1-3-indexingstrategy-与分块的关系}
 
 `internal/types/indexing_strategy.go` 的四个开关决定分块产物流向哪些管线：
 
@@ -88,7 +86,7 @@ type IndexingStrategy struct {
 - `NeedsEmbedding()`（vector || keyword）为假时分块只写 DB、跳过 `BatchIndex`（`processChunks` 中 `skipStage(StageEmbedding)`）；
 - Wiki / Graph 都以文本 chunk 为输入在后处理阶段消费。
 
-## 2. 自适应策略：三个 Tier 与回退链
+### 自适应策略：三个 Tier 与回退链 {#_2-自适应策略-三个-tier-与回退链}
 
 公开入口是 `chunker.Split(text, cfg)` / `chunker.SplitWithDiagnostics`（`strategy.go`）。`cfg.Strategy` 的取值与解析（`resolveChainWithProfile`）：
 
@@ -112,7 +110,7 @@ Validator 的拒绝规则：
 | 最大块不足 `chunkSize/4`（过度碎片化） | `all chunks far below target size` |
 | 最大块超过 `2*chunkSize`（无视预算） | `chunk exceeds 2x target size` |
 
-### 2.1 文档画像（profiler.go）
+#### 文档画像（profiler.go） {#_2-1-文档画像-profiler-go}
 
 `ProfileDocument(text)` 单遍扫描产出 `DocProfile`：总字符/行数、行长均值方差、Markdown 各级标题计数、编号小节数、全大写短行数、连续空行块、换页符 `\f` 数、水平分隔线数、德/英/中章节标记数、页脚行数、是否含表格/代码、代码占比、语言检测（前 4096 字节采样，`DetectLanguage` 按 CJK/拉丁比例判 `zh/de/en/mixed`）。
 
@@ -133,7 +131,7 @@ chain = append(chain, TierLegacy) // 永远兜底
 
 `DominantHeadingLevel` 选主分割层级：优先取"出现 ≥3 次的最浅层级"（文档真正的结构骨架），否则取最深的出现过的层级。
 
-### 2.2 分块决策流程图
+#### 分块决策流程图 {#_2-2-分块决策流程图}
 
 ```mermaid
 flowchart TD
@@ -160,9 +158,9 @@ flowchart TD
     V3 -->|"是"| OUT
 ```
 
-## 3. 三种分块算法详解
+### 三种分块算法详解 {#_3-三种分块算法详解}
 
-### 3.1 Tier 1：标题感知分块（heading_splitter.go）
+#### Tier 1：标题感知分块（heading_splitter.go） {#_3-1-tier-1-标题感知分块-heading-splitter-go}
 
 **适用**：有规范 Markdown 标题结构的文档（技术文档、导出的 Word/带书签 PDF 等）。
 
@@ -177,7 +175,7 @@ flowchart TD
 
 **位置不变式**：`End - Start == utf8.RuneCountInString(Content)` 始终成立（面包屑不算入 Content），文档还原、UI 高亮依赖这一点。
 
-### 3.2 Tier 2：启发式边界分块（heuristic_splitter.go + patterns.go）
+#### Tier 2：启发式边界分块（heuristic_splitter.go + patterns.go） {#_3-2-tier-2-启发式边界分块-heuristic-splitter-go-patterns-go}
 
 **适用**：没有 Markdown 标题、但有可识别结构线索的文档（OCR 出的 PDF、纯文本手册、扫描版书籍等）。
 
@@ -195,12 +193,12 @@ flowchart TD
 
 然后：
 
-- `dropBoundsInsideSpans`：落在受保护区间（表格/代码块/公式，见 §3.3）**内部**的边界被丢弃，边缘对齐的保留；
+- `dropBoundsInsideSpans`：落在受保护区间（表格/代码块/公式，见 [Tier 3：递归分块 legacy（splitter.go，Python 移植）](#_3-3-tier-3-递归分块-legacy-splitter-go-python-移植)）**内部**的边界被丢弃，边缘对齐的保留；
 - **贪心装箱**：沿边界累积块，累计超过 `ChunkSize` 且已有 ≥ `max(ChunkSize/4, 50)` 内容时落一个 Chunk；
 - 两边界之间的超大块递归交给 `SplitText`；
 - overlap 对齐：`applyOverlapAligned` 在 `[curEnd-2*overlap, curEnd)` 窗口内优先吸附到最近的语义边界，其次吸附到换行，避免下一块从词中间开始。
 
-### 3.3 Tier 3：递归分块 legacy（splitter.go，Python 移植）
+#### Tier 3：递归分块 legacy（splitter.go，Python 移植） {#_3-3-tier-3-递归分块-legacy-splitter-go-python-移植}
 
 这是从 `docreader/splitter/splitter.py` 移植的基础实现，也是所有 Tier 的兜底与"段内二次切分"引擎。三步：
 
@@ -228,11 +226,11 @@ var protectedPatterns = []*regexp.Regexp{
 - 边界优先级：段落分隔（`\n\n`）> 换行（`\n`）> 句末（`。`、`？`、`！`，以及英文 `. ` / `? ` / `! `——英文标点要求后面跟空格，避免把 `3.14`、`v1.2` 切开）。优先级相同时取窗口内**最靠前**的那个，让有效重叠尽量大；
 - 窗口可以切进单个 `splitUnit` 内部（旧实现只能整单元保留，普通段落经常直接退化成零重叠），但不会跨越表头标记这类 `start == end` 的零宽合成单元，以维持 `Start/End` 偏移与 Content 的对应不变式；
 - 受保护区间（代码块、行内代码 `` ` ` ``、公式、表格、图片/链接）内部的分隔符不作为边界；边界之后若只剩空白也不成立；
-- 窗口内找不到合法语义边界时**不保留重叠**，宁可没有重叠也不从半个词开始。
+- 窗口内找不到合法语义边界时不保留重叠，避免从词的中间截断。
 
 行内代码 `` `foo` `` 在这一版加入了受保护正则列表，防止在反引号内部切开。
 
-### 3.4 表格处理：表头追踪（header_tracker.go）
+#### 表格处理：表头追踪（header_tracker.go） {#_3-4-表格处理-表头追踪-header-tracker-go}
 
 大 Markdown 表格被切成多块后，后续块会丢失列名上下文。`headerTracker`（移植自 `docreader/splitter/header_hook.py`）解决这一问题：
 
@@ -243,13 +241,13 @@ var protectedPatterns = []*regexp.Regexp{
 
 另外，OCR 引擎（PaddleOCR-VL 等）输出的内联 HTML 表格在解析阶段就被 `docparser/html_table_normalizer.go` 的 `normalizeHTMLTables` 转成 GFM Markdown 表格（含 rowspan/colspan 的只剥离表现属性），从而进入上述保护与表头追踪逻辑，不会被 chunker 切碎。
 
-### 3.5 图片处理
+#### 图片处理 {#_3-5-图片处理}
 
 - Markdown 图片引用 `![alt](url)` 是受保护模式，永不被切断；
 - `chunker.ExtractImageRefs(text)`（`splitter.go`）用支持一层括号嵌套的正则提取块内图片引用，供 `processChunks` 建立 chunk ↔ 图片关联；
 - 每张图片在多模态阶段生成 `image_caption` / `image_ocr` 两个子 Chunk（`ParentChunkID` 指向文本块）并单独索引——图片语义可召回，命中后回到原文块。
 
-## 4. 上下文头（ContextHeader）
+### 上下文头（ContextHeader） {#_4-上下文头-contextheader}
 
 `Chunk.ContextHeader` 是与 Content **分离存储**的上下文串（标题面包屑）：
 
@@ -272,7 +270,7 @@ func (c *Chunk) EmbeddingContent() string {
 - **持久化到 `chunks.context_header` 列**（migration `000078`）。早期版本是内存字段（`gorm:"-"`），索引完成即丢弃；引入分块手工编辑后，重新索引单个分块时必须复现同样的索引输入，因此改为落库。`json:"-"` 保持不变，接口响应里仍不返回；
 - 父子分块时 `mergeBreadcrumbs`（`strategy.go`）合并父/子面包屑并去掉首行重复，子块获得比父块更细的路径。
 
-## 5. 父子分块（Parent-Child / 多粒度）
+### 父子分块（Parent-Child / 多粒度） {#_5-父子分块-parent-child-多粒度}
 
 `EnableParentChild = true` 时启用两级分块（`chunker.SplitParentChild`，策略感知版；legacy 版为 `SplitTextParentChild`）：
 
@@ -305,7 +303,7 @@ flowchart LR
     V --> R
 ```
 
-## 6. FAQ 分块的特殊性
+### FAQ 分块的特殊性 {#_6-faq-分块的特殊性}
 
 FAQ 知识库**不经过任何分块算法**：每条问答对本身就是一个 `ChunkTypeFAQ` 的 Chunk（`knowledge_faq.go`），Content 由 `buildFAQChunkContent` 按索引模式生成：
 
@@ -322,7 +320,7 @@ if mode == types.FAQIndexModeQuestionAnswer && len(meta.Answers) > 0 {
 - 索引模式：`question_only` / `question_answer`（KB 级 `FAQIndexMode`）；问题索引模式 `combined`（标准问+相似问一个向量）/ `separate`（每个相似问独立向量，支持增量更新）；
 - 建议 FAQ 场景 `chunk_overlap = 0` 的通用原则在此天然成立——条目间无重叠。
 
-## 7. 与入库管线的衔接
+### 与入库管线的衔接 {#_7-与入库管线的衔接}
 
 `knowledge_process.go` 中的调用链：
 
@@ -337,7 +335,7 @@ processDocument
 
 分块阶段有独立 Span（`StageChunking`，记录 `chunks_planned/chunks_written/total_text_chars`），失败错误码 `ErrCodeChunkingFailed`。
 
-## 8. 调试能力：POST /api/v1/chunker/preview（chunker_debug.go）
+### 调试能力：POST /api/v1/chunker/preview（chunker_debug.go） {#_8-调试能力-post-api-v1-chunker-preview-chunker-debug-go}
 
 只读预览端点，KB 编辑器的"分块调试面板"使用它在改参数前试切样例文本——**不写 DB、不产生 embedding、不记录文本日志**。
 
@@ -378,7 +376,7 @@ g.apiKeyRoute(r, http.MethodPost, "/chunker/preview",
     apiKeyRetrieve(apiKeyIngest(apiKeyFullAccess())), g.Viewer(), handler.PreviewChunking)
 ```
 
-## 9. Python 侧分块器（docreader/splitter/）
+### Python 侧分块器（docreader/splitter/） {#_9-python-侧分块器-docreader-splitter}
 
 `docreader/splitter/splitter.py` 的 `TextSplitter` 是 Go legacy 实现的原型，仍随 docreader sidecar 保留：
 
@@ -387,15 +385,21 @@ g.apiKeyRoute(r, http.MethodPost, "/chunker/preview",
 - 产出 `(start, end, text)` 三元组并断言 `"".join(splits) == text` 可完整还原；`restore_text` 演示了去重叠还原算法；
 - `docreader/splitter/header_hook.py` 的 `HeaderTracker` 与 Go `header_tracker.go` 行为一致（表头识别、空表头补全、列数不匹配时结束）。
 
-## 10. 参数速查与调优建议
+## 实现参考
 
-| 场景 | strategy | chunk_size | chunk_overlap | 其他 |
-|------|----------|------------|---------------|------|
-| 通用文档（推荐起点） | `auto` | 512 | 80 | — |
-| 结构化技术文档 / 手册 | `auto`（会命中 heading） | 512–1024 | 80 | 面包屑自动生效 |
-| OCR PDF / 纯文本书籍 | `auto`（会命中 heuristic） | 512–1024 | 80–150 | `languages` 指定语种可减少误判 |
-| 长叙事 / 论证型文档 | `auto` | 1000–2000 | 150–200 | 可叠加父子分块 |
-| 精确检索 + 长上下文 | 任意 | — | — | `enable_parent_child=true`，parent 4096 / child 384 |
-| FAQ / 原子记录 | 不适用（FAQ KB 逐条成块） | — | 0 | `FAQIndexMode` 控制答案是否入索引 |
-| 严格 token 上限的 embedding 模型 | 任意 | — | — | 设 `token_limit`，自动换算字符预算 |
-| 复现旧版本行为 | `legacy` | 原值 | 显式设 64 | 见 §1.1 迁移注意 |
+涉及源码：
+
+| 模块 | 文件 |
+|------|------|
+| 策略入口与回退链 | `internal/infrastructure/chunker/strategy.go` |
+| 文档画像 | `internal/infrastructure/chunker/profiler.go` |
+| Tier 1 标题分块 | `internal/infrastructure/chunker/heading_splitter.go`、`heading_hierarchy.go` |
+| Tier 2 启发式分块 | `internal/infrastructure/chunker/heuristic_splitter.go`、`patterns.go` |
+| Tier 3 递归分块（legacy） | `internal/infrastructure/chunker/splitter.go` |
+| 表头追踪 | `internal/infrastructure/chunker/header_tracker.go` |
+| 结果校验 | `internal/infrastructure/chunker/validator.go` |
+| Token 估算 | `internal/infrastructure/chunker/tokens.go` |
+| 配置结构 | `internal/types/knowledgebase.go`（`ChunkingConfig`）、`internal/types/indexing_strategy.go` |
+| 管线接入 | `internal/application/service/knowledge_process.go`（`buildSplitterConfigFromChunking` / `buildParentChildConfigs` / `processChunks`） |
+| 调试端点 | `internal/handler/chunker_debug.go`（`POST /api/v1/chunker/preview`） |
+| Python 侧 | `docreader/splitter/splitter.py`、`docreader/splitter/header_hook.py` |

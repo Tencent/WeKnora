@@ -93,6 +93,20 @@ type StreamingConnector interface {
 	) (*types.SyncCursor, error)
 }
 
+// FullSyncWithCursor is optional. The batch sync path uses it for ForceFull and
+// sync_mode=full so a connector can re-fetch every document while still
+// reconciling deletions against the previous cursor. Connectors that omit it
+// keep FetchAll's no-cursor behaviour and therefore cannot emit deletions on a
+// full sync.
+type FullSyncWithCursor interface {
+	FetchAllFromCursor(
+		ctx context.Context,
+		config *types.DataSourceConfig,
+		resourceIDs []string,
+		cursor *types.SyncCursor,
+	) ([]types.FetchedItem, *types.SyncCursor, error)
+}
+
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
 	connectors map[string]Connector
@@ -240,10 +254,10 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 	types.ConnectorTypeDingTalk: {
 		Type:         types.ConnectorTypeDingTalk,
 		Name:         "DingTalk (钉钉)",
-		Description:  "Sync documents and content from DingTalk",
+		Description:  "Sync online documents from DingTalk knowledge bases",
 		Priority:     7,
-		AuthType:     "api_key",
-		Capabilities: []string{"incremental"},
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeWebCrawler: {
 		Type:         types.ConnectorTypeWebCrawler,

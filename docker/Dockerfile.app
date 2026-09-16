@@ -1,3 +1,16 @@
+# Build the paired extension and fetch the checksum-pinned native daemon.
+# Node runs on the builder architecture; only bsk targets the runtime image.
+FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS browserskill
+WORKDIR /build
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git python3 ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+COPY scripts/build_browserskill.sh scripts/browserskill-release.json ./scripts/
+COPY patches/browserskill ./patches/browserskill
+ARG TARGETOS
+ARG TARGETARCH
+RUN bash scripts/build_browserskill.sh /opt/weknora/browserskill "${TARGETOS}/${TARGETARCH}"
+
 # Build stage
 FROM golang:1.26-bookworm AS builder
 
@@ -32,6 +45,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
 COPY . .
+RUN bash ./scripts/check-license-bundle.sh
 
 # Get version and commit info for build injection
 ARG VERSION_ARG
@@ -76,6 +90,11 @@ WORKDIR /app
 
 ARG APK_MIRROR_ARG
 
+# Pairing derives the gateway URL from the user's page origin by default.
+ENV BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk \
+    BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.2.1.zip
+COPY --from=browserskill /opt/weknora/browserskill /opt/weknora/browserskill
+
 # Create a non-root user first
 RUN useradd -m -s /bin/bash appuser
 
@@ -118,11 +137,10 @@ COPY --from=builder /app/config ./config
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/dataset/samples ./dataset/samples
-COPY --from=builder /app/skills/preloaded ./skills/preloaded
-# Keep a read-only backup so bind-mount cannot erase built-in skills
-COPY --from=builder /app/skills/preloaded ./skills/_builtin
 COPY --from=builder /root/.duckdb /home/appuser/.duckdb
 COPY --from=builder /app/WeKnora .
+COPY LICENSE THIRD_PARTY_NOTICES.md ./
+COPY licenses ./licenses
 
 # Copy and make entrypoint script executable
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh

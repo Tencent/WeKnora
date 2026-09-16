@@ -94,6 +94,30 @@ type CustomAgent struct {
 	CreatorName string `yaml:"-" json:"creator_name,omitempty" gorm:"-"`
 }
 
+// maxAgentAvatarLength mirrors the custom_agents.avatar column limit
+// (varchar(64)). See ValidateAvatar for why this is checked at the API
+// boundary instead of being left to the database.
+const maxAgentAvatarLength = 64
+
+// ValidateAvatar rejects an avatar value the DB column cannot store.
+//
+// Without it, an oversized avatar (a data-URI icon, say) reaches postgres
+// unchecked and comes back as a raw driver error — "ERROR: value too long for
+// type character varying(64) (SQLSTATE 22001)" — which is then forwarded to
+// the client as a 500. That is two problems at once: the caller only learns
+// the real limit from a crash, and internal database details leak into a
+// public API. Checking here turns it into an ordinary 400 that names the
+// limit, like the other request validations.
+func (a *CustomAgent) ValidateAvatar() error {
+	if a == nil {
+		return nil
+	}
+	if n := len([]rune(a.Avatar)); n > maxAgentAvatarLength {
+		return fmt.Errorf("avatar must not exceed %d characters, got %d", maxAgentAvatarLength, n)
+	}
+	return nil
+}
+
 // CustomAgentConfig represents the configuration of a custom agent
 type CustomAgentConfig struct {
 	// ===== Basic Settings =====
@@ -108,12 +132,12 @@ type CustomAgentConfig struct {
 	// System prompt for the agent (unified prompt, uses web_search_status placeholder for dynamic behavior)
 	SystemPrompt string `yaml:"system_prompt" json:"system_prompt"`
 	// SystemPromptID references a template ID in prompt_templates/ YAML files.
-	// If set and SystemPrompt is empty, the template content will be resolved at startup.
+	// If set and SystemPrompt is empty, the template content is resolved at request time for saved agents.
 	SystemPromptID string `yaml:"system_prompt_id" json:"system_prompt_id,omitempty"`
 	// Context template for normal mode (how to format retrieved chunks)
 	ContextTemplate string `yaml:"context_template" json:"context_template"`
 	// ContextTemplateID references a template ID in prompt_templates/ YAML files.
-	// If set and ContextTemplate is empty, the template content will be resolved at startup.
+	// If set and ContextTemplate is empty, the template content is resolved at request time for saved agents.
 	ContextTemplateID string `yaml:"context_template_id" json:"context_template_id,omitempty"`
 
 	// ===== Model Settings =====
@@ -123,7 +147,9 @@ type CustomAgentConfig struct {
 	RerankModelID string `yaml:"rerank_model_id" json:"rerank_model_id"`
 	// Temperature for LLM (0-1)
 	Temperature float64 `yaml:"temperature" json:"temperature"`
-	// Maximum completion tokens (only for normal mode)
+	// Maximum completion tokens. Quick-answer uses this for the RAG answer.
+	// Smart-reasoning ReAct rounds send this value as-is (zero becomes
+	// DefaultMaxCompletionTokens at call time: 4096, or 24576 with a sandbox).
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
@@ -132,7 +158,9 @@ type CustomAgentConfig struct {
 	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`
 
 	// ===== Agent Mode Settings =====
-	// Maximum iterations for ReAct loop (only for agent type)
+	// Maximum iterations for the ReAct loop. Zero is unset (filled with a
+	// default). A negative value is unlimited: the loop runs until the model
+	// stops, the user cancels, or another guard fires.
 	MaxIterations int `yaml:"max_iterations" json:"max_iterations"`
 	// Timeout for a single LLM call in seconds (0 = use global default)
 	LLMCallTimeout int `yaml:"llm_call_timeout" json:"llm_call_timeout,omitempty"`
@@ -147,7 +175,7 @@ type CustomAgentConfig struct {
 	MCPAuthWaitTimeout int `yaml:"mcp_auth_wait_timeout,omitempty" json:"mcp_auth_wait_timeout,omitempty"`
 
 	// ===== Skills Settings (only for smart-reasoning mode) =====
-	// Skills selection mode: "all" = all preloaded skills, "selected" = specific skills, "none" = no skills
+	// Skills selection mode: "all" = all installed skills, "selected" = specific skills, "none" = no skills
 	SkillsSelectionMode string `yaml:"skills_selection_mode" json:"skills_selection_mode"`
 	// Selected skill names (only used when SkillsSelectionMode is "selected")
 	SelectedSkills []string `yaml:"selected_skills" json:"selected_skills"`
@@ -419,21 +447,20 @@ func oneOf(value string, allowed ...string) bool {
 }
 
 // ResolveChatParserEngine returns the agent-configured parser engine for a
-// chat attachment file type, or "" when no rule matches. Mirrors the tenant
-// resolver in ParserEngineConfig.ResolveChatParserEngine.
+// chat attachment file type, or the type-level default when no rule matches.
+// Mirrors ParserEngineConfig.ResolveChatParserEngine.
 func (c *CustomAgentConfig) ResolveChatParserEngine(fileType string) string {
-	if c == nil {
-		return ""
-	}
-	fileType = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(fileType)), ".")
-	for _, rule := range c.ChatParserEngineRules {
-		for _, candidate := range rule.FileTypes {
-			if strings.TrimPrefix(strings.ToLower(strings.TrimSpace(candidate)), ".") == fileType {
-				return strings.TrimSpace(rule.Engine)
+	if c != nil {
+		normalized := normalizeParserFileType(fileType)
+		for _, rule := range c.ChatParserEngineRules {
+			for _, candidate := range rule.FileTypes {
+				if normalizeParserFileType(candidate) == normalized {
+					return strings.TrimSpace(rule.Engine)
+				}
 			}
 		}
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // Value implements driver.Valuer interface for CustomAgentConfig
@@ -500,6 +527,9 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.MaxIterations == 0 {
 		a.Config.MaxIterations = 10
 	}
+	if a.Config.MaxIterations < 0 {
+		a.Config.MaxIterations = UnlimitedMaxIterations
+	}
 	if a.Config.WebSearchMaxResults == 0 {
 		a.Config.WebSearchMaxResults = 5
 	}
@@ -523,9 +553,9 @@ func (a *CustomAgent) EnsureDefaults() {
 	if a.Config.FallbackStrategy == "" {
 		a.Config.FallbackStrategy = "model"
 	}
-	if a.Config.MaxCompletionTokens == 0 {
-		a.Config.MaxCompletionTokens = 2048
-	}
+	// MaxCompletionTokens 0 means "use DefaultMaxCompletionTokens at call
+	// time". Do not materialize a number here — that would make the editor
+	// treat a chosen default as a custom cap.
 	// Agent mode should always enable multi-turn conversation
 	if a.Config.AgentMode == AgentModeSmartReasoning {
 		a.Config.MultiTurnEnabled = true

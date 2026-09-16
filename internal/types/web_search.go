@@ -13,6 +13,9 @@ type WebSearchConfig struct {
 	// Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.
 	APIKey string `json:"api_key,omitempty"`
 
+	// Per-call Agent filters; never persisted in tenant configuration.
+	Filters WebSearchFilters `json:"-"`
+
 	MaxResults        int      `json:"max_results"`        // 最大搜索结果数
 	IncludeDate       bool     `json:"include_date"`       // 是否包含日期
 	CompressionMethod string   `json:"compression_method"` // 压缩方法：none, summary, extract, rag
@@ -79,11 +82,14 @@ func (c *WebSearchConfig) Scan(value interface{}) error {
 
 // WebSearchResult represents a single web search result
 type WebSearchResult struct {
-	Title       string     `json:"title"`                  // 搜索结果标题
-	URL         string     `json:"url"`                    // 结果URL
-	Snippet     string     `json:"snippet"`                // 摘要片段
-	Content     string     `json:"content"`                // 完整内容（可选，需要额外抓取）
-	Source      string     `json:"source"`                 // 来源（如：duckduckgo等）
+	Title   string `json:"title"`   // 搜索结果标题
+	URL     string `json:"url"`     // 结果URL
+	Snippet string `json:"snippet"` // 摘要片段
+	Content string `json:"content"` // 完整内容（可选，需要额外抓取）
+	Source  string `json:"source"`  // 来源（如：duckduckgo等）
+	// Provider-reported age, without inventing an exact publication date.
+	Age string `json:"age,omitempty"`
+
 	PublishedAt *time.Time `json:"published_at,omitempty"` // 发布时间（如果有）
 }
 

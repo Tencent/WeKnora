@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -87,22 +89,27 @@ func (r *fakeKBRepo) CreateKnowledgeBase(_ context.Context, kb *types.KnowledgeB
 	r.rows[kb.ID] = kb
 	return nil
 }
+
 func (r *fakeKBRepo) GetKnowledgeBaseByID(_ context.Context, id string) (*types.KnowledgeBase, error) {
 	return r.rows[id], nil
 }
+
 func (r *fakeKBRepo) GetKnowledgeBaseByIDAndTenant(_ context.Context, id string, tenantID uint64) (*types.KnowledgeBase, error) {
 	kb := r.rows[id]
 	if kb == nil || kb.TenantID != tenantID {
-		return nil, stderrors.New("not found")
+		return nil, repository.ErrKnowledgeBaseNotFound
 	}
 	return kb, nil
 }
+
 func (r *fakeKBRepo) GetKnowledgeBaseByIDs(_ context.Context, _ []string) ([]*types.KnowledgeBase, error) {
 	return nil, nil
 }
+
 func (r *fakeKBRepo) ListKnowledgeBases(_ context.Context) ([]*types.KnowledgeBase, error) {
 	return nil, nil
 }
+
 func (r *fakeKBRepo) ListKnowledgeBasesByTenantID(_ context.Context, tenantID uint64) ([]*types.KnowledgeBase, error) {
 	rows := make([]*types.KnowledgeBase, 0, len(r.rows))
 	for _, kb := range r.rows {
@@ -112,6 +119,7 @@ func (r *fakeKBRepo) ListKnowledgeBasesByTenantID(_ context.Context, tenantID ui
 	}
 	return rows, nil
 }
+
 func (r *fakeKBRepo) UpdateKnowledgeBase(_ context.Context, _ *types.KnowledgeBase) error {
 	return nil
 }
@@ -119,15 +127,23 @@ func (r *fakeKBRepo) DeleteKnowledgeBase(_ context.Context, _ string) error { re
 func (r *fakeKBRepo) TogglePinKnowledgeBase(_ context.Context, _ string, _ uint64) (*types.KnowledgeBase, error) {
 	return nil, nil
 }
+
 func (r *fakeKBRepo) CountByVectorStoreID(_ context.Context, _ *gorm.DB, _ uint64, _ string) (int64, error) {
 	return 0, nil
 }
+
 func (r *fakeKBRepo) CountByModelID(_ context.Context, _ uint64, _ string) (int64, error) {
 	return 0, nil
 }
+
+func (r *fakeKBRepo) ListModelUsages(_ context.Context, _ uint64, _ string) ([]types.ModelUsageResource, error) {
+	return []types.ModelUsageResource{}, nil
+}
+
 func (r *fakeKBRepo) SetUserKBPin(_ context.Context, _ uint64, _ string, _ string, _ bool) (*time.Time, error) {
 	return nil, nil
 }
+
 func (r *fakeKBRepo) ListUserKBPinIDs(_ context.Context, _ uint64, _ string) (map[string]time.Time, error) {
 	return map[string]time.Time{}, nil
 }
@@ -316,7 +332,7 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		repo.rows["src"] = mkKB("src", 1, "embed-1", &storeA)
 		svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-		src, tgt, err := svc.CopyKnowledgeBase(ctxWithTenant(1), "src", "")
+		src, tgt, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, ""), "src", "")
 		require.NoError(t, err)
 		require.NotNil(t, src.VectorStoreID)
 		require.NotNil(t, tgt.VectorStoreID)
@@ -334,7 +350,7 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		repo.rows["src"] = mkKB("src", 1, "embed-1", nil)
 		svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-		_, tgt, err := svc.CopyKnowledgeBase(ctxWithTenant(1), "src", "")
+		_, tgt, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, ""), "src", "")
 		require.NoError(t, err)
 		assert.Nil(t, tgt.VectorStoreID)
 	})
@@ -345,7 +361,7 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		repo.rows["dst"] = mkKB("dst", 1, "embed-1", nil)
 		svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-		_, _, err := svc.CopyKnowledgeBase(ctxWithTenant(1), "src", "dst")
+		_, _, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, "dst"), "src", "dst")
 		require.NoError(t, err)
 	})
 
@@ -355,7 +371,7 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		repo.rows["dst"] = mkKB("dst", 1, "embed-1", &storeA)
 		svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-		_, _, err := svc.CopyKnowledgeBase(ctxWithTenant(1), "src", "dst")
+		_, _, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, "dst"), "src", "dst")
 		require.NoError(t, err)
 	})
 
@@ -365,7 +381,7 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		repo.rows["dst"] = mkKB("dst", 1, "embed-2", &storeA)
 		svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-		_, _, err := svc.CopyKnowledgeBase(ctxWithTenant(1), "src", "dst")
+		_, _, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, "dst"), "src", "dst")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "different embedding models")
 	})
@@ -376,7 +392,7 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		repo.rows["dst"] = mkKB("dst", 1, "embed-1", &storeB)
 		svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-		_, _, err := svc.CopyKnowledgeBase(ctxWithTenant(1), "src", "dst")
+		_, _, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, "dst"), "src", "dst")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "different vector stores")
 		assert.NotContains(t, err.Error(), "Phase 4", "internal roadmap labels must not leak to end-user error messages")
@@ -388,7 +404,7 @@ func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 		repo.rows["dst"] = mkKB("dst", 1, "embed-1", &storeA)
 		svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
 
-		_, _, err := svc.CopyKnowledgeBase(ctxWithTenant(1), "src", "dst")
+		_, _, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, "dst"), "src", "dst")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "different vector stores")
 	})
@@ -518,4 +534,23 @@ func TestDuplicateKnowledgeBase_UsesLocalizedEnglishSuffix(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "Source KB Copy", target.Name)
+}
+
+func copyTaskTestContext(t *testing.T, repo *fakeKBRepo, dst string) context.Context {
+	t.Helper()
+	target := repo.rows[dst]
+	if target == nil {
+		target = &types.KnowledgeBase{ID: "reserved-copy", TenantID: 1}
+	}
+	ctx, err := access.WithKBTransferTask(
+		context.Background(),
+		repo.rows["src"],
+		target,
+		1,
+		access.KBTransferClone,
+		"clone-task",
+		dst == "",
+	)
+	require.NoError(t, err)
+	return ctx
 }

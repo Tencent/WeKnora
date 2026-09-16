@@ -147,12 +147,9 @@ func embedTokenHandler(w http.ResponseWriter, r *http.Request) {
 
 ## 域名白名单怎么填？
 
-| 要放行的请求来源 | 白名单示例 |
-|------------------|------------|
-| 聊天 iframe 所在源站（embed 页面） | `https://app.example.com` 或 `https://embed.example.com` |
-| 你的取令牌后端（exchange 时带的 Origin） | `https://shop.example.com` |
+A 网站（例如 `https://shop.example.com`）嵌入 B 上的 WeKnora 时，只需填写 A。iframe 的正常同源 API 调用不要求把 B 额外加入白名单。
 
-若 embed 使用[独立子域](./embed-subdomain.md)，**两条都要加**（embed 源站 + 业务后端源站）。
+业务后端调用 exchange 时，继续发送 `Origin: https://shop.example.com`，与实际宿主和渠道白名单一致。这里声明的是业务来源，不是后端机器的部署地址。完整部署及升级要求见[独立子域配置](./embed-subdomain.md#3-域名白名单填什么)。
 
 开发环境可临时使用 `*`；**生产环境禁止 `*`**。
 
@@ -161,7 +158,7 @@ func embedTokenHandler(w http.ResponseWriter, r *http.Request) {
 - [ ] 发布 Token 仅通过环境变量 / 密钥服务注入，未提交到 Git、未打进前端静态包
 - [ ] 取令牌接口校验访客身份
 - [ ] 全链路 HTTPS
-- [ ] 白名单已包含 embed 源站与 exchange 使用的 Origin
+- [ ] 白名单已包含宿主网站 A，exchange 使用同一 Origin
 - [ ] 已配置限流；敏感智能体不要用普通模式把 Token 暴露在网页里
 - [ ] 轮换发布 Token 后，同步更新服务端环境变量
 
@@ -170,7 +167,8 @@ func embedTokenHandler(w http.ResponseWriter, r *http.Request) {
 | 现象 | 原因与处理 |
 |------|------------|
 | exchange 返回 **401** / `publish token required` | 发布 Token 错误、已轮换，或误用了 `ems_` 会话 Token |
-| exchange 或聊天 API 返回 **403** `origin not allowed` | 白名单未包含当前请求的 `Origin`；服务端 exchange 记得手动加 `Origin` 头 |
+| exchange 或聊天 API 返回 **403** `origin not allowed` | 服务端 exchange 需手动加白名单中的业务 `Origin`；同源聊天失败时检查代理是否保留 Host（含端口）、协议和 `Sec-Fetch-Site` |
+| iframe 被 **frame-ancestors** 拒绝 | 将宿主网站 A 加入渠道白名单，确认所有祖先页面均被允许；旧渠道只填 B 的配置需要更新 |
 | iframe 一直「等待 Token」 | `token-endpoint` 未返回 `{ token, expiresIn }`，或 CORS 未允许 Widget 所在源站访问你的接口 |
 | 取令牌接口 **502** `mint failed` | WeKnora 不可达、渠道已停用，或 exchange 响应格式不对 |
 | 访客随便就能聊 | 取令牌接口未做登录校验——在 exchange 前加 Session / JWT 检查 |

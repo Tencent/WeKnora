@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -113,7 +114,7 @@ func (s *KnowledgeAutoTagService) Handle(ctx context.Context, task *asynq.Task) 
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		return fmt.Errorf("unmarshal knowledge auto tag payload: %w", err)
 	}
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
 	if payload.Language != "" {
 		ctx = context.WithValue(ctx, types.LanguageContextKey, payload.Language)
 	}
@@ -152,6 +153,10 @@ func (s *KnowledgeAutoTagService) Handle(ctx context.Context, task *asynq.Task) 
 	}
 	if kb == nil || kb.TenantID != payload.TenantID || kb.Type != types.KnowledgeBaseTypeDocument {
 		return skip("knowledge_base_not_eligible", nil)
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return err
 	}
 	config := kb.AutoTagConfig
 	if config == nil || !config.Enabled {
@@ -250,6 +255,9 @@ func (s *KnowledgeAutoTagService) Handle(ctx context.Context, task *asynq.Task) 
 	}
 	if len(added) == 0 {
 		return skip("all_matches_already_attached", types.JSONMap{"matched_tag_count": len(validIDs)})
+	}
+	if err := access.RequireKBWrite(ctx, kb); err != nil {
+		return err
 	}
 	if err := s.knowledgeRepo.AddKnowledgeTagRelations(
 		ctx,

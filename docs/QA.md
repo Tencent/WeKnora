@@ -381,18 +381,18 @@ SystemAdmin 可在 **系统管理 → 平台 API Key** 创建 `scope_type=platfo
 
 0.7.2 新增了完整的官方产品文档，位于仓库 [`website-docs/`](../website-docs/README.md) 目录，按「入门 → 架构 → 功能 → API → 客户端 → 开发」六个板块组织，覆盖约 360 个 API 端点、约 150 个环境变量与 9 大扩展点。
 
-该目录同时是一个 VitePress 站点，两种使用方式：
+该目录现在包含官网与 VitePress 文档站，统一构建和部署。以下命令分别从仓库根目录执行：
 
 ```bash
-# 本地预览
-cd website-docs && npm install && npm run dev
+# 本地预览（需要 Node.js 24）
+(cd website-docs && npm run setup && npm run build && npm run preview)
 
-# 独立容器部署（容器内 Nginx 监听 8081）
-docker build -t weknora-docs website-docs
-docker run -d -p 8081:8081 weknora-docs
+# 独立容器部署（容器内完成构建，Nginx 监听 80）
+docker build -t weknora-site website-docs
+docker run -d -p 8081:80 weknora-site
 ```
 
-站点的版本号在构建时自动读取仓库根目录的 `VERSION` 文件，因此升级版本后无需手动改文档。若某处截图显示为虚线占位框，说明 `website-docs/public/screenshots/` 下缺少同名图片，补图即可生效，不需要改 Markdown。
+官网位于 `/`，文档位于 `/docs/`。从旧文档容器迁移时注意将反向代理目标端口改为 `80`，并让域名根路径指向同一容器。站点版本号在构建时读取 `website-docs/VERSION`，发布时需同步更新；该目录可独立复制构建。完整部署说明见 [website-docs/README.md](../website-docs/README.md)。若某处截图显示为虚线占位框，说明 `website-docs/public/screenshots/` 下缺少同名图片，补图即可生效，不需要改 Markdown。
 
 `website-docs/sample-data/` 下还提供了 4 份 Markdown 样例文档与 1 份 FAQ 导入 JSON，可以直接用来跑一遍「建库 → 上传 → 问答」；`examples/mcp-demo/` 是一个可直接运行的本地 MCP 服务示例。
 
@@ -444,6 +444,50 @@ docker run -d -p 8081:8081 weknora-docs
 0.7.2 随附 MCP Server 1.1.x，已迁移到 mcp 2.x 的高级 `MCPServer` API，修复了 `uvx` 拉到 SDK 2.x 时的启动崩溃（`AttributeError: 'Server' object has no attribute 'list_tools'`），并恢复了 HTTP（`stateless_http`）与 SSE（`/sse/messages/`）传输的路由兼容性。工具总数为 29 个，新增 `create_knowledge_from_text`（用 Markdown 文本直接建知识条目）与 `list_shared_knowledge_bases`（共享知识库也纳入按名称解析）。
 
 行为变化提醒：工具执行失败时，MCPServer 2.x 返回 `CallToolResult(isError=True)`，不再像旧版低层 API 那样以成功响应返回 `"Error executing …"` 文本前缀。只解析 `content[0].text` 的客户端通常无感，依赖 `isError` 标志的集成方行为会更符合 MCP 规范。
+
+## 45. 升级到 0.8.0 后技能沙箱起不来 / 找不到 Local 后端？
+
+0.8.0 **移除了 Local 宿主机进程沙箱**。技能执行改为会话级常驻沙箱，三个后端共用同一套协议：
+
+- **Docker**（单机 / 私有化）：默认**关闭**。本机 `docker.sock` 等同宿主机 root，需系统管理员在 **设置 → 系统设置 → 网络安全** 打开，或设置 `WEKNORA_SANDBOX_DOCKER_ENABLED=true`。打开后才会出现「添加 Docker 后端」入口；已有配置仍可查看/删除。
+- **E2B**：E2B Cloud，或任意 E2B 兼容控制面（含自托管）。
+- **CubeSandbox**：集群模板 + 网络策略。
+
+原 Local 配置需要按上面任一后端重建。每个空间可配多个沙箱实例，并可为每个配置设置**网络策略**（默认放行出站、关闭公网入站；可改成默认拒绝出站再写允许名单）。详见 [`docs/sandbox-docker-backend.md`](./sandbox-docker-backend.md) 与 [`docs/sandbox-protocol.md`](./sandbox-protocol.md)。
+
+## 46. 技能目录和沙箱配置是什么关系？安装一直转圈怎么办？
+
+0.8.0 把技能做成空间级目录（迁移 `000086_tenant_skills` / `000090_skill_catalog`），再**按沙箱配置安装成快照**：
+
+1. 在 **设置 → 技能沙箱** 建好后端配置；
+2. 从 ClawHub（`@owner/slug`）、SkillHub / skills.sh、GitHub/GitLab URL 或 zip 上传安装；
+3. 安装抽屉会保持打开并显示环形进度；卡住时用「停止安装」，再用「重新安装」走已保存的安装包。
+
+环境变量分两层：**空间级**（Admin，该空间所有人共用）和**个人级**（`/api/v1/me/env-vars`，值永远不会读回）。技能声明的 `WEKNORA_*` 凭据可以按人填写。卸载沙箱里的技能不会删掉目录里的安装包。
+
+## 47. 0.7.1 删了 Neo4j 会话记忆，0.8.0 的「长期记忆」是一回事吗？
+
+不是。0.7.1 去掉的是旧版 **Neo4j episodic conversation memory**；**知识图谱（GraphRAG）仍然用 Neo4j**。0.8.0 的长期记忆是全新产品（迁移 `000084_memory`）：
+
+- 空间管理员先打开，用户还可以再关掉自己的；
+- 类型：`profile` / `preference` / `fact` / `task` / `interest`；
+- 自动抽取的条目先停在「待确认」，不会静默写进提示词；
+- 常驻画像每轮注入，情境记忆按需召回，Agent 也可用 `search_memory`；
+- 反复引用的文档会形成亲和度，检索时加权。
+
+接口在 `/api/v1/memory/*`，只操作当前调用者自己的记忆，需要 full-access API Key 或登录会话。
+
+## 48. 文档解析能否不经过 docreader？anydoc 是什么？
+
+0.8.0 引入进程内 **anydoc** 引擎（`third_party/anydoc-go`）。当绑定已链接时，anydoc 能转换的格式（含 doc/docx/ppt/pptx）会优先走 Go 进程，不再先打到 docreader。PPT/PPTX 在没有引擎规则时仍默认 MarkItDown。官方 app 镜像默认链接 anydoc。解析失败或格式不在 anydoc 覆盖范围时，仍回退到 docreader / MarkItDown / MinerU 等既有引擎。
+
+## 49. OIDC 登录提示签名无效，或想跳过前端直接 302？
+
+0.8.0 会通过 JWKS **校验 ID Token 签名**（#2799），显式配置的 token endpoint 同样走这条路径。请确认 IdP 的 JWKS URL 可达、密钥已轮换到当前 kid。若要做门户级跳转，可调用 `GET /auth/oidc/start` 直接 302 到 IdP，不必先渲染 SPA 握手页。
+
+## 50. 开启复杂密码后注册 / 改密失败？
+
+系统设置或 `WEKNORA_AUTH_COMPLEX_PASSWORD_ENABLED=true` 打开后，密码必须同时包含大写、小写、数字和特殊字符（`!@#$%^&*()_+-=[]{}|;:,.<>?`），长度 8–32。注册、个人中心改密、管理员重置走同一套规则。未打开时仍只要求长度。
 
 ## P.S.
 如果以上方式未解决问题，请在issue中描述您的问题，并提供必要的日志信息辅助我们进行问题排查

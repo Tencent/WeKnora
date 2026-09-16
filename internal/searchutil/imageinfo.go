@@ -231,6 +231,39 @@ func MergeImageInfoJSON(perChunk map[string]string) string {
 	return string(data)
 }
 
+// ClearImageInfoTextMatchingBody removes the OCR or caption field that exactly
+// matches recognized from image_info. Merge re-attaches that body onto Content
+// for image_ocr / image_caption hits; chat enrichment would otherwise inject
+// the same text again from ImageInfo.
+func ClearImageInfoTextMatchingBody(imageInfoJSON, recognized, chunkType string) string {
+	if imageInfoJSON == "" || recognized == "" {
+		return imageInfoJSON
+	}
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(imageInfoJSON), &infos); err != nil || len(infos) == 0 {
+		return imageInfoJSON
+	}
+	changed := false
+	for i := range infos {
+		switch chunkType {
+		case string(types.ChunkTypeImageOCR):
+			if infos[i].OCRText == recognized {
+				infos[i].OCRText = ""
+				changed = true
+			}
+		case string(types.ChunkTypeImageCaption):
+			if infos[i].Caption == recognized {
+				infos[i].Caption = ""
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return imageInfoJSON
+	}
+	return marshalImageInfos(infos)
+}
+
 // EnrichContentWithImageInfo embeds image info as XML tags into text content.
 // Inline Markdown image links get wrapped in <image> with <image_caption> / <image_ocr>;
 // images not found in content are appended as <image> blocks.

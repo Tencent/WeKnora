@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/Tencent/WeKnora/internal/types"
 	e2b "github.com/matiasinsaurralde/go-e2b"
 	"github.com/stretchr/testify/require"
 )
@@ -44,6 +45,7 @@ type e2bMockServer struct {
 	connectCount atomic.Int32
 	infoCount    atomic.Int32
 	deleteCount  atomic.Int32
+	timeoutPOSTs atomic.Int32
 
 	nextID      atomic.Int64
 	createBody  map[string]any
@@ -62,6 +64,7 @@ type e2bMockServer struct {
 	snapshotCreateBody      map[string]any
 	sandboxes               map[string]map[string]any // sandboxID -> SandboxInfo JSON
 	snapshots               map[string]map[string]any // snapshotID -> SnapshotInfo JSON
+	trafficAccessToken      string
 }
 
 func newE2BMockServer(t *testing.T) *e2bMockServer {
@@ -92,12 +95,19 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 			"startedAt":   time.Now().UTC().Format(time.RFC3339),
 			"metadata":    m.createBody["metadata"],
 		}
+		m.mu.Lock()
+		trafficAccessToken := m.trafficAccessToken
+		m.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		response := map[string]any{
 			"sandboxID":       id,
 			"envdAccessToken": "token-" + id,
-		})
+		}
+		if trafficAccessToken != "" {
+			response["trafficAccessToken"] = trafficAccessToken
+		}
+		_ = json.NewEncoder(w).Encode(response)
 
 	case r.URL.Path == "/sandboxes" && r.Method == http.MethodGet:
 		m.listCount.Add(1)
@@ -155,6 +165,17 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 			"sandboxID":       id,
 			"envdAccessToken": "reconnected-token-" + id,
 		})
+
+	case strings.HasPrefix(r.URL.Path, "/sandboxes/") &&
+		strings.HasSuffix(r.URL.Path, "/timeout") &&
+		r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/sandboxes/"), "/timeout")
+		if _, ok := m.sandboxes[id]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		m.timeoutPOSTs.Add(1)
+		w.WriteHeader(http.StatusNoContent)
 
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") &&
 		!strings.HasSuffix(r.URL.Path, "/connect") &&
@@ -363,7 +384,9 @@ func TestE2BRemoteClientProviderAndCapabilities(t *testing.T) {
 		SupportsTimeoutRefresh:        true,
 		SupportsFilesystemEnumeration: true,
 		SupportsSnapshots:             true,
-		SupportsVolumes:               true,
+		SupportsVolumes:               false,
+		SupportsTerminals:             true,
+		SupportsDesktop:               true,
 	}, client.Capabilities())
 }
 
@@ -745,6 +768,167 @@ func TestE2BRemoteClientListTemplatesIgnoresSpawnCount(t *testing.T) {
 	require.Equal(t, "waiting", templates[0].Status)
 }
 
+func TestE2BBuildStandardTemplateOverridesPtyPrompt(t *testing.T) {
+	var startBody struct {
+		FromImage string `json:"fromImage"`
+		Steps     []struct {
+			Type string   `json:"type"`
+			Args []string `json:"args"`
+		} `json:"steps"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		case r.Method == http.MethodPost && r.URL.Path == "/v3/templates":
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-new",
+				"buildID":    "build-new",
+				"names":      []string{StandardTemplateName},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/templates/tpl-new/builds/build-new":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&startBody))
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey:     "key-test",
+		E2BAPIURL:     server.URL,
+		E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	got, err := client.EnsureStandardTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-new", got.ID)
+	require.Equal(t, DefaultDockerImage, startBody.FromImage)
+	require.NotEmpty(t, startBody.Steps)
+	require.Equal(t, "run", startBody.Steps[0].Type)
+	require.Equal(t, e2bPtyPromptOverrideCmd, startBody.Steps[0].Args[0])
+}
+
+func TestE2BRemoteClientListTemplatesMarksDesktopSibling(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/templates", r.URL.Path)
+		writeJSON(w, http.StatusOK, []map[string]any{
+			{
+				"templateID":  "tpl-cli",
+				"names":       []string{"weknora"},
+				"buildStatus": "ready",
+			},
+			{
+				"templateID":  "tpl-desktop",
+				"names":       []string{"weknora-desktop"},
+				"buildStatus": "ready",
+			},
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey: "key-test", E2BAPIURL: server.URL, E2BSandboxTTL: time.Minute,
+		DesktopEnabled: true,
+	})
+	require.NoError(t, err)
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 2)
+	require.True(t, templates[0].Standard)
+	require.False(t, templates[0].Desktop)
+	require.True(t, templates[1].Desktop)
+	require.False(t, templates[1].Standard)
+}
+
+func TestE2BEnsureStandardTemplateIgnoresDesktopEnabled(t *testing.T) {
+	var startBody struct {
+		FromImage string `json:"fromImage"`
+	}
+	var postedName string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{})
+		case r.Method == http.MethodPost && r.URL.Path == "/v3/templates":
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			postedName, _ = body["alias"].(string)
+			if postedName == "" {
+				postedName, _ = body["name"].(string)
+			}
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-cli",
+				"buildID":    "build-cli",
+				"names":      []string{StandardTemplateName},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/templates/tpl-cli/builds/build-cli":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&startBody))
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey: "key-test", E2BAPIURL: server.URL, E2BSandboxTTL: time.Minute,
+		DesktopEnabled: true,
+	})
+	require.NoError(t, err)
+
+	got, err := client.EnsureStandardTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-cli", got.ID)
+	require.True(t, got.Standard)
+	require.False(t, got.Desktop)
+	require.Equal(t, DefaultDockerImage, startBody.FromImage)
+	require.NotEqual(t, DesktopTemplateName, postedName)
+}
+
+func TestE2BEnsureDesktopTemplateBuildsDesktopImage(t *testing.T) {
+	var startBody struct {
+		FromImage string `json:"fromImage"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/templates":
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID":  "tpl-cli",
+				"names":       []string{"weknora"},
+				"buildStatus": "ready",
+			}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v3/templates":
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-desk",
+				"buildID":    "build-desk",
+				"names":      []string{DesktopTemplateName},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v2/templates/tpl-desk/builds/build-desk":
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&startBody))
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewE2BRemoteClient(&Config{
+		E2BAPIKey: "key-test", E2BAPIURL: server.URL, E2BSandboxTTL: time.Minute,
+	})
+	require.NoError(t, err)
+
+	got, err := client.EnsureDesktopTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-desk", got.ID)
+	require.True(t, got.Desktop)
+	require.False(t, got.Standard)
+	require.Equal(t, DefaultDesktopDockerImage, startBody.FromImage)
+}
+
 func TestNormalizeE2BTemplateBuildStatus(t *testing.T) {
 	tests := map[string]string{
 		"READY":      "ready",
@@ -758,6 +942,66 @@ func TestNormalizeE2BTemplateBuildStatus(t *testing.T) {
 	for raw, want := range tests {
 		require.Equalf(t, want, normalizeE2BTemplateBuildStatus(raw), "status %q", raw)
 	}
+}
+
+func TestE2BDialDesktopRefreshesSandboxTTL(t *testing.T) {
+	prevMin := terminalTTLRefreshMin
+	terminalTTLRefreshMin = 40 * time.Millisecond
+	t.Cleanup(func() { terminalTTLRefreshMin = prevMin })
+
+	mock := newE2BMockServer(t)
+	var seen http.Request
+	proxy := desktopEchoServer(t, &seen)
+	t.Cleanup(proxy.Close)
+
+	cfg := &Config{
+		Type:                  SandboxTypeE2B,
+		E2BAPIKey:             "key-test",
+		E2BAPIURL:             mock.URL(),
+		E2BTemplate:           "template-a",
+		E2BSandboxTTL:         3 * time.Second,
+		E2BProxyURL:           proxy.URL,
+		E2BSandboxDomain:      "e2b.app",
+		AllowPrivateEndpoints: true,
+	}
+	policy := OutboundURLPolicy{AllowPrivate: true}
+	pool := NewSandboxGatewayTransportPoolWithPolicy(
+		NewGuardedTransportWithPolicy(policy),
+		policy,
+	)
+	client, err := NewE2BRemoteClientWithPool(cfg, pool)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	handle, err := client.Create(ctx, RemoteCreateRequest{
+		TemplateID: "template-a",
+		Timeout: RemoteTimeoutPolicy{
+			Mode:   RemoteTimeoutExplicit,
+			Value:  time.Minute,
+			Action: RemoteOnTimeoutPause,
+		},
+	})
+	require.NoError(t, err)
+
+	conn, err := client.DialDesktop(ctx, handle, RemoteDesktopOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	cancel()
+
+	require.Never(t, func() bool {
+		return mock.timeoutPOSTs.Load() >= 1
+	}, 150*time.Millisecond, 20*time.Millisecond,
+		"DialDesktop must not bind SetTimeout to the request context")
+
+	ttlCtx, ttlCancel := context.WithCancel(context.Background())
+	t.Cleanup(ttlCancel)
+	client.StartDesktopTTLRefresh(ttlCtx, handle)
+
+	require.Eventually(t, func() bool {
+		return mock.timeoutPOSTs.Load() >= 1
+	}, 2*time.Second, 20*time.Millisecond, "expected SetTimeout on the relay lifetime ctx")
 }
 
 func TestE2BRemoteClientCreateWritesMetadataAndPauseLifecycle(t *testing.T) {
@@ -790,15 +1034,14 @@ func TestE2BRemoteClientCreateWritesMetadataAndPauseLifecycle(t *testing.T) {
 	require.Equal(t, true, mock.createBody["autoPause"])
 	require.Equal(t, true, mock.createBody["autoPauseMemory"])
 	require.Equal(t, map[string]any{"enabled": true}, mock.createBody["autoResume"])
-	// Network defaults match the Cube adapter: public traffic on, internet
-	// egress on, and Secure=true so the response carries an envd access
-	// token. Regressing these keeps `pip install` broken silently, so we
-	// pin the wire payload here.
+	// Network defaults: egress on so `pip install` keeps working, inbound
+	// CLOSED so the sandbox URL is not reachable by anyone holding the ID.
+	// The inbound half is intentionally the opposite of E2B's own default.
 	require.Equal(t, true, mock.createBody["secure"])
 	require.Equal(t, true, mock.createBody["allow_internet_access"])
 	networkPayload, ok := mock.createBody["network"].(map[string]any)
 	require.True(t, ok, "network payload missing: %#v", mock.createBody["network"])
-	require.Equal(t, true, networkPayload["allowPublicTraffic"])
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 
 }
 
@@ -850,21 +1093,112 @@ func TestE2BRemoteClientCreateForwardsNetworkPolicy(t *testing.T) {
 			AllowPublicTraffic:  &privateSandbox,
 			AllowOut:            []string{"*.example.com"},
 			DenyOut:             []string{"0.0.0.0/0"},
+			E2BHostRules: []RemoteE2BHostRule{{
+				Host:    "api.example.com",
+				Headers: map[string]string{"X-Environment": "production"},
+			}},
 		},
 	})
 	require.NoError(t, err)
 
-	// Top-level allow_internet_access flips off as the caller requested,
-	// AllowPublicTraffic hides the sandbox behind a traffic access token,
-	// and the L3/L4 allow/deny lists both reach the server. Regressing any
-	// of these silently opens (or closes) the sandbox's network policy in
-	// a way callers cannot observe from unit tests, so pin the wire.
 	require.Equal(t, false, mock.createBody["allow_internet_access"])
 	networkPayload, ok := mock.createBody["network"].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
 	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"])
+
+	rules, ok := networkPayload["rules"].(map[string]any)
+	require.True(t, ok, "rules payload missing: %#v", networkPayload["rules"])
+	hostRules := rules["api.example.com"].([]any)
+	require.Len(t, hostRules, 1)
+	transform := hostRules[0].(map[string]any)["transform"].(map[string]any)
+	headers := transform["headers"].(map[string]any)
+	require.Equal(t, "production", headers["X-Environment"])
+}
+
+// Regression: a stored "deny by default + domain allowlist" policy used to
+// reach E2B as allow_internet_access=false with an empty denyOut, and the
+// provider answered
+//
+//	400 When specifying allowed domains in allow out, you must include
+//	'ALL_TRAFFIC' in deny out to block all other traffic.
+//
+// so every session on that config failed at create time. The existing wire
+// test could not catch it because it hand-built the resolved policy with the
+// sentinel already in place; this one starts from the stored shape and goes
+// through the real resolver.
+func TestE2BRemoteClientCreateSendsDenyAllForStoredDenyByDefault(t *testing.T) {
+	tenantCfg := &types.TenantSandboxConfig{
+		SandboxType: "e2b",
+		E2B: &types.E2BSandboxConfig{
+			APIKey:     "key-test",
+			TemplateID: "template-a",
+		},
+		Network: &types.SandboxNetworkPolicy{
+			DenyEgressByDefault: true,
+			AllowOut:            []string{"*.example.com"},
+		},
+	}
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err = client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: "template-a",
+		Network:    effective.Network,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, false, mock.createBody["allow_internet_access"])
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.Equal(t, []any{"*.example.com"}, networkPayload["allowOut"])
+	require.Equal(t, []any{"0.0.0.0/0"}, networkPayload["denyOut"],
+		"E2B refuses a domain allowlist without an explicit deny-all")
+}
+
+func TestE2BRemoteClientCreateOmitsRulesWhenNoneConfigured(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.NotContains(t, networkPayload, "rules")
+}
+
+// Same deliberate inversion as the Cube adapter: unspecified means inbound
+// closed. E2B additionally requires Secure=true for this, which the adapter
+// already pins.
+func TestE2BRemoteClientCreateDefaultsInboundClosed(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	require.Equal(t, true, mock.createBody["secure"])
+	require.Equal(t, true, mock.createBody["allow_internet_access"])
+	networkPayload := mock.createBody["network"].(map[string]any)
+	require.Equal(t, false, networkPayload["allowPublicTraffic"])
+}
+
+func TestE2BRemoteHandleExposesTrafficAccessToken(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.mu.Lock()
+	mock.trafficAccessToken = "traffic-token"
+	mock.mu.Unlock()
+	client := newTestE2BRemoteClient(t, mock)
+
+	handle, err := client.Create(context.Background(), RemoteCreateRequest{TemplateID: "template-a"})
+	require.NoError(t, err)
+
+	carrier, ok := handle.(RemoteInboundTokenCarrier)
+	require.True(t, ok, "e2b handle must expose the inbound token for the binding")
+	require.Equal(t, "traffic-token", carrier.TrafficAccessToken())
 }
 
 func TestE2BRemoteClientCreatePreservesTimeoutModes(t *testing.T) {
@@ -989,7 +1323,7 @@ func TestE2BRemoteClientConnectAcrossClients(t *testing.T) {
 	mock.sandboxes[handle.ID()]["state"] = "paused"
 
 	second := newTestE2BRemoteClient(t, mock)
-	reconnected, err := second.Connect(context.Background(), handle.ID())
+	reconnected, err := second.Connect(context.Background(), RemoteConnectRequest{SandboxID: handle.ID()})
 	require.NoError(t, err)
 	require.Equal(t, handle.ID(), reconnected.ID())
 	require.Nil(t, reconnected.Metadata())
@@ -1391,6 +1725,14 @@ func TestNormalizeE2BError(t *testing.T) {
 		{"connect data loss", "List", connect.NewError(connect.CodeDataLoss, errors.New("data loss")), RemoteErrorKindInternal},
 		{"connect unknown", "List", connect.NewError(connect.CodeUnknown, errors.New("unknown")), RemoteErrorKindInternal},
 		{"unknown", "List", errors.New("mystery"), RemoteErrorKindInternal},
+		{"delete snapshot in use", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "cannot delete template 'tpl-1' because there are paused sandboxes using it",
+		}, RemoteErrorKindConflict},
+		{"delete snapshot bad id", "DeleteSnapshot", &e2b.Error{
+			StatusCode: http.StatusBadRequest,
+			Message:    "invalid snapshot id",
+		}, RemoteErrorKindInvalidRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

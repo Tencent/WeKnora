@@ -92,3 +92,19 @@ func TestOrphanAliasesNilRegistry(t *testing.T) {
 	var r *resourceRegistry
 	require.Equal(t, []string{"res://0001"}, r.OrphanHandles("res://0001"))
 }
+
+// Aliases belong to one execution, and never follow mutable file names.
+func TestResourceVersionsStayImmutableAcrossRounds(t *testing.T) {
+	old := "resource://dHZ_fFslfs0GgJGaJZGjGA"
+	latest := "resource://4N1nAo-FZZoDEExDQz2yoA"
+	r := newResourceRegistry()
+	r.EncodeText("resource://aaaaaaaaaaaaaaaaaaaaaa resource://bbbbbbbbbbbbbbbbbbbbbb")
+	require.Equal(t, "res://0003", r.EncodeText(old))
+	require.Equal(t, "res://0004", r.EncodeText(latest))
+	require.Equal(t, old, r.DecodeText("res://0003"))
+	require.Equal(t, latest, r.DecodeText("res://0004"))
+	require.Equal(t, "res://0003", r.EncodeText(old))
+	nextRequest := newResourceRegistry()
+	require.Equal(t, "res://0001", nextRequest.EncodeText(latest))
+	require.Equal(t, old, r.DecodeText("res://0003"))
+}

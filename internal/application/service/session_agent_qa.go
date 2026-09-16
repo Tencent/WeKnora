@@ -91,6 +91,25 @@ func (s *sessionService) AgentQA(
 		return fmt.Errorf("failed to get chat model: %w", err)
 	}
 
+	// The model's own metadata decides two things the agent cannot guess: how
+	// much history fits before compaction, and whether images can be passed
+	// through. Resolve it once, before the engine is built — the engine sizes
+	// its memory consolidator from MaxContextTokens at construction.
+	var agentModelSupportsVision bool
+	modelContextWindow := 0
+	if effectiveModelID != "" {
+		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
+			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
+			modelContextWindow = modelInfo.Parameters.ContextWindow
+		}
+	}
+	agentConfig.ChatModelSupportsVision = agentModelSupportsVision
+	agentConfig.MaxContextTokens = types.AgentMaxContextTokens(
+		agentConfig.MaxContextTokens, modelContextWindow,
+	)
+	logger.Infof(ctx, "Agent context window: %d tokens (model %s declares %d)",
+		agentConfig.MaxContextTokens, effectiveModelID, modelContextWindow)
+
 	// Get rerank model from custom agent config only when knowledge_search can
 	// actually run. A disabled KB scope makes all KB tools ineffective, so it
 	// must not force users to configure an otherwise-unused rerank model.
@@ -171,7 +190,7 @@ func (s *sessionService) AgentQA(
 		if loadErr != nil {
 			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
 		}
-		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, sessionAttachments)
+		stagedAttachments, err = stager.stageSessionAttachments(ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments)
 		if err != nil {
 			return fmt.Errorf("restore session attachments into sandbox: %w", err)
 		}
@@ -212,12 +231,11 @@ func (s *sessionService) AgentQA(
 		}
 	}
 
-	// Route image data based on agent model's vision capability
-	var agentModelSupportsVision bool
-	if effectiveModelID != "" {
-		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
-			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
-		}
+	// Mid-run steering: when the caller supplied a sink, the engine will drain
+	// user-appended messages at every round boundary and persist accepted ones
+	// through it. Nil (IM/embed) keeps the old behaviour untouched.
+	if req.SteerSink != nil {
+		engine.SetSteerSink(req.SteerSink)
 	}
 
 	agentQuery := req.Query
@@ -281,6 +299,7 @@ func (s *sessionService) buildAgentConfig(
 		MaxIterations:               customAgent.Config.MaxIterations,
 		Temperature:                 customAgent.Config.Temperature,
 		WebSearchEnabled:            customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
+		LocalBrowserEnabled:         req.LocalBrowserEnabled,
 		WebSearchMaxResults:         customAgent.Config.WebSearchMaxResults,
 		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
 		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
@@ -293,6 +312,7 @@ func (s *sessionService) buildAgentConfig(
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
+		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
 	}
@@ -346,9 +366,9 @@ func (s *sessionService) buildAgentConfig(
 	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
 
 	// Use custom agent's system prompt if specified
-	if customAgent.Config.SystemPrompt != "" {
+	if systemPrompt, _ := s.cfg.ResolveCustomAgentPrompts(customAgent); systemPrompt != "" {
 		agentConfig.UseCustomSystemPrompt = true
-		agentConfig.SystemPrompt = customAgent.Config.SystemPrompt
+		agentConfig.SystemPrompt = systemPrompt
 	}
 
 	logger.Infof(ctx, "Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v, WebSearchEnabled=%v",
@@ -403,9 +423,8 @@ func (s *sessionService) buildAgentConfig(
 	}
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
 
-	if agentConfig.MaxContextTokens <= 0 {
-		agentConfig.MaxContextTokens = types.DefaultMaxContextTokens
-	}
+	// MaxContextTokens is deliberately left unset here. The caller fills it
+	// from the resolved model's declared window, which is not known yet.
 
 	return agentConfig, nil
 }
@@ -435,8 +454,12 @@ func mergeResolvedTagKnowledgeIDs(
 	return uniqueNonEmptyStrings(merged)
 }
 
-// applyPerRequestSkillScope narrows the agent's skill whitelist to the @Skill
-// mentions for this turn and records the pinned set for the <must_use> hint.
+// applyPerRequestSkillScope records the @Skill mentions for this turn as the
+// pinned set that drives the <must_use> hint. It deliberately does NOT narrow
+// the allow-gate: an agent whose prompt requires a skill the user did not
+// @mention must still be able to read and execute it. Mentioning a skill only
+// prioritizes it, it never revokes access to the agent's configured set.
+//
 // It is a no-op when no skills were mentioned or skills are disabled.
 func applyPerRequestSkillScope(
 	ctx context.Context,
@@ -454,24 +477,17 @@ func applyPerRequestSkillScope(
 	if !agentConfig.SkillsEnabled {
 		return
 	}
-	switch skillsMode {
-	case "selected":
-		agentConfig.AllowedSkills = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
-		if len(agentConfig.AllowedSkills) == 0 {
-			agentConfig.SkillsEnabled = false
-		}
-	case "all":
-		agentConfig.AllowedSkills = dedupPreservingOrder(requested)
-	}
-	if agentConfig.SkillsEnabled && len(agentConfig.AllowedSkills) > 0 {
-		agentConfig.PinnedSkillNames = intersectPreservingRequestOrder(requested, agentConfig.AllowedSkills)
-	}
+	// PinnedSkillNames carries only mentioned skills that are currently
+	// allowed, so the <must_use> hint never directs the model at a skill it
+	// cannot load. An empty AllowedSkills means all skills are allowed,
+	// matching Manager.isSkillAllowed, so every mention is pinned in that case.
+	agentConfig.PinnedSkillNames = pinPreservingRequestOrder(requested, agentConfig.AllowedSkills)
 	logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v pinned=%v",
 		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
 }
 
-// applyPerRequestMCPScope narrows the agent's MCP services to the @MCP mentions
-// for this turn and records the pinned set for the <must_use> hint. It is a
+// applyPerRequestMCPScope pins authorized @MCP mentions for the <must_use> hint,
+// preserving access to the rest of the agent's configured services. It is a
 // no-op when no services were mentioned or MCP selection is disabled.
 func applyPerRequestMCPScope(
 	ctx context.Context,
@@ -488,22 +504,22 @@ func applyPerRequestMCPScope(
 		return
 	}
 	mentioned := dedupPreservingOrder(requested)
-	effective, mode := resolvePerRequestMCPScope(mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent)
+	effective, _ := resolvePerRequestMCPScope(
+		mentioned, agentPresetMCPs, agentConfig.MCPSelectionMode, isSharedAgent,
+	)
 	if len(effective) == 0 {
 		logger.Warnf(ctx, "Ignoring @MCP scope outside agent preset: requested=%v agent=%v shared=%v",
 			requested, agentPresetMCPs, isSharedAgent)
 		return
 	}
-	agentConfig.MCPSelectionMode = mode
-	agentConfig.MCPServices = effective
-	agentConfig.PinnedMCPServiceIDs = intersectPreservingRequestOrder(requested, agentConfig.MCPServices)
-	logger.Infof(ctx, "Applied per-request @MCP scope: requested=%v mode=%s effective=%v",
-		requested, agentConfig.MCPSelectionMode, agentConfig.MCPServices)
+	agentConfig.PinnedMCPServiceIDs = effective
+	logger.Infof(ctx, "Applied per-request @MCP priority: requested=%v mode=%s pinned=%v",
+		requested, agentConfig.MCPSelectionMode, effective)
 }
 
-// resolvePerRequestMCPScope narrows MCP registration for a per-turn @mention.
-// selectionMode "none" rejects all mentions. Shared agents never register MCP
-// services outside the agent preset.
+// resolvePerRequestMCPScope selects authorized mentions for per-turn priority.
+// It does not modify the registration scope. Shared agents may only pin services
+// in the agent preset, and selectionMode "none" rejects all mentions.
 func resolvePerRequestMCPScope(
 	mentioned, agentMCPs []string,
 	selectionMode string,
@@ -553,6 +569,33 @@ func intersectPreservingRequestOrder(requested []string, allowed []string) []str
 	return result
 }
 
+// pinPreservingRequestOrder returns the requested skills that are allowed,
+// preserving request order. Unlike intersectPreservingRequestOrder, an empty
+// allowed list is treated as "all skills allowed" (matching
+// Manager.isSkillAllowed), so every requested skill is pinned.
+func pinPreservingRequestOrder(requested []string, allowed []string) []string {
+	allowedAll := len(allowed) == 0
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, value := range allowed {
+		if value != "" {
+			allowedSet[value] = true
+		}
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, value := range requested {
+		if value == "" || seen[value] {
+			continue
+		}
+		if !allowedAll && !allowedSet[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
+}
+
 func dedupPreservingOrder(values []string) []string {
 	result := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
@@ -568,8 +611,8 @@ func dedupPreservingOrder(values []string) []string {
 
 // configureSkillsFromAgent turns the agent's skill picker into runtime flags.
 // The skills themselves come from the sandbox image (TenantSkills), not from
-// the deployment's skills/preloaded directory — that host copy is not what
-// execute_skill_script would find inside the sandbox.
+// a host skill directory — that copy is not what shell_exec would find
+// inside the sandbox.
 func (s *sessionService) configureSkillsFromAgent(
 	ctx context.Context,
 	agentConfig *types.AgentConfig,

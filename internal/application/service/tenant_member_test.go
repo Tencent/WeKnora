@@ -314,6 +314,9 @@ func (r *cleanupTokenRepo) CreateToken(context.Context, *types.AuthToken) error 
 func (r *cleanupTokenRepo) GetTokenByValue(context.Context, string) (*types.AuthToken, error) {
 	return nil, errors.New("not found")
 }
+func (r *cleanupTokenRepo) GetTokenByID(context.Context, string) (*types.AuthToken, error) {
+	return nil, errors.New("not found")
+}
 func (r *cleanupTokenRepo) GetTokensByUserID(context.Context, string) ([]*types.AuthToken, error) {
 	return nil, nil
 }

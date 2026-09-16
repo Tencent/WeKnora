@@ -19,10 +19,10 @@ func logUsage(ctx context.Context, model string, u *types.TokenUsage) {
 	logger.Infof(ctx,
 		"[LLM Usage] model=%s, purpose=%s, prompt_prefix=%s, prompt_tokens=%d, completion_tokens=%d, "+
 			"total_tokens=%d, cached_tokens=%d, cache_read_tokens=%d, cache_write_tokens=%d, "+
-			"cache_miss_tokens=%d, cache_reported=%t, cache_status=%s%s",
+			"cache_miss_tokens=%d, cache_hit_rate=%.1f%%, cache_reported=%t, cache_status=%s%s",
 		model, purpose, prefixFingerprint, u.PromptTokens, u.CompletionTokens, u.TotalTokens,
 		u.CachedTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CacheMissTokens,
-		u.CacheReported, u.CacheStatus, usageAttribution(ctx))
+		u.PromptCacheHitRate(), u.CacheReported, u.CacheStatus, usageAttribution(ctx))
 }
 
 // usageAttribution renders the ", session_id=…, principal=…" suffix that

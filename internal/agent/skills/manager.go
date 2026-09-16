@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 	"strings"
 	"sync"
 
-	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
-	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // artifactOutputEnvVar is the name of the environment variable that WeKnora
@@ -38,7 +35,14 @@ const artifactHistoryEnvVar = "WEKNORA_SKILL_HISTORY_ROOT"
 // install-time verification pass exports the same name.
 const skillDirEnvVar = "WEKNORA_SKILL_DIR"
 
-// InjectedSandboxEnvVars is every name ExecuteScript writes into the sandbox
+// nodePathEnvVar carries the skill's own node_modules. pythonPathEnvVar is
+// never injected — a skill's Python packages arrive through its venv
+// interpreter — but stays on the blacklist below, because a stored PYTHONPATH
+// could otherwise shadow exactly those packages.
+const pythonPathEnvVar = "PYTHONPATH"
+const nodePathEnvVar = "NODE_PATH"
+
+// InjectedSandboxEnvVars is every name skill environment preparation writes into the sandbox
 // environment. The skill-env declaration blacklist must reject these so a
 // stored value cannot redirect artifacts, the skill directory, or the session
 // input tree. Credential names such as WEKNORA_API_KEY are not in this list.
@@ -48,6 +52,8 @@ func InjectedSandboxEnvVars() []string {
 		sessionInputEnvVar,
 		artifactHistoryEnvVar,
 		skillDirEnvVar,
+		pythonPathEnvVar,
+		nodePathEnvVar,
 	}
 }
 
@@ -63,42 +69,38 @@ const defaultArtifactOutputDir = "/workspace/output"
 // callers such as ArtifactCollector can list the same directory when
 // draining artifacts after Execute returns.
 //
-// Resolution order (first non-empty wins):
-//  1. WEKNORA_SKILL_OUTPUT_DIR from the host environment (ops override).
+// Resolution order (first usable wins):
+//  1. WEKNORA_SKILL_OUTPUT_DIR from the host environment (ops override), when
+//     it names a directory inside the session workspace.
 //  2. defaultArtifactOutputDir.
+//
+// The override goes through sandbox.ValidatedSessionOutputDir, the same gate
+// the sandbox applies to a tenant's override. An operator who points this
+// outside /workspace would otherwise send the readers (this function feeds the
+// sandbox file tools and ArtifactCollector) to a directory no skill can write,
+// since execution refuses the same path and falls back.
 //
 // Callers are expected to treat the returned string as read-only: the path
 // is normalised (no trailing slash) so it can be joined safely.
 func ArtifactOutputDir() string {
 	if v := strings.TrimSpace(os.Getenv(artifactOutputEnvVar)); v != "" {
-		return path.Clean(v)
+		if clean, ok := sandbox.ValidatedSessionOutputDir(v); ok {
+			return clean
+		}
 	}
 	return defaultArtifactOutputDir
 }
 
-// SkillOutputDir returns the artifact output directory for skill executions.
-// All skills write to the same root directory (/workspace/output/) to enable
-// collaboration and file sharing between different skill executions.
-func (m *Manager) SkillOutputDir(sessionID, skillName string) string {
-	return ArtifactOutputDir()
-}
-
-// Manager manages skills lifecycle including discovery, loading, and script execution
-// It coordinates between the Loader (filesystem operations) and Sandbox (script execution)
+// Manager manages skills lifecycle including discovery, reading, and shell environment preparation
+// It coordinates skill sources and session resource staging; shell_exec owns execution
 type Manager struct {
 	loader     *Loader
 	sandboxMgr sandbox.Manager
 
 	// tenantSource holds the skills installed into this run's sandbox image.
-	// When set it is the only source the model is told about: the host
-	// skills/preloaded directory is not what execute_skill_script would find
-	// inside the sandbox.
+	// When set it is the only source the model is told about: a host skill
+	// directory is not what execution would find inside the sandbox.
 	tenantSource SkillSource
-
-	// envResolver supplies the per-caller environment for one execution. It
-	// is nil when the run has no installed skills, in which case execution
-	// keeps exactly its previous behaviour.
-	envResolver SkillEnvResolver
 
 	// Configuration
 	skillDirs     []string
@@ -108,6 +110,8 @@ type Manager struct {
 	// Cache
 	metadataCache []*SkillMetadata
 	mu            sync.RWMutex
+	stageMu       sync.Mutex
+	stagedSkills  map[string]string
 }
 
 // ManagerConfig holds configuration for the skill manager
@@ -148,17 +152,9 @@ func (m *Manager) WithTenantSource(source SkillSource) *Manager {
 	return m
 }
 
-// WithEnvResolver attaches the per-caller environment resolver. Like
-// WithTenantSource it is part of construction and must be invoked before
-// Initialize, so it takes no lock.
-func (m *Manager) WithEnvResolver(resolver SkillEnvResolver) *Manager {
-	m.envResolver = resolver
-	return m
-}
-
 // resolveSource decides which source owns one skill name. An installed image
-// is the only copy the sandbox can run: falling back to a host preloaded
-// skill would advertise files that are not in the image.
+// is the only copy the sandbox can run: falling back to a host skill directory
+// would advertise files that are not in the image.
 func (m *Manager) resolveSource(skillName string) SkillSource {
 	if m.tenantSource != nil {
 		return m.tenantSource
@@ -167,9 +163,8 @@ func (m *Manager) resolveSource(skillName string) SkillSource {
 }
 
 // discoverAllSkills returns the set the model is told about. When skills are
-// installed into the sandbox image, that image is the source of truth; the
-// deployment's skills/preloaded directory is not what execute_skill_script
-// would find inside the sandbox.
+// installed into the sandbox image, that image is the source of truth; a host
+// skill directory is not what execution would find inside the sandbox.
 func (m *Manager) discoverAllSkills() ([]*SkillMetadata, error) {
 	if m.tenantSource != nil {
 		return m.tenantSource.DiscoverSkills()
@@ -298,10 +293,10 @@ func (m *Manager) ListSkillFiles(ctx context.Context, skillName string) ([]strin
 // SandboxSkillDir reports where a skill lives inside the sandbox image, and
 // whether that path means anything to say out loud.
 //
-// Only an installed skill has one. A preloaded skill is uploaded from the host
-// for the duration of a single call, so its base path names a directory on the
-// WeKnora machine that no shell command in the sandbox can reach — telling the
-// model about it would be worse than saying nothing.
+// Only an installed skill has one. A host skill is uploaded from the WeKnora
+// machine for the session, so its original base path names a directory that no
+// sandbox shell command can reach — telling the model about it would be worse
+// than saying nothing.
 func (m *Manager) SandboxSkillDir(skillName string) (string, bool) {
 	if m == nil || !m.enabled || !m.isSkillAllowed(skillName) {
 		return "", false
@@ -316,151 +311,6 @@ func (m *Manager) SandboxSkillDir(skillName string) (string, bool) {
 	}
 	dir = strings.TrimSpace(dir)
 	return dir, dir != ""
-}
-
-// ExecuteScript executes a script from a skill in the sandbox
-func (m *Manager) ExecuteScript(ctx context.Context, skillName, scriptPath string, args []string, stdin string) (*sandbox.ExecuteResult, error) {
-	if !m.enabled {
-		return nil, fmt.Errorf("skills are not enabled")
-	}
-
-	if !m.isSkillAllowed(skillName) {
-		return nil, fmt.Errorf("skill not allowed: %s", skillName)
-	}
-
-	// Verify sandbox manager is available
-	if m.sandboxMgr == nil {
-		return nil, fmt.Errorf("sandbox is not configured")
-	}
-
-	source := m.resolveSource(skillName)
-
-	// Get the skill base path
-	basePath, err := source.GetSkillBasePath(skillName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Prepare execution config
-	logger.Info(ctx, "[Tool][ExecuteScript]:Prepare execution config")
-	sessionID, _ := types.SessionIDFromContext(ctx)
-
-	// Compute the artifact output directory. All skills share the same root
-	// directory (/workspace/output/) to enable collaboration and file sharing
-	// between different skill executions in the same session.
-	// Skill scripts read the directory via WEKNORA_SKILL_OUTPUT_DIR; the
-	// root (for cross-run discovery) is available via WEKNORA_SKILL_HISTORY_ROOT.
-	outputDir := m.SkillOutputDir(sessionID, skillName)
-	env := map[string]string{
-		artifactOutputEnvVar:  outputDir,
-		artifactHistoryEnvVar: ArtifactOutputDir(),
-	}
-	// SessionFileStore advertises the "sandbox provides per-session file
-	// storage" capability. When present we can safely expose the input
-	// staging directory and pre-materialise the output directory; when
-	// absent, directories are materialised during script execution.
-	fileStore := sessionFileStoreFromManager(m.sandboxMgr)
-	if fileStore != nil {
-		env[sessionInputEnvVar] = sandbox.SessionInputRoot
-		if sessionID != "" {
-			if err := fileStore.EnsureSessionDir(ctx, sessionID, outputDir); err != nil {
-				logger.Warnf(ctx, "[Tool][ExecuteScript] pre-create output dir %s failed: %v", outputDir, err)
-			}
-		}
-	}
-
-	// Per-caller values are resolved here rather than baked into the sandbox
-	// at creation: an IM thread can have several people sharing one sandbox,
-	// so each turn's values must belong to that turn's speaker and must not
-	// linger where the next person could read them with `env`.
-	//
-	// The resolver runs after the artifact keys above are seeded, so
-	// applyResolvedEnv's skip-existing rule protects WEKNORA_SKILL_OUTPUT_DIR
-	// and WEKNORA_SKILL_HISTORY_ROOT (always) plus WEKNORA_SESSION_INPUT_DIR
-	// (when a session file store exists). skillDirEnvVar is set later inside
-	// buildSkillExecuteConfig by an unconditional write. The write-time
-	// blacklist of skills.InjectedSandboxEnvVars (service.validateUserEnvName)
-	// is what covers a name that was not seeded on this path. Other WEKNORA_*
-	// names (API keys, base URLs) are ordinary credentials a skill may declare.
-	if m.envResolver != nil {
-		resolved, missing, err := m.envResolver.ResolveEnv(ctx, skillName)
-		if err != nil {
-			return nil, err
-		}
-		if len(missing) > 0 {
-			return nil, &MissingSkillEnvError{SkillName: skillName, Names: missing}
-		}
-		applyResolvedEnv(env, resolved)
-	}
-
-	config, err := buildSkillExecuteConfig(
-		source, skillName, scriptPath, basePath, args, stdin, env, sessionID,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	// Execute in sandbox
-	return m.sandboxMgr.Execute(ctx, config)
-}
-
-// buildSkillExecuteConfig turns one skill script into an execution request.
-//
-// The two sources diverge here and nowhere else. A skill installed into the
-// image is run in place: there is no host-side copy to upload, and the
-// executor pins WorkDir to the session workspace and runs it as the ordinary
-// sandbox user. A preloaded skill keeps its existing behaviour exactly -
-// uploaded from the host, executed with the skill directory as WorkDir.
-func buildSkillExecuteConfig(
-	source SkillSource,
-	skillName, scriptPath, basePath string,
-	args []string,
-	stdin string,
-	env map[string]string,
-	sessionID string,
-) (*sandbox.ExecuteConfig, error) {
-	image, installed := source.(imageSkillSource)
-	if !installed {
-		// Load the script file to verify it exists and is a script
-		file, err := source.LoadSkillFile(skillName, scriptPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load script: %w", err)
-		}
-		if !file.IsScript {
-			return nil, fmt.Errorf("file is not an executable script: %s", scriptPath)
-		}
-		return &sandbox.ExecuteConfig{
-			Script:    file.Path,
-			Args:      args,
-			WorkDir:   basePath,
-			Stdin:     stdin,
-			Env:       env,
-			SessionID: sessionID,
-		}, nil
-	}
-
-	// The archive is deliberately not consulted: the image is what executes,
-	// and a skill whose archive failed to store is still installed and
-	// runnable. That leaves the extension as the only check available here,
-	// which is also the one the executor's interpreter choice depends on.
-	if !IsScript(scriptPath) {
-		return nil, fmt.Errorf("file is not an executable script: %s", scriptPath)
-	}
-	remoteScript, err := image.RemoteScriptPath(skillName, scriptPath)
-	if err != nil {
-		return nil, err
-	}
-	// The install-time verification pass exports the skill directory under
-	// this name, so the environment a script is checked in is the environment
-	// it is later called in.
-	env[skillDirEnvVar] = basePath
-	return &sandbox.ExecuteConfig{
-		RemoteScriptPath: remoteScript,
-		Args:             args,
-		Stdin:            stdin,
-		Env:              env,
-		SessionID:        sessionID,
-	}, nil
 }
 
 // sessionFileStoreFromManager returns the sandbox manager's effective

@@ -3,7 +3,6 @@ package file
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -38,13 +37,8 @@ func NewFileServiceFromStorageConfig(
 	case "local":
 		baseDir := localBaseDir
 		if sec != nil && sec.Local != nil {
-			rawPrefix := strings.TrimSpace(sec.Local.PathPrefix)
-			prefix := strings.Trim(rawPrefix, "/\\")
-			if prefix != "" {
-				candidate := filepath.Join(baseDir, prefix)
-				if safeBaseDir, err := secutils.SafePathUnderBase(baseDir, candidate); err == nil {
-					baseDir = safeBaseDir
-				}
+			if safeBaseDir, err := secutils.SafeJoinUnderBase(baseDir, sec.Local.PathPrefix); err == nil {
+				baseDir = safeBaseDir
 			}
 		}
 		externalURL := strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL"))

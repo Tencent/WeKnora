@@ -48,6 +48,25 @@ func zipBundleWithSymlink(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
+func zipBundleWithDirEntries(t *testing.T, dirs int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	f, err := w.Create("SKILL.md")
+	require.NoError(t, err)
+	_, err = f.Write([]byte(validSkillMD))
+	require.NoError(t, err)
+
+	for i := range dirs {
+		_, err := w.Create(fmt.Sprintf("empty-%04d/", i))
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, w.Close())
+	return buf.Bytes()
+}
+
 func zipBundleWithNFiles(t *testing.T, count int) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -87,6 +106,35 @@ func zipBundleWithDeclaredSize(t *testing.T, name string, size uint64) []byte {
 	f, err := w.Create("SKILL.md")
 	require.NoError(t, err)
 	_, err = f.Write([]byte(validSkillMD))
+	require.NoError(t, err)
+
+	require.NoError(t, w.Close())
+	return buf.Bytes()
+}
+
+func zipGitHubStyleWithOversizeExtra(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	f, err := w.Create("repo-main/skills/pdf/SKILL.md")
+	require.NoError(t, err)
+	_, err = f.Write([]byte(validSkillMD))
+	require.NoError(t, err)
+
+	f, err = w.Create("repo-main/skills/pdf/run.py")
+	require.NoError(t, err)
+	_, err = f.Write([]byte("print(1)\n"))
+	require.NoError(t, err)
+
+	header := &zip.FileHeader{
+		Name:               "repo-main/vendor/huge.bin",
+		Method:             zip.Store,
+		UncompressedSize64: uint64(maxSkillBundleFileBytes + 1),
+		CompressedSize64:   0,
+		CRC32:              0,
+	}
+	_, err = w.CreateRaw(header)
 	require.NoError(t, err)
 
 	require.NoError(t, w.Close())
@@ -194,6 +242,81 @@ Use scripts/extract.py to pull text out of a PDF.
 		require.Equal(t, "1.2.3", bundle.Version)
 	})
 
+	t.Run("reads UTF-8 BOM frontmatter including version", func(t *testing.T) {
+		manifest := "\ufeff---\nname: pdf-tools\nversion: 1.2.3\n" +
+			"description: Extract text from PDF files\n---\nUse PDF tools.\n"
+		data := zipBundle(t, map[string]string{"SKILL.md": manifest})
+		bundle, err := ParseSkillBundle(data)
+		require.NoError(t, err)
+		require.Equal(t, "pdf-tools", bundle.Name)
+		require.Equal(t, "1.2.3", bundle.Version)
+		require.Equal(t, "Use PDF tools.", bundle.Instructions)
+		require.Equal(t, []byte(manifest), bundle.Files["SKILL.md"])
+	})
+
+	t.Run("uses slug when name is a display title", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"SKILL.md": `---
+name: Word / DOCX
+slug: word-docx
+version: 1.0.2
+description: Create and edit Microsoft Word documents.
+---
+Use this skill for .docx files.
+`,
+		})
+
+		bundle, err := ParseSkillBundle(data)
+
+		require.NoError(t, err)
+		require.Equal(t, "word-docx", bundle.Name)
+		require.Equal(t, "1.0.2", bundle.Version)
+	})
+
+	t.Run("repairs version and description nested under name", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"SKILL.md": `---
+name: 命理大师
+  version: 1.2.6
+  description: |
+    全体系命理大师。
+---
+Use the scripts in this skill.
+`,
+		})
+
+		bundle, err := ParseSkillBundle(data)
+
+		require.NoError(t, err)
+		require.True(t, bundle.FrontmatterRepaired)
+		require.Equal(t, "命理大师", bundle.Name)
+		require.Equal(t, "1.2.6", bundle.Version)
+		require.Contains(t, bundle.Description, "全体系命理大师")
+	})
+
+	t.Run("rejects a SkillHub archive whose extra YAML is still invalid after repair", func(t *testing.T) {
+		data := zipBundle(t, map[string]string{
+			"SKILL.md": `---
+name: 命理大师
+  version: 1.2.6
+  description: |
+    全体系命理大师。
+metadata:
+  openclaw:
+    install:
+      - kind: node
+      package: iztro
+---
+Use the scripts in this skill.
+`,
+		})
+
+		_, err := ParseSkillBundle(data)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrSkillBundleInvalid)
+	})
+
 	t.Run("tolerates a single top-level directory", func(t *testing.T) {
 		data := zipBundle(t, map[string]string{
 			"pdf-tools/SKILL.md":           validSkillMD,
@@ -239,10 +362,48 @@ Use scripts/extract.py to pull text out of a PDF.
 		require.ErrorIs(t, err, ErrSkillBundleInvalid)
 	})
 
-	t.Run("rejects too many entries", func(t *testing.T) {
+	t.Run("remote options count only the skill subtree", func(t *testing.T) {
+		files := map[string]string{
+			"repo-main/README.md":           "noise",
+			"repo-main/skills/pdf/SKILL.md": validSkillMD,
+			"repo-main/skills/pdf/run.py":   "print(1)\n",
+		}
+		for i := 0; i < 3000; i++ {
+			files[fmt.Sprintf("repo-main/vendor/%04d.txt", i)] = "x"
+		}
+
+		bundle, err := ParseSkillBundleWithOptions(zipBundle(t, files), SkillBundleParseOptions{
+			AllowExtraFiles:  true,
+			AllowNestedSkill: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "pdf-tools", bundle.Name)
+		require.Len(t, bundle.Files, 2)
+		require.Contains(t, bundle.Files, "run.py")
+		require.NotContains(t, bundle.Files, "README.md")
+	})
+
+	t.Run("remote options ignore oversize files outside the skill subtree", func(t *testing.T) {
+		bundle, err := ParseSkillBundleWithOptions(zipGitHubStyleWithOversizeExtra(t), SkillBundleParseOptions{
+			AllowExtraFiles:  true,
+			AllowNestedSkill: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "pdf-tools", bundle.Name)
+		require.Contains(t, bundle.Files, "run.py")
+	})
+
+	t.Run("directory entries do not count toward the file cap", func(t *testing.T) {
+		bundle, err := ParseSkillBundle(zipBundleWithDirEntries(t, 3000))
+		require.NoError(t, err)
+		require.Equal(t, "pdf-tools", bundle.Name)
+		require.Len(t, bundle.Files, 1)
+	})
+
+	t.Run("rejects too many skill files", func(t *testing.T) {
 		_, err := ParseSkillBundle(zipBundleWithNFiles(t, maxSkillBundleFiles))
 		require.ErrorIs(t, err, ErrSkillBundleInvalid)
-		require.ErrorContains(t, err, "archive holds more than")
+		require.ErrorContains(t, err, "skill directory holds more than")
 	})
 
 	t.Run("rejects per-entry oversize", func(t *testing.T) {

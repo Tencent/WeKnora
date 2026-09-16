@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -38,11 +39,27 @@ type installTranscript struct {
 	sessionID          string
 	assistantMessageID string
 
-	mu       sync.Mutex
-	message  *types.Message
-	answers  []*installAnswerSegment
-	starts   map[string]time.Time
-	finished bool
+	mu      sync.Mutex
+	message *types.Message
+	answers []*installAnswerSegment
+	starts  map[string]time.Time
+	// closed guards the terminal event and the final write, both of which say
+	// "this install is over" and must be said once.
+	closed bool
+	// Totals accumulated across the run's engine turns, reported on the one
+	// terminal event Finish emits.
+	totalSteps      int
+	totalDurationMs int64
+
+	// Activity progress fills the long stretch between the seeded anchor (35%)
+	// and agent_done (80%) while the installer is actually working. Every tool
+	// call the bus already delivers advances an asymptotic percent, so the bar
+	// moves without knowing how many rounds the agent will run. onActivity is
+	// wired only by the install path; the remove path and most tests leave it
+	// nil and nothing publishes.
+	onActivity    func(steps int, lastCmd string)
+	toolCalls     int
+	progressMuted bool
 }
 
 // installAnswerSegment accumulates the prose streamed under one final-answer
@@ -67,6 +84,7 @@ func newInstallTranscript(
 	streams interfaces.StreamManager,
 	messages interfaces.MessageRepository,
 	sessionID, assistantMessageID string,
+	onActivity func(steps int, lastCmd string),
 ) *installTranscript {
 	return &installTranscript{
 		ctx:                ctx,
@@ -76,6 +94,7 @@ func newInstallTranscript(
 		sessionID:          sessionID,
 		assistantMessageID: assistantMessageID,
 		starts:             map[string]time.Time{},
+		onActivity:         onActivity,
 	}
 }
 
@@ -136,17 +155,25 @@ func (tr *installTranscript) Subscribe() {
 	}
 	tr.bus.On(event.EventAgentThought, tr.onThought)
 	tr.bus.On(event.EventAgentToolCall, tr.onToolCall)
+	tr.bus.On(event.EventAgentCommandOutput, tr.onInstallOutput)
 	tr.bus.On(event.EventAgentToolResult, tr.onToolResult)
 	tr.bus.On(event.EventAgentFinalAnswer, tr.onAnswer)
 	tr.bus.On(event.EventError, tr.onError)
 	tr.bus.On(event.EventAgentComplete, tr.onComplete)
 }
 
-// Finish closes the record. runErr is the engine's verdict: the engine emits
-// no complete event when it fails, and a failed install is the one people
-// actually come to read, so the failure is written here rather than hoped for.
+// Finish closes the record. runErr is the install's verdict, not just the
+// engine's: verification runs after the agent stops, and a failure there is the
+// one people actually come to read, so it is written here rather than hoped for.
 func (tr *installTranscript) Finish(ctx context.Context, runErr error) {
 	if tr == nil {
+		return
+	}
+	tr.mu.Lock()
+	alreadyClosed := tr.closed
+	tr.closed = true
+	tr.mu.Unlock()
+	if alreadyClosed {
 		return
 	}
 	if runErr != nil {
@@ -173,20 +200,39 @@ func (tr *installTranscript) Finish(ctx context.Context, runErr error) {
 	}
 
 	tr.mu.Lock()
-	alreadyComplete := tr.finished
-	tr.finished = true
+	steps, duration := tr.totalSteps, tr.totalDurationMs
 	tr.mu.Unlock()
-
-	if !alreadyComplete {
-		tr.append(interfaces.StreamEvent{
-			ID:        uuid.NewString(),
-			Type:      types.ResponseTypeComplete,
-			Done:      true,
-			Timestamp: time.Now(),
-			Data:      map[string]interface{}{},
-		})
-	}
+	tr.append(interfaces.StreamEvent{
+		ID:        uuid.NewString(),
+		Type:      types.ResponseTypeComplete,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"total_steps":       steps,
+			"total_duration_ms": duration,
+		},
+	})
 	tr.save(ctx)
+}
+
+// RecordPrompt logs a follow-up instruction the installer was given mid-run.
+//
+// The transcript exists so one replay of the event log is the whole
+// conversation. A repair round whose instruction is missing reads as the agent
+// spontaneously deciding to install more packages, which is precisely the
+// moment someone is reading this to find out why.
+func (tr *installTranscript) RecordPrompt(prompt string) {
+	if tr == nil {
+		return
+	}
+	tr.append(interfaces.StreamEvent{
+		ID:        uuid.NewString(),
+		Type:      types.ResponseTypeInstallPrompt,
+		Content:   prompt,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      map[string]interface{}{},
+	})
 }
 
 func (tr *installTranscript) onThought(_ context.Context, evt event.Event) error {
@@ -211,6 +257,11 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 		return nil
 	}
 	tr.mu.Lock()
+	_, seen := tr.starts[data.ToolCallID]
+	if seen {
+		tr.mu.Unlock()
+		return nil
+	}
 	tr.starts[data.ToolCallID] = time.Now()
 	// This round called a tool, so it is not the round that ends the run: any
 	// prose it streamed was a preamble and must not reach Message.Content.
@@ -218,6 +269,14 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 		if !seg.superseded && seg.content != "" {
 			seg.superseded = true
 		}
+	}
+	// One command is one step of the asymptotic progress. Muted runs (after
+	// the first round ends) stop counting so a repair round cannot drag the
+	// bar back under the stage anchors that govern it by then.
+	steps, lastCmd := 0, ""
+	if !tr.progressMuted {
+		tr.toolCalls++
+		steps, lastCmd = tr.toolCalls, installToolCallSummary(data)
 	}
 	tr.mu.Unlock()
 
@@ -232,6 +291,9 @@ func (tr *installTranscript) onToolCall(_ context.Context, evt event.Event) erro
 			"tool_call_id": data.ToolCallID,
 		},
 	})
+	if steps > 0 && tr.onActivity != nil {
+		tr.onActivity(steps, lastCmd)
+	}
 	return nil
 }
 
@@ -326,13 +388,16 @@ func (tr *installTranscript) onError(_ context.Context, evt event.Event) error {
 	return nil
 }
 
+// onComplete records what the round finished with. It deliberately emits no
+// terminal event: an install may run another installer round after
+// verification, and a console that saw "complete" would stop following before
+// that round began. Only Finish closes the stream.
 func (tr *installTranscript) onComplete(_ context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.AgentCompleteData)
 	if !ok {
 		return nil
 	}
 	tr.mu.Lock()
-	tr.finished = true
 	if data.MessageID == tr.assistantMessageID {
 		msg := tr.ensureMessageLocked()
 		msg.IsCompleted = true
@@ -347,18 +412,11 @@ func (tr *installTranscript) onComplete(_ context.Context, evt event.Event) erro
 	if tr.composeAnswerLocked() == "" && data.FinalAnswer != "" {
 		tr.segmentLocked(evt.ID).content = data.FinalAnswer
 	}
+	// Summed rather than overwritten: an install that needed a repair round ran
+	// two engine turns, and its cost is both of them.
+	tr.totalSteps += data.TotalSteps
+	tr.totalDurationMs += data.TotalDurationMs
 	tr.mu.Unlock()
-
-	tr.append(interfaces.StreamEvent{
-		ID:        evt.ID,
-		Type:      types.ResponseTypeComplete,
-		Done:      true,
-		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"total_steps":       data.TotalSteps,
-			"total_duration_ms": data.TotalDurationMs,
-		},
-	})
 	return nil
 }
 
@@ -446,4 +504,81 @@ func (tr *installTranscript) save(ctx context.Context) {
 	if err := tr.messages.UpdateMessage(ctx, msg); err != nil {
 		logger.Warnf(ctx, "[skill] persist install transcript %s failed: %v", tr.sessionID, err)
 	}
+}
+
+// progressLogMaxRunes caps the one-line command summary the progress card
+// shows. The card is one line tall; a heredoc would flatten it.
+const progressLogMaxRunes = 80
+
+// installToolCallSummary condenses one tool call into the one-line log the
+// progress card shows. The engine's own hint (e.g. `shell_exec: uv venv
+// .venv`) is preferred when it has one; otherwise the shell command is used.
+func installToolCallSummary(data event.AgentToolCallData) string {
+	summary := strings.TrimSpace(data.Hint)
+	if summary == "" {
+		if cmd, ok := data.Arguments["command"].(string); ok && strings.TrimSpace(cmd) != "" {
+			summary = fmt.Sprintf("%s: %s", data.ToolName, strings.TrimSpace(cmd))
+		} else {
+			summary = data.ToolName
+		}
+	}
+	summary = strings.ReplaceAll(summary, "\n", " ")
+	if runes := []rune(summary); len(runes) > progressLogMaxRunes {
+		summary = string(runes[:progressLogMaxRunes]) + "…"
+	}
+	return summary
+}
+
+// muteActivityProgress stops the asymptotic progress wherever it has reached.
+// Called once the first installer round ends: everything after it —
+// verification and any repair rounds — is covered by the explicit stage
+// anchors (agent_done 80, repairing 82), and tool calls from a repair round
+// publishing again would drag the bar back below those anchors.
+func (tr *installTranscript) muteActivityProgress() {
+	if tr == nil {
+		return
+	}
+	tr.mu.Lock()
+	tr.progressMuted = true
+	tr.mu.Unlock()
+}
+
+// asymptoticInstallPercent fills the 35→79 span with no knowledge of the
+// total: each command advances the bar by a shrinking share of what is left,
+// so the curve is monotonic for any round count and converges below the
+// agent_done anchor at 80 — never past it, never stalls on the way.
+//
+// The shape is 35 + 44·(1 − e^(−k/12)): the first command moves ~4 points, the
+// tenth ~60%, the twentieth ~71%, and even a run that exhausts
+// max_iterations=30 only reaches ~75, still short of the 79 ceiling.
+func asymptoticInstallPercent(k int) int {
+	if k <= 0 {
+		return 35
+	}
+	p := 35 + int(math.Round(44*(1-math.Exp(-float64(k)/12.0))))
+	if p > 79 {
+		return 79
+	}
+	return p
+}
+
+func (tr *installTranscript) onInstallOutput(_ context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.CommandOutputData)
+	if !ok {
+		return nil
+	}
+	tr.mu.Lock()
+	closed := tr.closed
+	tr.mu.Unlock()
+	if closed {
+		return nil
+	}
+	tr.append(interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeInstallOutput, Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tool_call_id": data.ToolCallID, "command": data.Command,
+			"started_at": data.StartedAt, "output": data.Output, "done": data.Done,
+		},
+	})
+	return nil
 }

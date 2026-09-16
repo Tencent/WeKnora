@@ -305,6 +305,18 @@ func (r *authTokenRepository) GetTokenByValue(ctx context.Context, tokenValue st
 	return &token, nil
 }
 
+// GetTokenByID gets a token by its primary key
+func (r *authTokenRepository) GetTokenByID(ctx context.Context, id string) (*types.AuthToken, error) {
+	var token types.AuthToken
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&token).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTokenNotFound
+		}
+		return nil, err
+	}
+	return &token, nil
+}
+
 // GetTokensByUserID gets all tokens for a user
 func (r *authTokenRepository) GetTokensByUserID(ctx context.Context, userID string) ([]*types.AuthToken, error) {
 	var tokens []*types.AuthToken

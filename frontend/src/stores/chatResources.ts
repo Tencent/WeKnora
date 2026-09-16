@@ -46,6 +46,9 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   // 自己是否仍是最新的那次，避免误清正在飞行的句柄。
   let kbAllGen = 0
   let agentsAllGen = 0
+  // 模型列表同样用代际挡住过期的 inflight：设置页保存后会 replaceModels，
+  // 不能让保存前发出的 ensureModels 把旧列表写回来。
+  let modelsGen = 0
 
   const agentKbCache = new Map<string, { at: number; data: any[] }>()
   const agentKbInflight = new Map<string, Promise<any[]>>()
@@ -203,10 +206,20 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
 
   async function ensureModels(force = false): Promise<void> {
     return runOnce('models', force, async () => {
+      const gen = ++modelsGen
       const models = await listModels()
+      if (gen !== modelsGen) return
       allModels.value = Array.isArray(models) ? models : []
       loadedAt.value.models = Date.now()
     })
+  }
+
+  /** 用刚拉到的列表覆盖缓存（模型增删改之后调用，避免 60s TTL 把旧窗口大小继续展示）。 */
+  function replaceModels(models: ModelConfig[]) {
+    modelsGen++
+    inflight.delete('models')
+    allModels.value = Array.isArray(models) ? models : []
+    loadedAt.value.models = Date.now()
   }
 
   /** @deprecated 使用 ensureModels；保留别名供对话输入栏调用 */
@@ -339,6 +352,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       kbAllInflight = null
       agentsLoadedLocale = ''
       bumpAgentsGeneration()
+      modelsGen++
       invalidateKnowledgeBaseDetail()
       return
     }
@@ -355,6 +369,9 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     if (keys.includes('agents')) {
       agentsLoadedLocale = ''
       bumpAgentsGeneration()
+    }
+    if (keys.includes('models')) {
+      modelsGen++
     }
   }
 
@@ -373,6 +390,7 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     ensureKnowledgeBases,
     ensureAgents,
     ensureModels,
+    replaceModels,
     ensureChatModels,
     ensureWebSearchProviders,
     ensureSandboxConfigs,

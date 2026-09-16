@@ -7,7 +7,7 @@ const source = readFileSync(new URL('./AgentEditorModal.vue', import.meta.url), 
 test('editing an agent closes the editor after a successful save', () => {
   assert.match(
     source,
-    /await updateAgent\(formData\.value\.id, formData\.value\);\s*MessagePlugin\.success\(t\('agent\.messages\.updated'\)\);\s*emit\('success'\);\s*handleClose\(\);/
+    /await updateAgent\(formData\.value\.id, payload\);\s*MessagePlugin\.success\(t\('agent\.messages\.updated'\)\);\s*emit\('success'\);\s*handleClose\(\);/
   )
 })
 
@@ -123,7 +123,36 @@ test('skills and sandbox share one editor section', () => {
   assert.doesNotMatch(source, /currentSection === 'sandbox' && isAgentMode/)
   assert.match(source, /sandbox: 'skills'/)
   assert.match(source, /formData\.config\.sandbox_config_id/)
-  assert.match(source, /:disabled="!hasSandboxSelected"/)
+  assert.match(source, /:disabled="!canEnableSkills"/)
   assert.match(source, /sandbox-option/)
   assert.doesNotMatch(source, /skill-info-box/)
+})
+
+test('agent skill picker uses the catalog and only enables ready installs', () => {
+  assert.match(source, /function autoBindSoleSandbox\(/)
+  assert.match(source, /canEnableSkills/)
+  assert.match(source, /catalogSkillRows/)
+  assert.match(source, /showCatalogSkillList/)
+  assert.match(source, /skillsSelectionMode\.value !== 'none'/)
+  assert.match(source, /:disabled="!skill\.selectable"/)
+  assert.match(source, /catalogSkillGroups/)
+  assert.match(source, /installPartial/)
+  assert.match(source, /installCatalogToCurrent/)
+  assert.match(source, /agent\.editor\.installToThisSandbox/)
+  assert.match(source, /skill-pick-list/)
+  assert.match(source, /skill-pick-group/)
+  assert.match(source, /skill-pick__badge/)
+  assert.match(source, /skillStatusIcon/)
+  assert.match(source, /isSkillBusy/)
+  assert.match(source, /viewInstallProgress/)
+  assert.match(source, /openSkillInstallProgress/)
+  assert.doesNotMatch(source, /await openSkillInstallProgress\(skill\)/)
+  assert.match(source, /SandboxSkillsPanel/)
+  assert.match(source, /focus-skill-id/)
+  assert.match(source, /skillsGroupUnavailable/)
+  assert.match(source, /selectedSandboxSummary/)
+  assert.match(source, /line-clamp: 2/)
+  assert.doesNotMatch(source, /skillsSelectionMode === 'selected' && catalogSkillRows/)
+  assert.doesNotMatch(source, /skill-list-summary/)
+  assert.doesNotMatch(source, /skill-ready-stat/)
 })

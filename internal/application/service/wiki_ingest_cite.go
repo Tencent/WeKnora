@@ -115,7 +115,7 @@ func (s *wikiIngestService) extractCandidateSlugs(
 	}
 
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts,
+		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
 	)
 
 	slugItems := make(map[string]extractedItem, len(result.Entities)+len(result.Concepts))

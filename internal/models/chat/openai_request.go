@@ -94,10 +94,11 @@ func (c *RemoteAPIChat) ConvertMessages(messages []Message) []openai.ChatComplet
 
 // BuildChatCompletionRequest 构建标准聊天请求参数（导出供子类使用）。
 //
-// 这是一个不含任何 provider 特定逻辑的通用实现：所有采样参数（temperature /
-// top_p / penalties）与 max_tokens 都按 opts 直接映射。供应商相关的特判
-// （OpenAI o-series / GPT-5 改用 max_completion_tokens、Moonshot 固定温度等）
-// 由对应的 providerAdapter.ShapeRequest 在事后施加，见 provider.go。
+// 采样参数（temperature / top_p / penalties）按 opts 直接映射。完成预算经
+// CompletionBudget 收成一个值，再按供应商只写入 max_tokens 或
+// max_completion_tokens 之一（二者互斥，见 #3014）。其余供应商特判
+// （o-series / GPT-5 采样参数、Moonshot 固定温度等）仍由
+// providerAdapter.ShapeRequest 在事后施加，见 provider.go。
 func (c *RemoteAPIChat) BuildChatCompletionRequest(
 	messages []Message, opts *ChatOptions, isStream bool,
 ) openai.ChatCompletionRequest {
@@ -126,12 +127,7 @@ func (c *RemoteAPIChat) BuildChatCompletionRequest(
 		req.PresencePenalty = float32(opts.PresencePenalty)
 	}
 
-	if opts.MaxTokens > 0 {
-		req.MaxTokens = opts.MaxTokens
-	}
-	if opts.MaxCompletionTokens > 0 {
-		req.MaxCompletionTokens = opts.MaxCompletionTokens
-	}
+	applyCompletionBudget(&req, opts.CompletionBudget(), wireCompletionTokenField(c.provider, c.modelName))
 
 	// 处理 Tools
 	if len(opts.Tools) > 0 {

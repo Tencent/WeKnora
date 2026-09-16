@@ -76,7 +76,9 @@ func configHasSkillSnapshot(cfg *types.TenantSandboxConfig) bool {
 }
 
 // skillRetargetWouldChange reports edits that would retarget the environment
-// a skill snapshot is built from: identity, spawn template, or Cube DNS.
+// a skill snapshot is built from: identity, spawn template, Cube DNS, or the
+// desktop/CLI base bit. Flipping DesktopEnabled changes the image generation
+// skills were stacked on, so installed skills must be rebuilt.
 func skillRetargetWouldChange(stored, merged *types.TenantSandboxConfig) bool {
 	if SandboxIdentityChanged(stored, merged) {
 		return true
@@ -84,7 +86,14 @@ func skillRetargetWouldChange(stored, merged *types.TenantSandboxConfig) bool {
 	if spawnTemplateID(stored) != spawnTemplateID(merged) {
 		return true
 	}
+	if desktopEnabledOf(stored) != desktopEnabledOf(merged) {
+		return true
+	}
 	return !sameStrings(cubeDNSServers(stored), cubeDNSServers(merged))
+}
+
+func desktopEnabledOf(cfg *types.TenantSandboxConfig) bool {
+	return cfg != nil && cfg.DesktopEnabled
 }
 
 // spawnTemplateID is the template/image this config would boot without a
@@ -221,6 +230,10 @@ type sandboxConfigSkillStore interface {
 	MarkSnapshotState(ctx context.Context, tenantID uint64, id, state, snapshotID string) error
 	ListSkillsByConfig(ctx context.Context, tenantID uint64, configID string) ([]*types.TenantSkillEntity, error)
 	DeleteSkill(ctx context.Context, tenantID uint64, configID, skillID string) error
+	// The tenant-wide lists answer who else still reads an archive the
+	// deleted install rows had pinned.
+	ListSkillsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillEntity, error)
+	ListCatalogsByTenant(ctx context.Context, tenantID uint64) ([]*types.TenantSkillCatalogEntity, error)
 	DeleteSnapshotRowsByConfig(ctx context.Context, tenantID uint64, configID string) error
 	DeleteUserEnvVarsByConfig(ctx context.Context, tenantID uint64, configID string) error
 }
@@ -268,11 +281,14 @@ type SandboxTemplateQueryInput struct {
 	ConfigID        string
 	EnsureStandard  bool
 	ReplaceStandard bool
+	EnsureDesktop   bool
+	ReplaceDesktop  bool
 }
 
 type SandboxTemplateCatalog struct {
 	Templates          []sandbox.RemoteTemplate `json:"templates"`
 	StandardTemplateID string                   `json:"standard_template_id,omitempty"`
+	DesktopTemplateID  string                   `json:"desktop_template_id,omitempty"`
 	Provisioned        bool                     `json:"provisioned"`
 }
 
@@ -289,9 +305,9 @@ type TenantSandboxConfigService struct {
 	globalCfg *sandbox.Config
 	now       func() time.Time
 
-	// skills and files are used only when deleting a config, to destroy the
-	// snapshot ledger and drop skill archives. Either may be nil in tests
-	// that never delete a config that owns skills.
+	// skills is used when deleting a config, to destroy the snapshot ledger
+	// and drop install rows. Catalog archives are owned by the skill
+	// definition and are not deleted here.
 	skills sandboxConfigSkillStore
 	files  sandboxConfigBundleResolver
 
@@ -337,7 +353,11 @@ func SanitizeSandboxConfig(
 	merged := types.MergeSandboxConfigForUpdate(incoming, existing)
 
 	if merged.SandboxType != "" {
-		if _, err := sandbox.ParseSandboxType(merged.SandboxType); err != nil {
+		parsed, err := sandbox.ParseSandboxType(merged.SandboxType)
+		if err != nil {
+			return nil, err
+		}
+		if err := sandbox.EnsureDockerBackendAllowed(parsed); err != nil {
 			return nil, err
 		}
 	}
@@ -347,6 +367,11 @@ func SanitizeSandboxConfig(
 			return nil, apperrors.NewBadRequestError(err.Error())
 		}
 		merged.Cube.DNSServers = dns
+	}
+	// Rejected here rather than at sandbox-create time: the provider's own
+	// error arrives minutes later, on a screen the admin has already left.
+	if err := types.ValidateSandboxNetworkPolicy(merged); err != nil {
+		return nil, apperrors.NewBadRequestError(err.Error())
 	}
 	for _, endpoint := range sandboxConfigEndpoints(merged) {
 		if err := sandbox.ValidateOutboundURLWithPolicy(endpoint, sandbox.OutboundURLPolicy{
@@ -393,7 +418,7 @@ func validateNamedSandboxBackend(cfg *types.TenantSandboxConfig) error {
 	if !sandbox.IsNamedSandboxBackendType(cfg.SandboxType) {
 		return fmt.Errorf("%w", ErrNamedSandboxBackendUnsupported)
 	}
-	return nil
+	return sandbox.EnsureDockerBackendAllowed(sandbox.SandboxType(cfg.SandboxType))
 }
 
 func filterPublicSandboxConfigs(
@@ -521,15 +546,19 @@ func (s *TenantSandboxConfigService) Get(
 	return entity, nil
 }
 
-// QueryTemplates reads the provider's template catalog and optionally installs
-// the standard WeKnora image when it is absent. This is intentionally driven by
-// workspace credentials instead of deployment environment variables.
+// QueryTemplates reads the provider's template catalog and, when asked,
+// installs the published WeKnora CLI and desktop images if that cluster has
+// none. Credentials come from the workspace connection, not env vars.
 func (s *TenantSandboxConfigService) QueryTemplates(
 	ctx context.Context, tenantID uint64, in SandboxTemplateQueryInput,
 ) (*SandboxTemplateCatalog, error) {
 	if in.ReplaceStandard && strings.TrimSpace(in.ConfigID) == "" {
 		return nil, apperrors.NewBadRequestError(
 			"config_id is required to rebuild the standard template")
+	}
+	if in.ReplaceDesktop && strings.TrimSpace(in.ConfigID) == "" {
+		return nil, apperrors.NewBadRequestError(
+			"config_id is required to rebuild the desktop template")
 	}
 	var existing *types.TenantSandboxConfig
 	if strings.TrimSpace(in.ConfigID) != "" {
@@ -549,7 +578,7 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 	if merged == nil {
 		return nil, apperrors.NewBadRequestError("sandbox config is required")
 	}
-	if in.ReplaceStandard {
+	if in.ReplaceStandard || in.ReplaceDesktop {
 		if err := s.refuseClusterSkillTemplateReplace(ctx, tenantID, merged); err != nil {
 			return nil, err
 		}
@@ -575,6 +604,9 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 			merged.E2B.TemplateID = "__catalog__"
 		}
 	case string(sandbox.SandboxTypeDocker):
+		if err := sandbox.EnsureDockerBackendAllowed(sandbox.SandboxTypeDocker); err != nil {
+			return nil, err
+		}
 		// Docker's template is an image, and the catalog step is where the
 		// admin picks one. The standard image stands in until they do, so the
 		// effective-config validation below has something to accept.
@@ -618,10 +650,11 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 		result.StandardTemplateID = usable.ID
 	}
 	oldStandardIDs := standardTemplateIDs(result.Templates)
-	// Listing is read-only. Creating or replacing the WeKnora template is an
-	// explicit settings-page action: auto-ensure on every refresh made DNS
-	// and image changes impossible to apply, and left admins unsure whether
-	// they had asked for a build.
+	// Missing first-party templates are filled from the published Hub images
+	// (ensure_standard / ensure_desktop). That is idempotent while a usable
+	// template already exists, so a catalog refresh cannot apply a new DNS or
+	// image spec — replace_standard / replace_desktop remains the explicit
+	// rebuild.
 	wantStandard := in.ReplaceStandard || (in.EnsureStandard && usable == nil)
 	if wantStandard {
 		op := "ensure"
@@ -665,9 +698,77 @@ func (s *TenantSandboxConfigService) QueryTemplates(
 			}
 		}
 	}
+	usableDesktop := pickDesktopTemplate(result.Templates)
+	if usableDesktop != nil {
+		result.DesktopTemplateID = usableDesktop.ID
+	}
+	oldDesktopIDs := desktopTemplateIDs(result.Templates)
+	wantDesktop := in.ReplaceDesktop || (in.EnsureDesktop && usableDesktop == nil)
+	if wantDesktop {
+		desktopCatalog, ok := any(client).(sandbox.RemoteDesktopTemplateCatalog)
+		if !ok {
+			if in.ReplaceDesktop {
+				return nil, fmt.Errorf("sandbox: provider %q does not expose desktop templates", effective.Type)
+			}
+		} else {
+			op := "ensure-desktop"
+			if in.ReplaceDesktop {
+				op = "replace-desktop"
+			}
+			key := op + ":" + ensureTemplateKey(tenantID, sandbox.IdentityOf(merged))
+			ensured, ensureErr, _ := s.ensureTemplate.Do(key, func() (any, error) {
+				if in.ReplaceDesktop {
+					return desktopCatalog.ReplaceDesktopTemplate(ctx)
+				}
+				return desktopCatalog.EnsureDesktopTemplate(ctx)
+			})
+			if ensureErr != nil {
+				if in.ReplaceDesktop {
+					return nil, ensureErr
+				}
+				logger.Warnf(ctx, "[sandbox] ensure desktop template: %v", ensureErr)
+			} else {
+				desktop, ok := ensured.(*sandbox.RemoteTemplate)
+				if !ok || desktop == nil {
+					if in.ReplaceDesktop {
+						return nil, fmt.Errorf("sandbox: provider %q returned no desktop template", effective.Type)
+					}
+					logger.Warnf(ctx, "[sandbox] ensure desktop template: provider %q returned no desktop template",
+						effective.Type)
+				} else {
+					result.Templates = deduplicateSandboxTemplates(append(result.Templates, *desktop))
+					if sandbox.IsTemplateReady(desktop.Status) {
+						result.Provisioned = true
+						if in.ReplaceDesktop {
+							persistErr := s.persistSpawnTemplateID(ctx, tenantID, merged, desktop.ID, oldDesktopIDs)
+							if persistErr != nil {
+								logger.Warnf(ctx,
+									"[sandbox] persist rebuilt desktop template id: %v; keeping previous templates",
+									persistErr)
+							} else {
+								result.DesktopTemplateID = desktop.ID
+								result.Templates = hideSupersededDesktopTemplates(result.Templates, desktop.ID)
+								s.deleteSupersededDesktopTemplates(ctx, desktopCatalog, desktop.ID)
+							}
+						} else {
+							result.DesktopTemplateID = desktop.ID
+						}
+					} else if !sandbox.IsTemplateBuildFailed(desktop.Status) {
+						result.Provisioned = true
+						if result.DesktopTemplateID == "" {
+							result.DesktopTemplateID = desktop.ID
+						}
+					}
+				}
+			}
+		}
+	}
 	sort.SliceStable(result.Templates, func(i, j int) bool {
 		if result.Templates[i].Standard != result.Templates[j].Standard {
 			return result.Templates[i].Standard
+		}
+		if result.Templates[i].Desktop != result.Templates[j].Desktop {
+			return result.Templates[i].Desktop
 		}
 		return strings.ToLower(result.Templates[i].Name) < strings.ToLower(result.Templates[j].Name)
 	})
@@ -696,6 +797,30 @@ func standardTemplateIDs(items []sandbox.RemoteTemplate) []string {
 		}
 	}
 	return out
+}
+
+func desktopTemplateIDs(items []sandbox.RemoteTemplate) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Desktop {
+			if id := strings.TrimSpace(item.ID); id != "" {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+func hideSupersededDesktopTemplates(items []sandbox.RemoteTemplate, keepID string) []sandbox.RemoteTemplate {
+	keepID = strings.TrimSpace(keepID)
+	kept := make([]sandbox.RemoteTemplate, 0, len(items))
+	for _, item := range items {
+		if item.Desktop && strings.TrimSpace(item.ID) != keepID {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	return kept
 }
 
 func (s *TenantSandboxConfigService) refuseClusterSkillTemplateReplace(
@@ -808,6 +933,17 @@ func (s *TenantSandboxConfigService) deleteSupersededStandardTemplates(
 	}
 }
 
+func (s *TenantSandboxConfigService) deleteSupersededDesktopTemplates(
+	ctx context.Context, catalog sandbox.RemoteDesktopTemplateCatalog, keepID string,
+) {
+	if catalog == nil || strings.TrimSpace(keepID) == "" {
+		return
+	}
+	if err := catalog.DeleteSupersededDesktopTemplates(ctx, keepID); err != nil {
+		logger.Warnf(ctx, "[sandbox] delete superseded desktop templates failed: %v", err)
+	}
+}
+
 func setSpawnTemplateID(cfg *types.TenantSandboxConfig, id string) {
 	if cfg == nil {
 		return
@@ -831,6 +967,19 @@ func pickStandardTemplate(items []sandbox.RemoteTemplate) *sandbox.RemoteTemplat
 	var best *sandbox.RemoteTemplate
 	for i := range items {
 		if !items[i].Standard || sandbox.IsTemplateBuildFailed(items[i].Status) {
+			continue
+		}
+		if best == nil || templateStatusRank(items[i].Status) > templateStatusRank(best.Status) {
+			best = &items[i]
+		}
+	}
+	return best
+}
+
+func pickDesktopTemplate(items []sandbox.RemoteTemplate) *sandbox.RemoteTemplate {
+	var best *sandbox.RemoteTemplate
+	for i := range items {
+		if !items[i].Desktop || sandbox.IsTemplateBuildFailed(items[i].Status) {
 			continue
 		}
 		if best == nil || templateStatusRank(items[i].Status) > templateStatusRank(best.Status) {
@@ -869,6 +1018,7 @@ func deduplicateSandboxTemplates(items []sandbox.RemoteTemplate) []sandbox.Remot
 		}
 		current := &result[idx]
 		current.Standard = current.Standard || item.Standard
+		current.Desktop = current.Desktop || item.Desktop
 		if templateStatusRank(item.Status) > templateStatusRank(current.Status) {
 			current.Status = item.Status
 			current.Version = item.Version
@@ -1275,16 +1425,26 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 	if err != nil {
 		logger.Warnf(ctx, "[sandbox] list skills for config %s cleanup failed: %v", configID, err)
 	}
+	var pinned []string
+	seen := map[string]struct{}{}
 	for _, skill := range skills {
 		if skill == nil {
 			continue
 		}
-		s.deleteSkillBundleBestEffort(ctx, tenantID, skill.BundleRef)
+		if ref := strings.TrimSpace(skill.BundleRef); ref != "" {
+			if _, dup := seen[ref]; !dup {
+				seen[ref] = struct{}{}
+				pinned = append(pinned, ref)
+			}
+		}
 		if err := s.skills.DeleteSkill(ctx, tenantID, configID, skill.ID); err != nil {
 			logger.Warnf(ctx, "[sandbox] delete skill %s on config %s failed: %v",
 				skill.ID, configID, err)
 		}
 	}
+	// After the rows are gone, never before: each ref is named by the very row
+	// being deleted, so asking first would always find a reader.
+	s.releasePinnedBundles(ctx, tenantID, pinned)
 	if err := s.skills.DeleteSnapshotRowsByConfig(ctx, tenantID, configID); err != nil {
 		logger.Warnf(ctx, "[sandbox] delete snapshot ledger for config %s failed: %v",
 			configID, err)
@@ -1297,20 +1457,65 @@ func (s *TenantSandboxConfigService) cleanupSkillMetadata(
 	}
 }
 
-func (s *TenantSandboxConfigService) deleteSkillBundleBestEffort(
-	ctx context.Context, tenantID uint64, bundleRef string,
+// releasePinnedBundles drops the archives whose last reader was an install row
+// this config deletion just removed.
+//
+// An install row names an object only in one case: a re-register replaced the
+// definition's copy while this sandbox kept running the image built from the
+// old one, so the row pinned those bytes. Deleting the config drops that
+// reader and no code path will ever look for them again.
+//
+// The pin is not exclusive, which is why this cannot just delete what the rows
+// named. Sibling configs installed from the same archive pin the same object,
+// and a definition may have been rolled back onto it, so the bytes go only once
+// no catalog and no surviving install names them. A list that cannot be read
+// keeps the archive: a leaked one costs storage, a deleted one costs some other
+// sandbox its files.
+func (s *TenantSandboxConfigService) releasePinnedBundles(
+	ctx context.Context, tenantID uint64, refs []string,
 ) {
-	if s.files == nil || strings.TrimSpace(bundleRef) == "" {
+	if len(refs) == 0 || s.files == nil || s.skills == nil {
 		return
 	}
-	fs, _, err := s.files.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
-	if err != nil || fs == nil {
-		logger.Warnf(ctx, "[sandbox] resolve file service to delete bundle %s failed: %v",
-			bundleRef, err)
+	catalogs, err := s.skills.ListCatalogsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] list catalogs before releasing skill archives failed: %v", err)
 		return
 	}
-	if err := fs.DeleteFile(ctx, bundleRef); err != nil {
-		logger.Warnf(ctx, "[sandbox] delete bundle %s failed: %v", bundleRef, err)
+	installs, err := s.skills.ListSkillsByTenant(ctx, tenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[sandbox] list installs before releasing skill archives failed: %v", err)
+		return
+	}
+	held := make(map[string]struct{}, len(catalogs)+len(installs))
+	for _, cat := range catalogs {
+		if cat != nil {
+			held[strings.TrimSpace(cat.BundleRef)] = struct{}{}
+		}
+	}
+	for _, row := range installs {
+		if row != nil {
+			held[strings.TrimSpace(row.BundleRef)] = struct{}{}
+		}
+	}
+
+	var fs interfaces.FileService
+	for _, ref := range refs {
+		if _, still := held[ref]; still {
+			continue
+		}
+		if fs == nil {
+			resolved, _, resolveErr := s.files.ResolveFileService(ctx, &types.Tenant{ID: tenantID}, "", "", "")
+			if resolveErr != nil || resolved == nil {
+				logger.Warnf(ctx, "[sandbox] resolve file service to release skill archives failed: %v",
+					resolveErr)
+				return
+			}
+			fs = resolved
+		}
+		if err := fs.DeleteFile(ctx, ref); err != nil {
+			logger.Warnf(ctx, "[sandbox] delete skill archive %s failed: %v", ref, err)
+		}
 	}
 }
 
@@ -1448,6 +1653,22 @@ func sandboxConfigHasSecrets(cfg *types.TenantSandboxConfig) bool {
 	for _, value := range cfg.EnvVars {
 		if value != "" {
 			return true
+		}
+	}
+	if cfg.Network != nil {
+		for _, rule := range cfg.Network.CubeRules {
+			for _, inject := range rule.Inject {
+				if inject.Secret != "" {
+					return true
+				}
+			}
+		}
+		for _, rule := range cfg.Network.E2BHostRules {
+			for _, value := range rule.Headers {
+				if value != "" {
+					return true
+				}
+			}
 		}
 	}
 	return false

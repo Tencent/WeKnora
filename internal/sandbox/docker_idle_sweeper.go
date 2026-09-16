@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/moby/moby/client"
 )
 
@@ -78,8 +79,11 @@ func (s *dockerIdleSweeper) trigger(ctx context.Context) {
 		return
 	}
 	go func() {
+		// Drop the chat-trace parent: Engine API list/stat/delete from a
+		// sweep must not appear as siblings of agent.round after the tool
+		// that triggered the sweep has already finished its span.
 		sweepCtx, cancel := context.WithTimeout(
-			context.WithoutCancel(ctx), dockerSweepBudget,
+			logger.CloneContextWithoutTrace(ctx), dockerSweepBudget,
 		)
 		defer cancel()
 		if reclaimed, err := s.sweep(sweepCtx); err != nil {
@@ -169,9 +173,9 @@ func (s *dockerIdleSweeper) ttlFor(summary RemoteSandboxSummary) time.Duration {
 // lastActivity returns when the container last ran a command, falling back to
 // when it started for a sandbox that has not executed anything yet.
 //
-// The marker lives inside the container and has to be writable by the
-// unprivileged sandbox account, so its mtime is attacker-influenced: a script
-// can `touch -d` it. A timestamp in the future is the one form of that which
+// The marker lives inside the container and has to be writable by the account
+// the execs run as, so its mtime is attacker-influenced: a script can
+// `touch -d` it. A timestamp in the future is the one form of that which
 // would disable reclamation permanently, so it is refused outright and the
 // container falls back to its start time. Backdating only makes a sandbox look
 // idle sooner, which costs the container that did it and nothing else.

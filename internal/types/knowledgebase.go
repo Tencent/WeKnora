@@ -249,7 +249,10 @@ type ChunkingConfig struct {
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
 	// ParserEngineRules configures which parser engine to use for each file type.
-	// When empty, the builtin engine is used for all types.
+	// When empty, DefaultParserEngine is used (builtin/simple routing, except
+	// types that only a specific engine can parse: ppt/pptx fall back to
+	// markitdown). A linked anydoc binding is preferred for every type it
+	// converts.
 	ParserEngineRules []ParserEngineRule `yaml:"parser_engine_rules,omitempty" json:"parser_engine_rules,omitempty"`
 	// EnableParentChild enables two-level parent-child chunking strategy.
 	// When enabled, large parent chunks provide context while small child chunks
@@ -278,14 +281,49 @@ type ChunkingConfig struct {
 	TableMetadataInstructions string `yaml:"table_metadata_instructions,omitempty" json:"table_metadata_instructions,omitempty"`
 }
 
+// defaultParserEngineByType maps file types the builtin/simple engines cannot
+// parse to a docreader engine that can. Types omitted here keep empty-string
+// routing (Go simple formats, otherwise docreader builtin) unless
+// SetPreferParserEngine selects a linked in-process engine such as anydoc.
+var defaultParserEngineByType = map[string]string{
+	"ppt":  "markitdown",
+	"pptx": "markitdown",
+}
+
+// preferParserEngine, if set, may override DefaultParserEngine. The
+// docparser package registers anydoc here so types does not import the
+// engine catalog.
+var preferParserEngine func(fileType string) string
+
+// SetPreferParserEngine registers a build-time preference used by
+// DefaultParserEngine. Pass nil to clear. Intended to be called from init().
+func SetPreferParserEngine(fn func(fileType string) string) {
+	preferParserEngine = fn
+}
+
+// DefaultParserEngine returns the engine used when no parser_engine_rules
+// match. Empty string means builtin (docreader) or Go simple-format routing.
+// When the anydoc binding is linked it is preferred for every type it
+// converts (except Go simple formats). ppt/pptx otherwise fall back to
+// markitdown.
+func DefaultParserEngine(fileType string) string {
+	ft := normalizeParserFileType(fileType)
+	if preferParserEngine != nil {
+		if engine := preferParserEngine(ft); engine != "" {
+			return engine
+		}
+	}
+	return defaultParserEngineByType[ft]
+}
+
 // ResolveParserEngine returns the engine name for the given file type
-// based on the configured rules. Returns empty string (builtin) when
-// no rule matches.
+// based on the configured rules. When no rule matches it returns the
+// type-level default (see DefaultParserEngine).
 func (c ChunkingConfig) ResolveParserEngine(fileType string) string {
 	if rule := c.ResolveParserEngineRule(fileType); rule != nil {
 		return rule.Engine
 	}
-	return ""
+	return DefaultParserEngine(fileType)
 }
 
 // ResolveParserEngineRule returns the parser rule for a file type.

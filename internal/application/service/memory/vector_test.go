@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // The reason for adding semantic recall at all: a memory the user has since
@@ -16,7 +17,15 @@ import (
 
 func newVectorHarness(t *testing.T) (*Service, *stubTenantRepo, *stubModelService) {
 	t.Helper()
-	svc, _, tenantRepo := newMemoryHarness(t)
+	svc, _, tenantRepo, models := newVectorHarnessWithDB(t)
+	return svc, tenantRepo, models
+}
+
+// newVectorHarnessWithDB also hands back the database, for the tests that have
+// to arrange a row state no service method produces.
+func newVectorHarnessWithDB(t *testing.T) (*Service, *gorm.DB, *stubTenantRepo, *stubModelService) {
+	t.Helper()
+	svc, db, tenantRepo := newMemoryHarness(t)
 	models := &stubModelService{
 		workspaceModels: []*types.Model{
 			{ID: "embed-1", Type: types.ModelTypeEmbedding, Status: types.ModelStatusActive},
@@ -30,7 +39,7 @@ func newVectorHarness(t *testing.T) (*Service, *stubTenantRepo, *stubModelServic
 		}},
 	}
 	svc.modelService = models
-	return svc, tenantRepo, models
+	return svc, db, tenantRepo, models
 }
 
 func TestARewordedMemoryIsStillFound(t *testing.T) {

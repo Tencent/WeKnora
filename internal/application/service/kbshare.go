@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -489,14 +490,7 @@ func (s *kbShareService) CheckTenantKBPermission(ctx context.Context, kbID strin
 // HasTenantKBPermission is a thin "do I have at least N" wrapper over
 // CheckTenantKBPermission for callers that don't need the granular role.
 func (s *kbShareService) HasTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole, requiredRole types.OrgMemberRole) (bool, error) {
-	role, isShared, err := s.CheckTenantKBPermission(ctx, kbID, callerTenantID, callerTenantRole)
-	if err != nil {
-		return false, err
-	}
-	if !isShared {
-		return false, nil
-	}
-	return role.HasPermission(requiredRole), nil
+	return access.NewKBSharePermissions(ctx, s, callerTenantID, callerTenantRole).Check(kbID, requiredRole)
 }
 
 // GetKBSourceTenant gets the source tenant ID for a shared knowledge base

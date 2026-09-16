@@ -82,6 +82,13 @@ func (r *StoredResource) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// MessageFileBindings contains authoritative file origins for an authorized message.
+// MessageArtifact requires an explicit artifact binding to that exact message.
+type MessageFileBindings struct {
+	KnowledgeBaseIDs []string
+	MessageArtifact  bool
+}
+
 // ResourceBinding connects a resource to a domain object that owns or uses it.
 type ResourceBinding struct {
 	ID         string    `json:"id" gorm:"type:varchar(36);primaryKey"`

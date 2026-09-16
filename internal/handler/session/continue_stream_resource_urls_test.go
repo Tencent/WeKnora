@@ -58,6 +58,46 @@ func (s *stubStreamManager) GetEvents(
 	return s.events[fromOffset:], len(s.events), nil
 }
 
+func (s *stubStreamManager) AppendSteerEvents(
+	context.Context, string, string, []interfaces.StreamEvent,
+) error {
+	return nil
+}
+
+func (s *stubStreamManager) GetSteerEvents(
+	_ context.Context, _, _ string, fromOffset int,
+) ([]interfaces.StreamEvent, int, error) {
+	return nil, fromOffset, nil
+}
+
+func (s *stubStreamManager) UpdateSteerEventData(
+	context.Context, string, string, string, map[string]interface{},
+) (bool, error) {
+	return false, nil
+}
+
+func (s *stubStreamManager) DeleteSteerEvent(
+	context.Context, string, string, string,
+) (bool, error) {
+	return false, nil
+}
+
+func (s *stubStreamManager) SetLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *stubStreamManager) ClaimLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *stubStreamManager) GetLiveRun(context.Context, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (s *stubStreamManager) ClearLiveRun(context.Context, string, string) error {
+	return nil
+}
+
 // completedAnswerStream is one assistant turn whose answer embeds a knowledge-base
 // image, with the resource handle straddling two deltas as it does in production
 // when the model-context decoder flushes mid-reference.

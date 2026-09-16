@@ -14,6 +14,8 @@ import (
 // not, because a newly added tool would opt out by accident.
 func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 	builtIns := []string{
+		ToolDiscoverMCPTools,
+		ToolCallMCPTool,
 		ToolThinking,
 		ToolTodoWrite,
 		ToolGrepChunks,
@@ -28,8 +30,13 @@ func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 		ToolDataSchema,
 		ToolWebSearch,
 		ToolWebFetch,
-		ToolExecuteSkillScript,
-		ToolReadSkill,
+		ToolReadFile,
+		ToolListSandboxFiles,
+		ToolWriteSandboxFile,
+		ToolEditSandboxFile,
+		ToolWriteSkillFile,
+		ToolEditSkillFile,
+		ToolShellExec,
 		ToolWikiReadPage,
 		ToolWikiWritePage,
 		ToolWikiReplaceText,

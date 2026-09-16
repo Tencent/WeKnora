@@ -529,3 +529,21 @@ func CloneContext(ctx context.Context) context.Context {
 
 	return newCtx
 }
+
+// CloneContextWithoutTrace copies the same identity keys as CloneContext but
+// drops the Langfuse *Trace handle and the OpenTelemetry span. Use it for
+// background work that must keep tenant/session identity yet must not attach
+// child spans (Docker Engine HTTP, idle sweeps, image pulls kicked off after
+// a tool has returned) onto the originating chat trace.
+func CloneContextWithoutTrace(ctx context.Context) context.Context {
+	newCtx := context.Background()
+	for _, k := range types.ContextKeysClonedAcrossDetach() {
+		if k == types.LangfuseTraceContextKey {
+			continue
+		}
+		if v := ctx.Value(k); v != nil {
+			newCtx = context.WithValue(newCtx, k, v)
+		}
+	}
+	return newCtx
+}

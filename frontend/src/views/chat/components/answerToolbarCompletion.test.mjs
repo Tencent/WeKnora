@@ -30,9 +30,21 @@ test('artifact count is a top-right overlay instead of t-badge', () => {
   assert.match(agentStream, /class="answer-toolbar__artifact-count"/)
   assert.match(sharedStyles, /answer-toolbar__artifact-count/)
   assert.match(sharedStyles, /position: absolute/)
-  assert.match(sharedStyles, /td-bg-color-secondarycontainer/)
+  assert.match(sharedStyles, /td-brand-color/)
+  assert.match(sharedStyles, /artifact-toolbar-arrive/)
+  assert.match(botMessage, /is-arrived': artifactArrived/)
+  assert.match(agentStream, /is-arrived': artifactArrived/)
+  assert.match(botMessage, /useArtifactArriveMotion/)
+  assert.match(agentStream, /useArtifactArriveMotion/)
   assert.doesNotMatch(botMessage, /<t-badge/)
   assert.doesNotMatch(agentStream, /<t-badge/)
+})
+
+test('artifact toolbar opens the sandbox panel artifacts tab', () => {
+  assert.match(botMessage, /sandboxPanel.open\('artifacts'/)
+  assert.match(agentStream, /sandboxPanel.open\('artifacts'/)
+  assert.match(botMessage, /v-if="hasArtifacts && embeddedMode"/)
+  assert.match(agentStream, /v-if="hasArtifacts && embeddedMode/)
 })
 
 test('artifact toolbar uses a folder icon and replaces it while collecting', () => {
@@ -75,7 +87,7 @@ test('follow-up suggestions wait until the answer is fully rendered', () => {
   )
   assert.match(
     chatView,
-    /<FollowUpSuggestions v-if="session\.answerFullyRendered && !session\.suggestionsDismissed"/,
+    /<FollowUpSuggestions v-if="session\.answerFullyRendered && !session\.steerForked && !session\.suggestionsDismissed"/,
   )
   assert.match(botMessage, /emit\('render-complete-change', ready\)/)
   assert.match(agentStream, /emit\('render-complete-change', ready\)/)

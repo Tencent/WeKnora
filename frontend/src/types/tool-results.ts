@@ -26,7 +26,13 @@ export type DisplayType =
     | 'wiki_replace_text'
     | 'wiki_rename_page'
     | 'wiki_delete_page'
-    | 'shell_exec';
+    | 'shell_exec'
+    | 'list_sandbox_files'
+    | 'write_sandbox_file'
+    | 'edit_sandbox_file'
+    | 'read_skill'
+    | 'mcp_discovery'
+    | 'mcp_call';
 
 // Search result item
 export interface SearchResultItem {
@@ -185,6 +191,14 @@ export interface WebSearchResultItem {
     content?: string;
     source?: string;
     published_at?: string;
+    age?: string;
+    page_status?: 'success' | 'failed';
+    page_verified?: boolean;
+    page_content?: string;
+    page_error?: string;
+    page_truncated?: boolean;
+    full_output_path?: string;
+    storage_error?: string;
 }
 
 // Web search results data
@@ -198,7 +212,6 @@ export interface WebSearchResultsData {
 // Web fetch result item
 export interface WebFetchResultItem {
     url: string;
-    prompt?: string;
     status?: 'success' | 'failed' | 'skipped';
     retryable?: boolean;
     error_code?: string;
@@ -207,8 +220,14 @@ export interface WebFetchResultItem {
     summary_status?: string;
     summary_error_code?: string;
     summary_error_message?: string;
+    full_output_path?: string;
+    storage_error?: string;
     raw_content?: string;
     content_length?: number;
+    offset?: number;
+    returned_chars?: number;
+    truncated?: boolean;
+    next_offset?: number;
     method?: string;
     /** @deprecated use error_message */
     error?: string;
@@ -338,6 +357,47 @@ export interface ShellExecData {
     stderr_truncated?: boolean;
 }
 
+export interface SandboxFileEntry {
+    name?: string;
+    path: string;
+    size?: number;
+    modified_at?: string;
+}
+
+export interface ListSandboxFilesData {
+    display_type?: 'list_sandbox_files';
+    session_id?: string;
+    path?: string;
+    root?: string;
+    entries?: SandboxFileEntry[];
+    count?: number;
+    truncated?: boolean;
+}
+
+export interface WriteSandboxFileData {
+    display_type?: 'write_sandbox_file' | 'edit_sandbox_file';
+    session_id?: string;
+    path?: string;
+    root?: string;
+    name?: string;
+    size?: number;
+    replacements?: number;
+    added_lines?: number;
+    removed_lines?: number;
+    preview?: string;
+}
+
+export interface ReadSkillData {
+    display_type?: 'read_skill';
+    skill_name?: string;
+    file_path?: string;
+    description?: string;
+    instructions?: string;
+    content?: string;
+    files?: string[];
+    skill_dir?: string;
+}
+
 // Union type for all wiki edit data
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
@@ -360,7 +420,9 @@ export type ToolResultData =
     | WikiReplaceTextData
     | WikiRenamePageData
     | WikiDeletePageData
-    | ShellExecData;
+    | ShellExecData
+    | ListSandboxFilesData
+    | ReadSkillData;
 
 // Action data (from index.vue)
 export interface ActionData {

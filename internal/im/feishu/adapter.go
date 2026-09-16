@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -36,8 +37,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Compile-time check that Adapter implements im.StreamSender and im.FileDownloader.
+// Compile-time checks for the optional IM capabilities implemented by Adapter.
 var _ im.StreamSender = (*Adapter)(nil)
+var _ im.FullOutputProgressSender = (*Adapter)(nil)
 var _ im.FileDownloader = (*Adapter)(nil)
 
 var httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
@@ -123,21 +125,45 @@ func startStreamReaper() {
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ticker.C:
-					cutoff := time.Now().Add(-streamOrphanTTL)
-					feishuStreamsMu.Lock()
-					for id, state := range feishuStreams {
-						if state.createdAt.Before(cutoff) {
-							delete(feishuStreams, id)
-						}
-					}
-					feishuStreamsMu.Unlock()
+				case now := <-ticker.C:
+					reapOrphanStreams(now)
 				case <-reaperStopCh:
 					return
 				}
 			}
 		}()
 	})
+}
+
+func reapOrphanStreams(now time.Time) {
+	feishuStreamsMu.Lock()
+	defer feishuStreamsMu.Unlock()
+	for id, state := range feishuStreams {
+		if state.ownerDone != nil {
+			select {
+			case <-state.ownerDone:
+			default:
+				// Full-output QA can be silent for longer than the orphan TTL.
+				// Keep a grace period after cancellation for final delivery too.
+				state.lastActivityAt = now
+				continue
+			}
+		}
+		if state.lastActivityAt.Before(now.Add(-streamOrphanTTL)) {
+			delete(feishuStreams, id)
+		}
+	}
+}
+
+func lookupStream(streamID string) (*feishuStreamState, bool) {
+	feishuStreamsMu.Lock()
+	defer feishuStreamsMu.Unlock()
+	state, ok := feishuStreams[streamID]
+	if ok {
+		// Attempts count as activity even when the remote API rejects an update.
+		state.lastActivityAt = time.Now()
+	}
+	return state, ok
 }
 
 // StopStreamReaper stops the background stream reaper goroutine.
@@ -154,6 +180,12 @@ func StopStreamReaper() {
 // Platform returns the platform identifier.
 func (a *Adapter) Platform() im.Platform {
 	return a.region.Platform
+}
+
+// SupportsFullOutputProgress reports that StartStream immediately sends a
+// visible, replaceable thinking card suitable for full-output mode.
+func (a *Adapter) SupportsFullOutputProgress() bool {
+	return true
 }
 
 // VerifyCallback verifies the Feishu event callback by checking the verification token.
@@ -498,13 +530,42 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 // type), we retry once via the plain "send message" API so the reply still
 // reaches the user.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
+	for _, text := range splitTextReply(reply.Content) {
+		if err := a.sendTextReply(ctx, incoming, text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Keep even worst-case JSON escaping below 20 KiB, including the surrounding
+// payload, so a long final answer can use the plain-message fallback safely.
+const textReplyChunkBytes = 2 * 1024
+
+func splitTextReply(text string) []string {
+	var parts []string
+	for len(text) > textReplyChunkBytes {
+		cut := textReplyChunkBytes
+		for !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		if newline := strings.LastIndexByte(text[:cut], '\n'); newline >= cut/2 {
+			cut = newline + 1
+		}
+		parts = append(parts, text[:cut])
+		text = text[cut:]
+	}
+	return append(parts, text)
+}
+
+func (a *Adapter) sendTextReply(ctx context.Context, incoming *im.IncomingMessage, text string) error {
 	accessToken, err := a.getTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
 	// Build text message content
-	content, _ := json.Marshal(map[string]string{"text": reply.Content})
+	content, _ := json.Marshal(map[string]string{"text": text})
 
 	// Reply payload (no receive_id — the path message_id locates the chat)
 	replyPayload := map[string]interface{}{
@@ -712,7 +773,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 //  1. POST  /cardkit/v1/cards                                      — create card entity
 //  2. POST  /im/v1/messages  content={"type":"card","data":{"card_id":"…"}} — send card
 //  3. PUT   /cardkit/v1/cards/{id}/elements/{eid}/content          — stream element content
-//  4. PATCH /cardkit/v1/cards/{id}/settings                        — set streaming_mode=false
+//  4. PATCH /cardkit/v1/cards/{id}/settings                        — finalize streaming and summary
 //
 // Reference: https://github.com/larksuite/openclaw-lark (official Lark plugin)
 //            https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview
@@ -727,14 +788,16 @@ const (
 type feishuStreamState struct {
 	mu         sync.Mutex
 	content    strings.Builder
-	seq        int64     // strictly incrementing sequence for CardKit API
-	createdAt  time.Time // for orphan stream detection
-	firstChunk bool      // true after the first real content chunk clears the placeholder
+	contentSeq int64 // sequence of the last successfully sent content
+	seq        int64 // strictly incrementing sequence for CardKit API
+	// Protected by feishuStreamsMu, independently of content/sequence updates.
+	lastActivityAt time.Time
+	ownerDone      <-chan struct{}
 }
 
 const (
-	// streamOrphanTTL is the maximum lifetime of a stream entry before it's
-	// considered orphaned (e.g., EndStream was never called due to an error).
+	// streamOrphanTTL bounds idle state after its request ends, or when the
+	// caller supplies a context without cancellation. It is not a QA deadline.
 	streamOrphanTTL = 5 * time.Minute
 	// streamReaperInterval is how often the reaper scans for orphaned streams.
 	streamReaperInterval = 1 * time.Minute
@@ -751,6 +814,16 @@ var (
 func (s *feishuStreamState) nextSeq() int {
 	s.seq++
 	return int(s.seq)
+}
+
+func cardSummaryPreview(content string) string {
+	content = feishuMarkdownImageRe.ReplaceAllString(content, "${1}")
+	content = feishuMarkdownLinkRe.ReplaceAllString(content, "${1}")
+	preview := []rune(strings.Join(strings.Fields(content), " "))
+	if len(preview) > 120 {
+		preview = preview[:120]
+	}
+	return string(preview)
 }
 
 // buildStreamingCardJSON builds a Card JSON 2.0 with streaming_mode enabled.
@@ -803,7 +876,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 
 	// 3. Track stream state
 	feishuStreamsMu.Lock()
-	feishuStreams[cardID] = &feishuStreamState{createdAt: time.Now()}
+	feishuStreams[cardID] = &feishuStreamState{lastActivityAt: time.Now(), ownerDone: ctx.Done()}
 	feishuStreamsMu.Unlock()
 
 	logger.Infof(ctx, "[%s] Streaming started: card_id=%s", a.region.Label, cardID)
@@ -816,19 +889,12 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 		return nil
 	}
 
-	feishuStreamsMu.Lock()
-	state, ok := feishuStreams[streamID]
-	feishuStreamsMu.Unlock()
+	state, ok := lookupStream(streamID)
 	if !ok {
 		return fmt.Errorf("unknown stream ID: %s", streamID)
 	}
 
 	state.mu.Lock()
-	if !state.firstChunk {
-		state.firstChunk = true
-	}
-	state.content.Reset()
-	state.content.WriteString(fullContent)
 	seq := state.nextSeq()
 	state.mu.Unlock()
 
@@ -842,7 +908,18 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 	// (uploading on demand) so the card update does not fail with 200570.
 	content := a.resolveMarkdownImages(ctx, accessToken, fullContent)
 
-	return a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, content, seq)
+	if err := a.cardkitUpdateElement(ctx, accessToken, streamID, streamingElementID, content, seq); err != nil {
+		return err
+	}
+
+	state.mu.Lock()
+	if int64(seq) > state.contentSeq {
+		state.content.Reset()
+		state.content.WriteString(fullContent)
+		state.contentSeq = int64(seq)
+	}
+	state.mu.Unlock()
+	return nil
 }
 
 // FinalizeStream replaces the card with answer-only content.
@@ -855,29 +932,39 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 	return a.UpdateStreamContent(ctx, incoming, streamID, content)
 }
 
-// EndStream disables streaming_mode and cleans up state.
+// EndStream disables streaming_mode, replaces the temporary summary, and cleans up state.
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
-	feishuStreamsMu.Lock()
-	state, ok := feishuStreams[streamID]
-	delete(feishuStreams, streamID)
-	feishuStreamsMu.Unlock()
+	state, ok := lookupStream(streamID)
+	if !ok {
+		return fmt.Errorf("unknown stream ID: %s", streamID)
+	}
 
 	accessToken, err := a.getTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	var seq int
-	if ok {
-		state.mu.Lock()
-		seq = state.nextSeq()
-		state.mu.Unlock()
+	var finalSummary *string
+	state.mu.Lock()
+	seq := state.nextSeq()
+	preview := cardSummaryPreview(state.content.String())
+	if preview != "" {
+		finalSummary = &preview
 	}
+	state.mu.Unlock()
 
-	// Turn off streaming_mode to remove loading indicator
-	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, seq); err != nil {
-		logger.Warnf(ctx, "[%s] Failed to disable streaming_mode: %v", a.region.Label, err)
+	// Always close streaming_mode under config (CardKit rejects a top-level
+	// streaming_mode field). Attach a summary only when we have delivered text;
+	// an empty summary would leave the create-time "thinking" preview in place
+	// or blank the chat list unexpectedly.
+	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, finalSummary, seq); err != nil {
+		return fmt.Errorf("disable streaming_mode: %w", err)
 	}
+	feishuStreamsMu.Lock()
+	if feishuStreams[streamID] == state {
+		delete(feishuStreams, streamID)
+	}
+	feishuStreamsMu.Unlock()
 
 	logger.Infof(ctx, "[%s] Streaming ended: card_id=%s", a.region.Label, streamID)
 	return nil
@@ -1010,6 +1097,10 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 
 // feishuMarkdownImageRe matches a markdown image whose target is an http(s) URL.
 var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+
+// feishuMarkdownLinkRe matches a markdown link whose target is an http(s) URL.
+// Applied after image stripping so signed image URLs are not left as links.
+var feishuMarkdownLinkRe = regexp.MustCompile(`\[([^\]]*)\]\((https?://[^)\s]+)\)`)
 
 // feishuMaxImageBytes caps the download size of an image before uploading to
 // Feishu (Feishu's limit is 10MB; keep a small margin).
@@ -1164,12 +1255,18 @@ func (a *Adapter) uploadImageFromURL(ctx context.Context, accessToken, rawURL st
 	return result.Data.ImageKey, nil
 }
 
-// cardkitSetStreaming updates the card's streaming_mode setting.
+// cardkitSetStreaming updates streaming_mode and, when available, the final summary.
 // PATCH /open-apis/cardkit/v1/cards/:card_id/settings
-func (a *Adapter) cardkitSetStreaming(ctx context.Context, accessToken, cardID string, streaming bool, sequence int) error {
-	settings, _ := json.Marshal(map[string]interface{}{
+func (a *Adapter) cardkitSetStreaming(
+	ctx context.Context, accessToken, cardID string, streaming bool, finalSummary *string, sequence int,
+) error {
+	config := map[string]interface{}{
 		"streaming_mode": streaming,
-	})
+	}
+	if finalSummary != nil && strings.TrimSpace(*finalSummary) != "" {
+		config["summary"] = map[string]string{"content": *finalSummary}
+	}
+	settings, _ := json.Marshal(map[string]interface{}{"config": config})
 	payload, _ := json.Marshal(map[string]interface{}{
 		"settings": string(settings),
 		"sequence": sequence,

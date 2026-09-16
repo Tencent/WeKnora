@@ -1,157 +1,96 @@
-"""Verify that an installed skill's Python sources can be loaded in this image.
+"""Verify that an installed skill's Python sources are well-formed in this image.
 
 Run inside the sandbox, by the interpreter a real skill call would use, as the
 ordinary execution user, after the tree has been given its final permissions:
 
-    python3 - <skill-dir> <relative-script> [<relative-script> ...]
+    python3 - <skill-dir> <script> [<script> ...] [--optional <script> ...]
 
-Nothing here executes the skill's own code. Everything it reports is decided
-from the parse tree and from what the environment can resolve, so a skill that
-writes files or calls the network on import cannot do either while being
-checked, and a script that never learned --help cannot be failed for it.
+Nothing here executes the skill's own code, and nothing here decides whether an
+import will resolve.
 
-Exits 1 and writes one line per problem to stderr; exits 0 otherwise.
+Import resolution used to live in this file, and it is gone on purpose. Whether
+`import helper` works depends on what the script does to sys.path before it
+runs — an idiom no static evaluator can enumerate: a guarded insert, a path
+constant imported from a sibling module, a value read from the environment, a
+mutation inside a helper function. Every approximation of that rejected skills
+that run perfectly, and a rejected install throws away the dependency work that
+succeeded and leaves the previous image serving. The installer agent has a root
+shell and the real interpreter, so proving an import resolves is its job: it can
+run the import instead of guessing at it.
+
+What remains is what a file, not a runtime, can settle:
+
+    - the execution user can read every source file
+    - every source file parses
+    - every distribution the manifests name is installed in the venv
+
+Findings are graded, because rejecting an install is expensive.
+
+    stdout  `note: ...` lines - reported, image kept
+    stderr  problem lines - the install is refused
+    exit 0  the image may be kept
+    exit 1  a problem no installer round can fix: a syntax error, or a file the
+            execution user cannot read
+    exit 2  every problem is a dependency missing from this image, so handing
+            these lines back to the installer is worth a round
+
+Files named after --optional are checked identically, but their findings are
+notes: nothing the skill offers loads a test or an example, and a bundled
+tests/ directory must not decide whether the skill installs.
 """
 
 import ast
-import importlib.util
 import os
 import re
 import sys
 
+OPTIONAL_FLAG = "--optional"
+
+EXIT_UNREPAIRABLE = 1
+EXIT_MISSING_DEPENDENCY = 2
+
 root = os.path.abspath(sys.argv[1])
-relative_scripts = sys.argv[2:]
+_argv_scripts = sys.argv[2:]
+if OPTIONAL_FLAG in _argv_scripts:
+    _cut = _argv_scripts.index(OPTIONAL_FLAG)
+    entry_scripts = _argv_scripts[:_cut]
+    optional_scripts = _argv_scripts[_cut + 1 :]
+else:
+    entry_scripts = _argv_scripts
+    optional_scripts = []
+all_scripts = entry_scripts + optional_scripts
+optional_set = set(optional_scripts)
+
+# problems refuse the install; notes are reported and the image is kept.
 problems = []
+notes = []
 
-# Directories that belong to the installed environment rather than the skill's
-# own sources, and would drown the scan below in third-party module names.
-PRUNED = {".venv", "venv", "node_modules", "__pycache__", ".git"}
-
-
-def under_root(candidate):
-    return candidate == root or candidate.startswith(root + os.sep)
+# Whether any problem is something installing a package cannot fix. It decides
+# the exit code, which is how the caller knows if another installer round could
+# help or if the bundle itself has to change.
+unrepairable = False
 
 
-def own_top_level_names():
-    """Top-level names that refer to something the skill itself ships.
+def add_problem(message, repairable=False):
+    global unrepairable
+    if message not in problems:
+        problems.append(message)
+    if not repairable:
+        unrepairable = True
 
-    Only the skill root is consulted. A nested file such as vendor/requests.py
-    must not make `import requests` look first-party — that name is a
-    dependency the installer was asked to put in the venv, and skipping it
-    would snapshot a broken install.
 
-    An import of one of these is the skill reaching for its own code, and
-    whether it resolves depends on how the script arranges sys.path at run
-    time — commonly by inserting its parent before importing `scripts.x`.
-    That is a runtime decision this checker cannot evaluate without executing
-    the file, so such imports are left to the skill. Sibling modules still
-    resolve through find_spec, which puts the script's own directory first.
+def add_note(message):
+    if message not in notes:
+        notes.append(message)
+
+
+def note_instead_of_problem(message, repairable=False):
+    """Reporter for an auxiliary file: the finding is real, the verdict is not.
+
+    repairable is accepted and ignored so this can stand in for add_problem;
+    a note never influences the exit code.
     """
-    names = set()
-    try:
-        entries = os.listdir(root)
-    except OSError:
-        return names
-    for name in entries:
-        if name in PRUNED or name.startswith("."):
-            continue
-        full = os.path.join(root, name)
-        if os.path.isdir(full):
-            names.add(name)
-        elif name.endswith(".py"):
-            names.add(name[:-3])
-    return names
-
-
-own_modules = own_top_level_names()
-
-
-def is_package(directory):
-    return os.path.isfile(os.path.join(directory, "__init__.py"))
-
-
-def module_exists(base, dotted):
-    """Whether a dotted name resolves to a file or package under base."""
-    target = os.path.join(base, *dotted.split(".")) if dotted else base
-    return os.path.isfile(target + ".py") or os.path.isfile(
-        os.path.join(target, "__init__.py")
-    )
-
-
-def is_importable(name, script_dir):
-    """Whether a top-level name is available to this script at run time.
-
-    find_spec consults the finders without importing, so a missing dependency
-    is reported without the side effects of loading a present one. script_dir
-    leads the path because that is where the interpreter puts the directory of
-    the script it was handed, which is how sibling modules resolve at runtime.
-    """
-    if name in own_modules:
-        return True
-    saved = sys.path[:]
-    sys.path.insert(0, script_dir)
-    try:
-        return importlib.util.find_spec(name) is not None
-    except Exception:
-        return False
-    finally:
-        sys.path[:] = saved
-
-
-def check_imports(rel, tree, script_dir):
-    """Check the imports that running this file is guaranteed to execute.
-
-    Only statements at module level are checked, and only unconditionally: an
-    import nested in try/except, in an `if`, or inside a function is how a
-    skill declares an optional or lazily loaded dependency, and failing an
-    install over one would reject a working skill.
-    """
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                top = alias.name.split(".")[0]
-                if not is_importable(top, script_dir):
-                    problems.append(
-                        "%s imports %s, which is not available in this image"
-                        % (rel, top)
-                    )
-        elif isinstance(node, ast.ImportFrom):
-            if node.level:
-                check_relative_import(rel, node, script_dir)
-            elif node.module:
-                top = node.module.split(".")[0]
-                if not is_importable(top, script_dir):
-                    problems.append(
-                        "%s imports %s, which is not available in this image"
-                        % (rel, top)
-                    )
-
-
-def check_relative_import(rel, node, script_dir):
-    spelling = "." * node.level + (node.module or "")
-    if not is_package(script_dir):
-        problems.append(
-            "%s uses the relative import '%s' but its directory has no "
-            "__init__.py, so the import can never resolve when the script is "
-            "run directly" % (rel, spelling)
-        )
-        return
-    base = script_dir
-    for _ in range(node.level - 1):
-        base = os.path.dirname(base)
-    if not under_root(base):
-        problems.append(
-            "%s uses the relative import '%s', which reaches outside the "
-            "skill directory" % (rel, spelling)
-        )
-        return
-    # A bare `from . import name` may be pulling something the package's
-    # __init__ defines rather than a submodule, so only the package itself is
-    # checked in that case.
-    if node.module and not module_exists(base, node.module):
-        problems.append(
-            "%s imports '%s', which does not exist in the skill" % (rel, spelling)
-        )
+    add_note("%s (auxiliary file; this does not fail the install)" % message)
 
 
 def distribution_name(raw):
@@ -168,6 +107,35 @@ def distribution_name(raw):
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", name):
         return ""
     return name
+
+
+def marker_of(raw):
+    """The PEP 508 environment marker on a requirement line, or ''."""
+    _, _, marker = raw.split("#")[0].partition(";")
+    return marker.strip()
+
+
+def marker_applies(marker):
+    """Whether pip would install a line carrying this marker in this image.
+
+    None means the answer cannot be established, and callers must read that as
+    "not enforceable" rather than "absent". Markers compare versions with
+    version semantics, so they are evaluated by `packaging` or not at all: a
+    hand-rolled string comparison reads "3.10" as lower than "3.9" and would
+    fail installs whose requirements pip resolved correctly. A bare venv has
+    no `packaging`, so None is the common answer.
+    """
+    if re.search(r"\bextra\b", marker):
+        # Gated on an extra, which pip does not install unless it is requested.
+        return False
+    try:
+        from packaging.markers import Marker
+    except Exception:
+        return None
+    try:
+        return bool(Marker(marker).evaluate())
+    except Exception:
+        return None
 
 
 def load_pyproject(path):
@@ -200,13 +168,29 @@ def declared_requirement_lines():
             yield "pyproject.toml", item
     poetry = ((data.get("tool") or {}).get("poetry") or {}).get("dependencies") or {}
     if isinstance(poetry, dict):
-        for name in poetry:
+        for name, spec in poetry.items():
             if str(name).strip().lower() == "python":
+                continue
+            # A table-valued dependency carrying optional, markers or a python
+            # constraint is conditional, and poetry would not have installed it
+            # here unconditionally.
+            if isinstance(spec, dict) and (
+                spec.get("optional") or spec.get("markers") or spec.get("python")
+            ):
                 continue
             yield "pyproject.toml", str(name)
 
 
 def check_declared_requirements():
+    """Check the manifests name nothing the venv is missing.
+
+    This is the installer's literal instruction - "install requirements.txt" -
+    so a distribution it names that pip did not land is a failed install. A
+    line pip would have skipped is not: an environment marker that is false
+    here, or an extras-gated dependency, is reported instead. Refusing an
+    install over `pywin32; sys_platform == "win32"` on Linux rejects a skill
+    whose requirements are all present.
+    """
     try:
         from importlib import metadata
     except ImportError:
@@ -217,39 +201,52 @@ def check_declared_requirements():
             continue
         try:
             metadata.distribution(name)
+            continue
         except Exception:
-            problems.append(
-                "%s declares %s but it is not installed in %s"
-                % (source, name, sys.prefix)
+            pass
+        missing = "%s declares %s but it is not installed in %s" % (
+            source,
+            name,
+            sys.prefix,
+        )
+        marker = marker_of(raw)
+        if not marker:
+            add_problem(missing, repairable=True)
+            continue
+        applies = marker_applies(marker)
+        if applies:
+            add_problem(missing, repairable=True)
+        elif applies is None:
+            add_note(
+                "%s, and its environment marker '%s' cannot be evaluated here, "
+                "so it is not enforced" % (missing, marker)
             )
 
 
-for relative in relative_scripts:
+for relative in all_scripts:
+    report = note_instead_of_problem if relative in optional_set else add_problem
     script = os.path.join(root, relative)
     try:
         with open(script, "rb") as source:
             code = source.read()
     except OSError as exc:
-        problems.append(
-            "%s cannot be read by the skill execution user (%s)" % (relative, exc)
-        )
+        report("%s cannot be read by the skill execution user (%s)" % (relative, exc))
         continue
     try:
-        parsed = ast.parse(code, filename=relative)
+        ast.parse(code, filename=relative)
     except SyntaxError as exc:
-        problems.append(
-            "%s has a syntax error on line %s: %s" % (relative, exc.lineno, exc.msg)
-        )
-        continue
-    check_imports(relative, parsed, os.path.dirname(script))
+        report("%s has a syntax error on line %s: %s" % (relative, exc.lineno, exc.msg))
 
 check_declared_requirements()
 
+for note in notes:
+    sys.stdout.write("note: %s\n" % note)
+
 if problems:
     sys.stderr.write("\n".join(problems) + "\n")
-    sys.exit(1)
+    sys.exit(EXIT_UNREPAIRABLE if unrepairable else EXIT_MISSING_DEPENDENCY)
 
 print(
     "verified %d python file(s) against %s"
-    % (len(relative_scripts), sys.executable or "python3")
+    % (len(all_scripts), sys.executable or "python3")
 )

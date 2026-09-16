@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -12,9 +13,7 @@ type wikiFixerKBLookup interface {
 	GetKnowledgeBaseByIDOnly(ctx context.Context, id string) (*types.KnowledgeBase, error)
 }
 
-type wikiFixerKBSharePermission interface {
-	CheckTenantKBPermission(ctx context.Context, kbID string, callerTenantID uint64, callerTenantRole types.TenantRole) (types.OrgMemberRole, bool, error)
-}
+type wikiFixerKBSharePermission = access.KBShareLookup
 
 func (h *Handler) resolveWikiFixerTenantScope(
 	ctx context.Context,
@@ -64,12 +63,13 @@ func resolveBuiltinWikiFixerTenantScope(
 		return agent, 0
 	}
 
-	permission, isShared, err := kbShare.CheckTenantKBPermission(ctx, kb.ID, currentTenantID, callerTenantRole)
+	permissions := access.NewKBSharePermissions(ctx, kbShare, currentTenantID, callerTenantRole)
+	allowed, err := permissions.Check(kb.ID, types.OrgRoleEditor)
 	if err != nil {
 		logger.Warnf(ctx, "wiki fixer: failed to check shared KB %s permission: %v", secutils.SanitizeForLog(kb.ID), err)
 		return agent, 0
 	}
-	if !isShared || !permission.HasPermission(types.OrgRoleEditor) {
+	if !allowed {
 		return agent, 0
 	}
 
