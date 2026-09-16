@@ -85,6 +85,10 @@ type TenantSandboxResolverDeps struct {
 	Store   SessionSandboxBindingStore
 	Checker SessionExistenceChecker
 
+	// Bootstrapper customises the first sandbox create of individual sessions
+	// (session fork). Optional: nil is the ordinary path.
+	Bootstrapper SessionBootstrapper
+
 	// SharedTransport is reused by every tenant's HTTP client. Optional; a
 	// guarded transport is installed when nil.
 	SharedTransport *http.Transport
@@ -194,6 +198,7 @@ func (r *tenantSandboxResolver) Resolve(
 			Checker:         r.deps.Checker,
 			SkipHealthProbe: true,
 			ConfigID:        configID,
+			Bootstrapper:    r.deps.Bootstrapper,
 		})
 	default:
 		return NewDisabledManager(), nil

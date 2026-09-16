@@ -106,6 +106,7 @@ func TestFileTransferSkipsShortHTTPTimeout(t *testing.T) {
 	assertBudget(t, cube, "/filesystem.Filesystem/WriteFile", false)
 	assertBudget(t, cube, "/filesystem.Filesystem/MakeDir", true)
 	assertBudget(t, cube, "/process.Process/Start", false)
+	assertBudget(t, cube, "/sandboxes/sbx-1/snapshots", false)
 	assertBudget(t, e2b, "/files", false)
 	assertBudget(t, e2b, "/filesystem.Filesystem/Read", false)
 	assertBudget(t, e2b, "/filesystem.Filesystem/MakeDir", true)

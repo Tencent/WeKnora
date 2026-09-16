@@ -177,6 +177,7 @@ func newTestRemoteSessionLifecycle(
 		},
 		time.Second,
 		"",
+		nil,
 	)
 	require.NoError(t, err)
 	return lifecycle
@@ -542,6 +543,7 @@ func newTestRemoteSessionLifecycleWithPolicy(
 		},
 		time.Second,
 		"",
+		nil,
 	)
 	require.NoError(t, err)
 	return lifecycle
@@ -1181,6 +1183,7 @@ func newLifecycleFixture(t *testing.T) *lifecycleFixture {
 		RemoteCreateRequest{TemplateID: "template-a"},
 		time.Minute,
 		"cfg-1",
+		nil,
 	)
 	require.NoError(t, err)
 	return &lifecycleFixture{
@@ -1348,6 +1351,7 @@ func newTestLifecycleWithConfigID(t *testing.T, configID string) *remoteSessionL
 		RemoteCreateRequest{TemplateID: "template-a"},
 		time.Minute,
 		configID,
+		nil,
 	)
 	require.NoError(t, err)
 	return lifecycle
