@@ -137,6 +137,19 @@ instance.interceptors.response.use(
     if (!error.response) {
       return Promise.reject({ message: t('error.networkError') });
     }
+
+    // 文件下载失败时服务端仍返回 JSON；先还原错误信息，避免被 Blob 隐藏。
+    // 不依赖 Content-Type：网关可能把错误改成 text/plain 或空类型。
+    if (typeof Blob !== 'undefined' && error.response.data instanceof Blob) {
+      try {
+        const text = (await error.response.data.text()).trim();
+        if (text.startsWith('{') || text.startsWith('[') || error.response.data.type.includes('json')) {
+          error.response.data = JSON.parse(text);
+        }
+      } catch {
+        // 非法 JSON 继续使用原有错误处理。
+      }
+    }
     
     // 公开接口（auto-setup / login / register / oidc）的 401 不走 refresh 逻辑，直接返回错误
     if ((error.response.status === 401 || error.response.status === 403) && isPublicAuthRequest(originalRequest?.url)) {

@@ -156,9 +156,9 @@
                 :class="{ 'option-chip--active': formData.mode === 'websocket' }"
                 :disabled="formData.platform === 'mattermost'"
                 @click="formData.mode = 'websocket'">
-                WebSocket
+                {{ formData.platform === 'dingtalk' ? 'Stream' : 'WebSocket' }}
               </button>
-              <button type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
+              <button v-if="formData.platform !== 'dingtalk' && formData.platform !== 'qqbot'" type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
                 @click="formData.mode = 'webhook'">
                 Webhook
               </button>
@@ -788,6 +788,7 @@ function platformSupportsThread(platform: string): boolean {
 watch(
   () => formData.value.platform,
   (p) => {
+    if (p === 'dingtalk' || p === 'qqbot') formData.value.mode = 'websocket';
     if (p === 'mattermost') {
       formData.value.mode = 'webhook';
       if (typeof formData.value.credentials.post_to_main !== 'boolean') {

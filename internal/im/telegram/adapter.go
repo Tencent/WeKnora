@@ -62,7 +62,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	if a.secretToken == "" {
-		return nil
+		return fmt.Errorf("webhook verification secret is required")
 	}
 	token := c.GetHeader("X-Telegram-Bot-Api-Secret-Token")
 	if subtle.ConstantTimeCompare([]byte(token), []byte(a.secretToken)) != 1 {

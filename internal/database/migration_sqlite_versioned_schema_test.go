@@ -36,15 +36,15 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenants":            {"api_principal_config"},                                          // 000064
 	"users":              {"is_system_admin"},                                               // 000053
 	"knowledges":         {"pending_subtasks_count"},                                        // 000056
-	"messages":           {"attachments", "usage", "sandbox_checkpoint"},                    // 000034, 000085, 000096
-	"sessions":           {"parent_session_id", "forked_from_message_id", "fork_bootstrap"}, // 000096
+	"messages":           {"attachments", "usage", "sandbox_checkpoint"},                    // 000034, 000085, 000097
+	"sessions":           {"parent_session_id", "forked_from_message_id", "fork_bootstrap"}, // 000097
 	"tenant_invitations": {"token", "accepted_count"},                                       // 000054
 	"embed_channels":     {"allow_memory"},                                                  // 000060
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"},                                // 000064
 	"mcp_tool_approvals": {"enabled"},                                                       // 000091
 }
 
-const expectedSQLiteMigrationVersion = 18
+const expectedSQLiteMigrationVersion = 19
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

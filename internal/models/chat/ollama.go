@@ -36,6 +36,7 @@ func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*Ol
 func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 	ollamaMessages := make([]ollamaapi.Message, 0, len(messages))
 	for _, msg := range messages {
+		msg = neutralizeMessageSpecialTokens(msg)
 		msgOllama := ollamaapi.Message{
 			Role:      msg.Role,
 			Content:   msg.Content,

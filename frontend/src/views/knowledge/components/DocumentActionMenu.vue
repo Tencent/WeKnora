@@ -108,7 +108,7 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   </div>
 
   <!-- 批量管理 -->
-  <div v-if="canMutateKnowledge" class="doc-action-menu-item" @click.stop="emit('batch-manage')">
+  <div v-if="canMutateKnowledge || canDownload" class="doc-action-menu-item" @click.stop="emit('batch-manage')">
     <t-icon class="icon" name="queue" />
     <span>{{ $t('menu.batchManage') }}</span>
   </div>
