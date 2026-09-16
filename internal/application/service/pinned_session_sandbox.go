@@ -144,3 +144,5 @@ func (a *PinnedSessionSandbox) DeleteForkSnapshot(
 }
 
 var _ SandboxShellRunner = (*PinnedSessionSandbox)(nil)
+var _ SessionForkSandboxPort = (*PinnedSessionSandbox)(nil)
+var _ SessionForkSandboxPort = (*sandbox.SessionBoundManager)(nil)

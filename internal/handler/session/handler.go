@@ -62,6 +62,9 @@ type Handler struct {
 	// redis backs the distributed desktop slot. Nil in Lite mode, where the
 	// in-process limiter is the correct degradation.
 	redis *redis.Client
+	// forkService branches a session at a chosen user message. May be nil in
+	// deployments where fork is not wired; ForkSession checks.
+	forkService sessionForker
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -95,6 +98,7 @@ func NewHandler(
 	desktopTickets service.SandboxDesktopTicketStore,
 	desktopLast service.SandboxDesktopLastStore,
 	rdb *redis.Client,
+	forkService *service.SessionForkService,
 ) *Handler {
 	h := &Handler{
 		browserSkill:          browserSkill,
@@ -130,6 +134,9 @@ func NewHandler(
 			imageResolver,
 			modelService,
 		),
+	}
+	if forkService != nil {
+		h.forkService = forkService
 	}
 	return h
 }

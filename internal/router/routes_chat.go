@@ -64,6 +64,7 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/attachments/:attachment_id/preview", handler.PreviewTemporaryDocument)
 		sessions.DELETE("/:id/attachments/:attachment_id", handler.DeleteTemporaryDocument)
 		sessions.POST("/:session_id/stop", handler.StopSession)
+		sessions.POST("/:session_id/fork", handler.ForkSession)
 		sessions.POST("/:session_id/sandbox/terminal-ticket", handler.IssueSandboxTerminalTicket)
 		sessions.POST("/:session_id/sandbox/desktop-ticket", handler.IssueSandboxDesktopTicket)
 		sessions.POST("/:session_id/sandbox/desktop/activity", handler.ReportSandboxDesktopActivity)
