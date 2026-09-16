@@ -180,7 +180,8 @@ func (r *messageRepository) GetMessageByRequestID(
 	return &message, nil
 }
 
-// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
+// SearchMessagesByKeyword searches messages by case-insensitive keyword match
+// across sessions for a tenant, on every supported SQL dialect.
 func (r *messageRepository) SearchMessagesByKeyword(
 	ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int,
 ) ([]*types.MessageWithSession, error) {
@@ -190,13 +191,23 @@ func (r *messageRepository) SearchMessagesByKeyword(
 
 	var results []*types.MessageWithSession
 
+	// Dialect-aware keyword match so the query works on Postgres and on the
+	// SQLite/MySQL builds; mirrors the session QueryPaged precedent. ILIKE
+	// is Postgres-only syntax and made the message search endpoint error on
+	// every request there (issue #3324).
+	isPostgres := r.db.Dialector.Name() == "postgres"
+	contentLikeExpr := "LOWER(messages.content) LIKE LOWER(?)"
+	if isPostgres {
+		contentLikeExpr = "messages.content ILIKE ?"
+	}
+
 	query := r.db.WithContext(ctx).
 		Table("messages").
 		Select("messages.*, sessions.title as session_title").
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
 		Where("sessions.tenant_id = ?", tenantID).
 		Where("messages.deleted_at IS NULL").
-		Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+		Where(contentLikeExpr, "%"+escapeLikeKeyword(keyword)+"%")
 
 	// Matches the scoping used when listing sessions, including the legacy
 	// allowance for tenant-level sessions created before per-user ownership.
