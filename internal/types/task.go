@@ -528,6 +528,13 @@ type ImageMultimodalPayload struct {
 	// tasks that were already in flight when batching shipped; ImageRefs()
 	// normalises both shapes so workers only ever see a slice.
 	Images []ImageBatchRef `json:"images,omitempty"`
+	// ClassifyMaxEdge is the longest edge, in pixels, that images are scaled
+	// down to before the batch describe round. 0 disables downscaling. It is
+	// resolved from the knowledge base's image processing config when the task
+	// is enqueued, so the worker needs no second config lookup. It only applies
+	// to batched tasks: a single-image payload runs the historical pipeline,
+	// which never downscales.
+	ClassifyMaxEdge int `json:"classify_max_edge,omitempty"`
 }
 
 // ImageBatchRef identifies one image inside an ImageMultimodalPayload batch.

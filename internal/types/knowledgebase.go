@@ -538,12 +538,22 @@ type ImageProcessingConfig struct {
 	// behaviour, so an unconfigured knowledge base is unaffected by batching.
 	// Values are clamped to [1, ImageBatchSizeMax] at use time.
 	BatchSize int `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`
+	// ClassifyMaxEdge is the longest edge, in pixels, that an image is scaled
+	// down to before the describe round. Zero selects DefaultClassifyMaxEdge;
+	// a negative value disables downscaling. OCR always runs on the original
+	// bytes, never on the downscaled copy.
+	ClassifyMaxEdge int `yaml:"classify_max_edge,omitempty" json:"classify_max_edge,omitempty"`
 }
 
 // ImageBatchSizeMax bounds how many images one multimodal request may carry.
 // Larger batches trim request count but grow the prompt linearly, so the cap
 // keeps a single request within what current VLMs handle comfortably.
 const ImageBatchSizeMax = 16
+
+// DefaultClassifyMaxEdge is the longest edge, in pixels, that images are scaled
+// down to before the describe round. It was measured to cut prompt tokens to
+// roughly a seventh while leaving the classification unchanged.
+const DefaultClassifyMaxEdge = 640
 
 // NormalizeImageBatchSize clamps a configured batch size into the supported
 // range. Zero (unset) maps to 1, which preserves the historical
@@ -556,6 +566,20 @@ func NormalizeImageBatchSize(n int) int {
 		return ImageBatchSizeMax
 	}
 	return n
+}
+
+// NormalizeClassifyMaxEdge resolves the configured describe-round edge length.
+// Zero means "unset" and selects the recommended default; a negative value
+// disables downscaling (reported as 0); anything else is used as configured.
+func NormalizeClassifyMaxEdge(n int) int {
+	switch {
+	case n == 0:
+		return DefaultClassifyMaxEdge
+	case n < 0:
+		return 0
+	default:
+		return n
+	}
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value

@@ -290,9 +290,25 @@ func (s *ImageMultimodalService) processImageBatch(
 
 	descriptions := map[int]string{}
 	if len(loaded) > 0 {
+		// The describe round works on downscaled copies: measurements showed
+		// that a short long-edge cuts prompt tokens to roughly a seventh
+		// without changing what the model reports. The per-image round below
+		// still gets the original bytes, because OCR is where detail decides
+		// the outcome.
 		payloads := make([][]byte, 0, len(loaded))
+		downscaled := 0
 		for _, i := range loaded {
-			payloads = append(payloads, imgBytes[i])
+			img := imgBytes[i]
+			if small, changed := downscaleForDescribe(img, payload.ClassifyMaxEdge); changed {
+				img = small
+				downscaled++
+			}
+			payloads = append(payloads, img)
+		}
+		if downscaled > 0 {
+			logger.Infof(ctx,
+				"[ImageMultimodal] Downscaled %d of %d image(s) to max edge %d for the describe round",
+				downscaled, len(payloads), payload.ClassifyMaxEdge)
 		}
 
 		raw, err := vlmModel.Predict(ctx, payloads, buildBatchImagePrompt(ctx, vlmCfg, len(payloads)))

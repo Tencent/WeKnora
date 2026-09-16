@@ -92,6 +92,8 @@ require (
 	gorm.io/gorm v1.31.1
 )
 
+require golang.org/x/image v0.38.0
+
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect

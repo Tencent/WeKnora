@@ -4052,6 +4052,16 @@ func imageMultimodalBatchSize(kb *types.KnowledgeBase) int {
 	return types.NormalizeImageBatchSize(kb.ImageProcessingConfig.BatchSize)
 }
 
+// imageClassifyMaxEdge resolves the longest edge images are scaled down to
+// before the batch describe round. It tolerates a nil knowledge base, which
+// yields 0 ("no downscaling").
+func imageClassifyMaxEdge(kb *types.KnowledgeBase) int {
+	if kb == nil {
+		return 0
+	}
+	return types.NormalizeClassifyMaxEdge(kb.ImageProcessingConfig.ClassifyMaxEdge)
+}
+
 // enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
 func (s *knowledgeService) enqueueImageMultimodalTasks(
 	ctx context.Context,
@@ -4087,6 +4097,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 
 	lang := types.LanguageFromContextOrDefault(ctx)
 	batchSize := imageMultimodalBatchSize(kb)
+	classifyMaxEdge := imageClassifyMaxEdge(kb)
 	for batchStart := 0; batchStart < len(refs); batchStart += batchSize {
 		batchEnd := batchStart + batchSize
 		if batchEnd > len(refs) {
@@ -4107,6 +4118,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			Attempt:         attempt,
 			ImageIndex:      batch[0].Index,
 			Images:          batch,
+			ClassifyMaxEdge: classifyMaxEdge,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)
