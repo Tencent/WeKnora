@@ -12,12 +12,11 @@
 
 ### 1. 准备部署包
 
-当前可直接使用 `releases/weknora-site-v0.8.0.tar.gz`。
-
-以后修改页面或文档后，在仓库的 `website-docs/` 目录执行：
+使用 Node.js 24，在仓库的 `website-docs/` 目录执行。首次构建或依赖锁文件变更后，先安装依赖：
 
 ```bash
 cd website-docs
+npm run setup
 npm run build
 npm run package:site
 ```
@@ -72,14 +71,27 @@ sudo nginx -s reload
 
 ## 可选：Docker 部署
 
-在 `website-docs/` 目录中先执行 `npm run build`，再执行：
+从干净源码即可构建，无需在宿主机安装 Node.js 或提前生成静态文件。Dockerfile 使用两个阶段：Node.js 24 按两份锁文件安装依赖并构建官网与文档，最终 Nginx 镜像只包含静态产物和服务配置。
+
+在仓库根目录执行：
 
 ```bash
-docker build -t weknora-site:0.8.0 .
+docker build -t weknora-site:0.8.0 website-docs
 docker run -d --name weknora-site --restart unless-stopped -p 8080:80 weknora-site:0.8.0
 ```
 
 访问 `http://服务器地址:8080/`。如使用域名和 HTTPS，让现有反向代理转发到该端口即可。镜像内已经包含官网、文档和 Nginx 路由配置。
+
+也可以只复制 `website-docs/` 目录，在该目录执行 `docker build -t weknora-site:0.8.0 .`。构建上下文必须是 `website-docs/`，宿主机的依赖、旧构建产物和部署包由 `.dockerignore` 排除。
+
+从旧文档镜像迁移时，将容器端口映射或反向代理目标端口从 `8081` 改为 `80`（宿主机端口可自行选择，例如 `-p 8081:80`）。域名根路径 `/` 现在提供官网，`/docs/` 提供文档，反向代理需覆盖整个站点并保留请求路径。容器使用 Nginx 官方镜像的默认入口，无需额外的 `docker-entrypoint.sh`。
+
+构建后可在安装了 Node.js 24 和 Docker 的机器上执行以下检查，无需安装 npm 依赖。检查会临时启动容器并自动清理，验证两站路由、静态资源、404、压缩和响应头：
+
+```bash
+cd website-docs
+npm run test:docker -- weknora-site:0.8.0
+```
 
 ## 本地开发
 

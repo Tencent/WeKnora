@@ -17,7 +17,8 @@
     "check:site": "node scripts/check-site.mjs",
     "check": "npm run check:docs && npm run check:site",
     "package:site": "node scripts/package-site.mjs",
-    "test:integration": "node scripts/test-integration.mjs"
+    "test:integration": "node scripts/test-integration.mjs",
+    "test:docker": "node scripts/test-docker.mjs"
   },
   "devDependencies": {
     "mermaid": "^11.16.0",
