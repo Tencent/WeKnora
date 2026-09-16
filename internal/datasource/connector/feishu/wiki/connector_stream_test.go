@@ -305,7 +305,6 @@ func TestFetchStream_EmitErrorAborts(t *testing.T) {
 // no export endpoint is registered, so any accidental fall-through to the export
 // path would 404 and surface as a core.Fetch error.
 func TestFetchStream_DocxMultiItem(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-blocks"
 		objToken  = "obj-blocks"
@@ -333,27 +332,28 @@ func TestFetchStream_DocxMultiItem(t *testing.T) {
 	}
 
 	if len(h.emitted) != 2 {
-		t.Fatalf("expected 2 emitted items (main doc + attachment), got %d: %+v", len(h.emitted), h.emitted)
+		t.Fatalf("expected 2 emitted items (attachment + main doc), got %d: %+v", len(h.emitted), h.emitted)
 	}
 
-	main := h.emitted[0]
-	if main.ExternalID != nodeToken {
-		t.Errorf("items[0].ExternalID = %q, want %q", main.ExternalID, nodeToken)
-	}
-	if main.ContentType != "text/markdown" {
-		t.Errorf("items[0].ContentType = %q, want text/markdown", main.ContentType)
-	}
-	if !main.ReplacesSubtree {
-		t.Errorf("items[0].ReplacesSubtree = false, want true")
-	}
-
-	att := h.emitted[1]
+	// P3 contract: sub-items are emitted BEFORE the parent document.
+	att := h.emitted[0]
 	wantAttID := nodeToken + "#file#" + attToken
 	if att.ExternalID != wantAttID {
-		t.Errorf("items[1].ExternalID = %q, want %q", att.ExternalID, wantAttID)
+		t.Errorf("items[0].ExternalID = %q, want %q", att.ExternalID, wantAttID)
 	}
 	if att.Metadata["attachment"] != "true" {
-		t.Errorf("items[1].Metadata[attachment] = %q, want \"true\"", att.Metadata["attachment"])
+		t.Errorf("items[0].Metadata[attachment] = %q, want \"true\"", att.Metadata["attachment"])
+	}
+
+	main := h.emitted[1]
+	if main.ExternalID != nodeToken {
+		t.Errorf("items[1].ExternalID = %q, want %q", main.ExternalID, nodeToken)
+	}
+	if main.ContentType != "text/markdown" {
+		t.Errorf("items[1].ContentType = %q, want text/markdown", main.ContentType)
+	}
+	if !main.ReplacesSubtree {
+		t.Errorf("items[1].ReplacesSubtree = false, want true")
 	}
 }
 
@@ -441,7 +441,6 @@ func fakeFeishuWithBlocksFallback(nodes []core.WikiNode, docToken string) (*http
 // "application/octet-stream", not "text/markdown". No hard failure occurs —
 // the sync completes successfully with the exported binary.
 func TestFetchStream_DocxBlocksFallback(t *testing.T) {
-	t.Setenv("FEISHU_DOCX_PARSE_MODE", "blocks")
 	const (
 		nodeToken = "nt-fallback"
 		objToken  = "obj-fallback"

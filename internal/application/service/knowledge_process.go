@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -3575,6 +3576,15 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		convertResult.AudioData = nil
 	}
 
+	// Step 1.9: resolve embedded-image placeholders BEFORE the docparser
+	// image-resolution stage (Step 2), so `weknora-img://<n>` markers are
+	// never mistaken for image URLs, and before chunking, so no marker and
+	// no wrong URL ever reaches a chunk or the vector index. Single pass —
+	// a missing image row degrades to a placeholder, no re-enqueue.
+	if convertResult != nil {
+		convertResult.MarkdownContent = s.resolveEmbeddedImageMarkers(ctx, knowledge, convertResult.MarkdownContent)
+	}
+
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
 
@@ -3663,6 +3673,87 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
 
 	return nil
+}
+
+// reWrappedImageMarker matches the marker wrapped in markdown image syntax:
+// `![alt](weknora-img://<n>)`. Only the URL part is rewritten, keeping alt.
+var reWrappedImageMarker = regexp.MustCompile(`!\[([^\]]*)\]\(weknora-img://(\d+)\)`)
+
+// reBareImageMarker matches the bare-text form `weknora-img://<n>` as a
+// fallback, so a connector emitting the unwrapped token still resolves.
+// n is a 1-based sequence within the doc and deliberately carries no
+// external-system token.
+var reBareImageMarker = regexp.MustCompile(`weknora-img://(\d+)`)
+
+// resolveEmbeddedImageMarkers rewrites `weknora-img://<n>` placeholders in the
+// document markdown into image references pointing at the persisted FilePath
+// (provider:// …) of the sibling image knowledge row named by the parent's
+// image_map metadata ({"n": external_id}). Image rows share the data source
+// but not necessarily the ingest order, so every absent mapping — no
+// image_map, unknown sequence number, missing sibling row, empty FilePath,
+// lookup error — degrades to an empty image reference: the document still
+// parses normally and no retry is enqueued.
+func (s *knowledgeService) resolveEmbeddedImageMarkers(
+	ctx context.Context, knowledge *types.Knowledge, markdown string,
+) string {
+	if !strings.Contains(markdown, "weknora-img://") {
+		return markdown
+	}
+	meta := knowledge.GetMetadata()
+	dataSourceID := meta["datasource_id"]
+	var imageMap map[string]string
+	if raw := meta["image_map"]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), &imageMap); err != nil {
+			logger.Warnf(ctx, "invalid image_map metadata for knowledge %s: %v", knowledge.ID, err)
+		}
+	}
+
+	// One DB lookup per distinct sequence number, however often it repeats.
+	resolved := make(map[string]string)
+	filePathFor := func(n string) string {
+		if path, ok := resolved[n]; ok {
+			return path
+		}
+		var path string
+		externalID := imageMap[n]
+		if dataSourceID != "" && externalID != "" {
+			row, err := s.repo.FindByDataSourceExternalID(
+				ctx, knowledge.TenantID, knowledge.KnowledgeBaseID, dataSourceID, externalID,
+			)
+			switch {
+			case err != nil:
+				logger.Warnf(ctx, "embedded image lookup failed for knowledge %s seq %s: %v",
+					knowledge.ID, n, err)
+			case row == nil || row.FilePath == "":
+				logger.Infof(ctx, "embedded image %s (seq %s) not available for knowledge %s; degrading to placeholder",
+					externalID, n, knowledge.ID)
+			default:
+				path = row.FilePath
+			}
+		}
+		resolved[n] = path
+		return path
+	}
+
+	resolvedCount, placeholderCount := 0, 0
+	replace := func(alt, n string) string {
+		if path := filePathFor(n); path != "" {
+			resolvedCount++
+			return fmt.Sprintf("![%s](%s)", alt, path)
+		}
+		placeholderCount++
+		return fmt.Sprintf("![%s]()", alt)
+	}
+	out := reWrappedImageMarker.ReplaceAllStringFunc(markdown, func(match string) string {
+		sub := reWrappedImageMarker.FindStringSubmatch(match)
+		return replace(sub[1], sub[2])
+	})
+	out = reBareImageMarker.ReplaceAllStringFunc(out, func(match string) string {
+		return replace("图片", strings.TrimPrefix(match, "weknora-img://"))
+	})
+	logger.Infof(ctx, "Resolved %d embedded image markers (%d placeholders) for knowledge %s",
+		resolvedCount, placeholderCount, knowledge.ID)
+	return out
 }
 
 // sanitizeReadResult protects every text field that can cross from a parser

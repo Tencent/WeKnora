@@ -3,10 +3,10 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -141,10 +141,15 @@ func FeishuErrorItemMeta(err error, extra map[string]string) map[string]string {
 }
 
 // parseableAttachmentExts are attachment extensions worth ingesting as their
-// own knowledge entries; other files (icons, tiny decor) are skipped.
+// own knowledge entries. This is the shared contract list (pdf/md/markdown/
+// xlsx/xls/csv/doc/docx/ppt/pptx); everything else — images (which ride the
+// embedded-image pipeline instead), videos, archives — degrades to an inline
+// Markdown reference. markdown.go's attachment rendering reads this same map,
+// so the inline `- 文件名` list and the produced sub-items can never disagree.
 var parseableAttachmentExts = map[string]bool{
-	".pdf": true, ".doc": true, ".docx": true, ".xls": true, ".xlsx": true,
-	".ppt": true, ".pptx": true, ".txt": true, ".md": true, ".csv": true,
+	".pdf": true, ".md": true, ".markdown": true,
+	".xlsx": true, ".xls": true, ".csv": true,
+	".doc": true, ".docx": true, ".ppt": true, ".pptx": true,
 }
 
 // MinAttachmentBytes filters out decorative micro-files.
@@ -204,6 +209,29 @@ func ParseFeishuConfig(config *types.DataSourceConfig, region Region) (*Config, 
 		if tz, ok := config.Settings["timezone"].(string); ok {
 			feishuConfig.Timezone = strings.TrimSpace(tz)
 		}
+	}
+
+	// parse_mode is likewise a per-data-source display setting, read from
+	// Settings (set on the data source edit form). Unset or empty falls back to
+	// blocks — the default since the FEISHU_DOCX_PARSE_MODE env var was retired;
+	// an unrecognized value falls back to blocks with a warning rather than
+	// failing the whole sync.
+	feishuConfig.ParseMode = ParseModeBlocks
+	if config.Settings != nil {
+		if pm, ok := config.Settings["parse_mode"].(string); ok {
+			feishuConfig.ParseMode = strings.ToLower(strings.TrimSpace(pm))
+		}
+	}
+	switch feishuConfig.ParseMode {
+	case "", ParseModeBlocks:
+		feishuConfig.ParseMode = ParseModeBlocks
+	case ParseModeExport:
+		// keep the explicit export selection
+	default:
+		logger.Warnf(context.Background(),
+			"[Feishu] invalid parse_mode %q in data source settings, falling back to %q",
+			feishuConfig.ParseMode, ParseModeBlocks)
+		feishuConfig.ParseMode = ParseModeBlocks
 	}
 
 	if err := datasource.ValidateConnectorBaseURL(feishuConfig.GetBaseURL()); err != nil {
@@ -296,32 +324,32 @@ type DocxFetchInput struct {
 	ResourceID string
 	EditTime   time.Time
 	// CreateTime is the document creation time in Feishu; zero when unknown.
-	CreateTime        time.Time
-	BaseMeta          map[string]string
-	MultimodalEnabled bool
+	CreateTime time.Time
+	BaseMeta   map[string]string
 }
 
 // FetchDocxWithBlocks retrieves a docx document via the blocks API, converts it
-// to Markdown, and returns a main item plus any parseable attachment/image
-// sub-items. Falls back to the export API if the blocks API errors or renders
-// empty. Shared by the wiki Connector and the Drive DriveConnector.
+// to Markdown, and returns any image/attachment sub-items followed by the main
+// item. Image and board blocks render as numbered `weknora-img://N` markers
+// resolved by the doc-process pipeline through the parent's image_map. Falls
+// back to the export API if the blocks API errors or renders empty. Shared by
+// the wiki Connector and the Drive DriveConnector.
 func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput) ([]*types.FetchedItem, error) {
-	// FEISHU_DOCX_PARSE_MODE selects the docx parsing path. The blocks path
-	// renders image blocks as empty `![图片]()` placeholders and fans images out
-	// into separate knowledge items, which breaks image↔document association in
-	// retrieval/wiki/agent. The export path yields a .docx that docreader parses
-	// inline, so images are bound to the parent document via parent_chunk_id
-	// (same as a regular docx upload). Default (unset / "export") uses export so
-	// images associate with the document; set "blocks" for the blocks-first
-	// behaviour (faster, keeps docx attachments, but images are detached).
-
-	// This is a temporary solution. If a better parsing solution is available later, this environment variable will be removed and replaced with a better one.
-	parsingMode := strings.TrimSpace(os.Getenv("FEISHU_DOCX_PARSE_MODE"))
+	// The parse mode comes from the data source's Settings["parse_mode"],
+	// resolved by ParseFeishuConfig into Config.ParseMode and carried on the
+	// Client. The blocks path (default) fans images/boards/attachments out into
+	// sub-items wired to the parent via weknora-img://N markers and image_map /
+	// attachment_ids metadata. The export path yields a .docx that docreader
+	// parses inline, so images are bound to the parent document via
+	// parent_chunk_id (same as a regular docx upload) — kept as the per-data-
+	// source escape hatch.
+	parsingMode := client.parseMode
 	if parsingMode == "" {
-		parsingMode = "export"
+		// Client constructed directly (e.g. tests) without ParseFeishuConfig.
+		parsingMode = ParseModeBlocks
 	}
 
-	if strings.EqualFold(parsingMode, "export") {
+	if strings.EqualFold(parsingMode, ParseModeExport) {
 		item, err := exportDocxFallback(ctx, client, in)
 		if err != nil {
 			return nil, err
@@ -343,12 +371,18 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		return []*types.FetchedItem{item}, nil
 	}
 
-	md, atts, err := blocksToMarkdown(ctx, client, blocks)
+	// Images/boards ride the weknora-img://N marker pipeline: the renderer
+	// numbers them in document order, the connector fans the media out into
+	// sub-items, and the parent's metadata image_map ("N" → external_id) lets
+	// the doc-process pipeline resolve each marker against the image
+	// knowledge's persistent FilePath in a single pass.
+	mdBytes, atts, imgs, err := blocksToMarkdown(ctx, client, blocks, in.URL)
 	if err != nil {
 		return nil, fmt.Errorf("convert blocks %s: %w", in.Title, err)
 	}
+	md := string(mdBytes)
 
-	if len(strings.TrimSpace(string(md))) == 0 {
+	if len(strings.TrimSpace(md)) == 0 {
 		logger.Infof(ctx, "[Feishu] doc %s (%s): blocks rendered empty Markdown, falling back to export",
 			in.Title, in.ObjToken)
 		item, ferr := exportDocxFallback(ctx, client, in)
@@ -358,45 +392,63 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 		return []*types.FetchedItem{item}, nil
 	}
 
-	main := &types.FetchedItem{
-		ExternalID:       in.DocToken,
-		Title:            in.Title,
-		Content:          md,
-		ContentType:      "text/markdown",
-		FileName:         SanitizeFileName(in.Title) + ".md",
-		URL:              in.URL,
-		UpdatedAt:        in.EditTime,
-		CreatedAt:        in.CreateTime,
-		SourceResourceID: in.ResourceID,
-		Metadata:         in.BaseMeta,
-		ReplacesSubtree:  true, // sweep stale attachment sub-items on re-sync
-	}
-	items := []*types.FetchedItem{main}
+	// Sub-items are emitted BEFORE the parent document so the pipeline can
+	// resolve the parent's image markers against sub-items already present in
+	// the same batch.
+	var children []*types.FetchedItem
+	keep := make([]string, 0, len(atts)+len(imgs))
+	attachmentIDs := make([]string, 0, len(atts))
+	imageMap := map[string]string{} // "N" → sub-item external_id
 
-	keep := make([]string, 0, len(atts))
 	childMeta := func() map[string]string {
 		m := maps.Clone(in.BaseMeta)
 		m["parent_node_token"] = in.DocToken
+		m["parent_doc_id"] = in.DocToken
 		m["attachment"] = "true"
 		return m
 	}
+	imgMeta := func() map[string]string {
+		m := maps.Clone(in.BaseMeta)
+		m["parent_node_token"] = in.DocToken
+		m["parent_doc_id"] = in.DocToken
+		m["embedded_image"] = "true"
+		return m
+	}
+	// patchMarker swaps one numbered image marker in the rendered Markdown for
+	// an inline degrade note (board export failure / attachment over cap).
+	// Markers are unique per N, and N is assigned once per image/board block.
+	patchMarker := func(n int, note string) {
+		md = strings.Replace(md, fmt.Sprintf("![图片](weknora-img://%d)", n), note, 1)
+	}
+
+	// ── file attachments ──
 	for _, a := range atts {
 		childID := types.SubtreeChildID(in.DocToken, "file", a.FileToken)
 		keep = append(keep, childID) // present in the doc → never sweep as stale
-		ext := strings.ToLower(filepath.Ext(a.Name))
-		if ext == "" {
-			logger.Warnf(ctx, "[Feishu] doc %s: skipping attachment with no usable filename (token=%s name=%q)",
-				in.ObjToken, a.FileToken, a.Name)
-			continue
-		}
-		if !parseableAttachmentExts[ext] {
-			continue
-		}
+		// The renderer only collects whitelisted extensions into atts, so
+		// non-whitelisted/video files never reach this loop (their inline
+		// `> [附件: …]` reference is already in the Markdown).
 		data, derr := client.downloadMediaFile(ctx, a.FileToken)
 		if derr != nil {
+			if errors.Is(derr, ErrDownloadTooLarge) {
+				// The file is fine, just over the sync cap: degrade inline
+				// instead of failing or error-iteming the document.
+				logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) over download cap, degrading to placeholder",
+					in.ObjToken, a.Name, a.FileToken)
+				displayName := a.Name
+				if displayName == "" {
+					displayName = a.FileToken
+				}
+				note := "> [附件: " + displayName + "]"
+				if in.URL != "" {
+					note = "> [附件: " + displayName + "](" + in.URL + ")"
+				}
+				md = strings.Replace(md, "- "+displayName, note, 1)
+				continue
+			}
 			logger.Warnf(ctx, "[Feishu] doc %s: attachment %q (token=%s) download failed: %v",
 				in.ObjToken, a.Name, a.FileToken, derr)
-			items = append(items, &types.FetchedItem{
+			children = append(children, &types.FetchedItem{
 				ExternalID:       childID,
 				Title:            a.Name,
 				SourceResourceID: in.ResourceID,
@@ -409,7 +461,7 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 				in.ObjToken, a.Name, a.FileToken, len(data), MinAttachmentBytes)
 			continue
 		}
-		items = append(items, &types.FetchedItem{
+		children = append(children, &types.FetchedItem{
 			ExternalID:       childID,
 			Title:            a.Name,
 			Content:          data,
@@ -421,60 +473,107 @@ func FetchDocxWithBlocks(ctx context.Context, client *Client, in DocxFetchInput)
 			SourceResourceID: in.ResourceID,
 			Metadata:         childMeta(),
 		})
+		attachmentIDs = append(attachmentIDs, childID)
 	}
 
-	imgMeta := func() map[string]string {
-		m := maps.Clone(in.BaseMeta)
-		m["parent_node_token"] = in.DocToken
-		m["embedded_image"] = "true"
-		return m
-	}
-	for _, b := range blocks {
-		if b.BlockType != BlockTypeImage || b.Image == nil || b.Image.Token == "" {
-			continue
+	// ── embedded images and whiteboard blocks (block_type 43) ──
+	for _, pi := range imgs {
+		if pi.Token == "" {
+			continue // malformed block: the marker stays, the pipeline degrades it
 		}
-		childID := types.SubtreeChildID(in.DocToken, "image", b.Image.Token)
+		childID := types.SubtreeChildID(in.DocToken, pi.Kind, pi.Token)
 		keep = append(keep, childID) // present in the doc → never sweep as stale
-		if !in.MultimodalEnabled {
-			continue // KB can't OCR images; the inline placeholder is all we keep
+
+		var (
+			data        []byte
+			derr        error
+			titleSuffix string
+			filePrefix  string
+		)
+		if pi.Kind == "board" {
+			data, derr = client.downloadBoardAsImage(ctx, pi.Token)
+			titleSuffix = "（画板）"
+			filePrefix = "board-"
+		} else {
+			data, derr = client.downloadMediaFile(ctx, pi.Token)
+			titleSuffix = "（内嵌图片）"
+			filePrefix = "image-"
 		}
-		data, derr := client.downloadMediaFile(ctx, b.Image.Token)
 		if derr != nil {
+			if pi.Kind == "board" {
+				// 403 (no board:whiteboard:node:read) or transient failure:
+				// degrade inline, never fail the document.
+				logger.Warnf(ctx, "[Feishu] doc %s: board %s export failed: %v", in.ObjToken, pi.Token, derr)
+				patchMarker(pi.N, "> [飞书画板无法导出]")
+				continue
+			}
 			logger.Warnf(ctx, "[Feishu] doc %s: image (token=%s) download failed: %v",
-				in.ObjToken, b.Image.Token, derr)
-			items = append(items, &types.FetchedItem{
+				in.ObjToken, pi.Token, derr)
+			children = append(children, &types.FetchedItem{
 				ExternalID:       childID,
-				Title:            fmt.Sprintf("%s（内嵌图片）", in.Title),
+				Title:            in.Title + titleSuffix,
 				SourceResourceID: in.ResourceID,
 				Metadata:         FeishuErrorItemMeta(derr, imgMeta()),
 			})
 			continue
 		}
-		if len(data) < MinAttachmentBytes {
-			continue // decorative micro-image (icon/spacer)
-		}
 		ext, contentType, ok := SupportedImageExt(data)
-		if !ok {
-			logger.Warnf(ctx, "[Feishu] doc %s: skipping image (token=%s) of unsupported type %q",
-				in.ObjToken, b.Image.Token, contentType)
-			continue
+		if !ok || len(data) < MinAttachmentBytes {
+			if pi.Kind == "board" {
+				// Non-image payload or decorative thumbnail: degrade inline.
+				logger.Warnf(ctx, "[Feishu] doc %s: board %s not a usable image (type=%q bytes=%d)",
+					in.ObjToken, pi.Token, contentType, len(data))
+				patchMarker(pi.N, "> [飞书画板无法导出]")
+				continue
+			}
+			if !ok {
+				logger.Warnf(ctx, "[Feishu] doc %s: skipping image (token=%s) of unsupported type %q",
+					in.ObjToken, pi.Token, contentType)
+			}
+			continue // tiny/unsupported: decorative micro-image (icon/spacer)
 		}
-		items = append(items, &types.FetchedItem{
+		children = append(children, &types.FetchedItem{
 			ExternalID:       childID,
-			Title:            fmt.Sprintf("%s（内嵌图片）", in.Title),
+			Title:            in.Title + titleSuffix,
 			Content:          data,
 			ContentType:      contentType,
-			FileName:         "image-" + b.Image.Token + ext,
+			FileName:         filePrefix + pi.Token + ext,
 			URL:              in.URL,
 			UpdatedAt:        in.EditTime,
 			CreatedAt:        in.CreateTime,
 			SourceResourceID: in.ResourceID,
 			Metadata:         imgMeta(),
 		})
+		imageMap[strconv.Itoa(pi.N)] = childID
 	}
 
+	meta := maps.Clone(in.BaseMeta)
+	if len(imageMap) > 0 {
+		if b, merr := json.Marshal(imageMap); merr == nil {
+			meta["image_map"] = string(b)
+		}
+	}
+	if len(attachmentIDs) > 0 {
+		if b, merr := json.Marshal(attachmentIDs); merr == nil {
+			meta["attachment_ids"] = string(b)
+		}
+	}
+
+	main := &types.FetchedItem{
+		ExternalID:       in.DocToken,
+		Title:            in.Title,
+		Content:          []byte(md),
+		ContentType:      "text/markdown",
+		FileName:         SanitizeFileName(in.Title) + ".md",
+		URL:              in.URL,
+		UpdatedAt:        in.EditTime,
+		CreatedAt:        in.CreateTime,
+		SourceResourceID: in.ResourceID,
+		Metadata:         meta,
+		ReplacesSubtree:  true, // sweep stale attachment sub-items on re-sync
+	}
 	main.SubtreeKeep = keep
-	return items, nil
+	return append(children, main), nil
 }
 
 // exportDocxFallback exports a docx document via the async export API and

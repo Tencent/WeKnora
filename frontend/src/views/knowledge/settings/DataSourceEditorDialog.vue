@@ -207,6 +207,9 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+// Feishu/Lark wiki + Drive connectors share the docx parse-mode setting.
+const isFeishuFamilyConnector = (type: string) =>
+  type === 'feishu' || type === 'lark' || type === 'feishu_drive' || type === 'lark_drive'
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -710,6 +713,11 @@ watch(visible, async (v) => {
       conflict_strategy: props.dataSource.conflict_strategy,
       sync_deletions: props.dataSource.sync_deletions,
     }
+    // Legacy rows predate the per-source parse_mode; show the effective default
+    // so the selector never renders empty.
+    if (isFeishuFamilyConnector(form.value.type) && !form.value.config.settings.parse_mode) {
+      form.value.config.settings.parse_mode = 'blocks'
+    }
     selectedResourceIds.value = form.value.config?.resource_ids || []
     if (isGitLabConnector(form.value.type)) {
       const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
@@ -784,6 +792,9 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = {}
+  if (isFeishuFamilyConnector(def.type)) {
+    form.value.config.settings.parse_mode = form.value.config.settings.parse_mode || 'blocks'
+  }
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
@@ -1823,6 +1834,33 @@ const drawerConfirmText = computed(() => {
               {{ t('datasource.conflict.skip') }}
             </button>
           </div>
+        </div>
+
+        <div v-if="isFeishuFamilyConnector(form.type)" class="form-item form-item--flat">
+          <label class="form-label">{{ t('datasource.parseModeLabel') }}</label>
+          <div class="option-group" role="radiogroup" :aria-label="t('datasource.parseModeLabel')">
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': (form.config.settings.parse_mode || 'blocks') === 'blocks' }"
+              role="radio"
+              :aria-checked="(form.config.settings.parse_mode || 'blocks') === 'blocks'"
+              @click="form.config.settings.parse_mode = 'blocks'"
+            >
+              {{ t('datasource.parseMode.blocks') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.config.settings.parse_mode === 'export' }"
+              role="radio"
+              :aria-checked="form.config.settings.parse_mode === 'export'"
+              @click="form.config.settings.parse_mode = 'export'"
+            >
+              {{ t('datasource.parseMode.export') }}
+            </button>
+          </div>
+          <p class="form-desc">{{ t('datasource.parseModeHint') }}</p>
         </div>
 
         <div class="form-item form-item--flat">

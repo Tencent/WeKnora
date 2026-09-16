@@ -652,6 +652,16 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 
+	// One-time legacy upgrade (feishu deep adaptation, design §7): feishu/lark
+	// data sources predating the per-source parse_mode setting get
+	// Settings["parse_mode"]="blocks" plus a one-shot Settings["resync_required"]
+	// marker; the marker upgrades the next sync (even an incremental one) to a
+	// full pass and is cleared on success. Must run before ParseConfig so the
+	// freshly written parse_mode is visible to the connector this run. The
+	// marker itself is read back from the parsed config below (forceFull +
+	// clear-on-success in processSyncStreaming).
+	s.ensureFeishuParseModeBackfill(ctx, ds)
+
 	// Parse configuration
 	config, err := ds.ParseConfig()
 	if err != nil {
@@ -667,10 +677,6 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		_ = s.dsRepo.Update(ctx, ds)
 		return err
 	}
-	// Surface the KB's multimodal/VLM state to the connector so it only extracts
-	// embedded images for OCR when the KB can actually ingest them (never persisted).
-	config.MultimodalEnabled = kb.IsMultimodalEnabled()
-
 	// Streaming path: connectors that support it interleave fetch→ingest→
 	// checkpoint so a large sync bounds memory and resumes after a timeout
 	// instead of restarting (Tencent/WeKnora#2136). Others fall back below.
@@ -989,6 +995,105 @@ func streamStartCursor(ds *types.DataSource, forceFull bool, attempt int) (*type
 	return ds.ParseSyncCursor()
 }
 
+// Settings keys used by the feishu deep-adaptation legacy upgrade (design §7).
+const (
+	feishuSettingParseMode      = "parse_mode"
+	feishuSettingResyncRequired = "resync_required"
+)
+
+// feishuFamilyConnector reports whether ds.Type is one of the feishu/lark
+// connector variants sharing the feishu connector package.
+func feishuFamilyConnector(dsType string) bool {
+	switch dsType {
+	case types.ConnectorTypeFeishu, types.ConnectorTypeLark,
+		types.ConnectorTypeFeishuDrive, types.ConnectorTypeLarkDrive:
+		return true
+	}
+	return false
+}
+
+// ensureFeishuParseModeBackfill migrates legacy feishu/lark data sources to the
+// per-source parse_mode setting with zero migration SQL: the first sync after
+// this code ships writes Settings["parse_mode"]="blocks" plus a one-shot
+// Settings["resync_required"]=true marker and persists both via the regular
+// Update path. The marker upgrades that sync (even a scheduled incremental one)
+// to a full pass so existing documents re-ingest under the blocks mode; it is
+// cleared once the upgraded run succeeds. Failures are non-fatal: the sync
+// proceeds without the upgrade.
+func (s *DataSourceService) ensureFeishuParseModeBackfill(ctx context.Context, ds *types.DataSource) bool {
+	if !feishuFamilyConnector(ds.Type) {
+		return false
+	}
+	cfg, err := ds.ParseConfig()
+	if err != nil {
+		logger.Warnf(ctx, "feishu parse_mode backfill skipped, config unreadable: ds=%s err=%v", ds.ID, err)
+		return false
+	}
+	if _, ok := cfg.Settings[feishuSettingParseMode]; ok {
+		// Backfill already ran (or the user configured parse_mode on the form).
+		// An armed resync_required marker is still honored via resyncRequired.
+		return false
+	}
+	if cfg.Settings == nil {
+		cfg.Settings = map[string]interface{}{}
+	}
+	cfg.Settings[feishuSettingParseMode] = "blocks"
+	cfg.Settings[feishuSettingResyncRequired] = true
+	blob, err := cfg.ToJSON()
+	if err != nil {
+		logger.Warnf(ctx, "feishu parse_mode backfill skipped, config re-encode failed: ds=%s err=%v", ds.ID, err)
+		return false
+	}
+	ds.Config = blob
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		logger.Warnf(ctx, "failed to persist feishu parse_mode backfill: ds=%s err=%v", ds.ID, err)
+		return false
+	}
+	logger.Infof(ctx, "feishu data source upgraded to per-source parse_mode=blocks with one-shot resync: ds=%s type=%s",
+		ds.ID, ds.Type)
+	return true
+}
+
+// resyncRequired reads the one-shot upgrade marker out of parsed config
+// Settings. Tolerates both bool and string encodings.
+func resyncRequired(cfg *types.DataSourceConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	switch v := cfg.Settings[feishuSettingResyncRequired].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
+	}
+}
+
+// clearResyncMarker removes the one-shot upgrade marker after the upgraded sync
+// succeeded so it never fires again. Streaming path only: the feishu/lark
+// connectors the backfill tags all implement StreamingConnector.
+func (s *DataSourceService) clearResyncMarker(ctx context.Context, ds *types.DataSource) {
+	cfg, err := ds.ParseConfig()
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, config unreadable: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	if cfg.Settings[feishuSettingResyncRequired] == nil {
+		return
+	}
+	delete(cfg.Settings, feishuSettingResyncRequired)
+	blob, err := cfg.ToJSON()
+	if err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker, config re-encode failed: ds=%s err=%v", ds.ID, err)
+		return
+	}
+	ds.Config = blob
+	if err := s.dsRepo.Update(ctx, ds); err != nil {
+		logger.Warnf(ctx, "failed to clear resync_required marker: ds=%s err=%v", ds.ID, err)
+	}
+}
+
 // streamSyncHandler adapts a streaming fetch to the knowledge-base ingest path.
 // Emit ingests each item as it arrives (bounding memory) and Checkpoint persists
 // the connector cursor plus live progress counts at page boundaries.
@@ -1065,6 +1170,14 @@ func (s *DataSourceService) processSyncStreaming(
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
+	if resyncRequired(config) {
+		// One-shot legacy upgrade (design §7): a data source tagged
+		// resync_required upgrades this sync — even a scheduled incremental one —
+		// to a full pass so existing documents re-ingest under the current
+		// parse mode. The marker is cleared only after the run succeeds below;
+		// a failure keeps it so the retry upgrades again from scratch.
+		forceFull = true
+	}
 	attempt, _ := asynq.GetRetryCount(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
@@ -1120,6 +1233,12 @@ func (s *DataSourceService) processSyncStreaming(
 		}
 	}
 	s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, status, errMsg, wasPaused)
+	// The upgraded full pass succeeded (success or partial — per-document
+	// failures are a normal retryable condition): retire the marker so it
+	// never fires again. Failed runs returned earlier and keep it.
+	if resyncRequired(config) {
+		s.clearResyncMarker(ctx, ds)
+	}
 	logger.Infof(ctx, "streaming sync completed: ds=%s created=%d updated=%d deleted=%d skipped=%d failed=%d",
 		payload.DataSourceID, result.Created, result.Updated, result.Deleted, result.Skipped, result.Failed)
 	return nil

@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -20,90 +22,275 @@ type pendingAttachment struct {
 	Name      string
 }
 
+// pendingImage is one image/board marker emitted into the Markdown, in
+// document order: N is the 1-based weknora-img:// sequence number, Kind is the
+// SubtreeChildID discriminator ("image" or "board"), Token the Feishu media or
+// whiteboard token. The connector turns these into sub-items and the
+// parent's metadata image_map ("N" → external_id); an image whose item is
+// never produced simply has no image_map entry, and the doc-process pipeline
+// degrades the unresolved marker back to a plain ![图片]() placeholder.
+type pendingImage struct {
+	N     int
+	Kind  string
+	Token string
+}
+
+// mdRenderer carries per-document rendering state: the block index for
+// container recursion, download candidates, and the ordered-list counter.
+type mdRenderer struct {
+	ctx    context.Context
+	client sheetReader
+	byID   map[string]DocxBlock
+	atts   []pendingAttachment
+	imgs   []pendingImage
+	imgN   int    // last weknora-img:// sequence number assigned
+	docURL string // parent document's web URL, for non-whitelisted attachment placeholders
+
+	orderedActive bool // an ordered-list run is in progress
+	orderedNext   int  // next number for "auto"/absent sequence
+}
+
+// nextImageNo assigns the next weknora-img:// sequence number. The renderer and
+// the recorded pendingImage share this single counter, so the marker in the
+// Markdown and the parent's image_map can never disagree.
+func (r *mdRenderer) nextImageNo(kind, token string) int {
+	r.imgN++
+	r.imgs = append(r.imgs, pendingImage{N: r.imgN, Kind: kind, Token: token})
+	return r.imgN
+}
+
 // blocksToMarkdown renders a flat docx block array to Markdown, inlining
-// embedded spreadsheet/bitable tables (Task 5) and collecting downloadable
-// attachments. client may be nil when the block set has no downdrill blocks.
-func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock) ([]byte, []pendingAttachment, error) {
+// embedded spreadsheet/bitable tables (Task 5), collecting downloadable
+// attachments, and numbering image/board blocks as weknora-img://N markers.
+// docURL is the parent document's web URL used in non-whitelisted attachment
+// placeholders (empty → placeholder without link). client may be nil when the
+// block set has no downdrill blocks.
+func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock, docURL string) ([]byte, []pendingAttachment, []pendingImage, error) {
 	byID := make(map[string]DocxBlock, len(blocks))
 	for _, b := range blocks {
 		byID[b.BlockID] = b
 	}
-	// Blocks nested inside a native table (its cells and their content blocks)
-	// are rendered by renderNativeTable. Mark them so the flat loop below does
-	// not also Emit them as stray top-level paragraphs.
+	// Blocks nested inside a native table are rendered by renderNativeTable;
+	// blocks nested inside a container the main loop renders recursively
+	// (callout / grid / quote_container) are rendered by that container. Mark
+	// both so the flat loop below never Emits them a second time.
 	consumed := tableDescendants(blocks, byID)
+	markContainerDescendants(blocks, byID, consumed)
 
+	r := &mdRenderer{ctx: ctx, client: client, byID: byID, docURL: docURL}
 	var sb strings.Builder
-	var atts []pendingAttachment
 	for _, b := range blocks {
 		if consumed[b.BlockID] {
 			continue
 		}
-		switch b.BlockType {
-		case BlockTypePage:
-			continue // root container, no text of its own
-		case BlockTypeText:
-			writePara(&sb, plainText(textBearingField(b)))
-		case BlockTypeBullet:
-			writePara(&sb, "- "+plainText(textBearingField(b)))
-		case BlockTypeOrdered:
-			writePara(&sb, "1. "+plainText(textBearingField(b)))
-		case BlockTypeCode:
-			writePara(&sb, "```\n"+plainText(textBearingField(b))+"\n```")
-		case BlockTypeQuote:
-			writePara(&sb, "> "+plainText(textBearingField(b)))
-		case BlockTypeDivider:
-			writePara(&sb, "---")
-		case BlockTypeTable:
-			writePara(&sb, renderNativeTable(b, byID))
-		case BlockTypeTableCell:
-			continue // rendered by its parent table (also covered by `consumed`)
-		case BlockTypeSheet:
-			if b.Sheet != nil {
-				writePara(&sb, inlineTable(ctx, client, b.Sheet.Token, "sheet"))
-			}
-		case BlockTypeBitable:
-			if b.Bitable != nil {
-				writePara(&sb, inlineTable(ctx, client, b.Bitable.Token, "bitable"))
-			}
-		case BlockTypeImage:
-			// Emit a token-free placeholder: images carry no retrievable text, and
-			// leaking the internal media token would pollute embeddings. A neutral
-			// marker preserves surrounding context (e.g. "如下图所示").
-			writePara(&sb, "![图片]()")
-		case BlockTypeTodo:
-			if t := plainText(textBearingField(b)); t != "" {
-				writePara(&sb, "- [ ] "+t)
-			}
-		case BlockTypeCallout:
-			// Callout is a container; its body is usually in child blocks (rendered
-			// separately). Emit its own text only if it carries direct inline text,
-			// so the container case is a safe no-op.
-			if t := plainText(textBearingField(b)); t != "" {
-				writePara(&sb, "> "+t)
-			}
-		case BlockTypeFile:
-			if b.File != nil {
-				name := b.File.Name
-				if name == "" {
-					name = b.File.Token
-				}
-				writePara(&sb, "📎 附件："+name)
-				atts = append(atts, pendingAttachment{FileToken: b.File.Token, Name: b.File.Name})
-			}
-		default:
-			if b.BlockType >= BlockTypeHeading1 && b.BlockType <= blockTypeHeading9 {
-				level := b.BlockType - BlockTypeHeading1 + 1
-				writePara(&sb, strings.Repeat("#", level)+" "+plainText(textBearingField(b)))
-			}
-		}
+		writePara(&sb, r.renderBlock(b))
 	}
-
 	out := strings.TrimRight(sb.String(), "\n")
+	// listDocumentBlocks stops collecting at maxDocumentBlocks, so a full-size
+	// array means content was dropped silently. Annotate it like the
+	// embedded-table truncation does instead of failing the document.
+	if len(blocks) >= maxDocumentBlocks {
+		out += fmt.Sprintf("\n> 文档已截断（仅显示前 %d 个块）", maxDocumentBlocks)
+	}
 	if out != "" {
 		out += "\n"
 	}
-	return []byte(out), atts, nil
+	return []byte(out), r.atts, r.imgs, nil
+}
+
+// markContainerDescendants marks every block reachable through the children of
+// the container blocks the main loop renders recursively (callout, grid — its
+// columns' content is rendered per column — and quote_container).
+func markContainerDescendants(blocks []DocxBlock, byID map[string]DocxBlock, consumed map[string]bool) {
+	var mark func(id string)
+	mark = func(id string) {
+		b, ok := byID[id]
+		if !ok || consumed[id] {
+			return
+		}
+		consumed[id] = true
+		for _, c := range b.Children {
+			mark(c)
+		}
+	}
+	for _, b := range blocks {
+		switch b.BlockType {
+		case BlockTypeCallout, BlockTypeGrid, BlockTypeQuoteContainer:
+			for _, c := range b.Children {
+				mark(c)
+			}
+		}
+	}
+}
+
+// renderBlock renders one block, recursing into containers. Returns "" when
+// the block contributes nothing.
+func (r *mdRenderer) renderBlock(b DocxBlock) string {
+	if b.BlockType != BlockTypeOrdered {
+		r.orderedActive = false
+	}
+	switch b.BlockType {
+	case BlockTypePage, BlockTypeTableCell:
+		return "" // containers rendered elsewhere
+	case BlockTypeText:
+		return richText(textBearingField(b))
+	case BlockTypeBullet:
+		return "- " + richText(b.Bullet)
+	case BlockTypeOrdered:
+		return fmt.Sprintf("%d. %s", r.nextOrderedNo(textBearingField(b)), richText(b.Ordered))
+	case BlockTypeCode:
+		return renderCode(b)
+	case BlockTypeQuote:
+		return "> " + richText(b.Quote)
+	case BlockTypeTodo:
+		if t := richText(b.Todo); t != "" {
+			return "- [ ] " + t
+		}
+	case BlockTypeDivider:
+		return "---"
+	case BlockTypeCallout:
+		return r.renderQuotedContainer(b, richText(b.Callout))
+	case BlockTypeQuoteContainer:
+		return r.renderQuotedContainer(b, "")
+	case BlockTypeGrid:
+		return r.renderGrid(b)
+	case BlockTypeTable:
+		return renderNativeTable(b, r.byID)
+	case BlockTypeSheet:
+		if b.Sheet != nil {
+			return inlineTable(r.ctx, r.client, b.Sheet.Token, "sheet")
+		}
+	case BlockTypeBitable:
+		if b.Bitable != nil {
+			return inlineTable(r.ctx, r.client, b.Bitable.Token, "bitable")
+		}
+	case BlockTypeImage:
+		// Token-free numbered marker: the media token never enters the Markdown;
+		// the doc-process pipeline resolves weknora-img://N through the parent's
+		// image_map to the image knowledge's persistent FilePath.
+		var tok string
+		if b.Image != nil {
+			tok = b.Image.Token
+		}
+		n := r.nextImageNo("image", tok)
+		return fmt.Sprintf("![图片](weknora-img://%d)", n)
+	case BlockTypeBoard:
+		if b.Board == nil || b.Board.Token == "" {
+			return unsupportedBlockNote(b)
+		}
+		// Boards ride the same image pipeline: the connector downloads the
+		// whiteboard thumbnail and fans it out as an image sub-item. On export
+		// failure the connector patches this marker back to a degrade note.
+		n := r.nextImageNo("board", b.Board.Token)
+		return fmt.Sprintf("![图片](weknora-img://%d)", n)
+	case BlockTypeFile:
+		if b.File != nil {
+			name := b.File.Name
+			if name == "" {
+				name = b.File.Token
+			}
+			if parseableAttachmentExts[strings.ToLower(filepath.Ext(name))] {
+				r.atts = append(r.atts, pendingAttachment{FileToken: b.File.Token, Name: b.File.Name})
+				return "- " + name
+			}
+			// Not ingestible (wrong type / video): keep a visible reference with
+			// the source link when available.
+			if r.docURL != "" {
+				return "> [附件: " + name + "](" + r.docURL + ")"
+			}
+			return "> [附件: " + name + "]"
+		}
+	case BlockTypeIframe:
+		if b.Iframe != nil && b.Iframe.Component != nil && b.Iframe.Component.URL != "" {
+			return "[内嵌网页](" + b.Iframe.Component.URL + ")"
+		}
+		return unsupportedBlockNote(b)
+	default:
+		if b.BlockType >= BlockTypeHeading1 && b.BlockType <= blockTypeHeading9 {
+			level := b.BlockType - BlockTypeHeading1 + 1
+			return strings.Repeat("#", level) + " " + richText(headingText(b))
+		}
+		return unsupportedBlockNote(b)
+	}
+	return ""
+}
+
+// renderQuotedContainer renders a container block (callout / quote_container):
+// its own inline text (if any) plus each child block, every line prefixed with
+// "> ".
+func (r *mdRenderer) renderQuotedContainer(b DocxBlock, own string) string {
+	var lines []string
+	if own != "" {
+		lines = append(lines, own)
+	}
+	for _, cid := range b.Children {
+		child, ok := r.byID[cid]
+		if !ok {
+			continue
+		}
+		if s := r.renderBlock(child); s != "" {
+			lines = append(lines, strings.Split(s, "\n")...)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	for i, l := range lines {
+		lines[i] = "> " + l
+	}
+	return strings.Join(lines, "\n")
+}
+
+// renderGrid renders a 分栏 (grid) block: each child column's content is
+// rendered in column order, columns separated by a horizontal rule.
+func (r *mdRenderer) renderGrid(b DocxBlock) string {
+	var cols []string
+	for _, cid := range b.Children {
+		col, ok := r.byID[cid]
+		if !ok {
+			continue
+		}
+		var parts []string
+		if col.BlockType == BlockTypeGridColumn {
+			for _, ccid := range col.Children {
+				if cb, ok := r.byID[ccid]; ok {
+					if s := r.renderBlock(cb); s != "" {
+						parts = append(parts, s)
+					}
+				}
+			}
+		} else if s := r.renderBlock(col); s != "" {
+			// Malformed grid whose child is not a grid_column: keep its content.
+			parts = append(parts, s)
+		}
+		if len(parts) > 0 {
+			cols = append(cols, strings.Join(parts, "\n\n"))
+		}
+	}
+	return strings.Join(cols, "\n\n---\n\n")
+}
+
+// nextOrderedNo returns the real number for an ordered list item. Feishu stores
+// it in style.sequence: a specific value starts or restarts the list ("3"),
+// "auto" continues it. Historical/OpenAPI-created docs omit the field entirely;
+// there we fall back to relative numbering, incrementing until a non-ordered
+// block resets the run.
+func (r *mdRenderer) nextOrderedNo(bt *BlockText) int {
+	if bt != nil && bt.Style != nil {
+		if n, err := strconv.Atoi(bt.Style.Sequence); err == nil && n > 0 {
+			r.orderedActive = true
+			r.orderedNext = n + 1
+			return n
+		}
+	}
+	if !r.orderedActive {
+		r.orderedActive = true
+		r.orderedNext = 2
+		return 1
+	}
+	n := r.orderedNext
+	r.orderedNext++
+	return n
 }
 
 // writePara appends a block of text followed by a blank line; empty text is skipped.
@@ -115,7 +302,8 @@ func writePara(sb *strings.Builder, s string) {
 	sb.WriteString("\n\n")
 }
 
-// plainText concatenates the text runs of a text-bearing block.
+// plainText concatenates the raw text runs of a text-bearing block (no inline
+// styling — used for table cells, where GFM styling would break the row).
 func plainText(bt *BlockText) string {
 	if bt == nil {
 		return ""
@@ -127,6 +315,132 @@ func plainText(bt *BlockText) string {
 		}
 	}
 	return sb.String()
+}
+
+// richText renders the inline elements of a text-bearing block: styled text
+// runs, @-mentions, and inline KaTeX equations.
+func richText(bt *BlockText) string {
+	if bt == nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, e := range bt.Elements {
+		switch {
+		case e.TextRun != nil:
+			sb.WriteString(styleRun(e.TextRun.Content, e.TextRun.TextElementStyle))
+		case e.MentionDoc != nil && e.MentionDoc.URL != "":
+			// The payload carries no document title — use the URL as link text.
+			u := e.MentionDoc.URL
+			sb.WriteString("[" + u + "](" + u + ")")
+		case e.MentionUser != nil:
+			// The API carries only the user OpenID, never a display name.
+			sb.WriteString("@成员")
+		case e.Equation != nil && strings.TrimSpace(e.Equation.Content) != "":
+			sb.WriteString("$" + strings.TrimSpace(e.Equation.Content) + "$")
+		}
+	}
+	return sb.String()
+}
+
+// styleRun wraps a text run in the GFM markers of its inline style.
+func styleRun(content string, st *TextElementStyle) string {
+	if content == "" {
+		return ""
+	}
+	if st == nil {
+		return content
+	}
+	if st.InlineCode {
+		content = "`" + content + "`"
+	}
+	if st.Bold {
+		content = "**" + content + "**"
+	}
+	if st.Italic {
+		content = "*" + content + "*"
+	}
+	if st.Strikethrough {
+		content = "~~" + content + "~~"
+	}
+	if st.Link != nil && st.Link.URL != "" {
+		content = "[" + content + "](" + st.Link.URL + ")"
+	}
+	return content
+}
+
+// gfmCodeLanguages maps the Feishu CodeLanguage enum (1-75, official docx-v1
+// docs) to GFM fence info strings. 1 (PlainText) and unknown values render an
+// untagged fence.
+var gfmCodeLanguages = map[int]string{
+	2: "abap", 3: "ada", 4: "apache", 5: "apex", 6: "asm", 7: "bash",
+	8: "c#", 9: "cpp", 10: "c", 11: "cobol", 12: "css", 13: "coffeescript",
+	14: "d", 15: "dart", 16: "delphi", 17: "django", 18: "dockerfile",
+	19: "erlang", 20: "fortran", 21: "foxpro", 22: "go", 23: "groovy",
+	24: "html", 25: "htmlbars", 26: "http", 27: "haskell", 28: "json",
+	29: "java", 30: "javascript", 31: "julia", 32: "kotlin", 33: "latex",
+	34: "lisp", 35: "logo", 36: "lua", 37: "matlab", 38: "makefile",
+	39: "markdown", 40: "nginx", 41: "objective-c", 42: "openedgeabl",
+	43: "php", 44: "perl", 45: "postscript", 46: "powershell", 47: "prolog",
+	48: "protobuf", 49: "python", 50: "r", 51: "rpg", 52: "ruby", 53: "rust",
+	54: "sas", 55: "scss", 56: "sql", 57: "scala", 58: "scheme", 59: "scratch",
+	60: "shell", 61: "swift", 62: "thrift", 63: "typescript", 64: "vbscript",
+	65: "vb", 66: "xml", 67: "yaml", 68: "cmake", 69: "diff", 70: "gherkin",
+	71: "graphql", 72: "glsl", 73: "properties", 74: "solidity", 75: "toml",
+}
+
+// renderCode renders a code block, tagging the fence with the GFM alias of the
+// block's CodeLanguage when one is known.
+func renderCode(b DocxBlock) string {
+	lang := ""
+	if b.Code != nil && b.Code.Style != nil {
+		lang = gfmCodeLanguages[b.Code.Style.Language]
+	}
+	fence := "```"
+	if lang != "" {
+		fence += lang
+	}
+	return fence + "\n" + richText(b.Code) + "\n```"
+}
+
+// blockTypeNames maps docx block types this converter does not unpack to their
+// names, for the degraded placeholder line. Board (43) is only reached here when
+// its block carries no token (the token case rides the image pipeline);
+// mindnote (29) has no content API at all (token-only placeholder per Feishu
+// docs).
+var blockTypeNames = map[int]string{
+	BlockTypeChatCard:          "会话卡片",
+	BlockTypeDiagram:           "流程图&UML",
+	BlockTypeGridColumn:        "分栏列",
+	BlockTypeISV:               "开放平台小组件",
+	BlockTypeMindnote:          "思维笔记",
+	BlockTypeView:              "视图",
+	BlockTypeTask:              "任务",
+	BlockTypeOKR:               "OKR",
+	BlockTypeOKRObjective:      "OKR目标",
+	BlockTypeOKRKeyResult:      "OKR关键结果",
+	BlockTypeOKRProgress:       "OKR进展",
+	BlockTypeAddOns:            "文档小组件",
+	BlockTypeJiraIssue:         "Jira问题",
+	BlockTypeWikiCatalog:       "Wiki子页面列表",
+	BlockTypeBoard:             "画板",
+	BlockTypeAgenda:            "议程",
+	BlockTypeAgendaItem:        "议程项",
+	BlockTypeAgendaItemTitle:   "议程项标题",
+	BlockTypeAgendaItemContent: "议程项内容",
+	BlockTypeLinkPreview:       "链接预览",
+	BlockTypeSourceSynced:      "源同步块",
+	BlockTypeReferenceSynced:   "引用同步块",
+	BlockTypeSubPageList:       "Wiki子页面列表(新版)",
+	BlockTypeAITemplate:        "AI模板",
+}
+
+// unsupportedBlockNote renders the degraded placeholder for a block type this
+// converter does not unpack. Tokens are never included (no-leak constraint).
+func unsupportedBlockNote(b DocxBlock) string {
+	if name, ok := blockTypeNames[b.BlockType]; ok {
+		return "> [飞书块: " + name + "]"
+	}
+	return fmt.Sprintf("> [飞书块: 未知类型(%d)]", b.BlockType)
 }
 
 // headingText returns the heading field for the block's level, or Text as fallback.
@@ -243,7 +557,45 @@ func renderNativeTable(b DocxBlock, byID map[string]DocxBlock) string {
 		}
 		rows = append(rows, cells[i:end])
 	}
+	fillMergedCells(rows, cols, b.Table.Property.MergeInfo)
 	return markdownTable(rows)
+}
+
+// fillMergedCells propagates each merged region's top-left value into the cells
+// it covers — GFM has no row/col span, and dropping the covered cells' content
+// would lose text, so the anchor value fills them instead. merge_info entries
+// are parallel to the table's cells array; entries beyond the rendered grid are
+// ignored. (Embedded sheet/bitable merge ranges would need the spreadsheet
+// merged-cell API; their cell read path carries no merge data, so nothing to
+// fill there.)
+func fillMergedCells(rows [][]string, cols int, merge []BlockTableMergeInfo) {
+	if len(merge) == 0 || len(rows) == 0 {
+		return
+	}
+	cellAt := func(r, c int) string {
+		if r < 0 || r >= len(rows) || c < 0 || c >= len(rows[r]) {
+			return ""
+		}
+		return rows[r][c]
+	}
+	for i, mi := range merge {
+		if mi.RowSpan <= 1 && mi.ColSpan <= 1 {
+			continue
+		}
+		r0, c0 := i/cols, i%cols
+		v := cellAt(r0, c0)
+		for dr := range mi.RowSpan {
+			for dc := range mi.ColSpan {
+				if dr == 0 && dc == 0 {
+					continue
+				}
+				rr, cc := r0+dr, c0+dc
+				if rr < len(rows) && cc < len(rows[rr]) {
+					rows[rr][cc] = v
+				}
+			}
+		}
+	}
 }
 
 // markdownTable renders a [][]string (first row = header) as a GFM table.

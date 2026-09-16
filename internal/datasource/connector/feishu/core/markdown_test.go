@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -37,15 +38,18 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 		{BlockID: "f", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "file_t", Name: "报表.pdf"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"名称", "数量"}, {"苹果", "3"}}}
-	md, atts, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, atts, imgs, err := blocksToMarkdown(context.Background(), fr, blocks, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if !strings.Contains(string(md), "| 名称 | 数量 |") || !strings.Contains(string(md), "| 苹果 | 3 |") {
 		t.Errorf("sheet not inlined:\n%s", md)
 	}
-	if !strings.Contains(string(md), "![图片]()") {
-		t.Errorf("image placeholder missing:\n%s", md)
+	if !strings.Contains(string(md), "![图片](weknora-img://1)") {
+		t.Errorf("numbered image marker missing:\n%s", md)
+	}
+	if len(imgs) != 1 || imgs[0].N != 1 || imgs[0].Kind != "image" || imgs[0].Token != "img_t" {
+		t.Errorf("pendingImages = %+v", imgs)
 	}
 	if strings.Contains(string(md), "feishu-media") {
 		t.Errorf("internal media token leaked into markdown:\n%s", md)
@@ -53,8 +57,8 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	if len(atts) != 1 || atts[0].FileToken != "file_t" || atts[0].Name != "报表.pdf" {
 		t.Errorf("attachments = %+v", atts)
 	}
-	if !strings.Contains(string(md), "📎 附件：报表.pdf") {
-		t.Errorf("attachment inline reference missing:\n%s", md)
+	if !strings.Contains(string(md), "- 报表.pdf") {
+		t.Errorf("attachment file-name list missing:\n%s", md)
 	}
 }
 
@@ -64,7 +68,7 @@ func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheet: [][]string{{"h"}, {"1"}}, sheetTruncated: true}
-	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -79,7 +83,7 @@ func TestBlocksToMarkdown_SheetPermissionDegrades(t *testing.T) {
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
 	}
 	fr := fakeReader{sheetErr: fmt.Errorf("code=99991672 permission denied")}
-	md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "")
 	if err != nil {
 		t.Fatalf("should not fail on permission error, got %v", err)
 	}
@@ -94,7 +98,7 @@ func TestBlocksToMarkdown_BitableInlinedAndDegrades(t *testing.T) {
 			{BlockID: "root", BlockType: BlockTypePage},
 			{BlockID: "bt", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "bascabc_tblxyz"}},
 		}
-		md, _, err := blocksToMarkdown(context.Background(), fr, blocks)
+		md, _, _, err := blocksToMarkdown(context.Background(), fr, blocks, "")
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
@@ -123,7 +127,7 @@ func TestBlocksToMarkdown_NativeTableFromCellChildren(t *testing.T) {
 		cellTextBlk("c1", "姓名"), cellTextBlk("c2", "分数"),
 		cellTextBlk("c3", "张三"), cellTextBlk("c4", "95"),
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -147,7 +151,7 @@ func TestBlocksToMarkdown_AttachmentInsideTableCellStillCollected(t *testing.T) 
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"f1"}},
 		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "tok-in-cell", Name: "内嵌.pdf"}},
 	}
-	_, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	_, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -209,7 +213,7 @@ func TestBlocksToMarkdown_UnrenderableTablePreservesCellText(t *testing.T) {
 		{BlockID: "c1", BlockType: BlockTypeTableCell, Children: []string{"c1_txt"}},
 		cellTextBlk("c1", "重要内容"),
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -225,7 +229,7 @@ func TestBlocksToMarkdown_TextConstructs(t *testing.T) {
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("一段正文")},
 		{BlockID: "b", BlockType: BlockTypeBullet, Bullet: txt("要点")},
 	}
-	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
 	if err != nil {
 		t.Fatalf("blocksToMarkdown: %v", err)
 	}
@@ -249,7 +253,7 @@ func TestBlocksToMarkdown_BlankDocRendersEmpty(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage, Children: []string{"p"}},
 		{BlockID: "p", BlockType: BlockTypeText, Text: txt("")},
 	}
-	md, atts, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, atts, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
 	if err != nil {
 		t.Fatalf("blocksToMarkdown: %v", err)
 	}
@@ -267,7 +271,7 @@ func TestBlocksToMarkdown_TodoAndCallout(t *testing.T) {
 		{BlockID: "t", BlockType: BlockTypeTodo, Todo: txt("买牛奶")},
 		{BlockID: "c", BlockType: BlockTypeCallout, Callout: txt("注意事项")},
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -285,11 +289,305 @@ func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "c", BlockType: BlockTypeCallout},
 	}
-	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if strings.TrimSpace(string(md)) != "" {
 		t.Errorf("empty callout should Emit nothing, got:\n%q", md)
+	}
+}
+
+func TestBlocksToMarkdown_CalloutQuotesChildren(t *testing.T) {
+	// A callout container renders its child blocks recursively with "> "
+	// prefixes — and must not also Emit them a second time as loose paragraphs.
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "c", BlockType: BlockTypeCallout, Children: []string{"h", "p"}},
+		{BlockID: "h", BlockType: 4, Heading2: txt("注意")},
+		{BlockID: "p", BlockType: BlockTypeText, Text: txt("正文内容")},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	if !strings.Contains(s, "> ## 注意") || !strings.Contains(s, "> 正文内容") {
+		t.Errorf("callout children not quoted:\n%s", s)
+	}
+	if n := strings.Count(s, "正文内容"); n != 1 {
+		t.Errorf("callout child duplicated (count=%d):\n%s", n, s)
+	}
+}
+
+func TestBlocksToMarkdown_QuoteContainerQuotesChildren(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "q", BlockType: BlockTypeQuoteContainer, Children: []string{"p"}},
+		{BlockID: "p", BlockType: BlockTypeText, Text: txt("引用内容")},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	if !strings.Contains(s, "> 引用内容") {
+		t.Errorf("quote_container children not quoted:\n%s", s)
+	}
+	if n := strings.Count(s, "引用内容"); n != 1 {
+		t.Errorf("quote_container child duplicated (count=%d):\n%s", n, s)
+	}
+}
+
+func TestBlocksToMarkdown_GridColumnsJoinedByRule(t *testing.T) {
+	// 分栏: each grid_column's content renders in column order, columns
+	// separated by ---, and nothing leaks out as stray paragraphs.
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "g", BlockType: BlockTypeGrid, Grid: &BlockGrid{ColumnSize: 2}, Children: []string{"c1", "c2"}},
+		{BlockID: "c1", BlockType: BlockTypeGridColumn, GridColumn: &BlockGridColumn{WidthRatio: 50}, Children: []string{"p1"}},
+		{BlockID: "c2", BlockType: BlockTypeGridColumn, GridColumn: &BlockGridColumn{WidthRatio: 50}, Children: []string{"p2"}},
+		{BlockID: "p1", BlockType: BlockTypeText, Text: txt("左栏")},
+		{BlockID: "p2", BlockType: BlockTypeText, Text: txt("右栏")},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	want := "左栏\n\n---\n\n右栏"
+	if !strings.Contains(s, want) {
+		t.Errorf("grid columns not joined by ---, want substring %q, got:\n%s", want, s)
+	}
+	for _, p := range []string{"左栏", "右栏"} {
+		if n := strings.Count(s, p); n != 1 {
+			t.Errorf("grid column content %q duplicated (count=%d):\n%s", p, n, s)
+		}
+	}
+}
+
+func TestBlocksToMarkdown_IframeLink(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "f", BlockType: BlockTypeIframe, Iframe: &BlockIframe{
+			Component: &BlockIframeComponent{Type: 1, URL: "https://example.com/embed"},
+		}},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(md), "[内嵌网页](https://example.com/embed)") {
+		t.Errorf("iframe not rendered as link:\n%s", md)
+	}
+}
+
+func TestBlocksToMarkdown_UnsupportedBlocksPlaceholdersNoTokenLeak(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "mn", BlockType: BlockTypeMindnote, Mindnote: &BlockTokenRef{Token: "bmnbSECRET"}},
+		{BlockID: "bd", BlockType: BlockTypeBoard, Board: &BlockBoard{Token: "brdSECRET"}},
+		{BlockID: "dg", BlockType: BlockTypeDiagram, Diagram: &BlockDiagram{DiagramType: 1}},
+		{BlockID: "cc", BlockType: BlockTypeChatCard, ChatCard: &BlockChatCard{ChatID: "oc_SECRET"}},
+		{BlockID: "jira", BlockType: BlockTypeJiraIssue, JiraIssue: &BlockJiraIssue{ID: "1", Key: "AB-1"}},
+		{BlockID: "unk", BlockType: 999},
+	}
+	md, atts, imgs, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	for _, want := range []string{
+		"> [飞书块: 思维笔记]", "> [飞书块: 流程图&UML]",
+		"> [飞书块: 会话卡片]", "> [飞书块: Jira问题]", "> [飞书块: 未知类型(999)]",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing placeholder %q, got:\n%s", want, s)
+		}
+	}
+	// Board (43) now rides the image pipeline: a token-bearing board renders a
+	// numbered weknora-img:// marker and records a pendingImage for the
+	// connector's whiteboard download.
+	if !strings.Contains(s, "![图片](weknora-img://1)") {
+		t.Errorf("board marker missing:\n%s", s)
+	}
+	if len(imgs) != 1 || imgs[0].Kind != "board" || imgs[0].Token != "brdSECRET" {
+		t.Errorf("pendingImages = %+v", imgs)
+	}
+	// No-leak: internal media tokens must never reach the markdown.
+	for _, tok := range []string{"SECRET", "bmnb", "brd", "oc_"} {
+		if strings.Contains(s, tok) {
+			t.Errorf("token fragment %q leaked into markdown:\n%s", tok, s)
+		}
+	}
+	if len(atts) != 0 {
+		t.Errorf("placeholders must not collect attachments, got %+v", atts)
+	}
+}
+
+func TestBlocksToMarkdown_RichTextElements(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "p", BlockType: BlockTypeText, Text: &BlockText{Elements: []TextElement{
+			{TextRun: &TextRun{Content: "加粗", TextElementStyle: &TextElementStyle{Bold: true}}},
+			{TextRun: &TextRun{Content: "code", TextElementStyle: &TextElementStyle{InlineCode: true}}},
+			{TextRun: &TextRun{Content: "删除", TextElementStyle: &TextElementStyle{Strikethrough: true, Italic: true}}},
+			{TextRun: &TextRun{Content: "链接", TextElementStyle: &TextElementStyle{Link: &TextElementLink{URL: "https://x.cn"}}}},
+			{MentionDoc: &MentionDoc{URL: "https://x.cn/doc"}},
+			{MentionUser: &MentionUser{UserID: "ou_1"}},
+			{Equation: &Equation{Content: "E=mc^2"}},
+		}}},
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	for _, want := range []string{
+		"**加粗**", "`code`", "~~*删除*~~", "[链接](https://x.cn)",
+		"[https://x.cn/doc](https://x.cn/doc)", "@成员", "$E=mc^2$",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing rich text %q, got:\n%s", want, s)
+		}
+	}
+}
+
+func TestBlocksToMarkdown_CodeBlockLanguage(t *testing.T) {
+	mk := func(lang int) string {
+		blocks := []DocxBlock{
+			{BlockID: "root", BlockType: BlockTypePage},
+			{BlockID: "c", BlockType: BlockTypeCode,
+				Code: &BlockText{Style: &BlockTextStyle{Language: lang}, Elements: []TextElement{{TextRun: &TextRun{Content: "x"}}}}},
+		}
+		md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+		if err != nil {
+			t.Fatalf("err: %v", err)
+		}
+		return string(md)
+	}
+	cases := map[int]string{
+		22: "```go\nx\n```",         // Go
+		9:  "```cpp\nx\n```",        // C++
+		8:  "```c#\nx\n```",         // CSharp
+		46: "```powershell\nx\n```", // Power Shell
+		1:  "```\nx\n```",           // PlainText → untagged
+		99: "```\nx\n```",           // unknown → untagged
+	}
+	for lang, want := range cases {
+		if got := mk(lang); !strings.Contains(got, want) {
+			t.Errorf("language %d: want %q in output, got:\n%s", lang, want, got)
+		}
+	}
+}
+
+func TestBlocksToMarkdown_OrderedListRealSequence(t *testing.T) {
+	ord := func(seq string, content string) DocxBlock {
+		b := DocxBlock{BlockID: content, BlockType: BlockTypeOrdered}
+		b.Ordered = txt(content)
+		if seq != "" {
+			b.Ordered.Style = &BlockTextStyle{Sequence: seq}
+		}
+		return b
+	}
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		ord("1", "甲"), ord("auto", "乙"), ord("auto", "丙"),
+		{BlockID: "sep", BlockType: BlockTypeText, Text: txt("分隔")},
+		ord("5", "戊"), ord("auto", "己"),
+		ord("", "无序号"), ord("", "续"),
+		{BlockID: "sep2", BlockType: BlockTypeText, Text: txt("第二段")},
+		ord("", "新列表"),
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	for _, want := range []string{"1. 甲", "2. 乙", "3. 丙", "5. 戊", "6. 己", "7. 无序号", "8. 续", "1. 新列表"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing ordered item %q, got:\n%s", want, s)
+		}
+	}
+}
+
+func TestBlocksToMarkdown_NativeTableMergedCellsFilled(t *testing.T) {
+	// merge_info[0] anchors at cell 0 with row_span=2, col_span=2: the anchor
+	// value must fill all four covered cells (GFM has no cell span).
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		tableBlk("t", 3, "c1", "c2", "c3", "c4", "c5", "c6"),
+		cellBlk("c1"), cellBlk("c2"), cellBlk("c3"),
+		cellBlk("c4"), cellBlk("c5"), cellBlk("c6"),
+		cellTextBlk("c1", "合并"), cellTextBlk("c2", ""), cellTextBlk("c3", "B"),
+		cellTextBlk("c4", "C"), cellTextBlk("c5", "D"), cellTextBlk("c6", "E"),
+	}
+	blocks[1].Table.Property.MergeInfo = []BlockTableMergeInfo{{RowSpan: 2, ColSpan: 2}}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	// Cells covered by the merge (c2, c4, c5) take the anchor value; uncovered
+	// cells (c3=B, c6=E) keep their own.
+	if !strings.Contains(s, "| 合并 | 合并 | B |") || !strings.Contains(s, "| 合并 | 合并 | E |") {
+		t.Errorf("merged cells not filled with anchor value:\n%s", s)
+	}
+	if strings.Contains(s, "C") || strings.Contains(s, "D") {
+		t.Errorf("covered cells must show the anchor value, not their own:\n%s", s)
+	}
+}
+
+func TestBlocksToMarkdown_DocumentTruncationNote(t *testing.T) {
+	// A block array at the maxDocumentBlocks cap means listDocumentBlocks
+	// dropped content; the markdown must end with an explicit note (aligned
+	// with the embedded-table truncation note) instead of failing silently.
+	blocks := make([]DocxBlock, maxDocumentBlocks)
+	for i := range blocks {
+		blocks[i] = DocxBlock{BlockID: strconv.Itoa(i), BlockType: BlockTypeText, Text: txt("块")}
+	}
+	md, _, _, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(md), "文档已截断") {
+		t.Errorf("missing document truncation note:\n...%s", md[len(md)-200:])
+	}
+}
+
+func TestBlocksToMarkdown_ImageNumberingStableOrder(t *testing.T) {
+	// Marker sequence numbers must follow document order across image, board,
+	// and file blocks interleaved — shared.go fans sub-items out from the same
+	// pendingImage list, so renderer-side numbering is the single source of truth.
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "p", BlockType: BlockTypeText, Text: txt("引言")},
+		{BlockID: "i1", BlockType: BlockTypeImage, Image: &BlockTokenRef{Token: "tok-a"}},
+		{BlockID: "f1", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "ft-1", Name: "附录.pdf"}},
+		{BlockID: "i2", BlockType: BlockTypeImage, Image: &BlockTokenRef{Token: "tok-b"}},
+		{BlockID: "bd", BlockType: BlockTypeBoard, Board: &BlockBoard{Token: "brd-9"}},
+	}
+	md, _, imgs, err := blocksToMarkdown(context.Background(), nil, blocks, "")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(md)
+	for _, want := range []string{"![图片](weknora-img://1)", "![图片](weknora-img://2)", "![图片](weknora-img://3)"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("marker %q missing:\n%s", want, s)
+		}
+	}
+	wantList := []pendingImage{
+		{N: 1, Kind: "image", Token: "tok-a"},
+		{N: 2, Kind: "image", Token: "tok-b"},
+		{N: 3, Kind: "board", Token: "brd-9"},
+	}
+	if len(imgs) != len(wantList) {
+		t.Fatalf("imgs = %+v, want %+v", imgs, wantList)
+	}
+	for i, w := range wantList {
+		if imgs[i] != w {
+			t.Errorf("imgs[%d] = %+v, want %+v", i, imgs[i], w)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,6 +26,12 @@ type Client struct {
 
 	// location renders bitable date cells in the table's timezone (default GMT+8).
 	location *time.Location
+
+	// parseMode selects the docx parsing path ("blocks" | "export"); resolved
+	// from Settings["parse_mode"] by ParseFeishuConfig. Empty means blocks —
+	// the default for Clients built directly (tests) without ParseFeishuConfig.
+	// Consumed by FetchDocxWithBlocks.
+	parseMode string
 
 	httpClient *http.Client
 
@@ -70,6 +77,7 @@ func NewClient(config *Config) *Client {
 		appID:      config.AppID,
 		appSecret:  config.AppSecret,
 		location:   resolveLocation(config.Timezone),
+		parseMode:  config.ParseMode,
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
 	}
 }
@@ -140,8 +148,16 @@ const (
 )
 
 // maxFeishuDownloadBytes bounds a single file download to protect the sync
-// worker from adversarial or pathological oversized responses.
-const maxFeishuDownloadBytes = 512 * 1024 * 1024 // 512 MB
+// worker from adversarial or pathological oversized responses. Overridable in
+// tests (package core) so the oversize-degrade path can be exercised without
+// serving half a gigabyte.
+var maxFeishuDownloadBytes = int64(512 * 1024 * 1024) // 512 MB
+
+// ErrDownloadTooLarge marks a download rejected by the maxFeishuDownloadBytes
+// cap (errors.Is-able). The connector degrades oversized attachments to an
+// inline Markdown placeholder instead of an error item — the file exists and is
+// fine, it just doesn't fit the sync budget.
+var ErrDownloadTooLarge = errors.New("download exceeds max size")
 
 var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
@@ -748,7 +764,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))
 		if readErr == nil && int64(len(data)) > maxFeishuDownloadBytes {
 			resp.Body.Close()
-			return nil, fmt.Errorf("download exceeds max size (%d bytes): %s", maxFeishuDownloadBytes, path)
+			return nil, fmt.Errorf("%w (%d bytes): %s", ErrDownloadTooLarge, maxFeishuDownloadBytes, path)
 		}
 		resp.Body.Close()
 		if readErr != nil {
@@ -841,76 +857,6 @@ func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string)
 			break
 		}
 		pageToken = next
-	}
-	return all, nil
-}
-
-// ListDriveFilesRecursiveFrom walks a Drive folder subtree depth-first,
-// returning all non-folder files. Mirrors ListWikiNodesRecursiveFrom.
-//
-//   - folder -> recurse (visited is a pure-defensive cycle guard; Drive folders
-//     have no shortcut concept so cycles are not expected - see glossary).
-//   - shortcut -> expand to its target (target_type is never "folder", verified)
-//     and include the target as a regular file. No extra API call: shortcut_info
-//     is returned by the list API.
-//   - other -> collect.
-//
-// Partial failures (a sub-folder listing returns an error) are collected into a
-// *PartialDriveFileListError and the walk continues, mirroring the wiki
-// connector's PartialWikiNodeListError semantics.
-func (c *Client) ListDriveFilesRecursiveFrom(ctx context.Context, folderToken string) ([]DriveFile, error) {
-	visited := make(map[string]bool)
-	var all []DriveFile
-	var failures []DriveFileListFailure
-
-	var walk func(folderToken string)
-	walk = func(folderToken string) {
-		if visited[folderToken] {
-			return
-		}
-		visited[folderToken] = true
-
-		files, err := c.ListDriveFilesAllPages(ctx, folderToken)
-		if err != nil {
-			wrappedErr := fmt.Errorf("list children of %s: %w", folderToken, err)
-			failures = append(failures, DriveFileListFailure{
-				FolderToken: folderToken,
-				Err:         wrappedErr,
-			})
-			logger.Warnf(ctx, "[FeishuDrive] partial drive file listing failure: folder=%s err=%v",
-				folderToken, err)
-			return
-		}
-
-		for _, f := range files {
-			switch f.Type {
-			case "folder":
-				walk(f.Token)
-			case "shortcut":
-				// Expand to target. target_type is never "folder" (verified), so
-				// no recursion here - the target is a regular file.
-				if f.ShortcutInfo != nil && f.ShortcutInfo.TargetToken != "" {
-					expanded := DriveFile{
-						Token:        f.ShortcutInfo.TargetToken,
-						Name:         f.Name,
-						Type:         f.ShortcutInfo.TargetType,
-						ParentToken:  f.ParentToken,
-						URL:          f.URL,
-						CreatedTime:  f.CreatedTime,
-						ModifiedTime: f.ModifiedTime,
-						OwnerID:      f.OwnerID,
-					}
-					all = append(all, expanded)
-				}
-			default:
-				all = append(all, f)
-			}
-		}
-	}
-
-	walk(folderToken)
-	if len(failures) > 0 {
-		return all, &PartialDriveFileListError{Failures: failures}
 	}
 	return all, nil
 }

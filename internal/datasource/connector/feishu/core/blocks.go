@@ -15,42 +15,122 @@ import (
 // Feishu docx block_type integer enum (subset this connector handles).
 // https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/docx-structure
 const (
-	BlockTypePage      = 1
-	BlockTypeText      = 2
-	BlockTypeHeading1  = 3
-	blockTypeHeading9  = 11
-	BlockTypeBullet    = 12
-	BlockTypeOrdered   = 13
-	BlockTypeCode      = 14
-	BlockTypeQuote     = 15
-	BlockTypeTodo      = 17
-	BlockTypeBitable   = 18
-	BlockTypeCallout   = 19
-	BlockTypeDivider   = 22
-	BlockTypeFile      = 23
-	BlockTypeImage     = 27
-	BlockTypeSheet     = 30
-	BlockTypeTable     = 31
-	BlockTypeTableCell = 32
+	BlockTypePage       = 1
+	BlockTypeText       = 2
+	BlockTypeHeading1   = 3
+	blockTypeHeading9   = 11
+	BlockTypeBullet     = 12
+	BlockTypeOrdered    = 13
+	BlockTypeCode       = 14
+	BlockTypeQuote      = 15
+	BlockTypeTodo       = 17
+	BlockTypeBitable    = 18
+	BlockTypeCallout    = 19
+	BlockTypeChatCard   = 20
+	BlockTypeDiagram    = 21
+	BlockTypeDivider    = 22
+	BlockTypeFile       = 23
+	BlockTypeGrid       = 24
+	BlockTypeGridColumn = 25
+	BlockTypeIframe     = 26
+	BlockTypeImage      = 27
+	BlockTypeISV        = 28
+	BlockTypeMindnote   = 29
+	BlockTypeSheet      = 30
+	BlockTypeTable      = 31
+	BlockTypeTableCell  = 32
+
+	BlockTypeView              = 33
+	BlockTypeQuoteContainer    = 34
+	BlockTypeTask              = 35
+	BlockTypeOKR               = 36
+	BlockTypeOKRObjective      = 37
+	BlockTypeOKRKeyResult      = 38
+	BlockTypeOKRProgress       = 39
+	BlockTypeAddOns            = 40
+	BlockTypeJiraIssue         = 41
+	BlockTypeWikiCatalog       = 42
+	BlockTypeBoard             = 43
+	BlockTypeAgenda            = 44
+	BlockTypeAgendaItem        = 45
+	BlockTypeAgendaItemTitle   = 46
+	BlockTypeAgendaItemContent = 47
+	BlockTypeLinkPreview       = 48
+	BlockTypeSourceSynced      = 49
+	BlockTypeReferenceSynced   = 50
+	BlockTypeSubPageList       = 51
+	BlockTypeAITemplate        = 52
 )
 
 // maxDocumentBlocks caps how many blocks a single document contributes, guarding
 // against pathological/adversarial documents. Far above any real Feishu doc.
 const maxDocumentBlocks = 50000
 
-// TextElement is one inline run inside a text-bearing block.
+// TextElementStyle is the inline style of a text element
+// (official docx-v1 TextElementStyle; color enums carry no GFM equivalent and
+// are not parsed).
+type TextElementStyle struct {
+	Bold          bool             `json:"bold"`
+	Italic        bool             `json:"italic"`
+	Strikethrough bool             `json:"strikethrough"`
+	InlineCode    bool             `json:"inline_code"`
+	Link          *TextElementLink `json:"link"`
+}
+
+// TextElementLink is the hyperlink payload of TextElementStyle.
+type TextElementLink struct {
+	URL string `json:"url"`
+}
+
 // TextRun is the text_run payload of a TextElement.
 type TextRun struct {
-	Content string `json:"content"`
+	Content          string            `json:"content"`
+	TextElementStyle *TextElementStyle `json:"text_element_style"`
+}
+
+// MentionDoc is the mention_doc payload (@-mention of a cloud document). The
+// API carries no document title — only the link.
+type MentionDoc struct {
+	URL              string            `json:"url"`
+	TextElementStyle *TextElementStyle `json:"text_element_style"`
+}
+
+// MentionUser is the mention_user payload. It carries only the user OpenID —
+// never a display name — so the renderer can only Emit a generic @ marker.
+type MentionUser struct {
+	UserID           string            `json:"user_id"`
+	TextElementStyle *TextElementStyle `json:"text_element_style"`
+}
+
+// Equation is the equation payload; Content is KaTeX syntax.
+type Equation struct {
+	Content          string            `json:"content"`
+	TextElementStyle *TextElementStyle `json:"text_element_style"`
 }
 
 type TextElement struct {
-	TextRun *TextRun `json:"text_run"`
+	TextRun     *TextRun     `json:"text_run"`
+	MentionUser *MentionUser `json:"mention_user"`
+	MentionDoc  *MentionDoc  `json:"mention_doc"`
+	Equation    *Equation    `json:"equation"`
+	// file / reminder / inline_block elements carry no renderable text (file
+	// is token-only and its token must never leak; reminder has no text body;
+	// inline_block is an ID reference), so they are not parsed.
+}
+
+// BlockTextStyle is the block-level style of text-bearing blocks. Code blocks
+// carry Language (CodeLanguage enum 1-75); ordered blocks carry Sequence (the
+// real list number: a specific value or "auto"; absent in historical docs and
+// docs created via OpenAPI).
+type BlockTextStyle struct {
+	Language int    `json:"language"`
+	Sequence string `json:"sequence"`
 }
 
 // BlockText is the shared shape of text-bearing blocks (text, headingN, bullet…).
 type BlockText struct {
-	Elements []TextElement `json:"elements"`
+	Elements []TextElement   `json:"elements"`
+	Style    *BlockTextStyle `json:"style"`
 }
 
 // BlockTokenRef is the shared shape of sheet/bitable/image block payloads
@@ -65,9 +145,80 @@ type BlockFileRef struct {
 	Name  string `json:"name"`
 }
 
+// Payload structs for the remaining docx block types (official docx-v1 block
+// data structures). Only the fields a renderer needs are parsed; the rest are
+// dropped by encoding/json.
+
+type BlockChatCard struct {
+	ChatID string `json:"chat_id"`
+	Align  int    `json:"align"`
+}
+
+type BlockDiagram struct {
+	DiagramType int `json:"diagram_type"`
+}
+
+type BlockGrid struct {
+	ColumnSize int `json:"column_size"`
+}
+
+type BlockGridColumn struct {
+	WidthRatio int `json:"width_ratio"`
+}
+
+type BlockIframeComponent struct {
+	Type int    `json:"type"`
+	URL  string `json:"url"`
+}
+
+type BlockIframe struct {
+	Component *BlockIframeComponent `json:"component"`
+}
+
+type BlockView struct {
+	ViewType int `json:"view_type"`
+}
+
+type BlockAddOns struct {
+	ComponentID     string `json:"component_id"`
+	ComponentTypeID string `json:"component_type_id"`
+	Record          string `json:"record"`
+}
+
+type BlockJiraIssue struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
+}
+
+type BlockWikiCatalog struct {
+	WikiToken string `json:"wiki_token"`
+}
+
+type BlockBoard struct {
+	Token  string `json:"token"`
+	Align  int    `json:"align"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+type BlockLinkPreview struct {
+	URL     string `json:"url"`
+	URLType string `json:"url_type"`
+}
+
+// BlockTableMergeInfo is one entry of TableProperty.merge_info, parallel to the
+// table's cells array: entry i describes the merge anchored at cell i
+// (row = i / column_size, col = i % column_size). GFM has no cell span, so the
+// renderer fills covered cells with the anchor value.
+type BlockTableMergeInfo struct {
+	RowSpan int `json:"row_span"`
+	ColSpan int `json:"col_span"`
+}
+
 // BlockTableProperty carries the table grid shape.
 type BlockTableProperty struct {
-	ColumnSize int `json:"column_size"`
+	ColumnSize int                   `json:"column_size"`
+	MergeInfo  []BlockTableMergeInfo `json:"merge_info"`
 }
 
 // BlockTable is the table block payload: cell block IDs plus grid property.
@@ -99,6 +250,19 @@ type DocxBlock struct {
 	Quote    *BlockText `json:"quote"`
 	Todo     *BlockText `json:"todo"`
 	Callout  *BlockText `json:"callout"`
+
+	ChatCard    *BlockChatCard    `json:"chat_card"`
+	Diagram     *BlockDiagram     `json:"diagram"`
+	Grid        *BlockGrid        `json:"grid"`
+	GridColumn  *BlockGridColumn  `json:"grid_column"`
+	Iframe      *BlockIframe      `json:"iframe"`
+	Mindnote    *BlockTokenRef    `json:"mindnote"`
+	View        *BlockView        `json:"view"`
+	AddOns      *BlockAddOns      `json:"add_ons"`
+	JiraIssue   *BlockJiraIssue   `json:"jira_issue"`
+	WikiCatalog *BlockWikiCatalog `json:"wiki_catalog"`
+	Board       *BlockBoard       `json:"board"`
+	LinkPreview *BlockLinkPreview `json:"link_preview"`
 
 	Sheet   *BlockTokenRef `json:"sheet"`
 	Bitable *BlockTokenRef `json:"bitable"`

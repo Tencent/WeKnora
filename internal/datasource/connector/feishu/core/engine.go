@@ -46,7 +46,7 @@ type NodeOps[N any] interface {
 
 	// fetch retrieves one node's content; (nil, nil) means an unsupported
 	// type that yields no item.
-	Fetch(ctx context.Context, client *Client, n N, resourceID string, multimodal bool) ([]*types.FetchedItem, error)
+	Fetch(ctx context.Context, client *Client, n N, resourceID string) ([]*types.FetchedItem, error)
 
 	// ListFailureItems converts a partial-listing error into error FetchedItems.
 	ListFailureItems(resourceID string, partial error) []types.FetchedItem
@@ -149,7 +149,7 @@ func runSync[N any](
 				continue
 			}
 
-			items, ferr := ops.Fetch(ctx, client, node, resourceID, config.MultimodalEnabled)
+			items, ferr := ops.Fetch(ctx, client, node, resourceID)
 			if ferr != nil {
 				tally.fail()
 				// Do NOT advance the cursor: the content was never fetched.

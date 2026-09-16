@@ -707,6 +707,12 @@ export default {
     pauseFailed: '일시정지 실패',
     logs: '로그',
     syncModeLabel: '동기화 모드',
+    parseModeLabel: '구문 분석 모드',
+    parseMode: {
+      blocks: '블록 분석 (기본값)',
+      export: '내보내기 분석 (docx)',
+    },
+    parseModeHint: 'Feishu 클라우드 문서의 구문 분석 방식입니다. 블록 분석은 더 빠르고 문서 내 첨부 파일을 유지합니다. 내보내기 분석은 docx로 변환하여 분석하며 이미지와 문서의 연관성이 더 잘 유지됩니다.',
     createTitle: '데이터 소스 추가',
     editTitle: '데이터 소스 편집',
     nameLabel: '이름',
