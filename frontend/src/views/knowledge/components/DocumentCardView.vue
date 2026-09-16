@@ -347,7 +347,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     >
       <div class="card-content">
         <div class="card-content-nav">
-          <div v-if="canEdit && batchMode" class="card-nav-check" @click.stop>
+          <div v-if="(canEdit || canDownload) && batchMode" class="card-nav-check" @click.stop>
             <t-checkbox
               class="card-select-checkbox"
               size="small"
