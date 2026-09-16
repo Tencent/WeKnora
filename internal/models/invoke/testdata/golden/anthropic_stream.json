@@ -1,0 +1,92 @@
+{
+  "scenario": "anthropic_stream",
+  "behavior": [
+    "stream=true in request body",
+    "message_start usage merged (input tokens + cache counters)",
+    "text_delta -\u003e answer chunks",
+    "message_delta stop_reason + output tokens merge",
+    "EOF path emits final Done chunk with usage + finish_reason=end_turn"
+  ],
+  "requests": [
+    {
+      "path": "/v1/messages",
+      "headers": {
+        "Accept": "text/event-stream",
+        "Anthropic-Version": "2023-06-01",
+        "Content-Type": "application/json",
+        "X-Api-Key": "test-key"
+      },
+      "body": {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 200,
+        "stream": true,
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "sse_response": [
+    "event: message_start",
+    "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}",
+    "",
+    "event: content_block_start",
+    "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
+    "",
+    "event: content_block_delta",
+    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hel\"}}",
+    "",
+    "event: content_block_delta",
+    "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"lo\"}}",
+    "",
+    "event: content_block_stop",
+    "data: {\"type\":\"content_block_stop\",\"index\":0}",
+    "",
+    "event: message_delta",
+    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}",
+    "",
+    "event: message_stop",
+    "data: {\"type\":\"message_stop\"}",
+    ""
+  ],
+  "client": [
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "Hel",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "lo",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "",
+      "done": true,
+      "usage": {
+        "prompt_tokens": 25,
+        "completion_tokens": 5,
+        "total_tokens": 30,
+        "cache_miss_tokens": 25,
+        "cache_reported": false,
+        "cache_status": "unreported"
+      },
+      "finish_reason": "end_turn"
+    }
+  ]
+}

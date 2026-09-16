@@ -146,7 +146,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 		logger.Info(ctx, "No knowledge base ID provided, creating new knowledge base")
 		// Create new knowledge base with default evaluation settings
 		// 获取默认的嵌入模型和LLM模型
-		models, err := e.modelService.ListModels(ctx)
+		models, err := e.modelService.ListModels(ctx, "")
 		if err != nil {
 			logger.Errorf(ctx, "Failed to list models: %v", err)
 			return nil, err
@@ -212,7 +212,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 	if rerankModelID == "" {
 		// 获取默认的重排模型
-		models, err := e.modelService.ListModels(ctx)
+		models, err := e.modelService.ListModels(ctx, "")
 		if err == nil {
 			for _, model := range models {
 				if model == nil {
@@ -233,7 +233,7 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 
 	if chatModelID == "" {
 		// 获取默认的LLM模型
-		models, err := e.modelService.ListModels(ctx)
+		models, err := e.modelService.ListModels(ctx, "")
 		if err == nil {
 			for _, model := range models {
 				if model == nil {
@@ -276,7 +276,6 @@ func (e *EvaluationService) Evaluation(ctx context.Context,
 				RerankThreshold:  e.config.Conversation.RerankThreshold,
 				ChatModelID:      chatModelID,
 				SummaryConfig: types.SummaryConfig{
-					MaxTokens:           e.config.Conversation.Summary.MaxTokens,
 					RepeatPenalty:       e.config.Conversation.Summary.RepeatPenalty,
 					TopK:                e.config.Conversation.Summary.TopK,
 					TopP:                e.config.Conversation.Summary.TopP,

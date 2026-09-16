@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -14,7 +14,10 @@ func TestMCPAnswerCannotBorrowDirectoryOrHistoricalKnowledgeCitations(t *testing
 	r := NewRegistry(true)
 	r.RegisterContextChunk(ChunkReference{ChunkID: "faq-1", DocumentTitle: "什么是 WeKnora？"})
 	r.RegisterContextChunk(ChunkReference{ChunkID: "faq-2", DocumentTitle: "如何创建知识库？"})
-	history := []chat.Message{{Role: "assistant", Content: `物业工作 <kb doc="9月13日周报.docx" chunk_id="weekly-report" />`}}
+	history := []invoke.Message{{
+		Role:    "assistant",
+		Content: []invoke.Part{{Text: `物业工作 <kb doc="9月13日周报.docx" chunk_id="weekly-report" />`}},
+	}}
 	r.EncodeMessages(history)
 	const article = "https://km.woa.com/articles/show/669504?jumpfrom=kmmcp"
 	result := &types.ToolResult{Success: true, Output: "标题: AI 玩法\nAI摘要: Computer Use 案例\n链接: " + article}
@@ -56,9 +59,11 @@ func TestMCPAnswerCannotBorrowDirectoryOrHistoricalKnowledgeCitations(t *testing
 
 func TestToolArgumentsAloneDoNotAuthorizeCitations(t *testing.T) {
 	r := NewRegistry(true)
-	r.EncodeMessages([]chat.Message{{Role: "assistant", ToolCalls: []chat.ToolCall{
-		{Function: chat.FunctionCall{Name: "list_knowledge_chunks", Arguments: `{"faq_id":"faq-real"}`}},
-		{Function: chat.FunctionCall{Name: "web_fetch", Arguments: `{"items":[{"url":"https://example.com/unread"}]}`}},
+	r.EncodeMessages([]invoke.Message{{Role: invoke.RoleAssistant, ToolCalls: []invoke.ToolCall{
+		{Function: invoke.FunctionCall{Name: "list_knowledge_chunks", Arguments: `{"faq_id":"faq-real"}`}},
+		{Function: invoke.FunctionCall{
+			Name: "web_fetch", Arguments: `{"items":[{"url":"https://example.com/unread"}]}`,
+		}},
 	}}})
 	require.Empty(t, r.DecodeOutputText(`<ref id="c1"/><ref id="w1"/>`))
 	r.ModelToolResultForTool("call_mcp_tool", &types.ToolResult{Success: false, Error: "https://example.com/error"})
@@ -71,7 +76,9 @@ func TestCurrentLegacySourceResultsRemainCitableButHistoryDoesNot(t *testing.T) 
 		`Evidence <kb doc="Guide" chunk_id="chunk-real" />`,
 	} {
 		r := NewRegistry(true)
-		r.EncodeMessages([]chat.Message{{Role: "tool", Name: "wiki_read_page", Content: output}})
+		r.EncodeMessages([]invoke.Message{
+			{Role: "tool", Name: "wiki_read_page", Content: []invoke.Part{{Text: output}}},
+		})
 		require.Empty(t, r.DecodeOutputText(`<ref id="c1"/>`))
 		result := &types.ToolResult{Success: true, Output: output}
 		modelOutput := r.ModelToolResultForTool("wiki_read_page", result)

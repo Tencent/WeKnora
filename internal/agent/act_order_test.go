@@ -22,7 +22,7 @@ func (t *orderedTestTool) Execute(ctx context.Context, _ json.RawMessage) (*type
 }
 
 func TestParallelReadsRespectMutationBarriers(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{})
+	engine := newTestEngine(t, nil)
 	engine.toolRegistry = tools.NewToolRegistry()
 	var mu sync.Mutex
 	var order []string

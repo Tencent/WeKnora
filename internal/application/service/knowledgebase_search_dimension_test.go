@@ -5,13 +5,13 @@ import (
 	"testing"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type dimensionTestEmbedder struct {
-	embedding.Embedder
+	interfaces.Embedder
 	name       string
 	dimensions int
 }

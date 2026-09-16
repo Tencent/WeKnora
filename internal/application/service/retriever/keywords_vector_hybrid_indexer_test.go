@@ -5,13 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 type capturingEmbedder struct {
-	embedding.Embedder
+	interfaces.Embedder
 	text       string
 	batchTexts []string
 }
@@ -23,7 +22,7 @@ func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, 
 
 func (e *capturingEmbedder) BatchEmbedWithPool(
 	ctx context.Context,
-	model embedding.Embedder,
+	_ interfaces.Embedder,
 	texts []string,
 ) ([][]float32, error) {
 	e.batchTexts = append([]string(nil), texts...)

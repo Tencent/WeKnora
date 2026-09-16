@@ -23,11 +23,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -224,8 +221,10 @@ func TestSkillTreeVerifyCommandQuotesPaths(t *testing.T) {
 func TestVerifySkillTreeIssuesOneCommandRegardlessOfScriptCount(t *testing.T) {
 	fx := newInstallFixture(t)
 	files := map[string][]byte{"SKILL.md": []byte(validSkillMD)}
-	rels := []string{"run.sh", "scripts/a.py", "scripts/b.py",
-		"scripts/c.py", "scripts/d.py", "scripts/e.py"}
+	rels := []string{
+		"run.sh", "scripts/a.py", "scripts/b.py",
+		"scripts/c.py", "scripts/d.py", "scripts/e.py",
+	}
 	for _, rel := range rels {
 		files[rel] = []byte("pass\n")
 	}
@@ -1528,7 +1527,7 @@ func TestInstallSessionIgnoresATenantOverrideOfTheInstallerAgent(t *testing.T) {
 	require.True(t, fx.engineConfig.SkillInstallMode())
 	require.Equal(t, installSkillDir, fx.engineConfig.SkillInstallDir(),
 		"the file tools must be scoped to this install's own skill directory")
-	require.Equal(t, "model-agent", fx.engineModel.GetModelID(),
+	require.Equal(t, "model-agent", fx.engineModel.ModelName,
 		"the model is the one choice the tenant record still makes")
 }
 
@@ -1764,7 +1763,7 @@ func TestResolveInstallerModelPrefersTheAgentsOwnModel(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, "model-agent", model.GetModelID(),
+	require.Equal(t, "model-agent", model.ModelID,
 		"whoever configured the installer agent chose that model for this job")
 }
 
@@ -1778,7 +1777,7 @@ func TestResolveInstallerModelFallsBackWhenTheAgentModelIsGone(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, "model-1", model.GetModelID())
+	require.Equal(t, "model-1", model.ModelID)
 }
 
 func TestResolveInstallerModelFallsBackWhenTheAgentNamesNoModel(t *testing.T) {
@@ -1789,7 +1788,7 @@ func TestResolveInstallerModelFallsBackWhenTheAgentNamesNoModel(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Equal(t, "model-1", model.GetModelID())
+	require.Equal(t, "model-1", model.ModelID)
 }
 
 // The console attaches to a running install through the assistant message, so
@@ -2009,7 +2008,7 @@ type installFixture struct {
 	// installerRecord is the tenant-overridable agent row GetAgentByID serves.
 	installerRecord *types.CustomAgent
 	engineConfig    *types.AgentConfig
-	engineModel     chat.Chat
+	engineModel     *invoke.ModelConfig
 	// saveErr fails bundle storage so InstallSkill cannot accept a skill
 	// whose archive will later be unreadable.
 	saveErr      error
@@ -3134,14 +3133,14 @@ func (s *installCustomAgentService) GetKnowledgeSuggestedQuestions(
 func (s *installAgentService) CreateAgentEngine(
 	_ context.Context,
 	config *types.AgentConfig,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	_ rerank.Reranker,
 	_ *event.EventBus,
 	_ string,
 	_ string,
 ) (interfaces.AgentEngine, error) {
 	s.fx.engineConfig = config
-	s.fx.engineModel = chatModel
+	s.fx.engineModel = invokeCfg
 	return &installAgentEngine{fx: s.fx}, nil
 }
 
@@ -3157,7 +3156,7 @@ func (e *installAgentEngine) Execute(
 	_ string,
 	_ string,
 	prompt string,
-	_ []chat.Message,
+	_ []invoke.Message,
 	_ ...[]string,
 ) (*types.AgentState, error) {
 	if e.fx.beforeExecute != nil {
@@ -3310,11 +3309,14 @@ type installModelService struct {
 }
 
 func (s *installModelService) CreateModel(context.Context, *types.Model) error { return nil }
-func (s *installModelService) GetModelByID(context.Context, string) (*types.Model, error) {
-	return nil, nil
+func (s *installModelService) GetModelByID(_ context.Context, modelID string) (*types.Model, error) {
+	if s.missing[modelID] {
+		return nil, fmt.Errorf("model %s not found", modelID)
+	}
+	return &types.Model{ID: modelID}, nil
 }
 
-func (s *installModelService) ListModels(context.Context) ([]*types.Model, error) {
+func (s *installModelService) ListModels(context.Context, types.ModelType) ([]*types.Model, error) {
 	return []*types.Model{{
 		ID:        "model-1",
 		Type:      types.ModelTypeKnowledgeQA,
@@ -3332,11 +3334,11 @@ func (s *installModelService) ClearModelCredential(context.Context, string, stri
 	return nil
 }
 
-func (s *installModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+func (s *installModelService) GetEmbeddingModel(context.Context, string) (interfaces.Embedder, error) {
 	return nil, nil
 }
 
-func (s *installModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (embedding.Embedder, error) {
+func (s *installModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (interfaces.Embedder, error) {
 	return nil, nil
 }
 
@@ -3344,26 +3346,15 @@ func (s *installModelService) GetRerankModel(context.Context, string) (rerank.Re
 	return nil, nil
 }
 
-func (s *installModelService) GetChatModel(_ context.Context, modelID string) (chat.Chat, error) {
-	if s.missing[modelID] {
-		return nil, fmt.Errorf("model %s not found", modelID)
-	}
-	return installChat{id: modelID}, nil
-}
-func (s *installModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) { return nil, nil }
-func (s *installModelService) GetASRModel(context.Context, string) (asr.ASR, error) { return nil, nil }
-
-type installChat struct{ id string }
-
-func (installChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+func (s *installModelService) GetASRModel(context.Context, string) (interfaces.ASR, error) {
 	return nil, nil
 }
 
-func (installChat) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
-	return nil, nil
+func (s *installModelService) BuildModelConfig(_ context.Context, model *types.Model) (*invoke.ModelConfig, error) {
+	// 与生产 BuildModelConfig 对齐：ModelName 承载模型记录名（安装引擎用它
+	// 观测所选模型，见 TestInstallSessionIgnoresATenantOverrideOfTheInstallerAgent）。
+	return &invoke.ModelConfig{ModelID: model.ID, ModelName: model.ID}, nil
 }
-func (installChat) GetModelName() string { return "install-chat" }
-func (c installChat) GetModelID() string { return c.id }
 
 type installStorageResolver struct{ fx *installFixture }
 
@@ -3403,6 +3394,7 @@ func (s installFileService) SaveBytes(_ context.Context, data []byte, _ uint64, 
 	}
 	return "file://bundle.zip", nil
 }
+
 func (s installFileService) GetFile(_ context.Context, ref string) (io.ReadCloser, error) {
 	if s.fx != nil {
 		s.fx.getFileCalls.Add(1)

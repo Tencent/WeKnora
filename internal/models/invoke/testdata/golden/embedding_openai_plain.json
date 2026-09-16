@@ -1,0 +1,24 @@
+{
+  "scenario": "embedding_openai_plain",
+  "behavior": [
+    "POST {base}/embeddings; Bearer auth; body {model,input[2],encoding_format:float,truncate_prompt_tokens:511}; no dimensions when override unsupported"
+  ],
+  "requests": [
+    {
+      "path": "/embeddings",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "text-embedding-3-small",
+        "input": [
+          "hello",
+          "world"
+        ],
+        "encoding_format": "float",
+        "truncate_prompt_tokens": 511
+      }
+    }
+  ]
+}

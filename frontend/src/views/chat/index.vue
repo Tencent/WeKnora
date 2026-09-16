@@ -149,7 +149,7 @@
         </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
             <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, thinkingLevel, thinkingEnabled) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, thinkingLevel, thinkingEnabled)"
                 @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                 @promote-steer="handlePromoteSteer"
                 @remove-steer="handleRemoveSteer"
@@ -1109,7 +1109,7 @@ const attachSteerFollowUp = async (completedAssistantId) => {
     }
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], thinkingLevel = '', thinkingEnabled) => {
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
@@ -1279,6 +1279,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         web_search_enabled: webSearchEnabled,
         local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore().knownOffline,
         summary_model_id: modelId,
+        thinking_level: thinkingLevel || undefined,
+        thinking: typeof thinkingEnabled === 'boolean' ? thinkingEnabled : undefined,
         mcp_service_ids: requestMcpServiceIds,
         skill_names: requestSkillNames,
         tag_ids: tagIds,

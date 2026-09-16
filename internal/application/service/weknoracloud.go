@@ -8,8 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
-	modelsutils "github.com/Tencent/WeKnora/internal/models/utils"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -30,7 +29,8 @@ func NewWeKnoraCloudService(
 }
 
 func IsWeKnoraCloudDocReaderAddr(addr string) bool {
-	return strings.TrimSuffix(strings.TrimSpace(addr), "/") == strings.TrimRight(provider.WeKnoraCloudBaseURL, "/")+"/api/v1/doc/reader"
+	readerBase := strings.TrimRight(invoke.WeKnoraCloudBaseURL, "/") + "/api/v1/doc/reader"
+	return strings.TrimSuffix(strings.TrimSpace(addr), "/") == readerBase
 }
 
 // SaveCredentials 仅保存 APPID/APPSECRET 凭证，不自动创建模型
@@ -55,7 +55,7 @@ func (s *weKnoraCloudService) SaveCredentials(ctx context.Context, appID, appSec
 // 注意：health 一般为探活接口，远端常不校验 APPID/SECRET 或签名；HTTP 200 通常只表示
 // 「网关/服务可达」，不能严格证明凭证有效。若需强校验，应改为调用必须鉴权的业务接口。
 func (s *weKnoraCloudService) verifyCredentials(ctx context.Context, appID, appSecret string) error {
-	baseURL := strings.TrimRight(provider.WeKnoraCloudBaseURL, "/")
+	baseURL := strings.TrimRight(invoke.WeKnoraCloudBaseURL, "/")
 	healthURL := baseURL + "/api/v1/health"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
@@ -64,7 +64,7 @@ func (s *weKnoraCloudService) verifyCredentials(ctx context.Context, appID, appS
 	}
 
 	requestID := fmt.Sprintf("verify-%d", time.Now().UnixNano())
-	signHeaders := modelsutils.Sign(appID, appSecret, requestID, "{}")
+	signHeaders := invoke.Sign(appID, appSecret, requestID, "{}")
 	for k, v := range signHeaders {
 		req.Header.Set(k, v)
 	}

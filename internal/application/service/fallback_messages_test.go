@@ -3,6 +3,8 @@ package service
 import (
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,18 +25,18 @@ func TestBuildFallbackMessages_PrependsSystemAndEndsWithUser(t *testing.T) {
 	msgs := buildFallbackMessages(cm, "No content directly matched...\n\nUser question: 这个文件内容")
 
 	require.GreaterOrEqual(t, len(msgs), 2)
-	assert.Equal(t, "system", msgs[0].Role, "fallback input must start with a system message")
-	assert.Contains(t, msgs[0].Content, "No content directly matched")
+	assert.Equal(t, invoke.RoleSystem, msgs[0].Role, "fallback input must start with a system message")
+	assert.Contains(t, msgs[0].Text(), "No content directly matched")
 
 	// History is replayed between system and the trailing user turn.
-	assert.Equal(t, "user", msgs[1].Role)
-	assert.Equal(t, "上一个问题", msgs[1].Content)
-	assert.Equal(t, "assistant", msgs[2].Role)
-	assert.Equal(t, "上一个回答", msgs[2].Content)
+	assert.Equal(t, invoke.RoleUser, msgs[1].Role)
+	assert.Equal(t, "上一个问题", msgs[1].Text())
+	assert.Equal(t, invoke.RoleAssistant, msgs[2].Role)
+	assert.Equal(t, "上一个回答", msgs[2].Text())
 
 	last := msgs[len(msgs)-1]
-	assert.Equal(t, "user", last.Role, "generation must be prompted by a trailing user turn")
-	assert.Equal(t, "这个文件内容", last.Content)
+	assert.Equal(t, invoke.RoleUser, last.Role, "generation must be prompted by a trailing user turn")
+	assert.Equal(t, "这个文件内容", last.Text())
 }
 
 // TestBuildFallbackMessages_PrefersRewriteQuery verifies the trailing user turn
@@ -47,8 +49,8 @@ func TestBuildFallbackMessages_PrefersRewriteQuery(t *testing.T) {
 	msgs := buildFallbackMessages(cm, "fallback instruction")
 
 	last := msgs[len(msgs)-1]
-	assert.Equal(t, "user", last.Role)
-	assert.Equal(t, "混元大模型性能怎么样", last.Content)
+	assert.Equal(t, invoke.RoleUser, last.Role)
+	assert.Equal(t, "混元大模型性能怎么样", last.Text())
 }
 
 // TestBuildFallbackMessages_EmptyPromptSkipsSystem ensures we don't inject an
@@ -60,8 +62,8 @@ func TestBuildFallbackMessages_EmptyPromptSkipsSystem(t *testing.T) {
 	msgs := buildFallbackMessages(cm, "   ")
 
 	require.Len(t, msgs, 1)
-	assert.Equal(t, "user", msgs[0].Role)
-	assert.Equal(t, "hello", msgs[0].Content)
+	assert.Equal(t, invoke.RoleUser, msgs[0].Role)
+	assert.Equal(t, "hello", msgs[0].Text())
 }
 
 // TestBuildFallbackMessages_AttachesImagesToUserTurn confirms images ride on the
@@ -73,11 +75,19 @@ func TestBuildFallbackMessages_AttachesImagesToUserTurn(t *testing.T) {
 
 	cm.ChatModelSupportsVision = false
 	noVision := buildFallbackMessages(cm, "fallback")
-	assert.Empty(t, noVision[len(noVision)-1].Images)
+	assert.False(t, invoke.HasImages(noVision))
 
 	cm.ChatModelSupportsVision = true
 	withVision := buildFallbackMessages(cm, "fallback")
-	assert.Equal(t, cm.Images, withVision[len(withVision)-1].Images)
+	last := withVision[len(withVision)-1]
+	assert.True(t, invoke.HasImages(withVision), "vision-capable model must receive the images")
+	var urls []string
+	for _, part := range last.Content {
+		if part.Image != nil {
+			urls = append(urls, part.Image.URL)
+		}
+	}
+	assert.Equal(t, cm.Images, urls)
 }
 
 func TestPrepareFallbackMessagesKeepsHistoricalSourcesNonCitable(t *testing.T) {
@@ -90,8 +100,8 @@ func TestPrepareFallbackMessagesKeepsHistoricalSourcesNonCitable(t *testing.T) {
 	}}
 
 	messages, refs := prepareFallbackMessages(cm, "legacy fallback prompt")
-	require.Contains(t, messages[0].Content, "Source handling protocol")
-	require.Equal(t, `Previous <ref id="c1"/> <ref id="w1"/>`, messages[2].Content)
+	require.Contains(t, messages[0].Text(), "Source handling protocol")
+	require.Equal(t, `Previous <ref id="c1"/> <ref id="w1"/>`, messages[2].Text())
 	// Fallback has no current retrieval evidence. Historical handles are kept
 	// for navigation but must not authorize citations in the new answer.
 	raw := `Answer <ref id="c1"/><ref id="w1"/>`
@@ -112,7 +122,7 @@ func TestPrepareFallbackMessagesSuppressesCitationsWhenDisabled(t *testing.T) {
 	}}
 
 	messages, refs := prepareFallbackMessages(cm, "legacy fallback prompt")
-	require.Contains(t, messages[0].Content, "Source citations are disabled")
-	require.Equal(t, `Previous <ref id="c1"/>`, messages[2].Content)
+	require.Contains(t, messages[0].Text(), "Source citations are disabled")
+	require.Equal(t, `Previous <ref id="c1"/>`, messages[2].Text())
 	require.Equal(t, "answer ", refs.DecodeOutputText(`answer <ref id="c1"/>`))
 }

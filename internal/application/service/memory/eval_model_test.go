@@ -6,15 +6,15 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	_ "github.com/Tencent/WeKnora/internal/models/invoke/adapters"
 )
 
-// newEvalChatModel builds a bare OpenAI-compatible client from the
+// newEvalModelConfig builds a bare OpenAI-compatible invoke config from the
 // environment. The eval harness deliberately does not go through ModelService:
 // scoring a prompt should not require a database, a workspace or a configured
 // model row — just an endpoint.
-func newEvalChatModel(modelID string) (chat.Chat, error) {
+func newEvalModelConfig(modelID string) (*invoke.ModelConfig, error) {
 	baseURL := strings.TrimSpace(firstNonEmpty(
 		os.Getenv("WEKNORA_MEMORY_EVAL_BASE_URL"),
 		os.Getenv("OPENAI_BASE_URL"),
@@ -26,12 +26,12 @@ func newEvalChatModel(modelID string) (chat.Chat, error) {
 	if baseURL == "" {
 		return nil, errors.New("set WEKNORA_MEMORY_EVAL_BASE_URL (or OPENAI_BASE_URL)")
 	}
-	return chat.NewChat(&chat.ChatConfig{
-		Source:    types.ModelSourceRemote,
-		ModelName: modelID,
-		BaseURL:   baseURL,
-		APIKey:    apiKey,
-	}, nil)
+	return &invoke.ModelConfig{
+		Provider:    string(invoke.DetectProvider(baseURL)),
+		ModelName:   modelID,
+		BaseURL:     baseURL,
+		Credentials: invoke.Credentials{APIKey: apiKey},
+	}, nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -47,12 +47,13 @@ func firstNonEmpty(values ...string) string {
 // product does, so the score reflects the whole path rather than the prompt in
 // isolation.
 func runEvalExtraction(
-	ctx context.Context, chatModel chat.Chat, userPrompt string,
+	ctx context.Context, cfg *invoke.ModelConfig, userPrompt string,
 ) ([]extractionDecision, error) {
-	response, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "system", Content: extractionSystemPrompt},
-		{Role: "user", Content: userPrompt},
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(ctx, cfg, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage(invoke.RoleSystem, extractionSystemPrompt),
+			invoke.TextMessage(invoke.RoleUser, userPrompt),
+		},
 		Temperature:         0,
 		MaxCompletionTokens: 1200,
 		Format:              extractionSchema,

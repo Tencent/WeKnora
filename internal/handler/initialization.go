@@ -21,12 +21,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/ollama"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -62,7 +59,7 @@ type InitializationHandler struct {
 	knowledgeService interfaces.KnowledgeService
 	ollamaService    *ollama.OllamaService
 	documentReader   interfaces.DocumentReader
-	pooler           embedding.EmbedderPooler
+	pooler           interfaces.EmbedderPooler
 	storageResolver  interfaces.StorageBackendResolver
 }
 
@@ -76,7 +73,7 @@ func NewInitializationHandler(
 	knowledgeService interfaces.KnowledgeService,
 	ollamaService *ollama.OllamaService,
 	documentReader interfaces.DocumentReader,
-	pooler embedding.EmbedderPooler,
+	pooler interfaces.EmbedderPooler,
 	storageResolver interfaces.StorageBackendResolver,
 ) *InitializationHandler {
 	return &InitializationHandler{
@@ -1657,18 +1654,30 @@ type ModelTestRequest struct {
 // actively typing a new key they want to verify. Missing or inaccessible
 // model is treated as a no-op (the connection test will fail downstream
 // with a clearer "missing apiKey" error than we could produce here).
-func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, req *ModelTestRequest) {
+// 返回 error 仅用于 2026-09-13 裁定 C4 的跨主机拒绝：请求把 base_url 指向
+// 与存量模型不同的主机时，存储凭证（api_key/app_secret 都属可外发秘密）
+// 一律不外借，且写审计日志——调用方显式携带的值不受影响，缺什么由后续
+// 测试调用以清晰的"missing apiKey"报出。
+func (h *InitializationHandler) fillSecretsFromStoredModel(
+	ctx context.Context, c *gin.Context, req *ModelTestRequest,
+) error {
 	if req == nil || req.ModelID == "" {
-		return
+		return nil
 	}
 	if req.APIKey != "" && req.AppSecret != "" && req.ExtraConfig != nil {
-		return
+		return nil
 	}
 	stored, err := h.modelService.GetModelByID(ctx, req.ModelID)
 	if err != nil || stored == nil {
 		logger.Warnf(ctx, "test-connection: stored model %s not found, leaving secrets empty: %v",
 			utils.SanitizeForLog(req.ModelID), err)
-		return
+		return nil
+	}
+	if req.BaseURL != "" && probeBaseURLHostsDiffer(req.BaseURL, stored.Parameters.BaseURL) {
+		tenantID, _ := types.TenantIDFromContext(ctx)
+		auditModelProbeRedirect(ctx, c, tenantID, req.ModelID,
+			stored.Parameters.BaseURL, req.BaseURL)
+		return stderrors.New("base_url 与存量模型主机不一致，存储凭证不外借；请显式提供 API Key 或还原 base_url")
 	}
 	if req.APIKey == "" {
 		req.APIKey = stored.Parameters.APIKey
@@ -1679,6 +1688,7 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 	if req.ExtraConfig == nil {
 		req.ExtraConfig = stored.Parameters.ExtraConfig
 	}
+	return nil
 }
 
 // RemoteModelCheckRequest 兼容旧 swagger 定义。
@@ -1769,7 +1779,10 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
@@ -1782,7 +1795,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(utils.FormatSSRFError("Base URL", req.BaseURL, err)))
 		return
 	}
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
+	_, _, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
 	if !ok {
 		logger.Error(ctx, "Tenant info not found")
 		c.Error(errors.NewBadRequestError("空间信息未找到"))
@@ -1790,7 +1803,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeKnowledgeQA, types.ModelSourceRemote)
-	available, message := h.checkChatModelConnection(ctx, model, appID, appSecret)
+	available, message := h.checkChatModelConnection(ctx, model)
 
 	logger.Infof(ctx, "Remote model check completed, available: %v, message: %s", available, message)
 
@@ -1826,7 +1839,10 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 	if req.Source == "" {
 		req.Source = string(types.ModelSourceRemote)
 	}
@@ -1856,15 +1872,18 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		}
 	}
 
-	appID, appSecret, ok := h.resolveTenantWeKnoraCloudCreds(ctx)
-	if !ok {
+	// WeKnoraCloud 凭证解析收敛到 BuildModelConfig 内部（租户回退一致），
+	// 这里仅校验空间上下文存在（v1 行为保留）。
+	if _, _, ok := h.resolveTenantWeKnoraCloudCreds(ctx); !ok {
 		logger.Error(ctx, "Tenant info not found")
 		c.Error(errors.NewBadRequestError("空间信息未找到"))
 		return
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeEmbedding, types.ModelSourceRemote)
-	emb, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), h.pooler, h.ollamaService)
+	// 临时表单模型经唯一共享构造函数走 invoke 入口（§6.1/§6.8）：凭证三槽、
+	// WeKnoraCloud 租户回退、存量 provider/base_url 映射与生产路径完全一致。
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, model)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model": utils.SanitizeForLog(req.ModelName)})
 		c.JSON(http.StatusOK, gin.H{
@@ -1873,8 +1892,14 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		})
 		return
 	}
-
-	vec, err := emb.Embed(ctx, "hello")
+	resp, err := invoke.Embed(ctx, invokeCfg, &invoke.EmbeddingOptions{
+		Inputs: []string{"hello"},
+		// 表单 embedding 参数与生产路径同源（v1 ConfigFromModel 承诺）：
+		// buildTestModel 已填 EmbeddingParameters，逐字段透传。
+		Dimensions:                model.Parameters.EmbeddingParameters.Dimension,
+		TruncatePromptTokens:      model.Parameters.EmbeddingParameters.TruncatePromptTokens,
+		SupportsDimensionOverride: model.Parameters.EmbeddingParameters.SupportsDimensionOverride,
+	})
 	if err != nil {
 		logger.Error(ctx, "Failed to call embedder", err)
 		c.JSON(http.StatusOK, gin.H{
@@ -1883,11 +1908,21 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 		})
 		return
 	}
+	if len(resp.Vectors) == 0 || len(resp.Vectors[0]) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    gin.H{`available`: false, `message`: "调用Embedding失败: 空向量返回", `dimension`: 0},
+		})
+		return
+	}
+	// 单输入调用：Vectors[0] 即本次文本的向量，维度 = len(Vectors[0])
+	//（v1 Embed 返回单 []float32，len 即维度）。
+	dimension := len(resp.Vectors[0])
 
-	logger.Infof(ctx, "Embedding test succeeded, dimension: %d", len(vec))
+	logger.Infof(ctx, "Embedding test succeeded, dimension: %d", dimension)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    gin.H{`available`: true, `message`: fmt.Sprintf("测试成功，向量维度=%d", len(vec)), `dimension`: len(vec)},
+		"data":    gin.H{`available`: true, `message`: fmt.Sprintf("测试成功，向量维度=%d", dimension), `dimension`: dimension},
 	})
 }
 
@@ -1914,30 +1949,39 @@ func classifyConnectionError(errMsg string) string {
 	}
 }
 
-// checkChatModelConnection 使用 chat 模块做一次最小化调用来测试连通性与鉴权。
-// 与生产路径走完全相同的 ConfigFromModel → NewChat 流程，因此 CustomHeaders、
-// ExtraConfig、Provider 等字段都会被正确透传。
+// checkChatModelConnection 做一次最小化调用来测试连通性与鉴权。临时表单模型
+// 经唯一共享构造函数 BuildModelConfig 走 invoke 入口（§6.1/§6.8）：凭证三槽、
+// WeKnoraCloud 租户回退、存量 provider/base_url 映射（ollama/generic）与生产
+// 路径完全一致，CustomHeaders、ExtraConfig 等字段都会被正确透传。
 func (h *InitializationHandler) checkChatModelConnection(
-	ctx context.Context, model *types.Model, appID, appSecret string,
+	ctx context.Context, model *types.Model,
 ) (bool, string) {
-	chatInstance, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), h.ollamaService)
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, model)
 	if err != nil {
 		return false, fmt.Sprintf("创建聊天实例失败: %v", err)
 	}
 
-	testMessages := []chat.Message{{Role: "user", Content: "test"}}
-	testOptions := &chat.ChatOptions{
-		MaxTokens: 1,
-		Thinking:  &[]bool{false}[0], // for dashscope.aliyuncs qwen3-32b
+	testMessages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "test")}
+	testOptions := &invoke.ChatOptions{
+		Messages:            testMessages,
+		MaxCompletionTokens: 1,
+		Thinking:            &[]bool{false}[0], // for dashscope.aliyuncs qwen3-32b
 	}
 
-	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
+	_, err = invoke.Chat(ctx, invokeCfg, testOptions)
 	if err != nil {
 		errMsg := err.Error()
-		// 400 = endpoint reachable + auth ok, just a parameter mismatch
-		// (e.g. max_tokens vs max_completion_tokens). Treat as success.
-		if strings.Contains(errMsg, "status code: 400") {
-			return true, "连接正常，模型可用"
+		// 400 = endpoint reachable + auth OK (401/403 classify as auth
+		// failures first), the vendor just rejected the minimal test request
+		// itself. Typed check — 2026-09-13 review: the v1-era string match
+		// "status code: 400" no longer matches the unified error format, so
+		// this success branch had gone dead and every 400 (including genuine
+		// config errors like a wrong URL path) surfaced as a connection
+		// failure. The upstream reason stays in the message so real config
+		// errors remain visible instead of masquerading as success.
+		var pe *invoke.ProviderError
+		if stderrors.As(err, &pe) && pe.Status == http.StatusBadRequest {
+			return true, fmt.Sprintf("连接正常，鉴权通过；厂商拒绝测试请求：%s", pe.Message)
 		}
 		// For every other failure mode we surface a human-readable hint
 		// AND the upstream error verbatim. Swallowing the underlying
@@ -1951,17 +1995,47 @@ func (h *InitializationHandler) checkChatModelConnection(
 	return true, "连接正常，模型可用"
 }
 
-// checkRerankModelConnection 使用 rerank 模块做一次最小化调用来测试连通性与鉴权。
-// 与生产路径共用 ConfigFromModel，所有字段（CustomHeaders 等）都透传。
+// checkRerankModelConnection 做一次最小化重排调用来测试连通性与鉴权。
+// P3 分支与生产路径 GetRerankModel 一致：lkeap/volcengine 走 v1 SDK 客户端
+// （P5 签名适配器未落地），其余厂商经 BuildModelConfig 走 invoke 入口。
 func (h *InitializationHandler) checkRerankModelConnection(
 	ctx context.Context, model *types.Model, appID, appSecret string,
 ) (bool, string) {
-	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
-	if err != nil {
-		return false, fmt.Sprintf("创建Reranker失败: %v", err)
+	providerName := invoke.ProviderName(model.Parameters.Provider)
+	if providerName == "" {
+		providerName = invoke.DetectProvider(model.Parameters.BaseURL)
 	}
-
-	results, err := reranker.Rerank(ctx, "ping", []string{"pong"})
+	var (
+		results []rerank.RankResult
+		err     error
+	)
+	if providerName == invoke.ProviderLKEAP || providerName == invoke.ProviderVolcengine {
+		reranker, rerankErr := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
+		if rerankErr != nil {
+			return false, fmt.Sprintf("创建Reranker失败: %v", rerankErr)
+		}
+		results, err = reranker.Rerank(ctx, "ping", []string{"pong"})
+	} else {
+		invokeCfg, cfgErr := h.modelService.BuildModelConfig(ctx, model)
+		if cfgErr != nil {
+			return false, fmt.Sprintf("创建Reranker失败: %v", cfgErr)
+		}
+		resp, rerankErr := invoke.Rerank(ctx, invokeCfg, &invoke.RerankOptions{
+			Query: "ping", Documents: []string{"pong"},
+		})
+		if rerankErr == nil && resp != nil {
+			for _, res := range resp.Results {
+				doc := ""
+				if res.Index >= 0 && res.Index < 1 {
+					doc = "pong"
+				}
+				results = append(results, rerank.RankResult{
+					Index: res.Index, Document: rerank.DocumentInfo{Text: doc}, RelevanceScore: res.Score,
+				})
+			}
+		}
+		err = rerankErr
+	}
 	if err != nil {
 		return false, fmt.Sprintf("重排测试失败: %v", err)
 	}
@@ -1994,7 +2068,10 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required")
@@ -2016,7 +2093,8 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
-	if providerName := provider.ProviderName(model.Parameters.Provider); providerName == provider.ProviderLKEAP || providerName == provider.ProviderVolcengine {
+	providerName := invoke.ProviderName(model.Parameters.Provider)
+	if providerName == invoke.ProviderLKEAP || providerName == invoke.ProviderVolcengine {
 		appID = ""
 		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
 	}
@@ -2056,7 +2134,10 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	h.fillSecretsFromStoredModel(ctx, &req)
+	if fillErr := h.fillSecretsFromStoredModel(ctx, c, &req); fillErr != nil {
+		_ = c.Error(errors.NewBadRequestError(fillErr.Error()))
+		return
+	}
 
 	if req.ModelName == "" || req.BaseURL == "" {
 		logger.Error(ctx, "Model name and base URL are required for ASR check")
@@ -2073,7 +2154,8 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	// 用统一构造器生成测试用 *types.Model（ASR 不涉及 WeKnoraCloud 凭证），
 	// 发送一段极短的静默 WAV 音频验证 /v1/audio/transcriptions 端点可达。
 	model := h.buildTestModel(&req, types.ModelTypeASR, types.ModelSourceRemote)
-	asrInstance, err := asr.NewASR(asr.ConfigFromModel(model))
+	// P3: asr 包已删，临时表单模型经 BuildModelConfig 走 invoke.Transcribe。
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, model)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create ASR instance for check: %v", err)
 		c.JSON(http.StatusOK, gin.H{
@@ -2086,7 +2168,16 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		return
 	}
 
-	res, err := asrInstance.Transcribe(ctx, assets.ASRTestWAV, "asr_test.wav")
+	asrResp, err := invoke.Transcribe(ctx, invokeCfg, &invoke.ASROptions{
+		Audio: assets.ASRTestWAV, FileName: "asr_test.wav",
+	})
+	var res *interfaces.TranscriptionResult
+	if asrResp != nil {
+		res = &interfaces.TranscriptionResult{Text: asrResp.Text}
+		for _, seg := range asrResp.Segments {
+			res.Segments = append(res.Segments, interfaces.Segment{Start: seg.Start, End: seg.End, Text: seg.Text})
+		}
+	}
 	var text string
 	if res != nil {
 		text = res.Text
@@ -2433,7 +2524,13 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	}
 
 	// 根据模型ID获取chat模型
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	record, err := h.modelService.GetModelByID(ctx, req.ModelID)
+	if err != nil {
+		logger.Error(ctx, "获取模型失败", err)
+		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		return
+	}
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, record)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
@@ -2441,7 +2538,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	}
 
 	// 调用模型服务进行文本关系提取
-	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, chatModel)
+	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, invokeCfg)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
 		c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
@@ -2459,7 +2556,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 	ctx context.Context,
 	text string,
 	tags []string,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 ) (*TextRelationExtractionResponse, error) {
 	template := &types.PromptTemplateStructured{
 		Description: h.config.ExtractManager.ExtractGraph.Description,
@@ -2467,7 +2564,7 @@ func (h *InitializationHandler) extractRelationsFromText(
 		Examples:    h.config.ExtractManager.ExtractGraph.Examples,
 	}
 
-	extractor := chatpipeline.NewExtractor(chatModel, template)
+	extractor := chatpipeline.NewExtractor(invokeCfg, template)
 	graph, err := extractor.Extract(ctx, text)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
@@ -2516,14 +2613,20 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 		return
 	}
 
-	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
+	record, err := h.modelService.GetModelByID(ctx, req.ModelID)
+	if err != nil {
+		logger.Error(ctx, "获取模型失败", err)
+		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		return
+	}
+	invokeCfg, err := h.modelService.BuildModelConfig(ctx, record)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
 		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
 		return
 	}
 
-	result, err := h.fabriText(ctx, req.Tags, chatModel)
+	result, err := h.fabriText(ctx, req.Tags, invokeCfg)
 	if err != nil {
 		logger.Error(ctx, "failed to generate fabri text", err)
 		c.Error(errors.NewInternalServerError("failed to generate fabri text: " + err.Error()))
@@ -2537,7 +2640,9 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 }
 
 // fabriText generates example text
-func (h *InitializationHandler) fabriText(ctx context.Context, tags []string, chatModel chat.Chat) (string, error) {
+func (h *InitializationHandler) fabriText(
+	ctx context.Context, tags []string, invokeCfg *invoke.ModelConfig,
+) (string, error) {
 	content := h.config.ExtractManager.FabriText.WithNoTag
 	if len(tags) > 0 {
 		tagStr, _ := json.Marshal(tags)
@@ -2545,12 +2650,11 @@ func (h *InitializationHandler) fabriText(ctx context.Context, tags []string, ch
 	}
 
 	think := false
-	result, err := chatModel.Chat(ctx, []chat.Message{
-		{Role: "user", Content: content},
-	}, &chat.ChatOptions{
-		Temperature: 0.3,
-		MaxTokens:   4096,
-		Thinking:    &think,
+	result, err := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+		Messages:            []invoke.Message{invoke.TextMessage(invoke.RoleUser, content)},
+		Temperature:         0.3,
+		MaxCompletionTokens: 4096,
+		Thinking:            &think,
 	})
 	if err != nil {
 		logger.Error(ctx, "生成示例文本失败", err)

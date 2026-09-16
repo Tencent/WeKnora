@@ -5,52 +5,19 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	invoketest "github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-type captureChatModel struct {
-	lastMessages []chat.Message
-}
-
-func (m *captureChatModel) Chat(
-	context.Context,
-	[]chat.Message,
-	*chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	return nil, nil
-}
-
-func (m *captureChatModel) ChatStream(
-	_ context.Context,
-	messages []chat.Message,
-	_ *chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	m.lastMessages = append([]chat.Message(nil), messages...)
-
-	ch := make(chan types.StreamResponse, 1)
-	ch <- types.StreamResponse{
-		ResponseType: types.ResponseTypeAnswer,
-		Content:      "ok",
-		Done:         true,
-	}
-	close(ch)
-	return ch, nil
-}
-
-func (m *captureChatModel) GetModelName() string { return "capture" }
-func (m *captureChatModel) GetModelID() string   { return "capture" }
-
 type stubModelService struct {
-	chatModel       chat.Chat
 	modelsByID      map[string]*types.Model
 	availableModels []*types.Model
+	cfg             *invoke.ModelConfig // BuildModelConfig 产物（invoketest seam）
 }
 
 func TestEmitKnowledgeReferencesEventIgnoresCitationOutputSetting(t *testing.T) {
@@ -89,7 +56,7 @@ func (s *stubModelService) GetModelByID(_ context.Context, id string) (*types.Mo
 	return s.modelsByID[id], nil
 }
 
-func (s *stubModelService) ListModels(context.Context) ([]*types.Model, error) {
+func (s *stubModelService) ListModels(context.Context, types.ModelType) ([]*types.Model, error) {
 	return s.availableModels, nil
 }
 
@@ -111,11 +78,11 @@ func (s *stubModelService) ClearModelCredential(context.Context, string, string)
 	return nil
 }
 
-func (s *stubModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+func (s *stubModelService) GetEmbeddingModel(context.Context, string) (interfaces.Embedder, error) {
 	return nil, nil
 }
 
-func (s *stubModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (embedding.Embedder, error) {
+func (s *stubModelService) GetEmbeddingModelForTenant(context.Context, string, uint64) (interfaces.Embedder, error) {
 	return nil, nil
 }
 
@@ -123,22 +90,25 @@ func (s *stubModelService) GetRerankModel(context.Context, string) (rerank.Reran
 	return nil, nil
 }
 
-func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, error) {
-	return s.chatModel, nil
-}
-
-func (s *stubModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) {
+func (s *stubModelService) GetASRModel(context.Context, string) (interfaces.ASR, error) {
 	return nil, nil
 }
 
-func (s *stubModelService) GetASRModel(context.Context, string) (asr.ASR, error) {
-	return nil, nil
+func (s *stubModelService) BuildModelConfig(context.Context, *types.Model) (*invoke.ModelConfig, error) {
+	return s.cfg, nil
 }
 
 func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
-	chatModel := &captureChatModel{}
+	fake := invoketest.New(t)
+	fake.EnqueueStream(
+		invoke.StreamEvent{Kind: invoke.StreamKindAnswer, Delta: &invoke.ContentDelta{Text: "继续"}},
+		invoke.StreamEvent{Kind: invoke.StreamKindAnswer, Done: &invoke.FinishInfo{FinishReason: "stop"}},
+	)
 	svc := &sessionService{
-		modelService: &stubModelService{chatModel: chatModel},
+		modelService: &stubModelService{
+			modelsByID: map[string]*types.Model{"chat-model": {ID: "chat-model"}},
+			cfg:        fake.Config(),
+		},
 	}
 
 	bus := event.NewEventBus()
@@ -171,13 +141,16 @@ func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 	// Corrected fallback shape: a system message carries the fallback
 	// instruction, history is replayed in the middle, and the turn ends on the
 	// user's question. Previously the system message was dropped entirely.
-	require.Len(t, chatModel.lastMessages, 4)
-	assert.Equal(t, "system", chatModel.lastMessages[0].Role)
-	assert.Contains(t, chatModel.lastMessages[0].Content, "Answer the latest user question")
-	assert.Equal(t, "user", chatModel.lastMessages[1].Role)
-	assert.Equal(t, "先介绍一下 WeKnora", chatModel.lastMessages[1].Content)
-	assert.Equal(t, "assistant", chatModel.lastMessages[2].Role)
-	assert.Equal(t, "WeKnora 是一个知识库问答系统。", chatModel.lastMessages[2].Content)
-	assert.Equal(t, "user", chatModel.lastMessages[3].Role)
-	assert.Contains(t, chatModel.lastMessages[3].Content, "现在还能继续讲吗？")
+	calls := fake.Calls()
+	require.Len(t, calls, 1)
+	msgs := calls[0].Opts.Messages
+	require.Len(t, msgs, 4)
+	assert.Equal(t, invoke.RoleSystem, msgs[0].Role)
+	assert.Contains(t, msgs[0].Text(), "Answer the latest user question")
+	assert.Equal(t, invoke.RoleUser, msgs[1].Role)
+	assert.Equal(t, "先介绍一下 WeKnora", msgs[1].Text())
+	assert.Equal(t, invoke.RoleAssistant, msgs[2].Role)
+	assert.Equal(t, "WeKnora 是一个知识库问答系统。", msgs[2].Text())
+	assert.Equal(t, invoke.RoleUser, msgs[3].Role)
+	assert.Contains(t, msgs[3].Text(), "现在还能继续讲吗？")
 }

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -236,7 +236,7 @@ func (r *Registry) decodeToolPolicies(call *types.LLMToolCall) {
 // encodeReplayedToolPolicies applies the exact inverse of decodeToolPolicies
 // to assistant tool calls replayed into a later model round. Only durable
 // values already proven and registered in this request are compacted.
-func (r *Registry) encodeReplayedToolPolicies(call *chat.ToolCall) {
+func (r *Registry) encodeReplayedToolPolicies(call *invoke.ToolCall) {
 	if r == nil || call == nil {
 		return
 	}

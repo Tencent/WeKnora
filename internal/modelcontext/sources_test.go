@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -127,16 +127,14 @@ func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
 
 func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 	registry := newSourceRegistry()
-	messages := []chat.Message{{
-		Role: "assistant",
-		Content: `Knowledge <kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" />; ` +
-			`web <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`,
-	}}
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleAssistant,
+		`Knowledge <kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" />; `+
+			`web <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`)}
 
 	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
-	require.Equal(t, `Knowledge <ref id="c1"/>; web <ref id="w1"/>`, encoded[0].Content)
-	require.NotContains(t, encoded[0].Content, "chunk-real")
-	require.NotContains(t, encoded[0].Content, "https://example.com")
+	require.Equal(t, `Knowledge <ref id="c1"/>; web <ref id="w1"/>`, encoded[0].Text())
+	require.NotContains(t, encoded[0].Text(), "chunk-real")
+	require.NotContains(t, encoded[0].Text(), "https://example.com")
 	require.Equal(t, " ", registry.ExpandText(`<ref id="c1"/> <ref id="w1"/>`), "history is not current evidence")
 	// A fresh retrieval promotes the same handles, retaining canonical metadata.
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
@@ -149,11 +147,11 @@ func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 
 func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 	registry := newSourceRegistry()
-	messages := []chat.Message{
+	messages := []invoke.Message{
 		{
 			Role: "assistant",
-			ToolCalls: []chat.ToolCall{{
-				Function: chat.FunctionCall{
+			ToolCalls: []invoke.ToolCall{{
+				Function: invoke.FunctionCall{
 					Name:      "knowledge_search",
 					Arguments: `{"knowledge_base_ids":["kb-real"],"knowledge_ids":["doc-real"]}`,
 				},
@@ -162,22 +160,22 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 		{
 			Role: "tool",
 			Name: "knowledge_search",
-			Content: `<chunk chunk_id="chunk-real" knowledge_id="doc-real" knowledge_base_id="kb-real" ` +
-				`knowledge_title="Legacy Doc">legacy content</chunk>`,
+			Content: []invoke.Part{{Text: `<chunk chunk_id="chunk-real" knowledge_id="doc-real" ` +
+				`knowledge_base_id="kb-real" knowledge_title="Legacy Doc">legacy content</chunk>`}},
 		},
-		{
-			Role:    "assistant",
-			Content: `Legacy answer <kb doc="Legacy Doc" chunk_id="chunk-real" kb_id="kb-real" />`,
-		},
+		invoke.TextMessage(
+			invoke.RoleAssistant,
+			`Legacy answer <kb doc="Legacy Doc" chunk_id="chunk-real" kb_id="kb-real" />`,
+		),
 	}
 
 	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.JSONEq(t, `{"knowledge_base_ids":["b1"],"knowledge_ids":["d1"]}`,
 		encoded[0].ToolCalls[0].Function.Arguments)
-	require.Contains(t, encoded[1].Content, `chunk_id="c1"`)
-	require.Contains(t, encoded[1].Content, `knowledge_id="d1"`)
-	require.Contains(t, encoded[1].Content, `knowledge_base_id="b1"`)
-	require.Equal(t, `Legacy answer <ref id="c1"/>`, encoded[2].Content)
+	require.Contains(t, encoded[1].Text(), `chunk_id="c1"`)
+	require.Contains(t, encoded[1].Text(), `knowledge_id="d1"`)
+	require.Contains(t, encoded[1].Text(), `knowledge_base_id="b1"`)
+	require.Equal(t, `Legacy answer <ref id="c1"/>`, encoded[2].Text())
 	require.Empty(t, registry.ExpandText(`<ref id="c1"/>`), "legacy tool history does not authorize new citations")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
 	require.Equal(t,
@@ -188,13 +186,12 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 
 func TestEncodeMessagesDoesNotTreatLegacyPromptExampleAsARealSource(t *testing.T) {
 	registry := newSourceRegistry()
-	messages := []chat.Message{{
-		Role:    "system",
-		Content: `Old rule: cite <kb doc="..." chunk_id="..." />`,
-	}}
+	messages := []invoke.Message{
+		invoke.TextMessage(invoke.RoleSystem, `Old rule: cite <kb doc="..." chunk_id="..." />`),
+	}
 
 	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
-	require.Equal(t, messages[0].Content, encoded[0].Content)
+	require.Equal(t, messages[0].Text(), encoded[0].Text())
 	require.Zero(t, registry.Count())
 }
 

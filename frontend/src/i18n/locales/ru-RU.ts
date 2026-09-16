@@ -982,6 +982,7 @@ export default {
   },
   agentEditor: {
     builtinHint: 'Это встроенный агент. Имя и описание нельзя изменить, но можно настроить параметры конфигурации.',
+    thinkingLevelResetToast: 'Модель переключена. Выбранный уровень размышления не поддерживается новой моделью и сброшен на значение по умолчанию.',
     fileTypes: {
       label: 'Поддерживаемые типы файлов',
       desc: 'Ограничение выбираемых типов файлов. Пустое поле — все типы поддерживаются.',
@@ -2574,7 +2575,16 @@ export default {
     languageDescription: 'Выберите язык отображения интерфейса',
     languageSaved: 'Настройки языка сохранены'
   },
+  thinking: {
+    unsupportedHint: 'Текущая модель не поддерживает режим размышления',
+    levelLabel: 'Уровень размышления',
+    levelPlaceholder: 'По умолчанию для модели',
+    reset: 'Сбросить',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: 'Название модели',
     defaultTag: 'По умолчанию',
     addModelInSettings: 'Перейти в общие настройки для добавления моделей',
@@ -2589,6 +2599,7 @@ export default {
       typeLabel: 'Тип модели',
       sectionSource: 'Источник',
       sectionProvider: 'Настройки провайдера',
+      sectionParameters: 'Параметры модели',
       sectionAdvanced: 'Дополнительные параметры',
       sourceLabel: 'Источник модели',
       sourceLocal: 'Ollama',
@@ -2621,6 +2632,12 @@ export default {
       dimensionOverrideDesc: 'Включайте только если документация провайдера подтверждает поддержку параметра dimensions.',
       supportsVisionLabel: 'Поддержка визуального / мультимодального ввода',
       supportsVisionDesc: 'Поддерживает ли модель изображения и другой мультимодальный ввод',
+      inputModalitiesLabel: 'Входные модальности',
+      inputModalitiesDesc: 'Отметьте входные модальности, которые поддерживает модель; текст — базовая способность всех моделей и отмечен по умолчанию.',
+      modalityText: 'Текст',
+      modalityImage: 'Изображение',
+      modalityAudio: 'Аудио',
+      modalityVideo: 'Видео',
       contextWindowLabel: 'Контекстное окно',
       contextWindowPlaceholder: 'По умолчанию {value}',
       contextWindowDesc: 'Сколько токенов модель принимает за один запрос. Сжатие истории агента использует этот лимит. Пустое значение — по умолчанию 200000 (200K). Укажите реальное окно провайдера: завышенное значение не запускает сжатие, и провайдер отклоняет запрос.',
@@ -2629,8 +2646,23 @@ export default {
       maxConcurrencyLabel: 'Лимит фоновой параллельности',
       maxConcurrencyPlaceholder: '0 — использовать глобальное значение',
       maxConcurrencyDesc: 'Ограничивает число одновременных фоновых вызовов (индексация/обогащение) к этой модели, общее для модели по всем репликам. 0 или пусто — используется глобальное значение по умолчанию; интерактивный чат не затрагивается.',
-      thinkingControlLabel: 'Формат параметров режима размышления',
-      thinkingControlDesc: 'Определяет, как переключатель «Режим размышления» агента записывается в API. При возможности выбирается по поставщику/модели; при несоответствии измените по документации API. При выборе «Не отправлять» переключатель «Режим размышления» агента не действует.',
+      thinkingToggleLabel: 'Переключатель размышления',
+      thinkingToggleDesc: 'Когда выключено, запрос не содержит параметров размышления; на выбор уровней не влияет.',
+      selectedLevelsLabel: 'Поддерживаемые уровни размышления',
+      selectedLevelsPlaceholder: 'Выберите уровни, которые поддерживает модель',
+      selectedLevelsDesc: 'Отметьте уровни из словаря вендора, которые модель реально поддерживает; пусто = не задано.',
+      thinkingLevelLabel: 'Уровень размышления по умолчанию',
+      thinkingLevelPlaceholder: 'Пусто = решает провайдер модели',
+      thinkingLevelDesc: 'Уровень по умолчанию, когда пользователь/агент его не указал; пусто — решает провайдер модели (вендор по умолчанию или без параметра уровня).',
+      thinkingLevelsUnsupportedHint: 'Эта модель не поддерживает регулировку силы размышления',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
+      maxOutputTokensLabel: 'Максимум выходных токенов',
+      maxOutputTokensPlaceholder: 'Пусто = без ограничения',
+      maxOutputTokensDesc: 'Сколько токенов модель может сгенерировать за один ответ. Пусто — без ограничения.',
+      sourceCatalog: 'Каталог',
+      visionDisabledHint: 'Текущий вендор не заявляет поддержку входных изображений',
+      dimensionOverrideDisabledHint: 'Текущий вендор не заявляет поддержку пользовательской размерности вывода',
       dimensionHint: 'Модель выбрана. Нажмите «Определить размерность», чтобы автоматически получить значение.',
       loadModelListFailed: 'Не удалось загрузить список моделей',
       listRefreshed: 'Список обновлён',
@@ -2724,7 +2756,11 @@ export default {
         },
         generic: {
           label: 'Пользовательский (OpenAI-совместимый)',
-          description: 'Generic API endpoint'
+          description: 'Generic API endpoint',
+        ollama: {
+          label: 'Ollama',
+          description: 'Локальный сервер Ollama (http://localhost:11434)',
+        },
         },
         requesty: {
           label: 'Requesty',
@@ -2765,25 +2801,18 @@ export default {
         modelNameMax: 'Название модели не может превышать 100 символов',
         baseUrlRequired: 'Введите Base URL',
         baseUrlEmpty: 'Base URL не может быть пустым',
-        baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес'
+        baseUrlInvalid: 'Недопустимый Base URL, введите корректный адрес',
+        contextWindowRange: 'Окно контекста должно быть от 1024 до 10000000',
+        maxOutputTokensRange: 'Макс. токены вывода должны быть положительным целым числом',
+        maxConcurrencyRange: 'Лимит фоновой конкурентности должен быть неотрицательным целым числом',
+        credentialRequired: 'Заполните поле «{field}»'
       },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 и др.; по умолчанию для LKEAP; для R1 — «Не отправлять»)'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Пользовательские OpenAI-совместимые шлюзы, NVIDIA NIM, vLLM / локальный Qwen'
-        },
-        none: {
-          label: 'Не отправлять параметры размышления',
-          hint: 'Переключатель «Режим размышления» агента не действует; параметры размышления не отправляются в запросе'
-        }
+      thinkingLevels: {
+        low: 'Низкий',
+        medium: 'Средний',
+        high: 'Высокий',
+        xhigh: 'Очень высокий',
+        max: 'Максимум'
       },
       volcengine: {
         accessKeyLabel: 'Access Key ID',
@@ -3647,6 +3676,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '(Вложение)',
     referenceChunkCount: '{count} фрагмент(ов)',
     fallbackHint: 'В базе знаний не найдено релевантного содержимого. Выше представлен прямой ответ модели.',
+    usageHint: 'Использование токенов за этот ход (вход → выход · всего · попадание в кэш)',
+    usageCached: 'кэш {n}',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',
@@ -4464,7 +4495,7 @@ export default {
     name: 'Название',
     nameDesc: 'Для админ-списков и идентификации канала',
     namePlaceholder: 'напр. Поддержка на сайте',
-    nameDefaultHint: 'По умолчанию «{agent} · Встраивание на сайт». Можно изменить; при пустом поле при сохранении используется имя по умолчанию.',
+    nameDefaultHint: 'По умолчанию «имя агента · Встраивание на сайт». Можно изменить; при пустом поле при сохранении используется имя по умолчанию.',
     defaultChannelName: 'Встраивание на сайт',
     defaultChannelNameWithAgent: '{agent} · Встраивание на сайт',
     welcomeMessage: 'Приветствие',
@@ -4668,7 +4699,7 @@ export default {
     customAgentMissingSummaryModel: 'Модель беседы',
     customAgentMissingRerankModel: 'Модель переранжирования',
     goToAgentEditor: 'Go to configure →',
-    agentNotReadyDetail: 'Agent не готов. Пожалуйста, настройте следующее: {reasons}',
+    agentNotReadyDetail: 'Агент «{agentName}» не готов. Пожалуйста, настройте следующее: {reasons}',
     sharedAgentNotReadyDetail: 'Общий agent «{agentName}» не готов (отсутствует: {reasons}). Обратитесь к администратору организации, которая поделилась agent.',
     knowledgeBase: 'База знаний',
     knowledgeBaseWithCount: 'База знаний ({count})',
@@ -4688,6 +4719,7 @@ export default {
     kbLockedByAgent: 'Knowledge base configuration is locked by the current agent',
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
+    thinkingLevelResetToast: 'Модель переключена. Выбранный уровень размышления не поддерживается новой моделью и сброшен на значение по умолчанию.',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
     goToAgentSettings: 'Go to agent settings',
     messages: {

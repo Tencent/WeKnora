@@ -1,0 +1,41 @@
+{
+  "scenario": "rerank_aliyun_qwen3",
+  "behavior": [
+    "qwen3-rerank rides the FLAT /compatible-api/v1/reranks shape: {model, query, documents} top-level, no input/parameters wrapper, top_n omitted (vendor default = return all)",
+    "a text-rerank-style base can never be valid for this protocol — it normalizes back to the DashScope root and gains the reranks path",
+    "response results sit at the TOP level (tolerant parser: top-level first, output-results fallback)"
+  ],
+  "requests": [
+    {
+      "path": "/compatible-api/v1/reranks",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "qwen3-rerank",
+        "query": "q",
+        "documents": [
+          "d1",
+          "d2"
+        ]
+      }
+    }
+  ],
+  "response": {
+    "results": [
+      {
+        "index": 1,
+        "relevance_score": 0.91
+      },
+      {
+        "index": 0,
+        "relevance_score": 0.32
+      }
+    ],
+    "model": "qwen3-rerank",
+    "usage": {
+      "total_tokens": 12
+    }
+  }
+}

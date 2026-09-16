@@ -51,6 +51,10 @@ type ModelParametersDTO struct {
 	MaxOutputTokens     int                       `json:"max_output_tokens,omitempty"`
 	MaxConcurrency      int                       `json:"max_concurrency,omitempty"`
 	AppID               string                    `json:"app_id,omitempty"`
+	// Chat carries the chat/vlm shard (thinking level, selected levels,
+	// input modalities). The flat fields above stay in sync via the
+	// dual-read accessors so older clients keep working (design §8).
+	Chat *types.ChatParameters `json:"chat,omitempty"`
 }
 
 // NewModelResponse converts a stored Model into its response shape.
@@ -69,11 +73,12 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		Provider:            m.Parameters.Provider,
 		ExtraConfig:         m.Parameters.ExtraConfig,
 		CustomHeaders:       m.Parameters.CustomHeaders,
-		SupportsVision:      m.Parameters.SupportsVision,
-		ContextWindow:       m.Parameters.ContextWindow,
-		MaxOutputTokens:     m.Parameters.MaxOutputTokens,
+		SupportsVision:      m.Parameters.GetSupportsVision(),
+		ContextWindow:       m.Parameters.GetContextWindow(),
+		MaxOutputTokens:     m.Parameters.GetMaxOutputTokens(),
 		MaxConcurrency:      m.Parameters.MaxConcurrency,
 		AppID:               m.Parameters.AppID,
+		Chat:                m.Parameters.Chat,
 	}
 	canManageBuiltin := m.IsBuiltin && types.IsSystemAdminFromContext(ctx)
 	if !CanViewIntegrationSecrets(ctx) && !canManageBuiltin {

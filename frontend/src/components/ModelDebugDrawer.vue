@@ -204,7 +204,7 @@ import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { debugModel, type ModelConfig, type ModelDebugResult } from '@/api/model'
 import { fileSizeVerification } from '@/utils'
-import { modelSupportsThinking } from '@/utils/thinkingControl'
+import { listModelProviders, type ProviderCapabilities } from '@/api/initialization'
 import {
   formatContextWindow,
   modelHasContextWindow,
@@ -251,7 +251,25 @@ let runSequence = 0
 const selectedModel = computed(() => props.models.find(model => model.id === selectedModelId.value))
 const filteredModels = computed(() => props.models.filter(model => model.type === selectedModelType.value))
 const isChat = computed(() => selectedModel.value?.type === 'KnowledgeQA')
-const supportsThinking = computed(() => selectedModel.value ? modelSupportsThinking(selectedModel.value) : false)
+// 思考开关按厂商能力声明判断（/models/providers），不再镜像后端厂商分支。
+// 能力清单不可用时退回显示开关：调试抽屉是自证工具，后端会如实回报
+// thinking_parameter_sent 观测。
+const providerCaps = ref<Record<string, ProviderCapabilities | undefined>>({})
+watch(() => props.visible, async (visible) => {
+  if (!visible || Object.keys(providerCaps.value).length > 0) return
+  try {
+    const providers = await listModelProviders()
+    providerCaps.value = Object.fromEntries(providers.map(p => [p.value, p.capabilities]))
+  } catch {
+    providerCaps.value = {}
+  }
+})
+const supportsThinking = computed(() => {
+  const model = selectedModel.value
+  if (!model || model.type !== 'KnowledgeQA' || model.source !== 'remote') return false
+  const caps = providerCaps.value[model.parameters.provider || '']
+  return caps ? (caps.chat?.thinking.supported ?? false) : true
+})
 const needsFile = computed(() => ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
 const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
 const canRun = computed(() => {

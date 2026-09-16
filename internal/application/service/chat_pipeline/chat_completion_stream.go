@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
@@ -62,7 +63,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		"system_prompt": chatMessages[0].Content,
 	})
 	pipelineInfo(ctx, "Stream", "user_message", map[string]interface{}{
-		"content": chatMessages[len(chatMessages)-1].Content,
+		"content": chatMessages[len(chatMessages)-1].Text(),
 	})
 	// EventBus is required for event-driven streaming
 	if chatManage.EventBus == nil {
@@ -81,7 +82,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 	pipelineInfo(ctx, "Stream", "model_call", map[string]interface{}{
 		"chat_model": chatManage.ChatModelID,
 	})
-	responseChan, err := chatModel.ChatStream(ctx, chatMessages, opt)
+	opt.Messages = chatMessages
+	responseChan, err := invoke.ChatStream(ctx, chatModel, opt)
 	if err != nil {
 		pipelineError(ctx, "Stream", "model_call", map[string]interface{}{
 			"chat_model": chatManage.ChatModelID,
@@ -113,6 +115,11 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		answerID := fmt.Sprintf("%s-answer", uuid.New().String()[:8])
 		thinkingOpen := false
 		answerCompleted := false
+		// E9 (2026-09-14 裁定): the final usage frame rides the terminal
+		// answer event so the non-agent QA handler can persist it on the
+		// assistant message and carry it in the complete event — previously
+		// non-agent turns threw the counters away.
+		var turnUsage *types.TokenUsage
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -216,6 +223,9 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					continue
 				}
 
+				if response.Usage != nil {
+					turnUsage = response.Usage
+				}
 				if response.ResponseType == types.ResponseTypeAnswer {
 					// Providers can emit a completion once for finish_reason and again
 					// for their EOF sentinel. A final answer is a terminal event for a
@@ -230,14 +240,18 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						answerCompleted = true
 					}
 					closeThinking()
+					data := event.AgentFinalAnswerData{
+						Content: response.Content,
+						Done:    response.Done,
+					}
+					if response.Done && turnUsage != nil {
+						data.Usage = turnUsage
+					}
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
 						SessionID: chatManage.SessionID,
-						Data: event.AgentFinalAnswerData{
-							Content: response.Content,
-							Done:    response.Done,
-						},
+						Data:      data,
 					})
 				}
 			}

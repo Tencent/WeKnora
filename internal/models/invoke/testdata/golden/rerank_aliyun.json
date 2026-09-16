@@ -1,0 +1,30 @@
+{
+  "scenario": "rerank_aliyun",
+  "behavior": [
+    "envelope protocol: {model, input:{query,documents}, parameters:{return_documents:true, top_n:len(documents)}}",
+    "base URL normalizes: a root/compatible-mode record gains the text-rerank path (2026-09-12 rerank normalization)"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/services/rerank/text-rerank/text-rerank",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gte-rerank",
+        "input": {
+          "query": "q",
+          "documents": [
+            "d1",
+            "d2"
+          ]
+        },
+        "parameters": {
+          "return_documents": true,
+          "top_n": 2
+        }
+      }
+    }
+  ]
+}

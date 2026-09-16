@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -90,24 +90,21 @@ func (r *resourceRegistry) StripOrphanHandles(value string) string {
 }
 
 // EncodeMessages returns a copied message slice with textual references
-// compacted. Binary/image content fields are intentionally left untouched.
-func (r *resourceRegistry) EncodeMessages(messages []chat.Message) []chat.Message {
+// compacted. Binary/image content parts are intentionally left untouched.
+func (r *resourceRegistry) EncodeMessages(messages []invoke.Message) []invoke.Message {
 	if r == nil || len(messages) == 0 {
 		return messages
 	}
-	encoded := make([]chat.Message, len(messages))
-	copy(encoded, messages)
-	for i := range encoded {
-		encoded[i].Content = r.EncodeText(encoded[i].Content)
-		encoded[i].ReasoningContent = r.EncodeText(encoded[i].ReasoningContent)
-		if len(encoded[i].MultiContent) > 0 {
-			encoded[i].MultiContent = append([]chat.MessageContentPart(nil), encoded[i].MultiContent...)
-			for j := range encoded[i].MultiContent {
-				encoded[i].MultiContent[j].Text = r.EncodeText(encoded[i].MultiContent[j].Text)
-			}
+	encoded := make([]invoke.Message, len(messages))
+	for i := range messages {
+		encoded[i] = messages[i]
+		encoded[i].Content = append([]invoke.Part(nil), messages[i].Content...)
+		for j := range encoded[i].Content {
+			encoded[i].Content[j].Text = r.EncodeText(encoded[i].Content[j].Text)
 		}
+		encoded[i].ReasoningContent = r.EncodeText(encoded[i].ReasoningContent)
 		if len(encoded[i].ToolCalls) > 0 {
-			encoded[i].ToolCalls = append([]chat.ToolCall(nil), encoded[i].ToolCalls...)
+			encoded[i].ToolCalls = append([]invoke.ToolCall(nil), encoded[i].ToolCalls...)
 			for j := range encoded[i].ToolCalls {
 				encoded[i].ToolCalls[j].Function.Arguments = r.EncodeText(encoded[i].ToolCalls[j].Function.Arguments)
 			}

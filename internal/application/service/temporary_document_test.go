@@ -4,71 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/vlm"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	invoketest "github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// fakeVLM is a minimal VLM stub that records calls and returns a fixed response.
-// The mutex guards calls because multi-page OCR requests run concurrently, so
-// the stub must be safe under the race detector.
-type fakeVLM struct {
-	response string
-
-	mu    sync.Mutex
-	calls int
-}
-
-func (f *fakeVLM) Predict(context.Context, [][]byte, string) (string, error) {
-	f.mu.Lock()
-	f.calls++
-	f.mu.Unlock()
-	if f.response == "" {
-		return "extracted document text from image", nil
+// newVLMTestService wires the temporary-document VLM path to the invoketest
+// fake adapter: responses replay one per call in queue order, and recorded
+// calls are classified as OCR or caption by prompt (the caption prompt is the
+// only one mentioning a "description of the main content" of the image).
+func newVLMTestService(t *testing.T, responses ...string) (*invoketest.Fake, *temporaryDocumentService) {
+	fake := invoketest.New(t)
+	for _, r := range responses {
+		fake.EnqueueResponse(invoke.ChatResponse{Content: r})
 	}
-	return f.response, nil
+	return fake, &temporaryDocumentService{modelService: &stubModelService{
+		modelsByID: map[string]*types.Model{"fake": {ID: "fake"}},
+		cfg:        fake.Config(),
+	}}
 }
 
-func (f *fakeVLM) GetModelName() string { return "fake-vlm" }
-func (f *fakeVLM) GetModelID() string   { return "fake" }
-
-// promptAwareVLM distinguishes OCR calls from caption calls by inspecting the
-// prompt, so tests can assert the OCR-first cascade (caption only fires as a
-// fallback). The caption prompt is the only one mentioning a "description of
-// the main content" of the image.
-type promptAwareVLM struct {
-	ocrResponse     string
-	captionResponse string
-
-	mu           sync.Mutex
-	ocrCalls     int
-	captionCalls int
-}
-
-func (f *promptAwareVLM) Predict(_ context.Context, _ [][]byte, prompt string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if strings.Contains(prompt, "description of the main content") {
-		f.captionCalls++
-		return f.captionResponse, nil
+// captionCalls counts recorded calls that used the caption prompt.
+func captionCalls(fake *invoketest.Fake) int {
+	n := 0
+	for _, rec := range fake.Calls() {
+		if len(rec.Opts.Messages) > 0 &&
+			strings.Contains(rec.Opts.Messages[0].Text(), "description of the main content") {
+			n++
+		}
 	}
-	f.ocrCalls++
-	return f.ocrResponse, nil
-}
-
-func (f *promptAwareVLM) GetModelName() string { return "prompt-aware-vlm" }
-func (f *promptAwareVLM) GetModelID() string   { return "fake" }
-
-// fakeVLMModelService embeds the shared stub and overrides GetVLMModel.
-type fakeVLMModelService struct {
-	stubModelService
-	model vlm.VLM
-}
-
-func (s *fakeVLMModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) {
-	return s.model, nil
+	return n
 }
 
 func TestApproxTextContentRunes(t *testing.T) {
@@ -97,101 +64,86 @@ func TestCollectImageBytes(t *testing.T) {
 }
 
 func TestApplyImageUnderstandingImageFileRunsVLM(t *testing.T) {
-	fv := &fakeVLM{response: "a cat sitting on a mat"}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	fake, svc := newVLMTestService(t, "a cat sitting on a mat")
 	options := types.TemporaryDocumentCreateOptions{VLMModelID: "fake"}
 	content := svc.applyImageUnderstanding(context.Background(), "png", options, []byte("imgbytes"), nil, "")
 	if !strings.Contains(content, "a cat sitting on a mat") {
 		t.Fatalf("image understanding should inject VLM text, got %q", content)
 	}
-	if fv.calls == 0 {
+	if len(fake.Calls()) == 0 {
 		t.Fatal("VLM should have been invoked for an image file")
 	}
 }
 
 func TestApplyImageUnderstandingImageOCRSufficientSkipsCaption(t *testing.T) {
-	fv := &promptAwareVLM{
-		ocrResponse:     strings.Repeat("发票明细行内容 ", 8), // > temporaryDocumentOCRSufficientRunes
-		captionResponse: "should-not-be-used",
-	}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	ocrText := strings.Repeat("发票明细行内容 ", 8) // > temporaryDocumentOCRSufficientRunes
+	fake, svc := newVLMTestService(t, ocrText)
 	options := types.TemporaryDocumentCreateOptions{VLMModelID: "fake"}
-	content := svc.applyImageUnderstanding(context.Background(), "png", options, []byte("imgbytes"), nil, "")
-	if strings.Contains(content, "should-not-be-used") {
-		t.Fatalf("text-rich OCR must not trigger a caption fallback, got %q", content)
+	svc.applyImageUnderstanding(context.Background(), "png", options, []byte("imgbytes"), nil, "")
+	if got := captionCalls(fake); got != 0 {
+		t.Fatalf("text-rich OCR must not trigger a caption fallback, caption calls = %d", got)
 	}
-	if fv.captionCalls != 0 {
-		t.Fatalf("caption calls = %d, want 0 when OCR is sufficient", fv.captionCalls)
-	}
-	if fv.ocrCalls != 1 {
-		t.Fatalf("ocr calls = %d, want 1 for a single image", fv.ocrCalls)
+	if len(fake.Calls()) != 1 {
+		t.Fatalf("VLM calls = %d, want 1 (OCR only) for a single image", len(fake.Calls()))
 	}
 }
 
 func TestApplyImageUnderstandingImageCaptionFallbackOnSparseOCR(t *testing.T) {
-	fv := &promptAwareVLM{
-		ocrResponse:     "No text content.", // sanitized to empty → sparse OCR
-		captionResponse: "a flowchart describing the login process",
-	}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	fake, svc := newVLMTestService(t, "No text content.", "a flowchart describing the login process")
 	options := types.TemporaryDocumentCreateOptions{VLMModelID: "fake"}
 	content := svc.applyImageUnderstanding(context.Background(), "png", options, []byte("imgbytes"), nil, "")
 	if !strings.Contains(content, "a flowchart describing the login process") {
 		t.Fatalf("sparse OCR should fall back to a caption, got %q", content)
 	}
-	if fv.captionCalls != 1 {
-		t.Fatalf("caption calls = %d, want 1 as an OCR fallback", fv.captionCalls)
+	if got := captionCalls(fake); got != 1 {
+		t.Fatalf("caption calls = %d, want 1 as an OCR fallback", got)
 	}
-	if fv.ocrCalls != 1 {
-		t.Fatalf("ocr calls = %d, want 1 before falling back", fv.ocrCalls)
+	if len(fake.Calls()) != 2 {
+		t.Fatalf("VLM calls = %d, want 2 (OCR then caption)", len(fake.Calls()))
 	}
 }
 
 func TestApplyImageUnderstandingScannedDocumentNeverCaptions(t *testing.T) {
-	fv := &promptAwareVLM{
-		ocrResponse:     "No text content.",
-		captionResponse: "should-not-be-used",
-	}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	fake, svc := newVLMTestService(t, "No text content.", "No text content.")
 	options := types.TemporaryDocumentCreateOptions{VLMModelID: "fake", ImageUnderstanding: true}
 	pages := [][]byte{[]byte("page-1"), []byte("page-2")}
 	content := svc.applyImageUnderstanding(context.Background(), "pdf", options, nil, pages, "![p](x)")
-	if strings.Contains(content, "should-not-be-used") {
+	if strings.Contains(content, "a flowchart") {
 		t.Fatalf("scanned documents must not use the caption fallback, got %q", content)
 	}
-	if fv.captionCalls != 0 {
-		t.Fatalf("caption calls = %d, want 0 for scanned documents", fv.captionCalls)
+	if got := captionCalls(fake); got != 0 {
+		t.Fatalf("caption calls = %d, want 0 for scanned documents", got)
+	}
+	if len(fake.Calls()) != 2 {
+		t.Fatalf("VLM calls = %d, want 2 (one OCR per page)", len(fake.Calls()))
 	}
 }
 
 func TestApplyImageUnderstandingWithoutVLMModelIsNoop(t *testing.T) {
-	fv := &fakeVLM{}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	fake, svc := newVLMTestService(t)
 	options := types.TemporaryDocumentCreateOptions{}
 	if got := svc.applyImageUnderstanding(context.Background(), "png", options, []byte("x"), nil, ""); got != "" {
 		t.Fatalf("no VLM model should be a no-op, got %q", got)
 	}
-	if fv.calls != 0 {
+	if len(fake.Calls()) != 0 {
 		t.Fatal("VLM must not be called without a configured model")
 	}
 }
 
 func TestApplyImageUnderstandingDocumentGatedByFlag(t *testing.T) {
-	fv := &fakeVLM{}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	fake, svc := newVLMTestService(t)
 	options := types.TemporaryDocumentCreateOptions{VLMModelID: "fake", ImageUnderstanding: false}
 	pages := [][]byte{[]byte("page-1")}
 	if got := svc.applyImageUnderstanding(context.Background(), "pdf", options, nil, pages, "![p](x)"); got != "" {
 		t.Fatalf("OCR fallback must stay off when the switch is disabled, got %q", got)
 	}
-	if fv.calls != 0 {
+	if len(fake.Calls()) != 0 {
 		t.Fatal("VLM must not run for a document when understanding is disabled")
 	}
 }
 
 func TestApplyImageUnderstandingScannedDocumentRunsOCR(t *testing.T) {
-	fv := &fakeVLM{response: "第一页扫描文字内容"}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	_, svc := newVLMTestService(t, "第一页扫描文字内容")
 	options := types.TemporaryDocumentCreateOptions{VLMModelID: "fake", ImageUnderstanding: true}
 	pages := [][]byte{[]byte("page-1")}
 	content := svc.applyImageUnderstanding(context.Background(), "pdf", options, nil, pages, "![p](x)")
@@ -201,15 +153,14 @@ func TestApplyImageUnderstandingScannedDocumentRunsOCR(t *testing.T) {
 }
 
 func TestApplyImageUnderstandingHighTextDocumentSkipsOCR(t *testing.T) {
-	fv := &fakeVLM{}
-	svc := &temporaryDocumentService{modelService: &fakeVLMModelService{model: fv}}
+	fake, svc := newVLMTestService(t)
 	options := types.TemporaryDocumentCreateOptions{VLMModelID: "fake", ImageUnderstanding: true}
 	pages := [][]byte{[]byte("page-1")}
 	longText := strings.Repeat("这是一段已经解析出来的正文内容。", 40)
 	if got := svc.applyImageUnderstanding(context.Background(), "pdf", options, nil, pages, longText); got != "" {
 		t.Fatalf("text-rich document should not trigger OCR, got a change")
 	}
-	if fv.calls != 0 {
+	if len(fake.Calls()) != 0 {
 		t.Fatal("VLM must not run when the document already has enough text")
 	}
 }

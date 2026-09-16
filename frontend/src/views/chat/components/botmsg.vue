@@ -75,6 +75,11 @@
                     </t-button>
                 </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
+                <!-- E9（2026-09-14 裁定）：本轮 token 用量（输入→输出 · 总计 · 缓存命中） -->
+                <span v-if="usageSummary" class="answer-toolbar__usage" :title="$t('chat.usageHint')">
+                    <t-icon name="chart" size="12px" />
+                    {{ usageSummary }}
+                </span>
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
                         aria-live="polite">
@@ -206,6 +211,19 @@ const props = defineProps({
 });
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
+
+// E9：助手消息的 token 用量摘要（complete 事件/历史消息的 usage 字段）。
+// prompt → completion · total，缓存命中时附 cached。无 usage 不渲染。
+const usageSummary = computed(() => {
+    const u = props.session?.usage;
+    if (!u || typeof u !== 'object') return '';
+    const total = Number(u.total_tokens) || (Number(u.prompt_tokens) || 0) + (Number(u.completion_tokens) || 0);
+    if (!total) return '';
+    let out = `${Number(u.prompt_tokens) || 0} → ${Number(u.completion_tokens) || 0} · ${total}`;
+    const cached = Number(u.cache_read_tokens) || Number(u.cached_tokens) || 0;
+    if (cached > 0) out += ` · ${t('chat.usageCached', { n: cached })}`;
+    return out;
+});
 
 // -----------------------------------------------------------------------------
 // Skill artifact download (drawer in embedded mode; sandbox panel otherwise)
@@ -567,4 +585,8 @@ onBeforeUnmount(() => {
     background: conic-gradient(from 90deg at 50% 50%, #fff 0deg, #676767 360deg) !important;
 
 }
+</style>
+
+<style>
+.answer-toolbar__usage { font-size: 12px; color: var(--td-text-color-placeholder); }
 </style>

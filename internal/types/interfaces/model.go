@@ -3,11 +3,8 @@ package interfaces
 import (
 	"context"
 
-	"github.com/Tencent/WeKnora/internal/models/asr"
-	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -18,7 +15,7 @@ type ModelService interface {
 	// GetModelByID gets a model by ID
 	GetModelByID(ctx context.Context, id string) (*types.Model, error)
 	// ListModels lists all models
-	ListModels(ctx context.Context) ([]*types.Model, error)
+	ListModels(ctx context.Context, modelType types.ModelType) ([]*types.Model, error)
 	// UpdateModel updates a model
 	UpdateModel(ctx context.Context, model *types.Model) error
 	// DeleteModel deletes a model
@@ -33,17 +30,21 @@ type ModelService interface {
 	// "api_key" or "app_secret". Clearing an already-empty field is a no-op.
 	ClearModelCredential(ctx context.Context, id, field string) error
 	// GetEmbeddingModel gets an embedding model
-	GetEmbeddingModel(ctx context.Context, modelId string) (embedding.Embedder, error)
+	GetEmbeddingModel(ctx context.Context, modelID string) (Embedder, error)
 	// GetEmbeddingModelForTenant gets an embedding model for a specific tenant (for cross-tenant sharing)
-	GetEmbeddingModelForTenant(ctx context.Context, modelId string, tenantID uint64) (embedding.Embedder, error)
+	GetEmbeddingModelForTenant(ctx context.Context, modelID string, tenantID uint64) (Embedder, error)
 	// GetRerankModel gets a rerank model
-	GetRerankModel(ctx context.Context, modelId string) (rerank.Reranker, error)
-	// GetChatModel gets a chat model
-	GetChatModel(ctx context.Context, modelId string) (chat.Chat, error)
-	// GetVLMModel gets a vision language model
-	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
+	GetRerankModel(ctx context.Context, modelID string) (rerank.Reranker, error)
 	// GetASRModel gets an automatic speech recognition model
-	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+	GetASRModel(ctx context.Context, modelID string) (ASR, error)
+
+	// BuildModelConfig assembles the unified invoke.ModelConfig from a model
+	// record through the single shared constructor (design §6.1/§6.8): the
+	// three credential slots with the WeKnoraCloud tenant fallback plus the
+	// legacy local-record provider/base-url mapping. Wave-2 caller sweep
+	// routes every construction path (service, handler test-connection form
+	// models) through this.
+	BuildModelConfig(ctx context.Context, model *types.Model) (*invoke.ModelConfig, error)
 }
 
 // ModelRepository defines the model repository interface

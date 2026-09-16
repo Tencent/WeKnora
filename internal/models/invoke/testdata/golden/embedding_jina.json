@@ -1,0 +1,22 @@
+{
+  "scenario": "embedding_jina",
+  "behavior": [
+    "body {model,input,truncate:true} — boolean truncate replaces truncate_prompt_tokens"
+  ],
+  "requests": [
+    {
+      "path": "/embeddings",
+      "headers": {
+        "Authorization": "Bearer jina-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "jina-embeddings-v3",
+        "input": [
+          "x"
+        ],
+        "truncate": true
+      }
+    }
+  ]
+}

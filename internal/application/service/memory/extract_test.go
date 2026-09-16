@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
 	"github.com/stretchr/testify/require"
@@ -208,7 +207,7 @@ func TestExtractionSkippedWhenWorkspaceDisabledAtRunTime(t *testing.T) {
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		TenantID: 7, SubjectID: "web_user:alice", SessionID: "s", MessageID: "m", ChatModelID: "m1",
 	})))
-	require.Zero(t, models.calls, "a disabled workspace must not pay for a model call")
+	require.Zero(t, models.callCount(), "a disabled workspace must not pay for a model call")
 }
 
 func TestExtractionDroppedWhenPayloadHasNoScope(t *testing.T) {
@@ -216,7 +215,7 @@ func TestExtractionDroppedWhenPayloadHasNoScope(t *testing.T) {
 	require.NoError(t, svc.Handle(context.Background(), extractTask(t, types.MemoryExtractPayload{
 		SessionID: "s", MessageID: "m",
 	})))
-	require.Zero(t, models.calls)
+	require.Zero(t, models.callCount())
 }
 
 func TestScheduleExtractionEnqueuesOnTheMemoryQueue(t *testing.T) {
@@ -287,5 +286,3 @@ func TestExtractionCapsItemsPerRun(t *testing.T) {
 	require.LessOrEqual(t, total, int64(extractMaxItemsPerRun),
 		"one rambling conversation must not flood the store")
 }
-
-var _ = chat.Message{}

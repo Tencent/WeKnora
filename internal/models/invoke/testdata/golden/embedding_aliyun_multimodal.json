@@ -1,0 +1,25 @@
+{
+  "scenario": "embedding_aliyun_multimodal",
+  "behavior": [
+    "vision/multimodal model → POST {base-stripped}/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding; body {model,input:{contents:[{text}]},parameters?}; compatible-mode suffix stripped from base"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "multimodal-embedding-v1",
+        "input": {
+          "contents": [
+            {
+              "text": "pic"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

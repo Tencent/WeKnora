@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -282,34 +282,31 @@ func (r *sourceRegistry) collectUnresolvedToolHandles(
 // messages and gates source processing for tool results by tool name. A nil
 // policy retains the legacy generic behavior for package-internal callers.
 func (r *sourceRegistry) EncodeMessagesWithPolicies(
-	messages []chat.Message,
+	messages []invoke.Message,
 	argumentPolicy toolArgumentPolicy,
 	resultPolicy func(toolName string) bool,
-) []chat.Message {
+) []invoke.Message {
 	if r == nil || len(messages) == 0 {
 		return messages
 	}
-	out := make([]chat.Message, len(messages))
-	copy(out, messages)
+	out := make([]invoke.Message, len(messages))
+	for i := range messages {
+		out[i] = messages[i]
+		out[i].Content = append([]invoke.Part(nil), messages[i].Content...)
+	}
 	// First register every durable identifier present in historical tool calls
 	// and canonical assistant citations. This two-pass shape lets an early tool
 	// message reuse metadata that appears only in the turn's final answer.
 	for i := range out {
 		processToolResult := out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name))
 		if out[i].Role == "assistant" || processToolResult {
-			out[i].Content = r.CompactPublicCitations(out[i].Content, false)
+			for j := range out[i].Content {
+				out[i].Content[j].Text = r.CompactPublicCitations(out[i].Content[j].Text, false)
+			}
 			out[i].ReasoningContent = r.CompactPublicCitations(out[i].ReasoningContent, false)
 		}
-		if len(out[i].MultiContent) > 0 {
-			out[i].MultiContent = append([]chat.MessageContentPart(nil), out[i].MultiContent...)
-			for j := range out[i].MultiContent {
-				if out[i].MultiContent[j].Type == "text" && (out[i].Role == "assistant" || processToolResult) {
-					out[i].MultiContent[j].Text = r.CompactPublicCitations(out[i].MultiContent[j].Text, false)
-				}
-			}
-		}
 		if len(out[i].ToolCalls) > 0 {
-			out[i].ToolCalls = append([]chat.ToolCall(nil), out[i].ToolCalls...)
+			out[i].ToolCalls = append([]invoke.ToolCall(nil), out[i].ToolCalls...)
 			for j := range out[i].ToolCalls {
 				toolName := out[i].ToolCalls[j].Function.Name
 				r.registerToolArguments(
@@ -321,8 +318,10 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 	}
 	for i := range out {
 		if out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name)) {
-			r.registerLegacyToolReferences(out[i].Content, false)
-			out[i].Content = r.CompactKnownText(out[i].Content)
+			for j := range out[i].Content {
+				r.registerLegacyToolReferences(out[i].Content[j].Text, false)
+				out[i].Content[j].Text = r.CompactKnownText(out[i].Content[j].Text)
+			}
 		}
 		for j := range out[i].ToolCalls {
 			toolName := out[i].ToolCalls[j].Function.Name

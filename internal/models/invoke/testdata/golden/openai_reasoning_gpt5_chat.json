@@ -1,0 +1,63 @@
+{
+  "scenario": "openai_reasoning_gpt5_chat",
+  "behavior": [
+    "openAIReasoningProvider.Matches(gpt-5-mini)",
+    "shapeOpenAIReasoning strips sampling params",
+    "max_tokens migrates to max_completion_tokens",
+    "reasoning_effort passthrough (level=high)",
+    "thinking=true and level from call options (no model fallback)"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "application/json",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-5-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 512,
+        "reasoning_effort": "high"
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unreported"
+    }
+  }
+}

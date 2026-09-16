@@ -10,7 +10,7 @@ import (
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -52,9 +52,9 @@ func LoadAgentHistory(
 	messageRepo interfaces.MessageRepository,
 	sessionID string,
 	maxRounds int,
-) ([]chat.Message, error) {
+) ([]invoke.Message, error) {
 	if maxRounds <= 0 {
-		return []chat.Message{}, nil
+		return []invoke.Message{}, nil
 	}
 
 	fetchLimit := maxRounds * agentHistoryFetchMultiplier
@@ -67,7 +67,7 @@ func LoadAgentHistory(
 		return nil, fmt.Errorf("load agent history: %w", err)
 	}
 	if len(rows) == 0 {
-		return []chat.Message{}, nil
+		return []invoke.Message{}, nil
 	}
 
 	// A turn is not always one user message. Mid-run steering persists every
@@ -115,7 +115,7 @@ func LoadAgentHistory(
 		completeTurns = completeTurns[len(completeTurns)-maxRounds:]
 	}
 
-	out := make([]chat.Message, 0, len(completeTurns)*4)
+	out := make([]invoke.Message, 0, len(completeTurns)*4)
 	for _, t := range completeTurns {
 		out = append(out, buildUserHistoryMessage(t.users[0]))
 		out = append(out, buildTurnBodyMessages(t.assistant, t.users[1:])...)
@@ -131,12 +131,12 @@ func LoadAgentHistory(
 //
 // Steps carry a timestamp; a user row belongs before the first step that
 // starts after it. Anything left over lands just before the final answer.
-func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Message) []chat.Message {
+func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Message) []invoke.Message {
 	if len(midRunUsers) == 0 {
 		return buildAssistantHistoryMessages(assistant)
 	}
 
-	out := make([]chat.Message, 0, len(assistant.AgentSteps)*2+len(midRunUsers)+1)
+	out := make([]invoke.Message, 0, len(assistant.AgentSteps)*2+len(midRunUsers)+1)
 	usersByID := make(map[string]*types.Message, len(midRunUsers))
 	for _, user := range midRunUsers {
 		usersByID[user.ID] = user
@@ -147,7 +147,7 @@ func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Messag
 	}
 	appendUser := func(user *types.Message) {
 		msg := buildUserHistoryMessage(user)
-		msg.Content = types.SteerMessageContent(msg.Content)
+		msg.Content = []invoke.Part{{Text: types.SteerMessageContent(msg.Text())}}
 		out = append(out, msg)
 		delete(usersByID, user.ID)
 	}
@@ -184,7 +184,7 @@ func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Messag
 // context format, which must not be mixed into the current request protocol.
 // Image captions and attachments are reconstructed from their canonical DB
 // columns so useful user-provided context is retained without stale RAG data.
-func buildUserHistoryMessage(m *types.Message) chat.Message {
+func buildUserHistoryMessage(m *types.Message) invoke.Message {
 	content := m.Content
 	if captions := extractImageCaptionsFromMessage(m.Images); captions != "" {
 		content += "\n\n[用户上传图片内容]\n" + captions
@@ -192,7 +192,7 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 	if len(m.Attachments) > 0 {
 		content += m.Attachments.BuildPrompt()
 	}
-	return chat.Message{Role: "user", Content: content}
+	return invoke.TextMessage(invoke.RoleUser, content)
 }
 
 // buildAssistantHistoryMessages reconstructs the assistant side of one
@@ -203,8 +203,8 @@ func buildUserHistoryMessage(m *types.Message) chat.Message {
 // AgentSteps from KnowledgeQA-mode turns are empty, in which case the result
 // is just the single final-answer assistant message — exactly mirroring how
 // the KnowledgeQA pipeline replays history today.
-func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
-	msgs := make([]chat.Message, 0, len(m.AgentSteps)*2+1)
+func buildAssistantHistoryMessages(m *types.Message) []invoke.Message {
+	msgs := make([]invoke.Message, 0, len(m.AgentSteps)*2+1)
 	for _, step := range m.AgentSteps {
 		msgs = append(msgs, buildAgentStepMessages(step)...)
 	}
@@ -217,39 +217,41 @@ func buildAssistantHistoryMessages(m *types.Message) []chat.Message {
 // buildAgentStepMessages expands one persisted step into the OpenAI-shaped
 // assistant + tool pair. Steps whose only calls were terminal or synthetic
 // produce nothing, so callers can treat an empty result as "not a real round".
-func buildAgentStepMessages(step types.AgentStep) []chat.Message {
+func buildAgentStepMessages(step types.AgentStep) []invoke.Message {
 	nonTerminalCalls := filterNonTerminalToolCalls(step.ToolCalls)
 	if len(nonTerminalCalls) == 0 {
 		if step.IntermediateAnswer && strings.TrimSpace(step.Thought) != "" {
-			return []chat.Message{{Role: "assistant", Content: step.Thought, ReasoningContent: step.ReasoningContent}}
+			msg := invoke.TextMessage(invoke.RoleAssistant, step.Thought)
+			msg.ReasoningContent = step.ReasoningContent
+			return []invoke.Message{msg}
 		}
 		return nil
 	}
-	assistantMsg := chat.Message{
-		Role:             "assistant",
-		Content:          step.Thought,
+	assistantMsg := invoke.Message{
+		Role:             invoke.RoleAssistant,
+		Content:          []invoke.Part{{Text: step.Thought}},
 		ReasoningContent: step.ReasoningContent,
-		ToolCalls:        make([]chat.ToolCall, 0, len(nonTerminalCalls)),
+		ToolCalls:        make([]invoke.ToolCall, 0, len(nonTerminalCalls)),
 	}
 	for _, tc := range nonTerminalCalls {
 		argsJSON, _ := json.Marshal(tc.Args)
-		assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, chat.ToolCall{
+		assistantMsg.ToolCalls = append(assistantMsg.ToolCalls, invoke.ToolCall{
 			ID:               tc.ID,
 			Type:             "function",
 			ProviderMetadata: tc.ProviderMetadata,
-			Function: chat.FunctionCall{
+			Function: invoke.FunctionCall{
 				Name:      tc.Name,
 				Arguments: string(argsJSON),
 			},
 		})
 	}
 
-	msgs := make([]chat.Message, 0, len(nonTerminalCalls)+1)
+	msgs := make([]invoke.Message, 0, len(nonTerminalCalls)+1)
 	msgs = append(msgs, assistantMsg)
 	for _, tc := range nonTerminalCalls {
-		msgs = append(msgs, chat.Message{
-			Role:       "tool",
-			Content:    toolCallOutput(tc),
+		msgs = append(msgs, invoke.Message{
+			Role:       invoke.RoleTool,
+			Content:    []invoke.Part{{Text: toolCallOutput(tc)}},
 			ToolCallID: tc.ID,
 			Name:       tc.Name,
 		})
@@ -261,7 +263,7 @@ func buildAgentStepMessages(step types.AgentStep) []chat.Message {
 // turn produced no text (stopped, or answered purely through tools). The
 // generated-file markers belong to that turn, so they are relabeled before
 // being replayed into a later turn's history.
-func finalAnswerHistoryMessage(m *types.Message) *chat.Message {
+func finalAnswerHistoryMessage(m *types.Message) *invoke.Message {
 	finalContent := agentHistoryThinkTagRegex.ReplaceAllString(m.Content, "")
 	// Version clarification was written for that message's turn, not this one.
 	finalContent = strings.NewReplacer(
@@ -272,7 +274,8 @@ func finalAnswerHistoryMessage(m *types.Message) *chat.Message {
 	if finalContent == "" {
 		return nil
 	}
-	return &chat.Message{Role: "assistant", Content: finalContent}
+	msg := invoke.TextMessage(invoke.RoleAssistant, finalContent)
+	return &msg
 }
 
 // legacyFinalAnswerToolName is the name of the now-removed final_answer tool.

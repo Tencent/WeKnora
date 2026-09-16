@@ -1,0 +1,24 @@
+{
+  "scenario": "embedding_openai_dimensions",
+  "behavior": [
+    "supportsDimensionOverride=true \u0026\u0026 dimensions\u003e0 → wire carries dimensions:256; truncate defaults to 511"
+  ],
+  "requests": [
+    {
+      "path": "/embeddings",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "text-embedding-3-small",
+        "input": [
+          "hello"
+        ],
+        "encoding_format": "float",
+        "dimensions": 256,
+        "truncate_prompt_tokens": 511
+      }
+    }
+  ]
+}

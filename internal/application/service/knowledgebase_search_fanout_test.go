@@ -12,7 +12,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -412,15 +411,21 @@ func (f *fakeRetrieveEngineService) Retrieve(ctx context.Context, p types.Retrie
 	}}, nil
 }
 
-func (f *fakeRetrieveEngineService) Index(context.Context, embedding.Embedder, *types.IndexInfo, []types.RetrieverType) error {
+func (f *fakeRetrieveEngineService) Index(
+	context.Context, interfaces.Embedder, *types.IndexInfo, []types.RetrieverType,
+) error {
 	panic("unused")
 }
 
-func (f *fakeRetrieveEngineService) BatchIndex(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) error {
+func (f *fakeRetrieveEngineService) BatchIndex(
+	context.Context, interfaces.Embedder, []*types.IndexInfo, []types.RetrieverType,
+) error {
 	panic("unused")
 }
 
-func (f *fakeRetrieveEngineService) EstimateStorageSize(context.Context, embedding.Embedder, []*types.IndexInfo, []types.RetrieverType) int64 {
+func (f *fakeRetrieveEngineService) EstimateStorageSize(
+	context.Context, interfaces.Embedder, []*types.IndexInfo, []types.RetrieverType,
+) int64 {
 	panic("unused")
 }
 

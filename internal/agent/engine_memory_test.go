@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -21,19 +21,19 @@ func TestAgentMemoryLandsInTheSystemPrompt(t *testing.T) {
 	require.Contains(t, systemPrompt, "回答请用中文")
 	require.Contains(t, systemPrompt, "<user_memory>")
 
-	history := []chat.Message{
-		{Role: "user", Content: "上一轮的问题"},
-		{Role: "assistant", Content: "上一轮的回答"},
+	history := []invoke.Message{
+		invoke.TextMessage(invoke.RoleUser, "上一轮的问题"),
+		invoke.TextMessage(invoke.RoleAssistant, "上一轮的回答"),
 	}
 	messages := engine.buildMessagesWithLLMContext(systemPrompt, "这一轮的问题", "test-session", history, nil)
 	require.NotEmpty(t, messages)
-	require.Equal(t, "system", messages[0].Role)
-	require.Contains(t, messages[0].Content, "回答请用中文")
+	require.Equal(t, invoke.RoleSystem, messages[0].Role)
+	require.Contains(t, messages[0].Text(), "回答请用中文")
 
 	// And it appears exactly once, not once per history turn.
-	require.Equal(t, 1, strings.Count(messages[0].Content, "<user_memory>"))
+	require.Equal(t, 1, strings.Count(messages[0].Text(), "<user_memory>"))
 	for _, message := range messages[1:] {
-		require.NotContains(t, message.Content, "<user_memory>")
+		require.NotContains(t, message.Text(), "<user_memory>")
 	}
 }
 

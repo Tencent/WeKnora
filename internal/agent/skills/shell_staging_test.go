@@ -66,7 +66,7 @@ func (m *stagingManager) SessionShellExecutor() sandbox.SessionShellExecutor { r
 
 func TestShellStagesHostResourcesOncePerSession(t *testing.T) {
 	root := hostSkillDir(t, "host-skill", "host resource staging")
-	require.NoError(t, os.WriteFile(filepath.Join(root, "host-skill", "asset.bin"), []byte{0, 255, 1}, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "host-skill", "asset.bin"), []byte{0, 255, 1}, 0o644))
 	store := &stagingStore{files: make(map[string][]byte)}
 	backend := &stagingManager{store: store}
 	mgr := NewManager(&ManagerConfig{Enabled: true, SkillDirs: []string{root}, AllowedSkills: []string{"host-skill"}}, backend)

@@ -1002,6 +1002,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         loading.value = false
         isReplying.value = false
         message.is_completed = true
+        // E9（2026-09-14 裁定）：complete 事件携带本轮 usage——agent 与
+        // 非 agent 模式统一存到助手消息上供展示
+        const completeUsage = (dataPayload as any)?.usage
+        if (completeUsage && typeof completeUsage === 'object') {
+          message.usage = completeUsage
+        }
         onReplyComplete?.(String(message.content || ''))
         onTurnComplete?.(message)
         fullContent.value = ''

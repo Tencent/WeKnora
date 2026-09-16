@@ -207,6 +207,12 @@ func (s *sessionService) applyAgentOverridesToChatManage(
 	} else {
 		logger.Warnf(ctx, "Custom agent thinking is unset after EnsureDefaults; model thinking param will be omitted")
 	}
+	// Agent-level thinking level overrides the global config default when set
+	// (empty = keep whatever the global config provided). Session-level
+	// override is applied later by the caller (highest precedence).
+	if customAgent.Config.ThinkingLevel != "" {
+		cm.SummaryConfig.ThinkingLevel = customAgent.Config.ThinkingLevel
+	}
 
 	// Override retrieval strategy settings
 	if customAgent.Config.EmbeddingTopK > 0 {

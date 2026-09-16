@@ -151,8 +151,9 @@ export interface CredentialFieldDef<K extends string = string> {
 
 export interface CredentialResourceApi<K extends string = string> {
   // PUT /credentials — body keyed by field name, value is the new secret.
-  // Returns the updated per-field configured map.
-  save: (patch: Partial<Record<K, string>>) => Promise<Record<K, { configured: boolean }>>
+  // Returns the updated per-field configured map (Partial: the backend only
+  // constructs the secret slots it manages, e.g. api_key/app_secret).
+  save: (patch: Partial<Record<K, string>>) => Promise<Partial<Record<K, { configured: boolean }>>>
   // DELETE /credentials/:field
   remove: (field: K) => Promise<void>
 }

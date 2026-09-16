@@ -1,9 +1,11 @@
 package compaction
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -52,10 +54,17 @@ var nonOverflowPatterns = []*regexp.Regexp{
 }
 
 // IsOverflowError reports whether a failed LLM call failed because the request
-// did not fit in the context window.
+// did not fit in the context window. v2 (design §6.5): a *invoke.ProviderError
+// classifies by Kind (ErrContextExceeded). The pattern screen remains as the
+// fallback for stream-path failures, where the provider message travels inside
+// a wrapped local error and no ProviderError value survives.
 func IsOverflowError(err error) bool {
 	if err == nil {
 		return false
+	}
+	var perr *invoke.ProviderError
+	if errors.As(err, &perr) {
+		return perr.Kind == invoke.ErrContextExceeded
 	}
 	msg := err.Error()
 	for _, p := range nonOverflowPatterns {

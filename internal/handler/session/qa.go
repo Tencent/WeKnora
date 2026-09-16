@@ -52,7 +52,9 @@ type qaRequestContext struct {
 	mcpServiceIDs         []string
 	skillNames            []string
 	summaryModelID        string
-	localBrowserEnabled   bool
+	thinkingLevel         string // our per-request thinking level override
+	thinking              *bool  // our per-request thinking on/off override (nil = follow agent)
+	localBrowserEnabled   bool   // upstream browser source
 	webSearchEnabled      bool
 	mentionedItems        types.MentionedItems
 	effectiveTenantID     uint64                   // when using shared agent, tenant ID for model/KB/MCP resolution; 0 = use context tenant
@@ -102,6 +104,8 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		Query:               rc.query,
 		AssistantMessageID:  rc.assistantMessage.ID,
 		SummaryModelID:      rc.summaryModelID,
+		ThinkingLevel:       rc.thinkingLevel,
+		Thinking:            rc.thinking,
 		CustomAgent:         rc.customAgent,
 		SharedAgentReadOnly: rc.sharedAgentReadOnly,
 		KnowledgeBaseIDs:    rc.knowledgeBaseIDs,
@@ -194,7 +198,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	}
 
 	// Merge @mentioned items into knowledge_base_ids and knowledge_ids
-	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIds, request.MentionedItems)
+	kbIDs, knowledgeIDs := mergeKnowledgeTargets(request.KnowledgeBaseIDs, request.KnowledgeIDs, request.MentionedItems)
 	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, knowledgeIDs); err != nil {
 		return nil, nil, err
 	}
@@ -409,6 +413,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
 		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
+		thinkingLevel:         request.ThinkingLevel,
+		thinking:              request.Thinking,
 		webSearchEnabled:      request.WebSearchEnabled,
 		localBrowserEnabled:   request.LocalBrowserEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
@@ -1186,6 +1192,14 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			if data.IsFallback {
 				streamCtx.assistantMessage.IsFallback = true
 			}
+			// E9: the terminal answer carries the turn's token usage — persist
+			// it on the assistant message (message.usage jsonb) and ride the
+			// complete event for live display.
+			if data.Usage != nil {
+				if u, ok := data.Usage.(*types.TokenUsage); ok {
+					streamCtx.assistantMessage.Usage = u
+				}
+			}
 			if data.Done {
 				if completionHandled {
 					return nil
@@ -1198,7 +1212,10 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventAgentComplete,
 					SessionID: sessionID,
-					Data:      event.AgentCompleteData{FinalAnswer: streamCtx.assistantMessage.Content},
+					Data: event.AgentCompleteData{
+						FinalAnswer: streamCtx.assistantMessage.Content,
+						Usage:       streamCtx.assistantMessage.Usage,
+					},
 				})
 			}
 			return nil

@@ -637,14 +637,16 @@
                       </div>
                     </div>
 
-                    <!-- 思考模式 -->
-                    <div class="setting-row">
-                      <div class="setting-info">
-                        <label>{{ $t('agent.editor.thinking') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
-                      </div>
-                      <div class="setting-control">
-                        <t-switch v-model="thinkingEnabled" />
+                    <!-- 思考模式（档位单选，能力声明驱动 design §8.1.2；不支持置灰说明，
+                         切模型档位越界由下方 watcher 自动清空 + toast） -->
+                    <div class="setting-row" data-agent-field="thinking">
+                      <div class="setting-control setting-control-full">
+                        <ThinkingControls
+                          v-model="thinkingValue"
+                          edit-mode="single"
+                          :caps="agentThinkingCaps"
+                          :chat-shard="agentModelChatShard"
+                        />
                       </div>
                     </div>
 
@@ -1868,6 +1870,8 @@ import AgentAvatar from '@/components/AgentAvatar.vue';
 import PromptTemplateSelector from '@/components/PromptTemplateSelector.vue';
 import ModelSelector from '@/components/ModelSelector.vue';
 import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue';
+import ThinkingControls from '@/components/ThinkingControls.vue';
+import { listModelProviders, type ModelProviderOption } from '@/api/initialization';
 import SettingDrawer from '@/components/settings/SettingDrawer.vue';
 import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
@@ -2731,6 +2735,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 0,
     thinking: false, // 默认禁用思考模式
+    thinking_level: '', // 思考档位；空 = 跟随模型默认
     citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
@@ -3351,10 +3356,59 @@ const onAgentTypeChange = (val: AgentType) => {
   }
 };
 
-// 思考模式计算属性（直接绑定 boolean）
-const thinkingEnabled = computed({
-  get: () => formData.value.config.thinking === true,
-  set: (val: boolean) => { formData.value.config.thinking = val; }
+// ---- 思考控件（ThinkingControls single 形态，design §8.1.2） ----
+
+// 厂商能力声明缓存（/models/providers?type=chat）；加载失败时控件整体置灰兜底。
+const chatProviderOptions = ref<ModelProviderOption[]>([]);
+const loadChatProviderCaps = async () => {
+  try {
+    chatProviderOptions.value = await listModelProviders('chat');
+  } catch (e) {
+    console.error('Failed to load chat provider capabilities', e);
+  }
+};
+onMounted(loadChatProviderCaps);
+
+// 所选对话模型与其思考能力声明 / chat 分片
+const selectedAgentModel = computed(() =>
+  allModels.value.find(m => m.id === formData.value.config.model_id));
+const agentModelChatShard = computed(() => selectedAgentModel.value?.parameters.chat);
+const agentThinkingCaps = computed(() => {
+  const provider = selectedAgentModel.value?.parameters.provider;
+  if (!provider) return undefined;
+  return chatProviderOptions.value.find(p => p.value === provider)?.capabilities?.chat?.thinking;
+});
+
+// single 档位 options = (分片子集 ?? 厂商枚举) ∩ 厂商枚举（与组件内规则一致）
+const agentThinkingLevelOptions = computed(() => {
+  const levels = agentThinkingCaps.value?.supported_levels ?? [];
+  const shard = agentModelChatShard.value?.selected_levels ?? [];
+  return shard.length ? levels.filter(l => shard.includes(l)) : levels;
+});
+
+// 开关 → config.thinking（bool 三态语义不变）；档位 → config.thinking_level（空 = 跟随模型默认）
+const thinkingValue = computed({
+  get: () => ({
+    enabled: formData.value.config.thinking === true,
+    level: formData.value.config.thinking_level || '',
+  }),
+  set: (v) => {
+    formData.value.config.thinking = v.enabled ?? false;
+    formData.value.config.thinking_level = v.level || '';
+  },
+});
+
+// 模型切换边界：已存档位 ∉ 新模型集合 → 自动清空为"跟随模型默认" + toast
+// （不留隐藏非法状态；即使漏清，wire 层回落链也兜底）。不支持思考的模型
+// 已存值保留不丢（模型换回来仍生效）。
+watch(() => formData.value.config.model_id, () => {
+  const level = formData.value.config.thinking_level;
+  if (!level) return;
+  const options = agentThinkingLevelOptions.value;
+  if (options.length > 0 && !options.includes(level)) {
+    formData.value.config.thinking_level = '';
+    MessagePlugin.warning(t('agentEditor.thinkingLevelResetToast'));
+  }
 });
 
 // 是否为内置智能体

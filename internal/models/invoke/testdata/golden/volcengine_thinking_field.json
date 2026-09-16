@@ -1,0 +1,50 @@
+{
+  "scenario": "volcengine_thinking_field",
+  "behavior": [
+    "thinkingTypeField: top-level thinking.type = enabled|disabled",
+    "custom body forces raw HTTP path",
+    "two requests in order: enabled, then disabled"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "doubao-seed-1-6",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 64,
+        "thinking": {
+          "type": "enabled"
+        }
+      }
+    },
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "doubao-seed-1-6",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 64,
+        "thinking": {
+          "type": "disabled"
+        }
+      }
+    }
+  ]
+}

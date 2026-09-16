@@ -1,0 +1,27 @@
+{
+  "scenario": "embedding_weknoracloud",
+  "behavior": [
+    "POST {base}/api/v1/embeddings; HMAC sign headers (X-Appid/X-Request-Id/X-Timestamp/X-Nonce/X-Signature, masked in golden); wire model = remote_model_name override; body {model,input}"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/embeddings",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Api-Key": "secret-1",
+        "X-Appid": "app-1",
+        "X-Nonce": "\u003cnonce\u003e",
+        "X-Request-Id": "\u003crequest-id\u003e",
+        "X-Signature": "\u003chmac-md5\u003e",
+        "X-Timestamp": "\u003cunix-seconds\u003e"
+      },
+      "body": {
+        "model": "remote-embed",
+        "input": [
+          "a",
+          "b"
+        ]
+      }
+    }
+  ]
+}

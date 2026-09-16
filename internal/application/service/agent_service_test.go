@@ -11,7 +11,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -39,36 +40,28 @@ type fakeAgentKnowledgeService struct {
 }
 
 type fakeAgentChatModel struct {
-	lastToolNames []string
+	fake *invoketest.Fake
 }
 
-func (*fakeAgentChatModel) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
-	return &types.ChatResponse{}, nil
+func newFakeAgentChatModel(t *testing.T) *fakeAgentChatModel {
+	return &fakeAgentChatModel{fake: invoketest.New(t)}
 }
 
-func (m *fakeAgentChatModel) ChatStream(
-	_ context.Context, _ []chat.Message, opts *chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	m.lastToolNames = nil
-	if opts != nil {
-		for _, tool := range opts.Tools {
-			m.lastToolNames = append(m.lastToolNames, tool.Function.Name)
-		}
+// model returns the config for CreateAgentEngine.
+func (m *fakeAgentChatModel) model() *invoke.ModelConfig { return m.fake.Config() }
+
+// lastToolNames returns the tool names dispatched on the first stream call.
+func (m *fakeAgentChatModel) lastToolNames() []string {
+	calls := m.fake.Calls()
+	if len(calls) == 0 {
+		return nil
 	}
-
-	ch := make(chan types.StreamResponse, 1)
-	ch <- types.StreamResponse{
-		ResponseType: types.ResponseTypeAnswer,
-		Content:      "ok",
-		Done:         true,
-		FinishReason: "stop",
+	var names []string
+	for _, tl := range calls[0].Opts.Tools {
+		names = append(names, tl.Name)
 	}
-	close(ch)
-	return ch, nil
+	return names
 }
-
-func (*fakeAgentChatModel) GetModelName() string { return "fake-chat" }
-func (*fakeAgentChatModel) GetModelID() string   { return "fake-chat-id" }
 
 type stubSessionFileStore struct{}
 
@@ -88,12 +81,15 @@ func (stubSessionFileStore) ReadSessionFile(context.Context, string, string) ([]
 func (stubSessionFileStore) WriteSessionInputFile(context.Context, string, string, []byte) error {
 	return nil
 }
+
 func (stubSessionFileStore) WriteSessionWorkspaceFile(context.Context, string, string, []byte) error {
 	return nil
 }
+
 func (stubSessionFileStore) WriteSessionWorkspaceFiles(context.Context, string, []sandbox.SessionWorkspaceFile) error {
 	return nil
 }
+
 func (stubSessionFileStore) RemoveSessionInputPath(context.Context, string, string) error { return nil }
 
 func (s *fakeAgentKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
@@ -139,7 +135,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 
 	t.Run("install-mode config gets shell_exec without skill tools", func(t *testing.T) {
-		chatModel := &fakeAgentChatModel{}
+		chatModel := newFakeAgentChatModel(t)
 		svc := &agentService{
 			sandboxResolver: stubSandboxResolver{
 				mgr: &capableManager{
@@ -160,24 +156,24 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		}
 		config.EnableSkillInstallMode(types.BuiltinSkillInstallerID, sandbox.SkillsImageRoot+"/pptx")
 
-		engine, err := svc.CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1", "msg-1")
+		engine, err := svc.CreateAgentEngine(ctx, config, chatModel.model(), nil, nil, "sess-1", "msg-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles),
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolShellExec))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolExecuteSkillScript))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolListSandboxFiles),
 			"session file tools only accept /workspace; the installer must write the skill tree via shell_exec")
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolWriteSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolEditSandboxFile))
 		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 	})
 
 	t.Run("an ordinary agent with skills off gets no shell but keeps file tools", func(t *testing.T) {
-		chatModel := &fakeAgentChatModel{}
+		chatModel := newFakeAgentChatModel(t)
 		svc := &agentService{
 			sandboxResolver: stubSandboxResolver{
 				mgr: &capableManager{
@@ -193,22 +189,22 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   false,
 			AllowedTools:    []string{tools.ToolShellExec, tools.ToolThinking},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel.model(), nil, nil, "sess-1", "msg-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec),
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolShellExec),
 			"shell_exec follows SkillsEnabled; an agent with skills off gets no shell")
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolListSandboxFiles))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolReadFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolWriteSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolEditSandboxFile))
 		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 	})
 
 	t.Run("skills disabled without skills or install mode gets no shell or skill tools but keeps file tools", func(t *testing.T) {
-		chatModel := &fakeAgentChatModel{}
+		chatModel := newFakeAgentChatModel(t)
 		svc := &agentService{
 			sandboxResolver: stubSandboxResolver{
 				mgr: &capableManager{
@@ -223,23 +219,23 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   false,
 			AllowedTools:    []string{tools.ToolThinking},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel.model(), nil, nil, "sess-1", "msg-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolShellExec))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolListSandboxFiles))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolReadFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolWriteSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolEditSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolExecuteSkillScript))
 		require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 	})
 
 	t.Run("skills enabled with skill dirs keeps existing behavior", func(t *testing.T) {
-		chatModel := &fakeAgentChatModel{}
+		chatModel := newFakeAgentChatModel(t)
 		svc := &agentService{
 			sandboxResolver: stubSandboxResolver{
 				mgr: &capableManager{
@@ -254,25 +250,25 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   true,
 			SkillDirs:       []string{t.TempDir()},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel.model(), nil, nil, "sess-1", "msg-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSandboxFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolShellExec))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolListSandboxFiles))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolReadFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolWriteSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolEditSandboxFile))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolExecuteSkillScript))
 		require.NotNil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 	})
 
 	t.Run("skills enabled with tenant skills and no host dirs still offers skill tools", func(t *testing.T) {
-		chatModel := &fakeAgentChatModel{}
+		chatModel := newFakeAgentChatModel(t)
 		svc := &agentService{
 			sandboxResolver: stubSandboxResolver{
 				mgr: &capableManager{
@@ -291,15 +287,15 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 				Name: "pdf-tools", Description: "PDF helpers",
 				Status: types.SkillStatusReady, Enabled: true,
 			}},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel.model(), nil, nil, "sess-1", "msg-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 		require.NoError(t, err)
-		require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSandboxFile))
-		require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
+		require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolReadFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolReadSkill))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolReadSandboxFile))
+		require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolExecuteSkillScript))
 		mgr := engine.(*agent.AgentEngine).GetSkillsManager()
 		require.NotNil(t, mgr)
 		var names []string
@@ -363,7 +359,7 @@ func TestSkillToolsFollowSkillsEnabled(t *testing.T) {
 // otherwise it has no way to inspect a fresh or still-installing sandbox.
 func TestCreateAgentEngineShellFollowsSkillsEnabledWithoutInstalledSkills(t *testing.T) {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
-	chatModel := &fakeAgentChatModel{}
+	chatModel := newFakeAgentChatModel(t)
 	svc := &agentService{
 		sandboxResolver: stubSandboxResolver{
 			mgr: &capableManager{
@@ -380,20 +376,20 @@ func TestCreateAgentEngineShellFollowsSkillsEnabledWithoutInstalledSkills(t *tes
 		SkillsEnabled:   true,
 		// No SkillDirs and no TenantSkills: skills are enabled, but the sandbox
 		// image carries none.
-	}, chatModel, nil, nil, "sess-1", "msg-1")
+	}, chatModel.model(), nil, nil, "sess-1", "msg-1")
 
 	require.NoError(t, err)
 	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 	require.NoError(t, err)
-	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolShellExec),
+	require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolShellExec),
 		"an agent with skills enabled must have shell_exec even when no ready skill exists yet")
-	require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolReadSkill),
+	require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolReadSkill),
 		"an empty sandbox must not be offered skill tools that cannot succeed")
-	require.False(t, toolOffered(chatModel.lastToolNames, tools.LegacyToolExecuteSkillScript))
-	require.False(t, toolOffered(chatModel.lastToolNames, tools.ToolListSandboxFiles))
-	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolReadFile))
-	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolWriteSandboxFile))
-	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolEditSandboxFile))
+	require.False(t, toolOffered(chatModel.lastToolNames(), tools.LegacyToolExecuteSkillScript))
+	require.False(t, toolOffered(chatModel.lastToolNames(), tools.ToolListSandboxFiles))
+	require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolReadFile))
+	require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolWriteSandboxFile))
+	require.True(t, toolOffered(chatModel.lastToolNames(), tools.ToolEditSandboxFile))
 	require.Nil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 }
 

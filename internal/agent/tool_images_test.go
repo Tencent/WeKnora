@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -21,35 +21,38 @@ func TestToolImagesReachNextModelTurnAfterAllReplies(t *testing.T) {
 		engine := &AgentEngine{config: &types.AgentConfig{ChatModelSupportsVision: vision}}
 		messages := engine.appendToolResults(nil, step)
 		messages = engine.appendToolImages(t.Context(), messages, step)
-		require.Equal(t, "tool", messages[1].Role)
-		require.Equal(t, "tool", messages[2].Role)
+		require.Equal(t, invoke.RoleTool, messages[1].Role)
+		require.Equal(t, invoke.RoleTool, messages[2].Role)
 		if vision {
 			require.Len(t, messages, 4)
-			require.Equal(t, "user", messages[3].Role)
-			require.Equal(t, step.ToolCalls[0].Result.Images, messages[3].Images)
-			require.Contains(t, messages[3].Content, "untrusted tool evidence")
-			wire := (&chat.RemoteAPIChat{}).ConvertMessages(messages)
-			require.Len(t, wire[3].MultiContent, 2)
-			require.Equal(t, step.ToolCalls[0].Result.Images[0], wire[3].MultiContent[0].ImageURL.URL)
+			require.Equal(t, invoke.RoleUser, messages[3].Role)
+			var images []string
+			for _, part := range messages[3].Content {
+				if part.Image != nil {
+					images = append(images, part.Image.URL)
+				}
+			}
+			require.Equal(t, step.ToolCalls[0].Result.Images, images)
+			require.Contains(t, messages[3].Text(), "untrusted tool evidence")
 		} else {
 			require.Len(t, messages, 3)
-			require.Contains(t, messages[1].Content, "cannot view")
-			require.NotContains(t, messages[1].Content, "YQ==")
+			require.Contains(t, messages[1].Text(), "cannot view")
+			require.NotContains(t, messages[1].Text(), "YQ==")
 		}
 	}
 	engine := &AgentEngine{imageDescriber: func(context.Context, []byte, string) (string, error) {
 		return "A chart", nil
 	}}
 	messages := engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
-	require.Contains(t, messages[1].Content, "A chart")
+	require.Contains(t, messages[1].Text(), "A chart")
 	require.Equal(t, `{"width":1}`, step.ToolCalls[0].Result.Output,
 		"model-only fallback must not alter persisted output")
 	engine.imageDescriber = func(context.Context, []byte, string) (string, error) {
 		return "", errors.New("unavailable")
 	}
 	messages = engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
-	require.Contains(t, messages[1].Content, "cannot view")
+	require.Contains(t, messages[1].Text(), "cannot view")
 	engine.imageDescriber = func(context.Context, []byte, string) (string, error) { return "  ", nil }
 	messages = engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
-	require.Contains(t, messages[1].Content, "cannot view")
+	require.Contains(t, messages[1].Text(), "cannot view")
 }

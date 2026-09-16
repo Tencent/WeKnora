@@ -12,7 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -64,6 +64,7 @@ func (s *sessionService) KnowledgeQA(
 		NoMatchPrefix:       s.cfg.Conversation.Summary.NoMatchPrefix,
 		MaxCompletionTokens: s.cfg.Conversation.Summary.MaxCompletionTokens,
 		Thinking:            s.cfg.Conversation.Summary.Thinking,
+		ThinkingLevel:       s.cfg.Conversation.Summary.ThinkingLevel,
 	}
 	fallbackStrategy := types.FallbackStrategy(s.cfg.Conversation.FallbackStrategy)
 	if fallbackStrategy == "" {
@@ -76,7 +77,7 @@ func (s *sessionService) KnowledgeQA(
 	var vlmModelID string
 	if chatModelID != "" {
 		if chatModelInfo, err := s.modelService.GetModelByID(ctx, chatModelID); err == nil && chatModelInfo != nil {
-			chatModelSupportsVision = chatModelInfo.Parameters.SupportsVision
+			chatModelSupportsVision = chatModelInfo.Parameters.GetSupportsVision()
 		}
 	}
 	if req.CustomAgent != nil {
@@ -152,6 +153,19 @@ func (s *sessionService) KnowledgeQA(
 	// Apply custom agent overrides (system prompt, temperature, retrieval params,
 	// rewrite, fallback, FAQ strategy, history turns)
 	s.applyAgentOverridesToChatManage(ctx, req.CustomAgent, chatManage)
+
+	// Thinking-level resolution for the knowledge QA path (design §4.2):
+	// agent overrides were just folded in; the per-request value wins last.
+	// The model-record default is applied at the wire layer (Phase D),
+	// where the adapter also owns provider-default fallback.
+	if req.ThinkingLevel != "" {
+		chatManage.SummaryConfig.ThinkingLevel = req.ThinkingLevel
+	}
+	// Per-request thinking on/off wins over the agent default (design §4.2
+	// session panel: the toggle is a first-class override, nil = follow).
+	if req.Thinking != nil {
+		chatManage.SummaryConfig.Thinking = req.Thinking
+	}
 
 	// An agent may opt out of long-term memory. The preference is per-request
 	// rather than per-user, so it travels in the context that the recall
@@ -306,7 +320,7 @@ func (s *sessionService) selectChatModelID(
 	}
 
 	// No knowledge bases - try to find any available chat model
-	models, err := s.modelService.ListModels(ctx)
+	models, err := s.modelService.ListModels(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list models: %v", err)
 		return "", fmt.Errorf("failed to list models: %w", err)
@@ -862,7 +876,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Get default models
-	models, err := s.modelService.ListModels(ctx)
+	models, err := s.modelService.ListModels(ctx, "")
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get models: %v", err)
 		return nil, err
@@ -966,17 +980,23 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 		return
 	}
 
-	// Get chat model
-	chatModel, err := s.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	// Get chat model via the single shared constructor (design §6.1/§6.8).
+	modelRecord, err := s.modelService.GetModelByID(ctx, chatManage.ChatModelID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to get chat model for fallback: %v, falling back to fixed response", err)
+		s.handleFixedFallback(ctx, chatManage)
+		return
+	}
+	chatModel, err := s.modelService.BuildModelConfig(ctx, modelRecord)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to build model config for fallback: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)
 		return
 	}
 
 	// Prepare chat options
 	thinking := false
-	opt := &chat.ChatOptions{
+	opt := &invoke.ChatOptions{
 		Temperature:         chatManage.SummaryConfig.Temperature,
 		MaxCompletionTokens: chatManage.SummaryConfig.MaxCompletionTokens,
 		Thinking:            &thinking,
@@ -984,7 +1004,8 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 
 	// Start streaming response
 	fallbackMessages, modelContext := prepareFallbackMessages(chatManage, promptContent)
-	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
+	opt.Messages = fallbackMessages
+	responseChan, err := invoke.ChatStream(ctx, chatModel, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)
 		s.handleFixedFallback(ctx, chatManage)
@@ -1004,20 +1025,24 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 func prepareFallbackMessages(
 	chatManage *types.ChatManage,
 	promptContent string,
-) ([]chat.Message, *modelcontext.Registry) {
+) ([]invoke.Message, *modelcontext.Registry) {
 	messages := buildFallbackMessages(chatManage, promptContent)
 	citationsEnabled := chatManage == nil || chatManage.CitationsEnabled()
 	registry := modelcontext.NewRegistry(citationsEnabled)
 	if len(messages) > 0 && messages[0].Role == "system" {
-		messages[0].Content = strings.TrimRight(messages[0].Content, " \t\r\n") + registry.ProtocolPrompt()
+		messages[0].Content = []invoke.Part{
+			{Text: strings.TrimRight(messages[0].Text(), " \t\r\n") + registry.ProtocolPrompt()},
+		}
 	} else {
-		messages = append([]chat.Message{{Role: "system", Content: strings.TrimSpace(registry.ProtocolPrompt())}}, messages...)
+		messages = append([]invoke.Message{
+			invoke.TextMessage(invoke.RoleSystem, strings.TrimSpace(registry.ProtocolPrompt())),
+		}, messages...)
 	}
 	return registry.EncodeMessages(messages), registry
 }
 
-func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) []chat.Message {
-	messages := make([]chat.Message, 0, len(chatManage.History)*2+2)
+func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) []invoke.Message {
+	messages := make([]invoke.Message, 0, len(chatManage.History)*2+2)
 
 	// The model-fallback prompt is a system-style instruction (KB document
 	// listing + "use general knowledge when nothing matched" guidance). Carry
@@ -1027,11 +1052,9 @@ func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) [
 	// forbids prior knowledge ("reply ONLY based on retrieved information"),
 	// which directly contradicts the fallback's purpose.
 	if strings.TrimSpace(promptContent) != "" {
-		messages = append(messages, chat.Message{
-			Role: "system",
-			Content: promptContent + "\n\n" + types.SourceDataBoundaryPrompt +
-				"\n\n" + types.SourcedAnswerOutputPrompt,
-		})
+		messages = append(messages, invoke.TextMessage(invoke.RoleSystem,
+			promptContent+"\n\n"+types.SourceDataBoundaryPrompt+
+				"\n\n"+types.SourcedAnswerOutputPrompt))
 	}
 
 	messages = chatpipeline.AppendHistoryMessages(messages, chatManage.History)
@@ -1043,9 +1066,11 @@ func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) [
 	if rq := strings.TrimSpace(chatManage.RewriteQuery); rq != "" {
 		query = rq
 	}
-	userMsg := chat.Message{Role: "user", Content: query}
+	userMsg := invoke.TextMessage(invoke.RoleUser, query)
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
-		userMsg.Images = chatManage.Images
+		for _, img := range chatManage.Images {
+			userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: img}})
+		}
 	}
 
 	return append(messages, userMsg)

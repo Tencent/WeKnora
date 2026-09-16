@@ -1,0 +1,23 @@
+{
+  "scenario": "rerank_openai_plain",
+  "behavior": [
+    "POST {base}/rerank; Bearer; body {model,query,documents} — NO truncate_prompt_tokens by default"
+  ],
+  "requests": [
+    {
+      "path": "/rerank",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "rerank-model",
+        "query": "q",
+        "documents": [
+          "d1",
+          "d2"
+        ]
+      }
+    }
+  ]
+}

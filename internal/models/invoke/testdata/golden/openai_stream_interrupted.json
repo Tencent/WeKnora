@@ -1,0 +1,67 @@
+{
+  "scenario": "openai_stream_interrupted",
+  "behavior": [
+    "mid-stream connection drop surfaces as error chunk (not retryable post-stream)",
+    "FinishReasonIncomplete marks partial response",
+    "partial tool calls carried on the error chunk"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "text/event-stream",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Weather?"
+          }
+        ],
+        "max_completion_tokens": 256,
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      }
+    }
+  ],
+  "sse_response": [
+    "data: {\"id\":\"chatcmpl-broken\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-broken\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\"}}]},\"finish_reason\":null}]}",
+    ""
+  ],
+  "client": [
+    {
+      "id": "",
+      "response_type": "tool_call",
+      "content": "",
+      "done": false,
+      "data": {
+        "tool_call_id": "call_1",
+        "tool_name": "get_weather"
+      }
+    },
+    {
+      "id": "",
+      "response_type": "error",
+      "content": "unexpected EOF",
+      "done": true,
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"city\":"
+          }
+        }
+      ],
+      "finish_reason": "incomplete"
+    }
+  ]
+}

@@ -18,7 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -180,7 +180,7 @@ func NewAgentService(
 func (s *agentService) CreateAgentEngine(
 	ctx context.Context,
 	config *types.AgentConfig,
-	chatModel chat.Chat,
+	chatModel *invoke.ModelConfig,
 	rerankModel rerank.Reranker,
 	eventBus *event.EventBus,
 	sessionID, assistantMessageID string,
@@ -205,7 +205,7 @@ func (s *agentService) CreateAgentEngine(
 	if config.MaxToolOutputChars > 0 {
 		toolRegistry.SetMaxToolOutputSize(config.MaxToolOutputChars)
 	}
-	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
+	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
@@ -246,9 +246,9 @@ func (s *agentService) CreateAgentEngine(
 	// Non-vision chat models use the configured VLM to describe tool images.
 	// Vision chat models receive the original images after the tool replies.
 	if config.VLMModelID != "" {
-		if vlmModel, err := s.modelService.GetVLMModel(ctx, config.VLMModelID); err == nil {
+		if vlmCfg, err := buildModelConfigByID(ctx, s.modelService, config.VLMModelID); err == nil {
 			engine.SetImageDescriber(func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
-				return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+				return invokeVLMPredict(ctx, vlmCfg, imgBytes, prompt)
 			})
 			logger.Infof(ctx, "VLM image describer set for tool result analysis (model: %s)", config.VLMModelID)
 		} else {
@@ -839,7 +839,6 @@ func (s *agentService) registerTools(
 	registry *tools.ToolRegistry,
 	config *types.AgentConfig,
 	rerankModel rerank.Reranker,
-	chatModel chat.Chat,
 	sessionID string,
 ) error {
 	// Source of truth policy:

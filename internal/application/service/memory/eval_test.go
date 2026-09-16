@@ -219,14 +219,14 @@ func TestPromptEval(t *testing.T) {
 	if modelID == "" {
 		t.Skip("set WEKNORA_MEMORY_EVAL_MODEL (plus base URL / API key) to score the prompt")
 	}
-	chatModel, err := newEvalChatModel(modelID)
+	cfg, err := newEvalModelConfig(modelID)
 	require.NoError(t, err)
 
 	set := loadEvalSet(t)
 	passed := 0
 	for _, c := range set.Cases {
 		prompt := buildExtractionPrompt(segmentForCase(c), existingForCase(c), nil, nil, "")
-		decisions, err := runEvalExtraction(context.Background(), chatModel, prompt)
+		decisions, err := runEvalExtraction(context.Background(), cfg, prompt)
 		if err != nil {
 			t.Errorf("case %q: %v", c.Name, err)
 			continue

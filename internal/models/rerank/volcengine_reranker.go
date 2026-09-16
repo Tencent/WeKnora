@@ -7,14 +7,16 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/volcengine/vikingdb-go-sdk/knowledge"
 	knowledgemodel "github.com/volcengine/vikingdb-go-sdk/knowledge/model"
 	"golang.org/x/sync/errgroup"
 )
 
 const (
-	VolcengineRerankBaseURL = provider.VolcengineRerankBaseURL
+	// VolcengineRerankBaseURL is the knowledge-base rerank endpoint; kept as a
+	// package alias until P5 retires this v1 client (invoke hosts the canonical).
+	VolcengineRerankBaseURL = invoke.VolcengineRerankBaseURL
 
 	volcengineRerankPath               = "/api/knowledge/service/rerank"
 	volcengineRerankDefaultModel       = "doubao-seed-rerank"

@@ -1,0 +1,69 @@
+{
+  "scenario": "openai_reasoning_content_roundtrip",
+  "behavior": [
+    "ConvertMessages round-trips assistant reasoning_content onto wire",
+    "deepseek-reasoner model name (no adapter behavior change; kept plain)",
+    "Kind field stays off wire (json:-)"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "application/json",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "deepseek-reasoner",
+        "messages": [
+          {
+            "role": "user",
+            "content": "What is 2+2?"
+          },
+          {
+            "role": "assistant",
+            "content": "4",
+            "reasoning_content": "addition of two integers"
+          },
+          {
+            "role": "user",
+            "content": "and times 3?"
+          }
+        ],
+        "max_completion_tokens": 256
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unreported"
+    }
+  }
+}

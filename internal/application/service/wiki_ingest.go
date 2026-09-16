@@ -15,7 +15,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -507,7 +507,6 @@ func EnqueueWikiIngest(
 	kbID, knowledgeID string,
 ) (bool, error) {
 	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
-
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
 	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
@@ -2105,7 +2104,8 @@ const indexIntroSummaryCap = 200
 //
 // The intro is written to both Content and Summary so legacy readers
 // that fall through to Summary stay in sync.
-func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat.Chat, payload WikiIngestPayload,
+func (s *wikiIngestService) rebuildIndexPage(
+	ctx context.Context, invokeCfg *invoke.ModelConfig, payload WikiIngestPayload,
 	changeDesc, lang, customInstructions string,
 ) error {
 	indexPage, _ := s.wikiService.GetIndex(ctx, payload.KnowledgeBaseID)
@@ -2160,7 +2160,7 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		if docSummaries.Len() == 0 {
 			docSummaries.WriteString("(no documents yet)")
 		}
-		generatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroPrompt, map[string]string{
+		generatedIntro, genErr := s.generateWithTemplate(ctx, invokeCfg, agent.WikiIndexIntroPrompt, map[string]string{
 			"DocumentSummaries":  framing + docSummaries.String(),
 			"Language":           lang,
 			"CustomInstructions": customInstructions,
@@ -2178,14 +2178,15 @@ func (s *wikiIngestService) rebuildIndexPage(ctx context.Context, chatModel chat
 		// would re-flood the context every batch, and the
 		// change-description block already encodes the "what just
 		// changed" signal the prompt is asking for.
-		updatedIntro, genErr := s.generateWithTemplate(ctx, chatModel, agent.WikiIndexIntroUpdatePrompt, map[string]string{
-			"ExistingIntro":      existingIntro,
-			"ChangeDescription":  changeDesc,
-			"DocumentSummaries":  "",
-			"Language":           lang,
-			"CustomInstructions": customInstructions,
-			"InstructionScope":   "wiki_content",
-		})
+		updatedIntro, genErr := s.generateWithTemplate(
+			ctx, invokeCfg, agent.WikiIndexIntroUpdatePrompt, map[string]string{
+				"ExistingIntro":      existingIntro,
+				"ChangeDescription":  changeDesc,
+				"DocumentSummaries":  "",
+				"Language":           lang,
+				"CustomInstructions": customInstructions,
+				"InstructionScope":   "wiki_content",
+			})
 		if genErr != nil {
 			intro = existingIntro // keep existing on error
 		} else {
@@ -2305,7 +2306,7 @@ func xmlEscape(s string) string {
 // init step (see migrations/paradedb/00-init-db.sql).
 func (s *wikiIngestService) deduplicateExtractedBatch(
 	ctx context.Context,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	kbID string,
 	entities, concepts []extractedItem,
 	batchCtx *WikiBatchContext,
@@ -2453,7 +2454,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 		return stabilize()
 	}
 
-	dedupeJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiDeduplicationPrompt, map[string]string{
+	dedupeJSON, err := s.generateWithTemplate(ctx, invokeCfg, agent.WikiDeduplicationPrompt, map[string]string{
 		"Candidates": candBuf.String(),
 	})
 	if err != nil {
@@ -2518,7 +2519,9 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 // transient 504 from the upstream gateway used to drop the document's
 // summary page permanently. Retries plus failedOps requeuing (see
 // mapOneDocument) turn those events into at-most-a-few-minute hiccups.
-func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel chat.Chat, promptTpl string, data map[string]string) (string, error) {
+func (s *wikiIngestService) generateWithTemplate(
+	ctx context.Context, invokeCfg *invoke.ModelConfig, promptTpl string, data map[string]string,
+) (string, error) {
 	tmpl, err := template.New("wiki").Parse(promptTpl)
 	if err != nil {
 		return "", fmt.Errorf("parse template: %w", err)
@@ -2533,33 +2536,38 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 
 	prompt := buf.String()
 	purpose := wikiPromptPurpose(promptTpl)
-	messages := []chat.Message{{Role: "user", Content: prompt}}
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, prompt)}
 	if promptTpl == agent.WikiPageModifyUserPrompt {
 		systemPrompt := types.AppendCustomPromptInstructions(
 			agent.WikiPageModifySystemPrompt,
 			maskedData["CustomInstructions"],
 			maskedData["InstructionScope"],
 		)
-		messages = []chat.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: prompt},
+		messages = []invoke.Message{
+			invoke.TextMessage(invoke.RoleSystem, systemPrompt),
+			invoke.TextMessage(invoke.RoleUser, prompt),
 		}
 	} else {
-		messages[0].Content = types.AppendCustomPromptInstructions(
+		messages[0].Content = []invoke.Part{{Text: types.AppendCustomPromptInstructions(
 			prompt, maskedData["CustomInstructions"], maskedData["InstructionScope"],
-		)
+		)}}
 	}
 	thinking := false
-	opts := &chat.ChatOptions{Temperature: 0.3, Thinking: &thinking, MaxTokens: wikiLLMMaxTokens}
-	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
+	opts := &invoke.ChatOptions{
+		Messages:            messages,
+		Temperature:         0.3,
+		Thinking:            &thinking,
+		MaxCompletionTokens: wikiLLMMaxTokens,
+	}
+	prefixFingerprint := invoke.PromptPrefixFingerprint(messages, opts)
 	warmupKey := ""
 	if promptTpl == agent.WikiPageModifyUserPrompt {
-		prefixFingerprint = chat.FingerprintPromptPrefix(
-			messages[0].Content, maskedData["SharedSourceContexts"],
+		prefixFingerprint = invoke.FingerprintPromptPrefix(
+			messages[0].Text(), maskedData["SharedSourceContexts"],
 		)
 		if tenantID, ok := types.TenantIDFromContext(ctx); ok {
-			warmupKey = chat.BuildPromptCacheKey(
-				tenantID, chatModel.GetModelID(), purpose, prefixFingerprint,
+			warmupKey = invoke.BuildPromptCacheKey(
+				tenantID, invokeCfg.ModelID, purpose, prefixFingerprint,
 			)
 		}
 	}
@@ -2567,12 +2575,12 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 
 	tenantID, tenantScoped := types.TenantIDFromContext(ctx)
 	requestJSON, _ := json.Marshal(struct {
-		Messages []chat.Message    `json:"messages"`
-		Options  *chat.ChatOptions `json:"options"`
+		Messages []invoke.Message    `json:"messages"`
+		Options  *invoke.ChatOptions `json:"options"`
 	}{Messages: messages, Options: opts})
-	requestKey := chat.BuildPromptCacheKey(
-		tenantID, chatModel.GetModelID(), "wiki_exact_request",
-		chat.FingerprintPromptPrefix(string(requestJSON)),
+	requestKey := invoke.BuildPromptCacheKey(
+		tenantID, invokeCfg.ModelID, "wiki_exact_request",
+		invoke.FingerprintPromptPrefix(string(requestJSON)),
 	)
 
 	execute := func() (interface{}, error) {
@@ -2588,7 +2596,7 @@ func (s *wikiIngestService) generateWithTemplate(ctx context.Context, chatModel 
 
 		var lastErr error
 		for attempt := 1; attempt <= wikiLLMMaxAttempts; attempt++ {
-			response, callErr := chatModel.Chat(ctx, messages, opts)
+			response, callErr := invoke.Chat(ctx, invokeCfg, opts)
 			if callErr == nil && response != nil {
 				return response.Content, nil
 			}

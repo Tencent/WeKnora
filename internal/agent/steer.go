@@ -6,7 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -38,7 +38,7 @@ func (e *AgentEngine) SetSteerSink(sink types.SteerSink) {
 func (e *AgentEngine) drainSteerMessages(
 	ctx context.Context,
 	state *types.AgentState,
-	messagesPtr *[]chat.Message,
+	messagesPtr *[]invoke.Message,
 	sessionID, messageID string,
 ) int {
 	if e.steerSink == nil {
@@ -66,7 +66,7 @@ func (e *AgentEngine) drainSteerMessages(
 			logger.Warnf(ctx, "[Agent] Steer persist failed for %s, leaving event pending", steerID)
 			continue
 		}
-		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: types.SteerMessageContent(content)})
+		*messagesPtr = append(*messagesPtr, invoke.TextMessage(invoke.RoleUser, types.SteerMessageContent(content)))
 		state.PendingSteerMessages = append(state.PendingSteerMessages, userMessageID)
 		_ = e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("injected"),

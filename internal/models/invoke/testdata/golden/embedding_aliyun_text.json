@@ -1,0 +1,25 @@
+{
+  "scenario": "embedding_aliyun_text",
+  "behavior": [
+    "native DashScope text-embedding endpoint ({model, input:{texts}}) — the compatible-mode openai shape retired 2026-09-12",
+    "legacy compatible-mode record base is normalized back to the DashScope root by the adapter"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/services/embeddings/text-embedding/text-embedding",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "text-embedding-v4",
+        "input": {
+          "texts": [
+            "hello",
+            "world"
+          ]
+        }
+      }
+    }
+  ]
+}

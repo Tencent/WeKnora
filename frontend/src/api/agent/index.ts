@@ -47,6 +47,7 @@ export interface CustomAgentConfig {
   temperature?: number;
   max_completion_tokens?: number;   // 0 = 跟随系统默认（快速问答 2048；智能推理 4096，绑沙箱可写文件时 24576）。大于 0 为自定义上限
   thinking?: boolean;                      // 是否启用思考模式（支持扩展思考的模型）
+  thinking_level?: string;               // 思考档位（空 = 跟随模型默认；开关为 config.thinking）
   citation_enabled?: boolean;        // 是否在最终回答中输出知识库/网页来源引用（默认开启）
 
   // ===== Agent模式设置 =====
@@ -134,6 +135,18 @@ export interface CustomAgentConfig {
   fallback_prompt?: string;         // 兜底提示词（模型生成时）
   // 意图提示词：非检索意图（问候、闲聊等）时覆盖主系统提示词
   intent_prompts?: Record<string, string>;
+
+  // ===== 上下文模板 / 检索历史 / 数据分析 / FAQ / 联网抓取 / 查询理解 =====
+  // （后端 custom_agent.go 全量替换 config——按本接口从零构造会清零这些
+  // 字段，2026-09-13 审查补齐镜像；context_template_id 声明见上方模型设置组）
+  retain_retrieval_history?: boolean;
+  data_analysis_enabled?: boolean;
+  faq_priority_enabled?: boolean;
+  faq_direct_answer_threshold?: number;
+  faq_score_boost?: number;
+  web_fetch_enabled?: boolean;
+  web_fetch_top_n?: number;
+  query_understand_model_id?: string;
 
   // ===== 已废弃字段（保留兼容）=====
   welcome_message?: string;

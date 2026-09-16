@@ -10,7 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -100,7 +100,7 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Ask LLM to generate SQL for data analysis
-	chatModel, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	chatModel, err := buildChatModelConfig(ctx, p.modelService, chatManage.ChatModelID)
 	if err != nil {
 		return ErrGetChatModel.WithError(err)
 	}
@@ -120,9 +120,8 @@ If NO, leave the sql field empty.
 Return your response in the specified JSON format.`, chatManage.Query, knowledge.ID, schema.Description())
 
 	modelCtx := types.WithLLMCallMetadata(ctx, "data_analysis_plan", "")
-	response, err := chatModel.Chat(modelCtx, []chat.Message{
-		{Role: "user", Content: analysisPrompt},
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(modelCtx, chatModel, &invoke.ChatOptions{
+		Messages:    []invoke.Message{invoke.TextMessage(invoke.RoleUser, analysisPrompt)},
 		Temperature: 0.1,
 		Format:      formatSchema,
 	})

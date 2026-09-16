@@ -1,19 +1,24 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/invoke/adapters"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -93,13 +98,17 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		}
 	}
 
+	// Store raw values — SanitizeForLog is a LOG-hygiene helper and must not
+	// mutate persisted data (2026-09-13 review: Create used to strip control
+	// characters at rest while Update stored raw, so editing a name carrying
+	// an invisible control character made the corruption visible).
 	model := &types.Model{
 		TenantID:    tenantID,
-		Name:        secutils.SanitizeForLog(req.Name),
-		DisplayName: secutils.SanitizeForLog(req.DisplayName),
-		Type:        types.ModelType(secutils.SanitizeForLog(string(req.Type))),
+		Name:        req.Name,
+		DisplayName: req.DisplayName,
+		Type:        req.Type,
 		Source:      req.Source,
-		Description: secutils.SanitizeForLog(req.Description),
+		Description: req.Description,
 		Parameters:  req.Parameters,
 	}
 
@@ -190,7 +199,9 @@ func (h *ModelHandler) ListModels(c *gin.Context) {
 		return
 	}
 
-	models, err := h.service.ListModels(ctx)
+	// 服务端类型过滤（2026-09-14 裁定 #14）：?type=chat|embedding|rerank|vllm|asr
+	// 下推到 repo，不再全量拉取后前端过滤。空参 = 全量。
+	models, err := h.service.ListModels(ctx, types.ModelType(strings.TrimSpace(c.Query("type"))))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(errors.NewInternalServerError(err.Error()))
@@ -433,17 +444,19 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("query cannot be empty"))
 			return
 		}
-		instance, callErr := h.service.GetChatModel(ctx, id)
+		// The outer fetch already loaded the record — a second GetModelByID
+		// per case is a wasted round trip and a TOCTOU gap (2026-09-13 review).
+		invokeCfg, callErr := h.service.BuildModelConfig(ctx, model)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
 		}
-		messages := make([]chat.Message, 0, 2)
+		messages := make([]invoke.Message, 0, 2)
 		if strings.TrimSpace(opts.SystemPrompt) != "" {
-			messages = append(messages, chat.Message{Role: "system", Content: opts.SystemPrompt})
+			messages = append(messages, invoke.TextMessage(invoke.RoleSystem, opts.SystemPrompt))
 		}
-		messages = append(messages, chat.Message{Role: "user", Content: input})
-		chatOpts := &chat.ChatOptions{}
+		messages = append(messages, invoke.TextMessage(invoke.RoleUser, input))
+		chatOpts := &invoke.ChatOptions{Messages: messages}
 		if opts.Temperature != nil {
 			chatOpts.Temperature = *opts.Temperature
 		}
@@ -451,17 +464,16 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			chatOpts.TopP = *opts.TopP
 		}
 		if opts.MaxTokens != nil {
-			chatOpts.MaxTokens = *opts.MaxTokens
+			chatOpts.MaxCompletionTokens = *opts.MaxTokens
 		}
 		chatOpts.Thinking = opts.Thinking
-		chatConfig := chat.ConfigFromModel(model, "", "")
-		thinkingControl := chat.EffectiveThinkingControl(chatConfig)
+		thinkingControl := invoke.EffectiveThinkingControl(invokeCfg)
 		observations["stream"] = true
 		observations["requested_thinking"] = opts.Thinking != nil && *opts.Thinking
 		observations["thinking_control"] = thinkingControl
 		observations["thinking_parameter_sent"] = opts.Thinking != nil && thinkingControl != "none"
 
-		stream, callErr := instance.ChatStream(ctx, messages, chatOpts)
+		stream, callErr := invoke.ChatStream(ctx, invokeCfg, chatOpts)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
@@ -504,12 +516,30 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("image file is required"))
 			return
 		}
-		instance, callErr := h.service.GetVLMModel(ctx, id)
+		// The outer fetch already loaded the record — a second GetModelByID
+		// per case is a wasted round trip and a TOCTOU gap (2026-09-13 review).
+		invokeCfg, callErr := h.service.BuildModelConfig(ctx, model)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
 		}
-		result, callErr := instance.Predict(ctx, [][]byte{fileBytes}, input)
+		resp, callErr := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+			// v1 vlm.Predict defaults: temperature 0.1, MaxTokens 5000, image
+			// inlined as a data URI with auto detail (text prompt first).
+			Temperature:         0.1,
+			MaxCompletionTokens: 5000,
+			Messages: []invoke.Message{{
+				Role: invoke.RoleUser,
+				Content: []invoke.Part{
+					{Text: input},
+					{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(fileBytes)}},
+				},
+			}},
+		})
+		result := ""
+		if resp != nil {
+			result = resp.Content
+		}
 		observations["answer_characters"] = len([]rune(result))
 		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
 	case types.ModelTypeASR:
@@ -589,10 +619,13 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 		return
 	}
 
-	// Update model fields if they are provided in the request
-	if req.Name != "" {
-		model.Name = req.Name
-	}
+	// Update model fields — REPLACE semantics (2026-09-13 裁定 C2): the
+	// request body is authoritative; omitted fields are CLEARED, nothing is
+	// silently preserved except the credential secrets below (subresource-
+	// owned, security rule). Callers must send the full configuration: the
+	// UI always does (full-form PUT) and the CLI fetches a baseline first
+	// (cli/cmd/model/update.go "full PUT must fetch baseline").
+	model.Name = req.Name
 	if req.DisplayName != nil {
 		model.DisplayName = secutils.SanitizeForLog(*req.DisplayName)
 	}
@@ -624,16 +657,47 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	newParams := req.Parameters
 	newParams.APIKey = storedAPIKey
 	newParams.AppSecret = storedAppSecret
-	// Preserve backend-managed fields not sent by the frontend either.
-	newParams.ParameterSize = model.Parameters.ParameterSize
-	if newParams.InterfaceType == "" {
-		newParams.InterfaceType = model.Parameters.InterfaceType
-	}
-	if newParams.AppID == "" {
-		newParams.AppID = model.Parameters.AppID
-	}
-	if newParams.ExtraConfig == nil {
-		newParams.ExtraConfig = model.Parameters.ExtraConfig
+	// Flat-field fold (design §8 write-side is shard-only): the Get* readers
+	// prefer the Chat shard, so the UI's flat context_window /
+	// max_output_tokens/supports_vision writes must fold into the shard or
+	// they are silently shadowed on read-back ("saved but no effect"). Under
+	// REPLACE semantics a caller-provided shard replaces the stored one; the
+	// flat form stays the legacy alias of the same three fields and folds in
+	// wherever non-zero. The fold reads the REQUEST's flat fields directly —
+	// the Get* readers would prefer the shard and fold it onto itself.
+	// Migration-window reads of the REQUEST's flat legacy fields — the Get*
+	// readers would prefer the shard and fold it back onto itself.
+	cw := newParams.ContextWindow   //nolint:staticcheck // SA1019 migration-window fold input
+	mo := newParams.MaxOutputTokens //nolint:staticcheck // SA1019 migration-window fold input
+	sv := newParams.SupportsVision  //nolint:staticcheck // SA1019 migration-window fold input
+	if newParams.Chat == nil {
+		if cw > 0 || mo > 0 || sv {
+			chat := newParams.EnsureChat()
+			chat.ContextWindow = cw
+			chat.MaxOutputTokens = mo
+			if sv {
+				chat.InputModalities = append(chat.InputModalities, "image")
+			}
+		}
+	} else {
+		if cw > 0 {
+			newParams.Chat.ContextWindow = cw
+		}
+		if mo > 0 {
+			newParams.Chat.MaxOutputTokens = mo
+		}
+		if sv {
+			hasImage := false
+			for _, mod := range newParams.Chat.InputModalities {
+				if mod == "image" {
+					hasImage = true
+					break
+				}
+			}
+			if !hasImage {
+				newParams.Chat.InputModalities = append(newParams.Chat.InputModalities, "image")
+			}
+		}
 	}
 	model.Parameters = newParams
 
@@ -709,11 +773,13 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 
 // ModelProviderDTO 模型厂商信息 DTO
 type ModelProviderDTO struct {
-	Value       string            `json:"value"`       // provider 标识符
-	Label       string            `json:"label"`       // 显示名称
-	Description string            `json:"description"` // 描述
-	DefaultURLs map[string]string `json:"defaultUrls"` // 按模型类型区分的默认 URL
-	ModelTypes  []string          `json:"modelTypes"`  // 支持的模型类型
+	Value        string                    `json:"value"`                 // provider 标识符
+	Label        string                    `json:"label"`                 // 显示名称
+	Description  string                    `json:"description"`           // 描述
+	DefaultURLs  map[string]string         `json:"defaultUrls"`           // 按模型类型区分的默认 URL
+	ModelTypes   []string                  `json:"modelTypes"`            // 支持的模型类型
+	Capabilities invoke.Capabilities       `json:"capabilities"`          // 能力声明分片（前端按 type 渲染）
+	ExtraFields  []invoke.ExtraFieldConfig `json:"extraFields,omitempty"` // 动态配置字段
 }
 
 // modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
@@ -741,7 +807,7 @@ func modelTypeToFrontend(mt types.ModelType) string {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm)"
+// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"
 // @Success      200         {object}  map[string]interface{}  "厂商列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -771,13 +837,14 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		backendModelType = types.ModelType(modelType)
 	}
 
-	var providers []provider.ProviderInfo
+	// 厂商元数据表在 adapters 包（P4：models/provider 注册表删除）。
+	var providers []invoke.ProviderInfo
 	if modelType != "" {
 		// 按模型类型过滤
-		providers = provider.ListByModelType(backendModelType)
+		providers = adapters.ListProvidersByModelType(backendModelType)
 	} else {
 		// 返回所有 provider
-		providers = provider.List()
+		providers = adapters.ListProviders()
 	}
 
 	// 转换为 DTO
@@ -798,11 +865,13 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		}
 
 		result = append(result, ModelProviderDTO{
-			Value:       string(p.Name),
-			Label:       p.DisplayName,
-			Description: p.Description,
-			DefaultURLs: defaultURLs,
-			ModelTypes:  modelTypes,
+			Value:        string(p.Name),
+			Label:        p.DisplayName,
+			Description:  p.Description,
+			DefaultURLs:  defaultURLs,
+			ModelTypes:   modelTypes,
+			Capabilities: p.EffectiveCapabilities(),
+			ExtraFields:  p.ExtraFields,
 		})
 	}
 
@@ -811,4 +880,217 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
+}
+
+// --- Model catalog & remote listing (design §5.10) ---
+
+// catalogProbeRateLimit caps backend-probe calls per tenant per minute to
+// keep the endpoint from becoming an external-scanning channel (design §5.10.2).
+const catalogProbeRateLimit = 10
+
+var (
+	catalogProbeMu      sync.Mutex
+	catalogProbeWindows = map[uint64]*catalogProbeWindow{}
+)
+
+type catalogProbeWindow struct {
+	start time.Time
+	count int
+}
+
+func allowCatalogProbe(tenantID uint64) bool {
+	now := time.Now()
+	catalogProbeMu.Lock()
+	defer catalogProbeMu.Unlock()
+	w, ok := catalogProbeWindows[tenantID]
+	if !ok || now.Sub(w.start) >= time.Minute {
+		if len(catalogProbeWindows) > 1024 {
+			catalogProbeWindows = map[uint64]*catalogProbeWindow{} // crude GC
+		}
+		catalogProbeWindows[tenantID] = &catalogProbeWindow{start: now, count: 1}
+		return true
+	}
+	w.count++
+	return w.count <= catalogProbeRateLimit
+}
+
+// GetModelCatalog godoc
+// @Summary      获取模型参数目录
+// @Description  返回内置 models.json 目录（按 provider 过滤可选），用于配置表单预填
+// @Tags         模型管理
+// @Produce      json
+// @Param        provider  query     string  false  "厂商标识（不传返回全部）"
+// @Success      200       {object}  map[string]interface{}  "目录数据"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/catalog [get]
+func (h *ModelHandler) GetModelCatalog(c *gin.Context) {
+	cat := catalog.Get()
+	if cat == nil {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"available": false}})
+		return
+	}
+	if filter := c.Query("provider"); filter != "" {
+		prov, ok := cat.Providers[strings.ToLower(filter)]
+		if !ok {
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"data":    gin.H{"available": false, "reason": "provider not in catalog"},
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"available": true,
+			"version":   cat.Version,
+			"providers": gin.H{strings.ToLower(filter): prov},
+		}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"available": true,
+		"version":   cat.Version,
+		"providers": cat.Providers,
+	}})
+}
+
+// probeBaseURLHostsDiffer reports whether two base URLs point at different
+// hosts — the C4 guard's trigger condition. Unparseable input counts as
+// differing: the guard fails closed.
+func probeBaseURLHostsDiffer(requested, stored string) bool {
+	u1, err1 := url.Parse(strings.TrimSpace(requested))
+	u2, err2 := url.Parse(strings.TrimSpace(stored))
+	if err1 != nil || err2 != nil {
+		return true
+	}
+	return !strings.EqualFold(u1.Host, u2.Host)
+}
+
+// auditModelProbeRedirect durably records a C4 redirect attempt (denied).
+// Details carry hosts only — never secrets. Best-effort: the audit service
+// is nil in lite mode, and an audit failure must not mask the 400.
+func auditModelProbeRedirect(ctx context.Context, c *gin.Context, tenantID uint64, modelID, fromURL, toURL string) {
+	logger.Warnf(ctx,
+		"[remote-catalog][audit] stored-credential probe redirected to a different host (model %s): %s -> %s; denied",
+		secutils.SanitizeForLog(modelID),
+		secutils.SanitizeForLog(fromURL), secutils.SanitizeForLog(toURL))
+	svc := middleware.AuditServiceFromContext(c)
+	if svc == nil {
+		return
+	}
+	actor := types.CallerFromContext(ctx)
+	details, _ := json.Marshal(map[string]string{
+		"from_host": hostOf(fromURL),
+		"to_host":   hostOf(toURL),
+	})
+	_ = svc.Log(ctx, &types.AuditLog{
+		TenantID:      tenantID,
+		ActorUserID:   actor.UserID,
+		Action:        types.AuditActionModelProbeRedirect,
+		ScopeType:     "model",
+		ScopeID:       modelID,
+		TargetType:    "model",
+		TargetID:      modelID,
+		RequestPath:   c.Request.URL.Path,
+		RequestMethod: c.Request.Method,
+		Outcome:       types.AuditOutcomeDenied,
+		Details:       details,
+	})
+}
+
+func hostOf(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// ProbeRemoteCatalogRequest carries the connection info for a backend
+// listing probe. APIKey is only present for unsaved configurations; saved
+// models reuse stored credentials via ModelID (design §5.10.2).
+type ProbeRemoteCatalogRequest struct {
+	Provider string `json:"provider" binding:"required"`
+	BaseURL  string `json:"base_url"`
+	APIKey   string `json:"api_key,omitempty"`
+	ModelID  string `json:"model_id,omitempty"`
+	// ModelType 是当前编辑的模型类型（2026-09-12 裁定③：所有远程列表
+	// 加载按编辑类型过滤；适配器按各自目录能力消费，无过滤能力的忽略）。
+	ModelType string `json:"model_type,omitempty"`
+}
+
+// ProbeRemoteCatalog godoc
+// @Summary      探测远端模型列表
+// @Description  后端代理探测厂商模型列表（密钥不出服务端；未保存配置可直接探测）
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        request  body      ProbeRemoteCatalogRequest  true  "厂商连接信息"
+// @Success      200      {object}  map[string]interface{}  "模型列表或失败原因"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      429      {object}  errors.AppError         "探测频率超限"
+// @Security     Bearer
+// @Router       /models/remote-catalog [post]
+func (h *ModelHandler) ProbeRemoteCatalog(c *gin.Context) {
+	ctx := c.Request.Context()
+	tenantID, _ := types.TenantIDFromContext(ctx)
+
+	var req ProbeRemoteCatalogRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if !allowCatalogProbe(tenantID) {
+		_ = c.Error(errors.NewTooManyRequestsError("remote catalog probe rate limit exceeded"))
+		return
+	}
+
+	apiKey := strings.TrimSpace(req.APIKey)
+	if apiKey == "" && req.ModelID != "" {
+		model, err := h.service.GetModelByID(ctx, req.ModelID)
+		if err != nil || model == nil {
+			_ = c.Error(errors.NewNotFoundError("model not found"))
+			return
+		}
+		if req.BaseURL != "" && probeBaseURLHostsDiffer(req.BaseURL, model.Parameters.BaseURL) {
+			// 2026-09-13 裁定 C4：编辑模式借存量凭证探测时，把 base_url 指向
+			// 与存量不同的主机，等于把（可能由他人配置的）密钥发往调用方
+			// 控制的任意外部主机——强制拒绝，要求显式携带 api_key，并留
+			// 审计日志（不落 secret 值）。SSRF 门禁照常在 invoke.List 生效。
+			// 前端影响：编辑态改 base_url 后的列表探测会降级手输（reason
+			// 透出本拒绝消息），属裁定接受的取舍。
+			auditModelProbeRedirect(ctx, c, tenantID, req.ModelID,
+				model.Parameters.BaseURL, req.BaseURL)
+			_ = c.Error(errors.NewBadRequestError(
+				"base_url 与存量模型主机不一致，不能复用存储凭证探测；请显式携带 api_key 或还原 base_url"))
+			return
+		}
+		apiKey = model.Parameters.APIKey
+		if req.BaseURL == "" {
+			req.BaseURL = model.Parameters.BaseURL
+		}
+	}
+
+	models, err := invoke.List(ctx, req.Provider, &invoke.ListOptions{
+		BaseURL:     req.BaseURL,
+		Credentials: invoke.Credentials{APIKey: apiKey},
+		ModelType:   types.ModelType(req.ModelType),
+	})
+	if err != nil {
+		// Failure degrades, never blocks (design §5.10.2): the frontend
+		// switches to manual entry with the reason. Keys are never logged.
+		logger.Warnf(ctx, "[remote-catalog] probe failed for provider %s: %v",
+			secutils.SanitizeForLog(req.Provider), err)
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+			"available": false,
+			"reason":    err.Error(),
+		}})
+		return
+	}
+
+	logger.Infof(ctx, "[remote-catalog] probe ok for provider %s: %d models",
+		secutils.SanitizeForLog(req.Provider), len(models))
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"available": true,
+		"models":    models,
+	}})
 }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -45,7 +45,7 @@ var ErrNothingToCompact = errors.New("compaction: nothing outside the keep-recen
 
 // Result describes what one compaction did.
 type Result struct {
-	Messages       []chat.Message
+	Messages       []invoke.Message
 	Summary        string
 	Reason         Reason
 	TokensBefore   int
@@ -69,18 +69,18 @@ func (r *Result) Freed() int {
 
 // Compactor summarizes conversation history into a checkpoint.
 type Compactor struct {
-	chatModel chat.Chat
-	estimator *agenttoken.Estimator
-	settings  Settings
+	chatConfig *invoke.ModelConfig
+	estimator  *agenttoken.Estimator
+	settings   Settings
 }
 
 // New builds a compactor. It returns nil when compaction cannot run, so the
 // caller can treat a nil compactor as "feature off" without a second flag.
-func New(chatModel chat.Chat, estimator *agenttoken.Estimator, settings Settings) *Compactor {
-	if chatModel == nil || estimator == nil || settings.MaxContextTokens <= 0 {
+func New(chatConfig *invoke.ModelConfig, estimator *agenttoken.Estimator, settings Settings) *Compactor {
+	if chatConfig == nil || estimator == nil || settings.MaxContextTokens <= 0 {
 		return nil
 	}
-	return &Compactor{chatModel: chatModel, estimator: estimator, settings: settings.Normalize()}
+	return &Compactor{chatConfig: chatConfig, estimator: estimator, settings: settings.Normalize()}
 }
 
 // Settings returns the normalized settings, including the derived threshold.
@@ -94,7 +94,7 @@ func (c *Compactor) Settings() Settings {
 // Compact replaces history older than the keep-recent budget with a summary.
 // It returns ErrNothingToCompact when no such history exists.
 func (c *Compactor) Compact(
-	ctx context.Context, messages []chat.Message, reason Reason,
+	ctx context.Context, messages []invoke.Message, reason Reason,
 ) (*Result, error) {
 	if c == nil {
 		return nil, ErrNothingToCompact
@@ -166,7 +166,7 @@ func (c *Compactor) buildSummary(ctx context.Context, p *Preparation) (string, b
 // summarize runs one summarization call with retries.
 func (c *Compactor) summarize(
 	ctx context.Context,
-	messages []chat.Message,
+	messages []invoke.Message,
 	previousSummary, instructions string,
 	maxTokens int,
 ) (string, error) {
@@ -176,13 +176,14 @@ func (c *Compactor) summarize(
 	for attempt := 1; attempt <= maxSummarizationAttempts; attempt++ {
 		callCtx, cancel := context.WithTimeout(ctx, summarizationTimeout)
 		callCtx = types.WithLLMCallMetadata(callCtx, llmCallLabel, "")
-		resp, err := c.chatModel.Chat(callCtx, []chat.Message{
-			{Role: "system", Content: summarizationSystemPrompt},
-			{Role: "user", Content: prompt},
-		}, &chat.ChatOptions{
-			Temperature:    0.3, // low temperature for factual summarization
-			MaxTokens:      maxTokens,
-			CacheRetention: chat.CacheRetentionNone,
+		resp, err := invoke.Chat(callCtx, c.chatConfig, &invoke.ChatOptions{
+			Messages: []invoke.Message{
+				invoke.TextMessage(invoke.RoleSystem, summarizationSystemPrompt),
+				invoke.TextMessage(invoke.RoleUser, prompt),
+			},
+			Temperature:         0.3, // low temperature for factual summarization
+			MaxCompletionTokens: maxTokens,
+			CacheRetention:      invoke.CacheRetentionNone,
 		})
 		cancel()
 
@@ -207,7 +208,7 @@ func (c *Compactor) summarize(
 // cap reads like a valid summary but silently ends mid-section, and every later
 // round inherits that truncation as its only memory of the dropped history.
 // A partial summary is a failure: it cannot serve as a checkpoint.
-func validateSummary(resp *types.ChatResponse) error {
+func validateSummary(resp *invoke.ChatResponse) error {
 	if resp == nil || strings.TrimSpace(resp.Content) == "" {
 		return errors.New("empty response from LLM")
 	}
@@ -221,7 +222,7 @@ func validateSummary(resp *types.ChatResponse) error {
 // buildSummarizationPrompt wraps the transcript in a tag and puts the
 // instructions last, so the summarizer cannot mistake conversation text for
 // its own instructions.
-func buildSummarizationPrompt(messages []chat.Message, previousSummary, instructions string) string {
+func buildSummarizationPrompt(messages []invoke.Message, previousSummary, instructions string) string {
 	var sb strings.Builder
 	sb.WriteString("<conversation>\n")
 	sb.WriteString(serializeConversation(messages))

@@ -31,6 +31,8 @@ import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
+import ThinkingControls from './ThinkingControls.vue';
+import { listModelProviders, type ModelProviderOption } from '@/api/initialization';
 import {
   kbSatisfiesAgentRequirements,
   deriveKbFilterForAgent,
@@ -68,8 +70,7 @@ const {
   chatModels: availableModels,
   webSearchProviders,
 } = storeToRefs(chatResources);
-const { t, locale } = useI18n();
-
+const { t, te, locale } = useI18n();
 let query = ref("");
 const showKbSelector = ref(false);
 
@@ -1092,6 +1093,107 @@ const selectedModel = computed(() => {
   return availableModels.value.find(model => model.id === selectedModelId.value);
 });
 
+// ---- 会话级思考覆盖（design §8.1.3）：内存态不持久化。面板初始展示智能体
+// 的思考设置；用户改动（touched）后才随 QA 请求发送 thinking（布尔，缺省
+// 跟随智能体/全局默认）与 thinking_level——未触碰时不发送任何思考字段。 ----
+const sessionThinkingTouched = ref(false);
+const sessionThinking = ref<{ enabled: boolean; level: string }>({ enabled: false, level: '' });
+const showThinkingPanel = ref(false);
+const chatProviderOptions = ref<ModelProviderOption[]>([]);
+
+const loadThinkingCaps = async () => {
+  try {
+    chatProviderOptions.value = await listModelProviders('chat');
+  } catch (e) {
+    console.error('Failed to load chat provider capabilities', e);
+  }
+};
+
+const selectedModelThinkingCaps = computed(() => {
+  const provider = selectedModel.value?.parameters.provider;
+  if (!provider) return undefined;
+  return chatProviderOptions.value.find(p => p.value === provider)?.capabilities?.chat?.thinking;
+});
+
+const selectedModelChatShard = computed(() => selectedModel.value?.parameters.chat);
+
+/** 未声明思考的模型整块隐藏（触发按钮 + 面板）。布尔思考（SupportedLevels
+    空，如 ollama think）同样支持——会话 API 已传输 thinking 布尔，面板渲染
+    纯开关（ThinkingControls single 形态对空档位不渲染选择器）。 */
+const thinkingSupported = computed(() =>
+  selectedModelThinkingCaps.value?.supported === true);
+
+/** single 档位 options = (分片子集 ?? 厂商枚举) ∩ 厂商枚举（与 ThinkingControls 内规则一致）。 */
+const sessionThinkingLevelOptions = computed(() => {
+  const levels = selectedModelThinkingCaps.value?.supported_levels ?? [];
+  const shard = selectedModelChatShard.value?.selected_levels ?? [];
+  return shard.length ? levels.filter(l => shard.includes(l)) : levels;
+});
+
+/** 智能体侧的思考默认（自定义智能体 config；内置普通模式回落关闭）。 */
+const agentThinkingDefault = computed(() => ({
+  enabled: selectedAgent.value?.config?.thinking === true,
+  level: selectedAgent.value?.config?.thinking_level || '',
+}));
+
+/** 展示态：未触碰 = 智能体默认（档位缺省回落厂商 default_level，且必须在
+    当前可选集合内，否则回落"跟随模型默认"占位）；触碰后 = 用户的选择。 */
+const displayedThinking = computed(() => {
+  if (sessionThinkingTouched.value) return sessionThinking.value;
+  const options = sessionThinkingLevelOptions.value;
+  const capsDefault = selectedModelThinkingCaps.value?.default_level || '';
+  const level = options.includes(agentThinkingDefault.value.level) ? agentThinkingDefault.value.level
+    : options.includes(capsDefault) ? capsDefault : '';
+  return { enabled: agentThinkingDefault.value.enabled, level };
+});
+
+const sessionThinkingEffectiveEnabled = computed(() => displayedThinking.value.enabled);
+const sessionThinkingActive = computed(() => sessionThinkingEffectiveEnabled.value);
+
+const sessionThinkingTriggerLabel = computed(() => {
+  if (!sessionThinkingEffectiveEnabled.value) return t('thinking.levelLabel');
+  const level = displayedThinking.value.level;
+  if (!level) return t('thinking.levelLabel');
+  const key = `model.editor.thinkingLevels.${level}`;
+  return `${t('thinking.levelLabel')} · ${te(key) ? t(key) : level}`;
+});
+
+const sessionThinkingValue = computed({
+  get: () => ({ enabled: sessionThinkingEffectiveEnabled.value, level: displayedThinking.value.level }),
+  set: (v) => {
+    sessionThinkingTouched.value = true;
+    sessionThinking.value = { enabled: v.enabled ?? false, level: v.level || '' };
+  },
+});
+
+/** 清回"跟随智能体/模型默认"（未触碰态：不发任何思考字段）。 */
+const clearSessionThinking = () => {
+  sessionThinkingTouched.value = false;
+  sessionThinking.value = { enabled: false, level: '' };
+};
+
+// 会话中切模型：触碰过的档位 ∉ 新模型集合 → 清回默认态 + toast；
+// 面板隐藏（模型不支持思考）时残留覆盖同样会随请求发出且用户不可见，一并清。
+watch(selectedModelId, () => {
+  if (!sessionThinkingTouched.value) return;
+  const options = sessionThinkingLevelOptions.value;
+  if (sessionThinking.value.level
+    && (options.length === 0 || !options.includes(sessionThinking.value.level))) {
+    clearSessionThinking();
+    MessagePlugin.warning(t('input.thinkingLevelResetToast'));
+  }
+});
+
+// 切智能体：面板默认展示跟随新智能体的思考设置。
+watch(selectedAgentId, () => {
+  clearSessionThinking();
+});
+
+// 会话切换：会话级覆盖是内存态，不跨会话携带
+watch(() => props.sessionId, () => {
+  clearSessionThinking();
+});
+
 // 模型展示名：本空间列表中有则用名称；若为共享智能体且其 model_id 不在本空间列表中则显示“共享智能体配置的模型”
 const selectedModelDisplayName = computed(() => {
   if (selectedModel.value) return modelDisplayName(selectedModel.value);
@@ -1843,6 +1945,7 @@ onMounted(() => {
     loadChatModels(),
     loadAgents(),
     loadMCPServices(),
+    loadThinkingCaps(),
   ]);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
@@ -1948,7 +2051,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], thinkingLevel?: string, thinkingEnabled?: boolean): void;
   (e: 'stop-generation'): void;
   (e: 'stop-confirmed'): void;
   (e: 'stop-failed'): void;
@@ -2080,7 +2183,12 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
 
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  // Detach-safety now lives in the teardown blur (blur the active textarea
+  // before unmount); sending must keep focus — the composer restores/keeps
+  // it across the DOM update (upstream focus contract).
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles,
+    sessionThinkingTouched.value && sessionThinking.value.enabled ? sessionThinking.value.level : '',
+    sessionThinkingTouched.value ? sessionThinking.value.enabled : undefined);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2855,6 +2963,29 @@ defineExpose({
               </div>
             </div>
           </t-tooltip>
+
+          <!-- 思考控制（会话级覆盖 design §8.1.3）：未开思考的模型整块隐藏；嵌入页不暴露 -->
+          <t-popup v-if="thinkingSupported && !embeddedMode" v-model="showThinkingPanel" trigger="click"
+            placement="top-left" :overlay-inner-class-name="'thinking-panel-popup'">
+            <div class="model-display model-display--thinking">
+              <div class="model-selector-trigger thinking-trigger" :class="{ active: sessionThinkingActive }">
+                <t-icon name="lightbulb" size="14px" />
+                <span class="model-selector-name">{{ sessionThinkingTriggerLabel }}</span>
+              </div>
+            </div>
+            <template #content>
+              <div class="thinking-panel" @click.stop>
+                <!-- 开关可传输（会话 API thinking 布尔覆盖）：初始展示智能体
+                     的思考设置，用户改动后随请求发送。 -->
+                <ThinkingControls
+                  v-model="sessionThinkingValue"
+                  edit-mode="single"
+                  :caps="selectedModelThinkingCaps"
+                  :chat-shard="selectedModelChatShard"
+                />
+              </div>
+            </template>
+          </t-popup>
         </div>
 
         <Teleport to="body">
@@ -3695,6 +3826,12 @@ const getImgSrc = (url: string) => {
   margin-left: auto;
   flex-shrink: 0;
 
+  /* 思考触发器是右侧第二个元素：两个 auto 边距会把剩余空间从中间平分，
+     造成模型芯片与思考按钮之间的大空洞（2026-09-14 反馈）——改固定间距 */
+  &.model-display--thinking {
+    margin-left: 6px;
+  }
+
   &.agent-controlled {
     .model-selector-trigger {
       cursor: not-allowed;
@@ -3728,6 +3865,20 @@ const getImgSrc = (url: string) => {
     }
   }
 }
+
+.thinking-trigger {
+  min-width: 0;
+
+  &.active {
+    border-color: var(--td-brand-color);
+    color: var(--td-brand-color);
+
+    .model-selector-name {
+      color: var(--td-brand-color);
+    }
+  }
+}
+
 
 .model-selector-name {
   flex: 1;
@@ -4061,6 +4212,46 @@ const getImgSrc = (url: string) => {
   &:hover {
     color: var(--td-brand-color-active);
     text-decoration: underline;
+  }
+}
+</style>
+
+<!-- 非 scoped 样式：t-popup 面板渲染到 body 下，scoped 无法命中 -->
+<style lang="less">
+/* 思考面板（会话级思考覆盖 design §8.1.3）——排版与全局一致 */
+.thinking-panel-popup {
+  padding: 0;
+  font-size: 13px;
+}
+
+.thinking-panel {
+  width: 280px;
+  padding: 12px;
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+
+  .thinking-controls {
+    gap: 10px;
+  }
+
+  .thinking-controls__label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--td-text-color-secondary);
+  }
+
+  .thinking-controls__desc {
+    margin: 0;
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .thinking-panel__footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--td-component-border, #e7e7e7);
   }
 }
 </style>

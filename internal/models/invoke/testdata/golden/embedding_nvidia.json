@@ -1,0 +1,23 @@
+{
+  "scenario": "embedding_nvidia",
+  "behavior": [
+    "body {model,input,encoding_format:float,input_type:passage} + dimensions when override supported; no truncate field"
+  ],
+  "requests": [
+    {
+      "path": "/embeddings",
+      "headers": {
+        "Authorization": "Bearer nvapi-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "nvidia/nv-embedqa",
+        "input": [
+          "doc"
+        ],
+        "encoding_format": "float",
+        "input_type": "passage"
+      }
+    }
+  ]
+}

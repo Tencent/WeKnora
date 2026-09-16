@@ -35,7 +35,7 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 	}
 	var offered [][]string
 	for _, selected := range []bool{false, true} {
-		model := &fakeAgentChatModel{}
+		model := newFakeAgentChatModel(t)
 		cfg := &types.AgentConfig{
 			LocalBrowserEnabled: selected, WebSearchEnabled: true, SkillsEnabled: true,
 			SandboxConfigID: "sandbox", MCPSelectionMode: "all", KnowledgeBases: []string{"kb"},
@@ -43,7 +43,7 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 			SkillDirs:     []string{t.TempDir()},
 			AllowedTools:  []string{tools.ToolKnowledgeSearch, tools.ToolShellExec, tools.ToolThinking},
 		}
-		engine, err := svc.CreateAgentEngine(ctx, cfg, model, nil, nil, "session", "message")
+		engine, err := svc.CreateAgentEngine(ctx, cfg, model.model(), nil, nil, "session", "message")
 		require.NoError(t, err)
 		require.NotNil(t, engine.(*agent.AgentEngine).GetSkillsManager())
 		_, err = engine.Execute(ctx, "session", "message", "use my browser and other sources", nil)
@@ -51,15 +51,15 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 		for _, name := range []string{
 			tools.ToolKnowledgeSearch, tools.ToolWebSearch, tools.ToolWebFetch, tools.ToolShellExec,
 		} {
-			require.Contains(t, model.lastToolNames, name)
+			require.Contains(t, model.lastToolNames(), name)
 		}
 		if selected {
-			require.Contains(t, model.lastToolNames, "local_browser")
+			require.Contains(t, model.lastToolNames(), "local_browser")
 		} else {
-			require.NotContains(t, model.lastToolNames, "local_browser")
+			require.NotContains(t, model.lastToolNames(), "local_browser")
 		}
 		var otherTools []string
-		for _, name := range model.lastToolNames {
+		for _, name := range model.lastToolNames() {
 			if name != "local_browser" {
 				otherTools = append(otherTools, name)
 			}
@@ -71,9 +71,10 @@ func TestBrowserSourceKeepsOtherConfiguredTools(t *testing.T) {
 
 func TestBrowserSourceUnavailableDoesNotCreateFallbackEngine(t *testing.T) {
 	svc := &agentService{}
+	model := newFakeAgentChatModel(t)
 	engine, err := svc.CreateAgentEngine(
 		t.Context(), &types.AgentConfig{LocalBrowserEnabled: true},
-		&fakeAgentChatModel{}, nil, nil, "session", "message",
+		model.model(), nil, nil, "session", "message",
 	)
 	require.ErrorContains(t, err, "local browser is unavailable")
 	require.Nil(t, engine)

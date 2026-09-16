@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -232,7 +231,7 @@ type kbCleanupModelService struct {
 	interfaces.ModelService
 }
 
-func (kbCleanupModelService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+func (kbCleanupModelService) GetEmbeddingModel(context.Context, string) (interfaces.Embedder, error) {
 	return kbCleanupEmbedder{}, nil
 }
 
@@ -247,7 +246,7 @@ func (kbCleanupEmbedder) GetDimensions() int   { return 1 }
 func (kbCleanupEmbedder) GetModelID() string   { return "test" }
 func (kbCleanupEmbedder) BatchEmbedWithPool(
 	context.Context,
-	embedding.Embedder,
+	interfaces.Embedder,
 	[]string,
 ) ([][]float32, error) {
 	return nil, nil

@@ -13,7 +13,9 @@ import (
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	internalmcp "github.com/Tencent/WeKnora/internal/mcp"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	// Real vendor adapters so the fake HTTP server speaks openai/anthropic wire protocols.
+	_ "github.com/Tencent/WeKnora/internal/models/invoke/adapters"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 	sdkmcp "github.com/mark3labs/mcp-go/mcp"
@@ -240,11 +242,13 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 				}
 			}))
 			defer modelServer.Close()
-			model, err := chat.NewRemoteChat(
-				&chat.ChatConfig{BaseURL: modelServer.URL, APIKey: "test", ModelName: "test-model", Provider: provider},
-			)
-			require.NoError(t, err)
-			engine := newTestEngine(t, model)
+			engine := newTestEngine(t, configSeam{cfg: &invoke.ModelConfig{
+				Provider:    provider,
+				ModelID:     "m-test",
+				ModelName:   "test-model",
+				BaseURL:     modelServer.URL,
+				Credentials: invoke.Credentials{APIKey: "test"},
+			}})
 			engine.toolRegistry = registry
 			state, err := engine.Execute(ctx, "session", "message", "查询订单42的配送状态", nil)
 			require.NoError(t, err)

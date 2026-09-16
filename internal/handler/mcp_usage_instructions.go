@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -74,7 +74,7 @@ func (h *MCPServiceHandler) GenerateMCPUsageInstructions(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	models, err := h.modelService.ListModels(ctx)
+	models, err := h.modelService.ListModels(ctx, types.ModelTypeKnowledgeQA)
 	if err != nil {
 		_ = c.Error(errors.NewInternalServerError("Failed to read chat models"))
 		return
@@ -95,7 +95,14 @@ func (h *MCPServiceHandler) GenerateMCPUsageInstructions(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError("Configure an active chat model before generating usage instructions"))
 		return
 	}
-	model, err := h.modelService.GetChatModel(ctx, selected.ID)
+	// v2 idiom (unified invocation): record → shared ModelConfig constructor,
+	// then invoke.Chat — the v1 chat.Chat interface is gone from this branch.
+	record, err := h.modelService.GetModelByID(ctx, selected.ID)
+	if err != nil {
+		_ = c.Error(errors.NewServiceUnavailableError("Chat model is unavailable"))
+		return
+	}
+	model, err := h.modelService.BuildModelConfig(ctx, record)
 	if err != nil {
 		_ = c.Error(errors.NewServiceUnavailableError("Chat model is unavailable"))
 		return
@@ -108,10 +115,15 @@ func (h *MCPServiceHandler) GenerateMCPUsageInstructions(c *gin.Context) {
 		language = "Simplified Chinese"
 	}
 	thinking := false
-	result, err := model.Chat(ctx, []chat.Message{
-		{Role: "system", Content: mcpUsagePrompt + "\nOutput language: " + language + "."},
-		{Role: "user", Content: input},
-	}, &chat.ChatOptions{Temperature: 0.2, MaxTokens: 512, Thinking: &thinking})
+	result, err := invoke.Chat(ctx, model, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage(invoke.RoleSystem, mcpUsagePrompt+"\nOutput language: "+language+"."),
+			invoke.TextMessage(invoke.RoleUser, input),
+		},
+		Temperature:         0.2,
+		MaxCompletionTokens: 512,
+		Thinking:            &thinking,
+	})
 	if err != nil || result == nil {
 		_ = c.Error(errors.NewServiceUnavailableError("Failed to generate usage instructions; try again"))
 		return

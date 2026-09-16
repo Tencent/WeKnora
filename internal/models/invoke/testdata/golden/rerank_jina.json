@@ -1,0 +1,24 @@
+{
+  "scenario": "rerank_jina",
+  "behavior": [
+    "POST {base}/rerank; body {model,query,documents,return_documents:true}"
+  ],
+  "requests": [
+    {
+      "path": "/rerank",
+      "headers": {
+        "Authorization": "Bearer jina-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "jina-reranker",
+        "query": "q",
+        "documents": [
+          "a",
+          "b"
+        ],
+        "return_documents": true
+      }
+    }
+  ]
+}

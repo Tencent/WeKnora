@@ -30,10 +30,21 @@ export interface ModelConfig {
     // 自定义 HTTP 请求头（类似 Python OpenAI SDK 的 extra_headers），
     // 会在调用远程模型 API 时附加到每个请求上。Authorization、Content-Type 等保留头会被忽略。
     custom_headers?: Record<string, string>;
-    supports_vision?: boolean; // Whether the model accepts image/multimodal input
+    supports_vision?: boolean; // Deprecated: use chat.input_modalities (migration window dual-read)
     // 对话/VLM 的上下文窗口（token）。0 或不填表示使用后端默认 200000。
     context_window?: number;
     max_output_tokens?: number;
+    // Chat 分片（KnowledgeQA + VLLM 共用）：思考档位、输入模态等新参数。
+    // 后端读侧优先分片、回落顶层扁平字段（迁移期双读）。
+    chat?: {
+      context_window?: number;
+      max_output_tokens?: number;
+      thinking_enabled?: boolean;
+      thinking_level?: string;
+      selected_levels?: string[];
+      parallel_tool_calls?: boolean;
+      input_modalities?: string[];
+    };
     // 后台任务（入库/富化）对该模型的并发上限，按模型 ID 全副本共享。
     // 0 或不填表示沿用全局默认（model.max_concurrency）；仅对 chat/embedding/vllm 生效。
     max_concurrency?: number;
@@ -49,10 +60,10 @@ export interface ModelConfig {
   status?: string;
   // Per-field configured? metadata from the main response. For builtin
   // models it is returned only to system administrators.
-  credentials?: Record<ModelCredentialField, { configured: boolean }>;
+  // 后端只构造 api_key/app_secret 两键（app_id 非密钥不进此 map）
+  credentials?: Partial<Record<ModelCredentialField, { configured: boolean }>>;
   created_at?: string;
   updated_at?: string;
-  deleted_at?: string | null;
 }
 
 // 创建模型
@@ -76,13 +87,11 @@ export function createModel(data: ModelConfig): Promise<ModelConfig> {
 // 获取模型列表
 export function listModels(type?: string): Promise<ModelConfig[]> {
   return new Promise((resolve, reject) => {
-    const url = `/api/v1/models`;
+    // 服务端类型过滤（2026-09-14 裁定 #14）：?type= 下推 repo，不再全量拉取
+    const url = type ? `/api/v1/models?type=${encodeURIComponent(type)}` : `/api/v1/models`;
     get(url)
       .then((response: any) => {
         if (response.success && response.data) {
-          if (type) {
-            response.data = response.data.filter((item: ModelConfig) => item.type === type);
-          }
           resolve(response.data);
         } else {
           resolve([]);
@@ -92,24 +101,6 @@ export function listModels(type?: string): Promise<ModelConfig[]> {
         console.error('Failed to list models:', error);
         // 抛出而非吞掉：调用方（含缓存层）才能区分「真失败」与「成功但无模型」，
         // 避免把一次瞬时失败的空结果缓存下来。各 UI 调用点均已 try/catch 兜底。
-        reject(error);
-      });
-  });
-}
-
-// 获取单个模型
-export function getModel(id: string): Promise<ModelConfig> {
-  return new Promise((resolve, reject) => {
-    get(`/api/v1/models/${id}`)
-      .then((response: any) => {
-        if (response.success && response.data) {
-          resolve(response.data);
-        } else {
-          reject(new Error(response.message || t('error.model.getFailed')));
-        }
-      })
-      .catch((error: any) => {
-        console.error('Failed to get model:', error);
         reject(error);
       });
   });
@@ -211,10 +202,10 @@ export async function debugModel(
 // shape and the design notes in internal/handler/dto/mcp.go.
 // ----------------------------------------------------------------------------
 
-export type ModelCredentialField = 'api_key' | 'app_secret'
+export type ModelCredentialField = 'api_key' | 'app_id' | 'app_secret'
 
 export interface ModelCredentialsResponse {
-  fields: Record<ModelCredentialField, { configured: boolean }>
+  fields: Partial<Record<ModelCredentialField, { configured: boolean }>>
 }
 
 export async function putModelCredentials(
@@ -278,4 +269,59 @@ export function getWeKnoraCloudStatus(): Promise<WeKnoraCloudStatusResult> {
         resolve({ has_models: false, needs_reinit: false })
       })
   })
+}
+
+// ----------------------------------------------------------------------------
+// 模型目录与远端列表（design §5.10）。取值链：接口元数据 → models.json 目录 → 留空。
+// ----------------------------------------------------------------------------
+
+// 厂商列表接口返回的模型条目（OpenAI /models 形状）。
+export interface RemoteCatalogModel {
+  id: string;
+  display_name?: string;
+  owned_by?: string;
+  // 接口元数据（取值链第 1 级）——后端已摊平为扁平字段（invoke.RemoteModel，
+  // v1 的恒空 meta 信封已删除）。多数 OpenAI 兼容列表只有 id，其余为空。
+  context_window?: number;
+  max_output_tokens?: number;
+  modalities?: string[];
+  thinking_levels?: string[];
+  /** @deprecated 后端 meta 信封已删除，恒 undefined，勿再读取 */
+  meta?: unknown;
+}
+
+// 后端代理探测厂商模型列表（密钥不出服务端）。失败降级 available:false，不阻断创建。
+interface CatalogEnvelope<T> { success: boolean; data: T }
+
+export async function probeRemoteCatalog(
+  body: { provider: string; base_url?: string; api_key?: string; model_id?: string; model_type?: string },
+): Promise<{ available: boolean; models?: RemoteCatalogModel[]; reason?: string }> {
+  const response = await post<CatalogEnvelope<{ available: boolean; models?: RemoteCatalogModel[]; reason?: string }>>(
+    '/api/v1/models/remote-catalog',
+    body,
+  )
+  return response?.data ?? { available: false }
+}
+
+// models.json 目录条目（WeKnora 自有 schema，design §5.4）。
+export interface CatalogModelEntry {
+  context_window?: number;
+  max_output_tokens?: number;
+  input_modalities?: string[];
+  thinking?: {
+    supported: boolean;
+    can_disable: boolean;
+    levels?: string[];
+    default_level?: string;
+  };
+}
+
+// 内置 models.json 目录（按 provider 过滤）。目录不可用只降级预填，不报错。
+export async function fetchModelCatalog(
+  provider: string,
+): Promise<{ available: boolean; version?: string; providers?: Record<string, { models: Record<string, CatalogModelEntry> }> }> {
+  const response = await get<CatalogEnvelope<{ available: boolean; version?: string; providers?: Record<string, { models: Record<string, CatalogModelEntry> }> }>>(
+    `/api/v1/models/catalog?provider=${encodeURIComponent(provider)}`,
+  )
+  return response?.data ?? { available: false }
 }

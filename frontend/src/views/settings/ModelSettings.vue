@@ -61,7 +61,13 @@
           @click="onModelCardClick($event, model._modelType, model)"
           @keydown.enter="onModelCardClick($event, model._modelType, model)">
           <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
-            <t-icon :name="typeIcon(model._modelType)" size="18px" />
+            <!-- #15：优先厂商 LOGO（assets/img/providers/*/model/<provider>.svg），
+                 无资源回落类型图标 -->
+            <img v-if="modelProviderLogo(model)?.mode === 'color'" :src="modelProviderLogo(model)!.url"
+              :alt="vendorLabel(model)" class="model-card__badge-img" />
+            <span v-else-if="modelProviderLogo(model)?.mode === 'mono'" class="model-card__badge-mono"
+              :style="{ '--logo-url': `url('${modelProviderLogo(model)!.url}')` }" />
+            <t-icon v-else :name="typeIcon(model._modelType)" size="18px" />
           </div>
           <div class="model-card__body">
             <div class="model-card__header">
@@ -115,11 +121,11 @@
                   :title="contextWindowTitle(model.contextWindow)"
                 >{{ formatContextWindow(model.contextWindow) }}</span>
               </template>
-              <template v-if="model._modelType === 'chat' && model.supportsVision">
+              <template v-if="cardModalities(model).length > 0">
                 <span class="model-card__sep">·</span>
-                <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
-                  :aria-label="$t('model.editor.supportsVisionLabel')">
-                  <t-icon name="image" size="12px" />
+                <span class="model-card__vision">
+                  <t-icon v-for="m in cardModalities(model)" :key="m" :name="modalityIcon(m)" size="12px"
+                    :title="modalityLabel(m)" :aria-label="modalityLabel(m)" />
                 </span>
               </template>
             </p>
@@ -259,8 +265,8 @@
     </t-dialog>
 
     <!-- 模型编辑器抽屉 -->
-    <ModelEditorDialog v-model:visible="showDialog" :model-type="currentModelType" :model-data="editingModel"
-      :save-model="handleModelSave" />
+    <ModelEditorDialog ref="editorDialogRef" v-model:visible="showDialog" :model-type="currentModelType"
+      :model-data="editingModel" @confirm="handleModelSave" />
     <ModelDebugDrawer v-model:visible="showDebugDrawer" :models="allModels" />
 
   </div>
@@ -273,6 +279,7 @@ import { AddIcon, PlayCircleIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import ModelEditorDialog from '@/components/ModelEditorDialog.vue'
+import { providerLogo } from './providerLogos';
 import ModelDebugDrawer from '@/components/ModelDebugDrawer.vue'
 import {
   listModels,
@@ -314,8 +321,12 @@ const usageConflict = ref<ModelUsageDetails | null>(null)
 const usageConflictModelName = ref('')
 const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
+// D1 契约：保存成功后由父组件通知抽屉关闭+清草稿（失败保持打开）
+const editorDialogRef = ref<InstanceType<typeof ModelEditorDialog> | null>(null)
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
+// 首次加载完成前 tab watch 不触发重拉（初次载入本身已按当前 tab 过滤）
+const loadedOnce = ref(false)
 
 const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
 const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
@@ -335,6 +346,12 @@ watch(
   },
   { immediate: true },
 )
+
+// #14：类型 tab 切换时按类型重新拉取（服务端过滤）。all 拉全量。
+watch(activeTypeFilter, (val, old) => {
+  if (val === old || !loadedOnce.value) return
+  void loadModels()
+})
 
 // 模型列表数据
 const allModels = ref<ModelConfig[]>([])
@@ -362,19 +379,28 @@ function convertToLegacyFormat(model: ModelConfig) {
     modelName: model.name,
     baseUrl: model.parameters.base_url || '',
     apiKey: '',
+    appId: '',
     provider: model.parameters.provider || '',
     dimension: model.parameters.embedding_parameters?.dimension,
     supportsDimensionOverride: model.parameters.embedding_parameters?.supports_dimension_override || false,
     isBuiltin: model.is_builtin || false,
-    supportsVision: model.parameters.supports_vision || false,
-    contextWindow: model.parameters.context_window || undefined,
+    // chat 分片优先，顶层扁平字段回落（迁移期双读，design §8）
+    supportsVision: model.parameters.chat?.input_modalities?.includes('image')
+      || model.parameters.supports_vision
+      || false,
+    contextWindow: model.parameters.chat?.context_window || model.parameters.context_window || undefined,
     maxConcurrency: model.parameters.max_concurrency,
+    maxOutputTokens: model.parameters.chat?.max_output_tokens || model.parameters.max_output_tokens || undefined,
+    inputModalities: model.parameters.chat?.input_modalities,
+    thinkingEnabled: model.parameters.chat?.thinking_enabled,
+    thinkingLevel: model.parameters.chat?.thinking_level || '',
+    selectedLevels: model.parameters.chat?.selected_levels,
     customHeaders: model.parameters.custom_headers
       ? Object.entries(model.parameters.custom_headers).map(([key, value]) => ({ key, value: String(value) }))
       : [],
     lkeapRegion: model.parameters.extra_config?.region || 'ap-guangzhou',
-    // 原始存库值，编辑弹窗内再 resolve（避免打开时被推断值覆盖）
-    thinkingControl: model.parameters.extra_config?.thinking_control,
+    // 厂商动态扩展字段回显（azure api_version 等）
+    extraConfig: model.parameters.extra_config ? { ...model.parameters.extra_config } : {},
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -392,6 +418,15 @@ const filteredModels = computed(() => {
 const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
 
 // 类型徽章图标。沿用 TDesign 自带 icon name，避免再引第三方图标包。
+// #15：卡片厂商 LOGO 查询（无资源返回 undefined → 回落类型图标）
+const modelProviderLogo = (model: any) => {
+  try {
+    return providerLogo('model', model.provider)
+  } catch {
+    return undefined
+  }
+}
+
 const typeIcon = (type: ModelType): string => {
   const map: Record<ModelType, string> = {
     chat: 'chat',
@@ -401,6 +436,34 @@ const typeIcon = (type: ModelType): string => {
     asr: 'sound',
   }
   return map[type]
+}
+
+// 卡片元信息行的模态小图标：按已勾选模态逐个渲染（2026-09-13 反馈——
+// 勾了全部四模态却只显示一个图片图标）。旧记录无 input_modalities 时回落
+// supports_vision 布尔（仅图片）。
+const MODALITY_ICONS: Record<string, string> = {
+  text: 'text',
+  image: 'image',
+  audio: 'sound',
+  video: 'video',
+}
+const MODALITY_LABEL_KEYS: Record<string, string> = {
+  text: 'model.editor.modalityText',
+  image: 'model.editor.modalityImage',
+  audio: 'model.editor.modalityAudio',
+  video: 'model.editor.modalityVideo',
+}
+const cardModalities = (model: any): string[] => {
+  if (model._modelType !== 'chat' && model._modelType !== 'vllm') return []
+  if (Array.isArray(model.inputModalities) && model.inputModalities.length > 0) {
+    return model.inputModalities
+  }
+  return model.supportsVision ? ['image'] : []
+}
+const modalityIcon = (m: string) => MODALITY_ICONS[m] ?? m
+const modalityLabel = (m: string) => {
+  const key = MODALITY_LABEL_KEYS[m]
+  return key ? t(key) : m
 }
 
 const typeLabel = (type: ModelType) => {
@@ -480,16 +543,23 @@ const emptyHint = computed(() => {
 const loadModels = async () => {
   loading.value = true
   try {
-    const models = await listModels()
+    // #14：类型 tab 下推服务端过滤（all 拉全量；单类型只拉该类型）
+    const models = await listModels(
+      activeTypeFilter.value === 'all' ? undefined : activeTypeFilter.value,
+    )
     allModels.value = models
     // 设置页自己 listModels 之后立刻写回空间级缓存。否则对话输入栏 /
     // 智能体编辑器会继续拿 60s TTL 里的旧 context_window，刷新页面才对。
-    chatResources.replaceModels(models)
+    // 类型过滤加载只更新本页列表——子集不能替换全局缓存（会丢其他类型）。
+    if (activeTypeFilter.value === 'all') {
+      chatResources.replaceModels(models)
+    }
   } catch (error: any) {
     console.error('加载模型列表失败:', error)
     MessagePlugin.error(error.message)
   } finally {
     loading.value = false
+    loadedOnce.value = true
   }
 }
 
@@ -596,20 +666,55 @@ const handleModelSave = async (modelData: any) => {
     const trimmedAppSecret = (modelData.appSecret ?? '').trim()
     const appSecretFields: { app_secret?: string } =
       !editingModel.value && trimmedAppSecret ? { app_secret: trimmedAppSecret } : {}
+    // app_id 槽位（design §6.8 三槽凭证）：同样仅在创建时随请求携带，空 = 不设置。
+    const trimmedAppId = (modelData.appId ?? '').trim()
+    const appIdFields: { app_id?: string } =
+      !editingModel.value && trimmedAppId ? { app_id: trimmedAppId } : {}
     const extraConfig: Record<string, string> = {}
     if (modelData.provider === 'lkeap' && saveType === 'rerank') {
       extraConfig.region = (modelData.lkeapRegion || 'ap-guangzhou').trim()
     }
-    if (
-      saveType === 'chat'
-      && modelData.source === 'remote'
-      && modelData.thinkingControl
-    ) {
-      extraConfig.thinking_control = modelData.thinkingControl
+    // 厂商动态扩展字段（azure api_version 等）原样汇入
+    if (modelData.extraConfig) {
+      for (const [k, v] of Object.entries(modelData.extraConfig)) {
+        if (v !== '' && v != null) extraConfig[k] = String(v)
+      }
     }
     const extraConfigFields = Object.keys(extraConfig).length > 0
       ? { extra_config: extraConfig }
       : {}
+
+    // Chat 分片（KnowledgeQA）：思考档位、输入模态、上下文/输出预算一律写分片，
+    // 不再写 extra_config.thinking_control 与顶层扁平字段（design §3/D3）。
+    const chatShard: NonNullable<ModelConfig['parameters']['chat']> = {}
+    if (saveType === 'chat' || saveType === 'vllm') {
+      // 输入模态自由编辑（2026-09-13 裁定 #2/#3）：vllm 也走分片存模态；
+      // 空数组回落 ['text']（LLM 基础能力）。
+      chatShard.input_modalities = modelData.inputModalities?.length
+        ? modelData.inputModalities
+        : ['text']
+    }
+    if (saveType === 'chat') {
+      if (Number(modelData.contextWindow) >= 1024) {
+        chatShard.context_window = Math.round(Number(modelData.contextWindow))
+      }
+      if (Number(modelData.maxOutputTokens) > 0) {
+        chatShard.max_output_tokens = Math.round(Number(modelData.maxOutputTokens))
+      }
+      chatShard.input_modalities = modelData.inputModalities?.length
+        ? modelData.inputModalities
+        : ['text']
+      if (modelData.thinkingEnabled !== undefined) {
+        chatShard.thinking_enabled = modelData.thinkingEnabled
+      }
+      if (modelData.thinkingLevel) {
+        chatShard.thinking_level = modelData.thinkingLevel
+      }
+      if (modelData.selectedLevels?.length) {
+        chatShard.selected_levels = modelData.selectedLevels
+      }
+    }
+    const chatShardFields = Object.keys(chatShard).length > 0 ? { chat: chatShard } : {}
 
     const apiModelData: ModelConfig = {
       name: modelData.modelName.trim(),
@@ -621,6 +726,7 @@ const handleModelSave = async (modelData: any) => {
         base_url: modelData.baseUrl?.trim() || '',
         ...apiKeyFields,
         ...appSecretFields,
+        ...appIdFields,
         provider: modelData.provider || '',
         ...extraConfigFields,
         ...(Object.keys(customHeadersMap).length > 0 ? { custom_headers: customHeadersMap } : {}),
@@ -632,14 +738,16 @@ const handleModelSave = async (modelData: any) => {
           }
         } : {}),
         ...(saveType === 'vllm' ? {
-          supports_vision: true
-        } : saveType === 'chat' ? {
-          supports_vision: modelData.supportsVision ?? false
+          // 不再硬编码 true：随用户勾选的模态派生（分片已存全量模态）
+          supports_vision: modelData.supportsVision ?? false,
+          ...(Number(modelData.contextWindow) >= 1024
+            ? { context_window: Math.round(Number(modelData.contextWindow)) }
+            : {}),
+          ...(Number(modelData.maxOutputTokens) > 0
+            ? { max_output_tokens: Math.round(Number(modelData.maxOutputTokens)) }
+            : {})
         } : {}),
-        ...((saveType === 'chat' || saveType === 'vllm')
-          && Number(modelData.contextWindow) >= 1024
-          ? { context_window: Math.round(Number(modelData.contextWindow)) }
-          : {}),
+        ...chatShardFields,
         // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
         ...(['chat', 'embedding', 'vllm'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0
@@ -656,6 +764,8 @@ const handleModelSave = async (modelData: any) => {
       MessagePlugin.success(t('modelSettings.toasts.added'))
     }
 
+    // D1：保存成功才关抽屉（抽屉内关闭+清草稿）；失败路径抽屉保持打开
+    editorDialogRef.value?.resetAfterSave()
     await loadModels()
   } catch (error: any) {
     console.error('保存模型失败:', error)
@@ -959,7 +1069,8 @@ onMounted(() => {
 .model-card {
   position: relative;
   display: flex;
-  align-items: flex-start;
+  // 徽章与两行文本块垂直居中（flex-start 让 logo 顶在标题线上，观感脱节）
+  align-items: center;
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid var(--td-component-stroke);
@@ -1050,7 +1161,27 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 1px;
+
+  // #15：厂商 LOGO 渲染（color 直渲；mono 用 mask 染主色）
+  .model-card__badge-img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+  }
+
+  .model-card__badge-mono {
+    width: 22px;
+    height: 22px;
+    background-color: var(--td-brand-color);
+    mask-image: var(--logo-url);
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-image: var(--logo-url);
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+  }
   // 默认底色，被 type 修饰覆盖
   background: rgba(0, 82, 217, 0.1);
   color: #0052D9;
@@ -1157,6 +1288,9 @@ onMounted(() => {
 .model-card__vision {
   display: inline-flex;
   align-items: center;
+  /* inline-flex 盒默认按基线对齐，而 svg 图标没有文本基线——图标会沉到
+     文本行下方；middle 让图标与文字垂直居中（2026-09-13 反馈） */
+  vertical-align: middle;
   gap: 3px;
 }
 
@@ -1173,6 +1307,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 2px;
+  // 行居中后操作按钮组仍钉在右上角
+  align-self: flex-start;
 }
 
 .model-card__action-btn {

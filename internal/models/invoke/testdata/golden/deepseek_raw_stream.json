@@ -1,0 +1,83 @@
+{
+  "scenario": "deepseek_raw_stream",
+  "behavior": [
+    "raw HTTP SSE demux (SSE reader + [DONE])",
+    "reasoning_content delta -\u003e thinking chunks",
+    "usage chunk with native cache hit/miss counters (applyRawPromptCacheUsage)",
+    "max_tokens wire field on stream request"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Accept": "text/event-stream",
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "max_tokens": 100,
+        "messages": [
+          {
+            "content": "Hi",
+            "role": "user"
+          }
+        ],
+        "model": "deepseek-chat",
+        "stream": true,
+        "stream_options": {
+          "include_usage": true
+        }
+      }
+    }
+  ],
+  "sse_response": [
+    "data: {\"id\":\"chatcmpl-ds-stream\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-ds-stream\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"step one\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-ds-stream\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hi there\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-ds-stream\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"finish_reason\":\"stop\"},\"finish_reason\":null}]}",
+    "",
+    "data: {\"id\":\"chatcmpl-ds-stream\",\"object\":\"chat.completion.chunk\",\"created\":1700000000,\"model\":\"golden-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":20,\"total_tokens\":1020,\"prompt_cache_hit_tokens\":936,\"prompt_cache_miss_tokens\":64}}",
+    "",
+    "data: [DONE]",
+    ""
+  ],
+  "client": [
+    {
+      "id": "",
+      "response_type": "thinking",
+      "content": "step one",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "thinking",
+      "content": "",
+      "done": true
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "Hi there",
+      "done": false
+    },
+    {
+      "id": "",
+      "response_type": "answer",
+      "content": "",
+      "done": true,
+      "usage": {
+        "prompt_tokens": 1000,
+        "completion_tokens": 20,
+        "total_tokens": 1020,
+        "cached_tokens": 936,
+        "cache_read_tokens": 936,
+        "cache_miss_tokens": 64,
+        "cache_reported": true,
+        "cache_status": "hit"
+      }
+    }
+  ]
+}

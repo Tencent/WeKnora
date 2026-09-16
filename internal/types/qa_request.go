@@ -43,10 +43,14 @@ type SteerSink interface {
 // replacing the previous 14-parameter method signatures.
 // EventBus is passed separately to avoid circular dependency with the event package.
 type QARequest struct {
-	Session             *Session           // The conversation session
-	Query               string             // User query text
-	AssistantMessageID  string             // Pre-created assistant message ID
-	SummaryModelID      string             // Optional model override; empty = use agent/KB default
+	Session            *Session // The conversation session
+	Query              string   // User query text
+	AssistantMessageID string   // Pre-created assistant message ID
+	SummaryModelID     string   // Optional model override; empty = use agent/KB default
+	ThinkingLevel      string   // Optional per-request thinking level override; empty = use defaults
+	// Thinking optionally forces thinking on/off for this request. Nil = follow
+	// the agent (or global) default; non-nil wins after agent overrides fold in.
+	Thinking            *bool
 	CustomAgent         *CustomAgent       // Optional custom agent for config override
 	SharedAgentReadOnly bool               // True only when access came from an agent share; source-workspace writes are forbidden
 	KnowledgeBaseIDs    []string           // Knowledge base IDs to search (from request + @mentions)

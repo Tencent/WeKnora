@@ -1,0 +1,268 @@
+package adapters
+
+// weknoracloud.go — WeKnoraCloud chat facet (design §6.2/§6.8). Behavior port
+// of v1 chat/provider.go weKnoraCloudProvider (endpoint + ForceRawHTTP +
+// TransformMessages multi-content downgrade + HMAC request signing) and the
+// chat-side of v1 vlm/weknoracloud.go (same signed /api/v1/chat/completions
+// route; the VLM facet rides Chat via InputModalities).
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/google/uuid"
+	"github.com/sashabaranov/go-openai"
+)
+
+// weKnoraCloudAdapter composes the openai fallback (request funnel, parse,
+// stream bridge) with the WeKnoraCloud deltas: signed endpoint, multi-content
+// downgrade, body-HMAC auth.
+type weKnoraCloudAdapter struct {
+	openaiAdapter
+}
+
+// compile-time lock #1 (design §6.2).
+var (
+	_ invoke.ChatAdapter      = (*weKnoraCloudAdapter)(nil)
+	_ invoke.EmbeddingAdapter = (*weKnoraCloudAdapter)(nil)
+	_ invoke.RerankAdapter    = (*weKnoraCloudAdapter)(nil)
+)
+
+const (
+	weKnoraCloudEmbedPath    = "/api/v1/embeddings"
+	weKnoraCloudEmbedTimeout = 60 * time.Second
+)
+
+func newWeKnoraCloudAdapter() *weKnoraCloudAdapter {
+	return &weKnoraCloudAdapter{openaiAdapter{
+		name: invoke.ProviderWeKnoraCloud,
+		spec: openaiVendorSpec{
+			// v1 weKnoraCloudProvider: ForceRawHTTP + multi-content downgrade.
+			forceRaw:  true,
+			sign:      true,
+			transform: transformWeKnoraCloudMessages,
+		},
+		caps: chatCapsFor(invoke.ProviderWeKnoraCloud),
+	}}
+}
+
+// BuildChatRequest builds the openai-form body (downgraded messages, map-form
+// roundtrip via spec.forceRaw) and then signs it: the HMAC depends on the
+// final body bytes, so it must happen inside BuildChatRequest (design §6.2).
+func (a *weKnoraCloudAdapter) BuildChatRequest(
+	ep invoke.Endpoint, model string, opts *invoke.ChatOptions,
+) (*invoke.Request, error) {
+	req, err := a.openaiAdapter.BuildChatRequest(ep, model, opts)
+	if err != nil {
+		return nil, err
+	}
+	// v1 weKnoraCloudProvider.Auth (provider.go:93-99): sign over the final
+	// body bytes with AppID/AppSecret (invoke.Sign).
+	requestID := uuid.NewString()
+	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(req.Body)) {
+		req.Header.Set(k, v)
+	}
+	// Signature/auth-critical headers the entry must not let user custom
+	// headers override (design §6.4 protected-header rule).
+	req.ProtectedHeaders = append(req.ProtectedHeaders,
+		"X-Appid", "X-Api-Key", "X-Request-Id", "X-Timestamp", "X-Nonce", "X-Signature")
+	return req, nil
+}
+
+// transformWeKnoraCloudMessages ports weKnoraCloudProvider.TransformMessages
+// (provider.go:103-120): downgrades MultiContent to newline-joined plain text
+// while preserving tool_calls / tool_call_id / name so the function-calling
+// protocol keeps working.
+func transformWeKnoraCloudMessages(messages []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	result := make([]openai.ChatCompletionMessage, 0, len(messages))
+	for _, m := range messages {
+		msg := m
+		if msg.Content == "" && len(msg.MultiContent) > 0 {
+			var textParts []string
+			for _, part := range msg.MultiContent {
+				if part.Type == openai.ChatMessagePartTypeText && part.Text != "" {
+					textParts = append(textParts, part.Text)
+				}
+			}
+			msg.Content = strings.Join(textParts, "\n")
+			msg.MultiContent = nil
+		}
+		result = append(result, msg)
+	}
+	return result
+}
+
+func init() {
+	if err := invoke.Default.Register(newWeKnoraCloudAdapter()); err != nil {
+		panic(fmt.Sprintf("invoke/adapters: register weknoracloud adapter: %v", err))
+	}
+}
+
+// --- Embedding facet (P2, port of v1 embedding/weknoracloud.go) ---
+
+// weKnoraCloudEmbedRequest mirrors the v1 wire shape: openai-like but with no
+// encoding_format / truncate_prompt_tokens (the v1 struct carried the token
+// field but never set it).
+type weKnoraCloudEmbedRequest struct {
+	Model      string   `json:"model"`
+	Input      []string `json:"input"`
+	Dimensions int      `json:"dimensions,omitempty"`
+}
+
+type weKnoraCloudEmbedResponse struct {
+	Data []struct {
+		Index     int       `json:"index"`
+		Embedding []float32 `json:"embedding"`
+	} `json:"data"`
+}
+
+// Capabilities overrides the embedded declaration: all three served shards.
+func (a *weKnoraCloudAdapter) Capabilities() invoke.Capabilities {
+	caps := a.openaiAdapter.Capabilities()
+	caps.Embedding = embeddingCapsFor(invoke.ProviderWeKnoraCloud)
+	caps.Rerank = rerankCapsFor(invoke.ProviderWeKnoraCloud)
+	return caps
+}
+
+// --- Rerank facet (P3, port of v1 rerank/weknoracloud.go) ---
+
+// BuildRerankRequest ports the signed /api/v1/rerank route ({model, query,
+// documents}; no truncation knobs on the v1 wire).
+func (a *weKnoraCloudAdapter) BuildRerankRequest(
+	ep invoke.Endpoint, model string, opts *invoke.RerankOptions,
+) (*invoke.Request, error) {
+	return buildWeKnoraCloudRerank(ep, model, opts)
+}
+
+// ParseRerankResponse maps the results array (envelope shared with the
+// generic fallback shape).
+func (a *weKnoraCloudAdapter) ParseRerankResponse(
+	status int, header http.Header, body []byte,
+) (*invoke.RerankResponse, error) {
+	return parseResultsEnvelopeRerank(status, header, body)
+}
+
+// --- rerank wire (v1 rerank/weknoracloud.go) ---
+
+const weKnoraCloudRerankTimeout = 60 * time.Second
+
+type weKnoraCloudRerankRequest struct {
+	Model     string   `json:"model"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+}
+
+func buildWeKnoraCloudRerank(ep invoke.Endpoint, model string, opts *invoke.RerankOptions) (*invoke.Request, error) {
+	if ep.Credentials.AppID == "" {
+		return nil, fmt.Errorf("WeKnoraCloud reranker: AppID is required")
+	}
+	if ep.Credentials.AppSecret == "" {
+		return nil, fmt.Errorf("WeKnoraCloud reranker: AppSecret is required")
+	}
+	base := strings.TrimRight(ep.BaseURL, "/")
+	body := weKnoraCloudRerankRequest{
+		Model:     model,
+		Query:     opts.Query,
+		Documents: opts.Documents,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("weknoracloud reranker: marshal: %w", err)
+	}
+	requestID := uuid.NewString()
+	header := http.Header{}
+	header.Set("Content-Type", "application/json")
+	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(data)) {
+		header.Set(k, v)
+	}
+	return &invoke.Request{
+		Method:  http.MethodPost,
+		URL:     base + "/api/v1/rerank",
+		Header:  header,
+		Body:    data,
+		Timeout: weKnoraCloudRerankTimeout,
+		ProtectedHeaders: []string{
+			"X-Appid", "X-Api-Key", "X-Request-Id", "X-Timestamp", "X-Nonce", "X-Signature",
+		},
+	}, nil
+}
+
+// BuildEmbeddingRequest ports v1 NewWeKnoraCloudEmbedder + BatchEmbed: the
+// signed /api/v1/embeddings route. The wire model name is the config-level
+// remote_model_name override when set (the shared constructor folds it into
+// ModelName, so `model` is already effective here).
+func (a *weKnoraCloudAdapter) BuildEmbeddingRequest(
+	ep invoke.Endpoint, model string, opts *invoke.EmbeddingOptions,
+) (*invoke.Request, error) {
+	if ep.Credentials.AppID == "" {
+		return nil, fmt.Errorf("WeKnoraCloud embedder: AppID is required")
+	}
+	if ep.Credentials.AppSecret == "" {
+		return nil, fmt.Errorf("WeKnoraCloud embedder: AppSecret is required")
+	}
+	base := strings.TrimRight(ep.BaseURL, "/")
+	if base == "" {
+		base = invoke.WeKnoraCloudBaseURL
+	}
+	reqBody := weKnoraCloudEmbedRequest{Model: model, Input: opts.Inputs}
+	if opts.SupportsDimensionOverride && opts.Dimensions > 0 {
+		reqBody.Dimensions = opts.Dimensions
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("weknoracloud embedder: marshal: %w", err)
+	}
+	requestID := uuid.NewString()
+	header := http.Header{}
+	header.Set("Content-Type", "application/json")
+	for k, v := range invoke.Sign(ep.Credentials.AppID, ep.Credentials.AppSecret, requestID, string(body)) {
+		header.Set(k, v)
+	}
+	return &invoke.Request{
+		Method:  http.MethodPost,
+		URL:     base + weKnoraCloudEmbedPath,
+		Header:  header,
+		Body:    body,
+		Timeout: weKnoraCloudEmbedTimeout,
+		// Signature/auth-critical headers (design §6.4 protected-header rule).
+		ProtectedHeaders: []string{
+			"X-Appid", "X-Api-Key", "X-Request-Id", "X-Timestamp", "X-Nonce", "X-Signature",
+		},
+	}, nil
+}
+
+// ParseEmbeddingResponse ports the v1 index-integrity validation: every input
+// index must appear exactly once.
+func (a *weKnoraCloudAdapter) ParseEmbeddingResponse(
+	_ int, _ http.Header, body []byte,
+) (*invoke.EmbeddingResponse, error) {
+	var embedResp weKnoraCloudEmbedResponse
+	if err := json.Unmarshal(body, &embedResp); err != nil {
+		return nil, invoke.ClassifyError(fmt.Errorf("weknoracloud embedder: unmarshal: %w", err))
+	}
+	count := len(embedResp.Data)
+	result := make([][]float32, count)
+	seen := make([]bool, count)
+	for _, item := range embedResp.Data {
+		if item.Index < 0 || item.Index >= count {
+			return nil, invoke.ClassifyError(fmt.Errorf(
+				"weknoracloud embedder: response index %d out of range for %d inputs", item.Index, count))
+		}
+		if seen[item.Index] {
+			return nil, invoke.ClassifyError(fmt.Errorf(
+				"weknoracloud embedder: duplicate response index %d", item.Index))
+		}
+		result[item.Index] = item.Embedding
+		seen[item.Index] = true
+	}
+	for index, found := range seen {
+		if !found {
+			return nil, invoke.ClassifyError(fmt.Errorf(
+				"weknoracloud embedder: missing embedding for input index %d", index))
+		}
+	}
+	return &invoke.EmbeddingResponse{Vectors: result}, nil
+}

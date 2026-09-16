@@ -10,10 +10,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -68,7 +67,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Retrieve(ctx context.Context
 // Index creates embeddings for the content and saves it to the repository
 // if vector retrieval is enabled in the retriever types
 func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
-	embedder embedding.Embedder, indexInfo *types.IndexInfo, retrieverTypes []types.RetrieverType,
+	embedder interfaces.Embedder, indexInfo *types.IndexInfo, retrieverTypes []types.RetrieverType,
 ) error {
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
@@ -86,7 +85,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 // BatchIndex creates embeddings for multiple content items and saves them to the repository
 // in batches for efficiency. Uses concurrent batch saving to improve performance.
 func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Context,
-	embedder embedding.Embedder, indexInfoList []*types.IndexInfo, retrieverTypes []types.RetrieverType,
+	embedder interfaces.Embedder, indexInfoList []*types.IndexInfo, retrieverTypes []types.RetrieverType,
 ) error {
 	if len(indexInfoList) == 0 {
 		return nil
@@ -129,7 +128,9 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
 // transient failures (200 / 400 / 800 / 1600 / 3200 ms). It returns the last
 // embedding result on success or the last error if every attempt failed.
-func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
+func batchEmbedWithBackoff(
+	ctx context.Context, embedder interfaces.Embedder, contentList []string,
+) ([][]float32, error) {
 	delay := embedRetryBaseDelay
 	var (
 		embeddings [][]float32
@@ -298,7 +299,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Support() []types.RetrieverT
 // EstimateStorageSize estimates the storage space needed for the provided index information
 func (v *KeywordsVectorHybridRetrieveEngineService) EstimateStorageSize(
 	ctx context.Context,
-	embedder embedding.Embedder,
+	embedder interfaces.Embedder,
 	indexInfoList []*types.IndexInfo,
 	retrieverTypes []types.RetrieverType,
 ) int64 {

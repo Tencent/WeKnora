@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -39,7 +39,7 @@ type contextBreakdown struct {
 	LargestTokens int
 }
 
-func (e *AgentEngine) breakdownContext(messages []chat.Message, tools []chat.Tool) contextBreakdown {
+func (e *AgentEngine) breakdownContext(messages []invoke.Message, tools []invoke.ToolDef) contextBreakdown {
 	b := contextBreakdown{Messages: len(messages), ToolSchemas: e.tokenEstimator.EstimateTools(tools)}
 	est := e.tokenEstimator
 
@@ -50,7 +50,7 @@ func (e *AgentEngine) breakdownContext(messages []chat.Message, tools []chat.Too
 
 		if msgTokens > b.LargestTokens {
 			b.LargestTokens = msgTokens
-			b.LargestKind = msg.Role
+			b.LargestKind = string(msg.Role)
 			if msg.Name != "" {
 				b.LargestKind += ":" + msg.Name
 			}
@@ -62,18 +62,15 @@ func (e *AgentEngine) breakdownContext(messages []chat.Message, tools []chat.Too
 		for _, tc := range msg.ToolCalls {
 			b.ToolCallArgs += est.EstimateString(tc.Function.Arguments)
 		}
-		for _, part := range msg.MultiContent {
-			if part.ImageURL != nil || part.Type == "image_url" {
+		for _, part := range msg.Content {
+			if part.Image != nil {
 				b.Images += estimatedImageTokensForLog
 			}
 		}
-		if len(msg.MultiContent) == 0 {
-			b.Images += len(msg.Images) * estimatedImageTokensForLog
-		}
 
-		content := est.EstimateString(msg.Content)
+		content := est.EstimateString(msg.Text())
 		switch {
-		case msg.Kind == chat.MessageKindCompactionSummary:
+		case msg.Kind == invoke.MessageKindCompactionSummary:
 			b.Summaries += content
 		case msg.Role == "tool":
 			b.ToolResults += content
@@ -110,7 +107,7 @@ func (b contextBreakdown) String() string {
 // logContextPrediction records what this round expects the request to cost,
 // broken down by source, alongside the threshold it is being judged against.
 func (e *AgentEngine) logContextPrediction(
-	ctx context.Context, round int, messages []chat.Message, tools []chat.Tool, predicted int,
+	ctx context.Context, round int, messages []invoke.Message, tools []invoke.ToolDef, predicted int,
 ) {
 	settings := e.compactor.Settings()
 	b := e.breakdownContext(messages, tools)

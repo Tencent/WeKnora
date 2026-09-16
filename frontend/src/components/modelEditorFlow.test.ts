@@ -50,7 +50,7 @@ async function fixture(options: {
   }
   const exports: any = {}
   runInNewContext(compiled, {
-    exports, URL, setInterval, clearInterval,
+    exports, URL, setInterval, clearInterval, setTimeout, clearTimeout,
     window: { addEventListener() {}, removeEventListener() {} },
     console: { error() {}, debug() {}, log() {} },
     require(name: string) {
@@ -77,11 +77,28 @@ async function fixture(options: {
     parentNode: () => null, nextSibling: () => null,
   })
   let vm: any
+  let parentSave: Promise<void> = Promise.resolve()
+  let lastSaveError: Error | null = null
   const app = renderer.createApp({
     setup: () => () => h(exports.default, {
       ...props,
       ref: (value: any) => { vm = value },
-      saveModel: async (payload: any) => { saves.push(payload); await options.save?.(payload) },
+      // Our contract: the editor emits `confirm`; the PARENT persists, then
+      // closes the drawer and clears the draft on success only (D1 ruling).
+      // ModelSettings' failure path rethrows and leaves the drawer untouched.
+      'onConfirm': (payload: any) => {
+        saves.push(payload)
+        parentSave = (async () => {
+          try {
+            await options.save?.(payload)
+            props.visible = false
+            vm?.resetAfterSave?.()
+          } catch (error) {
+            lastSaveError = error as Error
+            throw error
+          }
+        })()
+      },
       'onUpdate:visible': (value: boolean) => { visibility.push(value); props.visible = value },
     }),
   })
@@ -92,7 +109,7 @@ async function fixture(options: {
   Object.assign(vm.formData, { modelName: 'draft-model', baseUrl: 'https://example.com/v1', apiKey: options.edit ? '' : 'draft-key' })
   vm.formRef = { validate: async () => true }
   await nextTick()
-  return { vm, props, requests, saves, toasts, visibility, close: () => app.unmount() }
+  return { vm, props, requests, saves, toasts, visibility, parentSave: () => parentSave, lastSaveError: () => lastSaveError, close: () => app.unmount() }
 }
 
 for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
@@ -234,42 +251,31 @@ for (const source of ['remote', 'local']) {
   })
 }
 
-test('save waits for success, blocks duplicate saves and cancellation, then closes and clears the draft', async () => {
-  const response = deferred<void>()
-  const f = await fixture({ save: () => response.promise })
+test('confirm emits the payload once; the parent closes the drawer and clears the draft on success', async () => {
+  const f = await fixture({ save: async () => {} })
   try {
-    const pending = f.vm.handleConfirm()
-    await nextTick()
-    assert.equal(f.vm.saving, true)
-    assert.equal(f.props.visible, true)
-    assert.equal(f.vm.formData.modelName, 'draft-model')
     await f.vm.handleConfirm()
-    f.vm.handleCancel()
-    f.vm.dialogVisible = false
     assert.equal(f.saves.length, 1)
-    assert.equal(f.visibility.length, 0)
-    let stopped = false
-    f.vm.handleSaveEscape({ key: 'Escape', preventDefault() {}, stopImmediatePropagation() { stopped = true } })
-    assert.equal(stopped, true, 'Escape must not bubble to the outer Settings modal while saving')
-    response.resolve()
-    await pending
-    assert.equal(f.props.visible, false)
-    assert.equal(f.vm.formData.modelName, '')
+    await f.parentSave()
+    assert.equal(f.props.visible, false, 'only the parent closes the drawer (D1)')
+    assert.equal(f.vm.formData.modelName, '', 'the parent clears the draft after success')
     assert.equal(f.vm.saving, false)
   } finally { f.close() }
 })
 
-test('failed saves retain draft and drawer, show the error and allow a successful retry', async () => {
+test('failed saves retain draft and drawer and allow a successful retry', async () => {
   let calls = 0
   const f = await fixture({ save: async () => { if (++calls === 1) throw new Error('save rejected') } })
   try {
     await f.vm.handleConfirm()
-    assert.equal(f.props.visible, true)
+    await assert.rejects(f.parentSave(), /save rejected/)
+    assert.ok(f.lastSaveError(), 'the parent surfaces the error to its own toast layer')
+    assert.equal(f.props.visible, true, 'D1: a failed save keeps the drawer open')
     assert.equal(f.vm.formData.modelName, 'draft-model')
     assert.equal(f.vm.formData.apiKey, 'draft-key')
-    assert.equal(f.vm.saveError, 'save rejected')
     assert.equal(f.vm.saving, false)
     await f.vm.handleConfirm()
+    await f.parentSave()
     assert.equal(f.props.visible, false)
   } finally { f.close() }
 })
@@ -277,11 +283,14 @@ test('failed saves retain draft and drawer, show the error and allow a successfu
 test('failed form validation prevents persistence and leaves the drawer open', async () => {
   const f = await fixture()
   try {
-    f.vm.formRef = { validate: async () => ({ modelName: [{ result: false }] }) }
+    // Our dialog validates explicitly (no formRef.validate): an empty model
+    // name must warn, persist nothing, and keep the drawer open.
+    f.vm.formData.modelName = '   '
     await f.vm.handleConfirm()
     assert.equal(f.saves.length, 0)
     assert.equal(f.props.visible, true)
     assert.equal(f.vm.saving, false)
+    assert.ok(f.toasts.some((toast: string) => toast.includes('modelNameRequired')), String(f.toasts))
   } finally { f.close() }
 })
 
@@ -290,6 +299,7 @@ test('failed connection test does not prevent saving', async () => {
   try {
     await f.vm.checkRemoteAPI()
     await f.vm.handleConfirm()
+    await f.parentSave()
     assert.equal(f.saves.length, 1)
     assert.equal(f.props.visible, false)
   } finally { f.close() }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/hibiken/asynq"
@@ -66,11 +67,11 @@ func TestMemoryReachesTheMessagesSentToTheModel(t *testing.T) {
 
 	messages := prepareMessagesWithHistory(chatManage)
 	require.NotEmpty(t, messages)
-	require.Equal(t, "system", messages[0].Role)
-	require.Contains(t, messages[0].Content, "回答请直接给结论",
+	require.Equal(t, invoke.RoleSystem, messages[0].Role)
+	require.Contains(t, messages[0].Text(), "回答请直接给结论",
 		"the recalled memory must be present in the system message")
-	require.Contains(t, messages[0].Content, "<user_memory>")
-	require.True(t, strings.HasPrefix(messages[0].Content, "你是一个助手。"),
+	require.Contains(t, messages[0].Text(), "<user_memory>")
+	require.True(t, strings.HasPrefix(messages[0].Text(), "你是一个助手。"),
 		"memory must be appended after the configured prompt, not replace it")
 }
 
@@ -86,7 +87,7 @@ func TestMemoryIsAbsentWhenNothingRecalled(t *testing.T) {
 	require.Empty(t, chatManage.UsedMemories)
 
 	messages := prepareMessagesWithHistory(chatManage)
-	require.NotContains(t, messages[0].Content, "<user_memory>")
+	require.NotContains(t, messages[0].Text(), "<user_memory>")
 }
 
 func TestMemoryRecallEmitsWhatTheAnswerSaw(t *testing.T) {

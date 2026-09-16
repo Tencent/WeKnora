@@ -5,34 +5,21 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-type summaryContentCaptureChat struct {
-	messages []chat.Message
+type summaryContentCapture struct {
+	fake *invoketest.Fake
 }
 
-func (m *summaryContentCaptureChat) Chat(
-	_ context.Context,
-	messages []chat.Message,
-	_ *chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	m.messages = append([]chat.Message(nil), messages...)
-	return &types.ChatResponse{Content: "summary"}, nil
+func newSummaryContentCapture(t *testing.T) *summaryContentCapture {
+	f := invoketest.New(t)
+	f.EnqueueResponse(invoke.ChatResponse{Content: "summary", FinishReason: "stop"})
+	return &summaryContentCapture{fake: f}
 }
-
-func (m *summaryContentCaptureChat) ChatStream(
-	context.Context,
-	[]chat.Message,
-	*chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	return nil, nil
-}
-
-func (m *summaryContentCaptureChat) GetModelName() string { return "summary-capture" }
-func (m *summaryContentCaptureChat) GetModelID() string   { return "summary-capture" }
 
 type summaryImageInfoChunkRepo struct {
 	interfaces.ChunkRepository
@@ -58,26 +45,29 @@ func TestGetSummaryReconstructsTableChunksWithSyntheticHeaders(t *testing.T) {
 		}},
 		chunkRepo: summaryImageInfoChunkRepo{},
 	}
-	model := &summaryContentCaptureChat{}
+	model := newSummaryContentCapture(t)
 
-	_, err := service.getSummary(context.Background(), model, &types.Knowledge{ID: "knowledge-1"}, []*types.Chunk{
-		{
-			ID: "first", Content: firstContent, ChunkIndex: 0,
-			StartAt: 0, EndAt: len([]rune(firstContent)),
-		},
-		{
-			// The repeated header is synthetic: StartAt points at row two in the source.
-			ID: "second", Content: header + rowTwo + rowThree, ChunkIndex: 1,
-			StartAt: len([]rune(header + rowOne)), EndAt: len([]rune(want)),
-		},
-	})
+	_, err := service.getSummary(context.Background(), model.fake.Config(),
+		&types.Knowledge{ID: "knowledge-1"}, []*types.Chunk{
+			{
+				ID: "first", Content: firstContent, ChunkIndex: 0,
+				StartAt: 0, EndAt: len([]rune(firstContent)),
+			},
+			{
+				// The repeated header is synthetic: StartAt points at row two in the source.
+				ID: "second", Content: header + rowTwo + rowThree, ChunkIndex: 1,
+				StartAt: len([]rune(header + rowOne)), EndAt: len([]rune(want)),
+			},
+		})
 	if err != nil {
 		t.Fatalf("getSummary() error = %v", err)
 	}
-	if len(model.messages) != 2 {
-		t.Fatalf("summary model received %d messages, want 2", len(model.messages))
+	calls := model.fake.Calls()
+	if len(calls) != 1 || len(calls[0].Opts.Messages) != 2 {
+		t.Fatalf("summary model received %d calls, first with %d messages, want 1 call with 2 messages",
+			len(calls), len(calls[0].Opts.Messages))
 	}
-	if got := model.messages[1].Content; got != want {
+	if got := calls[0].Opts.Messages[1].Text(); got != want {
 		t.Fatalf("summary content mismatch:\n got: %q\nwant: %q", got, want)
 	}
 }

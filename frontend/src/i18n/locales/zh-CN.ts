@@ -984,6 +984,7 @@ export default {
   },
   agentEditor: {
     builtinHint: '这是内置智能体，名称和描述不可修改，但可以调整配置参数',
+    thinkingLevelResetToast: '已切换模型，思考档位不在新模型支持范围内，已重置为跟随默认',
     fileTypes: {
       label: '支持的文件类型',
       desc: '限制可选择的文件类型，留空表示支持所有类型',
@@ -2576,7 +2577,16 @@ export default {
     languageDescription: '选择界面显示语言',
     languageSaved: '语言设置已保存'
   },
+  thinking: {
+    unsupportedHint: '当前模型不支持思考',
+    levelLabel: '思考档位',
+    levelPlaceholder: '跟随模型默认',
+    reset: '重置',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: '模型名称',
     defaultTag: '默认',
     addModelInSettings: '前往全局设置添加模型',
@@ -2591,6 +2601,7 @@ export default {
       typeLabel: '模型类型',
       sectionSource: '模型来源',
       sectionProvider: '接入配置',
+      sectionParameters: '模型参数设置',
       sectionAdvanced: '高级选项',
       sourceLabel: '模型来源',
       sourceLocal: 'Ollama',
@@ -2623,6 +2634,12 @@ export default {
       dimensionOverrideDesc: '仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。',
       supportsVisionLabel: '支持视觉/多模态',
       supportsVisionDesc: '模型是否支持图片等多模态输入',
+      inputModalitiesLabel: '输入模态',
+      inputModalitiesDesc: '勾选该模型支持的输入模态；文本为所有模型的基础能力，默认勾选。',
+      modalityText: '文本',
+      modalityImage: '图片',
+      modalityAudio: '音频',
+      modalityVideo: '视频',
       contextWindowLabel: '上下文窗口',
       contextWindowPlaceholder: '默认 {value}',
       contextWindowDesc: '该模型一次请求能容纳的 token 数。智能体压缩对话历史会按此上限工作。留空则使用默认 200000（200K）。请按厂商文档填写真实值，填大会导致压缩不触发、上游直接拒绝请求。',
@@ -2631,8 +2648,21 @@ export default {
       maxConcurrencyLabel: '后台并发上限',
       maxConcurrencyPlaceholder: '0 表示使用全局默认',
       maxConcurrencyDesc: '限制文档入库/富化等后台任务对该模型的并发调用数（按模型全副本共享）。0 或留空表示沿用全局默认；不影响交互式对话。',
-      thinkingControlLabel: '思考模式参数格式',
-      thinkingControlDesc: '决定智能体「思考模式」开/关时如何写入 API。已尝试按厂商/模型预选，若与实际情况不符请按 API 文档手动修改；选「不写入」时，智能体「思考模式」开关不生效。',
+      thinkingToggleLabel: '思考开关',
+      thinkingToggleDesc: '关闭后请求不携带思考参数；档位选择不受影响。',
+      selectedLevelsLabel: '支持的思考档位',
+      selectedLevelsPlaceholder: '选择该模型支持的档位',
+      selectedLevelsDesc: '从厂商档位词表中勾选该模型实际支持的档位；留空表示未指定。',
+      thinkingLevelLabel: '默认思考档位',
+      thinkingLevelPlaceholder: '留空 = 服务商自决',
+      thinkingLevelDesc: '用户/智能体未指定档位时使用的默认档；留空由模型服务商决定（用厂商默认或不发档位参数）。',
+      thinkingLevelsUnsupportedHint: '该模型不支持思考强度调节',
+      maxOutputTokensLabel: '最大输出 token',
+      maxOutputTokensPlaceholder: '留空 = 不限制',
+      maxOutputTokensDesc: '该模型单次回复最多生成的 token 数。留空则不做限制。',
+      sourceCatalog: '目录',
+      visionDisabledHint: '当前厂商未声明支持图像输入',
+      dimensionOverrideDisabledHint: '当前厂商未声明支持自定义输出维度',
       dimensionHint: '模型已选择，点击"检测维度"按钮自动获取向量维度',
       loadModelListFailed: '加载模型列表失败',
       listRefreshed: '列表已刷新',
@@ -2648,6 +2678,8 @@ export default {
       connectionConfigError: '连接失败，请检查配置',
       downloadStarted: '开始下载 {name}',
       downloadCompleted: '{name} 下载完成',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
       downloadFailed: '{name} 下载失败',
       downloadStartFailed: '启动下载失败',
       ollamaUnavailable: 'Ollama服务不可用，无法选择本地模型',
@@ -2726,7 +2758,11 @@ export default {
         },
         generic: {
           label: '自定义 (OpenAI兼容接口)',
-          description: 'Generic API endpoint (OpenAI-compatible)'
+          description: 'Generic API endpoint (OpenAI-compatible)',
+        ollama: {
+          label: 'Ollama',
+          description: '本地 Ollama 服务（http://localhost:11434）',
+        },
         },
         requesty: {
           label: 'Requesty',
@@ -2767,25 +2803,18 @@ export default {
         modelNameMax: '模型名称不能超过100个字符',
         baseUrlRequired: '请输入 Base URL',
         baseUrlEmpty: 'Base URL 不能为空',
-        baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL'
+        baseUrlInvalid: 'Base URL 格式不正确，请输入有效的 URL',
+        contextWindowRange: '上下文窗口需在 1024 ~ 10000000 之间',
+        maxOutputTokensRange: '最大输出 Token 需为正整数',
+        maxConcurrencyRange: '后台并发上限需为非负整数',
+        credentialRequired: '请填写{field}'
       },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: '火山引擎 Ark；腾讯云 LKEAP（DeepSeek V3 等，选 LKEAP 时默认此项；R1 请改「不写入」）'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: '阿里云 DashScope：qwen3、qwen-plus、qwen-max、qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: '自定义 OpenAI 兼容、NVIDIA NIM、vLLM / 本地 Qwen 部署'
-        },
-        none: {
-          label: '不写入思考参数',
-          hint: '智能体「思考模式」开关不生效，不会在请求中写入思考相关参数'
-        }
+      thinkingLevels: {
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '超高',
+        max: '最大'
       },
       volcengine: {
         accessKeyLabel: 'Access Key ID',
@@ -3649,6 +3678,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '（附件）',
     referenceChunkCount: '{count}个片段',
     fallbackHint: '未从知识库中检索到相关内容，以上为模型直接回答',
+    usageHint: '本轮模型调用的 token 用量（输入 → 输出 · 总计 · 缓存命中）',
+    usageCached: '缓存 {n}',
     requestInfoTitle: '请求信息',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: '消息 ID',
@@ -4690,6 +4721,7 @@ export default {
     kbLockedByAgent: '当前智能体已锁定知识库配置',
     kbDisabledByAgent: '当前智能体已禁用知识库功能',
     modelLockedByAgent: '当前智能体已锁定模型配置',
+    thinkingLevelResetToast: '已切换模型，思考档位不在新模型支持范围内，已重置为跟随默认',
     imageUploadDisabledByAgent: '当前智能体未启用图片上传',
     goToAgentSettings: '去设置智能体',
     messages: {

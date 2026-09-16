@@ -7,7 +7,7 @@ import (
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,20 +87,20 @@ func TestDrainSteerMessagesInjectsIntoTail(t *testing.T) {
 	}
 	engine.SetSteerSink(sink)
 
-	messages := []chat.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "original query"},
-		{Role: "assistant", Content: "", ToolCalls: []chat.ToolCall{{ID: "tc1"}}},
-		{Role: "tool", Content: "tool output"},
+	messages := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "original query"}}},
+		{Role: "assistant", ToolCalls: []invoke.ToolCall{{ID: "tc1"}}},
+		{Role: "tool", Content: []invoke.Part{{Text: "tool output"}}},
 	}
 	state := &types.AgentState{CurrentRound: 1}
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
 
 	require.Len(t, messages, 5)
-	assert.Equal(t, "user", messages[4].Role)
-	assert.Equal(t, types.SteerMessageContent("再补充一点：也对比一下成本"), messages[4].Content)
+	assert.Equal(t, invoke.RoleUser, messages[4].Role)
+	assert.Equal(t, types.SteerMessageContent("再补充一点：也对比一下成本"), messages[4].Text())
 	// Tool result pairing is untouched — the tool message stays where it was.
-	assert.Equal(t, "tool", messages[3].Role)
+	assert.Equal(t, invoke.RoleTool, messages[3].Role)
 	assert.Equal(t, []string{"user-row-for-再补充一点：也对比一下成本"}, state.PendingSteerMessages)
 
 	require.Len(t, sink.persisted, 1)
@@ -125,7 +125,7 @@ func TestDrainSteerMessagesEmptyAndOffset(t *testing.T) {
 	sink := &fakeSteerSink{}
 	engine.SetSteerSink(sink)
 
-	messages := []chat.Message{{Role: "user", Content: "q"}}
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "q")}
 	state := &types.AgentState{CurrentRound: 0}
 
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
@@ -137,8 +137,8 @@ func TestDrainSteerMessagesEmptyAndOffset(t *testing.T) {
 	}
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
 	assert.Len(t, messages, 3)
-	assert.Equal(t, types.SteerMessageContent("first"), messages[1].Content)
-	assert.Equal(t, types.SteerMessageContent("second"), messages[2].Content)
+	assert.Equal(t, types.SteerMessageContent("first"), messages[1].Text())
+	assert.Equal(t, types.SteerMessageContent("second"), messages[2].Text())
 	require.Len(t, sink.persisted, 2)
 
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
@@ -153,7 +153,7 @@ func TestDrainSteerMessagesNilSinkNoOp(t *testing.T) {
 	engine := newTestEngine(t, model)
 	engine.eventBus = event.NewEventBus()
 
-	messages := []chat.Message{{Role: "user", Content: "q"}}
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "q")}
 	state := &types.AgentState{CurrentRound: 0}
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
 	assert.Len(t, messages, 1)
@@ -174,12 +174,12 @@ func TestDrainSteerMessagesBlankContentSkipped(t *testing.T) {
 	}
 	engine.SetSteerSink(sink)
 
-	messages := []chat.Message{{Role: "user", Content: "q"}}
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "q")}
 	state := &types.AgentState{CurrentRound: 0}
 	engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg")
 
 	require.Len(t, messages, 2)
-	assert.Equal(t, types.SteerMessageContent("real instruction"), messages[1].Content)
+	assert.Equal(t, types.SteerMessageContent("real instruction"), messages[1].Text())
 	require.Len(t, sink.persisted, 1)
 }
 
@@ -223,9 +223,9 @@ func TestExecuteLoopInjectsBeforeNextLLMCall(t *testing.T) {
 		CurrentRound: 0,
 		RoundSteps:   []types.AgentStep{},
 	}
-	messages := []chat.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "start"},
+	messages := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "start"}}},
 	}
 	tools := engine.buildToolsForLLM()
 	_, err := engine.executeLoop(context.Background(), state, "start", messages, tools, "sess", "msg")
@@ -233,22 +233,22 @@ func TestExecuteLoopInjectsBeforeNextLLMCall(t *testing.T) {
 	require.Len(t, model.calls, 2)
 
 	for _, msg := range model.calls[0] {
-		assert.NotContains(t, msg.Content, "focus on the cost angle")
+		assert.NotContains(t, msg.Text(), "focus on the cost angle")
 	}
 	// Continue with the original task and tool result exactly once; steering
 	// needs neither a restarted run nor an extra model call to interpret it.
 	second := model.calls[1]
 	steerCount, taskCount, toolCount := 0, 0, 0
 	for _, msg := range second {
-		if msg.Role == "user" && msg.Content == "start" {
+		if msg.Role == invoke.RoleUser && msg.Text() == "start" {
 			taskCount++
 		}
 		if msg.Role == "tool" && msg.ToolCallID == "tc1" {
 			toolCount++
 		}
-		if msg.Role == "user" && strings.Contains(msg.Content, "focus on the cost angle") {
+		if msg.Role == invoke.RoleUser && strings.Contains(msg.Text(), "focus on the cost angle") {
 			steerCount++
-			assert.Contains(t, msg.Content, "<continue_task>")
+			assert.Contains(t, msg.Text(), "<continue_task>")
 		}
 	}
 	assert.Equal(t, 1, taskCount)
@@ -303,9 +303,9 @@ func TestExecuteLoopContinuesWhenSteerArrivesOnNaturalStop(t *testing.T) {
 	engine.SetSteerSink(sink)
 
 	state := &types.AgentState{RoundSteps: []types.AgentStep{}}
-	messages := []chat.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "write a draft"},
+	messages := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "write a draft"}}},
 	}
 	_, err := engine.executeLoop(context.Background(), state, "write a draft", messages, nil, "sess", "msg")
 	require.NoError(t, err)
@@ -315,10 +315,10 @@ func TestExecuteLoopContinuesWhenSteerArrivesOnNaturalStop(t *testing.T) {
 	foundSteer := false
 	foundDraft := false
 	for _, msg := range second {
-		if msg.Role == "user" && strings.Contains(msg.Content, "rewrite this from the cost angle") {
+		if msg.Role == invoke.RoleUser && strings.Contains(msg.Text(), "rewrite this from the cost angle") {
 			foundSteer = true
 		}
-		if msg.Role == "assistant" && strings.Contains(msg.Content, "first draft") {
+		if msg.Role == invoke.RoleAssistant && strings.Contains(msg.Text(), "first draft") {
 			foundDraft = true
 		}
 	}
@@ -341,7 +341,7 @@ func TestDrainSteerMessagesSkipsAppendWhenPersistFails(t *testing.T) {
 	}
 	engine.SetSteerSink(sink)
 
-	messages := []chat.Message{{Role: "user", Content: "q"}}
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "q")}
 	state := &types.AgentState{CurrentRound: 0}
 	assert.Equal(t, 0, engine.drainSteerMessages(context.Background(), state, &messages, "sess", "msg"))
 	assert.Len(t, messages, 1)
@@ -387,9 +387,9 @@ func TestExecuteLoopLoopEndInjectDoesNotCloseAnswerBeforeContinue(t *testing.T) 
 	engine.SetSteerSink(sink)
 
 	state := &types.AgentState{RoundSteps: []types.AgentStep{}}
-	messages := []chat.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "write a draft"},
+	messages := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "write a draft"}}},
 	}
 	_, err := engine.executeLoop(context.Background(), state, "write a draft", messages, nil, "sess", "msg")
 	require.NoError(t, err)
@@ -422,9 +422,9 @@ func TestExecuteLoopLastRoundInjectRunsAnotherReActRound(t *testing.T) {
 	engine.SetSteerSink(sink)
 
 	state := &types.AgentState{RoundSteps: []types.AgentStep{}}
-	messages := []chat.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "write a draft"},
+	messages := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "write a draft"}}},
 	}
 	_, err := engine.executeLoop(context.Background(), state, "write a draft", messages, nil, "sess", "msg")
 	require.NoError(t, err)
@@ -476,9 +476,9 @@ func TestExecuteLoopSecondOverrunDoesNotContinue(t *testing.T) {
 	engine.SetSteerSink(sink)
 
 	state := &types.AgentState{RoundSteps: []types.AgentStep{}}
-	messages := []chat.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "write a draft"},
+	messages := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "write a draft"}}},
 	}
 	_, err := engine.executeLoop(context.Background(), state, "write a draft", messages, nil, "sess", "msg")
 	require.NoError(t, err)

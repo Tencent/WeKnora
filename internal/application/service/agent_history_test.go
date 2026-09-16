@@ -6,7 +6,7 @@ import (
 	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,9 +24,9 @@ func TestBuildUserHistoryMessage_IgnoresLegacyRenderedContent(t *testing.T) {
 		},
 	}
 	got := buildUserHistoryMessage(msg)
-	assert.Equal(t, "user", got.Role)
-	assert.Equal(t, "what about the chart?\n\n[用户上传图片内容]\na bar chart", got.Content)
-	assert.NotContains(t, got.Content, "[augmented]")
+	assert.Equal(t, invoke.RoleUser, got.Role)
+	assert.Equal(t, "what about the chart?\n\n[用户上传图片内容]\na bar chart", got.Text())
+	assert.NotContains(t, got.Text(), "[augmented]")
 }
 
 func TestBuildUserHistoryMessage_FallsBackToContentWithCaptions(t *testing.T) {
@@ -39,8 +39,8 @@ func TestBuildUserHistoryMessage_FallsBackToContentWithCaptions(t *testing.T) {
 		},
 	}
 	got := buildUserHistoryMessage(msg)
-	assert.Equal(t, "user", got.Role)
-	assert.Equal(t, "look at this\n\n[用户上传图片内容]\na bar chart\na pie chart", got.Content)
+	assert.Equal(t, invoke.RoleUser, got.Role)
+	assert.Equal(t, "look at this\n\n[用户上传图片内容]\na bar chart\na pie chart", got.Text())
 }
 
 // TestBuildUserHistoryMessage_AppendsAttachmentsWhenNoRenderedContent covers
@@ -62,10 +62,10 @@ func TestBuildUserHistoryMessage_AppendsAttachmentsWhenNoRenderedContent(t *test
 		},
 	}
 	got := buildUserHistoryMessage(msg)
-	assert.Equal(t, "user", got.Role)
-	assert.Contains(t, got.Content, "summarize this")
-	assert.Contains(t, got.Content, `<attachment index="1" name="report.pdf">`)
-	assert.Contains(t, got.Content, "hello world")
+	assert.Equal(t, invoke.RoleUser, got.Role)
+	assert.Contains(t, got.Text(), "summarize this")
+	assert.Contains(t, got.Text(), `<attachment index="1" name="report.pdf">`)
+	assert.Contains(t, got.Text(), "hello world")
 }
 
 // TestBuildUserHistoryMessage_RenderedContentRebuildsAttachment verifies that
@@ -81,9 +81,9 @@ func TestBuildUserHistoryMessage_RenderedContentRebuildsAttachment(t *testing.T)
 		},
 	}
 	got := buildUserHistoryMessage(msg)
-	assert.Contains(t, got.Content, "summarize this")
-	assert.NotContains(t, got.Content, "[with retrieval context already included]")
-	assert.Contains(t, got.Content, "<attachment")
+	assert.Contains(t, got.Text(), "summarize this")
+	assert.NotContains(t, got.Text(), "[with retrieval context already included]")
+	assert.Contains(t, got.Text(), "<attachment")
 }
 
 // TestBuildAssistantHistoryMessages_NaturalFinishEmitsSingleAnswer covers the
@@ -100,8 +100,8 @@ func TestBuildAssistantHistoryMessages_NaturalFinishEmitsSingleAnswer(t *testing
 	}
 	got := buildAssistantHistoryMessages(msg)
 	if assert.Len(t, got, 1) {
-		assert.Equal(t, "assistant", got[0].Role)
-		assert.Equal(t, "Hello, nice to meet you!", got[0].Content)
+		assert.Equal(t, invoke.RoleAssistant, got[0].Role)
+		assert.Equal(t, "Hello, nice to meet you!", got[0].Text())
 		assert.Empty(t, got[0].ToolCalls)
 	}
 }
@@ -116,7 +116,7 @@ func TestBuildAssistantHistoryMessages_StripsThinkBlocks(t *testing.T) {
 	}
 	got := buildAssistantHistoryMessages(msg)
 	if assert.Len(t, got, 1) {
-		assert.Equal(t, "The answer is 42.", got[0].Content)
+		assert.Equal(t, "The answer is 42.", got[0].Text())
 	}
 }
 
@@ -129,7 +129,7 @@ func TestAssistantHistoryScopesArtifactVersionsToHistoricalTurn(t *testing.T) {
 		message := &types.Message{Role: "assistant", Content: body}
 		history := buildAssistantHistoryMessages(message)
 		require.Len(t, history, 1)
-		require.Contains(t, history[0].Content, labels[1]+": ![deck](resource://AbCdEfGhIjKlMnOpQrStUv)")
+		require.Contains(t, history[0].Text(), labels[1]+": ![deck](resource://AbCdEfGhIjKlMnOpQrStUv)")
 		require.Equal(t, body, message.Content, "stored display content must remain unchanged")
 	}
 	result := &types.ToolResult{Success: true, Output: "command completed", OutputFiles: []string{"sandbox:deck.pptx"}}
@@ -183,20 +183,20 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 		return
 	}
 	// 1. assistant message announcing the tool call
-	assert.Equal(t, "assistant", got[0].Role)
-	assert.Equal(t, "Let me search.", got[0].Content)
+	assert.Equal(t, invoke.RoleAssistant, got[0].Role)
+	assert.Equal(t, "Let me search.", got[0].Text())
 	if assert.Len(t, got[0].ToolCalls, 1) {
 		assert.Equal(t, "call_1", got[0].ToolCalls[0].ID)
 		assert.Equal(t, agenttools.ToolKnowledgeSearch, got[0].ToolCalls[0].Function.Name)
 		assert.Contains(t, got[0].ToolCalls[0].Function.Arguments, "foo")
 	}
 	// 2. tool result paired with the call ID
-	assert.Equal(t, "tool", got[1].Role)
+	assert.Equal(t, invoke.RoleTool, got[1].Role)
 	assert.Equal(t, "call_1", got[1].ToolCallID)
-	assert.Equal(t, "doc A, doc B, doc C", got[1].Content)
+	assert.Equal(t, "doc A, doc B, doc C", got[1].Text())
 	// 3. canonical final answer (final_answer tool call itself was filtered)
-	assert.Equal(t, "assistant", got[2].Role)
-	assert.Equal(t, "Found 3 matches in the docs.", got[2].Content)
+	assert.Equal(t, invoke.RoleAssistant, got[2].Role)
+	assert.Equal(t, "Found 3 matches in the docs.", got[2].Text())
 	assert.Empty(t, got[2].ToolCalls)
 }
 
@@ -226,8 +226,8 @@ func TestBuildAssistantHistoryMessages_SkipsPipelineTimelineToolCalls(t *testing
 	if !assert.Len(t, got, 1) {
 		return
 	}
-	assert.Equal(t, "assistant", got[0].Role)
-	assert.Equal(t, "你好！很高兴见到你。", got[0].Content)
+	assert.Equal(t, invoke.RoleAssistant, got[0].Role)
+	assert.Equal(t, "你好！很高兴见到你。", got[0].Text())
 	assert.Empty(t, got[0].ToolCalls)
 }
 
@@ -260,9 +260,9 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 	if !assert.Len(t, got, 3) {
 		return
 	}
-	assert.Equal(t, chat.Message{
+	assert.Equal(t, invoke.Message{
 		Role:       "tool",
-		Content:    "Error: kb unreachable",
+		Content:    []invoke.Part{{Text: "Error: kb unreachable"}},
 		ToolCallID: "call_err",
 		Name:       agenttools.ToolKnowledgeSearch,
 	}, got[1])
@@ -299,9 +299,9 @@ func TestBuildAssistantHistoryMessages_SkillScriptFailureKeepsStdout(t *testing.
 	}
 	got := buildAssistantHistoryMessages(msg)
 	require.Len(t, got, 3)
-	assert.Equal(t, "tool", got[1].Role)
-	assert.Contains(t, got[1].Content, "X轴字段不存在：工作项目")
-	assert.Contains(t, got[1].Content, "Error: Script exited with code 1")
+	assert.Equal(t, invoke.RoleTool, got[1].Role)
+	assert.Contains(t, got[1].Text(), "X轴字段不存在：工作项目")
+	assert.Contains(t, got[1].Text(), "Error: Script exited with code 1")
 }
 
 // A steered turn has more than one user message: the original question plus
@@ -350,18 +350,21 @@ func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
 	got := buildTurnBodyMessages(assistant, midRun)
 	require.Len(t, got, 6)
 
-	assert.Equal(t, "assistant", got[0].Role)
-	assert.Equal(t, "tool", got[1].Role)
-	assert.Equal(t, "found A", got[1].Content)
+	assert.Equal(t, invoke.RoleAssistant, got[0].Role)
+	assert.Equal(t, invoke.RoleTool, got[1].Role)
+	assert.Equal(t, "found A", got[1].Text())
 
 	// The injected message belongs between the round it interrupted and the
 	// round it caused, not bolted onto either end.
-	assert.Equal(t, chat.Message{Role: "user", Content: types.SteerMessageContent("also check B")}, got[2])
+	assert.Equal(t, invoke.Message{
+		Role:    invoke.RoleUser,
+		Content: []invoke.Part{{Text: types.SteerMessageContent("also check B")}},
+	}, got[2])
 
-	assert.Equal(t, "assistant", got[3].Role)
-	assert.Equal(t, "tool", got[4].Role)
-	assert.Equal(t, "found B", got[4].Content)
-	assert.Equal(t, chat.Message{Role: "assistant", Content: "Both are covered in the guide."}, got[5])
+	assert.Equal(t, invoke.RoleAssistant, got[3].Role)
+	assert.Equal(t, invoke.RoleTool, got[4].Role)
+	assert.Equal(t, "found B", got[4].Text())
+	assert.Equal(t, invoke.TextMessage(invoke.RoleAssistant, "Both are covered in the guide."), got[5])
 }
 
 // A message injected after the last tool round still has to appear before the
@@ -390,8 +393,11 @@ func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
 
 	got := buildTurnBodyMessages(assistant, midRun)
 	require.Len(t, got, 4)
-	assert.Equal(t, chat.Message{Role: "user", Content: types.SteerMessageContent("and keep it short")}, got[2])
-	assert.Equal(t, chat.Message{Role: "assistant", Content: "Here you go."}, got[3])
+	assert.Equal(t, invoke.Message{
+		Role:    invoke.RoleUser,
+		Content: []invoke.Part{{Text: types.SteerMessageContent("and keep it short")}},
+	}, got[2])
+	assert.Equal(t, invoke.TextMessage(invoke.RoleAssistant, "Here you go."), got[3])
 }
 
 // TestFilterNonTerminalToolCalls confirms a legacy final_answer entry is
@@ -490,11 +496,11 @@ func TestBuildTurnBodyMessages_ReplaysExplicitBoundariesAndIntermediateAnswers(t
 	}}
 	got := buildTurnBodyMessages(assistant, users)
 	require.Len(t, got, 5)
-	assert.Equal(t, []chat.Message{
-		{Role: "assistant", Content: "first draft"},
-		{Role: "user", Content: types.SteerMessageContent("revise")},
-		{Role: "assistant", Content: "second draft"},
-		{Role: "user", Content: types.SteerMessageContent("revise")},
-		{Role: "assistant", Content: "final"},
+	assert.Equal(t, []invoke.Message{
+		invoke.TextMessage(invoke.RoleAssistant, "first draft"),
+		{Role: invoke.RoleUser, Content: []invoke.Part{{Text: types.SteerMessageContent("revise")}}},
+		invoke.TextMessage(invoke.RoleAssistant, "second draft"),
+		{Role: invoke.RoleUser, Content: []invoke.Part{{Text: types.SteerMessageContent("revise")}}},
+		invoke.TextMessage(invoke.RoleAssistant, "final"),
 	}, got)
 }

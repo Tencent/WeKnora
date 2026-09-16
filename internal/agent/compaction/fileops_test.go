@@ -4,23 +4,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/stretchr/testify/assert"
 )
 
-func toolCallMsg(name, arguments string) chat.Message {
-	return chat.Message{
+func toolCallMsg(name, arguments string) invoke.Message {
+	return invoke.Message{
 		Role: "assistant",
-		ToolCalls: []chat.ToolCall{{
+		ToolCalls: []invoke.ToolCall{{
 			ID:       "call-1",
 			Type:     "function",
-			Function: chat.FunctionCall{Name: name, Arguments: arguments},
+			Function: invoke.FunctionCall{Name: name, Arguments: arguments},
 		}},
 	}
 }
 
 func TestResolveSplitsReadsFromWrites(t *testing.T) {
-	read, modified := extractFileOps("", []chat.Message{
+	read, modified := extractFileOps("", []invoke.Message{
 		toolCallMsg("write_sandbox_file", `{"path":"/workspace/output/deck.html","content":"<html>"}`),
 		toolCallMsg("edit_sandbox_file", `{"path":"/workspace/output/deck.html","old_string":"a"}`),
 		toolCallMsg("read_file", `{"path":"/workspace/input/notes.txt"}`),
@@ -36,7 +36,7 @@ func TestResolveSplitsReadsFromWrites(t *testing.T) {
 // A file the agent read and then rewrote is only interesting as something it
 // modified; listing it twice invites the model to re-read its own output.
 func TestResolveDropsReadsThatWereAlsoWritten(t *testing.T) {
-	read, modified := extractFileOps("", []chat.Message{
+	read, modified := extractFileOps("", []invoke.Message{
 		toolCallMsg("read_sandbox_file", `{"path":"/workspace/output/deck.html"}`),
 		toolCallMsg("write_sandbox_file", `{"path":"/workspace/output/deck.html","content":"x"}`),
 	}).resolve()
@@ -48,7 +48,7 @@ func TestResolveDropsReadsThatWereAlsoWritten(t *testing.T) {
 // Truncated arguments are the normal case for the calls this feature exists
 // to survive, so they must be skipped rather than poison the list.
 func TestExtractFileOpsIgnoresUnparseableArguments(t *testing.T) {
-	read, modified := extractFileOps("", []chat.Message{
+	read, modified := extractFileOps("", []invoke.Message{
 		toolCallMsg("write_sandbox_file", `{"path":"/workspace/output/a.html","content":"<htm`),
 		toolCallMsg("write_sandbox_file", `{"content":"no path here"}`),
 	}).resolve()
@@ -67,7 +67,7 @@ func TestExtractFileOpsInheritsFromPreviousSummary(t *testing.T) {
 		read:    []string{"/workspace/input/notes.txt"},
 	}
 
-	read, modified := extractFileOps("prose"+earlier.format(), []chat.Message{
+	read, modified := extractFileOps("prose"+earlier.format(), []invoke.Message{
 		toolCallMsg("write_sandbox_file", `{"path":"/workspace/output/report.md","content":"x"}`),
 	}).resolve()
 
@@ -80,7 +80,7 @@ func TestFileOpsFormatIsEmptyWhenNothingTouched(t *testing.T) {
 }
 
 func TestFileOpsCapsTrackedPaths(t *testing.T) {
-	msgs := make([]chat.Message, 0, maxTrackedFilePaths+10)
+	msgs := make([]invoke.Message, 0, maxTrackedFilePaths+10)
 	for i := 0; i < maxTrackedFilePaths+10; i++ {
 		msgs = append(msgs, toolCallMsg("write_sandbox_file",
 			`{"path":"/workspace/output/`+strings.Repeat("a", i+1)+`.txt"}`))

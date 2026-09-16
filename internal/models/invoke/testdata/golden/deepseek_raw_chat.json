@@ -1,0 +1,75 @@
+{
+  "scenario": "deepseek_raw_chat",
+  "behavior": [
+    "deepseekProvider.ForceRawHTTP -\u003e raw HTTP path (Bearer auth)",
+    "ShapeRequest strips tool_choice (DeepSeek does not support it)",
+    "completion budget on max_tokens (deepseek wire field)",
+    "applyRawPromptCacheUsage captures prompt_cache_hit/miss_tokens",
+    "cache status: hit (read=936)"
+  ],
+  "requests": [
+    {
+      "path": "/chat/completions",
+      "headers": {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "max_tokens": 100,
+        "messages": [
+          {
+            "content": "Hi",
+            "role": "user"
+          }
+        ],
+        "model": "deepseek-chat",
+        "tools": [
+          {
+            "function": {
+              "name": "lookup",
+              "parameters": null
+            },
+            "type": "function"
+          }
+        ]
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-ds-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "deepseek-chat",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Answer"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 1000,
+      "completion_tokens": 20,
+      "total_tokens": 1020,
+      "prompt_cache_hit_tokens": 936,
+      "prompt_cache_miss_tokens": 64
+    }
+  },
+  "client": {
+    "content": "Answer",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 1000,
+      "completion_tokens": 20,
+      "total_tokens": 1020,
+      "cached_tokens": 936,
+      "cache_read_tokens": 936,
+      "cache_miss_tokens": 64,
+      "cache_reported": true,
+      "cache_status": "hit"
+    }
+  }
+}

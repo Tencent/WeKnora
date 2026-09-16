@@ -3,7 +3,7 @@ package tools
 import (
 	"html"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
 
 // SanitizeMessages validates and fixes a message array for LLM compatibility.
@@ -13,15 +13,15 @@ import (
 //   - Removes empty content messages that can cause API errors
 //
 // Returns the sanitized message slice (may be shorter than input).
-func SanitizeMessages(messages []chat.Message) []chat.Message {
+func SanitizeMessages(messages []invoke.Message) []invoke.Message {
 	if len(messages) == 0 {
 		return messages
 	}
 
-	result := make([]chat.Message, 0, len(messages))
+	result := make([]invoke.Message, 0, len(messages))
 	for i, msg := range messages {
 		// Skip empty non-system messages (some providers reject these)
-		if msg.Content == "" && msg.Role != "system" &&
+		if msg.Text() == "" && msg.Role != "system" &&
 			msg.Role != "tool" && len(msg.ToolCalls) == 0 {
 			continue
 		}
@@ -31,7 +31,8 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 			prev := result[len(result)-1]
 			if prev.Role == msg.Role && prev.Role != "tool" {
 				// Merge with previous message
-				result[len(result)-1].Content += "\n\n" + msg.Content
+				result[len(result)-1].Content = append(result[len(result)-1].Content,
+					invoke.Part{Text: "\n\n" + msg.Text()})
 				continue
 			}
 		}
@@ -39,10 +40,12 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 		// Verify tool result messages reference a valid tool call
 		if msg.Role == "tool" && msg.ToolCallID != "" {
 			if !hasMatchingToolCall(messages[:i], msg.ToolCallID) {
-				// Preserve recoverable data without promoting external output to policy.
-				msg.Role = "user"
-				msg.Content = "<untrusted_tool_result name=\"" + html.EscapeString(msg.Name) +
-					"\">\n" + html.EscapeString(msg.Content) + "\n</untrusted_tool_result>"
+				// Preserve recoverable data without promoting external output
+				// to policy: an orphaned tool result stays user-role content,
+				// wrapped and escaped (upstream 7a98a8e3).
+				msg.Role = invoke.RoleUser
+				msg.Content = []invoke.Part{{Text: "<untrusted_tool_result name=\"" + html.EscapeString(msg.Name) +
+					"\">\n" + html.EscapeString(msg.Text()) + "\n</untrusted_tool_result>"}}
 				msg.ToolCallID = ""
 				msg.Name = ""
 			}
@@ -55,7 +58,7 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 }
 
 // hasMatchingToolCall checks if any preceding assistant message has a tool call with the given ID.
-func hasMatchingToolCall(messages []chat.Message, toolCallID string) bool {
+func hasMatchingToolCall(messages []invoke.Message, toolCallID string) bool {
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg := messages[i]
 		if msg.Role == "assistant" {

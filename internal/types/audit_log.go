@@ -11,6 +11,13 @@ import (
 type AuditAction string
 
 const (
+	// AuditActionModelProbeRedirect fires when a remote-catalog probe or a
+	// connection test tried to reuse a saved model's stored credentials
+	// against a caller-chosen base_url on a DIFFERENT host (2026-09-13
+	// 裁定 C4): the request is denied — credentials must be supplied
+	// explicitly — and the redirect is recorded here. Details carry the
+	// host redirect only, never secrets.
+	AuditActionModelProbeRedirect AuditAction = "model.probe_credential_redirect"
 	// AuditActionMemberAdded fires when a tenant Owner / Admin adds a
 	// new tenant_members row. The actor is the inviter; the target is
 	// the invited user.

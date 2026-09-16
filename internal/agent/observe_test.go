@@ -10,7 +10,7 @@ import (
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,37 +27,46 @@ func TestTrimToolResultsKeepsNewestAndPairing(t *testing.T) {
 	estimator, err := agenttoken.NewEstimator()
 	require.NoError(t, err)
 
-	messages := []chat.Message{
-		{Role: "user", Content: "the question"},
+	messages := []invoke.Message{
+		{Role: "user", Content: []invoke.Part{{Text: "the question"}}},
 		{
 			Role: "assistant",
-			ToolCalls: []chat.ToolCall{
+			ToolCalls: []invoke.ToolCall{
 				{ID: "call-1", Type: "function"},
 				{ID: "call-2", Type: "function"},
 				{ID: "call-3", Type: "function"},
 			},
 		},
-		{Role: "tool", Name: "one", ToolCallID: "call-1", Content: strings.Repeat("alpha beta gamma ", 1000)},
-		{Role: "tool", Name: "two", ToolCallID: "call-2", Content: strings.Repeat("delta epsilon zeta ", 1000)},
-		{Role: "tool", Name: "three", ToolCallID: "call-3", Content: strings.Repeat("newest result ", 100)},
+		{
+			Role: "tool", Name: "one", ToolCallID: "call-1",
+			Content: []invoke.Part{{Text: strings.Repeat("alpha beta gamma ", 1000)}},
+		},
+		{
+			Role: "tool", Name: "two", ToolCallID: "call-2",
+			Content: []invoke.Part{{Text: strings.Repeat("delta epsilon zeta ", 1000)}},
+		},
+		{
+			Role: "tool", Name: "three", ToolCallID: "call-3",
+			Content: []invoke.Part{{Text: strings.Repeat("newest result ", 100)}},
+		},
 	}
 	latestCost := estimator.EstimateMessage(&messages[4])
 	markerOne := messages[2]
-	markerOne.Content = compactedToolResultMarker(markerOne.Content)
+	markerOne.Content = []invoke.Part{{Text: compactedToolResultMarker(markerOne.Text())}}
 	markerTwo := messages[3]
-	markerTwo.Content = compactedToolResultMarker(markerTwo.Content)
+	markerTwo.Content = []invoke.Part{{Text: compactedToolResultMarker(markerTwo.Text())}}
 	budget := latestCost + estimator.EstimateMessage(&markerOne) + estimator.EstimateMessage(&markerTwo)
 
 	trimmed, changed := trimToolResultsToBudget(messages, estimator, budget)
 
 	require.True(t, changed)
-	assert.Contains(t, trimmed[2].Content, "Tool result compacted")
-	assert.Contains(t, trimmed[3].Content, "Tool result compacted")
-	assert.Equal(t, messages[4].Content, trimmed[4].Content, "newest result should be kept in full")
+	assert.Contains(t, trimmed[2].Text(), "Tool result compacted")
+	assert.Contains(t, trimmed[3].Text(), "Tool result compacted")
+	assert.Equal(t, messages[4].Text(), trimmed[4].Text(), "newest result should be kept in full")
 	assert.Equal(t, messages[1].ToolCalls, trimmed[1].ToolCalls, "assistant tool-call pairing must remain intact")
 	assert.Equal(t,
 		strings.Repeat("alpha beta gamma ", 1000),
-		messages[2].Content,
+		messages[2].Text(),
 		"input messages must not be mutated",
 	)
 
@@ -73,7 +82,7 @@ func TestTrimToolResultsKeepsNewestAndPairing(t *testing.T) {
 // non-terminal and must keep the loop running. The agent ends only by stopping
 // naturally with its answer as plain text.
 func TestAnalyzeResponse_ToolCall_DoesNotTerminate(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{})
+	engine := newTestEngine(t, nil)
 	resp := &types.ChatResponse{
 		FinishReason: "tool_calls",
 		ToolCalls: []types.LLMToolCall{
@@ -112,7 +121,7 @@ func TestAnalyzeResponse_NaturalStop_Terminates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			engine := newTestEngine(t, &mockChat{})
+			engine := newTestEngine(t, nil)
 			resp := &types.ChatResponse{
 				FinishReason: tt.finishReason,
 				Content:      "Here is the answer.",
@@ -158,8 +167,8 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 		out := engine.appendToolResults(nil, step)
 
 		require.Len(t, out, 2, "expect one assistant + one tool message")
-		assert.Equal(t, "assistant", out[0].Role)
-		assert.Equal(t, "I will call search.", out[0].Content)
+		assert.Equal(t, invoke.RoleAssistant, out[0].Role)
+		assert.Equal(t, "I will call search.", out[0].Text())
 		assert.Equal(t, "Detailed chain of thought from MiMo/DeepSeek.", out[0].ReasoningContent,
 			"reasoning_content must be propagated to the assistant message so providers like MiMo "+
 				"and DeepSeek thinking-mode see it on the next round (issue #1302)")
@@ -168,8 +177,8 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 		assert.JSONEq(t, `{"thought_signature":"gemini-thought-signature"}`,
 			string(out[0].ToolCalls[0].ProviderMetadata["google"]))
 
-		assert.Equal(t, "tool", out[1].Role)
-		assert.Equal(t, "result text", out[1].Content)
+		assert.Equal(t, invoke.RoleTool, out[1].Role)
+		assert.Equal(t, "result text", out[1].Text())
 	})
 
 	t.Run("reasoning_content alone produces an assistant message", func(t *testing.T) {
@@ -185,9 +194,9 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 		out := engine.appendToolResults(nil, step)
 
 		require.Len(t, out, 1)
-		assert.Equal(t, "assistant", out[0].Role)
+		assert.Equal(t, invoke.RoleAssistant, out[0].Role)
 		assert.Equal(t, "reasoning only", out[0].ReasoningContent)
-		assert.Empty(t, out[0].Content)
+		assert.Empty(t, out[0].Text())
 		assert.Empty(t, out[0].ToolCalls)
 	})
 
@@ -198,9 +207,9 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	})
 
 	t.Run("appends to existing message slice", func(t *testing.T) {
-		prior := []chat.Message{
-			{Role: "system", Content: "sys"},
-			{Role: "user", Content: "hi"},
+		prior := []invoke.Message{
+			{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+			{Role: "user", Content: []invoke.Part{{Text: "hi"}}},
 		}
 		step := types.AgentStep{
 			Iteration:        1,
@@ -210,30 +219,32 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 		}
 		out := engine.appendToolResults(prior, step)
 		require.Len(t, out, 3)
-		assert.Equal(t, "system", out[0].Role)
-		assert.Equal(t, "user", out[1].Role)
-		assert.Equal(t, "assistant", out[2].Role)
+		assert.Equal(t, invoke.RoleSystem, out[0].Role)
+		assert.Equal(t, invoke.RoleUser, out[1].Role)
+		assert.Equal(t, invoke.RoleAssistant, out[2].Role)
 		assert.Equal(t, "thinking", out[2].ReasoningContent)
 	})
 }
 
 func TestAppendToolResultsKeepsImageOutputPolicyInStableSystemPrefix(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{})
-	engine.systemPromptTemplate = "Custom agent prompt."
-	prior := []chat.Message{
-		{Role: "system", Content: engine.buildSystemPrompt(t.Context())},
-		{Role: "user", Content: "解释流程"},
+	// Upstream 7a98a8e3 dropped the dynamic "Retrieved Image Output
+	// Requirement" injection: image-output policy lives in the stable system
+	// prompt (types.SourcedAnswerOutputPrompt), so retrieval must not mutate
+	// the prefix nor append a synthetic user instruction.
+	engine := &AgentEngine{}
+	prior := []invoke.Message{
+		{Role: invoke.RoleSystem, Content: []invoke.Part{{Text: "Custom agent prompt."}}},
+		{Role: invoke.RoleUser, Content: []invoke.Part{{Text: "解释流程"}}},
 	}
 	step := types.AgentStep{ToolCalls: []types.ToolCall{{
 		ID: "call-image", Name: "knowledge_search",
 		Result: &types.ToolResult{Success: true, Output: "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)"},
 	}}}
 	out := engine.appendToolResults(prior, step)
-	require.Len(t, out, 4)
-	assert.Equal(t, prior[0], out[0], "the system prefix stays stable after retrieval")
-	assert.Contains(t, out[0].Content, types.SourcedAnswerOutputPrompt)
-	assert.Equal(t, "tool", out[3].Role)
-	assert.Contains(t, out[3].Content, "![流程图](res://0001)")
+	require.Len(t, out, 4, "image results append no synthetic user instruction")
+	assert.Equal(t, "Custom agent prompt.", out[0].Text(), "the system prefix stays stable after retrieval")
+	assert.Equal(t, invoke.RoleTool, out[3].Role)
+	assert.Contains(t, out[3].Text(), "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
 	out = engine.appendToolResults(out, step)
 	require.Len(t, out, 6, "image results append no synthetic user instruction")
 }
@@ -338,7 +349,7 @@ func TestBuildMessagesWithLLMContextRegistersBoundScopeBeforeFirstModelCall(t *t
 
 	messages := engine.buildMessagesWithLLMContext("system", "question", "session", nil, nil)
 	require.Len(t, messages, 2)
-	userContent := messages[1].Content
+	userContent := messages[1].Text()
 	assert.Contains(t, userContent, `knowledge_base id="b1"`)
 	assert.Contains(t, userContent, `knowledge_id="d1"`)
 	assert.Contains(t, userContent, `knowledge_id="d2"`)
@@ -392,7 +403,7 @@ func TestIsLengthFinishReason(t *testing.T) {
 
 func newEngineWithTool(t *testing.T, name string) (*AgentEngine, *countingTool) {
 	t.Helper()
-	engine := newTestEngine(t, &mockChat{})
+	engine := newTestEngine(t, nil)
 	engine.toolRegistry = agenttools.NewToolRegistry()
 	tool := newCountingTool(name)
 	engine.toolRegistry.RegisterTool(tool)
@@ -404,7 +415,7 @@ func newEngineWithTool(t *testing.T, name string) (*AgentEngine, *countingTool) 
 // same truncation, so only a response that stopped short of its own budget
 // counts as something compaction can fix.
 func TestResponseHitContextLimitOnlyWhenShortOfItsOwnBudget(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{}, withMaxCompletionTokens(8192))
+	engine := newTestEngine(t, nil, withMaxCompletionTokens(8192))
 
 	stoppedShort := &types.ChatResponse{
 		FinishReason: "length",
@@ -512,7 +523,7 @@ func TestBuildMustUseBlockMCPDirectory(t *testing.T) {
 }
 
 func TestMCPProxyTargetDoesNotRewriteModelHistory(t *testing.T) {
-	engine := newTestEngine(t, &mockChat{})
+	engine := newTestEngine(t, nil)
 	target := &types.ToolCallTarget{
 		Name:        "mcp_orders_get",
 		Args:        map[string]any{"id": "42"},
@@ -539,18 +550,20 @@ func TestMCPProxyTargetDoesNotRewriteModelHistory(t *testing.T) {
 func TestMCPDiscoveryCompactionNeverReturnsPartialSchema(t *testing.T) {
 	estimator, err := agenttoken.NewEstimator()
 	require.NoError(t, err)
-	msg := chat.Message{
+	msg := invoke.Message{
 		Role:       "tool",
 		Name:       agenttools.ToolDiscoverMCPTools,
 		ToolCallID: "describe-id",
-		Content: `{"input_schema":{"description":"` + strings.Repeat(
-			"schema ",
-			5000,
-		) + `","required":["critical"]}}`,
+		Content: []invoke.Part{{
+			Text: `{"input_schema":{"description":"` + strings.Repeat(
+				"schema ",
+				5000,
+			) + `","required":["critical"]}}`,
+		}},
 	}
 	compacted := compactToolMessage(msg, 300, estimator)
 	require.Equal(t, msg.ToolCallID, compacted.ToolCallID)
-	require.NotContains(t, compacted.Content, "input_schema")
-	require.NotContains(t, compacted.Content, "required")
-	require.Contains(t, compacted.Content, "partial schema")
+	require.NotContains(t, compacted.Text(), "input_schema")
+	require.NotContains(t, compacted.Text(), "required")
+	require.Contains(t, compacted.Text(), "partial schema")
 }

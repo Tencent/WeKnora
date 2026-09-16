@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -167,7 +167,7 @@ func (r *ToolRegistry) prepareMCPToolsWithMode(ctx context.Context, grace time.D
 
 // RememberMCPHistory republishes tools this session already described or called
 // so a new engine does not require another describe round.
-func (r *ToolRegistry) RememberMCPHistory(messages []chat.Message) {
+func (r *ToolRegistry) RememberMCPHistory(messages []invoke.Message) {
 	c := r.mcpCatalog()
 	if c == nil {
 		return

@@ -1,0 +1,23 @@
+{
+  "scenario": "rerank_zhipu",
+  "behavior": [
+    "body {model,query,documents,return_documents:true} — top_n=0 and return_raw_scores=false omitted via omitempty"
+  ],
+  "requests": [
+    {
+      "path": "/",
+      "headers": {
+        "Authorization": "Bearer z-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "rerank",
+        "query": "q",
+        "documents": [
+          "a"
+        ],
+        "return_documents": true
+      }
+    }
+  ]
+}

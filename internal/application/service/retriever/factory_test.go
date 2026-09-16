@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -73,15 +72,21 @@ func (f *fakeEngine) Retrieve(ctx context.Context, _ types.RetrieveParams) ([]*t
 	panic("fakeEngine.Retrieve: not used in factory tests")
 }
 
-func (f *fakeEngine) Index(ctx context.Context, _ embedding.Embedder, _ *types.IndexInfo, _ []types.RetrieverType) error {
+func (f *fakeEngine) Index(
+	_ context.Context, _ interfaces.Embedder, _ *types.IndexInfo, _ []types.RetrieverType,
+) error {
 	panic("fakeEngine.Index: not used in factory tests")
 }
 
-func (f *fakeEngine) BatchIndex(ctx context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) error {
+func (f *fakeEngine) BatchIndex(
+	_ context.Context, _ interfaces.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType,
+) error {
 	panic("fakeEngine.BatchIndex: not used in factory tests")
 }
 
-func (f *fakeEngine) EstimateStorageSize(ctx context.Context, _ embedding.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType) int64 {
+func (f *fakeEngine) EstimateStorageSize(
+	_ context.Context, _ interfaces.Embedder, _ []*types.IndexInfo, _ []types.RetrieverType,
+) int64 {
 	panic("fakeEngine.EstimateStorageSize: not used in factory tests")
 }
 

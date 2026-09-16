@@ -2,12 +2,14 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	"github.com/Tencent/WeKnora/internal/browserskill"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 )
@@ -69,7 +71,10 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	return defaultToolExecTimeout
 }
 
-// transientErrorMarkers are substrings that indicate a transient (retryable) error.
+// transientErrorMarkers are substrings that indicate a transient (retryable)
+// failure on the stream path, where the provider message travels inside a
+// wrapped local error (stream error chunk / stall watchdog) and no
+// ProviderError value survives to classify.
 var transientErrorMarkers = []string{
 	"429", "rate limit",
 	"500", "502", "503", "504",
@@ -81,10 +86,17 @@ var transientErrorMarkers = []string{
 	"deadline exceeded", "stalled",
 }
 
-// isTransientError checks whether an error is likely transient and worth retrying.
+// isTransientError checks whether an LLM call failure is worth retrying.
+// v2 (design §6.5): provider failures classify by invoke.ProviderError.Kind
+// via IsRetryable — never by raw provider strings. The substring screen below
+// only covers local stream failures (see transientErrorMarkers).
 func isTransientError(err error) bool {
 	if err == nil {
 		return false
+	}
+	var perr *invoke.ProviderError
+	if errors.As(err, &perr) {
+		return perr.IsRetryable()
 	}
 	errStr := strings.ToLower(err.Error())
 	for _, marker := range transientErrorMarkers {

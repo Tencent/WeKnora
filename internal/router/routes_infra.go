@@ -18,10 +18,16 @@ func RegisterModelRoutes(
 	g *rbacGuards,
 ) {
 	// 模型路由组。空间级基础设施：仅完全访问（Owner）API key 可访问。
+	// 例外：POST /models/remote-catalog 含用户提供的密钥探测，默认仅 JWT
+	// 不对 API key 开放（design §5.10.2，fail-closed = 不声明 policy 即 403），
+	// 因此注册在 apiKeyGroup 之外。
+	r.POST("/models/remote-catalog", g.Admin(), handler.ProbeRemoteCatalog)
 	models := g.apiKeyGroup(r.Group("/models"), apiKeyManageModels(apiKeyFullAccess()))
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		// 获取模型参数目录（表单预填取值链第 2 级）— Viewer+
+		models.GET("/catalog", g.Viewer(), handler.GetModelCatalog)
 		// 创建模型 — Admin+
 		models.POST("", g.Admin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+

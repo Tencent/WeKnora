@@ -2613,6 +2613,7 @@ export default {
     kbLockedByAgent: '現在のエージェントによりナレッジベース設定がロックされています',
     kbDisabledByAgent: '現在のエージェントによりナレッジベースが無効になっています',
     modelLockedByAgent: '現在のエージェントによりモデル選択がロックされています',
+    thinkingLevelResetToast: 'モデルを切り替えたため、選択していた思考レベルは新しいモデルではサポートされず、デフォルトにリセットされました。',
     imageUploadDisabledByAgent: 'このエージェントでは画像アップロードが有効になっていません',
     goToAgentSettings: 'エージェント設定に移動'
   },
@@ -2728,7 +2729,7 @@ export default {
     name: '名前',
     nameDesc: '管理画面の一覧やチャネルの識別に使用します',
     namePlaceholder: '例: Webサイトサポート',
-    nameDefaultHint: 'エージェントを選択すると「{agent} · Web埋め込み」がデフォルトになります。保存時に空欄のままにするとデフォルトの名前が使用されます。',
+    nameDefaultHint: 'デフォルトは「エージェント名 · Web埋め込み」です。編集でき、保存時に空欄の場合はデフォルト名が使用されます。',
     defaultChannelName: 'Web埋め込み',
     defaultChannelNameWithAgent: '{agent} · Web埋め込み',
     welcomeMessage: 'ウェルカムメッセージ',
@@ -3586,6 +3587,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '（添付ファイル）',
     referenceChunkCount: '{count}件のチャンク',
     fallbackHint: 'ナレッジベースから関連する内容が見つかりませんでした。上記はモデルの直接回答です。',
+    usageHint: 'このターンのトークン使用量（入力 → 出力 · 合計 · キャッシュヒット）',
+    usageCached: 'キャッシュ {n}',
     requestInfoTitle: 'リクエスト情報',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'メッセージID',
@@ -4448,7 +4451,16 @@ export default {
       testFailed: 'テストに失敗しました'
     }
   },
+  thinking: {
+    unsupportedHint: '現在のモデルは思考モードに対応していません',
+    levelLabel: '思考レベル',
+    levelPlaceholder: 'モデルのデフォルトに従う',
+    reset: 'リセット',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: 'モデル名',
     defaultTag: 'デフォルト',
     addModelInSettings: 'モデルを追加するにはシステム設定を開いてください',
@@ -4462,6 +4474,7 @@ export default {
       typeLabel: 'モデルタイプ',
       sectionSource: 'ソース',
       sectionProvider: 'プロバイダ設定',
+      sectionParameters: 'モデルパラメータ設定',
       sectionAdvanced: '詳細オプション',
       sourceLabel: 'モデルのソース',
       sourceLocal: 'Ollama',
@@ -4526,6 +4539,12 @@ export default {
       dimensionOverrideDesc: 'プロバイダのドキュメントでこのモデルがdimensionsパラメータに対応していると記載されている場合にのみ有効にしてください。デフォルトでは検出された実際の次元数のみを使用します。',
       supportsVisionLabel: '視覚・マルチモーダルに対応',
       supportsVisionDesc: 'モデルが画像やマルチモーダル入力を受け付けるかどうか',
+      inputModalitiesLabel: '入力モダリティ',
+      inputModalitiesDesc: 'このモデルが対応する入力モダリティを選択してください。テキストは全モデルの基本能力のためデフォルトで選択されています。',
+      modalityText: 'テキスト',
+      modalityImage: '画像',
+      modalityAudio: '音声',
+      modalityVideo: '動画',
       contextWindowLabel: 'コンテキストウィンドウ',
       contextWindowPlaceholder: 'デフォルト値{value}',
       contextWindowDesc: '1回のリクエストでこのモデルが受け付けられるトークン数です。エージェントの履歴圧縮はこの上限を基準にします。空欄の場合はデフォルト値の200000（200K）が使われます。プロバイダの実際のウィンドウサイズを指定してください。大きすぎる値を指定すると圧縮が働かず、プロバイダにリクエストを拒否されます。',
@@ -4534,25 +4553,29 @@ export default {
       maxConcurrencyLabel: 'バックグラウンドの並列実行上限',
       maxConcurrencyPlaceholder: '0 = グローバルのデフォルト値を使用',
       maxConcurrencyDesc: 'このモデルへのバックグラウンド（取り込み・エンリッチメント）呼び出しの並列数を制限します。モデルごとにすべてのレプリカで共有されます。0または空欄の場合はグローバルのデフォルト値が使われます。対話型のチャットには影響しません。',
-      thinkingControlLabel: '思考モードのリクエスト形式',
-      thinkingControlDesc: 'エージェントの「思考モード」のオン/オフをAPIにどう送信するかを設定します。可能な場合はベンダやモデルに応じて自動選択されます。お使いのAPIドキュメントに合わせて変更してください。「送信しない」を選ぶと、エージェントの思考モードの切り替えは効果がありません。',
-      thinkingControl: {
-        none: {
-          label: '思考関連のフィールドを送信しない',
-          hint: 'エージェントの「思考モード」の切り替えは効果がなく、リクエストに思考パラメータは送信されません'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'OpenAI互換のカスタムゲートウェイ、NVIDIA NIM、vLLM / ローカルのQwen'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3、qwen-plus、qwen-max、qwen-turbo'
-        },
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark、Tencent LKEAP（DeepSeek V3など。LKEAPのデフォルト値。R1では「送信しない」を使用）'
-        }
+      thinkingToggleLabel: '思考スイッチ',
+      thinkingToggleDesc: 'オフにするとリクエストに思考パラメータを含めません。レベル選択には影響しません。',
+      selectedLevelsLabel: '対応する思考レベル',
+      selectedLevelsPlaceholder: 'このモデルが対応するレベルを選択',
+      selectedLevelsDesc: 'ベンダのレベル語彙から、このモデルが実際に対応するレベルを選択してください。空欄は未指定です。',
+      thinkingLevelLabel: 'デフォルト思考レベル',
+      thinkingLevelPlaceholder: '空欄 = モデルプロバイダーに任せる',
+      thinkingLevelDesc: 'ユーザー/エージェントがレベルを指定しない場合に使われるデフォルトです。空欄ならモデルプロバイダーが決定します（ベンダのデフォルトまたはレベルパラメータなし）。',
+      thinkingLevelsUnsupportedHint: 'このモデルは思考強度の調整に対応していません',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
+      maxOutputTokensLabel: '最大出力トークン数',
+      maxOutputTokensPlaceholder: '空欄 = 無制限',
+      maxOutputTokensDesc: 'このモデルが 1 回の応答で生成できる最大トークン数です。空欄なら制限しません。',
+      sourceCatalog: 'カタログ',
+      visionDisabledHint: '現在のベンダは画像入力サポートを宣言していません',
+      dimensionOverrideDisabledHint: '現在のベンダはカスタム出力次元数のサポートを宣言していません',
+      thinkingLevels: {
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '超高',
+        max: '最大'
       },
       dimensionHint: 'モデルを選択しました。「次元数を検出」をクリックするとベクトル次元数を自動取得できます。',
       loadModelListFailed: 'モデル一覧の読み込みに失敗しました',
@@ -4580,7 +4603,11 @@ export default {
         modelNameMax: 'モデル名は100文字以内で入力してください',
         baseUrlRequired: 'ベースURLを入力してください',
         baseUrlEmpty: 'ベースURLは空にできません',
-        baseUrlInvalid: 'ベースURLが無効です。有効なURLを入力してください'
+        baseUrlInvalid: 'ベースURLが無効です。有効なURLを入力してください',
+        contextWindowRange: 'コンテキストウィンドウは1024〜10000000の間で指定してください',
+        maxOutputTokensRange: '最大出力トークンは正の整数で指定してください',
+        maxConcurrencyRange: 'バックグラウンド同時実行上限は0以上の整数で指定してください',
+        credentialRequired: '{field}を入力してください'
       },
       providerLabel: 'プロバイダ',
       providerPlaceholder: 'モデルプロバイダを選択',
@@ -4619,7 +4646,11 @@ export default {
         },
         generic: {
           label: 'カスタム（OpenAI互換）',
-          description: '汎用のAPIエンドポイント'
+          description: '汎用のAPIエンドポイント',
+        ollama: {
+          label: 'Ollama',
+          description: 'ローカル Ollama サーバー（http://localhost:11434）',
+        },
         },
         siliconflow: {
           label: 'SiliconFlow',
@@ -5915,6 +5946,7 @@ export default {
   },
   agentEditor: {
     builtinHint: 'これは組み込みエージェントです。名前と説明は変更できませんが、設定パラメータは調整できます。',
+    thinkingLevelResetToast: 'モデルを切り替えたため、選択していた思考レベルは新しいモデルではサポートされず、デフォルトにリセットされました。',
     navGroups: {
       basic: '基本',
       knowledge: 'ナレッジと検索',

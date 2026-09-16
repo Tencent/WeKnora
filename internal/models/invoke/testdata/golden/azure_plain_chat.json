@@ -1,0 +1,62 @@
+{
+  "scenario": "azure_plain_chat",
+  "behavior": [
+    "azure SDK path: deployment URL + api-version query",
+    "api-key header auth (no Authorization)",
+    "MaxCompletionTokens used directly as budget"
+  ],
+  "requests": [
+    {
+      "path": "/openai/deployments/gpt-4o/chat/completions",
+      "query": "api-version=2023-05-15",
+      "headers": {
+        "Accept": "application/json",
+        "Api-Key": "test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "gpt-4o",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 128,
+        "temperature": 0.5
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unreported"
+    }
+  }
+}

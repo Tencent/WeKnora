@@ -13,7 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/event"
 	internalmcp "github.com/Tencent/WeKnora/internal/mcp"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 	sdkmcp "github.com/mark3labs/mcp-go/mcp"
@@ -326,7 +326,7 @@ func TestMCPDeferredSourcesStaySmallAndOnlyDescribedToolsLoad(t *testing.T) {
 }
 
 func TestMCPHistoryRestoresAdvertisedFunctions(t *testing.T) {
-	restore := func(t *testing.T, history func(*MCPTool) chat.Message) {
+	restore := func(t *testing.T, history func(*MCPTool) invoke.Message) {
 		t.Helper()
 		ctx, r, c, _, _ := catalogFixture(t, 1)
 		snapshot, _, err := c.snapshot(ctx, "server-1", false)
@@ -334,25 +334,25 @@ func TestMCPHistoryRestoresAdvertisedFunctions(t *testing.T) {
 		require.Len(t, snapshot, 1)
 		require.Len(t, r.GetModelFunctionDefinitions(), 2)
 		r.mcpPrepared = true
-		r.RememberMCPHistory([]chat.Message{history(snapshot[0])})
+		r.RememberMCPHistory([]invoke.Message{history(snapshot[0])})
 		r.RefreshMCPTools(ctx)
 		_, err = r.GetTool(mcpRegisteredName(snapshot[0]))
 		require.NoError(t, err)
 	}
 
-	restore(t, func(tool *MCPTool) chat.Message {
-		return chat.Message{
+	restore(t, func(tool *MCPTool) invoke.Message {
+		return invoke.Message{
 			Role: "assistant",
-			ToolCalls: []chat.ToolCall{{
-				Function: chat.FunctionCall{Name: mcpRegisteredName(tool)},
+			ToolCalls: []invoke.ToolCall{{
+				Function: invoke.FunctionCall{Name: mcpRegisteredName(tool)},
 			}},
 		}
 	})
-	restore(t, func(tool *MCPTool) chat.Message {
-		return chat.Message{
+	restore(t, func(tool *MCPTool) invoke.Message {
+		return invoke.Message{
 			Role: "assistant",
-			ToolCalls: []chat.ToolCall{{
-				Function: chat.FunctionCall{
+			ToolCalls: []invoke.ToolCall{{
+				Function: invoke.FunctionCall{
 					Name:      ToolCallMCPTool,
 					Arguments: `{"tool_ref":"` + mcpToolRef(tool) + `"}`,
 				},

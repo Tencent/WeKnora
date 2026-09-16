@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -149,20 +149,21 @@ func (r *Registry) encodeMCPDirectory(output string) string {
 
 // EncodeTools returns a model-facing copy. The registry/executor retains the
 // original UUID enum and validates only decoded durable identities.
-func (r *Registry) EncodeTools(tools []chat.Tool) []chat.Tool {
+// (invoke.ToolDef carries flat Name/Description/Parameters — the v1
+// Function-shaped nesting flattened with the unified invocation layer.)
+func (r *Registry) EncodeTools(tools []invoke.ToolDef) []invoke.ToolDef {
 	if r == nil {
 		return tools
 	}
-	encoded := append([]chat.Tool(nil), tools...)
+	encoded := append([]invoke.ToolDef(nil), tools...)
 	// Register routing enums first, independently of tool description order.
 	for i := range encoded {
-		def := &encoded[i].Function
-		key, table := r.mcpArgumentTable(def.Name)
+		key, table := r.mcpArgumentTable(encoded[i].Name)
 		if table == nil {
 			continue
 		}
 		var schema map[string]json.RawMessage
-		if json.Unmarshal(def.Parameters, &schema) != nil {
+		if json.Unmarshal(encoded[i].Parameters, &schema) != nil {
 			continue
 		}
 		var properties map[string]json.RawMessage
@@ -183,24 +184,24 @@ func (r *Registry) EncodeTools(tools []chat.Tool) []chat.Tool {
 		field["enum"], _ = json.Marshal(ids)
 		properties[key], _ = json.Marshal(field)
 		schema["properties"], _ = json.Marshal(properties)
-		def.Parameters, _ = json.Marshal(schema)
+		encoded[i].Parameters, _ = json.Marshal(schema)
 	}
 	for i := range encoded {
-		def := &encoded[i].Function
-		if def.Name == "discover_mcp_tools" {
-			lines := strings.Split(def.Description, "\n")
+		switch {
+		case encoded[i].Name == "discover_mcp_tools":
+			lines := strings.Split(encoded[i].Description, "\n")
 			for j := range lines {
 				lines[j] = rewriteMCPField(lines[j], "server_id", func(value string) string {
 					return registerMCPIdentity(r.mcpServers, value)
 				})
 			}
-			def.Description = strings.Join(lines, "\n")
-		} else if strings.HasPrefix(def.Name, "mcp_") && strings.HasPrefix(def.Description, "[MCP service ") {
-			prefix, body, ok := strings.Cut(def.Description, " (external)] ")
+			encoded[i].Description = strings.Join(lines, "\n")
+		case strings.HasPrefix(encoded[i].Name, "mcp_") && strings.HasPrefix(encoded[i].Description, "[MCP service "):
+			prefix, body, ok := strings.Cut(encoded[i].Description, " (external)] ")
 			if !ok {
 				continue
 			}
-			def.Description = r.encodeMCPRoutingText(prefix) + " (external)] " + body
+			encoded[i].Description = r.encodeMCPRoutingText(prefix) + " (external)] " + body
 		}
 	}
 	return encoded

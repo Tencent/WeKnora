@@ -1,0 +1,63 @@
+{
+  "scenario": "azure_reasoning_chat",
+  "behavior": [
+    "azureReasoningProvider.Matches(o4-mini)",
+    "shapeOpenAIReasoning strips sampling params; max_tokens -\u003e max_completion_tokens",
+    "reasoning_effort=medium",
+    "api-key header auth"
+  ],
+  "requests": [
+    {
+      "path": "/openai/deployments/o4-mini/chat/completions",
+      "query": "api-version=2023-05-15",
+      "headers": {
+        "Accept": "application/json",
+        "Api-Key": "test-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "o4-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Hi"
+          }
+        ],
+        "max_completion_tokens": 512,
+        "reasoning_effort": "medium"
+      }
+    }
+  ],
+  "response": {
+    "id": "chatcmpl-1",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "golden-model",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Hello there"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15
+    }
+  },
+  "client": {
+    "content": "Hello there",
+    "finish_reason": "stop",
+    "usage": {
+      "prompt_tokens": 10,
+      "completion_tokens": 5,
+      "total_tokens": 15,
+      "cache_reported": false,
+      "cache_status": "unreported"
+    }
+  }
+}

@@ -3,11 +3,21 @@ package handler
 import (
 	"context"
 	"errors"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/gin-gonic/gin"
 )
+
+// newFillSecretsGinContext builds a throwaway gin context for the C4 audit
+// accessor (audit service stays nil here — best-effort by design).
+func newFillSecretsGinContext() *gin.Context {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	return c
+}
 
 // stubFillSecretsModelService only implements GetModelByID; every other
 // ModelService call panics via the nil interface embedding. Keeps the test
@@ -39,7 +49,9 @@ func TestFillSecretsFromStoredModel_FillsExtraConfig(t *testing.T) {
 	}
 	req := &ModelTestRequest{ModelID: "m-1"}
 
-	h.fillSecretsFromStoredModel(context.Background(), req)
+	if err := h.fillSecretsFromStoredModel(context.Background(), newFillSecretsGinContext(), req); err != nil {
+		t.Fatalf("fillSecretsFromStoredModel returned an unexpected error: %v", err)
+	}
 
 	if req.APIKey != "sk-stored" || req.AppSecret != "app-secret-stored" {
 		t.Fatalf("secrets not filled from stored model: apiKey=%q appSecret=%q", req.APIKey, req.AppSecret)
@@ -73,7 +85,9 @@ func TestFillSecretsFromStoredModel_RequestExtraConfigWins(t *testing.T) {
 		ExtraConfig: map[string]string{"thinking_control": "enabled"},
 	}
 
-	h.fillSecretsFromStoredModel(context.Background(), req)
+	if err := h.fillSecretsFromStoredModel(context.Background(), newFillSecretsGinContext(), req); err != nil {
+		t.Fatalf("fillSecretsFromStoredModel returned an unexpected error: %v", err)
+	}
 
 	if req.ExtraConfig["thinking_control"] != "enabled" {
 		t.Fatalf("request ExtraConfig overwritten: %v", req.ExtraConfig)
@@ -103,7 +117,9 @@ func TestFillSecretsFromStoredModel_SecretsStillFilledWithoutExtraConfig(t *test
 	}
 	req := &ModelTestRequest{ModelID: "m-1", APIKey: "sk-typed", AppSecret: "app-typed"}
 
-	h.fillSecretsFromStoredModel(context.Background(), req)
+	if err := h.fillSecretsFromStoredModel(context.Background(), newFillSecretsGinContext(), req); err != nil {
+		t.Fatalf("fillSecretsFromStoredModel returned an unexpected error: %v", err)
+	}
 
 	if req.ExtraConfig == nil || req.ExtraConfig["remote_model_name"] != "gpt-x" {
 		t.Fatalf("ExtraConfig not filled when secrets were provided: %v", req.ExtraConfig)
@@ -121,7 +137,9 @@ func TestFillSecretsFromStoredModel_NoModelIDNoop(t *testing.T) {
 	}
 	req := &ModelTestRequest{}
 
-	h.fillSecretsFromStoredModel(context.Background(), req)
+	if err := h.fillSecretsFromStoredModel(context.Background(), newFillSecretsGinContext(), req); err != nil {
+		t.Fatalf("fillSecretsFromStoredModel returned an unexpected error: %v", err)
+	}
 
 	if req.ExtraConfig != nil {
 		t.Fatalf("ExtraConfig changed without model id: %v", req.ExtraConfig)
@@ -138,9 +156,66 @@ func TestFillSecretsFromStoredModel_ModelNotFoundNoop(t *testing.T) {
 	}
 	req := &ModelTestRequest{ModelID: "missing"}
 
-	h.fillSecretsFromStoredModel(context.Background(), req)
+	if err := h.fillSecretsFromStoredModel(context.Background(), newFillSecretsGinContext(), req); err != nil {
+		t.Fatalf("unexpected error on model lookup failure path: %v", err)
+	}
 
 	if req.ExtraConfig != nil {
 		t.Fatalf("ExtraConfig changed on model lookup failure: %v", req.ExtraConfig)
+	}
+}
+
+// TestFillSecretsFromStoredModel_CrossHostRedirectDenied pins the C4 ruling
+// (2026-09-13): a request pointing base_url at a different host than the
+// stored model must NOT borrow stored secrets — neither key may ride to a
+// caller-chosen host, and the caller gets an explicit error instead of a
+// misleading downstream auth failure.
+func TestFillSecretsFromStoredModel_CrossHostRedirectDenied(t *testing.T) {
+	stored := &types.Model{
+		Parameters: types.ModelParameters{
+			BaseURL:     "https://api.openai.com/v1",
+			APIKey:      "sk-stored",
+			AppSecret:   "app-secret-stored",
+			ExtraConfig: map[string]string{"thinking_control": "none"},
+		},
+	}
+	h := &InitializationHandler{
+		modelService: &stubFillSecretsModelService{
+			getModelByID: func(context.Context, string) (*types.Model, error) { return stored, nil },
+		},
+	}
+	req := &ModelTestRequest{ModelID: "m-1", BaseURL: "https://evil.example.com/v1"}
+
+	err := h.fillSecretsFromStoredModel(context.Background(), newFillSecretsGinContext(), req)
+
+	if err == nil {
+		t.Fatalf("cross-host redirect must be denied")
+	}
+	if req.APIKey != "" || req.AppSecret != "" || req.ExtraConfig != nil {
+		t.Fatalf("stored secrets leaked to a redirected host: %v", req)
+	}
+}
+
+// Same-host requests keep borrowing stored credentials (the intended
+// "test the saved model as configured" flow).
+func TestFillSecretsFromStoredModel_SameHostStillFills(t *testing.T) {
+	stored := &types.Model{
+		Parameters: types.ModelParameters{
+			BaseURL: "https://api.openai.com/v1",
+			APIKey:  "sk-stored",
+		},
+	}
+	h := &InitializationHandler{
+		modelService: &stubFillSecretsModelService{
+			getModelByID: func(context.Context, string) (*types.Model, error) { return stored, nil },
+		},
+	}
+	req := &ModelTestRequest{ModelID: "m-1", BaseURL: "https://api.openai.com/v1/"}
+
+	if err := h.fillSecretsFromStoredModel(context.Background(), newFillSecretsGinContext(), req); err != nil {
+		t.Fatalf("same-host request must keep borrowing: %v", err)
+	}
+	if req.APIKey != "sk-stored" {
+		t.Fatalf("stored api key not filled: %q", req.APIKey)
 	}
 }

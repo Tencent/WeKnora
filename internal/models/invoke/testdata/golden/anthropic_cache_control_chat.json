@@ -1,0 +1,77 @@
+{
+  "scenario": "anthropic_cache_control_chat",
+  "behavior": [
+    "default retention short -\u003e cache_control {type: ephemeral} blocks on system + last message",
+    "no ttl on short retention",
+    "cache_creation_input_tokens -\u003e usage cache write counters (reported)"
+  ],
+  "requests": [
+    {
+      "path": "/v1/messages",
+      "headers": {
+        "Anthropic-Version": "2023-06-01",
+        "Content-Type": "application/json",
+        "X-Api-Key": "test-key"
+      },
+      "body": {
+        "model": "claude-sonnet-4-5",
+        "max_tokens": 200,
+        "system": [
+          {
+            "type": "text",
+            "text": "You are helpful.",
+            "cache_control": {
+              "type": "ephemeral"
+            }
+          }
+        ],
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Hi",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "response": {
+    "id": "msg_2",
+    "type": "message",
+    "role": "assistant",
+    "model": "golden-claude",
+    "content": [
+      {
+        "type": "text",
+        "text": "Answer"
+      }
+    ],
+    "stop_reason": "end_turn",
+    "usage": {
+      "input_tokens": 10,
+      "output_tokens": 5,
+      "cache_creation_input_tokens": 150,
+      "cache_read_input_tokens": 0
+    }
+  },
+  "client": {
+    "content": "Answer",
+    "finish_reason": "end_turn",
+    "usage": {
+      "prompt_tokens": 160,
+      "completion_tokens": 5,
+      "total_tokens": 165,
+      "cache_write_tokens": 150,
+      "cache_miss_tokens": 160,
+      "cache_reported": true,
+      "cache_status": "miss"
+    }
+  }
+}

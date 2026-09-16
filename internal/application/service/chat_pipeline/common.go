@@ -10,7 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -32,26 +32,43 @@ func pipelineError(ctx context.Context, stage, action string, fields map[string]
 	common.PipelineError(ctx, stage, action, fields)
 }
 
-// prepareChatModel shared logic to prepare chat model and options
-// it gets the chat model and sets up the chat options based on the chat manage.
+// buildChatModelConfig resolves the model record and builds the unified call
+// configuration through the single shared constructor (design §6.1/§6.8).
+func buildChatModelConfig(ctx context.Context, modelService interfaces.ModelService,
+	modelID string,
+) (*invoke.ModelConfig, error) {
+	model, err := modelService.GetModelByID(ctx, modelID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get model %s: %v", modelID, err)
+		return nil, err
+	}
+	return modelService.BuildModelConfig(ctx, model)
+}
+
+// prepareChatModel shared logic to prepare the chat call configuration and
+// options from the chat manage. Budget normalization (user ruling): only
+// MaxCompletionTokens is filled — a legacy MaxTokens-only value folds in.
 func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 	chatManage *types.ChatManage,
-) (chat.Chat, *chat.ChatOptions, error) {
-	chatModel, err := modelService.GetChatModel(ctx, chatManage.ChatModelID)
+) (*invoke.ModelConfig, *invoke.ChatOptions, error) {
+	chatModel, err := buildChatModelConfig(ctx, modelService, chatManage.ChatModelID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get chat model: %v", err)
 		return nil, nil, err
 	}
 
-	opt := &chat.ChatOptions{
+	budget := chatManage.SummaryConfig.MaxCompletionTokens
+	if budget == 0 {
+		budget = chatManage.SummaryConfig.MaxTokens
+	}
+	opt := &invoke.ChatOptions{
 		Temperature:         chatManage.SummaryConfig.Temperature,
 		TopP:                chatManage.SummaryConfig.TopP,
 		Seed:                chatManage.SummaryConfig.Seed,
-		MaxTokens:           chatManage.SummaryConfig.MaxTokens,
-		MaxCompletionTokens: chatManage.SummaryConfig.MaxCompletionTokens,
+		MaxCompletionTokens: budget,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		ThinkingLevel:       chatManage.SummaryConfig.ThinkingLevel,
 		PromptCacheKey:      chatManage.SessionID,
 	}
 	if opt.Thinking != nil {
@@ -66,7 +83,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 // prepareMessagesWithHistory prepare complete messages including history.
 // When SystemPromptOverride is set (e.g. by intent-specific prompt logic),
 // it takes precedence over the default SummaryConfig.Prompt.
-func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
+func prepareMessagesWithHistory(chatManage *types.ChatManage) []invoke.Message {
 	base := chatManage.SummaryConfig.Prompt
 	if chatManage.SystemPromptOverride != "" {
 		base = chatManage.SystemPromptOverride
@@ -82,17 +99,19 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 	// substituted into prompt structure.
 	systemPrompt += chatManage.MemoryPrompt
 
-	chatMessages := []chat.Message{
-		{Role: "system", Content: systemPrompt},
+	chatMessages := []invoke.Message{
+		invoke.TextMessage(invoke.RoleSystem, systemPrompt),
 	}
 
 	chatMessages = AppendHistoryMessages(chatMessages, chatManage.History)
 
 	// Add current user message. Only include images when the chat model supports
 	// vision; non-vision models rely on the text description in UserContent.
-	userMsg := chat.Message{Role: "user", Content: chatManage.UserContent}
+	userMsg := invoke.TextMessage(invoke.RoleUser, chatManage.UserContent)
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
-		userMsg.Images = chatManage.Images
+		for _, img := range chatManage.Images {
+			userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: img}})
+		}
 	}
 	chatMessages = append(chatMessages, userMsg)
 
@@ -101,22 +120,22 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []chat.Message {
 
 func withPromptCacheMetadata(
 	ctx context.Context,
-	chatModel chat.Chat,
-	messages []chat.Message,
-	opts *chat.ChatOptions,
+	chatConfig *invoke.ModelConfig,
+	messages []invoke.Message,
+	opts *invoke.ChatOptions,
 	purpose string,
 ) context.Context {
-	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
-	_ = chatModel // model identity is already captured by the usage sink
+	prefixFingerprint := invoke.PromptPrefixFingerprint(messages, opts)
+	_ = chatConfig // model identity is already captured by the usage sink
 	return types.WithLLMCallMetadata(ctx, purpose, prefixFingerprint)
 }
 
 // AppendHistoryMessages appends prior Q&A rounds in chronological order.
 // History is already filtered and truncated upstream by the load_history plugin.
-func AppendHistoryMessages(messages []chat.Message, history []*types.History) []chat.Message {
+func AppendHistoryMessages(messages []invoke.Message, history []*types.History) []invoke.Message {
 	for _, history := range history {
-		messages = append(messages, chat.Message{Role: "user", Content: history.Query})
-		messages = append(messages, chat.Message{Role: "assistant", Content: history.Answer})
+		messages = append(messages, invoke.TextMessage(invoke.RoleUser, history.Query))
+		messages = append(messages, invoke.TextMessage(invoke.RoleAssistant, history.Answer))
 	}
 	return messages
 }

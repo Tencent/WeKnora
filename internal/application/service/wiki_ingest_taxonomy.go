@@ -10,7 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -31,7 +31,7 @@ type wikiTaxonomyItem struct {
 // Reduce applies these only to pages that don't already have a category.
 func (s *wikiIngestService) planBatchTaxonomy(
 	ctx context.Context,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	kb *types.KnowledgeBase,
 	slugUpdates map[string][]SlugUpdate,
 	lang string,
@@ -80,7 +80,7 @@ func (s *wikiIngestService) planBatchTaxonomy(
 				it.slug, it.title, it.pageType, previewText(it.about, 120))
 		}
 
-		raw, err := s.generateWithTemplate(ctx, chatModel, agent.WikiTaxonomyPlanPrompt, map[string]string{
+		raw, err := s.generateWithTemplate(ctx, invokeCfg, agent.WikiTaxonomyPlanPrompt, map[string]string{
 			"ExistingTaxonomy": tree,
 			"Items":            itemsBlock.String(),
 			"Language":         lang,

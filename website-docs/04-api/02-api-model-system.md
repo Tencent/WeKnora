@@ -12,10 +12,38 @@ API key：`manage_models` 或 full-access。
 
 用途：模型厂商列表。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model.go`
 
-响应：200 `{"success":true,"data":[{value,label,description,defaultUrls,modelTypes}]}`
+响应：200 `{"success":true,"data":[{value,label,description,defaultUrls,modelTypes,capabilities,extraFields?}]}`。`capabilities` 为按模型类型分片的能力声明（`chat.thinking.{supported,can_disable,supported_levels,default_level}`、`input_modalities`、`protocol` 等），前端据此动态渲染配置表单；`extraFields` 为厂商声明的动态配置字段。
 
 ```bash
 curl "$BASE/api/v1/models/providers?model_type=chat" -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/models/catalog
+
+用途：模型参数目录（内置 models.json，WeKnora 自有 schema），用于配置表单预填（取值链第 2 级）。目录全局单份、启动时异步加载；不可用时不阻断任何流程。权限：Viewer+。查询参数：`provider`（可选，厂商标识过滤）。
+
+响应：200 `{"success":true,"data":{"available":true,"version":"…","providers":{<provider>:{models:{<model_id>:{context_window,max_output_tokens,input_modalities,thinking:{supported,can_disable,levels,default_level}}}}}}}`；目录不可用或厂商未收录时 `available:false`。
+
+```bash
+curl "$BASE/api/v1/models/catalog?provider=openai" -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/models/remote-catalog
+
+用途：后端代理探测厂商模型列表（密钥不出服务端；未保存配置可直接探测，已存模型传 `model_id` 复用凭证）。权限：Admin+（仅 JWT；因携带用户提供的密钥做探测，不对 API key 开放）。每租户每分钟限 10 次。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `provider` | string | 是 | 厂商标识（anthropic 走 x-api-key 协议族，其余 OpenAI 兼容 Bearer） |
+| `base_url` | string | 条件必填 | 厂商地址；未传且 `model_id` 命中已存模型时复用其地址。经 SSRF 安全校验（私网地址需管理员配置 SSRF_WHITELIST 白名单） |
+| `api_key` | string | 否 | 未保存配置时的密钥；已存模型不要传（用 model_id） |
+| `model_id` | string | 否 | 已存模型 ID，复用其凭证 |
+
+响应：200 `{"success":true,"data":{"available":true,"models":[{id,display_name,owned_by}]}}`；不可达/401/超时等失败时 `{"available":false,"reason":"…"}`（不阻断模型创建，前端降级为手动填写）。服务端不记录密钥。超时默认 8s，可用 `WEKNORA_REMOTE_CATALOG_TIMEOUT_SECONDS` 覆盖。
+
+```bash
+curl -X POST $BASE/api/v1/models/remote-catalog -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"provider":"openai","base_url":"https://api.openai.com/v1","api_key":"sk-…"}'
 ```
 
 ### POST /api/v1/models

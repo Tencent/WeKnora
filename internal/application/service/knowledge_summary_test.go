@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -110,20 +112,20 @@ func TestCheckSufficientSummaryContent_ThresholdOverride(t *testing.T) {
 func TestValidateSummaryOutput(t *testing.T) {
 	tests := []struct {
 		name      string
-		response  *types.ChatResponse
+		response  *invoke.ChatResponse
 		want      string
 		wantError bool
 	}{
 		{name: "nil response rejected", response: nil, wantError: true},
-		{name: "empty response rejected", response: &types.ChatResponse{}, wantError: true},
+		{name: "empty response rejected", response: &invoke.ChatResponse{}, wantError: true},
 		{
 			name:      "whitespace response rejected",
-			response:  &types.ChatResponse{Content: " \n\t "},
+			response:  &invoke.ChatResponse{Content: " \n\t "},
 			wantError: true,
 		},
 		{
 			name:     "valid response is trimmed",
-			response: &types.ChatResponse{Content: "  useful summary \n"},
+			response: &invoke.ChatResponse{Content: "  useful summary \n"},
 			want:     "useful summary",
 		},
 	}

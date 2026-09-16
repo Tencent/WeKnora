@@ -132,6 +132,10 @@ type AgentConfig struct {
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
+	// ThinkingLevel overrides the model-level default thinking level for this
+	// agent (platform vocabulary: low/medium/high/xhigh/max). Empty means
+	// "use the model record's level".
+	ThinkingLevel string `json:"thinking_level,omitempty"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true.
 	CitationEnabled *bool `json:"citation_enabled"`
 	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)

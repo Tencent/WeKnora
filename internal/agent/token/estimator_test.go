@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -41,9 +41,8 @@ func TestEstimator(t *testing.T) {
 	})
 
 	t.Run("message estimation includes overhead", func(t *testing.T) {
-		msg := chat.Message{
-			Role:    "assistant",
-			Content: "hello",
+		msg := invoke.Message{
+			Role: "assistant",
 		}
 		tokens := e.EstimateMessage(&msg)
 		contentTokens := e.EstimateString("hello")
@@ -53,12 +52,12 @@ func TestEstimator(t *testing.T) {
 	})
 
 	t.Run("message with tool calls", func(t *testing.T) {
-		msg := chat.Message{
-			Role:    "assistant",
-			Content: "thinking...",
-			ToolCalls: []chat.ToolCall{
+		msg := invoke.Message{
+			Role: "assistant",
+
+			ToolCalls: []invoke.ToolCall{
 				{
-					Function: chat.FunctionCall{
+					Function: invoke.FunctionCall{
 						Name:      "knowledge_search",
 						Arguments: `{"query": "test"}`,
 					},
@@ -70,10 +69,10 @@ func TestEstimator(t *testing.T) {
 	})
 
 	t.Run("estimate messages", func(t *testing.T) {
-		messages := []chat.Message{
-			{Role: "system", Content: "You are a helpful assistant."},
-			{Role: "user", Content: "Hello"},
-			{Role: "assistant", Content: "Hi there!"},
+		messages := []invoke.Message{
+			{Role: "system", Content: []invoke.Part{{Text: "You are a helpful assistant."}}},
+			{Role: "user", Content: []invoke.Part{{Text: "Hello"}}},
+			{Role: "assistant", Content: []invoke.Part{{Text: "Hi there!"}}},
 		}
 		tokens := e.EstimateMessages(messages)
 		assert.Greater(t, tokens, 10)
@@ -89,8 +88,10 @@ func TestEstimateMessageCountsReasoningContent(t *testing.T) {
 	assert.NoError(t, err)
 
 	reasoning := strings.Repeat("let me think about this step by step. ", 200)
-	plain := chat.Message{Role: "assistant", Content: "short answer"}
-	thinking := chat.Message{Role: "assistant", Content: "short answer", ReasoningContent: reasoning}
+	plain := invoke.TextMessage(invoke.RoleAssistant, "short answer")
+	thinking := invoke.Message{
+		Role: "assistant", Content: []invoke.Part{{Text: "short answer"}}, ReasoningContent: reasoning,
+	}
 
 	assert.Greater(t, e.EstimateMessage(&thinking), e.EstimateMessage(&plain)+1000,
 		"reasoning content must be counted, it is sent on the wire")
@@ -104,22 +105,23 @@ func TestEstimateMessageCountsImages(t *testing.T) {
 	e, err := NewEstimator()
 	assert.NoError(t, err)
 
-	withImages := chat.Message{Role: "user", Content: "what is this", Images: []string{"https://x/a.png"}}
+	withImages := invoke.Message{Role: invoke.RoleUser, Content: []invoke.Part{
+		{Text: "what is this"}, {Image: &invoke.ImageRef{URL: "https://x/a.png"}},
+	}}
 	assert.Greater(t, e.EstimateMessage(&withImages), estimatedImageTokens)
 
-	multi := chat.Message{Role: "user", MultiContent: []chat.MessageContentPart{
-		{Type: "text", Text: "describe"},
-		{Type: "image_url", ImageURL: &chat.ImageURL{URL: "data:image/png;base64,AAAA"}},
+	multi := invoke.Message{Role: invoke.RoleUser, Content: []invoke.Part{
+		{Text: "describe"},
+		{Image: &invoke.ImageRef{URL: "data:image/png;base64,AAAA"}},
 	}}
 	assert.Greater(t, e.EstimateMessage(&multi), estimatedImageTokens)
 
-	// MultiContent is the representation actually sent; counting Images too
-	// would bill the same picture twice.
-	both := chat.Message{
-		Role:         "user",
-		Images:       []string{"https://x/a.png"},
-		MultiContent: multi.MultiContent,
-	}
+	// Counting the same picture as both an image part and text twice would
+	// double-bill it; each part is counted exactly once.
+	both := invoke.Message{Role: invoke.RoleUser, Content: []invoke.Part{
+		{Text: "describe"},
+		{Image: &invoke.ImageRef{URL: "data:image/png;base64,AAAA"}},
+	}}
 	assert.Equal(t, e.EstimateMessage(&multi), e.EstimateMessage(&both))
 }
 
@@ -130,13 +132,10 @@ func TestEstimateTools(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Zero(t, e.EstimateTools(nil))
-	tools := []chat.Tool{{
-		Type: "function",
-		Function: chat.FunctionDef{
-			Name:        "shell_exec",
-			Description: strings.Repeat("run a shell command in the sandbox. ", 20),
-			Parameters:  []byte(`{"type":"object","properties":{"command":{"type":"string"}}}`),
-		},
+	tools := []invoke.ToolDef{{
+		Name:        "shell_exec",
+		Description: strings.Repeat("run a shell command in the sandbox. ", 20),
+		Parameters:  []byte(`{"type":"object","properties":{"command":{"type":"string"}}}`),
 	}}
 	assert.Greater(t, e.EstimateTools(tools), 100)
 }

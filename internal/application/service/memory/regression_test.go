@@ -183,7 +183,7 @@ func TestReadPathMakesNoModelCall(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		require.NotEmpty(t, svc.Recall(ctx, "数据库怎么调优").Prompt)
 	}
-	require.Zero(t, models.calls, "the read path must not call a model")
+	require.Zero(t, models.callCount(), "the read path must not call a model")
 }
 
 // TestInjectedMemoryStaysInsideItsBudget keeps a user with a large memory

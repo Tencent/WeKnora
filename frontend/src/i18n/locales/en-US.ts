@@ -2613,6 +2613,7 @@ export default {
     kbLockedByAgent: 'Knowledge base configuration is locked by the current agent',
     kbDisabledByAgent: 'Knowledge base is disabled by the current agent',
     modelLockedByAgent: 'Model selection is locked by the current agent',
+    thinkingLevelResetToast: 'Model switched. The selected thinking level is not supported by the new model and has been reset to follow the default.',
     imageUploadDisabledByAgent: 'Image upload is not enabled for this agent',
     goToAgentSettings: 'Go to agent settings'
   },
@@ -2728,7 +2729,7 @@ export default {
     name: 'Name',
     nameDesc: 'For admin lists and channel identification',
     namePlaceholder: 'e.g. Website support',
-    nameDefaultHint: 'Defaults to "{agent} · Web Embed" when an agent is selected. Leave blank on save to use the default name.',
+    nameDefaultHint: 'Defaults to the agent name · Web Embed; editable, and used as the name when saved empty.',
     defaultChannelName: 'Web Embed',
     defaultChannelNameWithAgent: '{agent} · Web Embed',
     welcomeMessage: 'Welcome message',
@@ -3586,6 +3587,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '(Attachment)',
     referenceChunkCount: '{count} chunk(s)',
     fallbackHint: 'No relevant content found in knowledge base. Above is a direct response from the model.',
+    usageHint: 'Token usage for this turn (input → output · total · cache hit)',
+    usageCached: 'cached {n}',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',
@@ -4448,7 +4451,16 @@ export default {
       testFailed: 'Test failed'
     }
   },
+  thinking: {
+    unsupportedHint: 'The current model does not support thinking',
+    levelLabel: 'Thinking level',
+    levelPlaceholder: 'Follow model default',
+    reset: 'Reset',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: 'Model Name',
     defaultTag: 'Default',
     addModelInSettings: 'Go to global settings to add models',
@@ -4462,6 +4474,7 @@ export default {
       typeLabel: 'Model Type',
       sectionSource: 'Source',
       sectionProvider: 'Provider Settings',
+      sectionParameters: 'Model Parameters',
       sectionAdvanced: 'Advanced Options',
       sourceLabel: 'Model Source',
       sourceLocal: 'Ollama',
@@ -4526,6 +4539,12 @@ export default {
       dimensionOverrideDesc: 'Enable only if the provider documentation says this model accepts a dimensions parameter.',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      inputModalitiesLabel: 'Input modalities',
+      inputModalitiesDesc: 'Check the input modalities this model supports; text is the baseline capability and is checked by default.',
+      modalityText: 'Text',
+      modalityImage: 'Image',
+      modalityAudio: 'Audio',
+      modalityVideo: 'Video',
       contextWindowLabel: 'Context Window',
       contextWindowPlaceholder: 'Default {value}',
       contextWindowDesc: 'How many tokens this model can take in one request. Agent history compaction uses this limit. Leave empty for the default 200000 (200K). Use the provider’s real window — a larger guess means compaction never fires and the provider rejects the request.',
@@ -4534,25 +4553,29 @@ export default {
       maxConcurrencyLabel: 'Background concurrency limit',
       maxConcurrencyPlaceholder: '0 = use global default',
       maxConcurrencyDesc: 'Caps concurrent background (ingestion/enrichment) calls to this model, shared per model across all replicas. 0 or empty falls back to the global default; interactive chat is never affected.',
-      thinkingControlLabel: 'Thinking mode request format',
-      thinkingControlDesc: 'Controls how the agent’s “Thinking mode” on/off switch is written to the API. We pre-select based on vendor/model when possible; change it to match your API docs. With “Do not send”, the agent Thinking mode switch has no effect.',
-      thinkingControl: {
-        none: {
-          label: 'Do not send thinking fields',
-          hint: 'Agent “Thinking mode” switch has no effect; thinking parameters are not sent in requests'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: 'Custom OpenAI-compatible gateways, NVIDIA NIM, vLLM / local Qwen'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)'
-        }
+      thinkingToggleLabel: 'Thinking switch',
+      thinkingToggleDesc: 'When off, requests carry no thinking parameters; level selection is unaffected.',
+      selectedLevelsLabel: 'Supported thinking levels',
+      selectedLevelsPlaceholder: 'Select the levels this model supports',
+      selectedLevelsDesc: 'Pick the levels from the vendor vocabulary this model actually supports; leave empty for unspecified.',
+      thinkingLevelLabel: 'Default thinking level',
+      thinkingLevelPlaceholder: 'Empty = provider decides',
+      thinkingLevelDesc: 'Level used when the user/agent does not specify one; empty lets the model provider decide (vendor default or no level parameter).',
+      thinkingLevelsUnsupportedHint: 'This model does not support thinking strength control',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
+      maxOutputTokensLabel: 'Max output tokens',
+      maxOutputTokensPlaceholder: 'Empty = unlimited',
+      maxOutputTokensDesc: 'How many tokens this model may generate in one response. Leave empty for no limit.',
+      sourceCatalog: 'Catalog',
+      visionDisabledHint: 'The current vendor does not declare image input support',
+      dimensionOverrideDisabledHint: 'The current vendor does not declare custom output dimension support',
+      thinkingLevels: {
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra High',
+        max: 'Max'
       },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
@@ -4580,7 +4603,11 @@ export default {
         modelNameMax: 'Model name cannot exceed 100 characters',
         baseUrlRequired: 'Please enter the Base URL',
         baseUrlEmpty: 'Base URL cannot be empty',
-        baseUrlInvalid: 'Invalid Base URL, please enter a valid URL'
+        baseUrlInvalid: 'Invalid Base URL, please enter a valid URL',
+        contextWindowRange: 'Context window must be between 1024 and 10000000',
+        maxOutputTokensRange: 'Max output tokens must be a positive integer',
+        maxConcurrencyRange: 'Max concurrency must be a non-negative integer',
+        credentialRequired: 'Please fill in {field}'
       },
       providerLabel: 'Provider',
       providerPlaceholder: 'Select model provider',
@@ -4619,7 +4646,11 @@ export default {
         },
         generic: {
           label: 'Custom (OpenAI-compatible)',
-          description: 'Generic API endpoint'
+          description: 'Generic API endpoint',
+        ollama: {
+          label: 'Ollama',
+          description: 'Local Ollama server (http://localhost:11434)',
+        },
         },
         siliconflow: {
           label: 'SiliconFlow',
@@ -5915,6 +5946,7 @@ export default {
   },
   agentEditor: {
     builtinHint: 'This is a built-in agent. Name and description cannot be modified, but configuration parameters can be adjusted.',
+    thinkingLevelResetToast: 'Model switched. The selected thinking level is not supported by the new model and has been reset to follow the default.',
     navGroups: {
       basic: 'Basics',
       knowledge: 'Knowledge & Retrieval',

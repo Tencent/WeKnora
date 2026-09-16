@@ -23,7 +23,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
-	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1715,15 +1715,15 @@ type RuntimeWorkerPool struct {
 }
 
 type RuntimeQueuesResponse struct {
-	Available             bool                       `json:"available"`
-	UpstreamConcurrency   int                        `json:"upstream_concurrency"`
-	ParseConcurrency      int                        `json:"parse_concurrency"` // compatibility alias for upstream_concurrency
-	WikiConcurrency       int                        `json:"wiki_concurrency"`  // compatibility field
-	Pools                 []RuntimeWorkerPool        `json:"pools"`
-	Queues                []types.QueueStat          `json:"queues"`
-	ModelLimiterAvailable bool                       `json:"model_limiter_available"`
-	Models                []modellimiter.RuntimeStat `json:"models"`
-	Timestamp             int64                      `json:"timestamp"`
+	Available             bool                 `json:"available"`
+	UpstreamConcurrency   int                  `json:"upstream_concurrency"`
+	ParseConcurrency      int                  `json:"parse_concurrency"` // alias: upstream_concurrency
+	WikiConcurrency       int                  `json:"wiki_concurrency"`  // compatibility field
+	Pools                 []RuntimeWorkerPool  `json:"pools"`
+	Queues                []types.QueueStat    `json:"queues"`
+	ModelLimiterAvailable bool                 `json:"model_limiter_available"`
+	Models                []invoke.RuntimeStat `json:"models"`
+	Timestamp             int64                `json:"timestamp"`
 }
 
 func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.WorkerServerStat) {
@@ -1834,7 +1834,7 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	if resp.Queues == nil {
 		resp.Queues = []types.QueueStat{}
 	}
-	modelStats, modelSupported, modelErr := modellimiter.RuntimeStats(ctx)
+	modelStats, modelSupported, modelErr := invoke.RuntimeStats(ctx)
 	if modelErr != nil {
 		logger.Errorf(ctx, "get model concurrency stats failed: %v", modelErr)
 	}

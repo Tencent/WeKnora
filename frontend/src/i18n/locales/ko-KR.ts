@@ -982,6 +982,7 @@ export default {
   },
   agentEditor: {
     builtinHint: '내장 에이전트입니다. 이름과 설명은 수정할 수 없지만, 설정 매개변수는 조정할 수 있습니다.',
+    thinkingLevelResetToast: '모델이 변경되어 선택한 사고 레벨이 새 모델에서 지원되지 않으므로 기본값 따르기로 초기화되었습니다.',
     fileTypes: {
       label: '지원 파일 유형',
       desc: '선택 가능한 파일 유형을 제한합니다. 비워두면 모든 유형을 지원합니다.',
@@ -2574,7 +2575,16 @@ export default {
     languageDescription: '인터페이스 표시 언어 선택',
     languageSaved: '언어 설정이 저장되었습니다'
   },
+  thinking: {
+    unsupportedHint: '현재 모델은 사고 모드를 지원하지 않습니다',
+    levelLabel: '사고 레벨',
+    levelPlaceholder: '모델 기본값 따르기',
+    reset: '초기화',
+  },
   model: {
+    credentials: {
+      apiKey: 'API Key',
+    },
     modelName: '모델 이름',
     defaultTag: '기본값',
     addModelInSettings: '전역 설정에서 모델 추가하기',
@@ -2589,6 +2599,7 @@ export default {
       typeLabel: '모델 유형',
       sectionSource: '모델 소스',
       sectionProvider: '연결 설정',
+      sectionParameters: '모델 파라미터 설정',
       sectionAdvanced: '고급 옵션',
       sourceLabel: '모델 소스',
       sourceLocal: 'Ollama',
@@ -2621,6 +2632,12 @@ export default {
       dimensionOverrideDesc: '제공자 문서에서 이 모델이 dimensions 매개변수를 지원한다고 확인한 경우에만 켜세요.',
       supportsVisionLabel: '비전/멀티모달 지원',
       supportsVisionDesc: '모델의 이미지 등 멀티모달 입력 지원 여부',
+      inputModalitiesLabel: '입력 모달리티',
+      inputModalitiesDesc: '이 모델이 지원하는 입력 모달리티를 선택하세요. 텍스트는 모든 모델의 기본 능력이므로 기본 선택되어 있습니다.',
+      modalityText: '텍스트',
+      modalityImage: '이미지',
+      modalityAudio: '오디오',
+      modalityVideo: '비디오',
       contextWindowLabel: '컨텍스트 창',
       contextWindowPlaceholder: '기본값 {value}',
       contextWindowDesc: '모델이 한 요청에 수용할 수 있는 토큰 수입니다. 에이전트 대화 압축이 이 한도를 사용합니다. 비워 두면 기본값 200000(200K)을 사용합니다. 공급자 문서의 실제 값을 입력하세요. 더 크게 설정하면 압축이 발생하지 않고 요청이 거부될 수 있습니다.',
@@ -2629,8 +2646,23 @@ export default {
       maxConcurrencyLabel: '백그라운드 동시 실행 상한',
       maxConcurrencyPlaceholder: '0이면 전역 기본값 사용',
       maxConcurrencyDesc: '문서 인덱싱/보강 등 백그라운드 작업이 이 모델을 호출하는 동시 실행 수를 제한합니다(모델별로 모든 복제본이 공유). 0 또는 비워 두면 전역 기본값을 사용하며, 대화형 채팅에는 영향을 주지 않습니다.',
-      thinkingControlLabel: '사고 모드 매개변수 형식',
-      thinkingControlDesc: '에이전트 「사고 모드」 켜기/끄기 시 API에 어떻게 기록할지 결정합니다. 벤더/모델에 따라 미리 선택되며, 실제 API와 다르면 문서에 맞게 수정하세요. 「전송 안 함」을 선택하면 에이전트 「사고 모드」 스위치가 효과가 없습니다.',
+      thinkingToggleLabel: '사고 스위치',
+      thinkingToggleDesc: '끄면 요청에 사고 파라미터를 담지 않습니다. 레벨 선택에는 영향이 없습니다.',
+      selectedLevelsLabel: '지원되는 사고 레벨',
+      selectedLevelsPlaceholder: '이 모델이 지원하는 레벨 선택',
+      selectedLevelsDesc: '벤더 레벨 어휘에서 이 모델이 실제로 지원하는 레벨을 선택하세요. 비워 두면 미지정입니다.',
+      thinkingLevelLabel: '기본 사고 레벨',
+      thinkingLevelPlaceholder: '비움 = 모델 공급자가 결정',
+      thinkingLevelDesc: '사용자/에이전트가 레벨을 지정하지 않았을 때 쓰이는 기본 레벨입니다. 비워 두면 모델 공급자가 결정합니다(벤더 기본값 사용 또는 레벨 파라미터 미전송).',
+      thinkingLevelsUnsupportedHint: '이 모델은 사고 강도 조절을 지원하지 않습니다',
+      appIdLabel: 'App ID',
+      appSecretLabel: 'App Secret',
+      maxOutputTokensLabel: '최대 출력 토큰',
+      maxOutputTokensPlaceholder: '비워 두면 제한 없음',
+      maxOutputTokensDesc: '이 모델이 한 번의 응답에서 생성할 수 있는 최대 토큰 수입니다. 비워 두면 제한하지 않습니다.',
+      sourceCatalog: '카탈로그',
+      visionDisabledHint: '현재 벤더는 이미지 입력을 지원한다고 선언하지 않았습니다',
+      dimensionOverrideDisabledHint: '현재 벤더는 사용자 지정 출력 차원을 지원한다고 선언하지 않았습니다',
       dimensionHint: '모델이 선택되었습니다. "차원 감지" 버튼을 클릭하여 벡터 차원을 자동으로 가져옵니다',
       loadModelListFailed: '모델 목록 로드 실패',
       listRefreshed: '목록이 새로고침되었습니다',
@@ -2724,7 +2756,11 @@ export default {
         },
         generic: {
           label: '사용자 정의 (OpenAI 호환)',
-          description: 'Generic API endpoint'
+          description: 'Generic API endpoint',
+        ollama: {
+          label: 'Ollama',
+          description: '로컬 Ollama 서버 (http://localhost:11434)',
+        },
         },
         requesty: {
           label: 'Requesty',
@@ -2765,25 +2801,18 @@ export default {
         modelNameMax: '모델 이름은 100자를 초과할 수 없습니다',
         baseUrlRequired: 'Base URL을 입력해주세요',
         baseUrlEmpty: 'Base URL은 비워둘 수 없습니다',
-        baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요'
+        baseUrlInvalid: 'Base URL 형식이 올바르지 않습니다. 유효한 URL을 입력해주세요',
+        contextWindowRange: '컨텍스트 윈도우는 1024~10000000 사이여야 합니다',
+        maxOutputTokensRange: '최대 출력 토큰은 양의 정수여야 합니다',
+        maxConcurrencyRange: '백그라운드 동시 실행 상한은 0 이상의 정수여야 합니다',
+        credentialRequired: '{field}을(를) 입력해주세요'
       },
-      thinkingControl: {
-        thinkingType: {
-          label: 'thinking.type',
-          hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3 등, LKEAP 기본값; R1은 「전송 안 함」)'
-        },
-        enableThinking: {
-          label: 'enable_thinking',
-          hint: 'Alibaba DashScope: qwen3, qwen-plus, qwen-max, qwen-turbo'
-        },
-        chatTemplateKwargs: {
-          label: 'chat_template_kwargs',
-          hint: '사용자 정의 OpenAI 호환, NVIDIA NIM, vLLM / 로컬 Qwen 배포'
-        },
-        none: {
-          label: '사고 매개변수 전송 안 함',
-          hint: '에이전트 「사고 모드」 스위치가 효과 없음, 요청에 사고 관련 매개변수를 보내지 않음'
-        }
+      thinkingLevels: {
+        low: '낮음',
+        medium: '중간',
+        high: '높음',
+        xhigh: '매우 높음',
+        max: '최대'
       },
       volcengine: {
         accessKeyLabel: 'Access Key ID',
@@ -3647,6 +3676,8 @@ export default {
     questionMinimapAttachmentPlaceholder: '(첨부)',
     referenceChunkCount: '{count}개 청크',
     fallbackHint: '지식 베이스에서 관련 내용을 찾지 못했습니다. 위는 모델의 직접 응답입니다.',
+    usageHint: '이 턴의 토큰 사용량 (입력 → 출력 · 합계 · 캐시 히트)',
+    usageCached: '캐시 {n}',
     requestInfoTitle: 'Request info',
     requestInfoRequestId: 'Request ID',
     requestInfoMessageId: 'Message ID',
@@ -4688,6 +4719,7 @@ export default {
     kbLockedByAgent: '현재 에이전트가 지식베이스 구성을 잠갔습니다.',
     kbDisabledByAgent: '현재 에이전트가 지식베이스 기능을 비활성화했습니다.',
     modelLockedByAgent: '현재 에이전트는 모델 구성을 잠갔습니다.',
+    thinkingLevelResetToast: '모델이 변경되어 선택한 사고 레벨이 새 모델에서 지원되지 않으므로 기본값 따르기로 초기화되었습니다.',
     imageUploadDisabledByAgent: '현재 에이전트에서 이미지 업로드가 활성화되지 않았습니다',
     goToAgentSettings: '에이전트 설정으로 이동',
     messages: {

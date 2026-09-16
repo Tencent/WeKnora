@@ -8,42 +8,59 @@ import (
 	"testing"
 
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
-	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// stubChat records what the summarizer was asked and returns a canned reply.
+// stubChat records what the summarizer was asked and returns a canned reply,
+// backed by the shared invoketest seam (the compactor calls invoke.Chat).
 type stubChat struct {
+	fake         *invoketest.Fake
 	response     string
 	finishReason string
 	err          error
-	calls        int
-	prompts      []string
+	base         int
 }
 
-func (s *stubChat) Chat(
-	_ context.Context, messages []chat.Message, _ *chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	s.calls++
-	if len(messages) > 1 {
-		s.prompts = append(s.prompts, messages[len(messages)-1].Content)
+func newStubChat(t *testing.T, s *stubChat) *stubChat {
+	t.Helper()
+	s.fake = invoketest.New(t)
+	s.refill()
+	return s
+}
+
+// refill queues enough calls to cover the summarizer's retry budget.
+func (s *stubChat) refill() {
+	for range 8 {
+		if s.err != nil {
+			s.fake.EnqueueError(500, `{"error":{"message":"stub failure"}}`)
+			continue
+		}
+		s.fake.EnqueueResponse(invoke.ChatResponse{Content: s.response, FinishReason: s.finishReason})
 	}
-	if s.err != nil {
-		return nil, s.err
+}
+
+func (s *stubChat) config() *invoke.ModelConfig { return s.fake.Config() }
+
+// promptsView returns the last non-system message per dispatched call after
+// the reset point — the prompt each summarization request carried.
+func (s *stubChat) promptsView() []string {
+	var out []string
+	for _, c := range s.fake.Calls()[s.base:] {
+		if msgs := c.Opts.Messages; len(msgs) > 1 {
+			out = append(out, msgs[len(msgs)-1].Text())
+		}
 	}
-	return &types.ChatResponse{Content: s.response, FinishReason: s.finishReason}, nil
+	return out
 }
 
-func (s *stubChat) ChatStream(
-	context.Context, []chat.Message, *chat.ChatOptions,
-) (<-chan types.StreamResponse, error) {
-	return nil, nil
-}
+// resetPrompts drops recorded prompts so a later read sees only new calls.
+func (s *stubChat) resetPrompts() { s.base = len(s.fake.Calls()) }
 
-func (s *stubChat) GetModelName() string { return "stub" }
-func (s *stubChat) GetModelID() string   { return "stub" }
+// callCount returns the number of dispatched summarization calls.
+func (s *stubChat) callCount() int { return len(s.fake.Calls()) - s.base }
 
 func newEstimator(t *testing.T) *agenttoken.Estimator {
 	t.Helper()
@@ -68,30 +85,30 @@ func filler(n int) string { return strings.Repeat("some conversation content ", 
 // followed by many assistant/tool rounds, with no further user message. This
 // is the shape that the previous "never touch the current turn" rule made
 // impossible to compact.
-func reactTurn(rounds int) []chat.Message {
-	msgs := []chat.Message{
-		{Role: "system", Content: "you are an agent"},
-		{Role: "user", Content: "build me a deck"},
+func reactTurn(rounds int) []invoke.Message {
+	msgs := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "you are an agent"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "build me a deck"}}},
 	}
 	for i := 0; i < rounds; i++ {
 		msgs = append(msgs,
-			chat.Message{
+			invoke.Message{
 				Role:    "assistant",
-				Content: filler(20),
-				ToolCalls: []chat.ToolCall{{
+				Content: []invoke.Part{{Text: filler(20)}},
+				ToolCalls: []invoke.ToolCall{{
 					ID:   "call-" + string(rune('a'+i%26)),
 					Type: "function",
-					Function: chat.FunctionCall{
+					Function: invoke.FunctionCall{
 						Name:      "write_sandbox_file",
 						Arguments: `{"path":"/workspace/out.html","content":"` + filler(40) + `"}`,
 					},
 				}},
 			},
-			chat.Message{
+			invoke.Message{
 				Role:       "tool",
 				Name:       "write_sandbox_file",
 				ToolCallID: "call-" + string(rune('a'+i%26)),
-				Content:    filler(30),
+				Content:    []invoke.Part{{Text: filler(30)}},
 			},
 		)
 	}
@@ -104,8 +121,8 @@ func reactTurn(rounds int) []chat.Message {
 // every round paid for a summarization that freed nothing.
 func TestCompactsInsideASingleTurn(t *testing.T) {
 	est := newEstimator(t)
-	llm := &stubChat{response: "## Goal\nbuild a deck"}
-	c := New(llm, est, testSettings())
+	llm := newStubChat(t, &stubChat{response: "## Goal\nbuild a deck"})
+	c := New(llm.config(), est, testSettings())
 	require.NotNil(t, c)
 
 	msgs := reactTurn(40)
@@ -117,8 +134,8 @@ func TestCompactsInsideASingleTurn(t *testing.T) {
 	assert.Greater(t, result.Freed(), 0, "compaction must actually shrink the context")
 	assert.Less(t, result.TokensAfter, result.TokensBefore/2)
 	assert.True(t, result.SplitTurn, "a turn larger than the budget has to be split")
-	assert.Equal(t, "system", result.Messages[0].Role)
-	assert.Equal(t, chat.MessageKindCompactionSummary, result.Messages[1].Kind)
+	assert.Equal(t, invoke.RoleSystem, result.Messages[0].Role)
+	assert.Equal(t, invoke.MessageKindCompactionSummary, result.Messages[1].Kind)
 }
 
 // Cutting mid-turn discards the user's original request, so the prefix gets its
@@ -126,16 +143,16 @@ func TestCompactsInsideASingleTurn(t *testing.T) {
 // statement of what they were for.
 func TestSplitTurnSummarizesThePrefixSeparately(t *testing.T) {
 	est := newEstimator(t)
-	llm := &stubChat{response: "summary text"}
-	c := New(llm, est, testSettings())
+	llm := newStubChat(t, &stubChat{response: "summary text"})
+	c := New(llm.config(), est, testSettings())
 
 	result, err := c.Compact(context.Background(), reactTurn(12), ReasonThreshold)
 	require.NoError(t, err)
 
 	require.True(t, result.SplitTurn)
 	assert.Contains(t, result.Summary, "Turn Context (split turn)")
-	require.GreaterOrEqual(t, len(llm.prompts), 1)
-	assert.Contains(t, llm.prompts[len(llm.prompts)-1], "PREFIX of a turn",
+	require.GreaterOrEqual(t, len(llm.promptsView()), 1)
+	assert.Contains(t, llm.promptsView()[len(llm.promptsView())-1], "PREFIX of a turn",
 		"the prefix must be summarized with the prefix instructions, not the history ones")
 }
 
@@ -143,7 +160,7 @@ func TestSplitTurnSummarizesThePrefixSeparately(t *testing.T) {
 // originating assistant message was summarized away is rejected outright.
 func TestKeptTailNeverStartsWithAnOrphanToolResult(t *testing.T) {
 	est := newEstimator(t)
-	c := New(&stubChat{response: "s"}, est, testSettings())
+	c := New(newStubChat(t, &stubChat{response: "s"}).config(), est, testSettings())
 
 	for rounds := 4; rounds <= 40; rounds++ {
 		result, err := c.Compact(context.Background(), reactTurn(rounds), ReasonThreshold)
@@ -173,21 +190,25 @@ func TestKeptTailNeverStartsWithAnOrphanToolResult(t *testing.T) {
 func TestRetainedTailStaysWithinTheKeepRecentBudget(t *testing.T) {
 	est := newEstimator(t)
 	s := testSettings()
-	c := New(&stubChat{response: "summary"}, est, s)
+	stub := newStubChat(t, &stubChat{response: "summary"})
+	c := New(stub.config(), est, s)
 
 	// A search result far larger than the budget, followed by small rounds.
-	msgs := []chat.Message{
-		{Role: "system", Content: "you are an agent"},
-		{Role: "user", Content: "research this"},
+	msgs := []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "you are an agent"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "research this"}}},
 	}
 	for i := 0; i < 6; i++ {
 		id := "search-" + string(rune('a'+i))
 		msgs = append(msgs,
-			chat.Message{Role: "assistant", ToolCalls: []chat.ToolCall{{
+			invoke.Message{Role: invoke.RoleAssistant, ToolCalls: []invoke.ToolCall{{
 				ID: id, Type: "function",
-				Function: chat.FunctionCall{Name: "knowledge_search", Arguments: `{"query":"x"}`},
+				Function: invoke.FunctionCall{Name: "knowledge_search", Arguments: `{"query":"x"}`},
 			}}},
-			chat.Message{Role: "tool", Name: "knowledge_search", ToolCallID: id, Content: filler(600)},
+			invoke.Message{
+				Role: "tool", Name: "knowledge_search", ToolCallID: id,
+				Content: []invoke.Part{{Text: filler(600)}},
+			},
 		)
 	}
 
@@ -208,7 +229,8 @@ func TestRetainedTailStaysWithinTheKeepRecentBudget(t *testing.T) {
 func TestCompactionLeavesRoomForSeveralMoreRounds(t *testing.T) {
 	est := newEstimator(t)
 	s := testSettings().Normalize()
-	c := New(&stubChat{response: strings.Repeat("summary line\n", 40)}, est, s)
+	stub := newStubChat(t, &stubChat{response: strings.Repeat("summary line\n", 40)})
+	c := New(stub.config(), est, s)
 
 	result, err := c.Compact(context.Background(), reactTurn(40), ReasonThreshold)
 	require.NoError(t, err)
@@ -224,16 +246,16 @@ func TestCompactionLeavesRoomForSeveralMoreRounds(t *testing.T) {
 // This is what stops the every-round loop.
 func TestSecondCompactionReportsNothingToDo(t *testing.T) {
 	est := newEstimator(t)
-	llm := &stubChat{response: "## Goal\nbuild a deck"}
-	c := New(llm, est, testSettings())
+	llm := newStubChat(t, &stubChat{response: "## Goal\nbuild a deck"})
+	c := New(llm.config(), est, testSettings())
 
 	first, err := c.Compact(context.Background(), reactTurn(12), ReasonThreshold)
 	require.NoError(t, err)
-	callsAfterFirst := llm.calls
+	callsAfterFirst := llm.callCount()
 
 	_, err = c.Compact(context.Background(), first.Messages, ReasonThreshold)
 	require.ErrorIs(t, err, ErrNothingToCompact)
-	assert.Equal(t, callsAfterFirst, llm.calls, "a no-op compaction must not call the LLM")
+	assert.Equal(t, callsAfterFirst, llm.callCount(), "a no-op compaction must not call the LLM")
 }
 
 // A summary must never be summarized again: successive passes would degrade it
@@ -241,26 +263,26 @@ func TestSecondCompactionReportsNothingToDo(t *testing.T) {
 // prior context, and only the messages after it are new input.
 func TestPreviousSummaryIsUpdatedNotResummarized(t *testing.T) {
 	est := newEstimator(t)
-	llm := &stubChat{response: "## Goal\nfirst pass"}
-	c := New(llm, est, testSettings())
+	llm := newStubChat(t, &stubChat{response: "## Goal\nfirst pass"})
+	c := New(llm.config(), est, testSettings())
 
 	first, err := c.Compact(context.Background(), reactTurn(12), ReasonThreshold)
 	require.NoError(t, err)
 
 	// New work arrives after the compaction, so there is something to fold in.
-	grown := append(append([]chat.Message{}, first.Messages...), reactTurn(10)[2:]...)
-	llm.prompts = nil
+	grown := append(append([]invoke.Message{}, first.Messages...), reactTurn(10)[2:]...)
+	llm.resetPrompts()
 	second, err := c.Compact(context.Background(), grown, ReasonThreshold)
 	require.NoError(t, err)
 
-	prompt := llm.prompts[0]
+	prompt := llm.promptsView()[0]
 	assert.Contains(t, prompt, "<previous-summary>")
 	assert.Contains(t, prompt, "first pass")
 	conversation := prompt[strings.Index(prompt, "<conversation>"):strings.Index(prompt, "</conversation>")]
 	assert.NotContains(t, conversation, "compacted into the following summary",
 		"the prior summary must not re-enter as conversation input")
 
-	assert.Equal(t, 1, countKind(second.Messages, chat.MessageKindCompactionSummary),
+	assert.Equal(t, 1, countKind(second.Messages, invoke.MessageKindCompactionSummary),
 		"exactly one summary survives; they must not stack")
 }
 
@@ -269,8 +291,8 @@ func TestPreviousSummaryIsUpdatedNotResummarized(t *testing.T) {
 // memory. A length stop is a failure, not a result.
 func TestTruncatedSummaryIsRejected(t *testing.T) {
 	est := newEstimator(t)
-	llm := &stubChat{response: "## Goal\nhalf a sum", finishReason: "length"}
-	c := New(llm, est, testSettings())
+	llm := newStubChat(t, &stubChat{response: "## Goal\nhalf a sum", finishReason: "length"})
+	c := New(llm.config(), est, testSettings())
 
 	result, err := c.Compact(context.Background(), reactTurn(12), ReasonThreshold)
 	require.NoError(t, err)
@@ -282,7 +304,7 @@ func TestTruncatedSummaryIsRejected(t *testing.T) {
 
 func TestSummarizerFailureFallsBackToArchive(t *testing.T) {
 	est := newEstimator(t)
-	c := New(&stubChat{err: assert.AnError}, est, testSettings())
+	c := New(newStubChat(t, &stubChat{err: assert.AnError}).config(), est, testSettings())
 
 	result, err := c.Compact(context.Background(), reactTurn(12), ReasonThreshold)
 	require.NoError(t, err)
@@ -296,7 +318,7 @@ func TestSummarizerFailureFallsBackToArchive(t *testing.T) {
 // makes the agent rebuild files it already wrote.
 func TestFilePathsSurviveCompaction(t *testing.T) {
 	est := newEstimator(t)
-	c := New(&stubChat{response: "prose that mentions no paths"}, est, testSettings())
+	c := New(newStubChat(t, &stubChat{response: "prose that mentions no paths"}).config(), est, testSettings())
 
 	result, err := c.Compact(context.Background(), reactTurn(12), ReasonThreshold)
 	require.NoError(t, err)
@@ -308,17 +330,17 @@ func TestFilePathsSurviveCompaction(t *testing.T) {
 // A conversation that already fits has nothing outside the keep-recent budget.
 func TestSmallConversationIsLeftAlone(t *testing.T) {
 	est := newEstimator(t)
-	llm := &stubChat{response: "s"}
-	c := New(llm, est, testSettings())
+	llm := newStubChat(t, &stubChat{response: "s"})
+	c := New(llm.config(), est, testSettings())
 
-	_, err := c.Compact(context.Background(), []chat.Message{
-		{Role: "system", Content: "sys"},
-		{Role: "user", Content: "hi"},
-		{Role: "assistant", Content: "hello"},
+	_, err := c.Compact(context.Background(), []invoke.Message{
+		{Role: "system", Content: []invoke.Part{{Text: "sys"}}},
+		{Role: "user", Content: []invoke.Part{{Text: "hi"}}},
+		{Role: "assistant", Content: []invoke.Part{{Text: "hello"}}},
 	}, ReasonThreshold)
 
 	require.ErrorIs(t, err, ErrNothingToCompact)
-	assert.Zero(t, llm.calls)
+	assert.Zero(t, llm.callCount())
 }
 
 func TestKeepRecentIsScaledDownOnSmallWindows(t *testing.T) {
@@ -356,12 +378,12 @@ func TestSummaryKindIsNotSerialized(t *testing.T) {
 	assert.NotContains(t, encoded, "Kind")
 }
 
-func marshalMessage(msg chat.Message) (string, error) {
+func marshalMessage(msg invoke.Message) (string, error) {
 	encoded, err := json.Marshal(msg)
 	return string(encoded), err
 }
 
-func countRole(msgs []chat.Message, role string) int {
+func countRole(msgs []invoke.Message, role invoke.Role) int {
 	n := 0
 	for _, m := range msgs {
 		if m.Role == role {
@@ -371,7 +393,7 @@ func countRole(msgs []chat.Message, role string) int {
 	return n
 }
 
-func countKind(msgs []chat.Message, kind chat.MessageKind) int {
+func countKind(msgs []invoke.Message, kind invoke.MessageKind) int {
 	n := 0
 	for _, m := range msgs {
 		if m.Kind == kind {

@@ -8,7 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -18,7 +18,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	query string,
 	state *types.AgentState,
 	sessionID string,
-	conversation []chat.Message,
+	conversation []invoke.Message,
 ) error {
 	totalToolCalls := countTotalToolCalls(state.RoundSteps)
 	logger.Infof(ctx, "[Agent][FinalAnswer] Synthesizing from %d steps, %d tool calls",
@@ -33,15 +33,13 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	// Reuse the live transcript, including history, images, compaction and steer
 	// messages. Tool output must retain its role and call ID; never promote it
 	// into user instructions during error recovery or iteration-limit synthesis.
-	messages := append([]chat.Message(nil), conversation...)
-	messages = append(messages, chat.Message{
-		Role: "user",
-		Content: "Tool execution has ended for this run. Respond to the current task, including " +
-			"the latest user corrections and source restrictions in the conversation. Base claims on " +
-			"the evidence actually obtained; distinguish completed work from remaining work and explain " +
-			"any missing evidence. Use the user's requested language and format. Do not claim that an " +
-			"unperformed action succeeded.",
-	})
+	messages := append([]invoke.Message(nil), conversation...)
+	messages = append(messages, invoke.TextMessage(invoke.RoleUser,
+		"Tool execution has ended for this run. Respond to the current task, including "+
+			"the latest user corrections and source restrictions in the conversation. Base claims on "+
+			"the evidence actually obtained; distinguish completed work from remaining work and explain "+
+			"any missing evidence. Use the user's requested language and format. Do not claim that an "+
+			"unperformed action succeeded."))
 
 	// Generate a single ID for this entire final answer stream
 	answerID := generateEventID("answer")
@@ -52,7 +50,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
-		&chat.ChatOptions{
+		&invoke.ChatOptions{
 			Temperature:         e.config.Temperature,
 			MaxCompletionTokens: budget,
 			PromptCacheKey:      sessionID,
@@ -121,7 +119,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 // handleMaxIterations generates a final answer when the agent loop exhausted all iterations
 // without the LLM producing a natural stop. It marks state.IsComplete = true.
 func (e *AgentEngine) handleMaxIterations(
-	ctx context.Context, query string, state *types.AgentState, sessionID string, messages []chat.Message,
+	ctx context.Context, query string, state *types.AgentState, sessionID string, messages []invoke.Message,
 ) {
 	logger.Info(ctx, "Reached max iterations, generating final answer")
 	common.PipelineWarn(ctx, "Agent", "max_iterations_reached", map[string]interface{}{

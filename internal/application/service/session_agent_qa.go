@@ -9,7 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -85,10 +85,18 @@ func (s *sessionService) AgentQA(
 		return errors.New("summary model (model_id) is not configured in custom agent settings")
 	}
 
-	summaryModel, err := s.modelService.GetChatModel(ctx, effectiveModelID)
+	// Unified call configuration via the single shared constructor
+	// (design §6.1/§6.8). The ModelConfig also carries the capability
+	// ceilings the engine consumes — no direct model.Parameters reads here.
+	summaryModelRecord, err := s.modelService.GetModelByID(ctx, effectiveModelID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get chat model: %v", err)
 		return fmt.Errorf("failed to get chat model: %w", err)
+	}
+	summaryModel, err := s.modelService.BuildModelConfig(ctx, summaryModelRecord)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to build model config: %v", err)
+		return fmt.Errorf("failed to build model config: %w", err)
 	}
 
 	// The model's own metadata decides two things the agent cannot guess: how
@@ -98,9 +106,10 @@ func (s *sessionService) AgentQA(
 	var agentModelSupportsVision bool
 	modelContextWindow := 0
 	if effectiveModelID != "" {
-		if modelInfo, err := s.modelService.GetModelByID(ctx, effectiveModelID); err == nil && modelInfo != nil {
-			agentModelSupportsVision = modelInfo.Parameters.SupportsVision
-			modelContextWindow = modelInfo.Parameters.ContextWindow
+		if summaryModelRecord != nil {
+			agentModelSupportsVision = summaryModelRecord.Parameters.GetSupportsVision()
+			// Capability ceilings ride on the unified ModelConfig (design §6.1).
+			modelContextWindow = summaryModel.ContextWindow
 		}
 	}
 	agentConfig.ChatModelSupportsVision = agentModelSupportsVision
@@ -144,7 +153,7 @@ func (s *sessionService) AgentQA(
 	// assistant_with_tool_calls + tool messages so the model can see what was
 	// tried last turn — except final_answer, which is replayed as the trailing
 	// canonical assistant message.
-	var llmContext []chat.Message
+	var llmContext []invoke.Message
 	if agentConfig.MultiTurnEnabled {
 		historyTurns := agentConfig.HistoryTurns
 		if historyTurns <= 0 {
@@ -153,12 +162,12 @@ func (s *sessionService) AgentQA(
 		llmContext, err = LoadAgentHistory(ctx, s.messageRepo, sessionID, historyTurns)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to load agent history from DB: %v, continuing without history", err)
-			llmContext = []chat.Message{}
+			llmContext = []invoke.Message{}
 		}
 		logger.Infof(ctx, "Loaded %d history messages from DB (turns=%d)", len(llmContext), historyTurns)
 	} else {
 		logger.Infof(ctx, "Multi-turn disabled for this agent, running without history")
-		llmContext = []chat.Message{}
+		llmContext = []invoke.Message{}
 	}
 
 	// Hold the sandbox across this turn so an install that finishes while we
@@ -309,6 +318,7 @@ func (s *sessionService) buildAgentConfig(
 		MCPServices:                 customAgent.Config.MCPServices,
 		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
 		Thinking:                    customAgent.Config.Thinking,
+		ThinkingLevel:               customAgent.Config.ThinkingLevel,
 		CitationEnabled:             customAgent.Config.CitationEnabled,
 		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
 		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
@@ -320,6 +330,15 @@ func (s *sessionService) buildAgentConfig(
 	// Falls back to global configuration if no specific timeout is set for the agent.
 	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {
 		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
+	}
+
+	// Session-level thinking level wins over the agent config (design §4.2).
+	if req.ThinkingLevel != "" {
+		agentConfig.ThinkingLevel = req.ThinkingLevel
+	}
+	// Session-level thinking on/off likewise wins over the agent config.
+	if req.Thinking != nil {
+		agentConfig.Thinking = req.Thinking
 	}
 
 	// Configure skills based on CustomAgentConfig

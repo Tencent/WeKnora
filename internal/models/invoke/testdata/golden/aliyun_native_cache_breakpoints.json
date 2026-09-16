@@ -1,0 +1,71 @@
+{
+  "scenario": "aliyun_native_cache_breakpoints",
+  "behavior": [
+    "explicit-cache model (qwen3-max, documented list) injects cache_control:{type:ephemeral} on the first system message and the last conversation message (2026-09-13 方案, default-on)",
+    "no marker rides tool definitions (native wire ignores them) and no TTL field is sent (fixed 5-minute validity; CacheRetention=long collapses to the same rolling window)",
+    "qwen3 thinking family: non-stream pins enable_thinking=false; usage.cache_creation_input_tokens maps to Usage.CacheWriteTokens"
+  ],
+  "requests": [
+    {
+      "path": "/api/v1/services/aigc/text-generation/generation",
+      "headers": {
+        "Authorization": "Bearer test-key",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      "body": {
+        "model": "qwen3-max",
+        "input": {
+          "messages": [
+            {
+              "role": "system",
+              "content": [
+                {
+                  "text": "You are a chemistry expert.",
+                  "cache_control": { "type": "ephemeral" }
+                }
+              ]
+            },
+            {
+              "role": "user",
+              "content": [
+                {
+                  "text": "Ethanol properties?",
+                  "cache_control": { "type": "ephemeral" }
+                }
+              ]
+            }
+          ]
+        },
+        "parameters": {
+          "result_format": "message",
+          "max_completion_tokens": 64,
+          "enable_thinking": false
+        }
+      }
+    }
+  ],
+  "response": {
+    "request_id": "req-cache",
+    "output": {
+      "choices": [
+        {
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "Ethanol is a short-chain alcohol."
+          }
+        }
+      ]
+    },
+    "usage": {
+      "input_tokens": 28,
+      "output_tokens": 9,
+      "total_tokens": 37,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_creation": { "cache_creation_input_tokens": 28 }
+      }
+    }
+  }
+}

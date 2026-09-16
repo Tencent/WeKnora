@@ -2,7 +2,7 @@ package compaction
 
 import (
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 )
 
 // CutPoint is where the conversation is divided into "summarize this" and
@@ -27,20 +27,20 @@ type CutPoint struct {
 // The corollary is what makes mid-turn compaction safe: a cut that lands on an
 // assistant message keeps that message and every tool result following it, so
 // the pairing is never split from either side.
-func isCutPointMessage(msg *chat.Message) bool {
+func isCutPointMessage(msg *invoke.Message) bool {
 	return msg.Role != "tool"
 }
 
 // isTurnStartMessage reports whether this message opens a turn. Compaction
 // summaries count: they stand in for everything before them, so the turn they
 // begin is complete on its own.
-func isTurnStartMessage(msg *chat.Message) bool {
+func isTurnStartMessage(msg *invoke.Message) bool {
 	return msg.Role == "user"
 }
 
 // historyStart is the first index compaction may touch. The system prompt is
 // never a candidate — it carries the agent's instructions, not its history.
-func historyStart(messages []chat.Message) int {
+func historyStart(messages []invoke.Message) int {
 	if len(messages) > 0 && messages[0].Role == "system" {
 		return 1
 	}
@@ -60,7 +60,7 @@ func historyStart(messages []chat.Message) int {
 // only rule, and a turn large enough to exceed it on its own gets split rather
 // than exempted.
 func FindCutPoint(
-	messages []chat.Message,
+	messages []invoke.Message,
 	start, keepRecentTokens int,
 	estimator *agenttoken.Estimator,
 ) CutPoint {
@@ -108,7 +108,7 @@ func FindCutPoint(
 
 // findTurnStartIdx returns the index of the user message that opened the turn
 // containing entryIdx, or -1 if the turn started before the searchable range.
-func findTurnStartIdx(messages []chat.Message, entryIdx, start int) int {
+func findTurnStartIdx(messages []invoke.Message, entryIdx, start int) int {
 	for i := entryIdx; i >= start; i-- {
 		if isTurnStartMessage(&messages[i]) {
 			return i

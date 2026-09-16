@@ -176,7 +176,7 @@ func TestAlreadyReadMessagesAreNotReread(t *testing.T) {
 	messages.set("session-1", []*types.Message{userMessage("session-1", "旧的一句", base)})
 	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
 	drainExtractions(t, svc, enqueuer)
-	require.Equal(t, 1, models.calls)
+	require.Equal(t, 1, models.callCount())
 
 	messages.set("session-1", []*types.Message{
 		userMessage("session-1", "旧的一句", base),
@@ -185,7 +185,7 @@ func TestAlreadyReadMessagesAreNotReread(t *testing.T) {
 	svc.ScheduleExtraction(ctx, "session-1", "message-2", "model-1")
 	drainExtractions(t, svc, enqueuer)
 
-	require.Equal(t, 2, models.calls)
+	require.Equal(t, 2, models.callCount())
 	// The earlier message may appear as read-only context, but it must not be
 	// inside the block the model extracts from, or it would be re-derived into
 	// a memory on every run.
@@ -282,7 +282,7 @@ func TestNothingIsScheduledWhileMemoryIsOff(t *testing.T) {
 	svc.ScheduleExtraction(ctx, "session-1", "message-1", "model-1")
 
 	require.Empty(t, enqueuer.tasks)
-	require.Zero(t, models.calls)
+	require.Zero(t, models.callCount())
 }
 
 // transcriptBlock returns just the part of the prompt the model is asked to

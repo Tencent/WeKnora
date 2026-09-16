@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -73,7 +73,7 @@ func (r *Registry) ProtocolPrompt() string {
 
 // EncodeMessages returns a model-facing copy with every temporary handle
 // encoded in the only safe order.
-func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
+func (r *Registry) EncodeMessages(messages []invoke.Message) []invoke.Message {
 	if r == nil {
 		return messages
 	}
@@ -83,10 +83,14 @@ func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
 	// source codec's two-pass replay behavior.
 	for i := range messages {
 		if messages[i].Role == "system" || messages[i].Role == "user" {
-			messages[i].Content = r.encodeMCPRoutingText(messages[i].Content)
+			for j := range messages[i].Content {
+				messages[i].Content[j].Text = r.encodeMCPRoutingText(messages[i].Content[j].Text)
+			}
 		}
 		if messages[i].Role == "tool" {
-			messages[i].Content = r.encodeToolPrivateResult(messages[i].Name, messages[i].Content)
+			for j := range messages[i].Content {
+				messages[i].Content[j].Text = r.encodeToolPrivateResult(messages[i].Name, messages[i].Content[j].Text)
+			}
 		}
 	}
 	messages = r.sources.EncodeMessagesWithPolicies(messages, sourceArgumentAllowed, sourceOutputAllowed)
@@ -94,7 +98,7 @@ func (r *Registry) EncodeMessages(messages []chat.Message) []chat.Message {
 		if len(messages[i].ToolCalls) == 0 {
 			continue
 		}
-		messages[i].ToolCalls = append([]chat.ToolCall(nil), messages[i].ToolCalls...)
+		messages[i].ToolCalls = append([]invoke.ToolCall(nil), messages[i].ToolCalls...)
 		for j := range messages[i].ToolCalls {
 			r.encodeReplayedToolPolicies(&messages[i].ToolCalls[j])
 		}

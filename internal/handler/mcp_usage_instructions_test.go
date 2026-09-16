@@ -12,7 +12,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/middleware"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
+	"github.com/Tencent/WeKnora/internal/models/invoke/invoketest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -59,37 +60,31 @@ func (s *usagePolicyService) ListByService(context.Context, uint64, string) ([]*
 	return s.rows, nil
 }
 
-type usageChatBase interface{ chat.Chat }
-
-type usageChatModel struct {
-	usageChatBase
-	messages []chat.Message
-	options  *chat.ChatOptions
-	result   *types.ChatResponse
-	err      error
-}
-
-func (m *usageChatModel) Chat(
-	_ context.Context, messages []chat.Message, opts *chat.ChatOptions,
-) (*types.ChatResponse, error) {
-	m.messages, m.options = messages, opts
-	return m.result, m.err
-}
-
+// usageModelService stubs the ModelService surface the generation handler
+// uses. The chat call itself goes through invoke.Chat, so the "model" is an
+// invoketest.Fake: BuildModelConfig hands out the fake's config, and tests
+// enqueue responses (or errors) on it.
 type usageModelService struct {
 	interfaces.ModelService
 	models   []*types.Model
-	chat     *usageChatModel
+	fake     *invoketest.Fake
 	selected string
 }
 
-func (s *usageModelService) ListModels(context.Context) ([]*types.Model, error) { return s.models, nil }
-func (s *usageModelService) GetChatModel(_ context.Context, id string) (chat.Chat, error) {
-	s.selected = id
-	return s.chat, nil
+func (s *usageModelService) ListModels(context.Context, types.ModelType) ([]*types.Model, error) {
+	return s.models, nil
 }
 
-func usageHandlerFixture() (*MCPServiceHandler, *usageMCPService, *usageModelService) {
+func (s *usageModelService) GetModelByID(_ context.Context, id string) (*types.Model, error) {
+	s.selected = id
+	return &types.Model{ID: id, Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive}, nil
+}
+
+func (s *usageModelService) BuildModelConfig(context.Context, *types.Model) (*invoke.ModelConfig, error) {
+	return s.fake.Config(), nil
+}
+
+func usageHandlerFixture(t *testing.T) (*MCPServiceHandler, *usageMCPService, *usageModelService) {
 	svc := &usageMCPService{
 		service: &types.MCPService{ID: "svc", Name: "Logs", Headers: types.MCPHeaders{"Authorization": "secret"}},
 		snapshot: &types.MCPMetadata{
@@ -105,10 +100,12 @@ func usageHandlerFixture() (*MCPServiceHandler, *usageMCPService, *usageModelSer
 			{ID: "first", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive},
 			{ID: "default", Type: types.ModelTypeKnowledgeQA, Status: types.ModelStatusActive, IsDefault: true},
 		},
-		chat: &usageChatModel{result: &types.ChatResponse{
-			Content: "  查询指定模块和时间范围内的日志。  ", FinishReason: "stop",
-		}},
+		fake: invoketest.New(t),
 	}
+	models.fake.EnqueueResponse(invoke.ChatResponse{
+		Content:      "  查询指定模块和时间范围内的日志。  ",
+		FinishReason: "stop",
+	})
 	return &MCPServiceHandler{mcpServiceService: svc, modelService: models, mcpToolApprovalService: &usagePolicyService{
 		rows: []*types.MCPToolApproval{{ToolName: "delete_log", Enabled: false}},
 	}}, svc, models
@@ -132,23 +129,28 @@ func usageRequest(h *MCPServiceHandler, method, body string) *httptest.ResponseR
 }
 
 func TestMCPUsageGeneration(t *testing.T) {
-	h, svc, models := usageHandlerFixture()
+	h, svc, models := usageHandlerFixture(t)
 	w := usageRequest(h, http.MethodPost, `{"language":"en-US"}`)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, uint64(7), svc.tenant)
 	require.Nil(t, svc.updated, "generation must not persist the result")
 	require.Equal(t, "default", models.selected)
 	require.Contains(t, w.Body.String(), `"usage_instructions":"查询指定模块和时间范围内的日志。"`)
-	require.Equal(t, "system", models.chat.messages[0].Role)
-	require.Contains(t, models.chat.messages[0].Content, "untrusted reference data")
-	require.Contains(t, models.chat.messages[0].Content, "Output language: English.")
-	require.Contains(t, models.chat.messages[1].Content, "get_log")
-	require.Contains(t, models.chat.messages[1].Content, "module and time range")
-	require.NotContains(t, models.chat.messages[1].Content, "delete_log")
-	require.NotContains(t, models.chat.messages[1].Content, "secret")
-	require.Empty(t, models.chat.options.Tools)
-	require.False(t, *models.chat.options.Thinking)
-	require.Equal(t, 512, models.chat.options.MaxTokens)
+	calls := models.fake.Calls()
+	require.Len(t, calls, 1)
+	messages := calls[0].Opts.Messages
+	require.Len(t, messages, 2)
+	require.Equal(t, invoke.RoleSystem, messages[0].Role)
+	require.Contains(t, messages[0].Text(), "untrusted reference data")
+	require.Contains(t, messages[0].Text(), "Output language: English.")
+	require.Contains(t, messages[1].Text(), "get_log")
+	require.Contains(t, messages[1].Text(), "module and time range")
+	require.NotContains(t, messages[1].Text(), "delete_log")
+	require.NotContains(t, messages[1].Text(), "secret")
+	require.Empty(t, calls[0].Opts.Tools)
+	require.NotNil(t, calls[0].Opts.Thinking)
+	require.False(t, *calls[0].Opts.Thinking)
+	require.Equal(t, 512, calls[0].Opts.MaxCompletionTokens)
 }
 
 func TestMCPUsageGenerationRejectsUnavailableInputs(t *testing.T) {
@@ -169,11 +171,11 @@ func TestMCPUsageGenerationRejectsUnavailableInputs(t *testing.T) {
 		{"no chat model", func(_ *usageMCPService, m *usageModelService) { m.models = nil }, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h, svc, models := usageHandlerFixture()
+			h, svc, models := usageHandlerFixture(t)
 			tc.change(svc, models)
 			w := usageRequest(h, http.MethodPost, `{}`)
 			require.Equal(t, tc.status, w.Code, w.Body.String())
-			require.Empty(t, models.chat.messages)
+			require.Empty(t, models.fake.Calls())
 		})
 	}
 }
@@ -181,17 +183,24 @@ func TestMCPUsageGenerationRejectsUnavailableInputs(t *testing.T) {
 func TestMCPUsageGenerationRejectsInvalidOutput(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		result *types.ChatResponse
+		result *invoke.ChatResponse
 		err    error
 	}{
-		{"empty", &types.ChatResponse{Content: " \n "}, nil},
-		{"too long", &types.ChatResponse{Content: strings.Repeat("中", 501)}, nil},
-		{"truncated", &types.ChatResponse{Content: "partial", FinishReason: "length"}, nil},
+		{"empty", &invoke.ChatResponse{Content: " \n "}, nil},
+		{"too long", &invoke.ChatResponse{Content: strings.Repeat("中", 501)}, nil},
+		{"truncated", &invoke.ChatResponse{Content: "partial", FinishReason: "length"}, nil},
 		{"upstream failure", nil, errors.New("secret upstream URL")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h, _, models := usageHandlerFixture()
-			models.chat.result, models.chat.err = tc.result, tc.err
+			h, _, models := usageHandlerFixture(t)
+			// Swap in a fresh fake: the fixture pre-queues a success response,
+			// and these cases must drive the call with their own outcome.
+			models.fake = invoketest.New(t)
+			if tc.err != nil {
+				models.fake.EnqueueError(http.StatusInternalServerError, "secret upstream URL")
+			} else {
+				models.fake.EnqueueResponse(*tc.result)
+			}
 			w := usageRequest(h, http.MethodPost, `{}`)
 			require.Equal(t, http.StatusServiceUnavailable, w.Code)
 			require.NotContains(t, w.Body.String(), "secret")
@@ -200,7 +209,7 @@ func TestMCPUsageGenerationRejectsInvalidOutput(t *testing.T) {
 }
 
 func TestMCPUsageInputBoundsAndUntrustedData(t *testing.T) {
-	_, svc, _ := usageHandlerFixture()
+	_, svc, _ := usageHandlerFixture(t)
 	svc.snapshot.Instructions = strings.Repeat("中", 10000)
 	svc.snapshot.Tools = nil
 	for i := 0; i < 1000; i++ {
@@ -222,13 +231,13 @@ func TestMCPUsageUpdateRequiresNonBlankString(t *testing.T) {
 		`{"usage_instructions":null}`, `{"usage_instructions":123}`,
 		`{"usage_instructions":"` + strings.Repeat("中", 16001) + `"}`,
 	} {
-		h, svc, _ := usageHandlerFixture()
+		h, svc, _ := usageHandlerFixture(t)
 		w := usageRequest(h, http.MethodPut, body)
 		require.Equal(t, http.StatusBadRequest, w.Code, body[:min(len(body), 80)])
 		require.Nil(t, svc.updated)
 	}
 	for _, body := range []string{`{"usage_instructions":"  查询日志  "}`, `{"name":"Logs"}`} {
-		h, svc, _ := usageHandlerFixture()
+		h, svc, _ := usageHandlerFixture(t)
 		w := usageRequest(h, http.MethodPut, body)
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		require.NotNil(t, svc.updated)

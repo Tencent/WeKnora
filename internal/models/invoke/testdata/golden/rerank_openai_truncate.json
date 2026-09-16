@@ -1,0 +1,23 @@
+{
+  "scenario": "rerank_openai_truncate",
+  "behavior": [
+    "truncate_prompt_tokens:512 carried ONLY when extra_config opts in (vLLM semantics, issue #2143)"
+  ],
+  "requests": [
+    {
+      "path": "/rerank",
+      "headers": {
+        "Authorization": "Bearer sk-key",
+        "Content-Type": "application/json"
+      },
+      "body": {
+        "model": "rerank-model",
+        "query": "q",
+        "documents": [
+          "d1"
+        ],
+        "truncate_prompt_tokens": 512
+      }
+    }
+  ]
+}

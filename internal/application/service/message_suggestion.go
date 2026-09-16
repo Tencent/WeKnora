@@ -12,7 +12,7 @@ import (
 	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -21,8 +21,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var suggestionThinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
-var trailingCitationTags = regexp.MustCompile(`(?s)(?:\s*<(?:kb|web)>.*?</(?:kb|web)>)+\s*$`)
+var (
+	suggestionThinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
+	trailingCitationTags = regexp.MustCompile(`(?s)(?:\s*<(?:kb|web)>.*?</(?:kb|web)>)+\s*$`)
+)
 
 const (
 	suggestionHistoryRuneBudget        = 6000
@@ -259,7 +261,7 @@ func (s *messageSuggestionService) generate(
 	message *types.Message,
 	answer string,
 	config types.FollowUpSuggestionConfig,
-) (questions types.SuggestionItems, usage types.TokenUsage, err error) {
+) (questions types.SuggestionItems, usage invoke.Usage, err error) {
 	// The LLM call often runs on POST .../suggestions (frontend onTurnComplete)
 	// or after GinMiddleware has already ended the HTTP root. Resume the
 	// originating chat trace so chat.completion nests under that turn instead
@@ -289,7 +291,7 @@ func (s *messageSuggestionService) generate(
 	}
 	generationContext, err := s.buildGenerationContext(ctx, message, config.MaxContextTurns)
 	if err != nil {
-		return nil, types.TokenUsage{}, err
+		return nil, invoke.Usage{}, err
 	}
 	var generated types.SuggestionItems
 	var knowledge types.SuggestionItems
@@ -335,22 +337,22 @@ func (s *messageSuggestionService) generateWithModel(
 	generationContext suggestionGenerationContext,
 	config types.FollowUpSuggestionConfig,
 	count int,
-) (types.SuggestionItems, types.TokenUsage, error) {
+) (types.SuggestionItems, invoke.Usage, error) {
 	modelID := config.ModelID
 	if modelID == "" {
 		modelID = message.ModelID
 	}
 	if modelID == "" {
-		return nil, types.TokenUsage{}, errors.New("suggestion model is not configured")
+		return nil, invoke.Usage{}, errors.New("suggestion model is not configured")
 	}
 
 	modelCtx := ctx
 	if message.AgentTenantID != 0 {
 		modelCtx = context.WithValue(modelCtx, types.TenantIDContextKey, message.AgentTenantID)
 	}
-	chatModel, err := s.modelService.GetChatModel(modelCtx, modelID)
+	invokeCfg, err := buildModelConfigByID(modelCtx, s.modelService, modelID)
 	if err != nil {
-		return nil, types.TokenUsage{}, err
+		return nil, invoke.Usage{}, err
 	}
 	modelCtx = types.WithLLMCallMetadata(modelCtx, "follow_up.suggestions", "")
 	categories := strings.Join(config.Categories, ", ")
@@ -367,16 +369,17 @@ func (s *messageSuggestionService) generateWithModel(
 		"\n\nRecent completed turns (excluding the current turn):\n" + emptySuggestionSection(generationContext.History) +
 		"\n\nEvidence used by the latest answer:\n" + emptySuggestionSection(generationContext.Evidence)
 	thinking := false
-	response, err := chatModel.Chat(modelCtx, []chat.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
-	}, &chat.ChatOptions{
+	response, err := invoke.Chat(modelCtx, invokeCfg, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage(invoke.RoleSystem, systemPrompt),
+			invoke.TextMessage(invoke.RoleUser, userPrompt),
+		},
 		Temperature:         0.3,
 		MaxCompletionTokens: 700,
 		Thinking:            &thinking,
 	})
 	if err != nil {
-		return nil, types.TokenUsage{}, err
+		return nil, invoke.Usage{}, err
 	}
 	items, err := parseGeneratedSuggestions(response.Content, config.Categories, count)
 	return items, response.Usage, err

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -14,22 +14,22 @@ const (
 	mcpTestRef    = "mcpt_123456789abcdef"
 )
 
-func mcpTestDefinitions() []chat.Tool {
-	return []chat.Tool{{Type: "function", Function: chat.FunctionDef{
+func mcpTestDefinitions() []invoke.ToolDef {
+	return []invoke.ToolDef{{
 		Name:        "discover_mcp_tools",
 		Description: `Sources:` + "\n" + `{"server_id":"` + mcpTestServer + `","name":"amap-maps"}`,
 		Parameters: json.RawMessage(`{"type":"object","properties":{"server_id":` +
 			`{"type":"string","enum":["` + mcpTestServer + `"]}}}`),
-	}}}
+	}}
 }
 
 func TestMCPRoutingHandlesRoundTripWithoutTouchingExternalPayloads(t *testing.T) {
 	r := NewRegistry(false)
 	definitions := mcpTestDefinitions()
 	encoded := r.EncodeTools(definitions)
-	require.Contains(t, encoded[0].Function.Description, `"server_id":"ms1"`)
-	require.Contains(t, string(encoded[0].Function.Parameters), `"enum":["ms1"]`)
-	require.Contains(t, string(definitions[0].Function.Parameters), mcpTestServer, "executor schema stays durable")
+	require.Contains(t, encoded[0].Description, `"server_id":"ms1"`)
+	require.Contains(t, string(encoded[0].Parameters), `"enum":["ms1"]`)
+	require.Contains(t, string(definitions[0].Parameters), mcpTestServer, "executor schema stays durable")
 	external := `{"type":"object","properties":{"server_id":{"const":"` + mcpTestServer +
 		`"},"tool_ref":{"const":"` + mcpTestRef + `"}}}`
 	output := `{"server_id":"` + mcpTestServer + `","tool_ref":"` + mcpTestRef + `","input_schema":` + external + `}`
@@ -71,19 +71,19 @@ func TestMCPRoutingReplayAndStreamUseTheSameRegistry(t *testing.T) {
 	r.EncodeTools(mcpTestDefinitions())
 	output := `{"server_id":"` + mcpTestServer + `","tool_ref":"` + mcpTestRef + `"}`
 	raw := `{"tool_ref":"` + mcpTestRef + `","arguments":{"id":"42"}}`
-	history := []chat.Message{
-		{Role: "user", Content: `Use server_id="` + mcpTestServer + `"`},
-		{Role: "assistant", ToolCalls: []chat.ToolCall{
-			{Function: chat.FunctionCall{Name: "call_mcp_tool", Arguments: raw}},
+	history := []invoke.Message{
+		{Role: "user", Content: []invoke.Part{{Text: `Use server_id="` + mcpTestServer + `"`}}},
+		{Role: "assistant", ToolCalls: []invoke.ToolCall{
+			{Function: invoke.FunctionCall{Name: "call_mcp_tool", Arguments: raw}},
 		}},
-		{Role: "tool", Name: "discover_mcp_tools", Content: output},
+		{Role: "tool", Name: "discover_mcp_tools", Content: []invoke.Part{{Text: output}}},
 	}
 	encoded := r.EncodeMessages(history)
-	require.Equal(t, `Use server_id="ms1"`, encoded[0].Content)
+	require.Equal(t, `Use server_id="ms1"`, encoded[0].Text())
 	require.JSONEq(t, `{"tool_ref":"mt1","arguments":{"id":"42"}}`, encoded[1].ToolCalls[0].Function.Arguments)
-	require.JSONEq(t, `{"server_id":"ms1","tool_ref":"mt1"}`, encoded[2].Content)
+	require.JSONEq(t, `{"server_id":"ms1","tool_ref":"mt1"}`, encoded[2].Text())
 	require.Equal(t, raw, history[1].ToolCalls[0].Function.Arguments)
-	require.Equal(t, output, history[2].Content)
+	require.Equal(t, output, history[2].Text())
 	require.Equal(t, encoded, r.EncodeMessages(encoded), "replay must not renumber handles")
 	durable := "Use " + mcpTestServer + " with " + mcpTestRef + "."
 	require.Equal(t, durable, r.DecodeOutputText("Use ms1 with mt1."))

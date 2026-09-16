@@ -14,7 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -306,7 +306,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "missing_synthesis_model"
 		return fmt.Errorf("wiki ingest: no synthesis model configured for KB %s", kb.ID)
 	}
-	chatModel, err := s.modelService.GetChatModel(ctx, synthesisModelID)
+	invokeCfg, err := buildModelConfigByID(ctx, s.modelService, synthesisModelID)
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)
@@ -512,7 +512,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			mapMu.Unlock()
 
 			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
-			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx)
+			result, updates, err := s.mapOneDocument(mapCtx, invokeCfg, payload, op, batchCtx)
 			if err != nil {
 				mapMu.Lock()
 				ingestFailed++
@@ -573,7 +573,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	// that reuses existing folders. Reduce then only applies the plan to pages
 	// that don't already have a category (user-curated pages are never churned).
 	batchCtx.PlannedFolderID = s.resolvePlannedFolders(ctx, kb,
-		s.planBatchTaxonomy(ctx, chatModel, kb, slugUpdates, lang))
+		s.planBatchTaxonomy(ctx, invokeCfg, kb, slugUpdates, lang))
 
 	// 2. REDUCE PHASE (Parallel upserting grouped by Slug)
 	egReduce, reduceCtx := errgroup.WithContext(ctx)
@@ -636,7 +636,8 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			// (standard mode). runs fn directly in Lite mode.
 			acquired, lockErr := s.withSlugLock(reduceCtx, payload.KnowledgeBaseID, slug, func() error {
 				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
-					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
+					reduceCtx, invokeCfg, payload.KnowledgeBaseID, slug, updates,
+					payload.TenantID, batchCtx, kidToWikiSpan)
 				return reduceErr
 			})
 			if lockErr != nil {
@@ -1066,10 +1067,10 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 
 	indexRebuilt := false
 	if changeDesc.Len() > 0 && synthesisModelID != "" {
-		chatModel, mErr := s.modelService.GetChatModel(ctx, synthesisModelID)
+		invokeCfg, mErr := buildModelConfigByID(ctx, s.modelService, synthesisModelID)
 		if mErr != nil {
 			logger.Warnf(ctx, "wiki finalize: get chat model failed: %v", mErr)
-		} else if err := s.rebuildIndexPage(ctx, chatModel, payload, changeDesc.String(), lang,
+		} else if err := s.rebuildIndexPage(ctx, invokeCfg, payload, changeDesc.String(), lang,
 			batchCtx.ContentInstructions); err != nil {
 			logger.Warnf(ctx, "wiki finalize: rebuild index failed: %v", err)
 		} else {
@@ -1155,7 +1156,7 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 
 func (s *wikiIngestService) mapOneDocument(
 	ctx context.Context,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	payload WikiIngestPayload,
 	op WikiPendingOp,
 	batchCtx *WikiBatchContext,
@@ -1252,11 +1253,13 @@ func (s *wikiIngestService) mapOneDocument(
 		"content_chars": utf8.RuneCountInString(content),
 		"old_pages":     len(oldPageSlugs),
 	})
-	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+	extractedEntities, extractedConcepts, slugItems, err = s.extractCandidateSlugs(
+		ctx, invokeCfg, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: pass 0 failed for %s (%v) — falling back to legacy extractor", knowledgeID, err)
 		pass0Failed = true
-		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(ctx, chatModel, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
+		extractedEntities, extractedConcepts, slugItems, err = s.extractEntitiesAndConceptsNoUpsert(
+			ctx, invokeCfg, payload.KnowledgeBaseID, content, lang, oldPageSlugs, batchCtx)
 		if err != nil {
 			logger.Warnf(ctx, "wiki ingest: legacy fallback also failed for %s: %v", knowledgeID, err)
 			s.tracker().FailSpan(ctx, extractSpan, "EXTRACT_FAILED", err.Error(), err)
@@ -1326,7 +1329,7 @@ func (s *wikiIngestService) mapOneDocument(
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		summaryContent, summaryErr = s.generateWithTemplate(ctx, chatModel, agent.WikiSummaryPrompt, map[string]string{
+		summaryContent, summaryErr = s.generateWithTemplate(ctx, invokeCfg, agent.WikiSummaryPrompt, map[string]string{
 			"Content":            content,
 			"Language":           lang,
 			"ExtractedSlugs":     slugListing,
@@ -1354,7 +1357,8 @@ func (s *wikiIngestService) mapOneDocument(
 			return
 		}
 		candidatesXML := renderCandidateSlugsXML(extractedEntities, extractedConcepts)
-		citations, newSlugs, batchCount = s.classifyChunkCitations(ctx, chatModel, candidatesXML, chunks, lang, batchCtx)
+		citations, newSlugs, batchCount = s.classifyChunkCitations(
+			ctx, invokeCfg, candidatesXML, chunks, lang, batchCtx)
 		s.tracker().EndSpan(ctx, classifySpan, types.JSONMap{
 			"cited_slugs":      len(citations),
 			"new_slugs":        len(newSlugs),
@@ -1602,7 +1606,7 @@ func (s *wikiIngestService) mapOneDocument(
 
 func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	ctx context.Context,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	kbID string,
 	content, lang string,
 	oldPageSlugs map[string]bool,
@@ -1627,7 +1631,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 		prevSlugsText = "(none — this is a new document)"
 	}
 
-	extractionJSON, err := s.generateWithTemplate(ctx, chatModel, agent.WikiKnowledgeExtractPrompt, map[string]string{
+	extractionJSON, err := s.generateWithTemplate(ctx, invokeCfg, agent.WikiKnowledgeExtractPrompt, map[string]string{
 		"Content":            content,
 		"Language":           lang,
 		"PreviousSlugs":      prevSlugsText,
@@ -1652,7 +1656,7 @@ func (s *wikiIngestService) extractEntitiesAndConceptsNoUpsert(
 	// safe default — the LLM merge call simply doesn't get a candidate
 	// list and the items pass through unchanged.
 	result.Entities, result.Concepts = s.deduplicateExtractedBatch(
-		ctx, chatModel, kbID, result.Entities, result.Concepts, batchCtx,
+		ctx, invokeCfg, kbID, result.Entities, result.Concepts, batchCtx,
 	)
 
 	slugItems := make(map[string]extractedItem)
@@ -1701,7 +1705,7 @@ func resolveSlugUpdateLanguage(ctx context.Context, updates []SlugUpdate) string
 //   - err:              transport / repo error from the persisted upsert.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
-	chatModel chat.Chat,
+	invokeCfg *invoke.ModelConfig,
 	kbID string,
 	slug string,
 	updates []SlugUpdate,
@@ -2044,7 +2048,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		pageAliases := strings.Join(page.Aliases, ", ")
 
 		var updatedContent string
-		updatedContent, err = s.generateWithTemplate(ctx, chatModel, agent.WikiPageModifyUserPrompt, map[string]string{
+		updatedContent, err = s.generateWithTemplate(ctx, invokeCfg, agent.WikiPageModifyUserPrompt, map[string]string{
 			"HasAdditions":            hasAdditionsStr,
 			"HasRetractions":          hasRetractionsStr,
 			"PageSlug":                slug,

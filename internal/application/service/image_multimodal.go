@@ -13,8 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	"github.com/Tencent/WeKnora/internal/models/vlm"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -70,7 +69,6 @@ type ImageMultimodalService struct {
 	tenantRepo     interfaces.TenantRepository
 	retrieveEngine interfaces.RetrieveEngineRegistry
 	ownership      retriever.TenantStoreOwnership
-	ollamaService  *ollama.OllamaService
 	taskEnqueuer   interfaces.TaskEnqueuer
 	redisClient    *redis.Client
 	// fileSvc is the globally configured default FileService used as a fallback
@@ -98,7 +96,6 @@ func NewImageMultimodalService(
 	tenantRepo interfaces.TenantRepository,
 	retrieveEngine interfaces.RetrieveEngineRegistry,
 	ownership retriever.TenantStoreOwnership,
-	ollamaService *ollama.OllamaService,
 	taskEnqueuer interfaces.TaskEnqueuer,
 	redisClient *redis.Client,
 	fileSvc interfaces.FileService,
@@ -114,7 +111,6 @@ func NewImageMultimodalService(
 		tenantRepo:      tenantRepo,
 		retrieveEngine:  retrieveEngine,
 		ownership:       ownership,
-		ollamaService:   ollamaService,
 		taskEnqueuer:    taskEnqueuer,
 		redisClient:     redisClient,
 		fileSvc:         fileSvc,
@@ -224,7 +220,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}()
 
-	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
+	invokeCfg, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
@@ -268,7 +264,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+		ocrText, ocrErr := invokeVLMPredict(ctx, invokeCfg, imgBytes, prompt)
 		if ocrErr != nil {
 			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
 			imgOut["ocr_error"] = ocrErr.Error()
@@ -286,7 +282,8 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+	caption, capErr := invokeVLMPredict(ctx, invokeCfg, imgBytes, buildVLMCaptionPrompt(ctx, vlmCfg))
+
 	if capErr != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
 		imgOut["caption_error"] = capErr.Error()
@@ -511,10 +508,13 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
 }
 
-// resolveVLM creates a vlm.VLM instance for the given knowledge base,
-// supporting both new-style (ModelID) and legacy (inline BaseURL) configs.
-// Per-upload process_overrides on the knowledge entry take precedence over KB defaults.
-func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledgeID string) (vlm.VLM, types.VLMConfig, error) {
+// resolveVLM builds the unified invoke.ModelConfig for the given knowledge
+// base, supporting both new-style (ModelID) and legacy (inline BaseURL)
+// configs. Per-upload process_overrides on the knowledge entry take
+// precedence over KB defaults.
+func (s *ImageMultimodalService) resolveVLM(
+	ctx context.Context, kbID, knowledgeID string,
+) (*invoke.ModelConfig, types.VLMConfig, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
 	if err != nil {
 		return nil, types.VLMConfig{}, fmt.Errorf("get knowledge base %s: %w", kbID, err)
@@ -534,15 +534,50 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 		return nil, types.VLMConfig{}, fmt.Errorf("VLM is not enabled for knowledge base %s", kbID)
 	}
 
-	// New-style: resolve model through ModelService
+	// New-style: resolve through the shared constructor (§6.1/§6.8).
 	if vlmCfg.ModelID != "" {
-		model, err := s.modelService.GetVLMModel(ctx, vlmCfg.ModelID)
-		return model, vlmCfg, err
+		cfg, err := buildModelConfigByID(ctx, s.modelService, vlmCfg.ModelID)
+		return cfg, vlmCfg, err
 	}
 
-	// Legacy: create VLM from inline config
-	model, err := vlm.NewVLMFromLegacyConfig(vlmCfg, s.ollamaService)
-	return model, vlmCfg, err
+	// Legacy inline config (pre-model-record era) → direct ModelConfig with
+	// the same mapping rules (§6.1/§9): ollama interface → native provider
+	// with OLLAMA_BASE_URL fallback and /v1 stripping; anything else is
+	// OpenAI compatible with DetectProvider routing (generic fallback).
+	cfg := &invoke.ModelConfig{
+		ModelName:   vlmCfg.ModelName,
+		BaseURL:     strings.TrimSpace(vlmCfg.BaseURL),
+		Credentials: invoke.Credentials{APIKey: vlmCfg.APIKey},
+	}
+	if strings.EqualFold(strings.TrimSpace(vlmCfg.InterfaceType), "ollama") {
+		cfg.Provider = "ollama"
+		cfg.BaseURL = legacyOllamaBaseURL(cfg.BaseURL)
+	} else {
+		cfg.Provider = string(invoke.DetectProvider(cfg.BaseURL))
+	}
+	return cfg, vlmCfg, nil
+}
+
+// invokeVLMPredict runs one image-analysis call over the unified invoke entry
+// with the image inlined as a base64 data URI. Call defaults match v1
+// vlm.Predict: temperature 0.1, MaxTokens 5000, text prompt first, detail auto.
+// Package-wide helper for the residual VLM call sites (P1d).
+func invokeVLMPredict(ctx context.Context, cfg *invoke.ModelConfig, imgBytes []byte, prompt string) (string, error) {
+	resp, err := invoke.Chat(ctx, cfg, &invoke.ChatOptions{
+		Temperature:         0.1,
+		MaxCompletionTokens: 5000,
+		Messages: []invoke.Message{{
+			Role: "user",
+			Content: []invoke.Part{
+				{Text: prompt},
+				{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(imgBytes)}},
+			},
+		}},
+	})
+	if err != nil {
+		return "", err
+	}
+	return resp.Content, nil
 }
 
 // resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.

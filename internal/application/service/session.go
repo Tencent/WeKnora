@@ -12,7 +12,7 @@ import (
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/invoke"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -786,7 +786,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 
 	// Use provided modelID, or fallback to first available KnowledgeQA model
 	if modelID == "" {
-		models, err := s.modelService.ListModels(ctx)
+		models, err := s.modelService.ListModels(ctx, "")
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
 			return "", fmt.Errorf("failed to list models: %w", err)
@@ -809,7 +809,7 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 		logger.Infof(ctx, "Using specified model for title generation: %s", modelID)
 	}
 
-	chatModel, err := s.modelService.GetChatModel(ctx, modelID)
+	cfg, err := buildModelConfigByID(ctx, s.modelService, modelID)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"model_id": modelID,
@@ -821,17 +821,14 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	titlePrompt := types.RenderPromptPlaceholders(s.cfg.Conversation.GenerateSessionTitlePrompt, types.PlaceholderValues{
 		"language": types.LanguageNameFromContext(ctx),
 	})
-	var chatMessages []chat.Message
-	chatMessages = append(chatMessages,
-		chat.Message{Role: "system", Content: titlePrompt},
-	)
-	chatMessages = append(chatMessages,
-		chat.Message{Role: "user", Content: message.Content},
-	)
 
 	// Call model to generate title
 	thinking := false
-	response, err := chatModel.Chat(ctx, chatMessages, &chat.ChatOptions{
+	response, err := invoke.Chat(ctx, cfg, &invoke.ChatOptions{
+		Messages: []invoke.Message{
+			invoke.TextMessage(invoke.RoleSystem, titlePrompt),
+			invoke.TextMessage(invoke.RoleUser, message.Content),
+		},
 		Temperature: 0.3,
 		Thinking:    &thinking,
 	})
@@ -871,7 +868,8 @@ func (s *sessionService) GenerateTitleAsync(
 	modelID string,
 	eventBus *event.EventBus,
 ) {
-	// Use context tenant (effective tenant when using shared agent) so ListModels/GetChatModel find the agent's model.
+	// Use context tenant (effective tenant when using shared agent) so
+	// ListModels/BuildModelConfig find the agent's model.
 	// The session row itself is still updated by its persisted tenant/user owner scope.
 	tenantID := ctx.Value(types.TenantIDContextKey)
 	requestID := ctx.Value(types.RequestIDContextKey)
