@@ -182,7 +182,7 @@ curl -X PUT $BASE/api/v1/storage-backends/sb-1/default -H "Authorization: Bearer
 
 ## Web 搜索（/api/v1/web-search 与 /api/v1/web-search-providers）
 
-当前注册 13 个搜索提供商，包括 Metaso、Exa、Bocha、Brave。各自的 api_key 与 extra_config 参数见[联网搜索](../03-features/11-web-search.md)。
+当前注册 14 个搜索提供商，包括 Metaso、Exa、Bocha、Brave、Serply。各自的 api_key 与 extra_config 参数见[联网搜索](../03-features/11-web-search.md)。
 
 ### GET /api/v1/web-search/providers
 
