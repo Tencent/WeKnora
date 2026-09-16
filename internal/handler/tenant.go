@@ -136,33 +136,36 @@ type apiPrincipalTestTokenResponse struct {
 }
 
 type tenantAPIKeyCreateRequest struct {
-	Name             string   `json:"name"`
-	FullAccess       bool     `json:"full_access"`
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
-	Capabilities     []string `json:"capabilities"`
-	ExpiresAt        *int64   `json:"expires_at_unix"`
+	Name                     string                           `json:"name"`
+	FullAccess               bool                             `json:"full_access"`
+	KnowledgeBaseIDs         []string                         `json:"knowledge_base_ids"`
+	KnowledgeBasePermissions types.KnowledgeBasePermissionMap `json:"knowledge_base_permissions"`
+	Capabilities             []string                         `json:"capabilities"`
+	ExpiresAt                *int64                           `json:"expires_at_unix"`
 }
 
 // tenantAPIKeyUpdateRequest 修改已创建 API Key 的配置，字段语义与创建接口一致。
 type tenantAPIKeyUpdateRequest struct {
-	Name             string   `json:"name"`
-	FullAccess       bool     `json:"full_access"`
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
-	Capabilities     []string `json:"capabilities"`
-	ExpiresAt        *int64   `json:"expires_at_unix"`
+	Name                     string                           `json:"name"`
+	FullAccess               bool                             `json:"full_access"`
+	KnowledgeBaseIDs         []string                         `json:"knowledge_base_ids"`
+	KnowledgeBasePermissions types.KnowledgeBasePermissionMap `json:"knowledge_base_permissions"`
+	Capabilities             []string                         `json:"capabilities"`
+	ExpiresAt                *int64                           `json:"expires_at_unix"`
 }
 
 type tenantAPIKeyResponse struct {
-	ID               uint64                `json:"id"`
-	ScopeType        types.APIKeyScopeType `json:"scope_type"`
-	Name             string                `json:"name"`
-	APIKey           string                `json:"api_key"`
-	FullAccess       bool                  `json:"full_access"`
-	KnowledgeBaseIDs types.StringArray     `json:"knowledge_base_ids"`
-	Capabilities     types.StringArray     `json:"capabilities"`
-	LastUsedAt       *time.Time            `json:"last_used_at,omitempty"`
-	ExpiresAt        *time.Time            `json:"expires_at,omitempty"`
-	CreatedAt        time.Time             `json:"created_at"`
+	ID                       uint64                           `json:"id"`
+	ScopeType                types.APIKeyScopeType            `json:"scope_type"`
+	Name                     string                           `json:"name"`
+	APIKey                   string                           `json:"api_key"`
+	FullAccess               bool                             `json:"full_access"`
+	KnowledgeBaseIDs         types.StringArray                `json:"knowledge_base_ids"`
+	KnowledgeBasePermissions types.KnowledgeBasePermissionMap `json:"knowledge_base_permissions"`
+	Capabilities             types.StringArray                `json:"capabilities"`
+	LastUsedAt               *time.Time                       `json:"last_used_at,omitempty"`
+	ExpiresAt                *time.Time                       `json:"expires_at,omitempty"`
+	CreatedAt                time.Time                        `json:"created_at"`
 }
 
 type tenantAPIKeyCreateResponse struct {
@@ -702,12 +705,13 @@ func (h *TenantHandler) CreateAPIKey(c *gin.Context) {
 		expiresAt = &t
 	}
 	result, err := h.apiKeyService.CreateAPIKey(ctx, interfaces.TenantAPIKeyCreateRequest{
-		TenantID:         id,
-		Name:             req.Name,
-		FullAccess:       req.FullAccess,
-		KnowledgeBaseIDs: req.KnowledgeBaseIDs,
-		Capabilities:     req.Capabilities,
-		ExpiresAt:        expiresAt,
+		TenantID:                 id,
+		Name:                     req.Name,
+		FullAccess:               req.FullAccess,
+		KnowledgeBaseIDs:         req.KnowledgeBaseIDs,
+		KnowledgeBasePermissions: req.KnowledgeBasePermissions,
+		Capabilities:             req.Capabilities,
+		ExpiresAt:                expiresAt,
 	})
 	if err != nil {
 		c.Error(errors.NewInternalServerError("Failed to create API key").WithDetails(err.Error()))
@@ -753,7 +757,8 @@ func (h *TenantHandler) UpdateAPIKey(c *gin.Context) {
 
 	updated, err := h.apiKeyService.UpdateAPIKey(ctx, interfaces.TenantAPIKeyUpdateRequest{
 		TenantID: tenantID, APIKeyID: keyID, Name: req.Name, FullAccess: req.FullAccess,
-		KnowledgeBaseIDs: req.KnowledgeBaseIDs, Capabilities: req.Capabilities, ExpiresAt: expiresAt,
+		KnowledgeBaseIDs: req.KnowledgeBaseIDs, KnowledgeBasePermissions: req.KnowledgeBasePermissions,
+		Capabilities: req.Capabilities, ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		c.Error(errors.NewNotFoundError("API key not found"))
@@ -783,19 +788,24 @@ func (h *TenantHandler) DeleteAPIKey(c *gin.Context) {
 
 func tenantAPIKeyForResponse(key *types.TenantAPIKey) tenantAPIKeyResponse {
 	if key == nil {
-		return tenantAPIKeyResponse{}
+		return tenantAPIKeyResponse{KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{}}
+	}
+	permissions := key.KnowledgeBasePermissions
+	if permissions == nil {
+		permissions = types.KnowledgeBasePermissionMap{}
 	}
 	return tenantAPIKeyResponse{
-		ID:               key.ID,
-		ScopeType:        types.NormalizeAPIKeyScopeType(key.ScopeType),
-		Name:             key.Name,
-		APIKey:           key.APIKey,
-		FullAccess:       key.FullAccess,
-		KnowledgeBaseIDs: key.KnowledgeBaseIDs,
-		Capabilities:     types.NormalizeAPIKeyCapabilities(key.Capabilities),
-		LastUsedAt:       key.LastUsedAt,
-		ExpiresAt:        key.ExpiresAt,
-		CreatedAt:        key.CreatedAt,
+		ID:                       key.ID,
+		ScopeType:                types.NormalizeAPIKeyScopeType(key.ScopeType),
+		Name:                     key.Name,
+		APIKey:                   key.APIKey,
+		FullAccess:               key.FullAccess,
+		KnowledgeBaseIDs:         key.KnowledgeBaseIDs,
+		KnowledgeBasePermissions: permissions,
+		Capabilities:             types.NormalizeAPIKeyCapabilities(key.Capabilities),
+		LastUsedAt:               key.LastUsedAt,
+		ExpiresAt:                key.ExpiresAt,
+		CreatedAt:                key.CreatedAt,
 	}
 }
 
@@ -822,6 +832,9 @@ func validateTenantAPIKeyRequest(
 		if types.NormalizeAPIKeyCapability(types.APIKeyCapability(cap)) == "" {
 			return errors.NewValidationError("capabilities contains an unknown capability")
 		}
+	}
+	if types.KnowledgeBasePermissionsExceedCeiling(req.KnowledgeBasePermissions, caps) {
+		return errors.NewValidationError("knowledge_base_permissions exceeds the key capabilities")
 	}
 	return validateTenantAPIKeyKnowledgeBaseIDs(ctx, kbService, tenantID, req.KnowledgeBaseIDs)
 }

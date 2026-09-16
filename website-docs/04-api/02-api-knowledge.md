@@ -54,7 +54,7 @@ curl -X PUT "$BASE/api/v1/knowledge-bases/kb-1" \
 
 ### GET /api/v1/knowledge-bases
 
-用途：知识库列表。权限：Viewer+；API key `retrieve`/full。
+用途：知识库列表。权限：Viewer+；API key `retrieve`/full。每条记录带 `permission: {read, write, manage}`（可读 / 可写 / 可管理）。
 
 | 查询参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ curl $BASE/api/v1/knowledge-bases -H "X-API-Key: $API_KEY"
 
 ### GET /api/v1/knowledge-bases/:id
 
-用途：知识库详情（共享 KB 携带 `my_permission`）。权限：Viewer+，KB read。查询参数：`agent_id`（可选）。
+用途：知识库详情（共享 KB 携带 `my_permission`）。权限：Viewer+，KB read。查询参数：`agent_id`（可选）。响应同样带 `permission: {read, write, manage}`。
 
 响应：200 `{"success":true,"data":{KnowledgeBase}}`
 

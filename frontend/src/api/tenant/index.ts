@@ -100,6 +100,7 @@ export interface TenantAPIKey {
   api_key: string
   full_access: boolean
   knowledge_base_ids: string[] | null
+  knowledge_base_permissions?: Record<string, string[]> | null
   capabilities?: TenantAPIKeyCapability[]
   last_used_at?: string
   expires_at?: string
@@ -114,6 +115,7 @@ export interface CreateTenantAPIKeyPayload {
   name: string
   full_access?: boolean
   knowledge_base_ids?: string[]
+  knowledge_base_permissions?: Record<string, string[]>
   capabilities?: TenantAPIKeyCapability[]
   expires_at_unix?: number
 }
@@ -122,6 +124,7 @@ export interface UpdateTenantAPIKeyPayload {
   name: string
   full_access: boolean
   knowledge_base_ids: string[]
+  knowledge_base_permissions?: Record<string, string[]>
   capabilities: TenantAPIKeyCapability[]
   expires_at_unix?: number
 }

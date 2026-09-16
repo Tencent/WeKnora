@@ -63,13 +63,17 @@ func TestTenantAPIKeyRepositoryUpdateIsTenantScoped(t *testing.T) {
 	updated, err := repo.UpdateAPIKey(ctx, tenant42, keys[0].ID, &types.TenantAPIKey{
 		Name: "updated", FullAccess: false,
 		KnowledgeBaseIDs: types.StringArray{"kb-1", "kb-2"},
-		Capabilities:     types.StringArray{"retrieve", "chat"},
-		ExpiresAt:        &expiresAt,
+		KnowledgeBasePermissions: types.KnowledgeBasePermissionMap{
+			"kb-1": types.StringArray{"retrieve"},
+		},
+		Capabilities: types.StringArray{"retrieve", "chat"},
+		ExpiresAt:    &expiresAt,
 	})
 	require.NoError(t, err)
 	require.Equal(t, "updated", updated.Name)
 	require.Equal(t, types.StringArray{"kb-1", "kb-2"}, updated.KnowledgeBaseIDs)
 	require.Equal(t, types.StringArray{"retrieve", "chat"}, updated.Capabilities)
+	require.Equal(t, types.KnowledgeBasePermissionMap{"kb-1": types.StringArray{"retrieve"}}, updated.KnowledgeBasePermissions)
 	require.NotNil(t, updated.ExpiresAt)
 	require.True(t, updated.ExpiresAt.Equal(expiresAt))
 

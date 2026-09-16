@@ -26,6 +26,7 @@ var kbListFields = []string{
 	"embedding_model_id", "summary_model_id",
 	"knowledge_count", "chunk_count",
 	"is_processing", "processing_count",
+	"permission",
 	"created_at", "updated_at",
 }
 

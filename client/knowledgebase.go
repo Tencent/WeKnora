@@ -35,10 +35,11 @@ type KnowledgeBase struct {
 	CreatedAt             time.Time              `json:"created_at"`
 	UpdatedAt             time.Time              `json:"updated_at"`
 	// Computed fields (not stored in database)
-	KnowledgeCount  int64 `json:"knowledge_count"`
-	ChunkCount      int64 `json:"chunk_count"`
-	IsProcessing    bool  `json:"is_processing"`
-	ProcessingCount int64 `json:"processing_count"`
+	KnowledgeCount  int64               `json:"knowledge_count"`
+	ChunkCount      int64               `json:"chunk_count"`
+	IsProcessing    bool                `json:"is_processing"`
+	ProcessingCount int64               `json:"processing_count"`
+	Permission      KnowledgeBaseAccess `json:"permission,omitempty"`
 }
 
 // KnowledgeBaseConfig represents knowledge base configuration
@@ -88,6 +89,14 @@ type StorageConfig struct {
 	AppID      string `json:"app_id"`
 	PathPrefix string `json:"path_prefix"`
 	Provider   string `json:"provider"`
+}
+
+// KnowledgeBaseAccess is the caller's read / write / manage rights on one
+// knowledge base, as returned on GET /knowledge-bases.
+type KnowledgeBaseAccess struct {
+	Read   bool `json:"read"`
+	Write  bool `json:"write"`
+	Manage bool `json:"manage"`
 }
 
 // ExtractConfig represents the extract configuration for a knowledge base
