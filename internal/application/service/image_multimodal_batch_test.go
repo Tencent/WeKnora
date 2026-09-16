@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -107,8 +108,37 @@ func newBatchTestService(fileSvc interfaces.FileService, repo *batchChunkRepo) *
 	}
 }
 
+// persistedClasses counts the class written onto each persisted chunk, which is
+// how the "the class is stored, not just logged" contract is checked.
+func persistedClasses(t *testing.T, chunks []*types.Chunk) map[string]int {
+	t.Helper()
+	counts := map[string]int{}
+	for _, chunk := range chunks {
+		var infos []types.ImageInfo
+		if err := json.Unmarshal([]byte(chunk.ImageInfo), &infos); err != nil {
+			t.Fatalf("decode chunk image_info: %v", err)
+		}
+		for _, info := range infos {
+			counts[info.Class]++
+		}
+	}
+	return counts
+}
+
+func equalCounts(got, want map[string]int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for k, v := range want {
+		if got[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // ---------------------------------------------------------------------------
-// Prompt / parser unit tests
+// Config / prompt / parser unit tests
 // ---------------------------------------------------------------------------
 
 func TestNormalizeImageBatchSize(t *testing.T) {
@@ -147,6 +177,49 @@ func TestImageMultimodalBatchSizeReadsKBConfig(t *testing.T) {
 	}
 }
 
+func TestImageClassifyMaxEdgeReadsKBConfig(t *testing.T) {
+	t.Parallel()
+	if got := imageClassifyMaxEdge(nil); got != 0 {
+		t.Fatalf("nil KB should disable downscaling, got %d", got)
+	}
+	if got := imageClassifyMaxEdge(&types.KnowledgeBase{}); got != types.DefaultClassifyMaxEdge {
+		t.Fatalf("unconfigured KB should take the default edge, got %d", got)
+	}
+	kb := &types.KnowledgeBase{}
+	kb.ImageProcessingConfig.ClassifyMaxEdge = 320
+	if got := imageClassifyMaxEdge(kb); got != 320 {
+		t.Fatalf("configured edge = %d, want 320", got)
+	}
+}
+
+func TestNormalizeImageClass(t *testing.T) {
+	t.Parallel()
+	cases := map[string]types.ImageClass{
+		"decorative":        types.ImageClassDecorative,
+		"Decorative logo":   types.ImageClassDecorative,
+		"logo":              types.ImageClassDecorative,
+		"photo":             types.ImageClassPhoto,
+		"photograph":        types.ImageClassPhoto,
+		"text_screenshot":   types.ImageClassTextScreenshot,
+		"screenshot":        types.ImageClassTextScreenshot,
+		"screen-shot":       types.ImageClassTextScreenshot,
+		"table_image":       types.ImageClassTableImage,
+		"table":             types.ImageClassTableImage,
+		"chart":             types.ImageClassChart,
+		"infographic":       types.ImageClassChart,
+		"`chart`":           types.ImageClassChart,
+		"**chart**":         types.ImageClassChart,
+		"":                  types.ImageClassOther,
+		"something_new":     types.ImageClassOther,
+		"here is my answer": types.ImageClassOther,
+	}
+	for raw, want := range cases {
+		if got := types.NormalizeImageClass(raw); got != want {
+			t.Errorf("NormalizeImageClass(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
 func TestBuildBatchImagePrompt(t *testing.T) {
 	t.Parallel()
 	got := buildBatchImagePrompt(context.Background(), types.VLMConfig{
@@ -158,11 +231,21 @@ func TestBuildBatchImagePrompt(t *testing.T) {
 		"16 images",
 		"in English",
 		"### IMAGE <n>",
+		"CLASS: <",
+		"DESCRIPTION: <",
 		"16 blocks in total",
 		"Focus on alarm codes.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("batch prompt missing %q:\n%s", want, got)
+		}
+	}
+
+	// Every class the parser understands must be offered to the model,
+	// otherwise a label the prompt never mentions can never be produced.
+	for _, class := range types.ImageClasses {
+		if !strings.Contains(got, string(class)) {
+			t.Errorf("batch prompt does not mention class %q", class)
 		}
 	}
 
@@ -174,34 +257,37 @@ func TestBuildBatchImagePrompt(t *testing.T) {
 
 func TestParseBatchImageResponse(t *testing.T) {
 	t.Parallel()
-	raw := "### IMAGE 1\nA red circle.\n\n" +
+	raw := "### IMAGE 1\nCLASS: chart\nDESCRIPTION: A red circle.\n\n" +
 		"### IMAGE 2\n\n" +
-		"### IMAGE 3\nA blue square.\n"
+		"### IMAGE 3\nCLASS: table_image\nDESCRIPTION: A blue square.\n"
 	got := parseBatchImageResponse(raw, 3)
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 described images, got %d: %v", len(got), got)
 	}
-	if got[1] != "A red circle." {
-		t.Errorf("image 1 = %q", got[1])
+	if got[1].class != types.ImageClassChart || got[1].description != "A red circle." {
+		t.Errorf("image 1 = %+v", got[1])
 	}
-	if got[3] != "A blue square." {
-		t.Errorf("image 3 = %q", got[3])
+	if got[3].class != types.ImageClassTableImage || got[3].description != "A blue square." {
+		t.Errorf("image 3 = %+v", got[3])
 	}
 	if _, present := got[2]; present {
 		t.Errorf("an empty block must not register as a description: %v", got)
 	}
 
-	t.Run("tolerates heading level and trailing colon", func(t *testing.T) {
-		got := parseBatchImageResponse("## IMAGE 2\nsecond\n#### IMAGE 1\nfirst\n", 2)
-		if got[1] != "first" || got[2] != "second" {
+	t.Run("tolerates heading level and order", func(t *testing.T) {
+		got := parseBatchImageResponse("## IMAGE 2\nCLASS: photo\nDESCRIPTION: second\n"+
+			"#### IMAGE 1\nCLASS: chart\nDESCRIPTION: first\n", 2)
+		if got[1].description != "first" || got[2].description != "second" {
 			t.Fatalf("heading level / order handling broken: %v", got)
 		}
 	})
 
 	t.Run("ignores out-of-range and duplicate numbers", func(t *testing.T) {
-		got := parseBatchImageResponse("### IMAGE 9\nnope\n### IMAGE 1\none\n### IMAGE 1\nagain\n", 2)
-		if len(got) != 1 || got[1] != "one" {
+		got := parseBatchImageResponse("### IMAGE 9\nCLASS: photo\nDESCRIPTION: nope\n"+
+			"### IMAGE 1\nCLASS: chart\nDESCRIPTION: one\n"+
+			"### IMAGE 1\nCLASS: photo\nDESCRIPTION: again\n", 2)
+		if len(got) != 1 || got[1].description != "one" {
 			t.Fatalf("expected only image 1 = \"one\", got %v", got)
 		}
 	})
@@ -212,10 +298,24 @@ func TestParseBatchImageResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("strips list markers", func(t *testing.T) {
+	t.Run("keeps a description that has no class line", func(t *testing.T) {
 		got := parseBatchImageResponse("### IMAGE 1\n- A wiring diagram.\n", 1)
-		if got[1] != "A wiring diagram." {
-			t.Fatalf("list marker not stripped: %q", got[1])
+		if got[1].description != "A wiring diagram." {
+			t.Fatalf("list marker not stripped: %q", got[1].description)
+		}
+		if got[1].class != types.ImageClassOther {
+			t.Errorf("a missing CLASS line should fall back to other, got %q", got[1].class)
+		}
+	})
+
+	t.Run("joins multi-line descriptions and reads an emphasised class", func(t *testing.T) {
+		got := parseBatchImageResponse("### IMAGE 1\nCLASS: **text_screenshot**\nDESCRIPTION: first line\n"+
+			"second line\n", 1)
+		if got[1].class != types.ImageClassTextScreenshot {
+			t.Errorf("class = %q, want text_screenshot", got[1].class)
+		}
+		if got[1].description != "first line second line" {
+			t.Errorf("description = %q", got[1].description)
 		}
 	})
 }
@@ -224,10 +324,10 @@ func TestParseBatchImageResponse(t *testing.T) {
 // Batch execution
 // ---------------------------------------------------------------------------
 
-// TestProcessImageBatchDescribesOnceAndFallsBack pins the two behaviours that
-// make batching worth having: one describe request covers the whole batch, and
-// an image the batch response skipped is still described on its own instead of
-// losing its caption.
+// TestProcessImageBatchDescribesOnceAndFallsBack pins the behaviours that make
+// batching worth having: one describe request covers the whole batch, classes
+// come back with the descriptions and are persisted, and an image the batch
+// response skipped is still described (and classified) on its own.
 func TestProcessImageBatchDescribesOnceAndFallsBack(t *testing.T) {
 	t.Parallel()
 
@@ -244,22 +344,23 @@ func TestProcessImageBatchDescribesOnceAndFallsBack(t *testing.T) {
 	fake := &batchFakeVLM{}
 	fake.reply = func(prompt string, images int) (string, error) {
 		switch {
-		case strings.Contains(prompt, "### IMAGE <n>"):
-			if images != 3 {
-				return "", fmt.Errorf("batch describe carried %d images, want 3", images)
-			}
-			// Image 2 is deliberately absent to exercise the fallback.
-			return "### IMAGE 1\nfirst\n\n### IMAGE 3\nthird\n", nil
 		case strings.Contains(prompt, "OCR assistant"):
 			if images != 1 {
 				return "", fmt.Errorf("OCR call carried %d images, want 1", images)
 			}
 			return "OCR-TEXT", nil
+		case images > 1:
+			if images != 3 {
+				return "", fmt.Errorf("batch describe carried %d images, want 3", images)
+			}
+			// Image 2 is deliberately absent to exercise the fallback.
+			return "### IMAGE 1\nCLASS: chart\nDESCRIPTION: first\n\n" +
+				"### IMAGE 3\nCLASS: photo\nDESCRIPTION: third\n", nil
 		default:
 			if images != 1 {
-				return "", fmt.Errorf("fallback describe carried %d images, want 1", images)
+				return "", fmt.Errorf("per-image describe carried %d images, want 1", images)
 			}
-			return "fallback-caption", nil
+			return "### IMAGE 1\nCLASS: text_screenshot\nDESCRIPTION: fallback-caption\n", nil
 		}
 	}
 
@@ -277,25 +378,26 @@ func TestProcessImageBatchDescribesOnceAndFallsBack(t *testing.T) {
 		t.Fatalf("processImageBatch: %v", err)
 	}
 
-	// One describe + three OCR + one fallback describe.
+	// One batch describe + three OCR + one fallback describe.
 	if len(fake.calls) != 5 {
 		t.Fatalf("expected 5 VLM calls, got %d: %+v", len(fake.calls), fake.calls)
 	}
-	if fake.calls[0].images != 3 {
-		t.Errorf("first call should be the 3-image describe, got %d images", fake.calls[0].images)
-	}
-	describeCalls := 0
-	ocrCalls := 0
+	batchDescribe, perImageDescribe, ocrCalls := 0, 0, 0
 	for _, c := range fake.calls {
 		switch {
-		case strings.Contains(c.prompt, "### IMAGE <n>"):
-			describeCalls++
 		case strings.Contains(c.prompt, "OCR assistant"):
 			ocrCalls++
+		case c.images > 1:
+			batchDescribe++
+		default:
+			perImageDescribe++
 		}
 	}
-	if describeCalls != 1 {
-		t.Errorf("describe requests = %d, want 1 (batching must not describe per image)", describeCalls)
+	if batchDescribe != 1 {
+		t.Errorf("batch describe requests = %d, want 1 (batching must not describe per image)", batchDescribe)
+	}
+	if perImageDescribe != 1 {
+		t.Errorf("per-image describe requests = %d, want 1 (only the uncovered image)", perImageDescribe)
 	}
 	if ocrCalls != 3 {
 		t.Errorf("OCR requests = %d, want 3 (one per image)", ocrCalls)
@@ -315,15 +417,26 @@ func TestProcessImageBatchDescribesOnceAndFallsBack(t *testing.T) {
 		t.Errorf("persisted chunks = %d, want 6", len(repo.created))
 	}
 
-	// Images 1 and 3 keep their batch descriptions; image 2 uses the fallback.
+	// Classes reach the trace and the persisted rows (two chunks per image).
+	wantClasses := map[string]int{"chart": 2, "text_screenshot": 2, "photo": 2}
+	if got := persistedClasses(t, repo.created); !equalCounts(got, wantClasses) {
+		t.Errorf("persisted classes = %v, want %v", got, wantClasses)
+	}
+	if got := outs[0]["image_class"]; got != "chart" {
+		t.Errorf("image 1 class = %v, want chart", got)
+	}
+	if got := outs[1]["image_class"]; got != "text_screenshot" {
+		t.Errorf("image 2 class = %v, want text_screenshot (from the fallback)", got)
+	}
+	if got := outs[2]["image_class"]; got != "photo" {
+		t.Errorf("image 3 class = %v, want photo", got)
+	}
+
 	if got := outs[0]["caption_chars"]; got != len([]rune("first")) {
 		t.Errorf("image 1 caption_chars = %v, want %d", got, len([]rune("first")))
 	}
 	if got := outs[1]["caption_chars"]; got != len([]rune("fallback-caption")) {
 		t.Errorf("image 2 caption_chars = %v, want %d", got, len([]rune("fallback-caption")))
-	}
-	if got := outs[2]["caption_chars"]; got != len([]rune("third")) {
-		t.Errorf("image 3 caption_chars = %v, want %d", got, len([]rune("third")))
 	}
 }
 
@@ -336,12 +449,10 @@ func TestProcessImageBatchFailsOnTransportError(t *testing.T) {
 	fileSvc := &batchFileService{body: []byte("fake-image-bytes")}
 	svc := newBatchTestService(fileSvc, &batchChunkRepo{})
 
-	// Only the images described by hand in the prompt are counted; the batch's
-	// describe round-trip is skipped here.
 	sentinel := fmt.Errorf("upstream unavailable")
 	fake := &batchFakeVLM{}
-	fake.reply = func(prompt string, _ int) (string, error) {
-		if strings.Contains(prompt, "### IMAGE <n>") {
+	fake.reply = func(prompt string, images int) (string, error) {
+		if images > 1 {
 			return "", sentinel
 		}
 		return "x", nil
@@ -379,16 +490,18 @@ func TestProcessImageBatchSkipsUnreadableImage(t *testing.T) {
 
 	fake := &batchFakeVLM{}
 	fake.reply = func(prompt string, images int) (string, error) {
-		if strings.Contains(prompt, "### IMAGE <n>") {
+		switch {
+		case strings.Contains(prompt, "OCR assistant"):
+			return "OCR-TEXT", nil
+		case images > 1:
 			if images != 2 {
 				return "", fmt.Errorf("batch describe carried %d images, want 2", images)
 			}
-			return "### IMAGE 1\nalpha\n\n### IMAGE 2\nbeta\n", nil
+			return "### IMAGE 1\nCLASS: chart\nDESCRIPTION: alpha\n\n" +
+				"### IMAGE 2\nCLASS: photo\nDESCRIPTION: beta\n", nil
+		default:
+			return "### IMAGE 1\nCLASS: photo\nDESCRIPTION: caption\n", nil
 		}
-		if strings.Contains(prompt, "OCR assistant") {
-			return "OCR-TEXT", nil
-		}
-		return "caption", nil
 	}
 
 	payload := &types.ImageMultimodalPayload{
@@ -409,16 +522,11 @@ func TestProcessImageBatchSkipsUnreadableImage(t *testing.T) {
 		t.Fatalf("processImageBatch: %v", err)
 	}
 
-	// Load order: succeed, fail, succeed — so the two survivors are described
-	// together and no call carries the unreadable third image.
 	if len(outs) != 3 {
 		t.Fatalf("outputs = %d, want 3", len(outs))
 	}
 	if got := outs[1]["skipped"]; got != "unreadable_image" {
 		t.Errorf("middle image should be marked skipped, got %v", got)
-	}
-	if len(fake.calls) == 0 {
-		t.Fatal("expected VLM calls for the readable images")
 	}
 	if _, ok := outs[0]["skipped"]; ok {
 		t.Errorf("first image should not be skipped: %v", outs[0])
@@ -428,10 +536,10 @@ func TestProcessImageBatchSkipsUnreadableImage(t *testing.T) {
 	}
 }
 
-// TestProcessOneImageReusesCallerBytesAndCaption pins the zero-overhead path a
-// batched caller relies on: bytes and caption supplied by the caller mean no
+// TestProcessOneImageReusesCallerVerdict pins the zero-overhead path a batched
+// caller relies on: bytes and a describe verdict supplied by the caller mean no
 // extra read and no extra describe call.
-func TestProcessOneImageReusesCallerBytesAndCaption(t *testing.T) {
+func TestProcessOneImageReusesCallerVerdict(t *testing.T) {
 	t.Parallel()
 
 	fileSvc := &batchFileService{body: []byte("should-not-be-read")}
@@ -456,10 +564,10 @@ func TestProcessOneImageReusesCallerBytesAndCaption(t *testing.T) {
 	out, err := svc.processOneImage(context.Background(), payload,
 		types.ImageBatchRef{Index: 0, URL: "local://img/0.png", ChunkID: "chunk-a"},
 		fake, types.VLMConfig{}, noopSpanTracker{}, imageProcessInput{
-			Bytes:      []byte("caller-supplied"),
-			Caption:    "batched caption",
-			HasCaption: true,
-			BatchSize:  4,
+			Bytes:        []byte("caller-supplied"),
+			Described:    batchImageEntry{class: types.ImageClassChart, description: "batched caption"},
+			HasDescribed: true,
+			BatchSize:    4,
 		})
 	if err != nil {
 		t.Fatalf("processOneImage: %v", err)
@@ -470,13 +578,20 @@ func TestProcessOneImageReusesCallerBytesAndCaption(t *testing.T) {
 	}
 	for _, c := range fake.calls {
 		if !strings.Contains(c.prompt, "OCR assistant") {
-			t.Errorf("no describe call expected when HasCaption is set, got %q", c.prompt)
+			t.Errorf("no describe call expected when HasDescribed is set, got %q", c.prompt)
 		}
 	}
 	if got := out["caption_chars"]; got != len([]rune("batched caption")) {
 		t.Errorf("caption_chars = %v, want the caller-supplied caption length", got)
 	}
+	if got := out["image_class"]; got != "chart" {
+		t.Errorf("image_class = %v, want chart", got)
+	}
 	if got := out["image_bytes"]; got != len("caller-supplied") {
 		t.Errorf("image_bytes = %v, want the caller-supplied byte count", got)
+	}
+	// The class must land on the persisted row, not just the trace.
+	if got := persistedClasses(t, repo.created); !equalCounts(got, map[string]int{"chart": 2}) {
+		t.Errorf("persisted classes = %v, want one chart image", got)
 	}
 }

@@ -96,6 +96,10 @@ type ImageInfo struct {
 	Caption string `json:"caption"`
 	// 图片OCR文本
 	OCRText string `json:"ocr_text"`
+	// Class 是描述轮给出的粗分类（取值见 ImageClass）。该字段以 JSON 存储在
+	// chunks.image_info 中，无需迁移；分类能力上线前写入的行会缺省为空，读取方
+	// 必须容忍空值。
+	Class string `json:"class,omitempty"`
 }
 
 // VideoInfo 表示与 Chunk 关联的视频信息

@@ -226,29 +226,22 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
-	// A task that carries more than one image describes the whole batch in a
-	// single request and then runs the per-image pipeline for OCR. A task with
-	// one image (the default, and every legacy payload) keeps the historical
-	// pipeline untouched: OCR first, then caption, both on the original bytes.
-	if len(refs) > 1 {
-		perImageOut, handleErr = s.processImageBatch(ctx, &payload, refs, vlmModel, vlmCfg, tracker)
-		return handleErr
-	}
-	if len(refs) == 1 {
-		out, imgErr := s.processOneImage(ctx, &payload, refs[0], vlmModel, vlmCfg, tracker, imageProcessInput{})
-		if out == nil {
-			out = types.JSONMap{}
-		}
-		perImageOut = append(perImageOut, out)
-		handleErr = imgErr
-	}
+	// Every task now runs the same pipeline: the describe round also
+	// classifies, so a task carrying a single image is simply a batch of one
+	// and both shapes come back with a class, a description, and per-class
+	// OCR. Only the request count differs between them.
+	perImageOut, handleErr = s.processImageBatch(ctx, &payload, refs, vlmModel, vlmCfg, tracker)
 	return handleErr
 }
 
-// processImageBatch describes a whole batch in one VLM request, then runs the
-// per-image pipeline for OCR and for any image the batch response did not
-// cover. Describing N images together is what turns N requests into one; the
-// per-image round stays because OCR needs each image at full resolution.
+// processImageBatch classifies and describes a whole batch in one VLM request,
+// then runs the per-image pipeline for OCR and for any image the batch response
+// did not cover. Describing N images together is what turns N requests into
+// one; the per-image round stays because OCR needs each image at full
+// resolution.
+//
+// A task carrying a single image goes through here too — it is a batch of one,
+// which is why one code path covers both shapes.
 //
 // Two failure modes are deliberately distinguished:
 //   - a transport/API error on the batch call fails the task so asynq retries
@@ -288,7 +281,7 @@ func (s *ImageMultimodalService) processImageBatch(
 		loaded = append(loaded, i)
 	}
 
-	descriptions := map[int]string{}
+	descriptions := map[int]batchImageEntry{}
 	if len(loaded) > 0 {
 		// The describe round works on downscaled copies: measurements showed
 		// that a short long-edge cuts prompt tokens to roughly a seventh
@@ -318,12 +311,12 @@ func (s *ImageMultimodalService) processImageBatch(
 
 		parsed := parseBatchImageResponse(raw, len(payloads))
 		for pos, i := range loaded {
-			if text, ok := parsed[pos+1]; ok {
-				descriptions[i] = text
+			if entry, ok := parsed[pos+1]; ok {
+				descriptions[i] = entry
 			}
 		}
 		logger.Infof(ctx,
-			"[ImageMultimodal] One request described %d of %d image(s) for knowledge %s",
+			"[ImageMultimodal] One request classified and described %d of %d image(s) for knowledge %s",
 			len(descriptions), len(payloads), payload.KnowledgeID)
 	}
 
@@ -331,13 +324,13 @@ func (s *ImageMultimodalService) processImageBatch(
 		if imgBytes[i] == nil {
 			continue // unreadable, already recorded above
 		}
-		desc, hasDesc := descriptions[i]
+		described, hasDescribed := descriptions[i]
 		out, imgErr := s.processOneImage(ctx, payload, ref, vlmModel, vlmCfg, tracker, imageProcessInput{
-			Bytes:      imgBytes[i],
-			Caption:    desc,
-			HasCaption: hasDesc,
-			BatchSize:  len(refs),
-			Out:        outs[i],
+			Bytes:        imgBytes[i],
+			Described:    described,
+			HasDescribed: hasDescribed,
+			BatchSize:    len(refs),
+			Out:          outs[i],
 		})
 		if out != nil {
 			outs[i] = out
@@ -351,9 +344,13 @@ func (s *ImageMultimodalService) processImageBatch(
 	return outs, nil
 }
 
-// buildBatchImagePrompt asks for one labelled description block per image so a
-// single request can describe a whole batch. The 1-based numbering the model
-// echoes back is what maps each block onto its input image.
+// buildBatchImagePrompt asks for one labelled block per image, each carrying a
+// class and a description, so a single request can cover a whole batch. The
+// 1-based numbering the model echoes back is what maps each block onto its
+// input image.
+//
+// The same prompt serves a batch of one: a stand-alone image still needs a
+// class, and reusing one protocol keeps the parser single-pathed.
 func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) string {
 	language := strings.TrimSpace(cfg.DescriptionLanguage)
 	if language == "" {
@@ -361,15 +358,26 @@ func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) 
 	}
 	prompt := fmt.Sprintf(
 		"You are given %d images, in order: image 1 is the first image after this instruction, image 2 the second, and so on.\n"+
-			"For each image, write a brief and concise description of its main content in %s.\n\n"+
+			"For each image, classify it and describe its main content in %s.\n\n"+
 			"Output exactly one block per image, in ascending order, using this format:\n\n"+
 			"### IMAGE <n>\n"+
-			"<description>\n\n"+
+			"CLASS: <%s>\n"+
+			"DESCRIPTION: <one or two sentences>\n\n"+
 			"Rules:\n"+
 			"- Replace <n> with the image number, starting at 1.\n"+
+			"- CLASS must be exactly one of the listed values, with no extra words.\n"+
+			"- %s: artwork that carries no information, such as a logo, divider, background fill, or decorative icon.\n"+
+			"- %s: a photograph or a picture of a physical thing.\n"+
+			"- %s: a screenshot or scan whose content is mostly body text.\n"+
+			"- %s: a table rendered as an image.\n"+
+			"- %s: a chart, graph, diagram, or infographic.\n"+
+			"- %s: anything that does not fit the classes above.\n"+
 			"- Produce %d blocks in total: one per image, none merged, none skipped.\n"+
 			"- Output only the blocks. No preamble, no summary, no extra commentary.\n",
-		count, language, count)
+		count, language, types.ImageClassList(),
+		types.ImageClassDecorative, types.ImageClassPhoto, types.ImageClassTextScreenshot,
+		types.ImageClassTableImage, types.ImageClassChart, types.ImageClassOther,
+		count)
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
 }
 
@@ -378,26 +386,16 @@ func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) 
 // the marker at a different heading level still maps back correctly.
 var batchImageBlockRe = regexp.MustCompile(`(?m)^#{1,6}\s*IMAGE\s+(\d+)\s*$`)
 
-// parseBatchImageResponse maps 1-based image numbers onto the description that
-// follows each marker. Missing, out-of-range, and repeated numbers are simply
-// absent from the result: the caller describes those images on their own, so an
-// imprecise answer never discards a usable description.
-func parseBatchImageResponse(raw string, count int) map[int]string {
-	out := make(map[int]string, count)
+// parseBatchImageResponse maps 1-based image numbers onto the class and
+// description that follow each marker. Missing, out-of-range, and repeated
+// numbers are simply absent from the result: the caller describes those images
+// on their own, so an imprecise answer never discards a usable description.
+func parseBatchImageResponse(raw string, count int) map[int]batchImageEntry {
+	out := make(map[int]batchImageEntry, count)
 	locs := batchImageBlockRe.FindAllStringSubmatchIndex(raw, -1)
 	for pos, loc := range locs {
 		n, err := strconv.Atoi(raw[loc[2]:loc[3]])
 		if err != nil || n < 1 || n > count {
-			continue
-		}
-		bodyStart := loc[1]
-		bodyEnd := len(raw)
-		if pos+1 < len(locs) {
-			bodyEnd = locs[pos+1][0]
-		}
-		text := strings.TrimSpace(raw[bodyStart:bodyEnd])
-		text = strings.TrimSpace(strings.TrimLeft(text, "-*# "))
-		if text == "" {
 			continue
 		}
 		if _, dup := out[n]; dup {
@@ -405,31 +403,98 @@ func parseBatchImageResponse(raw string, count int) map[int]string {
 			// the first block is the one that follows the input order.
 			continue
 		}
-		out[n] = text
+		bodyStart := loc[1]
+		bodyEnd := len(raw)
+		if pos+1 < len(locs) {
+			bodyEnd = locs[pos+1][0]
+		}
+		entry := parseBatchImageBlock(raw[bodyStart:bodyEnd])
+		if entry.description == "" {
+			continue
+		}
+		out[n] = entry
 	}
 	return out
 }
 
-// processOneImage runs the multimodal pipeline (OCR, then caption) for a single
-// image and persists the derived child chunks. It returns the per-image trace
-// map; a non-nil error means the failure is worth retrying the whole task for.
-// Unreadable images are skipped (nil error) so one bad file cannot fail a batch
-// of otherwise healthy images.
-//
-// A payload may carry one image (legacy) or a batch, so this function reads the
-// image through ref and never touches payload.ImageURL / payload.ChunkID.
+// parseBatchImageBlock splits one block body into its CLASS and DESCRIPTION
+// parts. A block without a usable CLASS line still keeps its description — the
+// class falls back to ImageClassOther, which sends the image down the
+// conservative branch instead of discarding text the model did produce.
+func parseBatchImageBlock(body string) batchImageEntry {
+	entry := batchImageEntry{class: types.ImageClassOther}
+	var descriptions []string
+	classSeen := false
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !classSeen {
+			if value, ok := cutBatchLabel(trimmed, "CLASS"); ok {
+				entry.class = types.NormalizeImageClass(value)
+				classSeen = true
+				continue
+			}
+		}
+		if value, ok := cutBatchLabel(trimmed, "DESCRIPTION"); ok {
+			descriptions = append(descriptions, value)
+			continue
+		}
+		if trimmed != "" {
+			descriptions = append(descriptions, trimmed)
+		}
+	}
+	joined := strings.TrimSpace(strings.Join(descriptions, " "))
+	// A model may prefix the description with a list marker; drop it so the
+	// caption starts with prose.
+	entry.description = strings.TrimSpace(strings.TrimLeft(joined, "-*# "))
+	return entry
+}
+
+// cutBatchLabel returns the value of a "LABEL: value" line, tolerating the
+// markdown emphasis and list markers models put around the label. label must be
+// upper case.
+func cutBatchLabel(line, label string) (string, bool) {
+	cleaned := strings.TrimLeft(line, "*_#- ")
+	if !strings.HasPrefix(strings.ToUpper(cleaned), label+":") {
+		return "", false
+	}
+	return strings.TrimSpace(cleaned[len(label)+1:]), true
+}
+
+// applyImageDescription copies a parsed describe verdict onto the image record
+// so it is persisted with the chunk, and mirrors it into the trace map.
+func applyImageDescription(imageInfo *types.ImageInfo, entry batchImageEntry, out types.JSONMap) {
+	if entry.class != "" {
+		imageInfo.Class = string(entry.class)
+		out["image_class"] = string(entry.class)
+	}
+	if entry.description == "" {
+		return
+	}
+	imageInfo.Caption = entry.description
+	out["caption_chars"] = len([]rune(entry.description))
+	out["caption_preview"] = previewText(entry.description, 200)
+}
+
+// batchImageEntry is one parsed block of a describe response: the class the
+// model assigned to an image and the description it wrote for it.
+type batchImageEntry struct {
+	class       types.ImageClass
+	description string
+}
+
 // imageProcessInput carries work the caller has already done for one image so
 // the per-image pipeline does not repeat it. The zero value means "nothing
-// precomputed", which is exactly the historical single-image behaviour.
+// precomputed", so the image is described on its own.
 type imageProcessInput struct {
 	// Bytes is the image the caller already loaded. A batched caller reads
 	// every image up front to build its single request, so handing the bytes
 	// over here avoids reading the same object twice.
 	Bytes []byte
-	// Caption is the description the batch response already produced for this
-	// image. When HasCaption is true, no per-image describe call is made.
-	Caption    string
-	HasCaption bool
+	// Described is the describe round's verdict for this image. When
+	// HasDescribed is true neither the class nor the description is computed
+	// again here.
+	Described    batchImageEntry
+	HasDescribed bool
 	// BatchSize is how many images shared this task's batch request. Values
 	// above 1 mark the image as a batch member on the trace.
 	BatchSize int
@@ -437,6 +502,15 @@ type imageProcessInput struct {
 	Out types.JSONMap
 }
 
+// processOneImage runs the multimodal pipeline for one image and persists the
+// derived child chunks: the describe verdict it was handed (or one it fetches
+// itself), then OCR. It returns the per-image trace map; a non-nil error means
+// the failure is worth retrying the whole task for. Unreadable images are
+// skipped (nil error) so one bad file cannot fail a batch of otherwise healthy
+// images.
+//
+// A payload may carry one image or many, so this function reads the image
+// through ref and never touches payload.ImageURL / payload.ChunkID.
 func (s *ImageMultimodalService) processOneImage(
 	ctx context.Context,
 	payload *types.ImageMultimodalPayload,
@@ -545,23 +619,28 @@ func (s *ImageMultimodalService) processOneImage(
 		}
 	}
 
-	if in.HasCaption {
-		// A batched caller already described this image in its single request;
-		// reuse that text instead of paying for a second call.
-		if in.Caption != "" {
-			imageInfo.Caption = in.Caption
-			out["caption_chars"] = len([]rune(in.Caption))
-			out["caption_preview"] = previewText(in.Caption, 200)
-		}
+	if in.HasDescribed {
+		// The describe round already covered this image; reuse its verdict
+		// instead of paying for a second call.
+		applyImageDescription(&imageInfo, in.Described, out)
 	} else {
-		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+		// Describe this image on its own, using the same block protocol so it
+		// still comes back with a class. A batch response that skipped this
+		// image lands here.
+		raw, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildBatchImagePrompt(ctx, vlmCfg, 1))
 		if capErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", ref.URL, capErr)
+			logger.Warnf(ctx, "[ImageMultimodal] Describe failed for %s: %v", ref.URL, capErr)
 			out["caption_error"] = capErr.Error()
-		} else if caption != "" {
-			imageInfo.Caption = caption
-			out["caption_chars"] = len([]rune(caption))
-			out["caption_preview"] = previewText(caption, 200)
+		} else if entry, ok := parseBatchImageResponse(raw, 1)[1]; ok {
+			applyImageDescription(&imageInfo, entry, out)
+		} else if text := strings.TrimSpace(raw); text != "" {
+			// The model ignored the block format. Keeping its raw answer beats
+			// leaving the image with no description at all; the class stays
+			// unset so the image takes the conservative branch downstream.
+			imageInfo.Caption = text
+			out["caption_chars"] = len([]rune(text))
+			out["caption_preview"] = previewText(text, 200)
+			out["caption_unstructured"] = true
 		}
 	}
 
