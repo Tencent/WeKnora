@@ -6508,6 +6508,9 @@ export default {
       authHeaders: 'カスタムヘッダー（任意）',
       authHeadersHint: '非公開フィード用です。1行に1つ「名前: 値」の形式で入力します（例: Authorization: Bearer xxxx）'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud では、スペース直下のフォルダーなどコンテナ配下のページをここに一覧できません。スペース全体を選択すれば同期されます。'
+    },
     comingSoon: '近日対応予定',
     docHint: '認証情報の取得先:',
     openDoc: 'ドキュメントを開く',

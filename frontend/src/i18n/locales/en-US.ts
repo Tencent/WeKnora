@@ -6508,6 +6508,9 @@ export default {
       authHeaders: 'Custom headers (optional)',
       authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud cannot list pages stored directly under top-level folders in this space; selecting the whole space still syncs them.'
+    },
     comingSoon: 'Coming soon',
     docHint: 'Get credentials at:',
     openDoc: 'Open documentation',
