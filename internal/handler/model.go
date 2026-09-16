@@ -632,8 +632,22 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if newParams.AppID == "" {
 		newParams.AppID = model.Parameters.AppID
 	}
+	requestedProvider := strings.TrimSpace(newParams.Provider)
+	storedProvider := strings.TrimSpace(model.Parameters.Provider)
+	providerUnchanged := requestedProvider == "" || strings.EqualFold(requestedProvider, storedProvider)
 	if newParams.ExtraConfig == nil {
-		newParams.ExtraConfig = model.Parameters.ExtraConfig
+		if providerUnchanged {
+			newParams.ExtraConfig = model.Parameters.ExtraConfig
+		}
+	} else if providerUnchanged && len(newParams.ExtraConfig) > 0 && len(model.Parameters.ExtraConfig) > 0 {
+		merged := make(map[string]string, len(model.Parameters.ExtraConfig)+len(newParams.ExtraConfig))
+		for key, value := range model.Parameters.ExtraConfig {
+			merged[key] = value
+		}
+		for key, value := range newParams.ExtraConfig {
+			merged[key] = value
+		}
+		newParams.ExtraConfig = merged
 	}
 	model.Parameters = newParams
 

@@ -1481,6 +1481,13 @@ const checkRemoteAPI = async () => {
       ? { modelId: props.modelData.id as string }
       : {}
 
+    const thinkingControl = formData.value.thinkingControl
+    const thinkingPayload = activeModelType.value === 'chat'
+      && formData.value.source === 'remote'
+      && thinkingControl
+      ? { extraConfig: { thinking_control: thinkingControl } }
+      : {}
+
     switch (activeModelType.value) {
       case 'chat':
         // 对话模型（KnowledgeQA）
@@ -1491,6 +1498,7 @@ const checkRemoteAPI = async () => {
           provider: formData.value.provider,
           ...idPayload,
           ...headerPayload,
+          ...thinkingPayload,
         })
         break
 

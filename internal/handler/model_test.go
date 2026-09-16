@@ -1,13 +1,34 @@
 package handler
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type stubUpdateModelService struct {
+	interfaces.ModelService
+	stored  *types.Model
+	updated *types.Model
+}
+
+func (s *stubUpdateModelService) GetModelByID(context.Context, string) (*types.Model, error) {
+	return s.stored, nil
+}
+
+func (s *stubUpdateModelService) UpdateModel(_ context.Context, model *types.Model) error {
+	s.updated = model
+	return nil
+}
 
 func TestModelUpdateRequestDisplayNamePresence(t *testing.T) {
 	var omitted UpdateModelRequest
@@ -18,6 +39,74 @@ func TestModelUpdateRequestDisplayNamePresence(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"display_name":""}`), &cleared))
 	require.NotNil(t, cleared.DisplayName)
 	assert.Equal(t, "", *cleared.DisplayName)
+}
+
+func TestUpdateModelMergesExtraConfigForSameProvider(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &stubUpdateModelService{stored: &types.Model{
+		ID:   "model-1",
+		Name: "model",
+		Parameters: types.ModelParameters{
+			Provider: "generic",
+			ExtraConfig: map[string]string{
+				"thinking_control": "none",
+				"api_version":      "2024-10-21",
+			},
+		},
+	}}
+	body, err := json.Marshal(UpdateModelRequest{
+		Name: "model",
+		Parameters: types.ModelParameters{
+			Provider:    "generic",
+			ExtraConfig: map[string]string{"thinking_control": "enabled"},
+		},
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/models/model-1", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "model-1"}}
+
+	NewModelHandler(service).UpdateModel(c)
+
+	require.Empty(t, c.Errors)
+	require.NotNil(t, service.updated)
+	assert.Equal(t, "enabled", service.updated.Parameters.ExtraConfig["thinking_control"])
+	assert.Equal(t, "2024-10-21", service.updated.Parameters.ExtraConfig["api_version"])
+}
+
+func TestUpdateModelDoesNotMergeExtraConfigAcrossProviders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &stubUpdateModelService{stored: &types.Model{
+		ID:   "model-1",
+		Name: "model",
+		Parameters: types.ModelParameters{
+			Provider:    "azure",
+			ExtraConfig: map[string]string{"api_version": "2024-10-21"},
+		},
+	}}
+	body, err := json.Marshal(UpdateModelRequest{
+		Name: "model",
+		Parameters: types.ModelParameters{
+			Provider:    "generic",
+			ExtraConfig: map[string]string{"thinking_control": "enabled"},
+		},
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/models/model-1", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Params = gin.Params{{Key: "id", Value: "model-1"}}
+
+	NewModelHandler(service).UpdateModel(c)
+
+	require.Empty(t, c.Errors)
+	require.NotNil(t, service.updated)
+	assert.Equal(t, map[string]string{"thinking_control": "enabled"}, service.updated.Parameters.ExtraConfig)
 }
 
 func TestParseModelDebugOptionsPreservesExplicitThinkingFalse(t *testing.T) {
