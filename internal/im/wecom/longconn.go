@@ -646,7 +646,18 @@ func (c *LongConnClient) handleCallback(ctx context.Context, conn *ws.Conn, fram
 }
 
 // convertMixedMessage converts a WeCom mixed (text+image) message.
-// Extracts all text content for QA; if there's only images, treat as image message.
+//
+// A mixed message normally carries BOTH an image and a typed question — users
+// attach a photo and ask about it in the same turn, and in group chats the
+// @-mention arrives as its own text item. Both parts must survive:
+//   - the image is returned as an image message so the IM service downloads it
+//     and passes it to the model as vision input;
+//   - the text is carried in Content so it becomes the QA query.
+//
+// Returning a text-only message whenever text is present (the previous
+// behaviour) silently dropped the image, so the model answered about the
+// question text without ever seeing the picture. Only the first image is used;
+// multi-image turns still resolve to a single attachment.
 func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, chatType im.ChatType, reqID string) *im.IncomingMessage {
 	isGroup := chatType == im.ChatTypeGroup
 	var textParts []string
@@ -671,7 +682,25 @@ func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, cha
 		}
 	}
 
-	// If there's text content, treat as text message (QA query)
+	// Image present: return an image message so the service downloads it for
+	// vision input. Any text in the same turn rides along as the QA query.
+	if firstImageURL != "" {
+		return &im.IncomingMessage{
+			Platform:    im.PlatformWeCom,
+			MessageType: im.MessageTypeImage,
+			UserID:      msg.From.UserID,
+			UserName:    msg.From.UserID,
+			ChatID:      chatID,
+			ChatType:    chatType,
+			Content:     strings.Join(textParts, "\n"),
+			MessageID:   msg.MsgID,
+			FileKey:     firstImageURL,
+			FileName:    msg.MsgID + ".png",
+			Extra:       map[string]string{"req_id": reqID, "aes_key": firstImageAESKey},
+		}
+	}
+
+	// No image: plain text QA query.
 	if len(textParts) > 0 {
 		return &im.IncomingMessage{
 			Platform:    im.PlatformWeCom,
@@ -683,22 +712,6 @@ func (c *LongConnClient) convertMixedMessage(msg *botMessage, chatID string, cha
 			Content:     strings.Join(textParts, "\n"),
 			MessageID:   msg.MsgID,
 			Extra:       map[string]string{"req_id": reqID},
-		}
-	}
-
-	// Only images, treat as image message (save to KB)
-	if firstImageURL != "" {
-		return &im.IncomingMessage{
-			Platform:    im.PlatformWeCom,
-			MessageType: im.MessageTypeImage,
-			UserID:      msg.From.UserID,
-			UserName:    msg.From.UserID,
-			ChatID:      chatID,
-			ChatType:    chatType,
-			MessageID:   msg.MsgID,
-			FileKey:     firstImageURL,
-			FileName:    msg.MsgID + ".png",
-			Extra:       map[string]string{"req_id": reqID, "aes_key": firstImageAESKey},
 		}
 	}
 
