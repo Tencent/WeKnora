@@ -2773,7 +2773,7 @@ const drawerConfirmText = computed(() => {
 </style>
 
 <!--
-  Drawer header logo — same white badge as list cards / StorageEngineSettings.
+  Drawer header logo — same white badge as the data-source list cards.
 -->
 <style lang="less">
 .datasource-editor-drawer .setting-drawer__header-icon:has(.datasource-header-icon__img) {

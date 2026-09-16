@@ -7,9 +7,7 @@
 
     <h3 class="list-section-title">{{ t('webSearchSettings.providersTitle') }}</h3>
 
-    <!-- Provider List —— 与 ModelSettings 的卡片同形：左侧标识徽章 + 标题 / 副标题 / proxy URL 三段式。
-         不复用 SettingCard 的原因和 Models 一样：每页有微妙不同的右上侧栏需求（这里没有控件，
-         Mcp 有开关），SettingCard 仍服务于其它消费者。 -->
+    <!-- Provider cards keep their page-specific actions beside the provider details. -->
     <div v-if="providerEntities.length === 0 && !authStore.hasRole('admin')" class="empty-state">
       <t-empty :description="t('webSearchSettings.noProvidersDesc')" />
     </div>
