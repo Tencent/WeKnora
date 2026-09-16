@@ -214,6 +214,7 @@ func thinkingCapsFor(name ProviderName) ThinkingCaps {
 	}
 	switch name {
 	case ProviderOpenAI, ProviderAzureOpenAI, // reasoning_effort
+		ProviderGeneric,   // 自定义 OpenAI 兼容端点走同一个 openai 适配器（reasoning_effort），运行时本就支持
 		ProviderAnthropic, // thinking.budget_tokens (mapped in adapter)
 		ProviderGemini,    // thinkingConfig.thinkingBudget
 		ProviderAliyun,    // qwen thinking_budget / enable_thinking
