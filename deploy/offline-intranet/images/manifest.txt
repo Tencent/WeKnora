@@ -1,5 +1,5 @@
-registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-ui:v0.8.22  offline-images/registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-ui_v0.8.22.tar
-registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-app:v0.8.22  offline-images/registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-app_v0.8.22.tar
-registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-docreader:v0.8.22  offline-images/registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-docreader_v0.8.22.tar
+registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-ui:v0.8.23  offline-images/registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-ui_v0.8.23.tar
+registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-app:v0.8.23  offline-images/registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-app_v0.8.23.tar
+registry.cn-beijing.aliyuncs.com/gov-claw/tree-rag-docreader:v0.8.23  offline-images/registry.cn-beijing.aliyuncs.com_gov-claw_tree-rag-docreader_v0.8.23.tar
 paradedb/paradedb:v0.22.2-pg17  offline-images/paradedb_paradedb_v0.22.2-pg17.tar
 redis:7.0-alpine  offline-images/redis_7.0-alpine.tar
