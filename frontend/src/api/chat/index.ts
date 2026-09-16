@@ -6,10 +6,21 @@ export async function createSessions(data = {}) {
   return post("/api/v1/sessions", data);
 }
 
-export async function getSessionsList(page: number, page_size: number, source?: string) {
-  const params = new URLSearchParams({ page: String(page), page_size: String(page_size) });
+export async function getSessionsList(
+  page: number,
+  page_size: number,
+  source?: string,
+  agentId?: string,
+) {
+  const params = new URLSearchParams({
+    page: String(page),
+    page_size: String(page_size),
+  });
   if (source) {
     params.set("source", source);
+  }
+  if (agentId) {
+    params.set("agent_id", agentId);
   }
   return get(`/api/v1/sessions?${params.toString()}`);
 }

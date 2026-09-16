@@ -233,10 +233,24 @@ func (r *sessionRepository) QueryPaged(
 		}
 	}
 	applyAgent := func(db *gorm.DB) *gorm.DB {
-		if q.AgentID != "" {
-			return db.Where("ics.agent_id = ?", q.AgentID)
+		if q.AgentID == "" {
+			return db
 		}
-		return db
+		// IM rows carry agent_id on the mapping; web/embed chats remember the
+		// last agent in agent_config (SessionLastRequestState JSON).
+		var agentConfigExpr string
+		switch r.db.Dialector.Name() {
+		case "postgres":
+			agentConfigExpr = "s.agent_config->>'agent_id'"
+		case "mysql":
+			agentConfigExpr = "JSON_UNQUOTE(JSON_EXTRACT(s.agent_config, '$.agent_id'))"
+		default: // sqlite (Lite)
+			agentConfigExpr = "json_extract(s.agent_config, '$.agent_id')"
+		}
+		return db.Where(
+			"(ics.agent_id = ? OR "+agentConfigExpr+" = ?)",
+			q.AgentID, q.AgentID,
+		)
 	}
 
 	// Count distinct sessions to guard against fan-out from the join.

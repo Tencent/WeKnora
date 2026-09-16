@@ -6456,7 +6456,7 @@ export default {
     folderTree: {
       title: '폴더',
       rootRow: '루트',
-      rootRowTip: '지식 베이스 루트 디렉터리, 하위 폴더에 없는 문서가 여기에 있습니다',
+      rootRowTip: '지식 베이스의 모든 문서; 왼쪽 폴더를 열어 탐색하세요',
       folderCardCount: '문서 {count}개',
       searchingSubtree: '(하위 폴더 포함)',
       emptyFolder: '이 폴더에는 아직 문서가 없습니다',
@@ -6703,6 +6703,7 @@ export default {
     statusDraft: '초안',
     noDescription: '설명 없음',
     emptyKnowledgeDragDrop: '지식이 비어 있음, 드래그 앤 드롭으로 업로드',
+    loadDocumentsFailed: '문서 목록을 불러오지 못했습니다. 새로고침 후 다시 시도하세요',
     pdfDocFormat: 'pdf, doc 형식 파일, 최대 10MB',
     textMarkdownFormat: 'text, markdown 형식 파일, 최대 200KB',
     dragFileNotText: '텍스트나 링크가 아닌 파일을 드래그하세요',

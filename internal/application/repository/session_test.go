@@ -345,3 +345,39 @@ func TestSessionRepositoryQueryPagedHidesMaintenanceSessions(t *testing.T) {
 			"source=%q count must not include the maintenance session", source)
 	}
 }
+
+func TestSessionRepositoryQueryPagedAgentIDMatchesWebJSONAndIM(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	ctx := context.Background()
+
+	matchedWeb := createSessionForTest(t, db, 1, "alice")
+	otherWeb := createSessionForTest(t, db, 1, "alice")
+	imMatched := createSessionForTest(t, db, 1, "")
+	imOther := createSessionForTest(t, db, 1, "")
+
+	require.NoError(t, db.Model(&types.Session{}).Where("id = ?", matchedWeb.ID).
+		Update("agent_config", &types.SessionLastRequestState{AgentID: "agent-a"}).Error)
+	require.NoError(t, db.Model(&types.Session{}).Where("id = ?", otherWeb.ID).
+		Update("agent_config", &types.SessionLastRequestState{AgentID: "agent-b"}).Error)
+	require.NoError(t, db.Create(&testIMChannelSession{
+		ID: "ics-agent-a", SessionID: imMatched.ID, Platform: "feishu", AgentID: "agent-a",
+	}).Error)
+	require.NoError(t, db.Create(&testIMChannelSession{
+		ID: "ics-agent-b", SessionID: imOther.ID, Platform: "feishu", AgentID: "agent-b",
+	}).Error)
+
+	items, total, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "", AgentID: "agent-a", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	require.ElementsMatch(t, []string{matchedWeb.ID, imMatched.ID}, listItemIDsForTest(items))
+
+	webOnly, webTotal, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "", Source: "web", AgentID: "agent-a", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, webTotal)
+	require.Equal(t, []string{matchedWeb.ID}, listItemIDsForTest(webOnly))
+}

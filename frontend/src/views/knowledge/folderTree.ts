@@ -5,8 +5,9 @@ import type { KnowledgeFolderNode, KnowledgeFolderTree } from '@/api/knowledge-b
  *
  * A folder selection is just a path, where the empty string is the knowledge
  * base root. The root is a real node of the tree — every top-level folder is
- * its child — so there is no separate "all documents" pseudo-row: what the root
- * row lists is decided by the same recursive switch as any other folder.
+ * its child. The document list treats root as "whole knowledge base" so the
+ * tab stays aligned with knowledge_count; subfolders stay exact-scope unless
+ * a filter widens them to a subtree.
  */
 export const ROOT_FOLDER_PATH = ''
 

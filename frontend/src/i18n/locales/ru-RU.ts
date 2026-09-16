@@ -6456,7 +6456,7 @@ export default {
     folderTree: {
       title: 'Папки',
       rootRow: 'Корень',
-      rootRowTip: 'Корневая папка базы знаний; документы без подпапки находятся здесь',
+      rootRowTip: 'Все документы базы знаний; откройте папку слева для просмотра',
       folderCardCount: 'Документов: {count}',
       searchingSubtree: '(с вложенными папками)',
       emptyFolder: 'В этой папке пока нет документов',
@@ -6703,6 +6703,7 @@ export default {
     statusDraft: 'Черновик',
     noDescription: 'Нет описания',
     emptyKnowledgeDragDrop: 'База знаний пуста, перетащите файлы для загрузки',
+    loadDocumentsFailed: 'Не удалось загрузить список документов. Обновите страницу и попробуйте снова',
     pdfDocFormat: 'Файлы pdf, doc формата, не более 10 МБ',
     textMarkdownFormat: 'Файлы text, markdown формата, не более 200 КБ',
     dragFileNotText: 'Пожалуйста, перетащите файлы, а не текст или ссылки',

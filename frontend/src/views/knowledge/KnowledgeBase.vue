@@ -606,8 +606,9 @@ const hasFolders = computed(() => (folderTree.value?.folders?.length ?? 0) > 0);
 // The folder column only earns its space once the knowledge base actually has
 // folders, so knowledge bases filled with single-file uploads look unchanged.
 const showFolderTree = computed(() => !isFAQ.value && hasFolders.value);
-// Browsing lists one folder's own contents; filtering searches its whole
-// subtree. There is no mode switch: the list follows what the user is doing.
+// Browsing a subfolder lists that folder only; filtering searches its subtree.
+// The knowledge-base root is special: it must match the card's knowledge_count,
+// so it always lists the whole tree (otherwise folder uploads look "empty").
 const isFiltering = computed(() =>
   isFilteringDocuments({
     keyword: docSearchKeyword.value,
@@ -618,16 +619,21 @@ const isFiltering = computed(() =>
     timeRange: updatedTimeRange.value,
   }),
 );
+const isRootFolder = computed(
+  () => selectedFolderPath.value === ROOT_FOLDER_PATH,
+);
 // Sub-folder entries shown at the top of the list while browsing. Search results
-// are flat, so they are dropped as soon as a filter is active. When the sidebar
-// tree is open it already lists the same folders, so skip the duplicate rows.
+// are flat, so they are dropped as soon as a filter is active. The root already
+// lists every document, so folder rows there would duplicate the sidebar tree.
 const currentChildFolders = computed(() => {
-  if (isFiltering.value) return [];
+  if (isFiltering.value || isRootFolder.value) return [];
   if (showFolderTree.value && !folderTreeCollapsed.value) return [];
   return childFolders(folderTree.value, selectedFolderPath.value);
 });
 // A row's folder is worth showing only when the list can span folders.
-const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
+const showDocumentFolderPath = computed(
+  () => hasFolders.value && (isFiltering.value || isRootFolder.value),
+);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
 
 const filterParams = computed(() => {
@@ -641,9 +647,9 @@ const filterParams = computed(() => {
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
     folder_path: selectedFolderPath.value,
-    // Searching descends into sub-folders; browsing shows one level, with the
-    // sub-folders themselves rendered as entries in the list.
-    folder_recursive: isFiltering.value,
+    // Root (and any active filter) must include nested folder uploads so the
+    // document tab is not empty while the KB card still shows a non-zero count.
+    folder_recursive: isFiltering.value || isRootFolder.value,
   };
 });
 const tagMap = computed<Record<string, any>>(() => {
@@ -2413,8 +2419,8 @@ async function createNewSession(value: string): Promise<void> {
                     {{ crumb.name }}
                   </button>
                 </template>
-                <!-- Filtering silently widens the scope to sub-folders, so say so. -->
-                <span v-if="isFiltering" class="doc-folder-path__scope">
+                <!-- Root and filters both widen the list past a single folder. -->
+                <span v-if="isFiltering || isRootFolder" class="doc-folder-path__scope">
                   {{ $t('knowledgeBase.folderTree.searchingSubtree') }}
                 </span>
               </nav>

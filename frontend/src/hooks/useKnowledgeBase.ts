@@ -93,7 +93,13 @@ export default function (knowledgeBaseId?: string) {
         }
         total.value = totalResult;
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        // Surface list failures — a silent catch made a failed request look like
+        // an empty knowledge base while the KB card still showed knowledge_count.
+        if (requestGeneration !== knowledgeListGeneration) return;
+        console.error('Failed to load knowledge list', error);
+        MessagePlugin.error(t('knowledgeBase.loadDocumentsFailed'));
+      });
   };
   const openMore = (index: number) => {
     moreIndex.value = index;

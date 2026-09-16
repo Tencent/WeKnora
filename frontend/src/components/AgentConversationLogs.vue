@@ -123,6 +123,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { getSessionsList } from '@/api/chat'
+import { listIMChannels } from '@/api/agent'
 import { listEmbedChannels } from '@/api/embed'
 import { removeSession } from '@/components/sessionMutations'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
@@ -140,6 +141,11 @@ interface LogRow {
   ipLabel: string
   sourceKey: string
   sourceLabel: string
+}
+
+interface SessionsPageResponse {
+  data?: Record<string, unknown>[]
+  total?: number
 }
 
 const props = defineProps<{
@@ -166,7 +172,8 @@ const detailSessionId = ref('')
 const detailTitle = ref('')
 
 const PAGE_SIZE = 50
-const MAX_PAGES = 4
+// Hard safety cap so a broken total never spins forever.
+const MAX_PAGES = 1000
 
 const sourceOptions = computed(() => [
   { label: t('agentEditor.logs.sourceAll'), value: '' },
@@ -237,11 +244,6 @@ function sortByUpdatedAtDesc(left: LogRow, right: LogRow): number {
   return safeRight - safeLeft
 }
 
-function sessionMatchesAgent(session: Record<string, unknown>): boolean {
-  const state = session.last_request_state as { agent_id?: string } | undefined
-  return !!(state?.agent_id && state.agent_id === props.agentId)
-}
-
 function toRow(
   session: Record<string, unknown>,
   sourceKey: string,
@@ -264,21 +266,34 @@ function toRow(
   }
 }
 
-async function loadWebSessions(): Promise<LogRow[]> {
-  const matched: LogRow[] = []
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
-    const response = await getSessionsList(page, PAGE_SIZE)
-    const batch = (response?.data || []) as Record<string, unknown>[]
-    for (const session of batch) {
-      if (sessionMatchesAgent(session)) {
-        matched.push(
-          toRow(session, 'web', t('agentEditor.workspace.logsSourceWeb')),
-        )
-      }
+async function loadAllSessionPages(
+  fetchPage: (page: number) => Promise<SessionsPageResponse>,
+): Promise<Record<string, unknown>[]> {
+  const collected: Record<string, unknown>[] = []
+  let page = 1
+  let total = Number.POSITIVE_INFINITY
+
+  while (page <= MAX_PAGES && collected.length < total) {
+    const response = await fetchPage(page)
+    const batch = response?.data || []
+    const reportedTotal = Number(response?.total)
+    if (Number.isFinite(reportedTotal) && reportedTotal >= 0) {
+      total = reportedTotal
     }
+    collected.push(...batch)
     if (batch.length < PAGE_SIZE) break
+    page += 1
   }
-  return matched
+  return collected
+}
+
+async function loadWebSessions(): Promise<LogRow[]> {
+  const sessions = await loadAllSessionPages((page) =>
+    getSessionsList(page, PAGE_SIZE, 'web', props.agentId) as Promise<SessionsPageResponse>,
+  )
+  return sessions.map((session) =>
+    toRow(session, 'web', t('agentEditor.workspace.logsSourceWeb')),
+  )
 }
 
 async function loadEmbedSessions(): Promise<LogRow[]> {
@@ -288,19 +303,47 @@ async function loadEmbedSessions(): Promise<LogRow[]> {
   const matched: LogRow[] = []
   for (const channel of channels) {
     const source = `embed:${channel.id}`
-    for (let page = 1; page <= MAX_PAGES; page += 1) {
-      try {
-        const response = await getSessionsList(page, PAGE_SIZE, source)
-        const batch = (response?.data || []) as Record<string, unknown>[]
-        for (const session of batch) {
-          matched.push(
-            toRow(session, 'embed', t('agentEditor.workspace.logsSourceEmbed')),
-          )
-        }
-        if (batch.length < PAGE_SIZE) break
-      } catch {
-        break
+    try {
+      const sessions = await loadAllSessionPages((page) =>
+        getSessionsList(page, PAGE_SIZE, source) as Promise<SessionsPageResponse>,
+      )
+      for (const session of sessions) {
+        matched.push(
+          toRow(session, 'embed', t('agentEditor.workspace.logsSourceEmbed')),
+        )
       }
+    } catch {
+      // Channel may be gone or inaccessible; skip and continue others.
+    }
+  }
+  return matched
+}
+
+async function loadImSessions(): Promise<LogRow[]> {
+  if (!authStore.hasRole('admin') || !props.agentId) return []
+  const channelResp = await listIMChannels(props.agentId)
+  const channels = channelResp?.data || []
+  const platforms = Array.from(
+    new Set(channels.map((channel) => channel.platform).filter(Boolean)),
+  )
+  const matched: LogRow[] = []
+  for (const platform of platforms) {
+    try {
+      const sessions = await loadAllSessionPages((page) =>
+        getSessionsList(
+          page,
+          PAGE_SIZE,
+          platform,
+          props.agentId,
+        ) as Promise<SessionsPageResponse>,
+      )
+      for (const session of sessions) {
+        matched.push(
+          toRow(session, 'im', t('agentEditor.logs.sourceIm')),
+        )
+      }
+    } catch {
+      // Platform listing may be denied or empty; skip and continue others.
     }
   }
   return matched
@@ -313,12 +356,13 @@ async function reload(): Promise<void> {
   }
   loading.value = true
   try {
-    const [webRows, embedRows] = await Promise.all([
+    const [webRows, embedRows, imRows] = await Promise.all([
       loadWebSessions(),
       loadEmbedSessions(),
+      loadImSessions(),
     ])
     const byId = new Map<string, LogRow>()
-    for (const row of [...webRows, ...embedRows]) {
+    for (const row of [...webRows, ...embedRows, ...imRows]) {
       byId.set(row.id, row)
     }
     rows.value = Array.from(byId.values()).sort(sortByUpdatedAtDesc)

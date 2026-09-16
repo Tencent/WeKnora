@@ -340,16 +340,22 @@ func (s *sessionService) ListSessions(
 		query = &types.SessionListQuery{}
 	}
 	query.TenantID = types.MustTenantIDFromContext(ctx)
+	isAdmin := types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin)
 	// API / IM / embed source filters are tenant-wide admin views over channel
 	// traffic. Gate them behind Admin+ and drop the per-user owner scope so an
 	// Owner/admin can observe sessions that are otherwise isolated per key,
 	// visitor, or IM identity; everyone else stays scoped to their own principal.
+	// AgentID on web (or unfiltered) lists is the agent-editor conversation-log
+	// path: Admin+ also goes tenant-wide so logs are not limited to the caller's
+	// own chats.
 	if types.SessionListSourceRequiresAdmin(query.Source) {
-		if !types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+		if !isAdmin {
 			return nil, apperrors.NewForbiddenError(
 				"listing channel sessions requires tenant admin or owner role",
 			)
 		}
+		query.UserID = ""
+	} else if strings.TrimSpace(query.AgentID) != "" && isAdmin {
 		query.UserID = ""
 	} else if uid := types.SessionOwnerIDFromContext(ctx); uid != "" {
 		query.UserID = uid

@@ -490,7 +490,7 @@ export default {
     folderTree: {
       title: 'フォルダ',
       rootRow: 'ルート',
-      rootRowTip: 'ナレッジベースのルート。サブフォルダに属さないドキュメントはここに置かれます',
+      rootRowTip: 'ナレッジベース内の全ドキュメント。左のフォルダを開いて閲覧できます',
       folderCardCount: '{count}件のドキュメント',
       searchingSubtree: '（サブフォルダを含む）',
       emptyFolder: 'このフォルダにはまだドキュメントがありません',
@@ -737,6 +737,7 @@ export default {
     statusDraft: '下書き',
     noDescription: '説明なし',
     emptyKnowledgeDragDrop: 'ナレッジがありません。ドラッグ＆ドロップでアップロードできます',
+    loadDocumentsFailed: 'ドキュメント一覧の読み込みに失敗しました。更新して再試行してください',
     pdfDocFormat: 'pdf、doc形式のファイル、最大10M',
     textMarkdownFormat: 'text、markdown形式のファイル、最大200K',
     dragFileNotText: 'テキストやリンクではなくファイルをドラッグしてください',

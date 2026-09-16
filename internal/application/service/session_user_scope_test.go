@@ -311,6 +311,45 @@ func TestGetSessionAllowsAdminToReadAPIExternalUserSession(t *testing.T) {
 	require.Equal(t, apiSession.ID, got.ID)
 }
 
+func TestListSessionsAgentIDAdminSeesTenantWideWeb(t *testing.T) {
+	svc, db := newTestSessionService(t)
+	// AgentID filter always LEFT JOINs im_channel_sessions (web JSON + IM).
+	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
+
+	aliceSession := &types.Session{
+		TenantID: 1,
+		UserID:   "alice",
+		Title:    "alice agent chat",
+		LastRequestState: &types.SessionLastRequestState{AgentID: "agent-a"},
+	}
+	bobSession := &types.Session{
+		TenantID: 1,
+		UserID:   "bob",
+		Title:    "bob agent chat",
+		LastRequestState: &types.SessionLastRequestState{AgentID: "agent-a"},
+	}
+	require.NoError(t, db.Create(aliceSession).Error)
+	require.NoError(t, db.Create(bobSession).Error)
+
+	viewerCtx := testSessionScopeContext(1, "alice")
+	viewerResult, err := svc.ListSessions(viewerCtx, &types.SessionListQuery{
+		Source: "web", AgentID: "agent-a", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, viewerResult.Total)
+
+	adminCtx := context.WithValue(
+		testSessionScopeContext(1, "alice"),
+		types.TenantRoleContextKey,
+		types.TenantRoleAdmin,
+	)
+	adminResult, err := svc.ListSessions(adminCtx, &types.SessionListQuery{
+		Source: "web", AgentID: "agent-a", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, adminResult.Total)
+}
+
 func TestListSessionsIMSourceRequiresAdmin(t *testing.T) {
 	svc, db := newTestSessionService(t)
 	require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
