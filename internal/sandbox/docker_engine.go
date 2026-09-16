@@ -47,6 +47,9 @@ type dockerEngineAPI interface {
 	ContainerRemove(
 		ctx context.Context, containerID string, options client.ContainerRemoveOptions,
 	) (client.ContainerRemoveResult, error)
+	ContainerStats(
+		ctx context.Context, containerID string, options client.ContainerStatsOptions,
+	) (client.ContainerStatsResult, error)
 
 	ExecCreate(
 		ctx context.Context, containerID string, options client.ExecCreateOptions,

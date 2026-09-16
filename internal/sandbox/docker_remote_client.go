@@ -86,19 +86,25 @@ type DockerRemoteClient struct {
 	// sweeper reclaims idle containers. Nil disables idle reclamation, which
 	// is only appropriate for the connectivity-check client.
 	sweeper *dockerIdleSweeper
+
+	// limitWatchers continuously enforce limits the Docker daemon cannot map
+	// to HostConfig. Nil is used by connectivity probes and most unit tests.
+	limitWatchers *dockerLimitWatcherRegistry
 }
 
 // dockerRuntimeSettings is the per-config slice of Config the adapter reads.
 type dockerRuntimeSettings struct {
-	Image       string
-	CPULimit    float64
-	MemoryBytes int64
-	PidsLimit   int64
-	NetworkMode string
-	Runtime     string
-	IdleTTL     time.Duration
-	HTTPTimeout time.Duration
-	Endpoint    dockerEndpoint
+	Image        string
+	CPULimit     float64
+	MemoryBytes  int64
+	PidsLimit    int64
+	CPUTimeLimit time.Duration
+	NetworkMode  string
+	Runtime      string
+	IdleTTL      time.Duration
+	HardLifetime time.Duration
+	HTTPTimeout  time.Duration
+	Endpoint     dockerEndpoint
 }
 
 // NewDockerRemoteClient builds the adapter for one workspace config, reusing
@@ -112,7 +118,9 @@ func NewDockerRemoteClient(cfg *Config) (*DockerRemoteClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newDockerRemoteClientWithAPI(withDockerRPCTimeout(api, settings.HTTPTimeout), settings), nil
+	adapter := newDockerRemoteClientWithAPI(withDockerRPCTimeout(api, settings.HTTPTimeout), settings)
+	adapter.limitWatchers = sharedDockerLimitWatchers
+	return adapter, nil
 }
 
 // NewDockerRemoteClientForCheck builds a client for the connectivity check.
@@ -157,14 +165,16 @@ func dockerSettingsFromConfig(cfg *Config) (dockerRuntimeSettings, error) {
 		return dockerRuntimeSettings{}, errors.New("sandbox: docker backend requires an image")
 	}
 	settings := dockerRuntimeSettings{
-		Image:       image,
-		CPULimit:    cfg.DockerCPULimit,
-		MemoryBytes: cfg.DockerMemoryBytes,
-		PidsLimit:   cfg.DockerPidsLimit,
-		NetworkMode: strings.TrimSpace(cfg.DockerNetworkMode),
-		Runtime:     strings.TrimSpace(cfg.DockerRuntime),
-		IdleTTL:     cfg.DockerIdleTTL,
-		HTTPTimeout: cfg.DockerHTTPTimeout,
+		Image:        image,
+		CPULimit:     cfg.DockerCPULimit,
+		MemoryBytes:  cfg.DockerMemoryBytes,
+		PidsLimit:    cfg.DockerPidsLimit,
+		CPUTimeLimit: cfg.DockerCPUTimeLimit,
+		NetworkMode:  strings.TrimSpace(cfg.DockerNetworkMode),
+		Runtime:      strings.TrimSpace(cfg.DockerRuntime),
+		IdleTTL:      cfg.DockerIdleTTL,
+		HardLifetime: cfg.DockerHardLifetime,
+		HTTPTimeout:  cfg.DockerHTTPTimeout,
 		Endpoint: dockerEndpoint{
 			Host:         strings.TrimSpace(cfg.DockerHost),
 			TLSCertPath:  strings.TrimSpace(cfg.DockerTLSCertPath),
@@ -264,6 +274,8 @@ func (c *DockerRemoteClient) Create(
 
 	labels := dockerContainerLabels(req.Metadata)
 	labels[dockerIdleTTLLabel] = strconv.Itoa(int(c.effectiveIdleTTL(req.Timeout).Seconds()))
+	labels[dockerCPUTimeLimitLabel] = durationSecondsLabel(c.settings.CPUTimeLimit)
+	labels[dockerHardLifetimeLabel] = durationSecondsLabel(c.settings.HardLifetime)
 	created, err := c.api.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Image: image,
 		Config: &container.Config{
@@ -304,6 +316,7 @@ func (c *DockerRemoteClient) Create(
 		c.removeQuietly(ctx, created.ID)
 		return nil, err
 	}
+	c.watchLimits(created.ID)
 	c.sweepInBackground(ctx)
 	return &dockerSandboxHandle{id: created.ID, metadata: dockerSandboxMetadata(labels)}, nil
 }
@@ -407,6 +420,7 @@ func (c *DockerRemoteClient) Connect(
 			return nil, err
 		}
 	}
+	c.watchLimits(inspected.Container.ID)
 	c.sweepInBackground(ctx)
 
 	var labels map[string]string
@@ -624,6 +638,9 @@ func (c *DockerRemoteClient) Delete(ctx context.Context, sandboxID string) error
 	if err != nil {
 		return dockerError("Delete", err)
 	}
+	if c.limitWatchers != nil {
+		c.limitWatchers.stop(c, sandboxID)
+	}
 	return nil
 }
 
@@ -637,6 +654,9 @@ func (c *DockerRemoteClient) removeQuietly(ctx context.Context, id string) {
 	_, _ = c.api.ContainerRemove(cleanupCtx, id, client.ContainerRemoveOptions{
 		Force: true, RemoveVolumes: true,
 	})
+	if c.limitWatchers != nil {
+		c.limitWatchers.stop(c, id)
+	}
 }
 
 // Exec runs one command inside the sandbox.
