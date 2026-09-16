@@ -1,0 +1,482 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/models/vlm"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
+)
+
+// ---------------------------------------------------------------------------
+// Test doubles for the batched multimodal path.
+// ---------------------------------------------------------------------------
+
+// batchVLMCall records one Predict invocation so a test can assert how many
+// requests a batch actually cost and how many images each one carried.
+type batchVLMCall struct {
+	prompt string
+	images int
+}
+
+type batchFakeVLM struct {
+	calls []batchVLMCall
+	reply func(prompt string, images int) (string, error)
+}
+
+func (f *batchFakeVLM) Predict(_ context.Context, imgBytes [][]byte, prompt string) (string, error) {
+	f.calls = append(f.calls, batchVLMCall{prompt: prompt, images: len(imgBytes)})
+	if f.reply == nil {
+		return "", nil
+	}
+	return f.reply(prompt, len(imgBytes))
+}
+
+func (f *batchFakeVLM) GetModelName() string { return "batch-fake-vlm" }
+func (f *batchFakeVLM) GetModelID() string   { return "batch-fake-vlm-id" }
+
+var _ vlm.VLM = (*batchFakeVLM)(nil)
+
+// batchFileService serves every read from memory so readImageBytes resolves a
+// local:// reference without touching disk or the network. gets counts reads,
+// which is how the "batch pre-reads, per-image stage reuses" contract is
+// verified.
+type batchFileService struct {
+	interfaces.FileService
+	body []byte
+	err  error
+	// failFor marks individual paths unreadable, so a batch can mix healthy and
+	// broken objects.
+	failFor map[string]bool
+	gets    []string
+}
+
+func (s *batchFileService) GetFile(_ context.Context, filePath string) (io.ReadCloser, error) {
+	s.gets = append(s.gets, filePath)
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.failFor[filePath] {
+		return nil, fmt.Errorf("object %s is gone", filePath)
+	}
+	return io.NopCloser(bytes.NewReader(s.body)), nil
+}
+
+// batchTenantRepo reports "no tenant" so resolveFileServiceForPayload falls
+// back to the service's default FileService.
+type batchTenantRepo struct {
+	interfaces.TenantRepository
+}
+
+func (r *batchTenantRepo) GetTenantByID(_ context.Context, _ uint64) (*types.Tenant, error) {
+	return nil, nil
+}
+
+type batchChunkRepo struct {
+	interfaces.ChunkRepository
+	created []*types.Chunk
+}
+
+func (r *batchChunkRepo) CreateChunks(_ context.Context, chunks []*types.Chunk) error {
+	r.created = append(r.created, chunks...)
+	return nil
+}
+
+type batchChunkService struct {
+	interfaces.ChunkService
+	repo *batchChunkRepo
+}
+
+func (s *batchChunkService) GetRepository() interfaces.ChunkRepository { return s.repo }
+
+// newBatchTestService wires a service whose file reads come from memory and
+// whose knowledge base lookup returns nil, which makes indexChunks skip vector
+// work (it bails out on a nil KB). That keeps the test focused on the batch
+// protocol rather than on the retrieval engine.
+func newBatchTestService(fileSvc interfaces.FileService, repo *batchChunkRepo) *ImageMultimodalService {
+	return &ImageMultimodalService{
+		chunkService: &batchChunkService{repo: repo},
+		kbService:    &orphanKBService{},
+		tenantRepo:   &batchTenantRepo{},
+		fileSvc:      fileSvc,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Prompt / parser unit tests
+// ---------------------------------------------------------------------------
+
+func TestNormalizeImageBatchSize(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct{ in, want int }{
+		"unset is one":        {0, 1},
+		"negative is one":     {-3, 1},
+		"one stays one":       {1, 1},
+		"eight stays eight":   {8, 8},
+		"cap is allowed":      {types.ImageBatchSizeMax, types.ImageBatchSizeMax},
+		"over cap is clamped": {types.ImageBatchSizeMax + 40, types.ImageBatchSizeMax},
+	}
+	for name, tc := range cases {
+		if got := types.NormalizeImageBatchSize(tc.in); got != tc.want {
+			t.Errorf("%s: NormalizeImageBatchSize(%d) = %d, want %d", name, tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestImageMultimodalBatchSizeReadsKBConfig(t *testing.T) {
+	t.Parallel()
+	if got := imageMultimodalBatchSize(nil); got != 1 {
+		t.Fatalf("nil KB should default to 1, got %d", got)
+	}
+	if got := imageMultimodalBatchSize(&types.KnowledgeBase{}); got != 1 {
+		t.Fatalf("unconfigured KB should default to 1, got %d", got)
+	}
+	kb := &types.KnowledgeBase{}
+	kb.ImageProcessingConfig.BatchSize = 16
+	if got := imageMultimodalBatchSize(kb); got != 16 {
+		t.Fatalf("configured batch size 16 = %d, want 16", got)
+	}
+	kb.ImageProcessingConfig.BatchSize = 999
+	if got := imageMultimodalBatchSize(kb); got != types.ImageBatchSizeMax {
+		t.Fatalf("over-cap batch size clamped to %d, got %d", types.ImageBatchSizeMax, got)
+	}
+}
+
+func TestBuildBatchImagePrompt(t *testing.T) {
+	t.Parallel()
+	got := buildBatchImagePrompt(context.Background(), types.VLMConfig{
+		DescriptionLanguage: "English",
+		CustomInstructions:  "Focus on alarm codes.",
+	}, 16)
+
+	for _, want := range []string{
+		"16 images",
+		"in English",
+		"### IMAGE <n>",
+		"16 blocks in total",
+		"Focus on alarm codes.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("batch prompt missing %q:\n%s", want, got)
+		}
+	}
+
+	ctx := context.WithValue(context.Background(), types.LanguageContextKey, "ko-KR")
+	if got := buildBatchImagePrompt(ctx, types.VLMConfig{}, 2); !strings.Contains(got, "in Korean") {
+		t.Errorf("batch prompt should fall back to the context language:\n%s", got)
+	}
+}
+
+func TestParseBatchImageResponse(t *testing.T) {
+	t.Parallel()
+	raw := "### IMAGE 1\nA red circle.\n\n" +
+		"### IMAGE 2\n\n" +
+		"### IMAGE 3\nA blue square.\n"
+	got := parseBatchImageResponse(raw, 3)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 described images, got %d: %v", len(got), got)
+	}
+	if got[1] != "A red circle." {
+		t.Errorf("image 1 = %q", got[1])
+	}
+	if got[3] != "A blue square." {
+		t.Errorf("image 3 = %q", got[3])
+	}
+	if _, present := got[2]; present {
+		t.Errorf("an empty block must not register as a description: %v", got)
+	}
+
+	t.Run("tolerates heading level and trailing colon", func(t *testing.T) {
+		got := parseBatchImageResponse("## IMAGE 2\nsecond\n#### IMAGE 1\nfirst\n", 2)
+		if got[1] != "first" || got[2] != "second" {
+			t.Fatalf("heading level / order handling broken: %v", got)
+		}
+	})
+
+	t.Run("ignores out-of-range and duplicate numbers", func(t *testing.T) {
+		got := parseBatchImageResponse("### IMAGE 9\nnope\n### IMAGE 1\none\n### IMAGE 1\nagain\n", 2)
+		if len(got) != 1 || got[1] != "one" {
+			t.Fatalf("expected only image 1 = \"one\", got %v", got)
+		}
+	})
+
+	t.Run("unformatted response yields nothing", func(t *testing.T) {
+		if got := parseBatchImageResponse("Sure! Here are the descriptions.", 4); len(got) != 0 {
+			t.Fatalf("unformatted response should map nothing, got %v", got)
+		}
+	})
+
+	t.Run("strips list markers", func(t *testing.T) {
+		got := parseBatchImageResponse("### IMAGE 1\n- A wiring diagram.\n", 1)
+		if got[1] != "A wiring diagram." {
+			t.Fatalf("list marker not stripped: %q", got[1])
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Batch execution
+// ---------------------------------------------------------------------------
+
+// TestProcessImageBatchDescribesOnceAndFallsBack pins the two behaviours that
+// make batching worth having: one describe request covers the whole batch, and
+// an image the batch response skipped is still described on its own instead of
+// losing its caption.
+func TestProcessImageBatchDescribesOnceAndFallsBack(t *testing.T) {
+	t.Parallel()
+
+	fileSvc := &batchFileService{body: []byte("fake-image-bytes")}
+	repo := &batchChunkRepo{}
+	svc := newBatchTestService(fileSvc, repo)
+
+	refs := []types.ImageBatchRef{
+		{Index: 0, URL: "local://img/0.png", ChunkID: "chunk-a"},
+		{Index: 1, URL: "local://img/1.png", ChunkID: "chunk-a"},
+		{Index: 2, URL: "local://img/2.png", ChunkID: "chunk-b"},
+	}
+
+	fake := &batchFakeVLM{}
+	fake.reply = func(prompt string, images int) (string, error) {
+		switch {
+		case strings.Contains(prompt, "### IMAGE <n>"):
+			if images != 3 {
+				return "", fmt.Errorf("batch describe carried %d images, want 3", images)
+			}
+			// Image 2 is deliberately absent to exercise the fallback.
+			return "### IMAGE 1\nfirst\n\n### IMAGE 3\nthird\n", nil
+		case strings.Contains(prompt, "OCR assistant"):
+			if images != 1 {
+				return "", fmt.Errorf("OCR call carried %d images, want 1", images)
+			}
+			return "OCR-TEXT", nil
+		default:
+			if images != 1 {
+				return "", fmt.Errorf("fallback describe carried %d images, want 1", images)
+			}
+			return "fallback-caption", nil
+		}
+	}
+
+	payload := &types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		EnableOCR:       true,
+		EnableCaption:   true,
+	}
+
+	outs, err := svc.processImageBatch(
+		context.Background(), payload, refs, fake, types.VLMConfig{}, noopSpanTracker{})
+	if err != nil {
+		t.Fatalf("processImageBatch: %v", err)
+	}
+
+	// One describe + three OCR + one fallback describe.
+	if len(fake.calls) != 5 {
+		t.Fatalf("expected 5 VLM calls, got %d: %+v", len(fake.calls), fake.calls)
+	}
+	if fake.calls[0].images != 3 {
+		t.Errorf("first call should be the 3-image describe, got %d images", fake.calls[0].images)
+	}
+	describeCalls := 0
+	ocrCalls := 0
+	for _, c := range fake.calls {
+		switch {
+		case strings.Contains(c.prompt, "### IMAGE <n>"):
+			describeCalls++
+		case strings.Contains(c.prompt, "OCR assistant"):
+			ocrCalls++
+		}
+	}
+	if describeCalls != 1 {
+		t.Errorf("describe requests = %d, want 1 (batching must not describe per image)", describeCalls)
+	}
+	if ocrCalls != 3 {
+		t.Errorf("OCR requests = %d, want 3 (one per image)", ocrCalls)
+	}
+
+	// Every image is pre-read exactly once, and the per-image stage reuses those
+	// bytes rather than reading the object a second time.
+	if len(fileSvc.gets) != 3 {
+		t.Errorf("file reads = %d (%v), want 3", len(fileSvc.gets), fileSvc.gets)
+	}
+
+	if len(outs) != 3 {
+		t.Fatalf("outputs = %d, want 3", len(outs))
+	}
+	// Each image yields an OCR chunk plus a caption chunk.
+	if len(repo.created) != 6 {
+		t.Errorf("persisted chunks = %d, want 6", len(repo.created))
+	}
+
+	// Images 1 and 3 keep their batch descriptions; image 2 uses the fallback.
+	if got := outs[0]["caption_chars"]; got != len([]rune("first")) {
+		t.Errorf("image 1 caption_chars = %v, want %d", got, len([]rune("first")))
+	}
+	if got := outs[1]["caption_chars"]; got != len([]rune("fallback-caption")) {
+		t.Errorf("image 2 caption_chars = %v, want %d", got, len([]rune("fallback-caption")))
+	}
+	if got := outs[2]["caption_chars"]; got != len([]rune("third")) {
+		t.Errorf("image 3 caption_chars = %v, want %d", got, len([]rune("third")))
+	}
+}
+
+// TestProcessImageBatchFailsOnTransportError makes sure an API error fails the
+// task (so asynq retries it) instead of being silently absorbed into a batch
+// with no captions.
+func TestProcessImageBatchFailsOnTransportError(t *testing.T) {
+	t.Parallel()
+
+	fileSvc := &batchFileService{body: []byte("fake-image-bytes")}
+	svc := newBatchTestService(fileSvc, &batchChunkRepo{})
+
+	// Only the images described by hand in the prompt are counted; the batch's
+	// describe round-trip is skipped here.
+	sentinel := fmt.Errorf("upstream unavailable")
+	fake := &batchFakeVLM{}
+	fake.reply = func(prompt string, _ int) (string, error) {
+		if strings.Contains(prompt, "### IMAGE <n>") {
+			return "", sentinel
+		}
+		return "x", nil
+	}
+
+	payload := &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "k-1", KnowledgeBaseID: "kb-1"}
+	refs := []types.ImageBatchRef{
+		{Index: 0, URL: "local://img/0.png"},
+		{Index: 1, URL: "local://img/1.png"},
+	}
+
+	_, err := svc.processImageBatch(context.Background(), payload, refs, fake, types.VLMConfig{}, noopSpanTracker{})
+	if err == nil {
+		t.Fatal("a failed batch describe must fail the task, got nil")
+	}
+	if !strings.Contains(err.Error(), sentinel.Error()) {
+		t.Fatalf("error should wrap the transport failure, got %v", err)
+	}
+	if len(fake.calls) != 1 {
+		t.Fatalf("a failed batch describe must not trigger per-image calls, got %d calls", len(fake.calls))
+	}
+}
+
+// TestProcessImageBatchSkipsUnreadableImage checks that one bad object does not
+// cost its siblings: the rest of the batch is still described and persisted.
+func TestProcessImageBatchSkipsUnreadableImage(t *testing.T) {
+	t.Parallel()
+
+	fileSvc := &batchFileService{
+		body:    []byte("fake-image-bytes"),
+		failFor: map[string]bool{"local://img/1.png": true},
+	}
+	repo := &batchChunkRepo{}
+	svc := newBatchTestService(fileSvc, repo)
+
+	fake := &batchFakeVLM{}
+	fake.reply = func(prompt string, images int) (string, error) {
+		if strings.Contains(prompt, "### IMAGE <n>") {
+			if images != 2 {
+				return "", fmt.Errorf("batch describe carried %d images, want 2", images)
+			}
+			return "### IMAGE 1\nalpha\n\n### IMAGE 2\nbeta\n", nil
+		}
+		if strings.Contains(prompt, "OCR assistant") {
+			return "OCR-TEXT", nil
+		}
+		return "caption", nil
+	}
+
+	payload := &types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		EnableOCR:       true,
+		EnableCaption:   true,
+	}
+	refs := []types.ImageBatchRef{
+		{Index: 0, URL: "local://img/0.png"},
+		{Index: 1, URL: "local://img/1.png"},
+		{Index: 2, URL: "local://img/2.png"},
+	}
+
+	outs, err := svc.processImageBatch(context.Background(), payload, refs, fake, types.VLMConfig{}, noopSpanTracker{})
+	if err != nil {
+		t.Fatalf("processImageBatch: %v", err)
+	}
+
+	// Load order: succeed, fail, succeed — so the two survivors are described
+	// together and no call carries the unreadable third image.
+	if len(outs) != 3 {
+		t.Fatalf("outputs = %d, want 3", len(outs))
+	}
+	if got := outs[1]["skipped"]; got != "unreadable_image" {
+		t.Errorf("middle image should be marked skipped, got %v", got)
+	}
+	if len(fake.calls) == 0 {
+		t.Fatal("expected VLM calls for the readable images")
+	}
+	if _, ok := outs[0]["skipped"]; ok {
+		t.Errorf("first image should not be skipped: %v", outs[0])
+	}
+	if _, ok := outs[2]["skipped"]; ok {
+		t.Errorf("third image should not be skipped: %v", outs[2])
+	}
+}
+
+// TestProcessOneImageReusesCallerBytesAndCaption pins the zero-overhead path a
+// batched caller relies on: bytes and caption supplied by the caller mean no
+// extra read and no extra describe call.
+func TestProcessOneImageReusesCallerBytesAndCaption(t *testing.T) {
+	t.Parallel()
+
+	fileSvc := &batchFileService{body: []byte("should-not-be-read")}
+	repo := &batchChunkRepo{}
+	svc := newBatchTestService(fileSvc, repo)
+
+	fake := &batchFakeVLM{}
+	fake.reply = func(prompt string, _ int) (string, error) {
+		if strings.Contains(prompt, "OCR assistant") {
+			return "OCR-TEXT", nil
+		}
+		return "should-not-be-called", nil
+	}
+
+	payload := &types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		EnableOCR:       true,
+		EnableCaption:   true,
+	}
+	out, err := svc.processOneImage(context.Background(), payload,
+		types.ImageBatchRef{Index: 0, URL: "local://img/0.png", ChunkID: "chunk-a"},
+		fake, types.VLMConfig{}, noopSpanTracker{}, imageProcessInput{
+			Bytes:      []byte("caller-supplied"),
+			Caption:    "batched caption",
+			HasCaption: true,
+			BatchSize:  4,
+		})
+	if err != nil {
+		t.Fatalf("processOneImage: %v", err)
+	}
+
+	if len(fileSvc.gets) != 0 {
+		t.Errorf("caller-supplied bytes must skip the read, got reads %v", fileSvc.gets)
+	}
+	for _, c := range fake.calls {
+		if !strings.Contains(c.prompt, "OCR assistant") {
+			t.Errorf("no describe call expected when HasCaption is set, got %q", c.prompt)
+		}
+	}
+	if got := out["caption_chars"]; got != len([]rune("batched caption")) {
+		t.Errorf("caption_chars = %v, want the caller-supplied caption length", got)
+	}
+	if got := out["image_bytes"]; got != len("caller-supplied") {
+		t.Errorf("image_bytes = %v, want the caller-supplied byte count", got)
+	}
+}

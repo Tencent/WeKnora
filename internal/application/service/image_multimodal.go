@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -224,20 +226,172 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
-	for _, ref := range refs {
-		out, imgErr := s.processOneImage(ctx, &payload, ref, vlmModel, vlmCfg, tracker)
+	// A task that carries more than one image describes the whole batch in a
+	// single request and then runs the per-image pipeline for OCR. A task with
+	// one image (the default, and every legacy payload) keeps the historical
+	// pipeline untouched: OCR first, then caption, both on the original bytes.
+	if len(refs) > 1 {
+		perImageOut, handleErr = s.processImageBatch(ctx, &payload, refs, vlmModel, vlmCfg, tracker)
+		return handleErr
+	}
+	if len(refs) == 1 {
+		out, imgErr := s.processOneImage(ctx, &payload, refs[0], vlmModel, vlmCfg, tracker, imageProcessInput{})
 		if out == nil {
 			out = types.JSONMap{}
 		}
 		perImageOut = append(perImageOut, out)
-		if imgErr != nil {
-			// Fail fast: the batch shares one task, so the remaining images
-			// are covered by the retry instead of being half-processed here.
-			handleErr = imgErr
-			break
-		}
+		handleErr = imgErr
 	}
 	return handleErr
+}
+
+// processImageBatch describes a whole batch in one VLM request, then runs the
+// per-image pipeline for OCR and for any image the batch response did not
+// cover. Describing N images together is what turns N requests into one; the
+// per-image round stays because OCR needs each image at full resolution.
+//
+// Two failure modes are deliberately distinguished:
+//   - a transport/API error on the batch call fails the task so asynq retries
+//     it — none of the images were processed, so the retry is a clean redo;
+//   - a response that cannot be mapped back onto the inputs does NOT fail the
+//     task, because repeating the same prompt would produce the same answer.
+//     Instead each unmapped image is described on its own, so a sloppy answer
+//     costs a few extra calls rather than the batch's captions.
+//
+// Round 2 is per image on purpose: OCR is the step where resolution matters
+// most, so it is never handed a downscaled copy.
+func (s *ImageMultimodalService) processImageBatch(
+	ctx context.Context,
+	payload *types.ImageMultimodalPayload,
+	refs []types.ImageBatchRef,
+	vlmModel vlm.VLM,
+	vlmCfg types.VLMConfig,
+	tracker SpanTracker,
+) ([]types.JSONMap, error) {
+	outs := make([]types.JSONMap, len(refs))
+
+	// Read every image up front: the batch call needs them all in one request,
+	// and a single unreadable file must not cost its siblings their captions.
+	imgBytes := make([][]byte, len(refs))
+	loaded := make([]int, 0, len(refs))
+	for i, ref := range refs {
+		outs[i] = types.JSONMap{}
+		data, err := s.readImageBytes(ctx, *payload, ref.URL)
+		if err != nil {
+			logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", ref.URL, err)
+			outs[i]["skipped"] = "unreadable_image"
+			outs[i]["read_error"] = err.Error()
+			continue
+		}
+		imgBytes[i] = data
+		outs[i]["image_bytes"] = len(data)
+		loaded = append(loaded, i)
+	}
+
+	descriptions := map[int]string{}
+	if len(loaded) > 0 {
+		payloads := make([][]byte, 0, len(loaded))
+		for _, i := range loaded {
+			payloads = append(payloads, imgBytes[i])
+		}
+
+		raw, err := vlmModel.Predict(ctx, payloads, buildBatchImagePrompt(ctx, vlmCfg, len(payloads)))
+		if err != nil {
+			return outs, fmt.Errorf("describe %d image(s) in one request: %w", len(payloads), err)
+		}
+
+		parsed := parseBatchImageResponse(raw, len(payloads))
+		for pos, i := range loaded {
+			if text, ok := parsed[pos+1]; ok {
+				descriptions[i] = text
+			}
+		}
+		logger.Infof(ctx,
+			"[ImageMultimodal] One request described %d of %d image(s) for knowledge %s",
+			len(descriptions), len(payloads), payload.KnowledgeID)
+	}
+
+	for i, ref := range refs {
+		if imgBytes[i] == nil {
+			continue // unreadable, already recorded above
+		}
+		desc, hasDesc := descriptions[i]
+		out, imgErr := s.processOneImage(ctx, payload, ref, vlmModel, vlmCfg, tracker, imageProcessInput{
+			Bytes:      imgBytes[i],
+			Caption:    desc,
+			HasCaption: hasDesc,
+			BatchSize:  len(refs),
+			Out:        outs[i],
+		})
+		if out != nil {
+			outs[i] = out
+		}
+		if imgErr != nil {
+			// Fail fast: the batch shares one task, so the retry covers the
+			// remaining images instead of half-processing them here.
+			return outs, imgErr
+		}
+	}
+	return outs, nil
+}
+
+// buildBatchImagePrompt asks for one labelled description block per image so a
+// single request can describe a whole batch. The 1-based numbering the model
+// echoes back is what maps each block onto its input image.
+func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) string {
+	language := strings.TrimSpace(cfg.DescriptionLanguage)
+	if language == "" {
+		language = types.LanguageNameFromContext(ctx)
+	}
+	prompt := fmt.Sprintf(
+		"You are given %d images, in order: image 1 is the first image after this instruction, image 2 the second, and so on.\n"+
+			"For each image, write a brief and concise description of its main content in %s.\n\n"+
+			"Output exactly one block per image, in ascending order, using this format:\n\n"+
+			"### IMAGE <n>\n"+
+			"<description>\n\n"+
+			"Rules:\n"+
+			"- Replace <n> with the image number, starting at 1.\n"+
+			"- Produce %d blocks in total: one per image, none merged, none skipped.\n"+
+			"- Output only the blocks. No preamble, no summary, no extra commentary.\n",
+		count, language, count)
+	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
+}
+
+// batchImageBlockRe matches the "### IMAGE <n>" marker emitted by the batch
+// prompt. One to six leading '#' characters are accepted so a model rendering
+// the marker at a different heading level still maps back correctly.
+var batchImageBlockRe = regexp.MustCompile(`(?m)^#{1,6}\s*IMAGE\s+(\d+)\s*$`)
+
+// parseBatchImageResponse maps 1-based image numbers onto the description that
+// follows each marker. Missing, out-of-range, and repeated numbers are simply
+// absent from the result: the caller describes those images on their own, so an
+// imprecise answer never discards a usable description.
+func parseBatchImageResponse(raw string, count int) map[int]string {
+	out := make(map[int]string, count)
+	locs := batchImageBlockRe.FindAllStringSubmatchIndex(raw, -1)
+	for pos, loc := range locs {
+		n, err := strconv.Atoi(raw[loc[2]:loc[3]])
+		if err != nil || n < 1 || n > count {
+			continue
+		}
+		bodyStart := loc[1]
+		bodyEnd := len(raw)
+		if pos+1 < len(locs) {
+			bodyEnd = locs[pos+1][0]
+		}
+		text := strings.TrimSpace(raw[bodyStart:bodyEnd])
+		text = strings.TrimSpace(strings.TrimLeft(text, "-*# "))
+		if text == "" {
+			continue
+		}
+		if _, dup := out[n]; dup {
+			// A repeated number means the model lost track of the numbering;
+			// the first block is the one that follows the input order.
+			continue
+		}
+		out[n] = text
+	}
+	return out
 }
 
 // processOneImage runs the multimodal pipeline (OCR, then caption) for a single
@@ -248,6 +402,25 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 //
 // A payload may carry one image (legacy) or a batch, so this function reads the
 // image through ref and never touches payload.ImageURL / payload.ChunkID.
+// imageProcessInput carries work the caller has already done for one image so
+// the per-image pipeline does not repeat it. The zero value means "nothing
+// precomputed", which is exactly the historical single-image behaviour.
+type imageProcessInput struct {
+	// Bytes is the image the caller already loaded. A batched caller reads
+	// every image up front to build its single request, so handing the bytes
+	// over here avoids reading the same object twice.
+	Bytes []byte
+	// Caption is the description the batch response already produced for this
+	// image. When HasCaption is true, no per-image describe call is made.
+	Caption    string
+	HasCaption bool
+	// BatchSize is how many images shared this task's batch request. Values
+	// above 1 mark the image as a batch member on the trace.
+	BatchSize int
+	// Out receives the per-image trace map. Nil uses a fresh map.
+	Out types.JSONMap
+}
+
 func (s *ImageMultimodalService) processOneImage(
 	ctx context.Context,
 	payload *types.ImageMultimodalPayload,
@@ -255,8 +428,12 @@ func (s *ImageMultimodalService) processOneImage(
 	vlmModel vlm.VLM,
 	vlmCfg types.VLMConfig,
 	tracker SpanTracker,
+	in imageProcessInput,
 ) (types.JSONMap, error) {
-	out := types.JSONMap{}
+	out := in.Out
+	if out == nil {
+		out = types.JSONMap{}
+	}
 
 	// Open a per-image subspan under the parent attempt's multimodal stage.
 	// If the parent stage row is missing (legacy in-flight task, or the
@@ -267,13 +444,18 @@ func (s *ImageMultimodalService) processOneImage(
 		parent := tracker.LookupStage(ctx, payload.KnowledgeID, payload.Attempt, types.StageMultimodal)
 		if parent != nil {
 			name := fmt.Sprintf("multimodal.image[%d]", ref.Index)
-			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, types.JSONMap{
+			spanInput := types.JSONMap{
 				"image_url":         ref.URL,
 				"image_source_type": payload.ImageSourceType,
 				"enable_ocr":        payload.EnableOCR,
 				"enable_caption":    payload.EnableCaption,
 				"parent_chunk_id":   ref.ChunkID,
-			})
+			}
+			if in.BatchSize > 1 {
+				spanInput["batched"] = true
+				spanInput["batch_size"] = in.BatchSize
+			}
+			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, spanInput)
 		}
 	}
 
@@ -300,12 +482,16 @@ func (s *ImageMultimodalService) processOneImage(
 	// it must NEVER be handed to the HTTP downloader (which would fail with
 	// "unsupported URL scheme"). On unrecoverable read failure for a single
 	// image, skip it (the deferred finalize still counts it).
-	imgBytes, readErr := s.readImageBytes(ctx, *payload, ref.URL)
-	if readErr != nil {
-		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", ref.URL, readErr)
-		out["skipped"] = "unreadable_image"
-		out["read_error"] = readErr.Error()
-		return out, nil
+	imgBytes := in.Bytes
+	if imgBytes == nil {
+		var readErr error
+		imgBytes, readErr = s.readImageBytes(ctx, *payload, ref.URL)
+		if readErr != nil {
+			logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", ref.URL, readErr)
+			out["skipped"] = "unreadable_image"
+			out["read_error"] = readErr.Error()
+			return out, nil
+		}
 	}
 	out["image_bytes"] = len(imgBytes)
 
@@ -343,14 +529,24 @@ func (s *ImageMultimodalService) processOneImage(
 		}
 	}
 
-	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
-	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", ref.URL, capErr)
-		out["caption_error"] = capErr.Error()
-	} else if caption != "" {
-		imageInfo.Caption = caption
-		out["caption_chars"] = len([]rune(caption))
-		out["caption_preview"] = previewText(caption, 200)
+	if in.HasCaption {
+		// A batched caller already described this image in its single request;
+		// reuse that text instead of paying for a second call.
+		if in.Caption != "" {
+			imageInfo.Caption = in.Caption
+			out["caption_chars"] = len([]rune(in.Caption))
+			out["caption_preview"] = previewText(in.Caption, 200)
+		}
+	} else {
+		caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+		if capErr != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", ref.URL, capErr)
+			out["caption_error"] = capErr.Error()
+		} else if caption != "" {
+			imageInfo.Caption = caption
+			out["caption_chars"] = len([]rune(caption))
+			out["caption_preview"] = previewText(caption, 200)
+		}
 	}
 
 	// Build child chunks for OCR and caption results

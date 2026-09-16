@@ -4041,12 +4041,16 @@ func (s *knowledgeService) failKnowledge(
 	return nil, fmt.Errorf(format, args...)
 }
 
-// imageMultimodalBatchSize is how many images one multimodal task carries.
-// 1 preserves the historical one-task-per-image behaviour, which is the only
-// shape exercised in production so far. Raising it is what the batching unit
-// exists for; it gets wired to the KB-level config once the batch output
-// protocol lands.
-const imageMultimodalBatchSize = 1
+// imageMultimodalBatchSize is how many images one multimodal task carries into
+// a single VLM request. It is read from the knowledge base's image processing
+// config and defaults to 1, which reproduces the historical one-task-per-image
+// behaviour exactly: an unconfigured knowledge base is unaffected by batching.
+func imageMultimodalBatchSize(kb *types.KnowledgeBase) int {
+	if kb == nil {
+		return 1
+	}
+	return types.NormalizeImageBatchSize(kb.ImageProcessingConfig.BatchSize)
+}
 
 // enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
 func (s *knowledgeService) enqueueImageMultimodalTasks(
@@ -4082,8 +4086,9 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	}
 
 	lang := types.LanguageFromContextOrDefault(ctx)
-	for batchStart := 0; batchStart < len(refs); batchStart += imageMultimodalBatchSize {
-		batchEnd := batchStart + imageMultimodalBatchSize
+	batchSize := imageMultimodalBatchSize(kb)
+	for batchStart := 0; batchStart < len(refs); batchStart += batchSize {
+		batchEnd := batchStart + batchSize
 		if batchEnd > len(refs) {
 			batchEnd = len(refs)
 		}

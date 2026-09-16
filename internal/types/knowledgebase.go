@@ -533,6 +533,29 @@ func ParseProviderScheme(filePath string) string {
 type ImageProcessingConfig struct {
 	// Model ID
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// BatchSize is how many images a single multimodal task carries into one
+	// VLM request. Zero or one keeps the historical one-image-per-request
+	// behaviour, so an unconfigured knowledge base is unaffected by batching.
+	// Values are clamped to [1, ImageBatchSizeMax] at use time.
+	BatchSize int `yaml:"batch_size,omitempty" json:"batch_size,omitempty"`
+}
+
+// ImageBatchSizeMax bounds how many images one multimodal request may carry.
+// Larger batches trim request count but grow the prompt linearly, so the cap
+// keeps a single request within what current VLMs handle comfortably.
+const ImageBatchSizeMax = 16
+
+// NormalizeImageBatchSize clamps a configured batch size into the supported
+// range. Zero (unset) maps to 1, which preserves the historical
+// one-image-per-request behaviour so existing knowledge bases are unaffected.
+func NormalizeImageBatchSize(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > ImageBatchSizeMax {
+		return ImageBatchSizeMax
+	}
+	return n
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value
