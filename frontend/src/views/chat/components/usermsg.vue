@@ -43,6 +43,18 @@
         <div class="user_msg">
             {{ content }}
         </div>
+        <div v-if="canFork" class="user_msg_actions">
+            <t-tooltip :content="forkTooltip">
+                <t-button
+                    variant="text"
+                    size="small"
+                    class="user_msg_action"
+                    @click="emit('fork', messageId)"
+                >
+                    <t-icon name="git-branch" />
+                </t-button>
+            </t-tooltip>
+        </div>
         <div v-if="steerFailed" class="steer-failure" role="status">
             <span>{{ t('input.messages.steerFailed') }}</span>
             <t-tooltip :content="t('input.steerRetry')"><button type="button" :aria-label="t('input.steerRetry')" @click="emit('retry-steer')"><t-icon name="refresh" /></button></t-tooltip>
@@ -59,7 +71,7 @@ import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
 import { SKILL_ICON } from '@/types/mention';
-const emit = defineEmits(['retry-steer', 'remove-steer']);
+const emit = defineEmits(['retry-steer', 'remove-steer', 'fork']);
 
 const { t } = useI18n();
 
@@ -108,8 +120,27 @@ const props = defineProps({
     sessionId: {
         type: String,
         default: ''
+    },
+    messageId: {
+        type: String,
+        default: ''
+    },
+    canFork: {
+        type: Boolean,
+        default: false
+    },
+    willDegrade: {
+        type: Boolean,
+        default: false
     }
 });
+
+const canFork = computed(() => props.canFork === true && !props.embeddedMode);
+const forkTooltip = computed(() =>
+    props.willDegrade
+        ? '从这里分叉出新会话（将创建全新沙箱环境）'
+        : '从这里分叉出新会话',
+);
 
 const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
@@ -370,4 +401,21 @@ html[theme-mode="dark"] {
 .steer-failure { margin-top: 6px; color: var(--td-error-color); }
 .steer-failure button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
 .steer-failure button:hover { background: var(--td-bg-color-secondarycontainer); }
+
+.user_msg_actions {
+    display: flex;
+    justify-content: flex-end;
+    height: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+.user_msg_container:hover .user_msg_actions {
+    height: auto;
+    overflow: visible;
+    opacity: 1;
+    pointer-events: auto;
+}
 </style>

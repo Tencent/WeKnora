@@ -2614,6 +2614,14 @@ defineExpose({
     if (!text.trim()) return;
     query.value = text;
     nextTick(() => createSession(text));
+  },
+  /**
+   * Puts text in the composer WITHOUT sending it. Session fork uses this so
+   * the user lands on the branch with the original question ready to edit —
+   * the whole point of branching at a user message.
+   */
+  prefill(text: string) {
+    query.value = text;
   }
 });
 
