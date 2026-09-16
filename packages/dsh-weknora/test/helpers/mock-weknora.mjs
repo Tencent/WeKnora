@@ -108,6 +108,13 @@ function searchResults(query, knowledgeBaseIds, knowledgeIds) {
       start_at: 0,
       end_at: content.length,
       metadata: {},
+      image_info: document.knowledge_id === 'doc-retrieval-pipeline' && index === 0
+        ? JSON.stringify([{
+          url: 'https://cdn.example.com/retrieval-diagram.png',
+          caption: '检索流程图',
+          ocr_text: '向量召回 → 关键词召回 → rerank',
+        }])
+        : '',
     })))
     .filter(result => result.score > 0.4)
     .sort((left, right) => right.score - left.score)
@@ -277,10 +284,17 @@ export async function startMockWeknora(options = {}) {
             id: `${knowledgeId}-chunk-${start + index}`,
             knowledge_id: knowledgeId,
             knowledge_base_id: 'kb-product',
-            content,
-            chunk_index: start + index,
-            is_enabled: true,
-          })),
+          content,
+          chunk_index: start + index,
+          is_enabled: true,
+          image_info: knowledgeId === 'doc-retrieval-pipeline' && start + index === 0
+            ? JSON.stringify([{
+              url: 'https://cdn.example.com/retrieval-diagram.png',
+              caption: '检索流程图',
+              ocr_text: '向量召回 → 关键词召回 → rerank',
+            }])
+            : '',
+        })),
           total: document.chunks.length,
           page,
           page_size: pageSize,
