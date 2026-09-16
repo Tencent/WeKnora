@@ -47,6 +47,27 @@ func PromptPrefixFingerprint(messages []Message, opts *ChatOptions) string {
 	return FingerprintPromptPrefix(string(data))
 }
 
+// RequestFingerprint hashes the complete provider-relevant request without
+// retaining message, tool, image, or prompt bodies. Prompt cache routing fields
+// are included explicitly because ChatOptions keeps them off the wire JSON.
+func RequestFingerprint(ctx context.Context, messages []Message, opts *ChatOptions) string {
+	type requestSnapshot struct {
+		Messages       []Message      `json:"messages"`
+		Options        *ChatOptions   `json:"options,omitempty"`
+		PromptCacheKey string         `json:"prompt_cache_key,omitempty"`
+		CacheRetention CacheRetention `json:"cache_retention,omitempty"`
+	}
+	snapshot := requestSnapshot{
+		Messages:       messages,
+		Options:        opts,
+		CacheRetention: resolveCacheRetention(opts),
+	}
+	snapshot.PromptCacheKey = promptCacheSessionID(ctx, opts)
+	data, _ := json.Marshal(snapshot)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // BuildPromptCacheKey derives an opaque process-local coordination key.
 // Tenant and model identifiers are hashed rather than retained in memory.
 func BuildPromptCacheKey(tenantID uint64, modelID, purpose, prefixFingerprint string) string {

@@ -1,0 +1,67 @@
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
+)
+
+func TestVerifyAcceptsUntamperedReportAndRejectsMutation(t *testing.T) {
+	report := types.EvaluationEvidenceReport{
+		SchemaVersion: 1,
+		Task:          &types.EvaluationTask{ID: "task-1", DatasetID: "fixed"},
+	}
+	unsigned, err := json.Marshal(&report)
+	require.NoError(t, err)
+	report.ReportSHA256 = fmt.Sprintf("sha256:%x", sha256.Sum256(unsigned))
+	encoded, err := json.MarshalIndent(&report, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, verify(bytes.NewReader(encoded)))
+
+	report.Task.DatasetID = "tampered"
+	tampered, err := json.Marshal(&report)
+	require.NoError(t, err)
+	require.ErrorContains(t, verify(bytes.NewReader(tampered)), "checksum mismatch")
+}
+
+func TestVerifyAcceptsWikiCacheBenchmarkAndRejectsMutation(t *testing.T) {
+	report := types.WikiCacheBenchmarkEvidence{
+		SchemaVersion: 1, BenchmarkID: "benchmark-1", ModelID: "model-1", Repetitions: 3,
+		StrictValidation: types.WikiCacheStrictValidation{Passed: true},
+	}
+	unsigned, err := json.Marshal(&report)
+	require.NoError(t, err)
+	report.ReportSHA256 = fmt.Sprintf("sha256:%x", sha256.Sum256(unsigned))
+	encoded, err := json.MarshalIndent(&report, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, verify(bytes.NewReader(encoded)))
+
+	report.Repetitions = 4
+	tampered, err := json.Marshal(&report)
+	require.NoError(t, err)
+	require.ErrorContains(t, verify(bytes.NewReader(tampered)), "checksum mismatch")
+}
+
+func TestVerifyRejectsUnchecksummedFields(t *testing.T) {
+	report := types.EvaluationEvidenceReport{
+		SchemaVersion: 1,
+		Task:          &types.EvaluationTask{ID: "task-1", DatasetID: "fixed"},
+	}
+	unsigned, err := json.Marshal(&report)
+	require.NoError(t, err)
+	report.ReportSHA256 = fmt.Sprintf("sha256:%x", sha256.Sum256(unsigned))
+	encoded, err := json.Marshal(&report)
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &payload))
+	payload["approval_annotation"] = "not covered by the typed checksum"
+	withUnknownField, err := json.Marshal(payload)
+	require.NoError(t, err)
+	require.ErrorContains(t, verify(bytes.NewReader(withUnknownField)), "unknown field")
+}

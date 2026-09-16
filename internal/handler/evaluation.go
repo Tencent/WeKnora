@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -27,6 +30,10 @@ type EvaluationRequest struct {
 	KnowledgeBaseID string `json:"knowledge_base_id"` // ID of knowledge base to use
 	ChatModelID     string `json:"chat_id"`           // ID of chat model to use
 	RerankModelID   string `json:"rerank_id"`         // ID of rerank model to use
+}
+
+type WikiCacheBenchmarkRequest struct {
+	ChatModelID string `json:"chat_id" binding:"required"`
 }
 
 // Evaluation godoc
@@ -87,6 +94,35 @@ func (e *EvaluationHandler) Evaluation(c *gin.Context) {
 	})
 }
 
+// WikiCacheBenchmark runs a controlled three-pair cold/warm replay through the
+// production Wiki prompt-cache path and returns a body-free evidence report.
+// @Summary      执行 Wiki 缓存严格 A/B
+// @Description  使用同一模型执行三组完整请求一致的冷暖对照并导出证据
+// @Tags         评估
+// @Accept       json
+// @Produce      json
+// @Param        request  body  WikiCacheBenchmarkRequest  true  "Wiki 缓存评测参数"
+// @Success      200  {object}  types.WikiCacheBenchmarkEvidence
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/wiki-cache-benchmark [post]
+func (e *EvaluationHandler) WikiCacheBenchmark(c *gin.Context) {
+	var request WikiCacheBenchmarkRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	report, err := e.evaluationService.WikiCacheBenchmark(
+		c.Request.Context(), secutils.SanitizeForLog(request.ChatModelID),
+	)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, report)
+}
+
 // GetEvaluationRequest contains parameters for getting evaluation result
 type GetEvaluationRequest struct {
 	TaskID string `form:"task_id" binding:"required"` // ID of evaluation task
@@ -128,4 +164,144 @@ func (e *EvaluationHandler) GetEvaluationResult(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
+}
+
+// GetEvaluationEvidence returns a deterministic report whose SHA-256 can be
+// recomputed after clearing report_sha256. It contains no prompt or answer text.
+// @Summary      导出评测证据
+// @Description  导出当前租户指定评测任务的可审计、无正文证据包
+// @Tags         评估
+// @Produce      json
+// @Param        task_id  query  string  true  "评估任务ID"
+// @Success      200  {object}  types.EvaluationEvidenceReport
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/evidence [get]
+func (e *EvaluationHandler) GetEvaluationEvidence(c *gin.Context) {
+	var request GetEvaluationRequest
+	if err := c.ShouldBind(&request); err != nil {
+		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		return
+	}
+	report, err := e.evaluationService.EvaluationEvidence(
+		c.Request.Context(), secutils.SanitizeForLog(request.TaskID),
+	)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.Header("Content-Disposition", "attachment; filename=evaluation-evidence.json")
+	c.JSON(http.StatusOK, report)
+}
+
+// GetModelUsage returns tenant-scoped usage across evaluation, chat, Wiki, and
+// background model calls. Prompt and response bodies are never returned.
+// @Summary      获取模型用量
+// @Description  按模型和可选时间区间聚合当前租户的模型调用量、Token、缓存、耗时和成本
+// @Tags         评估
+// @Produce      json
+// @Param        start_time  query  string  false  "开始时间（RFC3339，含）"
+// @Param        end_time    query  string  false  "结束时间（RFC3339，含）"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/model-usage [get]
+func (e *EvaluationHandler) GetModelUsage(c *gin.Context) {
+	ctx := c.Request.Context()
+	startTime, err := parseOptionalRFC3339(c.Query("start_time"))
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid start_time").WithDetails(err.Error()))
+		return
+	}
+	endTime, err := parseOptionalRFC3339(c.Query("end_time"))
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid end_time").WithDetails(err.Error()))
+		return
+	}
+	if startTime != nil && endTime != nil && startTime.After(*endTime) {
+		c.Error(errors.NewBadRequestError("start_time must not be after end_time"))
+		return
+	}
+	stats, err := e.evaluationService.ModelUsage(ctx, startTime, endTime)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": stats})
+}
+
+// GetEvaluationDatasets lists manifest-backed datasets and their readiness.
+// @Summary      获取评测数据集
+// @Description  列出可选择的数据集及其语言、场景、覆盖维度和文件完整性
+// @Tags         评估
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/datasets [get]
+func (e *EvaluationHandler) GetEvaluationDatasets(c *gin.Context) {
+	datasets, err := e.evaluationService.EvaluationDatasets(c.Request.Context())
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": datasets})
+}
+
+// GetEvaluationRuns returns a tenant-scoped page of evaluation history.
+// @Summary      获取评测历史
+// @Description  按开始时间倒序列出当前租户的任务、指标、运行快照和聚合用量
+// @Tags         评估
+// @Produce      json
+// @Param        limit   query  int  false  "每页数量（1-100，默认 20）"
+// @Param        offset  query  int  false  "偏移量（默认 0）"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /evaluation/runs [get]
+func (e *EvaluationHandler) GetEvaluationRuns(c *gin.Context) {
+	limit, err := boundedQueryInt(c, "limit", 20, 1, 100)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid limit").WithDetails(err.Error()))
+		return
+	}
+	offset, err := boundedQueryInt(c, "offset", 0, 0, 1_000_000)
+	if err != nil {
+		c.Error(errors.NewBadRequestError("Invalid offset").WithDetails(err.Error()))
+		return
+	}
+	page, err := e.evaluationService.EvaluationRuns(c.Request.Context(), limit, offset)
+	if err != nil {
+		logger.ErrorWithFields(c.Request.Context(), err, nil)
+		c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": page})
+}
+
+func boundedQueryInt(c *gin.Context, name string, fallback, minimum, maximum int) (int, error) {
+	raw := c.Query(name)
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be an integer between %d and %d", name, minimum, maximum)
+	}
+	return value, nil
+}
+
+func parseOptionalRFC3339(raw string) (*time.Time, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return nil, err
+	}
+	parsed = parsed.UTC()
+	return &parsed, nil
 }

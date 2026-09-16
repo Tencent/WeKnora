@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "rhino-topic3-zh",
+  "name": "Rhino Topic 3 Chinese acceptance",
+  "description": "Self-authored deterministic Chinese QA set for Topic 3 observability, regression gates and cache experiments.",
+  "language": "zh-CN",
+  "scenario": "rag-observability-and-cache",
+  "source": "WeKnora Topic 3 self-authored acceptance fixture",
+  "license": "same-as-repository",
+  "created_at": "2026-09-08",
+  "coverage_dimensions": [
+    "model-call-observability",
+    "regression-gating",
+    "wiki-cache-benchmarking",
+    "evidence-integrity"
+  ]
+}

@@ -11,6 +11,7 @@ test('management shortcuts are stricter than read-only settings pages', () => {
   assert.equal(SETTINGS_SECTION_MIN_ROLE.members, 'viewer')
   assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.members, 'owner')
   assert.equal(SETTINGS_SECTION_MIN_ROLE.models, 'viewer')
+  assert.equal(SETTINGS_SECTION_MIN_ROLE.evaluation, 'viewer')
   assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models, 'admin')
 })
 

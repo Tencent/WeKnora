@@ -110,8 +110,8 @@ test('keeps navigation and localization stable for all resource kinds', () => {
     modelUsageResourceRoute('agent', 'agent-1', ['follow_up_model']),
     { path: '/platform/agents', query: { edit: 'agent-1', section: 'suggestions' } },
   )
-  assert.equal(modelUsageBindingI18nKey('vlm_model'), 'modelSettings.usage.bindings.vlm_model')
-  assert.equal(modelUsageBindingI18nKey('future_binding'), 'modelSettings.usage.bindings.unknown')
+  assert.equal(modelUsageBindingI18nKey('vlm_model'), 'modelSettings.dependencyUsage.bindings.vlm_model')
+  assert.equal(modelUsageBindingI18nKey('future_binding'), 'modelSettings.dependencyUsage.bindings.unknown')
 })
 
 test('maps knowledge-base bindings to the configuration section that owns them', () => {

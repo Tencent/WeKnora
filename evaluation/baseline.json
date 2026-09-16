@@ -1,0 +1,25 @@
+{
+  "require_success": true,
+  "require_complete": true,
+  "minimum": {
+    "metric.retrieval_metrics.precision": 0.5,
+    "metric.retrieval_metrics.recall": 0.5,
+    "metric.retrieval_metrics.ndcg10": 0.5,
+    "metric.retrieval_metrics.mrr": 0.5,
+    "metric.generation_metrics.rougel": 0.2
+  },
+  "maximum": {
+    "task.duration_ms": 600000,
+    "usage.cost_by_currency.USD": 5
+  },
+  "maximum_decrease": {
+    "metric.retrieval_metrics.precision": 0.05,
+    "metric.retrieval_metrics.recall": 0.05,
+    "metric.retrieval_metrics.ndcg10": 0.05,
+    "metric.retrieval_metrics.mrr": 0.05,
+    "metric.generation_metrics.rougel": 0.05
+  },
+  "maximum_increase": {
+    "usage.cost_by_currency.USD": 0.5
+  }
+}
