@@ -235,7 +235,10 @@ func (s *resourceCatalog) ListReferencesByOwner(
 	if strings.TrimSpace(ownerType) == "" || len(ids) == 0 {
 		return nil, nil
 	}
-	handles, err := s.repo.ListHandlesByOwner(ctx, ownerType, ids)
+	handles, err := s.repo.ListHandlesByOwner(ctx, ownerType, ids, []string{
+		types.ResourceRelationAttachment,
+		types.ResourceRelationExtractedImage,
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -790,10 +790,6 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
-	if err := service.BackfillKnowledgeResourceBindings(context.Background(), db); err != nil {
-		logger.Warnf(context.Background(), "Knowledge resource binding backfill failed: %v", err)
-	}
-
 	// Get underlying SQL DB object
 	sqlDB, err := db.DB()
 	if err != nil {

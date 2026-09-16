@@ -41,10 +41,13 @@ func collectImageURLs(ctx context.Context, imageInfos []string) []string {
 	return urls
 }
 
-// mergeKnowledgeReleaseURLs unions ImageInfo URLs with catalog bindings for
-// the knowledge entries being removed. Parsed documents often embed
-// resource:// handles only in markdown; multimodal ImageInfo is empty until
-// (or unless) those tasks finish, so binding rows are the complete claim set.
+// mergeKnowledgeReleaseURLs unions ImageInfo URLs with derived catalog
+// bindings for the knowledge entries being removed. Parsed documents often
+// embed resource:// handles only in markdown; multimodal ImageInfo is empty
+// until (or unless) those tasks finish, so attachment/extracted-image rows
+// are the complete claim set. Source files stay out of this list: reparse
+// and manual cleanup must keep the original document, and knowledge delete
+// already removes FilePath separately.
 func mergeKnowledgeReleaseURLs(
 	ctx context.Context,
 	catalog interfaces.ResourceCatalog,

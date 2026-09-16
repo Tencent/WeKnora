@@ -89,16 +89,16 @@ func (r *resourceRepository) CountBindings(ctx context.Context, resourceID strin
 }
 
 func (r *resourceRepository) ListHandlesByOwner(
-	ctx context.Context, ownerType string, ownerIDs []string,
+	ctx context.Context, ownerType string, ownerIDs, relations []string,
 ) ([]string, error) {
-	if ownerType == "" || len(ownerIDs) == 0 {
+	if ownerType == "" || len(ownerIDs) == 0 || len(relations) == 0 {
 		return nil, nil
 	}
 	var handles []string
 	err := r.db.WithContext(ctx).
 		Table("resource_bindings AS b").
 		Joins("JOIN resources AS r ON r.id = b.resource_id AND r.state = ?", types.ResourceStateActive).
-		Where("b.owner_type = ? AND b.owner_id IN ?", ownerType, ownerIDs).
+		Where("b.owner_type = ? AND b.owner_id IN ? AND b.relation IN ?", ownerType, ownerIDs, relations).
 		Distinct("r.handle").
 		Pluck("r.handle", &handles).Error
 	return handles, err

@@ -26,7 +26,7 @@ type ResourceRepository interface {
 	CreateBinding(ctx context.Context, binding *types.ResourceBinding) error
 	DeleteBinding(ctx context.Context, resourceID, ownerType, ownerID string) error
 	CountBindings(ctx context.Context, resourceID string) (int64, error)
-	ListHandlesByOwner(ctx context.Context, ownerType string, ownerIDs []string) ([]string, error)
+	ListHandlesByOwner(ctx context.Context, ownerType string, ownerIDs, relations []string) ([]string, error)
 	IsReferencedByKnowledgeBase(
 		ctx context.Context,
 		tenantID uint64,
@@ -69,10 +69,12 @@ type ResourceCatalog interface {
 	// catalog handle, or the count could not be read), which callers should
 	// treat as "delete as before" rather than as "keep forever".
 	Release(ctx context.Context, reference, ownerType, ownerID string) (remaining int64, err error)
-	// ListReferencesByOwner returns the resource:// handles still claimed by
-	// any of the given owners. Delete paths union this with ImageInfo URLs so
-	// markdown-only images are released even when multimodal never wrote
-	// ImageInfo.
+	// ListReferencesByOwner returns derived resource:// handles still claimed
+	// by any of the given owners (extracted images and markdown attachments).
+	// Source files are omitted: reparse/cleanup must keep the original
+	// document, which knowledge delete removes through FilePath. Delete paths
+	// union this with ImageInfo URLs so markdown-only images are released even
+	// when multimodal never wrote ImageInfo.
 	ListReferencesByOwner(ctx context.Context, ownerType string, ownerIDs ...string) ([]string, error)
 	MarkDeleted(ctx context.Context, reference string) error
 	CreateAccessGrant(ctx context.Context, reference string, ttl time.Duration) (string, error)

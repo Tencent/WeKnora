@@ -135,6 +135,11 @@ func TestResourceCatalogListReferencesByOwner(t *testing.T) {
 		ctx, second, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationExtractedImage))
 	require.NoError(t, catalog.Bind(ctx, first, types.ResourceOwnerKnowledge, "kn-2", types.ResourceRelationAttachment))
 
+	source, err := catalog.Register(ctx, 7, "local://7/docs/source.pdf", interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+	require.NoError(t, catalog.Bind(
+		ctx, source, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationSourceFile))
+
 	refs, err := catalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge, "kn-1")
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{first, second}, refs)
