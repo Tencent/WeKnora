@@ -82,7 +82,7 @@ export default function Home() {
           <article className={s.startCard}>
             <div className={s.startLabel}><Image className={s.startBrand} src="/brands/wechat-dialog.png" alt="微信对话开放平台 Logo" width={32} height={32} /><span>在线使用</span></div>
             <h3>微信对话开放平台</h3>
-            <p>在线管理知识库，将问答服务接入公众号、小程序等微信场景。</p>
+            <p>基于 WeKnora，提供知识助理和智能客服，无需自行部署。</p>
             <a className={s.textLink} href="https://chatbot.weixin.qq.com/login" target="_blank" rel="noreferrer">进入平台 <Icon name="external" /></a>
           </article>
           <article className={s.startCard}>
