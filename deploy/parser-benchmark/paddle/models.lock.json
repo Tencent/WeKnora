@@ -1,0 +1,148 @@
+[
+  {
+    "repo_id": "PaddlePaddle/PP-DocLayoutV3",
+    "name": "PP-DocLayoutV3",
+    "files": [
+      {
+        "size": 12077,
+        "git_blob": "0e67905a060d65fffd43d158c078e320b3c5d784",
+        "path": "README.md",
+        "lfs_sha256": null
+      },
+      {
+        "size": 1196890,
+        "git_blob": "5fd3ae9d9615dd36cd2134551a3bcc60d222ed21",
+        "path": "inference.json",
+        "lfs_sha256": null
+      },
+      {
+        "size": 130806572,
+        "git_blob": "87ad817138031fb925e57b59f92ff249f7d57c20",
+        "path": "inference.pdiparams",
+        "lfs_sha256": "70bd316b0582769ec968829fd1feb1a6a58b7c941b938327e551b6b12b45c137"
+      },
+      {
+        "size": 1482,
+        "git_blob": "ed7472400b398e0e0e032893f7986b32692980e7",
+        "path": "inference.yml",
+        "lfs_sha256": null
+      }
+    ],
+    "revision": "7b48a7566925fa464281f930c58eee04fe2c862a"
+  },
+  {
+    "repo_id": "PaddlePaddle/PaddleOCR-VL-1.6",
+    "name": "PaddleOCR-VL-1.6-0.9B",
+    "files": [
+      {
+        "size": 11376,
+        "git_blob": "0491a00e80b424eb709078b57e35d8b83ffee985",
+        "path": "LICENSE",
+        "lfs_sha256": null
+      },
+      {
+        "size": 21424,
+        "git_blob": "58e9801f72ad5f992f0fc2e397ccf0fb014e5e5f",
+        "path": "README.md",
+        "lfs_sha256": null
+      },
+      {
+        "size": 25381,
+        "git_blob": "6a2790e1462ecb007f9b92dfb00f594701462889",
+        "path": "added_tokens.json",
+        "lfs_sha256": null
+      },
+      {
+        "size": 1474,
+        "git_blob": "d8b8c271d7a7245d4937098f53aa372cff3dba70",
+        "path": "chat_template.jinja",
+        "lfs_sha256": null
+      },
+      {
+        "size": 2059,
+        "git_blob": "c54711466ae75457f8e57b909a49dae570bfa5c5",
+        "path": "config.json",
+        "lfs_sha256": null
+      },
+      {
+        "size": 8104,
+        "git_blob": "a8fd139287293301b287db6dfdaac21d7ad1a236",
+        "path": "configuration_paddleocr_vl.py",
+        "lfs_sha256": null
+      },
+      {
+        "size": 133,
+        "git_blob": "ba87d71b9881c1d52f0be4286fb63e381ce3febf",
+        "path": "generation_config.json",
+        "lfs_sha256": null
+      },
+      {
+        "size": 25032,
+        "git_blob": "f7e28fd3c1971331581f73d573b9c4a2a4ce7a58",
+        "path": "image_processing_paddleocr_vl.py",
+        "lfs_sha256": null
+      },
+      {
+        "size": 43,
+        "git_blob": "93f88dfb31b6dbc3f529094ccfe26ddec98fa8ad",
+        "path": "inference.yml",
+        "lfs_sha256": null
+      },
+      {
+        "size": 1917255968,
+        "git_blob": "04667d00268d801a65293c1041e0fa4ad2ef573b",
+        "path": "model.safetensors",
+        "lfs_sha256": "85a479d506a11e724e7285d395c551be69f41dbc16b6342d3cacfb189aed71db"
+      },
+      {
+        "size": 103889,
+        "git_blob": "693782514116586458b12cfd911c88d6565f552c",
+        "path": "modeling_paddleocr_vl.py",
+        "lfs_sha256": null
+      },
+      {
+        "size": 641,
+        "git_blob": "d873cd63d04d9e6243999759fc30f7752dab3222",
+        "path": "preprocessor_config.json",
+        "lfs_sha256": null
+      },
+      {
+        "size": 12253,
+        "git_blob": "73c3faeff201555fc7b52709848e3c669419dbb1",
+        "path": "processing_paddleocr_vl.py",
+        "lfs_sha256": null
+      },
+      {
+        "size": 137,
+        "git_blob": "033053ac4d8b5de2e47884ce85a6b4939cc58e87",
+        "path": "processor_config.json",
+        "lfs_sha256": null
+      },
+      {
+        "size": 1151,
+        "git_blob": "dcd70aaa8c9987899d7593995546d9c0cfc6a1f3",
+        "path": "special_tokens_map.json",
+        "lfs_sha256": null
+      },
+      {
+        "size": 11189060,
+        "git_blob": "e42528d5cae447340ed0a3e403001c88fe9b0f17",
+        "path": "tokenizer.json",
+        "lfs_sha256": "c8a215a59183d0d0781adc33bacd3ce6162716f7fd568fb30234a74d69803a7d"
+      },
+      {
+        "size": 1614363,
+        "git_blob": "81e33aa7fdb8ef76fceb1a69f1997021f3056770",
+        "path": "tokenizer.model",
+        "lfs_sha256": "34ef7db83df785924fb83d7b887b6e822a031c56e15cff40aaf9b982988180df"
+      },
+      {
+        "size": 186947,
+        "git_blob": "cd9eb7da01a3209f4fb9b3561e04be022cd87764",
+        "path": "tokenizer_config.json",
+        "lfs_sha256": null
+      }
+    ],
+    "revision": "c5630abae1d940eafe0697512a0325494b02ab42"
+  }
+]

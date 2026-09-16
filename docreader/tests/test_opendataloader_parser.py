@@ -95,6 +95,24 @@ class OpenDataLoaderHelpersTest(unittest.TestCase):
 
 
 class OpenDataLoaderParserTest(unittest.TestCase):
+    def test_scanned_fallback_preserves_requested_and_actual_engine(self):
+        from docreader.models.document import Document
+
+        def short_markdown(pdf_path, output_dir, image_dir, overrides=None):
+            with open(os.path.join(output_dir, "doc.md"), "w") as f:
+                f.write("")
+
+        rendered = Document(content="![page](images/page.jpg)", metadata={"page_count": 1})
+        with mock.patch("docreader.parser.opendataloader_parser.opendataloader_available", return_value=(True, "")), mock.patch(
+            "docreader.parser.opendataloader_parser._run_convert", side_effect=short_markdown
+        ), mock.patch("docreader.parser.pdf_parser.PDFScannedParser.parse_into_text", return_value=rendered):
+            result = OpenDataLoaderParser(file_name="doc.pdf", file_type="pdf").parse_into_text(b"%PDF-test")
+        self.assertEqual(result.metadata["parser_engine"], "builtin")
+        self.assertEqual(result.metadata["requested_parser_engine"], "opendataloader")
+        self.assertEqual(result.metadata["parser_fallback"], "builtin_scanned_renderer")
+        self.assertEqual(result.content, rendered.content)
+        self.assertEqual(result.metadata["page_count"], 1)
+
     @mock.patch("docreader.parser.opendataloader_parser.opendataloader_available")
     @mock.patch("docreader.parser.opendataloader_parser._run_convert")
     def test_parse_reads_markdown_and_images(self, mock_convert, mock_avail):

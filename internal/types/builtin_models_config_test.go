@@ -127,6 +127,47 @@ func TestLoadBuiltinModelsConfig_Idempotent(t *testing.T) {
 	assert.Equal(t, int64(1), count, "second load must not duplicate")
 }
 
+func TestLoadBuiltinModelsConfigMaintainsCustomHeaderBehaviorRevision(t *testing.T) {
+	db := setupBuiltinModelsDB(t)
+	dir := writeYAML(t, `builtin_models:
+  - id: builtin-llm
+    name: gpt-4o-mini
+    type: KnowledgeQA
+    parameters:
+      custom_headers:
+        X-Model-Route: blue
+        X-Tenant: acme
+`)
+	require.NoError(t, LoadBuiltinModelsConfig(context.Background(), db, dir))
+
+	var first Model
+	require.NoError(t, db.Where("id = ?", "builtin-llm").First(&first).Error)
+	firstRevision := first.Parameters.ExtraConfig[EvaluationModelBehaviorRevisionKey]
+	require.NotEmpty(t, firstRevision)
+
+	require.NoError(t, LoadBuiltinModelsConfig(context.Background(), db, dir))
+	var unchanged Model
+	require.NoError(t, db.Where("id = ?", "builtin-llm").First(&unchanged).Error)
+	assert.Equal(t, firstRevision, unchanged.Parameters.ExtraConfig[EvaluationModelBehaviorRevisionKey])
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "builtin_models.yaml"),
+		[]byte(`builtin_models:
+  - id: builtin-llm
+    name: gpt-4o-mini
+    type: KnowledgeQA
+    parameters:
+      custom_headers:
+        x-tenant: acme
+        x-model-route: green
+`), 0o644,
+	))
+	require.NoError(t, LoadBuiltinModelsConfig(context.Background(), db, dir))
+	var changed Model
+	require.NoError(t, db.Where("id = ?", "builtin-llm").First(&changed).Error)
+	assert.NotEqual(t, firstRevision, changed.Parameters.ExtraConfig[EvaluationModelBehaviorRevisionKey])
+}
+
 func TestLoadBuiltinModelsConfig_PreservesRuntimeOverride(t *testing.T) {
 	db := setupBuiltinModelsDB(t)
 	dir := writeYAML(t, `builtin_models:

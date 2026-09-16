@@ -21,6 +21,13 @@ import "sort"
 // false is a valid, meaningful answer — it means "deliberately does not
 // survive a detach" — and is not the same as being absent.
 var contextCloneAcrossDetach = map[ContextKey]bool{
+	// A detached operation remains accountable to its initiating evaluation.
+	ModelAccountingStateContextKey: true,
+	ModelCallPolicyContextKey:      true,
+	ModelEvaluationTaskContextKey:  true,
+	ModelRequestMetadataContextKey: true,
+	// One cache lookup result must not label an unrelated detached request.
+	ModelApplicationCacheContextKey: false,
 	// Caller identity and workspace scope. Background work runs as the same
 	// principal in the same workspace, so all of this has to survive; a
 	// detached goroutine that loses its tenant reads another tenant's rows or

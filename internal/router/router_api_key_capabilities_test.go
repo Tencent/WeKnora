@@ -335,8 +335,10 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	v1 := gin.New().Group("/api/v1")
 
 	RegisterTenantRoutes(v1, &handler.TenantHandler{}, nil, nil, nil, g)
-	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
-	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
+	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{},
+		&handler.ModelStatisticsHandler{}, g)
+	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, &handler.EvaluationDatasetHandler{},
+		&handler.EvaluationQuestionHandler{}, g)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
 	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
@@ -362,6 +364,17 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/models", types.APIKeyCapabilityManageModels},
 		{http.MethodDelete, "/api/v1/models/:id", types.APIKeyCapabilityManageModels},
 		{http.MethodPost, "/api/v1/evaluation", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodGet, "/api/v1/evaluation/metrics", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodGet, "/api/v1/evaluation/tasks", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodPut, "/api/v1/evaluation/tasks/:task_id/labels", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodPost, "/api/v1/evaluation/comparisons", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodGet, "/api/v1/evaluation/tasks/:task_id/export", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodPost, "/api/v1/evaluation/:task_id/cancel", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodGet, "/api/v1/evaluation/tasks/:task_id/questions", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodGet, "/api/v1/evaluation/datasets", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodPost, "/api/v1/evaluation/datasets/import", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodGet, "/api/v1/evaluation/datasets/catalog", types.APIKeyCapabilityRunEvaluations},
+		{http.MethodGet, "/api/v1/evaluation/datasets/catalog/:id", types.APIKeyCapabilityRunEvaluations},
 		{http.MethodGet, "/api/v1/system/info", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
 		{

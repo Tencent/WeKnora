@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/models/call"
+	"github.com/Tencent/WeKnora/internal/types"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -186,6 +190,7 @@ func (e *GeminiEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 }
 
 func (e *GeminiEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
+	ctx = call.WithNewBatch(ctx)
 	var resp *http.Response
 	var err error
 	url := fmt.Sprintf("%s/models/%s:batchEmbedContents", e.baseURL, e.modelName)
@@ -207,7 +212,20 @@ func (e *GeminiEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		}
 
 		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		req, err = http.NewRequestWithContext(
+			call.WithMetadata(
+				ctx,
+				map[string]any{
+					"attempt_number": i +
+						1,
+				},
+			),
+			"POST",
+			url,
+			bytes.NewReader(
+				jsonData,
+			),
+		)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("GeminiEmbedder failed to create request: %v", err)
 			continue
@@ -216,7 +234,10 @@ func (e *GeminiEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		req.Header.Set("x-goog-api-key", e.apiKey)
 		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
-		resp, err = e.httpClient.Do(req)
+		resp, err = call.DoJSON(e.httpClient, req, "embedding")
+		if errors.Is(err, types.ErrModelAccounting) {
+			return nil, err
+		}
 		if err == nil {
 			return resp, nil
 		}
@@ -238,3 +259,6 @@ func (e *GeminiEmbedder) GetDimensions() int {
 func (e *GeminiEmbedder) GetModelID() string {
 	return e.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (e *GeminiEmbedder) RequestAccountingSupported() bool { return true }

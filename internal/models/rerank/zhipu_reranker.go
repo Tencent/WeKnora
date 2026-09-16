@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -106,7 +108,7 @@ func (r *ZhipuReranker) Rerank(ctx context.Context, query string, documents []st
 
 	logger.Debugf(ctx, "%s", buildRerankRequestDebug(r.modelName, r.baseURL, query, documents))
 
-	resp, err := r.client.Do(req)
+	resp, err := call.DoJSON(r.client, req, "rerank")
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
@@ -151,3 +153,6 @@ func (r *ZhipuReranker) GetModelName() string {
 func (r *ZhipuReranker) GetModelID() string {
 	return r.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (r *ZhipuReranker) RequestAccountingSupported() bool { return true }

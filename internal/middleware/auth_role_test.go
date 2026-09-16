@@ -145,6 +145,13 @@ func cfgWithRBAC(enabled bool) *config.Config {
 	return &config.Config{Tenant: &config.TenantConfig{EnableRBAC: &enabled}}
 }
 
+func cfgWithRBACAndCrossTenant(enabled bool) *config.Config {
+	return &config.Config{Tenant: &config.TenantConfig{
+		EnableRBAC:              &enabled,
+		EnableCrossTenantAccess: true,
+	}}
+}
+
 func TestResolveTenantRole_ActiveMembershipWins(t *testing.T) {
 	svc := newFakeMemberService()
 	svc.seedActive("u1", 10, types.TenantRoleContributor)
@@ -164,12 +171,25 @@ func TestResolveTenantRole_CrossTenantSuperuserGetsAdmin_NoAutoPromote(t *testin
 	svc := newFakeMemberService()
 	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
 
-	got, ok := resolveTenantRole(context.Background(), svc, user, 99, true, cfgWithRBAC(true))
+	got, ok := resolveTenantRole(context.Background(), svc, user, 99, true, cfgWithRBACAndCrossTenant(true))
 	if !ok || got != types.TenantRoleAdmin {
 		t.Fatalf("got (%v, %v), want (admin, true)", got, ok)
 	}
 	if len(svc.addCalls) != 0 {
 		t.Fatalf("cross-tenant superuser must not trigger auto-promote, got %+v", svc.addCalls)
+	}
+}
+
+func TestResolveTenantRole_CrossTenantFlagOffRejectsSuperuserAttribute(t *testing.T) {
+	svc := newFakeMemberService()
+	user := &types.User{ID: "super", TenantID: 1, CanAccessAllTenants: true}
+
+	got, ok := resolveTenantRole(context.Background(), svc, user, 99, true, cfgWithRBAC(true))
+	if ok {
+		t.Fatalf("flag-off cross-tenant role must be rejected, got role=%v", got)
+	}
+	if len(svc.addCalls) != 0 {
+		t.Fatalf("rejected cross-tenant request must not auto-promote, got %+v", svc.addCalls)
 	}
 }
 
@@ -179,7 +199,7 @@ func TestResolveTenantRole_AutoPromoteRequiresHomeTenant(t *testing.T) {
 	svc := newFakeMemberService() // 空 — 任何空间都是孤儿
 	user := &types.User{ID: "u1", TenantID: 1, CanAccessAllTenants: true}
 
-	got, ok := resolveTenantRole(context.Background(), svc, user, 42, true, cfgWithRBAC(true))
+	got, ok := resolveTenantRole(context.Background(), svc, user, 42, true, cfgWithRBACAndCrossTenant(true))
 	if !ok || got != types.TenantRoleAdmin {
 		t.Fatalf("cross-tenant superuser should still get visitor Admin, got (%v, %v)", got, ok)
 	}

@@ -274,3 +274,9 @@ func wrapChatLangfuse(c Chat, err error) (Chat, error) {
 	}
 	return &langfuseChat{inner: c}, nil
 }
+
+// RequestAccountingSupported reports whether the wrapped provider accounts for physical requests.
+func (l *langfuseChat) RequestAccountingSupported() bool {
+	inner, ok := l.inner.(interface{ RequestAccountingSupported() bool })
+	return ok && inner.RequestAccountingSupported()
+}

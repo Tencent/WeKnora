@@ -80,6 +80,7 @@ func main() {
 		}
 
 		ctx, done := context.WithCancel(context.Background())
+		defer done()
 
 		// Start the system_settings pubsub subscriber. Runs in its own
 		// goroutine and exits when ctx is cancelled at shutdown. Best-
@@ -92,13 +93,10 @@ func main() {
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)
+		defer signal.Stop(signals)
 		go func() {
 			sig := <-signals
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
-
-			// Close listener first to release port immediately,
-			// so the next process can bind during our graceful drain.
-			listener.Close()
 
 			shutdownTimeout := cfg.Server.ShutdownTimeout
 			if shutdownTimeout == 0 {
@@ -114,6 +112,8 @@ func main() {
 				server.Close()
 			}()
 
+			// Shutdown marks the server as stopping before closing listeners, so
+			// Serve returns ErrServerClosed and main waits for resource cleanup.
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
 				server.Close()

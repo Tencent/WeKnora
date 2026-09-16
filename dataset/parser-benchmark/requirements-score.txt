@@ -1,0 +1,8 @@
+# Small official olmOCR scorer runtime (project-local --target directory).
+rapidfuzz==3.14.3
+fuzzysearch==0.8.1
+beautifulsoup4==4.14.3
+tqdm==4.67.1
+playwright==1.58.0
+apted==1.0.3
+Levenshtein==0.27.3

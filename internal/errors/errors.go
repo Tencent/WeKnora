@@ -140,6 +140,27 @@ func NewTooManyRequestsError(message string) *AppError {
 	}
 }
 
+// NewRequestEntityTooLargeError creates a 413 error for bounded inputs that
+// exceed configured size limits.
+func NewRequestEntityTooLargeError(message string) *AppError {
+	return &AppError{
+		Code:     ErrValidation,
+		Message:  message,
+		HTTPCode: http.StatusRequestEntityTooLarge,
+	}
+}
+
+// NewUnprocessableEntityError creates a 422 error for semantically valid
+// requests that conflict with a declared capability (e.g. an explicit seed
+// against a provider without seed support).
+func NewUnprocessableEntityError(message string) *AppError {
+	return &AppError{
+		Code:     ErrValidation,
+		Message:  message,
+		HTTPCode: http.StatusUnprocessableEntity,
+	}
+}
+
 // NewInternalServerError creates an internal server error
 func NewInternalServerError(message string) *AppError {
 	if message == "" {

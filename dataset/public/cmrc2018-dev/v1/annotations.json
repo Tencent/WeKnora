@@ -1,0 +1,578 @@
+[
+  {
+    "qid": "cmrc2018-dev-DEV_1052_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0631-p0000",
+    "upstream_qid": "DEV_1052_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "将公司之产品或服务销售给客户",
+        "answer_start": 54
+      },
+      {
+        "text": "将公司之产品或服务销售给客户",
+        "answer_start": 54
+      },
+      {
+        "text": "将公司之产品或服务销售给客户",
+        "answer_start": 54
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1070_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0648-p0000",
+    "upstream_qid": "DEV_1070_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "酒井美纪",
+        "answer_start": 58
+      },
+      {
+        "text": "酒井美纪",
+        "answer_start": 58
+      },
+      {
+        "text": "酒井美纪",
+        "answer_start": 58
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_107_QUERY_0",
+    "source_pid": "cmrc2018-dev-a0098-p0000",
+    "upstream_qid": "DEV_107_QUERY_0",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "田径",
+        "answer_start": 27
+      },
+      {
+        "text": "田径",
+        "answer_start": 27
+      },
+      {
+        "text": "田径",
+        "answer_start": 27
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1101_QUERY_4",
+    "source_pid": "cmrc2018-dev-a0674-p0000",
+    "upstream_qid": "DEV_1101_QUERY_4",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "66个",
+        "answer_start": 829
+      },
+      {
+        "text": "66个",
+        "answer_start": 829
+      },
+      {
+        "text": "66个",
+        "answer_start": 829
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1103_QUERY_0",
+    "source_pid": "cmrc2018-dev-a0676-p0000",
+    "upstream_qid": "DEV_1103_QUERY_0",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "英国英格兰东米德兰兹",
+        "answer_start": 17
+      },
+      {
+        "text": "英国英格兰东米德兰兹",
+        "answer_start": 17
+      },
+      {
+        "text": "英国英格兰东米德兰兹",
+        "answer_start": 17
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1135_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0704-p0000",
+    "upstream_qid": "DEV_1135_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "33公分",
+        "answer_start": 237
+      },
+      {
+        "text": "33公分",
+        "answer_start": 237
+      },
+      {
+        "text": "33公分",
+        "answer_start": 237
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_121_QUERY_4",
+    "source_pid": "cmrc2018-dev-a0112-p0000",
+    "upstream_qid": "DEV_121_QUERY_4",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "2005年",
+        "answer_start": 251
+      },
+      {
+        "text": "2005年",
+        "answer_start": 251
+      },
+      {
+        "text": "2005年",
+        "answer_start": 251
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1543_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0759-p0000",
+    "upstream_qid": "DEV_1543_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "印度西太平洋区",
+        "answer_start": 45
+      },
+      {
+        "text": "印度西太平洋区",
+        "answer_start": 45
+      },
+      {
+        "text": "印度西太平洋区",
+        "answer_start": 45
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1615_QUERY_3",
+    "source_pid": "cmrc2018-dev-a0783-p0000",
+    "upstream_qid": "DEV_1615_QUERY_3",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "沿著侧线有条黄色纵带自鳃盖后方延伸到尾鳍基部。",
+        "answer_start": 448
+      },
+      {
+        "text": "沿著侧线有条黄色纵带自鳃盖后方延伸到尾鳍基部。",
+        "answer_start": 448
+      },
+      {
+        "text": "沿著侧线有条黄色纵带自鳃盖后方延伸到尾鳍基部。",
+        "answer_start": 448
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1639_QUERY_0",
+    "source_pid": "cmrc2018-dev-a0793-p0000",
+    "upstream_qid": "DEV_1639_QUERY_0",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "嗑头、白点赤海、千年鲷、儋州红、打铁婆",
+        "answer_start": 14
+      },
+      {
+        "text": "嗑头、白点赤海、千年鲷、儋州红、打铁婆",
+        "answer_start": 14
+      },
+      {
+        "text": "嗑头、白点赤海、千年鲷、儋州红、打铁婆",
+        "answer_start": 14
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1710_QUERY_2",
+    "source_pid": "cmrc2018-dev-a0813-p0000",
+    "upstream_qid": "DEV_1710_QUERY_2",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "花蜜、花粉,也吃植物种子、嫩叶、昆虫。",
+        "answer_start": 221
+      },
+      {
+        "text": "花蜜、花粉,也吃植物种子、嫩叶、昆虫。",
+        "answer_start": 221
+      },
+      {
+        "text": "主要为花蜜、花粉,也吃植物种子、嫩叶、昆虫。",
+        "answer_start": 218
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1769_QUERY_3",
+    "source_pid": "cmrc2018-dev-a0817-p0000",
+    "upstream_qid": "DEV_1769_QUERY_3",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "因为内眦赘皮覆盖在泪小管上。",
+        "answer_start": 269
+      },
+      {
+        "text": "因为内眦赘皮覆盖在泪小管上。",
+        "answer_start": 269
+      },
+      {
+        "text": "内眦赘皮覆盖在泪小管上。",
+        "answer_start": 271
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1771_QUERY_4",
+    "source_pid": "cmrc2018-dev-a0818-p0000",
+    "upstream_qid": "DEV_1771_QUERY_4",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "呼、呼、悠悠阿",
+        "answer_start": 228
+      },
+      {
+        "text": "呼、呼、悠悠阿",
+        "answer_start": 228
+      },
+      {
+        "text": "呼、呼、悠悠阿",
+        "answer_start": 228
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_1888_QUERY_0",
+    "source_pid": "cmrc2018-dev-a0835-p0000",
+    "upstream_qid": "DEV_1888_QUERY_0",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "哥德式",
+        "answer_start": 23
+      },
+      {
+        "text": "哥德式",
+        "answer_start": 23
+      },
+      {
+        "text": "哥德式",
+        "answer_start": 23
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_193_QUERY_2",
+    "source_pid": "cmrc2018-dev-a0175-p0000",
+    "upstream_qid": "DEV_193_QUERY_2",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "栖息于岸边的珊瑚礁浅海域，白天于礁石区觅食，夜晚则潜入沙中睡眠。",
+        "answer_start": 379
+      },
+      {
+        "text": "栖息于岸边的珊瑚礁浅海域，白天于礁石区觅食，夜晚则潜入沙中睡眠。",
+        "answer_start": 379
+      },
+      {
+        "text": "本鱼栖息于岸边的珊瑚礁浅海域，白天于礁石区觅食，夜晚则潜入沙中睡眠。幼鱼以小型甲壳类和多毛类为食，成鱼以较大型的甲壳类、软体动物和多毛类等为食。",
+        "answer_start": 377
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_200_QUERY_2",
+    "source_pid": "cmrc2018-dev-a0181-p0000",
+    "upstream_qid": "DEV_200_QUERY_2",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "深恨人类",
+        "answer_start": 186
+      },
+      {
+        "text": "深恨人类",
+        "answer_start": 186
+      },
+      {
+        "text": "深恨人类",
+        "answer_start": 186
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_222_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0203-p0000",
+    "upstream_qid": "DEV_222_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "小提琴及钢琴等",
+        "answer_start": 105
+      },
+      {
+        "text": "小提琴及钢琴等",
+        "answer_start": 105
+      },
+      {
+        "text": "小提琴及钢琴",
+        "answer_start": 105
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_223_QUERY_0",
+    "source_pid": "cmrc2018-dev-a0204-p0000",
+    "upstream_qid": "DEV_223_QUERY_0",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "犯了庙讳",
+        "answer_start": 80
+      },
+      {
+        "text": "犯了庙讳",
+        "answer_start": 80
+      },
+      {
+        "text": "犯了庙讳",
+        "answer_start": 80
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_249_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0228-p0000",
+    "upstream_qid": "DEV_249_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "宋代",
+        "answer_start": 253
+      },
+      {
+        "text": "宋代",
+        "answer_start": 253
+      },
+      {
+        "text": "宋代",
+        "answer_start": 253
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_40_QUERY_3",
+    "source_pid": "cmrc2018-dev-a0038-p0000",
+    "upstream_qid": "DEV_40_QUERY_3",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "150头",
+        "answer_start": 251
+      },
+      {
+        "text": "150头",
+        "answer_start": 251
+      },
+      {
+        "text": "150头",
+        "answer_start": 251
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_462_QUERY_3",
+    "source_pid": "cmrc2018-dev-a0430-p0000",
+    "upstream_qid": "DEV_462_QUERY_3",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "方孝孺",
+        "answer_start": 366
+      },
+      {
+        "text": "方孝孺",
+        "answer_start": 366
+      },
+      {
+        "text": "方孝孺",
+        "answer_start": 366
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_490_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0458-p0000",
+    "upstream_qid": "DEV_490_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "朝鲜",
+        "answer_start": 12
+      },
+      {
+        "text": "朝鲜",
+        "answer_start": 12
+      },
+      {
+        "text": "朝鲜国籍",
+        "answer_start": 76
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_82_QUERY_3",
+    "source_pid": "cmrc2018-dev-a0077-p0000",
+    "upstream_qid": "DEV_82_QUERY_3",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "卫星转发器租赁、卫星通信及相关技术服务等",
+        "answer_start": 99
+      },
+      {
+        "text": "卫星转发器租赁、卫星通信及相关技术服务等",
+        "answer_start": 99
+      },
+      {
+        "text": "卫星转发器租赁、卫星通信及相关技术服务等",
+        "answer_start": 99
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  },
+  {
+    "qid": "cmrc2018-dev-DEV_98_QUERY_1",
+    "source_pid": "cmrc2018-dev-a0090-p0000",
+    "upstream_qid": "DEV_98_QUERY_1",
+    "is_impossible": false,
+    "answerability_scope": "source_pid_only",
+    "answers": [
+      {
+        "text": "陆尚",
+        "answer_start": 125
+      },
+      {
+        "text": "陆尚",
+        "answer_start": 125
+      },
+      {
+        "text": "陆尚",
+        "answer_start": 125
+      }
+    ],
+    "plausible_answers": [],
+    "answer_offset_unit": "unicode_code_points",
+    "reference_answer_policy": "first_upstream_answer"
+  }
+]

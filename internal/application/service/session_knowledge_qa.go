@@ -742,6 +742,7 @@ func (s *sessionService) KnowledgeQAByEvent(ctx context.Context,
 			retrievalProgress = nil
 		}
 		stageDuration := time.Since(stageStart)
+		chatManage.EvaluationTimings.AddStage(eventType, stageDuration)
 		var spanErr error
 		if err != nil && err != chatpipeline.ErrSearchNothing {
 			spanErr = err.Err

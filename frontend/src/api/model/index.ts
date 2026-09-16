@@ -279,3 +279,103 @@ export function getWeKnoraCloudStatus(): Promise<WeKnoraCloudStatusResult> {
       })
   })
 }
+
+export interface ModelCostTotal {
+  currency: string
+  cost_microunits: number
+}
+
+export interface ModelUsageStatistics {
+  model_id: string
+  call_count: number
+  started_calls: number
+  success_calls: number
+  error_calls: number
+  canceled_calls: number
+  usage_reported_calls: number
+  usage_unreported_calls: number
+  accounting_complete_calls: number
+  unpriced_calls: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  average_duration_ms: number
+  latency: {
+    p50_ms: number | null
+    p95_ms: number | null
+    p99_ms: number | null
+    reported_calls: number
+  }
+  costs: ModelCostTotal[]
+  provider_cache: {
+    read_tokens: number
+    write_tokens: number
+    miss_tokens: number
+    observed_tokens: number
+    hit_rate: number | null
+  }
+  application_cache: {
+    lookup_count: number
+    bypass_lookup_count: number
+    requested_items: number
+    unique_items: number
+    hit_items: number
+    miss_items: number
+    bypass_items: number
+    observed_items: number
+    hit_rate: number | null
+    average_lookup_duration_ms: number
+  }
+}
+
+export interface ModelUsageResponse {
+  from: string
+  to: string
+  items: ModelUsageStatistics[]
+}
+
+export interface ModelCachePricing {
+  version: 1
+  read_microunits_per_million?: number
+  write_5m_microunits_per_million?: number
+  write_1h_microunits_per_million?: number
+}
+
+export interface ModelPriceVersion {
+  id: string
+  tenant_id: number
+  model_id: string
+  valid_from: string
+  valid_to?: string
+  cache_pricing?: ModelCachePricing | null
+  input_microunits_per_million: number
+  output_microunits_per_million: number
+  currency: string
+  created_at: string
+}
+
+export async function listModelUsage(params: {
+  from?: string
+  to?: string
+  modelIds?: string[]
+} = {}): Promise<ModelUsageResponse> {
+  const query = new URLSearchParams()
+  if (params.from) query.set('from', params.from)
+  if (params.to) query.set('to', params.to)
+  if (params.modelIds?.length) query.set('model_ids', params.modelIds.join(','))
+  const response: any = await get(`/api/v1/models/usage${query.size ? `?${query}` : ''}`)
+  return response.data as ModelUsageResponse
+}
+
+export async function listModelPrices(modelId: string): Promise<ModelPriceVersion[]> {
+  const response: any = await get(`/api/v1/models/${modelId}/pricing`)
+  return (response.data || []) as ModelPriceVersion[]
+}
+
+export async function putModelPrice(
+  modelId: string,
+  body: Omit<ModelPriceVersion, 'id' | 'tenant_id' | 'model_id' | 'created_at'>,
+): Promise<ModelPriceVersion> {
+  const response: any = await put(`/api/v1/models/${modelId}/pricing`, body)
+  return response.data as ModelPriceVersion
+}

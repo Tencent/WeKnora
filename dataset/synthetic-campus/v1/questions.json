@@ -1,0 +1,250 @@
+[
+  {
+    "question_id": "Q01",
+    "category": "fact",
+    "question": "周六实验室什么时候开放？能办理设备借还吗？",
+    "answerable": true,
+    "reference_answer": "周六讨论区 10:00—18:00 开放，设备服务台仅周一至周五 10:00—17:00 办理，周六不能办理设备借还。",
+    "evidence_passage_ids": [
+      "D01-P02"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q02",
+    "category": "fact",
+    "question": "讨论座位最多提前几天预约？一次最长多久？",
+    "answerable": true,
+    "reference_answer": "最多提前 7 个自然日预约，每次最多 3 小时。",
+    "evidence_passage_ids": [
+      "D01-P04"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q03",
+    "category": "fact",
+    "question": "团队负责人通过设备培训后，其他成员是否自动具备设备借用资格？",
+    "answerable": true,
+    "reference_answer": "不具备。每位借用者须有对应设备培训记录，负责人资格不能替代成员的培训记录。",
+    "evidence_passage_ids": [
+      "D01-P03",
+      "D02-P02"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q04",
+    "category": "fact",
+    "question": "连续 30 天内两次预约未签到，会受到什么限制？",
+    "answerable": true,
+    "reference_answer": "座位预约资格暂停 7 个自然日；设备资格另按设备规则处理。",
+    "evidence_passage_ids": [
+      "D01-P04"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q05",
+    "category": "table",
+    "question": "哪种设备最长可以借 48 小时，同一账户最多同时借多少？",
+    "answerable": true,
+    "reference_answer": "SEN-02 星帆环境传感器套件，最长 48 小时，同一账户最多同时借 2 套。",
+    "evidence_passage_ids": [
+      "D02-P01"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q06",
+    "category": "table",
+    "question": "目录登记的相机和录音套装合计多少台或套？是否等于当前可借数量？",
+    "answerable": true,
+    "reference_answer": "4 台相机加 3 套录音套装，合计 7 件；登记库存不等于实时可借数量。",
+    "evidence_passage_ids": [
+      "D02-P01"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q07",
+    "category": "cross_document",
+    "question": "常规无维护安排的周五 16:00 领取 CAM-01，最迟什么时候归还？",
+    "answerable": true,
+    "reference_answer": "最迟当周五 17:00。24 小时后的周六 16:00 不在服务台办理时段，截止时间提前到此前最近办理时段结束的周五 17:00。",
+    "evidence_passage_ids": [
+      "D01-P02",
+      "D02-P01",
+      "D02-P02"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q08",
+    "category": "fact",
+    "question": "相机 CAM-01 能否续借？",
+    "answerable": true,
+    "reference_answer": "不支持续借。",
+    "evidence_passage_ids": [
+      "D02-P02"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q09",
+    "category": "distractor",
+    "question": "因为设备逾期被暂停借用资格，会同时失去讨论座位预约资格吗？",
+    "answerable": true,
+    "reference_answer": "不会。暂停设备借用不影响已具备资格的讨论区座位预约。",
+    "evidence_passage_ids": [
+      "D02-P04"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q10",
+    "category": "calculation",
+    "question": "个人账户本周已用 5 GPU 小时，再用两块 GPU 各运行 2 小时，剩多少配额？",
+    "answerable": true,
+    "reference_answer": "新增用量为 2×2=4 GPU 小时；个人每周 12 GPU 小时，因此剩 12−5−4=3 GPU 小时。",
+    "evidence_passage_ids": [
+      "D03-P01"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q11",
+    "category": "distractor",
+    "question": "任务排队两小时后运行一小时，取消时应计多少运行时间？",
+    "answerable": true,
+    "reference_answer": "排队不计配额，已运行的一小时计入配额；取消不会抹去已发生的运行用量。GPU 小时还需结合实际设备数量计算。",
+    "evidence_passage_ids": [
+      "D03-P02"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q12",
+    "category": "fact",
+    "question": "项目工作目录和任务日志分别保留多久？",
+    "answerable": true,
+    "reference_answer": "工作目录从最后一次写入起保留 30 个自然日；任务日志保留 90 个自然日。",
+    "evidence_passage_ids": [
+      "D03-P04"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q13",
+    "category": "table",
+    "question": "团队本周已领 35 枚标签，还能在免费额度内领取多少枚？",
+    "answerable": true,
+    "reference_answer": "MAT-B 标记标签每周免费额度 50 枚，尚可领取 15 枚。",
+    "evidence_passage_ids": [
+      "D04-P01"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q14",
+    "category": "cross_document",
+    "question": "项目用过计算资源，交流日提交的归档包还需要哪些计算相关材料？",
+    "answerable": true,
+    "reference_answer": "需要任务编号和导出日志。交流日提交的归档包须符合项目归档要求。",
+    "evidence_passage_ids": [
+      "D04-P04",
+      "D06-P03"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q15",
+    "category": "cross_document",
+    "question": "周六参加交流日，可以顺便去服务台归还设备或领取材料吗？",
+    "answerable": true,
+    "reference_answer": "不可以。设备服务台在周一至周五办理，材料仓在周二、周四办理；交流日展示厅开放不改变这两个服务点的办理安排。",
+    "evidence_passage_ids": [
+      "D01-P02",
+      "D04-P02",
+      "D06-P04"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q16",
+    "category": "distractor",
+    "question": "工作人员承诺一个工作日内响应，是否表示设备一定在一个工作日内修好？",
+    "answerable": true,
+    "reference_answer": "不表示。一个工作日内是首次响应目标，响应不等于修复；资料未给出统一修复时限。",
+    "evidence_passage_ids": [
+      "D05-P01",
+      "D05-P03"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q17",
+    "category": "table",
+    "question": "每队展示加问答总共多久？展示材料截止时间是什么？",
+    "answerable": true,
+    "reference_answer": "展示 6 分钟、问答 3 分钟，共 9 分钟；材料截止时间为 2026 年 10 月 21 日 18:00。",
+    "evidence_passage_ids": [
+      "D06-P02",
+      "D06-P03"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q18",
+    "category": "unanswerable",
+    "question": "设备服务台的电话号码是多少？",
+    "answerable": false,
+    "reference_answer": "资料未提供服务电话，无法从本语料确定电话号码。",
+    "evidence_passage_ids": [
+      "D05-P01"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q19",
+    "category": "unanswerable",
+    "question": "损坏一台 CAM-01 的固定赔偿金额是多少？",
+    "answerable": false,
+    "reference_answer": "资料没有统一赔偿单价，损坏责任和金额须单独调查，无法确定固定金额。",
+    "evidence_passage_ids": [
+      "D02-P04"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  },
+  {
+    "question_id": "Q20",
+    "category": "unanswerable",
+    "question": "团队“蓝鲸”的交流日展示安排在上午还是下午？",
+    "answerable": false,
+    "reference_answer": "资料未列出具体团队场次，无法确定“蓝鲸”团队的场次。",
+    "evidence_passage_ids": [
+      "D06-P02"
+    ],
+    "label_origin": "ai_authored_draft",
+    "human_review_status": "pending"
+  }
+]

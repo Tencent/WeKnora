@@ -34,9 +34,6 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
     apt-get update && \
     apt-get install -y git build-essential libsqlite3-dev curl
 
-# Install migrate tool
-RUN go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-
 # Copy go mod files. go.mod replace-points anydoc at ./third_party/anydoc-go,
 # so that module's go.mod must exist before `go mod download`.
 COPY go.mod go.sum ./
@@ -46,6 +43,7 @@ COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
 COPY . .
 RUN bash ./scripts/check-license-bundle.sh
+RUN --mount=type=cache,target=/go/pkg/mod go build -tags sqlite_fts5 -o /app/weknora-migrate ./cmd/migrate-runner
 
 # Get version and commit info for build injection
 ARG VERSION_ARG
@@ -128,8 +126,8 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
 RUN mkdir -p /data/files && \
     chown -R appuser:appuser /app /data/files
 
-# Copy migrate tool from builder stage
-COPY --from=builder /go/bin/migrate /usr/local/bin/
+# Copy the verified dual-chain migration command.
+COPY --from=builder /app/weknora-migrate /usr/local/bin/
 COPY --from=builder /app/yanyiwu/ /go/pkg/mod/github.com/yanyiwu/
 
 # Copy the binary from the builder stage

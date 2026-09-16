@@ -1,0 +1,79 @@
+name: Evaluation regression
+
+on:
+  pull_request:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  CGO_ENABLED: "1"
+  GOPROXY: https://proxy.golang.org,direct
+  LOG_FORMAT: ""
+
+jobs:
+  regression:
+    name: Deterministic golden evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run the reproducible evaluation gate
+        run: make evaluation-reproduce
+
+      - name: Validate frozen public evaluation bundles
+        run: |
+          python3 scripts/prepare-public-evaluation.py --check
+          python3 -B scripts/prepare-public-evaluation-test.py
+
+      - name: Run persistent HTTP evaluation and cache rebuild
+        run: python3 scripts/evaluation-rag-http-smoke.py --output artifacts/evaluation-rag-http
+
+      - name: Verify provider accounting and cumulative budget guards
+        run: |
+          go test -tags sqlite_fts5 ./internal/modelobs ./internal/models/call ./internal/models/chat ./internal/types
+          python3 -B scripts/test_evaluation_openrouter_budget.py
+          python3 -B scripts/test_evaluation_expanded_reader.py
+
+      - name: Verify cancellation and process-kill recovery
+        run: |
+          python3 scripts/evaluation-fault-http-smoke.py \
+            --output artifacts/evaluation-fault-http \
+            --server-binary artifacts/evaluation-rag-http/weknora-server
+
+      - name: Verify parser provenance and recovery without external services
+        run: |
+          go test -tags sqlite_fts5 ./cmd/parser-benchmark
+          python3 -B scripts/test_parser_benchmark.py ScoringIntegrityTests OfficialDenominatorAuditTests ReviewBindingTests ManifestMetadataTests
+          python3 -B scripts/test_parser_benchmark_launcher.py
+          python3 -B scripts/test_parser_benchmark_cpu_batch.py
+
+      - name: Check product version consistency
+        run: python3 scripts/check-product-version.py
+
+      - name: Upload authoritative and rendered reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-regression-${{ github.run_id }}
+          path: |
+            artifacts/evaluation-regression/
+            artifacts/evaluation-rag-http/
+            artifacts/evaluation-fault-http/
+          if-no-files-found: error

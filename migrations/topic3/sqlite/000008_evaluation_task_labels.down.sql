@@ -1,0 +1,3 @@
+DROP INDEX IF EXISTS idx_evaluation_tasks_tenant_dataset_version_started;
+DROP INDEX IF EXISTS idx_evaluation_tasks_tenant_dataset_started;
+DROP TABLE IF EXISTS evaluation_task_labels;

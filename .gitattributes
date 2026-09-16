@@ -18,3 +18,16 @@ cli/acceptance/testdata/**/*.json text eol=lf
 
 # Unified diffs use a space to mark empty context lines.
 patches/browserskill/*.patch whitespace=-blank-at-eol
+
+# Evaluation input hashes identify the original bytes on every operating system.
+# Preserve CRLF and whitespace in imported, frozen source documents and licenses.
+dataset/** -text whitespace=cr-at-eol
+dataset/public/weknora-docs/v1/source_docs/** whitespace=cr-at-eol,-blank-at-eol,-blank-at-eof
+dataset/public/weknora-docs/v1/LICENSE whitespace=cr-at-eol,-blank-at-eol
+
+# Pinned parser runtime inputs and timestamped validation evidence retain their bytes.
+deploy/parser-benchmark/mineru/validation.json -text whitespace=cr-at-eol
+deploy/parser-benchmark/paddle/validation.json -text whitespace=cr-at-eol
+deploy/parser-benchmark/paddle/models.lock.json -text whitespace=cr-at-eol
+deploy/parser-benchmark/paddle/requirements.lock -text whitespace=cr-at-eol
+deploy/parser-benchmark/paddle/pipeline.yaml -text whitespace=cr-at-eol,-blank-at-eol

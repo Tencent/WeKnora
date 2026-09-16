@@ -105,6 +105,15 @@ type userService struct {
 	systemSettingSvc interfaces.SystemSettingService
 }
 
+// crossTenantAccessEnabled applies the deployment-wide feature flag and the
+// per-user capability as one authorization decision. Keeping this check on
+// userService ensures token issuance follows the same contract as request
+// middleware.
+func (s *userService) crossTenantAccessEnabled(user *types.User) bool {
+	return user != nil && user.CanAccessAllTenants && s.config != nil &&
+		s.config.Tenant != nil && s.config.Tenant.EnableCrossTenantAccess
+}
+
 // NewUserService creates a new user service instance
 func NewUserService(
 	configInfo *config.Config,
@@ -905,7 +914,7 @@ func (s *userService) resolveLoginTenantID(ctx context.Context, user *types.User
 
 	// Membership (or cross-tenant superuser) must still be valid. Mirrors
 	// the gate in SwitchTenant so the two entry points stay consistent.
-	if !user.CanAccessAllTenants {
+	if !s.crossTenantAccessEnabled(user) {
 		if s.memberService == nil {
 			logger.Warnf(ctx,
 				"resolveLoginTenantID: member service unavailable; falling back to home for user %s",
@@ -948,7 +957,7 @@ func (s *userService) homeOrFirstMembershipTenant(ctx context.Context, user *typ
 	if user.TenantID == 0 {
 		return s.resolveFirstMembershipTenant(ctx, user)
 	}
-	if user.CanAccessAllTenants || s.memberService == nil {
+	if s.crossTenantAccessEnabled(user) || s.memberService == nil {
 		return user.TenantID
 	}
 	member, err := s.memberService.GetMembership(ctx, user.ID, user.TenantID)
@@ -1139,7 +1148,7 @@ func (s *userService) SwitchTenant(
 
 	// Verify membership unless the caller is a cross-tenant superuser
 	// switching outside their home tenant.
-	if !user.CanAccessAllTenants || targetTenantID == user.TenantID {
+	if !s.crossTenantAccessEnabled(user) || targetTenantID == user.TenantID {
 		if s.memberService == nil {
 			return nil, errors.New("workspace membership service unavailable")
 		}

@@ -79,6 +79,40 @@ func TestFAQEnabledFilterContract(t *testing.T) {
 	}
 }
 
+func TestModelStatisticsRouteContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths map[string]map[string]struct {
+					Responses map[string]any   `json:"responses" yaml:"responses"`
+					Security  []map[string]any `json:"security" yaml:"security"`
+				} `json:"paths" yaml:"paths"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatalf("parse generated Swagger document: %v", err)
+			}
+			for _, route := range []struct{ path, method, status string }{
+				{"/models/usage", "get", "200"},
+				{"/models/{id}/usage", "get", "200"},
+				{"/models/{id}/pricing", "get", "200"},
+				{"/models/{id}/pricing", "put", "201"},
+			} {
+				operation, ok := spec.Paths[route.path][route.method]
+				if !ok {
+					t.Errorf("missing %s %s", route.method, route.path)
+					continue
+				}
+				if _, ok := operation.Responses[route.status]; !ok {
+					t.Errorf("%s %s: missing response %s", route.method, route.path, route.status)
+				}
+				if len(operation.Security) == 0 {
+					t.Errorf("%s %s: missing authentication contract", route.method, route.path)
+				}
+			}
+		})
+	}
+}
+
 func readSwaggerFile(t *testing.T, name string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(name)

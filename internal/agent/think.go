@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ type streamLLMResult struct {
 	Usage            *types.TokenUsage
 	FinishReason     string // actual finish_reason from LLM (captured from last stream chunk)
 	StreamError      string // error message from stream (e.g., timeout), kept separate from Content
+	StreamErrorFinal bool   // the provider marked the error as the terminal stream response
 }
 
 // streamLLMToEventBus streams LLM response through EventBus (generic method)
@@ -51,26 +53,38 @@ func (e *AgentEngine) streamLLMToEventBus(
 	var lastChunkAt atomic.Int64
 	lastChunkAt.Store(time.Now().UnixNano())
 
+	stallTimeout := e.getLLMStallTimeout()
+	var providerWaiting atomic.Bool
+	providerWaiting.Store(true)
+	llmCtx = types.WithStreamActivity(llmCtx, func(waiting bool) {
+		if waiting {
+			lastChunkAt.Store(time.Now().UnixNano())
+		}
+		providerWaiting.Store(waiting)
+	})
+	stalled, stopWatchdog := watchStreamStallActivity(ctx, llmCancel, stallTimeout, &lastChunkAt, &providerWaiting)
+	defer stopWatchdog()
+
 	// Model-context encoding owns codec ordering and temporary-handle lifecycle.
 	messages = e.modelContext.EncodeMessages(messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
+		if stalled.Load() {
+			return nil, fmt.Errorf("LLM stream establishment stalled: %w", err)
+		}
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
 		return nil, err
 	}
 
 	result := &streamLLMResult{}
+	var accountingErr error
 	chunkCount := 0
 	responseTypeCounts := make(map[string]int)
 	firstChunkTime := time.Time{}
 	answerDecoder := e.modelContext.StreamDecoder()
 	thinkingDecoder := e.modelContext.StreamDecoder()
-
-	stallTimeout := e.getLLMStallTimeout()
-	stalled, stopWatchdog := watchStreamStall(ctx, llmCancel, stallTimeout, &lastChunkAt)
-	defer stopWatchdog()
 
 	for chunk := range stream {
 		lastChunkAt.Store(time.Now().UnixNano())
@@ -87,7 +101,14 @@ func (e *AgentEngine) streamLLMToEventBus(
 		// assembled when the stream broke; keeping them lets the caller log and
 		// reason about a partial call instead of seeing a clean empty response.
 		if chunk.ResponseType == types.ResponseTypeError {
+			if chunk.Usage != nil {
+				result.Usage = chunk.Usage
+			}
+			if chunk.Data["error_code"] == "model_call_accounting_failed" {
+				accountingErr = types.RecordModelAccountingError(ctx, errors.New(chunk.Content))
+			}
 			result.StreamError = chunk.Content
+			result.StreamErrorFinal = result.StreamErrorFinal || chunk.Done
 			if len(chunk.ToolCalls) > 0 {
 				result.ToolCalls = chunk.ToolCalls
 			}
@@ -189,6 +210,9 @@ func (e *AgentEngine) streamLLMToEventBus(
 	// retries or degrades. Returning it as success once let a 238-character
 	// preamble stand in as the final answer while a 30 KB write_sandbox_file
 	// call was silently dropped.
+	if accountingErr != nil {
+		return result, accountingErr
+	}
 	if result.StreamError != "" {
 		return result, fmt.Errorf("LLM stream error: %s", result.StreamError)
 	}
@@ -206,6 +230,13 @@ func watchStreamStall(
 	stallTimeout time.Duration,
 	lastChunkAt *atomic.Int64,
 ) (*atomic.Bool, func()) {
+	return watchStreamStallActivity(ctx, cancel, stallTimeout, lastChunkAt, nil)
+}
+
+func watchStreamStallActivity(
+	ctx context.Context, cancel context.CancelFunc, stallTimeout time.Duration,
+	lastChunkAt *atomic.Int64, waiting *atomic.Bool,
+) (*atomic.Bool, func()) {
 	stalled := &atomic.Bool{}
 	done := make(chan struct{})
 
@@ -219,6 +250,9 @@ func watchStreamStall(
 			case <-done:
 				return
 			case <-ticker.C:
+				if waiting != nil && !waiting.Load() {
+					continue
+				}
 				idle := time.Since(time.Unix(0, lastChunkAt.Load()))
 				if idle < stallTimeout {
 					continue
@@ -524,12 +558,18 @@ func (e *AgentEngine) callLLMWithRetry(
 	// Sanitize messages before sending to LLM (fix consecutive roles, orphaned tool results)
 	messages = agenttools.SanitizeMessages(messages)
 
+	if err := types.ModelAccountingError(ctx); err != nil {
+		return nil, err
+	}
 	response, err := e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
 
 	// A rejected-for-size request is neither transient nor fatal, and reading
 	// it as either is wrong in a specific way: retried unchanged it fails
 	// identically every time, and surfaced as an error it ends a turn that a
 	// compaction would have rescued. It gets its own one-shot recovery.
+	if errors.Is(err, types.ErrModelAccounting) {
+		return response, err
+	}
 	if err != nil && !e.overflowRecovered && compaction.IsOverflowError(err) {
 		e.overflowRecovered = true
 		logger.Warnf(ctx, "[Agent][Round-%d] Provider rejected the request as too large; "+
@@ -541,6 +581,9 @@ func (e *AgentEngine) callLLMWithRetry(
 		// back out. The provider gets the sanitized view; the engine keeps the
 		// structured one.
 		compacted := e.forceCompaction(ctx, messages, round)
+		if accountingErr := types.ModelAccountingError(ctx); accountingErr != nil {
+			return nil, accountingErr
+		}
 		*messagesPtr = compacted
 		messages = agenttools.SanitizeMessages(compacted)
 		e.lastSentMsgCount = len(compacted)
@@ -553,7 +596,13 @@ func (e *AgentEngine) callLLMWithRetry(
 			retryDelay := time.Duration(retry) * time.Second
 			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
 				round, retry, maxLLMRetries, retryDelay, err)
-			time.Sleep(retryDelay)
+			timer := time.NewTimer(retryDelay)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, context.Cause(ctx)
+			}
 
 			response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
 			if err == nil || !isTransientError(err) {
@@ -567,6 +616,10 @@ func (e *AgentEngine) callLLMWithRetry(
 			"iteration": iteration,
 			"error":     err.Error(),
 		})
+
+		if errors.Is(err, types.ErrModelAccounting) {
+			return response, err
+		}
 
 		// Graceful degradation: if we have tool results from previous rounds,
 		// try to synthesize a final answer from them instead of losing everything.

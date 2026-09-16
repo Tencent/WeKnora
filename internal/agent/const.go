@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -83,7 +85,7 @@ var transientErrorMarkers = []string{
 
 // isTransientError checks whether an error is likely transient and worth retrying.
 func isTransientError(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, types.ErrModelAccounting) || errors.Is(err, context.Canceled) {
 		return false
 	}
 	errStr := strings.ToLower(err.Error())
@@ -121,7 +123,11 @@ func (e *AgentEngine) getCompletionTokenBudget() int {
 		configured = e.config.MaxCompletionTokens
 		sandboxID = e.config.SandboxConfigID
 	}
-	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
+	budget := types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
+	if bounded, ok := e.chatModel.(interface{ OutputTokenLimit() int }); ok && bounded.OutputTokenLimit() > 0 {
+		budget = min(budget, bounded.OutputTokenLimit())
+	}
+	return budget
 }
 
 // contextReserveTokens is the part of the window that history may not occupy,

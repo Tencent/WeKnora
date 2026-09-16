@@ -67,6 +67,7 @@ echo ">> Assembling package..."
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}/web"
 
+go build -tags "sqlite_fts5" -o "${DIST_DIR}/weknora-migrate" ./cmd/migrate-runner
 cp WeKnora-lite "${DIST_DIR}/"
 bash ./scripts/copy-licenses.sh "${DIST_DIR}"
 if [ -d web ] && [ -f web/index.html ]; then
@@ -77,10 +78,12 @@ cp docs/LITE.md "${DIST_DIR}/README.md"
 if [ -d config ]; then
     cp -r config "${DIST_DIR}/config"
 fi
-if [ -d migrations/sqlite ]; then
-    mkdir -p "${DIST_DIR}/migrations/sqlite"
-    cp -r migrations/sqlite/* "${DIST_DIR}/migrations/sqlite/"
-fi
+mkdir -p "${DIST_DIR}/migrations"
+for migration_chain in versioned sqlite topic3/postgres topic3/sqlite; do
+    test -d "migrations/$migration_chain"
+    mkdir -p "${DIST_DIR}/migrations/$migration_chain"
+    cp -r "migrations/$migration_chain/." "${DIST_DIR}/migrations/$migration_chain/"
+done
 if [ -f deploy/weknora-lite.service ]; then
     cp deploy/weknora-lite.service "${DIST_DIR}/"
 fi

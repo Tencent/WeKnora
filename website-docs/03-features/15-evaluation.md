@@ -1,288 +1,137 @@
-# 评估能力（Evaluation）
+# 评测能力
 
-评估使用带标准答案的问答数据集，比较分块、模型和检索配置的效果。系统创建评估知识库并导入语料，逐题执行检索与生成，输出 Precision、Recall、NDCG、MRR、MAP、BLEU 和 ROUGE 等指标。
+评测能力使用版本化数据集执行知识库检索与生成流程，并保存任务、逐题事实、指标观测、运行时统计和实验快照。调用方可以查询任务、比较多个成功运行、导出终态结果，并为逐题结果追加人工评分修订。
 
-::: tip 通过 API 使用
-评估暂时没有独立的界面入口，通过 `POST /api/v1/evaluation` 发起、`GET /api/v1/evaluation?task_id=...` 轮询结果；创建需要 Admin，查询需要 Viewer 权限。数据集是 Parquet 格式，格式要求见下文。
-:::
+应用程序编程接口密钥（Application Programming Interface Key，API Key）访问评测接口时需要 `run_evaluations` 能力或 full-access 权限。查看者（Viewer）可以读取评测数据，管理员（Admin）可以创建、取消、标注任务以及写入数据集和人工评分。删除任务仅接受具备 Admin 权限的用户登录令牌。
 
-比较配置时应固定数据集，每次调整一个变量，并对照同一组指标分析结果。
+本文使用标识符（Identifier，ID）关联数据集、版本、任务和模型。导出格式包括 JavaScript 对象表示法（JavaScript Object Notation，JSON）与逗号分隔值（Comma-Separated Values，CSV）。
 
-## 运行一次评估
+## 数据与任务模型
 
-1. 准备符合下方格式的 Parquet 数据集，或使用内置 `default` 数据集。
-2. 选择参考知识库、对话模型和重排模型，通过 `POST /api/v1/evaluation` 创建任务。参考知识库用于复制配置，评估会使用单独的知识库。
-3. 记录返回的任务 ID，通过 `GET /api/v1/evaluation?task_id=...` 查询状态和进度。
-4. 任务成功后比较检索与生成指标；失败时先检查任务错误，再调整配置并重新运行。
+评测数据集由数据集身份和不可变版本组成。一个版本包含段落、问题和相关性关系；问题在版本中的顺序确定稳定的 `sample_index`。服务为版本计算内容哈希，并在任务实验快照中记录数据集版本、模型配置、参数、指标计划、代码和运行环境来源。
 
-创建任务需要 Admin 权限，查询结果需要 Viewer 权限；API Key 还需评估能力或 full-access。
+任务状态使用数值枚举：`0` 为 Pending，`1` 为 Running，`2` 为 Success，`3` 为 Failed，`4` 为 TimedOut，`5` 为 Interrupted，`6` 为 Canceled。任务响应同时提供 `total`、`finished`、`labels`、`dataset_version_id`、`provenance_complete` 和可选的 `cancel_requested_at`、`err_msg`、`cleanup_errors`。
 
-## 数据集格式
+下图展示数据集版本、评测任务和结果消费接口之间的数据流。
 
-数据集服务（`internal/application/service/dataset.go`）从 `./dataset/samples/` 加载 5 个 **Parquet** 文件：
+```mermaid
+flowchart LR
+    P["公开目录或本地 JSON"] --> A["校验导入请求"]
+    A --> B["事务创建租户数据集与不可变初版<br/>passages / questions / relevance"]
+    B --> C["POST /evaluation<br/>冻结数据集版本与实验配置"]
+    C --> D["持久化任务与逐题结果"]
+    D --> E["查询任务和逐题分页"]
+    D --> F["比较多个成功运行"]
+    D --> G["导出 JSON / CSV"]
+    D --> H["追加人工评分修订"]
+```
 
-| 文件 | Schema | 含义 |
+图中的不可变版本为一次评测提供固定输入，实验快照为比较和导出提供来源信息。逐题结果、人工评分和聚合指标都通过任务 ID 关联到同一次运行。
+
+## 接口清单
+
+所有路径都以 `/api/v1` 为前缀。
+
+| 方法 | 路径 | 角色 | 用途 |
+| --- | --- | --- | --- |
+| POST | `/evaluation` | Admin | 创建评测任务 |
+| GET | `/evaluation?task_id=...` | Viewer | 查询单个任务详情 |
+| GET | `/evaluation/metrics` | Viewer | 列出版本化指标定义 |
+| GET | `/evaluation/tasks` | Viewer | 筛选并分页列出任务 |
+| PUT | `/evaluation/tasks/:task_id/labels` | Admin | 全量替换任务标签 |
+| POST | `/evaluation/comparisons` | Viewer | 比较 2 至 10 个成功任务 |
+| GET | `/evaluation/tasks/:task_id/export?format=json|csv` | Viewer | 导出终态任务 |
+| POST | `/evaluation/:task_id/cancel` | Admin | 持久化取消请求 |
+| DELETE | `/evaluation/:task_id` | Admin 用户令牌 | 软删除终态任务 |
+| GET | `/evaluation/tasks/:task_id/questions` | Viewer | 分页读取逐题结果 |
+| GET | `/evaluation/tasks/:task_id/questions/:sample_index/ratings` | Viewer | 列出人工评分修订 |
+| POST | `/evaluation/tasks/:task_id/questions/:sample_index/ratings` | Admin | 追加人工评分修订 |
+| POST | `/evaluation/datasets` | Admin | 创建租户数据集身份 |
+| GET | `/evaluation/datasets` | Viewer | 列出可见数据集 |
+| POST | `/evaluation/datasets/import` | Admin | 原子导入租户数据集与初版，支持请求重试 |
+| GET | `/evaluation/datasets/catalog` | Viewer | 读取公开数据集目录和实际导入限制 |
+| GET | `/evaluation/datasets/catalog/:id` | Viewer | 读取公开包内容和来源清单 |
+| POST | `/evaluation/datasets/:id/versions` | Admin | 创建不可变数据集版本 |
+| GET | `/evaluation/datasets/:id/versions` | Viewer | 列出数据集版本 |
+
+## 创建评测任务
+
+`POST /api/v1/evaluation` 接受 JSON 请求体：
+
+| 字段 | 类型 | 必填 | 作用 |
+| --- | --- | --- | --- |
+| `dataset_id` | string | 否 | 数据集 ID |
+| `dataset_version_id` | string | 否 | 固定到一个不可变数据集版本 |
+| `knowledge_base_id` | string | 否 | 源知识库 ID，用于解析评测配置 |
+| `chat_id` | string | 否 | 对话模型 ID |
+| `rerank_id` | string | 否 | 重排序模型 ID |
+| `seed` | integer | 否 | 生成随机种子；省略与显式传入 `0` 含义不同 |
+| `configuration.retrieval` | object | 否 | `vector_threshold`、`keyword_threshold`、`embedding_top_k` 覆盖值 |
+| `configuration.rerank` | object | 否 | `rerank_top_k`、`rerank_threshold` 覆盖值 |
+| `configuration.generation` | object | 否 | `temperature`、`top_p`、`top_k`、`max_tokens` 覆盖值 |
+
+```bash
+curl -X POST "$BASE/api/v1/evaluation" \
+  -H "X-API-Key: $API_KEY" -H 'Content-Type: application/json' \
+  -d '{"dataset_id":"golden","dataset_version_id":"version-1","chat_id":"model-1","seed":0}'
+```
+
+服务返回 `{"success":true,"data":EvaluationTask}`。模型提供方无法兑现请求种子时返回 `422`；数据集、版本或源知识库不可见时返回 `404`。
+
+配置参数逐字段应用。仅提交 `configuration.retrieval.embedding_top_k` 时，服务保留向量阈值、关键词阈值和重排序参数的默认值；显式提交的 `0` 作为覆盖值生效。实验快照保存所有已解析参数，因此局部请求和具有相同有效数值的完整请求生成相同配置快照。
+
+## 查询与管理任务
+
+`GET /api/v1/evaluation/tasks` 按 `(start_time DESC, id DESC)` 使用不透明游标分页。支持 `status`、`dataset_id`、`dataset_version_id`、`model_id`、`started_from`、`started_to`、可重复的 `label`、`page_size` 和 `cursor`。时间参数使用 RFC 3339（Request for Comments 3339）格式；`page_size` 默认 20，最大 100。
+
+标签更新请求为 `{"labels":["baseline","embedding-a"]}`。比较请求为 `{"task_ids":["task-a","task-b"],"baseline_task_id":"task-a"}`，其中任务数为 2 至 10，且任务必须具有可比较的成功结果。导出接口要求 `format=json` 或 `format=csv`，并对导出条数和文件大小应用服务配置上限。
+
+导出格式版本为 3。JSON 导出的 `runtime_metrics` 与 CSV 运行记录的 `runtime_metrics_json` 保存任务持久化的运行时快照，包括阶段耗时、样本计数、用量与 `cost` 费用覆盖。费用按币种列出，同时保留未定价、用量未上报及尚未结束的调用数。空快照保留为 `null`，显式零费用保留为 0；导出使用保存的价格和费用事实。
+
+逐题接口按 `sample_index` 升序分页，`page_size` 默认 100，最大 500。响应中的每条记录包含问题、参考答案、检索与重排序结果、生成文本、逐样本指标、指标观测、阶段耗时、Token 用量、状态和结果哈希。
+
+人工评分请求字段如下：
+
+| 字段 | 类型 | 约束 |
 | --- | --- | --- |
-| `queries.parquet` | `id: int64, text: string` | 问题集合 |
-| `corpus.parquet` | `id: int64, text: string` | 语料段落（评估时灌入知识库） |
-| `answers.parquet` | `id: int64, text: string` | 参考答案 |
-| `qrels.parquet` | `qid: int64, pid: int64` | 问题 → 相关段落的 ground truth 关联（检索指标依据） |
-| `qas.parquet` | `qid: int64, aid: int64` | 问题 → 答案映射（生成指标依据） |
+| `rubric_key` | string | 必填，最长 64 字符 |
+| `rubric_version` | string | 必填，最长 32 字符 |
+| `rubric_snapshot` | object | 必填，保存评分量表快照 |
+| `score` | integer | 必填，1 至 5 |
+| `comment` | string | 可选，最长 4000 字符 |
 
-对应的 Go 结构体：
+服务保留每次人工评分修订，并通过 `supersedes_id` 连接同一 rubric 的上一修订。
 
-```go
-type TextInfo struct {
-    ID   int64  `parquet:"id"`
-    Text string `parquet:"text"`
-}
-type RelsInfo struct {
-    QID int64 `parquet:"qid"`
-    PID int64 `parquet:"pid"`
-}
-type QaInfo struct {
-    QID int64 `parquet:"qid"`
-    AID int64 `parquet:"aid"`
-}
-```
+## 数据集版本接口
 
-加载后拼装为逐样本的 `QAPair`（`internal/types/dataset.go`）：
+评测工作台通过公开目录和本地 JSON 导入资料。公开目录提供中文机器阅读理解数据集（Chinese Machine Reading Comprehension，CMRC 2018）与斯坦福问答数据集（Stanford Question Answering Dataset，SQuAD 2.0）的固定开发集子集。每个子集包含 32 个段落和 24 道问题，并附有来源地址、许可证、上游提交、抽样规则、文件摘要及适用限制。目录中的记录数量和导入上限来自服务响应。
 
-```go
-type QAPair struct {
-    QID      int      // 问题 ID
-    Question string   // 问题文本
-    PIDs     []int    // 相关段落 ID（ground truth）
-    Passages []string // 段落文本
-    AID      int      // 答案 ID
-    Answer   string   // 参考答案文本
-}
-```
+CMRC 2018 子集包含 24 道可回答题。SQuAD 2.0 子集包含 16 道可回答题和 8 道原始给定上下文的无答案题。每题只保留原始问题与上下文的标注关系，额外候选段落保持未标注。无答案题的相关性等级 `0` 表示指定原文不相关；该标注范围限定在原始上下文。检索指标表示命中已标注原文的情况，无正例时的检索零分需要结合无答案题类型解释。平台版本保存一个参考答案，完整多答案及字符偏移保存在资料包的 `annotations.json`。
 
-自定义数据集只需按上述 Schema 生成同名 Parquet 文件。加载时服务会打印统计信息（问题数、语料数、平均相关段落数、答案覆盖率等）。
+`POST /api/v1/evaluation/datasets/import` 接受 `request_id`、`name`、可选 `description` 与 `content`。`content` 使用下方三个数组的结构。请求标识使用通用唯一标识符（Universally Unique Identifier，UUID），前端在失败重试期间保留同一个标识。服务在一个数据库事务内创建数据集身份、不可变初版与全部内容，成功响应为 `{"success":true,"data":{"dataset":...,"version":...,"replayed":false}}`。相同租户和请求标识重试相同输入时返回同一个初版，并设置 `replayed:true`；不同输入复用该标识时返回 `409`。
 
-## 结果查询
+服务在写入前检查请求体字节、数组规模、标识长度、引用关系、文本长度和相关性等级，拒绝未知字段、重复字段、尾随 JSON 与截断输入。导入要求段落和问题数组非空，相关性数组可以为空。元数据为 JSON 对象，参考答案可以为空字符串。配置上限通过 `GET /api/v1/evaluation/datasets/catalog` 的 `data.limits` 返回，客户端据此在文件读取和提交前校验。导入过程保存评测输入，模型运行通过单独的任务创建操作启动。
 
-`GET /api/v1/evaluation?task_id=evaluation-{tenant}-{dataset}`，返回 `EvaluationDetail`：
+创建数据集身份的请求体为 `{"name":"回归集","description":"核心问答回归"}`。创建版本时提交三个数组：
 
 ```json
 {
-  "success": true,
-  "data": {
-    "task": {
-      "id": "evaluation-1-default",
-      "dataset_id": "default",
-      "status": 2,
-      "total": 100,
-      "finished": 100
-    },
-    "params": { "...": "ChatManage 评估参数快照" },
-    "metric": {
-      "retrieval_metrics": {
-        "precision": 0.85, "recall": 0.92,
-        "ndcg3": 0.88, "ndcg10": 0.86,
-        "mrr": 0.95, "map": 0.87
-      },
-      "generation_metrics": {
-        "bleu1": 0.72, "bleu2": 0.65, "bleu4": 0.58,
-        "rouge1": 0.78, "rouge2": 0.71, "rougel": 0.75
-      }
-    }
-  }
+  "passages": [
+    {"pid": "p-1", "content": "段落内容", "metadata": {"source": "manual"}}
+  ],
+  "questions": [
+    {"qid": "q-1", "question": "问题文本", "answer": "参考答案"}
+  ],
+  "relevance": [
+    {"qid": "q-1", "pid": "p-1", "grade": 1}
+  ]
 }
 ```
 
-任务运行期间可轮询该接口获取 `finished / total` 进度；`status = 3` 时 `err_msg` 携带失败原因。
+版本响应包含 `id`、`dataset_id`、`version_number`、`schema_version`、`artifact_sha256`、`content_sha256`、`manifest` 和三类记录数量。系统数据集对所有租户可见，租户数据集只对所属租户可见。
 
-> **注意**：评估结果存储在**内存**（`evaluationMemoryStorage`：`map[string]*EvaluationDetail` + `sync.RWMutex`，见 `internal/application/service/evaluation.go`），服务重启后任务与结果会丢失，需重新发起评估。
+## 指标目录
 
-## 指标清单
+`GET /api/v1/evaluation/metrics` 返回 `data.items`。每个指标定义包含 `key`、`version`、`kind`、`description`、`default_config` 和 `config_schema`。任务结果中的 `metric.scores` 使用指标实例 ID 作为键，并通过 `value`、`status` 和可选 `error_code` 区分有效零值、缺失观测和计算错误。
 
-指标注册表见 `internal/application/service/metric_hook.go`，共 12 项，分两组。文本先经 `metric/common.go` 分词：中文用 Jieba 分词、英文按空白切分、按 `。` / `.` 切句。
-
-### 检索指标（Retrieval Metrics）
-
-| 指标 | 字段 | 实现文件 | 含义 |
-| --- | --- | --- | --- |
-| Precision | `precision` | `metric/precision.go` | 检索准确率：命中的相关文档数 / 检索返回总数，按 GT 集合求均值 |
-| Recall | `recall` | `metric/recall.go` | 检索召回率：命中的相关文档数 / 相关文档总数 |
-| NDCG@3 | `ndcg3` | `metric/ndcg.go` | 归一化折损累计增益（取前 3 位），奖励把相关文档排在前面 |
-| NDCG@10 | `ndcg10` | `metric/ndcg.go` | 同上，取前 10 位 |
-| MRR | `mrr` | `metric/mrr.go` | 首个相关文档倒数排名的平均：`sum(1/rank) / N` |
-| MAP | `map` | `metric/map.go` | 平均精度均值：对每个命中位置累计 `Precision@k` 再归一化 |
-
-NDCG 核心计算（`metric/ndcg.go`）：
-
-```go
-// DCG = sum((2^rel_i - 1) / log2(i+2))，rel 为 0/1
-dcg += (math.Pow(2, float64(relevance)) - 1) / math.Log2(float64(i+2))
-// NDCG = DCG / IDCG（理想排序的 DCG）
-```
-
-MRR 核心计算（`metric/mrr.go`）：
-
-```go
-for i, predID := range ids {
-    if _, ok := gtSet[predID]; ok {
-        sumRR += 1.0 / float64(i+1) // 第一个命中位置的倒数
-        break
-    }
-}
-```
-
-### 生成指标（Generation Metrics）
-
-| 指标 | 字段 | 实现文件 | 含义 |
-| --- | --- | --- | --- |
-| BLEU-1 | `bleu1` | `metric/bleu.go` | 1-gram 精度（权重 `[1.0, 0, 0, 0]`） |
-| BLEU-2 | `bleu2` | `metric/bleu.go` | 1/2-gram 各 50%（权重 `[0.5, 0.5, 0, 0]`） |
-| BLEU-4 | `bleu4` | `metric/bleu.go` | 1~4-gram 均权（`[0.25, 0.25, 0.25, 0.25]`），含 brevity penalty |
-| ROUGE-1 | `rouge1` | `metric/rouge.go` | 一元词重叠 F1 |
-| ROUGE-2 | `rouge2` | `metric/rouge.go` | 二元词组重叠 F1 |
-| ROUGE-L | `rougel` | `metric/rouge.go` | 最长公共子序列（LCS）F1 |
-
-BLEU 核心（`metric/bleu.go`）：修正 n-gram 精度的加权几何平均乘以简短惩罚 `bp * exp(sum(w_i * log(p_i)))`。ROUGE 取 F1：`F1 = 2PR / (P + R + 1e-8)`（`metric/rouge_score.go`）。
-
-## 接口与执行参考
-
-### API
-
-`internal/router/router.go`：
-
-```go
-evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(apiKeyFullAccess()))
-{
-    evaluationRoutes.POST("", g.Admin(), handler.Evaluation)
-    evaluationRoutes.GET("", g.Viewer(), handler.GetEvaluationResult)
-}
-```
-
-| 方法 | 路径 | 权限 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/api/v1/evaluation` | Admin（API Key 需 `RunEvaluations` 能力） | 创建评估任务，立即返回任务信息 |
-| GET | `/api/v1/evaluation?task_id=...` | Viewer | 查询任务状态、进度与指标结果 |
-
-#### 创建评估任务
-
-请求参数（`internal/handler/evaluation.go`）：
-
-```go
-type EvaluationRequest struct {
-    DatasetID       string `json:"dataset_id"`        // 数据集 ID，默认 "default"
-    KnowledgeBaseID string `json:"knowledge_base_id"` // 参考知识库（复用其配置）
-    ChatModelID     string `json:"chat_id"`           // 聊天模型
-    RerankModelID   string `json:"rerank_id"`         // 重排模型
-}
-```
-
-| 参数 | 必填 | 默认行为 |
-| --- | --- | --- |
-| `dataset_id` | 否 | 缺省使用内置 `default` 数据集（`dataset/samples/`） |
-| `knowledge_base_id` | 否 | 未提供则新建评估专用知识库；提供则复制其配置创建评估 KB |
-| `chat_id` | 否 | 缺省自动选择默认 Chat 模型 |
-| `rerank_id` | 否 | 缺省自动选择默认 Rerank 模型 |
-
-任务 ID 格式为 `evaluation-{tenantID}-{datasetID}`。任务对象（`internal/types/evaluation.go`）：
-
-```go
-type EvaluationTask struct {
-    ID        string           `json:"id"`
-    TenantID  uint64           `json:"tenant_id"`
-    DatasetID string           `json:"dataset_id"`
-    StartTime time.Time        `json:"start_time"`
-    Status    EvaluationStatue `json:"status"`
-    ErrMsg    string           `json:"err_msg,omitempty"`
-    Total     int              `json:"total,omitempty"`    // 样本总数
-    Finished  int              `json:"finished,omitempty"` // 已完成数
-}
-```
-
-任务状态枚举（注意源码中拼写为 `EvaluationStatue`）：
-
-```go
-const (
-    EvaluationStatuePending EvaluationStatue = iota // 0 待启动
-    EvaluationStatueRunning                          // 1 运行中
-    EvaluationStatueSuccess                          // 2 成功
-    EvaluationStatueFailed                           // 3 失败
-)
-```
-
-### 评估流程
-
-`internal/application/service/evaluation.go` 中，POST 接口**同步完成准备、异步执行评估**：
-
-1. **知识库准备**：新建（或按参考 KB 配置克隆）评估专用知识库，取默认 Embedding 与 LLM 模型；
-2. **参数装配**：从系统配置装配 `ChatManage` 评估参数——`VectorThreshold`、`KeywordThreshold`、`EmbeddingTopK`、`RerankTopK`、`RerankThreshold`、`MaxRounds`、`SummaryConfig`（MaxTokens / TopK / TopP / RepeatPenalty / Prompt / ContextTemplate 等）、`FallbackResponse`、改写提示词等；
-3. **任务注册**：以任务 ID 注册到内存存储，状态 `Pending`，立即返回响应；
-4. **后台执行**（goroutine）：将数据集 corpus 灌入评估 KB → 并行评估每个 QA 对 → 汇聚指标 → 清理资源。
-
-并发度取 `max(GOMAXPROCS - 1, 1)`（errgroup 限流）：
-
-```go
-var g errgroup.Group
-metricHook := NewHookMetric(len(dataset))
-g.SetLimit(max(runtime.GOMAXPROCS(0)-1, 1))
-for i, qaPair := range dataset {
-    g.Go(func() error {
-        // 1. 克隆 ChatManage 配置
-        // 2. 走 KnowledgeQAByEvent 完整管道（检索 + 重排 + 生成）
-        // 3. 记录 MetricInput（检索到的 passage ID、生成文本、GT）
-        // 4. 加锁更新 finished 进度
-    })
-}
-g.Wait()
-```
-
-每个样本产出一个 `MetricInput`（`internal/types/evaluation.go`）：
-
-```go
-type MetricInput struct {
-    RetrievalGT    [][]int // 检索 ground truth（相关 passage ID 列表）
-    RetrievalIDs   []int   // 实际检索返回的 passage ID
-    GeneratedTexts string  // 模型生成文本
-    GeneratedGT    string  // 参考答案
-}
-```
-
-`metric_hook.go` 对每个样本遍历所有已注册指标计算器求分，最终 `Avg()` 对全部样本逐指标取均值，写入 `MetricResult`。
-
-::: warning RetrievalIDs 的口径
-`RetrievalIDs` 必须是**数据集里的 passage ID**，不能直接用检索结果的 `ChunkIndex`——后者只是分块在知识库里的序号，与 passage ID 没有对应关系，直接使用会让所有检索指标恒为 0。`recordFinish` 因此把每条检索结果的正文与该样本的 ground truth passage 做双向包含匹配，反查出对应的 pid 并去重。重排结果为空时回退用原始检索结果，避免整条样本记成「什么都没召回」。
-
-语料灌入也必须**同步等待索引完成**（`CreateKnowledgeFromPassageSync`）：异步入库时评估查询会跑在索引建好之前，同样表现为指标恒为 0。另外 passage 列表按 `maxPID + 1` 分配长度，pid 是 0-based 且包含末位。
-:::
-
-#### 评估流程图
-
-```mermaid
-flowchart TD
-    A["POST /api/v1/evaluation<br/>(dataset_id, knowledge_base_id, chat_id, rerank_id)"] --> B["创建评估专用知识库<br/>(新建或克隆参考 KB 配置)"]
-    B --> C["装配 ChatManage 评估参数<br/>(阈值 / TopK / Summary 配置)"]
-    C --> D["注册任务到内存存储<br/>ID = evaluation-{tenant}-{dataset}, 状态 Pending"]
-    D --> E["立即返回任务信息"]
-    D --> F["goroutine 后台执行, 状态 Running"]
-    F --> G["加载 Parquet 数据集<br/>queries / corpus / qrels / answers / qas"]
-    G --> H["corpus 灌入评估知识库"]
-    H --> I["errgroup 并行处理 QA 对<br/>并发 = max(CPU-1, 1)"]
-    I --> J["每个问题跑 KnowledgeQAByEvent<br/>检索 + 重排 + 生成"]
-    J --> K["记录 MetricInput<br/>(RetrievalIDs vs GT, 生成文本 vs 参考答案)"]
-    K --> L["MetricList.Avg 汇聚 12 项指标均值"]
-    L --> M["写回 EvaluationDetail, 状态 Success / Failed<br/>清理评估知识库"]
-    M --> N["GET /api/v1/evaluation?task_id=...<br/>轮询进度与指标"]
-```
-
-## 实现参考
-
-以下路径均相对仓库根目录：
-
-| 层 | 文件 |
-| --- | --- |
-| HTTP Handler | `internal/handler/evaluation.go` |
-| 评估服务 | `internal/application/service/evaluation.go` |
-| 指标注册与汇聚 | `internal/application/service/metric_hook.go` |
-| 指标实现 | `internal/application/service/metric/`（`precision.go`、`recall.go`、`ndcg.go`、`mrr.go`、`map.go`、`bleu.go`、`rouge.go`、`rouge_score.go`、`common.go`） |
-| 数据集加载 | `internal/application/service/dataset.go`、`internal/handler/dataset.go` |
-| 类型定义 | `internal/types/evaluation.go`、`internal/types/dataset.go` |
-| 内置样例数据集 | `dataset/samples/`（Parquet 文件） |
-| 路由注册 | `internal/router/router.go` 的 `RegisterEvaluationRoutes` |
+接口由 `internal/router/routes_infra.go` 注册；请求处理位于 `internal/handler/evaluation.go`、`internal/handler/evaluation_dataset.go` 和 `internal/handler/evaluation_question.go`。

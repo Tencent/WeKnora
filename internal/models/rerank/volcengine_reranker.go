@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/volcengine/vikingdb-go-sdk/knowledge"
@@ -75,7 +77,7 @@ func NewVolcengineReranker(config *RerankerConfig) (*VolcengineReranker, error) 
 		knowledge.WithRegion(region),
 		knowledge.WithTimeout(30*time.Second),
 		knowledge.WithHTTPClient(newRerankHTTPClient(30*time.Second)),
-		knowledge.WithMaxRetries(1),
+		knowledge.WithMaxRetries(0),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create Volcengine rerank client: %w", err)
@@ -137,7 +139,7 @@ func (r *VolcengineReranker) Rerank(
 // limit) and returns the per-document relevance scores in input order.
 func (r *VolcengineReranker) rerankBatch(
 	ctx context.Context, query string, documents []string,
-) ([]float64, error) {
+) (result []float64, callErr error) {
 	data := make([]knowledgemodel.RerankDataItem, len(documents))
 	for i := range documents {
 		data[i] = knowledgemodel.RerankDataItem{
@@ -156,6 +158,12 @@ func (r *VolcengineReranker) rerankBatch(
 		"%s",
 		buildRerankRequestDebug(r.modelName, r.endpoint+volcengineRerankPath, query, documents),
 	)
+	ctx = call.WithNewBatch(ctx)
+	finish, err := call.Start(ctx, "rerank")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { callErr = finish(callErr, nil) }()
 	response, err := r.client.Rerank(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("call Volcengine rerank: %w", err)
@@ -183,3 +191,6 @@ func (r *VolcengineReranker) GetModelName() string {
 func (r *VolcengineReranker) GetModelID() string {
 	return r.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (r *VolcengineReranker) RequestAccountingSupported() bool { return true }

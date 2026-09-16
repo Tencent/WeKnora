@@ -1,0 +1,106 @@
+{
+  "id": "squad2-dev",
+  "name": "SQuAD 2.0 英文阅读理解 · 24 题",
+  "description": "斯坦福问答开发集固定抽样，16 道可回答题、8 道针对指定原文的无答案题与 8 段额外候选原文。",
+  "kind": "evaluation",
+  "language": "en",
+  "source_url": "https://rajpurkar.github.io/SQuAD-explorer/",
+  "license": "CC-BY-SA-4.0",
+  "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+  "sample_seed": 20260908,
+  "counts": {
+    "passages": 32,
+    "questions": 24,
+    "relevance": 24,
+    "source_documents": 32,
+    "answerable": 16,
+    "unanswerable": 8,
+    "distractor_passages": 8
+  },
+  "sampling": {
+    "algorithm": "sha256_rank_distinct_contexts_v1",
+    "split": "development",
+    "distinct_question_contexts": 24,
+    "answerable": 16,
+    "unanswerable": 8,
+    "extra_unjudged_contexts": 8,
+    "upstream_counts": {
+      "articles": 35,
+      "passages": 1204,
+      "questions": 11873,
+      "invalid_questions_excluded": 0
+    }
+  },
+  "annotation_file": "annotations.json",
+  "upstream_files": [
+    {
+      "url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+      "revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+      "path": "dataset/dev-v2.0.json",
+      "sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/ymcui/cmrc2018/c0eb1b6ba219847457e6af3180da722bbeb656af/LICENCE",
+      "revision": "c0eb1b6ba219847457e6af3180da722bbeb656af",
+      "path": "LICENCE",
+      "sha256": "7abe19ec9bb73b36141b999b861d24ad855e808bafe0f81e84cce28556f6c297"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/e0c66cfec263165fb3c15cb76a22175e371b71d7/index.html",
+      "revision": "e0c66cfec263165fb3c15cb76a22175e371b71d7",
+      "path": "index.html",
+      "sha256": "989f7e43f27faa490ed9fc8fb440e6f0aa791c49131346a27b8361deb4a18baf"
+    }
+  ],
+  "limitations": [
+    "固定开发集子集用于导入、检索和生成链路试验；样本分数不能解释为官方完整基准分数或总体能力估计。",
+    "原始数据为给定上下文的阅读理解任务。跨段落候选语料是本项目的检索适配；仅原始题目与上下文之间存在标注，其余组合保持未标注。",
+    "额外候选段落属于未标注干扰段落，可能包含答案；不将其转换为可靠负例。检索指标仅描述命中已标注原文的情况。",
+    "注册格式只保存一个参考答案，取原始 answers 中第一个答案；annotations.json 保留全部原始答案及字符偏移。平台指标与官方多参考答案评分规则不同。",
+    "原文来自上游收录的维基百科快照，可能含时效性、文本噪声及内容偏差；不作为当前事实核验来源。",
+    "抽样候选要求全部参考答案具备有效字符偏移并与原文逐字匹配。上游不满足条件的题目数量记录在 sampling.upstream_counts.invalid_questions_excluded；筛选会改变样本分布。",
+    "无答案标注仅针对题目配对的原始上下文；不表示整个候选语料或用户知识库中均无答案。",
+    "无答案题使用空参考答案和原始上下文 grade=0。缺少正例时平台检索指标可能为 0，该值不能解释为拒答质量。",
+    "可答与无答案按 16:8 分层固定抽样，该比例不代表完整开发集分布。"
+  ],
+  "files_sha256": {
+    "LICENSE": "7abe19ec9bb73b36141b999b861d24ad855e808bafe0f81e84cce28556f6c297",
+    "NOTICE": "201e5510259ba32c8c34a70ce33486679ee62aa976892522dc69e48eda11eb1b",
+    "README.md": "5363c4e4a8a8bee18e840e2d308cff3596879380d7881ffc918473c2da0e6ca6",
+    "annotations.json": "45f9297119693757407c2c935c2fbc2f8b9444e561c673690958b88f11b76d87",
+    "registry-input.json": "028d96e8027dd5363d767de279277ec98820edbb124fb622357079b3bdca3f7c",
+    "source-samples.json": "34b90c1bc88be62745ef0f6e09229616eb7d64fca90db66ff788b991e1ecb557",
+    "source_docs/squad2-dev-a0001-p0013.txt": "b1883919e17ff672ebc5c8754b9babd683410134d88304f2048788353467a297",
+    "source_docs/squad2-dev-a0001-p0025.txt": "836fc4670df58e0f64317be9b717f3d2d78b471dc16251d4f836c660af6a3216",
+    "source_docs/squad2-dev-a0002-p0008.txt": "d1bd9316675d5ac9fa7e69f137619aecc59a46e6cd8398569396ed53c86f02f1",
+    "source_docs/squad2-dev-a0004-p0008.txt": "1dd13bf14660147737c3329dcbc515e988f9c216e86af57e2f8c27638569229b",
+    "source_docs/squad2-dev-a0005-p0038.txt": "8936635bf73401c433870cb063f6320a4ef8777db9a366c03e4dbb42de622dd0",
+    "source_docs/squad2-dev-a0006-p0017.txt": "4b2a2a7e8bce520e5e42162e14db64c90808895b36ef2edfc527bbc3df66971c",
+    "source_docs/squad2-dev-a0007-p0039.txt": "bb44cc7d6df50b60e3aa046eb94c63b1c6e157582dd86e876099903c7837fe97",
+    "source_docs/squad2-dev-a0008-p0002.txt": "1251911230ef039a4b2c5626af38721c8740071e0d9fdaabbc60165f4b237585",
+    "source_docs/squad2-dev-a0009-p0008.txt": "dd04072038d1a3ede59bf62dd3dc9ade4227b046627d4885431216fa66204dee",
+    "source_docs/squad2-dev-a0009-p0035.txt": "b425c59663b1f599dfeff34f5eca35cd8787024f5dfa1ce116e21e72f95f0107",
+    "source_docs/squad2-dev-a0013-p0001.txt": "9ef6e305a45e267b0ca488bc0108dedf4d653b1ec1d52109c09fadd0cce50299",
+    "source_docs/squad2-dev-a0015-p0006.txt": "1e0b24e08630dc44ca697627146eff0a852b93e1fc7e4d4a8bb9a1efa7ad0d66",
+    "source_docs/squad2-dev-a0017-p0001.txt": "661089229cefef25a7ee0f8224a2253cf17a5a8a5d9a6f5890c2586f84f2d5f7",
+    "source_docs/squad2-dev-a0017-p0005.txt": "e9cb625a732c3ee55bee95e5cdc73e57cf6cf438d250f0101db0bc232ec11f8a",
+    "source_docs/squad2-dev-a0017-p0018.txt": "e83edd2f6eb1fa0981acc0119542b4a54c226b0e0249686e43082425f6d974b0",
+    "source_docs/squad2-dev-a0018-p0019.txt": "7f004f5ed59315626739ba9c35512c96ceeb6f3af1db7426178150a313595b76",
+    "source_docs/squad2-dev-a0020-p0020.txt": "c921148c6781bd32095c95fe8a605f57c9e33119681a07d3d01a7ee290f988dc",
+    "source_docs/squad2-dev-a0021-p0014.txt": "75cb5a3ffcb3fc0fc634b23eb3e6ae0e8c3365b15ad5892f4ea7a382f0495c6a",
+    "source_docs/squad2-dev-a0022-p0002.txt": "34aa9a8e3e875665b03b42736977f2f48a2ec8d33658966acc4b94712b217093",
+    "source_docs/squad2-dev-a0022-p0018.txt": "6c330844d7a86f35d0c2ad99b16e53b4a661cde9c2483cf5f3dbbd4be24235f0",
+    "source_docs/squad2-dev-a0024-p0039.txt": "8ec9dcc4c2fe0ea5e8f0e2e102236786bbdd27dc8fb4452718334cf4545b34bf",
+    "source_docs/squad2-dev-a0024-p0044.txt": "961f2bbff5ebb4ccdaa901097a0bffde9754f25b2405a8a8486effbefd2b3cef",
+    "source_docs/squad2-dev-a0026-p0019.txt": "2fae4c948d1afffe2006da4982e6c6de310d14a0d328a01906062fde6bcaa3a1",
+    "source_docs/squad2-dev-a0027-p0017.txt": "697b56b27d7b0ea65bf37203f2581443d1622213ae4c8c57bf37844cc487aa68",
+    "source_docs/squad2-dev-a0027-p0018.txt": "4eef5ee2e8e5a99f7d072734f1ac52b08194c79b66eefd1f527eb2304547b585",
+    "source_docs/squad2-dev-a0028-p0033.txt": "8e983a2167b912359aa8e1110455d27a279e9b3baaac76337616f57b19396e19",
+    "source_docs/squad2-dev-a0032-p0018.txt": "b7991d39b23b7c72fc2a048b728292818e15fadf9f4db417aefd475c9db7b8b2",
+    "source_docs/squad2-dev-a0032-p0042.txt": "acd49776c5c867dd78a5c6b915a917f39479b502b183b3b4b0c8d4934fc1536a",
+    "source_docs/squad2-dev-a0033-p0018.txt": "255db98fb0b6e32abd3b8317106e8eeb1841b1f3860f985c69bb911aae85aadc",
+    "source_docs/squad2-dev-a0033-p0023.txt": "5b469d64ced1175805ddbb53037730159f46f770f6697c84c8b9e8738d9bbb19",
+    "source_docs/squad2-dev-a0034-p0033.txt": "7aa3c41e95ec3f91a2e6241e05c3d435913ef6549395e3a19ca6c397879a305c",
+    "source_docs/squad2-dev-a0034-p0037.txt": "74e88ac6d67515920292029909b403269481a3690e4aeb4db4704db9b3c42403"
+  }
+}

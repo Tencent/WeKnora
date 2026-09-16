@@ -1,0 +1,86 @@
+{
+  "id": "weknora-docs",
+  "name": "WeKnora 中文公开技术资料 · 5 篇",
+  "kind": "documentation",
+  "description": "固定版本的部署、开发、日志、向量数据库和知识图谱中文技术文档，可用于知识库上传体验。",
+  "language": "zh-CN",
+  "source_url": "https://github.com/Tencent/WeKnora",
+  "license": "MIT",
+  "upstream_revision": "ef9cbf456d042de4c442674e5b940dd93d15a2d2",
+  "sample_seed": null,
+  "counts": {
+    "passages": 5,
+    "questions": 0,
+    "relevance": 0,
+    "source_documents": 5,
+    "answerable": 0,
+    "unanswerable": 0,
+    "distractor_passages": 0
+  },
+  "sampling": {
+    "algorithm": "explicit_document_allowlist_v1",
+    "source_files": [
+      "weknora-LITE.md",
+      "weknora-logging.md",
+      "weknora-vector-databases.md",
+      "weknora-knowledge-graph.md",
+      "weknora-development.md"
+    ]
+  },
+  "annotation_file": null,
+  "upstream_files": [
+    {
+      "url": "https://raw.githubusercontent.com/Tencent/WeKnora/ef9cbf456d042de4c442674e5b940dd93d15a2d2/LICENSE",
+      "revision": "ef9cbf456d042de4c442674e5b940dd93d15a2d2",
+      "path": "LICENSE",
+      "sha256": "5f6c35c603349247019b1a107e0c19ac32bed953c9857383449003283e7ccd20"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Tencent/WeKnora/ef9cbf456d042de4c442674e5b940dd93d15a2d2/docs/LITE.md",
+      "revision": "ef9cbf456d042de4c442674e5b940dd93d15a2d2",
+      "path": "docs/LITE.md",
+      "sha256": "d595c37c55e80105dc9a5db2380a254daedf857ee162c884d4a8c0920c3dcdf2"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Tencent/WeKnora/ef9cbf456d042de4c442674e5b940dd93d15a2d2/docs/%E6%97%A5%E5%BF%97%E9%85%8D%E7%BD%AE.md",
+      "revision": "ef9cbf456d042de4c442674e5b940dd93d15a2d2",
+      "path": "docs/日志配置.md",
+      "sha256": "3c51e1bdffec538501769106f2fe5a551f95e5604ca7e56a7931b0b64e6369b7"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Tencent/WeKnora/ef9cbf456d042de4c442674e5b940dd93d15a2d2/docs/%E4%BD%BF%E7%94%A8%E5%85%B6%E4%BB%96%E5%90%91%E9%87%8F%E6%95%B0%E6%8D%AE%E5%BA%93.md",
+      "revision": "ef9cbf456d042de4c442674e5b940dd93d15a2d2",
+      "path": "docs/使用其他向量数据库.md",
+      "sha256": "f5e8acaf6cd632a5c73857b9939c8a010ec3c76c20fa4299d461e01e6bcd63da"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Tencent/WeKnora/ef9cbf456d042de4c442674e5b940dd93d15a2d2/docs/%E5%BC%80%E5%90%AF%E7%9F%A5%E8%AF%86%E5%9B%BE%E8%B0%B1%E5%8A%9F%E8%83%BD.md",
+      "revision": "ef9cbf456d042de4c442674e5b940dd93d15a2d2",
+      "path": "docs/开启知识图谱功能.md",
+      "sha256": "b7d171961809e9556d5d92131e777badedf4e46837d7d059e640973a5b08db3f"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/Tencent/WeKnora/ef9cbf456d042de4c442674e5b940dd93d15a2d2/docs/%E5%BC%80%E5%8F%91%E6%8C%87%E5%8D%97.md",
+      "revision": "ef9cbf456d042de4c442674e5b940dd93d15a2d2",
+      "path": "docs/开发指南.md",
+      "sha256": "950648c0a51f4c21f6c6b17bfb975cebae5a70eec8e3936e0d95bb2469667420"
+    }
+  ],
+  "limitations": [
+    "本包来自本项目的上游产品文档，用于资料上传和检索体验；没有独立人工问题真值，也不构成独立质量基准。",
+    "内容描述固定提交的上游产品；本地部署配置和功能可与文档存在差异。",
+    "文件中的外部链接、图片路径和命令作为资料正文保留，上传资料本身不执行其中命令。",
+    "本包含五篇完整 Markdown 原文；平台文档解析后的分块数量取决于知识库配置。"
+  ],
+  "files_sha256": {
+    "LICENSE": "5f6c35c603349247019b1a107e0c19ac32bed953c9857383449003283e7ccd20",
+    "NOTICE": "ddc50e446f12fdfa36b6be035fb42d5893e3521613353591b8807f0525596655",
+    "README.md": "c82d4705d5e0d05b788479006fad8f7884d5c0200b524cf996148f60251bffa3",
+    "registry-input.json": "ea6a588b7f548b2978c73b94d7f9ae038069af0a21992060bfa2cae7612c9d1a",
+    "source_docs/01-LITE.md": "d595c37c55e80105dc9a5db2380a254daedf857ee162c884d4a8c0920c3dcdf2",
+    "source_docs/02-logging.md": "3c51e1bdffec538501769106f2fe5a551f95e5604ca7e56a7931b0b64e6369b7",
+    "source_docs/03-vector-databases.md": "f5e8acaf6cd632a5c73857b9939c8a010ec3c76c20fa4299d461e01e6bcd63da",
+    "source_docs/04-knowledge-graph.md": "b7d171961809e9556d5d92131e777badedf4e46837d7d059e640973a5b08db3f",
+    "source_docs/05-development.md": "950648c0a51f4c21f6c6b17bfb975cebae5a70eec8e3936e0d95bb2469667420"
+  }
+}

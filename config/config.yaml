@@ -46,6 +46,10 @@ knowledge_base:
   image_processing:
     enable_multimodal: true
 
+# Evaluation task configuration
+evaluation:
+  task_timeout: 2h
+
 extract:
   extract_graph:
     description: |

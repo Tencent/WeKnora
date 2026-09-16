@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/buildinfo"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
@@ -22,8 +23,10 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-const oidcNonceCookieName = "weknora_oidc_nonce"
-const oidcNonceCookieMaxAge = 600
+const (
+	oidcNonceCookieName   = "weknora_oidc_nonce"
+	oidcNonceCookieMaxAge = 600
+)
 
 // AuthHandler implements HTTP request handlers for user authentication
 // Provides functionality for user registration, login, logout, and token management
@@ -895,7 +898,7 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	if Edition != "lite" {
+	if buildinfo.Edition != "lite" {
 		appErr := errors.NewForbiddenError("auto-setup is only available in lite edition")
 		c.Error(appErr)
 		return

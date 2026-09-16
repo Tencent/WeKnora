@@ -61,6 +61,15 @@ definitions:
       summary:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_database.MigrationChainState:
+    properties:
+      dirty:
+        type: boolean
+      expected_version:
+        type: integer
+      version:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata:
     properties:
       auth_type:
@@ -258,6 +267,11 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.AgentStep:
     properties:
+      intermediate_answer:
+        description: |-
+          IntermediateAnswer preserves a plain answer followed by a loop-end steer.
+          The canonical final answer is still stored in Message.Content.
+        type: boolean
       iteration:
         description: Iteration number (0-indexed)
         type: integer
@@ -279,6 +293,13 @@ definitions:
         items:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall'
         type: array
+      user_messages_before:
+        description: |-
+          UserMessagesBefore records consumed steer rows in delivery order, before
+          this model response. Unlike timestamps, this remains unambiguous on replay.
+        items:
+          type: string
+        type: array
     type: object
   github_com_Tencent_WeKnora_internal_types.AnswerStrategy:
     enum:
@@ -288,6 +309,29 @@ definitions:
     x-enum-varnames:
     - AnswerStrategyAll
     - AnswerStrategyRandom
+  github_com_Tencent_WeKnora_internal_types.ApplicationCacheStatistics:
+    properties:
+      average_lookup_duration_ms:
+        type: number
+      bypass_items:
+        type: integer
+      bypass_lookup_count:
+        type: integer
+      hit_items:
+        type: integer
+      hit_rate:
+        type: number
+      lookup_count:
+        type: integer
+      miss_items:
+        type: integer
+      observed_items:
+        type: integer
+      requested_items:
+        type: integer
+      unique_items:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.AuditAction:
     enum:
     - rbac.member_added
@@ -829,7 +873,7 @@ definitions:
       context_template_id:
         description: |-
           ContextTemplateID references a template ID in prompt_templates/ YAML files.
-          If set and ContextTemplate is empty, the template content will be resolved at startup.
+          If set and ContextTemplate is empty, the template content is resolved at request time for saved agents.
         type: string
       data_analysis_enabled:
         description: |-
@@ -1030,7 +1074,7 @@ definitions:
       system_prompt_id:
         description: |-
           SystemPromptID references a template ID in prompt_templates/ YAML files.
-          If set and SystemPrompt is empty, the template content will be resolved at startup.
+          If set and SystemPrompt is empty, the template content is resolved at request time for saved agents.
         type: string
       temperature:
         description: Temperature for LLM (0-1)
@@ -1246,6 +1290,97 @@ definitions:
         type: boolean
       truncate_prompt_tokens:
         type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationConfigurationOverrides:
+    properties:
+      generation:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationGenerationOverrides'
+      rerank:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationRerankOverrides'
+      retrieval:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationRetrievalOverrides'
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationDatasetImportInput:
+    properties:
+      content:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetVersionInput'
+      description:
+        type: string
+      name:
+        type: string
+      request_id:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationDatasetPassageInput:
+    properties:
+      content:
+        type: string
+      metadata:
+        items:
+          type: integer
+        type: array
+      pid:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationDatasetQuestionInput:
+    properties:
+      answer:
+        type: string
+      qid:
+        type: string
+      question:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationDatasetRelevanceInput:
+    properties:
+      grade:
+        type: integer
+      pid:
+        type: string
+      qid:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationDatasetVersionInput:
+    properties:
+      passages:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetPassageInput'
+        type: array
+      questions:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetQuestionInput'
+        type: array
+      relevance:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetRelevanceInput'
+        type: array
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationGenerationOverrides:
+    properties:
+      max_tokens:
+        type: integer
+      temperature:
+        type: number
+      top_k:
+        type: integer
+      top_p:
+        type: number
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationRerankOverrides:
+    properties:
+      rerank_threshold:
+        type: number
+      rerank_top_k:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.EvaluationRetrievalOverrides:
+    properties:
+      embedding_top_k:
+        type: integer
+      keyword_threshold:
+        type: number
+      vector_threshold:
+        type: number
     type: object
   github_com_Tencent_WeKnora_internal_types.ExtractConfig:
     properties:
@@ -2470,6 +2605,35 @@ definitions:
       use_ssl:
         type: boolean
     type: object
+  github_com_Tencent_WeKnora_internal_types.ModelCachePricing:
+    properties:
+      read_microunits_per_million:
+        type: integer
+      version:
+        type: integer
+      write_1h_microunits_per_million:
+        type: integer
+      write_5m_microunits_per_million:
+        type: integer
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ModelCostTotal:
+    properties:
+      cost_microunits:
+        type: integer
+      currency:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ModelLatencyStatistics:
+    properties:
+      p50_ms:
+        type: number
+      p95_ms:
+        type: number
+      p99_ms:
+        type: number
+      reported_calls:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.ModelParameters:
     properties:
       api_key:
@@ -2529,6 +2693,29 @@ definitions:
       supports_vision:
         description: Whether the model accepts image/multimodal input
         type: boolean
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ModelPriceVersion:
+    properties:
+      cache_pricing:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelCachePricing'
+      created_at:
+        type: string
+      currency:
+        type: string
+      id:
+        type: string
+      input_microunits_per_million:
+        type: integer
+      model_id:
+        type: string
+      output_microunits_per_million:
+        type: integer
+      tenant_id:
+        type: integer
+      valid_from:
+        type: string
+      valid_to:
+        type: string
     type: object
   github_com_Tencent_WeKnora_internal_types.ModelSource:
     enum:
@@ -2638,6 +2825,58 @@ definitions:
     - ModelTypeKnowledgeQA
     - ModelTypeVLLM
     - ModelTypeASR
+  github_com_Tencent_WeKnora_internal_types.ModelUsageResponse:
+    properties:
+      from:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelUsageStatistics'
+        type: array
+      to:
+        type: string
+    type: object
+  github_com_Tencent_WeKnora_internal_types.ModelUsageStatistics:
+    properties:
+      accounting_complete_calls:
+        type: integer
+      application_cache:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ApplicationCacheStatistics'
+      average_duration_ms:
+        type: number
+      call_count:
+        type: integer
+      canceled_calls:
+        type: integer
+      completion_tokens:
+        type: integer
+      costs:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelCostTotal'
+        type: array
+      error_calls:
+        type: integer
+      latency:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelLatencyStatistics'
+      model_id:
+        type: string
+      prompt_tokens:
+        type: integer
+      provider_cache:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ProviderCacheStatistics'
+      started_calls:
+        type: integer
+      success_calls:
+        type: integer
+      total_tokens:
+        type: integer
+      unpriced_calls:
+        type: integer
+      usage_reported_calls:
+        type: integer
+      usage_unreported_calls:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.OBSEngineConfig:
     properties:
       access_key:
@@ -2889,6 +3128,19 @@ definitions:
     - PromptCacheStatusUnreported
     - PromptCacheStatusMiss
     - PromptCacheStatusHit
+  github_com_Tencent_WeKnora_internal_types.ProviderCacheStatistics:
+    properties:
+      hit_rate:
+        type: number
+      miss_tokens:
+        type: integer
+      observed_tokens:
+        type: integer
+      read_tokens:
+        type: integer
+      write_tokens:
+        type: integer
+    type: object
   github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig:
     properties:
       custom_instructions:
@@ -3517,6 +3769,8 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        type: boolean
       mcp_service_ids:
         items:
           type: string
@@ -4007,8 +4261,16 @@ definitions:
         type: integer
       cache_reported:
         type: boolean
+      cache_reported_calls:
+        type: integer
       cache_status:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.PromptCacheStatus'
+      cache_unreported_calls:
+        type: integer
+      cache_write_1h_tokens:
+        type: integer
+      cache_write_5m_tokens:
+        type: integer
       cache_write_tokens:
         type: integer
       cached_tokens:
@@ -4020,7 +4282,18 @@ definitions:
         type: integer
       prompt_tokens:
         type: integer
+      reported_cost:
+        description: |-
+          ReportedCost preserves the provider's exact decimal amount. Its currency
+          is interpreted only by a provider-specific accounting path.
+        type: string
       total_tokens:
+        type: integer
+      usage_reported:
+        type: boolean
+      usage_reported_calls:
+        type: integer
+      usage_unreported_calls:
         type: integer
     type: object
   github_com_Tencent_WeKnora_internal_types.ToolCall:
@@ -4218,6 +4491,10 @@ definitions:
     type: object
   github_com_Tencent_WeKnora_internal_types.UserPreferences:
     properties:
+      browser_search_instructions:
+        description: BrowserSearchInstructions customizes browser search for this
+          user. Nil/empty uses the platform default.
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID remembers the last workspace the user actively
@@ -5030,6 +5307,15 @@ definitions:
     - ids
     - kb_id
     type: object
+  internal_handler.CompareEvaluationTasksRequest:
+    properties:
+      baseline_task_id:
+        type: string
+      task_ids:
+        items:
+          type: string
+        type: array
+    type: object
   internal_handler.CopyKnowledgeBaseRequest:
     properties:
       source_id:
@@ -5047,6 +5333,15 @@ definitions:
         type: string
       config:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig'
+      description:
+        type: string
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  internal_handler.CreateEvaluationDatasetRequest:
+    properties:
       description:
         type: string
       name:
@@ -5099,6 +5394,17 @@ definitions:
       user:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
     type: object
+  internal_handler.DBMigrationStatusResponse:
+    properties:
+      official:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_database.MigrationChainState'
+      phase:
+        type: string
+      ready:
+        type: boolean
+      topic3:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_database.MigrationChainState'
+    type: object
   internal_handler.DeleteTagRequest:
     properties:
       exclude_ids:
@@ -5117,8 +5423,18 @@ definitions:
       chat_id:
         description: ID of chat model to use
         type: string
+      configuration:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationConfigurationOverrides'
+        description: |-
+          Configuration optionally overrides resolved retrieval/rerank/generation
+          parameters field by field. Omitted fields keep defaults; explicit zero
+          values apply. The resolved configuration enters the experiment snapshot.
       dataset_id:
         description: ID of dataset to evaluate
+        type: string
+      dataset_version_id:
+        description: DatasetVersionID optionally pins one immutable dataset version.
         type: string
       knowledge_base_id:
         description: ID of knowledge base to use
@@ -5126,6 +5442,9 @@ definitions:
       rerank_id:
         description: ID of rerank model to use
         type: string
+      seed:
+        description: Seed distinguishes "not provided" (nil) from an explicit seed=0.
+        type: integer
     type: object
   internal_handler.FabriTextRequest:
     properties:
@@ -5164,6 +5483,8 @@ definitions:
           succeeded; non-empty values let the frontend surface a troubleshooting
           banner instead of silently hiding the DB version row (see issue #1319).
         type: string
+      db_migration_status:
+        $ref: '#/definitions/internal_handler.DBMigrationStatusResponse'
       db_version:
         type: string
       edition:
@@ -5685,6 +6006,13 @@ definitions:
     - from
     - to
     type: object
+  internal_handler.ReplaceEvaluationTaskLabelsRequest:
+    properties:
+      labels:
+        items:
+          type: string
+        type: array
+    type: object
   internal_handler.ResetUserPasswordRequest:
     properties:
       email:
@@ -6149,6 +6477,29 @@ definitions:
           revoke.
         type: string
     type: object
+  internal_handler.modelPriceEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelPriceVersion'
+      success:
+        type: boolean
+    type: object
+  internal_handler.modelPricesEnvelope:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelPriceVersion'
+        type: array
+      success:
+        type: boolean
+    type: object
+  internal_handler.modelUsageEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelUsageResponse'
+      success:
+        type: boolean
+    type: object
   internal_handler.platformAPIKeyCreateRequest:
     properties:
       capabilities:
@@ -6159,6 +6510,26 @@ definitions:
         type: integer
       name:
         type: string
+    type: object
+  internal_handler.putModelPriceRequest:
+    properties:
+      cache_pricing:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.ModelCachePricing'
+      currency:
+        type: string
+      input_microunits_per_million:
+        minimum: 0
+        type: integer
+      output_microunits_per_million:
+        minimum: 0
+        type: integer
+      valid_from:
+        type: string
+      valid_to:
+        type: string
+    required:
+    - currency
+    - valid_from
     type: object
   internal_handler.registerByInviteRequest:
     properties:
@@ -6255,6 +6626,9 @@ definitions:
     type: object
   internal_handler.updateMyPreferencesRequest:
     properties:
+      browser_search_instructions:
+        maxLength: 4000
+        type: string
       last_active_tenant_id:
         description: |-
           LastActiveTenantID lets clients persist "after a fresh login,
@@ -6321,6 +6695,9 @@ definitions:
         items:
           type: string
         type: array
+      local_browser_enabled:
+        description: Browser source
+        type: boolean
       mcp_service_ids:
         description: Per-request MCP services selected via @mention
         items:
@@ -6440,6 +6817,30 @@ definitions:
         items:
           type: string
         type: array
+    required:
+    - query
+    type: object
+  internal_handler_session.SteerMessageRequest:
+    properties:
+      channel:
+        type: string
+      delivery:
+        description: Delivery is "after" (default) or "inject". See the constants
+          above.
+        type: string
+      expected_assistant_message_id:
+        description: |-
+          Optional for older clients. New clients pin delivery to the run they see
+          and supply a stable ID so a consume event may precede the HTTP response.
+        type: string
+      mentioned_items:
+        items:
+          $ref: '#/definitions/internal_handler_session.MentionedItemRequest'
+        type: array
+      query:
+        type: string
+      steer_id:
+        type: string
     required:
     - query
     type: object
@@ -8099,7 +8500,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 对知识库进行评估测试
+      description: 对知识库进行评估测试；configuration 按字段覆盖，省略保留默认值，显式 0 生效
       parameters:
       - description: 评估请求参数
         in: body
@@ -8123,6 +8524,537 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 执行评估
+      tags:
+      - 评估
+  /evaluation/{task_id}:
+    delete:
+      consumes:
+      - application/json
+      description: 软删除终态评估任务；缺失、跨租户与已删除任务返回 204，活动任务返回 409
+      parameters:
+      - description: 评估任务ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: 删除成功或任务本就不存在
+        "409":
+          description: 任务仍在活动状态
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 删除已结束的评估任务
+      tags:
+      - 评估
+  /evaluation/{task_id}/cancel:
+    post:
+      consumes:
+      - application/json
+      description: 持久化取消请求；运行实例处理取消并完成资源清理后任务进入 Canceled
+      parameters:
+      - description: 评估任务ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 当前任务状态
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 任务不存在或属于其他租户
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 取消评估任务
+      tags:
+      - 评估
+  /evaluation/comparisons:
+    post:
+      consumes:
+      - application/json
+      description: 返回成功运行的冻结参数差异、指标绝对值和相对基线增减值
+      parameters:
+      - description: 运行与基线
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CompareEvaluationTasksRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 对比结果
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 运行不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 运行不可对比
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 对比评估运行
+      tags:
+      - 评估
+  /evaluation/datasets:
+    get:
+      description: 列出当前租户可见的评测数据集
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 数据集列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出评测数据集
+      tags:
+      - 评估
+    post:
+      consumes:
+      - application/json
+      description: 创建租户评测数据集身份
+      parameters:
+      - description: 数据集
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.CreateEvaluationDatasetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 数据集
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 创建评测数据集
+      tags:
+      - 评估
+  /evaluation/datasets/{id}/versions:
+    get:
+      description: 列出一个可见数据集的全部不可变版本
+      parameters:
+      - description: 数据集 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 版本列表
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出评测数据集版本
+      tags:
+      - 评估
+    post:
+      consumes:
+      - application/json
+      description: 以结构化输入创建不可变数据集版本
+      parameters:
+      - description: 数据集 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 版本内容
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetVersionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 版本
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 创建评测数据集版本
+      tags:
+      - 评估
+  /evaluation/datasets/catalog:
+    get:
+      description: 返回服务内嵌资料的来源、许可、规模及当前导入限制
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 公开目录与实际限制
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出公开评测数据集
+      tags:
+      - 评估
+  /evaluation/datasets/catalog/{id}:
+    get:
+      description: 校验内嵌资料摘要后返回可导入内容和来源清单
+      parameters:
+      - description: 公开数据集 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 内容与来源清单
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: 未知公开数据集
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 读取公开评测数据集内容
+      tags:
+      - 评估
+  /evaluation/datasets/import:
+    post:
+      consumes:
+      - application/json
+      description: request_id 在租户内幂等；不同输入复用同一标识返回 409
+      parameters:
+      - description: 数据集和初版
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetImportInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 数据集、版本和重放状态
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 输入无效
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: 请求标识冲突
+          schema:
+            additionalProperties: true
+            type: object
+        "413":
+          description: 超出配置限制
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 原子导入评测数据集与初版
+      tags:
+      - 评估
+  /evaluation/metrics:
+    get:
+      description: 返回指标 key、版本、类别、默认配置和配置 schema
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 指标目录
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出版本化评测指标
+      tags:
+      - 评估
+  /evaluation/tasks:
+    get:
+      consumes:
+      - application/json
+      description: 按 (start_time DESC, id DESC) keyset 分页列出当前租户的评估任务
+      parameters:
+      - description: 数值状态筛选
+        in: query
+        name: status
+        type: integer
+      - description: 数据集 ID
+        in: query
+        name: dataset_id
+        type: string
+      - description: 数据集版本 ID
+        in: query
+        name: dataset_version_id
+        type: string
+      - description: 冻结实验中使用的模型 ID
+        in: query
+        name: model_id
+        type: string
+      - description: 开始时间下界（RFC 3339，含）
+        in: query
+        name: started_from
+        type: string
+      - description: 开始时间上界（RFC 3339，不含）
+        in: query
+        name: started_to
+        type: string
+      - collectionFormat: csv
+        description: 标签交集筛选，可重复
+        in: query
+        items:
+          type: string
+        name: label
+        type: array
+      - description: 每页条数（默认 20，最大 100）
+        in: query
+        name: page_size
+        type: integer
+      - description: 上一页返回的 next_cursor
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 任务页
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 非法游标或筛选
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出评估任务
+      tags:
+      - 评估
+  /evaluation/tasks/{task_id}/export:
+    get:
+      description: 将终态任务与逐题事实导出为有界 JSON 或 CSV 文件
+      parameters:
+      - description: 评估任务ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: json 或 csv
+        in: query
+        name: format
+        required: true
+        type: string
+      produces:
+      - application/json
+      - text/csv
+      responses:
+        "200":
+          description: 导出文件
+          schema:
+            type: file
+        "400":
+          description: 格式错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 任务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "409":
+          description: 任务仍在运行
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "413":
+          description: 导出超过边界
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 导出评估运行
+      tags:
+      - 评估
+  /evaluation/tasks/{task_id}/labels:
+    put:
+      consumes:
+      - application/json
+      description: 在一个事务内全量替换规范化标签，不修改任务版本与更新时间
+      parameters:
+      - description: 评估任务ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: 标签集合
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.ReplaceEvaluationTaskLabelsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 规范化后的标签
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 标签非法
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 任务不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 替换评估任务标签
+      tags:
+      - 评估
+  /evaluation/tasks/{task_id}/questions:
+    get:
+      description: 按 sample_index 升序分页读取一个评测任务的逐题结果
+      parameters:
+      - description: 任务 ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: 每页数量（默认 100，最大 500）
+        in: query
+        name: page_size
+        type: integer
+      - description: keyset 游标
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 逐题分页
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 逐题结果分页
+      tags:
+      - 评估
+  /evaluation/tasks/{task_id}/questions/{sample_index}/ratings:
+    get:
+      description: 按修订号倒序返回一个评测题目的不可变人工评分记录
+      parameters:
+      - description: 任务 ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: 样本序号
+        in: path
+        name: sample_index
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 人工评分修订
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出逐题人工评分修订
+      tags:
+      - 评估
+    post:
+      consumes:
+      - application/json
+      description: 追加不可变评分记录，并关联同一 rubric 的上一修订
+      parameters:
+      - description: 任务 ID
+        in: path
+        name: task_id
+        required: true
+        type: string
+      - description: 样本序号
+        in: path
+        name: sample_index
+        required: true
+        type: integer
+      - description: 评分规则、版本、快照、分数和备注
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: 新增评分修订
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 追加逐题人工评分修订
       tags:
       - 评估
   /faq/import/progress/{task_id}:
@@ -11747,7 +12679,7 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取当前空间的所有MCP服务
+      description: 获取当前空间的所有MCP服务（含已保存工具目录数量）
       produces:
       - application/json
       responses:
@@ -12000,7 +12932,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
+      description: 显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要
+        Admin。
       parameters:
       - description: MCP服务ID
         in: path
@@ -13169,6 +14102,96 @@ paths:
       summary: 更新模型
       tags:
       - 模型管理
+  /models/{id}/pricing:
+    get:
+      parameters:
+      - description: Model identifier
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.modelPricesEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List model price versions
+      tags:
+      - models
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Model identifier
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Price interval and rates
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler.putModelPriceRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/internal_handler.modelPriceEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Create an effective-dated model price
+      tags:
+      - models
+  /models/{id}/usage:
+    get:
+      parameters:
+      - description: Model identifier
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Inclusive start time (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Exclusive end time (RFC3339)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.modelUsageEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: Get model usage
+      tags:
+      - models
   /models/providers:
     get:
       consumes:
@@ -13193,6 +14216,38 @@ paths:
       summary: 获取模型厂商列表
       tags:
       - 模型管理
+  /models/usage:
+    get:
+      parameters:
+      - description: Comma-separated model identifiers
+        in: query
+        name: model_ids
+        type: string
+      - description: Inclusive start time (RFC3339)
+        in: query
+        name: from
+        type: string
+      - description: Exclusive end time (RFC3339)
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_handler.modelUsageEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: List model usage
+      tags:
+      - models
   /models/weknoracloud/status:
     get:
       description: 检查当前空间的 WeKnoraCloud 凭证是否完好；needs_reinit=true 表示需要重新保存
@@ -14791,6 +15846,73 @@ paths:
       summary: 取消置顶会话
       tags:
       - 会话
+  /sessions/{id}/steer:
+    get:
+      description: 刷新页面后用来恢复输入框上方的队列。没有正在运行的 turn 时返回空列表。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 列出当前运行中尚未消费的排队消息
+      tags:
+      - 问答
+  /sessions/{id}/steer/{steer_id}:
+    delete:
+      description: 从当前运行的排队列表里去掉一条，不再注入也不再作为 follow-up 发出。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 删除一条排队中的消息
+      tags:
+      - 问答
   /sessions/{session_id}/artifacts:
     get:
       description: 返回本会话中所有 assistant 消息产生的技能产物元数据（不含 URL）
@@ -14916,6 +16038,89 @@ paths:
       summary: 置顶会话
       tags:
       - 会话
+  /sessions/{session_id}/steer:
+    post:
+      consumes:
+      - application/json
+      description: 向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 追加消息
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/internal_handler_session.SteerMessageRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 会话不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 向运行中的对话追加消息
+      tags:
+      - 问答
+  /sessions/{session_id}/steer/{steer_id}/inject:
+    post:
+      description: 把一条 delivery=after 的排队消息改为 inject，运行中的 agent 会在下一轮边界读到它。
+      parameters:
+      - description: 会话 ID
+        in: path
+        name: session_id
+        required: true
+        type: string
+      - description: 排队消息 ID
+        in: path
+        name: steer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: queued | new_run
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "503":
+          description: 活 turn 查询失败，可重试
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 将排队消息改为立即注入
+      tags:
+      - 问答
   /sessions/{session_id}/stop:
     post:
       consumes:

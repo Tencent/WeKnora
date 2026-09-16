@@ -1,0 +1,21 @@
+[
+  {
+    "name": "OmniDocBench",
+    "dataset": "https://huggingface.co/datasets/opendatalab/OmniDocBench",
+    "revision": "aa1ee96d106dbe53d0ae59474d75c6e6d9b53fec",
+    "code": "https://github.com/opendatalab/OmniDocBench",
+    "code_revision": "193627ae9e97d89188468ed1ee3b7a856ff76044",
+    "annotation_sha256": "a45cd84b04ad8b793e775089640e6b681209abea33ead54c1828ddca35fae496",
+    "usage": "research_only; original document copyrights remain with owners",
+    "license_url": "https://github.com/opendatalab/OmniDocBench/blob/193627ae9e97d89188468ed1ee3b7a856ff76044/README.md#copyright-statement"
+  },
+  {
+    "name": "olmOCR-bench",
+    "dataset": "https://huggingface.co/datasets/allenai/olmOCR-bench",
+    "revision": "54a96a6fb6a2bd3b297e59869491db4d3625b711",
+    "code": "https://github.com/allenai/olmocr",
+    "code_revision": "f7cfe4c22098b154c76b6ec950d1c0a464eecf8d",
+    "usage": "Follow dataset card and original document rights; sampled original PDFs are not committed",
+    "license_url": "https://huggingface.co/datasets/allenai/olmOCR-bench/blob/54a96a6fb6a2bd3b297e59869491db4d3625b711/README.md"
+  }
+]

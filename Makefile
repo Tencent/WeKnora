@@ -1,4 +1,4 @@
-.PHONY: help build run test clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-down docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
+.PHONY: help build run test evaluation-reproduce evaluation-verify evaluation-benchmark clean docker-build-app docker-build-docreader docker-build-frontend docker-build-all docker-run migrate-up migrate-inspect migrate-plan migrate-build migrate-version migrate-create docker-restart docker-stop start-all stop-all start-ollama stop-ollama build-images build-images-app build-images-docreader build-images-frontend clean-images check-env list-containers pull-images show-platform dev-start dev-stop dev-restart dev-logs dev-status dev-app dev-frontend docs install-swagger build-lite run-lite package-lite anydoc-lib build-anydoc
 
 # Show help
 help:
@@ -35,7 +35,8 @@ help:
 	@echo ""
 	@echo "数据库:"
 	@echo "  migrate-up        执行数据库迁移"
-	@echo "  migrate-down      回滚数据库迁移"
+	@echo "  migrate-inspect   只读检查来源与双链状态"
+	@echo "  migrate-plan      输出待执行迁移"
 	@echo ""
 	@echo "开发工具:"
 	@echo "  fmt               格式化代码"
@@ -106,6 +107,27 @@ run: build
 # Run tests
 test:
 	go test -v ./...
+
+EVALUATION_REPORT_DIR ?= artifacts/evaluation-regression
+
+# Run the keyless deterministic golden evaluation and regression gate.
+evaluation-reproduce:
+	go run ./cmd/evaluation-reproduce \
+		--dataset dataset/golden/v1/dataset.json \
+		--thresholds evaluation/regression/thresholds.json \
+		--output-dir "$(EVALUATION_REPORT_DIR)"
+
+# Run the complete isolated, keyless acceptance pipeline.
+evaluation-verify:
+	bash scripts/evaluation-verify.sh
+
+EVALUATION_PERFORMANCE_DIR ?= artifacts/evaluation-performance
+
+# Run the isolated keyless performance matrix; results are informational.
+evaluation-benchmark:
+	go run ./cmd/evaluation-benchmark \
+		--dataset dataset/golden/v1/dataset.json \
+		--output-dir "$(EVALUATION_PERFORMANCE_DIR)"
 
 # Clean build artifacts
 clean:
@@ -191,11 +213,17 @@ docker-restart:
 	docker-compose up
 
 # Database migrations
+migrate-inspect:
+	./scripts/migrate.sh inspect
+
+migrate-plan:
+	./scripts/migrate.sh plan
+
+migrate-build:
+	go build -tags sqlite_fts5 -o weknora-migrate ./cmd/migrate-runner
+
 migrate-up:
 	./scripts/migrate.sh up
-
-migrate-down:
-	./scripts/migrate.sh down
 
 migrate-version:
 	./scripts/migrate.sh version
@@ -208,22 +236,6 @@ migrate-create:
 	fi
 	./scripts/migrate.sh create $(name)
 
-migrate-force:
-	@if [ -z "$(version)" ]; then \
-		echo "Error: version is required"; \
-		echo "Usage: make migrate-force version=4"; \
-		exit 1; \
-	fi
-	./scripts/migrate.sh force $(version)
-
-migrate-goto:
-	@if [ -z "$(version)" ]; then \
-		echo "Error: version is required"; \
-		echo "Usage: make migrate-goto version=3"; \
-		exit 1; \
-	fi
-	./scripts/migrate.sh goto $(version)
-
 # Generate API documentation (Swagger)
 docs:
 	@echo "生成 Swagger API 文档..."
@@ -233,7 +245,7 @@ docs:
 
 # Install swagger tool
 install-swagger:
-	go install github.com/swaggo/swag/cmd/swag@latest
+	go install github.com/swaggo/swag/cmd/swag@v1.16.6
 
 # Format code
 fmt:
@@ -259,7 +271,7 @@ build-prod:
 	CGO_LDFLAGS="$$(if [ "$$(uname)" = 'Darwin' ]; then echo '-Wl,-no_warn_duplicate_libraries'; fi)" \
 	BUILD_TIME=$${BUILD_TIME:-unknown}; \
 	GO_VERSION=$${GO_VERSION:-unknown}; \
-	LDFLAGS="-X 'github.com/Tencent/WeKnora/internal/handler.Version=$$VERSION' -X 'github.com/Tencent/WeKnora/internal/handler.Edition=standard' -X 'github.com/Tencent/WeKnora/internal/handler.CommitID=$$COMMIT_ID' -X 'github.com/Tencent/WeKnora/internal/handler.BuildTime=$$BUILD_TIME' -X 'github.com/Tencent/WeKnora/internal/handler.GoVersion=$$GO_VERSION' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"; \
+	LDFLAGS="-X 'github.com/Tencent/WeKnora/internal/buildinfo.Version=$$VERSION' -X 'github.com/Tencent/WeKnora/internal/buildinfo.Edition=standard' -X 'github.com/Tencent/WeKnora/internal/buildinfo.CommitID=$$COMMIT_ID' -X 'github.com/Tencent/WeKnora/internal/buildinfo.BuildTime=$$BUILD_TIME' -X 'github.com/Tencent/WeKnora/internal/buildinfo.GoVersion=$$GO_VERSION' -X 'google.golang.org/protobuf/reflect/protoregistry.conflictPolicy=warn'"; \
 	go build -tags "$(GO_BUILD_TAGS)" -ldflags="-w -s $$LDFLAGS" -o $(BINARY_NAME) $(MAIN_PATH)
 
 # Build Lite version (single binary, SQLite + in-memory queue)
@@ -348,5 +360,4 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
-
 

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset_content_sha256": "d8deca2c2ab7b77123130788c9082d0998ecbf76c1d8556952703045cc2556e1",
+  "metrics": {
+    "generation.bleu.n1": {"baseline": 0.5778800783071405, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "generation.bleu.n2": {"baseline": 0.5870725745938864, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "generation.bleu.n4": {"baseline": 0.6176524762707064, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "generation.exact_match": {"baseline": 0.5, "max_absolute_degradation": 0, "direction": "higher_is_better"},
+    "generation.rouge.rouge-1": {"baseline": 0.4999999975, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "generation.rouge.rouge-2": {"baseline": 0.4999999975, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "generation.rouge.rouge-l": {"baseline": 0.4999999975, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "retrieval.map": {"baseline": 0.75, "max_absolute_degradation": 0, "direction": "higher_is_better"},
+    "retrieval.mrr": {"baseline": 1.0, "max_absolute_degradation": 0, "direction": "higher_is_better"},
+    "retrieval.ndcg.k10": {"baseline": 0.91311732856428, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "retrieval.ndcg.k3": {"baseline": 0.91311732856428, "max_absolute_degradation": 1e-9, "direction": "higher_is_better"},
+    "retrieval.precision": {"baseline": 0.5, "max_absolute_degradation": 0, "direction": "higher_is_better"},
+    "retrieval.recall": {"baseline": 0.75, "max_absolute_degradation": 0, "direction": "higher_is_better"}
+  }
+}

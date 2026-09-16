@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/call"
+	"github.com/Tencent/WeKnora/internal/types"
+
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	ollamaapi "github.com/ollama/ollama/api"
@@ -110,7 +113,20 @@ func (e *OllamaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]fl
 
 	// Send request
 	startTime := time.Now()
+	finish, err := call.Start(ctx, "embedding")
+	if err != nil {
+		return nil, err
+	}
 	resp, err := e.ollamaService.Embeddings(ctx, req)
+	var usage *types.TokenUsage
+	if resp != nil {
+		usage = &types.TokenUsage{
+			UsageReported: true,
+			PromptTokens:  resp.PromptEvalCount,
+			TotalTokens:   resp.PromptEvalCount,
+		}
+	}
+	err = finish(err, usage)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get embedding vectors: %w", err)
 	}
@@ -133,3 +149,6 @@ func (e *OllamaEmbedder) GetDimensions() int {
 func (e *OllamaEmbedder) GetModelID() string {
 	return e.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (e *OllamaEmbedder) RequestAccountingSupported() bool { return true }

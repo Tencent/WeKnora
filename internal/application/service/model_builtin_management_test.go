@@ -46,8 +46,8 @@ func TestUpdateBuiltinModel_SystemAdminCreatesRuntimeOverride(t *testing.T) {
 	svc := NewModelService(&stubModelRepoForDelete{
 		model: stored,
 		update: func(model *types.Model) error {
-			copy := *model
-			saved = &copy
+			snapshot := *model
+			saved = &snapshot
 			return nil
 		},
 	}, nil, nil, nil, nil, nil)
@@ -82,8 +82,8 @@ func TestUpdateBuiltinModelCredentials_SystemAdminOnly(t *testing.T) {
 		svc := NewModelService(&stubModelRepoForDelete{
 			model: stored,
 			update: func(model *types.Model) error {
-				copy := *model
-				saved = &copy
+				snapshot := *model
+				saved = &snapshot
 				return nil
 			},
 		}, nil, nil, nil, nil, nil)
@@ -95,5 +95,67 @@ func TestUpdateBuiltinModelCredentials_SystemAdminOnly(t *testing.T) {
 		assert.Equal(t, newKey, updated.Parameters.APIKey)
 		require.NotNil(t, saved)
 		assert.Empty(t, saved.ManagedBy)
+	})
+}
+
+func TestModelWritesMaintainCustomHeaderBehaviorRevision(t *testing.T) {
+	ctx := builtinModelContext(false)
+
+	t.Run("create assigns revision", func(t *testing.T) {
+		var saved *types.Model
+		svc := NewModelService(&stubModelRepoForDelete{
+			create: func(model *types.Model) error {
+				snapshot := *model
+				saved = &snapshot
+				return nil
+			},
+		}, nil, nil, nil, nil, nil)
+		input := &types.Model{
+			ID: "remote-chat", Source: types.ModelSourceRemote,
+			Parameters: types.ModelParameters{CustomHeaders: map[string]string{"X-Model-Route": "blue"}},
+		}
+
+		require.NoError(t, svc.CreateModel(ctx, input))
+		require.NotNil(t, saved)
+		assert.NotEmpty(t, saved.Parameters.ExtraConfig[types.EvaluationModelBehaviorRevisionKey])
+	})
+
+	t.Run("equivalent headers preserve revision and route changes rotate it", func(t *testing.T) {
+		stored := &types.Model{
+			ID: "remote-chat", TenantID: 7,
+			Parameters: types.ModelParameters{
+				CustomHeaders: map[string]string{"X-Model-Route": "blue", "X-Tenant": "acme"},
+				ExtraConfig:   map[string]string{types.EvaluationModelBehaviorRevisionKey: "route-v1"},
+			},
+		}
+		var saved *types.Model
+		svc := NewModelService(&stubModelRepoForDelete{
+			model: stored,
+			update: func(model *types.Model) error {
+				snapshot := *model
+				saved = &snapshot
+				return nil
+			},
+		}, nil, nil, nil, nil, nil)
+
+		equivalent := &types.Model{ID: stored.ID, Parameters: types.ModelParameters{
+			CustomHeaders: map[string]string{"x-tenant": "acme", "x-model-route": "blue"},
+		}}
+		require.NoError(t, svc.UpdateModel(ctx, equivalent))
+		require.NotNil(t, saved)
+		assert.Equal(t, "route-v1", saved.Parameters.ExtraConfig[types.EvaluationModelBehaviorRevisionKey])
+		assert.Equal(t, types.EvaluationModelConfigSHA256(stored), types.EvaluationModelConfigSHA256(saved))
+
+		changed := &types.Model{ID: stored.ID, Parameters: types.ModelParameters{
+			CustomHeaders: map[string]string{"X-Tenant": "acme", "X-Model-Route": "green"},
+			ExtraConfig:   map[string]string{types.EvaluationModelBehaviorRevisionKey: "client-value"},
+		}}
+		require.NoError(t, svc.UpdateModel(ctx, changed))
+		require.NotNil(t, saved)
+		revision := saved.Parameters.ExtraConfig[types.EvaluationModelBehaviorRevisionKey]
+		assert.NotEmpty(t, revision)
+		assert.NotEqual(t, "route-v1", revision)
+		assert.NotEqual(t, "client-value", revision)
+		assert.NotEqual(t, types.EvaluationModelConfigSHA256(stored), types.EvaluationModelConfigSHA256(saved))
 	})
 }

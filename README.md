@@ -385,3 +385,7 @@ Thanks to these excellent contributors:
 
 This project is licensed under the [MIT License](./LICENSE).
 You are free to use, modify, and distribute the code with proper attribution.
+
+## Evaluation and model usage
+
+The [evaluation workbench](docs/EVALUATION_WORKBENCH.md) freezes datasets and experiment settings, stores per-question retrieval and answer metrics, and exposes tenant-scoped model usage, pricing, and embedding cache statistics. Run `make evaluation-verify` from a clean checkout for the isolated, keyless acceptance pipeline.

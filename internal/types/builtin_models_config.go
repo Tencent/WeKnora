@@ -141,7 +141,7 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 		// a manually managed soft-deleted collision is not resurrected either.
 		var existing Model
 		lookupErr := db.WithContext(ctx).Unscoped().
-			Select("id", "managed_by").
+			Select("id", "managed_by", "parameters").
 			Where("id = ?", m.ID).
 			First(&existing).Error
 		if lookupErr == nil && existing.ManagedBy != BuiltinModelManagedBy {
@@ -151,6 +151,11 @@ func LoadBuiltinModelsConfig(ctx context.Context, db *gorm.DB, configDir string)
 		if lookupErr != nil && lookupErr != gorm.ErrRecordNotFound {
 			log.Printf("[builtin-models] WARN: inspect existing model %s failed: %v; skipping", m.ID, lookupErr)
 			continue
+		}
+		if lookupErr == nil {
+			MaintainModelBehaviorRevision(&existing.Parameters, &m.Parameters)
+		} else {
+			MaintainModelBehaviorRevision(nil, &m.Parameters)
 		}
 
 		// Mirror the API path's "single default per (tenant_id, type)"

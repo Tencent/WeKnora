@@ -217,7 +217,7 @@ python dataset/qa_dataset.py generate --input_dir ./batch2
 ### Common Issues
 
 **1. OpenAI API Errors**
-- Ensure your API key is set correctly: `echo $OPENAI_API_KEY`
+- Ensure your API key is set: `test -n "${OPENAI_API_KEY:-}" && echo "OPENAI_API_KEY is set"`
 - Check your API quota and billing status
 - Verify network connectivity to OpenAI
 

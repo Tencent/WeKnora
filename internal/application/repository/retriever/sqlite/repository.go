@@ -192,24 +192,30 @@ func (r *sqliteRepository) EstimateStorageSize(_ context.Context, indexInfoList 
 }
 
 func (r *sqliteRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList []string, _ int, _ string) error {
-	var rows []sqliteEmbedding
-	r.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Find(&rows)
-	r.deleteRowsAndVecs(ctx, rows)
-	return r.db.WithContext(ctx).Where("chunk_id IN ?", chunkIDList).Delete(&sqliteEmbedding{}).Error
+	return r.deleteIndexedRows(ctx, "chunk_id IN ?", chunkIDList)
 }
 
 func (r *sqliteRepository) DeleteBySourceIDList(ctx context.Context, sourceIDList []string, _ int, _ string) error {
-	var rows []sqliteEmbedding
-	r.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Find(&rows)
-	r.deleteRowsAndVecs(ctx, rows)
-	return r.db.WithContext(ctx).Where("source_id IN ?", sourceIDList).Delete(&sqliteEmbedding{}).Error
+	return r.deleteIndexedRows(ctx, "source_id IN ?", sourceIDList)
 }
 
 func (r *sqliteRepository) DeleteByKnowledgeIDList(ctx context.Context, knowledgeIDList []string, _ int, _ string) error {
-	var rows []sqliteEmbedding
-	r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Find(&rows)
-	r.deleteRowsAndVecs(ctx, rows)
-	return r.db.WithContext(ctx).Where("knowledge_id IN ?", knowledgeIDList).Delete(&sqliteEmbedding{}).Error
+	return r.deleteIndexedRows(ctx, "knowledge_id IN ?", knowledgeIDList)
+}
+
+func (r *sqliteRepository) deleteIndexedRows(ctx context.Context, filter string, ids []string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var rows []sqliteEmbedding
+		if err := tx.Where(filter, ids).Find(&rows).Error; err != nil {
+			return err
+		}
+		scoped := *r
+		scoped.db = tx
+		if err := scoped.deleteRowsAndVecs(rows); err != nil {
+			return err
+		}
+		return tx.Where(filter, ids).Delete(&sqliteEmbedding{}).Error
+	})
 }
 
 func (r *sqliteRepository) CopyIndices(ctx context.Context,
@@ -500,7 +506,10 @@ func (r *sqliteRepository) insertVec(_ context.Context, rowID uint, dim int, emb
 	r.db.Exec(sql, rowID, blob)
 }
 
-func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmbedding) {
+func (r *sqliteRepository) deleteRowsAndVecs(rows []sqliteEmbedding) error {
+	if len(rows) == 0 {
+		return nil
+	}
 	dimIDs := make(map[int][]uint)
 	for _, row := range rows {
 		if row.Dimension > 0 {
@@ -513,12 +522,28 @@ func (r *sqliteRepository) deleteRowsAndVecs(_ context.Context, rows []sqliteEmb
 		}
 		tbl := vecTableName(dim)
 		for _, id := range ids {
-			r.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", tbl), id)
+			if err := r.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE rowid = ?", tbl), id).Error; err != nil {
+				return err
+			}
 		}
 	}
 	for _, row := range rows {
-		r.db.Exec("DELETE FROM lite_embeddings_fts WHERE rowid = ?", row.ID)
+		if err := r.db.Exec("DELETE FROM lite_embeddings_fts WHERE rowid = ?", row.ID).Error; err != nil {
+			return err
+		}
 	}
+	// Contentless-delete tombstones retain FTS5's cumulative document/token
+	// totals even after optimize. Reset an empty index so rebuilding the same
+	// corpus starts with the same BM25 statistics. The caller's transaction
+	// keeps the emptiness check and reset atomic with metadata/vector deletion.
+	var hasRows bool
+	if err := r.db.Raw("SELECT EXISTS(SELECT 1 FROM lite_embeddings_fts LIMIT 1)").Scan(&hasRows).Error; err != nil {
+		return err
+	}
+	if !hasRows {
+		return r.db.Exec("INSERT INTO lite_embeddings_fts(lite_embeddings_fts) VALUES ('delete-all')").Error
+	}
+	return nil
 }
 
 func (r *sqliteRepository) copyVec(_ context.Context, srcID, dstID uint, dim int) {

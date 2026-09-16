@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/buildinfo"
 	"github.com/Tencent/WeKnora/internal/logger"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/mod/semver"
@@ -291,9 +291,9 @@ func downloadAndInstall(ctx context.Context, url string, filename string, curren
 	}()
 }
 
-// desktopAboutVersion 优先使用构建脚本注入的 handler.Version，否则尝试读取仓库根目录 VERSION（本地 wails dev 等未带 ldflags 时）。
+// desktopAboutVersion 优先使用构建脚本注入的 buildinfo.Version，否则尝试读取仓库根目录 VERSION（本地 wails dev 等未带 ldflags 时）。
 func desktopAboutVersion() string {
-	if v := strings.TrimSpace(handler.Version); v != "" && v != "unknown" {
+	if v := strings.TrimSpace(buildinfo.Version); v != "" && v != "unknown" {
 		return v
 	}
 	for _, p := range []string{

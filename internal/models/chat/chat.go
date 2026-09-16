@@ -26,9 +26,10 @@ type FunctionDef struct {
 
 // ChatOptions 聊天选项
 type ChatOptions struct {
-	Temperature float64 `json:"temperature"` // 温度参数
-	TopP        float64 `json:"top_p"`       // Top P 参数
-	Seed        int     `json:"seed"`        // 随机种子
+	Temperature  float64 `json:"temperature"`             // 温度参数
+	TopP         float64 `json:"top_p"`                   // Top P 参数
+	Seed         int     `json:"seed"`                    // 随机种子
+	SeedProvided bool    `json:"seed_provided,omitempty"` // Explicit seed=0 is distinct from absence.
 	// MaxTokens and MaxCompletionTokens are aliases for one completion budget.
 	// Callers may set either; CompletionBudget() prefers MaxCompletionTokens.
 	// The outbound Chat Completions JSON carries exactly one of max_tokens or
@@ -125,12 +126,14 @@ type Chat interface {
 }
 
 type ChatConfig struct {
-	Source    types.ModelSource
-	BaseURL   string
-	ModelName string
-	APIKey    string
-	ModelID   string
-	Provider  string
+	ContextWindow   int
+	MaxOutputTokens int
+	Source          types.ModelSource
+	BaseURL         string
+	ModelName       string
+	APIKey          string
+	ModelID         string
+	Provider        string
 	// MaxConcurrency caps concurrent background calls to this model; 0 falls
 	// back to the process-wide default (see limiter.GateN).
 	MaxConcurrency int
@@ -157,15 +160,22 @@ func ConfigFromModel(m *types.Model, appID, appSecret string) *ChatConfig {
 		Source:         m.Source,
 		Provider:       m.Parameters.Provider,
 		MaxConcurrency: m.Parameters.MaxConcurrency,
-		ExtraConfig:    m.Parameters.ExtraConfig,
-		CustomHeaders:  m.Parameters.CustomHeaders,
-		AppID:          appID,
-		AppSecret:      appSecret,
+		ContextWindow:  m.Parameters.ContextWindow, MaxOutputTokens: m.Parameters.MaxOutputTokens,
+		ExtraConfig:   m.Parameters.ExtraConfig,
+		CustomHeaders: m.Parameters.CustomHeaders,
+		AppID:         appID,
+		AppSecret:     appSecret,
 	}
 }
 
 // NewChat 创建聊天实例
 func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, error) {
+	if config == nil {
+		return nil, fmt.Errorf("chat configuration is required")
+	}
+	if err := validateBudget(config); err != nil {
+		return nil, err
+	}
 	var c Chat
 	var err error
 	switch strings.ToLower(string(config.Source)) {
@@ -180,7 +190,11 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 	c, err = wrapChatLangfuse(c, err)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
-	return wrapChatConcurrency(c, config.MaxConcurrency, err)
+	c, err = wrapChatConcurrency(c, config.MaxConcurrency, err)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetChat{inner: c, contextWindow: config.ContextWindow, maxOutput: config.MaxOutputTokens}, nil
 }
 
 // NewRemoteChat 根据 provider 创建远程聊天实例。

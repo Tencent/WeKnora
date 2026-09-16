@@ -1,0 +1,14 @@
+SQuAD 2.0 英文阅读理解 · 24 题
+
+Attribution: Pranav Rajpurkar, Robin Jia, Percy Liang and SQuAD contributors; Wikipedia contributors.
+Source: https://rajpurkar.github.io/SQuAD-explorer/
+License: Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA-4.0)
+https://creativecommons.org/licenses/by-sa/4.0/
+
+Changes: deterministic development-set selection; stable prefixed IDs; registry schema conversion; one upstream reference answer selected. Passage text, question text, and all original answers in the evidence files are preserved. This adaptation is distributed under CC-BY-SA-4.0. No endorsement is implied.
+
+Wikipedia article titles and attribution URLs accompany each passage. Upstream does not supply exact Wikipedia revision IDs. The pinned dataset snapshot is the authoritative text for this package; linked live articles can differ.
+
+CMRC means Chinese Machine Reading Comprehension; SQuAD means Stanford Question Answering Dataset.
+
+License evidence: official SQuAD website at revision e0c66cfec263165fb3c15cb76a22175e371b71d7; source hash recorded in manifest. Dataset license is CC-BY-SA-4.0. The repository's software license is not used for the dataset. The included CC license text is the identical license published with CMRC 2018.

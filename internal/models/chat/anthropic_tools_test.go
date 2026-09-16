@@ -84,12 +84,22 @@ func TestAnthropicToolStreamParallelFragmentsAndIncompleteCalls(t *testing.T) {
 			"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n",
 			types.FinishReasonIncomplete,
 		},
-		{"token limit", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\n", "length"},
+		{"token limit", "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n\n" +
+			"data: {\"type\":\"message_stop\"}\n\n", "length"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			body := prefix + test.tail
 			parsed, err := parseAnthropicSSE(strings.NewReader(body))
-			require.NoError(t, err)
+			if test.name == "cut off" || test.name == "missing block stop" {
+				require.ErrorContains(
+					t,
+					err,
+					"stream incomplete",
+					"EOF without message_stop cannot be accounted as success",
+				)
+			} else {
+				require.NoError(t, err)
+			}
 			require.Equal(t, test.reason, parsed.FinishReason)
 			require.JSONEq(t, `{"id":"42"}`, parsed.ToolCalls[0].Function.Arguments)
 			if test.name == "complete" {

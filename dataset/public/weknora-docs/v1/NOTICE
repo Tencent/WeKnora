@@ -1,0 +1,8 @@
+WeKnora public documentation snapshot
+
+Copyright (C) 2025 Tencent. All rights reserved.
+Source: https://github.com/Tencent/WeKnora
+License: MIT; upstream LICENSE is preserved including third-party notices.
+Changes: five documentation files selected and renamed for local upload; source file bytes are unchanged. Registry metadata and a manifest are added.
+
+This package is an upstream product documentation sample for knowledge-base upload and retrieval exploration. It has no labeled evaluation questions. It is related to this project's upstream and provides no independent quality benchmark. Source URLs identify the upstream revision and do not describe or guarantee the current local deployment.

@@ -1,10 +1,8 @@
 name: Go Lint
 
-# The repository carries a large backlog of pre-existing golangci-lint findings,
-# so pull requests are only judged on the code they introduce (`only-new-issues`).
-# That filter needs a pull request diff, which is why this workflow has no other
-# trigger; the companion go-lint-cache.yml keeps the caches this job restores
-# from warm on main.
+# Pull requests are judged on diagnostics introduced relative to their base.
+# A complete local checkout supplies that diff, including PRs beyond the hosted
+# patch API's file-count limit. The companion go-lint-cache.yml warms caches.
 
 on:
   pull_request:
@@ -101,4 +99,7 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: ${{ matrix.module }}
-          only-new-issues: true
+          # The action's patch download has a 300-file limit. The linter reads
+          # the same base-to-checkout diff locally without that API limit.
+          only-new-issues: false
+          args: --new-from-rev=${{ github.event.pull_request.base.sha }}

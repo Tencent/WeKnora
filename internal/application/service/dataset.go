@@ -121,7 +121,7 @@ func (d *dataset) Iterate() []*types.QAPair {
 		}
 
 		// Get related passages
-		pids := d.qrels[qid]
+		pids, labelsAvailable := d.qrels[qid]
 		var pidStr []int
 		for _, pid := range pids {
 			pidStr = append(pidStr, int(pid))
@@ -132,12 +132,13 @@ func (d *dataset) Iterate() []*types.QAPair {
 		}
 
 		pairs = append(pairs, &types.QAPair{
-			QID:      int(qid),
-			Question: question,
-			PIDs:     pidStr,
-			Passages: passages,
-			AID:      int(aid),
-			Answer:   answer,
+			QID:                      int(qid),
+			Question:                 question,
+			PIDs:                     pidStr,
+			Passages:                 passages,
+			RetrievalLabelsAvailable: labelsAvailable,
+			AID:                      int(aid),
+			Answer:                   answer,
 		})
 	}
 

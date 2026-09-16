@@ -1,12 +1,13 @@
 package router
 
 import (
+	"github.com/Tencent/WeKnora/internal/buildinfo"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCapabilitiesData {
-	return handler.BuildDeploymentCapabilities(handler.Edition, handler.DeploymentFeatureAvailability{
+	return handler.BuildDeploymentCapabilities(buildinfo.Edition, handler.DeploymentFeatureAvailability{
 		Organizations: params.OrganizationHandler != nil,
 		Agents:        params.CustomAgentHandler != nil,
 		IM:            params.IMHandler != nil,

@@ -1,0 +1,881 @@
+{
+  "passages": [
+    {
+      "pid": "D01-P01",
+      "content": "星帆共享实验室位于澄川大学创想楼二层 C201 室，提供共享设备、计算任务和项目讨论空间。设备借用在 C202 服务台办理，计算任务通过星帆工作台提交。讨论区共有 12 个座位，服务台不提供打印服务。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D01",
+        "heading": "场所与服务范围",
+        "source_file": "source_docs/01-实验室开放与预约.md",
+        "source_sha256": "a2c241c32939ce46ba62aa17e06ecfd612f2355f6b1770d254f68dadea555c07",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D01-P02",
+      "content": "常规开放时间为周一至周五 09:00—21:00，周六 10:00—18:00，周日关闭。设备借用与归还的服务时间为周一至周五 10:00—17:00；周六仅开放讨论区。实验室开放时间和服务台办理时间分别执行，进入讨论区不代表能够办理设备借还。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D01",
+        "heading": "开放时间",
+        "source_file": "source_docs/01-实验室开放与预约.md",
+        "source_sha256": "a2c241c32939ce46ba62aa17e06ecfd612f2355f6b1770d254f68dadea555c07",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D01-P03",
+      "content": "在校学生完成账户注册和基础培训后，可以预约讨论座位。借用设备还须通过对应设备培训。团队负责人负责成员名单，但负责人资格不能替代其他成员的个人培训记录。校外访客仅可在工作人员带领下参观，不办理独立借用。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D01",
+        "heading": "使用资格",
+        "source_file": "source_docs/01-实验室开放与预约.md",
+        "source_sha256": "a2c241c32939ce46ba62aa17e06ecfd612f2355f6b1770d254f68dadea555c07",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D01-P04",
+      "content": "讨论座位最多提前 7 个自然日预约，每次最多 3 小时。预约人须在开始后的 15 分钟内签到，超过 15 分钟未签到时系统释放座位。主动取消须在开始前至少 2 小时完成。同一账户在连续 30 个自然日内累计 2 次未签到，将暂停座位预约资格 7 个自然日；设备资格另按设备规则处理。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D01",
+        "heading": "预约与取消",
+        "source_file": "source_docs/01-实验室开放与预约.md",
+        "source_sha256": "a2c241c32939ce46ba62aa17e06ecfd612f2355f6b1770d254f68dadea555c07",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D02-P01",
+      "content": "| 设备编号 | 设备名称 | 库存 | 单次最长借期 | 同一账户同时借用上限 |\n| --- | --- | --- | --- | --- |\n| CAM-01 | 星帆影像相机 | 4 台 | 24 小时 | 1 台 |\n| SEN-02 | 星帆环境传感器套件 | 6 套 | 48 小时 | 2 套 |\n| MIC-03 | 星帆录音套装 | 3 套 | 24 小时 | 1 套 |\n\n库存表示目录登记数量，实际可借数量以预约时状态为准。设备用于课程与研究，所有名称与编号均属于本合成语料的虚构设定。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D02",
+        "heading": "设备目录",
+        "source_file": "source_docs/02-设备目录与借还.md",
+        "source_sha256": "4ee0226a4717b2047bd1d83118298a86ffc0f24dc5ea1ffecf98bb144b4db12a",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D02-P02",
+      "content": "设备预约最多提前 5 个自然日提交，领取时核验本人账户和对应设备培训记录。最长借期从实际领取时刻开始计算。归还截止时间必须落在服务台办理时段内；若按最长借期计算的终点落在非办理时段，应将截止时间提前到此前最近的办理时段结束时刻。CAM-01 不支持续借；其他设备可以申请一次不超过 24 小时的续借，且须无后续预约并获得服务台确认。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D02",
+        "heading": "领取与截止时间",
+        "source_file": "source_docs/02-设备目录与借还.md",
+        "source_sha256": "4ee0226a4717b2047bd1d83118298a86ffc0f24dc5ea1ffecf98bb144b4db12a",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D02-P03",
+      "content": "归还时须提交主机、附件和借用单。工作人员核验设备编号、附件数量与外观，并与领取时的检查记录比较。未经归还核验，系统继续显示借用中。检测到异常时先登记故障工单，再由工作人员决定是否暂停设备流转；使用者自行上传的照片不能替代归还核验。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D02",
+        "heading": "归还检查",
+        "source_file": "source_docs/02-设备目录与借还.md",
+        "source_sha256": "4ee0226a4717b2047bd1d83118298a86ffc0f24dc5ea1ffecf98bb144b4db12a",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D02-P04",
+      "content": "逾期归还暂停设备借用资格 7 个自然日，自实际归还并完成核验时起算。暂停设备借用不影响已具备资格的讨论区座位预约。正常磨损由实验室登记维护；损坏责任和赔偿金额须单独调查，本目录没有给出统一赔偿单价。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D02",
+        "heading": "逾期与损坏",
+        "source_file": "source_docs/02-设备目录与借还.md",
+        "source_sha256": "4ee0226a4717b2047bd1d83118298a86ffc0f24dc5ea1ffecf98bb144b4db12a",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D03-P01",
+      "content": "个人账户每周获得 12 GPU 小时计算配额，认证项目团队每周获得 40 GPU 小时。GPU 小时表示一块图形处理器运行一小时的用量；两块同时运行一小时计为 2 GPU 小时。个人与团队配额分别记账，提交任务时必须选择其中一个配额账户。同一任务不能混用两种配额。每周一 00:00 重置，剩余配额不结转。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D03",
+        "heading": "配额与结算",
+        "source_file": "source_docs/03-计算资源与任务.md",
+        "source_sha256": "967bf393d0b000102486945ea5ed54417c26060dc821c8d29e88852773ae1326",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D03-P02",
+      "content": "单个任务最多运行 4 小时，每个配额账户最多同时运行 2 个任务。排队时间不计入计算配额，实际运行时间计入配额。用户主动取消任务时，已经发生的运行用量仍然计入账户。任务日志保留任务编号、配额账户、设备数量、开始时间、结束时间和状态。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D03",
+        "heading": "任务限制",
+        "source_file": "source_docs/03-计算资源与任务.md",
+        "source_sha256": "967bf393d0b000102486945ea5ed54417c26060dc821c8d29e88852773ae1326",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D03-P03",
+      "content": "教学任务优先于普通项目任务，同一优先级按提交时间排序。教学高峰期普通项目任务可能被暂停；暂停期间不消耗计算配额，恢复后继续累计实际运行时间。星帆工作台展示排队、运行、暂停、成功、失败和取消状态。任务失败后重新提交会生成新的任务编号。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D03",
+        "heading": "排队与抢占",
+        "source_file": "source_docs/03-计算资源与任务.md",
+        "source_sha256": "967bf393d0b000102486945ea5ed54417c26060dc821c8d29e88852773ae1326",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D03-P04",
+      "content": "每个项目工作目录从最后一次写入起保留 30 个自然日，任务日志保留 90 个自然日。完成结果应导出至项目归档区。归档区只接收成员主动提交的文件，不会自动收集工作目录中的全部中间文件。材料仓的领取记录与计算任务日志属于不同记录。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D03",
+        "heading": "文件留存",
+        "source_file": "source_docs/03-计算资源与任务.md",
+        "source_sha256": "967bf393d0b000102486945ea5ed54417c26060dc821c8d29e88852773ae1326",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D04-P01",
+      "content": "| 材料编号 | 名称 | 领取单位 | 每个团队每周免费额度 |\n| --- | --- | --- | --- |\n| MAT-A | 原型纸板 | 张 | 20 |\n| MAT-B | 标记标签 | 枚 | 50 |\n| MAT-C | 连接线 | 根 | 10 |\n\n耗材只能以目录中的完整单位领取，每周一 00:00 重置免费额度，余量不结转。免费额度分别按材料编号计算。目录中的免费额度属于虚构实验室内部设定，不涉及真实购买。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D04",
+        "heading": "耗材目录",
+        "source_file": "source_docs/04-材料仓与项目归档.md",
+        "source_sha256": "983403fb54c9053f07b26b064126b8d1c20b2c1bea5a3626fcb0a823d74145c0",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D04-P02",
+      "content": "认证团队负责人可在星帆工作台提交领取单，写明材料编号、数量和项目用途。普通成员可以代领，但领取单须先由负责人确认。材料仓办理时间为周二、周四 14:00—17:00，位置在创想楼 C203 室。材料仓与 C202 设备服务台分别办理各自业务。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D04",
+        "heading": "领取流程",
+        "source_file": "source_docs/04-材料仓与项目归档.md",
+        "source_sha256": "983403fb54c9053f07b26b064126b8d1c20b2c1bea5a3626fcb0a823d74145c0",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D04-P03",
+      "content": "超过本周免费额度的领取申请进入人工审核，审核通过前不发放超额部分。退回材料须保持完整且未使用，工作人员核验后在当前周恢复对应可用额度。跨周退回不增加新一周的初始额度。材料目录未规定超额购买价格。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D04",
+        "heading": "超额与退回",
+        "source_file": "source_docs/04-材料仓与项目归档.md",
+        "source_sha256": "983403fb54c9053f07b26b064126b8d1c20b2c1bea5a3626fcb0a823d74145c0",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D04-P04",
+      "content": "项目归档包必须包含项目说明、材料清单、设备使用记录和最终成果文件。涉及计算任务时还须附任务编号与导出日志。文件名称采用项目编号、文档类型和版本号三个字段。只有经过负责人确认的归档包显示已归档；成员上传草稿后仍显示待确认。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D04",
+        "heading": "归档要求",
+        "source_file": "source_docs/04-材料仓与项目归档.md",
+        "source_sha256": "983403fb54c9053f07b26b064126b8d1c20b2c1bea5a3626fcb0a823d74145c0",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D05-P01",
+      "content": "服务工单通过星帆工作台的帮助入口提交，包含问题类别、关联设备或任务编号、发生时间和现象。服务团队在周一至周五 09:00—17:00 处理工单，首次响应目标为 1 个工作日内。首次响应表示工作人员开始受理，不表示已经修复。资料中没有提供服务电话。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D05",
+        "heading": "工单入口与响应",
+        "source_file": "source_docs/05-服务工单与故障.md",
+        "source_sha256": "35e8380a0453259af85ef53fb0800e1155a7d262202539f2d6146bb518125e54",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D05-P02",
+      "content": "发现设备异常时应停止继续借用并提交工单，将主机和现有附件交给设备服务台登记。工作人员核验后决定维修或恢复流转。故障报送不会自动结束借用记录，借用状态以设备归还核验结果为准。该规则适用于本合成语料的设备流程，不提供实际设备维修操作。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D05",
+        "heading": "设备异常",
+        "source_file": "source_docs/05-服务工单与故障.md",
+        "source_sha256": "35e8380a0453259af85ef53fb0800e1155a7d262202539f2d6146bb518125e54",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D05-P03",
+      "content": "计算任务出现失败或异常暂停时，应在工单中引用任务编号和时间范围。工作人员先核对任务日志再处理配额异议。用户可申请复核实际运行用量，工单提交本身不会自动返还配额。资料没有给出统一的修复时限，也没有承诺所有失败任务返还配额。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D05",
+        "heading": "平台任务异常",
+        "source_file": "source_docs/05-服务工单与故障.md",
+        "source_sha256": "35e8380a0453259af85ef53fb0800e1155a7d262202539f2d6146bb518125e54",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D05-P04",
+      "content": "计划维护至少提前 24 小时在星帆工作台发布，通知列明受影响功能、开始时间和预计结束时间。设备服务台、材料仓与计算服务可以分别进入维护状态。具体维护通知优先于常规开放安排；本版本语料没有发布某一天的具体维护通知。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D05",
+        "heading": "通知与维护",
+        "source_file": "source_docs/05-服务工单与故障.md",
+        "source_sha256": "35e8380a0453259af85ef53fb0800e1155a7d262202539f2d6146bb518125e54",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D06-P01",
+      "content": "秋季项目交流日计划于 2026 年 10 月 24 日在创想楼展示厅举行。报名截止时间为 2026 年 10 月 16 日 18:00。每队 3—5 人，须指定一名在校学生负责人。活动报名资格与设备借用资格分别审核，成功报名不自动获得设备培训认证。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D06",
+        "heading": "活动时间与报名",
+        "source_file": "source_docs/06-秋季项目交流日.md",
+        "source_sha256": "e7b80d4f85fb0ea3ef8350b5afefa93aaf0eb20d340d435ff084432ae589c9b6",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D06-P02",
+      "content": "| 场次 | 时间 | 内容 |\n| --- | --- | --- |\n| 上午场 | 09:30—12:00 | 原型展示与交流 |\n| 下午场 | 14:00—16:30 | 数据应用与项目复盘 |\n\n每队正式展示 6 分钟，问答 3 分钟，合计 9 分钟。场次由组织方排定，团队报名时可以填写偏好。资料没有列出每个团队的具体场次。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D06",
+        "heading": "场次与展示",
+        "source_file": "source_docs/06-秋季项目交流日.md",
+        "source_sha256": "e7b80d4f85fb0ea3ef8350b5afefa93aaf0eb20d340d435ff084432ae589c9b6",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D06-P03",
+      "content": "报名时提交项目摘要和成员名单。展示材料须在 2026 年 10 月 21 日 18:00 前提交，包含演示文件与符合项目归档要求的归档包。使用计算资源的项目须在归档包中提供任务编号和导出日志。摘要限 300 个汉字，演示文件格式为 PDF。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D06",
+        "heading": "材料提交",
+        "source_file": "source_docs/06-秋季项目交流日.md",
+        "source_sha256": "e7b80d4f85fb0ea3ef8350b5afefa93aaf0eb20d340d435ff084432ae589c9b6",
+        "human_review_status": "pending"
+      }
+    },
+    {
+      "pid": "D06-P04",
+      "content": "交流日活动报名不增加每周计算配额，不改变设备最长借期，也不改变材料免费额度。需要延长资源使用或超额领取时，仍分别按相关资源规则办理。活动日为周六，常规设备服务台和材料仓均不办理借还或领取；活动展示厅开放不等同于这些服务点开放。",
+      "metadata": {
+        "source": "ai_synthetic",
+        "document_id": "D06",
+        "heading": "资源安排",
+        "source_file": "source_docs/06-秋季项目交流日.md",
+        "source_sha256": "e7b80d4f85fb0ea3ef8350b5afefa93aaf0eb20d340d435ff084432ae589c9b6",
+        "human_review_status": "pending"
+      }
+    }
+  ],
+  "questions": [
+    {
+      "qid": "Q01",
+      "question": "周六实验室什么时候开放？能办理设备借还吗？",
+      "answer": "周六讨论区 10:00—18:00 开放，设备服务台仅周一至周五 10:00—17:00 办理，周六不能办理设备借还。"
+    },
+    {
+      "qid": "Q02",
+      "question": "讨论座位最多提前几天预约？一次最长多久？",
+      "answer": "最多提前 7 个自然日预约，每次最多 3 小时。"
+    },
+    {
+      "qid": "Q03",
+      "question": "团队负责人通过设备培训后，其他成员是否自动具备设备借用资格？",
+      "answer": "不具备。每位借用者须有对应设备培训记录，负责人资格不能替代成员的培训记录。"
+    },
+    {
+      "qid": "Q04",
+      "question": "连续 30 天内两次预约未签到，会受到什么限制？",
+      "answer": "座位预约资格暂停 7 个自然日；设备资格另按设备规则处理。"
+    },
+    {
+      "qid": "Q05",
+      "question": "哪种设备最长可以借 48 小时，同一账户最多同时借多少？",
+      "answer": "SEN-02 星帆环境传感器套件，最长 48 小时，同一账户最多同时借 2 套。"
+    },
+    {
+      "qid": "Q06",
+      "question": "目录登记的相机和录音套装合计多少台或套？是否等于当前可借数量？",
+      "answer": "4 台相机加 3 套录音套装，合计 7 件；登记库存不等于实时可借数量。"
+    },
+    {
+      "qid": "Q07",
+      "question": "常规无维护安排的周五 16:00 领取 CAM-01，最迟什么时候归还？",
+      "answer": "最迟当周五 17:00。24 小时后的周六 16:00 不在服务台办理时段，截止时间提前到此前最近办理时段结束的周五 17:00。"
+    },
+    {
+      "qid": "Q08",
+      "question": "相机 CAM-01 能否续借？",
+      "answer": "不支持续借。"
+    },
+    {
+      "qid": "Q09",
+      "question": "因为设备逾期被暂停借用资格，会同时失去讨论座位预约资格吗？",
+      "answer": "不会。暂停设备借用不影响已具备资格的讨论区座位预约。"
+    },
+    {
+      "qid": "Q10",
+      "question": "个人账户本周已用 5 GPU 小时，再用两块 GPU 各运行 2 小时，剩多少配额？",
+      "answer": "新增用量为 2×2=4 GPU 小时；个人每周 12 GPU 小时，因此剩 12−5−4=3 GPU 小时。"
+    },
+    {
+      "qid": "Q11",
+      "question": "任务排队两小时后运行一小时，取消时应计多少运行时间？",
+      "answer": "排队不计配额，已运行的一小时计入配额；取消不会抹去已发生的运行用量。GPU 小时还需结合实际设备数量计算。"
+    },
+    {
+      "qid": "Q12",
+      "question": "项目工作目录和任务日志分别保留多久？",
+      "answer": "工作目录从最后一次写入起保留 30 个自然日；任务日志保留 90 个自然日。"
+    },
+    {
+      "qid": "Q13",
+      "question": "团队本周已领 35 枚标签，还能在免费额度内领取多少枚？",
+      "answer": "MAT-B 标记标签每周免费额度 50 枚，尚可领取 15 枚。"
+    },
+    {
+      "qid": "Q14",
+      "question": "项目用过计算资源，交流日提交的归档包还需要哪些计算相关材料？",
+      "answer": "需要任务编号和导出日志。交流日提交的归档包须符合项目归档要求。"
+    },
+    {
+      "qid": "Q15",
+      "question": "周六参加交流日，可以顺便去服务台归还设备或领取材料吗？",
+      "answer": "不可以。设备服务台在周一至周五办理，材料仓在周二、周四办理；交流日展示厅开放不改变这两个服务点的办理安排。"
+    },
+    {
+      "qid": "Q16",
+      "question": "工作人员承诺一个工作日内响应，是否表示设备一定在一个工作日内修好？",
+      "answer": "不表示。一个工作日内是首次响应目标，响应不等于修复；资料未给出统一修复时限。"
+    },
+    {
+      "qid": "Q17",
+      "question": "每队展示加问答总共多久？展示材料截止时间是什么？",
+      "answer": "展示 6 分钟、问答 3 分钟，共 9 分钟；材料截止时间为 2026 年 10 月 21 日 18:00。"
+    },
+    {
+      "qid": "Q18",
+      "question": "设备服务台的电话号码是多少？",
+      "answer": "资料未提供服务电话，无法从本语料确定电话号码。"
+    },
+    {
+      "qid": "Q19",
+      "question": "损坏一台 CAM-01 的固定赔偿金额是多少？",
+      "answer": "资料没有统一赔偿单价，损坏责任和金额须单独调查，无法确定固定金额。"
+    },
+    {
+      "qid": "Q20",
+      "question": "团队“蓝鲸”的交流日展示安排在上午还是下午？",
+      "answer": "资料未列出具体团队场次，无法确定“蓝鲸”团队的场次。"
+    }
+  ],
+  "relevance": [
+    {
+      "qid": "Q01",
+      "pid": "D01-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q02",
+      "pid": "D01-P04",
+      "grade": 1
+    },
+    {
+      "qid": "Q03",
+      "pid": "D01-P03",
+      "grade": 1
+    },
+    {
+      "qid": "Q03",
+      "pid": "D02-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q04",
+      "pid": "D01-P04",
+      "grade": 1
+    },
+    {
+      "qid": "Q05",
+      "pid": "D02-P01",
+      "grade": 1
+    },
+    {
+      "qid": "Q06",
+      "pid": "D02-P01",
+      "grade": 1
+    },
+    {
+      "qid": "Q07",
+      "pid": "D01-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q07",
+      "pid": "D02-P01",
+      "grade": 1
+    },
+    {
+      "qid": "Q07",
+      "pid": "D02-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q08",
+      "pid": "D02-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q09",
+      "pid": "D02-P04",
+      "grade": 1
+    },
+    {
+      "qid": "Q10",
+      "pid": "D03-P01",
+      "grade": 1
+    },
+    {
+      "qid": "Q11",
+      "pid": "D03-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q12",
+      "pid": "D03-P04",
+      "grade": 1
+    },
+    {
+      "qid": "Q13",
+      "pid": "D04-P01",
+      "grade": 1
+    },
+    {
+      "qid": "Q14",
+      "pid": "D04-P04",
+      "grade": 1
+    },
+    {
+      "qid": "Q14",
+      "pid": "D06-P03",
+      "grade": 1
+    },
+    {
+      "qid": "Q15",
+      "pid": "D01-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q15",
+      "pid": "D04-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q15",
+      "pid": "D06-P04",
+      "grade": 1
+    },
+    {
+      "qid": "Q16",
+      "pid": "D05-P01",
+      "grade": 1
+    },
+    {
+      "qid": "Q16",
+      "pid": "D05-P03",
+      "grade": 1
+    },
+    {
+      "qid": "Q17",
+      "pid": "D06-P02",
+      "grade": 1
+    },
+    {
+      "qid": "Q17",
+      "pid": "D06-P03",
+      "grade": 1
+    },
+    {
+      "qid": "Q18",
+      "pid": "D01-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D01-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D01-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D01-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D02-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D02-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D02-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D02-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D03-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D03-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D03-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D03-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D04-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D04-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D04-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D04-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D05-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D05-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D05-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D05-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D06-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D06-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D06-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q18",
+      "pid": "D06-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D01-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D01-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D01-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D01-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D02-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D02-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D02-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D02-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D03-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D03-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D03-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D03-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D04-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D04-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D04-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D04-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D05-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D05-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D05-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D05-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D06-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D06-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D06-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q19",
+      "pid": "D06-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D01-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D01-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D01-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D01-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D02-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D02-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D02-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D02-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D03-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D03-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D03-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D03-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D04-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D04-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D04-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D04-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D05-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D05-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D05-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D05-P04",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D06-P01",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D06-P02",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D06-P03",
+      "grade": 0
+    },
+    {
+      "qid": "Q20",
+      "pid": "D06-P04",
+      "grade": 0
+    }
+  ]
+}

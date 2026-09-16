@@ -1,0 +1,5 @@
+mineru[pipeline]==3.4.5
+torch==2.8.0+cpu
+torchvision==0.23.0+cpu
+transformers==4.57.3
+six==1.17.0

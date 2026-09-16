@@ -1,0 +1,920 @@
+{
+  "passages": [
+    {
+      "pid": "squad2-dev-a0001-p0013",
+      "content": "A deterministic Turing machine is the most basic Turing machine, which uses a fixed set of rules to determine its future actions. A probabilistic Turing machine is a deterministic Turing machine with an extra supply of random bits. The ability to make probabilistic decisions often helps algorithms solve problems more efficiently. Algorithms that use random bits are called randomized algorithms. A non-deterministic Turing machine is a deterministic Turing machine with an added feature of non-determinism, which allows a Turing machine to have multiple possible future actions from a given state. One way to view non-determinism is that the Turing machine branches into many possible computational paths at each step, and if it solves the problem in any of these branches, it is said to have solved the problem. Clearly, this model is not meant to be a physically realizable model, it is just a theoretically interesting abstract machine that gives rise to particularly interesting complexity classes. For examples, see non-deterministic algorithm.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Computational_complexity_theory",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 1,
+        "paragraph_index": 13,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Computational_complexity_theory",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0001-p0013.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0001-p0025",
+      "content": "Many important complexity classes can be defined by bounding the time or space used by the algorithm. Some important complexity classes of decision problems defined in this manner are the following:",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Computational_complexity_theory",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 1,
+        "paragraph_index": 25,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Computational_complexity_theory",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0001-p0025.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0002-p0008",
+      "content": "Many locals and tourists frequent the southern California coast for its popular beaches, and the desert city of Palm Springs is popular for its resort feel and nearby open spaces.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Southern_California",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 2,
+        "paragraph_index": 8,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Southern_California",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0002-p0008.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0004-p0008",
+      "content": "Victoria has a written constitution enacted in 1975, but based on the 1855 colonial constitution, passed by the United Kingdom Parliament as the Victoria Constitution Act 1855, which establishes the Parliament as the state's law-making body for matters coming under state responsibility. The Victorian Constitution can be amended by the Parliament of Victoria, except for certain \"entrenched\" provisions that require either an absolute majority in both houses, a three-fifths majority in both houses, or the approval of the Victorian people in a referendum, depending on the provision.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Victoria_(Australia)",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 4,
+        "paragraph_index": 8,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Victoria_%28Australia%29",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0004-p0008.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0005-p0038",
+      "content": "New Rochelle, located in the county of Westchester on the north shore of Long Island Sound, seemed to be the great location of the Huguenots in New York. It is said that they landed on the coastline peninsula of Davenports Neck called \"Bauffet's Point\" after traveling from England where they had previously taken refuge on account of religious persecution, four years before the revocation of the Edict of Nantes. They purchased from John Pell, Lord of Pelham Manor, a tract of land consisting of six thousand one hundred acres with the help of Jacob Leisler. It was named New Rochelle after La Rochelle, their former strong-hold in France. A small wooden church was first erected in the community, followed by a second church that built of stone. Previous to the erection of it, the strong men would often walk twenty-three miles on Saturday evening, the distance by the road from New Rochelle to New York, to attend the Sunday service. The church was eventually replaced by a third, Trinity-St. Paul's Episcopal Church, which contains heirlooms including the original bell from the French Huguenot Church \"Eglise du St. Esperit\" on Pine Street in New York City, which is preserved as a relic in the tower room. The Huguenot cemetery, or \"Huguenot Burial Ground\", has since been recognized as a historic cemetery that is the final resting place for a wide range of the Huguenot founders, early settlers and prominent citizens dating back more than three centuries.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Huguenot",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 5,
+        "paragraph_index": 38,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Huguenot",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0005-p0038.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0006-p0017",
+      "content": "The working fluid in a Rankine cycle can operate as a closed loop system, where the working fluid is recycled continuously, or may be an \"open loop\" system, where the exhaust steam is directly released to the atmosphere, and a separate source of water feeding the boiler is supplied. Normally water is the fluid of choice due to its favourable properties, such as non-toxic and unreactive chemistry, abundance, low cost, and its thermodynamic properties. Mercury is the working fluid in the mercury vapor turbine. Low boiling hydrocarbons can be used in a binary cycle.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Steam_engine",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 6,
+        "paragraph_index": 17,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Steam_engine",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0006-p0017.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0007-p0039",
+      "content": "The element is found in almost all biomolecules that are important to (or generated by) life. Only a few common complex biomolecules, such as squalene and the carotenes, contain no oxygen. Of the organic compounds with biological relevance, carbohydrates contain the largest proportion by mass of oxygen. All fats, fatty acids, amino acids, and proteins contain oxygen (due to the presence of carbonyl groups in these acids and their ester residues). Oxygen also occurs in phosphate (PO3−\n4) groups in the biologically important energy-carrying molecules ATP and ADP, in the backbone and the purines (except adenine) and pyrimidines of RNA and DNA, and in bones as calcium phosphate and hydroxylapatite.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Oxygen",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 7,
+        "paragraph_index": 39,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Oxygen",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0007-p0039.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0008-p0002",
+      "content": "On August 15, 1971, the United States unilaterally pulled out of the Bretton Woods Accord. The US abandoned the Gold Exchange Standard whereby the value of the dollar had been pegged to the price of gold and all other currencies were pegged to the dollar, whose value was left to \"float\" (rise and fall according to market demand). Shortly thereafter, Britain followed, floating the pound sterling. The other industrialized nations followed suit with their respective currencies. Anticipating that currency values would fluctuate unpredictably for a time, the industrialized nations increased their reserves (by expanding their money supplies) in amounts far greater than before. The result was a depreciation of the dollar and other industrialized nations' currencies. Because oil was priced in dollars, oil producers' real income decreased. In September 1971, OPEC issued a joint communiqué stating that, from then on, they would price oil in terms of a fixed amount of gold.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "1973_oil_crisis",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 8,
+        "paragraph_index": 2,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/1973_oil_crisis",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0008-p0002.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0009-p0008",
+      "content": "The second main legislative body is the Council, which is composed of different ministers of the member states. The heads of government of member states also convene a \"European Council\" (a distinct body) that the TEU article 15 defines as providing the 'necessary impetus for its development and shall define the general political directions and priorities'. It meets each six months and its President (currently former Poland Prime Minister Donald Tusk) is meant to 'drive forward its work', but it does not itself 'legislative functions'. The Council does this: in effect this is the governments of the member states, but there will be a different minister at each meeting, depending on the topic discussed (e.g. for environmental issues, the member states' environment ministers attend and vote; for foreign affairs, the foreign ministers, etc.). The minister must have the authority to represent and bin the member states in decisions. When voting takes place it is weighted inversely to member state size, so smaller member states are not dominated by larger member states. In total there are 352 votes, but for most acts there must be a qualified majority vote, if not consensus. TEU article 16(4) and TFEU article 238(3) define this to mean at least 55 per cent of the Council members (not votes) representing 65 per cent of the population of the EU: currently this means around 74 per cent, or 260 of the 352 votes. This is critical during the legislative process.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "European_Union_law",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 9,
+        "paragraph_index": 8,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/European_Union_law",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0009-p0008.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0009-p0035",
+      "content": "Citizenship of the EU has increasingly been seen as a \"fundamental\" status of member state nationals by the Court of Justice, and has accordingly increased the number of social services that people can access wherever they move. The Court has required that higher education, along with other forms of vocational training, should be more access, albeit with qualifying periods. In Commission v Austria the Court held that Austria was not entitled to restrict places in Austrian universities to Austrian students to avoid \"structural, staffing and financial problems\" if (mainly German) foreign students applied for places because there was little evidence of an actual problem.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "European_Union_law",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 9,
+        "paragraph_index": 35,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/European_Union_law",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0009-p0035.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0013-p0001",
+      "content": "Packet switching contrasts with another principal networking paradigm, circuit switching, a method which pre-allocates dedicated network bandwidth specifically for each communication session, each having a constant bit rate and latency between nodes. In cases of billable services, such as cellular communication services, circuit switching is characterized by a fee per unit of connection time, even when no data is transferred, while packet switching may be characterized by a fee per unit of information transmitted, such as characters, packets, or messages.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Packet_switching",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 13,
+        "paragraph_index": 1,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Packet_switching",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0013-p0001.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0015-p0006",
+      "content": "The principle of inclusions and components states that, with sedimentary rocks, if inclusions (or clasts) are found in a formation, then the inclusions must be older than the formation that contains them. For example, in sedimentary rocks, it is common for gravel from an older formation to be ripped up and included in a newer layer. A similar situation with igneous rocks occurs when xenoliths are found. These foreign bodies are picked up as magma or lava flows, and are incorporated, later to cool in the matrix. As a result, xenoliths are older than the rock which contains them.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Geology",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 15,
+        "paragraph_index": 6,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Geology",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0015-p0006.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0017-p0001",
+      "content": "One of the oldest depictions of civil disobedience is in Sophocles' play Antigone, in which Antigone, one of the daughters of former King of Thebes, Oedipus, defies Creon, the current King of Thebes, who is trying to stop her from giving her brother Polynices a proper burial. She gives a stirring speech in which she tells him that she must obey her conscience rather than human law. She is not at all afraid of the death he threatens her with (and eventually carries out), but she is afraid of how her conscience will smite her if she does not do this.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Civil_disobedience",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 17,
+        "paragraph_index": 1,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Civil_disobedience",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0017-p0001.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0017-p0005",
+      "content": "Civil disobedience is usually defined as pertaining to a citizen's relation to the state and its laws, as distinguished from a constitutional impasse in which two public agencies, especially two equally sovereign branches of government, conflict. For instance, if the head of government of a country were to refuse to enforce a decision of that country's highest court, it would not be civil disobedience, since the head of government would be acting in her or his capacity as public official rather than private citizen.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Civil_disobedience",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 17,
+        "paragraph_index": 5,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Civil_disobedience",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0017-p0005.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0017-p0018",
+      "content": "When the Committee for Non-Violent Action sponsored a protest in August 1957, at the Camp Mercury nuclear test site near Las Vegas, Nevada, 13 of the protesters attempted to enter the test site knowing that they faced arrest. At a pre-arranged announced time, one at a time they stepped across the \"line\" and were immediately arrested. They were put on a bus and taken to the Nye County seat of Tonopah, Nevada, and arraigned for trial before the local Justice of the Peace, that afternoon. A well known civil rights attorney, Francis Heisler, had volunteered to defend the arrested persons, advising them to plead \"nolo contendere\", as an alternative to pleading either guilty or not-guilty. The arrested persons were found \"guilty,\" nevertheless, and given suspended sentences, conditional on their not reentering the test site grounds.[citation needed]",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Civil_disobedience",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 17,
+        "paragraph_index": 18,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Civil_disobedience",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0017-p0018.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0018-p0019",
+      "content": "In the United States, the industry in 2014 has around $960 billion in annual revenue according to statistics tracked by the Census Bureau, of which $680 billion is private (split evenly between residential and nonresidential) and the remainder is government. As of 2005, there were about 667,000 firms employing 1 million contractors (200,000 general contractors, 38,000 heavy, and 432,000 specialty); the average contractor employed fewer than 10 employees. As a whole, the industry employed an estimated 5.8 million as of April 2013, with a 13.2% unemployment rate. In the United States, approximately 828,000 women were employed in the construction industry as of 2011.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Construction",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 18,
+        "paragraph_index": 19,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Construction",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0018-p0019.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0020-p0020",
+      "content": "The Harvard University Library System is centered in Widener Library in Harvard Yard and comprises nearly 80 individual libraries holding over 18 million volumes. According to the American Library Association, this makes it the largest academic library in the United States, and one of the largest in the world. Cabot Science Library, Lamont Library, and Widener Library are three of the most popular libraries for undergraduates to use, with easy access and central locations. There are rare books, manuscripts and other special collections throughout Harvard's libraries; Houghton Library, the Arthur and Elizabeth Schlesinger Library on the History of Women in America, and the Harvard University Archives consist principally of rare and unique materials. America's oldest collection of maps, gazetteers, and atlases both old and new is stored in Pusey Library and open to the public. The largest collection of East-Asian language material outside of East Asia is held in the Harvard-Yenching Library.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Harvard_University",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 20,
+        "paragraph_index": 20,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Harvard_University",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0020-p0020.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0021-p0014",
+      "content": "According to the United States Census Bureau, the city has a total area of 874.3 square miles (2,264 km2), making Jacksonville the largest city in land area in the contiguous United States; of this, 86.66% (757.7 sq mi or 1,962 km2) is land and ; 13.34% (116.7 sq mi or 302 km2) is water. Jacksonville surrounds the town of Baldwin. Nassau County lies to the north, Baker County lies to the west, and Clay and St. Johns County lie to the south; the Atlantic Ocean lies to the east, along with the Jacksonville Beaches. The St. Johns River divides the city. The Trout River, a major tributary of the St. Johns River, is located entirely within Jacksonville.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Jacksonville,_Florida",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 21,
+        "paragraph_index": 14,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Jacksonville%2C_Florida",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0021-p0014.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0022-p0002",
+      "content": "Neoclassical economics views inequalities in the distribution of income as arising from differences in value added by labor, capital and land. Within labor income distribution is due to differences in value added by different classifications of workers. In this perspective, wages and profits are determined by the marginal value added of each economic actor (worker, capitalist/business owner, landlord). Thus, in a market economy, inequality is a reflection of the productivity gap between highly-paid professions and lower-paid professions.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Economic_inequality",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 22,
+        "paragraph_index": 2,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Economic_inequality",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0022-p0002.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0022-p0018",
+      "content": "Economist Joseph Stiglitz argues that rather than explaining concentrations of wealth and income, market forces should serve as a brake on such concentration, which may better be explained by the non-market force known as \"rent-seeking\". While the market will bid up compensation for rare and desired skills to reward wealth creation, greater productivity, etc., it will also prevent successful entrepreneurs from earning excess profits by fostering competition to cut prices, profits and large compensation. A better explainer of growing inequality, according to Stiglitz, is the use of political power generated by wealth by certain groups to shape government policies financially beneficial to them. This process, known to economists as rent-seeking, brings income not from creation of wealth but from \"grabbing a larger share of the wealth that would otherwise have been produced without their effort\"",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Economic_inequality",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 22,
+        "paragraph_index": 18,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Economic_inequality",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0022-p0018.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0024-p0039",
+      "content": "One of the more notable applications of printing technology was the chao, the paper money of the Yuan. Chao were made from the bark of mulberry trees. The Yuan government used woodblocks to print paper money, but switched to bronze plates in 1275. The Mongols experimented with establishing the Chinese-style paper monetary system in Mongol-controlled territories outside of China. The Yuan minister Bolad was sent to Iran, where he explained Yuan paper money to the Il-khanate court of Gaykhatu. The Il-khanate government issued paper money in 1294, but public distrust of the exotic new currency doomed the experiment.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Yuan_dynasty",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 24,
+        "paragraph_index": 39,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Yuan_dynasty",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0024-p0039.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0024-p0044",
+      "content": "The reason for the order of the classes and the reason why people were placed in a certain class was the date they surrendered to the Mongols, and had nothing to do with their ethnicity. The earlier they surrendered to the Mongols, the higher they were placed, the more the held out, the lower they were ranked. The Northern Chinese were ranked higher and Southern Chinese were ranked lower because southern China withstood and fought to the last before caving in. Major commerce during this era gave rise to favorable conditions for private southern Chinese manufacturers and merchants.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Yuan_dynasty",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 24,
+        "paragraph_index": 44,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Yuan_dynasty",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0024-p0044.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0026-p0019",
+      "content": "Michael Oppenheimer, a long-time participant in the IPCC and coordinating lead author of the Fifth Assessment Report conceded in Science Magazine's State of the Planet 2008-2009 some limitations of the IPCC consensus approach and asks for concurring, smaller assessments of special problems instead of the large scale approach as in the previous IPCC assessment reports. It has become more important to provide a broader exploration of uncertainties. Others see as well mixed blessings of the drive for consensus within the IPCC process and ask to include dissenting or minority positions or to improve statements about uncertainties.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Intergovernmental_Panel_on_Climate_Change",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 26,
+        "paragraph_index": 19,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Intergovernmental_Panel_on_Climate_Change",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0026-p0019.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0027-p0017",
+      "content": "The unproven Riemann hypothesis, dating from 1859, states that except for s = −2, −4, ..., all zeroes of the ζ-function have real part equal to 1/2. The connection to prime numbers is that it essentially says that the primes are as regularly distributed as possible.[clarification needed] From a physical viewpoint, it roughly states that the irregularity in the distribution of primes only comes from random noise. From a mathematical viewpoint, it roughly states that the asymptotic distribution of primes (about x/log x of numbers less than x are primes, the prime number theorem) also holds for much shorter intervals of length about the square root of x (for intervals near x). This hypothesis is generally believed to be correct. In particular, the simplest assumption is that primes should have no significant irregularities without good reason.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Prime_number",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 27,
+        "paragraph_index": 17,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Prime_number",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0027-p0017.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0027-p0018",
+      "content": "In addition to the Riemann hypothesis, many more conjectures revolving about primes have been posed. Often having an elementary formulation, many of these conjectures have withstood a proof for decades: all four of Landau's problems from 1912 are still unsolved. One of them is Goldbach's conjecture, which asserts that every even integer n greater than 2 can be written as a sum of two primes. As of February 2011[update], this conjecture has been verified for all numbers up to n = 2 · 1017. Weaker statements than this have been proven, for example Vinogradov's theorem says that every sufficiently large odd integer can be written as a sum of three primes. Chen's theorem says that every sufficiently large even number can be expressed as the sum of a prime and a semiprime, the product of two primes. Also, any even integer can be written as the sum of six primes. The branch of number theory studying such questions is called additive number theory.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Prime_number",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 27,
+        "paragraph_index": 18,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Prime_number",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0027-p0018.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0028-p0033",
+      "content": "Since ~3000 yr BP (= years Before Present), human impact is seen in the delta. As a result of increasing land clearance (Bronze Age agriculture), in the upland areas (central Germany), the sediment load of the Rhine has strongly increased and delta growth has sped up. This caused increased flooding and sedimentation, ending peat formation in the delta. The shifting of river channels to new locations, on the floodplain (termed avulsion), was the main process distributing sediment across the subrecent delta. Over the past 6000 years, approximately 80 avulsions have occurred. Direct human impact in the delta started with peat mining, for salt and fuel, from Roman times onward. This was followed by embankment, of the major distributaries and damming of minor distributaries, which took place in the 11–13th century AD. Thereafter, canals were dug, bends were short cut and groynes were built, to prevent the river's channels from migrating or silting up.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Rhine",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 28,
+        "paragraph_index": 33,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Rhine",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0028-p0033.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0032-p0018",
+      "content": "Building activity occurred in numerous noble palaces and churches during the later decades of the 17th century. One of the best examples of this architecture are Krasiński Palace (1677–1683), Wilanów Palace (1677–1696) and St. Kazimierz Church (1688–1692). The most impressive examples of rococo architecture are Czapski Palace (1712–1721), Palace of the Four Winds (1730s) and Visitationist Church (façade 1728–1761). The neoclassical architecture in Warsaw can be described by the simplicity of the geometrical forms teamed with a great inspiration from the Roman period. Some of the best examples of the neoclassical style are the Palace on the Water (rebuilt 1775–1795), Królikarnia (1782–1786), Carmelite Church (façade 1761–1783) and Evangelical Holy Trinity Church (1777–1782). The economic growth during the first years of Congress Poland caused a rapid rise architecture. The Neoclassical revival affected all aspects of architecture, the most notable are the Great Theater (1825–1833) and buildings located at Bank Square (1825–1828).",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Warsaw",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 32,
+        "paragraph_index": 18,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Warsaw",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0032-p0018.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0032-p0042",
+      "content": "A fine tribute to the fall of Warsaw and history of Poland can be found in the Warsaw Uprising Museum and in the Katyń Museum which preserves the memory of the crime. The Warsaw Uprising Museum also operates a rare preserved and operating historic stereoscopic theatre, the Warsaw Fotoplastikon. The Museum of Independence preserves patriotic and political objects connected with Poland's struggles for independence. Dating back to 1936 Warsaw Historical Museum contains 60 rooms which host a permanent exhibition of the history of Warsaw from its origins until today.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Warsaw",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 32,
+        "paragraph_index": 42,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Warsaw",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0032-p0042.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0033-p0018",
+      "content": "In the spring of 1753, Paul Marin de la Malgue was given command of a 2,000-man force of Troupes de la Marine and Indians. His orders were to protect the King's land in the Ohio Valley from the British. Marin followed the route that Céloron had mapped out four years earlier, but where Céloron had limited the record of French claims to the burial of lead plates, Marin constructed and garrisoned forts. He first constructed Fort Presque Isle (near present-day Erie, Pennsylvania) on Lake Erie's south shore. He had a road built to the headwaters of LeBoeuf Creek. Marin constructed a second fort at Fort Le Boeuf (present-day Waterford, Pennsylvania), designed to guard the headwaters of LeBoeuf Creek. As he moved south, he drove off or captured British traders, alarming both the British and the Iroquois. Tanaghrisson, a chief of the Mingo, who were remnants of Iroquois and other tribes who had been driven west by colonial expansion. He intensely disliked the French (whom he accused of killing and eating his father). Traveling to Fort Le Boeuf, he threatened the French with military action, which Marin contemptuously dismissed.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "French_and_Indian_War",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 33,
+        "paragraph_index": 18,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/French_and_Indian_War",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0033-p0018.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0033-p0023",
+      "content": "After Washington had returned to Williamsburg, Dinwiddie ordered him to lead a larger force to assist Trent in his work. While en route, Washington learned of Trent's retreat. Since Tanaghrisson had promised support to the British, Washington continued toward Fort Duquesne and met with the Mingo leader. Learning of a French scouting party in the area, Washington, with Tanaghrisson and his party, surprised the Canadians on May 28 in what became known as the Battle of Jumonville Glen. They killed many of the Canadians, including their commanding officer, Joseph Coulon de Jumonville, whose head was reportedly split open by Tanaghrisson with a tomahawk. The historian Fred Anderson suggests that Tanaghrisson was acting to gain the support of the British and regain authority over his own people. They had been inclined to support the French, with whom they had long trading relationships. One of Tanaghrisson's men told Contrecoeur that Jumonville had been killed by British musket fire.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "French_and_Indian_War",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 33,
+        "paragraph_index": 23,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/French_and_Indian_War",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0033-p0023.txt",
+        "corpus_role": "unjudged_distractor",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0034-p0033",
+      "content": "The weak force is due to the exchange of the heavy W and Z bosons. Its most familiar effect is beta decay (of neutrons in atomic nuclei) and the associated radioactivity. The word \"weak\" derives from the fact that the field strength is some 1013 times less than that of the strong force. Still, it is stronger than gravity over short distances. A consistent electroweak theory has also been developed, which shows that electromagnetic forces and the weak force are indistinguishable at a temperatures in excess of approximately 1015 kelvins. Such temperatures have been probed in modern particle accelerators and show the conditions of the universe in the early moments of the Big Bang.",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Force",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 34,
+        "paragraph_index": 33,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Force",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0034-p0033.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    },
+    {
+      "pid": "squad2-dev-a0034-p0037",
+      "content": "where  is the relevant cross-sectional area for the volume for which the stress-tensor is being calculated. This formalism includes pressure terms associated with forces that act normal to the cross-sectional area (the matrix diagonals of the tensor) as well as shear terms associated with forces that act parallel to the cross-sectional area (the off-diagonal elements). The stress tensor accounts for forces that cause all strains (deformations) including also tensile stresses and compressions.:133–134:38-1–38-11",
+      "metadata": {
+        "source": "public_dataset",
+        "dataset_id": "squad2-dev",
+        "title": "Force",
+        "source_url": "https://raw.githubusercontent.com/rajpurkar/SQuAD-explorer/eee5fdbf62f8613a7812b03419e6b29617b74fd1/dataset/dev-v2.0.json",
+        "upstream_revision": "eee5fdbf62f8613a7812b03419e6b29617b74fd1",
+        "upstream_sha256": "80a5225e94905956a6446d296ca1093975c4d3b3260f1d6c8f68bc2ab77182d8",
+        "article_index": 34,
+        "paragraph_index": 37,
+        "upstream_paragraph_id": null,
+        "wikipedia_attribution_url": "https://en.wikipedia.org/wiki/Force",
+        "wikipedia_revision": "not_provided_by_upstream",
+        "source_file": "source_docs/squad2-dev-a0034-p0037.txt",
+        "corpus_role": "question_context",
+        "relevance_scope": "original_question_context_only",
+        "license": "CC-BY-SA-4.0"
+      }
+    }
+  ],
+  "questions": [
+    {
+      "qid": "squad2-dev-56e1c3e1e3433e1400423148",
+      "question": "What are two examples of measurements are bound within algorithms to establish complexity classes?",
+      "answer": "time or space"
+    },
+    {
+      "qid": "squad2-dev-570d2f5bfed7b91900d45cd1",
+      "question": "What group can amend the Victorian constitution?",
+      "answer": "Parliament of Victoria"
+    },
+    {
+      "qid": "squad2-dev-57114dfb50c2381900b54a54",
+      "question": "What sort of system releases the exhaust steam into the atmosphere?",
+      "answer": "open loop"
+    },
+    {
+      "qid": "squad2-dev-571cde695efbb31900334e18",
+      "question": "Which organic compounds contain the greatest amount of oxygen by mass?",
+      "answer": "carbohydrates"
+    },
+    {
+      "qid": "squad2-dev-5725b76389a1e219009abd4e",
+      "question": "Why did oil start getting priced in terms of gold?",
+      "answer": "oil was priced in dollars, oil producers' real income decreased"
+    },
+    {
+      "qid": "squad2-dev-572667e2f1498d1400e8de92",
+      "question": "What is another word for inclusions in sedimentary rocks? ",
+      "answer": "clasts"
+    },
+    {
+      "qid": "squad2-dev-572755b7708984140094dc51",
+      "question": "How many women were employed in construction in 2011?",
+      "answer": "828,000"
+    },
+    {
+      "qid": "squad2-dev-5728d9403acd2414000e001e",
+      "question": "Civil Disobedience is mainly performed by what population group?",
+      "answer": "private citizen"
+    },
+    {
+      "qid": "squad2-dev-5728ec6a4b864d19001650ae",
+      "question": "What type of sentences were the protesters given?",
+      "answer": "suspended sentences"
+    },
+    {
+      "qid": "squad2-dev-57294baaaf94a219006aa26d",
+      "question": "What approach did Oppenheimer advocate?",
+      "answer": "concurring, smaller assessments of special problems"
+    },
+    {
+      "qid": "squad2-dev-57298ef11d04691400779531",
+      "question": "What type of prime distribution is characterized about x/log x of numbers less than x?",
+      "answer": "asymptotic distribution"
+    },
+    {
+      "qid": "squad2-dev-5729d51d3f37b31900478591",
+      "question": "What does the marginal value added by an economic actor determine?",
+      "answer": "wages and profits"
+    },
+    {
+      "qid": "squad2-dev-5729f4e46aef051400155156",
+      "question": "What career does Joseph Stiglitz have?",
+      "answer": "Economist"
+    },
+    {
+      "qid": "squad2-dev-5733a1854776f41900660f0a",
+      "question": "Where can a tribute to the fall of Warsaw be found?",
+      "answer": "Warsaw Uprising Museum"
+    },
+    {
+      "qid": "squad2-dev-57379829c3c5551400e51f40",
+      "question": "How many times less is the strenght of the weak field compared to the strong?",
+      "answer": "1013"
+    },
+    {
+      "qid": "squad2-dev-5737a25ac3c5551400e51f54",
+      "question": "What includes pressure terms when calculating area in volume?",
+      "answer": "formalism"
+    },
+    {
+      "qid": "squad2-dev-5a664314c2b11c001a425ed9",
+      "question": "What play by Oedipus, demonstrates civil disobedience?",
+      "answer": ""
+    },
+    {
+      "qid": "squad2-dev-5a667761846392001a1e1c38",
+      "question": "Does packet switching charge a fee when no data is transferred?",
+      "answer": ""
+    },
+    {
+      "qid": "squad2-dev-5a8235a931013a001a3352d8",
+      "question": "How many books are endorsed by the American Library Association?",
+      "answer": ""
+    },
+    {
+      "qid": "squad2-dev-5a893a003b2508001a72a540",
+      "question": "As of February 2017, how many numbers has Goldbach's conjecture been proven to?",
+      "answer": ""
+    },
+    {
+      "qid": "squad2-dev-5ad1373b645df0001a2d11cc",
+      "question": "What is the legislative body not composed of?",
+      "answer": ""
+    },
+    {
+      "qid": "squad2-dev-5ad158c0645df0001a2d1829",
+      "question": "What has having an EU Citizenship decreased?",
+      "answer": ""
+    },
+    {
+      "qid": "squad2-dev-5ad3ade2604f3c001a3fec18",
+      "question": "What wasn't Marin's orders?",
+      "answer": ""
+    },
+    {
+      "qid": "squad2-dev-5ad4d8d65b96ef001a10a363",
+      "question": "When was the Palace on the Bank rebuilt?",
+      "answer": ""
+    }
+  ],
+  "relevance": [
+    {
+      "qid": "squad2-dev-56e1c3e1e3433e1400423148",
+      "pid": "squad2-dev-a0001-p0025",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-570d2f5bfed7b91900d45cd1",
+      "pid": "squad2-dev-a0004-p0008",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-57114dfb50c2381900b54a54",
+      "pid": "squad2-dev-a0006-p0017",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-571cde695efbb31900334e18",
+      "pid": "squad2-dev-a0007-p0039",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5725b76389a1e219009abd4e",
+      "pid": "squad2-dev-a0008-p0002",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-572667e2f1498d1400e8de92",
+      "pid": "squad2-dev-a0015-p0006",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-572755b7708984140094dc51",
+      "pid": "squad2-dev-a0018-p0019",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5728d9403acd2414000e001e",
+      "pid": "squad2-dev-a0017-p0005",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5728ec6a4b864d19001650ae",
+      "pid": "squad2-dev-a0017-p0018",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-57294baaaf94a219006aa26d",
+      "pid": "squad2-dev-a0026-p0019",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-57298ef11d04691400779531",
+      "pid": "squad2-dev-a0027-p0017",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5729d51d3f37b31900478591",
+      "pid": "squad2-dev-a0022-p0002",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5729f4e46aef051400155156",
+      "pid": "squad2-dev-a0022-p0018",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5733a1854776f41900660f0a",
+      "pid": "squad2-dev-a0032-p0042",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-57379829c3c5551400e51f40",
+      "pid": "squad2-dev-a0034-p0033",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5737a25ac3c5551400e51f54",
+      "pid": "squad2-dev-a0034-p0037",
+      "grade": 1
+    },
+    {
+      "qid": "squad2-dev-5a664314c2b11c001a425ed9",
+      "pid": "squad2-dev-a0017-p0001",
+      "grade": 0
+    },
+    {
+      "qid": "squad2-dev-5a667761846392001a1e1c38",
+      "pid": "squad2-dev-a0013-p0001",
+      "grade": 0
+    },
+    {
+      "qid": "squad2-dev-5a8235a931013a001a3352d8",
+      "pid": "squad2-dev-a0020-p0020",
+      "grade": 0
+    },
+    {
+      "qid": "squad2-dev-5a893a003b2508001a72a540",
+      "pid": "squad2-dev-a0027-p0018",
+      "grade": 0
+    },
+    {
+      "qid": "squad2-dev-5ad1373b645df0001a2d11cc",
+      "pid": "squad2-dev-a0009-p0008",
+      "grade": 0
+    },
+    {
+      "qid": "squad2-dev-5ad158c0645df0001a2d1829",
+      "pid": "squad2-dev-a0009-p0035",
+      "grade": 0
+    },
+    {
+      "qid": "squad2-dev-5ad3ade2604f3c001a3fec18",
+      "pid": "squad2-dev-a0033-p0018",
+      "grade": 0
+    },
+    {
+      "qid": "squad2-dev-5ad4d8d65b96ef001a10a363",
+      "pid": "squad2-dev-a0032-p0018",
+      "grade": 0
+    }
+  ]
+}

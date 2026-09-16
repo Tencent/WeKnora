@@ -1,0 +1,9 @@
+# Freeze the transitive evaluate runtime; upstream's direct pins remain unchanged.
+datasets==2.21.0
+huggingface-hub==0.24.7
+fsspec==2024.6.1
+pyarrow==17.0.0
+requests==2.32.3
+dill==0.3.8
+multiprocess==0.70.16
+rapidfuzz==3.14.3

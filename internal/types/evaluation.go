@@ -30,11 +30,15 @@ func newJieba() *gojieba.Jieba {
 // EvaluationStatue represents the status of an evaluation task
 type EvaluationStatue int
 
+// Evaluation task status values describe the lifecycle state exposed by the API.
 const (
-	EvaluationStatuePending EvaluationStatue = iota // Task is waiting to start
-	EvaluationStatueRunning                         // Task is in progress
-	EvaluationStatueSuccess                         // Task completed successfully
-	EvaluationStatueFailed                          // Task failed
+	EvaluationStatuePending     EvaluationStatue = iota // Task is waiting to start
+	EvaluationStatueRunning                             // Task is in progress
+	EvaluationStatueSuccess                             // Task completed successfully
+	EvaluationStatueFailed                              // Task failed
+	EvaluationStatueTimedOut                            // Task exceeded its configured deadline
+	EvaluationStatueInterrupted                         // Task lease expired and recovery cleanup completed
+	EvaluationStatueCanceled                            // Task was canceled by a persistent user request
 )
 
 // EvaluationTask contains information about an evaluation task
@@ -43,9 +47,18 @@ type EvaluationTask struct {
 	TenantID  uint64 `json:"tenant_id"`  // Tenant/Organization ID
 	DatasetID string `json:"dataset_id"` // Dataset ID for evaluation
 
-	StartTime time.Time        `json:"start_time"`        // Task start time
-	Status    EvaluationStatue `json:"status"`            // Current task status
-	ErrMsg    string           `json:"err_msg,omitempty"` // Error message if failed
+	StartTime time.Time        `json:"start_time"`         // Task start time
+	EndTime   *time.Time       `json:"end_time,omitempty"` // Task completion time
+	Status    EvaluationStatue `json:"status"`             // Current task status
+	ErrMsg    string           `json:"err_msg,omitempty"`  // Execution failure or timeout message
+
+	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"` // First persistent cancel request time
+
+	CleanupErrors []string `json:"cleanup_errors,omitempty"` // Temporary resource cleanup warnings
+	Labels        []string `json:"labels"`                   // Normalized experiment labels
+
+	DatasetVersionID   *string `json:"dataset_version_id,omitempty"`
+	ProvenanceComplete bool    `json:"provenance_complete"`
 
 	Total    int `json:"total,omitempty"`    // Total items to evaluate
 	Finished int `json:"finished,omitempty"` // Completed items count
@@ -53,9 +66,27 @@ type EvaluationTask struct {
 
 // EvaluationDetail contains detailed evaluation information
 type EvaluationDetail struct {
-	Task   *EvaluationTask `json:"task"`             // Evaluation task info
-	Params *ChatManage     `json:"params"`           // Evaluation parameters
-	Metric *MetricResult   `json:"metric,omitempty"` // Evaluation metrics
+	Task           *EvaluationTask           `json:"task"`             // Evaluation task info
+	Params         *ChatManage               `json:"params"`           // Evaluation parameters
+	Metric         *MetricResult             `json:"metric,omitempty"` // Evaluation metrics
+	RuntimeMetrics *EvaluationRuntimeMetrics `json:"runtime_metrics,omitempty"`
+
+	// Experiment is the frozen schema-version-1 experiment manifest; it is
+	// null for pre-M3 tasks instead of an empty fabricated object.
+	Experiment *EvaluationExperimentSnapshot `json:"experiment"`
+	// ProvenanceComplete reports whether dataset, model, parameter, code,
+	// and environment provenance were fully frozen for this task.
+	ProvenanceComplete bool `json:"provenance_complete"`
+}
+
+// EvaluationMetricDefinition is the public registry catalog DTO.
+type EvaluationMetricDefinition struct {
+	Key           string          `json:"key"`
+	Version       string          `json:"version"`
+	Kind          string          `json:"kind"`
+	Description   string          `json:"description"`
+	DefaultConfig json.RawMessage `json:"default_config"`
+	ConfigSchema  json.RawMessage `json:"config_schema"`
 }
 
 // String returns JSON representation of EvaluationTask
@@ -66,8 +97,10 @@ func (e *EvaluationTask) String() string {
 
 // MetricInput contains input data for metric calculation
 type MetricInput struct {
-	RetrievalGT  [][]int // Ground truth for retrieval
-	RetrievalIDs []int   // Retrieved IDs
+	RetrievalGT              [][]int     // Binary ground truth for retrieval
+	RetrievalGrades          map[int]int // Graded relevance keyed by passage ID
+	RetrievalLabelsAvailable bool        // Distinguishes an empty labeled set from missing labels
+	RetrievalIDs             []int       // Retrieved IDs
 
 	GeneratedTexts string // Generated text for evaluation
 	GeneratedGT    string // Ground truth text for comparison
@@ -77,6 +110,17 @@ type MetricInput struct {
 type MetricResult struct {
 	RetrievalMetrics  RetrievalMetrics  `json:"retrieval_metrics"`  // Retrieval performance metrics
 	GenerationMetrics GenerationMetrics `json:"generation_metrics"` // Text generation quality metrics
+	// Scores is the additive registry result keyed by the frozen metric
+	// instance ID. Existing fixed fields remain populated for compatibility.
+	Scores map[string]EvaluationMetricScore `json:"scores,omitempty"`
+}
+
+// EvaluationMetricScore preserves the state of one dynamic aggregate or
+// per-sample score. Value remains nullable so zero and unavailable differ.
+type EvaluationMetricScore struct {
+	Value     *float64 `json:"value"`
+	Status    string   `json:"status"`
+	ErrorCode string   `json:"error_code,omitempty"`
 }
 
 // RetrievalMetrics contains metrics for retrieval evaluation

@@ -2538,7 +2538,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "对知识库进行评估测试",
+                "description": "对知识库进行评估测试；configuration 按字段覆盖，省略保留默认值，显式 0 生效",
                 "consumes": [
                     "application/json"
                 ],
@@ -2570,6 +2570,857 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/comparisons": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回成功运行的冻结参数差异、指标绝对值和相对基线增减值",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "对比评估运行",
+                "parameters": [
+                    {
+                        "description": "运行与基线",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CompareEvaluationTasksRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "对比结果",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "运行不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "运行不可对比",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/datasets": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "列出当前租户可见的评测数据集",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "列出评测数据集",
+                "responses": {
+                    "200": {
+                        "description": "数据集列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "创建租户评测数据集身份",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "创建评测数据集",
+                "parameters": [
+                    {
+                        "description": "数据集",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.CreateEvaluationDatasetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "数据集",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/datasets/catalog": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回服务内嵌资料的来源、许可、规模及当前导入限制",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "列出公开评测数据集",
+                "responses": {
+                    "200": {
+                        "description": "公开目录与实际限制",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/datasets/catalog/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "校验内嵌资料摘要后返回可导入内容和来源清单",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "读取公开评测数据集内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "公开数据集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "内容与来源清单",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "未知公开数据集",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/datasets/import": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "request_id 在租户内幂等；不同输入复用同一标识返回 409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "原子导入评测数据集与初版",
+                "parameters": [
+                    {
+                        "description": "数据集和初版",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetImportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "数据集、版本和重放状态",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "输入无效",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "请求标识冲突",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "413": {
+                        "description": "超出配置限制",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/datasets/{id}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "列出一个可见数据集的全部不可变版本",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "列出评测数据集版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "数据集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "版本列表",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "以结构化输入创建不可变数据集版本",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "创建评测数据集版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "数据集 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "版本内容",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetVersionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "版本",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/metrics": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回指标 key、版本、类别、默认配置和配置 schema",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "列出版本化评测指标",
+                "responses": {
+                    "200": {
+                        "description": "指标目录",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/tasks": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "按 (start_time DESC, id DESC) keyset 分页列出当前租户的评估任务",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "列出评估任务",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "数值状态筛选",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "数据集 ID",
+                        "name": "dataset_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "数据集版本 ID",
+                        "name": "dataset_version_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "冻结实验中使用的模型 ID",
+                        "name": "model_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "开始时间下界（RFC 3339，含）",
+                        "name": "started_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "开始时间上界（RFC 3339，不含）",
+                        "name": "started_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "csv",
+                        "description": "标签交集筛选，可重复",
+                        "name": "label",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页条数（默认 20，最大 100）",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "上一页返回的 next_cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "任务页",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "非法游标或筛选",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/tasks/{task_id}/export": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "将终态任务与逐题事实导出为有界 JSON 或 CSV 文件",
+                "produces": [
+                    "application/json",
+                    "text/csv"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "导出评估运行",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评估任务ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "json 或 csv",
+                        "name": "format",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "导出文件",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "格式错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "任务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "409": {
+                        "description": "任务仍在运行",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "413": {
+                        "description": "导出超过边界",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/tasks/{task_id}/labels": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "在一个事务内全量替换规范化标签，不修改任务版本与更新时间",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "替换评估任务标签",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评估任务ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "标签集合",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.ReplaceEvaluationTaskLabelsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "规范化后的标签",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "标签非法",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "任务不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/tasks/{task_id}/questions": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "按 sample_index 升序分页读取一个评测任务的逐题结果",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "逐题结果分页",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "任务 ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量（默认 100，最大 500）",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "keyset 游标",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "逐题分页",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/tasks/{task_id}/questions/{sample_index}/ratings": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "按修订号倒序返回一个评测题目的不可变人工评分记录",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "列出逐题人工评分修订",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "任务 ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "样本序号",
+                        "name": "sample_index",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "人工评分修订",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "追加不可变评分记录，并关联同一 rubric 的上一修订",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "追加逐题人工评分修订",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "任务 ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "样本序号",
+                        "name": "sample_index",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "评分规则、版本、快照、分数和备注",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "新增评分修订",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/{task_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "软删除终态评估任务；缺失、跨租户与已删除任务返回 204，活动任务返回 409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "删除已结束的评估任务",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评估任务ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "删除成功或任务本就不存在"
+                    },
+                    "409": {
+                        "description": "任务仍在活动状态",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/evaluation/{task_id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "持久化取消请求；运行实例处理取消并完成资源清理后任务进入 Canceled",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "评估"
+                ],
+                "summary": "取消评估任务",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评估任务ID",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "当前任务状态",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "任务不存在或属于其他租户",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -8258,7 +9109,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取当前空间的所有MCP服务",
+                "description": "获取当前空间的所有MCP服务（含已保存工具目录数量）",
                 "consumes": [
                     "application/json"
                 ],
@@ -10390,6 +11241,59 @@ const docTemplate = `{
                 }
             }
         },
+        "/models/usage": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "List model usage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Comma-separated model identifiers",
+                        "name": "model_ids",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Inclusive start time (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exclusive end time (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.modelUsageEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/models/weknoracloud/status": {
             "get": {
                 "security": [
@@ -10571,6 +11475,154 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "模型不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/{id}/pricing": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "List model price versions",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model identifier",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.modelPricesEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Create an effective-dated model price",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model identifier",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Price interval and rates",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.putModelPriceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.modelPriceEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/models/{id}/usage": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "models"
+                ],
+                "summary": "Get model usage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model identifier",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Inclusive start time (RFC3339)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exclusive end time (RFC3339)",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.modelUsageEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -13119,6 +14171,113 @@ const docTemplate = `{
                 }
             }
         },
+        "/sessions/{id}/steer": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "刷新页面后用来恢复输入框上方的队列。没有正在运行的 turn 时返回空列表。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "列出当前运行中尚未消费的排队消息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{id}/steer/{steer_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "从当前运行的排队列表里去掉一条，不再注入也不再作为 follow-up 发出。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "删除一条排队中的消息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "排队消息 ID",
+                        "name": "steer_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
         "/sessions/{session_id}/artifacts": {
             "get": {
                 "security": [
@@ -13312,6 +14471,137 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "会话不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/steer": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "向运行中的 agent turn 追加用户消息（after 排队 / inject 注入）。无活 turn 时返回 new_run。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "向运行中的对话追加消息",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "追加消息",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler_session.SteerMessageRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "queued | new_run",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "会话不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/sessions/{session_id}/steer/{steer_id}/inject": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "把一条 delivery=after 的排队消息改为 inject，运行中的 agent 会在下一轮边界读到它。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "问答"
+                ],
+                "summary": "将排队消息改为立即注入",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "会话 ID",
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "排队消息 ID",
+                        "name": "steer_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "queued | new_run",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "503": {
+                        "description": "活 turn 查询失败，可重试",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -17363,6 +18653,20 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_database.MigrationChainState": {
+            "type": "object",
+            "properties": {
+                "dirty": {
+                    "type": "boolean"
+                },
+                "expected_version": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_datasource.ConnectorMetadata": {
             "type": "object",
             "properties": {
@@ -17629,6 +18933,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.AgentStep": {
             "type": "object",
             "properties": {
+                "intermediate_answer": {
+                    "description": "IntermediateAnswer preserves a plain answer followed by a loop-end steer.\nThe canonical final answer is still stored in Message.Content.",
+                    "type": "boolean"
+                },
                 "iteration": {
                     "description": "Iteration number (0-indexed)",
                     "type": "integer"
@@ -17651,6 +18959,13 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ToolCall"
                     }
+                },
+                "user_messages_before": {
+                    "description": "UserMessagesBefore records consumed steer rows in delivery order, before\nthis model response. Unlike timestamps, this remains unambiguous on replay.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -17664,6 +18979,41 @@ const docTemplate = `{
                 "AnswerStrategyAll",
                 "AnswerStrategyRandom"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.ApplicationCacheStatistics": {
+            "type": "object",
+            "properties": {
+                "average_lookup_duration_ms": {
+                    "type": "number"
+                },
+                "bypass_items": {
+                    "type": "integer"
+                },
+                "bypass_lookup_count": {
+                    "type": "integer"
+                },
+                "hit_items": {
+                    "type": "integer"
+                },
+                "hit_rate": {
+                    "type": "number"
+                },
+                "lookup_count": {
+                    "type": "integer"
+                },
+                "miss_items": {
+                    "type": "integer"
+                },
+                "observed_items": {
+                    "type": "integer"
+                },
+                "requested_items": {
+                    "type": "integer"
+                },
+                "unique_items": {
+                    "type": "integer"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.AuditAction": {
             "type": "string",
@@ -18265,7 +19615,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "context_template_id": {
-                    "description": "ContextTemplateID references a template ID in prompt_templates/ YAML files.\nIf set and ContextTemplate is empty, the template content will be resolved at startup.",
+                    "description": "ContextTemplateID references a template ID in prompt_templates/ YAML files.\nIf set and ContextTemplate is empty, the template content is resolved at request time for saved agents.",
                     "type": "string"
                 },
                 "data_analysis_enabled": {
@@ -18448,7 +19798,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "system_prompt_id": {
-                    "description": "SystemPromptID references a template ID in prompt_templates/ YAML files.\nIf set and SystemPrompt is empty, the template content will be resolved at startup.",
+                    "description": "SystemPromptID references a template ID in prompt_templates/ YAML files.\nIf set and SystemPrompt is empty, the template content is resolved at request time for saved agents.",
                     "type": "string"
                 },
                 "temperature": {
@@ -18694,6 +20044,147 @@ const docTemplate = `{
                 },
                 "truncate_prompt_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationConfigurationOverrides": {
+            "type": "object",
+            "properties": {
+                "generation": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationGenerationOverrides"
+                },
+                "rerank": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationRerankOverrides"
+                },
+                "retrieval": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationRetrievalOverrides"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationDatasetImportInput": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetVersionInput"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "request_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationDatasetPassageInput": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "pid": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationDatasetQuestionInput": {
+            "type": "object",
+            "properties": {
+                "answer": {
+                    "type": "string"
+                },
+                "qid": {
+                    "type": "string"
+                },
+                "question": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationDatasetRelevanceInput": {
+            "type": "object",
+            "properties": {
+                "grade": {
+                    "type": "integer"
+                },
+                "pid": {
+                    "type": "string"
+                },
+                "qid": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationDatasetVersionInput": {
+            "type": "object",
+            "properties": {
+                "passages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetPassageInput"
+                    }
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetQuestionInput"
+                    }
+                },
+                "relevance": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationDatasetRelevanceInput"
+                    }
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationGenerationOverrides": {
+            "type": "object",
+            "properties": {
+                "max_tokens": {
+                    "type": "integer"
+                },
+                "temperature": {
+                    "type": "number"
+                },
+                "top_k": {
+                    "type": "integer"
+                },
+                "top_p": {
+                    "type": "number"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationRerankOverrides": {
+            "type": "object",
+            "properties": {
+                "rerank_threshold": {
+                    "type": "number"
+                },
+                "rerank_top_k": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.EvaluationRetrievalOverrides": {
+            "type": "object",
+            "properties": {
+                "embedding_top_k": {
+                    "type": "integer"
+                },
+                "keyword_threshold": {
+                    "type": "number"
+                },
+                "vector_threshold": {
+                    "type": "number"
                 }
             }
         },
@@ -20302,6 +21793,51 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.ModelCachePricing": {
+            "type": "object",
+            "properties": {
+                "read_microunits_per_million": {
+                    "type": "integer"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "write_1h_microunits_per_million": {
+                    "type": "integer"
+                },
+                "write_5m_microunits_per_million": {
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ModelCostTotal": {
+            "type": "object",
+            "properties": {
+                "cost_microunits": {
+                    "type": "integer"
+                },
+                "currency": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ModelLatencyStatistics": {
+            "type": "object",
+            "properties": {
+                "p50_ms": {
+                    "type": "number"
+                },
+                "p95_ms": {
+                    "type": "number"
+                },
+                "p99_ms": {
+                    "type": "number"
+                },
+                "reported_calls": {
+                    "type": "integer"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.ModelParameters": {
             "type": "object",
             "properties": {
@@ -20361,6 +21897,41 @@ const docTemplate = `{
                 "supports_vision": {
                     "description": "Whether the model accepts image/multimodal input",
                     "type": "boolean"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ModelPriceVersion": {
+            "type": "object",
+            "properties": {
+                "cache_pricing": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelCachePricing"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "input_microunits_per_million": {
+                    "type": "integer"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "output_microunits_per_million": {
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "type": "integer"
+                },
+                "valid_from": {
+                    "type": "string"
+                },
+                "valid_to": {
+                    "type": "string"
                 }
             }
         },
@@ -20481,6 +22052,85 @@ const docTemplate = `{
                 "ModelTypeVLLM",
                 "ModelTypeASR"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.ModelUsageResponse": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelUsageStatistics"
+                    }
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.ModelUsageStatistics": {
+            "type": "object",
+            "properties": {
+                "accounting_complete_calls": {
+                    "type": "integer"
+                },
+                "application_cache": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ApplicationCacheStatistics"
+                },
+                "average_duration_ms": {
+                    "type": "number"
+                },
+                "call_count": {
+                    "type": "integer"
+                },
+                "canceled_calls": {
+                    "type": "integer"
+                },
+                "completion_tokens": {
+                    "type": "integer"
+                },
+                "costs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelCostTotal"
+                    }
+                },
+                "error_calls": {
+                    "type": "integer"
+                },
+                "latency": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelLatencyStatistics"
+                },
+                "model_id": {
+                    "type": "string"
+                },
+                "prompt_tokens": {
+                    "type": "integer"
+                },
+                "provider_cache": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ProviderCacheStatistics"
+                },
+                "started_calls": {
+                    "type": "integer"
+                },
+                "success_calls": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                },
+                "unpriced_calls": {
+                    "type": "integer"
+                },
+                "usage_reported_calls": {
+                    "type": "integer"
+                },
+                "usage_unreported_calls": {
+                    "type": "integer"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.OBSEngineConfig": {
             "type": "object",
@@ -20827,6 +22477,26 @@ const docTemplate = `{
                 "PromptCacheStatusMiss",
                 "PromptCacheStatusHit"
             ]
+        },
+        "github_com_Tencent_WeKnora_internal_types.ProviderCacheStatistics": {
+            "type": "object",
+            "properties": {
+                "hit_rate": {
+                    "type": "number"
+                },
+                "miss_tokens": {
+                    "type": "integer"
+                },
+                "observed_tokens": {
+                    "type": "integer"
+                },
+                "read_tokens": {
+                    "type": "integer"
+                },
+                "write_tokens": {
+                    "type": "integer"
+                }
+            }
         },
         "github_com_Tencent_WeKnora_internal_types.QuestionGenerationConfig": {
             "type": "object",
@@ -21629,6 +23299,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "local_browser_enabled": {
+                    "type": "boolean"
+                },
                 "mcp_service_ids": {
                     "type": "array",
                     "items": {
@@ -22262,8 +23935,20 @@ const docTemplate = `{
                 "cache_reported": {
                     "type": "boolean"
                 },
+                "cache_reported_calls": {
+                    "type": "integer"
+                },
                 "cache_status": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.PromptCacheStatus"
+                },
+                "cache_unreported_calls": {
+                    "type": "integer"
+                },
+                "cache_write_1h_tokens": {
+                    "type": "integer"
+                },
+                "cache_write_5m_tokens": {
+                    "type": "integer"
                 },
                 "cache_write_tokens": {
                     "type": "integer"
@@ -22278,7 +23963,20 @@ const docTemplate = `{
                 "prompt_tokens": {
                     "type": "integer"
                 },
+                "reported_cost": {
+                    "description": "ReportedCost preserves the provider's exact decimal amount. Its currency\nis interpreted only by a provider-specific accounting path.",
+                    "type": "string"
+                },
                 "total_tokens": {
+                    "type": "integer"
+                },
+                "usage_reported": {
+                    "type": "boolean"
+                },
+                "usage_reported_calls": {
+                    "type": "integer"
+                },
+                "usage_unreported_calls": {
                     "type": "integer"
                 }
             }
@@ -22569,6 +24267,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.UserPreferences": {
             "type": "object",
             "properties": {
+                "browser_search_instructions": {
+                    "description": "BrowserSearchInstructions customizes browser search for this user. Nil/empty uses the platform default.",
+                    "type": "string"
+                },
                 "last_active_tenant_id": {
                     "description": "LastActiveTenantID remembers the last workspace the user actively\nswitched into, so a fresh login (new device, cleared browser, new\nrefresh token) lands them back in that workspace instead of always\nbouncing to their home workspace. Written by the SPA's preferences\nPUT and by service-level SwitchTenant (including when switching\nhome, which stores the home ID). Login / RefreshToken validate that\nthe workspace still exists and the user still has an active membership\n(or CanAccessAllTenants) before honouring this preference; an\ninvalid pointer is best-effort cleared and the user falls back to\nhome. Refresh JWT claims have no tenant_id, so RefreshToken\nre-resolves from this field.\n\nnil  = no preference (use user.TenantID, i.e. home)\n*0   = \"clear preference\" sentinel for the partial-update endpoint\n       (UpdateUserPreferences turns this into nil). Otherwise treat\n       a stored *0 the same as nil.\n*N   = preferred workspace id.",
                     "type": "integer"
@@ -23574,6 +25276,20 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.CompareEvaluationTasksRequest": {
+            "type": "object",
+            "properties": {
+                "baseline_task_id": {
+                    "type": "string"
+                },
+                "task_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_handler.CopyKnowledgeBaseRequest": {
             "type": "object",
             "required": [
@@ -23603,6 +25319,20 @@ const docTemplate = `{
                 "config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.CustomAgentConfig"
                 },
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.CreateEvaluationDatasetRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
                 "description": {
                     "type": "string"
                 },
@@ -23674,6 +25404,23 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.DBMigrationStatusResponse": {
+            "type": "object",
+            "properties": {
+                "official": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_database.MigrationChainState"
+                },
+                "phase": {
+                    "type": "string"
+                },
+                "ready": {
+                    "type": "boolean"
+                },
+                "topic3": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_database.MigrationChainState"
+                }
+            }
+        },
         "internal_handler.DeleteTagRequest": {
             "type": "object",
             "properties": {
@@ -23701,8 +25448,20 @@ const docTemplate = `{
                     "description": "ID of chat model to use",
                     "type": "string"
                 },
+                "configuration": {
+                    "description": "Configuration optionally overrides resolved retrieval/rerank/generation\nparameters field by field. Omitted fields keep defaults; explicit zero\nvalues apply. The resolved configuration enters the experiment snapshot.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.EvaluationConfigurationOverrides"
+                        }
+                    ]
+                },
                 "dataset_id": {
                     "description": "ID of dataset to evaluate",
+                    "type": "string"
+                },
+                "dataset_version_id": {
+                    "description": "DatasetVersionID optionally pins one immutable dataset version.",
                     "type": "string"
                 },
                 "knowledge_base_id": {
@@ -23712,6 +25471,10 @@ const docTemplate = `{
                 "rerank_id": {
                     "description": "ID of rerank model to use",
                     "type": "string"
+                },
+                "seed": {
+                    "description": "Seed distinguishes \"not provided\" (nil) from an explicit seed=0.",
+                    "type": "integer"
                 }
             }
         },
@@ -23764,6 +25527,9 @@ const docTemplate = `{
                 "db_migration_error": {
                     "description": "DBMigrationError carries the human-readable error message recorded when\nthe most recent startup migration attempt failed. Empty when migrations\nsucceeded; non-empty values let the frontend surface a troubleshooting\nbanner instead of silently hiding the DB version row (see issue #1319).",
                     "type": "string"
+                },
+                "db_migration_status": {
+                    "$ref": "#/definitions/internal_handler.DBMigrationStatusResponse"
                 },
                 "db_version": {
                     "type": "string"
@@ -24506,6 +26272,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.ReplaceEvaluationTaskLabelsRequest": {
+            "type": "object",
+            "properties": {
+                "labels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "internal_handler.ResetUserPasswordRequest": {
             "type": "object",
             "required": [
@@ -25180,6 +26957,42 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.modelPriceEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelPriceVersion"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.modelPricesEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelPriceVersion"
+                    }
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "internal_handler.modelUsageEnvelope": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelUsageResponse"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "internal_handler.platformAPIKeyCreateRequest": {
             "type": "object",
             "properties": {
@@ -25193,6 +27006,35 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.putModelPriceRequest": {
+            "type": "object",
+            "required": [
+                "currency",
+                "valid_from"
+            ],
+            "properties": {
+                "cache_pricing": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.ModelCachePricing"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "input_microunits_per_million": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "output_microunits_per_million": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "valid_from": {
+                    "type": "string"
+                },
+                "valid_to": {
                     "type": "string"
                 }
             }
@@ -25324,6 +27166,10 @@ const docTemplate = `{
         "internal_handler.updateMyPreferencesRequest": {
             "type": "object",
             "properties": {
+                "browser_search_instructions": {
+                    "type": "string",
+                    "maxLength": 4000
+                },
                 "last_active_tenant_id": {
                     "description": "LastActiveTenantID lets clients persist \"after a fresh login,\ndrop me back into this workspace\" across devices. The SPA sends\nthis after every tenant switch; POST /auth/switch-tenant records\nthe same preference server-side. Send a positive workspace id to\nset / replace, or 0 to clear. Membership is validated at next\nlogin, not here. Nil = field omitted from the PATCH and stays\nuntouched.",
                     "type": "integer"
@@ -25407,6 +27253,10 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "local_browser_enabled": {
+                    "description": "Browser source",
+                    "type": "boolean"
                 },
                 "mcp_service_ids": {
                     "description": "Per-request MCP services selected via @mention",
@@ -25574,6 +27424,37 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "internal_handler_session.SteerMessageRequest": {
+            "type": "object",
+            "required": [
+                "query"
+            ],
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "delivery": {
+                    "description": "Delivery is \"after\" (default) or \"inject\". See the constants above.",
+                    "type": "string"
+                },
+                "expected_assistant_message_id": {
+                    "description": "Optional for older clients. New clients pin delivery to the run they see\nand supply a stable ID so a consume event may precede the HTTP response.",
+                    "type": "string"
+                },
+                "mentioned_items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_handler_session.MentionedItemRequest"
+                    }
+                },
+                "query": {
+                    "type": "string"
+                },
+                "steer_id": {
+                    "type": "string"
                 }
             }
         },

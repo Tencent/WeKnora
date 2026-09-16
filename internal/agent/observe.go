@@ -85,6 +85,10 @@ func (e *AgentEngine) runCompaction(
 
 	result, err := e.compactor.Compact(ctx, messages, reason)
 	if err != nil {
+		if errors.Is(err, types.ErrModelAccounting) {
+			_ = types.RecordModelAccountingError(ctx, err)
+			return messages, false
+		}
 		if errors.Is(err, compaction.ErrNothingToCompact) {
 			logger.Infof(ctx, "[Agent][Round-%d] Nothing outside the keep-recent budget; "+
 				"skipping compaction", round)

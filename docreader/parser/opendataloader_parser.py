@@ -358,9 +358,16 @@ class OpenDataLoaderParser(BaseParser):
             )
             from docreader.parser.pdf_parser import PDFScannedParser
 
-            return PDFScannedParser(
+            result = PDFScannedParser(
                 file_name=self.file_name, file_type=self.file_type
             ).parse_into_text(content)
+            result.metadata.update({
+                "parser_engine": "builtin",
+                "requested_parser_engine": "opendataloader",
+                "parser_fallback": "builtin_scanned_renderer",
+                "parser_fallback_reason": "extracted_text_below_threshold",
+            })
+            return result
 
         logger.info(
             "OpenDataLoaderParser: %s -> content_len=%d images=%d",

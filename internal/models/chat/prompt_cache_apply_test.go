@@ -20,7 +20,7 @@ func TestClampPromptCacheKey(t *testing.T) {
 	long := strings.Repeat("a", 80)
 	got := clampPromptCacheKey(long)
 	assert.Equal(t, 64, len([]rune(got)))
-	assert.Equal(t, strings.Repeat("a", 64), got)
+	assert.NotEqual(t, got, clampPromptCacheKey(long+"b"))
 }
 
 func TestApplyPromptCacheToJSONBody_OpenAIKey(t *testing.T) {

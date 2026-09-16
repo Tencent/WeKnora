@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/models/call"
+	"github.com/Tencent/WeKnora/internal/types"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -107,6 +111,7 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 }
 
 func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
+	ctx = call.WithNewBatch(ctx)
 	var resp *http.Response
 	var err error
 	url := e.baseURL + "/embeddings"
@@ -140,7 +145,20 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		// Reproduce: stop the embedding upstream (e.g. localhost:3130), make
 		// any RAG query → backend SIGSEGV instead of returning HTTP 500.
 		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
+		req, err = http.NewRequestWithContext(
+			call.WithMetadata(
+				ctx,
+				map[string]any{
+					"attempt_number": i +
+						1,
+				},
+			),
+			"POST",
+			url,
+			bytes.NewReader(
+				jsonData,
+			),
+		)
 		if err != nil {
 			logger.GetLogger(ctx).Errorf("OpenAIEmbedder failed to create request: %v", err)
 			continue
@@ -149,7 +167,10 @@ func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte
 		req.Header.Set("Authorization", "Bearer "+e.apiKey)
 		secutils.ApplyCustomHeaders(req, e.customHeaders)
 
-		resp, err = e.httpClient.Do(req)
+		resp, err = call.DoJSON(e.httpClient, req, "embedding")
+		if errors.Is(err, types.ErrModelAccounting) {
+			return nil, err
+		}
 		if err == nil {
 			return resp, nil
 		}
@@ -267,3 +288,6 @@ func (e *OpenAIEmbedder) GetDimensions() int {
 func (e *OpenAIEmbedder) GetModelID() string {
 	return e.modelID
 }
+
+// RequestAccountingSupported reports support for accounting at each physical provider request.
+func (e *OpenAIEmbedder) RequestAccountingSupported() bool { return true }

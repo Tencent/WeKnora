@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -163,13 +164,14 @@ func TestSwitchTenantPreferenceWriteFailureAbortsSwitch(t *testing.T) {
 
 // TestSwitchTenantSuperuserRecordsPreferenceWithoutMembership covers
 // CanAccessAllTenants switching into a tenant with no membership row:
-// the preference still has to persist so refresh/login follow the switch.
+// the deployment flag enables the switch, and the preference persists.
 func TestSwitchTenantSuperuserRecordsPreferenceWithoutMembership(t *testing.T) {
 	ctx := context.Background()
 	repo := &switchTenantUserRepo{users: map[string]types.User{
 		"alice": {ID: "alice", TenantID: 7, CanAccessAllTenants: true},
 	}}
 	svc := newSwitchTenantTestService(repo, &membershipLookupService{byTenant: map[uint64]*types.TenantMember{}})
+	svc.config = &config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: true}}
 	user, _ := repo.GetUserByID(ctx, "alice")
 
 	resp, err := svc.SwitchTenant(ctx, user, 42, "")
@@ -182,6 +184,25 @@ func TestSwitchTenantSuperuserRecordsPreferenceWithoutMembership(t *testing.T) {
 	}
 	if resp.User.Preferences.LastActiveTenantID == nil || *resp.User.Preferences.LastActiveTenantID != 42 {
 		t.Fatalf("response LastActiveTenantID = %v, want 42", resp.User.Preferences.LastActiveTenantID)
+	}
+}
+
+func TestSwitchTenantSuperuserRequiresDeploymentFlag(t *testing.T) {
+	ctx := context.Background()
+	repo := &switchTenantUserRepo{users: map[string]types.User{
+		"alice": {ID: "alice", TenantID: 7, CanAccessAllTenants: true},
+	}}
+	svc := newSwitchTenantTestService(repo, &membershipLookupService{byTenant: map[uint64]*types.TenantMember{}})
+	svc.config = &config.Config{Tenant: &config.TenantConfig{EnableCrossTenantAccess: false}}
+	tokens := &countingAuthTokenRepo{}
+	svc.tokenRepo = tokens
+	user, _ := repo.GetUserByID(ctx, "alice")
+	response, err := svc.SwitchTenant(ctx, user, 42, "")
+	if err == nil || response != nil {
+		t.Fatal("disabled cross-tenant access must reject a switch without membership")
+	}
+	if repo.updateCalls != 0 || tokens.createCalls != 0 {
+		t.Fatal("rejected switch must not persist preferences or issue tokens")
 	}
 }
 

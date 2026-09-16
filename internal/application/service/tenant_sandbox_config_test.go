@@ -231,6 +231,7 @@ func TestSandboxIdentityChangedJudgesUnreachableOldEndpoint(t *testing.T) {
 // that prevents old credentials from being overwritten while they still own
 // provider resources.
 type fakeConfigRepo struct {
+	mu     sync.Mutex
 	entity *types.TenantSandboxConfigEntity
 	policy *types.TenantSandboxConfigEntity
 	others []*types.TenantSandboxConfigEntity
@@ -247,6 +248,8 @@ type fakeConfigRepo struct {
 }
 
 func (f *fakeConfigRepo) Create(_ context.Context, e *types.TenantSandboxConfigEntity) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if types.IsSandboxWorkspacePolicyRow(e) {
 		f.policy = e
 		return nil
@@ -258,6 +261,8 @@ func (f *fakeConfigRepo) Create(_ context.Context, e *types.TenantSandboxConfigE
 func (f *fakeConfigRepo) GetByID(
 	_ context.Context, _ uint64, _ string,
 ) (*types.TenantSandboxConfigEntity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.events = append(f.events, "get")
 	return f.entity, nil
 }
@@ -265,6 +270,8 @@ func (f *fakeConfigRepo) GetByID(
 func (f *fakeConfigRepo) ListByTenant(
 	context.Context, uint64,
 ) ([]*types.TenantSandboxConfigEntity, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	var out []*types.TenantSandboxConfigEntity
 	if f.entity != nil {
 		out = append(out, f.entity)
@@ -283,18 +290,21 @@ func (f *fakeConfigRepo) ListAll(context.Context) ([]*types.TenantSandboxConfigE
 func (f *fakeConfigRepo) Update(
 	_ context.Context, e *types.TenantSandboxConfigEntity,
 ) error {
+	f.mu.Lock()
 	f.events = append(f.events, "write")
 	f.updated = e
-	if f.onUpdate != nil {
-		f.onUpdate()
+	onUpdate := f.onUpdate
+	updateErr := f.updateErr
+	f.mu.Unlock()
+	if onUpdate != nil {
+		onUpdate()
 	}
-	if f.updateErr != nil {
-		return f.updateErr
-	}
-	return nil
+	return updateErr
 }
 
 func (f *fakeConfigRepo) SoftDelete(_ context.Context, _ uint64, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.events = append(f.events, "delete")
 	if f.policy != nil && f.policy.ID == id {
 		f.policy = nil
@@ -304,14 +314,19 @@ func (f *fakeConfigRepo) SoftDelete(_ context.Context, _ uint64, id string) erro
 }
 
 func (f *fakeConfigRepo) SetCordon(_ context.Context, _ uint64, _ string, _ time.Time) error {
+	f.mu.Lock()
 	f.events = append(f.events, "cordon")
-	if f.onSetCordon != nil {
-		f.onSetCordon()
+	onSetCordon := f.onSetCordon
+	f.mu.Unlock()
+	if onSetCordon != nil {
+		onSetCordon()
 	}
 	return nil
 }
 
 func (f *fakeConfigRepo) ClearCordon(ctx context.Context, _ uint64, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.events = append(f.events, "uncordon")
 	f.clearCordonCtxErr = ctx.Err()
 	return nil

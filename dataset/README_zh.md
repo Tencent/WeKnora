@@ -228,7 +228,7 @@ python dataset/qa_dataset.py generate --input_dir ./batch2
 ### 常见问题
 
 **1. OpenAI API错误**
-- 确保API密钥设置正确：`echo $OPENAI_API_KEY`
+- 确保API密钥已设置：`test -n "${OPENAI_API_KEY:-}" && echo "OPENAI_API_KEY 已设置"`
 - 检查API配额和账单状态
 - 验证与OpenAI的网络连接
 
