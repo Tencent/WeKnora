@@ -612,11 +612,7 @@ import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
 import { SETTING_DRAWER_HEADER_ACTIONS_ID } from '@/components/settings/SettingDrawer.vue'
 import { SKILL_ICON } from '@/types/mention'
-import {
-  getAgentById,
-  updateAgent,
-  type CustomAgent,
-} from '@/api/agent'
+import { useSkillInstallerModel } from '@/composables/useSkillInstallerModel'
 import {
   configSkillInstallEventsUrl,
   deleteConfigSkill,
@@ -710,12 +706,10 @@ const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
 const abortBySkill = new Map<string, AbortController>()
 let pollTimer: number | null = null
 
-const INSTALLER_AGENT_ID = 'builtin-skill-installer'
-const LAST_CHAT_MODEL_KEY = 'weknora_last_chat_model_id'
-
-const installerAgent = ref<CustomAgent | null>(null)
-const installerModelId = ref('')
-const savingInstallerModel = ref(false)
+const {
+  installerModelId, savingInstallerModel, loadInstallerModel, persistInstallerModel,
+  onInstallerModelChange, resetInstallerModel,
+} = useSkillInstallerModel()
 
 function normalizeSkillRollout(value?: string): 'next_turn' | 'new_session' {
   return value === 'new_session' ? 'new_session' : 'next_turn'
@@ -734,14 +728,6 @@ const deleteHint = computed(() =>
     ? t('settings.sandbox.skillDeleteHintNewSession')
     : t('settings.sandbox.skillDeleteHint'),
 )
-
-function readLastChatModelID(): string {
-  try {
-    return localStorage.getItem(LAST_CHAT_MODEL_KEY) || ''
-  } catch {
-    return ''
-  }
-}
 
 const STATUS_I18N: Record<string, string> = {
   installing: 'settings.sandbox.skillStatusInstalling',
@@ -1237,48 +1223,6 @@ defineExpose({
   revealSkill,
 })
 
-async function loadInstallerModel() {
-  try {
-    const res = await getAgentById(INSTALLER_AGENT_ID)
-    installerAgent.value = res?.data || null
-    const configured = installerAgent.value?.config?.model_id?.trim() || ''
-    installerModelId.value = configured || readLastChatModelID()
-  } catch {
-    installerAgent.value = null
-    installerModelId.value = readLastChatModelID()
-  }
-}
-
-async function persistInstallerModel(modelId: string) {
-  const id = modelId.trim()
-  if (!id) {
-    throw new Error(t('settings.sandbox.skillInstallerModelRequired'))
-  }
-  const current = installerAgent.value
-  const config = { ...(current?.config || {}), model_id: id }
-  const res = await updateAgent(INSTALLER_AGENT_ID, {
-    name: current?.name || '',
-    description: current?.description || '',
-    avatar: current?.avatar || '',
-    config,
-  })
-  installerAgent.value = res?.data || { ...(current as CustomAgent), config }
-  installerModelId.value = id
-}
-
-async function onInstallerModelChange(modelId: string) {
-  if (!modelId || modelId === '__add_model__') return
-  installerModelId.value = modelId
-  savingInstallerModel.value = true
-  try {
-    await persistInstallerModel(modelId)
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('settings.sandbox.skillInstallerModelSaveFailed'))
-  } finally {
-    savingInstallerModel.value = false
-  }
-}
-
 function isZipFile(file: File): boolean {
   return file.name.toLowerCase().endsWith('.zip') || file.type === 'application/zip'
 }
@@ -1474,8 +1418,7 @@ watch(
     stopPoll()
     skills.value = []
     progressById.value = {}
-    installerAgent.value = null
-    installerModelId.value = ''
+    resetInstallerModel()
   },
   { immediate: true },
 )
