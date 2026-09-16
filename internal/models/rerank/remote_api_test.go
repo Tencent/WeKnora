@@ -155,3 +155,71 @@ func TestNewOpenAIRerankerRejectsInvalidTruncatePromptTokens(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenAIRerankerSupportsHuggingFaceTEIFormat verifies compatibility with
+// Hugging Face text-embeddings-inference (TEI) and Infinity:
+// 1. The outgoing request must include the `texts` field expected by TEI.
+// 2. The parser must decode top-level array responses: [{"index": i, "score": s}].
+func TestOpenAIRerankerSupportsHuggingFaceTEIFormat(t *testing.T) {
+	withRerankSSRFWhitelist(t, "127.0.0.1")
+
+	var receivedRequest map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&receivedRequest); err != nil {
+			t.Errorf("decode request body: %v", err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		// TEI returns a top-level JSON array directly with `score` rather than `relevance_score`
+		_, _ = w.Write([]byte(`[
+			{"index": 1, "score": 0.9876},
+			{"index": 0, "score": 0.1234}
+		]`))
+	}))
+	defer server.Close()
+
+	reranker, err := NewOpenAIReranker(&RerankerConfig{
+		BaseURL:   server.URL,
+		ModelName: "BAAI/bge-reranker-v2-m3",
+		APIKey:    "test-key",
+	})
+	if err != nil {
+		t.Fatalf("NewOpenAIReranker: %v", err)
+	}
+
+	documents := []string{"Doc A", "Doc B"}
+	results, err := reranker.Rerank(t.Context(), "test query", documents)
+	if err != nil {
+		t.Fatalf("Rerank failed on TEI-style endpoint: %v", err)
+	}
+
+	// 1. Verify `texts` field was sent and equals documents
+	rawTexts, ok := receivedRequest["texts"]
+	if !ok {
+		t.Fatal("request is missing `texts` field required by Hugging Face TEI")
+	}
+	textsSlice, ok := rawTexts.([]interface{})
+	if !ok || len(textsSlice) != len(documents) {
+		t.Fatalf("texts = %v, want slice of length %d", rawTexts, len(documents))
+	}
+	for i, d := range documents {
+		if textsSlice[i] != d {
+			t.Errorf("texts[%d] = %v, want %v", i, textsSlice[i], d)
+		}
+	}
+
+	// 2. Verify results parsed from top-level array
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2", len(results))
+	}
+	if results[0].Index != 1 || results[0].RelevanceScore != 0.9876 {
+		t.Errorf("results[0] = {index: %d, score: %v}, want {index: 1, score: 0.9876}",
+			results[0].Index, results[0].RelevanceScore)
+	}
+	if results[1].Index != 0 || results[1].RelevanceScore != 0.1234 {
+		t.Errorf("results[1] = {index: %d, score: %v}, want {index: 0, score: 0.1234}",
+			results[1].Index, results[1].RelevanceScore)
+	}
+}
