@@ -76,6 +76,8 @@ func (r *replaceFileRepo) apply(values map[string]interface{}) {
 			r.row.Metadata = value.(types.JSON)
 		case "parse_status":
 			r.row.ParseStatus = value.(string)
+		case "enable_status":
+			r.row.EnableStatus = value.(string)
 		case "error_message":
 			r.row.ErrorMessage = value.(string)
 		}
@@ -144,6 +146,16 @@ type replaceFileGraph struct {
 
 func (replaceFileGraph) DelGraph(context.Context, []types.NameSpace) error { return nil }
 
+type replaceFileInspector struct {
+	fakeTaskInspector
+	events *[]string
+}
+
+func (i *replaceFileInspector) CancelTasksForKnowledge(_ context.Context, knowledgeID string) (int, int, error) {
+	*i.events = append(*i.events, "dequeue:"+knowledgeID)
+	return 1, 0, nil
+}
+
 type replaceFileHarness struct {
 	svc      *knowledgeService
 	repo     *replaceFileRepo
@@ -180,13 +192,14 @@ func newReplaceFileHarness(t *testing.T) *replaceFileHarness {
 	h.store = &replaceFileStore{events: &h.events}
 	h.tasks = &replaceFileEnqueuer{events: &h.events}
 	h.svc = &knowledgeService{
-		repo:         h.repo,
-		kbService:    &reparseFailureKBService{kb: kb},
-		fileSvc:      h.store,
-		task:         h.tasks,
-		chunkService: replaceFileChunkService{},
-		chunkRepo:    replaceFileChunks{},
-		graphEngine:  replaceFileGraph{},
+		repo:          h.repo,
+		kbService:     &reparseFailureKBService{kb: kb},
+		fileSvc:       h.store,
+		task:          h.tasks,
+		taskInspector: &replaceFileInspector{events: &h.events},
+		chunkService:  replaceFileChunkService{},
+		chunkRepo:     replaceFileChunks{},
+		graphEngine:   replaceFileGraph{},
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, &types.Tenant{ID: 7})
@@ -200,7 +213,14 @@ func (h *replaceFileHarness) replace(
 	t *testing.T, content, customFileName string, metadata map[string]string,
 ) (*types.Knowledge, error) {
 	t.Helper()
-	fh, err := bytesToFileHeader([]byte(content), "upload.md")
+	return h.replaceNamed(t, content, "upload.md", customFileName, metadata)
+}
+
+func (h *replaceFileHarness) replaceNamed(
+	t *testing.T, content, filename, customFileName string, metadata map[string]string,
+) (*types.Knowledge, error) {
+	t.Helper()
+	fh, err := bytesToFileHeader([]byte(content), filename)
 	require.NoError(t, err)
 	return h.svc.ReplaceKnowledgeFile(h.ctx, h.original.ID, fh, customFileName, metadata)
 }
@@ -236,8 +256,8 @@ func TestReplaceKnowledgeFilePreservesIDAndReparsesNewContent(t *testing.T) {
 	require.Len(t, h.tasks.payloads, 1)
 	assert.Equal(t, h.original.ID, h.tasks.payloads[0].KnowledgeID)
 	assert.Equal(t, "new/file.md", h.tasks.payloads[0].FilePath)
-	assert.Equal(t, []string{"save", "enqueue", "delete:old/file.md"}, h.events,
-		"the old file is deleted only after the reparse was submitted")
+	assert.Equal(t, []string{"save", "dequeue:knowledge-1", "enqueue", "delete:old/file.md"}, h.events,
+		"queued parse tasks are dropped before reparse; the old file is deleted only after enqueue")
 }
 
 func TestReplaceKnowledgeFileUnchangedContentSkipsReparse(t *testing.T) {
@@ -280,16 +300,19 @@ func TestReplaceKnowledgeFileSourceUpdateFailureDiscardsNewFile(t *testing.T) {
 	assert.Empty(t, h.tasks.payloads)
 }
 
-func TestReplaceKnowledgeFileCommittedUpdateReportedAsFailedKeepsNewFile(t *testing.T) {
+func TestReplaceKnowledgeFileCommittedUpdateReportedAsFailedContinuesReparse(t *testing.T) {
 	h := newReplaceFileHarness(t)
 	h.repo.failColumnsCall = 1
 	h.repo.commitThenFail = true
 
-	_, err := h.replace(t, "# new body", "notes/a.md", nil)
+	got, err := h.replace(t, "# new body", "notes/a.md", nil)
 
-	require.Error(t, err)
+	require.NoError(t, err)
+	require.Equal(t, h.original.ID, got.ID)
 	assert.Equal(t, "new/file.md", h.repo.row.FilePath)
-	assert.Empty(t, h.store.deleted, "a file the row references must not be deleted")
+	assert.Equal(t, types.ParseStatusPending, h.repo.row.ParseStatus)
+	assert.Equal(t, []string{"old/file.md"}, h.store.deleted)
+	require.Len(t, h.tasks.payloads, 1)
 }
 
 func TestReplaceKnowledgeFileReparseFailureRestoresPreviousSource(t *testing.T) {
@@ -342,4 +365,82 @@ func TestReplaceKnowledgeFileRejectsUnsupportedFileType(t *testing.T) {
 	require.Error(t, err)
 	assert.Zero(t, h.store.saved)
 	assert.Equal(t, h.original, h.repo.row)
+}
+
+func TestReplaceKnowledgeFileEmptyCustomNameKeepsFolder(t *testing.T) {
+	h := newReplaceFileHarness(t)
+
+	_, err := h.replaceNamed(t, "# new body", "a.md", "", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "notes", h.repo.row.FolderPath)
+	assert.Equal(t, "a.md", h.repo.row.FileName)
+}
+
+func TestReplaceKnowledgeFileBareCustomNameKeepsFolder(t *testing.T) {
+	h := newReplaceFileHarness(t)
+
+	_, err := h.replace(t, "# new body", "b.md", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "notes", h.repo.row.FolderPath, "a basename must not move the document to the KB root")
+	assert.Equal(t, "b.md", h.repo.row.FileName)
+}
+
+func TestReplaceKnowledgeFileIgnoresStorageQuota(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.ctx = context.WithValue(h.ctx, types.TenantInfoContextKey, &types.Tenant{
+		ID: 7, StorageQuota: 1, StorageUsed: 1,
+	})
+
+	got, err := h.replace(t, "# new body", "notes/a.md", nil)
+
+	require.NoError(t, err)
+	require.Equal(t, h.original.ID, got.ID)
+	assert.Equal(t, types.ParseStatusPending, h.repo.row.ParseStatus)
+}
+
+func TestReplaceKnowledgeFileDequeuesInProgressParse(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.repo.row.ParseStatus = types.ParseStatusProcessing
+
+	got, err := h.replace(t, "# new body", "notes/a.md", nil)
+
+	require.NoError(t, err)
+	require.Equal(t, h.original.ID, got.ID)
+	assert.Contains(t, h.events, "dequeue:knowledge-1")
+	assert.Equal(t, types.ParseStatusPending, h.repo.row.ParseStatus)
+	assert.Equal(t, "disabled", h.repo.row.EnableStatus)
+}
+
+func TestReplaceKnowledgeFileRejectsFAQKnowledgeBase(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	h.svc.kbService = &reparseFailureKBService{kb: &types.KnowledgeBase{
+		ID: "kb-1", TenantID: 7, Type: types.KnowledgeBaseTypeFAQ,
+	}}
+
+	_, err := h.replace(t, "# new body", "notes/a.md", nil)
+
+	require.Error(t, err)
+	assert.Zero(t, h.store.saved)
+}
+
+func TestIsKnowledgeSourceReplaced(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	loaded := h.original
+	assert.False(t, h.svc.isKnowledgeSourceReplaced(h.ctx, &loaded))
+
+	h.repo.row.FilePath = "new/file.md"
+	assert.True(t, h.svc.isKnowledgeSourceReplaced(h.ctx, &loaded))
+}
+
+func TestUpdateKnowledgeUnlessSourceReplacedSkipsStaleSave(t *testing.T) {
+	h := newReplaceFileHarness(t)
+	stale := h.original
+	stale.ParseStatus = types.ParseStatusFailed
+	h.repo.row.FilePath = "new/file.md"
+
+	require.NoError(t, h.svc.updateKnowledgeUnlessSourceReplaced(h.ctx, &stale))
+	assert.Equal(t, "new/file.md", h.repo.row.FilePath)
+	assert.NotEqual(t, types.ParseStatusFailed, h.repo.row.ParseStatus)
 }

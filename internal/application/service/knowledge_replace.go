@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"mime/multipart"
+	"strings"
 	"time"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -21,18 +22,22 @@ import (
 // Object storage is not transactional, so the steps are ordered to keep the
 // row pointing at a file that exists:
 //  1. save the new file under a fresh storage path;
-//  2. point the row at it with a single UPDATE of the source columns;
-//  3. ReparseKnowledge cleans the old chunks/index/graph and enqueues parsing;
-//  4. only after that succeeds, delete the old file.
+//  2. dequeue any in-flight parse of the previous source;
+//  3. point the row at the new file and mark it pending in one UPDATE;
+//  4. ReparseKnowledge cleans the old chunks/index/graph and enqueues parsing;
+//  5. only after that succeeds, delete the old file.
 //
-// If step 2 fails the new file is discarded. If step 3 fails the previous
-// source columns are restored (marked failed, since cleanup may already have
-// removed the old index) and the new file is discarded. A file is never
-// deleted while the row may still reference it.
+// If step 3 fails the new file is discarded, unless a re-read shows the write
+// committed despite the error — in that case reparse continues so the row is
+// not left completed against a new file. If step 4 fails the previous source
+// columns are restored (marked failed, since cleanup may already have removed
+// the old index) and the new file is discarded. A file is never deleted while
+// the row may still reference it.
 //
 // Identical content under the same name and folder is not re-parsed: changed
-// metadata is persisted and a DuplicateKnowledgeError carrying the knowledge
-// is returned, mirroring CreateKnowledgeFromFile's duplicate contract.
+// metadata is persisted and a DuplicateKnowledgeError carrying this knowledge
+// is returned. Unlike CreateKnowledgeFromFile, this does not treat another
+// knowledge's hash as a duplicate — path identity is what connectors need.
 func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	knowledgeID string, file *multipart.FileHeader, customFileName string, metadata map[string]string,
 ) (*types.Knowledge, error) {
@@ -42,6 +47,9 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	existing, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
 	if err != nil {
 		return nil, err
+	}
+	if kb != nil && kb.Type == types.KnowledgeBaseTypeFAQ {
+		return nil, werrors.NewBadRequestError("FAQ 知识库不支持文件上传，请使用 FAQ 导入功能")
 	}
 	if existing.Type != "file" || existing.FilePath == "" {
 		return nil, werrors.NewBadRequestError("only file knowledge can have its file replaced")
@@ -53,13 +61,18 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		return nil, err
 	}
 
-	// Same naming rules as CreateKnowledgeFromFile: a path-qualified custom name
-	// places the knowledge in that folder; without one the folder is kept.
 	fileName, folderPath := file.Filename, existing.FolderPath
 	if customFileName != "" {
-		folderPath, fileName = types.SplitKnowledgeRelativePath(customFileName)
-		if fileName == "" {
-			fileName = file.Filename
+		customFolder, customName := types.SplitKnowledgeRelativePath(customFileName)
+		if customName == "" {
+			customName = file.Filename
+		}
+		fileName = customName
+		// A path-qualified name relocates the knowledge. A bare filename
+		// keeps the existing folder so callers can pass file.Filename as
+		// customFileName without moving the document to the KB root.
+		if knowledgeCustomNameRelocates(customFileName) {
+			folderPath = customFolder
 		}
 	}
 	safeFileName, ok := secutils.ValidateInput(fileName)
@@ -108,11 +121,6 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		return existing, types.NewDuplicateFileError(existing)
 	}
 
-	if tenant, _ := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); tenant != nil &&
-		tenant.StorageQuota > 0 && tenant.StorageUsed >= tenant.StorageQuota {
-		return nil, types.NewStorageQuotaExceededError()
-	}
-
 	fileSvc := s.resolveFileService(ctx, kb)
 	newPath, err := fileSvc.SaveFile(ctx, file, existing.TenantID, existing.ID)
 	if err != nil {
@@ -131,20 +139,35 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	if len(previousMetadata) == 0 {
 		previousMetadata = types.JSON("{}") // metadata is NOT NULL; an empty JSON writes NULL
 	}
-	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, map[string]interface{}{
-		"title":       title,
-		"file_name":   safeFileName,
-		"folder_path": folderPath,
-		"file_type":   fileType,
-		"file_size":   file.Size,
-		"file_hash":   hash,
-		"file_path":   newPath,
-		"metadata":    newMetadata,
-		"updated_at":  time.Now(),
-	}); err != nil {
-		logger.Errorf(ctx, "Failed to point knowledge %s at its replacement file: %v", existing.ID, err)
-		s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
-		return nil, err
+
+	// Drop queued parse tasks of the previous source before the row
+	// points at the new file. The new TypeDocumentProcess task is
+	// enqueued later by ReparseKnowledge.
+	s.dequeueKnowledgeTasks(cleanupCtx, existing.ID)
+
+	sourceColumns := map[string]interface{}{
+		"title":         title,
+		"file_name":     safeFileName,
+		"folder_path":   folderPath,
+		"file_type":     fileType,
+		"file_size":     file.Size,
+		"file_hash":     hash,
+		"file_path":     newPath,
+		"metadata":      newMetadata,
+		"parse_status":  types.ParseStatusPending,
+		"enable_status": "disabled",
+		"error_message": "",
+		"updated_at":    time.Now(),
+	}
+	if err := s.repo.UpdateKnowledgeColumns(ctx, existing.ID, sourceColumns); err != nil {
+		current, readErr := s.repo.GetKnowledgeByID(cleanupCtx, existing.TenantID, existing.ID)
+		if readErr != nil || current == nil || current.FilePath != newPath {
+			logger.Errorf(ctx, "Failed to point knowledge %s at its replacement file: %v", existing.ID, err)
+			s.discardReplacementFile(cleanupCtx, fileSvc, existing.TenantID, existing.ID, newPath)
+			return nil, err
+		}
+		logger.Warnf(ctx, "Source update for knowledge %s reported an error after committing; continuing reparse: %v",
+			existing.ID, err)
 	}
 
 	reparsed, err := s.ReparseKnowledge(ctx, existing.ID, nil)
@@ -171,7 +194,8 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 	}
 
 	if existing.FilePath != newPath {
-		if err := fileSvc.DeleteFile(cleanupCtx, existing.FilePath); err != nil {
+		oldFileSvc := s.resolveFileServiceForPath(cleanupCtx, kb, existing.FilePath)
+		if err := oldFileSvc.DeleteFile(cleanupCtx, existing.FilePath); err != nil {
 			logger.Warnf(ctx, "Failed to delete replaced file %s of knowledge %s: %v",
 				existing.FilePath, existing.ID, err)
 		}
@@ -182,6 +206,10 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			"processing_status": "pending", "trigger": kbActivityTrigger(ctx),
 		})
 	return reparsed, nil
+}
+
+func knowledgeCustomNameRelocates(customFileName string) bool {
+	return strings.Contains(strings.ReplaceAll(customFileName, "\\", "/"), "/")
 }
 
 // discardReplacementFile deletes a replacement file that did not become the

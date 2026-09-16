@@ -130,8 +130,9 @@ type KnowledgeService interface {
 	) (*types.Knowledge, error)
 	// ReplaceKnowledgeFile replaces the source file of an existing file knowledge
 	// while preserving its ID, then re-parses it. A path-qualified customFileName
-	// also sets the folder; metadata entries are merged into the stored metadata.
-	// Identical content returns a DuplicateKnowledgeError without re-parsing.
+	// also sets the folder; a bare filename keeps the current folder. Metadata
+	// entries are merged into the stored metadata. Identical content on this
+	// same path returns a DuplicateKnowledgeError without re-parsing.
 	ReplaceKnowledgeFile(
 		ctx context.Context,
 		knowledgeID string,
