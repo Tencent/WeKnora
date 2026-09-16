@@ -162,6 +162,9 @@ function needsConnectionTest(): boolean {
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
   replaceCredentialsMode.value = true
+  if (form.value.type === "confluence" && !form.value.config.credentials.edition) {
+    form.value.config.credentials.edition = "server"
+  }
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -586,6 +589,20 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'confluence',
+    available: true,
+    docUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionDocUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionPageUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
+      { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
+      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true, optional: true },
+      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true, optional: true },
+    ],
+  },
+  {
     type: 'yuque',
     available: true,
     docUrl: 'https://www.yuque.com/yuque/developer/api',
@@ -654,6 +671,17 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+
+const displayedCredentialFields = computed(() => {
+  const fields = currentDef.value?.fields || []
+  if (form.value.type !== "confluence") return fields
+
+  return fields.filter((field) => {
+    if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
+    if (field.key === "api_token") return form.value.config.credentials.edition === "cloud"
+    return true
+  })
+})
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -783,7 +811,7 @@ function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
-  form.value.config.credentials = {}
+  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
@@ -1500,8 +1528,15 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
+          <div v-if="form.type === 'confluence'" class="form-item">
+            <label class="form-label">{{ t('datasource.field.confluenceEdition') }}</label>
+            <t-select v-model="form.config.credentials.edition">
+              <t-option value="server" :label="t('datasource.field.confluenceEditionServer')" />
+              <t-option value="cloud" :label="t('datasource.field.confluenceEditionCloud')" />
+            </t-select>
+          </div>
           <div
-            v-for="field in currentDef?.fields || []"
+            v-for="field in displayedCredentialFields"
             :key="field.key"
             class="form-item"
           >
