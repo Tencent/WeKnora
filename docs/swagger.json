@@ -22793,7 +22793,8 @@
                 "zhipu",
                 "exa",
                 "metaso",
-                "bocha"
+                "bocha",
+                "doubao"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBrave",
@@ -22808,7 +22809,8 @@
                 "WebSearchProviderTypeZhipu",
                 "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso",
-                "WebSearchProviderTypeBocha"
+                "WebSearchProviderTypeBocha",
+                "WebSearchProviderTypeDoubao"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WikiConfig": {

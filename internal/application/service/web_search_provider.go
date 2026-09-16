@@ -141,7 +141,8 @@ func isValidProviderType(provider types.WebSearchProviderType) bool {
 		types.WebSearchProviderTypeMetaso,
 		types.WebSearchProviderTypeZhipu,
 		types.WebSearchProviderTypeExa,
-		types.WebSearchProviderTypeBocha:
+		types.WebSearchProviderTypeBocha,
+		types.WebSearchProviderTypeDoubao:
 		return true
 	default:
 		return false
@@ -192,6 +193,10 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 		}
 	case types.WebSearchProviderTypeBocha:
 		if err := infra_web_search.ValidateBochaParameters(params); err != nil {
+			return err
+		}
+	case types.WebSearchProviderTypeDoubao:
+		if err := infra_web_search.ValidateDoubaoParameters(params); err != nil {
 			return err
 		}
 	case types.WebSearchProviderTypeDuckDuckGo:
