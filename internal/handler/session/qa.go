@@ -1194,12 +1194,7 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 				logger.Infof(streamCtx.asyncCtx, "Knowledge QA service completed for session: %s", sessionID)
 				updateCtx := context.WithValue(streamCtx.asyncCtx, types.TenantIDContextKey, reqCtx.session.TenantID)
-				h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID)
-				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
-					Type:      event.EventAgentComplete,
-					SessionID: sessionID,
-					Data:      event.AgentCompleteData{FinalAnswer: streamCtx.assistantMessage.Content},
-				})
+				h.completeQuickAnswerTurn(updateCtx, streamCtx, reqCtx.query, reqCtx.userMessageID)
 			}
 			return nil
 		})
@@ -1672,6 +1667,31 @@ func appendQuickAnswerReasoning(msg *types.Message, content string) {
 		return
 	}
 	ensureQuickAnswerStep(msg).ReasoningContent += content
+}
+
+// completeQuickAnswerTurn finishes a KnowledgeQA (fast-answer) turn.
+// EventAgentComplete must run before the GORM write: handleComplete attaches
+// SandboxCheckpoint (and artifacts) to the in-memory message, and
+// completeAssistantMessage is the only persist on this path.
+func (h *Handler) completeQuickAnswerTurn(
+	ctx context.Context, streamCtx *sseStreamContext, query, userMessageID string,
+) {
+	if streamCtx == nil || streamCtx.assistantMessage == nil {
+		return
+	}
+	if streamCtx.eventBus != nil {
+		// MessageID is what handleComplete keys on. Leave FinalAnswer empty:
+		// KnowledgeQA already accumulated the answer on the message, and
+		// handleComplete would append FinalAnswer a second time.
+		_ = streamCtx.eventBus.Emit(ctx, event.Event{
+			Type:      event.EventAgentComplete,
+			SessionID: streamCtx.assistantMessage.SessionID,
+			Data: event.AgentCompleteData{
+				MessageID: streamCtx.assistantMessage.ID,
+			},
+		})
+	}
+	h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
 }
 
 // completeAssistantMessage marks an assistant message as complete, updates it,

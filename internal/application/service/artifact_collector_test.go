@@ -311,13 +311,15 @@ func TestArtifactCollector_SkipsAlreadyKnown(t *testing.T) {
 	}
 }
 
-func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
+func TestArtifactCollector_SkipsRestoredFileSamePathSameSize(t *testing.T) {
 	ctx := context.Background()
 	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
 	src := &fakeSandboxSource{
 		entries: map[string][]sandbox.RemoteDirEntry{
 			"sess-1": {
-				// Same path as the known set, but a *newer* mtime — must be re-attached.
+				// git checkout rewrites the file with a fresh mtime but the
+				// same bytes. That must not attach a duplicate to the next
+				// assistant message.
 				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
 			},
 		},
@@ -326,7 +328,40 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 		},
 	}
 	store := &fakeStore{prev: []types.MessageArtifact{
-		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod},
+		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod, FileSize: 4},
+	}}
+	fs := &fakeFileService{}
+	c := newTestCollector(src, store, fs, 1<<20)
+
+	got, err := c.Collect(ctx, "sess-1", "msg-1", 42, "/workspace/output")
+	if err != nil {
+		t.Fatalf("Collect() error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Collect() len = %d, want 0 (same path+size after restore must not re-attach)", len(got))
+	}
+	if len(fs.saved) != 0 {
+		t.Fatalf("SaveBytes should not have been called; saved=%v", fs.saved)
+	}
+}
+
+func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
+	ctx := context.Background()
+	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				// Same path, newer mtime *and* a different size — the skill
+				// actually rewrote the file this turn.
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 8, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX-NEW"),
+		},
+	}
+	store := &fakeStore{prev: []types.MessageArtifact{
+		{SourcePath: "/workspace/output/report.pptx", ModTime: oldMod, FileSize: 4},
 	}}
 	fs := &fakeFileService{}
 	c := newTestCollector(src, store, fs, 1<<20)
@@ -336,7 +371,7 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 		t.Fatalf("Collect() error = %v", err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("Collect() len = %d, want 1 (mtime-change should re-attach)", len(got))
+		t.Fatalf("Collect() len = %d, want 1 (rewritten file should re-attach)", len(got))
 	}
 	if len(fs.saved) != 1 {
 		t.Fatalf("SaveBytes calls = %d, want 1", len(fs.saved))
