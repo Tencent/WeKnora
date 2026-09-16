@@ -230,6 +230,7 @@ const driveFolderToken = ref('')
 const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
+const isLinksConnector = (type: string) => type === 'feishu_links' || type === 'lark_links'
 const isGitLabConnector = (type: string) => type === 'gitlab'
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
@@ -245,6 +246,104 @@ function syncGitLabProjectsToSettings() {
 }
 function addGitLabProject() { gitlabProjects.value.push({ project_id: '', ref: '', pathsText: '' }) }
 function removeGitLabProject(index: number) { gitlabProjects.value.splice(index, 1); syncGitLabProjectsToSettings() }
+
+const linksUrlsText = ref('')
+const linksResolved = ref<Resource[]>([])
+const linksParsed = ref(false)
+const linksDuplicateCount = ref(0)
+
+function canonicalLinkKey(raw: string): string {
+  try {
+    const u = new URL(raw)
+    const segs = u.pathname.split('/').filter(Boolean)
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i] === 'wiki' && segs[i + 1] === 'space') return `rej:wiki_space:${segs[i + 2] || ''}`
+      if (segs[i] === 'drive' && segs[i + 1] === 'folder') return `rej:folder:${segs[i + 2] || ''}`
+      if (['wiki', 'docx', 'docs', 'sheets', 'base', 'file'].includes(segs[i]) && segs[i + 1]) {
+        return `${segs[i]}:${segs[i + 1]}`
+      }
+    }
+  } catch {
+    // not a URL
+  }
+  return `raw:${raw}`
+}
+
+function dedupeLinkLines(lines: string[]): { unique: string[]; dropped: number } {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  let dropped = 0
+  for (const line of lines) {
+    const key = canonicalLinkKey(line)
+    if (seen.has(key)) {
+      dropped++
+      continue
+    }
+    seen.add(key)
+    unique.push(line)
+  }
+  return { unique, dropped }
+}
+
+function syncLinksUrlsToSettings() {
+  if (!isLinksConnector(form.value.type)) return
+  const { unique, dropped } = dedupeLinkLines(
+    linksUrlsText.value.split('\n').map(s => s.trim()).filter(Boolean),
+  )
+  linksDuplicateCount.value = dropped
+  linksUrlsText.value = unique.join('\n')
+  form.value.config.settings.urls = unique
+}
+
+async function parseLinkList() {
+  syncLinksUrlsToSettings()
+  const urls = form.value.config.settings.urls as string[]
+  if (!urls?.length) {
+    MessagePlugin.warning(t('datasource.links.urlsRequired'))
+    return
+  }
+  loadingResources.value = true
+  try {
+    if (!tempDsId.value) {
+      const res = await createDataSource({
+        ...form.value,
+        knowledge_base_id: props.kbId,
+        status: 'paused',
+      } as any)
+      const created = res?.data || res
+      tempDsId.value = created.id
+    } else {
+      await updateDataSource(tempDsId.value, {
+        ...form.value,
+        knowledge_base_id: props.kbId,
+      } as any)
+    }
+    const res = await listResources(tempDsId.value)
+    const list: Resource[] = res?.data || res || []
+    linksResolved.value = list
+    linksParsed.value = true
+    const ok = list.filter(r => r.type !== 'link_error')
+    selectedResourceIds.value = ok.map(r => r.external_id)
+    form.value.config.resource_ids = selectedResourceIds.value
+    if (linksDuplicateCount.value > 0) {
+      MessagePlugin.info(t('datasource.links.deduped', { n: linksDuplicateCount.value }))
+    }
+    if (ok.length === 0) {
+      MessagePlugin.warning(t('datasource.links.noneResolved'))
+    }
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  }
+  loadingResources.value = false
+}
+
+function linksErrorText(r: Resource): string {
+  const code = String(r.metadata?.error_code || '')
+  const key = `datasource.links.error.${code}`
+  const translated = t(key)
+  if (translated && translated !== key) return translated
+  return String(r.metadata?.error || t('datasource.links.error.unrecognized'))
+}
 
 // extractDriveFolderToken accepts either a bare folder_token or a Drive folder
 // URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
@@ -599,6 +698,42 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'feishu_links',
+    available: true,
+    docUrl: 'https://open.feishu.cn/app',
+    permissionDocUrl: 'https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/docx-overview',
+    permissionPageUrl: 'https://open.feishu.cn/app',
+    requiredPermissions: [
+      'wiki:wiki:readonly',
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    type: 'lark_links',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/docs/docx-v1/docx-overview',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'wiki:wiki:readonly',
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.larksuite.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
     type: 'notion',
     available: true,
     docUrl: 'https://www.notion.so/my-integrations',
@@ -734,6 +869,10 @@ watch(visible, async (v) => {
   driveRootLoaded.value = false
   rssAuthHeaders.value = []
   gitlabProjects.value = []
+  linksUrlsText.value = ''
+  linksResolved.value = []
+  linksParsed.value = false
+  linksDuplicateCount.value = 0
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -777,6 +916,14 @@ watch(visible, async (v) => {
         // resource_id is "folderToken" or "folderToken:fileToken"; the root is
         // the first segment.
         driveFolderToken.value = rids[0].split(':')[0]
+      }
+    }
+    if (isLinksConnector(form.value.type)) {
+      const saved = form.value.config.settings?.urls
+      if (Array.isArray(saved)) {
+        linksUrlsText.value = saved.filter((u: unknown) => typeof u === 'string').join('\n')
+      } else if (typeof saved === 'string') {
+        linksUrlsText.value = saved
       }
     }
     tempDsId.value = props.dataSource.id
@@ -1082,6 +1229,16 @@ async function nextStep() {
       return
     }
   }
+  if (step.value === 2 && isLinksConnector(form.value.type)) {
+    if (!linksParsed.value) {
+      await parseLinkList()
+      if (!linksParsed.value) return
+    }
+    if (!selectedResourceIds.value.length) {
+      MessagePlugin.warning(t('datasource.links.noneResolved'))
+      return
+    }
+  }
   step.value++
   if (step.value === 2) {
     // Drive connectors need a user-supplied folder_token before listing.
@@ -1095,6 +1252,7 @@ async function nextStep() {
       return
     }
     if (isGitLabConnector(form.value.type)) return
+    if (isLinksConnector(form.value.type)) return
     loadResources()
   }
 }
@@ -1115,6 +1273,7 @@ function prevStep() {
 function buildConfigPayload(): Record<string, unknown> {
   syncGitLabProjectsToSettings()
   syncConfluencePublicFieldsToSettings()
+  syncLinksUrlsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1148,7 +1307,12 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
 
 // --- Final submit ---
 async function handleSubmit() {
-  form.value.config.resource_ids = selectedResourceIds.value
+  if (isLinksConnector(form.value.type)) {
+    syncLinksUrlsToSettings()
+    form.value.config.resource_ids = selectedResourceIds.value
+  } else {
+    form.value.config.resource_ids = selectedResourceIds.value
+  }
   submitting.value = true
   try {
     let dataSourceId = tempDsId.value
@@ -1299,7 +1463,7 @@ const drawerConfirmText = computed(() => {
     v-model:visible="visible"
     :title="drawerTitle"
     :description="drawerDescription"
-    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 && !isGitLabConnector(form.type) }]"
+    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 && !isGitLabConnector(form.type) && !isLinksConnector(form.type) }]"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
     :confirm-loading="submitting || (step === 1 && testing)"
@@ -1659,6 +1823,36 @@ const drawerConfirmText = computed(() => {
             <t-textarea v-model="project.pathsText" :placeholder="t('datasource.gitlab.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
           </div>
           <t-button variant="outline" @click="addGitLabProject"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitlab.addProject') }}</t-button>
+        </div>
+      </template>
+      <template v-else-if="isLinksConnector(form.type)">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.links.title') }}</h4>
+        <p class="ds-resource-hint">{{ t('datasource.links.hint') }}</p>
+        <t-textarea
+          v-model="linksUrlsText"
+          :placeholder="t('datasource.links.placeholder')"
+          :autosize="{ minRows: 6, maxRows: 14 }"
+          @change="linksParsed = false"
+        />
+        <div class="links-parse-row">
+          <t-button theme="primary" :loading="loadingResources" @click="parseLinkList">
+            {{ t('datasource.links.parse') }}
+          </t-button>
+          <span v-if="linksParsed" class="links-parse-count">
+            {{ t('datasource.links.resolvedCount', { n: selectedResourceIds.length }) }}
+          </span>
+        </div>
+        <div v-if="linksParsed && linksResolved.length" class="links-result-table">
+          <div
+            v-for="r in linksResolved"
+            :key="r.external_id"
+            class="links-result-row"
+            :class="{ 'is-error': r.type === 'link_error' }"
+          >
+            <span class="links-result-title">{{ r.type === 'link_error' ? (r.url || r.name) : (r.name || t('datasource.untitled')) }}</span>
+            <span v-if="r.type !== 'link_error'" class="links-result-type">{{ r.type }}</span>
+            <span v-else class="links-result-error">{{ linksErrorText(r) }}</span>
+          </div>
         </div>
       </template>
       <template v-else>
@@ -2399,6 +2593,60 @@ const drawerConfirmText = computed(() => {
   font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.links-parse-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.links-parse-count {
+  font-size: 12px;
+  color: var(--td-text-color-secondary);
+}
+
+.links-result-table {
+  margin-top: 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.links-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.links-result-row:last-child {
+  border-bottom: none;
+}
+
+.links-result-row.is-error {
+  background: var(--td-error-color-light);
+}
+
+.links-result-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.links-result-type {
+  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+}
+
+.links-result-error {
+  font-size: 12px;
+  color: var(--td-error-color);
 }
 
 .resource-picker {

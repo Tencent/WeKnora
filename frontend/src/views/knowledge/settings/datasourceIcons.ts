@@ -14,6 +14,8 @@ export const datasourceIconMap: Record<string, string> = {
   // Drive (云盘) connectors reuse the wiki icons - same product, same brand.
   feishu_drive: feishuIcon,
   lark_drive: larkIcon,
+  feishu_links: feishuIcon,
+  lark_links: larkIcon,
   notion: notionIcon,
   yuque: yuqueIcon,
   dingtalk: dingtalkIcon,

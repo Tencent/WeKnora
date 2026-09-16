@@ -66,6 +66,22 @@ var (
 		WebBaseURL:    larkWebBaseURL,
 		Label:         "LarkDrive",
 	}
+
+	// RegionFeishuLinks is the Chinese mainland cloud, document-URL-list mode.
+	RegionFeishuLinks = Region{
+		ConnectorType: types.ConnectorTypeFeishuLinks,
+		OpenBaseURL:   feishuOpenBaseURL,
+		WebBaseURL:    feishuWebBaseURL,
+		Label:         "FeishuLinks",
+	}
+
+	// RegionLarkLinks is the international cloud, document-URL-list mode.
+	RegionLarkLinks = Region{
+		ConnectorType: types.ConnectorTypeLarkLinks,
+		OpenBaseURL:   larkOpenBaseURL,
+		WebBaseURL:    larkWebBaseURL,
+		Label:         "LarkLinks",
+	}
 )
 
 // WikiURL builds the user-facing link to a wiki space or node on this cloud.
