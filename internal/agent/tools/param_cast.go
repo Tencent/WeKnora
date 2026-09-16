@@ -41,7 +41,7 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		if !ok {
 			continue
 		}
-		targetType, _ := prop["type"].(string)
+		targetType := schemaType(prop)
 		if targetType == "" {
 			continue
 		}
@@ -62,6 +62,24 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		return args
 	}
 	return result
+}
+
+// schemaType returns the concrete type a property expects. jsonschema-go emits
+// nilable Go types (slices, maps, pointers) as {"type":["null","array"]}, so a
+// plain string assertion reads "" and silently skips every cast and validation
+// for those parameters.
+func schemaType(prop map[string]interface{}) string {
+	switch t := prop["type"].(type) {
+	case string:
+		return t
+	case []interface{}:
+		for _, entry := range t {
+			if s, ok := entry.(string); ok && s != "null" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // castValue attempts to convert val to the expected targetType.
