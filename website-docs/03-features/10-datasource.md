@@ -72,7 +72,7 @@
 - **支持的 URL**：`/wiki/{node_token}`（只拉这一篇，不递归子页）、`/docx/{token}`、`/docs/{token}`、`/sheets/{token}`、`/base/{token}`、`/file/{token}`。
 - **拒绝**：`/wiki/space/`（整库请用 `feishu`）、`/drive/folder/`（整夹请用 `feishu_drive`）、mindnote / slides。
 - **解析与去重**：wiki 走 `get_node`，云文档走 `POST /drive/v1/metas/batch_query`。先按规范化 URL 去重，再按 `{obj_type}:{obj_token}` 去重（同一篇的 wiki copylink 与 `/docx/` 会合并）。
-- **权限**：`wiki:wiki:readonly`、`drive:drive:readonly`、`drive:export:readonly`、`docx:document:readonly`。把应用加为该文档协作者即可，不必进群分享整库或整夹。
+- **权限**：`wiki:wiki:readonly`（wiki copylink）、`drive:drive.metadata:readonly` 或 `drive:drive`（云文档 URL 的 `metas/batch_query`；`drive:drive:readonly` 不够）、`drive:drive:readonly`、`drive:export:readonly`、`docx:document:readonly`。开通后须发布应用版本。把应用加为该文档协作者即可，不必进群分享整库或整夹。
 
 #### GitLab（`connector/gitlab/`）
 

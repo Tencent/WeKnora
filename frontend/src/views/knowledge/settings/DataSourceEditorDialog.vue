@@ -705,6 +705,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     permissionPageUrl: 'https://open.feishu.cn/app',
     requiredPermissions: [
       'wiki:wiki:readonly',
+      'drive:drive.metadata:readonly',
       'drive:drive:readonly',
       'drive:export:readonly',
       'docx:document:readonly',
@@ -723,6 +724,7 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     permissionPageUrl: 'https://open.larksuite.com/app',
     requiredPermissions: [
       'wiki:wiki:readonly',
+      'drive:drive.metadata:readonly',
       'drive:drive:readonly',
       'drive:export:readonly',
       'docx:document:readonly',
