@@ -163,6 +163,7 @@ func newEnsureEmbedSessionCtx(ch *types.EmbedChannel, sessionID, sig string) (*g
 }
 
 func TestEnsureEmbedSessionValid(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	sig := service.SignEmbedSessionHandle(ch, testEmbedSessionID)
@@ -183,6 +184,7 @@ func TestEnsureEmbedSessionValid(t *testing.T) {
 }
 
 func TestEnsureEmbedSessionWrongTenant(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	sig := service.SignEmbedSessionHandle(ch, testEmbedSessionID)
@@ -207,6 +209,7 @@ func TestEnsureEmbedSessionWrongTenant(t *testing.T) {
 }
 
 func TestEnsureEmbedSessionWrongDescription(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	sig := service.SignEmbedSessionHandle(ch, testEmbedSessionID)
@@ -231,6 +234,7 @@ func TestEnsureEmbedSessionWrongDescription(t *testing.T) {
 }
 
 func TestEnsureEmbedSessionInvalidSig(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	h := &EmbedChannelHandler{
@@ -250,6 +254,7 @@ func TestEnsureEmbedSessionInvalidSig(t *testing.T) {
 }
 
 func TestEnsureEmbedSessionNotFound(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	h := &EmbedChannelHandler{sessionService: &stubSessionServiceForEmbed{sessions: map[string]*types.Session{}}}
@@ -263,6 +268,7 @@ func TestEnsureEmbedSessionNotFound(t *testing.T) {
 }
 
 func TestCreateEmbedSessionSuccess(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	gin.SetMode(gin.TestMode)
 	ch := testEmbedChannel()
@@ -303,6 +309,7 @@ func TestCreateEmbedSessionSuccess(t *testing.T) {
 }
 
 func TestGetEmbedChunkForbidden(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	gin.SetMode(gin.TestMode)
 	ch := testEmbedChannel()
@@ -329,6 +336,7 @@ func TestGetEmbedChunkForbidden(t *testing.T) {
 }
 
 func TestGetEmbedChunkSuccess(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	gin.SetMode(gin.TestMode)
 	ch := testEmbedChannel()
@@ -371,6 +379,7 @@ func newEmbedStopSessionCtx(ch *types.EmbedChannel, sessionID, sig, body string)
 }
 
 func TestEmbedStopSessionInvalidSig(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	h := &EmbedChannelHandler{
@@ -389,6 +398,7 @@ func TestEmbedStopSessionInvalidSig(t *testing.T) {
 }
 
 func TestEmbedStopSessionMissingMessageID(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	sig := service.SignEmbedSessionHandle(ch, testEmbedSessionID)

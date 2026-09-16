@@ -10,11 +10,16 @@ from docreader.utils.ssrf_proxy import SSRFProxy, checked_address
 
 class TestSSRFProxy(unittest.IsolatedAsyncioTestCase):
     async def test_dns_rebinding_is_checked_before_connect(self):
-        with patch('docreader.utils.ssrf_proxy.is_ssrf_safe_url', return_value=(True, '')), \
-             patch('docreader.utils.ssrf_proxy._resolve_host_ips', return_value=((ipaddress.ip_address('127.0.0.1'),), None)), \
-             patch('docreader.utils.ssrf_proxy._is_whitelisted', return_value=False):
-            with self.assertRaises(ValueError):
-                await checked_address('https://rebind.example/')
+        for address in (
+            '127.0.0.1', '64:ff9b:1::a9fe:a9fe', '64:ff9b:1::808:808',
+            '64:ff9b:1:ffff:ffff:ffff:ffff:ffff',
+        ):
+            with self.subTest(address=address), \
+                 patch('docreader.utils.ssrf_proxy.is_ssrf_safe_url', return_value=(True, '')), \
+                 patch('docreader.utils.ssrf_proxy._resolve_host_ips', return_value=((ipaddress.ip_address(address),), None)), \
+                 patch('docreader.utils.ssrf_proxy._is_whitelisted', return_value=False):
+                with self.assertRaises(ValueError):
+                    await checked_address('https://rebind.example/')
 
     async def test_proxy_refuses_restricted_connect(self):
         with patch.dict(os.environ, {'SSRF_WHITELIST': '', 'SSRF_WHITELIST_EXTRA': ''}):

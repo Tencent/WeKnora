@@ -78,6 +78,7 @@ func TestSSRFCrossOriginRedirect(t *testing.T) {
 }
 
 func TestKnownExampleKeyCannotSign(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-system-aes-key-32bytes!!")
 	require.Nil(t, SystemHMACKey())
 	_, err := SignFileURL("https://example.com", "local://1/a", 1, 0)

@@ -335,7 +335,7 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	}
 
 	u, err := url.Parse(downloadURL)
-	if err != nil || u.Scheme != "https" || u.Host != "files.slack.com" || u.User != nil {
+	if err != nil || !isTrustedFileDownloadURL(u) {
 		return nil, "", fmt.Errorf("untrusted Slack file download URL")
 	}
 
@@ -346,4 +346,21 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	}()
 
 	return pr, msg.FileName, nil
+}
+
+// isTrustedFileDownloadURL accepts private download endpoints, not public
+// permalinks or workspace pages. The SDK attaches the bot token to this URL.
+func isTrustedFileDownloadURL(u *url.URL) bool {
+	if u.Scheme != "https" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "files.slack.com":
+		return true
+	case "slack.com":
+		// Legacy private download URLs remain documented in files.sharedPublicURL.
+		return strings.HasPrefix(u.Path, "/files-pri/")
+	default:
+		return false
+	}
 }

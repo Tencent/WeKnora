@@ -10,7 +10,8 @@ func TestFrontendRedirectIsApplicationRelative(t *testing.T) {
 	t.Setenv("APP_EXTERNAL_URL", "")
 	for _, raw := range []string{
 		"https://evil.example/", "//evil.example/", `/\evil.example/`, "/%2fexample.com",
-		"/%5cexample.com", "javascript:alert(1)", " /example", "/\nexample",
+		"/%2f%2fevil.com", "/%2F%2Fevil.com", "/%5cexample.com", "/%5c%5cevil.com",
+		"javascript:alert(1)", " /example", "/\nexample",
 	} {
 		_, err := validateFrontendRedirect(raw)
 		require.Error(t, err, raw)

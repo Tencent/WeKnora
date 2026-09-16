@@ -31,5 +31,6 @@
 - **IM webhooks:** configure the platform verification secret for each supported
   HTTP channel. Empty secrets are rejected. Gateway/Stream channels cannot be
   reached through the HTTP callback endpoint. Slack downloads require
-  `https://files.slack.com`; DingTalk session replies require its exact platform
+  `https://files.slack.com` or legacy `https://slack.com/files-pri/` URLs;
+  DingTalk session replies require its exact platform
   endpoint.
