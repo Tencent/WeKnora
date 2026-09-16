@@ -2,8 +2,10 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,24 +25,26 @@ var versionedSQLiteTables = []string{
 	"browser_devices",
 	"browser_pairings",
 	"browser_task_interruptions",
+	"fork_snapshot_leases",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
 // versioned migrations add and the SQLite baseline was missing.
 var versionedSQLiteColumns = map[string][]string{
-	"memory_subjects":    {"extraction_state"},               // 000094
-	"memory_items":       {"replaces_id"},                    // 000094
-	"tenants":            {"api_principal_config"},           // 000064
-	"users":              {"is_system_admin"},                // 000053
-	"knowledges":         {"pending_subtasks_count"},         // 000056
-	"messages":           {"attachments", "usage"},           // 000034, 000085
-	"tenant_invitations": {"token", "accepted_count"},        // 000054
-	"embed_channels":     {"allow_memory"},                   // 000060
-	"mcp_oauth_tokens":   {"principal_type", "principal_id"}, // 000064
-	"mcp_tool_approvals": {"enabled"},                        // 000091
+	"memory_subjects":    {"extraction_state"},                                              // 000094
+	"memory_items":       {"replaces_id"},                                                   // 000094
+	"tenants":            {"api_principal_config"},                                          // 000064
+	"users":              {"is_system_admin"},                                               // 000053
+	"knowledges":         {"pending_subtasks_count"},                                        // 000056
+	"messages":           {"attachments", "usage", "sandbox_checkpoint"},                    // 000034, 000085, 000096
+	"sessions":           {"parent_session_id", "forked_from_message_id", "fork_bootstrap"}, // 000096
+	"tenant_invitations": {"token", "accepted_count"},                                       // 000054
+	"embed_channels":     {"allow_memory"},                                                  // 000060
+	"mcp_oauth_tokens":   {"principal_type", "principal_id"},                                // 000064
+	"mcp_tool_approvals": {"enabled"},                                                       // 000091
 }
 
-const expectedSQLiteMigrationVersion = 16
+const expectedSQLiteMigrationVersion = 18
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -135,6 +139,37 @@ func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {
 	).Scan(&relationCount))
 	require.Equal(t, 1, relationCount)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"))
+}
+
+func TestSQLiteMigrationsUpgradeV16AddsSessionForkColumns(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 16)
+	chdirAndRestore(t, legacyRoot)
+
+	dbPath := filepath.Join(t.TempDir(), "upgrade-v16.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	db := openSQLiteDB(t, dbPath)
+	versionBefore, dirtyBefore := sqliteMigrationState(t, db)
+	require.Equal(t, 16, versionBefore)
+	require.False(t, dirtyBefore)
+	require.False(t, sqliteColumnExists(t, db, "sessions", "parent_session_id"))
+	require.False(t, sqliteColumnExists(t, db, "sessions", "forked_from_message_id"))
+	require.False(t, sqliteColumnExists(t, db, "sessions", "fork_bootstrap"))
+	require.False(t, sqliteColumnExists(t, db, "messages", "sandbox_checkpoint"))
+
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+
+	db = openSQLiteDB(t, dbPath)
+	versionAfter, dirtyAfter := sqliteMigrationState(t, db)
+	require.Equal(t, expectedSQLiteMigrationVersion, versionAfter)
+	require.False(t, dirtyAfter)
+	for _, column := range versionedSQLiteColumns["sessions"] {
+		require.Truef(t, sqliteColumnExists(t, db, "sessions", column), "upgraded SQLite DB must have column sessions.%s", column)
+	}
+	require.True(t, sqliteColumnExists(t, db, "messages", "sandbox_checkpoint"))
 }
 
 func sqliteRepoRoot(t *testing.T) string {
@@ -249,22 +284,35 @@ func assertSQLiteMCPOAuthPrincipalUpsertWorks(t *testing.T, db *sql.DB) {
 
 func copySQLiteMigrationsV4(t *testing.T, repoRoot string) string {
 	t.Helper()
+	return copySQLiteMigrationsThrough(t, repoRoot, 4)
+}
+
+func copySQLiteMigrationsThrough(t *testing.T, repoRoot string, maxVersion int) string {
+	t.Helper()
 	dest := t.TempDir()
 	srcDir := filepath.Join(repoRoot, "migrations", "sqlite")
 	destDir := filepath.Join(dest, "migrations", "sqlite")
 	require.NoError(t, os.MkdirAll(destDir, 0o755))
 
-	legacy := []string{
-		"000000_init.up.sql",
-		"000001_remove_wiki_log.up.sql",
-		"000002_knowledge_folder_path.up.sql",
-		"000003_knowledge_base_auto_tag_config.up.sql",
-		"000004_memory.up.sql",
-	}
-	for _, name := range legacy {
-		data, err := os.ReadFile(filepath.Join(srcDir, name))
-		require.NoError(t, err)
+	entries, err := os.ReadDir(srcDir)
+	require.NoError(t, err)
+	copied := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".up.sql") {
+			continue
+		}
+		var version int
+		_, scanErr := fmt.Sscanf(name, "%d_", &version)
+		require.NoError(t, scanErr, "sqlite migration filename %s", name)
+		if version > maxVersion {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(srcDir, name))
+		require.NoError(t, readErr)
 		require.NoError(t, os.WriteFile(filepath.Join(destDir, name), data, 0o600))
+		copied++
 	}
+	require.Greater(t, copied, 0)
 	return dest
 }

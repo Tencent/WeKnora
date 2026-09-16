@@ -855,14 +855,14 @@ func (s *messageService) fetchPartnerMessages(ctx context.Context, items []*type
 	existingIDs := make(map[string]bool)
 	for _, item := range items {
 		existingIDs[item.ID] = true
-		rid := item.RequestID
-		if rid == "" {
+		if item.RequestID == "" || item.SessionID == "" {
 			continue
 		}
-		rs, ok := seen[rid]
+		key := searchPairKey(item.SessionID, item.RequestID)
+		rs, ok := seen[key]
 		if !ok {
 			rs = &roleSet{}
-			seen[rid] = rs
+			seen[key] = rs
 		}
 		if item.Role == "user" {
 			rs.hasUser = true
@@ -871,35 +871,38 @@ func (s *messageService) fetchPartnerMessages(ctx context.Context, items []*type
 		}
 	}
 
-	// Find request_ids that need partner lookup
-	var needFetch []string
-	for rid, rs := range seen {
-		if !rs.hasUser || !rs.hasAssistant {
-			needFetch = append(needFetch, rid)
-		}
-	}
-	if len(needFetch) == 0 {
-		return items
-	}
-
-	// Fetch partner messages
-	partners, err := s.messageRepo.GetMessagesByRequestIDs(ctx, needFetch)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to fetch partner messages: %v", err)
-		return items
-	}
-
-	// Append only messages not already in results
-	for _, p := range partners {
-		if existingIDs[p.ID] {
+	needBySession := make(map[string][]string)
+	for key, rs := range seen {
+		if rs.hasUser && rs.hasAssistant {
 			continue
 		}
-		existingIDs[p.ID] = true
-		items = append(items, &types.MessageSearchResultItem{
-			MessageWithSession: *p,
-			Score:              0, // partner is not directly matched
-			MatchType:          "",
-		})
+		sessionID, rid, ok := strings.Cut(key, "\x00")
+		if !ok || sessionID == "" || rid == "" {
+			continue
+		}
+		needBySession[sessionID] = append(needBySession[sessionID], rid)
+	}
+	if len(needBySession) == 0 {
+		return items
+	}
+
+	for sessionID, rids := range needBySession {
+		partners, err := s.messageRepo.GetMessagesByRequestIDs(ctx, sessionID, rids)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to fetch partner messages: %v", err)
+			return items
+		}
+		for _, p := range partners {
+			if existingIDs[p.ID] {
+				continue
+			}
+			existingIDs[p.ID] = true
+			items = append(items, &types.MessageSearchResultItem{
+				MessageWithSession: *p,
+				Score:              0, // partner is not directly matched
+				MatchType:          "",
+			})
+		}
 	}
 
 	return items
@@ -916,10 +919,9 @@ func groupByRequestID(items []*types.MessageSearchResultItem) []*types.MessageSe
 	nextOrder := 0
 
 	for _, item := range items {
-		key := item.RequestID
-		if key == "" {
-			// No request_id — treat as standalone
-			key = item.ID
+		key := item.ID
+		if item.RequestID != "" {
+			key = searchPairKey(item.SessionID, item.RequestID)
 		}
 
 		g, exists := groups[key]
@@ -975,4 +977,8 @@ func groupByRequestID(items []*types.MessageSearchResultItem) []*types.MessageSe
 	}
 
 	return result
+}
+
+func searchPairKey(sessionID, requestID string) string {
+	return sessionID + "\x00" + requestID
 }

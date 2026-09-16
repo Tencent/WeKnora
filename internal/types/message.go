@@ -369,6 +369,12 @@ type Message struct {
 	// spot. Persisted rather than only streamed so reopening a conversation
 	// still explains what the answer saw.
 	UsedMemories UsedMemories `json:"used_memories,omitempty" gorm:"type:jsonb;column:used_memories"`
+	// SandboxCheckpoint is the git commit this assistant turn produced in the
+	// session sandbox's /workspace. Nil for user messages, for turns that ran
+	// without a sandbox, and for turns whose commit failed (best-effort — a
+	// failed checkpoint must never block the reply). A message without a
+	// checkpoint cannot serve as a fork point with sandbox state.
+	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb;column:sandbox_checkpoint"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp
