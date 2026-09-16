@@ -301,7 +301,7 @@ WeKnora serves as the core technology framework for the [WeChat Dialog Open Plat
 
 ## 📘 API Reference
 
-**Official product documentation**: [`website-docs/`](./website-docs/README.md) — the complete documentation set organized as Getting Started → Architecture → Features → API → Clients → Development, covering ~360 API endpoints, ~150 environment variables, and 9 extension points. The directory is also a VitePress site: run `cd website-docs && npm install && npm run dev` to preview locally, or deploy it standalone with the `Dockerfile` inside.
+**Official website and product documentation**: [`website-docs/`](./website-docs/README.md) contains the product homepage and the complete documentation set organized as Getting Started → Architecture → Features → API → Clients → Development. With Node.js 24, run `cd website-docs && npm run setup && npm run build && npm run preview` to preview both together. The unified static output serves the homepage at `/` and documentation at `/docs/`; see the directory's README for Nginx and Docker deployment.
 
 Troubleshooting FAQ: [Troubleshooting FAQ](./docs/QA.md)
 

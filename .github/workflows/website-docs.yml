@@ -1,0 +1,51 @@
+name: Website and Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website-docs/**"
+      - ".github/workflows/website-docs.yml"
+  pull_request:
+    paths:
+      - "website-docs/**"
+      - ".github/workflows/website-docs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    name: Build and verify the unified site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: website-docs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            website-docs/package-lock.json
+            website-docs/homepage/package-lock.json
+      - name: Install locked dependencies
+        run: npm run setup
+      - name: Lint homepage
+        run: npm --prefix homepage run lint
+      - name: Build homepage and documentation, and check links
+        run: npm run build
+      - name: Package the unified site
+        run: npm run package:site
+      - name: Build the static server image
+        run: docker build -t weknora-site:ci .
