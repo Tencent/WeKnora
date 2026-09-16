@@ -9,6 +9,8 @@ Logos identify supported integrations; their names and marks belong to their res
 - Chrome: [official Chrome website asset](https://www.google.com/chrome/static/images/chrome-logo-m100.svg).
 - File formats, REST API, CLI: generic interface icons, not brand logos.
 - LiteLLM: [official documentation favicon](https://docs.litellm.ai/img/favicon.ico).
+- WeChat Dialog Open Platform: [official platform icon](https://res.wx.qq.com/mmspraiweb_node/dist/static/logo/logo180.png), referenced by the platform login page and saved unchanged as `public/brands/wechat-dialog.png`.
+- Tencent Cloud: [official website icon](https://cloudcache.tencent-cloud.com/qcloud/favicon.ico), referenced by the Lighthouse product page and saved unchanged as `public/brands/tencent-cloud.ico`. Both platform icons retain their original colors in light and dark mode.
 
 ## Product screenshots
 

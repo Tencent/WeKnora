@@ -156,8 +156,9 @@
 .closing h2 { font-size: clamp(30px, 2.8vw, 43px); }
 .startGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
 .startCard { display: flex; flex-direction: column; align-items: flex-start; padding: 30px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); }
-.startLabel { display: flex; align-items: center; gap: 10px; color: var(--soft); font-size: 13px; }
-.startLabel svg { width: 22px; height: 22px; color: var(--gold); }
+.startLabel { display: flex; align-items: center; gap: 14px; min-height: 34px; color: var(--soft); font-size: 13px; }
+.startBrand { display: block; width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
+.startLabel :global(.wk-logo) { width: 128px; }
 .startCard h3 { margin: 24px 0 12px; font-size: clamp(19px, 1.6vw, 24px); font-weight: 600; }
 .startCard p { margin: 0 0 28px; color: var(--soft); font-size: 15px; line-height: 1.9; }
 .startCard > a { margin-top: auto; }
