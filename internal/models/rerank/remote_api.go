@@ -40,6 +40,7 @@ type RerankRequest struct {
 	Model                string                 `json:"model"`                            // Model to use for reranking
 	Query                string                 `json:"query"`                            // Query text to compare documents against
 	Documents            []string               `json:"documents"`                        // List of document texts to rerank
+	Texts                []string               `json:"texts,omitempty"`                  // List of texts to rerank (Hugging Face TEI / Infinity format)
 	AdditionalData       map[string]interface{} `json:"additional_data,omitempty"`        // Optional additional data for the model
 	TruncatePromptTokens int                    `json:"truncate_prompt_tokens,omitempty"` // Maximum prompt tokens to use (vLLM-specific, opt-in)
 }
@@ -100,6 +101,7 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 		Model:                r.modelName,
 		Query:                query,
 		Documents:            documents,
+		Texts:                documents,
 		TruncatePromptTokens: r.truncatePromptTokens,
 	}
 
@@ -133,6 +135,16 @@ func (r *OpenAIReranker) Rerank(ctx context.Context, query string, documents []s
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("Rerank API error: Http Status: %s", resp.Status)
+	}
+
+	trimmed := bytes.TrimSpace(body)
+	// Hugging Face TEI and similar self-hosted engines return a top-level array directly: [{"index": 0, "score": ...}]
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var results []RankResult
+		if err := json.Unmarshal(trimmed, &results); err != nil {
+			return nil, fmt.Errorf("unmarshal array response: %w", err)
+		}
+		return results, nil
 	}
 
 	var response RerankResponse
