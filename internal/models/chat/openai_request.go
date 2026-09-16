@@ -11,6 +11,7 @@ import (
 func (c *RemoteAPIChat) ConvertMessages(messages []Message) []openai.ChatCompletionMessage {
 	openaiMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
 	for _, msg := range messages {
+		msg = neutralizeMessageSpecialTokens(msg)
 		openaiMsg := openai.ChatCompletionMessage{
 			Role: msg.Role,
 		}

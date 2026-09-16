@@ -1100,6 +1100,9 @@ func (s *Service) reloadChannelFromDB(channelID, reason string) {
 // the leader lock and opens the connection; other instances periodically
 // retry so they can take over if the leader dies.
 func (s *Service) StartChannel(channel *IMChannel) error {
+	if err := validateChannelTransport(channel); err != nil {
+		return err
+	}
 	if s.stopped.Load() {
 		return fmt.Errorf("im service is stopped")
 	}
@@ -3216,6 +3219,9 @@ func relocalizeBuiltinChannelAgentNames(ctx context.Context, rows []ChannelWithA
 // CreateChannel creates a new IM channel and optionally starts it.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) CreateChannel(channel *IMChannel) error {
+	if err := validateChannelTransport(channel); err != nil {
+		return err
+	}
 	if err := s.checkDuplicateBot(channel, ""); err != nil {
 		return err
 	}
@@ -3251,6 +3257,9 @@ func (s *Service) SetChannelAgentID(ctx context.Context, channel *IMChannel, age
 // UpdateChannel updates a channel and restarts it if needed.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) UpdateChannel(channel *IMChannel) error {
+	if err := validateChannelTransport(channel); err != nil {
+		return err
+	}
 	if err := s.checkDuplicateBot(channel, channel.ID); err != nil {
 		return err
 	}

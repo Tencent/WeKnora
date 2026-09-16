@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -99,7 +100,7 @@ func (a *Adapter) Platform() im.Platform {
 
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	if a.signingSecret == "" {
-		return nil
+		return fmt.Errorf("webhook verification secret is required")
 	}
 
 	bodyBytes, err := io.ReadAll(c.Request.Body)
@@ -331,6 +332,11 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 
 	if downloadURL == "" {
 		return nil, "", fmt.Errorf("no download URL available for file %s", msg.FileKey)
+	}
+
+	u, err := url.Parse(downloadURL)
+	if err != nil || u.Scheme != "https" || u.Host != "files.slack.com" || u.User != nil {
+		return nil, "", fmt.Errorf("untrusted Slack file download URL")
 	}
 
 	pr, pw := io.Pipe()
