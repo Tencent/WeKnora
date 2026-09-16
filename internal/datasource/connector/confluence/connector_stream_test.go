@@ -67,7 +67,7 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 	case path == "/wiki/rest/api/space/ENG/content/page":
 		a.listCalls++
 		return a.jsonResponse(map[string]any{
-			"page": map[string]any{"results": a.pageMaps()},
+			"results": a.pageMaps(),
 		})
 	case strings.HasPrefix(path, "/wiki/rest/api/content/"):
 		if req.URL.Query().Get("expand") != "body.view,version,space" {
@@ -340,6 +340,9 @@ func TestFetchStreamCloudUsesV2Body(t *testing.T) {
 	}
 	if !strings.Contains(string(h.items[0].Content), "Cloud") {
 		t.Fatalf("cloud markdown = %q", h.items[0].Content)
+	}
+	if h.items[0].FileName != "Cloud-p1.md" {
+		t.Fatalf("cloud filename = %q", h.items[0].FileName)
 	}
 }
 

@@ -52,6 +52,29 @@ func TestParseConfigReadsPublicFieldsFromSettings(t *testing.T) {
 	}
 }
 
+func TestParseConfigNormalizesSchemeAndCloudWikiPath(t *testing.T) {
+	server, err := parseConfig(&types.DataSourceConfig{Credentials: map[string]interface{}{
+		"base_url": "confluence.example.com:8090", "username": "reader", "password": "secret",
+	}})
+	if err != nil || server.baseURL != "https://confluence.example.com:8090" {
+		t.Fatalf("server parseConfig() = %#v, %v", server, err)
+	}
+
+	cloud, err := parseConfig(&types.DataSourceConfig{Credentials: map[string]interface{}{
+		"edition": "cloud", "base_url": "https://team.atlassian.net",
+		"username": "user@example.com", "api_token": "token",
+	}})
+	if err != nil || cloud.baseURL != "https://team.atlassian.net/wiki" {
+		t.Fatalf("cloud parseConfig() = %#v, %v", cloud, err)
+	}
+}
+
+func TestPageFileNameIncludesID(t *testing.T) {
+	if got := pageFileName("Overview", "98308"); got != "Overview-98308.md" {
+		t.Fatalf("pageFileName() = %q", got)
+	}
+}
+
 func TestPrepareSyncCursorsPreservesFullSyncBaseline(t *testing.T) {
 	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
 	baseline, next := prepareSyncCursors(old, true)

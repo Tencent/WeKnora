@@ -2,6 +2,7 @@ package confluence
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -50,5 +51,35 @@ func TestCapRetryDelayBoundsRetryAfter(t *testing.T) {
 	}
 	if got := capRetryDelay(5 * time.Minute); got != maxRetryDelay {
 		t.Fatalf("capRetryDelay(5m) = %v", got)
+	}
+}
+
+func TestResolveEndpointDoesNotDoubleEncodeSpaceKeys(t *testing.T) {
+	client := &client{cfg: config{baseURL: "https://confluence.test"}}
+	endpoint := "/rest/api/space/" + url.PathEscape("~foo bar") + "/content/page"
+	got, err := client.resolveEndpoint(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "%2520") {
+		t.Fatalf("resolveEndpoint double-encoded path: %s", got)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Path != "/rest/api/space/~foo bar/content/page" {
+		t.Fatalf("path = %q", parsed.Path)
+	}
+}
+
+func TestWithServerPageExpandRestoresDroppedQuery(t *testing.T) {
+	got := withServerPageExpand("/rest/api/space/ENG/content/page?limit=100&start=100")
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("expand") != serverPageExpand || parsed.Query().Get("start") != "100" {
+		t.Fatalf("withServerPageExpand() = %s", got)
 	}
 }

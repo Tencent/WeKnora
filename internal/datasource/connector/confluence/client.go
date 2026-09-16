@@ -130,17 +130,18 @@ func (c *client) resolveEndpoint(endpoint string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse Confluence pagination URL: %w", err)
 	}
-	basePath := strings.TrimRight(base.EscapedPath(), "/")
+	basePath := strings.TrimRight(base.Path, "/")
 	if next.IsAbs() {
 		if next.Scheme != base.Scheme || next.Host != base.Host {
 			return "", fmt.Errorf("confluence pagination URL leaves configured origin")
 		}
-		if basePath != "" && next.EscapedPath() != basePath && !strings.HasPrefix(next.EscapedPath(), basePath+"/") {
+		nextPath := strings.TrimRight(next.Path, "/")
+		if basePath != "" && nextPath != basePath && !strings.HasPrefix(next.Path, basePath+"/") {
 			return "", fmt.Errorf("confluence pagination URL leaves configured context path")
 		}
 		return next.String(), nil
 	}
-	path := next.EscapedPath()
+	path := next.Path
 	if path == "" {
 		path = basePath
 	} else if basePath != "" && path != basePath && !strings.HasPrefix(path, basePath+"/") {
@@ -196,8 +197,30 @@ func (c *client) spaces(ctx context.Context) ([]space, error) {
 	return all, nil
 }
 
+const serverPageExpand = "version,space"
+
 func serverSpacePagesEndpoint(spaceKey string) string {
-	return "/rest/api/space/" + url.PathEscape(spaceKey) + "/content/page?expand=version,space&limit=100"
+	query := url.Values{
+		"expand": []string{serverPageExpand},
+		"limit":  []string{"100"},
+	}
+	return "/rest/api/space/" + url.PathEscape(spaceKey) + "/content/page?" + query.Encode()
+}
+
+// withServerPageExpand restores expand=version,space on pagination URLs.
+// Confluence _links.next is typically ?limit=&start= and drops expand, which
+// would make later pages look versionless ("t:") and skip real edits.
+func withServerPageExpand(next string) string {
+	parsed, err := url.Parse(next)
+	if err != nil {
+		return next
+	}
+	query := parsed.Query()
+	if strings.TrimSpace(query.Get("expand")) == "" {
+		query.Set("expand", serverPageExpand)
+		parsed.RawQuery = query.Encode()
+	}
+	return parsed.String()
 }
 
 func (c *client) pages(ctx context.Context, s space) ([]page, error) {
@@ -229,10 +252,15 @@ func (c *client) pages(ctx context.Context, s space) ([]page, error) {
 		if err := c.get(ctx, next, &result); err != nil {
 			return nil, err
 		}
-		all = append(all, result.Page.Results...)
-		next = result.Page.Links.Next
-		if next == "" {
-			next = result.Links.Next
+		for _, listed := range result.pages() {
+			if listed.Space.Key == "" {
+				listed.Space.Key, listed.Space.Name = s.Key, s.Name
+			}
+			all = append(all, listed)
+		}
+		next = result.nextLink()
+		if next != "" {
+			next = withServerPageExpand(next)
 		}
 	}
 	return all, nil

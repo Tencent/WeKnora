@@ -301,7 +301,7 @@ func markdownItem(client *client, resourceID string, summary page, full pageBody
 		Title:            summary.Title,
 		Content:          []byte(markdown),
 		ContentType:      "text/markdown",
-		FileName:         safeFilename(summary.Title) + ".md",
+		FileName:         pageFileName(summary.Title, summary.ID),
 		URL:              client.resourceURL(summary.Links.WebUI),
 		UpdatedAt:        pageUpdatedAt(summary),
 		SourceResourceID: resourceID,

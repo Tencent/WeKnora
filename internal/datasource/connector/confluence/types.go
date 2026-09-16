@@ -3,6 +3,7 @@ package confluence
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -51,9 +52,14 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 	if cfg.edition != editionServer && cfg.edition != editionCloud {
 		return config{}, fmt.Errorf("%w: unsupported edition %q", datasource.ErrInvalidCredentials, cfg.edition)
 	}
-	if cfg.baseURL == "" || cfg.username == "" {
+	if cfg.username == "" {
 		return config{}, fmt.Errorf("%w: base_url and username are required", datasource.ErrInvalidCredentials)
 	}
+	normalized, err := normalizeBaseURL(cfg.baseURL, cfg.cloud())
+	if err != nil {
+		return config{}, err
+	}
+	cfg.baseURL = normalized
 	if cfg.cloud() {
 		cfg.secret = configValue(ds, "api_token")
 	} else {
@@ -63,6 +69,29 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 		return config{}, fmt.Errorf("%w: credentials are required", datasource.ErrInvalidCredentials)
 	}
 	return cfg, nil
+}
+
+func normalizeBaseURL(raw string, cloud bool) (string, error) {
+	raw = strings.TrimSpace(strings.TrimRight(raw, "/"))
+	if raw == "" {
+		return "", fmt.Errorf("%w: base_url and username are required", datasource.ErrInvalidCredentials)
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.Scheme == "" {
+		return "", fmt.Errorf("%w: invalid base_url", datasource.ErrInvalidCredentials)
+	}
+	if cloud && isAtlassianCloudHost(parsed.Host) && strings.Trim(parsed.Path, "/") == "" {
+		parsed.Path = "/wiki"
+	}
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func isAtlassianCloudHost(host string) bool {
+	host = strings.ToLower(host)
+	return host == "atlassian.net" || strings.HasSuffix(host, ".atlassian.net")
 }
 
 type space struct {
@@ -123,14 +152,26 @@ type pageList struct {
 	} `json:"_links"`
 }
 
-// serverSpacePageList matches GET /rest/api/space/{key}/content/page, which
-// nests the page collection under the "page" key instead of returning a flat
-// content list. Root _links.next is kept as a fallback used by some DC versions.
+// serverSpacePageList accepts both Server envelopes:
+//   - GET /rest/api/space/{key}/content/page → flat RestList {results,_links.next}
+//   - GET /rest/api/space/{key}/content      → nested {page:{results,_links}}
 type serverSpacePageList struct {
-	Page  pageList `json:"page"`
-	Links struct {
-		Next string `json:"next"`
-	} `json:"_links"`
+	pageList
+	Page pageList `json:"page"`
+}
+
+func (l serverSpacePageList) pages() []page {
+	if len(l.Page.Results) > 0 {
+		return l.Page.Results
+	}
+	return l.Results
+}
+
+func (l serverSpacePageList) nextLink() string {
+	if l.Page.Links.Next != "" {
+		return l.Page.Links.Next
+	}
+	return l.Links.Next
 }
 
 type cloudPage struct {
@@ -254,6 +295,15 @@ func pageUpdatedAt(p page) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+func pageFileName(title, id string) string {
+	base := safeFilename(title)
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return base + ".md"
+	}
+	return base + "-" + safeFilename(id) + ".md"
 }
 
 func safeFilename(name string) string {

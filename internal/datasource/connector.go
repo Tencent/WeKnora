@@ -220,7 +220,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Description:  "Sync spaces and pages from Atlassian Confluence",
 		Priority:     2,
 		AuthType:     "api_key",
-		Capabilities: []string{"incremental"},
+		Capabilities: []string{"incremental", "deletion_sync"},
 	},
 	types.ConnectorTypeYuque: {
 		Type:         types.ConnectorTypeYuque,

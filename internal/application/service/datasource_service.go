@@ -1042,6 +1042,26 @@ func (h *streamSyncHandler) Checkpoint(ctx context.Context, cursor *types.SyncCu
 	return nil
 }
 
+// streamingFetch dispatches to FetchFullStream when a connector can re-fetch
+// every item while keeping the stored cursor as the deletion baseline. Other
+// streaming connectors keep FetchStream, including force-full runs that drop
+// the cursor on the first attempt via streamStartCursor.
+func streamingFetch(
+	ctx context.Context,
+	sc datasource.StreamingConnector,
+	config *types.DataSourceConfig,
+	forceFull bool,
+	startCursor, fullBaseline *types.SyncCursor,
+	h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	if forceFull {
+		if full, ok := sc.(datasource.FullStreamingConnector); ok {
+			return full.FetchFullStream(ctx, config, fullBaseline, h)
+		}
+	}
+	return sc.FetchStream(ctx, config, startCursor, h)
+}
+
 // processSyncStreaming runs a sync through a StreamingConnector, ingesting each
 // item as it arrives and checkpointing progress so the run is memory-bounded and
 // resumable after a timeout.
@@ -1077,10 +1097,9 @@ func (s *DataSourceService) processSyncStreaming(
 	result := &types.SyncResult{}
 	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
 
-	var nextCursor *types.SyncCursor
-	var fetchErr error
+	fullBaseline := startCursor
 	if forceFull {
-		if full, ok := sc.(datasource.FullStreamingConnector); ok {
+		if _, ok := sc.(datasource.FullStreamingConnector); ok {
 			baseline, cursorErr := ds.ParseSyncCursor()
 			if cursorErr != nil {
 				logger.Errorf(ctx, "failed to parse full-sync cursor: %v", cursorErr)
@@ -1088,13 +1107,11 @@ func (s *DataSourceService) processSyncStreaming(
 					types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", cursorErr), wasPaused)
 				return cursorErr
 			}
-			nextCursor, fetchErr = full.FetchFullStream(ctx, config, baseline, handler)
-		} else {
-			nextCursor, fetchErr = sc.FetchStream(ctx, config, startCursor, handler)
+			fullBaseline = baseline
 		}
-	} else {
-		nextCursor, fetchErr = sc.FetchStream(ctx, config, startCursor, handler)
 	}
+
+	nextCursor, fetchErr := streamingFetch(ctx, sc, config, forceFull, startCursor, fullBaseline, handler)
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.
