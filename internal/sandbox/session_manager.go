@@ -109,6 +109,10 @@ type SessionBoundManagerConfig struct {
 	// Set by the per-tenant resolver, which builds a manager per request.
 	// See NewSessionBoundManager.
 	SkipHealthProbe bool
+
+	// Bootstrapper customises the first sandbox create of individual sessions
+	// (session fork). Optional: nil is the ordinary path.
+	Bootstrapper SessionBootstrapper
 }
 
 // NewSessionBoundManager wires the manager with an explicit RemoteSandboxClient
@@ -173,6 +177,11 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 
 	client := wrapLangfuseRemoteClient(deps.Client)
 
+	bootstrapper := deps.Bootstrapper
+	if withClient, ok := bootstrapper.(SessionBootstrapperWithClient); ok {
+		bootstrapper = withClient.WithClient(client)
+	}
+
 	lifecycle, err := newRemoteSessionLifecycle(
 		client,
 		deps.Store,
@@ -180,6 +189,7 @@ func NewSessionBoundManager(deps SessionBoundManagerConfig) (*SessionBoundManage
 		createRequest,
 		sessionLifecycleCleanupTimeout,
 		deps.ConfigID,
+		bootstrapper,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("session bound manager: %w", err)
@@ -443,6 +453,14 @@ func (m *SessionBoundManager) DeleteSnapshot(ctx context.Context, snapshotID str
 		return errors.New("sandbox: remote provider does not support snapshots")
 	}
 	return snapshots.DeleteSnapshot(ctx, snapshotID)
+}
+
+// DeleteForkSnapshot removes a fork snapshot. sessionID is accepted so the
+// method matches SessionForkSandboxPort; deletion is by snapshot ID.
+func (m *SessionBoundManager) DeleteForkSnapshot(
+	ctx context.Context, _ /* sessionID */, snapshotID string,
+) error {
+	return m.DeleteSnapshot(ctx, snapshotID)
 }
 
 // ListSnapshots forwards provider snapshot listing for audit and later cleanup
@@ -1021,6 +1039,72 @@ func (m *SessionBoundManager) EndSessionTurn(ctx context.Context, sessionID stri
 	return leaser.EndTurn(context.WithoutCancel(ctx), key)
 }
 
+// HasActiveTurn reports whether an agent turn currently holds the session's
+// sandbox lease. A store without turn-lease support is treated as not busy
+// so fork can proceed.
+func (m *SessionBoundManager) HasActiveTurn(ctx context.Context, sessionID string) (bool, error) {
+	if m == nil {
+		return false, nil
+	}
+	leaser, ok := m.bindings.(sessionTurnLeaseStore)
+	if !ok {
+		return false, nil
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	active, _, err := leaser.TurnState(ctx, key)
+	return active, err
+}
+
+// CreateForkSnapshot snapshots the session's already-bound sandbox. It never
+// provisions: an unbound session or a backend without snapshots returns an
+// error so fork can degrade.
+func (m *SessionBoundManager) CreateForkSnapshot(
+	ctx context.Context, sessionID, name string,
+) (string, error) {
+	if err := m.requireRemoteBackend(); err != nil {
+		return "", err
+	}
+	snapshots, ok := SnapshotManagerFrom(m.client)
+	if !ok || !m.client.Capabilities().SupportsSnapshots {
+		return "", errors.New("sandbox: remote provider does not support snapshots")
+	}
+	sandboxID, bound := m.BoundSandboxID(ctx, sessionID)
+	if !bound || sandboxID == "" {
+		return "", errors.New("sandbox: session has no bound sandbox")
+	}
+	ref, err := createForkOrProviderSnapshot(ctx, m.client, snapshots, sandboxID, name)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(ref.ID)
+	if id == "" {
+		return "", errors.New("sandbox: snapshot returned empty id")
+	}
+	return id, nil
+}
+
+type forkSnapshotCreator interface {
+	CreateForkSnapshot(ctx context.Context, sandboxID, name string) (RemoteSnapshotRef, error)
+}
+
+// createForkOrProviderSnapshot uses a fork-specific commit when the client
+// has one (Docker's weknora-fork/ namespace). Cube and E2B have no extra
+// namespace, so they keep using CreateSnapshot.
+func createForkOrProviderSnapshot(
+	ctx context.Context,
+	client RemoteSandboxClient,
+	snapshots RemoteSnapshotManager,
+	sandboxID, name string,
+) (RemoteSnapshotRef, error) {
+	if creator, ok := client.(forkSnapshotCreator); ok {
+		return creator.CreateForkSnapshot(ctx, sandboxID, name)
+	}
+	return snapshots.CreateSnapshot(ctx, sandboxID, name)
+}
+
 var _ SessionTurnHolder = (*SessionBoundManager)(nil)
 
 // resolveSession resolves (or lazily creates) the remote sandbox bound to
@@ -1082,6 +1166,33 @@ func (m *SessionBoundManager) peekBoundSandboxState(
 	// mismatch, or a state outside the filter). That is not "no sandbox":
 	// the UI should ask before Connect, which would resume a paused VM.
 	return RemoteStateUnknown, true, nil
+}
+
+// BoundSandboxID returns the ID of the sandbox currently bound to sessionID.
+// It never provisions and never Connects: a session with no live binding
+// reports ok=false, which callers treat as "nothing to check point".
+func (m *SessionBoundManager) BoundSandboxID(
+	ctx context.Context, sessionID string,
+) (string, bool) {
+	if m.remoteDisabled() || strings.TrimSpace(sessionID) == "" {
+		return "", false
+	}
+	key, err := m.sessionKey(ctx, sessionID)
+	if err != nil {
+		return "", false
+	}
+	binding, err := m.bindings.Get(ctx, key)
+	if err != nil {
+		return "", false
+	}
+	if binding == nil || binding.Provider != m.client.Provider() {
+		return "", false
+	}
+	sandboxID := strings.TrimSpace(binding.SandboxID)
+	if sandboxID == "" {
+		return "", false
+	}
+	return sandboxID, true
 }
 
 // lookupSessionHandle reads the authoritative binding and, when one exists
