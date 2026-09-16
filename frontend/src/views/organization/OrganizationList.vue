@@ -8,6 +8,7 @@
           <div class="title-row" style="--wails-draggable: drag">
             <h2 style="--wails-draggable: drag">{{ $t('organization.title') }}</h2>
             <div class="header-actions" style="--wails-draggable: no-drag">
+              <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip :content="canManageOrg ? $t('organization.joinOrg') : noPermissionTip" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
                   style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleJoinOrganization">
@@ -486,7 +487,14 @@ import { copyWithToast } from '@/utils/clipboard'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
 import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import ResourceSortControl from '@/components/ResourceSortControl.vue'
 import { shouldShowOrgRelationTag } from '@/utils/card-list-badge'
+import {
+  DEFAULT_RESOURCE_SORT,
+  sortResourcesWithinGroups,
+  type ResourceSortAccessors,
+  type ResourceSortValue,
+} from '@/utils/resourceSorting'
 
 type OrgWithUI = Organization
 
@@ -495,6 +503,13 @@ const route = useRoute()
 const router = useRouter()
 const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
+const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
+
+const organizationSortAccessors: ResourceSortAccessors<OrgWithUI> = {
+  getName: organization => organization.name,
+  getUpdatedAt: organization => organization.updated_at,
+  getCreatedAt: organization => organization.created_at,
+}
 
 // 后端 /api/v1/organizations 下的写操作（创建、加入、申请加入、邀请、审批、改设置等）
 // 在路由层都要求当前空间角色 ≥ admin。前端只用于 UI 渲染，安全边界仍在服务端。
@@ -708,14 +723,20 @@ const createdCount = computed(() => organizations.value.filter(o => o.is_owner).
 const joinedCount = computed(() => organizations.value.filter(o => !o.is_owner).length)
 
 const filteredOrganizations = computed(() => {
-  if (spaceSelection.value === 'created') return organizations.value.filter(o => o.is_owner)
-  if (spaceSelection.value === 'joined') return organizations.value.filter(o => !o.is_owner)
-  // 「全部」视图下把我创建的 owner 排在前面、我加入的排在后面，方便上面的
-  // 分组标题在过渡处一次性打出来——和 KB / Agent 列表口径一致。
-  return [...organizations.value].sort((a, b) => {
-    if (a.is_owner === b.is_owner) return 0
-    return a.is_owner ? -1 : 1
-  })
+  const visibleOrganizations = spaceSelection.value === 'created'
+    ? organizations.value.filter(organization => organization.is_owner)
+    : spaceSelection.value === 'joined'
+      ? organizations.value.filter(organization => !organization.is_owner)
+      : organizations.value
+
+  // 「全部」仍保持“我创建的 → 我加入的”两段，只在各段内部应用用户选择的顺序。
+  return sortResourcesWithinGroups(
+    visibleOrganizations,
+    selectedResourceSort.value,
+    organization => organization.is_owner ? 'created' : 'joined',
+    ['created', 'joined'],
+    organizationSortAccessors,
+  )
 })
 
 type OrgSectionKey = 'created' | 'joined'
