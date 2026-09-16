@@ -18,6 +18,8 @@ import (
 
 const (
 	maxJSONResponseBytes         int64 = 20 << 20
+	maxImageBytes                int64 = 10 << 20
+	maxImageRedirects                  = 10
 	requestAttempts                    = 4
 	maxErrorResponseRunes              = 1000
 	maxRetryDelay                      = 60 * time.Second
@@ -25,6 +27,15 @@ const (
 	maxTraversalNodes                  = 100000
 	maxTransparentTraversalNodes       = 10000
 	maxTransparentTraversalDepth       = 32
+)
+
+var (
+	errImageTooLarge        = errors.New("confluence image exceeds size limit")
+	errImageNonImageContent = errors.New("confluence image response is not an image")
+	// errImageRedirectOffOrigin fires whenever a redirect target leaves the base
+	// URL boundary resolveEndpoint enforces — a different origin, or the same host
+	// but a path outside the configured context path (e.g. /wiki → /other-app).
+	errImageRedirectOffOrigin = errors.New("confluence image redirect left the configured base URL")
 )
 
 type apiError struct {
@@ -225,6 +236,121 @@ func (c *client) resourceURL(link string) string {
 		return c.cfg.baseURL
 	}
 	return resolved
+}
+
+// sameOrigin reports whether u shares scheme and host with the configured base
+// URL. Only same-origin URLs may carry Confluence credentials.
+func (c *client) sameOrigin(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	base, err := url.Parse(c.cfg.baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(base.Scheme, u.Scheme) && strings.EqualFold(base.Host, u.Host)
+}
+
+// withinImageScope reports whether u stays inside the boundary resolveEndpoint
+// enforces for the initial image URL: the same origin AND a path inside the
+// configured context path. Redirect targets are validated with this same rule,
+// not merely sameOrigin, because Go forwards Basic Auth on a same-host redirect —
+// so a hop like /wiki/download → /other-app/image must fail closed too.
+func (c *client) withinImageScope(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	_, err := c.resolveEndpoint(u.String())
+	return err == nil
+}
+
+// downloadImage fetches a same-origin private image using the connector's
+// credentials. It streams with a hard size cap, fails closed if a redirect left
+// the Confluence origin, and validates the response really is an image. It is a
+// best-effort single attempt: a failed image degrades to keeping its original
+// URL rather than retrying or failing the page.
+func (c *client) downloadImage(ctx context.Context, absURL string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, absURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.SetBasicAuth(c.cfg.username, c.cfg.secret)
+	req.Header.Set("Accept", "image/*,*/*;q=0.8")
+	resp, err := c.imageHTTPClient().Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	// Backstop for the redirect policy: imageHTTPClient's CheckRedirect already
+	// refuses any hop that leaves the base before it is followed, so this only
+	// re-verifies the final URL when the transport populated resp.Request. A custom
+	// RoundTripper may leave it nil, in which case there is no followed redirect to
+	// re-check and the download is allowed to proceed.
+	if resp.Request != nil && !c.withinImageScope(resp.Request.URL) {
+		return nil, "", errImageRedirectOffOrigin
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", &apiError{endpoint: "image", status: resp.StatusCode}
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
+	if err != nil {
+		return nil, "", err
+	}
+	if int64(len(body)) > maxImageBytes {
+		return nil, "", errImageTooLarge
+	}
+	mime, ok := imageContentType(resp.Header.Get("Content-Type"), body)
+	if !ok {
+		return nil, "", errImageNonImageContent
+	}
+	return body, mime, nil
+}
+
+// imageHTTPClient reuses the connector's SSRF-safe transport and timeout but
+// pins redirects to the configured Confluence base, so a private-image fetch can
+// never be bounced to a third party or to another app on the same host. The
+// redirect check fails closed: any hop that resolveEndpoint would reject — a
+// foreign origin, or a same-host path outside the context path (which Go would
+// still send Basic Auth to) — is refused outright rather than merely stripped of
+// credentials.
+func (c *client) imageHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: c.http.Transport,
+		Timeout:   c.http.Timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxImageRedirects {
+				return errors.New("confluence image stopped after too many redirects")
+			}
+			if !c.withinImageScope(req.URL) {
+				return errImageRedirectOffOrigin
+			}
+			return nil
+		},
+	}
+}
+
+// imageContentType normalizes a response Content-Type to an image MIME type. An
+// empty or generic binary type falls back to content sniffing; any explicit
+// non-image type (for example the text/html login page Confluence returns when a
+// token expired) is rejected so it is never stored as an image.
+func imageContentType(header string, body []byte) (string, bool) {
+	ct := strings.ToLower(strings.TrimSpace(header))
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	switch {
+	case strings.HasPrefix(ct, "image/"):
+		return ct, true
+	case ct != "" && ct != "application/octet-stream":
+		return "", false
+	}
+	if sniff := strings.ToLower(http.DetectContentType(body)); strings.HasPrefix(sniff, "image/") {
+		if i := strings.Index(sniff, ";"); i >= 0 {
+			sniff = strings.TrimSpace(sniff[:i])
+		}
+		return sniff, true
+	}
+	return "", false
 }
 
 func (c *client) ping(ctx context.Context) error {

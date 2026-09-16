@@ -389,7 +389,7 @@ func (c *Connector) fetchStream(
 				}
 				continue
 			}
-			item, err := markdownItem(client, resourceID, summary, full)
+			item, err := markdownItem(ctx, client, resourceID, summary, full)
 			if err != nil {
 				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
 					return nil, emitErr
@@ -518,8 +518,12 @@ func classifyConfluenceError(err error) (code, reason string) {
 	return "confluence_sync_failed", "Confluence page could not be synced; see server logs"
 }
 
-func markdownItem(client *client, resourceID string, summary page, full pageBody) (types.FetchedItem, error) {
+func markdownItem(ctx context.Context, client *client, resourceID string, summary page, full pageBody) (types.FetchedItem, error) {
 	html := full.Body.View.Value
+	// Inline same-origin private Confluence images as data URIs so the generic
+	// docparser image pipeline can persist them and rewrite to resource:// URLs.
+	// Best-effort: a failed image keeps its original src and never fails the page.
+	html = newAssetResolver(client).Resolve(ctx, html)
 	markdown, err := htmltomd.ConvertString(html)
 	if err != nil {
 		return types.FetchedItem{}, err

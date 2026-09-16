@@ -31,6 +31,8 @@ type streamAPI struct {
 	pages         []streamPage
 	bodyCalls     int
 	bodyStatus    map[string]int
+	bodyHTML      map[string]string
+	imageCalls    int
 	listCalls     int
 	ancestorCalls int
 	spaceCalls    int
@@ -61,6 +63,15 @@ func (a *streamAPI) pageMaps() []any {
 func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 	path := req.URL.Path
 	switch {
+	case strings.HasPrefix(path, "/wiki/download/"):
+		a.imageCalls++
+		header := make(http.Header)
+		header.Set("Content-Type", "image/png")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     header,
+			Body:       io.NopCloser(bytes.NewReader([]byte("private-png-bytes"))),
+		}, nil
 	case path == "/wiki/rest/api/space":
 		a.spaceCalls++
 		return a.jsonResponse(map[string]any{
@@ -149,13 +160,17 @@ func (a *streamAPI) pageBody(id string) (*http.Response, error) {
 	}
 	for _, page := range a.pages {
 		if page.id == id {
+			value := "<p>" + page.title + "</p>"
+			if custom, ok := a.bodyHTML[id]; ok {
+				value = custom
+			}
 			return a.jsonResponse(map[string]any{
 				"id": page.id, "title": page.title,
 				"spaceId": "1",
 				"version": map[string]any{"number": page.version, "by": map[string]any{"displayName": "Ada"}},
 				"space":   map[string]any{"key": "ENG", "name": "Engineering"},
 				"_links":  map[string]any{"webui": "/wiki/pages/" + page.id},
-				"body":    map[string]any{"view": map[string]any{"value": "<p>" + page.title + "</p>"}},
+				"body":    map[string]any{"view": map[string]any{"value": value}},
 			})
 		}
 	}
