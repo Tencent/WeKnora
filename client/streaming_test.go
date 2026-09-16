@@ -283,7 +283,9 @@ func TestSearchResult_DecodesReferenceIndexes(t *testing.T) {
 }
 
 func TestAgentStreamResponseUnmarshalsContextUsage(t *testing.T) {
-	raw := `{"id":"e1","response_type":"context_usage","done":false,"usage":{"prompt_tokens":0,"total_tokens":0,"context":{"total":100,"window":200000,"conversation":80}}}`
+	raw := `{"id":"e1","response_type":"context_usage","done":false,` +
+		`"usage":{"prompt_tokens":0,"total_tokens":0,` +
+		`"context":{"total":100,"window":200000,"conversation":80}}}`
 	var resp AgentStreamResponse
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)

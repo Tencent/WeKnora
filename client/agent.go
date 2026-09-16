@@ -100,7 +100,8 @@ type AgentStreamResponse struct {
 	Done                bool                   `json:"done"`                 // Whether completed
 	KnowledgeReferences []*SearchResult        `json:"knowledge_references"` // Knowledge references
 	Data                map[string]interface{} `json:"data,omitempty"`       // Additional event data
-	Usage               *TokenUsage            `json:"usage,omitempty"`      // Token usage; live context_usage events carry Context
+	// Usage is turn totals on complete; context_usage events carry Context.
+	Usage *TokenUsage `json:"usage,omitempty"`
 }
 
 // AgentEventCallback is called for each streaming event
