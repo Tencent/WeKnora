@@ -346,22 +346,35 @@ func (c *recordingRemoteClient) Capabilities() sandbox.RemoteSandboxCapabilities
 	return sandbox.RemoteSandboxCapabilities{}
 }
 func (c *recordingRemoteClient) Health(context.Context) error { return nil }
-func (c *recordingRemoteClient) Create(context.Context, sandbox.RemoteCreateRequest) (sandbox.RemoteSandboxHandle, error) {
+func (c *recordingRemoteClient) Create(
+	context.Context, sandbox.RemoteCreateRequest,
+) (sandbox.RemoteSandboxHandle, error) {
 	panic("Create should not be called from AfterCreate")
 }
-func (c *recordingRemoteClient) Connect(context.Context, sandbox.RemoteConnectRequest) (sandbox.RemoteSandboxHandle, error) {
+
+func (c *recordingRemoteClient) Connect(
+	context.Context, sandbox.RemoteConnectRequest,
+) (sandbox.RemoteSandboxHandle, error) {
 	panic("Connect should not be called from AfterCreate")
 }
+
 func (c *recordingRemoteClient) Get(context.Context, string) (*sandbox.RemoteSandboxSummary, error) {
 	panic("Get should not be called from AfterCreate")
 }
-func (c *recordingRemoteClient) List(context.Context, sandbox.RemoteListFilter) ([]sandbox.RemoteSandboxSummary, error) {
+
+func (c *recordingRemoteClient) List(
+	context.Context, sandbox.RemoteListFilter,
+) ([]sandbox.RemoteSandboxSummary, error) {
 	panic("List should not be called from AfterCreate")
 }
+
 func (c *recordingRemoteClient) Delete(context.Context, string) error {
 	panic("Delete should not be called from AfterCreate")
 }
-func (c *recordingRemoteClient) Exec(_ context.Context, _ sandbox.RemoteSandboxHandle, req sandbox.RemoteExecRequest) (*sandbox.RemoteExecResult, error) {
+
+func (c *recordingRemoteClient) Exec(
+	_ context.Context, _ sandbox.RemoteSandboxHandle, req sandbox.RemoteExecRequest,
+) (*sandbox.RemoteExecResult, error) {
 	c.execs = append(c.execs, req)
 	if c.execErr != nil {
 		return nil, c.execErr
@@ -371,22 +384,32 @@ func (c *recordingRemoteClient) Exec(_ context.Context, _ sandbox.RemoteSandboxH
 	}
 	return &sandbox.RemoteExecResult{ExitCode: 0}, nil
 }
+
 func (c *recordingRemoteClient) WriteFile(context.Context, sandbox.RemoteSandboxHandle, string, []byte) error {
 	panic("WriteFile should not be called from AfterCreate")
 }
+
 func (c *recordingRemoteClient) ReadFile(context.Context, sandbox.RemoteSandboxHandle, string) ([]byte, error) {
 	panic("ReadFile should not be called from AfterCreate")
 }
-func (c *recordingRemoteClient) ListDir(context.Context, sandbox.RemoteSandboxHandle, string) ([]sandbox.RemoteDirEntry, error) {
+
+func (c *recordingRemoteClient) ListDir(
+	context.Context, sandbox.RemoteSandboxHandle, string,
+) ([]sandbox.RemoteDirEntry, error) {
 	panic("ListDir should not be called from AfterCreate")
 }
+
 func (c *recordingRemoteClient) MakeDir(context.Context, sandbox.RemoteSandboxHandle, string) error {
 	panic("MakeDir should not be called from AfterCreate")
 }
+
 func (c *recordingRemoteClient) Remove(context.Context, sandbox.RemoteSandboxHandle, string) error {
 	panic("Remove should not be called from AfterCreate")
 }
-func (c *recordingRemoteClient) Stat(context.Context, sandbox.RemoteSandboxHandle, string) (*sandbox.RemoteStatEntry, error) {
+
+func (c *recordingRemoteClient) Stat(
+	context.Context, sandbox.RemoteSandboxHandle, string,
+) (*sandbox.RemoteStatEntry, error) {
 	panic("Stat should not be called from AfterCreate")
 }
 

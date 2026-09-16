@@ -374,7 +374,7 @@ type Message struct {
 	// without a sandbox, and for turns whose commit failed (best-effort — a
 	// failed checkpoint must never block the reply). A message without a
 	// checkpoint cannot serve as a fork point with sandbox state.
-	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb;column:sandbox_checkpoint"`
+	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp

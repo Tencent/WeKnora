@@ -167,7 +167,12 @@ func TestSQLiteMigrationsUpgradeV16AddsSessionForkColumns(t *testing.T) {
 	require.Equal(t, expectedSQLiteMigrationVersion, versionAfter)
 	require.False(t, dirtyAfter)
 	for _, column := range versionedSQLiteColumns["sessions"] {
-		require.Truef(t, sqliteColumnExists(t, db, "sessions", column), "upgraded SQLite DB must have column sessions.%s", column)
+		require.Truef(
+			t,
+			sqliteColumnExists(t, db, "sessions", column),
+			"upgraded SQLite DB must have column sessions.%s",
+			column,
+		)
 	}
 	require.True(t, sqliteColumnExists(t, db, "messages", "sandbox_checkpoint"))
 }

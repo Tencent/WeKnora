@@ -115,7 +115,9 @@ type MessageRepository interface {
 	GetMessagesByKnowledgeIDs(ctx context.Context, knowledgeIDs []string) ([]*types.MessageWithSession, error)
 	// GetMessagesByRequestIDs retrieves messages by request ID inside one session
 	// (used to fetch Q&A pair partners). Empty sessionID returns no rows.
-	GetMessagesByRequestIDs(ctx context.Context, sessionID string, requestIDs []string) ([]*types.MessageWithSession, error)
+	GetMessagesByRequestIDs(
+		ctx context.Context, sessionID string, requestIDs []string,
+	) ([]*types.MessageWithSession, error)
 	// GetKnowledgeIDsBySessionID retrieves all knowledge IDs for messages in a session
 	GetKnowledgeIDsBySessionID(ctx context.Context, sessionID string) ([]string, error)
 	// UpdateMessageKnowledgeID updates the knowledge_id field for a message

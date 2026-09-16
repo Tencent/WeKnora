@@ -144,7 +144,9 @@ func (f *fakeSessionStore) UnconsumedForkSnapshotHolders(_ context.Context, snap
 	return ids, nil
 }
 
-func (f *fakeSessionStore) HasOtherUnconsumedForkSnapshot(ctx context.Context, snapshotID, excludeSessionID string) (bool, error) {
+func (f *fakeSessionStore) HasOtherUnconsumedForkSnapshot(
+	ctx context.Context, snapshotID, excludeSessionID string,
+) (bool, error) {
 	holders, err := f.UnconsumedForkSnapshotHolders(ctx, snapshotID)
 	if err != nil {
 		return false, err
@@ -177,7 +179,9 @@ func (f *fakeSessionStore) DeleteForkSnapshotLease(_ context.Context, snapshotID
 	return nil
 }
 
-func (f *fakeSessionStore) ListStaleForkSnapshotLeases(_ context.Context, olderThan time.Time) ([]*types.ForkSnapshotLease, error) {
+func (f *fakeSessionStore) ListStaleForkSnapshotLeases(
+	_ context.Context, olderThan time.Time,
+) ([]*types.ForkSnapshotLease, error) {
 	var out []*types.ForkSnapshotLease
 	for _, lease := range f.leases {
 		if lease == nil || lease.CreatedAt.After(olderThan) {
@@ -228,7 +232,9 @@ func (f *fakeMessageStore) GetMessage(_ context.Context, sessionID, messageID st
 	return nil, nil
 }
 
-func (f *fakeMessageStore) GetMessagesBySession(_ context.Context, sessionID string, page, pageSize int) ([]*types.Message, error) {
+func (f *fakeMessageStore) GetMessagesBySession(
+	_ context.Context, sessionID string, page, pageSize int,
+) ([]*types.Message, error) {
 	var out []*types.Message
 	for _, m := range f.messages {
 		if m != nil && m.SessionID == sessionID {

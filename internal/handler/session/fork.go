@@ -57,22 +57,22 @@ func (h *Handler) ForkSession(c *gin.Context) {
 		sessionID = strings.TrimSpace(c.Param("id"))
 	}
 	if sessionID == "" {
-		c.Error(errors.NewBadRequestError("session ID is required"))
+		_ = c.Error(errors.NewBadRequestError("session ID is required"))
 		return
 	}
 
 	var req ForkSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError("message_id is required"))
+		_ = c.Error(errors.NewBadRequestError("message_id is required"))
 		return
 	}
 	if strings.TrimSpace(req.MessageID) == "" {
-		c.Error(errors.NewBadRequestError("message_id is required"))
+		_ = c.Error(errors.NewBadRequestError("message_id is required"))
 		return
 	}
 
 	if h.forkService == nil {
-		c.Error(errors.NewBadRequestError("session fork is not available"))
+		_ = c.Error(errors.NewBadRequestError("session fork is not available"))
 		return
 	}
 
@@ -95,19 +95,19 @@ func (h *Handler) ForkSession(c *gin.Context) {
 			return
 		}
 		if stderrors.Is(err, service.ErrForkSessionNotFound) {
-			c.Error(errors.NewNotFoundError("session not found"))
+			_ = c.Error(errors.NewNotFoundError("session not found"))
 			return
 		}
 		if stderrors.Is(err, service.ErrForkMessageNotFound) {
-			c.Error(errors.NewNotFoundError("message not found"))
+			_ = c.Error(errors.NewNotFoundError("message not found"))
 			return
 		}
 		if stderrors.Is(err, service.ErrForkMessageNotUser) {
-			c.Error(errors.NewBadRequestError("fork point must be a user message"))
+			_ = c.Error(errors.NewBadRequestError("fork point must be a user message"))
 			return
 		}
 		logger.Errorf(ctx, "fork session %s failed: %v", sessionID, err)
-		c.Error(errors.NewInternalServerError("fork session failed"))
+		_ = c.Error(errors.NewInternalServerError("fork session failed"))
 		return
 	}
 

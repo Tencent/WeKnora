@@ -110,8 +110,11 @@ type capturingMessageService struct {
 }
 
 func (s *capturingMessageService) UpdateMessage(_ context.Context, message *types.Message) error {
+	if message == nil {
+		return nil
+	}
 	s.content = message.Content
-	if message != nil && message.SandboxCheckpoint != nil {
+	if message.SandboxCheckpoint != nil {
 		cp := *message.SandboxCheckpoint
 		s.checkpoint = &cp
 	}

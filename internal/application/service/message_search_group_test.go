@@ -40,7 +40,9 @@ type partnerLookupCall struct {
 	requestIDs []string
 }
 
-func (r *partnerLookupRepo) GetMessagesByRequestIDs(_ context.Context, sessionID string, requestIDs []string) ([]*types.MessageWithSession, error) {
+func (r *partnerLookupRepo) GetMessagesByRequestIDs(
+	_ context.Context, sessionID string, requestIDs []string,
+) ([]*types.MessageWithSession, error) {
 	copied := append([]string(nil), requestIDs...)
 	r.calls = append(r.calls, partnerLookupCall{sessionID: sessionID, requestIDs: copied})
 	return nil, nil

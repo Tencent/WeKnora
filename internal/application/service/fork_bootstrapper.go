@@ -146,11 +146,14 @@ func (b *ForkBootstrapper) AfterCreate(
 	// hit the same delete — a create/destroy loop. Snapshot GC is best-effort;
 	// the reaper retries leftover IDs after the refs drop.
 	if keep, err := b.snapshotStillShared(ctx, key.SessionID, pending.SnapshotID); err != nil {
-		logger.Warnf(ctx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v", pending.SnapshotID, err)
+		logger.Warnf(ctx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v",
+			pending.SnapshotID, err)
 	} else if keep {
-		logger.Infof(ctx, "[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete", pending.SnapshotID)
+		logger.Infof(ctx, "[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete",
+			pending.SnapshotID)
 	} else if err := b.deleteSnapshot(ctx, pending.SnapshotID); err != nil {
-		logger.Warnf(ctx, "[ForkBootstrap] delete snapshot %s failed after reset; sandbox kept: %v", pending.SnapshotID, err)
+		logger.Warnf(ctx, "[ForkBootstrap] delete snapshot %s failed after reset; sandbox kept: %v",
+			pending.SnapshotID, err)
 	}
 	return nil
 }
@@ -296,9 +299,12 @@ func (b *ForkBootstrapper) abandon(ctx context.Context, sessionID string, pendin
 	}
 	if pending != nil {
 		if keep, err := b.snapshotStillShared(cleanupCtx, sessionID, pending.SnapshotID); err != nil {
-			logger.Warnf(cleanupCtx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v", pending.SnapshotID, err)
+			logger.Warnf(cleanupCtx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v",
+				pending.SnapshotID, err)
 		} else if keep {
-			logger.Infof(cleanupCtx, "[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete", pending.SnapshotID)
+			logger.Infof(cleanupCtx,
+				"[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete",
+				pending.SnapshotID)
 		} else if err := b.deleteSnapshot(cleanupCtx, pending.SnapshotID); err != nil {
 			logger.Warnf(cleanupCtx, "[ForkBootstrap] delete snapshot %s failed: %v", pending.SnapshotID, err)
 		}
@@ -324,4 +330,5 @@ func (b *ForkBootstrapper) deleteSnapshot(ctx context.Context, snapshotID string
 }
 
 var _ sandbox.SessionBootstrapper = (*ForkBootstrapper)(nil)
+
 var _ sandbox.SessionBootstrapperWithClient = (*ForkBootstrapper)(nil)

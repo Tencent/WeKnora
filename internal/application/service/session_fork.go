@@ -33,21 +33,21 @@ import (
 type ForkDegradeReason string
 
 const (
-	// ForkDegradeNoCheckpoint: the turn preceding the fork point never
+	// ForkDegradeNoCheckpoint means the turn preceding the fork point never
 	// produced a git checkpoint (commit failed, or it ran without a sandbox).
 	ForkDegradeNoCheckpoint ForkDegradeReason = "NO_CHECKPOINT"
 
-	// ForkDegradeSandboxReplaced: the checkpoint belongs to a sandbox the
+	// ForkDegradeSandboxReplaced means the checkpoint belongs to a sandbox the
 	// session no longer uses. In-sandbox git history restarts from zero on
 	// every rebuild, so that SHA is unreachable from the current sandbox.
 	ForkDegradeSandboxReplaced ForkDegradeReason = "SANDBOX_REPLACED"
 
-	// ForkDegradeSandboxGone: the source session has no live sandbox to
+	// ForkDegradeSandboxGone means the source session has no live sandbox to
 	// snapshot.
 	ForkDegradeSandboxGone ForkDegradeReason = "SANDBOX_GONE"
 
-	// ForkDegradeSnapshotUnsupported: snapshotting failed or the backend does
-	// not support it.
+	// ForkDegradeSnapshotUnsupported means snapshotting failed or the backend
+	// does not support it.
 	ForkDegradeSnapshotUnsupported ForkDegradeReason = "SNAPSHOT_UNSUPPORTED"
 )
 

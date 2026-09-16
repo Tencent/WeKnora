@@ -730,7 +730,7 @@ type recordingForkSnapshotClient struct {
 }
 
 func (c *recordingForkSnapshotClient) CreateForkSnapshot(
-	ctx context.Context, sandboxID, name string,
+	_ context.Context, sandboxID, name string,
 ) (RemoteSnapshotRef, error) {
 	c.forkCalls++
 	c.forkName = name
@@ -820,6 +820,7 @@ func (b *clientBoundRecordingBootstrapper) AfterCreate(
 }
 
 var _ SessionBootstrapper = (*clientBoundRecordingBootstrapper)(nil)
+
 var _ SessionBootstrapperWithClient = (*clientBoundRecordingBootstrapper)(nil)
 
 func TestNewSessionBoundManagerBindsBootstrapperToClient(t *testing.T) {

@@ -150,12 +150,15 @@ type fakeCatalog struct {
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
 	return "", nil
 }
+
 func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
 	return nil, nil
 }
+
 func (c *fakeCatalog) ResolvePath(_ context.Context, v string) (string, *types.StoredResource, error) {
 	return v, nil, nil
 }
+
 func (c *fakeCatalog) Bind(_ context.Context, ref, ownerType, ownerID, relation string) error {
 	c.binds = append(c.binds, bindCall{ref, ownerType, ownerID, relation})
 	return c.bindErr
@@ -172,9 +175,11 @@ func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string)
 	}
 	return -1, nil
 }
+
 func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "", nil
 }
+
 func (c *fakeCatalog) ResolveAccessGrant(context.Context, string) (*types.StoredResource, error) {
 	return nil, nil
 }
@@ -353,7 +358,13 @@ func TestArtifactCollector_ReattachesOnMtimeChange(t *testing.T) {
 			"sess-1": {
 				// Same path, newer mtime *and* a different size — the skill
 				// actually rewrote the file this turn.
-				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 8, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
+				{
+					Name:    "report.pptx",
+					Path:    "/workspace/output/report.pptx",
+					Type:    sandbox.RemoteEntryFile,
+					Size:    8,
+					ModTime: mustParseTime("2026-07-10T10:21:00Z"),
+				},
 			},
 		},
 		contents: map[string][]byte{
