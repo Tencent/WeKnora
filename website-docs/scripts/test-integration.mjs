@@ -33,6 +33,16 @@ async function headerGeometry(p) {
     }),
   }));
 }
+async function currentSidebarLinkVisible(p) {
+  await p.waitForFunction(() => {
+    const sidebar = document.querySelector('.VPSidebar');
+    const active = sidebar?.querySelector('.VPSidebarItem.is-active > .item > a');
+    if (!active) return false;
+    const bounds = sidebar.getBoundingClientRect();
+    const item = active.getBoundingClientRect();
+    return item.height > 0 && item.top >= bounds.top && item.bottom <= bounds.bottom;
+  });
+}
 try {
   assert.equal((await page.goto(origin + '/')).status(), 200);
   await expectTheme(page, false);
@@ -52,6 +62,18 @@ try {
   assert.deepEqual((await headerGeometry(page)).links.map(link => link[0]), ['快速开始', '架构', '功能', 'API', '客户端', '开发', 'GitHub']);
   assert.equal(await page.locator('.wk-header').evaluate(el => el.getBoundingClientRect().height), 64);
   assert.equal(context.pages().length, 1);
+  // Switching distant sections must reveal the selected sidebar item in both directions.
+  for (const section of ['客户端', '开发', '快速开始', '功能', '架构']) {
+    await page.locator('#main-navigation').getByRole('link', { name: section, exact: true }).click();
+    await page.waitForFunction(section => document.querySelector('#main-navigation a[aria-current="page"]')?.textContent.trim() === section, section);
+    await currentSidebarLinkVisible(page);
+    assert.ok(await page.evaluate(() => window.scrollY < 2), 'Sidebar synchronization must not scroll the document');
+  }
+  // Manual sidebar scrolling must remain untouched until navigation occurs.
+  await page.locator('.VPSidebar').evaluate(el => el.scrollTop = el.scrollHeight);
+  await page.locator('.wk-theme-toggle').click();
+  assert.ok(await page.locator('.VPSidebar').evaluate(el => el.scrollTop > 500));
+  await page.locator('.wk-theme-toggle').click();
   await page.locator('#main-navigation').getByRole('link', { name: 'API', exact: true }).click();
   await page.waitForFunction(() => location.pathname.includes('/04-api/'));
   await page.waitForSelector('.VPDoc h1');
@@ -124,6 +146,11 @@ try {
   await page.keyboard.press('Escape');
   await page.locator('.VPLocalNav button.menu').click();
   await checkVisibleControl(page, '.VPSidebar.open');
+  await page.keyboard.press('Escape');
+  // A deep link must reveal its entry after hydration, including the mobile drawer.
+  await page.goto(origin + '/docs/05-clients/01-frontend.html');
+  await page.locator('.VPLocalNav button.menu').click();
+  await currentSidebarLinkVisible(page);
   await page.keyboard.press('Escape');
   await expectTheme(page, false);
   await page.locator('.wk-brand').click();

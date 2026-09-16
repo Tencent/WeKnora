@@ -190,24 +190,31 @@ body {
   color: var(--wk-ink);
 }
 
+.VPSidebarItem.level-1 > .item {
+  margin-left: -10px;
+  padding: 0 10px;
+  width: calc(100% + 10px);
+  border-radius: 5px;
+}
+
 .VPSidebarItem.level-1.is-active .link .text {
-  color: var(--wk-ink) !important;
-  font-weight: 600;
+  color: var(--wk-accent-text) !important;
+  font-weight: 700;
 }
 
 .VPSidebarItem.level-1.is-active > .item {
   position: relative;
+  background: color-mix(in srgb, var(--wk-gold) 16%, var(--wk-paper));
 }
 
 .VPSidebarItem.level-1.is-active > .item::before {
   content: "";
   position: absolute;
-  left: -14px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 0;
+  top: 6px;
+  bottom: 6px;
   width: 3px;
-  height: 3px;
-  border-radius: 50%;
+  border-radius: 2px;
   background: var(--wk-gold);
 }
 
