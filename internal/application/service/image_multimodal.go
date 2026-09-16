@@ -140,8 +140,11 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		return fmt.Errorf("unmarshal image multimodal payload: %w", err)
 	}
 
-	logger.Infof(ctx, "[ImageMultimodal] Processing image: chunk=%s, url=%s, ocr=%v, caption=%v",
-		payload.ChunkID, payload.ImageURL, payload.EnableOCR, payload.EnableCaption)
+	// A payload carries either one image (legacy) or a batch; normalise once
+	// here so the rest of the pipeline never branches on the payload shape.
+	refs := payload.ImageRefs()
+	logger.Infof(ctx, "[ImageMultimodal] Processing %d image(s): knowledge=%s, ocr=%v, caption=%v",
+		len(refs), payload.KnowledgeID, payload.EnableOCR, payload.EnableCaption)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -159,68 +162,50 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		logger.Infof(ctx,
 			"[ImageMultimodal] Dropping task chunk=%s knowledge=%s kb=%s image=%s",
 			payload.ChunkID, payload.KnowledgeID, payload.KnowledgeBaseID, payload.ImageURL)
-		// Still count this image toward the parent finalize gate so a batch
+		// Still count these images toward the parent finalize gate so a task
 		// of dropped orphans cannot strand multimodal:pending forever.
-		s.checkAndFinalizeAllImages(ctx, payload)
+		s.checkAndFinalizeAllImages(ctx, &payload, len(refs))
 		return nil
 	}
 
-	// Open a per-image subspan under the parent attempt's multimodal
-	// stage. If the parent stage row is missing (legacy in-flight
-	// task, or the upstream code shipped without span tracking), the
-	// tracker is a no-op so we silently fall back to the existing
-	// counter-based finalize semantics.
+	// Each image in the payload gets its own subspan and its own result map,
+	// so a batched task still shows per-image outcomes on the timeline. The
+	// pending counter is decremented ONCE per task (see the deferred finalize
+	// below) rather than once per image: a task that is retried after a
+	// partial success must not have already counted the images it processed
+	// before failing, or the parent document would finalize early.
 	tracker := s.tracker()
-	var imgSpan *Span
-	if payload.Attempt > 0 {
-		parent := tracker.LookupStage(ctx, payload.KnowledgeID, payload.Attempt, types.StageMultimodal)
-		if parent != nil {
-			name := fmt.Sprintf("multimodal.image[%d]", payload.ImageIndex)
-			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, types.JSONMap{
-				"image_url":         payload.ImageURL,
-				"image_source_type": payload.ImageSourceType,
-				"enable_ocr":        payload.EnableOCR,
-				"enable_caption":    payload.EnableCaption,
-				"parent_chunk_id":   payload.ChunkID,
-			})
-		}
-	}
-
-	// Output map populated as we go — the deferred close picks it up.
-	// Captures real VLM results (model id, byte count, OCR/caption
-	// previews, downstream chunk counts) so the trace viewer can answer
-	// "what did this image actually produce?" without joining back to
-	// the chunks table.
 	imgOut := types.JSONMap{}
+	var perImageOut []types.JSONMap
+	var handleErr error
 
 	// finalize-once semantics: on success we always decrement the parent's
 	// pending counter. On failure we only decrement when this is the last
-	// asynq retry, so a permanently-failing single image cannot leave the
-	// parent knowledge stuck in "processing" forever — which was the #1
-	// cause of "stuck parsing" reports. Intermediate retries skip finalize
-	// so we don't double-count and prematurely trigger post-process.
-	var handleErr error
+	// asynq retry, so a permanently-failing image cannot leave the parent
+	// knowledge stuck in "processing" forever — which was the #1 cause of
+	// "stuck parsing" reports. Intermediate retries skip finalize so we don't
+	// double-count and prematurely trigger post-process.
 	defer func() {
-		// Finalize the image subspan with the actual outcome — not the
-		// finalize-counter outcome. The counter logic counts a "tried"
-		// image regardless of inner success; the span surface tells the
-		// UI whether THIS specific image worked.
-		if imgSpan != nil {
-			if handleErr == nil {
-				tracker.EndSpan(ctx, imgSpan, imgOut)
-			} else if isFinalAsynqAttempt(ctx) {
-				tracker.FailSpan(ctx, imgSpan,
-					"MULTIMODAL_VLM_FAILED",
-					handleErr.Error(),
-					handleErr)
+		switch len(perImageOut) {
+		case 0:
+			// Nothing was processed (e.g. the VLM could not be resolved).
+		case 1:
+			// Legacy single-image shape: keep the output flat so existing
+			// traces read exactly as they did before batching shipped.
+			for k, v := range perImageOut[0] {
+				imgOut[k] = v
 			}
+		default:
+			imgOut["images"] = perImageOut
+			imgOut["image_count"] = len(perImageOut)
 		}
+
 		if handleErr == nil || isFinalAsynqAttempt(ctx) {
-			s.checkAndFinalizeAllImages(ctx, payload)
+			s.checkAndFinalizeAllImages(ctx, &payload, len(refs))
 		} else {
 			logger.Infof(ctx,
 				"[ImageMultimodal] Skip finalize on retryable error for %s (will count on last attempt)",
-				payload.ImageURL)
+				payload.KnowledgeID)
 		}
 	}()
 
@@ -229,71 +214,143 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
 		return handleErr
 	}
-	// Capture the resolved VLM model id (or "legacy_inline" for the
-	// legacy inline-config path) so the trace shows WHICH model handled
-	// this image. Without this, debugging "VLM is slow" requires a
-	// separate hop to the KB config.
+	// Capture the resolved VLM model id (or "legacy_inline" for the legacy
+	// inline-config path) so the trace shows WHICH model handled these images.
+	// Without this, debugging "VLM is slow" requires a separate hop to the KB
+	// config.
 	if id := strings.TrimSpace(vlmCfg.ModelID); id != "" {
 		imgOut["vlm_model_id"] = id
 	} else {
 		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
+	for _, ref := range refs {
+		out, imgErr := s.processOneImage(ctx, &payload, ref, vlmModel, vlmCfg, tracker)
+		if out == nil {
+			out = types.JSONMap{}
+		}
+		perImageOut = append(perImageOut, out)
+		if imgErr != nil {
+			// Fail fast: the batch shares one task, so the remaining images
+			// are covered by the retry instead of being half-processed here.
+			handleErr = imgErr
+			break
+		}
+	}
+	return handleErr
+}
+
+// processOneImage runs the multimodal pipeline (OCR, then caption) for a single
+// image and persists the derived child chunks. It returns the per-image trace
+// map; a non-nil error means the failure is worth retrying the whole task for.
+// Unreadable images are skipped (nil error) so one bad file cannot fail a batch
+// of otherwise healthy images.
+//
+// A payload may carry one image (legacy) or a batch, so this function reads the
+// image through ref and never touches payload.ImageURL / payload.ChunkID.
+func (s *ImageMultimodalService) processOneImage(
+	ctx context.Context,
+	payload *types.ImageMultimodalPayload,
+	ref types.ImageBatchRef,
+	vlmModel vlm.VLM,
+	vlmCfg types.VLMConfig,
+	tracker SpanTracker,
+) (types.JSONMap, error) {
+	out := types.JSONMap{}
+
+	// Open a per-image subspan under the parent attempt's multimodal stage.
+	// If the parent stage row is missing (legacy in-flight task, or the
+	// upstream code shipped without span tracking), the tracker is a no-op so
+	// we silently fall back to the existing counter-based finalize semantics.
+	var imgSpan *Span
+	if payload.Attempt > 0 {
+		parent := tracker.LookupStage(ctx, payload.KnowledgeID, payload.Attempt, types.StageMultimodal)
+		if parent != nil {
+			name := fmt.Sprintf("multimodal.image[%d]", ref.Index)
+			imgSpan = tracker.BeginSubSpan(ctx, parent, name, types.SpanKindGeneration, types.JSONMap{
+				"image_url":         ref.URL,
+				"image_source_type": payload.ImageSourceType,
+				"enable_ocr":        payload.EnableOCR,
+				"enable_caption":    payload.EnableCaption,
+				"parent_chunk_id":   ref.ChunkID,
+			})
+		}
+	}
+
+	var handleErr error
+	defer func() {
+		// Finalize the image subspan with the actual outcome — not the
+		// finalize-counter outcome. The counter logic counts a "tried" image
+		// regardless of inner success; the span surface tells the UI whether
+		// THIS specific image worked.
+		if imgSpan == nil {
+			return
+		}
+		if handleErr == nil {
+			tracker.EndSpan(ctx, imgSpan, out)
+		} else if isFinalAsynqAttempt(ctx) {
+			tracker.FailSpan(ctx, imgSpan,
+				"MULTIMODAL_VLM_FAILED",
+				handleErr.Error(),
+				handleErr)
+		}
+	}()
+
 	// Read image bytes. A provider:// URL must be resolved via FileService —
 	// it must NEVER be handed to the HTTP downloader (which would fail with
 	// "unsupported URL scheme"). On unrecoverable read failure for a single
-	// image, skip it (deferred finalize will count it).
-	imgBytes, readErr := s.readImageBytes(ctx, payload)
+	// image, skip it (the deferred finalize still counts it).
+	imgBytes, readErr := s.readImageBytes(ctx, *payload, ref.URL)
 	if readErr != nil {
-		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", payload.ImageURL, readErr)
-		imgOut["skipped"] = "unreadable_image"
-		imgOut["read_error"] = readErr.Error()
-		return nil
+		logger.Errorf(ctx, "[ImageMultimodal] Skip unreadable image %s: %v", ref.URL, readErr)
+		out["skipped"] = "unreadable_image"
+		out["read_error"] = readErr.Error()
+		return out, nil
 	}
-	imgOut["image_bytes"] = len(imgBytes)
+	out["image_bytes"] = len(imgBytes)
 
 	imageInfo := types.ImageInfo{
-		URL:         payload.ImageURL,
-		OriginalURL: payload.ImageURL,
+		URL:         ref.URL,
+		OriginalURL: ref.URL,
 	}
 
 	if payload.EnableOCR {
 		prompt := vlmOCRPrompt
 		if payload.ImageSourceType == "scanned_pdf" {
 			prompt = vlmOCRScannedPDFPrompt
-			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", payload.ImageURL)
-			imgOut["ocr_prompt"] = "scanned_pdf"
+			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", ref.URL)
+			out["ocr_prompt"] = "scanned_pdf"
 		} else {
-			imgOut["ocr_prompt"] = "default"
+			out["ocr_prompt"] = "default"
 		}
 		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
 		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", payload.ImageURL, ocrErr)
-			imgOut["ocr_error"] = ocrErr.Error()
+			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", ref.URL, ocrErr)
+			out["ocr_error"] = ocrErr.Error()
 		} else {
 			ocrText = sanitizeOCRText(ocrText)
 			if ocrText != "" {
 				imageInfo.OCRText = ocrText
-				imgOut["ocr_chars"] = len([]rune(ocrText))
-				imgOut["ocr_preview"] = previewText(ocrText, 200)
+				out["ocr_chars"] = len([]rune(ocrText))
+				out["ocr_preview"] = previewText(ocrText, 200)
 			} else {
-				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", payload.ImageURL)
-				imgOut["ocr_chars"] = 0
-				imgOut["ocr_skipped"] = "empty_or_invalid"
+				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", ref.URL)
+				out["ocr_chars"] = 0
+				out["ocr_skipped"] = "empty_or_invalid"
 			}
 		}
 	}
 
 	caption, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
 	if capErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", payload.ImageURL, capErr)
-		imgOut["caption_error"] = capErr.Error()
+		logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", ref.URL, capErr)
+		out["caption_error"] = capErr.Error()
 	} else if caption != "" {
 		imageInfo.Caption = caption
-		imgOut["caption_chars"] = len([]rune(caption))
-		imgOut["caption_preview"] = previewText(caption, 200)
+		out["caption_chars"] = len([]rune(caption))
+		out["caption_preview"] = previewText(caption, 200)
 	}
 
 	// Build child chunks for OCR and caption results
@@ -308,7 +365,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.OCRText,
 			ChunkType:       types.ChunkTypeImageOCR,
-			ParentChunkID:   payload.ChunkID,
+			ParentChunkID:   ref.ChunkID,
 			IsEnabled:       true,
 			Flags:           types.ChunkFlagRecommended,
 			ImageInfo:       string(imageInfoJSON),
@@ -325,7 +382,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			KnowledgeBaseID: payload.KnowledgeBaseID,
 			Content:         imageInfo.Caption,
 			ChunkType:       types.ChunkTypeImageCaption,
-			ParentChunkID:   payload.ChunkID,
+			ParentChunkID:   ref.ChunkID,
 			IsEnabled:       true,
 			Flags:           types.ChunkFlagRecommended,
 			ImageInfo:       string(imageInfoJSON),
@@ -333,36 +390,29 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 			UpdatedAt:       time.Now(),
 		})
 	}
-	imgOut["chunks_created"] = len(newChunks)
+	out["chunks_created"] = len(newChunks)
 
 	if len(newChunks) == 0 {
 		// Deferred finalize will count this image on success.
-		imgOut["skipped"] = "no_extracted_content"
-		return nil
+		out["skipped"] = "no_extracted_content"
+		return out, nil
 	}
 
 	// Persist chunks
 	if err := s.chunkService.GetRepository().CreateChunks(ctx, newChunks); err != nil {
 		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
-		return handleErr
+		return out, handleErr
 	}
 	for _, c := range newChunks {
 		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
-			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
+			c.ChunkType, c.ID, ref.URL, len(c.Content))
 	}
 
 	// Index chunks so they can be retrieved
-	s.indexChunks(ctx, payload, newChunks)
-	imgOut["indexed"] = true
+	s.indexChunks(ctx, *payload, newChunks)
+	out["indexed"] = true
 
-	// Enqueue question generation for the caption/OCR content if KB has it enabled.
-	// During initial processChunks, question generation is skipped for image-type
-	// knowledge because the text chunk is just a markdown reference. Now that we
-	// have real textual content (caption/OCR), we can generate questions.
-	// Note: for documents with multiple images (e.g. PDFs), we also wait until
-	// all images are processed before triggering summary/question generation.
-	// Deferred finalize handles the parent knowledge counter.
-	return nil
+	return out, nil
 }
 
 // shouldDropOrphanedMultimodal reports whether the task should exit without
@@ -508,7 +558,7 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		}
 	}
 
-	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
+	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for knowledge %s", len(chunks), payload.KnowledgeID)
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
@@ -600,28 +650,34 @@ func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Contex
 	return fileSvc
 }
 
-// readImageBytes loads the image bytes for a multimodal payload.
+// readImageBytes loads the image bytes for one image of a multimodal payload.
 //   - For provider:// URLs (local://, minio://, s3://, cos://, ...) it reads via
 //     the resolved FileService and NEVER falls back to HTTP — handing a
 //     provider:// URL to the HTTP downloader is what caused issue #1282.
 //   - For legacy in-flight payloads with ImageLocalPath set, it tries the local
 //     file before falling back to the URL.
 //   - For plain http(s):// URLs it uses the SSRF-safe downloader.
-func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload types.ImageMultimodalPayload) ([]byte, error) {
-	_, isResourceRef := types.ParseResourcePath(payload.ImageURL)
-	if isResourceRef || types.ParseProviderScheme(payload.ImageURL) != "" {
+//
+// imageURL is passed explicitly (instead of read from payload.ImageURL) because
+// a batched payload carries several images and only the first one is mirrored
+// onto the legacy single-image fields.
+func (s *ImageMultimodalService) readImageBytes(
+	ctx context.Context, payload types.ImageMultimodalPayload, imageURL string,
+) ([]byte, error) {
+	_, isResourceRef := types.ParseResourcePath(imageURL)
+	if isResourceRef || types.ParseProviderScheme(imageURL) != "" {
 		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
 		if fileSvc == nil {
-			return nil, fmt.Errorf("no file service available for %s", payload.ImageURL)
+			return nil, fmt.Errorf("no file service available for %s", imageURL)
 		}
-		reader, err := fileSvc.GetFile(ctx, payload.ImageURL)
+		reader, err := fileSvc.GetFile(ctx, imageURL)
 		if err != nil {
-			return nil, fmt.Errorf("file service get %s: %w", payload.ImageURL, err)
+			return nil, fmt.Errorf("file service get %s: %w", imageURL, err)
 		}
 		defer reader.Close()
 		data, err := io.ReadAll(reader)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", payload.ImageURL, err)
+			return nil, fmt.Errorf("read %s: %w", imageURL, err)
 		}
 		return data, nil
 	}
@@ -634,9 +690,9 @@ func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload typ
 		}
 	}
 
-	data, err := downloadImageFromURL(payload.ImageURL)
+	data, err := downloadImageFromURL(imageURL)
 	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", payload.ImageURL, err)
+		return nil, fmt.Errorf("download %s: %w", imageURL, err)
 	}
 	logger.Infof(ctx, "[ImageMultimodal] Image downloaded from URL, len=%d", len(data))
 	return data, nil
@@ -647,15 +703,24 @@ func downloadImageFromURL(imageURL string) ([]byte, error) {
 	return secutils.DownloadBytes(imageURL)
 }
 
-func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, payload types.ImageMultimodalPayload) {
+// checkAndFinalizeAllImages decrements the parent's pending-image counter by
+// count (one task may cover a whole batch) and enqueues post-process once the
+// counter reaches zero. count <= 0 is a no-op: an empty payload must not
+// consume someone else's pending slot.
+func (s *ImageMultimodalService) checkAndFinalizeAllImages(
+	ctx context.Context, payload *types.ImageMultimodalPayload, count int,
+) {
+	if count <= 0 {
+		return
+	}
 	if s.redisClient == nil {
-		s.enqueueKnowledgePostProcessTask(ctx, payload)
+		s.enqueueKnowledgePostProcessTask(ctx, *payload)
 		return
 	}
 
 	redisKey := fmt.Sprintf("multimodal:pending:%s", payload.KnowledgeID)
 
-	pendingCount, err := s.redisClient.Decr(ctx, redisKey).Result()
+	pendingCount, err := s.redisClient.DecrBy(ctx, redisKey, int64(count)).Result()
 	if err != nil && err != redis.Nil {
 		// Redis hiccup must not strand the parent knowledge. Best-effort:
 		// enqueue post-process anyway. KnowledgePostProcess is idempotent
@@ -666,7 +731,7 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 		logger.Warnf(ctx,
 			"[ImageMultimodal] Decrement failed for %s (%v); fallback-enqueueing post-process",
 			payload.KnowledgeID, err)
-		s.enqueueKnowledgePostProcessTask(ctx, payload)
+		s.enqueueKnowledgePostProcessTask(ctx, *payload)
 		return
 	}
 
@@ -674,7 +739,7 @@ func (s *ImageMultimodalService) checkAndFinalizeAllImages(ctx context.Context, 
 		logger.Infof(ctx, "[ImageMultimodal] All images processed for knowledge %s. Finalizing...", payload.KnowledgeID)
 		s.redisClient.Del(ctx, redisKey)
 
-		s.enqueueKnowledgePostProcessTask(ctx, payload)
+		s.enqueueKnowledgePostProcessTask(ctx, *payload)
 	}
 }
 

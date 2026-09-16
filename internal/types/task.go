@@ -522,6 +522,37 @@ type ImageMultimodalPayload struct {
 	// parent's image set. Used as the subspan name suffix
 	// ("multimodal.image[3]") so the timeline preserves order.
 	ImageIndex int `json:"image_index,omitempty"`
+	// Images carries a batch of images handled by a single task. Batching
+	// trims the number of VLM requests and queue entries without changing
+	// per-image results. It is empty for legacy single-image payloads and for
+	// tasks that were already in flight when batching shipped; ImageRefs()
+	// normalises both shapes so workers only ever see a slice.
+	Images []ImageBatchRef `json:"images,omitempty"`
+}
+
+// ImageBatchRef identifies one image inside an ImageMultimodalPayload batch.
+type ImageBatchRef struct {
+	// Index is the 0-based ordinal of this image inside the parent's image
+	// set. It stays per image (not per batch) so subspan names and the legacy
+	// ImageIndex field keep their meaning whichever way the payload is shaped.
+	Index int `json:"index"`
+	// URL is a provider:// reference (local://, minio://, ...) or plain http(s).
+	URL string `json:"url"`
+	// ChunkID is the parent text chunk whose content references this image.
+	ChunkID string `json:"chunk_id,omitempty"`
+}
+
+// ImageRefs normalises the single-image and batch payload shapes into one
+// slice. A legacy payload (Images empty, ImageURL set) yields exactly one ref,
+// so batch-aware worker code stays behaviour-identical at batch size 1.
+func (p *ImageMultimodalPayload) ImageRefs() []ImageBatchRef {
+	if len(p.Images) > 0 {
+		return p.Images
+	}
+	if p.ImageURL == "" {
+		return nil
+	}
+	return []ImageBatchRef{{Index: p.ImageIndex, URL: p.ImageURL, ChunkID: p.ChunkID}}
 }
 
 // KnowledgePostProcessPayload represents the knowledge post process task payload.

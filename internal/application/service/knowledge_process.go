@@ -4041,6 +4041,13 @@ func (s *knowledgeService) failKnowledge(
 	return nil, fmt.Errorf(format, args...)
 }
 
+// imageMultimodalBatchSize is how many images one multimodal task carries.
+// 1 preserves the historical one-task-per-image behaviour, which is the only
+// shape exercised in production so far. Raising it is what the batching unit
+// exists for; it gets wired to the KB-level config once the batch output
+// protocol lands.
+const imageMultimodalBatchSize = 1
+
 // enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
 func (s *knowledgeService) enqueueImageMultimodalTasks(
 	ctx context.Context,
@@ -4062,33 +4069,39 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 	}
 
+	refs := make([]types.ImageBatchRef, 0, len(images))
 	for idx, img := range images {
-		// Match image to the ParsedChunk whose content contains the image URL.
-		// ChunkID was populated by processChunks with the real DB UUID.
-		chunkID := ""
-		for _, c := range chunks {
-			if strings.Contains(c.Content, img.ServingURL) {
-				chunkID = c.ChunkID
-				break
-			}
-		}
-		if chunkID == "" && len(chunks) > 0 {
-			chunkID = chunks[0].ChunkID
-		}
+		// Resolve each image to the ParsedChunk that references it, then group
+		// the refs into tasks below, so the grouping step never has to
+		// re-derive a chunk id.
+		refs = append(refs, types.ImageBatchRef{
+			Index:   idx,
+			URL:     img.ServingURL,
+			ChunkID: matchImageToChunk(chunks, img.ServingURL),
+		})
+	}
 
-		lang := types.LanguageFromContextOrDefault(ctx)
+	lang := types.LanguageFromContextOrDefault(ctx)
+	for batchStart := 0; batchStart < len(refs); batchStart += imageMultimodalBatchSize {
+		batchEnd := batchStart + imageMultimodalBatchSize
+		if batchEnd > len(refs) {
+			batchEnd = len(refs)
+		}
+		batch := refs[batchStart:batchEnd]
+
 		payload := types.ImageMultimodalPayload{
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: kb.ID,
-			ChunkID:         chunkID,
-			ImageURL:        img.ServingURL,
+			ChunkID:         batch[0].ChunkID,
+			ImageURL:        batch[0].URL,
 			EnableOCR:       true,
 			EnableCaption:   true,
 			Language:        lang,
 			ImageSourceType: metadata["image_source_type"],
 			Attempt:         attempt,
-			ImageIndex:      idx,
+			ImageIndex:      batch[0].Index,
+			Images:          batch,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)
@@ -4101,11 +4114,26 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		task := asynq.NewTask(types.TypeImageMultimodal, payloadBytes,
 			asynq.Queue(types.QueueMultimodal), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
 		if _, err := s.task.Enqueue(task); err != nil {
-			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", img.ServingURL, err)
+			logger.Warnf(ctx, "Failed to enqueue image multimodal task for %s: %v", batch[0].URL, err)
 		} else {
-			logger.Infof(ctx, "Enqueued image:multimodal task for %s", img.ServingURL)
+			logger.Infof(ctx, "Enqueued image:multimodal task for %s (%d image(s))", batch[0].URL, len(batch))
 		}
 	}
+}
+
+// matchImageToChunk returns the id of the ParsedChunk whose content references
+// the given image URL, falling back to the first chunk when the document has
+// chunks but none of them mentions the image.
+func matchImageToChunk(chunks []types.ParsedChunk, servingURL string) string {
+	for _, c := range chunks {
+		if strings.Contains(c.Content, servingURL) {
+			return c.ChunkID
+		}
+	}
+	if len(chunks) > 0 {
+		return chunks[0].ChunkID
+	}
+	return ""
 }
 
 // ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks.
