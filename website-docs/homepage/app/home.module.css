@@ -152,9 +152,15 @@
 .enterpriseGrid article > svg { color: var(--gold); width: 29px; height: 29px; }
 .enterpriseGrid h3 { margin: 22px 0 12px; font-size: 22px; font-weight: 550; }
 .enterpriseGrid p { margin: 0; color: var(--soft); font-size: 16px; line-height: 1.9; }
-.closing { padding-block: 95px; display: flex; align-items: center; justify-content: space-between; gap: 40px; }
+.closing { padding-block: 80px; scroll-margin-top: 88px; }
 .closing h2 { font-size: clamp(30px, 2.8vw, 43px); }
-.closing .primary { flex-shrink: 0; }
+.startGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.startCard { display: flex; flex-direction: column; align-items: flex-start; padding: 30px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); }
+.startLabel { display: flex; align-items: center; gap: 10px; color: var(--soft); font-size: 13px; }
+.startLabel svg { width: 22px; height: 22px; color: var(--gold); }
+.startCard h3 { margin: 24px 0 12px; font-size: clamp(19px, 1.6vw, 24px); font-weight: 600; }
+.startCard p { margin: 0 0 28px; color: var(--soft); font-size: 15px; line-height: 1.9; }
+.startCard > a { margin-top: auto; }
 .footer { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding-block: 28px; border-top: 1px solid var(--rule); }
 .footer > p { color: var(--mute); font-size: 12px; margin: 0; }
 .footer nav { margin-left: auto; display: flex; gap: 28px; }
@@ -211,7 +217,9 @@
   .enterprise { padding-block: 65px; }
   .enterpriseGrid { grid-template-columns: 1fr; gap: 32px; }
   .enterpriseGrid h3 { margin-top: 14px; }
-  .closing { flex-direction: column; align-items: start; padding-block: 68px; gap: 27px; }
+  .closing { padding-block: 68px; }
+  .startGrid { grid-template-columns: 1fr; gap: 16px; }
+  .startCard { padding: 24px; }
   .footer { gap: 14px 25px; }
   .footer nav { margin-left: 0; width: 100%; gap: 26px; }
 }

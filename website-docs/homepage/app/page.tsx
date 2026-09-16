@@ -33,7 +33,7 @@ export default function Home() {
           <div className={s.heroAside}>
             <p className={s.eyebrow}>TENCENT OPEN SOURCE · WEKNORA</p>
             <p className={s.heroDescription}>腾讯开源的企业级知识管理框架。<br />汇集团队资料，用于知识问答、任务执行和 Wiki 整理。</p>
-            <div className={s.actions}><a className={s.primary} href={guide("01-getting-started/02-installation")}>开始使用 <Icon name="arrow" /></a><a className={s.secondary} href={repo} target="_blank" rel="noreferrer"><Icon name="github" /> GitHub</a></div>
+            <div className={s.actions}><a className={s.primary} href="#get-started">开始使用 <Icon name="arrow" /></a><a className={s.secondary} href={repo} target="_blank" rel="noreferrer"><Icon name="github" /> GitHub</a></div>
             <p className={s.heroNote}>RAG 问答 / Agent 推理 / 自动 Wiki</p>
           </div>
         </div>
@@ -76,7 +76,29 @@ export default function Home() {
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>05 / BUILT FOR YOUR TEAM</p><h2 id="enterprise-title">私有化部署，<br />按团队需要管理权限。</h2></div><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>
         <div className={s.enterpriseGrid}><article><Icon name="server" /><h3>部署与存储</h3><p>支持 Docker、Kubernetes 与 Helm。模型、向量数据库和存储后端可按需替换，支持本地推理。</p></article><article><Icon name="shield" /><h3>空间与资源权限</h3><p>多空间隔离与四级角色矩阵。API Key 按能力和知识库限定范围，支持 OIDC 身份集成。</p></article><article><Icon name="trace" /><h3>审计与运行监控</h3><p>空间审计日志、运行时任务队列面板与 Langfuse 追踪，帮助团队定位问题、管理运行状态。</p></article></div>
       </div></section>
-      <section className={`${s.shell} ${s.closing}`} aria-labelledby="closing-title"><div><p className={s.eyebrow}>GET STARTED</p><h2 id="closing-title">搭建团队自己的知识库。</h2></div><a className={s.primary} href={guide("01-getting-started/02-installation")}>部署 WeKnora <Icon name="arrow" /></a></section>
+      <section id="get-started" className={`${s.shell} ${s.closing}`} aria-labelledby="closing-title">
+        <div className={s.sectionHeading}><div><p className={s.eyebrow}>GET STARTED</p><h2 id="closing-title">选择适合你的使用方式。</h2></div></div>
+        <div className={s.startGrid}>
+          <article className={s.startCard}>
+            <div className={s.startLabel}><Icon name="channels" /><span>在线使用</span></div>
+            <h3>微信对话开放平台</h3>
+            <p>在线管理知识库，将问答服务接入公众号、小程序等微信场景。</p>
+            <a className={s.textLink} href="https://chatbot.weixin.qq.com/login" target="_blank" rel="noreferrer">进入平台 <Icon name="external" /></a>
+          </article>
+          <article className={s.startCard}>
+            <div className={s.startLabel}><Icon name="server" /><span>云端部署</span></div>
+            <h3>腾讯云轻量应用服务器</h3>
+            <p>通过应用模板部署 WeKnora，在自己的云服务器上运行。</p>
+            <a className={s.textLink} href="https://mc.tencent.com/s69nKCVz" target="_blank" rel="noreferrer">前往腾讯云部署 <Icon name="external" /></a>
+          </article>
+          <article className={s.startCard}>
+            <div className={s.startLabel}><Icon name="code" /><span>自行部署</span></div>
+            <h3>部署到自己的环境</h3>
+            <p>使用 Docker 或 Kubernetes 部署，自行配置模型、存储和网络。</p>
+            <a className={s.textLink} href={guide("01-getting-started/02-installation")}>查看部署文档 <Icon name="arrow" /></a>
+          </article>
+        </div>
+      </section>
     </main>
     <footer className={`${s.shell} ${s.footer}`}><Link className={s.brand} href="/" aria-label="WeKnora 首页"><BrandLogo /></Link><p>Tencent Open Source · MIT License</p><nav aria-label="页脚导航"><a href={docs}>文档</a><a href={repo} target="_blank" rel="noreferrer">GitHub <Icon name="external" /></a><a href={`${repo}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">更新日志</a></nav></footer>
   </div>;
