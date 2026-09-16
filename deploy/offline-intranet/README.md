@@ -3,7 +3,7 @@
 面向：**已安装 Docker、Docker Compose、Nginx 的 Ubuntu 内网机**。  
 方式：**有网机打离线镜像包 → 拷贝本目录 → 内网 `docker load` + `compose up` → Nginx 反代**。
 
-当前预置版本：`v0.8.23`  
+当前预置版本：`v0.8.24`  
 预置模型网关：**内蒙古人社AI网关**（`http://10.55.45.50:38080/v1`）
 
 > **本目录已内置 `images/` 离线镜像**（linux/amd64，约 9.6GB）。  
@@ -53,9 +53,9 @@ offline-intranet/
 
 | 容器 | 镜像 | 说明 |
 |------|------|------|
-| frontend | `tree-rag-ui:v0.8.23` | Web UI |
-| app | `tree-rag-app:v0.8.23` | API |
-| docreader | `tree-rag-docreader:v0.8.23` | 文档解析 |
+| frontend | `tree-rag-ui:v0.8.24` | Web UI |
+| app | `tree-rag-app:v0.8.24` | API |
+| docreader | `tree-rag-docreader:v0.8.24` | 文档解析 |
 | postgres | `paradedb/paradedb:v0.22.2-pg17` | DB + 向量检索 |
 | redis | `redis:7.0-alpine` | 队列 / 流 |
 
@@ -69,7 +69,7 @@ offline-intranet/
 # 在制作机（本仓库）
 rsync -avP deploy/offline-intranet/ user@intranet:/opt/treerag/
 # 或打成一个总包
-tar -C deploy -cvf treerag-offline-intranet-v0.8.23.tar offline-intranet
+tar -C deploy -cvf treerag-offline-intranet-v0.8.24.tar offline-intranet
 ```
 
 > 合计约 **10GB+**，请预留磁盘与传输时间。`.env` 含密钥，仅限内网介质传递。

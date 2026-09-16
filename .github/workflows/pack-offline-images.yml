@@ -5,9 +5,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image tag (e.g. v0.8.23)"
+        description: "Image tag (e.g. v0.8.24)"
         required: true
-        default: "v0.8.23"
+        default: "v0.8.24"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
