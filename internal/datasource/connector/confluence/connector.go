@@ -11,8 +11,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-var _ datasource.StreamingConnector = (*Connector)(nil)
-var _ datasource.FullStreamingConnector = (*Connector)(nil)
+var (
+	_ datasource.StreamingConnector     = (*Connector)(nil)
+	_ datasource.FullStreamingConnector = (*Connector)(nil)
+)
 
 // Connector implements datasource.StreamingConnector for Confluence.
 type Connector struct {
@@ -85,9 +87,9 @@ func (*Connector) ResolveResourceAncestors(context.Context, *types.DataSourceCon
 func (c *Connector) FetchAll(
 	ctx context.Context, ds *types.DataSourceConfig, resourceIDs []string,
 ) ([]types.FetchedItem, error) {
-	copy := *ds
-	copy.ResourceIDs = resourceIDs
-	return c.collect(ctx, &copy, nil)
+	dsCopy := *ds
+	dsCopy.ResourceIDs = resourceIDs
+	return c.collect(ctx, &dsCopy, nil)
 }
 
 // FetchIncremental syncs pages whose versions changed since the last cursor.
@@ -147,7 +149,7 @@ func (c *Connector) fetchStream(
 	forceFull bool,
 ) (*types.SyncCursor, error) {
 	if ds == nil || len(ds.ResourceIDs) == 0 {
-		return nil, fmt.Errorf("Confluence requires at least one selected space")
+		return nil, fmt.Errorf("confluence requires at least one selected space")
 	}
 	client, _, err := c.configured(ds)
 	if err != nil {

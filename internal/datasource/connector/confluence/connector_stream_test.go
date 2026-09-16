@@ -173,9 +173,9 @@ func (h *captureHandler) Emit(_ context.Context, item types.FetchedItem) error {
 
 func (h *captureHandler) Checkpoint(_ context.Context, c *types.SyncCursor) error {
 	raw, _ := json.Marshal(c)
-	var copy types.SyncCursor
-	_ = json.Unmarshal(raw, &copy)
-	h.checkpoints = append(h.checkpoints, &copy)
+	var stored types.SyncCursor
+	_ = json.Unmarshal(raw, &stored)
+	h.checkpoints = append(h.checkpoints, &stored)
 	return nil
 }
 

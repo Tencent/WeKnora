@@ -14,10 +14,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 )
 
-const maxJSONResponseBytes int64 = 20 << 20
-const requestAttempts = 4
-const maxErrorResponseRunes = 1000
-const maxRetryDelay = 60 * time.Second
+const (
+	maxJSONResponseBytes  int64 = 20 << 20
+	requestAttempts             = 4
+	maxErrorResponseRunes       = 1000
+	maxRetryDelay               = 60 * time.Second
+)
 
 type client struct {
 	cfg  config
@@ -46,12 +48,12 @@ func (c *client) get(ctx context.Context, endpoint string, output interface{}) e
 		resp, err := c.http.Do(req)
 		if err == nil {
 			body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxJSONResponseBytes+1))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if readErr != nil {
 				return readErr
 			}
 			if int64(len(body)) > maxJSONResponseBytes {
-				return fmt.Errorf("Confluence response exceeds %d MiB limit", maxJSONResponseBytes>>20)
+				return fmt.Errorf("confluence response exceeds %d MiB limit", maxJSONResponseBytes>>20)
 			}
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				if output == nil {
@@ -60,10 +62,13 @@ func (c *client) get(ctx context.Context, endpoint string, output interface{}) e
 				return json.Unmarshal(body, output)
 			}
 			if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
-				return fmt.Errorf("Confluence API %s: status %d body=%q", endpoint, resp.StatusCode, responseExcerpt(body))
+				return fmt.Errorf(
+					"confluence API %s: status %d body=%q",
+					endpoint, resp.StatusCode, responseExcerpt(body),
+				)
 			}
 			if attempt == requestAttempts-1 {
-				return fmt.Errorf("Confluence API %s: status %d after retries", endpoint, resp.StatusCode)
+				return fmt.Errorf("confluence API %s: status %d after retries", endpoint, resp.StatusCode)
 			}
 			if err = waitRetry(ctx, resp.Header.Get("Retry-After"), attempt); err != nil {
 				return err
@@ -71,13 +76,13 @@ func (c *client) get(ctx context.Context, endpoint string, output interface{}) e
 			continue
 		}
 		if attempt == requestAttempts-1 {
-			return fmt.Errorf("Confluence API %s: %w", endpoint, err)
+			return fmt.Errorf("confluence API %s: %w", endpoint, err)
 		}
 		if err = waitRetry(ctx, "", attempt); err != nil {
 			return err
 		}
 	}
-	return fmt.Errorf("Confluence API %s: retry exhausted", endpoint)
+	return fmt.Errorf("confluence API %s: retry exhausted", endpoint)
 }
 
 func responseExcerpt(body []byte) string {
@@ -128,10 +133,10 @@ func (c *client) resolveEndpoint(endpoint string) (string, error) {
 	basePath := strings.TrimRight(base.EscapedPath(), "/")
 	if next.IsAbs() {
 		if next.Scheme != base.Scheme || next.Host != base.Host {
-			return "", fmt.Errorf("Confluence pagination URL leaves configured origin")
+			return "", fmt.Errorf("confluence pagination URL leaves configured origin")
 		}
 		if basePath != "" && next.EscapedPath() != basePath && !strings.HasPrefix(next.EscapedPath(), basePath+"/") {
-			return "", fmt.Errorf("Confluence pagination URL leaves configured context path")
+			return "", fmt.Errorf("confluence pagination URL leaves configured context path")
 		}
 		return next.String(), nil
 	}

@@ -34,14 +34,23 @@ func TestPingUsesEditionEndpoint(t *testing.T) {
 		want string
 	}{
 		{name: "server", cfg: config{baseURL: "https://confluence.test"}, want: "/rest/api/space"},
-		{name: "cloud", cfg: config{baseURL: "https://team.atlassian.net/wiki", edition: editionCloud}, want: "/wiki/api/v2/spaces"},
+		{
+			name: "cloud",
+			cfg:  config{baseURL: "https://team.atlassian.net/wiki", edition: editionCloud},
+			want: "/wiki/api/v2/spaces",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var path string
-			client := &client{cfg: tc.cfg, http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			transport := roundTripper(func(req *http.Request) (*http.Response, error) {
 				path = req.URL.Path
-				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("{}"))}, nil
-			})}}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("{}")),
+				}, nil
+			})
+			client := &client{cfg: tc.cfg, http: &http.Client{Transport: transport}}
 
 			if err := client.ping(context.Background()); err != nil {
 				t.Fatal(err)
