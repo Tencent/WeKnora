@@ -226,6 +226,7 @@ const closePreImg = () => {
 @import '../../../components/css/chat-resource-chips.less';
 
 .user_msg_container {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -403,18 +404,20 @@ html[theme-mode="dark"] {
 .steer-failure button:hover { background: var(--td-bg-color-secondarycontainer); }
 
 .user_msg_actions {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 2;
     display: flex;
     justify-content: flex-end;
-    height: 0;
-    overflow: hidden;
+    padding-top: 2px;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s ease;
 }
 
-.user_msg_container:hover .user_msg_actions {
-    height: auto;
-    overflow: visible;
+.user_msg_container:hover .user_msg_actions,
+.user_msg_container:focus-within .user_msg_actions {
     opacity: 1;
     pointer-events: auto;
 }
