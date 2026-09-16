@@ -29,9 +29,10 @@ test('空原因码返回空串，调用方据此不显示横幅', () => {
   assert.equal(forkDegradeMessage(''), '')
 })
 
-test('成功分叉提示说明环境来自分叉时刻而不是分叉点', () => {
+test('成功分叉提示说明工作区已回滚、依赖仍是分叉当下', () => {
   const text = forkSuccessMessage()
-  assert.ok(text.includes('分叉操作时'))
-  assert.ok(text.includes('不是分叉点'))
+  assert.ok(text.includes('工作区'))
+  assert.ok(text.includes('分叉点'))
+  assert.ok(text.includes('依赖'))
   assert.notEqual(text, forkDegradeMessage('NO_CHECKPOINT'))
 })

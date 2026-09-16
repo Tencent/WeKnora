@@ -4,7 +4,7 @@
  * A degraded fork still succeeded — the branch exists and the conversation is
  * intact — so the wording explains what was NOT carried over rather than
  * reading as an error. A non-degraded fork still needs a note: the sandbox
- * filesystem is rolled back to the fork point, but installed packages are
+ * working tree is rolled back to the fork point, but installed packages are
  * from the fork *moment*.
  */
 
@@ -15,7 +15,7 @@ const FORK_DEGRADE_COPY: Record<string, string> = {
   SNAPSHOT_UNSUPPORTED: '当前沙箱后端不支持环境复制，已创建全新环境',
 }
 
-const FORK_SUCCESS_COPY = '分支沙箱的依赖环境来自分叉操作时的最新状态，不是分叉点当时的状态'
+const FORK_SUCCESS_COPY = '工作区已回到分叉点；已安装的依赖仍是分叉操作当时的环境'
 
 /** Returns the banner text for a degrade reason, or '' when none applies. */
 export function forkDegradeMessage(reason: string): string {

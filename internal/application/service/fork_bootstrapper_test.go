@@ -3,6 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +14,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func forkTestCommitSHA() string {
+	return strings.Repeat("a", 40)
+}
 
 type fakeSnapshotDeleter struct {
 	deleted []string
@@ -33,7 +41,7 @@ func pendingForkSession() *types.Session {
 	return &types.Session{
 		ID: "fork-1", TenantID: 1,
 		ForkBootstrap: &types.ForkBootstrap{
-			SnapshotID: "snap-1", CommitSHA: "abc123",
+			SnapshotID: "snap-1", CommitSHA: forkTestCommitSHA(),
 			SourceSandboxID: "sbx-1", CreatedAt: time.Now().UTC(),
 		},
 	}
@@ -96,8 +104,11 @@ func TestAfterCreateResetsWorkspaceThenConsumesAndDeletesSnapshot(t *testing.T) 
 
 	require.Len(t, runner.calls, 1)
 	script := runner.calls[0]
-	require.Contains(t, script, "reset --hard abc123")
+	require.Contains(t, script, "reset --hard "+forkTestCommitSHA())
+	require.Contains(t, script, "reflog expire --expire=now --all")
+	require.Contains(t, script, "gc --prune=now")
 	require.Contains(t, script, "clean -fdx")
+	require.Contains(t, script, "ORIG_HEAD")
 
 	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
 	require.NotNil(t, sessions.updatedBootstrap)
@@ -151,7 +162,7 @@ func TestAfterCreateResetFailKeepsSnapshotWhenClearFails(t *testing.T) {
 	sessions := newFakeSessionStore(pendingForkSession())
 	sessions.clearErr = errors.New("db down")
 	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{
-		ExitCode: 128, Stderr: "fatal: bad object abc123",
+		ExitCode: 128, Stderr: "fatal: bad object " + forkTestCommitSHA(),
 	}}
 	snapshots := &fakeSnapshotDeleter{}
 	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
@@ -171,7 +182,7 @@ func TestAfterCreateRewritesCopiedCheckpointsToNewSandboxID(t *testing.T) {
 	messages := newFakeMessageStore([]*types.Message{{
 		ID: "a1", SessionID: "fork-1", Role: "assistant",
 		SandboxCheckpoint: &types.SandboxCheckpoint{
-			SandboxID: "sbx-1", CommitSHA: "abc123", CommittedAt: committedAt,
+			SandboxID: "sbx-1", CommitSHA: forkTestCommitSHA(), CommittedAt: committedAt,
 		},
 	}})
 	b := NewForkBootstrapper(sessions, messages, runner, &fakeSnapshotDeleter{})
@@ -179,7 +190,7 @@ func TestAfterCreateRewritesCopiedCheckpointsToNewSandboxID(t *testing.T) {
 	require.NoError(t, b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"}))
 
 	require.Equal(t, "sbx-2", messages.messages[0].SandboxCheckpoint.SandboxID)
-	require.Equal(t, "abc123", messages.messages[0].SandboxCheckpoint.CommitSHA)
+	require.Equal(t, forkTestCommitSHA(), messages.messages[0].SandboxCheckpoint.CommitSHA)
 	require.Equal(t, committedAt, messages.messages[0].SandboxCheckpoint.CommittedAt)
 	require.True(t, sessions.updatedBootstrap.Consumed())
 }
@@ -197,7 +208,7 @@ func TestAfterCreateIsNoOpForOrdinarySession(t *testing.T) {
 func TestAfterCreateFailsWhenResetFails(t *testing.T) {
 	sessions := newFakeSessionStore(pendingForkSession())
 	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{
-		ExitCode: 128, Stderr: "fatal: bad object abc123",
+		ExitCode: 128, Stderr: "fatal: bad object " + forkTestCommitSHA(),
 	}}
 	snapshots := &fakeSnapshotDeleter{}
 	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
@@ -208,6 +219,90 @@ func TestAfterCreateFailsWhenResetFails(t *testing.T) {
 	// 引导失败时清空 bootstrap 并回收快照：下次 resolve 走全新沙箱路径。
 	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
 	require.True(t, sessions.bootstrapCleared)
+}
+
+func TestAfterCreateRejectsInvalidCommitSHAWithoutExec(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	sessions.source.ForkBootstrap.CommitSHA = "HEAD; echo pwned"
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
+
+	err := b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"})
+
+	require.Error(t, err)
+	require.Empty(t, runner.calls)
+	require.Contains(t, err.Error(), "invalid commit sha")
+}
+
+func TestForkResetScriptRejectsNonHexSHA(t *testing.T) {
+	_, err := forkResetScript(sandbox.SessionWorkspaceRoot, "abc123")
+	require.Error(t, err)
+	_, err = forkResetScript(sandbox.SessionWorkspaceRoot, "")
+	require.Error(t, err)
+	_, err = forkResetScript(sandbox.SessionWorkspaceRoot, forkTestCommitSHA()+";rm")
+	require.Error(t, err)
+}
+
+func TestForkResetScriptPrunesLaterCommits(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	env := isolatedGitEnv(t)
+	runGit := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = env
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(out))
+		return strings.TrimSpace(string(out))
+	}
+
+	runGit("init")
+	runGit("config", "user.email", "agent@weknora.local")
+	runGit("config", "user.name", "WeKnora Agent")
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("early"), 0o644))
+	runGit("add", "-A")
+	runGit("commit", "-m", "early")
+	early := runGit("rev-parse", "HEAD")
+	if !gitSHAPattern.MatchString(early) {
+		t.Skip("host git is not using SHA-1 object names")
+	}
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("later-secret"), 0o644))
+	runGit("add", "-A")
+	runGit("commit", "-m", "later")
+	later := runGit("rev-parse", "HEAD")
+	require.NotEqual(t, early, later)
+
+	script, err := forkResetScript(dir, early)
+	require.NoError(t, err)
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+
+	cat := exec.Command("git", "-C", dir, "cat-file", "-t", later)
+	cat.Env = env
+	require.Error(t, cat.Run(), "later-turn commit must be unreachable after prune")
+	_, err = os.Stat(filepath.Join(dir, "secret.txt"))
+	require.True(t, os.IsNotExist(err))
+	body, err := os.ReadFile(filepath.Join(dir, "keep.txt"))
+	require.NoError(t, err)
+	require.Equal(t, "early", string(body))
+}
+
+func isolatedGitEnv(t *testing.T) []string {
+	t.Helper()
+	return append(os.Environ(),
+		"GIT_CONFIG_GLOBAL="+filepath.Join(t.TempDir(), "gitconfig"),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=WeKnora Agent",
+		"GIT_AUTHOR_EMAIL=agent@weknora.local",
+		"GIT_COMMITTER_NAME=WeKnora Agent",
+		"GIT_COMMITTER_EMAIL=agent@weknora.local",
+	)
 }
 
 func TestWithClientNilReceiver(t *testing.T) {
@@ -234,7 +329,8 @@ func TestAfterCreateWithClientUsesHandleNotRunner(t *testing.T) {
 	require.Equal(t, sandbox.SessionWorkspaceRoot, client.execs[0].WorkDir)
 	require.Equal(t, sandbox.DefaultSandboxExecUser, client.execs[0].User)
 	require.Equal(t, forkResetTimeout, client.execs[0].Timeout)
-	require.Contains(t, client.execs[0].Command, "reset --hard abc123")
+	require.Contains(t, client.execs[0].Command, "reset --hard "+forkTestCommitSHA())
+	require.Contains(t, client.execs[0].Command, "gc --prune=now")
 	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
 	require.True(t, sessions.updatedBootstrap.Consumed())
 }
