@@ -14,12 +14,17 @@ import (
 var _ datasource.StreamingConnector = (*Connector)(nil)
 var _ datasource.FullStreamingConnector = (*Connector)(nil)
 
+// Connector implements datasource.StreamingConnector for Confluence.
 type Connector struct {
 	newClient func(config) (*client, error)
 }
 
-func NewConnector() *Connector  { return &Connector{newClient: newClient} }
+// NewConnector creates a Confluence connector.
+func NewConnector() *Connector { return &Connector{newClient: newClient} }
+
+// Type returns the connector type identifier.
 func (*Connector) Type() string { return types.ConnectorTypeConfluence }
+
 func (c *Connector) configured(ds *types.DataSourceConfig) (*client, config, error) {
 	cfg, err := parseConfig(ds)
 	if err != nil {
@@ -32,6 +37,8 @@ func (c *Connector) configured(ds *types.DataSourceConfig) (*client, config, err
 	client, err := factory(cfg)
 	return client, cfg, err
 }
+
+// Validate pings Confluence with the supplied credentials.
 func (c *Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) error {
 	client, _, err := c.configured(ds)
 	if err != nil {
@@ -39,7 +46,11 @@ func (c *Connector) Validate(ctx context.Context, ds *types.DataSourceConfig) er
 	}
 	return client.ping(ctx)
 }
-func (c *Connector) ListResources(ctx context.Context, ds *types.DataSourceConfig, parentID string) ([]types.Resource, error) {
+
+// ListResources returns the Confluence spaces the credentials can see.
+func (c *Connector) ListResources(
+	ctx context.Context, ds *types.DataSourceConfig, parentID string,
+) ([]types.Resource, error) {
 	if parentID != "" {
 		return nil, nil
 	}
@@ -53,23 +64,36 @@ func (c *Connector) ListResources(ctx context.Context, ds *types.DataSourceConfi
 	}
 	out := make([]types.Resource, 0, len(spaces))
 	for _, s := range spaces {
-		resourceURL, err := client.resolveEndpoint(s.Links.WebUI)
-		if err != nil {
-			return nil, fmt.Errorf("resolve Confluence space URL: %w", err)
-		}
-		out = append(out, types.Resource{ExternalID: s.ID, Name: s.Name, Type: "space", URL: resourceURL, HasChildren: false, Metadata: map[string]interface{}{"space_key": s.Key}})
+		out = append(out, types.Resource{
+			ExternalID:  s.ID,
+			Name:        s.Name,
+			Type:        "space",
+			URL:         client.resourceURL(s.Links.WebUI),
+			HasChildren: false,
+			Metadata:    map[string]interface{}{"space_key": s.Key},
+		})
 	}
 	return out, nil
 }
+
+// ResolveResourceAncestors is a no-op: Confluence spaces are a flat list.
 func (*Connector) ResolveResourceAncestors(context.Context, *types.DataSourceConfig, []string) ([]string, error) {
 	return nil, nil
 }
-func (c *Connector) FetchAll(ctx context.Context, ds *types.DataSourceConfig, resourceIDs []string) ([]types.FetchedItem, error) {
+
+// FetchAll syncs every selected space. Deletion reconciliation needs FetchStream.
+func (c *Connector) FetchAll(
+	ctx context.Context, ds *types.DataSourceConfig, resourceIDs []string,
+) ([]types.FetchedItem, error) {
 	copy := *ds
 	copy.ResourceIDs = resourceIDs
 	return c.collect(ctx, &copy, nil)
 }
-func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+
+// FetchIncremental syncs pages whose versions changed since the last cursor.
+func (c *Connector) FetchIncremental(
+	ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
 	items, next, err := c.collectWithCursor(ctx, ds, old)
 	return items, next, err
 }
@@ -81,11 +105,17 @@ func (h *collector) Emit(_ context.Context, item types.FetchedItem) error {
 	return nil
 }
 func (*collector) Checkpoint(context.Context, *types.SyncCursor) error { return nil }
-func (c *Connector) collect(ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor) ([]types.FetchedItem, error) {
+
+func (c *Connector) collect(
+	ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor,
+) ([]types.FetchedItem, error) {
 	items, _, err := c.collectWithCursor(ctx, ds, old)
 	return items, err
 }
-func (c *Connector) collectWithCursor(ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+
+func (c *Connector) collectWithCursor(
+	ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
 	h := &collector{}
 	next, err := c.FetchStream(ctx, ds, old, h)
 	return h.items, next, err
@@ -93,17 +123,29 @@ func (c *Connector) collectWithCursor(ctx context.Context, ds *types.DataSourceC
 
 // FetchStream is the one sync engine. A version enters its cursor only after
 // its Markdown has been fetched and Emit has succeeded, making checkpoints safe.
-func (c *Connector) FetchStream(ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor, h datasource.StreamHandler) (*types.SyncCursor, error) {
+func (c *Connector) FetchStream(
+	ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
 	return c.fetchStream(ctx, ds, old, h, false)
 }
 
 // FetchFullStream forces every page to be re-fetched while retaining old solely
-// as a complete baseline for deletion reconciliation.
-func (c *Connector) FetchFullStream(ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor, h datasource.StreamHandler) (*types.SyncCursor, error) {
+// as a complete baseline for deletion reconciliation. Mid-run checkpoints keep
+// that baseline plus the pages already re-fetched so Asynq retries resume
+// instead of starting over.
+func (c *Connector) FetchFullStream(
+	ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor, h datasource.StreamHandler,
+) (*types.SyncCursor, error) {
 	return c.fetchStream(ctx, ds, old, h, true)
 }
 
-func (c *Connector) fetchStream(ctx context.Context, ds *types.DataSourceConfig, old *types.SyncCursor, h datasource.StreamHandler, forceFull bool) (*types.SyncCursor, error) {
+func (c *Connector) fetchStream(
+	ctx context.Context,
+	ds *types.DataSourceConfig,
+	old *types.SyncCursor,
+	h datasource.StreamHandler,
+	forceFull bool,
+) (*types.SyncCursor, error) {
 	if ds == nil || len(ds.ResourceIDs) == 0 {
 		return nil, fmt.Errorf("Confluence requires at least one selected space")
 	}
@@ -119,34 +161,53 @@ func (c *Connector) fetchStream(ctx context.Context, ds *types.DataSourceConfig,
 	for _, s := range spaces {
 		byID[s.ID] = s
 	}
-	previous, next := decodeCursor(old), decodeCursor(old).clone()
+	baseline, next := prepareSyncCursors(old, forceFull)
 	for _, resourceID := range ds.ResourceIDs {
 		s, found := byID[resourceID]
 		if !found {
-			return nil, fmt.Errorf("selected Confluence space %s is unavailable; refusing destructive reconciliation", resourceID)
+			return nil, fmt.Errorf(
+				"selected Confluence space %s is unavailable; refusing destructive reconciliation",
+				resourceID,
+			)
 		}
 		pages, err := client.pages(ctx, s)
 		if err != nil {
 			return nil, fmt.Errorf("list pages in Confluence space %s: %w", s.Key, err)
 		}
-		priorPages, hadBaseline := previous.SpacePages[resourceID]
+		priorPages, hadBaseline := baseline.SpacePages[resourceID]
 		if next.SpacePages[resourceID] == nil {
 			next.SpacePages[resourceID] = map[string]string{}
 		}
 		seen := make(map[string]struct{}, len(pages))
 		for _, summary := range pages {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			seen[summary.ID] = struct{}{}
 			version := pageVersion(summary)
-			if !forceFull && priorPages[summary.ID] == version {
+			if forceFull {
+				if next.SpacePages[resourceID][summary.ID] == version {
+					continue
+				}
+			} else if priorPages[summary.ID] == version {
 				continue
 			}
 			full, err := client.body(ctx, summary.ID)
 			if err != nil {
-				return nil, fmt.Errorf("fetch Confluence page %s: %w", summary.ID, err)
+				if ctx.Err() != nil {
+					return nil, err
+				}
+				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
+					return nil, emitErr
+				}
+				continue
 			}
 			item, err := markdownItem(client, resourceID, summary, full)
 			if err != nil {
-				return nil, fmt.Errorf("convert Confluence page %s: %w", summary.ID, err)
+				if emitErr := h.Emit(ctx, failedPageItem(resourceID, summary, err)); emitErr != nil {
+					return nil, emitErr
+				}
+				continue
 			}
 			if err := h.Emit(ctx, item); err != nil {
 				return nil, err
@@ -164,13 +225,20 @@ func (c *Connector) fetchStream(ctx context.Context, ds *types.DataSourceConfig,
 				}
 			}
 			if missing >= 20 && missing*100 >= len(priorPages)*80 {
-				return nil, fmt.Errorf("refusing Confluence mirror deletion in %s: %d/%d pages disappeared", s.Key, missing, len(priorPages))
+				return nil, fmt.Errorf(
+					"refusing Confluence mirror deletion in %s: %d/%d pages disappeared",
+					s.Key, missing, len(priorPages),
+				)
 			}
 			for id := range priorPages {
 				if _, exists := seen[id]; exists {
 					continue
 				}
-				if err := h.Emit(ctx, types.FetchedItem{ExternalID: id, IsDeleted: true, SourceResourceID: resourceID, Metadata: map[string]string{"channel": types.ChannelConfluence}}); err != nil {
+				deleted := types.FetchedItem{
+					ExternalID: id, IsDeleted: true, SourceResourceID: resourceID,
+					Metadata: map[string]string{"channel": types.ChannelConfluence},
+				}
+				if err := h.Emit(ctx, deleted); err != nil {
 					return nil, err
 				}
 				delete(next.SpacePages[resourceID], id)
@@ -180,8 +248,24 @@ func (c *Connector) fetchStream(ctx context.Context, ds *types.DataSourceConfig,
 			}
 		}
 	}
+	next.FullSync = false
+	next.FullSyncBaseline = nil
 	return next.syncCursor(), nil
 }
+
+func failedPageItem(resourceID string, summary page, err error) types.FetchedItem {
+	return types.FetchedItem{
+		ExternalID:       summary.ID,
+		Title:            summary.Title,
+		SourceResourceID: resourceID,
+		Metadata: map[string]string{
+			"channel": types.ChannelConfluence,
+			"error":   err.Error(),
+			"page_id": summary.ID,
+		},
+	}
+}
+
 func markdownItem(client *client, resourceID string, summary page, full pageBody) (types.FetchedItem, error) {
 	html := full.Body.View.Value
 	markdown, err := htmltomd.ConvertString(html)
@@ -200,13 +284,25 @@ func markdownItem(client *client, resourceID string, summary page, full pageBody
 	if full.Space.Key != "" {
 		summary.Space = full.Space
 	}
-	pageURL, err := client.resolveEndpoint(summary.Links.WebUI)
-	if err != nil {
-		return types.FetchedItem{}, fmt.Errorf("resolve Confluence page URL: %w", err)
+	if webui := strings.TrimSpace(summary.Links.WebUI); webui == "" && full.Links.WebUI != "" {
+		summary.Links.WebUI = full.Links.WebUI
 	}
-	metadata := map[string]string{"channel": types.ChannelConfluence, "space_key": summary.Space.Key, "space_name": summary.Space.Name, "page_id": summary.ID}
+	metadata := map[string]string{
+		"channel": types.ChannelConfluence, "space_key": summary.Space.Key,
+		"space_name": summary.Space.Name, "page_id": summary.ID,
+	}
 	if creator := strings.TrimSpace(summary.Version.By.DisplayName); creator != "" {
 		metadata["creator"] = creator
 	}
-	return types.FetchedItem{ExternalID: summary.ID, Title: summary.Title, Content: []byte(markdown), ContentType: "text/markdown", FileName: safeFilename(summary.Title) + ".md", URL: pageURL, UpdatedAt: pageUpdatedAt(summary), SourceResourceID: resourceID, Metadata: metadata}, nil
+	return types.FetchedItem{
+		ExternalID:       summary.ID,
+		Title:            summary.Title,
+		Content:          []byte(markdown),
+		ContentType:      "text/markdown",
+		FileName:         safeFilename(summary.Title) + ".md",
+		URL:              client.resourceURL(summary.Links.WebUI),
+		UpdatedAt:        pageUpdatedAt(summary),
+		SourceResourceID: resourceID,
+		Metadata:         metadata,
+	}, nil
 }

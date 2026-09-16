@@ -3,6 +3,7 @@ package confluence
 import (
 	"net/url"
 	"testing"
+	"time"
 )
 
 func TestResolveEndpointKeepsCloudContextPath(t *testing.T) {
@@ -29,15 +30,25 @@ func TestResolveEndpointRejectsForeignOrigin(t *testing.T) {
 	}
 }
 
-func TestServerPageSearchQuotesSpecialSpaceKey(t *testing.T) {
-	endpoint := serverPageSearchEndpoint("~personal_space")
+func TestServerSpacePagesEndpointEscapesPersonalKey(t *testing.T) {
+	endpoint := serverSpacePagesEndpoint("~personal_space")
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
 		t.Fatalf("parse endpoint: %v", err)
 	}
+	if parsed.Path != "/rest/api/space/~personal_space/content/page" {
+		t.Fatalf("path = %q", parsed.Path)
+	}
+	if parsed.Query().Get("expand") != "version,space" {
+		t.Fatalf("expand = %q", parsed.Query().Get("expand"))
+	}
+}
 
-	want := `space="~personal_space" AND type=page AND status=current`
-	if got := parsed.Query().Get("cql"); got != want {
-		t.Fatalf("CQL = %q, want %q", got, want)
+func TestCapRetryDelayBoundsRetryAfter(t *testing.T) {
+	if got := capRetryDelay(0); got != 100*time.Millisecond {
+		t.Fatalf("capRetryDelay(0) = %v", got)
+	}
+	if got := capRetryDelay(5 * time.Minute); got != maxRetryDelay {
+		t.Fatalf("capRetryDelay(5m) = %v", got)
 	}
 }

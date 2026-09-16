@@ -21,12 +21,30 @@ type config struct {
 
 func (c config) cloud() bool { return c.edition == editionCloud }
 
+func configValue(ds *types.DataSourceConfig, name string) string {
+	if ds == nil {
+		return ""
+	}
+	if v, ok := ds.Credentials[name].(string); ok {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	if v, ok := ds.Settings[name].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
 func parseConfig(ds *types.DataSourceConfig) (config, error) {
 	if ds == nil {
 		return config{}, datasource.ErrInvalidConfig
 	}
-	value := func(name string) string { v, _ := ds.Credentials[name].(string); return strings.TrimSpace(v) }
-	cfg := config{edition: strings.ToLower(value("edition")), baseURL: strings.TrimRight(value("base_url"), "/"), username: value("username")}
+	cfg := config{
+		edition:  strings.ToLower(configValue(ds, "edition")),
+		baseURL:  strings.TrimRight(configValue(ds, "base_url"), "/"),
+		username: configValue(ds, "username"),
+	}
 	if cfg.edition == "" {
 		cfg.edition = editionServer
 	}
@@ -37,9 +55,9 @@ func parseConfig(ds *types.DataSourceConfig) (config, error) {
 		return config{}, fmt.Errorf("%w: base_url and username are required", datasource.ErrInvalidCredentials)
 	}
 	if cfg.cloud() {
-		cfg.secret = value("api_token")
+		cfg.secret = configValue(ds, "api_token")
 	} else {
-		cfg.secret = value("password")
+		cfg.secret = configValue(ds, "password")
 	}
 	if cfg.secret == "" {
 		return config{}, fmt.Errorf("%w: credentials are required", datasource.ErrInvalidCredentials)
@@ -55,12 +73,14 @@ type space struct {
 		WebUI string `json:"webui"`
 	} `json:"_links"`
 }
+
 type spaceList struct {
 	Results []space `json:"results"`
 	Links   struct {
 		Next string `json:"next"`
 	} `json:"_links"`
 }
+
 type serverSpaceList struct {
 	Results []struct {
 		ID    json.Number `json:"id"`
@@ -95,12 +115,24 @@ type page struct {
 		WebUI string `json:"webui"`
 	} `json:"_links"`
 }
+
 type pageList struct {
 	Results []page `json:"results"`
 	Links   struct {
 		Next string `json:"next"`
 	} `json:"_links"`
 }
+
+// serverSpacePageList matches GET /rest/api/space/{key}/content/page, which
+// nests the page collection under the "page" key instead of returning a flat
+// content list. Root _links.next is kept as a fallback used by some DC versions.
+type serverSpacePageList struct {
+	Page  pageList `json:"page"`
+	Links struct {
+		Next string `json:"next"`
+	} `json:"_links"`
+}
+
 type cloudPage struct {
 	ID        string `json:"id"`
 	Title     string `json:"title"`
@@ -115,12 +147,14 @@ type cloudPage struct {
 		WebUI string `json:"webui"`
 	} `json:"_links"`
 }
+
 type cloudPageList struct {
 	Results []cloudPage `json:"results"`
 	Links   struct {
 		Next string `json:"next"`
 	} `json:"_links"`
 }
+
 type pageBody struct {
 	page
 	Body struct {
@@ -130,10 +164,17 @@ type pageBody struct {
 	} `json:"body"`
 }
 
-// cursor deliberately records a semantic version token, rather than a formatted
-// timestamp. Cloud exposes version.number; Server/DC does too on supported APIs.
+// cursor records a semantic version token per page. Cloud and Server/DC both
+// expose version.number on supported APIs.
+//
+// FullSync / FullSyncBaseline exist only while a force-full run is in progress:
+// the service overwrites LastSyncCursor on every checkpoint, so the original
+// deletion baseline has to travel inside the checkpoint or retries would either
+// re-fetch everything or treat unprocessed pages as deletions.
 type cursor struct {
-	SpacePages map[string]map[string]string `json:"space_pages"`
+	SpacePages       map[string]map[string]string `json:"space_pages"`
+	FullSyncBaseline map[string]map[string]string `json:"full_sync_baseline,omitempty"`
+	FullSync         bool                         `json:"full_sync,omitempty"`
 }
 
 func decodeCursor(old *types.SyncCursor) cursor {
@@ -148,22 +189,54 @@ func decodeCursor(old *types.SyncCursor) cursor {
 	}
 	return c
 }
-func (c cursor) clone() cursor {
-	out := cursor{SpacePages: make(map[string]map[string]string, len(c.SpacePages))}
-	for resource, pages := range c.SpacePages {
-		out.SpacePages[resource] = make(map[string]string, len(pages))
+
+func clonePageMap(in map[string]map[string]string) map[string]map[string]string {
+	out := make(map[string]map[string]string, len(in))
+	for resource, pages := range in {
+		out[resource] = make(map[string]string, len(pages))
 		for id, version := range pages {
-			out.SpacePages[resource][id] = version
+			out[resource][id] = version
 		}
 	}
 	return out
 }
+
+func (c cursor) clone() cursor {
+	return cursor{
+		SpacePages:       clonePageMap(c.SpacePages),
+		FullSyncBaseline: clonePageMap(c.FullSyncBaseline),
+		FullSync:         c.FullSync,
+	}
+}
+
 func (c cursor) syncCursor() *types.SyncCursor {
 	raw, _ := json.Marshal(c)
 	fields := map[string]interface{}{}
 	_ = json.Unmarshal(raw, &fields)
 	return &types.SyncCursor{LastSyncTime: time.Now().UTC(), ConnectorCursor: fields}
 }
+
+func prepareSyncCursors(old *types.SyncCursor, forceFull bool) (baseline, next cursor) {
+	previous := decodeCursor(old)
+	if !forceFull {
+		next = previous.clone()
+		next.FullSync = false
+		next.FullSyncBaseline = nil
+		return previous, next
+	}
+	next = previous.clone()
+	if !next.FullSync {
+		next.FullSyncBaseline = clonePageMap(previous.SpacePages)
+		next.SpacePages = map[string]map[string]string{}
+		next.FullSync = true
+	}
+	baseline.SpacePages = next.FullSyncBaseline
+	if baseline.SpacePages == nil {
+		baseline.SpacePages = map[string]map[string]string{}
+	}
+	return baseline, next
+}
+
 func pageVersion(p page) string {
 	if p.Version.Number > 0 {
 		return fmt.Sprintf("v:%d", p.Version.Number)
@@ -173,6 +246,7 @@ func pageVersion(p page) string {
 	}
 	return "t:" + p.Version.CreatedAt
 }
+
 func pageUpdatedAt(p page) time.Time {
 	for _, value := range []string{p.Version.When, p.Version.CreatedAt} {
 		if t, err := time.Parse(time.RFC3339, value); err == nil {
@@ -181,6 +255,7 @@ func pageUpdatedAt(p page) time.Time {
 	}
 	return time.Time{}
 }
+
 func safeFilename(name string) string {
 	name = strings.Map(func(r rune) rune {
 		if r < 32 || strings.ContainsRune(`<>:"/\\|?*`, r) {

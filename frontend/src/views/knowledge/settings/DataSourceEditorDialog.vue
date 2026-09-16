@@ -159,12 +159,33 @@ function needsConnectionTest(): boolean {
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
+function hydrateConfluenceCredentialsFromSettings() {
+  if (form.value.type !== 'confluence') return
+  const settings = form.value.config.settings || {}
+  const creds = form.value.config.credentials || {}
+  form.value.config.credentials = {
+    ...creds,
+    edition: creds.edition || settings.edition || 'server',
+    base_url: creds.base_url || settings.base_url || '',
+    username: creds.username || settings.username || '',
+  }
+}
+
+function syncConfluencePublicFieldsToSettings() {
+  if (form.value.type !== 'confluence') return
+  const creds = form.value.config.credentials || {}
+  form.value.config.settings = {
+    ...(form.value.config.settings || {}),
+    ...(creds.edition ? { edition: creds.edition } : {}),
+    ...(creds.base_url ? { base_url: creds.base_url } : {}),
+    ...(creds.username ? { username: creds.username } : {}),
+  }
+}
+
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
   replaceCredentialsMode.value = true
-  if (form.value.type === "confluence" && !form.value.config.credentials.edition) {
-    form.value.config.credentials.edition = "server"
-  }
+  hydrateConfluenceCredentialsFromSettings()
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -598,8 +619,8 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     fields: [
       { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
       { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
-      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true, optional: true },
-      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true, optional: true },
+      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true },
+      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true },
     ],
   },
   {
@@ -812,6 +833,9 @@ function selectType(def: ConnectorDef) {
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
   form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  if (def.type === 'confluence') {
+    form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
+  }
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
@@ -820,9 +844,10 @@ function selectType(def: ConnectorDef) {
 // --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = currentDef.value?.fields || []
+    const fields = displayedCredentialFields.value
     for (const f of fields) {
       if (f.optional || f.fieldType === 'custom_headers') continue
       if (!form.value.config.credentials[f.key]) {
@@ -867,6 +892,7 @@ async function testConnection() {
 async function loadResources() {
   loadingResources.value = true
   try {
+    syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
@@ -1021,7 +1047,7 @@ function validateStep1Fields(): boolean {
     return true
   }
 
-  const fields = currentDef.value?.fields || []
+  const fields = displayedCredentialFields.value
   for (const f of fields) {
     if (f.optional || f.fieldType === 'custom_headers') continue
     if (!form.value.config.credentials[f.key]) {
@@ -1088,6 +1114,7 @@ function prevStep() {
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
   syncGitLabProjectsToSettings()
+  syncConfluencePublicFieldsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1101,6 +1128,7 @@ function buildConfigPayload(): Record<string, unknown> {
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
   )

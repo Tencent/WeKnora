@@ -17,6 +17,7 @@ import (
 const maxJSONResponseBytes int64 = 20 << 20
 const requestAttempts = 4
 const maxErrorResponseRunes = 1000
+const maxRetryDelay = 60 * time.Second
 
 type client struct {
 	cfg  config
@@ -78,6 +79,7 @@ func (c *client) get(ctx context.Context, endpoint string, output interface{}) e
 	}
 	return fmt.Errorf("Confluence API %s: retry exhausted", endpoint)
 }
+
 func responseExcerpt(body []byte) string {
 	value := []rune(strings.TrimSpace(string(body)))
 	if len(value) <= maxErrorResponseRunes {
@@ -87,11 +89,12 @@ func responseExcerpt(body []byte) string {
 }
 
 func waitRetry(ctx context.Context, retryAfter string, attempt int) error {
-	delay := time.Duration(1<<attempt)*time.Second + time.Duration(time.Now().UnixNano()%250)*time.Millisecond
-	if secs, err := strconv.Atoi(retryAfter); err == nil && secs >= 0 {
-		delay = time.Duration(secs) * time.Second
-	} else if t, err := http.ParseTime(retryAfter); err == nil && time.Until(t) > 0 {
-		delay = time.Until(t)
+	backoff := time.Duration(1<<attempt)*time.Second + time.Duration(time.Now().UnixNano()%250)*time.Millisecond
+	delay := capRetryDelay(backoff)
+	if secs, err := strconv.Atoi(retryAfter); err == nil {
+		delay = capRetryDelay(time.Duration(secs) * time.Second)
+	} else if t, err := http.ParseTime(retryAfter); err == nil {
+		delay = capRetryDelay(time.Until(t))
 	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -102,6 +105,17 @@ func waitRetry(ctx context.Context, retryAfter string, attempt int) error {
 		return nil
 	}
 }
+
+func capRetryDelay(delay time.Duration) time.Duration {
+	if delay <= 0 {
+		return 100 * time.Millisecond
+	}
+	if delay > maxRetryDelay {
+		return maxRetryDelay
+	}
+	return delay
+}
+
 func (c *client) resolveEndpoint(endpoint string) (string, error) {
 	base, err := url.Parse(c.cfg.baseURL)
 	if err != nil {
@@ -128,6 +142,17 @@ func (c *client) resolveEndpoint(endpoint string) (string, error) {
 		path = basePath + "/" + strings.TrimLeft(path, "/")
 	}
 	return (&url.URL{Scheme: base.Scheme, Host: base.Host, Path: path, RawQuery: next.RawQuery}).String(), nil
+}
+
+func (c *client) resourceURL(link string) string {
+	if strings.TrimSpace(link) == "" {
+		return c.cfg.baseURL
+	}
+	resolved, err := c.resolveEndpoint(link)
+	if err != nil {
+		return c.cfg.baseURL
+	}
+	return resolved
 }
 
 func (c *client) ping(ctx context.Context) error {
@@ -165,20 +190,15 @@ func (c *client) spaces(ctx context.Context) ([]space, error) {
 	}
 	return all, nil
 }
-func serverPageSearchEndpoint(spaceKey string) string {
-	cql := "space=" + cqlString(spaceKey) + " AND type=page AND status=current"
-	return "/rest/api/content/search?cql=" + url.QueryEscape(cql) + "&expand=version,space&limit=100"
-}
 
-func cqlString(value string) string {
-	escaped := strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(value)
-	return "\"" + escaped + "\""
+func serverSpacePagesEndpoint(spaceKey string) string {
+	return "/rest/api/space/" + url.PathEscape(spaceKey) + "/content/page?expand=version,space&limit=100"
 }
 
 func (c *client) pages(ctx context.Context, s space) ([]page, error) {
 	if c.cfg.cloud() {
 		var all []page
-		next := "/api/v2/spaces/" + url.PathEscape(s.ID) + "/pages?status=current&limit=250"
+		next := "/api/v2/spaces/" + url.PathEscape(s.ID) + "/pages?status=current&depth=all&limit=250"
 		for next != "" {
 			var result cloudPageList
 			if err := c.get(ctx, next, &result); err != nil {
@@ -198,18 +218,27 @@ func (c *client) pages(ctx context.Context, s space) ([]page, error) {
 		return all, nil
 	}
 	var all []page
-	next := serverPageSearchEndpoint(s.Key)
+	next := serverSpacePagesEndpoint(s.Key)
 	for next != "" {
-		var result pageList
+		var result serverSpacePageList
 		if err := c.get(ctx, next, &result); err != nil {
 			return nil, err
 		}
-		all = append(all, result.Results...)
-		next = result.Links.Next
+		all = append(all, result.Page.Results...)
+		next = result.Page.Links.Next
+		if next == "" {
+			next = result.Links.Next
+		}
 	}
 	return all, nil
 }
+
 func (c *client) body(ctx context.Context, id string) (pageBody, error) {
+	if c.cfg.cloud() {
+		var result pageBody
+		err := c.get(ctx, "/api/v2/pages/"+url.PathEscape(id)+"?body-format=view", &result)
+		return result, err
+	}
 	var result pageBody
 	err := c.get(ctx, "/rest/api/content/"+url.PathEscape(id)+"?expand=body.view,version,space", &result)
 	return result, err

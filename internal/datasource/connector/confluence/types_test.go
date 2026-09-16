@@ -30,9 +30,37 @@ func TestDecodeCursorCloneDoesNotMutateBaseline(t *testing.T) {
 
 func TestParseConfigUsesCloudToken(t *testing.T) {
 	cfg, err := parseConfig(&types.DataSourceConfig{Credentials: map[string]interface{}{
-		"edition": "cloud", "base_url": "https://team.atlassian.net/wiki", "username": "user@example.com", "api_token": "token",
+		"edition":   "cloud",
+		"base_url":  "https://team.atlassian.net/wiki",
+		"username":  "user@example.com",
+		"api_token": "token",
 	}})
 	if err != nil || !cfg.cloud() || cfg.secret != "token" {
 		t.Fatalf("parseConfig() = %#v, %v", cfg, err)
+	}
+}
+
+func TestParseConfigReadsPublicFieldsFromSettings(t *testing.T) {
+	cfg, err := parseConfig(&types.DataSourceConfig{
+		Credentials: map[string]interface{}{"api_token": "token"},
+		Settings: map[string]interface{}{
+			"edition": "cloud", "base_url": "https://team.atlassian.net/wiki", "username": "user@example.com",
+		},
+	})
+	if err != nil || !cfg.cloud() || cfg.username != "user@example.com" || cfg.secret != "token" {
+		t.Fatalf("parseConfig() = %#v, %v", cfg, err)
+	}
+}
+
+func TestPrepareSyncCursorsPreservesFullSyncBaseline(t *testing.T) {
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
+	baseline, next := prepareSyncCursors(old, true)
+	if len(next.SpacePages) != 0 || baseline.SpacePages["1"]["p1"] != "v:1" || !next.FullSync {
+		t.Fatalf("first full sync baseline=%#v next=%#v", baseline, next)
+	}
+	next.SpacePages["1"] = map[string]string{"p1": "v:1"}
+	resumeBaseline, resumeNext := prepareSyncCursors(next.syncCursor(), true)
+	if resumeNext.SpacePages["1"]["p1"] != "v:1" || resumeBaseline.SpacePages["1"]["p2"] != "v:1" {
+		t.Fatalf("resume baseline=%#v next=%#v", resumeBaseline, resumeNext)
 	}
 }
