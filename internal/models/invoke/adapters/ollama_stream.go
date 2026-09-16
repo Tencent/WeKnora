@@ -132,18 +132,12 @@ func resolveStoredImageForOllama(imageURL string) []byte {
 		}
 		return decoded
 	}
-	if isApplicationStoredImage(imageURL) && invoke.LocalImageResolver != nil {
+	if invoke.IsApplicationStoredImage(imageURL) && invoke.LocalImageResolver != nil {
 		if data, ok := invoke.LocalImageResolver(imageURL); ok {
 			return data
 		}
 	}
 	return nil
-}
-
-func isApplicationStoredImage(imageURL string) bool {
-	return strings.HasPrefix(imageURL, "resource://") ||
-		strings.HasPrefix(imageURL, "local://") ||
-		strings.HasPrefix(imageURL, "storage://")
 }
 
 // jsonMarshal keeps the tool-call argument marshaling failure explicit.

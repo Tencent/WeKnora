@@ -195,6 +195,76 @@ func chatOnce(ctx context.Context, m *ModelConfig, opts *ChatOptions) (*ChatResp
 }
 
 // chatExecute is the shared Build→Overlay→Execute half of the chat pipeline.
+// Application-stored image reference schemes: internal handles that remote
+// vendors can neither read nor reach (v1 image_resolve.go vocabulary).
+const (
+	imageSchemeResource = "resource://"
+	imageSchemeLocal    = "local://"
+	imageSchemeStorage  = "storage://"
+)
+
+// IsApplicationStoredImage reports whether the image reference uses an
+// application-internal scheme that must be inlined before any vendor wire.
+func IsApplicationStoredImage(imageURL string) bool {
+	return strings.HasPrefix(imageURL, imageSchemeResource) ||
+		strings.HasPrefix(imageURL, imageSchemeLocal) ||
+		strings.HasPrefix(imageURL, imageSchemeStorage)
+}
+
+// inlineStoredImages inlines application-stored image references
+// (resource://, local://, storage://) into data URIs through the
+// LocalImageResolver hook, single-homing image base64-inlining at the entry's
+// preprocessing step (design §6.6; the P1c migration of v1
+// chat/image_resolve.go). Remote vendors can neither read those schemes nor
+// reach local storage, so an unresolved handle would surface as a vendor 400
+// (Ark: "Only base64, http or https URLs are supported"). data:/http(s)
+// references pass through untouched; unresolvable stored references are left
+// as-is so the failure stays loud instead of an image silently disappearing.
+// Messages without resolvable images are returned unchanged (zero-copy).
+func inlineStoredImages(messages []Message) []Message {
+	if LocalImageResolver == nil {
+		return messages
+	}
+	needsInline := func(m Message) bool {
+		for _, p := range m.Content {
+			if p.Image != nil && IsApplicationStoredImage(p.Image.URL) {
+				return true
+			}
+		}
+		return false
+	}
+	touched := false
+	for _, m := range messages {
+		if needsInline(m) {
+			touched = true
+			break
+		}
+	}
+	if !touched {
+		return messages
+	}
+	out := make([]Message, len(messages))
+	copy(out, messages)
+	for i := range out {
+		if !needsInline(out[i]) {
+			continue
+		}
+		parts := make([]Part, len(out[i].Content))
+		copy(parts, out[i].Content)
+		for j := range parts {
+			img := parts[j].Image
+			if img == nil || !IsApplicationStoredImage(img.URL) {
+				continue
+			}
+			if data, ok := LocalImageResolver(img.URL); ok {
+				parts[j].Image = &ImageRef{URL: ImageDataURI(data), Detail: img.Detail}
+			}
+		}
+		out[i].Content = parts
+	}
+	return out
+}
+
 func chatExecute(ctx context.Context, m *ModelConfig, opts *ChatOptions) (*RawResult, error) {
 	a, err := resolveAdapter(m.Provider)
 	if err != nil {
@@ -206,6 +276,7 @@ func chatExecute(ctx context.Context, m *ModelConfig, opts *ChatOptions) (*RawRe
 			Kind: ErrUnsupportedType, Message: "provider " + m.Provider + " does not implement chat",
 		}
 	}
+	opts.Messages = inlineStoredImages(opts.Messages)
 	req, err := ca.BuildChatRequest(endpoint(m), m.ModelName, opts)
 	if err != nil {
 		return nil, ClassifyError(err)
