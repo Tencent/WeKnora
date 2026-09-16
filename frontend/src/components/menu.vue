@@ -699,6 +699,7 @@ const mapSessionRow = (item: any) => ({
     im_platform: item.im_platform || '',
     description: item.description || '',
     user_id: item.user_id || '',
+    parent_session_id: item.parent_session_id || '',
 });
 
 const syncMenuStoreFromBuckets = () => {
@@ -720,6 +721,7 @@ const menuChildToSessionRow = (item: Record<string, unknown>): SessionForGroupin
         im_platform: typeof item.im_platform === 'string' ? item.im_platform : '',
         description: typeof item.description === 'string' ? item.description : '',
         user_id: typeof item.user_id === 'string' ? item.user_id : '',
+        parent_session_id: typeof item.parent_session_id === 'string' ? item.parent_session_id : '',
     };
 };
 
@@ -1494,6 +1496,14 @@ const onDragHandleMouseDown = (e: MouseEvent) => {
     }
 
     :deep(.submenu_pin_icon) {
+        color: inherit;
+        font-size: 12px;
+        margin-right: 4px;
+        vertical-align: middle;
+        flex-shrink: 0;
+    }
+
+    :deep(.submenu_fork_icon) {
         color: inherit;
         font-size: 12px;
         margin-right: 4px;
