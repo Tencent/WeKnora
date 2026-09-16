@@ -1,0 +1,297 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/sandbox"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/stretchr/testify/require"
+)
+
+type fakeSnapshotDeleter struct {
+	deleted []string
+	err     error
+}
+
+func (f *fakeSnapshotDeleter) DeleteSnapshot(_ context.Context, id string) error {
+	f.deleted = append(f.deleted, id)
+	return f.err
+}
+
+type fakeHandle struct {
+	id string
+}
+
+func (h fakeHandle) ID() string                       { return h.id }
+func (h fakeHandle) Provider() sandbox.RemoteProvider { return sandbox.SandboxTypeCube }
+func (h fakeHandle) Metadata() map[string]string      { return nil }
+
+func pendingForkSession() *types.Session {
+	return &types.Session{
+		ID: "fork-1", TenantID: 1,
+		ForkBootstrap: &types.ForkBootstrap{
+			SnapshotID: "snap-1", CommitSHA: "abc123",
+			SourceSandboxID: "sbx-1", CreatedAt: time.Now().UTC(),
+		},
+	}
+}
+
+func forkKey() sandbox.SessionSandboxKey {
+	return sandbox.SessionSandboxKey{TenantID: 1, SessionID: "fork-1"}
+}
+
+func TestTemplateOverrideReturnsSnapshotForPendingFork(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	b := NewForkBootstrapper(sessions, nil, nil, nil)
+
+	got, err := b.TemplateOverride(context.Background(), forkKey())
+
+	require.NoError(t, err)
+	require.Equal(t, "snap-1", got)
+}
+
+func TestTemplateOverrideIsEmptyForOrdinarySession(t *testing.T) {
+	sessions := newFakeSessionStore(&types.Session{ID: "fork-1", TenantID: 1})
+	b := NewForkBootstrapper(sessions, nil, nil, nil)
+
+	got, err := b.TemplateOverride(context.Background(), forkKey())
+
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
+
+func TestTemplateOverrideIsEmptyForConsumedFork(t *testing.T) {
+	s := pendingForkSession()
+	at := time.Now().UTC()
+	s.ForkBootstrap.ConsumedAt = &at
+	sessions := newFakeSessionStore(s)
+	b := NewForkBootstrapper(sessions, nil, nil, nil)
+
+	got, err := b.TemplateOverride(context.Background(), forkKey())
+
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
+
+func TestTemplateOverridePropagatesLookupError(t *testing.T) {
+	sessions := newFakeSessionStore(nil)
+	sessions.getErr = errors.New("db down")
+	b := NewForkBootstrapper(sessions, nil, nil, nil)
+
+	_, err := b.TemplateOverride(context.Background(), forkKey())
+
+	require.Error(t, err)
+}
+
+func TestAfterCreateResetsWorkspaceThenConsumesAndDeletesSnapshot(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
+
+	require.NoError(t, b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"}))
+
+	require.Len(t, runner.calls, 1)
+	script := runner.calls[0]
+	require.Contains(t, script, "reset --hard abc123")
+	require.Contains(t, script, "clean -fdx")
+
+	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
+	require.NotNil(t, sessions.updatedBootstrap)
+	require.True(t, sessions.updatedBootstrap.Consumed())
+}
+
+func TestAfterCreateConsumesWhenSnapshotDeleteFailsAfterReset(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	snapshots := &fakeSnapshotDeleter{err: sandbox.NewRemoteError(
+		sandbox.SandboxTypeCube, "DeleteSnapshot", sandbox.RemoteErrorKindConflict,
+		"CubeMaster returned error code 130409: template attempt is already in progress: "+
+			"snapshot snap-1 still has 2 active runtime ref(s): src@host, fork@host (HTTP 500)",
+		nil,
+	)}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
+
+	err := b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"})
+
+	require.NoError(t, err, "git reset succeeded; an in-use Cube snapshot must not destroy the sandbox")
+	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
+	require.False(t, sessions.bootstrapCleared)
+	require.True(t, sessions.updatedBootstrap.Consumed())
+	require.Equal(t, "snap-1", sessions.updatedBootstrap.SnapshotID)
+
+	got, overrideErr := b.TemplateOverride(context.Background(), forkKey())
+	require.NoError(t, overrideErr)
+	require.Empty(t, got, "retry must not boot another sandbox from the same snapshot")
+}
+
+func TestAfterCreateSkipsDeleteWhenSiblingStillNeedsSnapshot(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	sessions.unconsumed = []*types.Session{{
+		ID: "fork-2", TenantID: 1,
+		ForkBootstrap: &types.ForkBootstrap{
+			SnapshotID: "snap-1", CreatedAt: time.Now().UTC(),
+		},
+	}}
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
+
+	require.NoError(t, b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"}))
+
+	require.Empty(t, snapshots.deleted, "a sibling still boots from this snapshot")
+	require.True(t, sessions.updatedBootstrap.Consumed())
+	require.Equal(t, "snap-1", sessions.updatedBootstrap.SnapshotID)
+}
+
+func TestAfterCreateResetFailKeepsSnapshotWhenClearFails(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	sessions.clearErr = errors.New("db down")
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{
+		ExitCode: 128, Stderr: "fatal: bad object abc123",
+	}}
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
+
+	err := b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"})
+
+	require.Error(t, err)
+	require.False(t, sessions.bootstrapCleared)
+	require.Empty(t, snapshots.deleted)
+	require.NotNil(t, sessions.source.ForkBootstrap)
+}
+
+func TestAfterCreateRewritesCopiedCheckpointsToNewSandboxID(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	committedAt := time.Date(2026, 9, 10, 9, 0, 1, 0, time.UTC)
+	messages := newFakeMessageStore([]*types.Message{{
+		ID: "a1", SessionID: "fork-1", Role: "assistant",
+		SandboxCheckpoint: &types.SandboxCheckpoint{
+			SandboxID: "sbx-1", CommitSHA: "abc123", CommittedAt: committedAt,
+		},
+	}})
+	b := NewForkBootstrapper(sessions, messages, runner, &fakeSnapshotDeleter{})
+
+	require.NoError(t, b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"}))
+
+	require.Equal(t, "sbx-2", messages.messages[0].SandboxCheckpoint.SandboxID)
+	require.Equal(t, "abc123", messages.messages[0].SandboxCheckpoint.CommitSHA)
+	require.Equal(t, committedAt, messages.messages[0].SandboxCheckpoint.CommittedAt)
+	require.True(t, sessions.updatedBootstrap.Consumed())
+}
+
+func TestAfterCreateIsNoOpForOrdinarySession(t *testing.T) {
+	sessions := newFakeSessionStore(&types.Session{ID: "fork-1", TenantID: 1})
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, &fakeSnapshotDeleter{})
+
+	require.NoError(t, b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"}))
+	require.Empty(t, runner.calls)
+}
+
+// 全有或全无：reset 失败必须返回 error，让 lifecycle 销毁这个沙箱。
+func TestAfterCreateFailsWhenResetFails(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{
+		ExitCode: 128, Stderr: "fatal: bad object abc123",
+	}}
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
+
+	err := b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"})
+
+	require.Error(t, err)
+	// 引导失败时清空 bootstrap 并回收快照：下次 resolve 走全新沙箱路径。
+	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
+	require.True(t, sessions.bootstrapCleared)
+}
+
+func TestWithClientNilReceiver(t *testing.T) {
+	var b *ForkBootstrapper
+	require.Nil(t, b.WithClient(&recordingRemoteClient{}))
+}
+
+func TestAfterCreateWithClientUsesHandleNotRunner(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	client := &recordingRemoteClient{execResult: &sandbox.RemoteExecResult{ExitCode: 0}}
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, newFakeMessageStore(nil), runner, snapshots)
+
+	bound, ok := b.WithClient(client).(*ForkBootstrapper)
+	require.True(t, ok)
+	require.Same(t, client, bound.client)
+
+	require.NoError(t, bound.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"}))
+
+	require.Empty(t, runner.calls, "AfterCreate must not Resolve via the session runner")
+	require.Len(t, client.execs, 1)
+	require.True(t, client.execs[0].Shell)
+	require.Equal(t, sandbox.SessionWorkspaceRoot, client.execs[0].WorkDir)
+	require.Equal(t, sandbox.DefaultSandboxExecUser, client.execs[0].User)
+	require.Equal(t, forkResetTimeout, client.execs[0].Timeout)
+	require.Contains(t, client.execs[0].Command, "reset --hard abc123")
+	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
+	require.True(t, sessions.updatedBootstrap.Consumed())
+}
+
+type recordingRemoteClient struct {
+	execs      []sandbox.RemoteExecRequest
+	execResult *sandbox.RemoteExecResult
+	execErr    error
+}
+
+func (c *recordingRemoteClient) Provider() sandbox.RemoteProvider { return sandbox.SandboxTypeCube }
+func (c *recordingRemoteClient) Capabilities() sandbox.RemoteSandboxCapabilities {
+	return sandbox.RemoteSandboxCapabilities{}
+}
+func (c *recordingRemoteClient) Health(context.Context) error { return nil }
+func (c *recordingRemoteClient) Create(context.Context, sandbox.RemoteCreateRequest) (sandbox.RemoteSandboxHandle, error) {
+	panic("Create should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) Connect(context.Context, sandbox.RemoteConnectRequest) (sandbox.RemoteSandboxHandle, error) {
+	panic("Connect should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) Get(context.Context, string) (*sandbox.RemoteSandboxSummary, error) {
+	panic("Get should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) List(context.Context, sandbox.RemoteListFilter) ([]sandbox.RemoteSandboxSummary, error) {
+	panic("List should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) Delete(context.Context, string) error {
+	panic("Delete should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) Exec(_ context.Context, _ sandbox.RemoteSandboxHandle, req sandbox.RemoteExecRequest) (*sandbox.RemoteExecResult, error) {
+	c.execs = append(c.execs, req)
+	if c.execErr != nil {
+		return nil, c.execErr
+	}
+	if c.execResult != nil {
+		return c.execResult, nil
+	}
+	return &sandbox.RemoteExecResult{ExitCode: 0}, nil
+}
+func (c *recordingRemoteClient) WriteFile(context.Context, sandbox.RemoteSandboxHandle, string, []byte) error {
+	panic("WriteFile should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) ReadFile(context.Context, sandbox.RemoteSandboxHandle, string) ([]byte, error) {
+	panic("ReadFile should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) ListDir(context.Context, sandbox.RemoteSandboxHandle, string) ([]sandbox.RemoteDirEntry, error) {
+	panic("ListDir should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) MakeDir(context.Context, sandbox.RemoteSandboxHandle, string) error {
+	panic("MakeDir should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) Remove(context.Context, sandbox.RemoteSandboxHandle, string) error {
+	panic("Remove should not be called from AfterCreate")
+}
+func (c *recordingRemoteClient) Stat(context.Context, sandbox.RemoteSandboxHandle, string) (*sandbox.RemoteStatEntry, error) {
+	panic("Stat should not be called from AfterCreate")
+}
+
+var _ sandbox.RemoteSandboxClient = (*recordingRemoteClient)(nil)
