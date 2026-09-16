@@ -92,3 +92,21 @@ func TestPipelineSnapshotHashesPromptBodiesAndFingerprintsControls(t *testing.T)
 	require.NotEqual(t, fullA, fingerprintEvaluationConfig(config, false))
 	require.Equal(t, controlledA, fingerprintEvaluationConfig(config, true))
 }
+
+func TestControlledFingerprintIgnoresModelDisplayMetadata(t *testing.T) {
+	config := &types.EvaluationRunConfig{
+		SchemaVersion: 2, DatasetFingerprint: "sha256:data", DatasetSamples: 4,
+		Models: []types.EvaluationModelSnapshot{{
+			Role: "embedding", ID: "embed-a", Name: "text-embedding-v1",
+			DisplayName: "Embedding A", ConfigFingerprint: "sha256:model",
+			UpdatedAt: time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC),
+		}},
+		CodeVersion: "commit-abc",
+	}
+	baseline := fingerprintEvaluationConfig(config, true)
+	config.Models[0].DisplayName = "Renamed only"
+	config.Models[0].UpdatedAt = config.Models[0].UpdatedAt.Add(time.Hour)
+	require.Equal(t, baseline, fingerprintEvaluationConfig(config, true))
+	config.Models[0].ConfigFingerprint = "sha256:changed"
+	require.NotEqual(t, baseline, fingerprintEvaluationConfig(config, true))
+}

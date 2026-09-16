@@ -140,7 +140,7 @@ type EvaluationSummarySnapshot struct {
 }
 
 // EvaluationModelSnapshot identifies the exact non-secret model configuration
-// used by a run. ConfigFingerprint excludes credentials and custom headers.
+// used by a run. ConfigFingerprint excludes credentials and secret headers.
 type EvaluationModelSnapshot struct {
 	Role              string      `json:"role"`
 	ID                string      `json:"id"`

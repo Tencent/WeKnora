@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -44,16 +45,31 @@ func verify(reader io.Reader) error {
 	}
 	if kind.BenchmarkID != "" {
 		var report types.WikiCacheBenchmarkEvidence
-		if err := json.Unmarshal(data, &report); err != nil {
+		if err := decodeStrictEvidence(data, &report); err != nil {
 			return fmt.Errorf("parse report: %w", err)
 		}
 		return verifyWikiCacheReport(&report)
 	}
 	var report types.EvaluationEvidenceReport
-	if err := json.Unmarshal(data, &report); err != nil {
+	if err := decodeStrictEvidence(data, &report); err != nil {
 		return fmt.Errorf("parse report: %w", err)
 	}
 	return verifyEvaluationReport(&report)
+}
+
+func decodeStrictEvidence(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
 }
 
 func verifyEvaluationReport(report *types.EvaluationEvidenceReport) error {

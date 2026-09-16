@@ -235,6 +235,31 @@ func TestCachedEmbedderReportsHitsMissesAndBatchDeduplication(t *testing.T) {
 	}, collector.observations[1])
 }
 
+func TestCachedEmbedderDoesNotDoubleCountPersistentDuplicateHits(t *testing.T) {
+	backend := &cacheTestPersistentBackend{
+		vectors: make(map[string][]float32), expiresAt: make(map[string]time.Time),
+	}
+	SetPersistentCache(backend)
+	t.Cleanup(func() { SetPersistentCache(nil) })
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))
+
+	seed := newTestCachedEmbedder(&cacheTestEmbedder{modelID: "persistent-model"})
+	_, err := seed.Embed(ctx, "same")
+	require.NoError(t, err)
+
+	collector := &cacheObservationCollector{}
+	types.SetGlobalLLMCallObserver(collector)
+	t.Cleanup(func() { types.SetGlobalLLMCallObserver(nil) })
+	reader := newTestCachedEmbedder(&cacheTestEmbedder{modelID: "persistent-model"})
+	_, err = reader.BatchEmbed(ctx, []string{"same", "same"})
+	require.NoError(t, err)
+	require.Len(t, collector.observations, 1)
+	require.Equal(t, 2, collector.observations[0].LookupCount)
+	require.Equal(t, 1, collector.observations[0].HitCount)
+	require.Equal(t, 1, collector.observations[0].DeduplicatedCount)
+	require.Equal(t, 2, collector.observations[0].AvoidedComputations)
+}
+
 func TestCachedEmbedderPooledPathOnlyFetchesMisses(t *testing.T) {
 	inner := &cacheTestEmbedder{modelID: t.Name()}
 	cached := newTestCachedEmbedder(inner)
@@ -281,6 +306,19 @@ func TestCachedEmbedderEvictsLeastRecentlyUsedEntry(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.Equal(t, 4, inner.embedCalls)
+}
+
+func TestEmbeddingCacheStoreBoundsNamespacesIndependently(t *testing.T) {
+	store := newEmbeddingCacheStore()
+	expiresAt := time.Now().Add(time.Hour)
+	store.put("large", "large-a", []float32{1}, expiresAt, 2)
+	store.put("large", "large-b", []float32{2}, expiresAt, 2)
+	store.put("small", "small-a", []float32{3}, expiresAt, 1)
+
+	_, firstOK := store.get("large", "large-a", time.Now())
+	_, secondOK := store.get("large", "large-b", time.Now())
+	require.True(t, firstOK)
+	require.True(t, secondOK)
 }
 
 func TestEmbeddingCacheOptions(t *testing.T) {

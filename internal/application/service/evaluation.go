@@ -978,6 +978,11 @@ func fingerprintEvaluationConfig(config *types.EvaluationRunConfig, controlled b
 		models = models[:0]
 		for _, model := range config.Models {
 			if model.Role != "chat" {
+				// Display metadata does not change inference behavior. Controlled
+				// grouping is based on the selected role/row and its non-secret
+				// configuration, not on a rename or an unchanged save timestamp.
+				model.DisplayName = ""
+				model.UpdatedAt = time.Time{}
 				models = append(models, model)
 			}
 		}

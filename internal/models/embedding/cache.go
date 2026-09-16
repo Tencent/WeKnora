@@ -68,10 +68,14 @@ func getPersistentCache() PersistentCache {
 }
 
 // embeddingCacheStore is shared across model instances because modelService
-// rebuilds an Embedder for each lookup. The bounded LRU prevents repeated model
-// creation from creating an unbounded number of caches.
+// rebuilds an Embedder for each lookup. Each model/config namespace owns its
+// bounded LRU so one model's smaller limit cannot evict another model's cache.
 type embeddingCacheStore struct {
-	mu      sync.Mutex
+	mu       sync.Mutex
+	segments map[string]*embeddingCacheSegment
+}
+
+type embeddingCacheSegment struct {
 	entries map[string]*list.Element
 	lru     *list.List
 }
@@ -80,57 +84,67 @@ var sharedEmbeddingCache = newEmbeddingCacheStore()
 
 func newEmbeddingCacheStore() *embeddingCacheStore {
 	return &embeddingCacheStore{
-		entries: make(map[string]*list.Element),
-		lru:     list.New(),
+		segments: make(map[string]*embeddingCacheSegment),
 	}
 }
 
-func (s *embeddingCacheStore) get(key string, now time.Time) ([]float32, bool) {
+func (s *embeddingCacheStore) get(namespace, key string, now time.Time) ([]float32, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	element, ok := s.entries[key]
+	segment := s.segments[namespace]
+	if segment == nil {
+		return nil, false
+	}
+	element, ok := segment.entries[key]
 	if !ok {
 		return nil, false
 	}
 	entry := element.Value.(*embeddingCacheEntry)
 	if !now.Before(entry.expiresAt) {
-		s.remove(element)
+		s.remove(segment, element)
 		return nil, false
 	}
-	s.lru.MoveToFront(element)
+	segment.lru.MoveToFront(element)
 	return cloneVector(entry.vector), true
 }
 
-func (s *embeddingCacheStore) put(key string, vector []float32, expiresAt time.Time, maxEntries int) {
+func (s *embeddingCacheStore) put(
+	namespace, key string, vector []float32, expiresAt time.Time, maxEntries int,
+) {
 	if maxEntries <= 0 {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if element, ok := s.entries[key]; ok {
+	segment := s.segments[namespace]
+	if segment == nil {
+		segment = &embeddingCacheSegment{entries: make(map[string]*list.Element), lru: list.New()}
+		s.segments[namespace] = segment
+	}
+	if element, ok := segment.entries[key]; ok {
 		entry := element.Value.(*embeddingCacheEntry)
 		entry.vector = cloneVector(vector)
 		entry.expiresAt = expiresAt
-		s.lru.MoveToFront(element)
+		segment.lru.MoveToFront(element)
 	} else {
 		entry := &embeddingCacheEntry{key: key, vector: cloneVector(vector), expiresAt: expiresAt}
-		element := s.lru.PushFront(entry)
-		s.entries[key] = element
+		element := segment.lru.PushFront(entry)
+		segment.entries[key] = element
 	}
-	for s.lru.Len() > maxEntries {
-		s.remove(s.lru.Back())
+	for segment.lru.Len() > maxEntries {
+		s.remove(segment, segment.lru.Back())
 	}
 }
 
-func (s *embeddingCacheStore) remove(element *list.Element) {
+func (s *embeddingCacheStore) remove(segment *embeddingCacheSegment, element *list.Element) {
 	if element == nil {
 		return
 	}
 	entry := element.Value.(*embeddingCacheEntry)
-	delete(s.entries, entry.key)
-	s.lru.Remove(element)
+	delete(segment.entries, entry.key)
+	segment.lru.Remove(element)
 }
 
 type cachedEmbedder struct {
@@ -143,7 +157,7 @@ type cachedEmbedder struct {
 
 func (c *cachedEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	key := c.key(ctx, text)
-	if vector, ok := c.store.get(key, c.now()); ok {
+	if vector, ok := c.store.get(c.namespace, key, c.now()); ok {
 		c.observeCache(ctx, 1, 1, 0, 0)
 		return vector, nil
 	}
@@ -151,7 +165,7 @@ func (c *cachedEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 		vectors, err := backend.Get(ctx, []string{key}, c.now())
 		if err == nil {
 			if entry, ok := vectors[key]; ok {
-				c.store.put(key, entry.Vector, entry.ExpiresAt, c.options.maxEntries)
+				c.store.put(c.namespace, key, entry.Vector, entry.ExpiresAt, c.options.maxEntries)
 				c.observeCache(ctx, 1, 1, 0, 0)
 				return cloneVector(entry.Vector), nil
 			}
@@ -163,7 +177,7 @@ func (c *cachedEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 		return nil, err
 	}
 	expiresAt := c.now().Add(c.options.ttl)
-	c.store.put(key, vector, expiresAt, c.options.maxEntries)
+	c.store.put(c.namespace, key, vector, expiresAt, c.options.maxEntries)
 	c.persist(ctx, map[string][]float32{key: vector}, expiresAt)
 	return cloneVector(vector), nil
 }
@@ -205,7 +219,7 @@ func (c *cachedEmbedder) batchEmbed(
 
 	for index, text := range texts {
 		key := c.key(ctx, text)
-		if vector, ok := c.store.get(key, now); ok {
+		if vector, ok := c.store.get(c.namespace, key, now); ok {
 			results[index] = vector
 			hitCount++
 			continue
@@ -231,8 +245,11 @@ func (c *cachedEmbedder) batchEmbed(
 					remaining = append(remaining, item)
 					continue
 				}
-				c.store.put(item.key, entry.Vector, entry.ExpiresAt, c.options.maxEntries)
-				hitCount += len(item.indices)
+				c.store.put(c.namespace, item.key, entry.Vector, entry.ExpiresAt, c.options.maxEntries)
+				// Duplicate positions were already classified as in-batch
+				// deduplication above. Count the persisted unique key once so
+				// avoided computations never exceeds total lookups.
+				hitCount++
 				for _, resultIndex := range item.indices {
 					results[resultIndex] = cloneVector(entry.Vector)
 				}
@@ -261,7 +278,7 @@ func (c *cachedEmbedder) batchEmbed(
 	persistentVectors := make(map[string][]float32, len(misses))
 	for missIndex, item := range misses {
 		vector := vectors[missIndex]
-		c.store.put(item.key, vector, expiresAt, c.options.maxEntries)
+		c.store.put(c.namespace, item.key, vector, expiresAt, c.options.maxEntries)
 		persistentVectors[item.key] = vector
 		for _, resultIndex := range item.indices {
 			results[resultIndex] = cloneVector(vector)
