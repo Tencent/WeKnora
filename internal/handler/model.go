@@ -529,7 +529,7 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			Temperature:         0.1,
 			MaxCompletionTokens: 5000,
 			Messages: []invoke.Message{{
-				Role: "user",
+				Role: invoke.RoleUser,
 				Content: []invoke.Part{
 					{Text: input},
 					{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(fileBytes)}},

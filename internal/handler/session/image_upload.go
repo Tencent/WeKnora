@@ -94,7 +94,7 @@ func (h *Handler) analyzeImageAttachments(ctx context.Context, images []ImageAtt
 			Temperature:         0.1,
 			MaxCompletionTokens: 5000,
 			Messages: []invoke.Message{{
-				Role: "user",
+				Role: invoke.RoleUser,
 				Content: []invoke.Part{
 					{Text: prompt},
 					{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(imgBytes)}},

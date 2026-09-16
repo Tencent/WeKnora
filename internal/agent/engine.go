@@ -784,7 +784,7 @@ func (e *AgentEngine) runReActIteration(
 				logger.Warnf(ctx, "[Agent][Round-%d] Empty content with stop - retrying (%d/%d)",
 					round, *emptyRetries, maxEmptyResponseRetries)
 				*messagesPtr = append(*messagesPtr, invoke.TextMessage(
-					"user", "Please provide your complete answer now as plain text."))
+					invoke.RoleUser, "Please provide your complete answer now as plain text."))
 				return iterOutcomeContinue, nil
 			}
 			// Retries exhausted — use fallback message rather than empty answer.
