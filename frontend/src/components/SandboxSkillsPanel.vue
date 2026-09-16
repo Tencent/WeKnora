@@ -607,14 +607,13 @@ import { computed, inject, nextTick, onUnmounted, reactive, ref, watch } from 'v
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
-import { fetchEventSource } from '@microsoft/fetch-event-source'
 import ModelSelector from '@/components/ModelSelector.vue'
 import SkillInstallTimeline from '@/components/SkillInstallTimeline.vue'
 import { SETTING_DRAWER_HEADER_ACTIONS_ID } from '@/components/settings/SettingDrawer.vue'
 import { SKILL_ICON } from '@/types/mention'
+import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
 import { useSkillInstallerModel } from '@/composables/useSkillInstallerModel'
 import {
-  configSkillInstallEventsUrl,
   deleteConfigSkill,
   getSandboxConfigById,
   listConfigSkills,
@@ -624,12 +623,9 @@ import {
   uploadConfigSkill,
   installConfigSkillFromSource,
   type ConfigSkill,
-  type ConfigSkillInstallEvent,
   type SandboxConfigRecord,
 } from '@/api/system'
-import { getApiBaseUrl } from '@/utils/api-base'
-import { generateRandomString, MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
-import i18n from '@/i18n'
+import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
 import {
   MAX_ENV_VALUE_BYTES,
   addSkillEnvSaveInFlight,
@@ -701,9 +697,18 @@ const envDrafts = reactive<Record<string, Record<string, string>>>({})
 const envInputUnlocked = reactive<Record<string, boolean>>({})
 const envSavesInFlight = ref<SkillEnvSavesInFlight>({})
 const fileInputRef = ref<HTMLInputElement | null>(null)
-const progressById = ref<Record<string, ConfigSkillInstallEvent>>({})
-
-const abortBySkill = new Map<string, AbortController>()
+const {
+  eventOf: installEventOf, follow: followInstallProgress, sync: syncInstallProgress,
+  stopAll: stopAllFollows, reset: resetInstallProgress, forget: forgetInstallProgress,
+  setEvent: setInstallEvent,
+} = useConfigSkillInstallProgress({
+  retainProgress: true,
+  onDone() {
+    void loadSkills()
+    void refreshImage()
+  },
+})
+let panelGeneration = 0
 let pollTimer: number | null = null
 
 const {
@@ -747,7 +752,7 @@ function isBusy(skill: ConfigSkill): boolean {
 
 function isRemoving(skill: ConfigSkill): boolean {
   if (uninstallingId.value === skill.id && !uninstallDone.value) {
-    if (progressById.value[skill.id]?.stage !== 'failed') return true
+    if (progressEvent(skill.id)?.stage !== 'failed') return true
   }
   return skill.status === 'removing' || deletingId.value === skill.id
 }
@@ -1001,7 +1006,7 @@ async function submitEnvs(
 }
 
 function progressOf(skill: ConfigSkill): number {
-  const percent = progressById.value[skill.id]?.percent
+  const percent = progressEvent(skill.id)?.percent
   if (typeof percent === 'number' && Number.isFinite(percent)) {
     return Math.max(0, Math.min(100, percent))
   }
@@ -1018,7 +1023,7 @@ const REMOVE_STAGE_I18N: Record<string, string> = {
 }
 
 function progressStageText(skill: ConfigSkill): string {
-  const ev = progressById.value[skill.id]
+  const ev = progressEvent(skill.id)
   const stageKey = ev?.stage ? REMOVE_STAGE_I18N[ev.stage] : ''
   if (stageKey) return t(stageKey)
   if (skill.status === 'removing' || deletingId.value === skill.id) {
@@ -1028,21 +1033,18 @@ function progressStageText(skill: ConfigSkill): string {
 }
 
 function progressLog(skill: ConfigSkill): string {
-  const ev = progressById.value[skill.id]
+  const ev = progressEvent(skill.id)
   if (ev?.log) return ev.log
   if (skill.status === 'removing') return progressStageText(skill)
   return ''
 }
 
-// A re-run reuses the skill id, so the previous run's last event is still the
-// one cached here. Left in place it renders as this run's state: a retry would
-// open at 100% showing the failure it was started to fix, until the first new
-// event lands.
+function progressEvent(skillId: string) {
+  return installEventOf(props.record?.id || '', skillId)
+}
+
 function forgetProgress(skillId: string) {
-  if (!(skillId in progressById.value)) return
-  const next = { ...progressById.value }
-  delete next[skillId]
-  progressById.value = next
+  if (props.record) forgetInstallProgress(props.record.id, skillId)
 }
 
 function failedError(skill: ConfigSkill): string {
@@ -1062,7 +1064,7 @@ function failedErrorLines(skill: ConfigSkill): string[] {
 }
 
 function removalErrorLines(skill: ConfigSkill): string[] {
-  const ev = progressById.value[skill.id]
+  const ev = progressEvent(skill.id)
   const raw = ev?.stage === 'failed'
     ? (ev.log || skill.error || '')
     : (uninstallingId.value === skill.id && skill.status !== 'removing' ? (skill.error || '') : '')
@@ -1070,20 +1072,6 @@ function removalErrorLines(skill: ConfigSkill): string[] {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-}
-
-function stopFollow(skillId: string) {
-  const controller = abortBySkill.get(skillId)
-  if (controller) {
-    controller.abort()
-    abortBySkill.delete(skillId)
-  }
-}
-
-function stopAllFollows() {
-  for (const skillId of [...abortBySkill.keys()]) {
-    stopFollow(skillId)
-  }
 }
 
 function stopPoll() {
@@ -1105,67 +1093,25 @@ function ensurePoll() {
 }
 
 function followBusySkills() {
-  if (!props.record) return
-  const busyIds = new Set(skills.value.filter(isBusy).map((skill) => skill.id))
-  for (const skillId of [...abortBySkill.keys()]) {
-    if (!busyIds.has(skillId)) stopFollow(skillId)
-  }
-  for (const skill of skills.value) {
-    if (isBusy(skill)) followProgress(skill.id)
-  }
+  const configId = props.record?.id
+  syncInstallProgress(configId
+    ? skills.value.filter(isBusy).map(skill => ({ configId, skillId: skill.id }))
+    : [])
 }
 
 function followProgress(skillId: string) {
-  if (!props.record || abortBySkill.has(skillId)) return
-  const configId = props.record.id
-  const controller = new AbortController()
-  abortBySkill.set(skillId, controller)
-
-  const token = localStorage.getItem('weknora_token')
-  const tenantId = localStorage.getItem('weknora_selected_tenant_id')
-  const url = `${getApiBaseUrl()}${configSkillInstallEventsUrl(configId, skillId)}`
-
-  void fetchEventSource(url, {
-    method: 'GET',
-    headers: {
-      Authorization: token ? `Bearer ${token}` : '',
-      'Accept-Language': i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
-      'X-Request-ID': generateRandomString(12),
-      ...(tenantId ? { 'X-Tenant-ID': tenantId } : {}),
-    },
-    signal: controller.signal,
-    openWhenHidden: true,
-    onmessage(ev) {
-      if (!ev.data) return
-      let parsed: ConfigSkillInstallEvent
-      try {
-        parsed = JSON.parse(ev.data) as ConfigSkillInstallEvent
-      } catch {
-        return
-      }
-      progressById.value = { ...progressById.value, [skillId]: parsed }
-      if (parsed.done) {
-        stopFollow(skillId)
-        void loadSkills()
-        void refreshImage()
-      }
-    },
-    onerror() {
-      stopFollow(skillId)
-      throw new Error('skill install stream closed')
-    },
-  }).catch(() => {
-    stopFollow(skillId)
-  })
+  if (props.record) followInstallProgress(props.record.id, skillId)
 }
 
 async function refreshImage() {
   if (!props.record) return
+  const generation = panelGeneration
   try {
     const res = await getSandboxConfigById(props.record.id)
+    if (generation !== panelGeneration) return
     if (res?.data) emit('updated', res.data)
   } catch {
-    emit('skillsChanged')
+    if (generation === panelGeneration) emit('skillsChanged')
   }
 }
 
@@ -1176,7 +1122,7 @@ function skillsSignature(list: ConfigSkill[]): string {
 function overlayUninstallStatus(list: ConfigSkill[]): ConfigSkill[] {
   const id = uninstallingId.value
   if (!id || uninstallDone.value) return list
-  if (progressById.value[id]?.stage === 'failed') return list
+  if (progressEvent(id)?.stage === 'failed') return list
   return list.map((item) => {
     if (item.id !== id) return item
     if (item.status === 'removed' || item.status === 'failed' || item.status === 'removing') {
@@ -1188,11 +1134,13 @@ function overlayUninstallStatus(list: ConfigSkill[]): ConfigSkill[] {
 
 async function loadSkills(silent = false) {
   if (!props.record) return
+  const generation = panelGeneration
   if (!silent) loading.value = true
   const previous = skillsSignature(skills.value)
   const wasBusy = skills.value.some(isBusy)
   try {
     const res = await listConfigSkills(props.record.id)
+    if (generation !== panelGeneration) return
     skills.value = overlayUninstallStatus(res?.data || [])
     followBusySkills()
     ensurePoll()
@@ -1204,11 +1152,11 @@ async function loadSkills(silent = false) {
       void refreshImage()
     }
   } catch (e: any) {
-    if (!silent) {
+    if (!silent && generation === panelGeneration) {
       MessagePlugin.error(e?.message || t('settings.sandbox.skillLoadFailed'))
     }
   } finally {
-    if (!silent) loading.value = false
+    if (!silent && generation === panelGeneration) loading.value = false
   }
 }
 
@@ -1337,26 +1285,32 @@ async function toggleEnabled(skill: ConfigSkill, enabled: boolean) {
 // re-attached under the id already on screen.
 async function retrySkill(skill: ConfigSkill) {
   if (!props.record) return
+  const generation = panelGeneration
   retryingId.value = skill.id
   forgetProgress(skill.id)
   try {
     await reinstallConfigSkill(props.record.id, skill.id)
+    if (generation !== panelGeneration) return
     MessagePlugin.success(t('settings.sandbox.skillRetryAccepted'))
     await loadSkills()
+    if (generation !== panelGeneration) return
     followProgress(skill.id)
   } catch (e: any) {
+    if (generation !== panelGeneration) return
     MessagePlugin.error(e?.message || t('settings.sandbox.skillRetryFailed'))
   } finally {
-    retryingId.value = ''
+    if (generation === panelGeneration) retryingId.value = ''
   }
 }
 
 async function stopSkill(skill: ConfigSkill) {
   if (!props.record) return
+  const generation = panelGeneration
   stoppingId.value = skill.id
   forgetProgress(skill.id)
   try {
     const res = await stopConfigSkill(props.record.id, skill.id)
+    if (generation !== panelGeneration) return
     const updated = res?.data
     if (updated) {
       skills.value = skills.value.map((item) => (item.id === skill.id ? { ...item, ...updated } : item))
@@ -1364,14 +1318,16 @@ async function stopSkill(skill: ConfigSkill) {
     MessagePlugin.success(t('settings.sandbox.skillStopAccepted'))
     await loadSkills()
   } catch (e: any) {
+    if (generation !== panelGeneration) return
     MessagePlugin.error(e?.message || t('settings.sandbox.skillStopFailed'))
   } finally {
-    stoppingId.value = ''
+    if (generation === panelGeneration) stoppingId.value = ''
   }
 }
 
 async function removeSkill(skill: ConfigSkill) {
   if (!props.record || isBusy(skill) || deletingId.value) return
+  const generation = panelGeneration
   deletingId.value = skill.id
   uninstallingId.value = skill.id
   uninstallingName.value = skill.name
@@ -1379,25 +1335,26 @@ async function removeSkill(skill: ConfigSkill) {
   forgetProgress(skill.id)
   try {
     await deleteConfigSkill(props.record.id, skill.id)
+    if (generation !== panelGeneration) return
     MessagePlugin.success(t('settings.sandbox.skillDeleteAccepted'))
     skills.value = skills.value.map((item) => (
       item.id === skill.id ? { ...item, status: 'removing' } : item
     ))
     sawRemoving.value = true
-    progressById.value = {
-      ...progressById.value,
-      [skill.id]: { percent: 5, stage: 'accepted', done: false },
-    }
+    setInstallEvent(props.record.id, skill.id, { percent: 5, stage: 'accepted', done: false })
     await loadSkills()
+    if (generation !== panelGeneration) return
     await refreshImage()
+    if (generation !== panelGeneration) return
     followProgress(skill.id)
   } catch (e: any) {
+    if (generation !== panelGeneration) return
     uninstallingId.value = ''
     uninstallingName.value = ''
     sawRemoving.value = false
     MessagePlugin.error(e?.message || t('common.deleteFailed'))
   } finally {
-    deletingId.value = ''
+    if (generation === panelGeneration) deletingId.value = ''
   }
 }
 
@@ -1407,6 +1364,18 @@ watch(
   () => props.record?.id,
   (configID, previousConfigID) => {
     if (configID !== previousConfigID) {
+      panelGeneration++
+      resetInstallProgress()
+      stopPoll()
+      skills.value = []
+      loading.value = false
+      retryingId.value = ''
+      stoppingId.value = ''
+      deletingId.value = ''
+      uninstallingId.value = ''
+      uninstallingName.value = ''
+      uninstallDone.value = false
+      sawRemoving.value = false
       expandedEnvSkillId.value = ''
       for (const skillId of Object.keys(envDrafts)) delete envDrafts[skillId]
     }
@@ -1417,7 +1386,6 @@ watch(
     stopAllFollows()
     stopPoll()
     skills.value = []
-    progressById.value = {}
     resetInstallerModel()
   },
   { immediate: true },
@@ -1431,6 +1399,7 @@ watch(
 )
 
 onUnmounted(() => {
+  panelGeneration++
   stopAllFollows()
   stopPoll()
   if (focusTimer != null) window.clearTimeout(focusTimer)
