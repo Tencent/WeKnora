@@ -69,6 +69,7 @@ miniprogram/project.private.config.json
 /docs/adr/0001-saved-model-config-never-auto-refreshed.md
 /docs/adr/0002-model-level-thinking-levels-catalog-or-user-pick.md
 /docs/adr/0003-scope-model-management-plus-unified-invocation.md
+/docs/adr/0004-model-types-converge-to-four-facets-vision-rides-modalities.md
 
 # fork 本地的手动 docker 构建流水线（不入上游，2026-09-15）
 /.github/workflows/docker-build.yaml

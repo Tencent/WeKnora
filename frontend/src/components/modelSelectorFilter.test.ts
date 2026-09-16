@@ -21,19 +21,18 @@ function model(overrides: Partial<ModelConfig> & Pick<ModelConfig, 'id' | 'type'
 }
 
 const fixtures: ModelConfig[] = [
-  model({ id: 'vllm-1', name: 'MiniMax-M3', display_name: 'MiniMax M3', type: 'VLLM' }),
   model({ id: 'chat-vision', name: 'MiniMax-M3', display_name: 'MiniMax M3', type: 'KnowledgeQA', parameters: { supports_vision: true } }),
   model({ id: 'chat-text', type: 'KnowledgeQA' }),
   model({ id: 'embed-vision', type: 'Embedding', parameters: { supports_vision: true } }),
   model({ id: 'embed-1', type: 'Embedding' }),
 ]
 
-test('VLLM selector includes native VLLM and vision-capable chat models', () => {
-  const ids = filterModelsByType(fixtures, 'VLLM').map((m) => m.id)
-  assert.deepEqual(ids, ['vllm-1', 'chat-vision'])
+test('vision selector includes vision-capable chat models only (ADR 0004)', () => {
+  const ids = filterModelsByType(fixtures, 'vision').map((m) => m.id)
+  assert.deepEqual(ids, ['chat-vision'])
 })
 
-test('VLLM selector keeps the standard model-name presentation without type suffixes', () => {
+test('vision selector keeps the standard model-name presentation without type suffixes', () => {
   assert.match(selectorSource, /:label="modelDisplayName\(model\)"/)
   assert.doesNotMatch(selectorSource, /modelOptionTypeLabel|modelOptionLabel|vlmOptionType/)
 })
@@ -43,7 +42,7 @@ test('VLM selection, knowledge-base and agent saves, and deletion preserve the s
   assert.match(selectorSource, /emit\('update:selectedModelId', value \|\| ''\)/)
   assert.match(kbEditorSource, /handleMultimodalVLLMChange[\s\S]*vllmModelId = modelId/)
   assert.match(kbEditorSource, /vlm_config = \{[\s\S]*model_id:[\s\S]*vllmModelId/)
-  assert.match(agentEditorSource, /model-type="VLLM"[\s\S]*formData\.config\.vlm_model_id[\s\S]*formData\.config\.vlm_model_id = val/)
+  assert.match(agentEditorSource, /model-type="vision"[\s\S]*formData\.config\.vlm_model_id[\s\S]*formData\.config\.vlm_model_id = val/)
   assert.match(agentEditorSource, /const payload = \{ \.\.\.formData\.value, config: serializeAgentPrompts/)
   assert.match(agentEditorSource, /updateAgent\(formData\.value\.id, payload\)/)
   assert.match(modelSettingsSource, /@confirm="deleteModel\(model\._modelType, model\.id\)"/)
@@ -51,13 +50,13 @@ test('VLM selection, knowledge-base and agent saves, and deletion preserve the s
   assert.match(modelSettingsSource, /await deleteModelAPI\(modelId\)/)
 })
 
-test('VLLM selector excludes non-vision chat and other types even with supports_vision', () => {
-  const ids = filterModelsByType(fixtures, 'VLLM')
+test('vision selector excludes non-vision chat and other types even with supports_vision', () => {
+  const ids = filterModelsByType(fixtures, 'vision')
   assert.ok(!ids.some((m) => m.id === 'chat-text'))
   assert.ok(!ids.some((m) => m.id === 'embed-vision'))
 })
 
-test('non-VLLM selectors still filter strictly by type', () => {
+test('non-vision selectors still filter strictly by type', () => {
   const ids = filterModelsByType(fixtures, 'KnowledgeQA').map((m) => m.id)
   assert.deepEqual(ids, ['chat-vision', 'chat-text'])
 })

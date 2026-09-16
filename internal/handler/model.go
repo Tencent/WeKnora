@@ -102,6 +102,11 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	// mutate persisted data (2026-09-13 review: Create used to strip control
 	// characters at rest while Update stored raw, so editing a name carrying
 	// an invisible control character made the corruption visible).
+	if !isValidModelType(req.Type) {
+		c.Error(errors.NewBadRequestError("unsupported model type: " + string(req.Type)))
+		return
+	}
+	req.Parameters.NormalizeInputModalities()
 	model := &types.Model{
 		TenantID:    tenantID,
 		Name:        req.Name,
@@ -444,6 +449,41 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("query cannot be empty"))
 			return
 		}
+		// Image debug (the former VLLM case): a chat model that declares
+		// image input accepts an image file with the prompt; one that does
+		// not must not silently drop the upload (ADR 0004).
+		if len(fileBytes) > 0 {
+			if !model.Parameters.GetSupportsVision() {
+				c.Error(errors.NewBadRequestError("model does not accept image input"))
+				return
+			}
+			invokeCfg, callErr := h.service.BuildModelConfig(ctx, model)
+			if callErr != nil {
+				writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+				return
+			}
+			resp, callErr := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
+				// v1 vlm.Predict defaults: temperature 0.1, MaxTokens 5000,
+				// image inlined as a data URI with auto detail (text prompt
+				// first).
+				Temperature:         0.1,
+				MaxCompletionTokens: 5000,
+				Messages: []invoke.Message{{
+					Role: invoke.RoleUser,
+					Content: []invoke.Part{
+						{Text: input},
+						{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(fileBytes)}},
+					},
+				}},
+			})
+			result := ""
+			if resp != nil {
+				result = resp.Content
+			}
+			observations["answer_characters"] = len([]rune(result))
+			writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
+			return
+		}
 		// The outer fetch already loaded the record — a second GetModelByID
 		// per case is a wasted round trip and a TOCTOU gap (2026-09-13 review).
 		invokeCfg, callErr := h.service.BuildModelConfig(ctx, model)
@@ -511,37 +551,6 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		results, callErr := instance.Rerank(ctx, input, documents)
 		observations["result_count"] = len(results)
 		writeModelDebugResult(c, started, requestPreview, results, callErr, observations)
-	case types.ModelTypeVLLM:
-		if len(fileBytes) == 0 {
-			c.Error(errors.NewBadRequestError("image file is required"))
-			return
-		}
-		// The outer fetch already loaded the record — a second GetModelByID
-		// per case is a wasted round trip and a TOCTOU gap (2026-09-13 review).
-		invokeCfg, callErr := h.service.BuildModelConfig(ctx, model)
-		if callErr != nil {
-			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
-			return
-		}
-		resp, callErr := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
-			// v1 vlm.Predict defaults: temperature 0.1, MaxTokens 5000, image
-			// inlined as a data URI with auto detail (text prompt first).
-			Temperature:         0.1,
-			MaxCompletionTokens: 5000,
-			Messages: []invoke.Message{{
-				Role: invoke.RoleUser,
-				Content: []invoke.Part{
-					{Text: input},
-					{Image: &invoke.ImageRef{URL: invoke.ImageDataURI(fileBytes)}},
-				},
-			}},
-		})
-		result := ""
-		if resp != nil {
-			result = resp.Content
-		}
-		observations["answer_characters"] = len([]rune(result))
-		writeModelDebugResult(c, started, requestPreview, result, callErr, observations)
 	case types.ModelTypeASR:
 		if len(fileBytes) == 0 {
 			c.Error(errors.NewBadRequestError("audio file is required"))
@@ -702,7 +711,12 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	model.Parameters = newParams
 
 	model.Source = req.Source
+	if !isValidModelType(req.Type) {
+		c.Error(errors.NewBadRequestError("unsupported model type: " + string(req.Type)))
+		return
+	}
 	model.Type = req.Type
+	newParams.NormalizeInputModalities()
 
 	logger.Infof(ctx, "Updating model, ID: %s, Name: %s", id, model.Name)
 	if err := h.service.UpdateModel(ctx, model); err != nil {
@@ -782,8 +796,21 @@ type ModelProviderDTO struct {
 	ExtraFields  []invoke.ExtraFieldConfig `json:"extraFields,omitempty"` // 动态配置字段
 }
 
+// isValidModelType gates writes to the closed type vocabulary (ADR 0004):
+// a stale client must not be able to persist a type the runtime no longer
+// knows how to dispatch.
+func isValidModelType(mt types.ModelType) bool {
+	switch mt {
+	case types.ModelTypeKnowledgeQA, types.ModelTypeEmbedding,
+		types.ModelTypeRerank, types.ModelTypeASR:
+		return true
+	default:
+		return false
+	}
+}
+
 // modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
-// KnowledgeQA -> chat, Embedding -> embedding, Rerank -> rerank, VLLM -> vllm
+// KnowledgeQA -> chat, Embedding -> embedding, Rerank -> rerank
 func modelTypeToFrontend(mt types.ModelType) string {
 	switch mt {
 	case types.ModelTypeKnowledgeQA:
@@ -792,8 +819,6 @@ func modelTypeToFrontend(mt types.ModelType) string {
 		return "embedding"
 	case types.ModelTypeRerank:
 		return "rerank"
-	case types.ModelTypeVLLM:
-		return "vllm"
 	case types.ModelTypeASR:
 		return "asr"
 	default:
@@ -807,7 +832,7 @@ func modelTypeToFrontend(mt types.ModelType) string {
 // @Tags         模型管理
 // @Accept       json
 // @Produce      json
-// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm, asr)"
+// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, asr)"
 // @Success      200         {object}  map[string]interface{}  "厂商列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -819,8 +844,8 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	logger.Infof(ctx, "Listing model providers for type: %s", secutils.SanitizeForLog(modelType))
 
 	// 将前端类型映射到后端类型
-	// 前端: chat, embedding, rerank, vllm
-	// 后端: KnowledgeQA, Embedding, Rerank, VLLM
+	// 前端: chat, embedding, rerank, asr
+	// 后端: KnowledgeQA, Embedding, Rerank, ASR
 	var backendModelType types.ModelType
 	switch modelType {
 	case "chat":
@@ -829,8 +854,6 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		backendModelType = types.ModelTypeEmbedding
 	case "rerank":
 		backendModelType = types.ModelTypeRerank
-	case "vllm":
-		backendModelType = types.ModelTypeVLLM
 	case "asr":
 		backendModelType = types.ModelTypeASR
 	default:

@@ -73,7 +73,7 @@ import {
 } from '@/utils/contextWindow'
 
 interface Props {
-  modelType: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR'
+  modelType: 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'ASR' | 'vision'
   selectedModelId?: string
   disabled?: boolean
   placeholder?: string

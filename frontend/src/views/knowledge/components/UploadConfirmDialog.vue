@@ -378,7 +378,7 @@
                           </div>
                           <div class="setting-control">
                             <ModelSelector
-                              model-type="VLLM"
+                              model-type="vision"
                               :selected-model-id="uiState.multimodalConfig.vllmModelId"
                               :all-models="allModels"
                               :status="showMultimodalModelError ? 'error' : 'default'"
@@ -1365,7 +1365,7 @@ const handleMultimodalVLLMChange = (modelId: string) => {
 }
 
 const handleAddVLLMModel = () => {
-  uiStore.openSettings('models', 'vllm')
+  uiStore.openSettings('models', 'chat')
 }
 
 const handleAddASRModel = () => {

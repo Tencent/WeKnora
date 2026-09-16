@@ -229,7 +229,6 @@ var validBuiltinModelTypes = map[ModelType]struct{}{
 	ModelTypeKnowledgeQA: {},
 	ModelTypeEmbedding:   {},
 	ModelTypeRerank:      {},
-	ModelTypeVLLM:        {},
 	ModelTypeASR:         {},
 }
 

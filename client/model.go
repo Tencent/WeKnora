@@ -16,8 +16,7 @@ type ModelType string
 const (
 	ModelTypeEmbedding   ModelType = "Embedding"   // Embedding model
 	ModelTypeRerank      ModelType = "Rerank"      // Rerank model
-	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
-	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
+	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model (vision rides input modalities)
 	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
 )
 
@@ -26,7 +25,7 @@ const (
 // re-typing the string set, so they can't drift from the SDK.
 func AllModelTypes() []ModelType {
 	return []ModelType{
-		ModelTypeEmbedding, ModelTypeRerank, ModelTypeKnowledgeQA, ModelTypeVLLM, ModelTypeASR,
+		ModelTypeEmbedding, ModelTypeRerank, ModelTypeKnowledgeQA, ModelTypeASR,
 	}
 }
 
@@ -215,7 +214,7 @@ type ModelProviderListResponse struct {
 }
 
 // ListModelProviders retrieves the list of supported model providers.
-// modelType is optional and can be used to filter by type: "chat", "embedding", "rerank", "vllm".
+// modelType is optional and can be used to filter by type: "chat", "embedding", "rerank", "asr".
 func (c *Client) ListModelProviders(ctx context.Context, modelType string) ([]ModelProvider, error) {
 	var queryParams url.Values
 	if modelType != "" {

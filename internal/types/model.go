@@ -17,8 +17,7 @@ type ModelType string
 const (
 	ModelTypeEmbedding   ModelType = "Embedding"   // Embedding model
 	ModelTypeRerank      ModelType = "Rerank"      // Rerank model
-	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
-	ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
+	ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model (vision rides InputModalities — ADR 0004)
 	ModelTypeASR         ModelType = "ASR"         // ASR (Automatic Speech Recognition) model
 )
 
@@ -121,8 +120,8 @@ type EmbeddingParameters struct {
 	SupportsDimensionOverride bool `yaml:"supports_dimension_override" json:"supports_dimension_override"`
 }
 
-// ChatParameters holds chat/vlm-specific configuration. KnowledgeQA and VLLM
-// share this shard (design §3). New chat fields live here; the deprecated
+// ChatParameters holds chat-specific configuration (design §3). New chat
+// fields live here; the deprecated
 // top-level SupportsVision / ContextWindow / MaxOutputTokens on ModelParameters
 // are still read through the Get* accessors below during the migration window
 // (design §8) so legacy rows keep working. Rerank/ASR have no type-specific
@@ -224,6 +223,40 @@ func (p *ModelParameters) EnsureChat() *ChatParameters {
 		p.Chat = &ChatParameters{}
 	}
 	return p.Chat
+}
+
+// inputModalityVocabulary is the closed set of chat input modalities a model
+// record may declare (ADR 0004): text is axiomatic, image/audio are
+// declarable, everything else (e.g. video — no product surface delivers it
+// to a model) is stripped on write so banned values cannot re-enter the
+// vocabulary through a client or a catalog prefill.
+var inputModalityVocabulary = map[string]struct{}{
+	"text": {}, "image": {}, "audio": {},
+}
+
+// NormalizeInputModalities enforces the chat input-modality vocabulary on
+// write: text is always present (an axiom of the chat facet, not an option
+// the client may drop), unknown values are dropped. Non-chat models have no
+// Chat shard and are left untouched.
+func (p *ModelParameters) NormalizeInputModalities() {
+	if p.Chat == nil {
+		return
+	}
+	normalized := make([]string, 0, len(p.Chat.InputModalities)+1)
+	hasText := false
+	for _, m := range p.Chat.InputModalities {
+		if _, ok := inputModalityVocabulary[m]; !ok {
+			continue
+		}
+		if m == "text" {
+			hasText = true
+		}
+		normalized = append(normalized, m)
+	}
+	if !hasText {
+		normalized = append(normalized, "text")
+	}
+	p.Chat.InputModalities = normalized
 }
 
 // Per-response redaction for Model now lives in dto.NewModelResponse. The

@@ -275,7 +275,7 @@
               </div>
             </div>
           </div>
-          <!-- 模型名称 / 模型 ID。远程 chat/vllm 用可搜索下拉（远端列表探测）+ 自由输入。 -->
+          <!-- 模型名称 / 模型 ID。远程对话模型用可搜索下拉（远端列表探测）+ 自由输入。 -->
           <div class="form-item">
             <label class="form-label required">{{ $t('model.modelName') }}</label>
             <t-select
@@ -314,7 +314,7 @@
 
       <!-- Section 3 — 模型参数设置（2026-09-13 裁定：上下文/预算/模态/思考
            属模型参数；并发上限单独留"高级选项"） -->
-      <section v-if="['embedding', 'chat', 'vllm'].includes(activeModelType)" class="setting-drawer__section">
+      <section v-if="['embedding', 'chat'].includes(activeModelType)" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionParameters') }}</h4>
 
         <!-- Embedding 专用：维度 -->
@@ -346,7 +346,7 @@
         </div>
 
         <!-- Chat / VLM: context window + max output tokens. Agent compaction sizes itself from this. -->
-        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+        <div v-if="activeModelType === 'chat'" class="form-item">
           <label class="form-label">
             {{ $t('model.editor.contextWindowLabel') }}
             <span v-if="prefillBadge('contextWindow')" class="prefill-source">{{ prefillBadge('contextWindow') }}</span>
@@ -357,7 +357,7 @@
           <p class="form-desc">{{ $t('model.editor.contextWindowDesc') }}</p>
         </div>
 
-        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+        <div v-if="activeModelType === 'chat'" class="form-item">
           <label class="form-label">
             {{ $t('model.editor.maxOutputTokensLabel') }}
             <span v-if="prefillBadge('maxOutputTokens')" class="prefill-source">{{ prefillBadge('maxOutputTokens') }}</span>
@@ -368,18 +368,18 @@
           <p class="form-desc">{{ $t('model.editor.maxOutputTokensDesc') }}</p>
         </div>
 
-        <!-- Chat/VLLM: 输入模态多选（2026-09-13 裁定 #2/#3：自由编辑，列表
+        <!-- Chat: 输入模态多选（2026-09-13 裁定 #2/#3：自由编辑，列表
              未提供模态不设限；LLM 默认文本。存 chat 分片 input_modalities） -->
-        <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
+        <div v-if="activeModelType === 'chat'" class="form-item">
           <label class="form-label">
             {{ $t('model.editor.inputModalitiesLabel') }}
             <span v-if="prefillBadge('inputModalities')" class="prefill-source">{{ prefillBadge('inputModalities') }}</span>
           </label>
           <t-checkbox-group v-model="formData.inputModalities" @change="markManualField('inputModalities')">
-            <t-checkbox value="text">{{ $t('model.editor.modalityText') }}</t-checkbox>
+            <!-- 文本是 chat facet 的公理（ADR 0004）：恒选且不可关闭 -->
+            <t-checkbox value="text" :disabled="true">{{ $t('model.editor.modalityText') }}</t-checkbox>
             <t-checkbox value="image">{{ $t('model.editor.modalityImage') }}</t-checkbox>
             <t-checkbox value="audio">{{ $t('model.editor.modalityAudio') }}</t-checkbox>
-            <t-checkbox value="video">{{ $t('model.editor.modalityVideo') }}</t-checkbox>
           </t-checkbox-group>
           <p class="form-desc">{{ $t('model.editor.inputModalitiesDesc') }}</p>
         </div>
@@ -403,14 +403,14 @@
         </template>
 
         <!--
-          Background concurrency cap for this model. Only chat / embedding / vllm
+          Background concurrency cap for this model. Only chat / embedding
           are gated by the governor (see internal/models/limiter), so we surface
           it just for those three. 0 = fall back to the global default.
         -->
       </section>
 
       <!-- Section 4 — 高级选项（仅后台并发上限：治理治理面，非模型参数） -->
-      <section v-if="['chat', 'embedding', 'vllm'].includes(activeModelType)" class="setting-drawer__section">
+      <section v-if="['chat', 'embedding'].includes(activeModelType)" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ $t('model.editor.sectionAdvanced') }}</h4>
         <div class="form-item">
           <label class="form-label">{{ $t('model.editor.maxConcurrencyLabel') }}</label>
@@ -472,7 +472,7 @@ interface ModelFormData {
   supportsVision?: boolean
   /** 对话/VLM 上下文窗口（token）。空/0 表示使用默认 200000。 */
   contextWindow?: number
-  /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
+  /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding 生效。 */
   maxConcurrency?: number
   /** chat 分片：单次回复最大输出 token */
   maxOutputTokens?: number
@@ -495,7 +495,7 @@ interface ModelFormData {
   extraConfig?: Record<string, string>
 }
 
-type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+type EditorModelType = 'chat' | 'embedding' | 'rerank' | 'asr'
 
 interface Props {
   visible: boolean
@@ -528,7 +528,6 @@ const modelTypeChoices = computed(() => ([
   { value: 'chat' as const, label: t('modelSettings.typeShort.chat'), icon: 'chat' },
   { value: 'embedding' as const, label: t('modelSettings.typeShort.embedding'), icon: 'chart-bubble' },
   { value: 'rerank' as const, label: t('modelSettings.typeShort.rerank'), icon: 'filter-sort' },
-  { value: 'vllm' as const, label: t('modelSettings.typeShort.vllm'), icon: 'image' },
   { value: 'asr' as const, label: t('modelSettings.typeShort.asr'), icon: 'sound' },
 ]))
 
@@ -545,7 +544,7 @@ const fallbackProviderOptions = computed<ModelProviderOption[]>(() => [
     label: t('model.editor.providers.generic.label'),
     defaultUrls: {},
     description: t('model.editor.providers.generic.description'),
-    modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+    modelTypes: ['chat', 'embedding', 'rerank', 'asr']
   },
   {
     value: 'ollama',
@@ -553,10 +552,9 @@ const fallbackProviderOptions = computed<ModelProviderOption[]>(() => [
     defaultUrls: {
       chat: 'http://localhost:11434',
       embedding: 'http://localhost:11434',
-      vllm: 'http://localhost:11434',
     } as Record<string, string>,
     description: t('model.editor.providers.ollama.description'),
-    modelTypes: ['chat', 'embedding', 'vllm']
+    modelTypes: ['chat', 'embedding']
   },
 ])
 
@@ -699,8 +697,12 @@ function applyPrefill(meta: CatalogModelEntry, source: PrefillSource) {
   set('contextWindow', !!meta.context_window, () => { f.contextWindow = meta.context_window })
   set('maxOutputTokens', !!meta.max_output_tokens, () => { f.maxOutputTokens = meta.max_output_tokens })
   set('inputModalities', !!meta.input_modalities?.length, () => {
-    f.inputModalities = [...(meta.input_modalities as string[])]
-    f.supportsVision = meta.input_modalities?.includes('image') ?? false
+    // 词表白名单（ADR 0004）：checkbox-group 的 v-model 不剪组外值，REPLACE
+    // 语义会把目录声明的 video 等废弃值原样保存回来——预填即过滤，恒保 text。
+    f.inputModalities = (meta.input_modalities as string[])
+      .filter(m => m === 'text' || m === 'image' || m === 'audio')
+    if (!f.inputModalities.includes('text')) f.inputModalities.unshift('text')
+    f.supportsVision = f.inputModalities.includes('image')
   })
   if (meta.thinking?.supported && showThinkingSection.value) {
     const providerLevels = chatThinkingCaps.value?.supported_levels
@@ -731,7 +733,7 @@ const showRemoteModelSelect = computed(() =>
 
 // #反馈（2026-09-14）：服务端类型过滤只有 aliyun 能力码生效，其余厂商的
 // 目录接口不带类型元数据——按模型名启发式在客户端过滤（creatable 手输
-// 仍是逃逸口）。chat/vllm 做排除式（避免误杀命名特别的对话模型）。
+// 仍是逃逸口）。chat 做排除式（避免误杀命名特别的对话模型）。
 const REMOTE_MODEL_TYPE_HINTS: Record<string, RegExp> = {
   embedding: /embed/i,
   rerank: /rerank/i,
@@ -749,7 +751,7 @@ const remoteModelMatchesType = (id: string, type: string): boolean => {
       return isRerank
     case 'asr':
       return isAsrTts
-    default: // chat / vllm：排除明确的非对话族
+    default: // chat：排除明确的非对话族
       return !isEmbed && !isRerank && !isAsrTts
   }
 }
@@ -868,7 +870,6 @@ const modelTypeIcon = computed(() => {
     chat: 'chat',
     embedding: 'chart-bubble',
     rerank: 'filter-sort',
-    vllm: 'image',
     asr: 'sound',
   }
   return map[activeModelType.value] || 'setting'
@@ -1136,11 +1137,6 @@ const getModalDescription = () => {
 
 // 获取模型名称占位符
 const getModelNamePlaceholder = () => {
-  if (activeModelType.value === 'vllm') {
-    return formData.value.source === 'local'
-      ? t('model.editor.modelNamePlaceholder.localVllm')
-      : t('model.editor.modelNamePlaceholder.remoteVllm')
-  }
   if (activeModelType.value === 'asr') {
     return t('model.editor.modelNamePlaceholder.remoteAsr')
   }
@@ -1150,9 +1146,6 @@ const getModelNamePlaceholder = () => {
 }
 
 const getBaseUrlPlaceholder = () => {
-  if (activeModelType.value === 'vllm') {
-    return t('model.editor.baseUrlPlaceholderVllm')
-  }
   if (activeModelType.value === 'asr') {
     return t('model.editor.baseUrlPlaceholderAsr')
   }
@@ -1311,8 +1304,8 @@ const isOllamaProvider = computed(() => formData.value.provider === 'ollama')
 // source 派生自 provider（含灌入期——存量 local 记录若 provider 不一致会被
 // 纠正为派生值，payload 出口再兜底一次）。
 // 输入模态自由编辑（2026-09-13 裁定 #2/#3）：模型列表/目录未提供模态
-// 时不限制用户勾选；LLM 默认勾选文本（所有模型的基础能力）。supportsVision
-// 保持与模态数组同步（payload 的 vllm 扁平字段与列表页图标消费它）。
+// 时不限制用户勾选；文本恒选（chat facet 公理，ADR 0004）。supportsVision
+// 保持与模态数组同步（列表页图标消费它）。
 watch(() => formData.value.inputModalities, (mods) => {
   formData.value.supportsVision = !!mods?.includes('image')
 })
@@ -1712,19 +1705,6 @@ const checkRemoteAPI = async () => {
         })
         break
       }
-
-      case 'vllm':
-        // VLLM 模型（多模态）
-        // VLLM 使用 checkRemoteModel 进行基础连接测试
-        result = await checkRemoteModel({
-          modelName: formData.value.modelName,
-          baseUrl: formData.value.baseUrl || '',
-          apiKey: formData.value.apiKey || '',
-          provider: formData.value.provider,
-          ...idPayload,
-          ...headerPayload,
-        })
-        break
 
       case 'asr':
         // ASR 模型（语音识别）— 使用专用的 ASR 测试接口（/v1/audio/transcriptions）

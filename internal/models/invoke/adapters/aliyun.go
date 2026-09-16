@@ -948,7 +948,7 @@ func (a *AliyunAdapter) ListPageSize() int { return aliyunListPageSize }
 // caller-side UX still shows whatever the vendor returns.
 func aliyunCapabilityFilter(modelType types.ModelType) []string {
 	switch modelType {
-	case types.ModelTypeKnowledgeQA, types.ModelTypeVLLM:
+	case types.ModelTypeKnowledgeQA:
 		return []string{"TG"}
 	case types.ModelTypeEmbedding:
 		return []string{"TR", "ME"}

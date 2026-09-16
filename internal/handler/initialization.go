@@ -519,13 +519,13 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 		return
 	}
 
-	processedModels, err := h.processInitializationModels(ctx, kb, kbIdStr, req)
+	descriptors, processedModels, err := h.processInitializationModels(ctx, kb, kbIdStr, req)
 	if err != nil {
 		c.Error(err)
 		return
 	}
 
-	h.applyKnowledgeBaseInitialization(kb, req, processedModels)
+	h.applyKnowledgeBaseInitialization(kb, req, descriptors, processedModels)
 
 	if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
@@ -672,8 +672,16 @@ func validateNodeExtractConfig(ctx context.Context, req *InitializationRequest) 
 	return nil
 }
 
+// descriptorSlotMultimodal marks the descriptor that feeds the KB's
+// image-understanding slot (VLMConfig). It must ride on the descriptor and
+// not be inferred from the model type: since the type convergence (ADR 0004)
+// the LLM slot and the multimodal slot both create KnowledgeQA models, so
+// the type alone no longer discriminates them.
+const descriptorSlotMultimodal = "multimodal"
+
 type modelDescriptor struct {
 	modelType     types.ModelType
+	slot          string
 	name          string
 	source        types.ModelSource
 	description   string
@@ -717,7 +725,8 @@ func buildModelDescriptors(req *InitializationRequest) []modelDescriptor {
 
 	if req.Multimodal.Enabled && req.Multimodal.VLM != nil {
 		descriptors = append(descriptors, modelDescriptor{
-			modelType:     types.ModelTypeVLLM,
+			modelType:     types.ModelTypeKnowledgeQA,
+			slot:          descriptorSlotMultimodal,
 			name:          utils.SanitizeForLog(req.Multimodal.VLM.ModelName),
 			source:        types.ModelSourceRemote,
 			description:   "VLM Model",
@@ -735,13 +744,13 @@ func (h *InitializationHandler) processInitializationModels(
 	kb *types.KnowledgeBase,
 	kbIdStr string,
 	req *InitializationRequest,
-) ([]*types.Model, error) {
+) ([]modelDescriptor, []*types.Model, error) {
 	descriptors := buildModelDescriptors(req)
 	var processedModels []*types.Model
 
 	for _, descriptor := range descriptors {
 		model := descriptor.toModel()
-		existingModelID := h.findExistingModelID(kb, descriptor.modelType)
+		existingModelID := h.findExistingModelID(kb, descriptor)
 
 		var existingModel *types.Model
 		if existingModelID != "" {
@@ -765,7 +774,7 @@ func (h *InitializationHandler) processInitializationModels(
 					"model_id": model.ID,
 					"kb_id":    kbIdStr,
 				})
-				return nil, errors.NewInternalServerError("更新模型失败: " + err.Error())
+				return nil, nil, errors.NewInternalServerError("更新模型失败: " + err.Error())
 			}
 			processedModels = append(processedModels, existingModel)
 			continue
@@ -776,12 +785,12 @@ func (h *InitializationHandler) processInitializationModels(
 				"model_id": model.ID,
 				"kb_id":    kbIdStr,
 			})
-			return nil, errors.NewInternalServerError("创建模型失败: " + err.Error())
+			return nil, nil, errors.NewInternalServerError("创建模型失败: " + err.Error())
 		}
 		processedModels = append(processedModels, model)
 	}
 
-	return processedModels, nil
+	return descriptors, processedModels, nil
 }
 
 func (descriptor modelDescriptor) toModel() *types.Model {
@@ -805,17 +814,29 @@ func (descriptor modelDescriptor) toModel() *types.Model {
 		}
 	}
 
+	if descriptor.slot == descriptorSlotMultimodal {
+		// ADR 0004: image understanding is a chat-model capability, not a
+		// type — the wizard's multimodal slot creates a chat model declaring
+		// text+image input.
+		model.Parameters.EnsureChat().InputModalities = []string{"text", "image"}
+	}
+
 	return model
 }
 
-func (h *InitializationHandler) findExistingModelID(kb *types.KnowledgeBase, modelType types.ModelType) string {
-	switch modelType {
+// findExistingModelID resolves the KB slot a descriptor feeds to its bound
+// model ID. Slot identity is carried on the descriptor (ADR 0004): the LLM
+// and multimodal slots share the KnowledgeQA type, so type alone cannot
+// route the lookup.
+func (h *InitializationHandler) findExistingModelID(kb *types.KnowledgeBase, descriptor modelDescriptor) string {
+	if descriptor.slot == descriptorSlotMultimodal {
+		return kb.VLMConfig.ModelID
+	}
+	switch descriptor.modelType {
 	case types.ModelTypeEmbedding:
 		return kb.EmbeddingModelID
 	case types.ModelTypeKnowledgeQA:
 		return kb.SummaryModelID
-	case types.ModelTypeVLLM:
-		return kb.VLMConfig.ModelID
 	default:
 		return ""
 	}
@@ -824,9 +845,10 @@ func (h *InitializationHandler) findExistingModelID(kb *types.KnowledgeBase, mod
 func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 	kb *types.KnowledgeBase,
 	req *InitializationRequest,
+	descriptors []modelDescriptor,
 	processedModels []*types.Model,
 ) {
-	embeddingModelID, llmModelID, vlmModelID := extractModelIDs(processedModels)
+	embeddingModelID, llmModelID, vlmModelID := extractModelIDs(descriptors, processedModels)
 
 	kb.SummaryModelID = llmModelID
 	kb.EmbeddingModelID = embeddingModelID
@@ -900,18 +922,25 @@ func (h *InitializationHandler) applyKnowledgeBaseInitialization(
 	}
 }
 
-func extractModelIDs(processedModels []*types.Model) (embeddingModelID, llmModelID, vlmModelID string) {
-	for _, model := range processedModels {
-		if model == nil {
+// extractModelIDs pairs each created model back to the KB slot its descriptor
+// feeds. Slot identity comes from the descriptor (ADR 0004): chat and vision
+// models share the KnowledgeQA type, so the type alone no longer
+// discriminates the LLM and multimodal slots.
+func extractModelIDs(
+	descriptors []modelDescriptor,
+	processedModels []*types.Model,
+) (embeddingModelID, llmModelID, vlmModelID string) {
+	for i, model := range processedModels {
+		if model == nil || i >= len(descriptors) {
 			continue
 		}
-		switch model.Type {
-		case types.ModelTypeEmbedding:
-			embeddingModelID = model.ID
-		case types.ModelTypeKnowledgeQA:
-			llmModelID = model.ID
-		case types.ModelTypeVLLM:
+		switch {
+		case descriptors[i].slot == descriptorSlotMultimodal:
 			vlmModelID = model.ID
+		case descriptors[i].modelType == types.ModelTypeEmbedding:
+			embeddingModelID = model.ID
+		case descriptors[i].modelType == types.ModelTypeKnowledgeQA:
+			llmModelID = model.ID
 		}
 	}
 	return
@@ -1466,22 +1495,35 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
 				},
 			}
-		case types.ModelTypeVLLM:
+		}
+	}
+
+	// 多模态槽位（ADR 0004）：图像理解模型是 KnowledgeQA 类型的 chat 模型，
+	// 无法再靠类型 switch 识别，改由 KB 槽位绑定（VLMConfig.ModelID）解析。
+	if kb.VLMConfig.ModelID != "" {
+		for _, model := range models {
+			if model == nil || model.ID != kb.VLMConfig.ModelID {
+				continue
+			}
+			vlmBaseURL := model.Parameters.BaseURL
+			if model.IsBuiltin || !includeIntegrationDetail {
+				vlmBaseURL = ""
+			}
 			if config["multimodal"] == nil {
 				config["multimodal"] = map[string]interface{}{
 					"enabled": true,
 				}
 			}
-			multimodal := config["multimodal"].(map[string]interface{})
-			multimodal["vlm"] = map[string]interface{}{
+			config["multimodal"].(map[string]interface{})["vlm"] = map[string]interface{}{
 				"modelName":     model.Name,
-				"baseUrl":       baseURL,
+				"baseUrl":       vlmBaseURL,
 				"interfaceType": model.Parameters.InterfaceType,
 				"modelId":       model.ID,
 				"credentials": map[string]bool{
 					"apiKey": model.Parameters.APIKey != "" && !model.IsBuiltin,
 				},
 			}
+			break
 		}
 	}
 

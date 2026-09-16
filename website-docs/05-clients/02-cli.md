@@ -400,7 +400,7 @@ weknora agent update agt_123 --add-kb <kb-id2> --temperature 0.3
 
 | 子命令 | Use | 说明 |
 |---|---|---|
-| list | `list` | 列表：`--type`（Embedding / Rerank / KnowledgeQA / VLLM / ASR）、`--source`（local / remote / openai / aliyun …）、`--limit/-L` |
+| list | `list` | 列表：`--type`（Embedding / Rerank / KnowledgeQA / ASR）、`--source`（local / remote / openai / aliyun …）、`--limit/-L` |
 | view | `view <model-id>` | 查看 |
 | create | `create <name>` | 注册模型：`--type`（必填；`chat` 等价 KnowledgeQA）、`--source`（必填；local=Ollama，remote=provider API）、`--provider`（source=remote 时必填）、`--base-url`、`--api-key-stdin`（从 stdin 读 key，不进 argv/history）、`--dimension`（Embedding 专用）、`--default`、`--param key=value`（可重复，值按 JSON 解析）、`--display-name`、`--description` |
 | update | `update <model-id>` | `--display-name`、`--description`、`--base-url`、`--api-key-stdin`（轮换 key）、`--param`、`--default` |

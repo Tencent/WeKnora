@@ -2321,11 +2321,6 @@ export default {
       desc: 'Модели распознавания речи для транскрибации аудио (например, OpenAI Whisper)',
       empty: 'Нет ASR моделей'
     },
-    vllm: {
-      title: 'VLLM модели зрения',
-      desc: 'Визуально-языковые модели для мультимодального понимания',
-      empty: 'Нет VLLM моделей'
-    },
     rerank: {
       title: 'Модели ReRank',
       desc: 'Модели для повторной ранжировки результатов',
@@ -2609,7 +2604,6 @@ export default {
       displayNamePlaceholder: 'например: модель поддержки',
       displayNameDesc: 'Используется только в интерфейсе. Для вызовов по-прежнему используется имя модели выше.',
       baseUrlPlaceholder: 'например: https://api.openai.com/v1',
-      baseUrlPlaceholderVllm: 'например: http://localhost:11434/v1',
       baseUrlPlaceholderAsr: 'например: https://api.openai.com/v1',
       apiKeyOptional: 'API Key (опционально)',
       apiKeyPlaceholder: 'Введите API Key',
@@ -2637,7 +2631,6 @@ export default {
       modalityText: 'Текст',
       modalityImage: 'Изображение',
       modalityAudio: 'Аудио',
-      modalityVideo: 'Видео',
       contextWindowLabel: 'Контекстное окно',
       contextWindowPlaceholder: 'По умолчанию {value}',
       contextWindowDesc: 'Сколько токенов модель принимает за один запрос. Сжатие истории агента использует этот лимит. Пустое значение — по умолчанию 200000 (200K). Укажите реальное окно провайдера: завышенное значение не запускает сжатие, и провайдер отклоняет запрос.',
@@ -2834,15 +2827,12 @@ export default {
       modelNamePlaceholder: {
         local: 'например: llama2:latest',
         remote: 'например: gpt-4, claude-3-opus',
-        localVllm: 'например: llava:latest',
-        remoteVllm: 'например: gpt-4-vision-preview',
         remoteAsr: 'например: whisper-1'
       },
       description: {
         chat: 'Настройте языковую модель для диалогов',
         embedding: 'Настройте модель встраивания для текстовой векторизации',
         rerank: 'Настройте модель для повторного ранжирования результатов',
-        vllm: 'Настройте визуально-языковую модель для мультимодального понимания',
         asr: 'Настройте модель распознавания речи для транскрибации аудио',
         default: 'Настройте информацию о модели'
       }

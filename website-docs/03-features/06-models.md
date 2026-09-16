@@ -44,18 +44,16 @@
 const (
     ModelTypeEmbedding   ModelType = "Embedding"   // Embedding model
     ModelTypeRerank      ModelType = "Rerank"      // Rerank model
-    ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model
-    ModelTypeVLLM        ModelType = "VLLM"        // VLLM model
+    ModelTypeKnowledgeQA ModelType = "KnowledgeQA" // KnowledgeQA model（视觉经输入模态声明，ADR 0004）
     ModelTypeASR         ModelType = "ASR"         // ASR model
 )
 ```
 
 | 类型 | 前端标识 | 客户端包 | 接口 | 用途 |
 |------|---------|---------|------|------|
-| `KnowledgeQA` | `chat` | `internal/models/chat` | `Chat` / `ChatStream`（支持 Tools、Thinking、多模态消息） | 知识问答、Agent 推理、摘要 / 问题生成 / 图谱抽取等一切 LLM 调用 |
+| `KnowledgeQA` | `chat` | `internal/models/chat` | `Chat` / `ChatStream`（支持 Tools、Thinking、多模态消息） | 知识问答、Agent 推理、摘要 / 问题生成 / 图谱抽取等一切 LLM 调用（含图像理解：声明图片输入的对话模型） |
 | `Embedding` | `embedding` | `internal/models/embedding` | `Embed` / `BatchEmbed`（含 `GetDimensions`） | 文本向量化，供向量检索索引与查询 |
 | `Rerank` | `rerank` | `internal/models/rerank` | `Rerank(query, documents)` 返回 `RankResult` | 检索结果精排 |
-| `VLLM` | `vllm` | `internal/models/vlm` | `Predict(imgBytes, prompt)` | 视觉语言模型（VLM），文档图片理解 / 多模态解析 |
 | `ASR` | `asr` | `internal/models/asr` | `Transcribe(audioBytes, fileName)` 返回文本与分段时间戳 | 音频转写（自动语音识别） |
 
 前后端类型映射见 `internal/handler/model.go` 的 `modelTypeToFrontend()`（`KnowledgeQA -> chat` 等）。
@@ -121,7 +119,7 @@ const (
 - **漂移清理**：`managed_by='yaml'` 但 id 已不在文件中的行被软删除——从 YAML 删除条目即是下线内置模型的正规方式。
 - 管理员在运行时接管某行（`managed_by` 置空）后，YAML 加载器会跳过该行（"preserving runtime override"）。
 - `is_default: true` 条目会先清掉同 `(tenant_id, type)` 桶内其他默认，保持与 API 路径一致的唯一默认不变式。
-- 校验规则：id 非空且 ≤64 字符（`ModelIDMaxLen`）、type 必须是 `KnowledgeQA | Embedding | Rerank | VLLM | ASR`、status 合法或为空；YAML 解析失败时中止对账（不执行漂移清理）。
+- 校验规则：id 非空且 ≤64 字符（`ModelIDMaxLen`）、type 必须是 `KnowledgeQA | Embedding | Rerank | ASR`、status 合法或为空；YAML 解析失败时中止对账（不执行漂移清理）。
 
 YAML 示例（摘自 `builtin_models.yaml.example`）：
 

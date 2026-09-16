@@ -95,14 +95,14 @@
             <p class="form-desc">{{ $t('modelSettings.debug.documentsHint') }}</p>
           </div>
 
-          <div v-if="needsFile" class="form-item">
+          <div v-if="needsFile || isVisionModel" class="form-item">
             <label class="form-label">{{ fileLabel }}</label>
             <div class="file-picker">
               <input
                 ref="fileInputRef"
                 class="file-picker__input"
                 type="file"
-                :accept="selectedModel.type === 'VLLM' ? 'image/*' : 'audio/*'"
+                :accept="fileAccept"
                 @change="onNativeFileChange"
               >
               <t-button variant="outline" size="small" @click="fileInputRef?.click()">
@@ -270,7 +270,10 @@ const supportsThinking = computed(() => {
   const caps = providerCaps.value[model.parameters.provider || '']
   return caps ? (caps.chat?.thinking.supported ?? false) : true
 })
-const needsFile = computed(() => ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
+// ADR 0004: 图像理解不是类型而是对话模型的能力，调试抽屉按声明能力出表单。
+const isVisionModel = computed(() => selectedModel.value?.parameters?.supports_vision === true)
+const fileAccept = computed(() => (isVisionModel.value ? 'image/*' : 'audio/*'))
+const needsFile = computed(() => selectedModel.value?.type === 'ASR')
 const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
 const canRun = computed(() => {
   if (!selectedModel.value) return false
@@ -285,7 +288,6 @@ const allModelTypeOptions = computed(() => {
     KnowledgeQA: { short: 'chat', icon: 'chat' },
     Embedding: { short: 'embedding', icon: 'chart-bubble' },
     Rerank: { short: 'rerank', icon: 'filter-sort' },
-    VLLM: { short: 'vllm', icon: 'image' },
     ASR: { short: 'asr', icon: 'sound' },
   }
   return (Object.keys(keys) as DebugModelType[]).map(value => ({
@@ -313,19 +315,19 @@ const vendorLabel = (model: ModelConfig) => {
 
 const inputLabel = computed(() => {
   if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingInput')
-  if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPrompt')
+  if (isVisionModel.value && file.value) return t('modelSettings.debug.vlmPrompt')
   if (selectedModel.value?.type === 'Rerank') return t('modelSettings.debug.query')
   return t('modelSettings.debug.query')
 })
 
 const inputPlaceholder = computed(() => {
   if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingPlaceholder')
-  if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPromptPlaceholder')
+  if (isVisionModel.value && file.value) return t('modelSettings.debug.vlmPromptPlaceholder')
   return t('modelSettings.debug.queryPlaceholder')
 })
 
 const fileLabel = computed(() =>
-  selectedModel.value?.type === 'VLLM'
+  isVisionModel.value
     ? t('modelSettings.debug.imageFile')
     : t('modelSettings.debug.audioFile'),
 )

@@ -4483,15 +4483,12 @@ export default {
         chat: 'Configure large language models for conversations',
         embedding: 'Configure embedding models for text vectorization',
         rerank: 'Configure models for result re-ranking',
-        vllm: 'Configure vision-language models for multimodal understanding',
         asr: 'Configure speech-to-text models for audio transcription',
         default: 'Configure model information'
       },
       modelNamePlaceholder: {
         local: 'e.g. llama2:latest',
         remote: 'e.g. gpt-4, claude-3-opus',
-        localVllm: 'e.g. llava:latest',
-        remoteVllm: 'e.g. gpt-4-vision-preview',
         remoteAsr: 'e.g. whisper-1'
       },
       baseUrlLabel: 'Base URL',
@@ -4499,7 +4496,6 @@ export default {
       displayNamePlaceholder: 'e.g. Support QA model',
       displayNameDesc: 'Used only in the UI. Runtime calls still use the model name above.',
       baseUrlPlaceholder: 'e.g. https://api.openai.com/v1',
-      baseUrlPlaceholderVllm: 'e.g. http://localhost:11434/v1',
       baseUrlPlaceholderAsr: 'e.g. https://api.openai.com/v1',
       apiKeyOptional: 'API Key (optional)',
       apiKeyPlaceholder: 'Enter API Key',
@@ -4544,7 +4540,6 @@ export default {
       modalityText: 'Text',
       modalityImage: 'Image',
       modalityAudio: 'Audio',
-      modalityVideo: 'Video',
       contextWindowLabel: 'Context Window',
       contextWindowPlaceholder: 'Default {value}',
       contextWindowDesc: 'How many tokens this model can take in one request. Agent history compaction uses this limit. Leave empty for the default 200000 (200K). Use the provider’s real window — a larger guess means compaction never fires and the provider rejects the request.',
@@ -4974,11 +4969,6 @@ export default {
       title: 'ReRank Models',
       desc: 'Configure models for result re-ranking',
       empty: 'No re-rank models'
-    },
-    vllm: {
-      title: 'VLLM Vision Models',
-      desc: 'Configure vision-language models for multimodal understanding',
-      empty: 'No VLLM models'
     },
     asr: {
       title: 'ASR Speech Models',

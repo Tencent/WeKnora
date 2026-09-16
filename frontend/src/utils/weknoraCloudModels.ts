@@ -9,7 +9,8 @@ const BACKEND_TYPE_BY_KIND: Record<WkcModelKind, ModelConfig['type']> = {
   chat: 'KnowledgeQA',
   embedding: 'Embedding',
   rerank: 'Rerank',
-  vllm: 'VLLM',
+  // ADR 0004：视觉不再是类型——wkc 的 vlm 条目落库为声明了图片输入的对话模型
+  vllm: 'KnowledgeQA',
 }
 
 export const WKC_MODEL_NAME_BY_KIND: Record<WkcModelKind, string> = {
@@ -31,7 +32,13 @@ export function existingWkcKinds(models: ModelConfig[]): Set<WkcModelKind> {
   for (const model of models) {
     if (!isWeKnoraCloudModel(model)) continue
     for (const kind of WKC_MODEL_KINDS) {
-      if (model.type === BACKEND_TYPE_BY_KIND[kind]) {
+      // chat 与 vllm 两种 kind 落库后同为 KnowledgeQA，type 无法区分——
+      // 以 wkc 固定的模型名（WKC_MODEL_NAME_BY_KIND）补齐判定位。
+      if (
+        model.type === BACKEND_TYPE_BY_KIND[kind]
+        && (model.name === WKC_MODEL_NAME_BY_KIND[kind]
+          || model.display_name === WKC_MODEL_NAME_BY_KIND[kind])
+      ) {
         found.add(kind)
       }
     }

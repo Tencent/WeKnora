@@ -767,10 +767,10 @@
                         <p class="desc">{{ $t('agentEditor.imageUpload.vlmModelDesc') }}</p>
                       </div>
                       <div class="setting-control">
-                        <ModelSelector model-type="VLLM" :selected-model-id="formData.config.vlm_model_id"
+                        <ModelSelector model-type="vision" :selected-model-id="formData.config.vlm_model_id"
                           :all-models="allModels"
                           @update:selected-model-id="(val: string) => formData.config.vlm_model_id = val"
-                          @add-model="handleAddModel('vllm')"
+                          @add-model="handleAddModel('chat')"
                           :placeholder="$t('agentEditor.imageUpload.vlmModelPlaceholder')" />
                       </div>
                     </div>

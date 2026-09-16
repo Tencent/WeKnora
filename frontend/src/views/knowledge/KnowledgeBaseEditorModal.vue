@@ -307,7 +307,7 @@
                         </div>
                         <div class="setting-control">
                           <ModelSelector
-                            model-type="VLLM"
+                            model-type="vision"
                             :selected-model-id="formData.multimodalConfig.vllmModelId"
                             :all-models="allModels"
                             @update:selected-model-id="handleMultimodalVLLMChange"

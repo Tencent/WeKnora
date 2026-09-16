@@ -41,7 +41,6 @@
       <t-tab-panel value="embedding"
         :label="`${$t('modelSettings.typeShort.embedding')}(${countByType('embedding')})`" />
       <t-tab-panel value="rerank" :label="`${$t('modelSettings.typeShort.rerank')}(${countByType('rerank')})`" />
-      <t-tab-panel value="vllm" :label="`${$t('modelSettings.typeShort.vllm')}(${countByType('vllm')})`" />
       <t-tab-panel value="asr" :label="`${$t('modelSettings.typeShort.asr')}(${countByType('asr')})`" />
     </t-tabs>
 
@@ -113,7 +112,7 @@
                 <span class="model-card__sep">·</span>
                 <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
               </template>
-              <template v-if="model._modelType === 'chat' || model._modelType === 'vllm'">
+              <template v-if="model._modelType === 'chat'">
                 <span class="model-card__sep">·</span>
                 <span
                   class="model-card__ctx"
@@ -311,7 +310,7 @@ const authStore = useAuthStore()
 const uiStore = useUIStore()
 const chatResources = useChatResourcesStore()
 const router = useRouter()
-type ModelType = 'chat' | 'embedding' | 'rerank' | 'vllm' | 'asr'
+type ModelType = 'chat' | 'embedding' | 'rerank' | 'asr'
 type FilterType = 'all' | ModelType
 
 const showDialog = ref(false)
@@ -328,7 +327,7 @@ const activeTypeFilter = ref<FilterType>('all')
 // 首次加载完成前 tab watch 不触发重拉（初次载入本身已按当前 tab 过滤）
 const loadedOnce = ref(false)
 
-const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'asr']
 const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
   'home',
   'knowledgeBaseList',
@@ -361,7 +360,6 @@ const backendTypeToModelType: Record<string, ModelType> = {
   KnowledgeQA: 'chat',
   Embedding: 'embedding',
   Rerank: 'rerank',
-  VLLM: 'vllm',
   ASR: 'asr'
 }
 
@@ -432,7 +430,6 @@ const typeIcon = (type: ModelType): string => {
     chat: 'chat',
     embedding: 'chart-bubble',
     rerank: 'filter-sort',
-    vllm: 'image',
     asr: 'sound',
   }
   return map[type]
@@ -445,16 +442,14 @@ const MODALITY_ICONS: Record<string, string> = {
   text: 'text',
   image: 'image',
   audio: 'sound',
-  video: 'video',
 }
 const MODALITY_LABEL_KEYS: Record<string, string> = {
   text: 'model.editor.modalityText',
   image: 'model.editor.modalityImage',
   audio: 'model.editor.modalityAudio',
-  video: 'model.editor.modalityVideo',
 }
 const cardModalities = (model: any): string[] => {
-  if (model._modelType !== 'chat' && model._modelType !== 'vllm') return []
+  if (model._modelType !== 'chat') return []
   if (Array.isArray(model.inputModalities) && model.inputModalities.length > 0) {
     return model.inputModalities
   }
@@ -471,15 +466,14 @@ const typeLabel = (type: ModelType) => {
     chat: t('modelSettings.typeShort.chat'),
     embedding: t('modelSettings.typeShort.embedding'),
     rerank: t('modelSettings.typeShort.rerank'),
-    vllm: t('modelSettings.typeShort.vllm'),
     asr: t('modelSettings.typeShort.asr')
   }
   return map[type]
 }
 
 const sourceLabel = (type: ModelType) => {
-  // vllm / asr 的 remote 文案特殊，其余走通用 remote 文案
-  if (type === 'vllm' || type === 'asr') {
+  // asr 的 remote 文案特殊，其余走通用 remote 文案
+  if (type === 'asr') {
     return t('modelSettings.source.openaiCompatible')
   }
   return t('modelSettings.source.remote')
@@ -533,7 +527,6 @@ const emptyHint = computed(() => {
     chat: t('modelSettings.chat.empty'),
     embedding: t('modelSettings.embedding.empty'),
     rerank: t('modelSettings.rerank.empty'),
-    vllm: t('modelSettings.vllm.empty'),
     asr: t('modelSettings.asr.empty')
   }
   return map[activeTypeFilter.value as ModelType]
@@ -687,14 +680,12 @@ const handleModelSave = async (modelData: any) => {
     // Chat 分片（KnowledgeQA）：思考档位、输入模态、上下文/输出预算一律写分片，
     // 不再写 extra_config.thinking_control 与顶层扁平字段（design §3/D3）。
     const chatShard: NonNullable<ModelConfig['parameters']['chat']> = {}
-    if (saveType === 'chat' || saveType === 'vllm') {
-      // 输入模态自由编辑（2026-09-13 裁定 #2/#3）：vllm 也走分片存模态；
-      // 空数组回落 ['text']（LLM 基础能力）。
+    if (saveType === 'chat') {
+      // 输入模态自由编辑（2026-09-13 裁定 #2/#3）：分片存模态；
+      // 空数组回落 ['text']（LLM 基础能力，ADR 0004：文本恒在）。
       chatShard.input_modalities = modelData.inputModalities?.length
         ? modelData.inputModalities
         : ['text']
-    }
-    if (saveType === 'chat') {
       if (Number(modelData.contextWindow) >= 1024) {
         chatShard.context_window = Math.round(Number(modelData.contextWindow))
       }
@@ -737,19 +728,9 @@ const handleModelSave = async (modelData: any) => {
             supports_dimension_override: modelData.supportsDimensionOverride ?? false
           }
         } : {}),
-        ...(saveType === 'vllm' ? {
-          // 不再硬编码 true：随用户勾选的模态派生（分片已存全量模态）
-          supports_vision: modelData.supportsVision ?? false,
-          ...(Number(modelData.contextWindow) >= 1024
-            ? { context_window: Math.round(Number(modelData.contextWindow)) }
-            : {}),
-          ...(Number(modelData.maxOutputTokens) > 0
-            ? { max_output_tokens: Math.round(Number(modelData.maxOutputTokens)) }
-            : {})
-        } : {}),
         ...chatShardFields,
-        // 后台并发上限：仅 chat/embedding/vllm 受治理，>0 才写入（0/空沿用全局默认）。
-        ...(['chat', 'embedding', 'vllm'].includes(saveType)
+        // 后台并发上限：仅 chat/embedding 受治理，>0 才写入（0/空沿用全局默认）。
+        ...(['chat', 'embedding'].includes(saveType)
           && Number(modelData.maxConcurrency) > 0
           ? { max_concurrency: Number(modelData.maxConcurrency) }
           : {})
@@ -927,12 +908,11 @@ const copyModel = async (_type: ModelType, modelId: string) => {
 }
 
 // 获取后端模型类型
-function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'VLLM' | 'ASR' {
+function getModelType(type: ModelType): 'KnowledgeQA' | 'Embedding' | 'Rerank' | 'ASR' {
   const typeMap = {
     chat: 'KnowledgeQA' as const,
     embedding: 'Embedding' as const,
     rerank: 'Rerank' as const,
-    vllm: 'VLLM' as const,
     asr: 'ASR' as const
   }
   return typeMap[type]
@@ -1201,11 +1181,6 @@ onMounted(() => {
 .model-card--rerank .model-card__badge {
   background: rgba(184, 92, 0, 0.1);
   color: #B85C00;
-}
-
-.model-card--vllm .model-card__badge {
-  background: rgba(201, 62, 62, 0.1);
-  color: #C93E3E;
 }
 
 .model-card--asr .model-card__badge {

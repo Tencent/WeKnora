@@ -255,7 +255,7 @@ func defaultCapabilities(name ProviderName, modelTypes []types.ModelType) Capabi
 		}
 		return false
 	}
-	if serves(types.ModelTypeKnowledgeQA) || serves(types.ModelTypeVLLM) {
+	if serves(types.ModelTypeKnowledgeQA) {
 		caps.Chat = &ChatCaps{
 			Thinking:          thinkingCapsFor(name),
 			InputModalities:   []Modality{ModalityText},

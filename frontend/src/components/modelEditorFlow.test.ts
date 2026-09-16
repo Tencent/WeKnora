@@ -112,7 +112,7 @@ async function fixture(options: {
   return { vm, props, requests, saves, toasts, visibility, parentSave: () => parentSave, lastSaveError: () => lastSaveError, close: () => app.unmount() }
 }
 
-for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
+for (const type of ['chat', 'embedding', 'rerank', 'asr']) {
   test(`${type}: connection tests use unsaved form values without saving`, async () => {
     const f = await fixture({ type })
     try {

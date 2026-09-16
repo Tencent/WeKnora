@@ -2,7 +2,7 @@
 export const DEFAULT_MODEL_CONTEXT_WINDOW = 200000
 
 export function modelHasContextWindow(type?: string): boolean {
-  return type === 'KnowledgeQA' || type === 'VLLM' || type === 'chat' || type === 'vllm'
+  return type === 'KnowledgeQA' || type === 'chat'
 }
 
 /** Tokens the backend will actually use: the model's value, or 200K. */

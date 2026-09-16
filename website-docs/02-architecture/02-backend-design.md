@@ -297,7 +297,7 @@ erDiagram
     MODEL {
         string id PK
         uint64 tenant_id FK
-        string type "Embedding/Rerank/KnowledgeQA/VLLM/ASR"
+        string type "Embedding/Rerank/KnowledgeQA/ASR"
         string source "18+ 提供商"
         json parameters "APIKey AES 加密"
     }

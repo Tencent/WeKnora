@@ -59,11 +59,6 @@ func TestDefaultCapabilitiesShardsByModelType(t *testing.T) {
 		assert.Equal(t, UsageFull, caps.Common.UsageReporting)
 	})
 
-	t.Run("vllm shares the Chat shard", func(t *testing.T) {
-		caps := defaultCapabilities(ProviderOpenAI, []types.ModelType{types.ModelTypeVLLM})
-		require.NotNil(t, caps.Chat, "VLLM shares the Chat capability shard")
-	})
-
 	t.Run("embedding-only vendor gets no Chat shard", func(t *testing.T) {
 		caps := defaultCapabilities(ProviderJina, []types.ModelType{types.ModelTypeEmbedding, types.ModelTypeRerank})
 		assert.Nil(t, caps.Chat)
@@ -74,7 +69,7 @@ func TestDefaultCapabilitiesShardsByModelType(t *testing.T) {
 
 	t.Run("full vendor declares every served shard", func(t *testing.T) {
 		caps := defaultCapabilities(ProviderAliyun, []types.ModelType{
-			types.ModelTypeKnowledgeQA, types.ModelTypeEmbedding, types.ModelTypeRerank, types.ModelTypeVLLM,
+			types.ModelTypeKnowledgeQA, types.ModelTypeEmbedding, types.ModelTypeRerank,
 		})
 		assert.NotNil(t, caps.Chat)
 		assert.NotNil(t, caps.Embedding)

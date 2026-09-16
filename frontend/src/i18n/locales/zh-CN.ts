@@ -2323,11 +2323,6 @@ export default {
       desc: '配置用于语音识别和音频转录的语音转文本模型（如 OpenAI Whisper）',
       empty: '暂无 ASR 语音模型'
     },
-    vllm: {
-      title: 'VLLM 视觉模型',
-      desc: '配置用于视觉理解和多模态的视觉语言模型',
-      empty: '暂无 VLLM 视觉模型'
-    },
     rerank: {
       title: 'ReRank 模型',
       desc: '配置用于结果重排序的模型',
@@ -2611,7 +2606,6 @@ export default {
       displayNamePlaceholder: '例如：客服问答模型',
       displayNameDesc: '仅用于界面展示，实际调用仍使用上面的模型名称。',
       baseUrlPlaceholder: '例如：https://api.openai.com/v1',
-      baseUrlPlaceholderVllm: '例如：http://localhost:11434/v1',
       baseUrlPlaceholderAsr: '例如：https://api.openai.com/v1',
       apiKeyOptional: 'API Key（可选）',
       apiKeyPlaceholder: '输入 API Key',
@@ -2639,7 +2633,6 @@ export default {
       modalityText: '文本',
       modalityImage: '图片',
       modalityAudio: '音频',
-      modalityVideo: '视频',
       contextWindowLabel: '上下文窗口',
       contextWindowPlaceholder: '默认 {value}',
       contextWindowDesc: '该模型一次请求能容纳的 token 数。智能体压缩对话历史会按此上限工作。留空则使用默认 200000（200K）。请按厂商文档填写真实值，填大会导致压缩不触发、上游直接拒绝请求。',
@@ -2836,15 +2829,12 @@ export default {
       modelNamePlaceholder: {
         local: '例如：llama2:latest',
         remote: '例如：gpt-4, claude-3-opus',
-        localVllm: '例如：llava:latest',
-        remoteVllm: '例如：gpt-4-vision-preview',
         remoteAsr: '例如：whisper-1'
       },
       description: {
         chat: '配置用于对话的大语言模型',
         embedding: '配置用于文本向量化的嵌入模型',
         rerank: '配置用于结果重排序的模型',
-        vllm: '配置用于视觉理解和多模态的视觉语言模型',
         asr: '配置用于语音识别和音频转录的语音转文本模型',
         default: '配置模型信息'
       }

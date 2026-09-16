@@ -52,7 +52,7 @@ interface ModelItem {
   baseUrl?: string;  // 远程API URL
   apiKey?: string;  // 远程API Key
   dimension?: number;  // Embedding专用：向量维度
-  interfaceType?: 'ollama' | 'openai';  // VLLM专用：接口类型
+  interfaceType?: 'ollama' | 'openai';  // Ollama 本地模型接口类型
   isDefault?: boolean;  // 是否为默认模型
 }
 
@@ -61,7 +61,6 @@ interface ModelConfig {
   chatModels: ModelItem[];
   embeddingModels: ModelItem[];
   rerankModels: ModelItem[];
-  vllmModels: ModelItem[];  // VLLM视觉模型
 }
 
 // Ollama 配置接口
@@ -91,8 +90,7 @@ const defaultSettings: Settings = {
   modelConfig: {
     chatModels: [],
     embeddingModels: [],
-    rerankModels: [],
-    vllmModels: []
+    rerankModels: []
   },
   ollamaConfig: {
     baseUrl: "http://localhost:11434",
@@ -232,7 +230,7 @@ export const useSettingsStore = defineStore("settings", {
     },
     
     // 添加模型
-    addModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', model: ModelItem) {
+    addModel(type: 'chat' | 'embedding' | 'rerank', model: ModelItem) {
       const key = `${type}Models` as keyof ModelConfig;
       const models = [...this.settings.modelConfig[key]] as ModelItem[];
       // 如果设为默认，取消其他模型的默认状态
@@ -249,7 +247,7 @@ export const useSettingsStore = defineStore("settings", {
     },
     
     // 更新模型
-    updateModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', modelId: string, updates: Partial<ModelItem>) {
+    updateModel(type: 'chat' | 'embedding' | 'rerank', modelId: string, updates: Partial<ModelItem>) {
       const key = `${type}Models` as keyof ModelConfig;
       const models = [...this.settings.modelConfig[key]] as ModelItem[];
       const index = models.findIndex(m => m.id === modelId);
@@ -265,7 +263,7 @@ export const useSettingsStore = defineStore("settings", {
     },
     
     // 删除模型
-    deleteModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', modelId: string) {
+    deleteModel(type: 'chat' | 'embedding' | 'rerank', modelId: string) {
       const key = `${type}Models` as keyof ModelConfig;
       let models = [...this.settings.modelConfig[key]] as ModelItem[];
       const deletedModel = models.find(m => m.id === modelId);
@@ -279,7 +277,7 @@ export const useSettingsStore = defineStore("settings", {
     },
     
     // 设置默认模型
-    setDefaultModel(type: 'chat' | 'embedding' | 'rerank' | 'vllm', modelId: string) {
+    setDefaultModel(type: 'chat' | 'embedding' | 'rerank', modelId: string) {
       const key = `${type}Models` as keyof ModelConfig;
       const models = [...this.settings.modelConfig[key]] as ModelItem[];
       models.forEach(m => m.isDefault = (m.id === modelId));

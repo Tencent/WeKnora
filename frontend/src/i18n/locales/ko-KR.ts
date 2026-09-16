@@ -2321,11 +2321,6 @@ export default {
       desc: '음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정 (예: OpenAI Whisper)',
       empty: 'ASR 음성 모델 없음'
     },
-    vllm: {
-      title: 'VLLM 비전 모델',
-      desc: '시각 이해 및 멀티모달용 비전 언어 모델 설정',
-      empty: 'VLLM 비전 모델 없음'
-    },
     rerank: {
       title: 'ReRank 모델',
       desc: '결과 재정렬용 모델 설정',
@@ -2609,7 +2604,6 @@ export default {
       displayNamePlaceholder: '예: 고객지원 QA 모델',
       displayNameDesc: 'UI 표시용으로만 사용되며 실제 호출은 위의 모델 이름을 사용합니다.',
       baseUrlPlaceholder: '예: https://api.openai.com/v1',
-      baseUrlPlaceholderVllm: '예: http://localhost:11434/v1',
       baseUrlPlaceholderAsr: '예: https://api.openai.com/v1',
       apiKeyOptional: 'API 키 (선택)',
       apiKeyPlaceholder: 'API 키 입력',
@@ -2637,7 +2631,6 @@ export default {
       modalityText: '텍스트',
       modalityImage: '이미지',
       modalityAudio: '오디오',
-      modalityVideo: '비디오',
       contextWindowLabel: '컨텍스트 창',
       contextWindowPlaceholder: '기본값 {value}',
       contextWindowDesc: '모델이 한 요청에 수용할 수 있는 토큰 수입니다. 에이전트 대화 압축이 이 한도를 사용합니다. 비워 두면 기본값 200000(200K)을 사용합니다. 공급자 문서의 실제 값을 입력하세요. 더 크게 설정하면 압축이 발생하지 않고 요청이 거부될 수 있습니다.',
@@ -2834,15 +2827,12 @@ export default {
       modelNamePlaceholder: {
         local: '예: llama2:latest',
         remote: '예: gpt-4, claude-3-opus',
-        localVllm: '예: llava:latest',
-        remoteVllm: '예: gpt-4-vision-preview',
         remoteAsr: '예: whisper-1'
       },
       description: {
         chat: '대화용 대규모 언어 모델 설정',
         embedding: '텍스트 벡터화용 임베딩 모델 설정',
         rerank: '결과 재정렬용 모델 설정',
-        vllm: '시각 이해 및 멀티모달용 비전 언어 모델 설정',
         asr: '음성 인식 및 오디오 전사를 위한 음성 인식 모델 설정',
         default: '모델 정보 설정'
       }

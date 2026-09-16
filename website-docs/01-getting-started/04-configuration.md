@@ -358,7 +358,7 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 ```yaml
 builtin_models:
   - id: builtin-llm-default        # 稳定 ID，重复启动按 ID 幂等更新
-    type: KnowledgeQA              # KnowledgeQA | Embedding | Rerank | VLLM | ASR
+    type: KnowledgeQA              # KnowledgeQA | Embedding | Rerank | ASR（视觉经输入模态声明，不再有独立类型）
     source: remote                 # remote（默认）| local
     is_default: true               # 是否设为该类型默认模型
     name: ${LLM_MODEL_NAME}        # 字符串字段均支持 ${ENV} 引用（.env 经 env_file 注入容器）

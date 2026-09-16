@@ -36,7 +36,7 @@ var modelSourceValues = cmdutil.EnumStrings(sdk.AllModelSources())
 // ListOptions captures `model list` filter flag state.
 type ListOptions struct {
 	// Type / Source, when set, restrict output to models of that type
-	// (Embedding, Rerank, KnowledgeQA, VLLM, ASR) or provider (local, openai,
+	// (Embedding, Rerank, KnowledgeQA, ASR) or provider (local, openai,
 	// …), matched case-insensitively. Empty shows everything.
 	Type   string
 	Source string
@@ -58,7 +58,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 		Use:   "list",
 		Short: "List models configured on the server",
 		Long: `List the models configured on the server, sorted by type then name. Pass
---type to restrict to one model type (Embedding, Rerank, KnowledgeQA, VLLM, ASR).`,
+--type to restrict to one model type (Embedding, Rerank, KnowledgeQA, ASR).`,
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			fopts, err := cmdutil.CheckFormatFlag(c)
@@ -78,7 +78,7 @@ func NewCmdList(f *cmdutil.Factory) *cobra.Command {
 			return runList(c.Context(), opts, fopts, cli)
 		},
 	}
-	cmd.Flags().StringVar(&opts.Type, "type", "", "Only show models of this type (Embedding, Rerank, KnowledgeQA, VLLM, ASR)")
+	cmd.Flags().StringVar(&opts.Type, "type", "", "Only show models of this type (Embedding, Rerank, KnowledgeQA, ASR)")
 	cmd.Flags().StringVar(&opts.Source, "source", "", "Only show models from this provider (local, remote, openai, aliyun, …)")
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmdutil.AddFormatFlag(cmd, modelListFields...)

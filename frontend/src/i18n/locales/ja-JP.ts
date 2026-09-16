@@ -4483,15 +4483,12 @@ export default {
         chat: '会話用の大規模言語モデルを設定します',
         embedding: 'テキストのベクトル化に使う埋め込みモデルを設定します',
         rerank: '検索結果のリランクに使うモデルを設定します',
-        vllm: 'マルチモーダル理解に使う視覚言語モデルを設定します',
         asr: '音声の文字起こしに使う音声認識モデルを設定します',
         default: 'モデル情報を設定します'
       },
       modelNamePlaceholder: {
         local: '例: llama2:latest',
         remote: '例: gpt-4, claude-3-opus',
-        localVllm: '例: llava:latest',
-        remoteVllm: '例: gpt-4-vision-preview',
         remoteAsr: '例: whisper-1'
       },
       baseUrlLabel: 'ベースURL',
@@ -4499,7 +4496,6 @@ export default {
       displayNamePlaceholder: '例: サポートQA用モデル',
       displayNameDesc: 'UIでの表示にのみ使用されます。実行時の呼び出しには上のモデル名が使われます。',
       baseUrlPlaceholder: '例: https://api.openai.com/v1',
-      baseUrlPlaceholderVllm: '例: http://localhost:11434/v1',
       baseUrlPlaceholderAsr: '例: https://api.openai.com/v1',
       apiKeyOptional: 'APIキー（任意）',
       apiKeyPlaceholder: 'APIキーを入力してください',
@@ -4544,7 +4540,6 @@ export default {
       modalityText: 'テキスト',
       modalityImage: '画像',
       modalityAudio: '音声',
-      modalityVideo: '動画',
       contextWindowLabel: 'コンテキストウィンドウ',
       contextWindowPlaceholder: 'デフォルト値{value}',
       contextWindowDesc: '1回のリクエストでこのモデルが受け付けられるトークン数です。エージェントの履歴圧縮はこの上限を基準にします。空欄の場合はデフォルト値の200000（200K）が使われます。プロバイダの実際のウィンドウサイズを指定してください。大きすぎる値を指定すると圧縮が働かず、プロバイダにリクエストを拒否されます。',
@@ -4974,11 +4969,6 @@ export default {
       title: 'リランクモデル',
       desc: '結果のリランクに使用するモデルを設定します',
       empty: 'リランクモデルがありません'
-    },
-    vllm: {
-      title: 'VLLM視覚モデル',
-      desc: 'マルチモーダル理解に使用する視覚言語モデルを設定します',
-      empty: 'VLLMモデルがありません'
     },
     asr: {
       title: 'ASR音声モデル',
