@@ -20,9 +20,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const maxBatchDownloadFiles = 200
-const maxBatchDownloadBytes int64 = 512 * 1024 * 1024
-const maxConcurrentBatchDownloads = 4
+const (
+	maxBatchDownloadFiles             = 200
+	maxBatchDownloadBytes       int64 = 512 * 1024 * 1024
+	maxConcurrentBatchDownloads       = 4
+)
 
 var batchDownloadSlots = make(chan struct{}, maxConcurrentBatchDownloads)
 

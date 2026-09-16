@@ -156,19 +156,47 @@ func TestBatchDownloadKnowledgeRejectsInvalidSelectionsBeforeReading(t *testing.
 		scope  *types.TenantAPIKeyScope
 		status int
 	}{
-		{name: "空列表", kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 400},
-		{name: "空白ID", ids: []string{" "}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 400},
-		{name: "超出数量", ids: make([]string, maxBatchDownloadFiles+1), kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 400},
-		{name: "文档缺失", ids: []string{"missing"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 404},
-		{name: "跨知识库", ids: []string{"a"}, item: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "other", FilePath: "secret"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 404},
-		{name: "跨租户", ids: []string{"a"}, item: &types.Knowledge{ID: "a", TenantID: 8, KnowledgeBaseID: "kb-1", FilePath: "secret"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 404},
+		{
+			name: "空列表", status: 400,
+			kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+		},
+		{
+			name: "空白ID", ids: []string{" "}, status: 400,
+			kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+		},
+		{
+			name: "超出数量", ids: make([]string, maxBatchDownloadFiles+1), status: 400,
+			kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+		},
+		{
+			name: "文档缺失", ids: []string{"missing"}, status: 404,
+			kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+		},
+		{
+			name: "跨知识库", ids: []string{"a"}, status: 404,
+			item: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "other", FilePath: "secret"},
+			kb:   &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+		},
+		{
+			name: "跨租户", ids: []string{"a"}, status: 404,
+			item: &types.Knowledge{ID: "a", TenantID: 8, KnowledgeBaseID: "kb-1", FilePath: "secret"},
+			kb:   &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+		},
 		{
 			name: "仅无原文件", ids: []string{"a"}, status: 400,
 			item: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "url"},
 			kb:   &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
 		},
-		{name: "共享只读", ids: []string{"a"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 8}, share: &downloadShareStub{permission: types.OrgRoleViewer}, status: 403},
-		{name: "密钥无此库权限", ids: []string{"a"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, scope: &types.TenantAPIKeyScope{KnowledgeBaseIDs: types.StringArray{"other"}}, status: 403},
+		{
+			name: "共享只读", ids: []string{"a"}, status: 403,
+			kb:    &types.KnowledgeBase{ID: "kb-1", TenantID: 8},
+			share: &downloadShareStub{permission: types.OrgRoleViewer},
+		},
+		{
+			name: "密钥无此库权限", ids: []string{"a"}, status: 403,
+			kb:    &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+			scope: &types.TenantAPIKeyScope{KnowledgeBaseIDs: types.StringArray{"other"}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
