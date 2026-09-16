@@ -36,7 +36,7 @@ func driveAliyunStreamShape(t *testing.T, contentType, body string, status int) 
 		Credentials: invoke.Credentials{APIKey: "k"},
 	}
 	ch, err := invoke.ChatStream(t.Context(), m, &invoke.ChatOptions{
-		Messages:            []invoke.Message{invoke.TextMessage("user", "再来")},
+		Messages:            []invoke.Message{invoke.TextMessage(invoke.RoleUser, "再来")},
 		Stream:              true,
 		Thinking:            textPtr(true),
 		MaxCompletionTokens: 512,

@@ -2536,7 +2536,7 @@ func (s *wikiIngestService) generateWithTemplate(
 
 	prompt := buf.String()
 	purpose := wikiPromptPurpose(promptTpl)
-	messages := []invoke.Message{invoke.TextMessage("user", prompt)}
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, prompt)}
 	if promptTpl == agent.WikiPageModifyUserPrompt {
 		systemPrompt := types.AppendCustomPromptInstructions(
 			agent.WikiPageModifySystemPrompt,
@@ -2544,8 +2544,8 @@ func (s *wikiIngestService) generateWithTemplate(
 			maskedData["InstructionScope"],
 		)
 		messages = []invoke.Message{
-			invoke.TextMessage("system", systemPrompt),
-			invoke.TextMessage("user", prompt),
+			invoke.TextMessage(invoke.RoleSystem, systemPrompt),
+			invoke.TextMessage(invoke.RoleUser, prompt),
 		}
 	} else {
 		messages[0].Content = []invoke.Part{{Text: types.AppendCustomPromptInstructions(

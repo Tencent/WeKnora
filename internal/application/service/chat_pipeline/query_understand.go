@@ -105,7 +105,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	// --- Build prompts ---
 	systemContent, userContent := p.buildPrompts(ctx, chatManage, historyList)
 
-	userMsg := invoke.TextMessage("user", userContent)
+	userMsg := invoke.TextMessage(invoke.RoleUser, userContent)
 	if useImages {
 		for _, img := range chatManage.Images {
 			userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: img}})
@@ -122,7 +122,7 @@ func (p *PluginQueryUnderstand) OnEvent(ctx context.Context,
 	modelCtx := types.WithLLMCallMetadata(ctx, "query_rewrite", "")
 	response, err := invoke.Chat(modelCtx, rewriteModel, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", systemContent),
+			invoke.TextMessage(invoke.RoleSystem, systemContent),
 			userMsg,
 		},
 		Temperature:         0.3,

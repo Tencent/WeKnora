@@ -37,8 +37,8 @@ func TestSanitizeMessages(t *testing.T) {
 			{Role: "assistant", Content: []invoke.Part{{Text: "thinking"}}, ToolCalls: []invoke.ToolCall{
 				{ID: "call_1"}, {ID: "call_2"},
 			}},
-			invoke.TextMessage("tool", "result1"),
-			invoke.TextMessage("tool", "result2"),
+			invoke.TextMessage(invoke.RoleTool, "result1"),
+			invoke.TextMessage(invoke.RoleTool, "result2"),
 		}
 		result := SanitizeMessages(messages)
 		assert.Len(t, result, 4) // all preserved

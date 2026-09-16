@@ -826,8 +826,8 @@ func (s *sessionService) GenerateTitle(ctx context.Context,
 	thinking := false
 	response, err := invoke.Chat(ctx, cfg, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", titlePrompt),
-			invoke.TextMessage("user", message.Content),
+			invoke.TextMessage(invoke.RoleSystem, titlePrompt),
+			invoke.TextMessage(invoke.RoleUser, message.Content),
 		},
 		Temperature: 0.3,
 		Thinking:    &thinking,

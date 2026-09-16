@@ -88,7 +88,7 @@ func TestEstimateMessageCountsReasoningContent(t *testing.T) {
 	assert.NoError(t, err)
 
 	reasoning := strings.Repeat("let me think about this step by step. ", 200)
-	plain := invoke.TextMessage("assistant", "short answer")
+	plain := invoke.TextMessage(invoke.RoleAssistant, "short answer")
 	thinking := invoke.Message{
 		Role: "assistant", Content: []invoke.Part{{Text: "short answer"}}, ReasoningContent: reasoning,
 	}
@@ -105,12 +105,12 @@ func TestEstimateMessageCountsImages(t *testing.T) {
 	e, err := NewEstimator()
 	assert.NoError(t, err)
 
-	withImages := invoke.Message{Role: "user", Content: []invoke.Part{
+	withImages := invoke.Message{Role: invoke.RoleUser, Content: []invoke.Part{
 		{Text: "what is this"}, {Image: &invoke.ImageRef{URL: "https://x/a.png"}},
 	}}
 	assert.Greater(t, e.EstimateMessage(&withImages), estimatedImageTokens)
 
-	multi := invoke.Message{Role: "user", Content: []invoke.Part{
+	multi := invoke.Message{Role: invoke.RoleUser, Content: []invoke.Part{
 		{Text: "describe"},
 		{Image: &invoke.ImageRef{URL: "data:image/png;base64,AAAA"}},
 	}}
@@ -118,7 +118,7 @@ func TestEstimateMessageCountsImages(t *testing.T) {
 
 	// Counting the same picture as both an image part and text twice would
 	// double-bill it; each part is counted exactly once.
-	both := invoke.Message{Role: "user", Content: []invoke.Part{
+	both := invoke.Message{Role: invoke.RoleUser, Content: []invoke.Part{
 		{Text: "describe"},
 		{Image: &invoke.ImageRef{URL: "data:image/png;base64,AAAA"}},
 	}}

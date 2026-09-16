@@ -34,7 +34,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	// messages. Tool output must retain its role and call ID; never promote it
 	// into user instructions during error recovery or iteration-limit synthesis.
 	messages := append([]invoke.Message(nil), conversation...)
-	messages = append(messages, invoke.TextMessage("user",
+	messages = append(messages, invoke.TextMessage(invoke.RoleUser,
 		"Tool execution has ended for this run. Respond to the current task, including "+
 			"the latest user corrections and source restrictions in the conversation. Base claims on "+
 			"the evidence actually obtained; distinguish completed work from remaining work and explain "+

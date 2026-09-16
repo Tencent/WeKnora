@@ -178,8 +178,8 @@ func (c *Compactor) summarize(
 		callCtx = types.WithLLMCallMetadata(callCtx, llmCallLabel, "")
 		resp, err := invoke.Chat(callCtx, c.chatConfig, &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", summarizationSystemPrompt),
-				invoke.TextMessage("user", prompt),
+				invoke.TextMessage(invoke.RoleSystem, summarizationSystemPrompt),
+				invoke.TextMessage(invoke.RoleUser, prompt),
 			},
 			Temperature:         0.3, // low temperature for factual summarization
 			MaxCompletionTokens: maxTokens,

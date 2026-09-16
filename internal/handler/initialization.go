@@ -1961,7 +1961,7 @@ func (h *InitializationHandler) checkChatModelConnection(
 		return false, fmt.Sprintf("创建聊天实例失败: %v", err)
 	}
 
-	testMessages := []invoke.Message{invoke.TextMessage("user", "test")}
+	testMessages := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "test")}
 	testOptions := &invoke.ChatOptions{
 		Messages:            testMessages,
 		MaxCompletionTokens: 1,
@@ -2651,7 +2651,7 @@ func (h *InitializationHandler) fabriText(
 
 	think := false
 	result, err := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
-		Messages:            []invoke.Message{invoke.TextMessage("user", content)},
+		Messages:            []invoke.Message{invoke.TextMessage(invoke.RoleUser, content)},
 		Temperature:         0.3,
 		MaxCompletionTokens: 4096,
 		Thinking:            &think,

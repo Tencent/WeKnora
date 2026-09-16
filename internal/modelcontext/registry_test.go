@@ -15,7 +15,7 @@ func TestRegistryOwnsEncodingOrderForSummarySlugs(t *testing.T) {
 	registry := NewRegistry(true)
 	require.Equal(t, "d1", registry.RegisterDocument(knowledgeID))
 
-	messages := registry.EncodeMessages([]invoke.Message{invoke.TextMessage("tool",
+	messages := registry.EncodeMessages([]invoke.Message{invoke.TextMessage(invoke.RoleTool,
 		"[[summary/"+knowledgeID+"|Summary]] document="+knowledgeID)})
 	require.Contains(t, messages[0].Text(), "[[res://0001|Summary]]")
 	require.Contains(t, messages[0].Text(), "document=d1")
@@ -326,7 +326,7 @@ func TestRegistryDecodesCanonicalArgumentsForEveryBuiltInReferenceTool(t *testin
 	registry.RegisterKnowledgeBase("kb-real")
 	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real", KnowledgeID: "doc-real", KnowledgeBaseID: "kb-real"})
 	registry.EncodeMessages([]invoke.Message{
-		invoke.TextMessage("user", "summary/00000000-0000-0000-0000-000000000001"),
+		invoke.TextMessage(invoke.RoleUser, "summary/00000000-0000-0000-0000-000000000001"),
 	})
 	registry.RegisterWeb("https://example.com/page", "Example")
 	registry.ModelToolResultForTool("wiki_read_issue", &types.ToolResult{Success: true, Output: `{"id":"issue-real"}`})
@@ -382,7 +382,7 @@ func TestModelToolResultProtectsSummarySlugBeforeSourceCompaction(t *testing.T) 
 
 func TestRegistryStreamDecoderRestoresSplitResourceAndCitationHandles(t *testing.T) {
 	registry := NewRegistry(true)
-	registry.EncodeMessages([]invoke.Message{invoke.TextMessage("user", "resource://AbCdEfGhIjKlMnOpQrStUv")})
+	registry.EncodeMessages([]invoke.Message{invoke.TextMessage(invoke.RoleUser, "resource://AbCdEfGhIjKlMnOpQrStUv")})
 	registry.RegisterChunk(ChunkReference{
 		ChunkID:         "chunk-real",
 		KnowledgeID:     "doc-real",

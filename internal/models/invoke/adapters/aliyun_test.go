@@ -47,7 +47,7 @@ func TestAliyunBudgetFieldStrategy(t *testing.T) {
 	a := newAliyunAdapter()
 	build := func(model string) (maxCompletion, maxTokens int) {
 		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, &invoke.ChatOptions{
-			Messages:            []invoke.Message{invoke.TextMessage("user", "hi")},
+			Messages:            []invoke.Message{invoke.TextMessage(invoke.RoleUser, "hi")},
 			MaxCompletionTokens: 64,
 		})
 		require.NoError(t, err)
@@ -73,7 +73,7 @@ func TestAliyunBuildChatRequestTextShape(t *testing.T) {
 	req, err := a.BuildChatRequest(invoke.Endpoint{Credentials: invoke.Credentials{APIKey: "sk"}},
 		"qwen-plus", &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", "be terse"), invoke.TextMessage("user", "hi"),
+				invoke.TextMessage(invoke.RoleSystem, "be terse"), invoke.TextMessage(invoke.RoleUser, "hi"),
 			},
 			MaxCompletionTokens: 32,
 			Temperature:         0.7,
@@ -120,7 +120,7 @@ func TestAliyunBuildChatRequestStreamHeadersAndIncremental(t *testing.T) {
 	on := true
 	req, err := a.BuildChatRequest(invoke.Endpoint{Credentials: invoke.Credentials{APIKey: "sk"}},
 		"qwen3-max", &invoke.ChatOptions{
-			Messages: []invoke.Message{invoke.TextMessage("user", "hi")},
+			Messages: []invoke.Message{invoke.TextMessage(invoke.RoleUser, "hi")},
 			Thinking: &on,
 			Stream:   true,
 		})
@@ -145,7 +145,7 @@ func TestAliyunThinkingPinFalseOnNonStream(t *testing.T) {
 	a := newAliyunAdapter()
 	on := true
 	req, err := a.BuildChatRequest(invoke.Endpoint{}, "qwen3-max", &invoke.ChatOptions{
-		Messages: []invoke.Message{invoke.TextMessage("user", "hi")},
+		Messages: []invoke.Message{invoke.TextMessage(invoke.RoleUser, "hi")},
 		Thinking: &on,
 	})
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestAliyunToolsGateByModelFamily(t *testing.T) {
 	a := newAliyunAdapter()
 	tools := []invoke.ToolDef{{Name: "get_weather", Description: "查天气"}}
 	build := func(model string, images bool) (*invoke.Request, error) {
-		msgs := []invoke.Message{invoke.TextMessage("user", "天气如何")}
+		msgs := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "天气如何")}
 		if images {
 			msgs = []invoke.Message{{
 				Role: "user",
@@ -552,7 +552,7 @@ func TestAliyunThinkingExtendedHybridFamilies(t *testing.T) {
 func TestAliyunToolChoiceRequiredOmitted(t *testing.T) {
 	a := newAliyunAdapter()
 	req, err := a.BuildChatRequest(invoke.Endpoint{}, "qwen-plus", &invoke.ChatOptions{
-		Messages:   []invoke.Message{invoke.TextMessage("user", "hi")},
+		Messages:   []invoke.Message{invoke.TextMessage(invoke.RoleUser, "hi")},
 		Tools:      []invoke.ToolDef{{Name: "f", Description: "d"}},
 		ToolChoice: "required",
 	})
@@ -646,7 +646,7 @@ func TestAliyunExplicitCacheGating(t *testing.T) {
 	build := func(model, retention string) string {
 		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", "sys"), invoke.TextMessage("user", "hi"),
+				invoke.TextMessage(invoke.RoleSystem, "sys"), invoke.TextMessage(invoke.RoleUser, "hi"),
 			},
 			CacheRetention: retention,
 		})
@@ -711,10 +711,10 @@ func TestAliyunCacheBreakpointPlacement(t *testing.T) {
 	t.Run("first system + last conversation, middle untouched", func(t *testing.T) {
 		msgs := request(t, "qwen3-max", &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", "sys prompt"),
-				invoke.TextMessage("user", "q1"),
-				invoke.TextMessage("assistant", "a1"),
-				invoke.TextMessage("user", "q2"),
+				invoke.TextMessage(invoke.RoleSystem, "sys prompt"),
+				invoke.TextMessage(invoke.RoleUser, "q1"),
+				invoke.TextMessage(invoke.RoleAssistant, "a1"),
+				invoke.TextMessage(invoke.RoleUser, "q2"),
 			},
 		})
 		require.Len(t, msgs, 4)
@@ -731,9 +731,9 @@ func TestAliyunCacheBreakpointPlacement(t *testing.T) {
 	t.Run("tool-ended conversation marks the tool result", func(t *testing.T) {
 		msgs := request(t, "deepseek-v3.2", &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", "sys"),
-				invoke.TextMessage("user", "q"),
-				invoke.TextMessage("tool", "tool result"),
+				invoke.TextMessage(invoke.RoleSystem, "sys"),
+				invoke.TextMessage(invoke.RoleUser, "q"),
+				invoke.TextMessage(invoke.RoleTool, "tool result"),
 			},
 		})
 		require.True(t, marked(t, msgs[2].Content), "tool 消息支持断点，最后一条落点")
@@ -742,8 +742,8 @@ func TestAliyunCacheBreakpointPlacement(t *testing.T) {
 	t.Run("marker lands after the structured-output hint", func(t *testing.T) {
 		msgs := request(t, "qwen3-max", &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", "sys"),
-				invoke.TextMessage("user", "q2"),
+				invoke.TextMessage(invoke.RoleSystem, "sys"),
+				invoke.TextMessage(invoke.RoleUser, "q2"),
 			},
 			Format: json.RawMessage(`{"type":"object"}`),
 		})
@@ -756,7 +756,7 @@ func TestAliyunCacheBreakpointPlacement(t *testing.T) {
 	t.Run("vision part array marks the trailing part", func(t *testing.T) {
 		msgs := request(t, "qwen3-vl-plus", &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", "sys"),
+				invoke.TextMessage(invoke.RoleSystem, "sys"),
 				{Role: "user", Content: []invoke.Part{
 					{Image: &invoke.ImageRef{URL: "https://example.com/pic.jpg"}},
 					{Text: "这是什么？"},
@@ -772,8 +772,8 @@ func TestAliyunCacheBreakpointPlacement(t *testing.T) {
 	t.Run("empty-content tail falls back to an earlier message", func(t *testing.T) {
 		msgs := request(t, "qwen3-max", &invoke.ChatOptions{
 			Messages: []invoke.Message{
-				invoke.TextMessage("system", "sys"),
-				invoke.TextMessage("user", "q"),
+				invoke.TextMessage(invoke.RoleSystem, "sys"),
+				invoke.TextMessage(invoke.RoleUser, "q"),
 				{Role: "assistant", Content: []invoke.Part{{Text: ""}}},
 			},
 		})
@@ -824,7 +824,7 @@ func TestAliyunThinkingToolChoiceMutex(t *testing.T) {
 	a := newAliyunAdapter()
 	build := func(model string, stream bool, thinking *bool) (any, *bool) {
 		req, err := a.BuildChatRequest(invoke.Endpoint{}, model, &invoke.ChatOptions{
-			Messages: []invoke.Message{invoke.TextMessage("user", "hi")},
+			Messages: []invoke.Message{invoke.TextMessage(invoke.RoleUser, "hi")},
 			Stream:   stream,
 			Thinking: thinking,
 			// 具名 tool_choice：必须与 Tools 同发才会出现在线上

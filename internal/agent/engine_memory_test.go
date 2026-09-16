@@ -22,8 +22,8 @@ func TestAgentMemoryLandsInTheSystemPrompt(t *testing.T) {
 	require.Contains(t, systemPrompt, "<user_memory>")
 
 	history := []invoke.Message{
-		invoke.TextMessage("user", "上一轮的问题"),
-		invoke.TextMessage("assistant", "上一轮的回答"),
+		invoke.TextMessage(invoke.RoleUser, "上一轮的问题"),
+		invoke.TextMessage(invoke.RoleAssistant, "上一轮的回答"),
 	}
 	messages := engine.buildMessagesWithLLMContext(systemPrompt, "这一轮的问题", "test-session", history, nil)
 	require.NotEmpty(t, messages)

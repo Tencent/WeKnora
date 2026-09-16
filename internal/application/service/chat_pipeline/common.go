@@ -100,14 +100,14 @@ func prepareMessagesWithHistory(chatManage *types.ChatManage) []invoke.Message {
 	systemPrompt += chatManage.MemoryPrompt
 
 	chatMessages := []invoke.Message{
-		invoke.TextMessage("system", systemPrompt),
+		invoke.TextMessage(invoke.RoleSystem, systemPrompt),
 	}
 
 	chatMessages = AppendHistoryMessages(chatMessages, chatManage.History)
 
 	// Add current user message. Only include images when the chat model supports
 	// vision; non-vision models rely on the text description in UserContent.
-	userMsg := invoke.TextMessage("user", chatManage.UserContent)
+	userMsg := invoke.TextMessage(invoke.RoleUser, chatManage.UserContent)
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
 		for _, img := range chatManage.Images {
 			userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: img}})
@@ -134,8 +134,8 @@ func withPromptCacheMetadata(
 // History is already filtered and truncated upstream by the load_history plugin.
 func AppendHistoryMessages(messages []invoke.Message, history []*types.History) []invoke.Message {
 	for _, history := range history {
-		messages = append(messages, invoke.TextMessage("user", history.Query))
-		messages = append(messages, invoke.TextMessage("assistant", history.Answer))
+		messages = append(messages, invoke.TextMessage(invoke.RoleUser, history.Query))
+		messages = append(messages, invoke.TextMessage(invoke.RoleAssistant, history.Answer))
 	}
 	return messages
 }

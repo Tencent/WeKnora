@@ -279,8 +279,8 @@ func (qa *QAPromptGenerator) User(ctx context.Context, question string) string {
 // Render renders a prompt
 func (qa *QAPromptGenerator) Render(ctx context.Context, question string) []invoke.Message {
 	return []invoke.Message{
-		invoke.TextMessage("system", qa.System(ctx)),
-		invoke.TextMessage("user", qa.User(ctx, question)),
+		invoke.TextMessage(invoke.RoleSystem, qa.System(ctx)),
+		invoke.TextMessage(invoke.RoleUser, qa.User(ctx, question)),
 	}
 }
 

@@ -85,7 +85,7 @@ func TestGoldenReplayAnthropicThinkingLevelsChat(t *testing.T) {
 	on := true
 	for _, level := range []string{"low", "medium", "high"} {
 		_, err := invoke.Chat(context.Background(), anthropicConfig(t, g.Server.URL), &invoke.ChatOptions{
-			Messages:            []invoke.Message{{Role: "user", Content: []invoke.Part{{Text: "Hi"}}}},
+			Messages:            []invoke.Message{{Role: invoke.RoleUser, Content: []invoke.Part{{Text: "Hi"}}}},
 			MaxCompletionTokens: 1024,
 			Thinking:            &on,
 			ThinkingLevel:       level,
@@ -106,7 +106,7 @@ func TestGoldenReplayAnthropicStream(t *testing.T) {
 	g := newReconcileServer(t, sseHandler(golden.SSE...))
 
 	ch, err := invoke.ChatStream(context.Background(), anthropicConfig(t, g.Server.URL), &invoke.ChatOptions{
-		Messages:            []invoke.Message{{Role: "user", Content: []invoke.Part{{Text: "Hi"}}}},
+		Messages:            []invoke.Message{{Role: invoke.RoleUser, Content: []invoke.Part{{Text: "Hi"}}}},
 		MaxCompletionTokens: 200,
 	})
 	require.NoError(t, err)
@@ -126,7 +126,7 @@ func TestGoldenReplayAnthropic401Auth(t *testing.T) {
 		`{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`))
 
 	_, err := invoke.Chat(context.Background(), anthropicConfig(t, g.Server.URL), &invoke.ChatOptions{
-		Messages:            []invoke.Message{{Role: "user", Content: []invoke.Part{{Text: "Hi"}}}},
+		Messages:            []invoke.Message{{Role: invoke.RoleUser, Content: []invoke.Part{{Text: "Hi"}}}},
 		MaxCompletionTokens: 16,
 	})
 	require.Error(t, err)

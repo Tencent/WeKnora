@@ -45,7 +45,7 @@ func TestRegistryLeavesEntitySlugUntouched(t *testing.T) {
 func TestRegistryEncodesMessageCopies(t *testing.T) {
 	r := newResourceRegistry()
 	ref := "resource://AbCdEfGhIjKlMnOpQrStUv"
-	original := []invoke.Message{invoke.TextMessage("tool", ref)}
+	original := []invoke.Message{invoke.TextMessage(invoke.RoleTool, ref)}
 	encoded := r.EncodeMessages(original)
 	require.Equal(t, ref, original[0].Text())
 	require.Equal(t, "res://0001", encoded[0].Text())

@@ -51,8 +51,8 @@ func runEvalExtraction(
 ) ([]extractionDecision, error) {
 	response, err := invoke.Chat(ctx, cfg, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", extractionSystemPrompt),
-			invoke.TextMessage("user", userPrompt),
+			invoke.TextMessage(invoke.RoleSystem, extractionSystemPrompt),
+			invoke.TextMessage(invoke.RoleUser, userPrompt),
 		},
 		Temperature:         0,
 		MaxCompletionTokens: 1200,

@@ -192,7 +192,7 @@ func buildUserHistoryMessage(m *types.Message) invoke.Message {
 	if len(m.Attachments) > 0 {
 		content += m.Attachments.BuildPrompt()
 	}
-	return invoke.TextMessage("user", content)
+	return invoke.TextMessage(invoke.RoleUser, content)
 }
 
 // buildAssistantHistoryMessages reconstructs the assistant side of one

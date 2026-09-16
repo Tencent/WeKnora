@@ -201,7 +201,7 @@ func TestRetainedTailStaysWithinTheKeepRecentBudget(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		id := "search-" + string(rune('a'+i))
 		msgs = append(msgs,
-			invoke.Message{Role: "assistant", ToolCalls: []invoke.ToolCall{{
+			invoke.Message{Role: invoke.RoleAssistant, ToolCalls: []invoke.ToolCall{{
 				ID: id, Type: "function",
 				Function: invoke.FunctionCall{Name: "knowledge_search", Arguments: `{"query":"x"}`},
 			}}},

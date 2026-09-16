@@ -108,8 +108,11 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 	// Create prompt for entity extraction
 	thinking := false
 	messages := []invoke.Message{
-		invoke.TextMessage("system", b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractEntitiesPrompt)),
-		invoke.TextMessage("user", chunk.Content),
+		invoke.TextMessage(
+			invoke.RoleSystem,
+			b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractEntitiesPrompt),
+		),
+		invoke.TextMessage(invoke.RoleUser, chunk.Content),
 	}
 
 	// Call LLM to extract entities
@@ -214,9 +217,9 @@ func (b *graphBuilder) extractRelationships(ctx context.Context,
 	// Create relationship extraction prompt
 	thinking := false
 	messages := []invoke.Message{
-		invoke.TextMessage("system",
+		invoke.TextMessage(invoke.RoleSystem,
 			b.renderGraphExtractionPrompt(ctx, b.config.Conversation.ExtractRelationshipsPrompt)),
-		invoke.TextMessage("user", fmt.Sprintf("Entities: %s\n\nText: %s", string(entitiesJSON), content)),
+		invoke.TextMessage(invoke.RoleUser, fmt.Sprintf("Entities: %s\n\nText: %s", string(entitiesJSON), content)),
 	}
 
 	// Call LLM to extract relationships

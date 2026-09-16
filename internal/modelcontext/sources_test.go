@@ -127,7 +127,7 @@ func TestStreamExpanderHoldsSplitReferenceAndDropsUnknown(t *testing.T) {
 
 func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 	registry := newSourceRegistry()
-	messages := []invoke.Message{invoke.TextMessage("assistant",
+	messages := []invoke.Message{invoke.TextMessage(invoke.RoleAssistant,
 		`Knowledge <kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" />; `+
 			`web <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`)}
 
@@ -163,7 +163,10 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 			Content: []invoke.Part{{Text: `<chunk chunk_id="chunk-real" knowledge_id="doc-real" ` +
 				`knowledge_base_id="kb-real" knowledge_title="Legacy Doc">legacy content</chunk>`}},
 		},
-		invoke.TextMessage("assistant", `Legacy answer <kb doc="Legacy Doc" chunk_id="chunk-real" kb_id="kb-real" />`),
+		invoke.TextMessage(
+			invoke.RoleAssistant,
+			`Legacy answer <kb doc="Legacy Doc" chunk_id="chunk-real" kb_id="kb-real" />`,
+		),
 	}
 
 	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
@@ -183,7 +186,9 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 
 func TestEncodeMessagesDoesNotTreatLegacyPromptExampleAsARealSource(t *testing.T) {
 	registry := newSourceRegistry()
-	messages := []invoke.Message{invoke.TextMessage("system", `Old rule: cite <kb doc="..." chunk_id="..." />`)}
+	messages := []invoke.Message{
+		invoke.TextMessage(invoke.RoleSystem, `Old rule: cite <kb doc="..." chunk_id="..." />`),
+	}
 
 	encoded := registry.EncodeMessagesWithPolicies(messages, nil, nil)
 	require.Equal(t, messages[0].Text(), encoded[0].Text())

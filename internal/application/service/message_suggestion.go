@@ -371,8 +371,8 @@ func (s *messageSuggestionService) generateWithModel(
 	thinking := false
 	response, err := invoke.Chat(modelCtx, invokeCfg, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", systemPrompt),
-			invoke.TextMessage("user", userPrompt),
+			invoke.TextMessage(invoke.RoleSystem, systemPrompt),
+			invoke.TextMessage(invoke.RoleUser, userPrompt),
 		},
 		Temperature:         0.3,
 		MaxCompletionTokens: 700,

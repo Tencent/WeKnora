@@ -987,8 +987,8 @@ func (s *Service) completeExtraction(
 	thinking := false
 	response, err := invoke.Chat(ctx, chatModel, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", extractionSystemPrompt),
-			invoke.TextMessage("user", userPrompt),
+			invoke.TextMessage(invoke.RoleSystem, extractionSystemPrompt),
+			invoke.TextMessage(invoke.RoleUser, userPrompt),
 		},
 		Temperature:         0,
 		MaxCompletionTokens: budget,

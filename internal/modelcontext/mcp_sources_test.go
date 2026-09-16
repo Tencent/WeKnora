@@ -59,7 +59,7 @@ func TestMCPAnswerCannotBorrowDirectoryOrHistoricalKnowledgeCitations(t *testing
 
 func TestToolArgumentsAloneDoNotAuthorizeCitations(t *testing.T) {
 	r := NewRegistry(true)
-	r.EncodeMessages([]invoke.Message{{Role: "assistant", ToolCalls: []invoke.ToolCall{
+	r.EncodeMessages([]invoke.Message{{Role: invoke.RoleAssistant, ToolCalls: []invoke.ToolCall{
 		{Function: invoke.FunctionCall{Name: "list_knowledge_chunks", Arguments: `{"faq_id":"faq-real"}`}},
 		{Function: invoke.FunctionCall{
 			Name: "web_fetch", Arguments: `{"items":[{"url":"https://example.com/unread"}]}`,

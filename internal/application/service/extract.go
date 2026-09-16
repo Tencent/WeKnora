@@ -828,7 +828,7 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 
 	thinking := false
 	response, err := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
-		Messages:            []invoke.Message{invoke.TextMessage("user", prompt)},
+		Messages:            []invoke.Message{invoke.TextMessage(invoke.RoleUser, prompt)},
 		Temperature:         0.3,
 		MaxCompletionTokens: 512,
 		Thinking:            &thinking,
@@ -852,7 +852,7 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 	// Call LLM once for all columns
 	thinking := false
 	response, err := invoke.Chat(ctx, invokeCfg, &invoke.ChatOptions{
-		Messages:            []invoke.Message{invoke.TextMessage("user", prompt)},
+		Messages:            []invoke.Message{invoke.TextMessage(invoke.RoleUser, prompt)},
 		Temperature:         0.3,
 		MaxCompletionTokens: 2048,
 		Thinking:            &thinking,

@@ -1035,7 +1035,7 @@ func prepareFallbackMessages(
 		}
 	} else {
 		messages = append([]invoke.Message{
-			invoke.TextMessage("system", strings.TrimSpace(registry.ProtocolPrompt())),
+			invoke.TextMessage(invoke.RoleSystem, strings.TrimSpace(registry.ProtocolPrompt())),
 		}, messages...)
 	}
 	return registry.EncodeMessages(messages), registry
@@ -1066,7 +1066,7 @@ func buildFallbackMessages(chatManage *types.ChatManage, promptContent string) [
 	if rq := strings.TrimSpace(chatManage.RewriteQuery); rq != "" {
 		query = rq
 	}
-	userMsg := invoke.TextMessage("user", query)
+	userMsg := invoke.TextMessage(invoke.RoleUser, query)
 	if chatManage.ChatModelSupportsVision && len(chatManage.Images) > 0 {
 		for _, img := range chatManage.Images {
 			userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: img}})

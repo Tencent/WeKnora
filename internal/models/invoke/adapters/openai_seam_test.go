@@ -83,5 +83,5 @@ func TestParseChatResponseBackfillsCacheUsage(t *testing.T) {
 }
 
 func thinkingTestMessages() []invoke.Message {
-	return []invoke.Message{{Role: "user", Content: []invoke.Part{{Text: "hi"}}}}
+	return []invoke.Message{{Role: invoke.RoleUser, Content: []invoke.Part{{Text: "hi"}}}}
 }

@@ -252,8 +252,8 @@ func (s *Service) adjudicateTopics(
 	thinking := false
 	response, err := invoke.Chat(ctx, chatModel, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", topicAdjudicationPrompt),
-			invoke.TextMessage("user", b.String()),
+			invoke.TextMessage(invoke.RoleSystem, topicAdjudicationPrompt),
+			invoke.TextMessage(invoke.RoleUser, b.String()),
 		},
 		Temperature:         0,
 		MaxCompletionTokens: 800,

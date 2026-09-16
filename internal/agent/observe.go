@@ -794,7 +794,7 @@ func (e *AgentEngine) appendToolResults(
 ) []invoke.Message {
 	// Add assistant message with tool calls (if any)
 	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
-		assistantMsg := invoke.TextMessage("assistant", step.Thought)
+		assistantMsg := invoke.TextMessage(invoke.RoleAssistant, step.Thought)
 		assistantMsg.ReasoningContent = step.ReasoningContent
 
 		// Add tool calls to assistant message (following OpenAI format)
@@ -887,7 +887,7 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	imageURLs []string,
 ) []invoke.Message {
 	messages := []invoke.Message{
-		invoke.TextMessage("system", systemPrompt),
+		invoke.TextMessage(invoke.RoleSystem, systemPrompt),
 	}
 
 	if len(llmContext) > 0 {
@@ -916,7 +916,7 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	// final synthesis. Calling buildRuntimeContextBlock directly here would put
 	// durable bound-KB/document IDs into the first model request before the
 	// request-local source registry had seen them.
-	userMsg := invoke.TextMessage("user", e.RenderUserTurnContent(sessionID, currentQuery))
+	userMsg := invoke.TextMessage(invoke.RoleUser, e.RenderUserTurnContent(sessionID, currentQuery))
 	for _, u := range imageURLs {
 		userMsg.Content = append(userMsg.Content, invoke.Part{Image: &invoke.ImageRef{URL: u}})
 	}

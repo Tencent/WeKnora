@@ -172,8 +172,8 @@ func askTopicMerge(cfg *invoke.ModelConfig, user string) (bool, error) {
 	thinking := false
 	response, err := invoke.Chat(context.Background(), cfg, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", topicAdjudicationPrompt),
-			invoke.TextMessage("user", user),
+			invoke.TextMessage(invoke.RoleSystem, topicAdjudicationPrompt),
+			invoke.TextMessage(invoke.RoleUser, user),
 		},
 		Temperature:         0,
 		MaxCompletionTokens: 800,

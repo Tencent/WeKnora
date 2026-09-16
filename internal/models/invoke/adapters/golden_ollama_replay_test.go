@@ -92,7 +92,7 @@ func TestGoldenReplayOllamaStream(t *testing.T) {
 	// 无 caller deadline：默认超时流式路径回归（executor cancel 绑定
 	// stream 生命周期，骨架缺陷已修复）。
 	ch, err := invoke.ChatStream(context.Background(), ollamaConfig(t, g.URL), &invoke.ChatOptions{
-		Messages:            []invoke.Message{{Role: "user", Content: []invoke.Part{{Text: "Hi"}}}},
+		Messages:            []invoke.Message{{Role: invoke.RoleUser, Content: []invoke.Part{{Text: "Hi"}}}},
 		MaxCompletionTokens: 64,
 		Thinking:            &on,
 	})

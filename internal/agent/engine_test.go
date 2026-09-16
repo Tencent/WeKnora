@@ -71,7 +71,7 @@ func TestStreamLLMResourceAliasesRoundTrip(t *testing.T) {
 	engine := newTestEngine(t, fake)
 	result, err := engine.streamLLMToEventBus(
 		context.Background(),
-		[]invoke.Message{invoke.TextMessage("tool", "source="+ref)},
+		[]invoke.Message{invoke.TextMessage(invoke.RoleTool, "source="+ref)},
 		nil,
 		nil,
 	)
@@ -110,7 +110,7 @@ func TestStreamLLMSummarySlugSurvivesDocumentCompaction(t *testing.T) {
 	// context (<document id="d1">…) would have registered it upstream.
 	require.Equal(t, "d1", engine.modelContext.RegisterDocument(knowledgeID))
 
-	toolMsg := invoke.TextMessage("tool",
+	toolMsg := invoke.TextMessage(invoke.RoleTool,
 		`<link>[[`+summarySlug+`|Weknora 试错记录.md - Summary]]</link>`)
 	result, err := engine.streamLLMToEventBus(context.Background(),
 		[]invoke.Message{toolMsg}, nil, nil)
@@ -360,10 +360,10 @@ func TestEstimateCurrentTokensDoesNotDoubleCountTheReply(t *testing.T) {
 	engine := newTestEngine(t, nil, withMaxContextTokens(128000))
 
 	sent := []invoke.Message{
-		invoke.TextMessage("system", "you are an agent"),
-		invoke.TextMessage("user", "do the thing"),
+		invoke.TextMessage(invoke.RoleSystem, "you are an agent"),
+		invoke.TextMessage(invoke.RoleUser, "do the thing"),
 	}
-	reply := invoke.TextMessage("assistant", "working on it")
+	reply := invoke.TextMessage(invoke.RoleAssistant, "working on it")
 	reply.ReasoningContent = strings.Repeat("deliberating carefully. ", 200)
 	toolResult := invoke.Message{
 		Role: "tool", Name: "t", ToolCallID: "c1",
@@ -397,8 +397,8 @@ func TestEstimateCurrentTokensDoesNotCountToolSchemasWithoutUsage(t *testing.T) 
 	engine := newTestEngine(t, nil, withMaxContextTokens(128000))
 
 	messages := []invoke.Message{
-		invoke.TextMessage("system", "you are an agent"),
-		invoke.TextMessage("user", "do the thing"),
+		invoke.TextMessage(invoke.RoleSystem, "you are an agent"),
+		invoke.TextMessage(invoke.RoleUser, "do the thing"),
 	}
 	tools := make([]invoke.ToolDef, 80)
 	for i := range tools {
@@ -436,14 +436,14 @@ func TestContextCompactionDoesNotRunEveryRound(t *testing.T) {
 	// One user message, then many assistant/tool rounds — a ReAct turn with
 	// no turn boundary anywhere in it.
 	messages := []invoke.Message{
-		invoke.TextMessage("system", "you are an agent"),
-		invoke.TextMessage("user", "build me a deck"),
+		invoke.TextMessage(invoke.RoleSystem, "you are an agent"),
+		invoke.TextMessage(invoke.RoleUser, "build me a deck"),
 	}
 	body := strings.Repeat("tool output content ", 400)
 	for i := 0; i < 20; i++ {
 		id := fmt.Sprintf("call-%d", i)
 		messages = append(messages,
-			invoke.Message{Role: "assistant", ToolCalls: []invoke.ToolCall{{
+			invoke.Message{Role: invoke.RoleAssistant, ToolCalls: []invoke.ToolCall{{
 				ID:       id,
 				Type:     "function",
 				Function: invoke.FunctionCall{Name: "write_sandbox_file", Arguments: `{"path":"/w/a.html"}`},
@@ -541,8 +541,8 @@ func newTestEngine(t *testing.T, seam testLLMSeam, opts ...testEngineOption) *Ag
 
 func emptyMessages() []invoke.Message {
 	return []invoke.Message{
-		invoke.TextMessage("system", "You are a test agent."),
-		invoke.TextMessage("user", "test query"),
+		invoke.TextMessage(invoke.RoleSystem, "You are a test agent."),
+		invoke.TextMessage(invoke.RoleUser, "test query"),
 	}
 }
 
@@ -643,7 +643,7 @@ func TestStreamThinkingToEventBus_PropagatesFinishReason(t *testing.T) {
 
 			engine := newTestEngine(t, fake)
 			ctx := context.Background()
-			msgs := []invoke.Message{invoke.TextMessage("user", "test")}
+			msgs := []invoke.Message{invoke.TextMessage(invoke.RoleUser, "test")}
 			tools := []invoke.ToolDef{}
 
 			resp, err := engine.streamThinkingToEventBus(ctx, msgs, tools, 0, "sess-1")
@@ -660,7 +660,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 		fake.EnqueueStream(ansChunk("ok", true, "stop"))
 		engine := newTestEngine(t, fake, withMaxCompletionTokens(4096))
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage(invoke.RoleUser, "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, fake.Calls(), 1)
 		assert.Equal(t, 4096, fake.Calls()[0].Opts.MaxCompletionTokens)
@@ -671,7 +671,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 		fake.EnqueueStream(ansChunk("ok", true, "stop"))
 		engine := newTestEngine(t, fake)
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage(invoke.RoleUser, "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, fake.Calls(), 1)
 		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, fake.Calls()[0].Opts.MaxCompletionTokens)
@@ -684,7 +684,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 			cfg.SandboxConfigID = "cfg-a"
 		})
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage(invoke.RoleUser, "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, fake.Calls(), 1)
 		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, fake.Calls()[0].Opts.MaxCompletionTokens)
@@ -695,7 +695,7 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 		fake.EnqueueStream(ansChunk("ok", true, "stop"))
 		engine := newTestEngine(t, fake, withMaxCompletionTokens(64000))
 		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]invoke.Message{invoke.TextMessage("user", "test")}, nil, 0, "sess-1")
+			[]invoke.Message{invoke.TextMessage(invoke.RoleUser, "test")}, nil, 0, "sess-1")
 		require.NoError(t, err)
 		require.Len(t, fake.Calls(), 1)
 		assert.Equal(t, 64000, fake.Calls()[0].Opts.MaxCompletionTokens)

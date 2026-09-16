@@ -453,9 +453,9 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		}
 		messages := make([]invoke.Message, 0, 2)
 		if strings.TrimSpace(opts.SystemPrompt) != "" {
-			messages = append(messages, invoke.TextMessage("system", opts.SystemPrompt))
+			messages = append(messages, invoke.TextMessage(invoke.RoleSystem, opts.SystemPrompt))
 		}
-		messages = append(messages, invoke.TextMessage("user", input))
+		messages = append(messages, invoke.TextMessage(invoke.RoleUser, input))
 		chatOpts := &invoke.ChatOptions{Messages: messages}
 		if opts.Temperature != nil {
 			chatOpts.Temperature = *opts.Temperature

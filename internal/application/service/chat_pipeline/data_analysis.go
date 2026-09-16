@@ -121,7 +121,7 @@ Return your response in the specified JSON format.`, chatManage.Query, knowledge
 
 	modelCtx := types.WithLLMCallMetadata(ctx, "data_analysis_plan", "")
 	response, err := invoke.Chat(modelCtx, chatModel, &invoke.ChatOptions{
-		Messages:    []invoke.Message{invoke.TextMessage("user", analysisPrompt)},
+		Messages:    []invoke.Message{invoke.TextMessage(invoke.RoleUser, analysisPrompt)},
 		Temperature: 0.1,
 		Format:      formatSchema,
 	})

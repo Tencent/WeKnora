@@ -490,8 +490,8 @@ func (s *Service) callConsolidationModel(
 	thinking := false
 	response, err := invoke.Chat(ctx, chatModel, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", consolidationSystemPrompt),
-			invoke.TextMessage("user", b.String()),
+			invoke.TextMessage(invoke.RoleSystem, consolidationSystemPrompt),
+			invoke.TextMessage(invoke.RoleUser, b.String()),
 		},
 
 		Temperature:         0,

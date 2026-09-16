@@ -970,8 +970,8 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	modelCtx := types.WithLLMCallMetadata(ctx, "document_summary", "")
 	summary, err := invoke.Chat(modelCtx, invokeCfg, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("system", summaryPrompt),
-			invoke.TextMessage("user", contentWithMetadata),
+			invoke.TextMessage(invoke.RoleSystem, summaryPrompt),
+			invoke.TextMessage(invoke.RoleUser, contentWithMetadata),
 		},
 		Temperature:         0.3,
 		MaxCompletionTokens: maxTokens,
@@ -2164,7 +2164,7 @@ func (s *knowledgeService) generateQuestionsWithContext(ctx context.Context,
 	modelCtx := types.WithLLMCallMetadata(ctx, "question_generation", "")
 	response, err := invoke.Chat(modelCtx, invokeCfg, &invoke.ChatOptions{
 		Messages: []invoke.Message{
-			invoke.TextMessage("user", prompt),
+			invoke.TextMessage(invoke.RoleUser, prompt),
 		},
 		Temperature:         0.7,
 		MaxCompletionTokens: 512,
