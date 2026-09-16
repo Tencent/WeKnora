@@ -257,6 +257,59 @@ func TestStageSessionAttachmentsResolvesURLFromTemporaryDocument(t *testing.T) {
 	assert.Equal(t, 1, fileService.getCalls[resourceRef])
 }
 
+func TestStageSessionAttachmentsResolvesURLFromParentSessionDocument(t *testing.T) {
+	db := stagingTempDocDB(t)
+	docID := "doc-1"
+	resourceRef := "local://tenant/attachment-1"
+	require.NoError(t, db.Create(&types.TemporaryDocument{
+		ID:          docID,
+		TenantID:    7,
+		SessionID:   "parent-session",
+		ResourceRef: resourceRef,
+		FileName:    "report.pdf",
+		FileType:    ".pdf",
+		FileSize:    7,
+		Status:      types.TemporaryDocumentStatusReady,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}).Error)
+
+	attachment := types.MessageAttachment{
+		ID:       docID,
+		FileName: "report.pdf",
+		FileType: ".pdf",
+		FileSize: 7,
+	}
+	remotePath, err := sandboxAttachmentPath(types.MessageAttachment{
+		URL: resourceRef, FileName: "report.pdf",
+	})
+	require.NoError(t, err)
+
+	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}
+	fileService := &stagingFileService{
+		files: map[string][]byte{resourceRef: []byte("content")},
+	}
+	service := &agentService{
+		db:              db,
+		sandboxMgr:      manager,
+		fileService:     fileService,
+		sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	staged, err := service.stageSessionAttachments(
+		ctx,
+		"forked-session",
+		"cfg-remote",
+		7,
+		types.MessageAttachments{attachment},
+	)
+
+	require.NoError(t, err)
+	require.Len(t, staged, 1)
+	assert.Equal(t, remotePath, staged[0].Path)
+	assert.Equal(t, []string{remotePath}, manager.writes)
+}
+
 func TestStageSessionAttachmentsSkipsMissingTemporaryDocument(t *testing.T) {
 	db := stagingTempDocDB(t)
 	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}

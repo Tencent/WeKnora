@@ -13,9 +13,20 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+// SandboxIDLookup reports the sandbox currently bound to a session without
+// provisioning one. A session with no live sandbox reports ok=false, which the
+// completion path treats as "nothing to check point".
+type SandboxIDLookup interface {
+	BoundSandboxID(ctx context.Context, sessionID string) (string, bool)
+}
+
+var _ SandboxIDLookup = (*sandbox.SessionBoundManager)(nil)
+var _ SandboxIDLookup = (*service.PinnedSessionSandbox)(nil)
 
 // AgentStreamHandler handles agent events for SSE streaming
 // It uses a dedicated EventBus per request to avoid SessionID filtering
@@ -37,6 +48,16 @@ type AgentStreamHandler struct {
 	// sandbox after the agent completes. Nil when the sandbox backend
 	// doesn't support artifact collection or WeKnora was built without it.
 	artifactCollector *service.ArtifactCollector
+
+	// checkpointer commits the sandbox's /workspace at the end of the turn so
+	// session fork can roll a forked sandbox back to this exact message. Nil
+	// when the deployment has no sandbox backend; handleComplete checks.
+	checkpointer *service.WorkspaceCheckpointer
+
+	// sandboxIDLookup resolves the session's currently bound sandbox ID. The
+	// ID is stored next to the commit SHA because a SHA is only meaningful
+	// within one sandbox's git repository.
+	sandboxIDLookup SandboxIDLookup
 
 	// State tracking
 	knowledgeRefs   []*types.SearchResult
@@ -90,6 +111,8 @@ func NewAgentStreamHandler(
 	streamManager interfaces.StreamManager,
 	eventBus *event.EventBus,
 	artifactCollector *service.ArtifactCollector,
+	checkpointer *service.WorkspaceCheckpointer,
+	sandboxIDLookup SandboxIDLookup,
 ) *AgentStreamHandler {
 	return &AgentStreamHandler{
 		ctx:                ctx,
@@ -102,6 +125,8 @@ func NewAgentStreamHandler(
 		streamManager:      streamManager,
 		eventBus:           eventBus,
 		artifactCollector:  artifactCollector,
+		checkpointer:       checkpointer,
+		sandboxIDLookup:    sandboxIDLookup,
 		knowledgeRefs:      make([]*types.SearchResult, 0),
 		eventStartTimes:    make(map[string]time.Time),
 	}
@@ -715,6 +740,26 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// reads still carry it after the live stream is gone.
 		if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
 			h.assistantMessage.Usage = usage
+		}
+
+		// Check point /workspace before draining artifacts. Every tool has
+		// finished, and the turn's sandbox lease is still held, so the sandbox
+		// is guaranteed to still be here.
+		//
+		// This runs on every exit path, including cancelled and errored turns.
+		// Skipping unsuccessful turns would fold their file changes into the
+		// NEXT turn's commit, so forking at that next turn would silently pick
+		// up the cancelled turn's edits.
+		//
+		// Best-effort throughout: a nil checkpoint just means this message
+		// cannot serve as a fork point.
+		if h.checkpointer != nil && h.sandboxIDLookup != nil {
+			checkpointCtx := context.WithoutCancel(h.ctx)
+			if sandboxID, ok := h.sandboxIDLookup.BoundSandboxID(checkpointCtx, h.sessionID); ok {
+				h.assistantMessage.SandboxCheckpoint = h.checkpointer.Checkpoint(
+					checkpointCtx, h.sessionID, sandboxID, h.assistantMessageID,
+				)
+			}
 		}
 
 		// Drain skill-generated files from the sandbox into persistent

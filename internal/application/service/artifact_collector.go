@@ -14,13 +14,15 @@
 //     sandbox and returns an empty slice when none exists.
 //   - Best-effort: individual errors are logged and skipped, never returned,
 //     so a stray unreadable file cannot block the assistant reply.
-//   - De-duplication by (SourcePath, ModTime): if a prior message in the
-//     same session already recorded the same (path, mtime), skip it.
+//   - De-duplication by (SourcePath, ModTime) or (SourcePath, FileSize):
+//     an unchanged file whose mtime was refreshed by git checkout must not
+//     re-attach to a later message.
 package service
 
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -344,7 +346,7 @@ func (c *ArtifactCollector) collect(
 		// pathological case where ListSessionFiles returns the same path
 		// twice (envd hasn't been observed to do so, but future-proofing
 		// the loop is cheap).
-		known[artifactKey(art.SourcePath, art.ModTime)] = struct{}{}
+		rememberKnown(known, art.SourcePath, art.ModTime, art.FileSize)
 	}
 	logger.Infof(ctx, "[ArtifactCollector] done session=%s listed=%d attached=%d",
 		sessionID, len(entries), len(artifacts))
@@ -365,7 +367,7 @@ func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) 
 		return set
 	}
 	for _, p := range prev {
-		set[artifactKey(p.SourcePath, p.ModTime)] = struct{}{}
+		rememberKnown(set, p.SourcePath, p.ModTime, p.FileSize)
 	}
 	return set
 }
@@ -382,6 +384,11 @@ func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known map[
 	}
 	if _, seen := known[artifactKey(entry.Path, entry.ModTime)]; seen {
 		return false
+	}
+	if entry.Size > 0 {
+		if _, seen := known[artifactSizeKey(entry.Path, entry.Size)]; seen {
+			return false
+		}
 	}
 	return true
 }
@@ -412,6 +419,12 @@ func (c *ArtifactCollector) maybePersist(
 		logger.Warnf(ctx, "[ArtifactCollector] read artifact failed: session=%s path=%s err=%v",
 			sessionID, entry.Path, err)
 		return types.MessageArtifact{}, false
+	}
+	if actual := int64(len(data)); actual > 0 {
+		if _, seen := known[artifactSizeKey(entry.Path, actual)]; seen {
+			rememberKnown(known, entry.Path, entry.ModTime, actual)
+			return types.MessageArtifact{}, false
+		}
 	}
 	// A second guard: envd may report a stale size while the file is being
 	// re-written; enforce the cap against the actual byte count too.
@@ -508,6 +521,20 @@ func artifactKey(path string, mod time.Time) string {
 		return path + "\x00"
 	}
 	return path + "\x00" + mod.UTC().Format(time.RFC3339Nano)
+}
+
+func artifactSizeKey(path string, size int64) string {
+	return path + "\x00s" + strconv.FormatInt(size, 10)
+}
+
+func rememberKnown(known map[string]struct{}, path string, mod time.Time, size int64) {
+	if known == nil {
+		return
+	}
+	known[artifactKey(path, mod)] = struct{}{}
+	if size > 0 {
+		known[artifactSizeKey(path, size)] = struct{}{}
+	}
 }
 
 // safeFileName strips slashes and backslashes from the original name before

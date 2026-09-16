@@ -87,6 +87,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -320,6 +321,41 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// The factory returns nil when the sandbox backend does not support
 	// per-session file inspection; downstream code guards on nil.
 	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
+
+	// WorkspaceCheckpointer commits the sandbox /workspace after each agent
+	// turn so session fork can roll a forked sandbox back to a given message.
+	// The process-wide Manager is DisabledManager, so the runner and ID lookup
+	// go through the session pin + per-tenant resolver — the same path
+	// ArtifactCollector already uses. Direct Manager type-asserts still win
+	// when a deployment injects a SessionBoundManager as the process default.
+	must(container.Provide(func(
+		mgr sandbox.Manager,
+		resolver sandbox.TenantSandboxResolver,
+		pinner *service.SessionSandboxPinner,
+	) *service.PinnedSessionSandbox {
+		return service.NewPinnedSessionSandbox(pinner, resolver, mgr)
+	}))
+	must(container.Provide(func(
+		mgr sandbox.Manager,
+		pinned *service.PinnedSessionSandbox,
+	) *service.WorkspaceCheckpointer {
+		if runner, ok := mgr.(service.SandboxShellRunner); ok {
+			return service.NewWorkspaceCheckpointer(runner)
+		}
+		return service.NewWorkspaceCheckpointer(pinned)
+	}))
+	must(container.Provide(func(
+		mgr sandbox.Manager,
+		pinned *service.PinnedSessionSandbox,
+	) session.SandboxIDLookup {
+		if lookup, ok := mgr.(session.SandboxIDLookup); ok {
+			return lookup
+		}
+		if pinned == nil {
+			return nil
+		}
+		return pinned
+	}))
 
 	// SandboxTerminalService opens interactive PTYs on session sandboxes for
 	// the frontend terminal panel. First-use provisioning takes a sandbox
