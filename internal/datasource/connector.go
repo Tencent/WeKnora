@@ -206,6 +206,22 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
+	types.ConnectorTypeFeishuLinks: {
+		Type:         types.ConnectorTypeFeishuLinks,
+		Name:         "Feishu Links (飞书链接列表)",
+		Description:  "Sync individual Feishu documents from a list of URLs",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
+	types.ConnectorTypeLarkLinks: {
+		Type:         types.ConnectorTypeLarkLinks,
+		Name:         "Lark Links",
+		Description:  "Sync individual Lark documents from a list of URLs",
+		Priority:     0,
+		AuthType:     "oauth2",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 	types.ConnectorTypeNotion: {
 		Type:         types.ConnectorTypeNotion,
 		Name:         "Notion",
