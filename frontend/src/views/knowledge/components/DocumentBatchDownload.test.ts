@@ -19,8 +19,10 @@ test('批量下载使用受认证的 Blob 请求并支持取消', () => {
 test('批量下载界面限制单批 200 项并保留只读权限边界', () => {
   assert.match(batchBar, /v-if="canDownload"/)
   assert.match(batchBar, /count > 200/)
+  assert.match(batchBar, /batch-download-trigger/)
   assert.match(batchBar, /v-if="canMutate"/)
-  assert.match(knowledgeBase, /if \(ids\.length > 200\)/)
+  assert.match(knowledgeBase, /isBatchDownloadableKnowledge/)
+  assert.match(knowledgeBase, /ids\.length > MAX_BATCH_DOWNLOAD_FILES/)
   assert.match(knowledgeBase, /:can-download="canDownloadKnowledge"/)
   assert.match(knowledgeBase, /@select-loaded="toggleSelectAll\(true\)"/)
   assert.match(listView, /v-if="canEdit \|\| canDownload"/)
@@ -28,5 +30,6 @@ test('批量下载界面限制单批 200 项并保留只读权限边界', () => 
 
 test('Blob 格式的 JSON 错误会还原为可读消息', () => {
   assert.match(request, /error\.response\.data instanceof Blob/)
-  assert.match(request, /JSON\.parse\(await error\.response\.data\.text\(\)\)/)
+  assert.match(request, /JSON\.parse\(text\)/)
+  assert.match(request, /text\.startsWith\('\{'\)/)
 })

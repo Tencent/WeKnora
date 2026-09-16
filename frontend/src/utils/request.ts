@@ -139,9 +139,13 @@ instance.interceptors.response.use(
     }
 
     // 文件下载失败时服务端仍返回 JSON；先还原错误信息，避免被 Blob 隐藏。
-    if (typeof Blob !== 'undefined' && error.response.data instanceof Blob && error.response.data.type.includes('json')) {
+    // 不依赖 Content-Type：网关可能把错误改成 text/plain 或空类型。
+    if (typeof Blob !== 'undefined' && error.response.data instanceof Blob) {
       try {
-        error.response.data = JSON.parse(await error.response.data.text());
+        const text = (await error.response.data.text()).trim();
+        if (text.startsWith('{') || text.startsWith('[') || error.response.data.type.includes('json')) {
+          error.response.data = JSON.parse(text);
+        }
       } catch {
         // 非法 JSON 继续使用原有错误处理。
       }

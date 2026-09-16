@@ -43,6 +43,7 @@ import {
   downKnowledgeDetails,
   type KnowledgeFolderTree,
 } from "@/api/knowledge-base/index";
+import { isBatchDownloadableKnowledge } from './knowledgeDownloadFileName';
 import { waitForKnowledgeDeletion } from '@/utils/knowledgeDeletion';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
 import FAQEntryManager from './components/FAQEntryManager.vue';
@@ -445,12 +446,34 @@ const batchTagging = ref(false);
 const batchDownloading = ref(false);
 let batchDownloadController: AbortController | undefined;
 
+const MAX_BATCH_DOWNLOAD_FILES = 200;
+const MAX_BATCH_DOWNLOAD_BYTES = 512 * 1024 * 1024;
+
 const handleBatchDownload = async () => {
   if (batchDownloading.value || batchDeleting.value || batchReparsing.value || batchTagging.value || selectedIds.value.size === 0) return;
-  const ids = Array.from(selectedIds.value);
-  if (ids.length > 200) {
+  const selected = Array.from(selectedIds.value);
+  const itemsById = new Map((cardList.value || []).map((item) => [item.id, item]));
+  const ids = selected.filter((id) => isBatchDownloadableKnowledge(itemsById.get(id)));
+  const skipped = selected.length - ids.length;
+  if (ids.length === 0) {
+    MessagePlugin.warning(t('knowledgeBase.batchDownloadNoFiles'));
+    return;
+  }
+  if (ids.length > MAX_BATCH_DOWNLOAD_FILES) {
     MessagePlugin.warning(t('knowledgeBase.batchDownloadHint'));
     return;
+  }
+  let knownBytes = 0;
+  for (const id of ids) {
+    const size = Number(itemsById.get(id)?.file_size);
+    if (Number.isFinite(size) && size > 0) knownBytes += size;
+  }
+  if (knownBytes > MAX_BATCH_DOWNLOAD_BYTES) {
+    MessagePlugin.warning(t('knowledgeBase.batchDownloadTooLarge'));
+    return;
+  }
+  if (skipped > 0) {
+    MessagePlugin.warning(t('knowledgeBase.batchDownloadSkipped', { count: skipped }));
   }
   const controller = new AbortController();
   batchDownloadController = controller;

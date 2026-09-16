@@ -52,12 +52,14 @@ const folderPickerVisible = ref(false);
         </div>
         <div class="batch-bar-actions">
           <t-tooltip v-if="canDownload" :content="t('knowledgeBase.batchDownloadHint')">
-            <t-button theme="primary" size="small" :loading="downloadLoading"
-              :disabled="count === 0 || count > 200 || deleteLoading || reparseLoading || tagLoading || downloadLoading"
-              @click="emit('download')">
-              <template #icon><t-icon name="download" size="14px" /></template>
-              {{ t(downloadLoading ? 'knowledgeBase.batchDownloading' : 'knowledgeBase.batchDownload') }}
-            </t-button>
+            <span class="batch-download-trigger">
+              <t-button theme="primary" size="small" :loading="downloadLoading"
+                :disabled="count === 0 || count > 200 || deleteLoading || reparseLoading || tagLoading || downloadLoading"
+                @click="emit('download')">
+                <template #icon><t-icon name="download" size="14px" /></template>
+                {{ t(downloadLoading ? 'knowledgeBase.batchDownloading' : 'knowledgeBase.batchDownload') }}
+              </t-button>
+            </span>
           </t-tooltip>
 
           <t-popconfirm v-if="canMutate" theme="warning" :content="t('knowledgeBase.confirmBatchReparseDocument', { count })"
@@ -166,6 +168,10 @@ const folderPickerVisible = ref(false);
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.batch-download-trigger {
+  display: inline-flex;
 }
 
 .batch-bar-fade-enter-active,

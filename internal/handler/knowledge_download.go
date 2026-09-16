@@ -3,6 +3,7 @@ package handler
 import (
 	"archive/zip"
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,15 +22,23 @@ import (
 
 const maxBatchDownloadFiles = 200
 const maxBatchDownloadBytes int64 = 512 * 1024 * 1024
+const maxConcurrentBatchDownloads = 4
+
+var batchDownloadSlots = make(chan struct{}, maxConcurrentBatchDownloads)
 
 // BatchDownloadKnowledgeRequest 指定同一知识库中需要下载的文档。
 type BatchDownloadKnowledgeRequest struct {
 	IDs []string `json:"ids" binding:"required,min=1,max=200,dive,required,max=128"`
 }
 
+type knowledgeDownloadEntry struct {
+	ID         string
+	FolderPath string
+}
+
 // BatchDownloadKnowledge godoc
 // @Summary 批量下载知识文件
-// @Description 将同一知识库的最多 200 个文档打包为 ZIP，原始内容合计不超过 512 MiB。任一文件失败时不返回残缺压缩包。
+// @Description 将同一知识库的最多 200 个文档打包为 ZIP，原始内容合计不超过 512 MiB。无原文件的条目会被跳过；无权访问、跨库或读取失败时不返回残缺压缩包。
 // @Tags 知识管理
 // @Accept json
 // @Produce application/zip
@@ -37,8 +46,11 @@ type BatchDownloadKnowledgeRequest struct {
 // @Param request body BatchDownloadKnowledgeRequest true "文档ID列表"
 // @Success 200 {file} file "ZIP 压缩包"
 // @Failure 400 {object} errors.AppError
+// @Failure 401 {object} errors.AppError
 // @Failure 403 {object} errors.AppError
 // @Failure 404 {object} errors.AppError
+// @Failure 429 {object} errors.AppError
+// @Failure 500 {object} errors.AppError
 // @Security Bearer
 // @Security ApiKeyAuth
 // @Router /knowledge-bases/{id}/knowledge/batch-download [post]
@@ -77,6 +89,7 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 			byID[item.ID] = item
 		}
 	}
+	entries := make([]knowledgeDownloadEntry, 0, len(ids))
 	// 在读取任何文件之前检查整批文档，防止混入其他知识库或租户的 ID。
 	for _, id := range ids {
 		item := byID[id]
@@ -85,12 +98,20 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 			return
 		}
 		if !item.IsManual() && item.FilePath == "" {
-			_ = c.Error(errors.NewBadRequestError("所选文档没有可下载的原始文件，请取消选择后重试").WithDetails(
-				gin.H{"knowledge_id": id},
-			))
-			return
+			continue
 		}
+		entries = append(entries, knowledgeDownloadEntry{ID: id, FolderPath: item.FolderPath})
 	}
+	if len(entries) == 0 {
+		_ = c.Error(errors.NewBadRequestError("所选文档没有可下载的原始文件，请取消选择后重试"))
+		return
+	}
+
+	if !tryAcquireBatchDownloadSlot() {
+		_ = c.Error(errors.NewTooManyRequestsError("当前批量下载过多，请稍后重试"))
+		return
+	}
+	defer releaseBatchDownloadSlot()
 
 	// 先在临时文件中完整生成压缩包，避免读取失败时向用户返回残缺 ZIP。
 	archive, err := os.CreateTemp("", "weknora-download-*.zip")
@@ -104,10 +125,13 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 		_ = os.Remove(archivePath)
 	}()
 	if err := writeKnowledgeDownloadArchive(
-		ctx, archive, ids, h.kgService.GetKnowledgeFile, maxBatchDownloadBytes,
+		ctx, archive, entries, h.kgService.GetKnowledgeFile, maxBatchDownloadBytes,
 	); err != nil {
-		logger.ErrorWithFields(ctx, err, nil)
-		_ = c.Error(err)
+		mapped := mapKnowledgeDownloadError(err)
+		if appErr, ok := errors.IsAppError(mapped); !ok || appErr.HTTPCode >= 500 {
+			logger.ErrorWithFields(ctx, err, nil)
+		}
+		_ = c.Error(mapped)
 		return
 	}
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
@@ -120,6 +144,19 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 	}); err != nil {
 		logger.Errorf(ctx, "Failed to send knowledge archive: %v", err)
 	}
+}
+
+func tryAcquireBatchDownloadSlot() bool {
+	select {
+	case batchDownloadSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func releaseBatchDownloadSlot() {
+	<-batchDownloadSlots
 }
 
 func uniqueKnowledgeDownloadIDs(input []string) []string {
@@ -135,36 +172,56 @@ func uniqueKnowledgeDownloadIDs(input []string) []string {
 	return ids
 }
 
+func isKnowledgeDownloadCanceled(err error) bool {
+	return err != nil && (stderrors.Is(err, context.Canceled) || stderrors.Is(err, context.DeadlineExceeded))
+}
+
+func mapKnowledgeDownloadError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := errors.IsAppError(err); ok {
+		return err
+	}
+	if isKnowledgeDownloadCanceled(err) {
+		return errors.NewBadRequestError("下载已取消")
+	}
+	return err
+}
+
 type knowledgeDownloadOpener func(context.Context, string) (io.ReadCloser, string, error)
 
 func writeKnowledgeDownloadArchive(
 	ctx context.Context,
 	output io.Writer,
-	ids []string,
+	entries []knowledgeDownloadEntry,
 	open knowledgeDownloadOpener,
 	limit int64,
 ) error {
 	writer := zip.NewWriter(output)
-	usedNames := make(map[string]bool, len(ids))
+	usedNames := make(map[string]bool, len(entries))
 	var total int64
-	for _, id := range ids {
+	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		file, filename, err := open(ctx, id)
+		file, filename, err := open(ctx, entry.ID)
 		if err != nil {
+			if isKnowledgeDownloadCanceled(err) {
+				return err
+			}
 			return errors.NewInternalServerError("部分文件无法读取，未生成压缩包，请检查文档后重试").WithDetails(
-				gin.H{"knowledge_id": id},
+				gin.H{"knowledge_id": entry.ID},
 			)
 		}
-		name := uniqueKnowledgeDownloadName(filename, usedNames)
+		name := uniqueKnowledgeDownloadZipPath(entry.FolderPath, filename, usedNames)
 		// 原样存储可避免 PDF、Office 等已压缩文件再次压缩的 CPU 开销。
-		entry, err := writer.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
+		zipEntry, err := writer.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
 		if err != nil {
 			_ = file.Close()
 			return errors.NewInternalServerError("无法写入下载压缩包，请稍后重试")
 		}
-		n, copyErr := io.Copy(entry, io.LimitReader(
+		n, copyErr := io.Copy(zipEntry, io.LimitReader(
 			&knowledgeDownloadReader{ctx: ctx, reader: file}, limit-total+1,
 		))
 		closeErr := file.Close()
@@ -172,9 +229,12 @@ func writeKnowledgeDownloadArchive(
 		if total > limit {
 			return errors.NewBadRequestError("所选文件合计超过 512 MiB，请分批下载")
 		}
+		if isKnowledgeDownloadCanceled(copyErr) {
+			return copyErr
+		}
 		if copyErr != nil || closeErr != nil {
 			return errors.NewInternalServerError("部分文件读取失败，未生成压缩包，请稍后重试").WithDetails(
-				gin.H{"knowledge_id": id},
+				gin.H{"knowledge_id": entry.ID},
 			)
 		}
 	}
@@ -198,14 +258,33 @@ func (r *knowledgeDownloadReader) Read(p []byte) (int, error) {
 }
 
 func uniqueKnowledgeDownloadName(filename string, used map[string]bool) string {
-	// 移除路径、控制字符及 Windows 非法字符，确保解压不会逃逸目录。
-	filename = path.Base(strings.ReplaceAll(filename, "\\", "/"))
-	filename = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || strings.ContainsRune(`<>:"/\|?*`, r) {
-			return '_'
+	return uniqueKnowledgeDownloadZipPath("", filename, used)
+}
+
+func uniqueKnowledgeDownloadZipPath(folderPath, filename string, used map[string]bool) string {
+	base := sanitizeDownloadFileName(filename)
+	ext := path.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	dir := sanitizeDownloadFolderPath(folderPath)
+	name := base
+	if dir != "" {
+		name = dir + "/" + base
+	}
+	for index := 2; used[strings.ToLower(name)]; index++ {
+		suffixed := fmt.Sprintf("%s (%d)%s", stem, index, ext)
+		if dir != "" {
+			name = dir + "/" + suffixed
+		} else {
+			name = suffixed
 		}
-		return r
-	}, filename)
+	}
+	used[strings.ToLower(name)] = true
+	return name
+}
+
+func sanitizeDownloadFileName(filename string) string {
+	filename = path.Base(strings.ReplaceAll(filename, "\\", "/"))
+	filename = sanitizeDownloadRunes(filename)
 	filename = strings.Trim(filename, " .")
 	if filename == "" {
 		filename = "document"
@@ -215,28 +294,66 @@ func uniqueKnowledgeDownloadName(filename string, used map[string]bool) string {
 		ext = ""
 	}
 	stem := strings.TrimSuffix(filename, ext)
+	stem = shortenDownloadName(stem, 180)
+	stem = strings.TrimRight(stem, " .")
+	if stem == "" {
+		stem = "document"
+	}
+	return escapeWindowsReservedName(stem) + ext
+}
+
+func sanitizeDownloadFolderPath(folderPath string) string {
+	folderPath = strings.ReplaceAll(folderPath, "\\", "/")
+	var parts []string
+	var total int
+	for _, part := range strings.Split(folderPath, "/") {
+		part = sanitizeDownloadRunes(part)
+		part = strings.Trim(part, " .")
+		if part == "" || part == "." || part == ".." {
+			continue
+		}
+		part = shortenDownloadName(part, 80)
+		part = strings.TrimRight(part, " .")
+		if part == "" {
+			continue
+		}
+		part = escapeWindowsReservedName(part)
+		if total+len(part)+1 > 160 {
+			break
+		}
+		parts = append(parts, part)
+		total += len(part) + 1
+	}
+	return strings.Join(parts, "/")
+}
+
+func sanitizeDownloadRunes(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return '_'
+		}
+		return r
+	}, value)
+}
+
+func shortenDownloadName(value string, limit int) string {
 	var shortened strings.Builder
-	for _, r := range stem {
-		if shortened.Len()+len(string(r)) > 180 {
+	for _, r := range value {
+		if shortened.Len()+len(string(r)) > limit {
 			break
 		}
 		shortened.WriteRune(r)
 	}
-	stem = strings.TrimRight(shortened.String(), " .")
-	if stem == "" {
-		stem = "document"
-	}
+	return shortened.String()
+}
+
+func escapeWindowsReservedName(stem string) string {
 	reserved := strings.ToUpper(strings.Split(stem, ".")[0])
 	reservedRunes := []rune(reserved)
 	if reserved == "CON" || reserved == "PRN" || reserved == "AUX" || reserved == "NUL" ||
 		(len(reservedRunes) == 4 && (strings.HasPrefix(reserved, "COM") || strings.HasPrefix(reserved, "LPT")) &&
 			strings.ContainsRune("123456789¹²³", reservedRunes[3])) {
-		stem = "_" + stem
+		return "_" + stem
 	}
-	name := stem + ext
-	for index := 2; used[strings.ToLower(name)]; index++ {
-		name = fmt.Sprintf("%s (%d)%s", stem, index, ext)
-	}
-	used[strings.ToLower(name)] = true
-	return name
+	return stem
 }

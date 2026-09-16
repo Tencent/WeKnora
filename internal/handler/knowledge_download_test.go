@@ -14,6 +14,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -23,10 +24,11 @@ import (
 
 type downloadKnowledgeStub struct {
 	interfaces.KnowledgeService
-	items  []*types.Knowledge
-	names  map[string]string
-	opened []string
-	failID string
+	items          []*types.Knowledge
+	names          map[string]string
+	opened         []string
+	failID         string
+	expectedTenant uint64
 }
 
 func (s *downloadKnowledgeStub) GetKnowledgeBatch(context.Context, uint64, []string) ([]*types.Knowledge, error) {
@@ -34,7 +36,11 @@ func (s *downloadKnowledgeStub) GetKnowledgeBatch(context.Context, uint64, []str
 }
 
 func (s *downloadKnowledgeStub) GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error) {
-	if types.MustTenantIDFromContext(ctx) != 7 {
+	want := s.expectedTenant
+	if want == 0 {
+		want = 7
+	}
+	if types.MustTenantIDFromContext(ctx) != want {
 		return nil, "", fmt.Errorf("错误的租户上下文")
 	}
 	s.opened = append(s.opened, id)
@@ -156,7 +162,11 @@ func TestBatchDownloadKnowledgeRejectsInvalidSelectionsBeforeReading(t *testing.
 		{name: "文档缺失", ids: []string{"missing"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 404},
 		{name: "跨知识库", ids: []string{"a"}, item: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "other", FilePath: "secret"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 404},
 		{name: "跨租户", ids: []string{"a"}, item: &types.Knowledge{ID: "a", TenantID: 8, KnowledgeBaseID: "kb-1", FilePath: "secret"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 404},
-		{name: "无原文件", ids: []string{"a"}, item: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "url"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, status: 400},
+		{
+			name: "仅无原文件", ids: []string{"a"}, status: 400,
+			item: &types.Knowledge{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "url"},
+			kb:   &types.KnowledgeBase{ID: "kb-1", TenantID: 7},
+		},
 		{name: "共享只读", ids: []string{"a"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 8}, share: &downloadShareStub{permission: types.OrgRoleViewer}, status: 403},
 		{name: "密钥无此库权限", ids: []string{"a"}, kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 7}, scope: &types.TenantAPIKeyScope{KnowledgeBaseIDs: types.StringArray{"other"}}, status: 403},
 	}
@@ -203,11 +213,64 @@ func (r *downloadTrackingReader) Close() error {
 	return nil
 }
 
+func TestBatchDownloadKnowledgeSkipsEntriesWithoutOriginalFiles(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	svc := &downloadKnowledgeStub{
+		items: []*types.Knowledge{
+			{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a"},
+			{ID: "url", TenantID: 7, KnowledgeBaseID: "kb-1", Type: "url"},
+		},
+		names: map[string]string{"a": "keep.txt"},
+	}
+	w := runBatchDownload(t, svc, []string{"a", "url"},
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7}, nil, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	reader, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	require.NoError(t, err)
+	require.Len(t, reader.File, 1)
+	require.Equal(t, "keep.txt", reader.File[0].Name)
+	require.Equal(t, []string{"a"}, svc.opened)
+}
+
+func TestBatchDownloadKnowledgeAllowsSharedEditor(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	svc := &downloadKnowledgeStub{
+		items:          []*types.Knowledge{{ID: "a", TenantID: 8, KnowledgeBaseID: "kb-1", FilePath: "stored-a"}},
+		names:          map[string]string{"a": "shared.txt"},
+		expectedTenant: 8,
+	}
+	w := runBatchDownload(t, svc, []string{"a"},
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 8},
+		&downloadShareStub{permission: types.OrgRoleEditor}, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, []string{"a"}, svc.opened)
+}
+
+func TestBatchDownloadKnowledgeRejectsWhenBusy(t *testing.T) {
+	for i := 0; i < maxConcurrentBatchDownloads; i++ {
+		batchDownloadSlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for i := 0; i < maxConcurrentBatchDownloads; i++ {
+			<-batchDownloadSlots
+		}
+	})
+	svc := &downloadKnowledgeStub{
+		items: []*types.Knowledge{{ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "a"}},
+		names: map[string]string{"a": "a.txt"},
+	}
+	w := runBatchDownload(t, svc, []string{"a"},
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7}, nil, nil)
+	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+	require.Empty(t, svc.opened)
+}
+
 func TestKnowledgeDownloadArchiveEnforcesActualByteLimitAndClosesFiles(t *testing.T) {
 	for _, limit := range []int64{4, 5} {
 		var output bytes.Buffer
 		file := &downloadTrackingReader{Reader: strings.NewReader("12345")}
-		err := writeKnowledgeDownloadArchive(context.Background(), &output, []string{"a"},
+		err := writeKnowledgeDownloadArchive(context.Background(), &output,
+			[]knowledgeDownloadEntry{{ID: "a"}},
 			func(context.Context, string) (io.ReadCloser, string, error) { return file, "a.txt", nil }, limit)
 		if limit == 4 {
 			require.Error(t, err)
@@ -222,13 +285,38 @@ func TestKnowledgeDownloadArchiveStopsWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var output bytes.Buffer
-	err := writeKnowledgeDownloadArchive(ctx, &output, []string{"a"},
+	err := writeKnowledgeDownloadArchive(ctx, &output, []knowledgeDownloadEntry{{ID: "a"}},
 		func(context.Context, string) (io.ReadCloser, string, error) {
 			t.Fatal("取消后不应继续读取文件")
 			return nil, "", nil
 		}, 100)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, output.Len())
+}
+
+func TestKnowledgeDownloadArchiveCancelsAfterOpenAndClosesFile(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	file := &downloadTrackingReader{Reader: strings.NewReader("12345")}
+	err := writeKnowledgeDownloadArchive(ctx, io.Discard, []knowledgeDownloadEntry{{ID: "a"}},
+		func(context.Context, string) (io.ReadCloser, string, error) {
+			cancel()
+			return file, "a.txt", nil
+		}, 100)
+	require.True(t, isKnowledgeDownloadCanceled(err), err)
+	require.True(t, file.closed)
+	requireAppHTTP(t, mapKnowledgeDownloadError(err), http.StatusBadRequest)
+}
+
+func TestMapKnowledgeDownloadError(t *testing.T) {
+	requireAppHTTP(t, mapKnowledgeDownloadError(context.Canceled), http.StatusBadRequest)
+	requireAppHTTP(t, mapKnowledgeDownloadError(context.DeadlineExceeded), http.StatusBadRequest)
+}
+
+func requireAppHTTP(t *testing.T, err error, status int) {
+	t.Helper()
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok, err)
+	require.Equal(t, status, appErr.HTTPCode)
 }
 
 func TestKnowledgeDownloadNamesAreSafeForWindowsAndUTF8(t *testing.T) {
@@ -247,4 +335,31 @@ func TestKnowledgeDownloadNamesAreSafeForWindowsAndUTF8(t *testing.T) {
 		require.Less(t, len(got), 255)
 	}
 	require.True(t, used["report (2).txt"])
+}
+
+func TestKnowledgeDownloadZipPathKeepsSafeFolders(t *testing.T) {
+	used := map[string]bool{}
+	require.Equal(t, "docs/spec/a.md", uniqueKnowledgeDownloadZipPath(`..\docs/spec`, "a.md", used))
+	require.Equal(t, "docs/spec/a (2).md", uniqueKnowledgeDownloadZipPath("docs/spec", "../a.md", used))
+	got := uniqueKnowledgeDownloadZipPath("/abs/../secret", "CON.txt", map[string]bool{})
+	require.Equal(t, "abs/secret/_CON.txt", got)
+	require.NotContains(t, got, "..")
+	require.False(t, strings.HasPrefix(got, "/"))
+}
+
+func TestBatchDownloadKnowledgePreservesFolderPaths(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	svc := &downloadKnowledgeStub{
+		items: []*types.Knowledge{{
+			ID: "a", TenantID: 7, KnowledgeBaseID: "kb-1", FilePath: "stored-a", FolderPath: "docs/spec",
+		}},
+		names: map[string]string{"a": "design.md"},
+	}
+	w := runBatchDownload(t, svc, []string{"a"},
+		&types.KnowledgeBase{ID: "kb-1", TenantID: 7}, nil, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	reader, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	require.NoError(t, err)
+	require.Len(t, reader.File, 1)
+	require.Equal(t, "docs/spec/design.md", reader.File[0].Name)
 }
