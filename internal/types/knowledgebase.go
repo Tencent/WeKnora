@@ -316,6 +316,36 @@ func DefaultParserEngine(fileType string) string {
 	return defaultParserEngineByType[ft]
 }
 
+// UnmarshalJSON keeps backward compatibility with rows written from the
+// migration DDL defaults, which used the legacy "split_markers" key for the
+// separator list. The canonical key is "separators"; the legacy key is read
+// only when "separators" is absent, so an explicitly empty separator list
+// is never overridden by a stale legacy key.
+func (c *ChunkingConfig) UnmarshalJSON(data []byte) error {
+	type alias ChunkingConfig
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	// Fall back to the legacy "split_markers" key only when the canonical
+	// "separators" key is absent, so an explicitly empty separator list
+	// is never overridden by a stale legacy key.
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
+	if _, present := keys["separators"]; !present {
+		var legacy struct {
+			SplitMarkers []string `json:"split_markers"`
+		}
+		if err := json.Unmarshal(data, &legacy); err == nil && len(legacy.SplitMarkers) > 0 {
+			decoded.Separators = legacy.SplitMarkers
+		}
+	}
+	*c = ChunkingConfig(decoded)
+	return nil
+}
+
 // ResolveParserEngine returns the engine name for the given file type
 // based on the configured rules. When no rule matches it returns the
 // type-level default (see DefaultParserEngine).
