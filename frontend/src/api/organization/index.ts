@@ -89,6 +89,8 @@ export interface SharedKnowledgeBase {
     type: string
     knowledge_count?: number
     chunk_count?: number
+    created_at?: string
+    updated_at?: string
   }
   share_id: string
   organization_id: string

@@ -165,6 +165,21 @@ export default {
       description: 'Try a different keyword or file type'
     }
   },
+  resourceSort: {
+    title: 'Sort',
+    updatedTime: 'Updated time',
+    updatedTimeDescription: 'Default option.',
+    createdTime: 'Created time',
+    createdTimeDescription: 'View the newest or earliest created items',
+    name: 'Name',
+    nameDescription: 'Quickly find an item when you know its name',
+    recentlyUpdated: 'Recently updated',
+    earliestUpdated: 'Earliest updated',
+    recentlyCreated: 'Recently created',
+    earliestCreated: 'Earliest created',
+    nameAscending: 'A–Z',
+    nameDescending: 'Z–A',
+  },
   menu: {
     sessionInProgress: 'Conversation in progress',
     knowledgeBase: 'Knowledge Base',
@@ -537,6 +552,21 @@ export default {
     name: 'Name',
     description: 'Description',
     settings: 'Settings',
+    sort: {
+      title: 'Sort',
+      updatedTime: 'Updated time',
+      updatedTimeDescription: 'Sort by the latest change made to each file.',
+      createdTime: 'Upload/created time',
+      createdTimeDescription: 'Default. Review the newest additions or the earliest accumulated material.',
+      fileName: 'File name',
+      fileNameDescription: 'Quickly find a file whose name you already know.',
+      recentlyUpdated: 'Recently updated',
+      earliestUpdated: 'Earliest updated',
+      newestCreated: 'Newest uploaded',
+      earliestCreated: 'Earliest uploaded',
+      nameAscending: 'A–Z',
+      nameDescending: 'Z–A',
+    },
     tagUpdateSuccess: 'Tag updated successfully',
     tagEditDialogHeading: 'Edit tags',
     folderTree: {
