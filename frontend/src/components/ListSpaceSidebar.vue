@@ -41,21 +41,8 @@
             <span class="icon-label">{{ $t('listSpaceSidebar.allOrgs') }}</span>
           </div>
         </t-tooltip>
-        <!-- Shared spaces group: per-org/space entries only. We dropped
-             the aggregate "协作" / shared-with-me entry — its meaning
-             oscillated between "everything shared to me" and "things I
-             can edit", and either reading duplicated information already
-             visible on the per-space entries below. -->
-        <template v-if="organizationsWithCount.length">
-          <div class="icon-strip-divider" />
-          <t-tooltip v-for="org in organizationsWithCount" :key="org.id"
-            :content="tooltipText(org.name, getOrgCount(org.id))" placement="right" :show-arrow="false">
-            <div class="icon-item-labeled" :class="{ active: selected === org.id }" @click="select(org.id)">
-              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" />
-              <span class="icon-label">{{ truncateLabel(org.name) }}</span>
-            </div>
-          </t-tooltip>
-        </template>
+        <!-- 单空间 + 组织树：上下级共享不走 Organization，侧栏不再挂
+             「共享空间」条目，避免与「默认空间 / 本组织」混淆。 -->
       </template>
 
       <template v-else>
@@ -124,21 +111,7 @@
             <span class="item-label">{{ $t('listSpaceSidebar.allOrgs') }}</span>
           </div>
         </div>
-        <!-- Shared spaces group — per-org entries only; the aggregate
-             entry was removed (see collapsed strip for rationale). -->
-        <template v-if="organizationsWithCount.length">
-          <div class="sidebar-section">
-            <span class="section-title">{{ $t('listSpaceSidebar.spaces') }}</span>
-          </div>
-          <div v-for="org in organizationsWithCount" :key="org.id" class="sidebar-item org-item"
-            :class="{ active: selected === org.id }" @click="select(org.id)">
-            <div class="item-left">
-              <SpaceAvatar :name="org.name" :avatar="org.avatar" size="small" class="item-avatar" />
-              <span class="item-label" :title="org.name">{{ org.name }}</span>
-            </div>
-            <span v-if="getOrgCount(org.id) !== undefined" class="item-count">{{ getOrgCount(org.id) }}</span>
-          </div>
-        </template>
+        <!-- resource 模式不展示共享空间列表，见折叠态注释。 -->
       </template>
 
       <template v-else>
@@ -167,11 +140,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { Icon as TIcon } from 'tdesign-vue-next'
-import SpaceAvatar from './SpaceAvatar.vue'
 import { useAuthStore } from '@/stores/auth'
-import { useOrganizationStore } from '@/stores/organization'
 import { useWorkspaceScopeLabel } from '@/composables/useWorkspaceScopeLabel'
 import {
   clearExplicitAllOrgsScope,
@@ -191,6 +162,7 @@ const props = withDefaults(
     collapsedKey?: string
     countAll?: number
     countMine?: number
+    /** @deprecated 单空间树形共享后 resource 侧栏不再按 Organization 计数 */
     countByOrg?: Record<string, number>
     countCreated?: number
     countJoined?: number
@@ -261,37 +233,21 @@ function tooltipText(name: string, count?: number): string {
   return count !== undefined ? `${name} (${count})` : name
 }
 
-// truncateLabel keeps the collapsed-strip label visually balanced (~44px
-// wide). 4 CJK chars fits; ASCII can stretch further. Callers that want
-// the full label should pass it as :title= on the same element for hover.
-function truncateLabel(text: string, max = 4): string {
-  if (!text) return ''
-  return text.length > max ? text.slice(0, max) + '…' : text
-}
-
 const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
 const selected = computed({
   get: () => props.modelValue,
   set: (v: string) => emit('update:modelValue', v)
 })
 
-// 「本空间」位展示所在组织名；「所有」为超管独立入口，不再占用本组织位文案。
+// 「本空间」位展示所在组织名；「所有」为所有者/超管独立入口。
 const { workspaceScopeLabel: workspaceLabel } = useWorkspaceScopeLabel()
 
 // UI gate only — list APIs still enforce isUnscopedOrgBrowser server-side.
-const showAllOrgs = computed(() => authStore.isSystemAdmin === true)
-
-const organizations = computed(() => orgStore.organizations || [])
-
-const organizationsWithCount = computed(() => {
-  if (props.mode !== 'resource') return organizations.value
-  return organizations.value.filter((org) => (props.countByOrg?.[org.id] ?? 0) > 0)
-})
+const showAllOrgs = computed(() => authStore.canBrowseAllOrgs)
 
 async function select(value: string) {
   if (value === 'all-orgs') {
@@ -313,15 +269,6 @@ async function select(value: string) {
   }
   selected.value = value
 }
-
-function getOrgCount(orgId: string): number | undefined {
-  const n = props.countByOrg?.[orgId]
-  return n === undefined ? undefined : n
-}
-
-onMounted(() => {
-  orgStore.fetchOrganizations()
-})
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onDragMove)

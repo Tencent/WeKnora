@@ -1402,10 +1402,10 @@ watch(spaceSelection, async (val, prev) => {
     spaceSelection.value = 'all'
     return
   }
-  // Super-admin「所有」: clear OrgUnit so list APIs return every unit.
-  // Non-admins must not keep this scope even via a crafted URL.
+  // 所有者/超管「所有」: clear OrgUnit so list APIs return every unit.
+  // Others must not keep this scope even via a crafted URL.
   if (val === 'all-orgs') {
-    if (!authStore.isSystemAdmin) {
+    if (!authStore.canBrowseAllOrgs) {
       spaceSelection.value = defaultScope
       return
     }
@@ -1417,7 +1417,7 @@ watch(spaceSelection, async (val, prev) => {
   }
   if (
     prev === 'all-orgs' &&
-    authStore.isSystemAdmin &&
+    authStore.canBrowseAllOrgs &&
     !getStoredOrgUnitId().trim()
   ) {
     clearExplicitAllOrgsScope()

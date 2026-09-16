@@ -173,8 +173,11 @@ export default {
     inviteSubmit: '发送邀请',
     inviteSuccess: '邀请已发出，等待对方接受。',
     confirmInviteTitle: '确认发送邀请？',
-    confirmInviteBody: '将向 {email} 发出加入邀请（角色：{role}）。TA 在站内接受后才会成为成员。',
+    confirmInviteBody:
+      '将向 {email} 发出加入邀请（角色：{role}，组织：{orgUnit}）。TA 在站内接受后才会成为成员。',
     confirmSend: '发送',
+    orgUnitLabel: '所属组织',
+    orgUnitPlaceholder: '本级 / 下级（管理员角色仅下级）',
     copyLink: '复制邀请链接',
     copied: '已复制到剪贴板',
     copyFailed: '复制失败，请手动选中文本',
@@ -184,6 +187,10 @@ export default {
       notPending: '邀请已不在待处理状态。',
       forbidden: '只有被邀请人本人可以接受或拒绝该邀请。',
       notFound: '邀请不存在或已被撤销。',
+      orgUnitRequired: '请选择被邀请人所属的组织层级。',
+      orgUnitNotInviteable:
+        '只能邀请编辑/访客到本级或下级；管理员角色仅可邀请到下级组织。',
+      inviterOrgUnitRequired: '请先选择当前组织，再邀请成员。',
       generic: '操作失败，请稍后重试。'
     },
     myInbox: {
@@ -210,6 +217,7 @@ export default {
     columns: {
       invitee: '被邀请人',
       role: '角色',
+      orgUnit: '所属组织',
       inviter: '邀请人',
       expiresAt: '到期时间',
       status: '状态',
@@ -2094,6 +2102,9 @@ export default {
     serviceUrl: '服务 URL',
     serviceUrlPlaceholder: 'https://example.com/mcp',
     enableService: '启用服务',
+    shareWithDescendantsLabel: '是否共享给下级机构',
+    shareWithDescendantsTip:
+      '勾选后，下级机构可只读引用本 MCP 服务；默认不共享。',
     authConfig: '认证配置',
     authType: '认证方式',
     authTypeNone: '无 / 自定义 Header',
@@ -4240,7 +4251,10 @@ export default {
       nameLabel: '知识库名称',
       namePlaceholder: '请输入知识库名称',
       descriptionLabel: '知识库描述',
-      descriptionPlaceholder: '请输入知识库描述（可选）'
+      descriptionPlaceholder: '请输入知识库描述（可选）',
+      shareWithDescendantsLabel: '是否共享给下级机构',
+      shareWithDescendantsTip:
+        '勾选后，下级机构可只读引用本知识库；默认不共享。',
     },
     errors: {
       vectorStoreBindingInvalid: '无法使用所选向量存储。请选择其他存储或使用系统默认值。',
@@ -6790,10 +6804,18 @@ export default {
   },
   listSpaceSidebar: {
     all: '全部',
+    allOrgs: '所有',
     workspace: '本空间',
+    currentOrg: '本组织',
     spaces: '共享给我',
     favorites: '收藏',
     recents: '最近'
+  },
+  orgUnit: {
+    sectionDescription:
+      '平台组织树：根组织由系统管理员创建；成员登录后自动进入「组织名的空间」，本组织与下级组织用户共享该空间。',
+    sectionDescriptionScoped:
+      '从您所属的组织节点起管理下级：可在本级下新增、调整下级组织，不能改动上级或平级。',
   },
   batchManage: {
     selectAll: '全选',
@@ -7124,5 +7146,51 @@ export default {
     chatsSection: '网页对话',
     otherSources: '其他来源',
     loadMoreSessions: '加载更多',
-  }
+  },
+  dataCharts: {
+    desc: '可视化展示组织层级及下属数据，帮助管理员全面掌握资源分布',
+    orgUnits: '组织节点',
+    organizations: '共享空间',
+    members: '成员总数',
+    shares: '共享资源',
+    knowledgeBases: '知识库',
+    agentCount: '智能体',
+    totalKnowledge: '文档总数',
+    totalChunks: '切片总数',
+    orgTree: '组织层级结构',
+    treeView: '树形图',
+    treemapView: '矩形树图',
+    memberDist: '成员分布',
+    roleDist: '角色分布',
+    kbDist: '知识库分布',
+    resourceRadar: '资源概览',
+    depthDist: '层级深度分布',
+    shareHeatmap: '共享资源热力图',
+    kbKnowledgeCount: '知识库文档数量 Top 10',
+    kbChunkCount: '知识库切片数量 Top 10',
+    kbTypeDist: '知识库类型分布',
+    agentModeDist: '智能体模式分布',
+    agentKBCount: '智能体关联知识库数量',
+    agentFeatureDist: '智能体功能使用统计',
+    kbShares: '知识库共享',
+    agentShares: '智能体共享',
+    pendingRequests: '待处理请求',
+    roleAdmin: '管理员',
+    roleEditor: '编辑者',
+    roleViewer: '访客',
+    kbTypeDocument: '文档库',
+    kbTypeFAQ: 'FAQ库',
+    kbTypeWiki: '知识百科',
+    agentModeQuick: '快速回答',
+    agentModeSmart: '智能推理',
+    agentModeOther: '其他',
+    kbModeAll: '全部',
+    kbCount: '个知识库',
+    featureWebSearch: '联网搜索',
+    featureMultiTurn: '多轮对话',
+    featureMCP: 'MCP工具',
+    featureImage: '图片理解',
+    featureUsage: '功能使用',
+    noData: '暂无数据',
+  },
 }

@@ -932,16 +932,19 @@ func (s *orgUnitService) ListInviteableOrgUnits(
 }
 
 // isUnscopedOrgBrowser reports callers whose default OrgUnit scope is
-// "all units" when no X-Org-Unit-ID is sent: system admins and
-// cross-tenant superusers.
+// "all units" when no X-Org-Unit-ID is sent: platform system admins,
+// cross-tenant superusers, and tenant Owners (product treats Owner as
+// the workspace-level equivalent of system admin for tree browse).
 func isUnscopedOrgBrowser(ctx context.Context) bool {
 	if types.IsSystemAdminActor(ctx) {
 		return true
 	}
 	if user, ok := ctx.Value(types.UserContextKey).(*types.User); ok && user != nil {
-		return user.CanAccessAllTenants
+		if user.CanAccessAllTenants {
+			return true
+		}
 	}
-	return false
+	return types.TenantRoleFromContext(ctx) == types.TenantRoleOwner
 }
 
 // isUnscopedOrgInviter reports callers who may invite without binding to

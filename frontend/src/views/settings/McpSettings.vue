@@ -4,7 +4,6 @@
       v-model="spaceSelection"
       :count-all="services.length + sharedServices.length"
       :count-mine="localOrgServices.length"
-      :count-by-org="sharedCountByOrg"
       :show-favorites="false"
       :show-recents="false"
     />
@@ -227,16 +226,6 @@ const localOrgServices = computed(() =>
   services.value.filter(isLocalOrgUnitService),
 )
 
-const sharedCountByOrg = computed<Record<string, number>>(() => {
-  const counts: Record<string, number> = {}
-  sharedServices.value.forEach((item) => {
-    const orgId = item.organization_id
-    if (!orgId) return
-    counts[orgId] = (counts[orgId] || 0) + 1
-  })
-  return counts
-})
-
 const displayServices = computed<MCPService[]>(() => {
   if (spaceSelection.value === 'mine' || spaceSelection.value === 'all-orgs') {
     return localOrgServices.value
@@ -286,8 +275,9 @@ const loadServices = async () => {
 }
 
 watch(spaceSelection, async (val, prev) => {
+  // 所有者/超管可进「所有」；其他人落到 all-orgs 时退回默认范围。
   if (val === 'all-orgs') {
-    if (!authStore.isSystemAdmin) {
+    if (!authStore.canBrowseAllOrgs) {
       spaceSelection.value = defaultScope
       return
     }
@@ -298,7 +288,7 @@ watch(spaceSelection, async (val, prev) => {
   }
   if (
     prev === 'all-orgs' &&
-    authStore.isSystemAdmin &&
+    authStore.canBrowseAllOrgs &&
     !getStoredOrgUnitId().trim()
   ) {
     clearExplicitAllOrgsScope()

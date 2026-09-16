@@ -1160,7 +1160,7 @@ const handleOpenAgentEditor = (event: CustomEvent) => {
 // 选中空间时请求该空间内全部智能体（含我共享的）
 watch(spaceSelection, async (val, prev) => {
   if (val === 'all-orgs') {
-    if (!authStore.isSystemAdmin) {
+    if (!authStore.canBrowseAllOrgs) {
       spaceSelection.value = defaultScope
       return
     }
@@ -1172,7 +1172,7 @@ watch(spaceSelection, async (val, prev) => {
   }
   if (
     prev === 'all-orgs' &&
-    authStore.isSystemAdmin &&
+    authStore.canBrowseAllOrgs &&
     !getStoredOrgUnitId().trim()
   ) {
     clearExplicitAllOrgsScope()

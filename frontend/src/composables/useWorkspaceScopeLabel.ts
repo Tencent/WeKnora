@@ -93,12 +93,10 @@ export function useWorkspaceScopeLabel() {
   const { t } = useI18n()
   const authStore = useAuthStore()
 
-  const canBrowseAllOrgs = computed(
-    () => authStore.canAccessAllTenants || authStore.isSystemAdmin,
-  )
+  const canBrowseAllOrgs = computed(() => authStore.canBrowseAllOrgs)
 
   const refresh = () => {
-    void loadOrgUnitName(authStore.canAccessAllTenants === true)
+    void loadOrgUnitName(authStore.canBrowseAllOrgs === true)
   }
 
   onMounted(() => {
@@ -113,8 +111,7 @@ export function useWorkspaceScopeLabel() {
   watch(
     () => [
       authStore.effectiveTenantId,
-      authStore.canAccessAllTenants,
-      authStore.isSystemAdmin,
+      authStore.canBrowseAllOrgs,
       authStore.user?.id,
     ],
     () => {

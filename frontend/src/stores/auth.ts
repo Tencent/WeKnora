@@ -194,6 +194,15 @@ export const useAuthStore = defineStore('auth', () => {
     () => isSystemAdmin.value || canAccessAllTenants.value || hasRole('admin'),
   )
 
+  // 列表侧栏「所有」：跨组织全林浏览。单空间产品里空间所有者与平台超管
+  // 同级，不能只认 isSystemAdmin（否则 owner 看不到入口）。
+  const canBrowseAllOrgs = computed(
+    () =>
+      isSystemAdmin.value ||
+      canAccessAllTenants.value ||
+      hasRole('owner'),
+  )
+
   // Create / configure knowledge bases (non-content). Content edits stay
   // at contributor via separate gates.
   const canManageKnowledgeBase = computed(
@@ -589,6 +598,7 @@ export const useAuthStore = defineStore('auth', () => {
     hasRole,
     canAccessSettings,
     canManageWorkspaceSettings,
+    canBrowseAllOrgs,
     canManageKnowledgeBase,
     effectiveTenantId,
 

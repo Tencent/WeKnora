@@ -118,10 +118,13 @@ export const useMenuStore = defineStore('menuStore', () => {
     if (item.path === 'creatChat' && !SHOW_SIDEBAR_NEW_CHAT) return false
     const authStore = useAuthStore()
     const deploymentCapabilities = useDeploymentCapabilitiesStore()
-    if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
+    // 单空间 + 组织树为主路径：上下级用「共享给下级」，不走跨 Tenant 的
+    // Organization。侧栏再露「共享空间」会与「组织层级」混淆，故一律隐藏；
+    // 路由/API 仍保留，供日后跨客户协作深链使用。
+    if (item.path === 'organizations') {
       return false
     }
-    if (item.path === 'organizations' && !authStore.hasRole('admin')) {
+    if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
       return false
     }
     if (!deploymentCapabilities.isSupported(item.requiredCapability)) {
