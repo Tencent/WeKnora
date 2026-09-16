@@ -1077,7 +1077,24 @@ func (s *DataSourceService) processSyncStreaming(
 	result := &types.SyncResult{}
 	handler := &streamSyncHandler{svc: s, ds: ds, tagIDs: autoTagIDs, result: result, syncLog: syncLog}
 
-	nextCursor, fetchErr := sc.FetchStream(ctx, config, startCursor, handler)
+	var nextCursor *types.SyncCursor
+	var fetchErr error
+	if forceFull {
+		if full, ok := sc.(datasource.FullStreamingConnector); ok {
+			baseline, cursorErr := ds.ParseSyncCursor()
+			if cursorErr != nil {
+				logger.Errorf(ctx, "failed to parse full-sync cursor: %v", cursorErr)
+				s.updateSyncRunResult(ctx, ds, syncLog, result, nil,
+					types.SyncLogStatusFailed, fmt.Sprintf("Invalid cursor: %v", cursorErr), wasPaused)
+				return cursorErr
+			}
+			nextCursor, fetchErr = full.FetchFullStream(ctx, config, baseline, handler)
+		} else {
+			nextCursor, fetchErr = sc.FetchStream(ctx, config, startCursor, handler)
+		}
+	} else {
+		nextCursor, fetchErr = sc.FetchStream(ctx, config, startCursor, handler)
+	}
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.
