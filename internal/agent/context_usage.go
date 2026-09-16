@@ -1,10 +1,12 @@
 package agent
 
 import (
+	"context"
 	"strings"
 
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -77,7 +79,11 @@ func AttributeContextUsage(
 // snapshotContextUsage records the prompt mix of the request that is about
 // to be sent (or was just sent). promptTokens calibrates buckets to the
 // provider's count when one is available; 0 leaves the estimate as-is.
+// Live SSE is opt-in: round-start and synthesis snapshots stay on state so
+// the ring does not jump estimate→measured, and so ToolChoice=none does not
+// flash Tools/MCP to zero mid-turn. Call publishContextUsage after Calibrate.
 func (e *AgentEngine) snapshotContextUsage(
+	_ context.Context,
 	state *types.AgentState,
 	messages []chat.Message,
 	tools []chat.Tool,
@@ -90,6 +96,21 @@ func (e *AgentEngine) snapshotContextUsage(
 		e.tokenEstimator, messages, tools, e.skillsPromptContent(), e.contextWindowTokens(),
 	)
 	state.ContextUsage.Calibrate(promptTokens)
+}
+
+func (e *AgentEngine) publishContextUsage(ctx context.Context, state *types.AgentState) {
+	if e == nil || e.eventBus == nil || state == nil {
+		return
+	}
+	if state.ContextUsage.Window <= 0 {
+		return
+	}
+	_ = e.eventBus.Emit(ctx, event.Event{
+		ID:        generateEventID("context-usage"),
+		Type:      event.EventAgentContextUsage,
+		SessionID: e.sessionID,
+		Data:      state.ContextUsage,
+	})
 }
 
 func isMCPToolSchema(name string) bool {

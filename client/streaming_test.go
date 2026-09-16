@@ -281,3 +281,17 @@ func TestSearchResult_DecodesReferenceIndexes(t *testing.T) {
 		t.Errorf("SubChunkID=%v, want [s1 s2]", r.SubChunkID)
 	}
 }
+
+func TestAgentStreamResponseUnmarshalsContextUsage(t *testing.T) {
+	raw := `{"id":"e1","response_type":"context_usage","done":false,"usage":{"prompt_tokens":0,"total_tokens":0,"context":{"total":100,"window":200000,"conversation":80}}}`
+	var resp AgentStreamResponse
+	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.ResponseType != AgentResponseTypeContextUsage {
+		t.Fatalf("ResponseType=%q, want %q", resp.ResponseType, AgentResponseTypeContextUsage)
+	}
+	if resp.Usage == nil || resp.Usage.Context.Window != 200000 || resp.Usage.Context.Total != 100 {
+		t.Fatalf("Usage=%+v", resp.Usage)
+	}
+}

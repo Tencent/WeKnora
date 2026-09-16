@@ -46,7 +46,9 @@ type TokenUsage struct {
 	CacheStatus      PromptCacheStatus `json:"cache_status,omitempty"`
 	// Context is the last request's classified prompt breakdown. It is a
 	// snapshot, not a sum: Accumulate keeps the latest non-zero value.
-	Context ContextUsage `json:"context,omitempty"`
+	// omitzero is required: encoding/json treats a zero struct as non-empty
+	// for omitempty, which would otherwise emit "context":{} on every usage.
+	Context ContextUsage `json:"context,omitempty,omitzero"`
 }
 
 // SetPromptCacheUsage normalizes provider-specific cache counters into the
@@ -294,6 +296,9 @@ const (
 	// remembers — an answer that forgets an earlier instruction is otherwise
 	// indistinguishable from the model ignoring it.
 	ResponseTypeContextCompacted ResponseType = "context_compacted"
+	// ResponseTypeContextUsage is a live snapshot of the last LLM request's
+	// classified prompt mix, so the composer ring can update mid-turn.
+	ResponseTypeContextUsage ResponseType = "context_usage"
 	// ResponseTypeInstallPrompt is the instruction a skill install handed to
 	// the installer agent. Only the skill install transcript emits this, and
 	// it emits it first, so replaying the log alone shows what was asked for

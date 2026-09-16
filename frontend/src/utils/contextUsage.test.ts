@@ -33,7 +33,9 @@ test('latestContextUsage reads the newest assistant snapshot', () => {
     { role: 'user', content: 'hi' },
     { role: 'assistant', usage: { context: { total: 80, window: 200000, conversation: 50, system_prompt: 20, tools: 10 } } },
   ]
-  assert.deepEqual(latestContextUsage(messages), messages[2].usage.context)
+  const latest = messages[2]?.usage?.context
+  assert.ok(latest)
+  assert.deepEqual(latestContextUsage(messages), latest)
   assert.equal(latestContextUsage([]), null)
   assert.equal(latestContextUsage([{ role: 'user' }]), null)
 })
@@ -54,6 +56,15 @@ test('an in-flight assistant still shows the last completed agent snapshot', () 
     { role: 'user', content: 'follow up' },
     { role: 'assistant', is_completed: false, content: '' },
   ]), agentSnapshot)
+})
+
+test('an in-flight assistant with a live snapshot wins over the previous turn', () => {
+  const live = { total: 120, window: 200000, conversation: 90, tools: 20 }
+  assert.deepEqual(latestContextUsage([
+    { role: 'assistant', is_completed: true, usage: { context: agentSnapshot } },
+    { role: 'user', content: 'follow up' },
+    { role: 'assistant', is_completed: false, usage: { context: live } },
+  ]), live)
 })
 
 test('category palette covers the five prompt sources', () => {

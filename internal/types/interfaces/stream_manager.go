@@ -15,7 +15,7 @@ type StreamEvent struct {
 	Done      bool                   `json:"done"`            // Whether this event is done
 	Timestamp time.Time              `json:"timestamp"`       // When this event occurred
 	Data      map[string]interface{} `json:"data,omitempty"`  // Additional event data (references, metadata, etc.)
-	Usage     *types.TokenUsage      `json:"usage,omitempty"` // LLM token usage aggregated over the turn (complete events)
+	Usage     *types.TokenUsage      `json:"usage,omitempty"` // Turn totals on complete; classified prompt mix on context_usage
 }
 
 // StreamManager stream manager interface - minimal append-only design

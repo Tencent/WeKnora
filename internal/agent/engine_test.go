@@ -972,6 +972,37 @@ func TestStreamFinalAnswerRefreshesContextUsageFromSynthesisRequest(t *testing.T
 	require.Greater(t, state.ContextUsage.Conversation, 0)
 }
 
+func TestStreamFinalAnswerDoesNotPublishLiveContextUsage(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{
+					ResponseType: types.ResponseTypeAnswer,
+					Content:      "final answer",
+					Done:         true,
+					FinishReason: "stop",
+					Usage:        &types.TokenUsage{PromptTokens: 80, CompletionTokens: 5, TotalTokens: 85},
+				},
+			}},
+		},
+	}
+	engine := newTestEngine(t, mock)
+	var snapshots []types.ContextUsage
+	engine.eventBus.On(event.EventAgentContextUsage, func(_ context.Context, evt event.Event) error {
+		usage, ok := evt.Data.(types.ContextUsage)
+		require.True(t, ok)
+		snapshots = append(snapshots, usage)
+		return nil
+	})
+	state := &types.AgentState{
+		ContextUsage: types.ContextUsage{Tools: 4000, MCP: 1500, Total: 5500, Window: 200000},
+	}
+
+	require.NoError(t, engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1", emptyMessages()))
+	require.Empty(t, snapshots, "synthesis must not flash Tools/MCP to zero on the live ring")
+	require.Zero(t, state.ContextUsage.Tools, "the persisted snapshot still reflects the last request")
+}
+
 func lastToolContent(messages []chat.Message) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if messages[i].Role == "tool" {
@@ -1086,4 +1117,53 @@ func TestExecuteLoopReattributesContextUsageAfterOverflowError(t *testing.T) {
 	stale.Calibrate(retryPrompt)
 	require.Greater(t, state.ContextUsage.Tools, stale.Tools,
 		"retry attribution must not keep the pre-compaction category mix")
+}
+
+func TestSnapshotContextUsagePublishesToEventBus(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	var got []types.ContextUsage
+	engine.eventBus.On(event.EventAgentContextUsage, func(_ context.Context, evt event.Event) error {
+		usage, ok := evt.Data.(types.ContextUsage)
+		require.True(t, ok)
+		got = append(got, usage)
+		return nil
+	})
+
+	state := &types.AgentState{}
+	engine.snapshotContextUsage(context.Background(), state, emptyMessages(), emptyTools(), 0)
+	engine.publishContextUsage(context.Background(), state)
+
+	require.Len(t, got, 1)
+	require.Equal(t, state.ContextUsage, got[0])
+	require.Greater(t, got[0].Window, 0)
+}
+
+func TestExecuteLoopPublishesContextUsageDuringTheTurn(t *testing.T) {
+	const promptTokens = 40
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{{
+				Content: "Here is my answer",
+				Done:    true,
+				Usage: &types.TokenUsage{
+					PromptTokens:     promptTokens,
+					CompletionTokens: 8,
+					TotalTokens:      promptTokens + 8,
+				},
+			}}},
+		},
+	}
+	engine := newTestEngine(t, mock)
+	var snapshots []types.ContextUsage
+	engine.eventBus.On(event.EventAgentContextUsage, func(_ context.Context, evt event.Event) error {
+		usage, ok := evt.Data.(types.ContextUsage)
+		require.True(t, ok)
+		snapshots = append(snapshots, usage)
+		return nil
+	})
+
+	_, err := engine.executeLoop(context.Background(), &types.AgentState{}, "test query", emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	require.NoError(t, err)
+	require.Len(t, snapshots, 1, "one calibrated snapshot per round; the pre-LLM estimate stays off the wire")
+	require.Equal(t, promptTokens, snapshots[0].Total)
 }

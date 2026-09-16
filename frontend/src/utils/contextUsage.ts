@@ -20,13 +20,14 @@ export type ContextUsageCategoryKey = typeof CONTEXT_USAGE_CATEGORIES[number]['k
 
 type MessageWithUsage = {
   role?: string
+  content?: string
   is_completed?: boolean
   usage?: {
     context?: ContextUsage
   }
 }
 
-function hasContextSnapshot(context?: ContextUsage): boolean {
+function hasContextSnapshot(context?: ContextUsage): context is ContextUsage {
   return !!context && ((context.total ?? 0) > 0 || (context.window ?? 0) > 0)
 }
 
@@ -39,13 +40,13 @@ export function latestContextUsage(messages: MessageWithUsage[] | null | undefin
     if (message?.role !== 'assistant') {
       continue
     }
-    // Still streaming: this turn has no snapshot yet, keep the previous agent one.
-    if (message.is_completed === false) {
-      continue
-    }
     const context = message.usage?.context
     if (hasContextSnapshot(context)) {
       return context
+    }
+    // Still streaming and this turn has no snapshot yet: keep the previous agent one.
+    if (message.is_completed === false) {
+      continue
     }
     // A finished non-agent reply (quick answer / RAG) must not inherit
     // an older agent snapshot.

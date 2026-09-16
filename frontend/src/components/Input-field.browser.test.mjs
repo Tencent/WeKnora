@@ -56,6 +56,7 @@ test('context usage ring sits immediately left of the model selector', () => {
   assert.notEqual(ring, -1)
   assert.notEqual(composerEnd, -1)
   assert.ok(composerEnd < ring && ring < model)
+  assert.match(inputField, /v-if="!embeddedMode && contextUsage"/)
   assert.match(inputField, /:usage="contextUsage"/)
   assert.match(chatPage, /:context-usage="latestContextUsage"/)
 })

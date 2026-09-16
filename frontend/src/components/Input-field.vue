@@ -2841,7 +2841,7 @@ defineExpose({
           </t-tooltip>
 
           <div class="composer-end">
-            <ContextUsageRing v-if="!embeddedMode" :usage="contextUsage" />
+            <ContextUsageRing v-if="!embeddedMode && contextUsage" :usage="contextUsage" />
 
           <!-- 模型显示 -->
           <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"

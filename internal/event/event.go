@@ -79,6 +79,10 @@ const (
 	// away to fit the context window.
 	EventContextCompacted EventType = "context_compacted"
 
+	// EventAgentContextUsage is the classified prompt mix of the LLM request
+	// that was just snapshotted (round start, overflow retry, or synthesis).
+	EventAgentContextUsage EventType = "context_usage"
+
 	// EventUserMessageInjected is emitted when a message the user appended
 	// while the run was in flight was accepted into the running turn (see
 	// agent drainSteerMessages).

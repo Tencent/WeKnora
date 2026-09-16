@@ -689,7 +689,7 @@ func (e *AgentEngine) runReActIteration(
 	logger.Infof(ctx, "[Agent][Round-%d/%s] Starting: %d messages, %d tools, est_tokens=%d",
 		round, e.maxIterationsDisplay(), len(*messagesPtr), len(tools), currentTokens)
 	e.logContextPrediction(ctx, round, *messagesPtr, tools, currentTokens)
-	e.snapshotContextUsage(state, *messagesPtr, tools, 0)
+	e.snapshotContextUsage(ctx, state, *messagesPtr, tools, 0)
 	common.PipelineInfo(ctx, "Agent", "round_start", map[string]interface{}{
 		"iteration":      state.CurrentRound,
 		"round":          round,
@@ -721,7 +721,7 @@ func (e *AgentEngine) runReActIteration(
 			round, resp.FinishReason, resp.Usage.CompletionTokens, e.getCompletionTokenBudget())
 		*messagesPtr = e.forceCompaction(ctx, *messagesPtr, round)
 		e.lastSentMsgCount = len(*messagesPtr)
-		e.snapshotContextUsage(state, *messagesPtr, tools, 0)
+		e.snapshotContextUsage(ctx, state, *messagesPtr, tools, 0)
 		resp, err = e.callLLMWithRetry(ctx, messagesPtr, tools, state, query, state.CurrentRound, sessionID)
 		if err != nil {
 			retErr = err
@@ -744,6 +744,7 @@ func (e *AgentEngine) runReActIteration(
 			response.Usage.CacheReadTokens, response.Usage.CacheWriteTokens,
 			response.Usage.PromptCacheHitRate(), response.Usage.CacheStatus)
 	}
+	e.publishContextUsage(ctx, state)
 
 	// Detect stuck loops: if the LLM keeps returning the same content
 	// without tool calls (e.g., an unhandled finish reason), break early.

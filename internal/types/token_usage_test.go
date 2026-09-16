@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +100,16 @@ func TestTokenUsageValueScanRoundTrip(t *testing.T) {
 	}
 	if string(direct) != string(raw) {
 		t.Fatalf("Value diverged from json.Marshal: %s vs %s", raw, direct)
+	}
+}
+
+func TestTokenUsageOmitsEmptyContext(t *testing.T) {
+	raw, err := json.Marshal(&TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), `"context"`) {
+		t.Fatalf("zero Context must stay off the wire, got %s", raw)
 	}
 }
 

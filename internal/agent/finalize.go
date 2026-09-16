@@ -109,7 +109,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 		state.TurnUsage.Accumulate(*llmResult.Usage)
 		promptTokens = llmResult.Usage.PromptTokens
 	}
-	e.snapshotContextUsage(state, messages, nil, promptTokens)
+	e.snapshotContextUsage(ctx, state, messages, nil, promptTokens)
 
 	// Safety net: strip any residual <think> blocks that may have leaked through
 	fullAnswer := agenttools.StripThinkBlocks(llmResult.Content)
@@ -180,9 +180,9 @@ func (e *AgentEngine) emitCompletionEvent(
 	logger.Infof(ctx, "Agent execution completed in %d rounds", state.CurrentRound)
 }
 
-// turnUsage returns the turn's aggregated LLM usage, or nil when no round
-// reported usage so the field stays absent from the completion event and the
-// persisted message alike.
+// turnUsage returns the turn's aggregated LLM usage plus the last request's
+// context snapshot. Nil only when neither billing tokens nor a snapshot exist.
+// A snapshot always carries Window, so context-only turns still emit usage.
 func turnUsage(state *types.AgentState) *types.TokenUsage {
 	if state == nil {
 		return nil
