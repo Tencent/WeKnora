@@ -83,3 +83,29 @@ func TestWithServerPageExpandRestoresDroppedQuery(t *testing.T) {
 		t.Fatalf("withServerPageExpand() = %s", got)
 	}
 }
+
+func TestResolveEndpointRejectsContextPathTraversal(t *testing.T) {
+	client := &client{cfg: config{baseURL: "https://team.atlassian.net/wiki"}}
+	for _, endpoint := range []string{
+		"/wiki/../rest/other",
+		"https://team.atlassian.net/wiki/../rest/other",
+		"../rest/other",
+	} {
+		if _, err := client.resolveEndpoint(endpoint); err == nil {
+			t.Fatalf("resolveEndpoint(%q) accepted a path that leaves /wiki", endpoint)
+		}
+	}
+}
+
+func TestWithCloudPageQueryRestoresDroppedFilters(t *testing.T) {
+	got := withCloudPageQuery("/wiki/api/v2/spaces/1/pages?cursor=abc&limit=250")
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Query().Get("status") != "current" ||
+		parsed.Query().Get("depth") != "all" ||
+		parsed.Query().Get("cursor") != "abc" {
+		t.Fatalf("withCloudPageQuery() = %s", got)
+	}
+}

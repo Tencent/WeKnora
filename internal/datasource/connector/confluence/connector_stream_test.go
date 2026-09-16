@@ -233,18 +233,27 @@ func TestFetchStreamRefusesMassDeletion(t *testing.T) {
 	}
 }
 
-func TestFetchStreamDeletesSmallBaselineAfterEmptyListing(t *testing.T) {
+func TestFetchStreamRefusesEmptyListingWhenBaselineExists(t *testing.T) {
 	prior := map[string]string{"p1": "v:1", "p2": "v:1"}
 	api := &streamAPI{}
 	h := &captureHandler{}
 
-	if _, err := newStreamConnector(api).FetchStream(
+	_, err := newStreamConnector(api).FetchStream(
 		context.Background(), streamConfig(), streamCursor(prior), h,
-	); err != nil {
-		t.Fatal(err)
+	)
+	if err == nil || len(h.items) != 0 {
+		t.Fatalf("empty listing err=%v items=%#v", err, h.items)
 	}
-	if len(h.items) != 2 || !h.items[0].IsDeleted || !h.items[1].IsDeleted {
-		t.Fatalf("empty listing items=%#v", h.items)
+}
+
+func TestFetchFullStreamRefusesEmptyListingWhenBaselineExists(t *testing.T) {
+	prior := map[string]string{"p1": "v:1", "p2": "v:1"}
+	h := &captureHandler{}
+	_, err := newStreamConnector(&streamAPI{}).FetchFullStream(
+		context.Background(), streamConfig(), streamCursor(prior), h,
+	)
+	if err == nil || len(h.items) != 0 {
+		t.Fatalf("full-sync empty listing err=%v items=%#v", err, h.items)
 	}
 }
 
@@ -314,7 +323,9 @@ func TestFetchStreamContinuesAfterPageBodyError(t *testing.T) {
 	if len(h.items) != 2 {
 		t.Fatalf("items = %#v", h.items)
 	}
-	if h.items[0].Metadata["error"] == "" || len(h.items[0].Content) != 0 {
+	if h.items[0].Metadata["error_reason_code"] != "confluence_not_found" ||
+		strings.Contains(h.items[0].Metadata["error_reason"], "missing page") ||
+		len(h.items[0].Content) != 0 {
 		t.Fatalf("broken page = %#v", h.items[0])
 	}
 	if string(h.items[1].Content) == "" || h.items[1].ExternalID != "p2" {

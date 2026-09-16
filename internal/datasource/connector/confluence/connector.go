@@ -3,7 +3,9 @@ package confluence
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
@@ -220,6 +222,12 @@ func (c *Connector) fetchStream(
 			}
 		}
 		if hadBaseline {
+			if len(pages) == 0 && len(priorPages) > 0 {
+				return nil, fmt.Errorf(
+					"refusing Confluence mirror deletion in %s: listing returned 0 pages against a %d-page baseline",
+					s.Key, len(priorPages),
+				)
+			}
 			missing := 0
 			for id := range priorPages {
 				if _, exists := seen[id]; !exists {
@@ -256,16 +264,41 @@ func (c *Connector) fetchStream(
 }
 
 func failedPageItem(resourceID string, summary page, err error) types.FetchedItem {
+	code, reason := classifyConfluenceError(err)
 	return types.FetchedItem{
 		ExternalID:       summary.ID,
 		Title:            summary.Title,
 		SourceResourceID: resourceID,
 		Metadata: map[string]string{
-			"channel": types.ChannelConfluence,
-			"error":   err.Error(),
-			"page_id": summary.ID,
+			"channel":           types.ChannelConfluence,
+			"error":             err.Error(),
+			"error_reason_code": code,
+			"error_reason":      reason,
+			"page_id":           summary.ID,
 		},
 	}
+}
+
+func classifyConfluenceError(err error) (code, reason string) {
+	var api *apiError
+	if errors.As(err, &api) {
+		switch api.status {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "confluence_auth_or_permission",
+				"Authentication or permission error; check credentials and space permissions"
+		case http.StatusNotFound:
+			return "confluence_not_found", "Confluence page was not found; will retry on the next sync"
+		case http.StatusTooManyRequests:
+			return "confluence_rate_limited", "Confluence API rate limited; will retry on the next sync"
+		default:
+			if api.status >= 500 {
+				return "confluence_server_unavailable",
+					"Confluence service temporarily unavailable; will retry on the next sync"
+			}
+			return "confluence_api_error", "Confluence API error; see server logs"
+		}
+	}
+	return "confluence_sync_failed", "Confluence page could not be synced; see server logs"
 }
 
 func markdownItem(client *client, resourceID string, summary page, full pageBody) (types.FetchedItem, error) {

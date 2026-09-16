@@ -86,3 +86,36 @@ func TestServerSpacePageListPrefersFlatResults(t *testing.T) {
 		t.Fatalf("nextLink() = %q", listed.nextLink())
 	}
 }
+
+func TestPagesCloudFollowsNextAndKeepsDepth(t *testing.T) {
+	var depths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/wiki/api/v2/spaces/1/pages" {
+			http.NotFound(w, r)
+			return
+		}
+		depths = append(depths, r.URL.Query().Get("depth"))
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("cursor") == "page-two" {
+			_, _ = w.Write([]byte(`{"results":[{"id":"2","title":"Child","version":{"number":2}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{
+			"_links": {"next": "/wiki/api/v2/spaces/1/pages?limit=250&cursor=page-two"},
+			"results": [{"id":"1","title":"Root","version":{"number":1}}]
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	c := &client{cfg: config{baseURL: server.URL + "/wiki", edition: editionCloud}, http: server.Client()}
+	pages, err := c.pages(context.Background(), space{ID: "1", Key: "ENG", Name: "Engineering"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 2 || pages[0].ID != "1" || pages[1].ID != "2" {
+		t.Fatalf("pages = %#v", pages)
+	}
+	if len(depths) != 2 || depths[0] != "all" || depths[1] != "all" {
+		t.Fatalf("depth query = %#v", depths)
+	}
+}

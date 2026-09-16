@@ -9,6 +9,16 @@ import (
 	"testing"
 )
 
+func TestPaginateRejectsLoop(t *testing.T) {
+	client := &client{cfg: config{baseURL: "https://confluence.test"}}
+	err := client.paginate(context.Background(), "/rest/api/space?limit=100", func(string) (string, error) {
+		return "/rest/api/space?limit=100", nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "looped") {
+		t.Fatalf("paginate() error = %v", err)
+	}
+}
+
 func TestGetIncludesClientErrorBody(t *testing.T) {
 	client := &client{
 		cfg: config{baseURL: "https://confluence.test", username: "reader", secret: "secret"},
