@@ -104,3 +104,42 @@ func TestDeleteExtractedImagesWithoutCatalogDeletesEverything(t *testing.T) {
 		t.Fatalf("deleted %v, want %v", files.deleted, urls)
 	}
 }
+
+func TestMergeKnowledgeReleaseURLsIncludesOwnerBindings(t *testing.T) {
+	legacy := "local://7/exports/old.png"
+	bound := handleRef("m")
+	catalog := &fakeCatalog{
+		ownerRefs:        map[string][]string{"kn-1": {bound}},
+		releaseRemaining: map[string]int64{bound: 0},
+	}
+	files := &deleteRecorder{}
+
+	urls := mergeKnowledgeReleaseURLs(context.Background(), catalog, []string{"kn-1"}, []string{legacy})
+	deleteExtractedImages(context.Background(), files, knowledgeResourceOwners(catalog, "kn-1"), urls)
+
+	want := []string{legacy, bound}
+	if len(files.deleted) != len(want) {
+		t.Fatalf("deleted %v, want %v", files.deleted, want)
+	}
+	for i, url := range want {
+		if files.deleted[i] != url {
+			t.Fatalf("deleted[%d] = %q, want %q", i, files.deleted[i], url)
+		}
+	}
+}
+
+func TestMergeKnowledgeReleaseURLsReleasesMarkdownOnlyBindings(t *testing.T) {
+	bound := handleRef("n")
+	catalog := &fakeCatalog{
+		ownerRefs:        map[string][]string{"kn-1": {bound}},
+		releaseRemaining: map[string]int64{bound: 0},
+	}
+	files := &deleteRecorder{}
+
+	urls := mergeKnowledgeReleaseURLs(context.Background(), catalog, []string{"kn-1"}, nil)
+	deleteExtractedImages(context.Background(), files, knowledgeResourceOwners(catalog, "kn-1"), urls)
+
+	if len(files.deleted) != 1 || files.deleted[0] != bound {
+		t.Fatalf("deleted %v, want markdown-bound handle %q", files.deleted, bound)
+	}
+}

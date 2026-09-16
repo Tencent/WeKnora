@@ -42,8 +42,9 @@ func copyOwnedObject(
 	srcPath string,
 	tenantID uint64,
 	knowledgeID string,
+	catalog interfaces.ResourceCatalog,
+	relation string,
 ) (string, error) {
-	_ = knowledgeID // exports objects are tenant-scoped, not knowledge-scoped
 	rc, err := srcSvc.GetFile(ctx, srcPath)
 	if err != nil {
 		return "", fmt.Errorf("read source image %q: %w", srcPath, err)
@@ -59,7 +60,32 @@ func copyOwnedObject(
 	if err != nil {
 		return "", fmt.Errorf("save copied image for %q: %w", srcPath, err)
 	}
+	if err := bindCopiedResource(ctx, catalog, dstSvc, newPath, knowledgeID, relation); err != nil {
+		return "", err
+	}
 	return newPath, nil
+}
+
+// bindCopiedResource claims a cloned object for the destination knowledge.
+// Non-catalog paths (legacy provider:// URLs) are left unbound, matching
+// Release's treatment of pre-registry locators.
+func bindCopiedResource(
+	ctx context.Context,
+	catalog interfaces.ResourceCatalog,
+	fileSvc interfaces.FileService,
+	ref, knowledgeID, relation string,
+) error {
+	if catalog == nil || knowledgeID == "" || relation == "" {
+		return nil
+	}
+	if _, ok := types.ParseResourcePath(ref); !ok {
+		return nil
+	}
+	if err := catalog.Bind(ctx, ref, types.ResourceOwnerKnowledge, knowledgeID, relation); err != nil {
+		_ = fileSvc.DeleteFile(ctx, ref)
+		return fmt.Errorf("bind copied resource: %w", err)
+	}
+	return nil
 }
 
 // imageExtForCopy resolves the file extension to use for a copied image. It
@@ -114,6 +140,7 @@ func cloneChunkImageInfo(
 	tenantID uint64,
 	knowledgeID string,
 	urlCache map[string]string,
+	catalog interfaces.ResourceCatalog,
 ) (newImageInfo string, copiedURLs []string, err error) {
 	if srcImageInfo == "" {
 		return "", nil, nil
@@ -132,7 +159,9 @@ func cloneChunkImageInfo(
 
 		newURL, cached := urlCache[img.URL]
 		if !cached {
-			newURL, err = copyOwnedObject(ctx, dstSvc, dstSvc, img.URL, tenantID, knowledgeID)
+			newURL, err = copyOwnedObject(
+				ctx, dstSvc, dstSvc, img.URL, tenantID, knowledgeID,
+				catalog, types.ResourceRelationExtractedImage)
 			if err != nil {
 				return "", copiedURLs, fmt.Errorf("failed to copy chunk image %q: %w", img.URL, err)
 			}
@@ -323,7 +352,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 		// child chunks, so a parent text chunk's ![](url) reference cannot be
 		// rewritten until its child image chunk has been processed).
 		newImageInfo, copied, copyErr := cloneChunkImageInfo(
-			ctx, dstSvc, sourceChunk.ImageInfo, dst.TenantID, dst.ID, urlCache)
+			ctx, dstSvc, sourceChunk.ImageInfo, dst.TenantID, dst.ID, urlCache, s.resourceCatalog)
 		copiedURLs = append(copiedURLs, copied...)
 		if copyErr != nil {
 			err = fmt.Errorf("clone chunk image copy failed: %w", copyErr)
@@ -387,6 +416,7 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 			return err
 		}
 	}
+	s.bindChunkResources(ctx, dst.TenantID, dst.ID, targetChunks)
 
 	tenantID := types.MustTenantIDFromContext(ctx)
 	// Route CopyIndices via the source KB's bound store. This function does
@@ -806,7 +836,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 			// Deep-copy extracted images into objects owned by the destination
 			// FAQ knowledge so deleting the source never breaks this clone.
 			newImageInfo, copied, copyErr := cloneChunkImageInfo(
-				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache)
+				ctx, dstSvc, srcChunk.ImageInfo, dstKB.TenantID, dstKnowledge.ID, imageURLCache, s.resourceCatalog)
 			if copyErr != nil {
 				logger.Errorf(ctx, "Failed to copy FAQ chunk images: %v", copyErr)
 				handleError(progress, copyErr, "Failed to copy FAQ entry images")
@@ -842,6 +872,7 @@ func (s *knowledgeService) cloneFAQKnowledgeBase(
 			handleError(progress, err, "Failed to create FAQ entries")
 			return err
 		}
+		s.bindChunkResources(ctx, dstKB.TenantID, dstKnowledge.ID, newChunks)
 
 		// Saved rows now own these images, including when indexing later fails.
 		// A later batch failure must not delete files from an earlier saved batch.

@@ -145,6 +145,8 @@ type fakeCatalog struct {
 	releaseRemaining map[string]int64
 	releaseErr       error
 	releases         []string
+	ownerRefs        map[string][]string
+	listErr          error
 }
 
 func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
@@ -172,6 +174,20 @@ func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string)
 	}
 	return -1, nil
 }
+
+func (c *fakeCatalog) ListReferencesByOwner(_ context.Context, _ string, ownerIDs ...string) ([]string, error) {
+	if c.listErr != nil {
+		return nil, c.listErr
+	}
+	var out []string
+	for _, id := range ownerIDs {
+		out = append(out, c.ownerRefs[id]...)
+	}
+	return out, nil
+}
+
+var _ interfaces.ResourceCatalog = (*fakeCatalog)(nil)
+
 func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
 	return "", nil
 }

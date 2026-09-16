@@ -223,6 +223,35 @@ func (s *resourceCatalog) Release(
 	return s.repo.CountBindings(ctx, resource.ID)
 }
 
+func (s *resourceCatalog) ListReferencesByOwner(
+	ctx context.Context, ownerType string, ownerIDs ...string,
+) ([]string, error) {
+	ids := make([]string, 0, len(ownerIDs))
+	for _, id := range ownerIDs {
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, id)
+		}
+	}
+	if strings.TrimSpace(ownerType) == "" || len(ids) == 0 {
+		return nil, nil
+	}
+	handles, err := s.repo.ListHandlesByOwner(ctx, ownerType, ids)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]string, 0, len(handles))
+	seen := make(map[string]struct{}, len(handles))
+	for _, handle := range handles {
+		ref := types.BuildResourcePath(handle)
+		if _, exists := seen[ref]; exists {
+			continue
+		}
+		seen[ref] = struct{}{}
+		refs = append(refs, ref)
+	}
+	return refs, nil
+}
+
 func (s *resourceCatalog) MarkDeleted(ctx context.Context, reference string) error {
 	resource, err := s.Resolve(ctx, reference)
 	if err != nil {

@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +48,10 @@ func (c *resolvingCatalog) ResolvePath(
 
 func (c *resolvingCatalog) Release(context.Context, string, string, string) (int64, error) {
 	return -1, nil
+}
+
+func (c *resolvingCatalog) ListReferencesByOwner(context.Context, string, ...string) ([]string, error) {
+	return nil, nil
 }
 
 func (c *resolvingCatalog) MarkDeleted(context.Context, string) error { return nil }
@@ -119,4 +125,31 @@ func TestBindContentResourcesIsInertWithoutCatalog(t *testing.T) {
 	// Must not panic; a deployment without a resource registry has nothing to
 	// claim and keeps the pre-binding behaviour.
 	svc.bindContentResources(context.Background(), 7, "kn-1", "![a]("+contentRef("f")+")")
+}
+
+func TestBindChunkResourcesClaimsContentAndImageInfo(t *testing.T) {
+	fromContent := contentRef("p")
+	fromInfo := contentRef("q")
+	catalog := &resolvingCatalog{tenantByRef: map[string]uint64{fromContent: 7, fromInfo: 7}}
+	svc := &knowledgeService{resourceCatalog: catalog}
+
+	svc.bindChunkResources(context.Background(), 7, "kn-clone", []*types.Chunk{
+		{Content: "![a](" + fromContent + ")"},
+		{ImageInfo: `[{"url":"` + fromInfo + `"}]`},
+	})
+
+	if len(catalog.binds) != 2 {
+		t.Fatalf("binds = %v, want content and image_info handles", catalog.binds)
+	}
+}
+
+func TestProcessDocumentClaimsParsedMarkdown(t *testing.T) {
+	src, err := os.ReadFile("knowledge_process.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	needle := []byte("s.bindContentResources(ctx, knowledge.TenantID, knowledge.ID, convertResult.MarkdownContent)")
+	if !bytes.Contains(src, needle) {
+		t.Fatal("ProcessDocument must claim parsed markdown resources before processChunks")
+	}
 }
