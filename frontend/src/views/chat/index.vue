@@ -105,17 +105,20 @@
                                 :value="session.created_at" />
 
                             <div v-if="session.role == 'user'" class="message-row"
-                                :data-message-id="session.id || undefined">
+                                :data-message-id="session.id || undefined"
+                                :class="{ 'is-minimap-target': session.id && session.id === minimapTargetId }">
                                 <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                                     :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
                                     :session-id="session_id"
                                     :message-id="session.id"
                                     :created-at="session.created_at"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="!embeddedMode && forkAffordanceOf(session.id).canFork"
                                     :steer-failed="Boolean(session._steerFailed)"
                                     @retry-steer="handleRetrySteer(session.steer_id)"
                                     @remove-steer="handleRemoveSteer(session.steer_id)"
-                                    @fork="handleFork">
+                                    @fork="handleFork"
+                                    @rewind="handleRewind">
                                 </usermsg>
                             </div>
                             <div v-if="session.role == 'assistant' && shouldRenderAssistantMessage(session)"
@@ -126,7 +129,9 @@
                                     :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                                     :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                     :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                    :can-rewind="!embeddedMode && forkAffordanceOf(session.id).canFork"
                                     @fork="handleFork"
+                                    @rewind="handleRewind"
                                     @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                                 </botmsg>
                                 <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
@@ -193,8 +198,9 @@ import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vu
 import InputField from '../../components/Input-field.vue';
 import botmsg from './components/botmsg.vue';
 import usermsg from './components/usermsg.vue';
-import { getMessageList, getSession, forkSession } from "@/api/chat/index";
+import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
+import { rewindSkipMessage } from './rewindNotice';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -204,7 +210,7 @@ import { persistedAssistantId, previewSteerMessage, discardSteerPreview, reconci
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useBrowserConnectionStore } from '@/stores/browserConnection';
-import { MessagePlugin } from 'tdesign-vue-next';
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
@@ -327,6 +333,7 @@ function forkAffordanceOf(messageId) {
 
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
 let forkInFlight = false
+let rewindInFlight = false
 
 function stashForkLanding(sessionId, text) {
     const payload = JSON.stringify({ sessionId, text })
@@ -372,7 +379,7 @@ function applyForkLanding() {
 
 async function handleFork(messageId) {
     if (props.embeddedMode) return
-    if (forkInFlight) return
+    if (forkInFlight || rewindInFlight) return
     if (!messageId || !session_id.value) return
     const source = messagesList.find((m) => m.id === messageId)
     if (!source) return
@@ -413,6 +420,62 @@ async function handleFork(messageId) {
     } finally {
         forkInFlight = false
     }
+}
+
+function truncateMessagesAt(messageId, inclusive) {
+    const index = messagesList.findIndex((m) => m.id === messageId)
+    if (index < 0) return
+    messagesList.splice(inclusive ? index : index + 1)
+}
+
+async function handleRewind(messageId) {
+    if (props.embeddedMode) return
+    if (forkInFlight || rewindInFlight) return
+    if (!messageId || !session_id.value) return
+    const source = messagesList.find((m) => m.id === messageId)
+    if (!source) return
+    const sourceSessionId = session_id.value
+
+    const dialog = DialogPlugin.confirm({
+        header: t('chat.rewind.confirmTitle'),
+        body: t('chat.rewind.confirmBody'),
+        confirmBtn: { content: t('chat.rewind.confirmButton'), theme: 'danger' },
+        cancelBtn: t('chat.rewind.cancelButton'),
+        theme: 'warning',
+        onConfirm: async () => {
+            dialog.destroy()
+            if (forkInFlight || rewindInFlight) return
+            rewindInFlight = true
+            try {
+                const res = await rewindSession(sourceSessionId, { message_id: messageId })
+                const data = res?.data
+                if (!data) return
+
+                truncateMessagesAt(messageId, source.role === 'user')
+                if (source.role === 'user') {
+                    inputFieldRef.value?.prefill(String(source.content ?? ''))
+                }
+
+                if (data.workspace_reset) {
+                    MessagePlugin.success(t('chat.rewind.success'))
+                    return
+                }
+                const skip = rewindSkipMessage(String(data.reason || ''), t)
+                if (skip) {
+                    MessagePlugin.info(skip)
+                }
+            } catch (err) {
+                if (err?.status === 409 || err?.$httpStatus === 409) {
+                    MessagePlugin.warning(t('chat.rewind.busy'))
+                    return
+                }
+                MessagePlugin.error(t('chat.rewind.failed'))
+            } finally {
+                rewindInFlight = false
+            }
+        },
+        onCancel: () => dialog.destroy(),
+    })
 }
 
 const sessionArtifacts = computed(() => collectSessionArtifacts(messagesList));
