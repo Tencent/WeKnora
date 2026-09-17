@@ -139,6 +139,7 @@ func (s *modelService) BuildModelConfig(ctx context.Context, model *types.Model)
 	if params.Chat != nil {
 		cfg.ThinkingLevel = params.Chat.ThinkingLevel
 		cfg.SelectedLevels = params.Chat.SelectedLevels
+		cfg.ThinkingEnabled = params.Chat.ThinkingEnabled
 	}
 	applyLegacyLocalRecordMapping(model, cfg)
 	// Legacy records created before the provider field was mandatory carry an

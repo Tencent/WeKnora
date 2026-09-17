@@ -1117,11 +1117,15 @@ const selectedModelThinkingCaps = computed(() => {
 
 const selectedModelChatShard = computed(() => selectedModel.value?.parameters.chat);
 
-/** 未声明思考的模型整块隐藏（触发按钮 + 面板）。布尔思考（SupportedLevels
-    空，如 ollama think）同样支持——会话 API 已传输 thinking 布尔，面板渲染
-    纯开关（ThinkingControls single 形态对空档位不渲染选择器）。 */
+/** 未声明思考的模型整块隐藏（触发按钮 + 面板）。模型记录主开关关闭
+    （chat 分片 thinking_enabled === false，模型管理页拍板）同样隐藏——
+    运行时入口已硬门（foldChatOptions），UI 随动不再发送思考字段。布尔思考
+    （SupportedLevels 空，如 ollama think）同样支持——会话 API 已传输
+    thinking 布尔，面板渲染纯开关（ThinkingControls single 形态对空档位不
+    渲染选择器）。 */
 const thinkingSupported = computed(() =>
-  selectedModelThinkingCaps.value?.supported === true);
+  selectedModelThinkingCaps.value?.supported === true
+    && selectedModelChatShard.value?.thinking_enabled !== false);
 
 /** single 档位 options = (分片子集 ?? 厂商枚举) ∩ 厂商枚举（与 ThinkingControls 内规则一致）。 */
 const sessionThinkingLevelOptions = computed(() => {
@@ -2187,8 +2191,8 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
   // before unmount); sending must keep focus — the composer restores/keeps
   // it across the DOM update (upstream focus contract).
   emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles,
-    sessionThinkingTouched.value && sessionThinking.value.enabled ? sessionThinking.value.level : '',
-    sessionThinkingTouched.value ? sessionThinking.value.enabled : undefined);
+    sessionThinkingTouched.value && thinkingSupported.value && sessionThinking.value.enabled ? sessionThinking.value.level : '',
+    sessionThinkingTouched.value && thinkingSupported.value ? sessionThinking.value.enabled : undefined);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));

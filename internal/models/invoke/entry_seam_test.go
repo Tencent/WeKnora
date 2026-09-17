@@ -71,6 +71,40 @@ func TestFoldChatOptionsTierChain(t *testing.T) {
 	assert.Equal(t, "", fold("xhigh", badSet))
 }
 
+// TestFoldChatOptionsMasterSwitchOff covers the model-record hard gate: with
+// ThinkingEnabled explicitly false, the session/agent tiers lose — Thinking
+// is forced off and the level cleared. nil stays ungated.
+func TestFoldChatOptionsMasterSwitchOff(t *testing.T) {
+	caps := thinkingCaps(LevelLow, LevelMedium, LevelHigh)
+	registerFake(t, capsFakeAdapter{caps: caps})
+	on := true
+	off := false
+	gated := &ModelConfig{Provider: "fake", ThinkingEnabled: &off, ThinkingLevel: "low"}
+
+	// Agent/session want thinking on with a level → forced off, level cleared.
+	folded := foldChatOptions(gated, &ChatOptions{Thinking: &on, ThinkingLevel: "high"})
+	require.NotNil(t, folded.Thinking)
+	assert.False(t, *folded.Thinking)
+	assert.Equal(t, "", folded.ThinkingLevel)
+
+	// Caller sent nothing → still an explicit off (stronger than omission for
+	// protocols with an off parameter, e.g. dashscope enable_thinking).
+	folded = foldChatOptions(gated, &ChatOptions{})
+	require.NotNil(t, folded.Thinking)
+	assert.False(t, *folded.Thinking)
+
+	// Already off and level-less → no copy.
+	alreadyOff := &ChatOptions{Thinking: &off}
+	assert.Same(t, alreadyOff, foldChatOptions(gated, alreadyOff))
+
+	// nil ThinkingEnabled (record never touched the editor) → ungated.
+	ungated := &ModelConfig{Provider: "fake", ThinkingLevel: "low"}
+	opts := &ChatOptions{Thinking: &on, ThinkingLevel: "xhigh"}
+	folded = foldChatOptions(ungated, opts)
+	assert.True(t, *folded.Thinking)
+	assert.Equal(t, "low", folded.ThinkingLevel, "xhigh fails the provider set → tier 2 record level")
+}
+
 func TestFoldThinkingControl(t *testing.T) {
 	cases := map[string]string{
 		"":                     "", // unset → adapter default

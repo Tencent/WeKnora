@@ -128,6 +128,20 @@ func foldChatOptions(m *ModelConfig, opts *ChatOptions) *ChatOptions {
 	if opts == nil {
 		return opts
 	}
+	// Model-record master switch (hard gate): when the user turned thinking
+	// off for this model, the session/agent tiers lose — the wire must carry
+	// no thinking at all, level included. nil stays ungated for records that
+	// never touched the editor toggle.
+	if m != nil && m.ThinkingEnabled != nil && !*m.ThinkingEnabled {
+		if opts.Thinking != nil && !*opts.Thinking && opts.ThinkingLevel == "" {
+			return opts
+		}
+		off := false
+		cloned := *opts
+		cloned.Thinking = &off
+		cloned.ThinkingLevel = ""
+		return &cloned
+	}
 	var caps ThinkingCaps
 	if a, err := resolveAdapter(m.Provider); err == nil {
 		if cc := a.Capabilities().Chat; cc != nil {

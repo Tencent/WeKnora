@@ -470,6 +470,11 @@ type ModelConfig struct {
 
 	ThinkingLevel  string   // model record default (chain tier 2)
 	SelectedLevels []string // model record allowed set
+	// ThinkingEnabled is the model record's master switch (editor toggle).
+	// nil = undeclared (no gate, tier chain runs as before); &false = the user
+	// deliberately disabled thinking for this model — foldChatOptions forces
+	// the wire off regardless of the session/agent tier.
+	ThinkingEnabled *bool
 
 	// Capability ceilings consumed by compression decisions / adapter clamps.
 	ContextWindow   int

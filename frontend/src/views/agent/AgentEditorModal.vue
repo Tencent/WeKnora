@@ -644,7 +644,7 @@
                         <ThinkingControls
                           v-model="thinkingValue"
                           edit-mode="single"
-                          :caps="agentThinkingCaps"
+                          :caps="agentThinkingAvailable ? agentThinkingCaps : undefined"
                           :chat-shard="agentModelChatShard"
                         />
                       </div>
@@ -3378,6 +3378,13 @@ const agentThinkingCaps = computed(() => {
   if (!provider) return undefined;
   return chatProviderOptions.value.find(p => p.value === provider)?.capabilities?.chat?.thinking;
 });
+
+/** 模型记录主开关（模型管理页）关闭 → 思考不可用：caps 置 undefined 让
+    ThinkingControls 整块置灰并说明（已存值保留，运行时入口亦有硬门兜底），
+    与会话面板"消失不见"的语义同步（模型级开关 = 硬门）。 */
+const agentThinkingAvailable = computed(() =>
+  agentThinkingCaps.value?.supported === true
+    && agentModelChatShard.value?.thinking_enabled !== false);
 
 // single 档位 options = (分片子集 ?? 厂商枚举) ∩ 厂商枚举（与组件内规则一致）
 const agentThinkingLevelOptions = computed(() => {
