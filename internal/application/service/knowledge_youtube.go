@@ -62,18 +62,31 @@ func normalizeYouTubeImportURL(rawURL string) (string, bool, error) {
 }
 
 type youTubeImportVideo struct {
-	id    string
-	title string
+	id     string
+	title  string
+	folder string
+}
+
+// youTubePlaylistFolder names the folder a playlist's videos are imported
+// into: the playlist title (or its ID when untitled) under baseFolder. Slashes
+// in the title are replaced so a title never creates nested folders.
+func youTubePlaylistFolder(baseFolder, title, playlistID string) string {
+	name := strings.TrimSpace(strings.NewReplacer("/", "-", "\\", "-").Replace(title))
+	if name == "" {
+		name = playlistID
+	}
+	return types.NormalizeKnowledgeFolderPath(baseFolder + "/" + name)
 }
 
 // CreateKnowledgeFromYouTube queues one URL knowledge entry per distinct video
-// across a batch of YouTube video and playlist links. Links that cannot be
-// resolved and videos that fail to queue are reported per item, and videos
-// already in the knowledge base are reported as duplicates, so one bad link
-// never fails the whole batch.
+// across a batch of YouTube video and playlist links. Single videos are placed
+// in folderPath and each playlist's videos in a subfolder named after the
+// playlist. Links that cannot be resolved and videos that fail to queue are
+// reported per item, and videos already in the knowledge base are reported as
+// duplicates, so one bad link never fails the whole batch.
 func (s *knowledgeService) CreateKnowledgeFromYouTube(ctx context.Context,
 	kbID string, rawURLs []string, enableMultimodel *bool, tagIDs []string, channel string,
-	processOverrides *types.KnowledgeProcessOverrides,
+	processOverrides *types.KnowledgeProcessOverrides, folderPath string,
 ) (*types.YouTubeImportResult, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
@@ -89,7 +102,7 @@ func (s *knowledgeService) CreateKnowledgeFromYouTube(ctx context.Context,
 		Duplicates: []types.YouTubeImportItem{},
 		Failed:     []types.YouTubeImportItem{},
 	}
-	videos, err := s.resolveYouTubeVideos(ctx, rawURLs, result)
+	videos, err := s.resolveYouTubeVideos(ctx, rawURLs, types.NormalizeKnowledgeFolderPath(folderPath), result)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +121,8 @@ func (s *knowledgeService) CreateKnowledgeFromYouTube(ctx context.Context,
 		}
 		videoURL := youtube.VideoURL(video.id)
 		item := types.YouTubeImportItem{URL: videoURL, VideoID: video.id, Title: video.title}
-		knowledge, err := s.CreateKnowledgeFromURL(
-			ctx, kbID, videoURL, "", "", enableMultimodel, video.title, tagIDs, channel, processOverrides,
+		knowledge, err := s.createKnowledgeFromURL(
+			ctx, kbID, videoURL, "", "", enableMultimodel, video.title, tagIDs, channel, processOverrides, video.folder,
 		)
 		var duplicate *types.DuplicateKnowledgeError
 		switch {
@@ -131,15 +144,16 @@ func (s *knowledgeService) CreateKnowledgeFromYouTube(ctx context.Context,
 }
 
 // resolveYouTubeVideos expands the submitted links into distinct videos, in
-// submission order, capped at the client's per-import limit. Unresolvable
-// links are recorded in result.Failed; only a missing yt-dlp aborts the batch.
+// submission order, capped at the client's per-import limit. A video linked
+// more than once keeps the folder of its first occurrence. Unresolvable links
+// are recorded in result.Failed; only a missing yt-dlp aborts the batch.
 func (s *knowledgeService) resolveYouTubeVideos(
-	ctx context.Context, rawURLs []string, result *types.YouTubeImportResult,
+	ctx context.Context, rawURLs []string, baseFolder string, result *types.YouTubeImportResult,
 ) ([]youTubeImportVideo, error) {
 	limit := s.youTube().MaxVideosPerImport()
 	seen := make(map[string]bool)
 	var videos []youTubeImportVideo
-	add := func(id, title string) {
+	add := func(id, title, folder string) {
 		if seen[id] {
 			return
 		}
@@ -148,7 +162,7 @@ func (s *knowledgeService) resolveYouTubeVideos(
 			return
 		}
 		seen[id] = true
-		videos = append(videos, youTubeImportVideo{id: id, title: title})
+		videos = append(videos, youTubeImportVideo{id: id, title: title, folder: folder})
 	}
 
 	for _, rawURL := range rawURLs {
@@ -164,7 +178,7 @@ func (s *knowledgeService) resolveYouTubeVideos(
 			continue
 		}
 		if link.Kind == youtube.LinkVideo {
-			add(link.VideoID, "")
+			add(link.VideoID, "", baseFolder)
 			continue
 		}
 		// A playlist whose videos all overlap earlier links still fits once
@@ -184,8 +198,9 @@ func (s *knowledgeService) resolveYouTubeVideos(
 			continue
 		}
 		before := len(videos)
+		folder := youTubePlaylistFolder(baseFolder, playlist.Title, link.PlaylistID)
 		for _, entry := range playlist.Entries {
-			add(entry.VideoID, entry.Title)
+			add(entry.VideoID, entry.Title, folder)
 		}
 		if playlist.Truncated {
 			result.Truncated = true
@@ -196,7 +211,8 @@ func (s *knowledgeService) resolveYouTubeVideos(
 			})
 		}
 		result.Playlists = append(result.Playlists, types.YouTubeImportPlaylist{
-			URL: rawURL, PlaylistID: link.PlaylistID, Title: playlist.Title, Videos: len(videos) - before,
+			URL: rawURL, PlaylistID: link.PlaylistID, Title: playlist.Title, FolderPath: folder,
+			Videos: len(videos) - before,
 		})
 	}
 	return videos, nil

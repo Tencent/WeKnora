@@ -220,6 +220,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 一次提交多个 YouTube 视频和/或播放列表链接（最多 100 个）。后端按提交顺序展开播放列表（私有/已删除视频会被跳过），按视频去重后为每个视频创建一条 URL 知识，随后按上文"YouTube 模式"异步处理。权限与 `knowledge/url` 相同。
 
+- 单个视频链接放入 `folder_path` 指定的文件夹；每个播放列表的视频放入 `folder_path` 下以播放列表标题命名的子文件夹（标题中的 `/` 会替换为 `-`，无标题时使用列表 ID）；同一视频出现多次时按首次出现的位置归档；
 - 无法识别的链接、读取失败的播放列表、创建失败的视频计入 `failed`；已在知识库中的视频计入 `duplicates`；均不会导致整体失败；
 - 单次请求最多导入 `YOUTUBE_MAX_VIDEOS_PER_IMPORT` 个不同视频（默认 200），超出时 `truncated` 为 `true`，仅导入靠前的视频；
 - 所有链接都无法得到可导入的视频时返回 400；服务器未安装 `yt-dlp` 时返回 500。
@@ -229,6 +230,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 | 字段                | 类型     | 必填 | 说明                                                  |
 | ------------------- | -------- | ---- | ----------------------------------------------------- |
 | `urls`              | string[] | 是   | YouTube 视频或播放列表链接，1–100 个                  |
+| `folder_path`       | string   | 否   | 目标文件夹，默认知识库根目录                          |
 | `enable_multimodel` | boolean  | 否   | 是否启用多模态解析                                    |
 | `tag_ids`           | string[] | 否   | 应用到每个视频的标签 ID                               |
 | `channel`           | string   | 否   | 来源渠道标识                                          |
@@ -262,6 +264,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
                 "url": "https://www.youtube.com/playlist?list=PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH",
                 "playlist_id": "PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH",
                 "title": "Coding Challenges",
+                "folder_path": "Coding Challenges",
                 "videos": 2
             }
         ],

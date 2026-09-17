@@ -275,6 +275,9 @@ func (c *Client) CreateKnowledgeFromURL(
 type CreateKnowledgeFromYouTubeRequest struct {
 	// URLs are YouTube video and/or playlist links, at most 100 per request (required)
 	URLs []string `json:"urls"`
+	// FolderPath is the folder single videos are placed in; each playlist's videos go into a
+	// subfolder named after the playlist. Empty means the knowledge base root.
+	FolderPath string `json:"folder_path,omitempty"`
 	// EnableMultimodel is the optional flag to enable multimodal processing
 	EnableMultimodel *bool `json:"enable_multimodel,omitempty"`
 	// TagIDs are optional tag IDs applied to every imported video
@@ -299,6 +302,8 @@ type YouTubeImportPlaylist struct {
 	URL        string `json:"url"`
 	PlaylistID string `json:"playlist_id"`
 	Title      string `json:"title"`
+	// FolderPath is the folder this playlist's videos were placed in.
+	FolderPath string `json:"folder_path"`
 	// Videos is the number of importable videos taken from this playlist.
 	Videos int `json:"videos"`
 }

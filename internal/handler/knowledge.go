@@ -489,12 +489,13 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 // @Summary      批量导入YouTube视频与播放列表
 // @Description  接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识
 // @Description  （异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，
-// @Description  均不会导致整体失败；单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制
+// @Description  均不会导致整体失败；单个视频放入 folder_path，每个播放列表的视频放入 folder_path 下以播放列表标题命名的子文件夹；
+// @Description  单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{urls=[]string,enable_multimodel=bool,tag_ids=[]string}  true  "导入请求"
+// @Param        request  body      object{urls=[]string,folder_path=string,tag_ids=[]string}  true  "导入请求"
 // @Success      201      {object}  types.YouTubeImportResult  "导入结果"
 // @Failure      400      {object}  errors.AppError            "请求参数错误或没有可导入的视频"
 // @Security     Bearer
@@ -515,6 +516,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromYouTube(c *gin.Context) {
 
 	var req struct {
 		URLs             []string                         `json:"urls" binding:"required,min=1,max=100"`
+		FolderPath       string                           `json:"folder_path"`
 		EnableMultimodel *bool                            `json:"enable_multimodel"`
 		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
@@ -529,7 +531,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromYouTube(c *gin.Context) {
 		len(req.URLs), secutils.SanitizeForLog(kbID))
 
 	result, err := h.kgService.CreateKnowledgeFromYouTube(
-		ctx, kbID, req.URLs, req.EnableMultimodel, req.TagIDs, req.Channel, req.ProcessConfig,
+		ctx, kbID, req.URLs, req.EnableMultimodel, req.TagIDs, req.Channel, req.ProcessConfig, req.FolderPath,
 	)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {

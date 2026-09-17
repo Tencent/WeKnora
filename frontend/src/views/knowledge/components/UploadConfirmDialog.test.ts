@@ -33,8 +33,21 @@ test('imports pasted links in bulk: YouTube links as one batch, other links one 
   assert.match(dialog, /@urls="appendUrls"/)
   assert.match(knowledgeBase, /@urls="handleUploadSourceUrls"/)
   assert.match(knowledgeBase, /const youTubeUrls = urls\.filter\(isYouTubeUrl\)/)
-  assert.match(knowledgeBase, /executeYouTubeImport\(youTubeUrls, processConfig, tagIds\)/)
+  assert.match(
+    knowledgeBase,
+    /executeYouTubeImport\(youTubeUrls, processConfig, tagIds, result\.targetFolder \|\| ROOT_FOLDER_PATH\)/,
+  )
+  assert.match(knowledgeBase, /folder_path: targetFolder \|\| undefined/)
   assert.match(knowledgeBase, /urls\.filter\(\(candidate\) => !isYouTubeUrl\(candidate\)\)/)
+})
+
+test('offers a YouTube-only import that accepts only YouTube links, one per line', () => {
+  const dropdown = readFileSync(new URL('./KbUploadSourceDropdown.vue', import.meta.url), 'utf8')
+  assert.match(dropdown, /value: 'importYouTube'/)
+  assert.match(dropdown, /case 'importYouTube':\s*openUrlDialog\('youtube'\)/)
+  assert.match(dropdown, /urls = parsed\.urls\.filter\(isYouTubeUrl\)/)
+  assert.match(dropdown, /knowledgeBase\.nonYouTubeURLsSkipped/)
+  assert.match(dropdown, /knowledgeBase\.youtubeUrlTip/)
 })
 
 // Browsing a folder pre-fills the upload destination, so the dialog must show it

@@ -17,6 +17,8 @@ type YouTubeImportPlaylist struct {
 	URL        string `json:"url"`
 	PlaylistID string `json:"playlist_id"`
 	Title      string `json:"title"`
+	// FolderPath is the folder this playlist's videos were placed in.
+	FolderPath string `json:"folder_path"`
 	// Videos is the number of importable videos taken from this playlist.
 	Videos int `json:"videos"`
 }

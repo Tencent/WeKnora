@@ -258,6 +258,7 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `urls` | []string | 是（`binding:"required,min=1,max=100"`） | YouTube 视频或播放列表链接 |
+| `folder_path` | string | 否 | 目标文件夹；每个播放列表的视频放入其下以列表标题命名的子文件夹 |
 | `enable_multimodel` | *bool | 否 | 多模态开关 |
 | `tag_ids` | []string | 否 | 应用到每个视频的标签 |
 | `channel` | string | 否 | 渠道 |

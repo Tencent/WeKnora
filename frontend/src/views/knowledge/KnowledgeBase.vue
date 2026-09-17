@@ -1783,6 +1783,7 @@ const executeYouTubeImport = async (
   urls: string[],
   processConfig?: KnowledgeProcessOverrides,
   tagIds?: string[],
+  targetFolder?: string,
 ) => {
   const targetKbId = kbId.value;
   if (!targetKbId) {
@@ -1802,6 +1803,7 @@ const executeYouTubeImport = async (
     try {
       const responseData: any = await createKnowledgeFromYouTube(targetKbId, {
         urls: batch,
+        folder_path: targetFolder || undefined,
         tag_ids: tagIdsToUpload,
         process_config: processConfig,
       });
@@ -1907,7 +1909,7 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
 
   const youTubeUrls = urls.filter(isYouTubeUrl);
   if (youTubeUrls.length > 0) {
-    await executeYouTubeImport(youTubeUrls, processConfig, tagIds);
+    await executeYouTubeImport(youTubeUrls, processConfig, tagIds, result.targetFolder || ROOT_FOLDER_PATH);
   }
   for (const url of urls.filter((candidate) => !isYouTubeUrl(candidate))) {
     await executeUrlImport(url, processConfig, tagIds);

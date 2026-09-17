@@ -189,15 +189,18 @@ func TestCreateKnowledgeFromYouTubeBatchMixesVideosAndPlaylists(t *testing.T) {
 		"  ",
 		"https://example.com/not-youtube",
 		"https://www.youtube.com/playlist?list=PL222222",
-	}, nil, nil, "", nil)
+	}, nil, nil, "", nil, "")
 
 	require.NoError(t, err)
 	require.Equal(t, 3, result.TotalVideos, "a, b and c once each")
 	require.False(t, result.Truncated)
 	require.Equal(t, []string{"PL111111", "PL222222"}, source.playlistCalls)
 	require.Equal(t, []types.YouTubeImportPlaylist{{
-		URL: "https://www.youtube.com/playlist?list=PL111111", PlaylistID: "PL111111", Title: "Course", Videos: 2,
+		URL: "https://www.youtube.com/playlist?list=PL111111", PlaylistID: "PL111111", Title: "Course",
+		FolderPath: "Course", Videos: 2,
 	}}, result.Playlists)
+	require.Empty(t, repo.created[0].FolderPath, "single videos stay in the requested folder (root)")
+	require.Equal(t, "Course", repo.created[1].FolderPath, "playlist videos go into the playlist folder")
 
 	require.Len(t, result.Created, 2)
 	require.Len(t, repo.created, 2)
@@ -215,6 +218,34 @@ func TestCreateKnowledgeFromYouTubeBatchMixesVideosAndPlaylists(t *testing.T) {
 	require.Contains(t, result.Failed[0].Error, "not a YouTube")
 	require.Equal(t, "https://www.youtube.com/playlist?list=PL222222", result.Failed[1].URL)
 	require.Contains(t, result.Failed[1].Error, "playlist does not exist")
+}
+
+func TestCreateKnowledgeFromYouTubePlacesPlaylistsInFolders(t *testing.T) {
+	allowYouTubeHostsForTest(t)
+
+	repo := &youTubeRepoStub{}
+	source := &fakeYouTubeSource{
+		playlists: map[string]*youtube.Playlist{
+			"PL111111": {ID: "PL111111", Title: "易經 / Part 1", Entries: []youtube.PlaylistEntry{
+				{VideoID: "bbbbbbbbbbb", Title: "第一集"},
+			}},
+			"PL222222": {ID: "PL222222", Entries: []youtube.PlaylistEntry{{VideoID: "ccccccccccc"}}},
+		},
+	}
+	svc := newYouTubeImportService(repo, &createKnowledgeTaskEnqueuerStub{}, source)
+
+	result, err := svc.CreateKnowledgeFromYouTube(newCreateKnowledgeFileContext(), "kb-1", []string{
+		"https://youtu.be/aaaaaaaaaaa",
+		"https://www.youtube.com/playlist?list=PL111111",
+		"https://www.youtube.com/playlist?list=PL222222",
+	}, nil, nil, "", nil, " Lectures/ ")
+
+	require.NoError(t, err)
+	require.Len(t, repo.created, 3)
+	require.Equal(t, "Lectures", repo.created[0].FolderPath)
+	require.Equal(t, "Lectures/易經 - Part 1", repo.created[1].FolderPath, "a slash in the title must not nest folders")
+	require.Equal(t, "Lectures/PL222222", repo.created[2].FolderPath, "untitled playlists fall back to their ID")
+	require.Equal(t, "Lectures/易經 - Part 1", result.Playlists[0].FolderPath)
 }
 
 func TestCreateKnowledgeFromYouTubeCapsVideosPerImport(t *testing.T) {
@@ -236,7 +267,7 @@ func TestCreateKnowledgeFromYouTubeCapsVideosPerImport(t *testing.T) {
 		"https://youtu.be/aaaaaaaaaaa",
 		"https://www.youtube.com/playlist?list=PL111111",
 		"https://youtu.be/ddddddddddd",
-	}, nil, nil, "", nil)
+	}, nil, nil, "", nil, "")
 
 	require.NoError(t, err)
 	require.True(t, result.Truncated)
@@ -251,7 +282,7 @@ func TestCreateKnowledgeFromYouTubeErrors(t *testing.T) {
 	t.Run("no YouTube links", func(t *testing.T) {
 		source := &fakeYouTubeSource{}
 		_, err := newYouTubeImportService(&youTubeRepoStub{}, nil, source).CreateKnowledgeFromYouTube(
-			newCreateKnowledgeFileContext(), "kb-1", []string{"https://example.com/a"}, nil, nil, "", nil)
+			newCreateKnowledgeFileContext(), "kb-1", []string{"https://example.com/a"}, nil, nil, "", nil, "")
 		requireAppErrorStatus(t, err, http.StatusBadRequest)
 		require.Contains(t, err.Error(), "not a YouTube")
 		require.Empty(t, source.playlistCalls)
@@ -261,7 +292,7 @@ func TestCreateKnowledgeFromYouTubeErrors(t *testing.T) {
 		source := &fakeYouTubeSource{}
 		_, err := newYouTubeImportService(&youTubeRepoStub{}, nil, source).CreateKnowledgeFromYouTube(
 			newCreateKnowledgeFileContext(), "kb-1", []string{"https://www.youtube.com/playlist?list=PL111111"},
-			nil, nil, "", nil)
+			nil, nil, "", nil, "")
 		requireAppErrorStatus(t, err, http.StatusBadRequest)
 		require.Contains(t, err.Error(), "no importable videos")
 	})
@@ -270,7 +301,7 @@ func TestCreateKnowledgeFromYouTubeErrors(t *testing.T) {
 		source := &fakeYouTubeSource{playlistErrs: map[string]error{"PL111111": youtube.ErrToolMissing}}
 		_, err := newYouTubeImportService(&youTubeRepoStub{}, nil, source).CreateKnowledgeFromYouTube(
 			newCreateKnowledgeFileContext(), "kb-1", []string{"https://www.youtube.com/playlist?list=PL111111"},
-			nil, nil, "", nil)
+			nil, nil, "", nil, "")
 		requireAppErrorStatus(t, err, http.StatusInternalServerError)
 	})
 }

@@ -5628,7 +5628,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识\n（异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，\n均不会导致整体失败；单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制",
+                "description": "接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识\n（异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，\n均不会导致整体失败；单个视频放入 folder_path，每个播放列表的视频放入 folder_path 下以播放列表标题命名的子文件夹；\n单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制",
                 "consumes": [
                     "application/json"
                 ],
@@ -5655,8 +5655,8 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
-                                "enable_multimodel": {
-                                    "type": "boolean"
+                                "folder_path": {
+                                    "type": "string"
                                 },
                                 "tag_ids": {
                                     "type": "array",
@@ -23896,6 +23896,10 @@ const docTemplate = `{
         "github_com_Tencent_WeKnora_internal_types.YouTubeImportPlaylist": {
             "type": "object",
             "properties": {
+                "folder_path": {
+                    "description": "FolderPath is the folder this playlist's videos were placed in.",
+                    "type": "string"
+                },
                 "playlist_id": {
                     "type": "string"
                 },
