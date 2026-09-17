@@ -190,6 +190,19 @@ func looksLikeSandboxOutputPath(candidate string) bool {
 
 // lookupArtifactRef resolves one Markdown destination to an artifact reference.
 func lookupArtifactRef(destination string, byName map[string]string, image bool) (string, bool) {
+	name, ok := artifactDestinationName(destination, image)
+	if !ok {
+		return "", false
+	}
+	ref, ok := byName[name]
+	return ref, ok
+}
+
+// artifactDestinationName normalizes one Markdown link/image destination down to
+// the sandbox-output file name it names. ok is false when the destination is not
+// a sandbox-local file name at all — a real URL, a resource:// handle, a bare
+// name in an ordinary link, or incidental prose punctuation.
+func artifactDestinationName(destination string, image bool) (string, bool) {
 	candidate := strings.TrimSpace(destination)
 	if candidate == "" {
 		return "", false
@@ -231,9 +244,101 @@ func lookupArtifactRef(destination string, byName map[string]string, image bool)
 	if candidate == "" || candidate == "." || candidate == "/" {
 		return "", false
 	}
+	return candidate, true
+}
 
-	ref, ok := byName[candidate]
-	return ref, ok
+// forEachArtifactDestination calls fn with the normalized file name of every
+// link/image destination in content. Destinations inside code spans or fences
+// are skipped, mirroring rewriteArtifactReferences.
+func forEachArtifactDestination(content string, fn func(name string)) {
+	if content == "" || !strings.Contains(content, "](") {
+		return
+	}
+	// Split returns only the non-code segments (Go does not interleave the
+	// matched fences the way a capturing-group Python split would). Walk
+	// every part; skipping odd indexes would drop citations after the first
+	// fence, which rewriteArtifactReferences still rewrites.
+	for _, part := range fencedOrInlineCodeRE.Split(content, -1) {
+		walkSegmentDestinations(part, fn)
+	}
+}
+
+func walkSegmentDestinations(segment string, fn func(name string)) {
+	cursor := 0
+	for cursor < len(segment) {
+		relative := strings.Index(segment[cursor:], "](")
+		if relative < 0 {
+			return
+		}
+		closeBracket := cursor + relative
+		open := closeBracket + 1
+
+		inner, end, ok := scanLinkDestination(segment, open)
+		if !ok || !hasLinkLabelBefore(segment, closeBracket) {
+			cursor = open + 1
+			continue
+		}
+		destination, _ := splitDestinationTitle(inner)
+		if name, ok := artifactDestinationName(destination, markdownImageBefore(segment, closeBracket)); ok {
+			fn(name)
+		}
+		cursor = end + 1
+	}
+}
+
+// referencedArtifacts returns the candidates the answer body names, in
+// candidate order.
+//
+// A candidate is named when the body carries its resource:// handle, or when a
+// link/image destination resolves to its file name — the same spellings
+// rewriteArtifactReferences accepts. Matching goes through the Markdown
+// destination rules rather than a substring search, so a file that merely
+// appears in prose is not treated as a reference.
+//
+// Candidates are matched in the order given: listing this turn's artifacts
+// first lets a regenerated file shadow the older version of itself, so only an
+// explicit handle reference still pulls the old version in.
+func referencedArtifacts(content string, candidates types.MessageArtifacts) types.MessageArtifacts {
+	if content == "" || len(candidates) == 0 {
+		return nil
+	}
+
+	matched := make([]bool, len(candidates))
+	for _, handle := range types.ScanResourceReferences(content) {
+		for i := range candidates {
+			if candidates[i].URL == handle {
+				matched[i] = true
+				break
+			}
+		}
+	}
+
+	nameToIndex := make(map[string]int, len(candidates))
+	for i := range candidates {
+		name := strings.TrimSpace(candidates[i].FileName)
+		if name == "" {
+			continue
+		}
+		if _, exists := nameToIndex[name]; exists {
+			continue
+		}
+		nameToIndex[name] = i
+	}
+	if len(nameToIndex) > 0 {
+		forEachArtifactDestination(content, func(name string) {
+			if i, ok := nameToIndex[name]; ok {
+				matched[i] = true
+			}
+		})
+	}
+
+	var out types.MessageArtifacts
+	for i := range candidates {
+		if matched[i] {
+			out = append(out, candidates[i])
+		}
+	}
+	return out
 }
 
 // artifactRefByName maps each artifact's file name to the reference that
@@ -267,4 +372,68 @@ func artifactReference(artifact types.MessageArtifact) string {
 		return types.BuildResourcePath(handle)
 	}
 	return "sandbox:" + strings.TrimSpace(artifact.FileName)
+}
+
+// artifactsNewestFirst returns a copy of artifacts in reverse order so the
+// latest recorded version of a name is first. KnownArtifacts is creation
+// order (oldest first); a hash-skipped citation must bind the fork-point
+// file, not the first time that name appeared. A copy is required: reversing
+// in place would mutate the store's backing slice.
+func artifactsNewestFirst(artifacts types.MessageArtifacts) types.MessageArtifacts {
+	n := len(artifacts)
+	if n < 2 {
+		return artifacts
+	}
+	out := make(types.MessageArtifacts, n)
+	for i, artifact := range artifacts {
+		out[n-1-i] = artifact
+	}
+	return out
+}
+
+// mergeArtifactLists concatenates artifact lists in order, keeping the first
+// occurrence of each storage URL. Order is preserved because a reference
+// resolves to an index into the resulting list, so the caller's ordering
+// decides which version a name points at: putting this turn's artifacts first
+// makes a regenerated file shadow the older one.
+func mergeArtifactLists(lists ...types.MessageArtifacts) types.MessageArtifacts {
+	var out types.MessageArtifacts
+	var seen map[string]struct{}
+	for _, list := range lists {
+		for _, artifact := range list {
+			key := strings.TrimSpace(artifact.URL)
+			if key != "" {
+				if _, exists := seen[key]; exists {
+					continue
+				}
+				if seen == nil {
+					seen = make(map[string]struct{})
+				}
+				seen[key] = struct{}{}
+			}
+			out = append(out, artifact)
+		}
+	}
+	return out
+}
+
+// historyOnlyArtifacts returns the entries of referenced that this turn did not
+// produce. Those are the ones whose ownership has to be extended to the new
+// message; the collector already bound the ones it persisted itself.
+func historyOnlyArtifacts(referenced, current types.MessageArtifacts) types.MessageArtifacts {
+	if len(referenced) == 0 {
+		return nil
+	}
+	produced := make(map[string]struct{}, len(current))
+	for _, artifact := range current {
+		produced[strings.TrimSpace(artifact.URL)] = struct{}{}
+	}
+	var out types.MessageArtifacts
+	for _, artifact := range referenced {
+		if _, isCurrent := produced[strings.TrimSpace(artifact.URL)]; isCurrent {
+			continue
+		}
+		out = append(out, artifact)
+	}
+	return out
 }

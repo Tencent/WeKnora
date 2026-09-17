@@ -272,12 +272,13 @@ func (m *MessageArtifacts) Scan(value interface{}) error {
 	return json.Unmarshal(b, m)
 }
 
-// WithRestoredMtime stamps sandbox mtime (and hash) onto the artifact at
-// sourcePath whose content already matched. Used after a fork checkout so
-// later collects can skip by path+mtime. Other versions at the same path
-// with a different hash are left alone. The returned slice is a copy.
+// WithRestoredMtime stamps sandbox mtime onto the artifact at sourcePath
+// whose ContentHash already matches. Used after a fork checkout so later
+// collects can skip by path+mtime. Other versions at the same path —
+// including empty-hash legacy rows — are left alone. The returned slice is a
+// copy.
 func (m MessageArtifacts) WithRestoredMtime(sourcePath string, mod time.Time, hash string) (MessageArtifacts, bool) {
-	if len(m) == 0 || sourcePath == "" {
+	if len(m) == 0 || sourcePath == "" || hash == "" {
 		return m, false
 	}
 	out := make(MessageArtifacts, len(m))
@@ -287,16 +288,16 @@ func (m MessageArtifacts) WithRestoredMtime(sourcePath string, mod time.Time, ha
 		if out[i].SourcePath != sourcePath {
 			continue
 		}
-		if out[i].ContentHash != "" && hash != "" && out[i].ContentHash != hash {
+		// Empty hashes are not a match: a restore must not stamp every
+		// historical version at this path. Only the row whose content
+		// already hashed to `hash` gets the new mtime.
+		if out[i].ContentHash != hash {
 			continue
 		}
-		if out[i].ModTime.Equal(mod) && (hash == "" || out[i].ContentHash == hash) {
+		if out[i].ModTime.Equal(mod) {
 			continue
 		}
 		out[i].ModTime = mod
-		if hash != "" {
-			out[i].ContentHash = hash
-		}
 		changed = true
 	}
 	return out, changed

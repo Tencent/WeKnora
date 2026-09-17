@@ -268,12 +268,16 @@ func TestArtifactCollector_NotifyFiresBeforeUpload(t *testing.T) {
 			"/workspace/output/b.csv":  []byte("x,"),
 		},
 	}
-	c := newTestCollector(src, &fakeStore{}, &fakeFileService{}, 1<<20)
+	fs := &fakeFileService{}
+	c := newTestCollector(src, &fakeStore{}, fs, 1<<20)
 
 	var notified int
 	got, err := c.CollectWithNotify(ctx, "sess-1", "msg-1", 42, "/workspace/output", func(n int) {
-		if src.readCalls != nil {
-			t.Fatalf("notify ran after ReadSessionFile: %v", src.readCalls)
+		if len(fs.saved) != 0 {
+			t.Fatalf("notify ran after SaveBytes: saved=%v", fs.saved)
+		}
+		if len(src.readCalls) == 0 {
+			t.Fatalf("notify should run after hash reads")
 		}
 		notified = n
 	})
@@ -285,6 +289,44 @@ func TestArtifactCollector_NotifyFiresBeforeUpload(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("CollectWithNotify() len = %d, want 2", len(got))
+	}
+}
+
+func TestArtifactCollector_NotifySkipsHashMatchedRestores(t *testing.T) {
+	ctx := context.Background()
+	oldMod, _ := time.Parse(time.RFC3339, "2026-07-10T10:20:33Z")
+	src := &fakeSandboxSource{
+		entries: map[string][]sandbox.RemoteDirEntry{
+			"sess-1": {
+				{Name: "report.pptx", Path: "/workspace/output/report.pptx", Type: sandbox.RemoteEntryFile, Size: 4, ModTime: mustParseTime("2026-07-10T10:21:00Z")},
+			},
+		},
+		contents: map[string][]byte{
+			"/workspace/output/report.pptx": []byte("PPTX"),
+		},
+	}
+	store := &fakeStore{prev: []types.MessageArtifact{
+		{
+			SourcePath:  "/workspace/output/report.pptx",
+			ModTime:     oldMod,
+			FileSize:    4,
+			ContentHash: artifactContentHash([]byte("PPTX")),
+		},
+	}}
+	c := newTestCollector(src, store, &fakeFileService{}, 1<<20)
+
+	notified := 0
+	got, err := c.CollectWithNotify(ctx, "sess-1", "msg-1", 42, "/workspace/output", func(n int) {
+		notified = n
+	})
+	if err != nil {
+		t.Fatalf("CollectWithNotify() error = %v", err)
+	}
+	if notified != 0 {
+		t.Fatalf("notify count = %d, want 0 (restored files must not look pending)", notified)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CollectWithNotify() len = %d, want 0", len(got))
 	}
 }
 

@@ -783,22 +783,46 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 					"artifact collect failed session=%s message=%s: %v",
 					h.sessionID, h.assistantMessageID, err,
 				)
-			} else if len(artifacts) > 0 {
-				h.assistantMessage.Artifacts = artifacts
+			}
+
+			// Resolve the files the answer names against this turn's artifacts
+			// AND the ones already recorded for the session.
+			//
+			// A turn can legitimately reference a file it did not regenerate.
+			// The first turn after a session fork is restored to the fork point,
+			// so every unchanged file is de-duplicated out of `artifacts` — yet
+			// the model still writes `sandbox:<name>` for it. Gating the
+			// rewrite on `artifacts` alone would leave those references
+			// unnormalized, and the client resolves names only against the
+			// message's own artifact list, so they would render as missing
+			// files.
+			// KnownArtifacts is oldest-first. Name matching is first-wins, so
+			// this turn shadows a regenerated file, then the latest known
+			// version (the fork-point file) beats earlier ones of the same name.
+			known := h.artifactCollector.SessionArtifacts(collectCtx, h.sessionID)
+			referenced := referencedArtifacts(
+				h.assistantMessage.Content,
+				mergeArtifactLists(artifacts, artifactsNewestFirst(known)),
+			)
+			previous = historyOnlyArtifacts(referenced, artifacts)
+
+			if attached := mergeArtifactLists(h.assistantMessage.Artifacts, artifacts, referenced); len(attached) > 0 {
+				h.assistantMessage.Artifacts = attached
 				// The answer text names generated files the way the model saw
 				// them in the sandbox. Bind those names to artifact indices now
 				// that the index space is final, so a reloaded conversation
 				// renders them instead of showing a broken link.
 				h.assistantMessage.Content = rewriteArtifactReferences(
-					h.assistantMessage.Content, artifacts,
+					h.assistantMessage.Content, attached,
 				)
 				logger.GetLogger(h.ctx).Infof(
 					"artifact collect attached %d file(s) to message=%s session=%s",
-					len(artifacts), h.assistantMessageID, h.sessionID,
+					len(attached), h.assistantMessageID, h.sessionID,
 				)
 			}
-			previous = h.artifactCollector.ReferencedHistory(collectCtx, h.sessionID,
-				h.assistantMessageID, h.assistantMessage.Content)
+			// A reused reference is owned by this message too, so deleting the
+			// message that first produced the file cannot invalidate it.
+			h.artifactCollector.BindArtifactsToMessage(collectCtx, h.assistantMessageID, previous)
 		}
 		h.assistantMessage.Content = types.ClarifyArtifactVersions(h.assistantMessage.Content,
 			h.assistantMessage.Artifacts, previous, types.LanguageFromContextOrDefault(h.ctx))

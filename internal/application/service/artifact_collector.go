@@ -241,11 +241,11 @@ func (c *ArtifactCollector) Collect(
 	return c.collect(ctx, sessionID, messageID, tenantID, outputDir, nil)
 }
 
-// CollectWithNotify is Collect plus a progress hook fired after the sandbox
-// listing is filtered, before any file is read or uploaded. The frontend uses
-// this to show a toolbar placeholder while object-storage uploads (often a
-// few seconds for HTML charts) finish. notify is skipped when nothing will
-// be persisted, so ordinary sandbox turns without new files stay quiet.
+// CollectWithNotify is Collect plus a progress hook fired after files have
+// been hashed and we know they will be uploaded. The frontend uses this to
+// show a toolbar placeholder while object-storage uploads (often a few
+// seconds for HTML charts) finish. notify is skipped when nothing will be
+// persisted, so a fork restore that only refreshes mtime stays quiet.
 func (c *ArtifactCollector) CollectWithNotify(
 	ctx context.Context,
 	sessionID string,
@@ -331,27 +331,31 @@ func (c *ArtifactCollector) collect(
 		logger.Infof(ctx, "[ArtifactCollector] known set size=%d (session=%s)", known.len(), sessionID)
 	}
 
-	pending := 0
+	// pending uploads are files that passed the hash check. Counting
+	// acceptEntry (mtime miss) before the read would treat a git restore as
+	// "about to persist" and spin the toolbar on an empty attach.
+	var uploads []pendingArtifactUpload
 	for _, entry := range entries {
-		if c.acceptEntry(entry, known) {
-			pending++
+		data, hash, ok := c.readNewContent(ctx, source, sessionID, entry, known)
+		if !ok {
+			continue
 		}
+		uploads = append(uploads, pendingArtifactUpload{entry: entry, data: data, hash: hash})
+		known.remember(types.MessageArtifact{
+			SourcePath: entry.Path, ModTime: entry.ModTime, ContentHash: hash, FileSize: int64(len(data)),
+		})
 	}
-	if pending > 0 && notify != nil {
-		notify(pending)
+	if len(uploads) > 0 && notify != nil {
+		notify(len(uploads))
 	}
 
-	artifacts = make(types.MessageArtifacts, 0, pending)
-	for _, entry := range entries {
-		art, ok := c.maybePersist(ctx, source, sessionID, messageID, tenantID, entry, known)
+	artifacts = make(types.MessageArtifacts, 0, len(uploads))
+	for _, item := range uploads {
+		art, ok := c.persistBytes(ctx, sessionID, messageID, tenantID, item.entry, item.data, item.hash)
 		if !ok {
 			continue
 		}
 		artifacts = append(artifacts, art)
-		// Adding to the known set inside the loop protects us against the
-		// pathological case where ListSessionFiles returns the same path
-		// twice (envd hasn't been observed to do so, but future-proofing
-		// the loop is cheap).
 		known.remember(art)
 	}
 	logger.Infof(ctx, "[ArtifactCollector] done session=%s listed=%d attached=%d",
@@ -391,38 +395,38 @@ func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known *art
 	return !known.seenMtime(entry.Path, entry.ModTime)
 }
 
-// maybePersist runs the per-file pipeline (filter → download → upload →
-// build metadata). Returns ok=false when the entry was skipped for any
-// reason (already known, too large, upload failed). All skip reasons are
-// logged so operators can diagnose empty artifact panels.
-func (c *ArtifactCollector) maybePersist(
+type pendingArtifactUpload struct {
+	entry sandbox.RemoteDirEntry
+	data  []byte
+	hash  string
+}
+
+// readNewContent downloads an accepted file and returns its bytes when the
+// content is new. Same-content restores update this session's mtime and
+// return ok=false so they are not counted as pending uploads.
+func (c *ArtifactCollector) readNewContent(
 	ctx context.Context,
 	source SandboxArtifactSource,
 	sessionID string,
-	messageID string,
-	tenantID uint64,
 	entry sandbox.RemoteDirEntry,
 	known *artifactKnownSet,
-) (types.MessageArtifact, bool) {
+) ([]byte, string, bool) {
 	if !c.acceptEntry(entry, known) {
 		if entry.Type == sandbox.RemoteEntryFile && entry.Size > c.config.MaxFileBytes {
 			logger.Warnf(ctx, "[ArtifactCollector] skip oversize artifact: session=%s path=%s size=%d limit=%d",
 				sessionID, entry.Path, entry.Size, c.config.MaxFileBytes)
 		}
-		return types.MessageArtifact{}, false
+		return nil, "", false
 	}
 
 	data, err := source.ReadSessionFile(ctx, sessionID, entry.Path)
 	if err != nil {
 		logger.Warnf(ctx, "[ArtifactCollector] read artifact failed: session=%s path=%s err=%v",
 			sessionID, entry.Path, err)
-		return types.MessageArtifact{}, false
+		return nil, "", false
 	}
 	hash := artifactContentHash(data)
 	if c.knownSameContent(ctx, known, entry.Path, hash) {
-		// git checkout (or an equivalent restore) refreshed mtime on the
-		// same bytes. Persist the new mtime on THIS session's copied
-		// artifacts so later turns hit path+mtime and do not re-read.
 		known.remember(types.MessageArtifact{
 			SourcePath: entry.Path, ModTime: entry.ModTime, ContentHash: hash, FileSize: int64(len(data)),
 		})
@@ -432,20 +436,25 @@ func (c *ArtifactCollector) maybePersist(
 					sessionID, entry.Path, err)
 			}
 		}
-		return types.MessageArtifact{}, false
+		return nil, "", false
 	}
-	// A second guard: envd may report a stale size while the file is being
-	// re-written; enforce the cap against the actual byte count too.
 	if int64(len(data)) > c.config.MaxFileBytes {
 		logger.Warnf(ctx, "[ArtifactCollector] skip oversize artifact after read: session=%s path=%s size=%d limit=%d",
 			sessionID, entry.Path, len(data), c.config.MaxFileBytes)
-		return types.MessageArtifact{}, false
+		return nil, "", false
 	}
+	return data, hash, true
+}
 
-	// Give each blob a UUID-namespaced storage name so concurrent turns
-	// cannot collide, and so the storage key itself is unguessable from
-	// the outside (defence-in-depth on top of the /artifacts/:index
-	// endpoint's ownership check).
+func (c *ArtifactCollector) persistBytes(
+	ctx context.Context,
+	sessionID string,
+	messageID string,
+	tenantID uint64,
+	entry sandbox.RemoteDirEntry,
+	data []byte,
+	hash string,
+) (types.MessageArtifact, bool) {
 	storageName := "artifact_" + uuid.NewString() + "_" + safeFileName(entry.Name)
 	storagePath, err := c.fileService.SaveBytes(ctx, data, tenantID, storageName, false)
 	if err != nil {
@@ -532,34 +541,41 @@ func (c *ArtifactCollector) bindArtifactResource(ctx context.Context, ref, messa
 	}
 }
 
-// ReferencedHistory returns only artifacts from this session explicitly named
-// in the answer. Bind these immutable versions to the new message as well, so
-// deleting their original message cannot invalidate a later reference.
-func (c *ArtifactCollector) ReferencedHistory(ctx context.Context, sessionID, messageID, content string) types.MessageArtifacts {
-	if c == nil || c.store == nil {
-		return nil
-	}
-	refs := make(map[string]bool)
-	for _, ref := range types.ScanResourceReferences(content) {
-		refs[ref] = true
-	}
-	if len(refs) == 0 {
+// SessionArtifacts returns every artifact already recorded against the session.
+// Empty on error, so the caller degrades to "nothing to resolve" rather than
+// dropping the turn.
+//
+// Callers need this to resolve an answer's file references: a turn can name a
+// file it did not (re)generate — the first turn after a session fork points the
+// sandbox back at an earlier commit, so every unchanged file is de-duplicated
+// out of that turn's own artifact list — and the reference still has to be bound
+// to that file's stable handle.
+func (c *ArtifactCollector) SessionArtifacts(ctx context.Context, sessionID string) types.MessageArtifacts {
+	if c == nil || c.store == nil || sessionID == "" {
 		return nil
 	}
 	previous, err := c.store.KnownArtifacts(ctx, sessionID)
 	if err != nil {
-		logger.Warnf(ctx, "Read referenced artifact history failed: %v", err)
+		logger.Warnf(ctx, "Read session artifacts failed: %v", err)
 		return nil
 	}
-	var result types.MessageArtifacts
-	for _, artifact := range previous {
-		if refs[artifact.URL] {
-			result = append(result, artifact)
-			c.bindArtifactResource(ctx, artifact.URL, messageID)
-			delete(refs, artifact.URL)
-		}
+	return previous
+}
+
+// BindArtifactsToMessage makes messageID an owner of each artifact's resource
+// handle as well. Deleting the message that originally produced the file then
+// cannot invalidate a reference made from a later one. Best-effort: a binding
+// failure never discards the artifact, which is already stored and downloadable
+// through the /artifacts endpoint.
+func (c *ArtifactCollector) BindArtifactsToMessage(
+	ctx context.Context, messageID string, artifacts types.MessageArtifacts,
+) {
+	if c == nil || c.catalog == nil || messageID == "" {
+		return
 	}
-	return result
+	for _, artifact := range artifacts {
+		c.bindArtifactResource(ctx, artifact.URL, messageID)
+	}
 }
 
 // artifactKey is the string form of the (source_path, mtime) tuple used to
