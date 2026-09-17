@@ -263,11 +263,11 @@ func TestAfterCreateRejectsInvalidCommitSHAWithoutExec(t *testing.T) {
 }
 
 func TestForkResetScriptRejectsNonHexSHA(t *testing.T) {
-	_, err := forkResetScript(sandbox.SessionWorkspaceRoot, "abc123")
+	_, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, "abc123")
 	require.Error(t, err)
-	_, err = forkResetScript(sandbox.SessionWorkspaceRoot, "")
+	_, err = workspaceResetScript(sandbox.SessionWorkspaceRoot, "")
 	require.Error(t, err)
-	_, err = forkResetScript(sandbox.SessionWorkspaceRoot, forkTestCommitSHA()+";rm")
+	_, err = workspaceResetScript(sandbox.SessionWorkspaceRoot, forkTestCommitSHA()+";rm")
 	require.Error(t, err)
 }
 
@@ -311,7 +311,7 @@ func TestForkResetScriptPrunesLaterCommits(t *testing.T) {
 	later := runGit("rev-parse", "HEAD")
 	require.NotEqual(t, early, later)
 
-	script, err := forkResetScript(dir, early)
+	script, err := workspaceResetScript(dir, early)
 	require.NoError(t, err)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = env
@@ -432,7 +432,7 @@ func TestAfterCreateWithClientUsesHandleNotRunner(t *testing.T) {
 	require.True(t, client.execs[0].Shell)
 	require.Equal(t, sandbox.SessionWorkspaceRoot, client.execs[0].WorkDir)
 	require.Equal(t, sandbox.DefaultSandboxExecUser, client.execs[0].User)
-	require.Equal(t, forkResetTimeout, client.execs[0].Timeout)
+	require.Equal(t, workspaceResetTimeout, client.execs[0].Timeout)
 	require.Contains(t, client.execs[0].Command, "reset --hard "+forkTestCommitSHA())
 	require.Contains(t, client.execs[0].Command, "gc --prune=now")
 	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
