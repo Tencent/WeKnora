@@ -2,7 +2,7 @@
 services:
   # 只启动依赖的基础设施服务
   postgres:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-postgres-dev
     ports:
       - "${DB_PORT:-5432}:5432"
@@ -381,7 +381,7 @@ services:
   # ---------------------------------------------------------------------------
   # 复用 dev 已有的 ParadeDB 镜像，不额外拉 postgres 镜像
   langfuse-db-init:
-    image: paradedb/paradedb:v0.22.2-pg17
+    image: paradedb/paradedb:v0.22.6-pg17
     container_name: WeKnora-langfuse-db-init-dev
     depends_on:
       postgres:

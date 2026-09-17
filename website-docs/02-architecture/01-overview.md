@@ -13,7 +13,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 | `app` | `wechatopenai/weknora-app`（`docker/Dockerfile.app`，Go） | `8080` | 主后端：REST API、RAG 检索、Agent 引擎、异步任务 worker、IM/Embed 渠道接入。健康检查 `GET /health` |
 | `frontend` | `wechatopenai/weknora-ui`（`frontend/`，NGINX + Vue3 静态产物） | `80` | Web UI；NGINX 同时充当反向代理，将 `/api` 转发到 `app`（`APP_HOST`/`APP_BACKEND_PORT`/`APP_SCHEME` 可指向远端后端） |
 | `docreader` | `wechatopenai/weknora-docreader`（`docker/Dockerfile.docreader`，Python） | `50051`（仅 compose 网络内 expose，不映射宿主机） | 文档解析微服务：gRPC 服务端，PDF/DOCX/Excel/EPUB/网页等 25+ 格式解析与页面渲染。健康检查 `grpc_health_probe` |
-| `postgres` | `paradedb/paradedb:v0.22.2-pg17` | `5432`（网络内） | 主数据库。ParadeDB 发行版自带 BM25 全文检索与 pgvector 向量能力，因此**默认部署无需独立向量库**（`RETRIEVE_DRIVER=postgres`） |
+| `postgres` | `paradedb/paradedb:v0.22.6-pg17` | `5432`（网络内） | 主数据库。ParadeDB 发行版自带 BM25 全文检索与 pgvector 向量能力，因此**默认部署无需独立向量库**（`RETRIEVE_DRIVER=postgres`） |
 | `redis` | `redis:7.0-alpine`（`appendonly` + `requirepass`） | `6379`（网络内） | Asynq 任务队列、SSE 流管理（跨实例）、system_settings 发布订阅、限流与分布式模型并发闸门 |
 | `sandbox` | `wechatopenai/weknora-sandbox`（`docker/Dockerfile.sandbox`） | — | WeKnora 标准运行镜像；可直接用于空间 Docker 后端，接入 CubeSandbox/E2B 时则通过模板 API 自动注册并用于 Agent Skills |
 
