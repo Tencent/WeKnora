@@ -617,6 +617,8 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .system-audit-log {
   width: 100%;
   display: flex;
@@ -625,7 +627,7 @@ onUnmounted(() => {
 }
 
 .section-header {
-  margin-bottom: 20px;
+  .settings-section-header();
 }
 
 .audit-page-header {
@@ -640,13 +642,6 @@ onUnmounted(() => {
   font-size: 20px;
   font-weight: 600;
   color: var(--td-text-color-primary);
-}
-
-.section-description {
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .rq-refresh {

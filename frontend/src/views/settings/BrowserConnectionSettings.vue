@@ -202,26 +202,14 @@ onMounted(() => { void refresh() })
 onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); clearPairing() })
 </script>
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .browser-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 24px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
-  }
+  .settings-section-header();
 }
 
 .connection-card {

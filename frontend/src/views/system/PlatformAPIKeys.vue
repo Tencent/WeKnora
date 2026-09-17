@@ -355,13 +355,15 @@ async function copyToken() {
 onMounted(reload)
 </script>
 
-<style scoped>
+<style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .platform-api-keys {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 20px;
+  .settings-section-header();
 }
 
 .section-header h2 {
@@ -369,13 +371,6 @@ onMounted(reload)
   font-size: 20px;
   font-weight: 600;
   color: var(--td-text-color-primary);
-}
-
-.section-description {
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .security-alert {

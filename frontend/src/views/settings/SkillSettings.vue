@@ -1170,25 +1170,20 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .skill-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 28px;
+  .settings-section-header();
 
   &__title-row {
     display: flex;
     align-items: center;
     gap: 8px;
     margin-bottom: 8px;
-  }
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
   }
 
   &__help {
@@ -1200,13 +1195,6 @@ onUnmounted(() => {
     &:hover {
       color: var(--td-text-color-secondary);
     }
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.6;
   }
 }
 

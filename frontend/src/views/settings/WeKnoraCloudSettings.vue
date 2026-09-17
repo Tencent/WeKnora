@@ -367,26 +367,14 @@ onMounted(async () => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .weknoracloud-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 24px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0 0 8px 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 0 0 10px 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .credential-warning {
@@ -442,16 +430,9 @@ onMounted(async () => {
 }
 
 .setting-row {
-  display: flex;
+  .setting-row();
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 16px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
 
   &.action-row {
     padding-top: 20px;
@@ -459,27 +440,11 @@ onMounted(async () => {
 }
 
 .setting-info {
-  flex: 1;
-  min-width: 0;
-
-  .setting-label {
-    display: block;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-    margin-bottom: 4px;
-  }
-
-  .setting-desc {
-    font-size: 13px;
-    color: var(--td-text-color-secondary);
-    margin: 0;
-    line-height: 1.5;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
+  .setting-control();
 }
 
 .models-section {

@@ -576,33 +576,14 @@ onMounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .sandbox-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 20px;
-
-  h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-  }
-}
-
-.section-description {
-  margin: 0;
-  color: var(--td-text-color-secondary);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.section-header__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
+  .settings-section-header();
 }
 
 .defaults-trigger {
@@ -688,39 +669,16 @@ onMounted(() => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  .setting-row();
   gap: 24px;
-  padding: 0 0 16px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .setting-info {
-  flex: 1;
-  min-width: 0;
-
-  label {
-    display: block;
-    margin-bottom: 4px;
-    color: var(--td-text-color-primary);
-    font-size: 14px;
-    font-weight: 500;
-  }
-
-  .desc {
-    margin: 0;
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.5;
-  }
+  .setting-info();
 }
 
 .setting-control {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
+  .setting-control();
 }
 
 .sandbox-tabs-row {

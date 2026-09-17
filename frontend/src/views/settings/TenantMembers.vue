@@ -1466,6 +1466,8 @@ watch(
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .tenant-members {
   width: 100%;
 }
@@ -1497,23 +1499,7 @@ watch(
 }
 
 .section-header {
-  margin-bottom: 20px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-    letter-spacing: -0.02em;
-  }
-
-  .section-description {
-    color: var(--td-text-color-secondary);
-    font-size: 13px;
-    line-height: 1.55;
-    margin: 8px 0 0;
-    max-width: 52rem;
-  }
+  .settings-section-header();
 }
 
 .section-header-row {
