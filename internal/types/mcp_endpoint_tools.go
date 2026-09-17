@@ -160,3 +160,23 @@ func MCPEndpointScope(ep *MCPEndpoint) TenantAPIKeyScope {
 		Capabilities:     StringArray(MCPEndpointCapabilitiesForTools(ep.Tools)),
 	}
 }
+
+// MCPEndpointAgentAllowed reports whether an endpoint of tenantID may run
+// agent for the ask tool. Tenant-owned agents qualify; builtins qualify only
+// when they are user-facing (listed by GetBuiltinAgentIDs). Internal builtins
+// such as the wiki fixer and the skill installer stay unreachable because
+// they ship write and shell tools that the endpoint allowlist never covers.
+func MCPEndpointAgentAllowed(agent *CustomAgent, tenantID uint64) bool {
+	if agent == nil {
+		return false
+	}
+	if agent.IsBuiltin || IsBuiltinAgentID(agent.ID) {
+		for _, id := range GetBuiltinAgentIDs() {
+			if id == agent.ID {
+				return true
+			}
+		}
+		return false
+	}
+	return agent.TenantID == tenantID
+}

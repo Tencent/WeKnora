@@ -311,9 +311,9 @@ const connectSnippets = computed(() => {
   if (!ep) return []
   const url = endpointUrl(ep)
   return [
-    { key: 'http', text: buildHttpClientSnippet(ep.name, url, connectToken.value) },
-    { key: 'claudeCode', text: buildClaudeCodeCommand(ep.name, url, connectToken.value) },
-    { key: 'stdio', text: buildStdioBridgeSnippet(ep.name, url, connectToken.value) },
+    { key: 'http', text: buildHttpClientSnippet(ep.name, url, connectToken.value, ep.id) },
+    { key: 'claudeCode', text: buildClaudeCodeCommand(ep.name, url, connectToken.value, ep.id) },
+    { key: 'stdio', text: buildStdioBridgeSnippet(ep.name, url, connectToken.value, ep.id) },
   ]
 })
 

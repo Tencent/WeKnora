@@ -214,3 +214,58 @@ func TestMCPEndpointUpdateRotateDeleteAreTenantScoped(t *testing.T) {
 		t.Fatalf("deleted endpoint must be gone, got %v", err)
 	}
 }
+
+type stubKBForMCPEndpoint struct {
+	interfaces.KnowledgeBaseService
+	kbs map[string]*types.KnowledgeBase
+}
+
+func (s *stubKBForMCPEndpoint) GetKnowledgeBaseByIDOnly(_ context.Context, id string) (*types.KnowledgeBase, error) {
+	kb, ok := s.kbs[id]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return kb, nil
+}
+
+func TestMCPEndpointKnowledgeBaseScopeIsTenantIsolated(t *testing.T) {
+	svc := &mcpEndpointService{
+		repo: newStubMCPEndpointRepo(),
+		kbService: &stubKBForMCPEndpoint{kbs: map[string]*types.KnowledgeBase{
+			"kb-own":     {ID: "kb-own", TenantID: 1, Name: "Own"},
+			"kb-foreign": {ID: "kb-foreign", TenantID: 2, Name: "Foreign"},
+		}},
+	}
+	ctx := types.WithCaller(context.Background(), types.Caller{TenantID: 1, UserID: "u1", Role: types.TenantRoleAdmin})
+
+	if _, _, err := svc.Create(ctx, 1, &types.MCPEndpoint{
+		Name: "x", Tools: types.StringArray{"ask"}, KnowledgeBaseIDs: types.StringArray{"kb-own"},
+	}); err != nil {
+		t.Fatalf("own knowledge base must be accepted: %v", err)
+	}
+
+	_, _, err := svc.Create(ctx, 1, &types.MCPEndpoint{
+		Name: "x", Tools: types.StringArray{"ask"}, KnowledgeBaseIDs: types.StringArray{"kb-foreign"},
+	})
+	if appErr, ok := apperrors.IsAppError(err); !ok || appErr.Code != apperrors.ErrNotFound {
+		t.Fatalf("another workspace's knowledge base must be rejected, got %v", err)
+	}
+
+	_, _, err = svc.Create(ctx, 1, &types.MCPEndpoint{
+		Name: "x", Tools: types.StringArray{"ask"}, KnowledgeBaseIDs: types.StringArray{"kb-missing"},
+	})
+	if appErr, ok := apperrors.IsAppError(err); !ok || appErr.Code != apperrors.ErrNotFound {
+		t.Fatalf("unknown knowledge base must be rejected, got %v", err)
+	}
+}
+
+func TestMCPEndpointRejectsInternalBuiltinAgent(t *testing.T) {
+	hidden := &types.CustomAgent{ID: types.BuiltinWikiFixerID, TenantID: 1, IsBuiltin: true}
+	svc := newMCPEndpointServiceForTest(newStubMCPEndpointRepo(), hidden)
+	_, _, err := svc.Create(context.Background(), 1, &types.MCPEndpoint{
+		Name: "x", Tools: types.StringArray{"ask"}, DefaultAgentID: types.BuiltinWikiFixerID,
+	})
+	if appErr, ok := apperrors.IsAppError(err); !ok || appErr.Code != apperrors.ErrNotFound {
+		t.Fatalf("internal builtin agent must be rejected, got %v", err)
+	}
+}

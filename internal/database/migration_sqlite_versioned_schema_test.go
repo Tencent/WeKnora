@@ -26,6 +26,7 @@ var versionedSQLiteTables = []string{
 	"browser_pairings",
 	"browser_task_interruptions",
 	"fork_snapshot_leases",
+	"mcp_endpoints",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the

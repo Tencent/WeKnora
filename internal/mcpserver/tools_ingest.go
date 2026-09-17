@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -19,7 +20,8 @@ func addDocumentTool() mcp.Tool {
 		mcp.WithString("url", mcp.Description("Web page or file URL to import instead of content")),
 		mcp.WithBoolean("publish", mcp.Description("For text documents: publish immediately (default true) or keep "+
 			"as draft")),
-		mcp.WithDestructiveHintAnnotation(false),
+		mcp.WithReadOnlyHintAnnotation(false),
+		mcp.WithDestructiveHintAnnotation(true),
 	)
 }
 
@@ -73,6 +75,13 @@ func (s *Server) handleAddDocument(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	kb := kbs[0]
+	ctx, err = s.grantContext(ctx, kbs, types.OrgRoleEditor)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if err := access.RequireKBWrite(ctx, kb); err != nil {
+		return mcp.NewToolResultError("this endpoint is not allowed to write to knowledge base " + kb.ID), nil
+	}
 
 	var created *types.Knowledge
 	if url != "" {
@@ -111,7 +120,11 @@ func (s *Server) handleUpdateDocument(ctx context.Context, req mcp.CallToolReque
 	if strings.TrimSpace(content) == "" {
 		return mcp.NewToolResultError("content is required"), nil
 	}
-	existing, _, err := s.knowledgeInScope(ctx, ep, knowledgeID)
+	existing, kb, err := s.knowledgeInScope(ctx, ep, knowledgeID)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	ctx, err = s.grantContext(ctx, []*types.KnowledgeBase{kb}, types.OrgRoleEditor)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -143,7 +156,11 @@ func (s *Server) handleDeleteDocument(ctx context.Context, req mcp.CallToolReque
 	if err != nil {
 		return mcp.NewToolResultError("knowledge_id is required"), nil
 	}
-	existing, _, err := s.knowledgeInScope(ctx, ep, knowledgeID)
+	existing, kb, err := s.knowledgeInScope(ctx, ep, knowledgeID)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	ctx, err = s.grantContext(ctx, []*types.KnowledgeBase{kb}, types.OrgRoleEditor)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

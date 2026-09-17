@@ -23,19 +23,20 @@ const (
 
 func askTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolAsk,
-		mcp.WithDescription("Ask the workspace a question and get a synthesized answer with citations. WeKnora "+
-			"retrieves from the knowledge bases in scope and runs the endpoint's default agent (or the agent you "+
-			"name). Pass the returned session_id on follow-up questions to keep the conversation going. This can "+
-			"take up to a few minutes for agentic runs; prefer search_knowledge when you only need raw passages."),
+		mcp.WithDescription("Ask the workspace a question and get a synthesized answer with citations. "+
+			"WeKnora retrieves from the knowledge bases in scope and runs the agent configured on this "+
+			"endpoint. Pass the returned session_id on follow-up questions to keep the conversation going. "+
+			"This can take up to a few minutes for agentic runs; prefer search_knowledge when you only need "+
+			"raw passages."),
 		mcp.WithString("question", mcp.Required(), mcp.Description("The question to answer")),
-		mcp.WithString("session_id", mcp.Description("Session id returned by a previous ask call, to continue that "+
-			"conversation")),
-		mcp.WithString("agent_id", mcp.Description("Optional agent id to answer with; defaults to the endpoint's "+
-			"configured agent")),
+		mcp.WithString("session_id",
+			mcp.Description("Session id returned by a previous ask call, to continue that conversation")),
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
-			mcp.Description("Optional knowledge base ids or names to retrieve from; defaults to the endpoint scope "+
-				"or the agent's own configuration")),
-		mcp.WithReadOnlyHintAnnotation(true),
+			mcp.Description("Optional knowledge base ids or names to retrieve from; defaults to the "+
+				"endpoint scope or the agent's own configuration")),
+		// Not read-only: it creates a session and messages, and the configured
+		// agent may run its own tools. Clients must not auto-approve it.
+		mcp.WithReadOnlyHintAnnotation(false),
 	)
 }
 
@@ -58,7 +59,7 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	question = strings.TrimSpace(question)
 
-	agent, err := s.resolveAskAgent(ctx, ep, req.GetString("agent_id", ""))
+	agent, err := s.resolveAskAgent(ctx, ep)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -101,22 +102,21 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	return mcp.NewToolResultStructured(structured, text), nil
 }
 
-func (s *Server) resolveAskAgent(
-	ctx context.Context, ep *types.MCPEndpoint, requested string,
-) (*types.CustomAgent, error) {
-	agentID := strings.TrimSpace(requested)
-	if agentID == "" {
-		agentID = strings.TrimSpace(ep.DefaultAgentID)
-	}
+// resolveAskAgent picks the agent configured on the endpoint. Callers cannot
+// name an agent: letting a client choose any tenant agent (or an internal
+// builtin such as the wiki fixer or skill installer, which carry write and
+// shell tools) would bypass the endpoint's tool allowlist.
+func (s *Server) resolveAskAgent(ctx context.Context, ep *types.MCPEndpoint) (*types.CustomAgent, error) {
+	agentID := strings.TrimSpace(ep.DefaultAgentID)
 	if agentID == "" {
 		agentID = types.BuiltinQuickAnswerID
 	}
 	agent, err := s.agentService.GetAgentByID(ctx, agentID)
 	if err != nil || agent == nil {
-		return nil, fmt.Errorf("agent %q was not found", agentID)
+		return nil, fmt.Errorf("the agent configured on this endpoint (%q) is not available", agentID)
 	}
-	if agent.TenantID != ep.TenantID && !agent.IsBuiltin {
-		return nil, fmt.Errorf("agent %q was not found", agentID)
+	if !types.MCPEndpointAgentAllowed(agent, ep.TenantID) {
+		return nil, fmt.Errorf("the agent configured on this endpoint (%q) is not available", agentID)
 	}
 	return agent, nil
 }
@@ -309,7 +309,10 @@ func (s *Server) runQA(
 			UserMessageID:      userMsg.ID,
 			CustomAgent:        agent,
 			KnowledgeBaseIDs:   kbIDs,
-			WebSearchEnabled:   agent.Config.WebSearchEnabled,
+			// Web search is never enabled from the MCP surface: the builtin
+			// quick-answer agent turns it on by default, which would make an
+			// otherwise read-only endpoint reach the public internet.
+			WebSearchEnabled: false,
 		}
 		var runErr error
 		if useAgent {

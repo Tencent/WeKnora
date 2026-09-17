@@ -15,22 +15,28 @@ export function buildMcpEndpointUrl(apiBaseUrl: string, endpointPath: string): s
   return `${base}${path}`
 }
 
-/** Sanitize an endpoint name into an mcpServers key. */
-export function mcpServerKey(name: string): string {
+/**
+ * Sanitize an endpoint name into an mcpServers key. Names that leave no
+ * ASCII characters (e.g. Chinese) fall back to the endpoint id so two such
+ * endpoints never collide in the client configuration.
+ */
+export function mcpServerKey(name: string, id = ''): string {
   const slug = (name || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return slug ? `weknora-${slug}` : 'weknora'
+  if (slug) return `weknora-${slug}`
+  const idSlug = (id || '').replace(/[^a-z0-9]/gi, '').slice(0, 8).toLowerCase()
+  return idSlug ? `weknora-${idSlug}` : 'weknora'
 }
 
 /** JSON block for clients that speak Streamable HTTP natively (Cursor, VS Code, Claude Desktop connectors). */
-export function buildHttpClientSnippet(name: string, url: string, token: string): string {
+export function buildHttpClientSnippet(name: string, url: string, token: string, id = ''): string {
   return JSON.stringify(
     {
       mcpServers: {
-        [mcpServerKey(name)]: {
+        [mcpServerKey(name, id)]: {
           url,
           headers: { Authorization: `Bearer ${token || MCP_TOKEN_PLACEHOLDER}` },
         },
@@ -42,17 +48,17 @@ export function buildHttpClientSnippet(name: string, url: string, token: string)
 }
 
 /** One-liner for Claude Code. */
-export function buildClaudeCodeCommand(name: string, url: string, token: string): string {
+export function buildClaudeCodeCommand(name: string, url: string, token: string, id = ''): string {
   const auth = `Authorization: Bearer ${token || MCP_TOKEN_PLACEHOLDER}`
-  return `claude mcp add --transport http ${mcpServerKey(name)} ${url} --header "${auth}"`
+  return `claude mcp add --transport http ${mcpServerKey(name, id)} ${url} --header "${auth}"`
 }
 
 /** JSON block for stdio-only clients, bridged through mcp-remote. */
-export function buildStdioBridgeSnippet(name: string, url: string, token: string): string {
+export function buildStdioBridgeSnippet(name: string, url: string, token: string, id = ''): string {
   return JSON.stringify(
     {
       mcpServers: {
-        [mcpServerKey(name)]: {
+        [mcpServerKey(name, id)]: {
           command: 'npx',
           args: ['-y', 'mcp-remote', url, '--header', `Authorization: Bearer ${token || MCP_TOKEN_PLACEHOLDER}`],
         },

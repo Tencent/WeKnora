@@ -2,37 +2,79 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// allowedKnowledgeBases returns every knowledge base the endpoint may touch.
-// An endpoint with an explicit allowlist resolves exactly those IDs (dropping
-// any that no longer resolve); an unrestricted endpoint sees the workspace's
-// own knowledge bases.
+// allowedKnowledgeBases returns every knowledge base the endpoint may touch,
+// each one re-authorized for the calling principal through access.ResolveKB
+// so a stale or foreign ID in the allowlist is dropped rather than trusted.
+// An unrestricted endpoint sees the workspace's own knowledge bases.
 func (s *Server) allowedKnowledgeBases(ctx context.Context, ep *types.MCPEndpoint) ([]*types.KnowledgeBase, error) {
-	if ep.RestrictsKnowledgeBases() {
-		out := make([]*types.KnowledgeBase, 0, len(ep.KnowledgeBaseIDs))
-		for _, id := range ep.KnowledgeBaseIDs {
-			kb, err := s.kbService.GetKnowledgeBaseByID(ctx, id)
-			if err != nil || kb == nil {
-				logger.Warnf(ctx, "[mcpserver] endpoint %s references unavailable knowledge base %s: %v",
-					ep.ID, id, err)
-				continue
-			}
-			out = append(out, kb)
-		}
-		return out, nil
+	if !ep.RestrictsKnowledgeBases() {
+		return s.kbService.ListKnowledgeBases(ctx)
 	}
-	kbs, err := s.kbService.ListKnowledgeBases(ctx)
-	if err != nil {
+	out := make([]*types.KnowledgeBase, 0, len(ep.KnowledgeBaseIDs))
+	for _, id := range ep.KnowledgeBaseIDs {
+		kb, err := s.authorizedKnowledgeBase(ctx, id, types.OrgRoleViewer)
+		if err != nil {
+			logger.Warnf(ctx, "[mcpserver] endpoint %s references unavailable knowledge base %s: %v",
+				ep.ID, id, err)
+			continue
+		}
+		out = append(out, kb)
+	}
+	return out, nil
+}
+
+// authorizedKnowledgeBase loads a knowledge base by ID and resolves the
+// caller's permission on it (ownership or organization share). The returned
+// error is access.ErrForbidden / ErrNotFound for authorization failures.
+func (s *Server) authorizedKnowledgeBase(
+	ctx context.Context, kbID string, required types.OrgMemberRole,
+) (*types.KnowledgeBase, error) {
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, strings.TrimSpace(kbID))
+	if err != nil || kb == nil {
+		return nil, access.ErrNotFound
+	}
+	if _, err := s.resolveKB(ctx, kb, required); err != nil {
 		return nil, err
 	}
-	return kbs, nil
+	return kb, nil
+}
+
+func (s *Server) resolveKB(
+	ctx context.Context, kb *types.KnowledgeBase, required types.OrgMemberRole,
+) (*access.KBAccess, error) {
+	request := access.KBRequest{Caller: types.CallerFromContext(ctx)}
+	return access.ResolveKB(ctx, request, kb, required, s.kbShareService, nil)
+}
+
+// grantContext resolves every knowledge base at the required permission and
+// returns a context carrying the matching grants, so downstream services that
+// consume access.RequireKBWrite see an explicit authorization instead of an
+// implicit "same tenant". Missing permission on any knowledge base fails the
+// whole call.
+func (s *Server) grantContext(
+	ctx context.Context, kbs []*types.KnowledgeBase, required types.OrgMemberRole,
+) (context.Context, error) {
+	for _, kb := range kbs {
+		grant, err := s.resolveKB(ctx, kb, required)
+		if err != nil {
+			if errors.Is(err, access.ErrForbidden) || errors.Is(err, access.ErrUnauthorized) {
+				return ctx, fmt.Errorf("this endpoint is not allowed to write to knowledge base %q", kb.ID)
+			}
+			return ctx, err
+		}
+		ctx = grant.WithGrant(ctx)
+	}
+	return ctx, nil
 }
 
 // selectKnowledgeBases narrows the allowed set to the ones a caller named,
@@ -62,8 +104,8 @@ func (s *Server) selectKnowledgeBases(
 	for _, sel := range cleaned {
 		kb := matchKnowledgeBase(allowed, sel)
 		if kb == nil {
-			return nil, fmt.Errorf("knowledge base %q was not found or is outside this endpoint's scope; call "+
-				"list_knowledge_bases to see what is available", sel)
+			return nil, fmt.Errorf("knowledge base %q was not found or is outside this endpoint's scope; "+
+				"call list_knowledge_bases to see what is available", sel)
 		}
 		if _, dup := seen[kb.ID]; dup {
 			continue

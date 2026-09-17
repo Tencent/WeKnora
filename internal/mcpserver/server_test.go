@@ -21,7 +21,7 @@ import (
 func newTestEngine(t *testing.T, ep *types.MCPEndpoint) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	r := gin.New()
 	inject := func(c *gin.Context) {
 		if ep != nil {

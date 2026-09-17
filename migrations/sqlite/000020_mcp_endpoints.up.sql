@@ -24,3 +24,4 @@ CREATE INDEX IF NOT EXISTS idx_mcp_endpoints_tenant ON mcp_endpoints (tenant_id)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_endpoints_token_hash
     ON mcp_endpoints (token_hash)
     WHERE token_hash != '' AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_mcp_endpoints_deleted ON mcp_endpoints (deleted_at) WHERE deleted_at IS NOT NULL;

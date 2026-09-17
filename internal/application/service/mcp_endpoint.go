@@ -10,6 +10,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -36,18 +37,25 @@ const (
 )
 
 type mcpEndpointService struct {
-	repo         interfaces.MCPEndpointRepository
-	kbService    interfaces.KnowledgeBaseService
-	agentService interfaces.CustomAgentService
+	repo           interfaces.MCPEndpointRepository
+	kbService      interfaces.KnowledgeBaseService
+	kbShareService interfaces.KBShareService
+	agentService   interfaces.CustomAgentService
 }
 
 // NewMCPEndpointService creates the workspace MCP endpoint service.
 func NewMCPEndpointService(
 	repo interfaces.MCPEndpointRepository,
 	kbService interfaces.KnowledgeBaseService,
+	kbShareService interfaces.KBShareService,
 	agentService interfaces.CustomAgentService,
 ) interfaces.MCPEndpointService {
-	return &mcpEndpointService{repo: repo, kbService: kbService, agentService: agentService}
+	return &mcpEndpointService{
+		repo:           repo,
+		kbService:      kbService,
+		kbShareService: kbShareService,
+		agentService:   agentService,
+	}
 }
 
 func generateMCPEndpointToken() (string, error) {
@@ -248,12 +256,20 @@ func (s *mcpEndpointService) getOwned(ctx context.Context, tenantID uint64, id s
 }
 
 // validateKnowledgeBases confirms every ID names a knowledge base the
-// workspace can read and returns the deduplicated list. The check goes
-// through the tenant-scoped getter so shared knowledge bases the caller has
-// been granted are accepted while foreign ones are rejected.
+// workspace owns or has been granted through an organization share, and
+// returns the deduplicated list. The lookup is tenant-agnostic on purpose so
+// that shared knowledge bases resolve; authorization is then decided by
+// access.ResolveKB for the calling principal, never inferred from the ID.
 func (s *mcpEndpointService) validateKnowledgeBases(
-	ctx context.Context, _ uint64, ids []string,
+	ctx context.Context, tenantID uint64, ids []string,
 ) ([]string, error) {
+	caller := types.CallerFromContext(ctx)
+	if caller.TenantID == 0 {
+		caller.TenantID = tenantID
+	}
+	if caller.TenantID != tenantID {
+		return nil, apperrors.NewForbiddenError("caller does not belong to this workspace")
+	}
 	out := make([]string, 0, len(ids))
 	seen := map[string]struct{}{}
 	for _, raw := range ids {
@@ -264,8 +280,12 @@ func (s *mcpEndpointService) validateKnowledgeBases(
 		if _, dup := seen[id]; dup {
 			continue
 		}
-		kb, err := s.kbService.GetKnowledgeBaseByID(ctx, id)
+		kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, id)
 		if err != nil || kb == nil {
+			return nil, apperrors.NewNotFoundError("knowledge base not found: " + id)
+		}
+		if _, err := access.ResolveKB(ctx, access.KBRequest{Caller: caller}, kb,
+			types.OrgRoleViewer, s.kbShareService, nil); err != nil {
 			return nil, apperrors.NewNotFoundError("knowledge base not found: " + id)
 		}
 		seen[id] = struct{}{}
@@ -274,16 +294,15 @@ func (s *mcpEndpointService) validateKnowledgeBases(
 	return out, nil
 }
 
+// validateAgent accepts a tenant-owned agent or a user-facing builtin. The
+// same rule is applied again at call time by the MCP server.
 func (s *mcpEndpointService) validateAgent(ctx context.Context, tenantID uint64, agentID string) (string, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return "", nil
 	}
 	agent, err := s.agentService.GetAgentByID(ctx, agentID)
-	if err != nil || agent == nil {
-		return "", apperrors.NewNotFoundError("agent not found")
-	}
-	if agent.TenantID != tenantID && !agent.IsBuiltin {
+	if err != nil || agent == nil || !types.MCPEndpointAgentAllowed(agent, tenantID) {
 		return "", apperrors.NewNotFoundError("agent not found")
 	}
 	return agentID, nil

@@ -49,6 +49,7 @@ type Server struct {
 	sessionService   interfaces.SessionService
 	messageService   interfaces.MessageService
 	agentService     interfaces.CustomAgentService
+	kbShareService   interfaces.KBShareService
 	endpointRepo     interfaces.MCPEndpointRepository
 	db               *gorm.DB
 	cfg              *config.Config
@@ -69,6 +70,7 @@ func NewServer(
 	sessionService interfaces.SessionService,
 	messageService interfaces.MessageService,
 	agentService interfaces.CustomAgentService,
+	kbShareService interfaces.KBShareService,
 	endpointRepo interfaces.MCPEndpointRepository,
 	db *gorm.DB,
 	cfg *config.Config,
@@ -82,11 +84,15 @@ func NewServer(
 		sessionService:   sessionService,
 		messageService:   messageService,
 		agentService:     agentService,
+		kbShareService:   kbShareService,
 		endpointRepo:     endpointRepo,
 		db:               db,
 		cfg:              cfg,
 		limiter:          ratelimit.New(redisClient, rateLimitKeyPrefix, time.Minute, ""),
 	}
+	// The local fallback map only grows without periodic eviction; the server
+	// lives for the whole process so the cleanup goroutine never stops.
+	go s.limiter.StartCleanup(make(chan struct{}))
 	s.mcp = server.NewMCPServer(
 		serverName,
 		serverVersion,

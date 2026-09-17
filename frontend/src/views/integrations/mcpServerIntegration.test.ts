@@ -20,6 +20,8 @@ test('mcpServerKey slugs the endpoint name', () => {
   assert.equal(mcpServerKey('Docs Bot!'), 'weknora-docs-bot')
   assert.equal(mcpServerKey('  '), 'weknora')
   assert.equal(mcpServerKey('产品知识库'), 'weknora')
+  assert.equal(mcpServerKey('产品知识库', '3f9a2c1e-aaaa'), 'weknora-3f9a2c1e')
+  assert.notEqual(mcpServerKey('知识库A', 'id-one'), mcpServerKey('知识库B', 'id-two'))
 })
 
 test('http snippet carries url and bearer header', () => {

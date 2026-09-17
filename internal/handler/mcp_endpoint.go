@@ -42,6 +42,15 @@ func stringValue(p *string) string {
 }
 
 // ListToolCatalog returns the tools an endpoint can expose, grouped.
+//
+// @Summary      获取 MCP 端点工具目录
+// @Description  返回工作空间 MCP 端点可勾选的工具清单、分组和默认勾选项
+// @Tags         MCP端点
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "工具目录"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-endpoints/tools [get]
 func (h *MCPEndpointHandler) ListToolCatalog(c *gin.Context) {
 	groups := types.MCPEndpointToolGroups()
 	c.JSON(http.StatusOK, gin.H{
@@ -55,6 +64,18 @@ func (h *MCPEndpointHandler) ListToolCatalog(c *gin.Context) {
 }
 
 // CreateMCPEndpoint creates an endpoint and returns it with the one-time token.
+//
+// @Summary      创建 MCP 端点
+// @Description  为当前工作空间发布一个 MCP 端点，响应中的 token 只返回一次
+// @Tags         MCP端点
+// @Accept       json
+// @Produce      json
+// @Param        request  body      object  true  "端点配置：name、description、enabled、knowledge_base_ids、tools 等"
+// @Success      201      {object}  map[string]interface{}  "创建的端点，含一次性 token"
+// @Failure      400      {object}  map[string]interface{}  "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-endpoints [post]
 func (h *MCPEndpointHandler) CreateMCPEndpoint(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req mcpEndpointRequest
@@ -95,6 +116,14 @@ func (h *MCPEndpointHandler) CreateMCPEndpoint(c *gin.Context) {
 }
 
 // ListMCPEndpoints lists the workspace endpoints without tokens.
+//
+// @Summary      获取 MCP 端点列表
+// @Tags         MCP端点
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}  "端点列表"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-endpoints [get]
 func (h *MCPEndpointHandler) ListMCPEndpoints(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	rows, err := h.svc.List(c.Request.Context(), tenantID)
@@ -110,6 +139,16 @@ func (h *MCPEndpointHandler) ListMCPEndpoints(c *gin.Context) {
 }
 
 // GetMCPEndpoint returns one endpoint.
+//
+// @Summary      获取 MCP 端点详情
+// @Tags         MCP端点
+// @Produce      json
+// @Param        endpoint_id  path      string  true  "端点 ID"
+// @Success      200          {object}  map[string]interface{}  "端点详情"
+// @Failure      404          {object}  map[string]interface{}  "端点不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-endpoints/{endpoint_id} [get]
 func (h *MCPEndpointHandler) GetMCPEndpoint(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	id := secutils.SanitizeForLog(c.Param("endpoint_id"))
@@ -122,6 +161,19 @@ func (h *MCPEndpointHandler) GetMCPEndpoint(c *gin.Context) {
 }
 
 // UpdateMCPEndpoint applies a partial update; omitted fields are kept.
+//
+// @Summary      更新 MCP 端点
+// @Tags         MCP端点
+// @Accept       json
+// @Produce      json
+// @Param        endpoint_id  path      string  true  "端点 ID"
+// @Param        request      body      object  true  "要更新的字段，未提供的字段保持不变"
+// @Success      200          {object}  map[string]interface{}  "更新后的端点"
+// @Failure      400          {object}  map[string]interface{}  "请求参数错误"
+// @Failure      404          {object}  map[string]interface{}  "端点不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-endpoints/{endpoint_id} [put]
 func (h *MCPEndpointHandler) UpdateMCPEndpoint(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	id := secutils.SanitizeForLog(c.Param("endpoint_id"))
@@ -147,6 +199,16 @@ func (h *MCPEndpointHandler) UpdateMCPEndpoint(c *gin.Context) {
 }
 
 // DeleteMCPEndpoint soft-deletes an endpoint; connected clients lose access.
+//
+// @Summary      删除 MCP 端点
+// @Tags         MCP端点
+// @Produce      json
+// @Param        endpoint_id  path      string  true  "端点 ID"
+// @Success      200          {object}  map[string]interface{}  "删除成功"
+// @Failure      404          {object}  map[string]interface{}  "端点不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-endpoints/{endpoint_id} [delete]
 func (h *MCPEndpointHandler) DeleteMCPEndpoint(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	id := secutils.SanitizeForLog(c.Param("endpoint_id"))
@@ -158,6 +220,17 @@ func (h *MCPEndpointHandler) DeleteMCPEndpoint(c *gin.Context) {
 }
 
 // RotateMCPEndpointToken issues a fresh token and returns it once.
+//
+// @Summary      轮换 MCP 端点令牌
+// @Description  生成新令牌并立即作废旧令牌，响应中的 token 只返回一次
+// @Tags         MCP端点
+// @Produce      json
+// @Param        endpoint_id  path      string  true  "端点 ID"
+// @Success      200          {object}  map[string]interface{}  "含新 token 的端点"
+// @Failure      404          {object}  map[string]interface{}  "端点不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /mcp-endpoints/{endpoint_id}/rotate-token [post]
 func (h *MCPEndpointHandler) RotateMCPEndpointToken(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	id := secutils.SanitizeForLog(c.Param("endpoint_id"))
