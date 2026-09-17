@@ -306,6 +306,7 @@ func (c *ArtifactCollector) collect(
 
 	logger.Infof(ctx, "[ArtifactCollector] begin session=%s dir=%s", sessionID, outputDir)
 
+	ctx = sandbox.WithSessionFileOperation(ctx)
 	entries, err := source.ListSessionFiles(ctx, sessionID, outputDir)
 	if err != nil {
 		logger.Warnf(ctx, "[ArtifactCollector] list sandbox files failed: session=%s dir=%s err=%v",

@@ -106,14 +106,20 @@ func (c *WorkspaceCheckpointer) Checkpoint(
 		return nil
 	}
 
-	result, err := c.runner.ExecShellCommand(
-		ctx,
-		sessionID,
-		checkpointScript(sandbox.SessionWorkspaceRoot, messageID),
-		sandbox.SessionWorkspaceRoot,
-		workspaceCheckpointTimeout,
-		nil,
-	)
+	var result *sandbox.ExecuteResult
+	var err error
+	command := checkpointScript(sandbox.SessionWorkspaceRoot, messageID)
+	if runner, ok := c.runner.(sandbox.SessionInstallShellExecutor); ok {
+		// Git operates on the existing workspace. Do not prepare artifact/input
+		// directories or let a late checkpoint provision a replacement sandbox.
+		result, err = runner.ExecShellCommandWithOptions(ctx, sessionID, command, sandbox.ShellExecOptions{
+			WorkDir: sandbox.SessionWorkspaceRoot, Timeout: workspaceCheckpointTimeout,
+			SkipWorkspacePrep: true, ExpectedSandboxID: sandboxID,
+		})
+	} else {
+		result, err = c.runner.ExecShellCommand(ctx, sessionID, command,
+			sandbox.SessionWorkspaceRoot, workspaceCheckpointTimeout, nil)
+	}
 	if err != nil {
 		logger.Warnf(ctx, "[WorkspaceCheckpointer] exec failed session=%s message=%s: %v",
 			sessionID, messageID, err)

@@ -151,6 +151,7 @@ func (t *workspaceFileReader) read(ctx context.Context, input ReadFileInput) (*t
 		rootDir = "/"
 	}
 
+	ctx = sandbox.WithSessionFileOperation(ctx)
 	stat, err := t.source.StatSessionFile(ctx, sessionID, clean)
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][ReadSandboxFile] stat failed: session=%s path=%s err=%v",

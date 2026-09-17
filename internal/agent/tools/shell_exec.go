@@ -491,12 +491,37 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 		execCommand = "printf %s " + sandbox.ShellQuote(base64.StdEncoding.EncodeToString([]byte(input.Stdin))) +
 			" | base64 -d | /bin/bash --noprofile --norc -c " + sandbox.ShellQuote(execCommand)
 	}
-	beforeOutputs, inspectedOutputs := sandboxOutputSnapshot(ctx, t.executor, sessionID)
 	output, finishOutput := shellCommandOutput(ctx, command)
 	defer finishOutput()
 	// Observe only the requested command, not skill staging or artifact probes.
 	execCtx := sandbox.WithCommandOutput(ctx, output)
-	res, err := t.executor.ExecShellCommand(execCtx, sessionID, execCommand, workDir, timeout, env)
+	var res *sandbox.ExecuteResult
+	var err error
+	var outputFiles []string
+	if executor, ok := t.executor.(interface {
+		ExecShellCommandWithOutputSnapshot(
+			context.Context, string, string, sandbox.ShellExecOptions, string,
+		) (*sandbox.ExecuteResult, *sandbox.ShellOutputSnapshot, error)
+	}); ok {
+		var snapshot *sandbox.ShellOutputSnapshot
+		res, snapshot, err = executor.ExecShellCommandWithOutputSnapshot(execCtx, sessionID, execCommand,
+			sandbox.ShellExecOptions{WorkDir: workDir, Timeout: timeout, Env: env}, skills.ArtifactOutputDir())
+		if snapshot != nil {
+			outputFiles = changedOutputLinks(
+				outputEntriesSnapshot(snapshot.Before), outputEntriesSnapshot(snapshot.After),
+			)
+		}
+	} else {
+		// Keep support for executors without the combined operation (including
+		// install mode); production session managers use one handle above.
+		before, inspected := sandboxOutputSnapshot(ctx, t.executor, sessionID)
+		res, err = t.executor.ExecShellCommand(execCtx, sessionID, execCommand, workDir, timeout, env)
+		if err == nil && res != nil && inspected {
+			if after, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID); ok {
+				outputFiles = changedOutputLinks(before, after)
+			}
+		}
+	}
 	finishOutput()
 	noteSandboxMutation()
 	if err != nil {
@@ -565,12 +590,6 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	if hint := t.recoveryHint(input.SkillName, res.ExitCode, command, stderr); hint != "" {
 		b.WriteString(hint)
 		b.WriteString("\n")
-	}
-	var outputFiles []string
-	if inspectedOutputs {
-		if afterOutputs, ok := sandboxOutputSnapshot(ctx, t.executor, sessionID); ok {
-			outputFiles = changedOutputLinks(beforeOutputs, afterOutputs)
-		}
 	}
 	visibleOutput := b.String()
 	visibleOutput, totalTruncated := truncateShellStream(visibleOutput, maxShellExecVisibleBytes)

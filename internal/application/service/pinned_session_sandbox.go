@@ -92,6 +92,19 @@ func (a *PinnedSessionSandbox) ExecShellCommand(
 	return runner.ExecShellCommand(ctx, sessionID, command, workDir, timeout, env)
 }
 
+// ExecShellCommandWithOptions forwards maintenance options to the pinned
+// manager, preserving lookup-only execution and the expected sandbox identity.
+func (a *PinnedSessionSandbox) ExecShellCommandWithOptions(
+	ctx context.Context, sessionID, command string, opts sandbox.ShellExecOptions,
+) (*sandbox.ExecuteResult, error) {
+	mgr := a.manager(ctx, sessionID)
+	runner, ok := mgr.(sandbox.SessionInstallShellExecutor)
+	if !ok || runner == nil {
+		return nil, errors.New("sandbox: no maintenance shell runner for session")
+	}
+	return runner.ExecShellCommandWithOptions(ctx, sessionID, command, opts)
+}
+
 // HasActiveTurn reports whether the session's pinned manager currently holds a
 // turn lease. Managers that do not expose the method are treated as not busy.
 func (a *PinnedSessionSandbox) HasActiveTurn(ctx context.Context, sessionID string) (bool, error) {

@@ -27,13 +27,17 @@ func sandboxOutputSnapshot(ctx context.Context, executor SandboxCommandExecutor,
 	if err != nil {
 		return nil, false
 	}
+	return outputEntriesSnapshot(entries), true
+}
+
+func outputEntriesSnapshot(entries []sandbox.RemoteDirEntry) map[string]sandbox.RemoteDirEntry {
 	files := make(map[string]sandbox.RemoteDirEntry, len(entries))
 	for _, entry := range entries {
 		if entry.Type == sandbox.RemoteEntryFile {
 			files[entry.Path] = entry
 		}
 	}
-	return files, true
+	return files
 }
 
 func changedOutputLinks(before, after map[string]sandbox.RemoteDirEntry) []string {
