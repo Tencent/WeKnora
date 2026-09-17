@@ -211,7 +211,8 @@ func (c *Chunk) EmbeddingContent() string {
 }
 
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.
-// Must be called before CreateInBatches for SQLite compatibility.
+// SQLite callers must run this and the subsequent insert in one transaction so
+// concurrent allocations cannot observe the same MAX(seq_id).
 func AssignChunkSeqIDs(tx *gorm.DB, chunks []*Chunk) error {
 	needAssign := false
 	for _, c := range chunks {
