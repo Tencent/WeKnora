@@ -118,6 +118,7 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentReferences, h.handleReferences)
 	h.eventBus.On(event.EventMemoryRecalled, h.handleMemoryRecalled)
 	h.eventBus.On(event.EventContextCompacted, h.handleContextCompacted)
+	h.eventBus.On(event.EventAgentContextUsage, h.handleContextUsage)
 	h.eventBus.On(event.EventUserMessageInjected, h.handleUserMessageInjected)
 	h.eventBus.On(event.EventAgentFinalAnswer, h.handleFinalAnswer)
 	h.eventBus.On(event.EventAgentReflection, h.handleReflection)
@@ -491,6 +492,31 @@ func (h *AgentStreamHandler) handleContextCompacted(_ context.Context, evt event
 		},
 	}); err != nil {
 		logger.GetLogger(h.ctx).Error("Append context compacted event to stream failed", "error", err)
+	}
+	return nil
+}
+
+// handleContextUsage forwards a live prompt-mix snapshot so the composer ring
+// can update during the turn, not only on complete. It does not mutate the
+// in-memory assistant message: the stop path persists that message without
+// h.mu, and a mid-turn Usage write would race it and persist a token-zero
+// usage that used to stay SQL NULL.
+func (h *AgentStreamHandler) handleContextUsage(_ context.Context, evt event.Event) error {
+	usage, ok := evt.Data.(types.ContextUsage)
+	if !ok {
+		return nil
+	}
+
+	tokenUsage := &types.TokenUsage{Context: usage}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      types.ResponseTypeContextUsage,
+		Done:      false,
+		Timestamp: time.Now(),
+		Data:      map[string]interface{}{"usage": tokenUsage},
+		Usage:     tokenUsage,
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append context usage event to stream failed", "error", err)
 	}
 	return nil
 }

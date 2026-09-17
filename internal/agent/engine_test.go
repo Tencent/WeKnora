@@ -38,6 +38,7 @@ func (t *countingTool) Execute(context.Context, json.RawMessage) (*types.ToolRes
 
 type mockResponse struct {
 	chunks []types.StreamResponse
+	err    error
 }
 
 type mockChat struct {
@@ -62,6 +63,9 @@ func (m *mockChat) ChatStream(
 	m.calls = append(m.calls, append([]chat.Message(nil), messages...))
 	m.opts = append(m.opts, opts)
 	m.callCount++
+	if resp.err != nil {
+		return nil, resp.err
+	}
 
 	ch := make(chan types.StreamResponse, len(resp.chunks))
 	for _, chunk := range resp.chunks {
@@ -926,4 +930,240 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	assert.Equal(t, "final answer", finalAnswerEvents[0].Content+finalAnswerEvents[1].Content,
 		"a decoder may hold a short suffix until Done to rule out a split model handle")
 	assert.Equal(t, "final answer", state.FinalAnswer)
+}
+
+func TestStreamFinalAnswerRefreshesContextUsageFromSynthesisRequest(t *testing.T) {
+	const promptTokens = 80
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{
+					ResponseType: types.ResponseTypeAnswer,
+					Content:      "final answer",
+					Done:         true,
+					FinishReason: "stop",
+					Usage: &types.TokenUsage{
+						PromptTokens:     promptTokens,
+						CompletionTokens: 5,
+						TotalTokens:      promptTokens + 5,
+					},
+				},
+			}},
+		},
+	}
+	engine := newTestEngine(t, mock)
+	state := &types.AgentState{
+		ContextUsage: types.ContextUsage{
+			SystemPrompt: 10,
+			Tools:        4000,
+			MCP:          1500,
+			Conversation: 90,
+			Total:        5600,
+			Window:       200000,
+		},
+	}
+
+	err := engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1", emptyMessages())
+
+	require.NoError(t, err)
+	require.Zero(t, state.ContextUsage.Tools, "synthesis sends ToolChoice=none; Tools must drop")
+	require.Zero(t, state.ContextUsage.MCP)
+	require.Equal(t, promptTokens, state.ContextUsage.Total)
+	require.Greater(t, state.ContextUsage.Conversation, 0)
+}
+
+func TestStreamFinalAnswerDoesNotPublishLiveContextUsage(t *testing.T) {
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{
+				{
+					ResponseType: types.ResponseTypeAnswer,
+					Content:      "final answer",
+					Done:         true,
+					FinishReason: "stop",
+					Usage:        &types.TokenUsage{PromptTokens: 80, CompletionTokens: 5, TotalTokens: 85},
+				},
+			}},
+		},
+	}
+	engine := newTestEngine(t, mock)
+	var snapshots []types.ContextUsage
+	engine.eventBus.On(event.EventAgentContextUsage, func(_ context.Context, evt event.Event) error {
+		usage, ok := evt.Data.(types.ContextUsage)
+		require.True(t, ok)
+		snapshots = append(snapshots, usage)
+		return nil
+	})
+	state := &types.AgentState{
+		ContextUsage: types.ContextUsage{Tools: 4000, MCP: 1500, Total: 5500, Window: 200000},
+	}
+
+	require.NoError(t, engine.streamFinalAnswerToEventBus(context.Background(), "test query", state, "sess-1", emptyMessages()))
+	require.Empty(t, snapshots, "synthesis must not flash Tools/MCP to zero on the live ring")
+	require.Zero(t, state.ContextUsage.Tools, "the persisted snapshot still reflects the last request")
+}
+
+func lastToolContent(messages []chat.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "tool" {
+			return messages[i].Content
+		}
+	}
+	return ""
+}
+
+func overflowHistory(t *testing.T) (messages []chat.Message, tools []chat.Tool) {
+	t.Helper()
+	tools = []chat.Tool{{
+		Type: "function",
+		Function: chat.FunctionDef{
+			Name:        agenttools.ToolKnowledgeSearch,
+			Description: strings.Repeat("Search bound knowledge bases. ", 400),
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}}}`),
+		},
+	}}
+	messages = []chat.Message{
+		{Role: "system", Content: "You are a test agent."},
+		{Role: "user", Content: "summarize"},
+		{Role: "assistant", ToolCalls: []chat.ToolCall{{
+			ID:   "c1",
+			Type: "function",
+			Function: chat.FunctionCall{
+				Name:      "knowledge_search",
+				Arguments: `{"query":"x"}`,
+			},
+		}}},
+		{Role: "tool", ToolCallID: "c1", Name: "knowledge_search", Content: strings.Repeat("tool-output-", 20000)},
+	}
+	return messages, tools
+}
+
+func TestExecuteLoopReattributesContextUsageAfterOverflowCompaction(t *testing.T) {
+	messages, tools := overflowHistory(t)
+	const retryPrompt = 3000
+	mock := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{
+			Content:      "truncated",
+			Done:         true,
+			FinishReason: "length",
+			Usage: &types.TokenUsage{
+				PromptTokens:     80000,
+				CompletionTokens: 12,
+				TotalTokens:      80012,
+			},
+		}}},
+		{chunks: []types.StreamResponse{{
+			Content:      "Here is my answer after compacting",
+			Done:         true,
+			FinishReason: "stop",
+			Usage: &types.TokenUsage{
+				PromptTokens:     retryPrompt,
+				CompletionTokens: 20,
+				TotalTokens:      retryPrompt + 20,
+			},
+		}}},
+	}}
+	engine := newTestEngine(t, mock, withMaxCompletionTokens(4096))
+	state := &types.AgentState{}
+
+	_, err := engine.executeLoop(context.Background(), state, "summarize", messages, tools, "sess-1", "msg-1")
+
+	require.NoError(t, err)
+	require.Equal(t, 2, mock.callCount)
+	require.Greater(t, len(lastToolContent(mock.calls[0])), len(lastToolContent(mock.calls[1])),
+		"overflow recovery should shrink the tool result before retry")
+
+	expected := AttributeContextUsage(engine.tokenEstimator, mock.calls[1], tools, "", engine.contextWindowTokens())
+	expected.Calibrate(retryPrompt)
+	require.InDelta(t, float64(expected.Tools), float64(state.ContextUsage.Tools), 1)
+	require.InDelta(t, float64(expected.Conversation), float64(state.ContextUsage.Conversation), 1)
+
+	stale := AttributeContextUsage(engine.tokenEstimator, mock.calls[0], tools, "", engine.contextWindowTokens())
+	stale.Calibrate(retryPrompt)
+	require.Greater(t, state.ContextUsage.Tools, stale.Tools,
+		"retry attribution must not keep the pre-compaction category mix")
+}
+
+func TestExecuteLoopReattributesContextUsageAfterOverflowError(t *testing.T) {
+	messages, tools := overflowHistory(t)
+	const retryPrompt = 3000
+	mock := &mockChat{responses: []mockResponse{
+		{err: fmt.Errorf("prompt is too long: exceeds the context window")},
+		{chunks: []types.StreamResponse{{
+			Content:      "Here is my answer after compacting",
+			Done:         true,
+			FinishReason: "stop",
+			Usage: &types.TokenUsage{
+				PromptTokens:     retryPrompt,
+				CompletionTokens: 20,
+				TotalTokens:      retryPrompt + 20,
+			},
+		}}},
+	}}
+	engine := newTestEngine(t, mock, withMaxCompletionTokens(4096))
+	state := &types.AgentState{}
+
+	_, err := engine.executeLoop(context.Background(), state, "summarize", messages, tools, "sess-1", "msg-1")
+
+	require.NoError(t, err)
+	require.Equal(t, 2, mock.callCount)
+	require.Greater(t, len(lastToolContent(mock.calls[0])), len(lastToolContent(mock.calls[1])))
+
+	expected := AttributeContextUsage(engine.tokenEstimator, mock.calls[1], tools, "", engine.contextWindowTokens())
+	expected.Calibrate(retryPrompt)
+	require.InDelta(t, float64(expected.Tools), float64(state.ContextUsage.Tools), 1)
+
+	stale := AttributeContextUsage(engine.tokenEstimator, mock.calls[0], tools, "", engine.contextWindowTokens())
+	stale.Calibrate(retryPrompt)
+	require.Greater(t, state.ContextUsage.Tools, stale.Tools,
+		"retry attribution must not keep the pre-compaction category mix")
+}
+
+func TestSnapshotContextUsagePublishesToEventBus(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	var got []types.ContextUsage
+	engine.eventBus.On(event.EventAgentContextUsage, func(_ context.Context, evt event.Event) error {
+		usage, ok := evt.Data.(types.ContextUsage)
+		require.True(t, ok)
+		got = append(got, usage)
+		return nil
+	})
+
+	state := &types.AgentState{}
+	engine.snapshotContextUsage(context.Background(), state, emptyMessages(), emptyTools(), 0)
+	engine.publishContextUsage(context.Background(), state)
+
+	require.Len(t, got, 1)
+	require.Equal(t, state.ContextUsage, got[0])
+	require.Greater(t, got[0].Window, 0)
+}
+
+func TestExecuteLoopPublishesContextUsageDuringTheTurn(t *testing.T) {
+	const promptTokens = 40
+	mock := &mockChat{
+		responses: []mockResponse{
+			{chunks: []types.StreamResponse{{
+				Content: "Here is my answer",
+				Done:    true,
+				Usage: &types.TokenUsage{
+					PromptTokens:     promptTokens,
+					CompletionTokens: 8,
+					TotalTokens:      promptTokens + 8,
+				},
+			}}},
+		},
+	}
+	engine := newTestEngine(t, mock)
+	var snapshots []types.ContextUsage
+	engine.eventBus.On(event.EventAgentContextUsage, func(_ context.Context, evt event.Event) error {
+		usage, ok := evt.Data.(types.ContextUsage)
+		require.True(t, ok)
+		snapshots = append(snapshots, usage)
+		return nil
+	})
+
+	_, err := engine.executeLoop(context.Background(), &types.AgentState{}, "test query", emptyMessages(), emptyTools(), "sess-1", "msg-1")
+	require.NoError(t, err)
+	require.Len(t, snapshots, 1, "one calibrated snapshot per round; the pre-LLM estimate stays off the wire")
+	require.Equal(t, promptTokens, snapshots[0].Total)
 }

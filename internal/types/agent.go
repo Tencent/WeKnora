@@ -454,6 +454,7 @@ type AgentState struct {
 	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
 	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
 	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
+	ContextUsage         ContextUsage    `json:"context_usage"`  // Last request's classified prompt breakdown
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

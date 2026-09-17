@@ -18,6 +18,7 @@ import { useOrganizationStore } from '@/stores/organization';
 import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
+import ContextUsageRing from './ContextUsageRing.vue';
 import { getCaretCoordinates } from '@/utils/caret';
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom';
 import { type ModelConfig } from '@/api/model';
@@ -26,6 +27,7 @@ import {
   isDefaultContextWindow,
   effectiveContextWindow,
 } from '@/utils/contextWindow';
+import type { ContextUsage } from '@/utils/contextUsage';
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
@@ -536,6 +538,10 @@ const props = defineProps({
   canSteer: {
     type: Boolean,
     default: false
+  },
+  contextUsage: {
+    type: Object as PropType<ContextUsage | null>,
+    default: null
   }
 });
 
@@ -2834,6 +2840,9 @@ defineExpose({
             </div>
           </t-tooltip>
 
+          <div class="composer-end">
+            <ContextUsageRing v-if="!embeddedMode && contextUsage" :usage="contextUsage" />
+
           <!-- 模型显示 -->
           <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
             :disabled="!isModelLockedByAgent">
@@ -2855,6 +2864,7 @@ defineExpose({
               </div>
             </div>
           </t-tooltip>
+          </div>
         </div>
 
         <Teleport to="body">
@@ -2954,6 +2964,17 @@ const getImgSrc = (url: string) => {
     .steer-queue {
       max-width: 100%;
     }
+  }
+
+  &.is-docked {
+    position: relative;
+    bottom: auto;
+    left: auto;
+    transform: none;
+    z-index: auto;
+    width: 100%;
+    max-width: 960px;
+    pointer-events: auto;
   }
 }
 
@@ -3688,11 +3709,18 @@ const getImgSrc = (url: string) => {
   }
 }
 
+.composer-end {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* 模型显示样式 */
 .model-display {
   display: flex;
   align-items: center;
-  margin-left: auto;
   flex-shrink: 0;
 
   &.agent-controlled {

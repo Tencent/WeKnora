@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -99,6 +100,33 @@ func TestTokenUsageValueScanRoundTrip(t *testing.T) {
 	}
 	if string(direct) != string(raw) {
 		t.Fatalf("Value diverged from json.Marshal: %s vs %s", raw, direct)
+	}
+}
+
+func TestTokenUsageOmitsEmptyContext(t *testing.T) {
+	raw, err := json.Marshal(&TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), `"context"`) {
+		t.Fatalf("zero Context must stay off the wire, got %s", raw)
+	}
+}
+
+func TestTokenUsageContextRoundTrip(t *testing.T) {
+	original := &TokenUsage{PromptTokens: 80, CompletionTokens: 10, TotalTokens: 90}
+	original.Context = ContextUsage{SystemPrompt: 20, Tools: 10, Conversation: 50, Total: 80, Window: 200000}
+
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var restored TokenUsage
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if restored != *original {
+		t.Fatalf("context round trip diverged: got %+v want %+v", restored, *original)
 	}
 }
 

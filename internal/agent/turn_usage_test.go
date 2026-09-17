@@ -15,6 +15,37 @@ func TestTurnUsageNilWhenNothingReported(t *testing.T) {
 	}
 }
 
+func TestTurnUsageAttachesLastRoundContext(t *testing.T) {
+	state := &types.AgentState{}
+	state.TurnUsage.Accumulate(types.TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120})
+	state.ContextUsage = types.ContextUsage{
+		SystemPrompt: 40, Tools: 10, Conversation: 50, Total: 100, Window: 200000,
+	}
+
+	usage := turnUsage(state)
+	if usage == nil {
+		t.Fatal("expected usage")
+	}
+	if usage.Context.Total != 100 || usage.Context.Window != 200000 || usage.Context.Conversation != 50 {
+		t.Fatalf("context not attached: %+v", usage.Context)
+	}
+
+	state.ContextUsage.Conversation = 1
+	if usage.Context.Conversation != 50 {
+		t.Fatalf("emitted context must be detached from state: %+v", usage.Context)
+	}
+}
+
+func TestTurnUsageEmitsContextWithoutBillingTokens(t *testing.T) {
+	state := &types.AgentState{
+		ContextUsage: types.ContextUsage{SystemPrompt: 20, Total: 20, Window: 128000},
+	}
+	usage := turnUsage(state)
+	if usage == nil || usage.Context.Total != 20 || usage.TotalTokens != 0 {
+		t.Fatalf("context-only turns must still be emitted: %+v", usage)
+	}
+}
+
 func TestTurnUsageCopiesTheAggregate(t *testing.T) {
 	state := &types.AgentState{}
 	state.TurnUsage.Accumulate(types.TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120})

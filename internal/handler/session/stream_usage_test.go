@@ -12,6 +12,7 @@ import (
 
 func TestBuildStreamResponsePromotesUsageOnCompleteEvents(t *testing.T) {
 	usage := &types.TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120}
+	usage.Context = types.ContextUsage{SystemPrompt: 40, Conversation: 60, Total: 100, Window: 200000}
 
 	response := buildStreamResponse(interfaces.StreamEvent{
 		Type:  types.ResponseTypeComplete,
@@ -22,6 +23,8 @@ func TestBuildStreamResponsePromotesUsageOnCompleteEvents(t *testing.T) {
 
 	require.NotNil(t, response.Usage)
 	assert.Equal(t, 120, response.Usage.TotalTokens)
+	assert.Equal(t, 40, response.Usage.Context.SystemPrompt)
+	assert.Equal(t, 200000, response.Usage.Context.Window)
 	assert.Equal(t, usage, response.Data["usage"])
 }
 

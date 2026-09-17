@@ -4698,6 +4698,18 @@ export default {
     kbLockedByAgent: '현재 에이전트가 지식베이스 구성을 잠갔습니다.',
     kbDisabledByAgent: '현재 에이전트가 지식베이스 기능을 비활성화했습니다.',
     modelLockedByAgent: '현재 에이전트는 모델 구성을 잠갔습니다.',
+    contextUsage: {
+      title: '컨텍스트 사용량',
+      used: '사용 {used} / {window}',
+      empty: '메시지를 보내면 컨텍스트 구성이 표시됩니다',
+      categories: {
+        system_prompt: 'System Prompt',
+        tools: 'Tools',
+        conversation: 'Conversation',
+        mcp: 'MCP',
+        skills: 'Skills',
+      },
+    },
     imageUploadDisabledByAgent: '현재 에이전트에서 이미지 업로드가 활성화되지 않았습니다',
     goToAgentSettings: '에이전트 설정으로 이동',
     messages: {

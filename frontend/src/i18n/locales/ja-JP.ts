@@ -2624,6 +2624,18 @@ export default {
     kbLockedByAgent: '現在のエージェントによりナレッジベース設定がロックされています',
     kbDisabledByAgent: '現在のエージェントによりナレッジベースが無効になっています',
     modelLockedByAgent: '現在のエージェントによりモデル選択がロックされています',
+    contextUsage: {
+      title: 'コンテキスト使用量',
+      used: '使用中 {used} / {window}',
+      empty: 'メッセージを送るとコンテキストの内訳が表示されます',
+      categories: {
+        system_prompt: 'System Prompt',
+        tools: 'Tools',
+        conversation: 'Conversation',
+        mcp: 'MCP',
+        skills: 'Skills',
+      },
+    },
     imageUploadDisabledByAgent: 'このエージェントでは画像アップロードが有効になっていません',
     goToAgentSettings: 'エージェント設定に移動'
   },
