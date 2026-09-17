@@ -128,19 +128,11 @@ const props = defineProps({
     canFork: {
         type: Boolean,
         default: false
-    },
-    willDegrade: {
-        type: Boolean,
-        default: false
     }
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode);
-const forkTooltip = computed(() =>
-    props.willDegrade
-        ? '从这里分叉出新会话（将创建全新沙箱环境）'
-        : '从这里分叉出新会话',
-);
+const forkTooltip = '从这里分叉出新会话';
 
 const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
@@ -404,21 +396,8 @@ html[theme-mode="dark"] {
 .steer-failure button:hover { background: var(--td-bg-color-secondarycontainer); }
 
 .user_msg_actions {
-    position: absolute;
-    right: 0;
-    top: 100%;
-    z-index: 2;
     display: flex;
     justify-content: flex-end;
     padding-top: 2px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.15s ease;
-}
-
-.user_msg_container:hover .user_msg_actions,
-.user_msg_container:focus-within .user_msg_actions {
-    opacity: 1;
-    pointer-events: auto;
 }
 </style>

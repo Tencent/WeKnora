@@ -3,7 +3,7 @@
  * mounting the chat view.
  *
  * The backend re-derives all of this; this is purely so the UI can show the
- * right button state and tooltip without an extra round trip.
+ * right button state without an extra round trip.
  *
  * User messages fork *at* the question (history excludes it, composer prefills
  * it). Assistant messages fork *after* the answer (history includes it).
@@ -13,20 +13,14 @@ export interface ForkCandidateMessage {
   id?: unknown
   role?: unknown
   is_completed?: unknown
-  sandbox_checkpoint?: unknown
 }
 
 export interface ForkAffordance {
   /** Whether the fork button should be offered on this message at all. */
   canFork: boolean
-  /**
-   * Whether forking here will start from a brand new sandbox rather than a
-   * copy of the current one. The fork still succeeds; the tooltip just says so.
-   */
-  willDegrade: boolean
 }
 
-const REFUSED: ForkAffordance = { canFork: false, willDegrade: false }
+const REFUSED: ForkAffordance = { canFork: false }
 
 export function resolveForkAffordance(
   messages: ForkCandidateMessage[],
@@ -44,21 +38,8 @@ export function resolveForkAffordance(
   }
 
   const target = messages[index]
-  if (target.role === 'assistant') {
-    return { canFork: true, willDegrade: !target.sandbox_checkpoint }
+  if (target.role === 'assistant' || target.role === 'user') {
+    return { canFork: true }
   }
-  if (target.role !== 'user') {
-    return REFUSED
-  }
-
-  // Walk back to the nearest preceding assistant message: that turn's
-  // checkpoint is the state a fork here would roll back to.
-  for (let i = index - 1; i >= 0; i -= 1) {
-    if (messages[i].role !== 'assistant') continue
-    return { canFork: true, willDegrade: !messages[i].sandbox_checkpoint }
-  }
-
-  // Nothing before this message produced output, so a brand new sandbox is the
-  // correct result rather than a degradation.
-  return { canFork: true, willDegrade: false }
+  return REFUSED
 }

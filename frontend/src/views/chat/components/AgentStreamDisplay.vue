@@ -967,7 +967,6 @@ const props = defineProps<{
   ragMode?: boolean;
   followUpLoading?: boolean;
   canFork?: boolean;
-  willDegrade?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -976,11 +975,7 @@ const emit = defineEmits<{
 }>();
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
-const forkTooltip = computed(() =>
-  props.willDegrade
-    ? '从这条回答继续分叉（将创建全新沙箱环境）'
-    : '从这条回答继续分叉',
-)
+const forkTooltip = '从这条回答继续分叉'
 const emitFork = () => {
   const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
   if (messageId) emit('fork', messageId)

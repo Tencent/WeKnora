@@ -19,7 +19,7 @@
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
-                    :can-fork="canFork" :will-degrade="willDegrade"
+                    :can-fork="canFork"
                     @fork="emit('fork', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
@@ -34,7 +34,7 @@
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
                     :embedded-mode="embeddedMode"
-                    :can-fork="canFork" :will-degrade="willDegrade"
+                    :can-fork="canFork"
                     @fork="emit('fork', $event)"
                     @render-complete-change="emit('render-complete-change', $event)" />
             </template>
@@ -217,19 +217,11 @@ const props = defineProps({
     canFork: {
         type: Boolean,
         default: false
-    },
-    willDegrade: {
-        type: Boolean,
-        default: false
     }
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
-const forkTooltip = computed(() =>
-    props.willDegrade
-        ? '从这条回答继续分叉（将创建全新沙箱环境）'
-        : '从这条回答继续分叉',
-)
+const forkTooltip = '从这条回答继续分叉'
 const emitFork = () => {
     const messageId = persistedAssistantId(props.session) || props.session?.id
     if (messageId) emit('fork', messageId)

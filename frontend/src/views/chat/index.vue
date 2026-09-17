@@ -111,7 +111,6 @@
                                 :session-id="session_id"
                                 :message-id="session.id"
                                 :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                :will-degrade="forkAffordanceOf(session.id).willDegrade"
                                 :steer-failed="Boolean(session._steerFailed)"
                                 @retry-steer="handleRetrySteer(session.steer_id)"
                                 @remove-steer="handleRemoveSteer(session.steer_id)"
@@ -125,7 +124,6 @@
                                 :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                                 :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
                                 :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
-                                :will-degrade="forkAffordanceOf(session.id).willDegrade"
                                 @fork="handleFork"
                                 @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                             </botmsg>
@@ -314,7 +312,7 @@ const limit = ref(20);
 const messagesList = reactive([]);
 
 function forkAffordanceOf(messageId) {
-    if (!messageId) return { canFork: false, willDegrade: false }
+    if (!messageId) return { canFork: false }
     return resolveForkAffordance(messagesList, messageId)
 }
 
