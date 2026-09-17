@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // deleteRecorder captures which files a cleanup actually removed.
@@ -102,5 +103,72 @@ func TestDeleteExtractedImagesWithoutCatalogDeletesEverything(t *testing.T) {
 
 	if len(files.deleted) != len(urls) {
 		t.Fatalf("deleted %v, want %v", files.deleted, urls)
+	}
+}
+
+func TestMergeKnowledgeReleaseURLsIncludesOwnerBindings(t *testing.T) {
+	legacy := "local://7/exports/old.png"
+	bound := handleRef("m")
+	catalog := &fakeCatalog{
+		ownerRefs:        map[string][]string{"kn-1": {bound}},
+		releaseRemaining: map[string]int64{bound: 0},
+	}
+	files := &deleteRecorder{}
+
+	urls := mergeKnowledgeReleaseURLs(context.Background(), catalog, []string{"kn-1"}, []string{legacy})
+	deleteExtractedImages(context.Background(), files, knowledgeResourceOwners(catalog, "kn-1"), urls)
+
+	want := []string{legacy, bound}
+	if len(files.deleted) != len(want) {
+		t.Fatalf("deleted %v, want %v", files.deleted, want)
+	}
+	for i, url := range want {
+		if files.deleted[i] != url {
+			t.Fatalf("deleted[%d] = %q, want %q", i, files.deleted[i], url)
+		}
+	}
+}
+
+func TestMergeKnowledgeReleaseURLsReleasesMarkdownOnlyBindings(t *testing.T) {
+	bound := handleRef("n")
+	catalog := &fakeCatalog{
+		ownerRefs:        map[string][]string{"kn-1": {bound}},
+		releaseRemaining: map[string]int64{bound: 0},
+	}
+	files := &deleteRecorder{}
+
+	urls := mergeKnowledgeReleaseURLs(context.Background(), catalog, []string{"kn-1"}, nil)
+	deleteExtractedImages(context.Background(), files, knowledgeResourceOwners(catalog, "kn-1"), urls)
+
+	if len(files.deleted) != 1 || files.deleted[0] != bound {
+		t.Fatalf("deleted %v, want markdown-bound handle %q", files.deleted, bound)
+	}
+}
+
+func TestMergeKnowledgeReleaseURLsOmitsSourceFileBinding(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	ctx := context.Background()
+	image, err := catalog.Register(ctx, 7, "local://7/exports/a.png", interfaces.ResourceRegistration{})
+	if err != nil {
+		t.Fatalf("register image: %v", err)
+	}
+	source, err := catalog.Register(ctx, 7, "local://7/docs/source.pdf", interfaces.ResourceRegistration{})
+	if err != nil {
+		t.Fatalf("register source: %v", err)
+	}
+	if err := catalog.Bind(
+		ctx, image, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationExtractedImage,
+	); err != nil {
+		t.Fatalf("bind image: %v", err)
+	}
+	if err := catalog.Bind(
+		ctx, source, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationSourceFile,
+	); err != nil {
+		t.Fatalf("bind source: %v", err)
+	}
+
+	urls := mergeKnowledgeReleaseURLs(ctx, catalog, []string{"kn-1"}, nil)
+	if len(urls) != 1 || urls[0] != image {
+		t.Fatalf("release URLs = %v, want only extracted image %q", urls, image)
 	}
 }

@@ -94,7 +94,9 @@ func (s *knowledgeService) cloneKnowledge(
 		}
 		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
 		dstSvc := s.resolveFileService(ctx, targetKB)
-		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		newPath, copyErr := copyOwnedObject(
+			ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID,
+			s.resourceCatalog, types.ResourceRelationSourceFile)
 		if copyErr != nil {
 			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
 		}
@@ -3686,6 +3688,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 		logger.Infof(ctx, "Split document into %d chunks for knowledge %s", len(chunks), knowledge.ID)
 	}
+
+	// Claim files the parsed body now references. The KB file proxy serves a
+	// shared object only through an explicit knowledge binding; a handle that
+	// merely appears in a chunk is not ownership evidence. Best-effort like the
+	// other ingestion paths: the document is already parsed, so a missed claim
+	// logs and continues rather than failing the run.
+	s.bindContentResources(ctx, knowledge.TenantID, knowledge.ID, convertResult.MarkdownContent)
 
 	// Step 4: Process chunks (vectorize + index + enqueue async tasks)
 	s.processChunks(ctx, kb, knowledge, chunks, processOpts)
