@@ -17,6 +17,7 @@ codec lives in this one package:
 | `mcp.go` | MCP bridge routing handles (`msN`/`mtN`), definition projection and envelope codec |
 | `mcp_sources.go` | bounded citation sidecar for HTTP(S) links in successful MCP results |
 | `handles.go` | exported `HandleTable` for invocation-local spaces (`iN`, `ref-N`, `c000`) |
+| `leaks.go` | `LeakedIdentifiers` report of raw UUIDs that survive `EncodeMessages`, logged at every model-call site |
 
 ## Identity rules
 
@@ -56,6 +57,13 @@ same handle without renumbering it. Both complete and streaming decoders drop
 references that have not been backed by current evidence.
 
 ## Observability
+
+Every model-call site runs `LeakedIdentifiers` on the encoded messages and
+logs a warning naming the role or tool whose text still carries a raw UUID.
+A *registered* leak means the codec missed a rewrite site; an *unregistered*
+leak means a producer emitted an identifier that never entered the registry.
+Text-level compaction (`CompactKnownText`) stays in place as defense in depth
+until those producers are fixed and the report stays quiet.
 
 Langfuse generation observations contain the exact encoded payload sent to and
 returned by the model. Agent tool spans contain both `model_arguments` (the
