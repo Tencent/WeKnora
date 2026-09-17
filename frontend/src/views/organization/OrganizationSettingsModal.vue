@@ -1607,13 +1607,14 @@ const handleSubmitUpgrade = async () => {
   }
 }
 
-// 添加成员：搜索空间（仅按空间名模糊匹配，按 tenant_id 去重）
+// 添加成员：按完整空间 ID 查询。
 let tenantSearchTimer: ReturnType<typeof setTimeout> | null = null
 const handleTenantSearch = (query: string) => {
   if (tenantSearchTimer) {
     clearTimeout(tenantSearchTimer)
   }
-  if (!query || query.length < 2) {
+  const workspaceID = query.trim()
+  if (!/^[1-9]\d*$/.test(workspaceID)) {
     tenantSearchResults.value = []
     return
   }
@@ -1621,7 +1622,7 @@ const handleTenantSearch = (query: string) => {
     if (!props.orgId) return
     tenantSearchLoading.value = true
     try {
-      const res = await searchTenantsForInvite(props.orgId, query, 10)
+      const res = await searchTenantsForInvite(props.orgId, workspaceID, 10)
       if (res.success && res.data) {
         tenantSearchResults.value = res.data
       }

@@ -15,9 +15,11 @@ import (
 )
 
 // TestMain whitelists loopback for SSRF so the httptest servers (127.0.0.1)
-// are reachable. Production keeps the default strict SSRF policy.
+// are reachable, and the default base host so parseIMAConfig does not resolve
+// ima.qq.com over live DNS during a unit test. Production keeps the default
+// strict SSRF policy.
 func TestMain(m *testing.M) {
-	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost")
+	_ = os.Setenv("SSRF_WHITELIST", "127.0.0.1,localhost,ima.qq.com")
 	secutils.ResetSSRFWhitelistForTest()
 	os.Exit(m.Run())
 }

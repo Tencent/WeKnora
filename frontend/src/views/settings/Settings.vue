@@ -151,7 +151,7 @@
 
                   <!-- 存储引擎 -->
                   <div v-if="currentSection === 'storage'" class="section">
-                    <StorageEngineSettings />
+                    <StorageBackendSettings />
                   </div>
 
                   <!-- 沙箱 -->
@@ -249,7 +249,7 @@ import EnvVarSettings from './EnvVarSettings.vue'
 import MemoryWorkspaceSettings from './MemoryWorkspaceSettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
-import StorageEngineSettings from './StorageBackendSettings.vue'
+import StorageBackendSettings from './StorageBackendSettings.vue'
 import SandboxSettings from './SandboxSettings.vue'
 import SkillSettings from './SkillSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'

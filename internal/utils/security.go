@@ -668,10 +668,11 @@ func ValidateStdioConfig(command string, args []string, envVars map[string]strin
 
 // SSRFSafeHTTPClientConfig contains configuration for the SSRF-safe HTTP client
 type SSRFSafeHTTPClientConfig struct {
-	Timeout            time.Duration
-	MaxRedirects       int
-	DisableKeepAlives  bool
-	DisableCompression bool
+	SameOriginRedirectsOnly bool
+	Timeout                 time.Duration
+	MaxRedirects            int
+	DisableKeepAlives       bool
+	DisableCompression      bool
 }
 
 // DefaultSSRFSafeHTTPClientConfig returns the default configuration
@@ -698,11 +699,14 @@ func sameHTTPOrigin(a, b *url.URL) bool {
 // stripRedirectSensitiveHeaders removes credentials that must not follow a
 // cross-host redirect (Go only strips Authorization/Cookie by default).
 func stripRedirectSensitiveHeaders(req *http.Request) {
-	req.Header.Del("Authorization")
-	req.Header.Del("Cookie")
-	req.Header.Del("X-Auth-Token")
-	req.Header.Del("X-Api-Key")
-	req.Header.Del("Api-Key")
+	for name := range req.Header {
+		switch http.CanonicalHeaderKey(name) {
+		case "Accept", "Accept-Language", "User-Agent":
+		default:
+			req.Header.Del(name)
+		}
+	}
+	req.Host = ""
 }
 
 // NewSSRFSafeTransport builds an *http.Transport whose connections are guarded
@@ -731,6 +735,9 @@ func newSSRFCheckRedirect(maxRedirects int) func(*http.Request, []*http.Request)
 		// Strip credentials when the redirect crosses hosts so connector
 		// tokens (e.g. Yuque X-Auth-Token) cannot leak to a third party.
 		if len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
+			if via[0].Method != http.MethodGet && via[0].Method != http.MethodHead || via[0].Body != nil {
+				return fmt.Errorf("%w: cross-origin request replay is forbidden", ErrSSRFRedirectBlocked)
+			}
 			stripRedirectSensitiveHeaders(req)
 		}
 
@@ -785,9 +792,14 @@ func NewSSRFSafeHTTPClientWithTransport(
 		transport = NewSSRFSafeTransport(config)
 	}
 	return &http.Client{
-		Timeout:       config.Timeout,
-		Transport:     &SSRFValidatingRoundTripper{Base: transport},
-		CheckRedirect: newSSRFCheckRedirect(config.MaxRedirects),
+		Timeout:   config.Timeout,
+		Transport: &SSRFValidatingRoundTripper{Base: transport},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if config.SameOriginRedirectsOnly && len(via) > 0 && !sameHTTPOrigin(via[0].URL, req.URL) {
+				return fmt.Errorf("%w: cross-origin redirect is forbidden", ErrSSRFRedirectBlocked)
+			}
+			return newSSRFCheckRedirect(config.MaxRedirects)(req, via)
+		},
 	}
 }
 

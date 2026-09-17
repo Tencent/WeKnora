@@ -393,6 +393,10 @@ func (h *EmbedChannelHandler) GetEmbedSuggestedQuestions(c *gin.Context) {
 }
 
 func (h *EmbedChannelHandler) CreateEmbedSession(c *gin.Context) {
+	if len(secutils.SystemHMACKey()) == 0 {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "embed session signing key is not configured"})
+		return
+	}
 	ctx := c.Request.Context()
 	ch, ok := middleware.EmbedChannelFromContext(ctx)
 	if !ok {

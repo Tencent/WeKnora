@@ -40,7 +40,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_tool_approvals": {"enabled"},                        // 000091
 }
 
-const expectedSQLiteMigrationVersion = 17 // 000017 model_type_convergence (data-only, no schema change)
+const expectedSQLiteMigrationVersion = 18 // 000018 model_type_convergence (data-only, no schema change)
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)

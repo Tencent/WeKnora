@@ -8,6 +8,7 @@ import (
 // App holds Wails-bound state for the desktop shell.
 type App struct {
 	ctx           context.Context
+	setupToken    string
 	backendURL    string
 	apiLanBaseURL string
 	listenPublic  bool
@@ -82,3 +83,6 @@ func (a *App) AutoCheckForUpdates() {
 		checkUpdate(a.ctx, desktopAboutVersion(), false, true)
 	}
 }
+
+// GetAutoSetupToken exposes the per-process capability only through the native bridge.
+func (a *App) GetAutoSetupToken() string { return a.setupToken }
