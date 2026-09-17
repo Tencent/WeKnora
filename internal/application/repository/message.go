@@ -226,6 +226,48 @@ func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Me
 	})
 }
 
+// DeleteMessagesFrom soft-deletes every message of a session at or after the
+// (boundary, boundaryID) composite cursor and returns the deleted rows, oldest
+// first, so the caller can clean up what hangs off them.
+//
+// inclusive selects the rewind semantics: a user rewind point is dropped along
+// with everything after it (the client prefills that question back into the
+// composer), while an assistant rewind point survives and the conversation
+// resumes after it. The cursor is composite for the same reason
+// ListMessagesBySessionUpTo is — two messages written in the same millisecond
+// are ordered by ID, so the cut is reproducible.
+//
+// The read and the delete share one transaction: the returned rows must be
+// exactly the rows that went away, or the cleanup that follows would act on a
+// different set than the conversation lost.
+func (r *messageRepository) DeleteMessagesFrom(
+	ctx context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
+) ([]*types.Message, error) {
+	condition := "created_at > ? OR (created_at = ? AND id > ?)"
+	if inclusive {
+		condition = "created_at > ? OR (created_at = ? AND id >= ?)"
+	}
+
+	var deleted []*types.Message
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		scope := func() *gorm.DB {
+			return tx.Where("session_id = ?", sessionID).
+				Where(condition, boundary, boundary, boundaryID)
+		}
+		if err := scope().Order("created_at ASC, id ASC").Find(&deleted).Error; err != nil {
+			return err
+		}
+		if len(deleted) == 0 {
+			return nil
+		}
+		return scope().Delete(&types.Message{}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return deleted, nil
+}
+
 // DeleteMessage deletes a message
 func (r *messageRepository) DeleteMessage(ctx context.Context, sessionID string, messageID string) error {
 	return r.db.WithContext(ctx).Where(
