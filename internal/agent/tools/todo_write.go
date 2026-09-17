@@ -199,32 +199,6 @@ func (t *TodoWriteTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}, nil
 }
 
-// Helper function to safely get string field from map
-func getStringField(m map[string]interface{}, key string) string {
-	if val, ok := m[key].(string); ok {
-		return val
-	}
-	return ""
-}
-
-// Helper function to safely get string array field from map
-func getStringArrayField(m map[string]interface{}, key string) []string {
-	if val, ok := m[key].([]interface{}); ok {
-		result := make([]string, 0, len(val))
-		for _, item := range val {
-			if str, ok := item.(string); ok {
-				result = append(result, str)
-			}
-		}
-		return result
-	}
-	// Handle legacy string format for backward compatibility
-	if val, ok := m[key].(string); ok && val != "" {
-		return []string{val}
-	}
-	return []string{}
-}
-
 // generatePlanOutput generates a formatted plan output
 func generatePlanOutput(task string, steps []PlanStep) string {
 	output := "Plan created\n\n"

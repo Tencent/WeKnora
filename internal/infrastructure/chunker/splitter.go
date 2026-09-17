@@ -74,10 +74,9 @@ type SplitterConfig struct {
 }
 
 // Default chunk sizing constants. Single source of truth for the entire
-// chunker package and (via knowledge.go::buildSplitterConfig) the
-// knowledge service. The frontend KnowledgeBaseEditorModal mirrors these
-// numbers in its initial form state — keep them in sync if you change
-// either value here.
+// chunker package and the knowledge service via NormalizeSplitterConfig.
+// The frontend KnowledgeBaseEditorModal mirrors these numbers in its initial
+// form state — keep them in sync if you change either value here.
 //
 // DefaultChunkSize = 512 chars: ~100–130 English tokens / ~300 Chinese
 // tokens. Validated as a strong baseline by the Vecta Feb-2026 benchmark

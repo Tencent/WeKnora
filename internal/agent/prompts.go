@@ -11,24 +11,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// formatFileSize formats file size in human-readable format
-func formatFileSize(size int64) string {
-	const (
-		KB = 1024
-		MB = 1024 * KB
-		GB = 1024 * MB
-	)
-
-	if size < KB {
-		return fmt.Sprintf("%d B", size)
-	} else if size < MB {
-		return fmt.Sprintf("%.2f KB", float64(size)/KB)
-	} else if size < GB {
-		return fmt.Sprintf("%.2f MB", float64(size)/MB)
-	}
-	return fmt.Sprintf("%.2f GB", float64(size)/GB)
-}
-
 // formatDocSummary cleans and truncates document summaries for table display
 func formatDocSummary(summary string, maxLen int) string {
 	cleaned := strings.TrimSpace(summary)

@@ -1512,12 +1512,6 @@ func (h *KnowledgeHandler) DownloadKnowledgeFile(c *gin.Context) {
 	}
 }
 
-// mimeTypeByExt returns the MIME type for a given file extension.
-func mimeTypeByExt(filename string) string {
-	ct, _ := secutils.SafeContentTypeByFilename(filename)
-	return ct
-}
-
 // PreviewKnowledgeFile godoc
 // @Summary      预览知识文件
 // @Description  返回知识条目关联的原始文件，Content-Type 根据文件类型设置，用于浏览器内嵌预览

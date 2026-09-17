@@ -250,14 +250,8 @@ func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
 	knowledge.UpdatedAt = now
 }
 
-// buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
-// Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
-// identical whether callers come through this path or invoke the chunker
-// directly with a zero-value config.
-func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
-	return buildSplitterConfigFromChunking(kb.ChunkingConfig)
-}
-
+// buildSplitterConfigFromChunking normalizes effective chunking settings with
+// the shared chunker defaults.
 func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterConfig {
 	return chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
 		ChunkSize:    cc.ChunkSize,

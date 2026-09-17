@@ -192,7 +192,7 @@ var splitByHeuristics = func(text string, cfg SplitterConfig, _ *DocProfile) []C
    - 增加策略常量（如 `StrategyMine = "mine"`）与新的 `StrategyTier`；
    - 在 `resolveChain`/`resolveChainWithProfile` 的 switch 中为新策略返回 tier 链（建议以 `TierLegacy` 兜底）；
    - 在 `runTier()` 中新增 case；
-3. 调用方无需改动：知识库的 `chunking_config.strategy`（JSONB）经 `internal/application/service/knowledge.go` 的 `buildSplitterConfig` 传入；
+3. 调用方无需改动：知识库的 `chunking_config.strategy`（JSONB）经 `internal/application/service/knowledge_process.go` 的 `buildSplitterConfigFromChunking` 传入；
 4. 用 `SplitWithDiagnostics` 写单测验证 tier 选择与 `ValidateChunks` 验收行为。
 
 ---

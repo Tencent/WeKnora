@@ -440,11 +440,6 @@ func (h *Handler) writeAgentQueryEvent(
 	}
 }
 
-// getRequestID gets the request ID from gin context
-func getRequestID(c *gin.Context) string {
-	return c.GetString(types.RequestIDContextKey.String())
-}
-
 // Helper function for type assertion with default value
 func getString(m map[string]interface{}, key string) string {
 	if val, ok := m[key].(string); ok {

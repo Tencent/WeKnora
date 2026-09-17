@@ -281,18 +281,6 @@ func inspectablePathError(requested string) string {
 	return base + ". Use read_file with a listed skill:// resource for skill packages."
 }
 
-func relativeSkillFileFromImagePath(clean, skillName string) string {
-	dir, err := sandbox.SkillDirFor(skillName)
-	if err != nil || clean == dir {
-		return ""
-	}
-	prefix := dir + "/"
-	if strings.HasPrefix(clean, prefix) {
-		return strings.TrimPrefix(clean, prefix)
-	}
-	return ""
-}
-
 // matchingInspectableRoot returns the allowlisted root that contains
 // clean, or ("", false) when the path sits outside every root.
 func matchingInspectableRoot(clean string) (string, bool) {

@@ -86,6 +86,17 @@
 - 新增 15 项真实 composable 行为测试，覆盖两个入口、接口路由、缓存、引用抽屉、请求竞争、计时和 Vue 挂载/卸载生命周期。
 - `scripts/verify_frontend_pr.sh` 通过：948 项测试通过，1 项原有浏览器场景测试跳过，类型检查和生产构建通过。嵌入消息 template/style 与本批基线逐字节一致；未做浏览器视觉验收，未修改或测试后端。
 
+## 第五批已实施：Go 未引用私有函数
+
+基于第四批合入后的 `d645334d0`，逐包核实原有 16 个候选，全部确认无调用；同时删除仅被候选使用的 `collectTableAliases` 与 `escapeDoubleQuotes`。共移除 18 个私有函数和 3 个失效 import，生产 Go 源码净减少 235 行。
+
+- 使用 Go AST 检查候选所属 12 个包目录中的 894 个 Go 文件，包括测试、带构建标签和平台后缀的源码；删除集合以外没有对应标识符引用。全仓搜索同时检查文档、脚本和特殊链接引用。
+- 对修改文件逐函数比较：453 个保留函数的签名与函数体完全一致。Qdrant 的 `tokenizeQuery`、Agent 工具包的 `formatFileSize`、JSON 解析包的 `formatValue` 等同名活跃实现继续保留。
+- 更新分块配置相关注释和开发文档，指向仍在使用的 `buildSplitterConfigFromChunking` / `NormalizeSplitterConfig`；迁移历史注释保留旧名称。
+- 13 个受影响包执行 `go test -count=1`：12 个包通过，微信适配包无测试文件但编译通过；3,529 项顶层测试通过、1 项原有测试跳过，计入子测试为 5,274 项通过。跳过项为需要可替换连接探测或真实后端的向量存储创建测试。
+- `integration,e2b_integration,docker_integration` 标签下的 sandbox/tools 测试代码编译通过，未执行需要外部服务的集成测试。未修改前端，未运行前端或浏览器检查。
+- 本批只删除无调用代码，复用现有包测试和编译检查，没有添加仅断言函数不存在的测试。
+
 ## 后续优先级
 
 | 优先级 | 证据 | 建议边界 | 验证重点 |
@@ -100,24 +111,24 @@
 
 ### 后端重复的具体判断
 
-- Qdrant 与 Weaviate 的 `tokenizeQuery` 函数体相同，但只有 Qdrant 的关键字检索调用它；Weaviate 使用 `WithQuery(params.Query)`。后续应验证并删除 Weaviate 的失效函数，而非为了它增加共享分词层。
+- Qdrant 与 Weaviate 的 `tokenizeQuery` 函数体相同，但只有 Qdrant 的关键字检索调用它；Weaviate 使用 `WithQuery(params.Query)`。第五批已删除 Weaviate 的失效函数，保留 Qdrant 实现。
 - IMA、语雀的 `sanitizeFileName` 函数体相同，可以共享；RSS 的近似实现另外处理首尾空白和换行，合并时必须保留这些差异。
 - Milvus/Qdrant/Weaviate 的结果映射体相似，但接收不同后端类型。当前各约 17 行，为此引入通用接口或泛型转换层未必减少维护成本。
 - 终端和桌面 WebSocket ticket handler 重复检查会话、用户、租户和 token，但签发方式不同。后续可共享前置身份校验，保留 ticket 和连接生命周期各自的契约。
 - 资源权限已经有 `internal/application/access`；继续沿已有授权边界收敛，避免新建与其并行的权限工具层。
 
-### 未引用 Go 私有自由函数候选
+### 第五批已核实并删除的 Go 私有自由函数
 
-扫描发现 16 个，第一批暂未改动后端。后续逐包确认调用、构建入口和测试后处理：
+初次扫描的 16 个候选和 2 个仅被候选调用的辅助函数已清理：
 
 | 文件（相对 `internal`） | 函数 |
 | --- | --- |
 | `application/repository/retriever/weaviate/repository.go` | `tokenizeQuery` |
 | `im/wechat/crypto.go` | `encryptAES128ECB` |
-| `application/repository/retriever/milvus/filter.go` | `formatValue` |
+| `application/repository/retriever/milvus/filter.go` | `formatValue`、`escapeDoubleQuotes` |
 | `agent/tools/todo_write.go` | `getStringArrayField`、`getStringField` |
 | `agent/prompts.go` | `formatFileSize` |
-| `utils/inject.go` | `extractTableAliasMap` |
+| `utils/inject.go` | `extractTableAliasMap`、`collectTableAliases` |
 | `application/service/wiki_ingest_dedup.go` | `countEntityConceptPages` |
 | `agent/tools/sandbox_ls.go` | `relativeSkillFileFromImagePath` |
 | `infrastructure/docparser/json_converter.go` | `indentJSON` |
@@ -140,4 +151,4 @@
 - 构建仍报告大 chunk 提示；本轮未以 bundle 体积为目标，也没有测量构建前后的体积差异。
 - 未修改后端，未运行后端测试；未做浏览器视觉验收。
 
-下一批优先逐包核实并清理未引用 Go 私有函数候选，再处理后端具体重复逻辑。涉及聊天、任务重试、权限或共享状态的改动应单独成批，以可验证的行为等价为边界。
+下一批优先处理 IMA、语雀等外部来源的重复文件名清理逻辑，核实调用与差异后再决定共享边界。涉及聊天、任务重试、权限或共享状态的改动应单独成批，以可验证的行为等价为边界。

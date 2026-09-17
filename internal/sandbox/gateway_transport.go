@@ -154,13 +154,8 @@ func (p *SandboxGatewayTransportPool) dataTransport(target string) http.RoundTri
 	return actual.(http.RoundTripper)
 }
 
-// newGatewayDataTransport dials target regardless of the request's authority,
-// mirroring the SDK's proxy rewrite while adding the outbound address guard
-// the SDKs have no notion of.
-func newGatewayDataTransport(target string) *http.Transport {
-	return newGatewayDataTransportWithPolicy(target, DefaultOutboundURLPolicy())
-}
-
+// newGatewayDataTransportWithPolicy dials target regardless of the request's
+// authority, preserving the gateway rewrite and the configured outbound guard.
 func newGatewayDataTransportWithPolicy(target string, policy OutboundURLPolicy) *http.Transport {
 	dialer := &net.Dialer{
 		Timeout:   10 * time.Second,
