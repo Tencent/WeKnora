@@ -7371,7 +7371,7 @@ export default {
   },
   chatHeader: {
     moreActions: '更多对话操作',
-    toggleSandboxPanel: '沙箱终端',
+    toggleSandboxPanel: '展开侧边栏',
     copySessionId: '复制会话 ID',
     copyLink: '复制对话链接',
     copyMarkdown: '复制为 Markdown',

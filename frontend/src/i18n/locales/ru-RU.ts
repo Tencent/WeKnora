@@ -7369,7 +7369,7 @@ export default {
   },
   chatHeader: {
     moreActions: 'Другие действия с диалогом',
-    toggleSandboxPanel: 'Терминал песочницы',
+    toggleSandboxPanel: 'Развернуть боковую панель',
     copySessionId: 'Копировать ID сессии',
     copyLink: 'Копировать ссылку на диалог',
     copyMarkdown: 'Копировать как Markdown',

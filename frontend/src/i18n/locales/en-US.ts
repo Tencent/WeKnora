@@ -194,7 +194,7 @@ export default {
   },
   chatHeader: {
     moreActions: 'More conversation actions',
-    toggleSandboxPanel: 'Sandbox terminal',
+    toggleSandboxPanel: 'Expand sidebar',
     copySessionId: 'Copy Session ID',
     copyLink: 'Copy Conversation Link',
     copyMarkdown: 'Copy as Markdown',

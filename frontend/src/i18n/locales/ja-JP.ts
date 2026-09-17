@@ -194,7 +194,7 @@ export default {
   },
   chatHeader: {
     moreActions: 'その他の会話操作',
-    toggleSandboxPanel: 'サンドボックスターミナル',
+    toggleSandboxPanel: 'サイドバーを展開',
     copySessionId: 'セッションIDをコピー',
     copyLink: '会話リンクをコピー',
     copyMarkdown: 'Markdownとしてコピー',

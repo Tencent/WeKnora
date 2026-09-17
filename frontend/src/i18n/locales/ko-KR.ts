@@ -7369,7 +7369,7 @@ export default {
   },
   chatHeader: {
     moreActions: '대화 추가 작업',
-    toggleSandboxPanel: '샌드박스 터미널',
+    toggleSandboxPanel: '사이드바 펼치기',
     copySessionId: '세션 ID 복사',
     copyLink: '대화 링크 복사',
     copyMarkdown: 'Markdown으로 복사',
