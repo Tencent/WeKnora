@@ -12,6 +12,11 @@ type uiReply struct {
 	err  error
 }
 
+var errGatewayUIUnsupported = &RPCError{
+	Code:    "gateway_ui_unsupported",
+	Message: "BrowserSkill extension lacks WeKnora task controls; install the companion extension",
+}
+
 // Focus is user initiated. Only the server-owned task ID is sent to Chrome.
 func (m *Manager) Focus(ctx context.Context, s Scope, session string) error {
 	if _, remote, err := m.route(ctx, s, session, "focus", "", nil); remote || err != nil {
@@ -96,6 +101,10 @@ func (m *Manager) receiveUI(d *device, data []byte) bool {
 	var err error
 	if len(frame.Error) > 0 && string(frame.Error) != "null" {
 		err = errors.New("browser task tab unavailable")
+		var rpcErr RPCError
+		if json.Unmarshal(frame.Error, &rpcErr) == nil && rpcErr.Code == "unknown_method" {
+			err = errGatewayUIUnsupported
+		}
 	}
 	reply <- uiReply{frame.Result, err}
 	return true
@@ -153,8 +162,20 @@ func (m *Manager) Idle(ctx context.Context, s Scope, session string) error {
 // retained or interrupted tasks stay available for user handoff. The browser
 // source preference lives in the client settings, independently of this task.
 func (m *Manager) FinishTurn(ctx context.Context, s Scope, session string, keepOpen bool) error {
+	// An unmodified official extension can still stop a completed task through
+	// native RPC. Retained tasks require the companion extension's idle barrier.
 	if err := m.Idle(ctx, s, session); err != nil {
-		return err
+		var rpcErr *RPCError
+		if keepOpen || !errors.As(err, &rpcErr) || rpcErr.Code != errGatewayUIUnsupported.Code {
+			return err
+		}
+		status, statusErr := m.GetStatus(ctx, s, session)
+		if statusErr != nil {
+			return statusErr
+		}
+		if status.Paused {
+			return err
+		}
 	}
 	if keepOpen {
 		return nil

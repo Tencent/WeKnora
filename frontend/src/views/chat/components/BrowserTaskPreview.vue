@@ -1,10 +1,16 @@
 <template>
   <Teleport :to="pipTarget || 'body'" :disabled="!pipTarget">
-  <aside v-if="status.selected" ref="previewElement" class="browser-task-preview" :class="{ 'is-dragging': dragging, 'is-pip': !!pipTarget }" :style="pipTarget ? {} : positionStyle" :aria-label="t('localBrowser.preview')">
+  <aside v-if="status.selected" ref="previewElement" class="browser-task-preview" :class="{ 'is-dragging': dragging, 'is-pip': !!pipTarget, 'needs-help': status.needs_help }" :style="pipTarget ? {} : positionStyle" :aria-label="t('localBrowser.preview')">
     <div class="preview-heading" @pointerdown="!pipTarget && startDrag($event)" @pointermove="moveDrag" @pointerup="stopDrag" @pointercancel="stopDrag" @lostpointercapture="stopDrag"><BrowserIcon class="preview-browser-icon" width="20" height="20" /><strong>{{ t('localBrowser.local') }}</strong><span>{{ t(!status.connected ? 'localBrowser.offline' : status.stopping ? 'localBrowser.stopping' : status.paused ? 'localBrowser.paused' : status.needs_help ? 'localBrowser.needHelp' : status.task_id ? 'localBrowser.connected' : 'localBrowser.waiting') }}</span>
       <button v-if="pipSupported" class="preview-popout" :disabled="pipOpening" :title="t(pipTarget ? 'localBrowser.pipReturn' : 'localBrowser.pipOpen')" :aria-label="t(pipTarget ? 'localBrowser.pipReturn' : 'localBrowser.pipOpen')" @pointerdown.stop @click="togglePictureInPicture"><t-icon :name="pipTarget ? 'fullscreen-exit' : 'fullscreen'" size="16px" /></button>
     </div>
-    <button class="preview-image" :disabled="!status.connected || !status.task_id || busy || status.stopping" :aria-label="t('localBrowser.locateWindow')" @click="act('focus')">
+    <section v-if="status.needs_help" class="preview-handoff" role="status" aria-live="polite">
+      <strong>{{ t('localBrowser.needHelp') }}</strong>
+      <p v-if="status.help_prompt" class="handoff-prompt">{{ status.help_prompt }}</p>
+      <p>{{ t(status.action === 'tab_borrow' ? 'localBrowser.borrowHint' : 'localBrowser.helpHint') }}</p>
+      <t-button v-if="status.action !== 'tab_borrow'" theme="primary" :disabled="!status.connected || !status.task_id || busy || status.stopping" @click="act('focus')"><t-icon name="jump" />{{ t('localBrowser.locateWindow') }}</t-button>
+    </section>
+    <button v-if="!(status.needs_help && status.action === 'tab_borrow')" class="preview-image" :disabled="!status.connected || !status.task_id || busy || status.stopping" :aria-label="t('localBrowser.locateWindow')" @click="act('focus')">
       <img v-if="preview" :src="preview" :alt="t('localBrowser.preview')" />
       <span v-else>{{ t(status.connected ? 'localBrowser.waiting' : 'localBrowser.reconnectShort') }}</span>
       <span v-if="status.connected && status.task_id" class="locate"><t-icon name="jump" size="13px" />{{ t('localBrowser.locateWindow') }}</span>
@@ -13,7 +19,6 @@
     <p v-if="browserPageAddress(status.page_url)" class="preview-address">{{ browserPageAddress(status.page_url) }}</p>
     <p v-if="status.last_error" class="preview-error">{{ status.last_error }}</p>
     <p class="preview-sync" role="status">{{ t(!status.connected ? 'localBrowser.reconnectShort' : status.idle ? 'localBrowser.previewIdle' : previewStale ? 'localBrowser.previewStale' : preview ? 'localBrowser.previewLive' : 'localBrowser.previewLoading') }}</p>
-    <p v-if="status.needs_help" class="preview-help"><span v-if="status.help_prompt">{{ status.help_prompt }}<br /></span>{{ t('localBrowser.helpHint') }}</p>
     <p v-if="pipFailed" class="preview-error" role="alert">{{ t('localBrowser.pipFailed') }}</p>
     <p v-if="error" class="preview-error" role="alert">{{ error }}</p>
     <p class="preview-scope">{{ t('localBrowser.controlScope') }}</p>
@@ -117,4 +122,14 @@ onBeforeUnmount(() => { alive = false; document.removeEventListener('visibilityc
 .browser-task-preview.is-pip { position: static; width: 100%; max-width: none; min-height: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
 .is-pip .preview-heading { cursor: default; }
 .is-pip .preview-image { height: clamp(126px, 45vh, 480px); }
+.browser-task-preview.needs-help { width: 420px; border-color: var(--td-brand-color); }
+.preview-handoff { padding: 12px; background: var(--td-brand-color-light); overflow-wrap: anywhere; }
+.preview-handoff strong { font-size: 14px; color: var(--td-brand-color); }
+.preview-handoff p { font-size: 12px; line-height: 1.6; margin: 8px 0; white-space: pre-wrap; }
+.preview-handoff .handoff-prompt { max-height: 22vh; overflow-y: auto; }
+.preview-handoff .t-button { width: 100%; }
+.needs-help .preview-image { height: clamp(140px, 30vh, 260px); }
+.needs-help .preview-heading { flex-wrap: wrap; }
+.browser-task-preview.is-pip.needs-help { width: 100%; }
+@media(max-width:480px) { .browser-task-preview.needs-help { width: calc(100% - 24px); max-width: calc(100% - 24px); } .browser-task-preview.is-pip.needs-help { width: 100%; max-width: none; } }
 </style>

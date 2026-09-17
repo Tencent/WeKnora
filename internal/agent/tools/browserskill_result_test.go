@@ -131,3 +131,35 @@ func TestNavigationTimeoutRetainsTask(t *testing.T) {
 	require.False(t, result.Success, "navigation that did not reach requested phase must not count as completed")
 	require.Equal(t, []bool{true}, manager.retained, "unfinished navigation should retain pages")
 }
+
+func TestEvaluateTopLevelReturnRecovery(t *testing.T) {
+	tool := NewBrowserSkillTool(nil, browserskill.Scope{}, "chat")
+	raw := json.RawMessage(`{"ok":false,"error":{"text":"SyntaxError: Illegal return statement"}}`)
+	result := tool.interpretResult("evaluate", raw)
+	require.False(t, result.Success)
+	require.Contains(t, result.Error, "IIFE")
+	require.Contains(t, result.Error, "before repeating mutations")
+	require.JSONEq(t, string(raw), result.Output)
+}
+
+func TestBorrowRecoveryDoesNotConfuseResumeWithApproval(t *testing.T) {
+	for _, message := range []string{
+		"tab_select: borrow this tab before controlling it remotely",
+		"Authorize this tab with tab_borrow before reading or operating it",
+	} {
+		hint := browserRecoveryHint("tab_select", &browserskill.RPCError{Code: "permission_denied", Message: message})
+		require.Contains(t, hint, "call tab_borrow once")
+		require.Contains(t, hint, "before borrowing succeeds")
+	}
+	hint := browserRecoveryHint("tab_borrow", &browserskill.RPCError{
+		Code: "timeout", Message: "Timed out waiting for tab borrow confirmation",
+		Data: json.RawMessage(`{"reason":"confirmation_timeout"}`),
+	})
+	require.Contains(t, hint, "confirmation is no longer pending")
+	require.Contains(t, hint, "does not grant tab access")
+	require.Contains(t, hint, "After explicit resume")
+	require.Contains(t, hint, "Do not call request_help")
+	// Unrelated permission denials must not suggest a way to borrow around them.
+	hint = browserRecoveryHint("click", &browserskill.RPCError{Code: "permission_denied", Message: "policy denied"})
+	require.NotContains(t, hint, "call tab_borrow")
+}

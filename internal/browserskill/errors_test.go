@@ -58,3 +58,68 @@ func TestRPCErrorBoundsLargeDetails(t *testing.T) {
 	rpcErr.BoundDetails()
 	require.JSONEq(t, `{"reason":"fill_failed","effect_state":"unknown","truncated":true}`, string(rpcErr.Data))
 }
+
+// Exercise the actual daemon parser, rather than assuming that a successful
+// handshake means every advertised extension tool is supported by the binary.
+func TestNativeDaemonSupportsAdvertisedMethods(t *testing.T) {
+	binary := os.Getenv("BROWSERSKILL_TEST_BINARY")
+	if binary == "" {
+		t.Skip("set BROWSERSKILL_TEST_BINARY for native protocol coverage")
+	}
+	m := NewManager()
+	m.binary = binary
+	runtime, err := m.start(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(runtime.stop)
+	for method := range methods {
+		t.Run(method, func(t *testing.T) {
+			_, err := rpc(t.Context(), &device{runtime: runtime}, "tool."+method,
+				map[string]any{"session_id": "missing-protocol-test-session"})
+			if err == nil {
+				return
+			}
+			var rpcErr *RPCError
+			require.ErrorAs(t, err, &rpcErr)
+			require.NotEqual(t, "daemon_incompatible", rpcErr.Code)
+			require.NotEqual(t, "protocol_error", rpcErr.Code)
+		})
+	}
+}
+
+func TestRPCRejectsUnsupportedMethodAndMismatchedResponse(t *testing.T) {
+	for _, tc := range []struct{ id, code, want string }{
+		{"0", "protocol_error", "daemon_incompatible"},
+		{"other", "protocol_error", "invalid BrowserSkill response ID"},
+		{"0", "permission_denied", "invalid BrowserSkill response ID"},
+	} {
+		t.Run(tc.id+tc.code, func(t *testing.T) {
+			home, err := os.MkdirTemp("", "bsk-wire-")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = os.RemoveAll(home) })
+			require.NoError(t, os.Mkdir(filepath.Join(home, "run"), 0o700))
+			listener, err := net.Listen("unix", filepath.Join(home, "run", "daemon.sock"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = listener.Close() })
+			done := make(chan error, 1)
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					done <- err
+					return
+				}
+				defer func() { _ = conn.Close() }()
+				var request map[string]any
+				if err = json.NewDecoder(conn).Decode(&request); err == nil {
+					err = json.NewEncoder(conn).Encode(rpcReply{
+						ID: tc.id, Error: &RPCError{Code: tc.code, Message: "unsupported request"},
+					})
+				}
+				done <- err
+			}()
+			_, err = rpc(t.Context(), &device{runtime: &daemon{home: home}},
+				"tool.wheel", map[string]any{"delta_y": 500})
+			require.ErrorContains(t, err, tc.want)
+			require.NoError(t, <-done)
+		})
+	}
+}

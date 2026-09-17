@@ -25,37 +25,15 @@ try {
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`],
   });
   const worker = browser.serviceWorkers()[0] ?? await browser.waitForEvent('serviceworker');
-  const taskWindow = process.env.BROWSERSKILL_TEST_TASK_WINDOW !== '0';
   const popup = await browser.newPage();
   await popup.goto(new URL('popup.html', worker.url()).href);
   await popup.locator('details summary').click();
+  // Official 0.3.0 unifies local/remote connection settings.
+  await popup.locator('[role="group"] button').nth(1).click();
   await popup.locator('#remote-pairing').fill(pairing);
-  await popup.locator('details button').first().click();
-  try {
-    await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('details [role=alert]'));
-  } catch (error) {
-    // Never include the password input or pairing credential in diagnostics.
-    console.error('Extension pairing UI:', await popup.locator('body').innerText());
-    console.error('Pairing form state:', await popup.evaluate(() => ({
-      length: document.querySelector('#remote-pairing')?.value.length,
-      disabled: document.querySelector('#remote-pairing')?.disabled,
-      buttons: [...document.querySelectorAll('details button')].map(b => ({text:b.textContent,disabled:b.disabled})),
-    })));
-    throw error;
-  }
-  if (await popup.locator('details [role=alert]').count()) throw new Error('Extension authorization failed before browser tests');
-  if (!taskWindow) {
-    await popup.locator('#bsk-task-window-mode').selectOption('tabs');
-    await popup.waitForFunction(() => {
-      const select = document.querySelector('#bsk-task-window-mode');
-      return select?.value === 'tabs' && !select.disabled;
-    });
-  } else {
-    await popup.waitForFunction(() => {
-      const select = document.querySelector('#bsk-task-window-mode');
-      return select?.value === 'window' && !select.disabled;
-    });
-  }
+  await popup.locator('form button[type="submit"]').click();
+  await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('form [role=alert]'));
+  if (await popup.locator('form [role=alert]').count()) throw new Error('Extension authorization failed before browser tests');
   const initial = await worker.evaluate(async () => {
     const window = await chrome.windows.getLastFocused();
     const tabs = await chrome.tabs.query({windowId:window.id,active:true});
@@ -65,20 +43,29 @@ try {
   process.stdout.write('ready\n');
   for await (const command of lines) {
     if (command === 'close') break;
-    if (command === 'complete-help' || command === 'interrupt-window') {
-      const selector = command === 'complete-help'
+    if (command === 'complete-login' || command === 'interrupt-window' || command === 'approve-borrow') {
+      const selector = command === 'complete-login'
         ? '[data-slot="help-request-banner"][data-display-mode="full"] [data-slot="help-continue-button"]'
+        : command === 'approve-borrow' ? '[data-slot="borrow-confirmation-allow-button"]'
         : '[data-slot="control-overlay-stop-all"]';
       // Click the actual extension overlay in an isolated fixture browser.
       let clicked = false;
       const deadline = Date.now() + 5000;
       while (!clicked && Date.now() < deadline) {
         for (const page of browser.pages().filter(page => page !== popup).reverse()) {
-          const button = command === 'complete-help'
+          const button = command === 'complete-login'
             ? page.locator('[data-slot="help-request-banner"][data-display-mode="full"]')
                 .filter({hasText:'Confirm this fixture step'}).locator('[data-slot="help-continue-button"]').first()
             : page.locator(selector).first();
           if (!await button.isVisible()) continue;
+          if (command === 'complete-login') {
+            // Only synthetic fixture credentials, entered through the page UI.
+            await page.locator('#login-account').fill('fixture-user');
+            await page.locator('#login-password').fill('fixture-password');
+            await page.locator('#login-submit').click();
+            await page.waitForURL('**/login-complete');
+            await button.waitFor({state:'visible',timeout:5000});
+          }
           await button.click({timeout:5000});
           clicked = true;
           break;
@@ -107,8 +94,8 @@ try {
       process.stdout.write(JSON.stringify({detached:attached.length===0})+'\n');
     }
     if (command === 'check-cleanup') {
-      const state = await worker.evaluate(async () => ({ids:(await chrome.tabs.query({})).map(t=>t.id), groups:await chrome.tabGroups.query({})}));
-      process.stdout.write(JSON.stringify({cleaned:state.groups.length===0 && state.ids.length===initial.tabIds.length && state.ids.every(id=>initial.tabIds.includes(id))})+'\n');
+      const state = await worker.evaluate(async () => ({ids:(await chrome.tabs.query({})).map(t=>t.id)}));
+      process.stdout.write(JSON.stringify({cleaned:state.ids.length===initial.tabIds.length && state.ids.every(id=>initial.tabIds.includes(id))})+'\n');
     }
     if (command === 'remember-foreground') {
       const foreground = await worker.evaluate(async () => {
@@ -119,28 +106,42 @@ try {
       Object.assign(initial, foreground);
       process.stdout.write('remembered\n');
     }
+    if (command === 'create-unowned-tab') {
+      const createdPage = browser.waitForEvent('page', {predicate:p => p !== popup});
+      const tab = await worker.evaluate(async (initialIds) => {
+        const source = (await chrome.tabs.query({})).find(t => !initialIds.includes(t.id) && t.url?.startsWith('http://127.0.0.1:'));
+        if (!source) throw new Error('Fixture task page unavailable');
+        // Extension API creation simulates a user-created tab: no navigation
+        // source event, even though it is inside the Agent Window.
+        return chrome.tabs.create({windowId:source.windowId,url:source.url+'?user-tab=1',active:true});
+      }, initial.tabIds);
+      const page = await createdPage;
+      await page.waitForURL('**/*?user-tab=1');
+      await page.locator('browser-skill-overlay').waitFor({state:'attached'});
+      process.stdout.write(JSON.stringify({tab_id:tab.id})+'\n');
+    }
+    if (command.startsWith('close-fixture-window ')) {
+      const id = Number(command.split(' ')[1]);
+      await worker.evaluate(async (tabId) => {
+        const tab = await chrome.tabs.get(tabId);
+        await chrome.windows.remove(tab.windowId);
+      }, id);
+      process.stdout.write('fixture-window-closed\n');
+    }
+    if (command.startsWith('remove-fixture-tab ')) {
+      const id = Number(command.split(' ')[1]);
+      await worker.evaluate(async (tabId) => chrome.tabs.remove(tabId), id);
+      process.stdout.write('fixture-tab-removed\n');
+    }
     if (command === 'check-background') {
-      if (taskWindow) {
-        const valid = await worker.evaluate(async (original) => {
-          const tabs = await chrome.tabs.query({});
-          const groups = await chrome.tabGroups.query({});
-          const taskWindows = [...new Set(tabs.filter(t => t.windowId !== original.windowId).map(t => t.windowId))];
-          return tabs.find(t => t.id === original.tabId)?.active === true &&
-            groups.length === 0 && taskWindows.length > 0 && taskWindows.every(id =>
-              tabs.filter(t => t.windowId === id && t.active).length === 1);
-        }, originalWindow);
-        process.stdout.write(JSON.stringify({background:valid})+'\n');
-        continue;
-      }
-      const current = await worker.evaluate(async () => {
-        const window=await chrome.windows.getLastFocused();
-        const tabs=await chrome.tabs.query({windowId:window.id,active:true});
-        const windows=await chrome.windows.getAll({windowTypes:['normal']});
-        const groups=await chrome.tabGroups.query({windowId:window.id});
-        return {windowId:window.id,tabId:tabs[0].id,windowCount:windows.length,labeled:groups.some(g=>g.title?.startsWith('WeKnora'))};
-      });
-      const background = current.windowId === initial.windowId && current.tabId === initial.tabId && current.windowCount === 1 && current.labeled;
-      process.stdout.write(JSON.stringify(background ? {background} : {background, initial, current}) + '\n');
+      const valid = await worker.evaluate(async (original) => {
+        const tabs = await chrome.tabs.query({});
+        const taskWindows = [...new Set(tabs.filter(t => t.windowId !== original.windowId).map(t => t.windowId))];
+        return tabs.find(t => t.id === original.tabId)?.active === true &&
+          taskWindows.length > 0 && taskWindows.every(id =>
+            tabs.filter(t => t.windowId === id && t.active).length === 1);
+      }, originalWindow);
+      process.stdout.write(JSON.stringify({background:valid})+'\n');
     }
   }
 } finally {

@@ -625,8 +625,21 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 		return nil, errors.New("browser command interrupted or timed out; do not replay actions automatically")
 	}
 	var reply rpcReply
-	if json.Unmarshal(line, &reply) != nil || reply.ID != id {
+	if json.Unmarshal(line, &reply) != nil {
 		return nil, errors.New("invalid BrowserSkill response")
+	}
+	if reply.ID != id {
+		// The daemon answers unrecognized request methods with an uncorrelated
+		// protocol error. This socket carries only one request; preserve the
+		// actionable version mismatch without accepting other mismatched replies.
+		if reply.ID == "0" && reply.Error != nil && reply.Error.Code == "protocol_error" {
+			return nil, &RPCError{
+				Code: "daemon_incompatible",
+				Message: "BrowserSkill daemon rejected the request protocol; " +
+					"rebuild bsk and the extension from the same pinned source baseline",
+			}
+		}
+		return nil, errors.New("invalid BrowserSkill response ID")
 	}
 	if reply.Error != nil {
 		reply.Error.BoundDetails()
@@ -735,6 +748,10 @@ func (m *Manager) Call(
 	}
 	t.idle = false
 	t.action, t.actionStarted, t.actionFinished, t.lastError = method, time.Now(), time.Time{}, ""
+	if method == "navigate" {
+		requestedURL, _ := params["url"].(string)
+		t.pageURL = statusPageURL(requestedURL)
+	}
 	if method == "tab_select" || method == "tab_close" || method == "tab_return" {
 		t.pageURL = ""
 	}
@@ -776,10 +793,23 @@ func (m *Manager) Call(
 			clean["wait_until"] = "domcontentloaded"
 		}
 	}
+	if method == "request_help" {
+		// A model-proposed page predicate is not evidence that the human step
+		// finished (e.g. login pages can already contain "History"). Require
+		// the user's explicit Continue action, including for legacy callers.
+		delete(clean, "completion_criteria")
+	}
 	clean["session_id"] = id
 	if helping {
 		// Keep all transports inside the same bounded human-wait budget.
-		clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+		if method == "tab_borrow" {
+			// Borrow confirmation uses a distinct protocol field. timeout_ms is
+			// ignored by this method, leaving the extension's shorter default.
+			clean["confirmation_timeout_ms"] = humanTimeoutMS(clean["confirmation_timeout_ms"])
+			delete(clean, "timeout_ms")
+		} else {
+			clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+		}
 	}
 	result, err := rpc(callCtx, d, "tool."+method, clean)
 	if method == "request_help" && err == nil {

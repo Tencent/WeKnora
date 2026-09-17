@@ -36,6 +36,49 @@ func TestRealExtension(t *testing.T) {
 	t.Cleanup(m.Close)
 	m.publicURL = "ws" + strings.TrimPrefix(server.URL, "http") + "/extension"
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow-error-page" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, "<!doctype html><title>Fixture slow error</title>"+
+				"<p>Visible error while response is loading</p>")
+			w.(http.Flusher).Flush()
+			select {
+			case <-time.After(time.Second):
+			case <-r.Context().Done():
+			}
+			return
+		}
+		if r.URL.Path == "/error-page" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, "<!doctype html><title>Fixture error</title><p>Requested page does not exist</p>")
+			return
+		}
+		if r.URL.Path == "/redirect-error" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, `<!doctype html><script>location.replace('/error-page')</script>`)
+			return
+		}
+		if r.URL.Path == "/login" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, `<!doctype html><title>Fixture login</title>
+<button>看过</button>
+<form action="/login-complete" method="post">
+<label>Account <input id="login-account" name="account"></label>
+<label>Password <input id="login-password" type="password" name="password"></label>
+<button id="login-submit" type="submit">Sign in</button></form>`)
+			return
+		}
+		if r.URL.Path == "/login-complete" {
+			if r.Method != http.MethodPost || r.FormValue("account") != "fixture-user" ||
+				r.FormValue("password") != "fixture-password" {
+				http.Error(w, "Fixture login failed", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, "<!doctype html><title>Fixture signed in</title><p>Fixture login complete</p>")
+			return
+		}
 		if r.URL.Path == "/large-page" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = io.WriteString(w, "<!doctype html><title>Large task fixture</title><p>Ready</p>"+
@@ -66,7 +109,8 @@ func TestRealExtension(t *testing.T) {
  onclick="document.querySelector('#result').textContent='你好 '+document.querySelector('#name').value">Save</button>
 <p id="result"></p>
 <a id="new-tab" href="/linked" target="_blank" rel="noopener">Open linked page</a>
-<button id="popup" onclick="window.open('/popup', '_blank')">Open popup</button>`,
+<button id="popup" onclick="window.open('/popup', '_blank', 'width=480,height=320')">Open popup</button>
+<p id="scroll-target" style="margin-top:2400px">Scroll destination</p>`,
 		)
 	}))
 	defer fixture.Close()
@@ -217,6 +261,40 @@ func TestRealExtension(t *testing.T) {
 			t.Fatal("element screenshot was not cropped")
 		}
 	}
+	if _, err = call(ctx, scope, "chat", "scroll_to", map[string]any{"selector": "#scroll-target"}); err != nil {
+		t.Fatal(err)
+	}
+	position, err := call(ctx, scope, "chat", "evaluate", map[string]any{"expression": "window.scrollY"})
+	var scroll struct {
+		Value float64 `json:"value"`
+	}
+	if err != nil || json.Unmarshal(position, &scroll) != nil || scroll.Value < 1000 {
+		t.Fatalf("scroll_to did not move viewport: %s, %v", position, err)
+	}
+	if _, err = call(ctx, scope, "chat", "wheel", map[string]any{"delta_y": -600}); err != nil {
+		t.Fatal(err)
+	}
+	startY := scroll.Value
+	scrollDeadline := time.Now().Add(3 * time.Second)
+	for {
+		position, err = call(ctx, scope, "chat", "evaluate",
+			map[string]any{"expression": "(() => { return window.scrollY; })()"})
+		if err != nil || json.Unmarshal(position, &scroll) != nil {
+			t.Fatalf("scroll position unavailable: %s, %v", position, err)
+		}
+		if scroll.Value < startY {
+			break
+		}
+		if time.Now().After(scrollDeadline) {
+			t.Fatal("wheel did not move viewport")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, method := range []string{"scroll_to", "focus", "blur"} {
+		if _, err = call(ctx, scope, "chat", method, map[string]any{"selector": "#name"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err = call(ctx, scope, "chat", "fill", map[string]any{"selector": "#name", "value": "世界"}); err != nil {
 		t.Fatal(err)
 	}
@@ -231,28 +309,127 @@ func TestRealExtension(t *testing.T) {
 		t.Fatalf("action result missing: %s", snap)
 	}
 	checkBackground()
-	// Both target=_blank (including noopener) and window.open must become
-	// background task-owned tabs, not leaked foreground user tabs.
-	for i, selector := range []string{"#new-tab", "#popup"} {
-		if i > 0 {
-			if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err != nil {
-				t.Fatal(err)
-			}
-		}
+	// Agent-created navigation targets remain usable throughout their lifecycle.
+	// Cover both noopener links and script-created popup windows.
+	for _, selector := range []string{"#new-tab", "#popup"} {
 		if _, err = call(ctx, scope, "chat", "click", map[string]any{"selector": selector}); err != nil {
 			t.Fatal(err)
 		}
-		listed, e := call(ctx, scope, "chat", "tab_list", map[string]any{"scope": "agent"})
-		if e != nil {
+		popupID := 0
+		var e error
+		deadline := time.NewTimer(3 * time.Second)
+	waitPopup:
+		for popupID == 0 {
+			listed, listErr := call(ctx, scope, "chat", "tab_list", map[string]any{"scope": "all"})
+			if listErr != nil {
+				t.Fatal(listErr)
+			}
+			var result struct {
+				Tabs []struct {
+					ID  int    `json:"tab_id"`
+					URL string `json:"url"`
+				} `json:"tabs"`
+			}
+			if e = json.Unmarshal(listed, &result); e != nil {
+				t.Fatal(e)
+			}
+			for _, tab := range result.Tabs {
+				if strings.HasSuffix(tab.URL, "/linked") || strings.HasSuffix(tab.URL, "/popup") {
+					popupID = tab.ID
+				}
+			}
+			if popupID != 0 {
+				break waitPopup
+			}
+			select {
+			case <-tick.C:
+			case <-deadline.C:
+				t.Fatalf("fixture popup missing: %s", listed)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		}
+		deadline.Stop()
+		if _, e = call(ctx, scope, "chat", "tab_select", map[string]any{"tab_id": popupID}); e != nil {
 			t.Fatal(e)
 		}
-		var result struct {
-			Tabs []json.RawMessage `json:"tabs"`
+		if _, e = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": popupID}); e != nil {
+			t.Fatal(e)
 		}
-		if json.Unmarshal(listed, &result) != nil || len(result.Tabs) != i+2 {
-			t.Fatalf("page-created tab was not claimed: %s", listed)
+		if _, e = call(ctx, scope, "chat", "tab_close", map[string]any{"tab_id": popupID}); e != nil {
+			t.Fatal(e)
 		}
-		checkBackground()
+	}
+	// A genuine user-created tab inside the task window remains unauthorized,
+	// but can be borrowed there with an actual browser confirmation.
+	_, _ = io.WriteString(input, "create-unowned-tab\n")
+	var userTab struct {
+		ID int `json:"tab_id"`
+	}
+	select {
+	case line := <-hostLines:
+		if err = json.Unmarshal([]byte(line), &userTab); err != nil || userTab.ID == 0 {
+			t.Fatalf("create fixture tab: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	for _, method := range []string{"snapshot", "tab_select", "tab_close"} {
+		if _, err = call(ctx, scope, "chat", method, map[string]any{"tab_id": userTab.ID}); err == nil ||
+			!strings.Contains(err.Error(), "permission_denied") {
+			t.Fatalf("unowned user tab accepted %s: %v", method, err)
+		}
+	}
+	borrowDone := make(chan error, 1)
+	go func() {
+		_, borrowErr := call(ctx, scope, "chat", "tab_borrow", map[string]any{"tab_id": userTab.ID})
+		borrowDone <- borrowErr
+	}()
+	for !m.Status(scope, "chat").NeedsHelp {
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if m.Status(scope, "chat").Action != "tab_borrow" {
+		t.Fatal("borrow confirmation must identify its handoff separately from login help")
+	}
+	_, _ = io.WriteString(input, "approve-borrow\n")
+	select {
+	case line := <-hostLines:
+		if line != "approve-borrow-done" {
+			t.Fatalf("borrow confirmation: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case err = <-borrowDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if _, err = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": userTab.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = call(ctx, scope, "chat", "tab_return", map[string]any{"tab_id": userTab.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = call(ctx, scope, "chat", "snapshot", map[string]any{"tab_id": userTab.ID}); err == nil ||
+		!strings.Contains(err.Error(), "permission_denied") {
+		t.Fatalf("returned tab remained readable: %v", err)
+	}
+	_, _ = fmt.Fprintf(input, "remove-fixture-tab %d\n", userTab.ID)
+	select {
+	case line := <-hostLines:
+		if line != "fixture-tab-removed" {
+			t.Fatalf("fixture cleanup: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	if _, err = call(ctx, scope, "chat", "tab_create", map[string]any{"url": fixture.URL}); err != nil {
 		t.Fatal(err)
@@ -299,20 +476,77 @@ func TestRealExtension(t *testing.T) {
 	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
 		t.Fatal(err)
 	}
-	// Completing the real extension help overlay releases the same pending RPC.
+	// A fully loaded HTTP error is still a completed navigation. Inline redirects
+	// may replace the initial loader before its DOMContentLoaded event.
+	for _, path := range []string{"/error-page", "/redirect-error"} {
+		result, navErr := call(ctx, scope, "chat", "navigate", map[string]any{
+			"url": fixture.URL + path, "timeout_ms": 2000,
+		})
+		if navErr != nil || !strings.Contains(string(result), `"reached":"domcontentloaded"`) {
+			t.Fatalf("loaded error-page navigation %s: %s, %v", path, result, navErr)
+		}
+		observed, observeErr := call(ctx, scope, "chat", "snapshot", nil)
+		if observeErr != nil || !strings.Contains(string(observed), "Requested page does not exist") {
+			t.Fatalf("error page must remain readable: %s, %v", observed, observeErr)
+		}
+	}
+	// Rendering an error message does not imply DOMContentLoaded. The extension
+	// must report its own lifecycle timeout before the outer RPC deadline, leaving
+	// observation available to inspect the displayed error instead of pausing.
+	slowError, navErr := call(ctx, scope, "chat", "navigate", map[string]any{
+		"url": fixture.URL + "/slow-error-page", "timeout_ms": 200,
+	})
+	if navErr != nil || !NavigationIncomplete("navigate", slowError) {
+		t.Fatalf("expected inspectable navigation timeout, got %s, %v", slowError, navErr)
+	}
+	if m.Status(scope, "chat").Paused {
+		t.Fatal("a reported navigation wait timeout must not block page observation")
+	}
+	errorPage, observeErr := call(ctx, scope, "chat", "snapshot", nil)
+	if observeErr != nil || !strings.Contains(string(errorPage), "Visible error while response is loading") {
+		t.Fatalf("cannot inspect error page after navigation timeout: %s, %v", errorPage, observeErr)
+	}
+	// The human can fill a login form and navigate; help reappears in the new
+	// document and its completion releases the same pending RPC.
+	if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL + "/login"}); err != nil {
+		t.Fatal(err)
+	}
 	go func() {
 		result, e := call(ctx, scope, "chat", "request_help", map[string]any{
 			"prompt": "Confirm this fixture step", "timeout_ms": 10000,
+			// This text exists before login. Legacy criteria must not complete
+			// the help RPC before the human confirms the actual login.
+			"completion_criteria": map[string]any{"any": []map[string]string{{"text_exists": "看过"}}},
 		})
 		if e == nil && !strings.Contains(string(result), `"continued"`) {
 			e = fmt.Errorf("unexpected help outcome: %s", result)
 		}
 		helpDone <- e
 	}()
-	_, _ = io.WriteString(input, "complete-help\n")
+	for !m.Status(scope, "chat").NeedsHelp {
+		select {
+		case err := <-helpDone:
+			t.Fatalf("help completed before handoff: %v", err)
+		case <-tick.C:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	// Give the upstream automatic detector time to run. No human has acted.
+	select {
+	case err := <-helpDone:
+		t.Fatalf("help completed without manual confirmation: %v", err)
+	case <-time.After(2500 * time.Millisecond):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if !m.Status(scope, "chat").NeedsHelp {
+		t.Fatal("help prompt disappeared before the user completed login")
+	}
+	_, _ = io.WriteString(input, "complete-login\n")
 	select {
 	case line := <-hostLines:
-		if line != "complete-help-done" {
+		if line != "complete-login-done" {
 			t.Fatalf("complete help: %s", line)
 		}
 	case <-ctx.Done():
@@ -328,6 +562,13 @@ func TestRealExtension(t *testing.T) {
 	}
 	if m.Status(scope, "chat").Paused || m.Status(scope, "chat").NeedsHelp {
 		t.Fatal("completed help did not release automation")
+	}
+	loggedIn, err := call(ctx, scope, "chat", "snapshot", nil)
+	if err != nil || !strings.Contains(string(loggedIn), "Fixture login complete") {
+		t.Fatalf("agent could not resume after manual login: %s, %v", loggedIn, err)
+	}
+	if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err != nil {
+		t.Fatal(err)
 	}
 	checkBackground()
 	if err = m.Focus(ctx, scope, "chat"); err != nil {
@@ -500,6 +741,72 @@ func TestRealExtension(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
+	}
+	checkCleanup()
+	// Closing the final page through the agent is normal cleanup, not a user
+	// interrupt. The following turn must start without a manual Resume click.
+	if err = m.Control(ctx, scope, "chat", "select"); err != nil {
+		t.Fatal(err)
+	}
+	lastPage, err := call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL})
+	var lastTab struct {
+		ID int `json:"tab_id"`
+	}
+	if err != nil || json.Unmarshal(lastPage, &lastTab) != nil || lastTab.ID == 0 {
+		t.Fatalf("last tab fixture: %s, %v", lastPage, err)
+	}
+	if _, err = call(ctx, scope, "chat", "tab_close", map[string]any{"tab_id": lastTab.ID}); err != nil {
+		t.Fatal(err)
+	}
+	// The model streams its answer before turn cleanup. Let Chrome's queued
+	// window-removal event arrive instead of racing it with session.stop.
+	time.Sleep(250 * time.Millisecond)
+	if m.Status(scope, "chat").Paused {
+		t.Fatal("agent tab_close was reported as a user interrupt")
+	}
+	if err = m.FinishTurn(ctx, scope, "chat", false); err != nil {
+		t.Fatal(err)
+	}
+	if m.Status(scope, "chat").Paused {
+		t.Fatal("agent closing the final tab incorrectly paused the task")
+	}
+	checkCleanup()
+	// Closing a window outside the agent command must still pause the task.
+	if err = m.Control(ctx, scope, "chat", "select"); err != nil {
+		t.Fatal(err)
+	}
+	lastPage, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL})
+	if err != nil || json.Unmarshal(lastPage, &lastTab) != nil || lastTab.ID == 0 {
+		t.Fatalf("manual close fixture: %s, %v", lastPage, err)
+	}
+	_, _ = fmt.Fprintf(input, "close-fixture-window %d\n", lastTab.ID)
+	select {
+	case line := <-hostLines:
+		if line != "fixture-window-closed" {
+			t.Fatalf("manual window closure: %s", line)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	closeDeadline := time.After(5 * time.Second)
+	for !m.Status(scope, "chat").Paused {
+		select {
+		case <-tick.C:
+		case <-closeDeadline:
+			t.Fatal("manual window closure did not pause task")
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
+	if _, err = call(ctx, scope, "chat", "navigate", map[string]any{"url": fixture.URL}); err == nil ||
+		!strings.Contains(err.Error(), "task_paused") {
+		t.Fatalf("manual window closure did not block automation: %v", err)
+	}
+	if err = m.Control(ctx, scope, "chat", "resume"); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.FinishTurn(ctx, scope, "chat", false); err != nil {
+		t.Fatal(err)
 	}
 	checkCleanup()
 	// Repeated successful turns must return to the original user tabs, with

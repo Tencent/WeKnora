@@ -59,6 +59,7 @@ export default {
     "previewIdle": "마지막 화면 유지 중",
     "previewLive": "화면 동기화 중",
     "previewLoading": "화면 가져오는 중",
+    "borrowHint": "사용하려는 페이지로 전환하여 BrowserSkill 확인 창에서 허용 또는 거부를 선택하세요. 허용하면 자동으로 계속됩니다. 작업 계속은 일시 중지만 해제하며 탭 사용을 승인하지 않습니다.",
     "helpHint": "인증 또는 권한 승인이 필요합니다. 미리보기를 클릭하여 이동하세요.",
 
     "settingsTitle": "브라우저 연결",

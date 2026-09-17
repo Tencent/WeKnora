@@ -59,6 +59,7 @@ export default {
     "previewIdle": "Last preview retained",
     "previewLive": "Preview syncing",
     "previewLoading": "Fetching preview",
+    "borrowHint": "Switch to the page being borrowed and choose Allow or Deny in the BrowserSkill confirmation. Approval continues automatically. Continue operation only resumes a paused task; it does not approve borrowing.",
     "helpHint": "Open the browser from the preview, complete the requested step, then confirm completion in the browser help overlay.",
 
     "settingsTitle": "Browser connection",
