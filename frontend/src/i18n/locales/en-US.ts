@@ -3554,7 +3554,25 @@ export default {
         descriptionLanguageAuto: 'Follow document language',
         customInstructionsLabel: 'Image Processing Instructions',
         customInstructionsDescription: 'Add visual priorities while OCR and Markdown output contracts remain fixed',
-        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…'
+        customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…',
+        imagePostProcessLabel: 'Image post-processing',
+        imagePostProcessDescription: 'When on, a two-round pipeline runs: a batched classify-and-describe round, then OCR per the class table below, and the selected classes are retired automatically. When off, the basic mode applies: every image is described and OCR runs for all of them, one by one',
+        imageBatchSizeLabel: 'Describe batch size',
+        imageBatchSizeDescription: 'How many images share one describe request. Saves request count, not tokens — useful for APIs billed per request; 1 = one image per request, max 16',
+        imageDownscaleLabel: 'Downscale before describe',
+        imageDownscaleDescription: 'Shrink images to a 640px long edge before the describe round, cutting prompt tokens sharply; turn off for models that handle full resolution well',
+        imageClassPoliciesLabel: 'Class policies',
+        imageClassPoliciesDescription: "Per-class post-processing: Disabled removes the class's references from the body text (the image stops reaching models through the text), while its caption and OCR text are still generated and remain searchable; OCR runs a text-extraction round on the image",
+        policyDisabledCol: 'Disabled',
+        policyOcrCol: 'OCR',
+        imageClassChart: 'Chart',
+        imageClassDecorative: 'Decorative',
+        imageClassLogo: 'Logo',
+        imageClassPhoto: 'Photo',
+        imageClassTableImage: 'Table image',
+        imageClassTextScreenshot: 'Text screenshot',
+        imageClassOther: 'Other',
+        imagePipelineKbNote: 'Defaults follow the knowledge base settings; adjust them for this task'
       }
     }
   },

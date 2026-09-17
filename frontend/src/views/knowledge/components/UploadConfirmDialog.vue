@@ -421,6 +421,53 @@
                             />
                           </div>
                         </div>
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
+                          <div class="setting-info">
+                            <label>{{ t('knowledgeEditor.advanced.multimodal.imagePostProcessLabel') }}</label>
+                            <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imagePostProcessDescription') }}</p>
+                          </div>
+                          <t-switch v-model="uiState.imagePostProcessEnabled" size="medium" />
+                        </div>
+                        <template v-if="uiState.multimodalConfig.enabled && uiState.imagePostProcessEnabled">
+                          <div class="setting-row">
+                            <div class="setting-info">
+                              <label>{{ t('knowledgeEditor.advanced.multimodal.imageBatchSizeLabel') }}</label>
+                              <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageBatchSizeDescription') }}</p>
+                            </div>
+                            <t-input-number v-model="uiState.imageBatchSize" :min="1" :max="16" :step="1"
+                              theme="column" style="width: 120px" />
+                          </div>
+                          <div class="setting-row">
+                            <div class="setting-info">
+                              <label>{{ t('knowledgeEditor.advanced.multimodal.imageDownscaleLabel') }}</label>
+                              <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageDownscaleDescription') }}</p>
+                            </div>
+                            <t-switch v-model="uiState.imageDownscaleEnabled" size="medium" />
+                          </div>
+                          <div class="setting-row setting-row-vertical">
+                            <div class="setting-info">
+                              <label>{{ t('knowledgeEditor.advanced.multimodal.imageClassPoliciesLabel') }}</label>
+                              <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageClassPoliciesDescription') }}</p>
+                            </div>
+                            <div class="image-policy-table">
+                              <div class="image-policy-row image-policy-head">
+                                <span></span>
+                                <span>{{ t('knowledgeEditor.advanced.multimodal.policyDisabledCol') }}</span>
+                                <span>{{ t('knowledgeEditor.advanced.multimodal.policyOcrCol') }}</span>
+                              </div>
+                              <div v-for="cls in IMAGE_CLASS_ORDER" :key="cls" class="image-policy-row">
+                                <span class="image-policy-name">{{ t(imageClassLabelKey(cls)) }} <span class="image-policy-en">{{ cls }}</span></span>
+                                <span>
+                                  <t-switch v-model="uiState.imageClassPolicies[cls].disabled" size="small" />
+                                </span>
+                                <span>
+                                  <t-switch v-model="uiState.imageClassPolicies[cls].ocr" size="small" />
+                                </span>
+                              </div>
+                            </div>
+                            <div class="image-pipeline-kb-note">{{ t('knowledgeEditor.advanced.multimodal.imagePipelineKbNote') }}</div>
+                          </div>
+                        </template>
                       </div>
                     </div>
                   </div>
@@ -581,7 +628,7 @@ import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useUIStore } from '@/stores/ui'
 import { formatFileSize, getFileIcon } from '@/utils/files'
 import { getUploadFileKey } from '../utils/uploadSources'
-import { listKnowledgeTags } from '@/api/knowledge-base'
+import { listKnowledgeTags, mergeImageClassPolicies, IMAGE_CLASS_ORDER } from '@/api/knowledge-base'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue'
 import { folderOptionFromPath, sortFolderOptions } from '../folderTree'
@@ -621,6 +668,10 @@ interface UploadUIState {
   summaryEnabled: boolean
   chunkingConfig: ChunkingUIConfig
   multimodalConfig: { enabled: boolean; vllmModelId: string; descriptionLanguage?: string; customInstructions?: string }
+  imagePostProcessEnabled: boolean
+  imageBatchSize: number
+  imageDownscaleEnabled: boolean
+  imageClassPolicies: Record<string, { ocr: boolean; caption: boolean; disabled: boolean }>
   asrConfig: { enabled: boolean; modelId: string; language: string }
   questionGenerationConfig: { enabled: boolean; questionCount: number; customInstructions?: string }
   nodeExtractConfig: {
@@ -799,6 +850,10 @@ function inferMediaExtsFromMarkdown(content: string): string[] {
 
 const manualCharCount = computed(() => props.manualPreview?.content?.length ?? 0)
 const batchItemCount = computed(() => localFiles.value.length + localUrls.value.length)
+
+const imageClassLabelKey = (cls: string) =>
+  'knowledgeEditor.advanced.multimodal.imageClass' +
+  cls.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('')
 
 const dialogTitle = computed(() => {
   if (props.mode === 'manual') return t('uploadConfirm.titleManual')
@@ -1097,6 +1152,10 @@ function createDefaultUIState(): UploadUIState {
       tableMetadataInstructions: '',
     },
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
+    imagePostProcessEnabled: false,
+    imageBatchSize: 1,
+    imageDownscaleEnabled: true,
+    imageClassPolicies: mergeImageClassPolicies({}),
     asrConfig: { enabled: false, modelId: '', language: '' },
     questionGenerationConfig: { enabled: true, questionCount: 3, customInstructions: '' },
     nodeExtractConfig: {
@@ -1139,6 +1198,11 @@ function initFromKbInfo(kb: any) {
       descriptionLanguage: kb.vlm_config?.description_language || '',
       customInstructions: kb.vlm_config?.custom_instructions || '',
     },
+    // 默认跟随知识库的图片后处理设置；用户可对本次任务单独覆盖。
+    imagePostProcessEnabled: !!kb.image_processing_config?.post_process_image_enabled,
+    imageBatchSize: Math.min(16, Math.max(1, kb.image_processing_config?.batch_size || 1)),
+    imageDownscaleEnabled: kb.image_processing_config?.classify_downscale_enabled !== false,
+    imageClassPolicies: mergeImageClassPolicies(kb.image_processing_config?.class_policies),
     asrConfig: {
       enabled: !!kb.asr_config?.enabled,
       modelId: kb.asr_config?.model_id || '',
@@ -1185,6 +1249,10 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       table_metadata_instructions: chunking.tableMetadataInstructions,
     },
     enable_multimodel: state.multimodalConfig.enabled,
+    post_process_image_enabled: state.imagePostProcessEnabled,
+    image_batch_size: state.imageBatchSize,
+    image_classify_downscale_enabled: state.imageDownscaleEnabled,
+    image_class_policies: state.imageClassPolicies,
     vlm_config: {
       enabled: state.multimodalConfig.enabled,
       model_id: state.multimodalConfig.vllmModelId,
@@ -1241,6 +1309,10 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   }
   if (o.parser_engine_rules) s.chunkingConfig.parserEngineRules = o.parser_engine_rules
   if (o.enable_multimodel != null) s.multimodalConfig.enabled = o.enable_multimodel
+  if (o.post_process_image_enabled != null) s.imagePostProcessEnabled = o.post_process_image_enabled
+  if (o.image_batch_size != null) s.imageBatchSize = Math.min(16, Math.max(1, o.image_batch_size))
+  if (o.image_classify_downscale_enabled != null) s.imageDownscaleEnabled = o.image_classify_downscale_enabled
+  if (o.image_class_policies) s.imageClassPolicies = mergeImageClassPolicies(o.image_class_policies)
   if (o.vlm_config) {
     if (o.vlm_config.enabled != null) s.multimodalConfig.enabled = o.vlm_config.enabled
     if (o.vlm_config.model_id != null) s.multimodalConfig.vllmModelId = o.vlm_config.model_id
@@ -1473,6 +1545,57 @@ const handleConfirm = () => {
 </script>
 
 <style lang="less" scoped>
+// 与知识库编辑器同款的类别策略表（批大小 / 降分辨率 / 屏蔽类别可改）
+.image-policy-table {
+  width: 100%;
+  max-width: 640px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-sm);
+  overflow: hidden;
+  font-size: var(--app-text-md);
+}
+
+.image-policy-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr 1fr;
+  align-items: center;
+  padding: 6px 12px;
+
+  & + .image-policy-row {
+    border-top: 1px solid var(--td-component-border);
+  }
+
+  span {
+    text-align: center;
+
+    &:first-child {
+      text-align: left;
+    }
+  }
+
+  &.image-policy-head {
+    background: var(--td-bg-color-secondarycontainer);
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+}
+
+.image-policy-name {
+  color: var(--td-text-color-primary);
+}
+
+.image-policy-en {
+  margin-left: 6px;
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
+}
+
+.image-pipeline-kb-note {
+  margin-top: 4px;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+}
+
 .upload-confirm-overlay {
   position: fixed;
   inset: 0;

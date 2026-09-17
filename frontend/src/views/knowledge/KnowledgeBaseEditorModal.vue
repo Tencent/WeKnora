@@ -363,6 +363,54 @@
                   :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
               </div>
             </div>
+
+            <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePostProcessLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imagePostProcessDescription') }}</p>
+              </div>
+              <t-switch v-model="formData.imagePostProcessEnabled" size="medium" />
+            </div>
+
+            <template v-if="formData.multimodalConfig.enabled && formData.imagePostProcessEnabled">
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label>{{ $t('knowledgeEditor.advanced.multimodal.imageBatchSizeLabel') }}</label>
+                  <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageBatchSizeDescription') }}</p>
+                </div>
+                <t-input-number v-model="formData.imageBatchSize" :min="1" :max="16" :step="1"
+                  style="width: 120px" theme="column" />
+              </div>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label>{{ $t('knowledgeEditor.advanced.multimodal.imageDownscaleLabel') }}</label>
+                  <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageDownscaleDescription') }}</p>
+                </div>
+                <t-switch v-model="formData.imageDownscaleEnabled" size="medium" />
+              </div>
+              <div class="setting-row setting-row-vertical">
+                <div class="setting-info">
+                  <label>{{ $t('knowledgeEditor.advanced.multimodal.imageClassPoliciesLabel') }}</label>
+                  <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageClassPoliciesDescription') }}</p>
+                </div>
+                <div class="image-policy-table">
+                  <div class="image-policy-row image-policy-head">
+                    <span></span>
+                    <span>{{ $t('knowledgeEditor.advanced.multimodal.policyDisabledCol') }}</span>
+                    <span>{{ $t('knowledgeEditor.advanced.multimodal.policyOcrCol') }}</span>
+                  </div>
+                  <div v-for="cls in imageClassOrder" :key="cls" class="image-policy-row">
+                    <span class="image-policy-name">{{ $t(imageClassLabelKey(cls)) }} <span class="image-policy-en">{{ cls }}</span></span>
+                    <span>
+                      <t-switch v-model="formData.imageClassPolicies[cls].disabled" size="small" />
+                    </span>
+                    <span>
+                      <t-switch v-model="formData.imageClassPolicies[cls].ocr" size="small" />
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -503,8 +551,19 @@ import {
   updateKnowledgeBase,
   rebuildKBIndex,
   generateKnowledgeBaseProfile,
+  mergeImageClassPolicies,
+  IMAGE_CLASS_ORDER,
   type KnowledgeBaseProfile,
 } from '@/api/knowledge-base'
+
+// Display order for the class policy table (mirrors the backend enum keys).
+const imageClassOrder = IMAGE_CLASS_ORDER
+
+// i18n key for one class label: snake_case class name to PascalCase suffix
+// ("table_image" -> "...imageClassTableImage").
+const imageClassLabelKey = (cls: string) =>
+  'knowledgeEditor.advanced.multimodal.imageClass' +
+  cls.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join('')
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { selectInitialModelId } from '@/utils/modelDefaults'
@@ -807,6 +866,14 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       descriptionLanguage: '',
       customInstructions: ''
     },
+    // 图片后处理：开关 + 三个子设置（批大小、降分辨率、类别策略）由 UI 编辑；
+    // 其余配置（classify_max_edge、规则 JSON 等）按加载时的快照原样回传，
+    // 避免把 API 侧写入的设置洗掉。
+    imagePostProcessEnabled: false,
+    imageBatchSize: 1,
+    imageDownscaleEnabled: true,
+    imageClassPolicies: mergeImageClassPolicies(),
+    imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
       enabled: false,
       modelId: '',
@@ -956,6 +1023,17 @@ const loadKBData = async (
         descriptionLanguage: kb.vlm_config?.description_language || '',
         customInstructions: kb.vlm_config?.custom_instructions || ''
       },
+      imagePostProcessEnabled:
+        !!(kb as Record<string, any>).image_processing_config?.post_process_image_enabled,
+      imageBatchSize:
+        Math.min(16, Math.max(1, (kb as Record<string, any>).image_processing_config?.batch_size || 1)),
+      imageDownscaleEnabled:
+        (kb as Record<string, any>).image_processing_config?.classify_downscale_enabled !== false,
+      imageClassPolicies: mergeImageClassPolicies(
+        (kb as Record<string, any>).image_processing_config?.class_policies,
+      ),
+      imageProcessingConfigSnapshot:
+        (kb as Record<string, any>).image_processing_config || null,
       asrConfig: {
         enabled: !!kb.asr_config?.enabled,
         modelId: kb.asr_config?.model_id || '',
@@ -1335,6 +1413,23 @@ const buildSubmitData = () => {
       : '',
     description_language: formData.value.multimodalConfig.descriptionLanguage || '',
     custom_instructions: formData.value.multimodalConfig.customInstructions || ''
+  }
+
+  // 图片处理配置：后端是整体替换语义（payload 不带该字段 = 保持不变）。
+  // UI 编辑开关 + 批大小 + 降分辨率 + 类别策略，其余字段（classify_max_edge、
+  // 规则 JSON 等）从快照原样带走；整体与快照一致时不发，保持请求最小。
+  {
+    const snap = formData.value.imageProcessingConfigSnapshot || {}
+    const built = {
+      ...snap,
+      post_process_image_enabled: formData.value.imagePostProcessEnabled,
+      batch_size: formData.value.imageBatchSize,
+      classify_downscale_enabled: formData.value.imageDownscaleEnabled,
+      class_policies: JSON.parse(JSON.stringify(formData.value.imageClassPolicies)),
+    }
+    if (JSON.stringify(built) !== JSON.stringify(snap)) {
+      data.image_processing_config = built
+    }
   }
 
   // 添加ASR语音识别配置
@@ -1726,6 +1821,51 @@ watch(() => chatResources.allModels, (list) => {
 </script>
 
 <style scoped lang="less">
+// 类别策略表（图片后处理）：三列网格，列宽固定，开关居中
+.image-policy-table {
+  width: 100%;
+  max-width: 640px;
+  border: 1px solid var(--td-component-border);
+  border-radius: var(--app-radius-sm);
+  overflow: hidden;
+  font-size: var(--app-text-md);
+}
+
+.image-policy-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr 1fr;
+  align-items: center;
+  padding: 6px 12px;
+
+  & + .image-policy-row {
+    border-top: 1px solid var(--td-component-border);
+  }
+
+  span {
+    text-align: center;
+
+    &:first-child {
+      text-align: left;
+    }
+  }
+
+  &.image-policy-head {
+    background: var(--td-bg-color-secondarycontainer);
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+}
+
+.image-policy-name {
+  color: var(--td-text-color-primary);
+}
+
+.image-policy-en {
+  margin-left: 6px;
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
+}
+
 // 复用创建知识库的样式
 /* 左侧导航：与 AgentEditorModal 对齐 */
 .content-wrapper {
@@ -1979,6 +2119,17 @@ watch(() => chatResources.allModels, (list) => {
 
     &:last-child {
       border-bottom: none;
+    }
+  }
+
+  // 纵向行（类别策略表用）：说明文字占满整行，表格换到下一行
+  .setting-row-vertical {
+    flex-direction: column;
+    align-items: stretch;
+
+    > .setting-info {
+      max-width: 100%;
+      padding-right: 0;
     }
   }
 
