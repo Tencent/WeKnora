@@ -159,6 +159,28 @@ func (a *asynqTaskInspector) CancelTasksForKnowledgeBase(
 	return deleted, cancelled, nil
 }
 
+// matchesKnowledgeListDelete identifies a knowledge:list_delete task whose
+// batch payload covers knowledgeID. Delete tasks carry knowledge_ids (plural)
+// and are deliberately outside taskTypesForKnowledgeCancel, so they need
+// their own matcher for the housekeeping delete sweep's liveness probe.
+func matchesKnowledgeListDelete(taskType string, payload []byte, knowledgeID string) bool {
+	if taskType != types.TypeKnowledgeListDelete {
+		return false
+	}
+	var probe struct {
+		KnowledgeIDs []string `json:"knowledge_ids"`
+	}
+	if err := json.Unmarshal(payload, &probe); err != nil {
+		return false
+	}
+	for _, id := range probe.KnowledgeIDs {
+		if id == knowledgeID {
+			return true
+		}
+	}
+	return false
+}
+
 // HasQueuedTasksForKnowledge reports whether any pending / scheduled /
 // retry / active task referencing knowledgeID still lives in the queue.
 // Read-only counterpart of CancelTasksForKnowledge — the housekeeping
@@ -172,6 +194,29 @@ func (a *asynqTaskInspector) HasQueuedTasksForKnowledge(
 	}
 	matcher := func(taskType string, payload []byte) bool {
 		return matchesKnowledge(taskType, payload, knowledgeID)
+	}
+	for _, queue := range queuesScanned {
+		for _, state := range a.cancellableTaskStates() {
+			if a.queueStateHasMatch(ctx, queue, state.name, state.list, matcher) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// HasQueuedDeleteTasksForKnowledge is the delete-task counterpart of
+// HasQueuedTasksForKnowledge: it matches knowledge:list_delete batch
+// payloads that still cover the knowledge ID. The housekeeping delete
+// sweep uses it to protect backlogged-but-alive deletes from recovery.
+func (a *asynqTaskInspector) HasQueuedDeleteTasksForKnowledge(
+	ctx context.Context, knowledgeID string,
+) (bool, error) {
+	if a == nil || a.inspector == nil || knowledgeID == "" {
+		return false, nil
+	}
+	matcher := func(taskType string, payload []byte) bool {
+		return matchesKnowledgeListDelete(taskType, payload, knowledgeID)
 	}
 	for _, queue := range queuesScanned {
 		for _, state := range a.cancellableTaskStates() {
@@ -1076,6 +1121,15 @@ func (noopTaskInspector) CancelTasksForKnowledge(
 // executors never enqueue, so there is no backlog to protect against and
 // the housekeeping sweep's span/updated_at checks stay authoritative.
 func (noopTaskInspector) HasQueuedTasksForKnowledge(
+	ctx context.Context, knowledgeID string,
+) (bool, error) {
+	return false, nil
+}
+
+// HasQueuedDeleteTasksForKnowledge always reports false in Lite mode:
+// deletes also run inline there, so a stale "deleting" row genuinely has
+// no task left and the delete sweep may recover it.
+func (noopTaskInspector) HasQueuedDeleteTasksForKnowledge(
 	ctx context.Context, knowledgeID string,
 ) (bool, error) {
 	return false, nil

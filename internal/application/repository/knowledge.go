@@ -705,8 +705,12 @@ func (r *knowledgeRepository) CountKnowledgeByKnowledgeBaseID(
 	kbID string,
 ) (int64, error) {
 	var count int64
+	// Mirror the document list's view (applyKnowledgeListFilter): rows
+	// mid-deletion are hidden there, so counting them here is what produced
+	// the "4 documents, 3 listed" ghost on the KB card (issues #3338/#3345).
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?",
+			tenantID, kbID, types.ParseStatusDeleting).
 		Count(&count).Error
 	return count, err
 }

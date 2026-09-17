@@ -138,3 +138,28 @@ func TestCheckKnowledgeExists_ParseStatusMatrix(t *testing.T) {
 		})
 	}
 }
+
+// TestCountKnowledgeByKnowledgeBaseID_ExcludesDeleting pins the count/list
+// alignment (issues #3338/#3345): the document list hides rows mid-deletion,
+// so the KB card count must not include them either — otherwise a stranded
+// delete shows up as "4 documents, 3 listed".
+func TestCountKnowledgeByKnowledgeBaseID_ExcludesDeleting(t *testing.T) {
+	db := setupKnowledgeTestDB(t)
+	repo := NewKnowledgeRepository(db)
+	for _, tc := range []struct{ id, status string }{
+		{"k-done", "completed"},
+		{"k-failed", "failed"},
+		{"k-deleting", "deleting"},
+	} {
+		require.NoError(t, db.Exec(`
+			INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, file_name, parse_status)
+			VALUES (?, 1, 'kb-cnt', 'file', ?, ?)
+		`, tc.id, tc.id+".md", tc.status).Error)
+	}
+
+	count, err := repo.CountKnowledgeByKnowledgeBaseID(context.Background(), 1, "kb-cnt")
+	require.NoError(t, err)
+	// failed rows stay counted (they are visible, actionable cards); only
+	// the hidden mid-deletion row drops out.
+	require.Equal(t, int64(2), count)
+}
