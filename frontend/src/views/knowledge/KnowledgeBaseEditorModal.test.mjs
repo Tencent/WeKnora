@@ -30,3 +30,12 @@ test('shows a post-create hint after the first successful save', () => {
   assert.match(source, /settings-footer-note/)
   assert.match(source, /knowledgeEditor\.postCreateHint\.followUpDesc/)
 })
+
+test('create mode seeds the full default class policy table', () => {
+  // Regression: an empty imageClassPolicies in initFormData made the policy
+  // table read `undefined.disabled` the moment the post-process switch was
+  // turned on in the create dialog, crashing the modal.
+  const initBlock = source.match(/const initFormData[\s\S]*?imageClassPolicies: ([^,]+),/)?.[1]
+  assert.ok(initBlock, 'expected to find imageClassPolicies in initFormData')
+  assert.match(initBlock, /mergeImageClassPolicies\(\)/)
+})

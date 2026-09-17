@@ -869,6 +869,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 图片后处理：开关 + 三个子设置（批大小、降分辨率、类别策略）由 UI 编辑；
     // 其余配置（classify_max_edge、规则 JSON 等）按加载时的快照原样回传，
     // 避免把 API 侧写入的设置洗掉。
+    // 新建模式也必须用完整默认表初始化类别策略——策略表模板直接读
+    // imageClassPolicies[cls].disabled/.ocr，空对象会让打开开关的瞬间渲染崩溃。
     imagePostProcessEnabled: false,
     imageBatchSize: 1,
     imageDownscaleEnabled: true,
