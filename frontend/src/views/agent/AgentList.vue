@@ -42,7 +42,7 @@
 
         <!-- 骨架屏占位 -->
         <div v-if="loading && agents.length === 0" class="agent-card-wrap">
-          <div v-for="n in 6" :key="'skel-' + n" class="agent-card agent-card-skeleton">
+          <div v-for="n in 6" :key="'skel-' + n" class="agent-card agent-card-skeleton is-skeleton">
             <div class="card-header">
               <div class="card-header-left">
                 <t-skeleton animation="gradient"
@@ -637,11 +637,9 @@
         </div>
 
         <!-- 空状态：全部（保留创建 CTA） -->
-        <div v-if="spaceSelection === 'all' && filteredAgents.length === 0 && !loading" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
-          <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn empty-state-btn"
+        <EmptyState v-if="spaceSelection === 'all' && filteredAgents.length === 0 && !loading" icon="chat-bubble-1" :title="$t('agent.empty.title')"
+          :description="$t('agent.empty.description')">
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn"
             data-guide="agent-list-create" @click="handleCreateAgent">
             <template #icon>
               <span class="btn-icon-wrapper">
@@ -664,25 +662,17 @@
             </template>
             <span>{{ $t('agent.createAgent') }}</span>
           </t-button>
-        </div>
+        </EmptyState>
 
         <!-- 空状态：收藏 / 最近 — 不放创建按钮，参见 KnowledgeBaseList 的同处理由 -->
-        <div v-if="spaceSelection === 'favorites' && filteredAgents.length === 0 && !loading" class="empty-state">
-          <t-icon name="star" size="48px" class="empty-icon" />
-          <span class="empty-txt">{{ $t('agent.empty.favoritesTitle') }}</span>
-          <span class="empty-desc">{{ $t('agent.empty.favoritesDescription') }}</span>
-        </div>
-        <div v-if="spaceSelection === 'recents' && filteredAgents.length === 0 && !loading" class="empty-state">
-          <t-icon name="history" size="48px" class="empty-icon" />
-          <span class="empty-txt">{{ $t('agent.empty.recentsTitle') }}</span>
-          <span class="empty-desc">{{ $t('agent.empty.recentsDescription') }}</span>
-        </div>
+        <EmptyState v-if="spaceSelection === 'favorites' && filteredAgents.length === 0 && !loading" icon="star" :title="$t('agent.empty.favoritesTitle')"
+          :description="$t('agent.empty.favoritesDescription')" />
+        <EmptyState v-if="spaceSelection === 'recents' && filteredAgents.length === 0 && !loading" icon="history" :title="$t('agent.empty.recentsTitle')"
+          :description="$t('agent.empty.recentsDescription')" />
         <!-- 空状态：我的 -->
-        <div v-if="spaceSelection === 'mine' && agents.length === 0 && !loading" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
-          <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn empty-state-btn"
+        <EmptyState v-if="spaceSelection === 'mine' && agents.length === 0 && !loading" icon="chat-bubble-1" :title="$t('agent.empty.title')"
+          :description="$t('agent.empty.description')">
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn"
             @click="handleCreateAgent">
             <template #icon>
               <span class="btn-icon-wrapper">
@@ -705,13 +695,10 @@
             </template>
             <span>{{ $t('agent.createAgent') }}</span>
           </t-button>
-        </div>
+        </EmptyState>
         <!-- 空状态：空间下 -->
-        <div v-if="spaceSelectionOrgId && !spaceAgentsLoading && spaceAgentsList.length === 0" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ $t('agent.empty.sharedTitle') }}</span>
-          <span class="empty-desc">{{ $t('agent.empty.sharedDescription') }}</span>
-        </div>
+        <EmptyState v-if="spaceSelectionOrgId && !spaceAgentsLoading && spaceAgentsList.length === 0" icon="chat-bubble-1" :title="$t('agent.empty.sharedTitle')"
+          :description="$t('agent.empty.sharedDescription')" />
       </div>
     </div>
 
@@ -797,6 +784,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
+import EmptyState from '@/components/EmptyState.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -1590,6 +1578,8 @@ defineExpose({
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/resource-card.less';
+
 .agent-list-container {
   margin: 0;
   height: 100%;
@@ -1874,49 +1864,12 @@ defineExpose({
 }
 
 .agent-card-wrap {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr;
-  animation: contentFadeIn 0.32s ease-out;
-}
-
-.agent-card-skeleton {
-  cursor: default;
-
-  .card-header {
-    margin-bottom: 12px;
-  }
-
-  .card-content {
-    flex: 1;
-  }
-
-  .card-bottom {
-    margin-top: auto;
-  }
+  .resource-card-grid();
 }
 
 /* 与知识库列表卡片统一尺寸：紧凑行高、148px 卡片高 */
 .agent-card {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  overflow: hidden;
-  box-sizing: border-box;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: var(--td-bg-color-container);
-  position: relative;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  height: 136px;
-  min-height: 136px;
-
-  &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  }
+  .resource-card();
 
   .agent-favorite-star {
     // 浮在卡片右上角顶角。卡片自身有 padding，"更多"按钮在 header flex
@@ -1973,60 +1926,20 @@ defineExpose({
 
   // Agent 模式样式
   &.agent-mode-agent {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(124, 77, 255, 0.04) 100%);
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--app-accent-purple) 4%, transparent) 100%);
 
     &:hover {
       border-color: var(--td-brand-color);
-      box-shadow: 0 4px 12px rgba(124, 77, 255, 0.12);
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(124, 77, 255, 0.08) 100%);
+      box-shadow: 0 4px 12px color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--app-accent-purple) 8%, transparent) 100%);
     }
 
     .card-decoration {
-      color: rgba(124, 77, 255, 0.35);
+      color: color-mix(in srgb, var(--app-accent-purple) 35%, transparent);
     }
 
     &:hover .card-decoration {
-      color: rgba(124, 77, 255, 0.5);
-    }
-  }
-
-  // 确保内容在装饰之上
-  .card-header,
-  .card-content,
-  .card-bottom {
-    position: relative;
-    z-index: 1;
-  }
-
-  .card-header {
-    margin-bottom: 6px;
-  }
-
-  .card-title {
-    font-size: 15px;
-    line-height: 22px;
-  }
-
-  .card-content {
-    margin-bottom: 6px;
-  }
-
-  .card-description {
-    font-size: 12px;
-    line-height: 17px;
-  }
-
-  .card-bottom {
-    padding-top: 6px;
-  }
-
-  .more-wrap {
-    width: 28px;
-    height: 28px;
-
-    .more-icon {
-      width: 16px;
-      height: 16px;
+      color: color-mix(in srgb, var(--app-accent-purple) 50%, transparent);
     }
   }
 
@@ -2064,36 +1977,6 @@ defineExpose({
   }
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 6px;
-}
-
-.card-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-}
-
-.card-title {
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 22px;
-  letter-spacing: 0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
 .builtin-badge {
   display: inline-flex;
   align-items: center;
@@ -2129,7 +2012,7 @@ defineExpose({
   }
 
   &.agent {
-    background: linear-gradient(135deg, rgba(124, 77, 255, 0.15) 0%, rgba(124, 77, 255, 0.08) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--app-accent-purple) 15%, transparent) 0%, color-mix(in srgb, var(--app-accent-purple) 8%, transparent) 100%);
     color: var(--td-brand-color);
   }
 }
@@ -2152,93 +2035,16 @@ defineExpose({
   }
 }
 
-.more-wrap {
-  display: flex;
-  width: 28px;
-  height: 28px;
-  justify-content: center;
-  align-items: center;
-  border-radius: 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  opacity: 0;
-
-  .agent-card:hover & {
-    opacity: 0.6;
-  }
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  &.active-more {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  .more-icon {
-    width: 16px;
-    height: 16px;
-  }
-}
-
 /* 与知识库卡片内容区一致 */
-.card-content {
-  flex: 1;
-  min-height: 0;
-  margin-bottom: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 /* 三个列表卡片统一：描述字体 */
-.card-description {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-.card-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding-top: 8px;
-  border-top: .5px solid var(--td-component-stroke);
-}
-
 .bottom-left {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.feature-badges {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .feature-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  cursor: default;
-  transition: background 0.2s ease;
+  .resource-feature-badge();
 
   &.mode-normal {
     background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
@@ -2250,20 +2056,20 @@ defineExpose({
   }
 
   &.mode-agent {
-    background: rgba(124, 77, 255, 0.08);
+    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
     color: var(--td-brand-color);
 
     &:hover {
-      background: rgba(124, 77, 255, 0.12);
+      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
     }
   }
 
   &.web-search {
-    background: rgba(255, 152, 0, 0.08);
+    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
     color: var(--td-warning-color);
 
     &:hover {
-      background: rgba(255, 152, 0, 0.12);
+      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
     }
   }
 
@@ -2277,65 +2083,21 @@ defineExpose({
   }
 
   &.mcp {
-    background: rgba(236, 72, 153, 0.08);
+    background: color-mix(in srgb, var(--td-error-color) 8%, transparent);
     color: var(--td-error-color);
 
     &:hover {
-      background: rgba(236, 72, 153, 0.12);
+      background: color-mix(in srgb, var(--td-error-color) 12%, transparent);
     }
   }
 
   &.multi-turn {
-    background: rgba(59, 130, 246, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color);
 
     &:hover {
-      background: rgba(59, 130, 246, 0.12);
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     }
-  }
-}
-
-.card-time {
-  color: var(--td-text-color-placeholder);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 60px 20px;
-
-  .empty-img {
-    width: 162px;
-    height: 162px;
-    margin-bottom: 20px;
-  }
-
-  .empty-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 26px;
-    margin-bottom: 8px;
-  }
-
-  .empty-desc {
-    color: var(--td-text-color-disabled);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    margin-bottom: 0;
-  }
-
-  .empty-state-btn {
-    margin-top: 20px;
   }
 }
 

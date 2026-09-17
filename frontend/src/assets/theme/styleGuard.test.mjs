@@ -26,7 +26,7 @@ const RULES = [
     name: 'legacy-blue-rgba',
     why: '旧版 TDesign 蓝 rgba(0,82,217) 已不是品牌色',
     pattern: /rgba\(\s*0\s*,\s*82\s*,\s*217\s*,/g,
-    baseline: 40,
+    baseline: 18,
   },
   {
     name: 'td-token-fallback',

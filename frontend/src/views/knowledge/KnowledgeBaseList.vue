@@ -73,7 +73,7 @@
 
         <!-- 骨架屏占位 -->
         <div v-if="loading && kbs.length === 0" class="kb-card-wrap">
-          <div v-for="n in 6" :key="'skel-' + n" class="kb-card kb-card-skeleton">
+          <div v-for="n in 6" :key="'skel-' + n" class="kb-card kb-card-skeleton is-skeleton">
             <div class="card-header">
               <t-skeleton animation="gradient" :row-col="[{ width: '60%', height: '20px' }]" />
             </div>
@@ -631,51 +631,37 @@
         </div>
 
         <!-- 全部空状态：保留「新建知识库」CTA，因为是空间没有任何 KB 的真空场景 -->
-        <div v-if="spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
-          <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn empty-state-btn"
+        <EmptyState v-if="spaceSelection === 'all' && filteredKnowledgeBases.length === 0 && !loading" icon="folder-open" :title="$t('knowledgeList.empty.title')"
+          :description="$t('knowledgeList.empty.description')">
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
           </t-button>
-        </div>
+        </EmptyState>
 
         <!-- 收藏空状态：不放创建按钮——「没有收藏」 ≠ 「没有知识库」，
              正确引导是「去星标一下」，不是「再建一个」。 -->
-        <div v-if="spaceSelection === 'favorites' && filteredKnowledgeBases.length === 0 && !loading"
-          class="empty-state">
-          <t-icon name="star" size="48px" class="empty-icon" />
-          <span class="empty-txt">{{ $t('knowledgeList.empty.favoritesTitle') }}</span>
-          <span class="empty-desc">{{ $t('knowledgeList.empty.favoritesDescription') }}</span>
-        </div>
+        <EmptyState v-if="spaceSelection === 'favorites' && filteredKnowledgeBases.length === 0 && !loading" icon="star" :title="$t('knowledgeList.empty.favoritesTitle')"
+          :description="$t('knowledgeList.empty.favoritesDescription')" />
 
         <!-- 最近空状态：同理，引导是「去打开一个」。 -->
-        <div v-if="spaceSelection === 'recents' && filteredKnowledgeBases.length === 0 && !loading" class="empty-state">
-          <t-icon name="history" size="48px" class="empty-icon" />
-          <span class="empty-txt">{{ $t('knowledgeList.empty.recentsTitle') }}</span>
-          <span class="empty-desc">{{ $t('knowledgeList.empty.recentsDescription') }}</span>
-        </div>
+        <EmptyState v-if="spaceSelection === 'recents' && filteredKnowledgeBases.length === 0 && !loading" icon="history" :title="$t('knowledgeList.empty.recentsTitle')"
+          :description="$t('knowledgeList.empty.recentsDescription')" />
 
         <!-- 我的知识库空状态 -->
-        <div v-if="spaceSelection === 'mine' && kbs.length === 0 && !loading" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
-          <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn empty-state-btn"
+        <EmptyState v-if="spaceSelection === 'mine' && kbs.length === 0 && !loading" icon="folder-open" :title="$t('knowledgeList.empty.title')"
+          :description="$t('knowledgeList.empty.description')">
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
           </t-button>
-        </div>
+        </EmptyState>
 
         <!-- 空间下知识库空状态 -->
-        <div v-if="spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ $t('knowledgeList.empty.sharedTitle') }}</span>
-          <span class="empty-desc">{{ $t('knowledgeList.empty.sharedDescription') }}</span>
-        </div>
+        <EmptyState v-if="spaceSelectionOrgId && !spaceKbsLoading && spaceKbsList.length === 0" icon="folder-open" :title="$t('knowledgeList.empty.sharedTitle')"
+          :description="$t('knowledgeList.empty.sharedDescription')" />
       </div>
     </div>
 
@@ -764,6 +750,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
+import EmptyState from '@/components/EmptyState.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteKnowledgeBase, duplicateKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -1767,6 +1754,8 @@ const handleUploadFinishedEvent = (event: Event) => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/resource-card.less';
+
 .kb-list-container {
   margin: 0;
   height: 100%;
@@ -2024,21 +2013,21 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &.kb-type-faq {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.04) 100%) !important;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 4%, transparent) 100%) !important;
 
     &:hover {
       border-color: var(--td-brand-color) !important;
-      box-shadow: 0 4px 12px rgba(0, 82, 217, 0.12) !important;
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.08) 100%) !important;
+      box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent) !important;
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%) !important;
     }
 
     &::after {
-      background: linear-gradient(135deg, rgba(0, 82, 217, 0.08) 0%, transparent 100%) !important;
+      background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 0%, transparent 100%) !important;
     }
 
     // FAQ 类型共享标识使用蓝色
     .shared-badge {
-      background: rgba(0, 82, 217, 0.1);
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
 
       .t-icon {
@@ -2052,9 +2041,9 @@ const handleUploadFinishedEvent = (event: Event) => {
     align-items: center;
     gap: 4px;
     font-size: 12px;
-    border-color: rgba(0, 82, 217, 0.15);
+    border-color: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
     color: var(--td-brand-color);
-    background: rgba(0, 82, 217, 0.04);
+    background: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
     font-weight: 500;
     padding: 2px 8px;
     border-radius: 4px;
@@ -2164,10 +2153,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .kb-card-wrap {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr;
-  animation: contentFadeIn 0.32s ease-out;
+  .resource-card-grid();
 }
 
 .kb-section-header {
@@ -2253,41 +2239,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .kb-card {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  overflow: hidden;
-  box-sizing: border-box;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: var(--td-bg-color-container);
-  position: relative;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  height: 136px;
-  min-height: 136px;
-
-  &.kb-card-skeleton {
-    cursor: default;
-
-    .card-header {
-      margin-bottom: 12px;
-    }
-
-    .card-content {
-      flex: 1;
-    }
-
-    .card-bottom {
-      margin-top: auto;
-    }
-  }
-
-  &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  }
+  .resource-card();
 
   &.uninitialized {
     opacity: 0.9;
@@ -2319,12 +2271,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   // 问答类型样式
   &.kb-type-faq {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.04) 100%);
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 4%, transparent) 100%);
 
     &:hover {
       border-color: var(--td-brand-color);
-      box-shadow: 0 4px 12px rgba(0, 82, 217, 0.12);
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(0, 82, 217, 0.08) 100%);
+      box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
     }
 
     // 右上角装饰
@@ -2335,7 +2287,7 @@ const handleUploadFinishedEvent = (event: Event) => {
       right: 0;
       width: 60px;
       height: 60px;
-      background: linear-gradient(135deg, rgba(0, 82, 217, 0.08) 0%, transparent 100%);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 0%, transparent 100%);
       border-radius: 0 12px 0 100%;
       pointer-events: none;
       z-index: 0;
@@ -2378,183 +2330,9 @@ const handleUploadFinishedEvent = (event: Event) => {
     opacity: 1;
   }
 
-  // 确保内容在装饰之上
-  .card-header,
-  .card-content,
-  .card-bottom {
-    position: relative;
-    z-index: 1;
-  }
-
-  .card-header {
-    margin-bottom: 6px;
-  }
-
-  .card-title {
-    font-size: 15px;
-    line-height: 22px;
-  }
-
-  .card-content {
-    margin-bottom: 6px;
-  }
-
-  .card-description {
-    font-size: 12px;
-    line-height: 17px;
-  }
-
-  .card-bottom {
-    padding-top: 6px;
-  }
-
-  .more-wrap {
-    width: 28px;
-    height: 28px;
-
-    .more-icon {
-      width: 16px;
-      height: 16px;
-    }
-  }
-
-  .card-more-btn {
-    width: 28px;
-    height: 28px;
-  }
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 6px;
-
-  .card-title {
-    flex: 1;
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .card-title-text {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .card-more-btn {
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 6px;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    transition: all 0.2s;
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-      color: var(--td-text-color-secondary);
-    }
-  }
-
-  .permission-tag {
-    flex-shrink: 0;
-  }
-}
-
-.card-title {
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 22px;
-  letter-spacing: 0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
-}
-
-.more-wrap {
-  display: flex;
-  width: 24px;
-  height: 24px;
-  justify-content: center;
-  align-items: center;
-  border-radius: 6px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  opacity: 0;
-
-  .kb-card:hover & {
-    opacity: 0.6;
-  }
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  &.active-more {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  .more-icon {
-    width: 14px;
-    height: 14px;
-  }
-}
-
-.card-content {
-  flex: 1;
-  min-height: 0;
-  margin-bottom: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 /* 三个列表卡片统一：描述字体 */
-.card-description {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-.card-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding-top: 8px;
-  border-top: .5px solid var(--td-component-stroke);
-}
-
 .bottom-left {
   display: flex;
   align-items: center;
@@ -2575,21 +2353,8 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-.feature-badges {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .feature-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  cursor: default;
-  transition: background 0.2s ease;
+  .resource-feature-badge();
 
   &.type-document {
     background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
@@ -2613,14 +2378,14 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &.type-faq {
-    background: rgba(0, 82, 217, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color);
     width: auto;
     padding: 0 6px;
     gap: 3px;
 
     &:hover {
-      background: rgba(0, 82, 217, 0.12);
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     }
 
     .badge-count {
@@ -2634,38 +2399,38 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &.kg {
-    background: rgba(124, 77, 255, 0.08);
+    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
     color: var(--td-brand-color);
 
     &:hover {
-      background: rgba(124, 77, 255, 0.12);
+      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
     }
   }
 
   &.multimodal {
-    background: rgba(255, 152, 0, 0.08);
+    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
     color: var(--td-warning-color);
 
     &:hover {
-      background: rgba(255, 152, 0, 0.12);
+      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
     }
   }
 
   &.question {
-    background: rgba(0, 150, 136, 0.08);
+    background: color-mix(in srgb, var(--td-success-color) 8%, transparent);
     color: var(--td-success-color);
 
     &:hover {
-      background: rgba(0, 150, 136, 0.12);
+      background: color-mix(in srgb, var(--td-success-color) 12%, transparent);
     }
   }
 
   &.shared {
-    background: rgba(0, 82, 217, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color);
 
     &:hover {
-      background: rgba(0, 82, 217, 0.12);
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     }
   }
 
@@ -2679,11 +2444,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &.role-editor {
-    background: rgba(255, 152, 0, 0.1);
+    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
     color: var(--td-warning-color);
 
     &:hover {
-      background: rgba(255, 152, 0, 0.15);
+      background: color-mix(in srgb, var(--td-warning-color) 15%, transparent);
     }
   }
 
@@ -2692,7 +2457,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     color: var(--td-text-color-secondary);
 
     &:hover {
-      background: rgba(0, 0, 0, 0.08);
+      background: var(--td-bg-color-component);
     }
   }
 }
@@ -2733,50 +2498,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   box-shadow: 0 0 12px color-mix(in srgb, var(--td-brand-color) 30%, transparent) !important;
 }
 
-.card-time {
-  color: var(--td-text-color-placeholder);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  font-weight: 400;
-}
-
-
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 60px 20px;
-
-  .empty-img {
-    width: 162px;
-    height: 162px;
-    margin-bottom: 20px;
-  }
-
-  .empty-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 26px;
-    margin-bottom: 8px;
-  }
-
-  .empty-desc {
-    color: var(--td-text-color-disabled);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    margin-bottom: 0;
-  }
-
-  .empty-state-btn {
-    margin-top: 20px;
-  }
-}
 
 // 响应式布局
 @media (min-width: 900px) {

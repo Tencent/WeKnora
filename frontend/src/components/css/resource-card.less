@@ -1,0 +1,231 @@
+// 列表页资源卡片（知识库 / 智能体 / 共享空间）共用的视觉规范。
+// 以 mixin 形式提供，消费方保留自己的根 class（.kb-card / .agent-card / .org-card）
+// 与特有变体（类型渐变、收藏星标、装饰图案），基础尺寸、hover、更多按钮、徽标由这里统一。
+//
+// 用法（在消费方 <style lang="less" scoped> 内）：
+//   @import (reference) '@/components/css/resource-card.less';
+//   .kb-card-wrap { .resource-card-grid(); }
+//   .kb-card { .resource-card(); /* 变体… */ }
+//   .feature-badge { .resource-feature-badge(); /* 语义色变体… */ }
+
+.resource-card-grid() {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+  animation: contentFadeIn 0.32s ease-out;
+}
+
+.resource-card() {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 136px;
+  min-height: 136px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-container);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    border-color: var(--td-brand-color);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+  }
+
+  &.is-skeleton {
+    cursor: default;
+
+    .card-header {
+      margin-bottom: 12px;
+    }
+
+    .card-content {
+      flex: 1;
+    }
+
+    .card-bottom {
+      margin-top: auto;
+    }
+  }
+
+  // 内容永远压在装饰图案之上
+  .card-header,
+  .card-content,
+  .card-bottom {
+    position: relative;
+    z-index: 1;
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+
+  .card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .card-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .card-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    color: var(--td-text-color-primary);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 22px;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .card-title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .permission-tag {
+    flex-shrink: 0;
+  }
+
+  // 「更多」按钮：hover 卡片时半透明出现，hover 自身时完全不透明
+  .more-wrap,
+  .card-more-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    border-radius: 6px;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    opacity: 0;
+    transition: background 0.2s ease, opacity 0.2s ease, color 0.2s ease;
+
+    &:hover,
+    &.active-more {
+      background: var(--td-bg-color-container-hover);
+      color: var(--td-text-color-secondary);
+      opacity: 1;
+    }
+
+    .more-icon {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  &:hover .more-wrap,
+  &:hover .card-more-btn {
+    opacity: 0.6;
+  }
+
+  &:hover .more-wrap:hover,
+  &:hover .more-wrap.active-more,
+  &:hover .card-more-btn:hover,
+  &:hover .card-more-btn.active-more {
+    opacity: 1;
+  }
+
+  // 触屏没有 hover，保持可见
+  @media (hover: none) {
+    .more-wrap,
+    .card-more-btn {
+      opacity: 0.6;
+    }
+  }
+
+  .card-content {
+    flex: 1;
+    min-height: 0;
+    margin-bottom: 6px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .card-description {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    color: var(--td-text-color-secondary);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 17px;
+  }
+
+  .card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: auto;
+    padding-top: 6px;
+    border-top: 0.5px solid var(--td-component-stroke);
+  }
+
+  .card-time {
+    color: var(--td-text-color-placeholder);
+    font-size: 12px;
+    font-weight: 400;
+  }
+
+  .feature-badges {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+// 卡片底部的小徽标：图标独占时 22×22，带计数时自适应宽度
+.resource-feature-badge() {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: default;
+  transition: background 0.2s ease;
+
+  .t-icon {
+    flex-shrink: 0;
+  }
+
+  .badge-count {
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+  }
+}

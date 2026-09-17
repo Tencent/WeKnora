@@ -29,7 +29,7 @@
       <div class="org-list-main">
         <!-- 骨架屏占位 -->
         <div v-if="loading && filteredOrganizations.length === 0" class="org-card-wrap">
-          <div v-for="n in 4" :key="'skel-' + n" class="org-card org-card-skeleton">
+          <div v-for="n in 4" :key="'skel-' + n" class="org-card org-card-skeleton is-skeleton">
             <div class="card-header">
               <t-skeleton animation="gradient"
                 :row-col="[[{ width: '36px', height: '36px', type: 'circle' }, { width: '50%', height: '20px' }]]" />
@@ -175,27 +175,23 @@
         </div>
 
         <!-- 空状态（按筛选显示不同文案） -->
-        <div v-else-if="!loading" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ emptyStateTitle }}</span>
-          <span class="empty-desc">{{ emptyStateDesc }}</span>
-          <div class="empty-state-actions">
-            <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
-              <t-button theme="default" variant="outline" class="org-join-btn" :disabled="!canManageOrg"
-                @click="handleJoinOrganization">
-                <template #icon><t-icon name="enter" /></template>
-                {{ $t('organization.joinOrg') }}
-              </t-button>
-            </t-tooltip>
-            <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
-              <t-button theme="primary" class="org-create-btn" :disabled="!canManageOrg" @click="handleCreateOrganization">
-                <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
-                    aria-hidden="true" /></template>
-                {{ $t('organization.createOrg') }}
-              </t-button>
-            </t-tooltip>
-          </div>
-        </div>
+        <EmptyState v-else-if="!loading" icon="usergroup" :title="emptyStateTitle"
+          :description="emptyStateDesc">
+          <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+            <t-button theme="default" variant="outline" class="org-join-btn" :disabled="!canManageOrg"
+              @click="handleJoinOrganization">
+              <template #icon><t-icon name="enter" /></template>
+              {{ $t('organization.joinOrg') }}
+            </t-button>
+          </t-tooltip>
+          <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+            <t-button theme="primary" class="org-create-btn" :disabled="!canManageOrg" @click="handleCreateOrganization">
+              <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
+                  aria-hidden="true" /></template>
+              {{ $t('organization.createOrg') }}
+            </t-button>
+          </t-tooltip>
+        </EmptyState>
       </div>
     </div>
 
@@ -441,6 +437,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
+import EmptyState from '@/components/EmptyState.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
@@ -1077,6 +1074,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/resource-card.less';
+
 .org-list-container {
   margin: 0 16px 0 0;
   height: 100%;
@@ -1263,10 +1262,7 @@ onUnmounted(() => {
 }
 
 .org-card-wrap {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr;
-  animation: contentFadeIn 0.32s ease-out;
+  .resource-card-grid();
 }
 
 // 共享空间分组标题——与 KB / Agent 列表口径完全一致（图标 + 名称 + 数量 + 折叠 chevron）。
@@ -1331,30 +1327,9 @@ onUnmounted(() => {
   }
 }
 
-.org-card-skeleton {
-  cursor: default;
-  display: flex;
-  flex-direction: column;
-  height: 136px;
-  min-height: 136px;
-}
-
 /* 与知识库 / 智能体列表统一：紧凑 + 1px 描边 */
 .org-card {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  overflow: hidden;
-  box-sizing: border-box;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: var(--td-bg-color-container);
-  position: relative;
-  cursor: pointer;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  height: 136px;
-  min-height: 136px;
+  .resource-card();
 
   &::before {
     content: '';
@@ -1368,18 +1343,6 @@ onUnmounted(() => {
     z-index: 0;
   }
 
-  &.joined-org {
-    &:hover {
-      border-color: color-mix(in srgb, var(--td-brand-color) 40%, transparent);
-      box-shadow: 0 4px 16px color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    }
-  }
-
-  &:hover {
-    border-color: color-mix(in srgb, var(--td-brand-color) 50%, transparent);
-    box-shadow: 0 6px 20px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  }
-
   .card-decoration {
     color: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
   }
@@ -1388,44 +1351,6 @@ onUnmounted(() => {
     color: color-mix(in srgb, var(--td-brand-color) 55%, transparent);
   }
 
-  .card-header {
-    position: relative;
-    z-index: 2;
-    margin-bottom: 6px;
-  }
-
-  .card-title {
-    font-size: 15px;
-    line-height: 22px;
-  }
-
-  .card-content {
-    position: relative;
-    z-index: 1;
-    margin-bottom: 6px;
-  }
-
-  .card-bottom {
-    position: relative;
-    z-index: 1;
-    padding-top: 6px;
-  }
-
-  .card-description {
-    font-size: 12px;
-    line-height: 17px;
-  }
-
-  .more-wrap {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-
-    .more-icon {
-      width: 16px;
-      height: 16px;
-    }
-  }
 }
 
 // 卡片装饰：协作网络图形
@@ -1447,23 +1372,6 @@ onUnmounted(() => {
   }
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  position: relative;
-  z-index: 2;
-}
-
-.card-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-}
-
 // 空间头像容器（SpaceAvatar 自带样式）
 .org-avatar {
   display: flex;
@@ -1472,92 +1380,8 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.card-title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.card-title {
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 22px;
-  letter-spacing: 0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.more-wrap {
-  display: flex;
-  width: 28px;
-  height: 28px;
-  justify-content: center;
-  align-items: center;
-  border-radius: 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  opacity: 0;
-
-  .org-card:hover & {
-    opacity: 0.6;
-  }
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  &.active-more {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  .more-icon {
-    width: 16px;
-    height: 16px;
-  }
-}
-
 /* 与知识库卡片内容区一致 */
-.card-content {
-  flex: 1;
-  min-height: 0;
-  margin-bottom: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 /* 三个列表卡片统一：描述字体 */
-.card-description {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-.card-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding-top: 8px;
-  border-top: .5px solid var(--td-component-stroke);
-}
-
 .bottom-left {
   display: flex;
   align-items: center;
@@ -1567,25 +1391,8 @@ onUnmounted(() => {
 }
 
 // 与知识库卡片统一的底部标签：小尺寸、统一圆角
-.feature-badges {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .feature-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 500;
-  font-family: var(--app-font-family);
-  cursor: default;
-  transition: background 0.2s ease;
+  .resource-feature-badge();
 
   .t-icon {
     flex-shrink: 0;
@@ -1596,7 +1403,7 @@ onUnmounted(() => {
   }
 
   &.stat-member {
-    background: rgba(100, 116, 139, 0.08);
+    background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
     color: var(--td-text-color-secondary);
 
     .t-icon {
@@ -1604,7 +1411,7 @@ onUnmounted(() => {
     }
 
     &:hover {
-      background: rgba(100, 116, 139, 0.12);
+      background: color-mix(in srgb, var(--td-text-color-secondary) 12%, transparent);
     }
   }
 
@@ -1622,7 +1429,7 @@ onUnmounted(() => {
   }
 
   &.stat-agent {
-    background: rgba(124, 77, 255, 0.08);
+    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
     color: var(--td-brand-color);
 
     .stat-agent-icon {
@@ -1634,7 +1441,7 @@ onUnmounted(() => {
     }
 
     &:hover {
-      background: rgba(124, 77, 255, 0.12);
+      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
     }
   }
 }
@@ -1670,7 +1477,7 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 500;
   font-family: var(--app-font-family);
-  background: rgba(107, 114, 128, 0.08);
+  background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
   color: var(--td-text-color-secondary);
 
   .t-icon {
@@ -1679,7 +1486,7 @@ onUnmounted(() => {
   }
 
   &.owner {
-    background: rgba(124, 77, 255, 0.1);
+    background: color-mix(in srgb, var(--app-accent-purple) 10%, transparent);
     color: var(--td-brand-color);
 
     .t-icon {
@@ -1706,52 +1513,12 @@ onUnmounted(() => {
   }
 
   &.viewer {
-    background: rgba(107, 114, 128, 0.08);
+    background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
     color: var(--td-text-color-secondary);
 
     .t-icon {
       color: var(--td-text-color-secondary);
     }
-  }
-}
-
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 60px 20px;
-
-  .empty-img {
-    width: 162px;
-    height: 162px;
-    margin-bottom: 20px;
-  }
-
-  .empty-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 26px;
-    margin-bottom: 8px;
-  }
-
-  .empty-desc {
-    color: var(--td-text-color-disabled);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    margin-bottom: 0;
-  }
-
-  .empty-state-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 20px;
   }
 }
 
