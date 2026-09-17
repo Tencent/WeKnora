@@ -239,12 +239,13 @@ export function createKnowledgeFromURL(
   return post(`/api/v1/knowledge-bases/${kbId}/knowledge/url`, data);
 }
 
-// 从 YouTube 播放列表创建知识：为列表中的每个视频创建一条 URL 知识
-export function createKnowledgeFromYouTubePlaylist(
+// 批量导入 YouTube 视频与播放列表：展开播放列表并按视频去重，每个视频创建一条 URL 知识
+// data.urls: 最多 100 个链接
+export function createKnowledgeFromYouTube(
   kbId: string,
-  data: { url: string; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
+  data: { urls: string[]; enable_multimodel?: boolean; tag_ids?: string[]; process_config?: KnowledgeProcessOverrides },
 ) {
-  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/youtube-playlist`, data);
+  return post(`/api/v1/knowledge-bases/${kbId}/knowledge/youtube`, data);
 }
 
 // 手工创建知识

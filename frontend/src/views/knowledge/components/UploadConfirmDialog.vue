@@ -22,7 +22,7 @@
                       :tooltip="t('uploadConfirm.continueAdd')"
                       placement="bottom-left"
                       @files="appendFiles"
-                      @url="appendUrl"
+                      @urls="appendUrls"
                     />
                   </div>
                 </div>
@@ -1335,13 +1335,16 @@ const appendFiles = (incoming: File[]) => {
   }
 }
 
-const appendUrl = (url: string) => {
-  if (localUrls.value.includes(url)) {
+const appendUrls = (urls: string[]) => {
+  const toAdd = urls.filter((url) => !localUrls.value.includes(url))
+  if (toAdd.length === 0) {
     MessagePlugin.warning(t('uploadConfirm.urlDuplicate'))
     return
   }
-  localUrls.value = [...localUrls.value, url]
-  MessagePlugin.success(t('uploadConfirm.urlAdded'))
+  localUrls.value = [...localUrls.value, ...toAdd]
+  MessagePlugin.success(toAdd.length === 1
+    ? t('uploadConfirm.urlAdded')
+    : t('uploadConfirm.urlsAdded', { count: toAdd.length }))
 }
 
 const removeUrl = (index: number) => {

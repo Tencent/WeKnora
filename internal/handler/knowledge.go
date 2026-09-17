@@ -389,7 +389,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 // CreateKnowledgeFromURL godoc
 // @Summary      从URL创建知识
 // @Description  从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式。
-// @Description  YouTube 视频链接会抓取字幕（无字幕时下载音频并用知识库的 ASR 模型转写），再用摘要模型整理为文档；播放列表链接请使用 youtube-playlist 接口
+// @Description  YouTube 视频链接会抓取字幕（无字幕时下载音频并用知识库的 ASR 模型转写），再用摘要模型整理为文档；播放列表或批量链接请使用 youtube 接口
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
@@ -485,21 +485,22 @@ func (h *KnowledgeHandler) CreateKnowledgeFromURL(c *gin.Context) {
 	})
 }
 
-// CreateKnowledgeFromYouTubePlaylist godoc
-// @Summary      从YouTube播放列表创建知识
-// @Description  列出 YouTube 播放列表中的视频，并为每个视频创建一条 URL 知识（异步抓取字幕或转写音频后生成文档并入库）。
-// @Description  已存在的视频计入 duplicates，不会导致整体失败；视频数量上限由 YOUTUBE_PLAYLIST_MAX_VIDEOS 控制
+// CreateKnowledgeFromYouTube godoc
+// @Summary      批量导入YouTube视频与播放列表
+// @Description  接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识
+// @Description  （异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，
+// @Description  均不会导致整体失败；单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
 // @Param        id       path      string  true  "知识库ID"
-// @Param        request  body      object{url=string,enable_multimodel=bool,tag_ids=[]string}  true  "播放列表请求"
-// @Success      201      {object}  types.YouTubePlaylistImportResult  "导入结果"
-// @Failure      400      {object}  errors.AppError                    "请求参数错误或播放列表不可读取"
+// @Param        request  body      object{urls=[]string,enable_multimodel=bool,tag_ids=[]string}  true  "导入请求"
+// @Success      201      {object}  types.YouTubeImportResult  "导入结果"
+// @Failure      400      {object}  errors.AppError            "请求参数错误或没有可导入的视频"
 // @Security     Bearer
 // @Security     ApiKeyAuth
-// @Router       /knowledge-bases/{id}/knowledge/youtube-playlist [post]
-func (h *KnowledgeHandler) CreateKnowledgeFromYouTubePlaylist(c *gin.Context) {
+// @Router       /knowledge-bases/{id}/knowledge/youtube [post]
+func (h *KnowledgeHandler) CreateKnowledgeFromYouTube(c *gin.Context) {
 	_, kbID, effectiveTenantID, permission, err := h.validateKnowledgeBaseAccess(c)
 	if err != nil {
 		_ = c.Error(err)
@@ -513,7 +514,7 @@ func (h *KnowledgeHandler) CreateKnowledgeFromYouTubePlaylist(c *gin.Context) {
 	}
 
 	var req struct {
-		URL              string                           `json:"url" binding:"required"`
+		URLs             []string                         `json:"urls" binding:"required,min=1,max=100"`
 		EnableMultimodel *bool                            `json:"enable_multimodel"`
 		TagIDs           []string                         `json:"tag_ids"`
 		Channel          string                           `json:"channel"`
@@ -524,11 +525,11 @@ func (h *KnowledgeHandler) CreateKnowledgeFromYouTubePlaylist(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "Importing YouTube playlist into knowledge base %s: %s",
-		secutils.SanitizeForLog(kbID), secutils.SanitizeForLog(req.URL))
+	logger.Infof(ctx, "Importing %d YouTube link(s) into knowledge base %s",
+		len(req.URLs), secutils.SanitizeForLog(kbID))
 
-	result, err := h.kgService.CreateKnowledgeFromYouTubePlaylist(
-		ctx, kbID, req.URL, req.EnableMultimodel, req.TagIDs, req.Channel, req.ProcessConfig,
+	result, err := h.kgService.CreateKnowledgeFromYouTube(
+		ctx, kbID, req.URLs, req.EnableMultimodel, req.TagIDs, req.Channel, req.ProcessConfig,
 	)
 	if err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {

@@ -27,18 +27,25 @@ func allowYouTubeHostsForTest(t *testing.T) {
 }
 
 type fakeYouTubeSource struct {
-	playlist      *youtube.Playlist
-	playlistErr   error
+	playlists     map[string]*youtube.Playlist
+	playlistErrs  map[string]error
+	maxVideos     int
 	transcript    *youtube.Transcript
 	transcriptErr error
 
-	playlistCalls  int
+	playlistCalls  []string
 	gotTranscriber youtube.Transcriber
 }
 
-func (f *fakeYouTubeSource) Playlist(context.Context, string) (*youtube.Playlist, error) {
-	f.playlistCalls++
-	return f.playlist, f.playlistErr
+func (f *fakeYouTubeSource) Playlist(_ context.Context, playlistID string, _ int) (*youtube.Playlist, error) {
+	f.playlistCalls = append(f.playlistCalls, playlistID)
+	if err := f.playlistErrs[playlistID]; err != nil {
+		return nil, err
+	}
+	if playlist, ok := f.playlists[playlistID]; ok {
+		return playlist, nil
+	}
+	return &youtube.Playlist{ID: playlistID}, nil
 }
 
 func (f *fakeYouTubeSource) FetchTranscript(
@@ -46,6 +53,13 @@ func (f *fakeYouTubeSource) FetchTranscript(
 ) (*youtube.Transcript, error) {
 	f.gotTranscriber = transcribe
 	return f.transcript, f.transcriptErr
+}
+
+func (f *fakeYouTubeSource) MaxVideosPerImport() int {
+	if f.maxVideos > 0 {
+		return f.maxVideos
+	}
+	return 200
 }
 
 // youTubeRepoStub records created knowledge and reports existing URLs as duplicates.
@@ -138,92 +152,126 @@ func TestCreateKnowledgeFromURLRejectsYouTubePlaylist(t *testing.T) {
 	require.Empty(t, repo.created)
 }
 
-func TestCreateKnowledgeFromYouTubePlaylistQueuesEachVideo(t *testing.T) {
-	allowYouTubeHostsForTest(t)
-
-	existing := &types.Knowledge{ID: "existing-1", Source: "https://www.youtube.com/watch?v=bbbbbbbbbbb"}
-	repo := &youTubeRepoStub{existingURLs: map[string]*types.Knowledge{existing.Source: existing}}
-	task := &createKnowledgeTaskEnqueuerStub{}
-	source := &fakeYouTubeSource{playlist: &youtube.Playlist{
-		ID:    "PL123456",
-		Title: "Course",
-		Entries: []youtube.PlaylistEntry{
-			{VideoID: "aaaaaaaaaaa", Title: "Lesson 1"},
-			{VideoID: "bbbbbbbbbbb", Title: "Lesson 2"},
-			{VideoID: "ccccccccccc", Title: "Lesson 3"},
-		},
-		Truncated: true,
-	}}
-	svc := &knowledgeService{
+func newYouTubeImportService(repo *youTubeRepoStub, task *createKnowledgeTaskEnqueuerStub,
+	source *fakeYouTubeSource,
+) *knowledgeService {
+	return &knowledgeService{
 		repo:          repo,
 		kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
 		fileSvc:       &createKnowledgeFileServiceStub{},
 		task:          task,
 		youtubeSource: source,
 	}
-
-	result, err := svc.CreateKnowledgeFromYouTubePlaylist(newCreateKnowledgeFileContext(), "kb-1",
-		"https://www.youtube.com/playlist?list=PL123456", nil, nil, "", nil)
-
-	require.NoError(t, err)
-	require.Equal(t, "PL123456", result.PlaylistID)
-	require.Equal(t, "Course", result.PlaylistTitle)
-	require.Equal(t, 3, result.TotalVideos)
-	require.True(t, result.Truncated)
-	require.Len(t, result.Created, 2)
-	require.Empty(t, result.Failed)
-	require.Equal(t, []types.YouTubePlaylistImportItem{{
-		VideoID: "bbbbbbbbbbb", Title: "Lesson 2",
-		URL: "https://www.youtube.com/watch?v=bbbbbbbbbbb", KnowledgeID: "existing-1",
-	}}, result.Duplicates)
-
-	require.Len(t, repo.created, 2)
-	require.Equal(t, "Lesson 1", repo.created[0].Title)
-	require.Equal(t, "https://www.youtube.com/watch?v=aaaaaaaaaaa", repo.created[0].Source)
-	require.Equal(t, "Lesson 3", repo.created[1].Title)
-	require.Equal(t, 2, task.calls)
 }
 
-func TestCreateKnowledgeFromYouTubePlaylistErrors(t *testing.T) {
+func TestCreateKnowledgeFromYouTubeBatchMixesVideosAndPlaylists(t *testing.T) {
+	allowYouTubeHostsForTest(t)
+
+	existing := &types.Knowledge{ID: "existing-c", Source: "https://www.youtube.com/watch?v=ccccccccccc"}
+	repo := &youTubeRepoStub{existingURLs: map[string]*types.Knowledge{existing.Source: existing}}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	source := &fakeYouTubeSource{
+		playlists: map[string]*youtube.Playlist{
+			"PL111111": {ID: "PL111111", Title: "Course", Entries: []youtube.PlaylistEntry{
+				{VideoID: "aaaaaaaaaaa", Title: "Lesson A"},
+				{VideoID: "bbbbbbbbbbb", Title: "Lesson B"},
+				{VideoID: "ccccccccccc", Title: "Lesson C"},
+			}},
+		},
+		playlistErrs: map[string]error{"PL222222": errors.New("ERROR: The playlist does not exist")},
+	}
+	svc := newYouTubeImportService(repo, task, source)
+
+	result, err := svc.CreateKnowledgeFromYouTube(newCreateKnowledgeFileContext(), "kb-1", []string{
+		"https://youtu.be/aaaaaaaaaaa",
+		"https://www.youtube.com/playlist?list=PL111111",
+		"https://www.youtube.com/watch?v=bbbbbbbbbbb&t=10s",
+		"  ",
+		"https://example.com/not-youtube",
+		"https://www.youtube.com/playlist?list=PL222222",
+	}, nil, nil, "", nil)
+
+	require.NoError(t, err)
+	require.Equal(t, 3, result.TotalVideos, "a, b and c once each")
+	require.False(t, result.Truncated)
+	require.Equal(t, []string{"PL111111", "PL222222"}, source.playlistCalls)
+	require.Equal(t, []types.YouTubeImportPlaylist{{
+		URL: "https://www.youtube.com/playlist?list=PL111111", PlaylistID: "PL111111", Title: "Course", Videos: 2,
+	}}, result.Playlists)
+
+	require.Len(t, result.Created, 2)
+	require.Len(t, repo.created, 2)
+	require.Equal(t, "https://www.youtube.com/watch?v=aaaaaaaaaaa", repo.created[0].Source)
+	require.Empty(t, repo.created[0].Title, "single links get their title from the video during processing")
+	require.Equal(t, "https://www.youtube.com/watch?v=bbbbbbbbbbb", repo.created[1].Source)
+	require.Equal(t, "Lesson B", repo.created[1].Title)
+	require.Equal(t, 2, task.calls)
+
+	require.Equal(t, []types.YouTubeImportItem{{
+		URL: existing.Source, VideoID: "ccccccccccc", Title: "Lesson C", KnowledgeID: "existing-c",
+	}}, result.Duplicates)
+	require.Len(t, result.Failed, 2)
+	require.Equal(t, "https://example.com/not-youtube", result.Failed[0].URL)
+	require.Contains(t, result.Failed[0].Error, "not a YouTube")
+	require.Equal(t, "https://www.youtube.com/playlist?list=PL222222", result.Failed[1].URL)
+	require.Contains(t, result.Failed[1].Error, "playlist does not exist")
+}
+
+func TestCreateKnowledgeFromYouTubeCapsVideosPerImport(t *testing.T) {
+	allowYouTubeHostsForTest(t)
+
+	repo := &youTubeRepoStub{}
+	task := &createKnowledgeTaskEnqueuerStub{}
+	source := &fakeYouTubeSource{
+		maxVideos: 2,
+		playlists: map[string]*youtube.Playlist{
+			"PL111111": {ID: "PL111111", Entries: []youtube.PlaylistEntry{
+				{VideoID: "bbbbbbbbbbb"}, {VideoID: "ccccccccccc"},
+			}},
+		},
+	}
+	svc := newYouTubeImportService(repo, task, source)
+
+	result, err := svc.CreateKnowledgeFromYouTube(newCreateKnowledgeFileContext(), "kb-1", []string{
+		"https://youtu.be/aaaaaaaaaaa",
+		"https://www.youtube.com/playlist?list=PL111111",
+		"https://youtu.be/ddddddddddd",
+	}, nil, nil, "", nil)
+
+	require.NoError(t, err)
+	require.True(t, result.Truncated)
+	require.Equal(t, 2, result.TotalVideos)
+	require.Len(t, repo.created, 2)
+	require.Equal(t, "https://www.youtube.com/watch?v=bbbbbbbbbbb", repo.created[1].Source)
+}
+
+func TestCreateKnowledgeFromYouTubeErrors(t *testing.T) {
 	t.Parallel()
 
-	newService := func(source *fakeYouTubeSource) *knowledgeService {
-		return &knowledgeService{
-			repo:          &youTubeRepoStub{},
-			kbService:     &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
-			fileSvc:       &createKnowledgeFileServiceStub{},
-			youtubeSource: source,
-		}
-	}
-	playlistURL := "https://www.youtube.com/playlist?list=PL123456"
-
-	t.Run("not a playlist link", func(t *testing.T) {
+	t.Run("no YouTube links", func(t *testing.T) {
 		source := &fakeYouTubeSource{}
-		_, err := newService(source).CreateKnowledgeFromYouTubePlaylist(newCreateKnowledgeFileContext(), "kb-1",
-			"https://www.youtube.com/watch?v=jNQXAC9IVRw", nil, nil, "", nil)
+		_, err := newYouTubeImportService(&youTubeRepoStub{}, nil, source).CreateKnowledgeFromYouTube(
+			newCreateKnowledgeFileContext(), "kb-1", []string{"https://example.com/a"}, nil, nil, "", nil)
 		requireAppErrorStatus(t, err, http.StatusBadRequest)
-		require.Zero(t, source.playlistCalls)
+		require.Contains(t, err.Error(), "not a YouTube")
+		require.Empty(t, source.playlistCalls)
 	})
 
-	t.Run("playlist cannot be read", func(t *testing.T) {
-		source := &fakeYouTubeSource{playlistErr: errors.New("ERROR: playlist does not exist")}
-		_, err := newService(source).CreateKnowledgeFromYouTubePlaylist(newCreateKnowledgeFileContext(), "kb-1",
-			playlistURL, nil, nil, "", nil)
+	t.Run("only an empty playlist", func(t *testing.T) {
+		source := &fakeYouTubeSource{}
+		_, err := newYouTubeImportService(&youTubeRepoStub{}, nil, source).CreateKnowledgeFromYouTube(
+			newCreateKnowledgeFileContext(), "kb-1", []string{"https://www.youtube.com/playlist?list=PL111111"},
+			nil, nil, "", nil)
 		requireAppErrorStatus(t, err, http.StatusBadRequest)
+		require.Contains(t, err.Error(), "no importable videos")
 	})
 
 	t.Run("yt-dlp missing is a server error", func(t *testing.T) {
-		source := &fakeYouTubeSource{playlistErr: youtube.ErrToolMissing}
-		_, err := newService(source).CreateKnowledgeFromYouTubePlaylist(newCreateKnowledgeFileContext(), "kb-1",
-			playlistURL, nil, nil, "", nil)
+		source := &fakeYouTubeSource{playlistErrs: map[string]error{"PL111111": youtube.ErrToolMissing}}
+		_, err := newYouTubeImportService(&youTubeRepoStub{}, nil, source).CreateKnowledgeFromYouTube(
+			newCreateKnowledgeFileContext(), "kb-1", []string{"https://www.youtube.com/playlist?list=PL111111"},
+			nil, nil, "", nil)
 		requireAppErrorStatus(t, err, http.StatusInternalServerError)
-	})
-
-	t.Run("empty playlist", func(t *testing.T) {
-		source := &fakeYouTubeSource{playlist: &youtube.Playlist{ID: "PL123456"}}
-		_, err := newService(source).CreateKnowledgeFromYouTubePlaylist(newCreateKnowledgeFileContext(), "kb-1",
-			playlistURL, nil, nil, "", nil)
-		requireAppErrorStatus(t, err, http.StatusBadRequest)
 	})
 }
 

@@ -25,8 +25,9 @@ const (
 
 // youTubeSource is the part of the YouTube client the knowledge service uses.
 type youTubeSource interface {
-	Playlist(ctx context.Context, playlistID string) (*youtube.Playlist, error)
+	Playlist(ctx context.Context, playlistID string, limit int) (*youtube.Playlist, error)
 	FetchTranscript(ctx context.Context, videoID string, transcribe youtube.Transcriber) (*youtube.Transcript, error)
+	MaxVideosPerImport() int
 }
 
 var (
@@ -47,7 +48,7 @@ func (s *knowledgeService) youTube() youTubeSource {
 // normalizeYouTubeImportURL rewrites a YouTube video link to its canonical
 // watch URL so the same video is deduplicated however it was linked. It
 // reports whether the link was a YouTube video, and rejects playlist links,
-// which fan out into many knowledge entries through their own endpoint.
+// which fan out into many knowledge entries through the YouTube batch endpoint.
 func normalizeYouTubeImportURL(rawURL string) (string, bool, error) {
 	link, ok := youtube.ParseURL(rawURL)
 	if !ok {
@@ -55,24 +56,25 @@ func normalizeYouTubeImportURL(rawURL string) (string, bool, error) {
 	}
 	if link.Kind == youtube.LinkPlaylist {
 		return "", false, werrors.NewBadRequestError(
-			"YouTube playlist links are imported with POST /knowledge-bases/{id}/knowledge/youtube-playlist")
+			"YouTube playlist links are imported with POST /knowledge-bases/{id}/knowledge/youtube")
 	}
 	return youtube.VideoURL(link.VideoID), true, nil
 }
 
-// CreateKnowledgeFromYouTubePlaylist queues one URL knowledge entry per video
-// in a YouTube playlist. Videos already in the knowledge base are reported as
-// duplicates rather than failing the whole import.
-func (s *knowledgeService) CreateKnowledgeFromYouTubePlaylist(ctx context.Context,
-	kbID string, rawURL string, enableMultimodel *bool, tagIDs []string, channel string,
-	processOverrides *types.KnowledgeProcessOverrides,
-) (*types.YouTubePlaylistImportResult, error) {
-	link, ok := youtube.ParseURL(rawURL)
-	if !ok || link.Kind != youtube.LinkPlaylist {
-		return nil, werrors.NewBadRequestError(
-			"not a YouTube playlist link; expected https://www.youtube.com/playlist?list=...")
-	}
+type youTubeImportVideo struct {
+	id    string
+	title string
+}
 
+// CreateKnowledgeFromYouTube queues one URL knowledge entry per distinct video
+// across a batch of YouTube video and playlist links. Links that cannot be
+// resolved and videos that fail to queue are reported per item, and videos
+// already in the knowledge base are reported as duplicates, so one bad link
+// never fails the whole batch.
+func (s *knowledgeService) CreateKnowledgeFromYouTube(ctx context.Context,
+	kbID string, rawURLs []string, enableMultimodel *bool, tagIDs []string, channel string,
+	processOverrides *types.KnowledgeProcessOverrides,
+) (*types.YouTubeImportResult, error) {
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, kbID)
 	if err != nil {
 		return nil, err
@@ -81,34 +83,33 @@ func (s *knowledgeService) CreateKnowledgeFromYouTubePlaylist(ctx context.Contex
 		return nil, err
 	}
 
-	listCtx, cancel := context.WithTimeout(ctx, youTubePlaylistListTimeout)
-	defer cancel()
-	playlist, err := s.youTube().Playlist(listCtx, link.PlaylistID)
-	if err != nil {
-		logger.Errorf(ctx, "[YouTube] failed to list playlist %s: %v", link.PlaylistID, err)
-		if errors.Is(err, youtube.ErrToolMissing) {
-			return nil, werrors.NewInternalServerError(err.Error())
-		}
-		return nil, werrors.NewBadRequestError(fmt.Sprintf("failed to read YouTube playlist: %v", err))
+	result := &types.YouTubeImportResult{
+		Playlists:  []types.YouTubeImportPlaylist{},
+		Created:    []*types.Knowledge{},
+		Duplicates: []types.YouTubeImportItem{},
+		Failed:     []types.YouTubeImportItem{},
 	}
-	if len(playlist.Entries) == 0 {
-		return nil, werrors.NewBadRequestError("the YouTube playlist has no importable videos")
+	videos, err := s.resolveYouTubeVideos(ctx, rawURLs, result)
+	if err != nil {
+		return nil, err
+	}
+	result.TotalVideos = len(videos)
+	if len(videos) == 0 {
+		message := "no importable YouTube videos were found"
+		if len(result.Failed) > 0 {
+			message += ": " + result.Failed[0].Error
+		}
+		return nil, werrors.NewBadRequestError(message)
 	}
 
-	result := &types.YouTubePlaylistImportResult{
-		PlaylistID:    link.PlaylistID,
-		PlaylistTitle: playlist.Title,
-		TotalVideos:   len(playlist.Entries),
-		Truncated:     playlist.Truncated,
-		Created:       []*types.Knowledge{},
-		Duplicates:    []types.YouTubePlaylistImportItem{},
-		Failed:        []types.YouTubePlaylistImportItem{},
-	}
-	for _, entry := range playlist.Entries {
-		videoURL := youtube.VideoURL(entry.VideoID)
-		item := types.YouTubePlaylistImportItem{VideoID: entry.VideoID, Title: entry.Title, URL: videoURL}
+	for _, video := range videos {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		videoURL := youtube.VideoURL(video.id)
+		item := types.YouTubeImportItem{URL: videoURL, VideoID: video.id, Title: video.title}
 		knowledge, err := s.CreateKnowledgeFromURL(
-			ctx, kbID, videoURL, "", "", enableMultimodel, entry.Title, tagIDs, channel, processOverrides,
+			ctx, kbID, videoURL, "", "", enableMultimodel, video.title, tagIDs, channel, processOverrides,
 		)
 		var duplicate *types.DuplicateKnowledgeError
 		switch {
@@ -120,17 +121,85 @@ func (s *knowledgeService) CreateKnowledgeFromYouTubePlaylist(ctx context.Contex
 		case err != nil:
 			item.Error = err.Error()
 			result.Failed = append(result.Failed, item)
-			var quota *types.StorageQuotaExceededError
-			if errors.As(err, &quota) || ctx.Err() != nil {
-				return result, nil
-			}
 		default:
 			result.Created = append(result.Created, knowledge)
 		}
 	}
-	logger.Infof(ctx, "[YouTube] playlist %s import: %d created, %d duplicates, %d failed",
-		link.PlaylistID, len(result.Created), len(result.Duplicates), len(result.Failed))
+	logger.Infof(ctx, "[YouTube] import of %d link(s): %d created, %d duplicates, %d failed, truncated=%v",
+		len(rawURLs), len(result.Created), len(result.Duplicates), len(result.Failed), result.Truncated)
 	return result, nil
+}
+
+// resolveYouTubeVideos expands the submitted links into distinct videos, in
+// submission order, capped at the client's per-import limit. Unresolvable
+// links are recorded in result.Failed; only a missing yt-dlp aborts the batch.
+func (s *knowledgeService) resolveYouTubeVideos(
+	ctx context.Context, rawURLs []string, result *types.YouTubeImportResult,
+) ([]youTubeImportVideo, error) {
+	limit := s.youTube().MaxVideosPerImport()
+	seen := make(map[string]bool)
+	var videos []youTubeImportVideo
+	add := func(id, title string) {
+		if seen[id] {
+			return
+		}
+		if len(videos) >= limit {
+			result.Truncated = true
+			return
+		}
+		seen[id] = true
+		videos = append(videos, youTubeImportVideo{id: id, title: title})
+	}
+
+	for _, rawURL := range rawURLs {
+		rawURL = strings.TrimSpace(rawURL)
+		if rawURL == "" {
+			continue
+		}
+		link, ok := youtube.ParseURL(rawURL)
+		if !ok {
+			result.Failed = append(result.Failed, types.YouTubeImportItem{
+				URL: rawURL, Error: "not a YouTube video or playlist link",
+			})
+			continue
+		}
+		if link.Kind == youtube.LinkVideo {
+			add(link.VideoID, "")
+			continue
+		}
+		// A playlist whose videos all overlap earlier links still fits once
+		// the cap is reached, so list it with the full limit and let add()
+		// enforce the cap on distinct videos.
+		listCtx, cancel := context.WithTimeout(ctx, youTubePlaylistListTimeout)
+		playlist, err := s.youTube().Playlist(listCtx, link.PlaylistID, limit)
+		cancel()
+		if err != nil {
+			logger.Errorf(ctx, "[YouTube] failed to list playlist %s: %v", link.PlaylistID, err)
+			if errors.Is(err, youtube.ErrToolMissing) {
+				return nil, werrors.NewInternalServerError(err.Error())
+			}
+			result.Failed = append(result.Failed, types.YouTubeImportItem{
+				URL: rawURL, Error: fmt.Sprintf("failed to read YouTube playlist: %v", err),
+			})
+			continue
+		}
+		before := len(videos)
+		for _, entry := range playlist.Entries {
+			add(entry.VideoID, entry.Title)
+		}
+		if playlist.Truncated {
+			result.Truncated = true
+		}
+		if len(playlist.Entries) == 0 {
+			result.Failed = append(result.Failed, types.YouTubeImportItem{
+				URL: rawURL, Error: "the YouTube playlist has no importable videos",
+			})
+		}
+		result.Playlists = append(result.Playlists, types.YouTubeImportPlaylist{
+			URL: rawURL, PlaylistID: link.PlaylistID, Title: playlist.Title, Videos: len(videos) - before,
+		})
+	}
+	return videos, nil
 }
 
 // convertYouTube is the YouTube counterpart of convert: it fetches the

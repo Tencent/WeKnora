@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	defaultMaxPlaylistVideos = 200
-	defaultMaxAudioMinutes   = 240
-	defaultAudioSegmentSecs  = 600
-	stderrTailBytes          = 2048
+	defaultMaxVideosPerImport = 200
+	defaultMaxAudioMinutes    = 240
+	defaultAudioSegmentSecs   = 600
+	stderrTailBytes           = 2048
 )
 
 var (
@@ -46,8 +46,9 @@ type Config struct {
 	CookiesFile string
 	// JSRuntimes is passed to yt-dlp --js-runtimes (e.g. "node").
 	JSRuntimes string
-	// MaxPlaylistVideos caps how many videos one playlist import creates.
-	MaxPlaylistVideos int
+	// MaxVideosPerImport caps how many videos one import request creates,
+	// counting single links and every video of every playlist.
+	MaxVideosPerImport int
 	// MaxAudioDuration caps videos sent to speech recognition.
 	MaxAudioDuration time.Duration
 	// AudioSegmentDuration is the length of each audio piece sent to the ASR
@@ -58,11 +59,11 @@ type Config struct {
 // ConfigFromEnv reads the YOUTUBE_* environment variables.
 func ConfigFromEnv() Config {
 	return Config{
-		YtDlpBinary:       envOr("YOUTUBE_YTDLP_BINARY", "yt-dlp"),
-		FFmpegBinary:      envOr("YOUTUBE_FFMPEG_BINARY", "ffmpeg"),
-		CookiesFile:       strings.TrimSpace(os.Getenv("YOUTUBE_COOKIES_FILE")),
-		JSRuntimes:        strings.TrimSpace(os.Getenv("YOUTUBE_JS_RUNTIMES")),
-		MaxPlaylistVideos: envInt("YOUTUBE_PLAYLIST_MAX_VIDEOS", defaultMaxPlaylistVideos),
+		YtDlpBinary:        envOr("YOUTUBE_YTDLP_BINARY", "yt-dlp"),
+		FFmpegBinary:       envOr("YOUTUBE_FFMPEG_BINARY", "ffmpeg"),
+		CookiesFile:        strings.TrimSpace(os.Getenv("YOUTUBE_COOKIES_FILE")),
+		JSRuntimes:         strings.TrimSpace(os.Getenv("YOUTUBE_JS_RUNTIMES")),
+		MaxVideosPerImport: envInt("YOUTUBE_MAX_VIDEOS_PER_IMPORT", defaultMaxVideosPerImport),
 		MaxAudioDuration: time.Duration(
 			envInt("YOUTUBE_MAX_AUDIO_MINUTES", defaultMaxAudioMinutes)) * time.Minute,
 		AudioSegmentDuration: time.Duration(
@@ -102,8 +103,8 @@ func NewClient(cfg Config) *Client {
 	if cfg.FFmpegBinary == "" {
 		cfg.FFmpegBinary = "ffmpeg"
 	}
-	if cfg.MaxPlaylistVideos <= 0 {
-		cfg.MaxPlaylistVideos = defaultMaxPlaylistVideos
+	if cfg.MaxVideosPerImport <= 0 {
+		cfg.MaxVideosPerImport = defaultMaxVideosPerImport
 	}
 	if cfg.AudioSegmentDuration <= 0 {
 		cfg.AudioSegmentDuration = defaultAudioSegmentSecs * time.Second
@@ -111,9 +112,9 @@ func NewClient(cfg Config) *Client {
 	return &Client{cfg: cfg, run: runCommand}
 }
 
-// Config returns the effective configuration.
-func (c *Client) Config() Config {
-	return c.cfg
+// MaxVideosPerImport returns the per-request video cap.
+func (c *Client) MaxVideosPerImport() int {
+	return c.cfg.MaxVideosPerImport
 }
 
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -177,7 +178,7 @@ type Playlist struct {
 	ID      string
 	Title   string
 	Entries []PlaylistEntry
-	// Truncated reports that the playlist has more than MaxPlaylistVideos videos.
+	// Truncated reports that the playlist has more videos than the requested limit.
 	Truncated bool
 }
 
@@ -190,12 +191,14 @@ type rawPlaylist struct {
 	} `json:"entries"`
 }
 
-// Playlist lists the videos of a playlist without downloading them.
-func (c *Client) Playlist(ctx context.Context, playlistID string) (*Playlist, error) {
+// Playlist lists up to limit videos of a playlist without downloading them.
+func (c *Client) Playlist(ctx context.Context, playlistID string, limit int) (*Playlist, error) {
 	if !playlistIDPattern.MatchString(playlistID) {
 		return nil, fmt.Errorf("invalid YouTube playlist ID %q", playlistID)
 	}
-	limit := c.cfg.MaxPlaylistVideos
+	if limit <= 0 {
+		limit = c.cfg.MaxVideosPerImport
+	}
 	out, err := c.run(ctx, c.cfg.YtDlpBinary, c.ytDlpArgs(
 		"--flat-playlist", "--dump-single-json",
 		"--playlist-end", strconv.Itoa(limit+1),

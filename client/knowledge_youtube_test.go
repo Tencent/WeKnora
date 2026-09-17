@@ -8,20 +8,22 @@ import (
 	"testing"
 )
 
-func TestCreateKnowledgeFromYouTubePlaylist(t *testing.T) {
+func TestCreateKnowledgeFromYouTube(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
-		if r.URL.Path != "/api/v1/knowledge-bases/kb-1/knowledge/youtube-playlist" {
+		if r.URL.Path != "/api/v1/knowledge-bases/kb-1/knowledge/youtube" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		var body map[string]interface{}
+		var body struct {
+			URLs []string `json:"urls"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body["url"] != "https://www.youtube.com/playlist?list=PL1" {
-			t.Fatalf("url = %v", body["url"])
+		if len(body.URLs) != 2 || body.URLs[1] != "https://www.youtube.com/playlist?list=PL1" {
+			t.Fatalf("urls = %v", body.URLs)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -29,13 +31,16 @@ func TestCreateKnowledgeFromYouTubePlaylist(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 			"data": map[string]interface{}{
-				"playlist_id":    "PL1",
-				"playlist_title": "Course",
-				"total_videos":   2,
-				"truncated":      false,
-				"created":        []map[string]interface{}{{"id": "k-1", "title": "Lesson 1"}},
+				"total_videos": 2,
+				"truncated":    false,
+				"playlists": []map[string]interface{}{{
+					"url":         "https://www.youtube.com/playlist?list=PL1",
+					"playlist_id": "PL1", "title": "Course", "videos": 1,
+				}},
+				"created": []map[string]interface{}{{"id": "k-1", "title": "Lesson 1"}},
 				"duplicates": []map[string]interface{}{{
-					"video_id": "bbbbbbbbbbb", "title": "Lesson 2", "knowledge_id": "k-0",
+					"url":      "https://www.youtube.com/watch?v=bbbbbbbbbbb",
+					"video_id": "bbbbbbbbbbb", "knowledge_id": "k-0",
 				}},
 				"failed": []interface{}{},
 			},
@@ -44,12 +49,13 @@ func TestCreateKnowledgeFromYouTubePlaylist(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, WithAPIKey("sk-test"))
-	result, err := c.CreateKnowledgeFromYouTubePlaylist(context.Background(), "kb-1",
-		CreateKnowledgeFromYouTubePlaylistRequest{URL: "https://www.youtube.com/playlist?list=PL1"})
+	result, err := c.CreateKnowledgeFromYouTube(context.Background(), "kb-1", CreateKnowledgeFromYouTubeRequest{
+		URLs: []string{"https://youtu.be/aaaaaaaaaaa", "https://www.youtube.com/playlist?list=PL1"},
+	})
 	if err != nil {
-		t.Fatalf("CreateKnowledgeFromYouTubePlaylist() error = %v", err)
+		t.Fatalf("CreateKnowledgeFromYouTube() error = %v", err)
 	}
-	if result.PlaylistTitle != "Course" || result.TotalVideos != 2 {
+	if result.TotalVideos != 2 || len(result.Playlists) != 1 || result.Playlists[0].Title != "Course" {
 		t.Fatalf("unexpected result %+v", result)
 	}
 	if len(result.Created) != 1 || result.Created[0].ID != "k-1" {

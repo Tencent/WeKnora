@@ -245,15 +245,15 @@ func TestFetchTranscriptRejectsLiveAndInvalidIDs(t *testing.T) {
 	if _, err := client.FetchTranscript(context.Background(), "--exec=x", nil); err == nil {
 		t.Fatal("expected invalid ID error")
 	}
-	if _, err := client.Playlist(context.Background(), "bad id!"); err == nil {
+	if _, err := client.Playlist(context.Background(), "bad id!", 5); err == nil {
 		t.Fatal("expected invalid playlist ID error")
 	}
 }
 
 func TestPlaylistRequestsOneExtraEntryToDetectTruncation(t *testing.T) {
 	tools := &fakeTools{}
-	client := newFakeClient(tools, Config{MaxPlaylistVideos: 5})
-	playlist, err := client.Playlist(context.Background(), "PL1")
+	client := newFakeClient(tools, Config{MaxVideosPerImport: 50})
+	playlist, err := client.Playlist(context.Background(), "PL1", 5)
 	if err != nil {
 		t.Fatal(err)
 	}

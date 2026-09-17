@@ -5535,7 +5535,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式。\nYouTube 视频链接会抓取字幕（无字幕时下载音频并用知识库的 ASR 模型转写），再用摘要模型整理为文档；播放列表链接请使用 youtube-playlist 接口",
+                "description": "从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式。\nYouTube 视频链接会抓取字幕（无字幕时下载音频并用知识库的 ASR 模型转写），再用摘要模型整理为文档；播放列表或批量链接请使用 youtube 接口",
                 "consumes": [
                     "application/json"
                 ],
@@ -5611,7 +5611,7 @@
                 }
             }
         },
-        "/knowledge-bases/{id}/knowledge/youtube-playlist": {
+        "/knowledge-bases/{id}/knowledge/youtube": {
             "post": {
                 "security": [
                     {
@@ -5621,7 +5621,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "列出 YouTube 播放列表中的视频，并为每个视频创建一条 URL 知识（异步抓取字幕或转写音频后生成文档并入库）。\n已存在的视频计入 duplicates，不会导致整体失败；视频数量上限由 YOUTUBE_PLAYLIST_MAX_VIDEOS 控制",
+                "description": "接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识\n（异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，\n均不会导致整体失败；单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制",
                 "consumes": [
                     "application/json"
                 ],
@@ -5631,7 +5631,7 @@
                 "tags": [
                     "知识管理"
                 ],
-                "summary": "从YouTube播放列表创建知识",
+                "summary": "批量导入YouTube视频与播放列表",
                 "parameters": [
                     {
                         "type": "string",
@@ -5641,7 +5641,7 @@
                         "required": true
                     },
                     {
-                        "description": "播放列表请求",
+                        "description": "导入请求",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -5657,8 +5657,11 @@
                                         "type": "string"
                                     }
                                 },
-                                "url": {
-                                    "type": "string"
+                                "urls": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
                                 }
                             }
                         }
@@ -5668,11 +5671,11 @@
                     "201": {
                         "description": "导入结果",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubePlaylistImportResult"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportResult"
                         }
                     },
                     "400": {
-                        "description": "请求参数错误或播放列表不可读取",
+                        "description": "请求参数错误或没有可导入的视频",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -23862,7 +23865,7 @@
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.YouTubePlaylistImportItem": {
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportItem": {
             "type": "object",
             "properties": {
                 "error": {
@@ -23875,6 +23878,7 @@
                     "type": "string"
                 },
                 "url": {
+                    "description": "URL is the canonical video URL, or the link as submitted when it could\nnot be resolved to a video.",
                     "type": "string"
                 },
                 "video_id": {
@@ -23882,7 +23886,25 @@
                 }
             }
         },
-        "github_com_Tencent_WeKnora_internal_types.YouTubePlaylistImportResult": {
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportPlaylist": {
+            "type": "object",
+            "properties": {
+                "playlist_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "videos": {
+                    "description": "Videos is the number of importable videos taken from this playlist.",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportResult": {
             "type": "object",
             "properties": {
                 "created": {
@@ -23894,27 +23916,27 @@
                 "duplicates": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubePlaylistImportItem"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportItem"
                     }
                 },
                 "failed": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubePlaylistImportItem"
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportItem"
                     }
                 },
-                "playlist_id": {
-                    "type": "string"
-                },
-                "playlist_title": {
-                    "type": "string"
+                "playlists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportPlaylist"
+                    }
                 },
                 "total_videos": {
-                    "description": "TotalVideos is the number of importable videos considered.",
+                    "description": "TotalVideos is the number of distinct videos considered.",
                     "type": "integer"
                 },
                 "truncated": {
-                    "description": "Truncated reports that the playlist exceeded YOUTUBE_PLAYLIST_MAX_VIDEOS\nand only the first videos were imported.",
+                    "description": "Truncated reports that the links resolved to more videos than\nYOUTUBE_MAX_VIDEOS_PER_IMPORT and only the first ones were imported.",
                     "type": "boolean"
                 }
             }

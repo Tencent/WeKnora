@@ -236,7 +236,7 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | POST | `/knowledge-bases/:id/knowledge/file` | 上传文件 | OwnedKBOrAdmin + KBAccessWrite |
 | POST | `/knowledge-bases/:id/knowledge/url` | URL 导入（含 YouTube 视频） | 同上 |
-| POST | `/knowledge-bases/:id/knowledge/youtube-playlist` | YouTube 播放列表导入 | 同上 |
+| POST | `/knowledge-bases/:id/knowledge/youtube` | YouTube 视频/播放列表批量导入 | 同上 |
 | POST | `/knowledge-bases/:id/knowledge/manual` | 手动 Markdown 知识 | 同上 |
 | GET | `/knowledge-bases/:id/knowledge` | 列表（分页 + 过滤） | Viewer+ + KBAccessRead |
 | DELETE | `/knowledge-bases/:id/knowledge` | 清空 KB 内容 | Admin + KBAccessWrite |

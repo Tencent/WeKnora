@@ -47,12 +47,11 @@
     >
       <div class="url-import-form">
         <div class="url-input-label">{{ t('knowledgeBase.urlLabel') }}</div>
-        <t-input
+        <t-textarea
           v-model="urlInputValue"
           :placeholder="t('knowledgeBase.urlPlaceholder')"
-          clearable
+          :autosize="{ minRows: 3, maxRows: 10 }"
           autofocus
-          @enter="handleUrlDialogConfirm"
         />
         <div class="url-input-tip">{{ t('knowledgeBase.urlTip') }}</div>
       </div>
@@ -65,6 +64,7 @@ import { ref, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
+import { parseImportUrls } from '@/utils/youtube'
 
 const props = withDefaults(defineProps<{
   acceptFileTypes?: string
@@ -88,7 +88,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   files: [files: File[]]
-  url: [url: string]
+  urls: [urls: string[]]
   manual: []
 }>()
 
@@ -187,20 +187,21 @@ const handleFilesChange = (event: Event, fromFolder: boolean) => {
 }
 
 const handleUrlDialogConfirm = () => {
-  const url = urlInputValue.value.trim()
-  if (!url) {
+  if (!urlInputValue.value.trim()) {
     MessagePlugin.warning(t('knowledgeBase.urlRequired'))
     return
   }
-  try {
-    new URL(url)
-  } catch {
+  const { urls, invalid } = parseImportUrls(urlInputValue.value)
+  if (urls.length === 0) {
     MessagePlugin.warning(t('knowledgeBase.invalidURL'))
     return
   }
+  if (invalid.length > 0) {
+    MessagePlugin.warning(t('knowledgeBase.invalidURLsSkipped', { count: invalid.length }))
+  }
   urlDialogVisible.value = false
   urlInputValue.value = ''
-  emit('url', url)
+  emit('urls', urls)
 }
 
 const handleUrlDialogCancel = () => {

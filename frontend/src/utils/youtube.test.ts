@@ -1,23 +1,52 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isYouTubePlaylistUrl } from './youtube.ts'
+import { isYouTubeUrl, parseImportUrls, youTubeLinkKind } from './youtube.ts'
 
-test('recognises YouTube playlist pages', () => {
-  assert.equal(isYouTubePlaylistUrl('https://www.youtube.com/playlist?list=PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH'), true)
-  assert.equal(isYouTubePlaylistUrl('  https://m.youtube.com/playlist?list=PL123456&si=abc '), true)
-  assert.equal(isYouTubePlaylistUrl('https://music.youtube.com/playlist?list=OLAK5uy_abc'), true)
+test('classifies YouTube video links', () => {
+  for (const url of [
+    'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+    'https://www.youtube.com/watch?v=jNQXAC9IVRw&list=PL123456',
+    'https://m.youtube.com/watch?v=jNQXAC9IVRw',
+    'https://youtu.be/jNQXAC9IVRw?si=abc',
+    'https://www.youtube.com/shorts/jNQXAC9IVRw',
+    'https://www.youtube.com/live/jNQXAC9IVRw',
+    'https://www.youtube-nocookie.com/embed/jNQXAC9IVRw',
+  ]) {
+    assert.equal(youTubeLinkKind(url), 'video', url)
+  }
 })
 
-test('treats video links, including watch links inside a playlist, as single videos', () => {
-  assert.equal(isYouTubePlaylistUrl('https://www.youtube.com/watch?v=jNQXAC9IVRw&list=PL123456'), false)
-  assert.equal(isYouTubePlaylistUrl('https://youtu.be/jNQXAC9IVRw'), false)
+test('classifies YouTube playlist links', () => {
+  assert.equal(youTubeLinkKind('https://www.youtube.com/playlist?list=PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH'), 'playlist')
+  assert.equal(youTubeLinkKind('  https://music.youtube.com/playlist?list=OLAK5uy_abc '), 'playlist')
 })
 
-test('rejects non-playlist and non-YouTube links', () => {
-  assert.equal(isYouTubePlaylistUrl('https://www.youtube.com/playlist'), false)
-  assert.equal(isYouTubePlaylistUrl('https://www.youtube.com/playlist?list=bad id'), false)
-  assert.equal(isYouTubePlaylistUrl('https://youtube.com.evil.test/playlist?list=PL123456'), false)
-  assert.equal(isYouTubePlaylistUrl('https://example.com/playlist?list=PL123456'), false)
-  assert.equal(isYouTubePlaylistUrl('not a url'), false)
+test('rejects non-YouTube and malformed links', () => {
+  for (const url of [
+    'https://www.youtube.com/playlist',
+    'https://www.youtube.com/playlist?list=bad id',
+    'https://www.youtube.com/watch?v=short',
+    'https://www.youtube.com/@channel',
+    'https://youtube.com.evil.test/watch?v=jNQXAC9IVRw',
+    'https://example.com/watch?v=jNQXAC9IVRw',
+    'not a url',
+  ]) {
+    assert.equal(isYouTubeUrl(url), false, url)
+  }
+})
+
+test('parses pasted links separated by new lines, spaces and commas', () => {
+  const text = `https://youtu.be/jNQXAC9IVRw
+    https://www.youtube.com/playlist?list=PL123456, https://example.com/doc，https://youtu.be/jNQXAC9IVRw
+  notalink ftp://example.com/file`
+  assert.deepEqual(parseImportUrls(text), {
+    urls: [
+      'https://youtu.be/jNQXAC9IVRw',
+      'https://www.youtube.com/playlist?list=PL123456',
+      'https://example.com/doc',
+    ],
+    invalid: ['notalink', 'ftp://example.com/file'],
+  })
+  assert.deepEqual(parseImportUrls('   '), { urls: [], invalid: [] })
 })

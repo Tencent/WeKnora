@@ -41,17 +41,18 @@ type KnowledgeService interface {
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
-	// CreateKnowledgeFromYouTubePlaylist queues one knowledge entry per video in a
-	// YouTube playlist; each video is then imported from its transcript.
-	CreateKnowledgeFromYouTubePlaylist(
+	// CreateKnowledgeFromYouTube queues one knowledge entry per distinct video
+	// across a batch of YouTube video and playlist links; each video is then
+	// imported from its transcript.
+	CreateKnowledgeFromYouTube(
 		ctx context.Context,
 		kbID string,
-		url string,
+		urls []string,
 		enableMultimodel *bool,
 		tagIDs []string,
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
-	) (*types.YouTubePlaylistImportResult, error)
+	) (*types.YouTubeImportResult, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
 	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)

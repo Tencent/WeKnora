@@ -221,7 +221,7 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 // When FileName or FileType is provided (or the URL path has a known file extension such as .pdf/.docx/.doc/.txt/.md),
 // the server automatically switches to file-download mode instead of web-page crawling.
 // YouTube video links are imported from the video's captions (or ASR over its audio) instead;
-// use CreateKnowledgeFromYouTubePlaylist for playlist links.
+// use CreateKnowledgeFromYouTube for playlist links or batches.
 type CreateKnowledgeFromURLRequest struct {
 	// URL is the target URL (required)
 	URL string `json:"url"`
@@ -271,10 +271,10 @@ func (c *Client) CreateKnowledgeFromURL(
 	return &response.Data, nil
 }
 
-// CreateKnowledgeFromYouTubePlaylistRequest contains the parameters for importing a YouTube playlist.
-type CreateKnowledgeFromYouTubePlaylistRequest struct {
-	// URL is the playlist link, e.g. https://www.youtube.com/playlist?list=... (required)
-	URL string `json:"url"`
+// CreateKnowledgeFromYouTubeRequest contains the parameters for a batch YouTube import.
+type CreateKnowledgeFromYouTubeRequest struct {
+	// URLs are YouTube video and/or playlist links, at most 100 per request (required)
+	URLs []string `json:"urls"`
 	// EnableMultimodel is the optional flag to enable multimodal processing
 	EnableMultimodel *bool `json:"enable_multimodel,omitempty"`
 	// TagIDs are optional tag IDs applied to every imported video
@@ -285,44 +285,53 @@ type CreateKnowledgeFromYouTubePlaylistRequest struct {
 	ProcessConfig *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 }
 
-// YouTubePlaylistImportItem describes a playlist video that was skipped as a duplicate or failed to queue.
-type YouTubePlaylistImportItem struct {
-	VideoID     string `json:"video_id"`
-	Title       string `json:"title"`
+// YouTubeImportItem describes a link or video that was skipped as a duplicate or failed.
+type YouTubeImportItem struct {
 	URL         string `json:"url"`
+	VideoID     string `json:"video_id,omitempty"`
+	Title       string `json:"title,omitempty"`
 	KnowledgeID string `json:"knowledge_id,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
 
-// YouTubePlaylistImportResult is the outcome of a YouTube playlist import.
-type YouTubePlaylistImportResult struct {
-	PlaylistID    string `json:"playlist_id"`
-	PlaylistTitle string `json:"playlist_title"`
-	// TotalVideos is the number of importable videos considered.
-	TotalVideos int `json:"total_videos"`
-	// Truncated reports that the playlist exceeded the server's video limit.
-	Truncated  bool                        `json:"truncated"`
-	Created    []Knowledge                 `json:"created"`
-	Duplicates []YouTubePlaylistImportItem `json:"duplicates"`
-	Failed     []YouTubePlaylistImportItem `json:"failed"`
+// YouTubeImportPlaylist summarises one playlist link of a YouTube import.
+type YouTubeImportPlaylist struct {
+	URL        string `json:"url"`
+	PlaylistID string `json:"playlist_id"`
+	Title      string `json:"title"`
+	// Videos is the number of importable videos taken from this playlist.
+	Videos int `json:"videos"`
 }
 
-// CreateKnowledgeFromYouTubePlaylist queues one knowledge entry per video in a YouTube playlist.
-// Each video is processed asynchronously from its transcript; poll the created entries for parse status.
-func (c *Client) CreateKnowledgeFromYouTubePlaylist(
+// YouTubeImportResult is the outcome of a batch YouTube import.
+type YouTubeImportResult struct {
+	// TotalVideos is the number of distinct videos considered.
+	TotalVideos int `json:"total_videos"`
+	// Truncated reports that the links exceeded the server's per-import video limit.
+	Truncated  bool                    `json:"truncated"`
+	Playlists  []YouTubeImportPlaylist `json:"playlists"`
+	Created    []Knowledge             `json:"created"`
+	Duplicates []YouTubeImportItem     `json:"duplicates"`
+	Failed     []YouTubeImportItem     `json:"failed"`
+}
+
+// CreateKnowledgeFromYouTube queues one knowledge entry per distinct video across a batch of
+// YouTube video and playlist links. Each video is processed asynchronously from its transcript;
+// poll the created entries for parse status.
+func (c *Client) CreateKnowledgeFromYouTube(
 	ctx context.Context,
 	knowledgeBaseID string,
-	req CreateKnowledgeFromYouTubePlaylistRequest,
-) (*YouTubePlaylistImportResult, error) {
-	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/youtube-playlist", knowledgeBaseID)
+	req CreateKnowledgeFromYouTubeRequest,
+) (*YouTubeImportResult, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/youtube", knowledgeBaseID)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, req, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	var response struct {
-		Success bool                        `json:"success"`
-		Data    YouTubePlaylistImportResult `json:"data"`
+		Success bool                `json:"success"`
+		Data    YouTubeImportResult `json:"data"`
 	}
 	if err := parseResponse(resp, &response); err != nil {
 		return nil, err

@@ -25,6 +25,18 @@ test('uses confirmed tags for file and URL imports instead of reading the list f
   )
 })
 
+test('imports pasted links in bulk: YouTube links as one batch, other links one by one', () => {
+  const dropdown = readFileSync(new URL('./KbUploadSourceDropdown.vue', import.meta.url), 'utf8')
+  assert.match(dropdown, /<t-textarea[\s\S]*?v-model="urlInputValue"/)
+  assert.match(dropdown, /parseImportUrls\(urlInputValue\.value\)/)
+  assert.match(dropdown, /emit\('urls', urls\)/)
+  assert.match(dialog, /@urls="appendUrls"/)
+  assert.match(knowledgeBase, /@urls="handleUploadSourceUrls"/)
+  assert.match(knowledgeBase, /const youTubeUrls = urls\.filter\(isYouTubeUrl\)/)
+  assert.match(knowledgeBase, /executeYouTubeImport\(youTubeUrls, processConfig, tagIds\)/)
+  assert.match(knowledgeBase, /urls\.filter\(\(candidate\) => !isYouTubeUrl\(candidate\)\)/)
+})
+
 // Browsing a folder pre-fills the upload destination, so the dialog must show it
 // and the batch must use the folder the user confirmed there — never the sidebar
 // selection as it stands when the uploads actually start.
