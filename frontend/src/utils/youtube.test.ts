@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isYouTubeUrl, parseImportUrls, youTubeLinkKind } from './youtube.ts'
+import { isYouTubeUrl, parseImportUrls, summarizeImportUrls, youTubeLinkKind } from './youtube.ts'
 
 test('classifies YouTube video links', () => {
   for (const url of [
@@ -49,4 +49,15 @@ test('parses pasted links separated by new lines, spaces and commas', () => {
     invalid: ['notalink', 'ftp://example.com/file'],
   })
   assert.deepEqual(parseImportUrls('   '), { urls: [], invalid: [] })
+})
+
+test('summarizes pasted links for the import preview', () => {
+  const text = `https://example.com/article
+https://youtu.be/jNQXAC9IVRw
+https://www.youtube.com/watch?v=reiXAO1vl9I&list=PL123456
+https://www.youtube.com/playlist?list=PL123456
+https://www.youtube.com/watchv=reiXAO1vl9I
+not-a-link`
+  assert.deepEqual(summarizeImportUrls(text), { webPages: 2, youTubeVideos: 2, youTubePlaylists: 1, invalid: 1 })
+  assert.deepEqual(summarizeImportUrls(''), { webPages: 0, youTubeVideos: 0, youTubePlaylists: 0, invalid: 0 })
 })

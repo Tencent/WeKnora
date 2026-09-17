@@ -41,13 +41,12 @@ test('imports pasted links in bulk: YouTube links as one batch, other links one 
   assert.match(knowledgeBase, /urls\.filter\(\(candidate\) => !isYouTubeUrl\(candidate\)\)/)
 })
 
-test('offers a YouTube-only import that accepts only YouTube links, one per line', () => {
+test('imports YouTube links from the URL dialog with a live link preview instead of a separate entry', () => {
   const dropdown = readFileSync(new URL('./KbUploadSourceDropdown.vue', import.meta.url), 'utf8')
-  assert.match(dropdown, /value: 'importYouTube'/)
-  assert.match(dropdown, /case 'importYouTube':\s*openUrlDialog\('youtube'\)/)
-  assert.match(dropdown, /urls = parsed\.urls\.filter\(isYouTubeUrl\)/)
-  assert.match(dropdown, /knowledgeBase\.nonYouTubeURLsSkipped/)
-  assert.match(dropdown, /knowledgeBase\.youtubeUrlTip/)
+  assert.doesNotMatch(dropdown, /importYouTube/)
+  assert.match(dropdown, /summarizeImportUrls\(urlInputValue\.value\)/)
+  assert.match(dropdown, /v-for="part in urlPreviewParts"/)
+  assert.match(dropdown, /knowledgeBase\.urlPreviewYouTubePlaylists/)
 })
 
 test('flags speech recognition for YouTube links without blocking confirmation', () => {

@@ -79,3 +79,25 @@ export function parseImportUrls(text: string): { urls: string[]; invalid: string
   }
   return { urls, invalid }
 }
+
+export interface ImportUrlSummary {
+  webPages: number
+  youTubeVideos: number
+  youTubePlaylists: number
+  invalid: number
+}
+
+// summarizeImportUrls classifies pasted links for the import dialog's live
+// preview, so users can see which lines are recognised as YouTube before
+// confirming.
+export function summarizeImportUrls(text: string): ImportUrlSummary {
+  const { urls, invalid } = parseImportUrls(text)
+  const summary: ImportUrlSummary = { webPages: 0, youTubeVideos: 0, youTubePlaylists: 0, invalid: invalid.length }
+  for (const url of urls) {
+    const kind = youTubeLinkKind(url)
+    if (kind === 'video') summary.youTubeVideos++
+    else if (kind === 'playlist') summary.youTubePlaylists++
+    else summary.webPages++
+  }
+  return summary
+}

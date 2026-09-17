@@ -38,7 +38,7 @@
 
     <t-dialog
       v-model:visible="urlDialogVisible"
-      :header="urlDialogText.title"
+      :header="t('knowledgeBase.importURLTitle')"
       :confirm-btn="{ content: t('common.confirm'), theme: 'primary' }"
       :cancel-btn="{ content: t('common.cancel') }"
       width="500px"
@@ -46,14 +46,21 @@
       @cancel="handleUrlDialogCancel"
     >
       <div class="url-import-form">
-        <div class="url-input-label">{{ urlDialogText.label }}</div>
+        <div class="url-input-label">{{ t('knowledgeBase.urlLabel') }}</div>
         <t-textarea
           v-model="urlInputValue"
-          :placeholder="urlDialogText.placeholder"
+          :placeholder="t('knowledgeBase.urlPlaceholder')"
           :autosize="{ minRows: 3, maxRows: 10 }"
           autofocus
         />
-        <div class="url-input-tip">{{ urlDialogText.tip }}</div>
+        <div v-if="urlPreviewParts.length > 0" class="url-input-preview">
+          <span
+            v-for="part in urlPreviewParts"
+            :key="part.key"
+            :class="['url-input-preview-item', { 'is-warning': part.warning }]"
+          >{{ part.text }}</span>
+        </div>
+        <div class="url-input-tip">{{ t('knowledgeBase.urlTip') }}</div>
       </div>
     </t-dialog>
   </div>
@@ -64,7 +71,7 @@ import { ref, computed, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
 import { filterUploadFiles } from '../utils/uploadSources'
-import { isYouTubeUrl, parseImportUrls } from '@/utils/youtube'
+import { parseImportUrls, summarizeImportUrls } from '@/utils/youtube'
 
 const props = withDefaults(defineProps<{
   acceptFileTypes?: string
@@ -98,23 +105,29 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const urlDialogVisible = ref(false)
 const urlInputValue = ref('')
-// The link dialog serves both general web page import and the YouTube-only
-// import, which accepts video and playlist links and nothing else.
-const urlDialogMode = ref<'url' | 'youtube'>('url')
 
-const urlDialogText = computed(() => urlDialogMode.value === 'youtube'
-  ? {
-      title: t('knowledgeBase.importYouTubeTitle'),
-      label: t('knowledgeBase.youtubeUrlLabel'),
-      placeholder: t('knowledgeBase.youtubeUrlPlaceholder'),
-      tip: t('knowledgeBase.youtubeUrlTip'),
-    }
-  : {
-      title: t('knowledgeBase.importURLTitle'),
-      label: t('knowledgeBase.urlLabel'),
-      placeholder: t('knowledgeBase.urlPlaceholder'),
-      tip: t('knowledgeBase.urlTip'),
+// Live preview of how the pasted links will be imported, so it is visible
+// before confirming which lines are recognised as YouTube videos or playlists.
+const urlPreviewParts = computed(() => {
+  const summary = summarizeImportUrls(urlInputValue.value)
+  const parts: Array<{ key: string; text: string; warning?: boolean }> = []
+  if (summary.webPages > 0) {
+    parts.push({ key: 'web', text: t('knowledgeBase.urlPreviewWebPages', { count: summary.webPages }) })
+  }
+  if (summary.youTubeVideos > 0) {
+    parts.push({ key: 'video', text: t('knowledgeBase.urlPreviewYouTubeVideos', { count: summary.youTubeVideos }) })
+  }
+  if (summary.youTubePlaylists > 0) {
+    parts.push({
+      key: 'playlist',
+      text: t('knowledgeBase.urlPreviewYouTubePlaylists', { count: summary.youTubePlaylists }),
     })
+  }
+  if (summary.invalid > 0) {
+    parts.push({ key: 'invalid', text: t('knowledgeBase.urlPreviewInvalid', { count: summary.invalid }), warning: true })
+  }
+  return parts
+})
 
 const tooltipText = computed(() => props.tooltip || t('knowledgeBase.addDocument'))
 
@@ -134,11 +147,6 @@ const dropdownOptions = computed(() => {
       content: t('knowledgeBase.importURL'),
       value: 'importURL',
       prefixIcon: () => h(TIcon, { name: 'link', size: '16px' }),
-    },
-    {
-      content: t('knowledgeBase.importYouTube'),
-      value: 'importYouTube',
-      prefixIcon: () => h(TIcon, { name: 'logo-youtube', size: '16px' }),
     },
   ]
   if (props.includeManual) {
@@ -161,9 +169,6 @@ const handleActionSelect = (data: { value: string }) => {
       break
     case 'importURL':
       openUrlDialog()
-      break
-    case 'importYouTube':
-      openUrlDialog('youtube')
       break
     case 'manualCreate':
       emit('manual')
@@ -215,22 +220,13 @@ const handleUrlDialogConfirm = () => {
     MessagePlugin.warning(t('knowledgeBase.urlRequired'))
     return
   }
-  const parsed = parseImportUrls(urlInputValue.value)
-  let urls = parsed.urls
-  let skippedCount = parsed.invalid.length
-  if (urlDialogMode.value === 'youtube') {
-    urls = parsed.urls.filter(isYouTubeUrl)
-    skippedCount += parsed.urls.length - urls.length
-  }
+  const { urls, invalid } = parseImportUrls(urlInputValue.value)
   if (urls.length === 0) {
-    MessagePlugin.warning(t(urlDialogMode.value === 'youtube' ? 'knowledgeBase.noYouTubeURLs' : 'knowledgeBase.invalidURL'))
+    MessagePlugin.warning(t('knowledgeBase.invalidURL'))
     return
   }
-  if (skippedCount > 0) {
-    MessagePlugin.warning(t(
-      urlDialogMode.value === 'youtube' ? 'knowledgeBase.nonYouTubeURLsSkipped' : 'knowledgeBase.invalidURLsSkipped',
-      { count: skippedCount },
-    ))
+  if (invalid.length > 0) {
+    MessagePlugin.warning(t('knowledgeBase.invalidURLsSkipped', { count: invalid.length }))
   }
   urlDialogVisible.value = false
   urlInputValue.value = ''
@@ -242,8 +238,7 @@ const handleUrlDialogCancel = () => {
   urlInputValue.value = ''
 }
 
-const openUrlDialog = (mode: 'url' | 'youtube' = 'url') => {
-  urlDialogMode.value = mode
+const openUrlDialog = () => {
   urlInputValue.value = ''
   urlDialogVisible.value = true
 }
@@ -274,6 +269,27 @@ defineExpose({ openUrlDialog })
     font-size: 14px;
     font-weight: 500;
     color: var(--td-text-color-primary);
+  }
+
+  .url-input-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .url-input-preview-item {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+
+    &.is-warning {
+      color: var(--td-warning-color);
+      background: var(--td-warning-color-light);
+    }
   }
 
   .url-input-tip {
