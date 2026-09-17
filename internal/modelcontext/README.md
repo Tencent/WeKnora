@@ -73,9 +73,12 @@ are decoded centrally through a tool-name plus JSON-field allowlist. The
 `sourceKeySpaces` table is the single source of truth for which keys are
 ID-bearing and which handle space they register into; per-tool `sourceIDKeys`
 contracts gate which of those keys each tool may use.
-`database_query.sql` and `data_analysis.sql` have an explicit policy because
-source handles can be embedded inside quoted SQL values; unquoted SQL aliases
-and arbitrary prose are never rewritten. Wiki issue IDs use the same lifecycle
+`database_query.sql` has an explicit policy because source handles can be
+embedded inside quoted SQL values when the model filters the real
+`knowledges`/`chunks` tables; unquoted SQL aliases and arbitrary prose are
+never rewritten. `data_analysis.sql` carries no handles: the selected document
+is always exposed as the fixed table `dataset`, so only `knowledge_id` is
+decoded. Wiki issue IDs use the same lifecycle
 via an `iN` handle space.
 
 Dynamic MCP tools are intentionally opaque in both arguments and results.

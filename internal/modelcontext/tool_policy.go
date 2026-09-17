@@ -94,9 +94,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		sourceTextKeys: map[string]struct{}{"sql": {}},
 		sourceOutput:   true,
 	},
+	// data_analysis exposes the selected document as a fixed table name, so
+	// its SQL never carries a document handle; only knowledge_id is decoded.
 	toolDataAnalysis: {
-		sourceIDKeys:   map[string]struct{}{"knowledge_id": {}},
-		sourceTextKeys: map[string]struct{}{"sql": {}},
+		sourceIDKeys: map[string]struct{}{"knowledge_id": {}},
 	},
 	"data_schema": {
 		sourceIDKeys: map[string]struct{}{"knowledge_id": {}},

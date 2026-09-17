@@ -364,7 +364,11 @@ func TestRegistryDecodesCanonicalArgumentsForEveryBuiltInReferenceTool(t *testin
 		{"list chunk", "list_knowledge_chunks", `{"chunk_id":"c1"}`, `{"chunk_id":"chunk-real"}`},
 		{"document info", "get_document_info", `{"knowledge_ids":["d1"],"faq_ids":["c1"]}`, `{"knowledge_ids":["doc-real"],"faq_ids":["chunk-real"]}`},
 		{"knowledge graph", "query_knowledge_graph", `{"knowledge_base_ids":["b1"],"query":"topic"}`, `{"knowledge_base_ids":["kb-real"],"query":"topic"}`},
-		{"data analysis SQL", "data_analysis", `{"knowledge_id":"d1","sql":"SELECT * FROM 'd1'"}`, `{"knowledge_id":"doc-real","sql":"SELECT * FROM 'doc-real'"}`},
+		{
+			"data analysis SQL", "data_analysis",
+			`{"knowledge_id":"d1","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'd1'"}`,
+			`{"knowledge_id":"doc-real","sql":"SELECT COUNT(*) FROM dataset WHERE label = 'd1'"}`,
+		},
 		{"data schema", "data_schema", `{"knowledge_id":"d1"}`, `{"knowledge_id":"doc-real"}`},
 		{"database SQL", "database_query", `{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='b1'"}`, `{"sql":"SELECT * FROM chunks WHERE knowledge_base_id='kb-real'"}`},
 		{"web fetch", "web_fetch", `{"items":[{"url":"w1"}]}`, `{"items":[{"url":"https://example.com/page"}]}`},

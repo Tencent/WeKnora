@@ -417,8 +417,8 @@ flowchart TD
 | `query_knowledge_graph` | `knowledge_base_ids[]`\*（1–10 个 `bN`）、`query`\* | 并发查询各 KB 知识图谱的实体与关系；未配置图谱的 KB 退化为普通检索结果 |
 | `get_document_info` | `knowledge_ids[]`（`dN`）、`faq_ids[]`（`cN`）（至少一个） | 并发批量返回文档元数据（标题、类型、大小、parse_status、分块数）或 FAQ 标准问/答案 |
 | `database_query` | SQL（SELECT-only） | 只读查询白名单表（`knowledge_bases`/`knowledges`/`chunks`），自动注入 tenant_id 过滤与 `deleted_at IS NULL`；SQL 参数在 UI/Langfuse 中脱敏 |
-| `data_schema` | `knowledge_id`\*（`dN`） | 读取 CSV/Excel 文件的 `table_summary` + `table_column` 类型分块，返回表名、列信息与行数 |
-| `data_analysis` | `knowledge_id`\*、`sql`\* | 把 CSV/Excel 载入 DuckDB 后执行 SQL；多 Sheet Excel 合并为一张表并暴露 `__sheet_name` 列；自动纠正列名大小写/空格差异；会话结束 Cleanup 时 DROP 所建表 |
+| `data_schema` | `knowledge_id`\*（`dN`） | 读取 CSV/Excel 文件的 `table_summary` + `table_column` 类型分块，返回列信息与行数；并告知模型该文档在 `data_analysis` 中固定以表名 `dataset` 访问 |
+| `data_analysis` | `knowledge_id`\*、`sql`\* | 把 CSV/Excel 载入 DuckDB 后执行 SQL。文档由 `knowledge_id` 选定，SQL 中固定以表名 `dataset` 引用它（每次查询在独立连接上建临时视图映射到物理表，模型永远不需要在 SQL 里写文档 ID）；多 Sheet Excel 合并为一张表并暴露 `__sheet_name` 列；自动纠正列名大小写/空格差异；会话结束 Cleanup 时 DROP 所建表 |
 | `web_search` | `query`\*，可选 `count`、`country`、`freshness`、`content` | 联网搜索，直接返回提供商的标题、摘要和 `wN` 页面短 ID；按任务需要选择知识库或联网检索，Agent 搜索不再自动进行 RAG 压缩；Brave 支持地区/时效过滤，`content=true` 并行抓取前 3 条正文并返回完整正文地址 |
 | `web_fetch` | `items[]`\*（每项 `url`\*=`wN` 或 HTTP(S) URL，可选 `offset`、`limit`） | 并发抓取最多 8 个网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），直接返回 Markdown 或支持的文本正文；60s 超时。按字符分页，使用 `next_offset` 续读；完整正文保存在 `full_output_path`，可用 `read_file` 跨轮按行读取；逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码，部分失败不影响其它页面 |
 | `read_file` | `path`、offset、limit、max_bytes；网页可带 line_offset | 读取工作区文本、skill:// 资源和 web:// 网页快照，按结果续读 |
