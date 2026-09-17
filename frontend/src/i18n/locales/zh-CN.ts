@@ -6480,6 +6480,7 @@ export default {
     statusNeedsSetup: '待配置',
     multimodalSetupHint: '含图片内容，请启用多模态并选择模型',
     asrSetupHint: '含音频内容，请启用语音识别并选择模型',
+    asrYouTubeHint: '没有字幕的 YouTube 视频需要通过语音识别转写，请启用语音识别并选择模型，否则这些视频会导入失败',
     vlmModelRequired: '请配置多模态模型',
     asrModelRequired: '请配置语音识别模型',
     vlmModelSelectRequired: '已启用多模态，请选择 VLM 模型',

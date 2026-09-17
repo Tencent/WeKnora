@@ -50,6 +50,13 @@ test('offers a YouTube-only import that accepts only YouTube links, one per line
   assert.match(dropdown, /knowledgeBase\.youtubeUrlTip/)
 })
 
+test('flags speech recognition for YouTube links without blocking confirmation', () => {
+  assert.match(dialog, /const hasYouTube = computed\(\(\) => localUrls\.value\.some\(isYouTubeUrl\)\)/)
+  assert.match(dialog, /if \(hasAudio\.value \|\| hasYouTube\.value\) \{/)
+  assert.match(dialog, /hasAudio \? 'uploadConfirm\.asrSetupHint' : 'uploadConfirm\.asrYouTubeHint'/)
+  assert.doesNotMatch(dialog, /if \(hasYouTube\.value\) \{\s*if \(!uiState\.value\.asrConfig\.enabled[\s\S]{0,80}return false/)
+})
+
 // Browsing a folder pre-fills the upload destination, so the dialog must show it
 // and the batch must use the folder the user confirmed there — never the sidebar
 // selection as it stands when the uploads actually start.

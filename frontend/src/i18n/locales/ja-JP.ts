@@ -831,6 +831,7 @@ export default {
     statusNeedsSetup: '設定が必要',
     multimodalSetupHint: '画像が含まれています。マルチモーダルを有効にしてモデルを選択してください。',
     asrSetupHint: '音声が含まれています。音声認識を有効にしてモデルを選択してください。',
+    asrYouTubeHint: '字幕のない YouTube 動画は音声認識で文字起こしされます。音声認識を有効にしてモデルを選択しないと、これらの動画は取り込みに失敗します。',
     vlmModelRequired: 'マルチモーダルモデルを設定してください',
     asrModelRequired: '音声認識モデルを設定してください',
     vlmModelSelectRequired: 'マルチモーダルが有効です。VLMモデルを選択してください。',

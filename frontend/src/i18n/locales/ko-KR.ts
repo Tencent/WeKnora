@@ -6478,6 +6478,7 @@ export default {
     statusNeedsSetup: '설정 필요',
     multimodalSetupHint: '이미지가 포함되어 있습니다. 멀티모달을 활성화하고 모델을 선택하세요',
     asrSetupHint: '오디오가 포함되어 있습니다. 음성 인식을 활성화하고 모델을 선택하세요',
+    asrYouTubeHint: '자막이 없는 YouTube 동영상은 음성 인식으로 변환됩니다. 음성 인식을 활성화하고 모델을 선택하지 않으면 해당 동영상을 가져오지 못합니다',
     vlmModelRequired: '멀티모달 모델을 설정하세요',
     asrModelRequired: '음성 인식 모델을 설정하세요',
     vlmModelSelectRequired: '멀티모달이 활성화되었습니다. VLM 모델을 선택하세요',

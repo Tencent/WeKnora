@@ -831,6 +831,7 @@ export default {
     statusNeedsSetup: 'Needs setup',
     multimodalSetupHint: 'Images detected. Enable multimodal and select a model.',
     asrSetupHint: 'Audio detected. Enable speech recognition and select a model.',
+    asrYouTubeHint: 'YouTube videos without captions are transcribed with speech recognition. Enable it and select a model, or those videos will fail to import.',
     vlmModelRequired: 'Configure a multimodal model',
     asrModelRequired: 'Configure a speech recognition model',
     vlmModelSelectRequired: 'Multimodal is enabled. Please select a VLM model.',
