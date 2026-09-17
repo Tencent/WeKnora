@@ -1,0 +1,162 @@
+package mcpserver
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+)
+
+// allowedKnowledgeBases returns every knowledge base the endpoint may touch.
+// An endpoint with an explicit allowlist resolves exactly those IDs (dropping
+// any that no longer resolve); an unrestricted endpoint sees the workspace's
+// own knowledge bases.
+func (s *Server) allowedKnowledgeBases(ctx context.Context, ep *types.MCPEndpoint) ([]*types.KnowledgeBase, error) {
+	if ep.RestrictsKnowledgeBases() {
+		out := make([]*types.KnowledgeBase, 0, len(ep.KnowledgeBaseIDs))
+		for _, id := range ep.KnowledgeBaseIDs {
+			kb, err := s.kbService.GetKnowledgeBaseByID(ctx, id)
+			if err != nil || kb == nil {
+				logger.Warnf(ctx, "[mcpserver] endpoint %s references unavailable knowledge base %s: %v",
+					ep.ID, id, err)
+				continue
+			}
+			out = append(out, kb)
+		}
+		return out, nil
+	}
+	kbs, err := s.kbService.ListKnowledgeBases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return kbs, nil
+}
+
+// selectKnowledgeBases narrows the allowed set to the ones a caller named,
+// accepting either IDs or exact (case-insensitive) names. With no selector
+// every allowed knowledge base is returned.
+func (s *Server) selectKnowledgeBases(
+	ctx context.Context, ep *types.MCPEndpoint, requested []string,
+) ([]*types.KnowledgeBase, error) {
+	allowed, err := s.allowedKnowledgeBases(ctx, ep)
+	if err != nil {
+		return nil, err
+	}
+	if len(allowed) == 0 {
+		return nil, fmt.Errorf("no knowledge base is available on this endpoint")
+	}
+	cleaned := make([]string, 0, len(requested))
+	for _, r := range requested {
+		if r = strings.TrimSpace(r); r != "" {
+			cleaned = append(cleaned, r)
+		}
+	}
+	if len(cleaned) == 0 {
+		return allowed, nil
+	}
+	out := make([]*types.KnowledgeBase, 0, len(cleaned))
+	seen := map[string]struct{}{}
+	for _, sel := range cleaned {
+		kb := matchKnowledgeBase(allowed, sel)
+		if kb == nil {
+			return nil, fmt.Errorf("knowledge base %q was not found or is outside this endpoint's scope; call "+
+				"list_knowledge_bases to see what is available", sel)
+		}
+		if _, dup := seen[kb.ID]; dup {
+			continue
+		}
+		seen[kb.ID] = struct{}{}
+		out = append(out, kb)
+	}
+	return out, nil
+}
+
+func matchKnowledgeBase(kbs []*types.KnowledgeBase, selector string) *types.KnowledgeBase {
+	for _, kb := range kbs {
+		if kb.ID == selector {
+			return kb
+		}
+	}
+	for _, kb := range kbs {
+		if strings.EqualFold(strings.TrimSpace(kb.Name), selector) {
+			return kb
+		}
+	}
+	return nil
+}
+
+// searchTargetsFor builds whole-knowledge-base search targets. TenantID is
+// carried per target because shared knowledge bases index under their owner.
+func searchTargetsFor(kbs []*types.KnowledgeBase) types.SearchTargets {
+	targets := make(types.SearchTargets, 0, len(kbs))
+	for _, kb := range kbs {
+		targets = append(targets, &types.SearchTarget{
+			Type:            types.SearchTargetTypeKnowledgeBase,
+			KnowledgeBaseID: kb.ID,
+			TenantID:        kb.TenantID,
+		})
+	}
+	return targets
+}
+
+func knowledgeBaseIDs(kbs []*types.KnowledgeBase) []string {
+	ids := make([]string, 0, len(kbs))
+	for _, kb := range kbs {
+		ids = append(ids, kb.ID)
+	}
+	return ids
+}
+
+// retrievableKnowledgeBases keeps knowledge bases that have a vector or
+// keyword index, i.e. the ones the search tools can actually query.
+func retrievableKnowledgeBases(kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+	out := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
+			out = append(out, kb)
+		}
+	}
+	return out
+}
+
+// wikiKnowledgeBases keeps knowledge bases with a generated wiki.
+func wikiKnowledgeBases(kbs []*types.KnowledgeBase) []*types.KnowledgeBase {
+	out := make([]*types.KnowledgeBase, 0, len(kbs))
+	for _, kb := range kbs {
+		if kb.IsWikiEnabled() {
+			out = append(out, kb)
+		}
+	}
+	return out
+}
+
+func wikiScopesFor(kbs []*types.KnowledgeBase) []tools.WikiScope {
+	return tools.NewWikiScopesFromKBIDs(knowledgeBaseIDs(kbs))
+}
+
+// knowledgeInScope loads a document and confirms it belongs to a knowledge
+// base the endpoint may touch.
+func (s *Server) knowledgeInScope(
+	ctx context.Context, ep *types.MCPEndpoint, knowledgeID string,
+) (*types.Knowledge, *types.KnowledgeBase, error) {
+	knowledgeID = strings.TrimSpace(knowledgeID)
+	if knowledgeID == "" {
+		return nil, nil, fmt.Errorf("knowledge_id is required")
+	}
+	k, err := s.knowledgeService.GetKnowledgeByID(ctx, knowledgeID)
+	if err != nil || k == nil {
+		return nil, nil, fmt.Errorf("document %q was not found", knowledgeID)
+	}
+	allowed, err := s.allowedKnowledgeBases(ctx, ep)
+	if err != nil {
+		return nil, nil, err
+	}
+	kb := matchKnowledgeBase(allowed, k.KnowledgeBaseID)
+	if kb == nil {
+		return nil, nil, fmt.Errorf("document %q is outside this endpoint's scope", knowledgeID)
+	}
+	return k, kb, nil
+}
