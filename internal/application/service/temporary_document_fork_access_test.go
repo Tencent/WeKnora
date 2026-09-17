@@ -150,3 +150,37 @@ func TestOpenFileResolvesParentAttachmentReferencedByForkedSession(t *testing.T)
 	require.NoError(t, reader.Close())
 	require.True(t, bytes.Equal(body, []byte("%PDF-fake")))
 }
+
+func TestResolveForPromptUsesParentAttachmentReferencedByFork(t *testing.T) {
+	doc := parentOwnedBrief(t)
+	doc.Content = "parent brief body"
+	svc := &temporaryDocumentService{
+		repo: &forkAccessDocRepo{docs: []*types.TemporaryDocument{doc}},
+		sessionAttachments: &forkAccessAttachments{bySession: map[string]types.MessageAttachments{
+			"fork": {{ID: "doc-1", FileName: "brief.pdf"}},
+		}},
+	}
+
+	got, err := svc.ResolveForPrompt(context.Background(), 7, "fork", []string{"doc-1"}, "summarize")
+
+	require.NoError(t, err)
+	require.Len(t, got.Attachments, 1)
+	require.Equal(t, "doc-1", got.Attachments[0].ID)
+	require.Equal(t, "parent brief body", got.Attachments[0].Content)
+}
+
+func TestResolveForPromptHidesParentAttachmentNotOnForkedHistory(t *testing.T) {
+	doc := parentOwnedBrief(t)
+	doc.Content = "secret"
+	svc := &temporaryDocumentService{
+		repo: &forkAccessDocRepo{docs: []*types.TemporaryDocument{doc}},
+		sessionAttachments: &forkAccessAttachments{bySession: map[string]types.MessageAttachments{
+			"fork": {{ID: "other-doc", FileName: "later.pdf"}},
+		}},
+	}
+
+	_, err := svc.ResolveForPrompt(context.Background(), 7, "fork", []string{"doc-1"}, "summarize")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+}

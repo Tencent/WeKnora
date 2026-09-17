@@ -666,7 +666,7 @@ func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantI
 			continue
 		}
 		seen[documentID] = struct{}{}
-		document, err := s.repo.GetScoped(ctx, tenantID, sessionID, documentID)
+		document, err := s.resolveInSession(ctx, tenantID, sessionID, documentID)
 		if err != nil {
 			return nil, err
 		}
