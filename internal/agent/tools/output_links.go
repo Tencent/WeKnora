@@ -49,7 +49,10 @@ func changedOutputLinks(before, after map[string]sandbox.RemoteDirEntry) []strin
 }
 
 func sandboxOutputLinks(paths ...string) []string {
-	var links []string
+	// A non-nil empty list means inspection completed without finding output
+	// links. Keep it distinct from nil (inspection unavailable or failed) so the
+	// next model turn can distinguish stdout filenames from deliverables.
+	links := []string{}
 	bytes := 0
 	for _, filePath := range paths {
 		filePath = path.Clean(filePath)

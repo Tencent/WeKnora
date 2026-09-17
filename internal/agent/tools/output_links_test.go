@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -70,6 +71,7 @@ func TestShellOutputLinksOmitUnverifiedOutputs(t *testing.T) {
 		result, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), json.RawMessage(`{"command":"python3 generate.py"}`))
 		require.NoError(t, err)
 		require.Empty(t, result.OutputFiles)
+		require.Nil(t, result.OutputFiles, "failed inspection must not claim that no output files were found")
 		require.Equal(t, 1, executor.calls)
 	})
 	t.Run("failed command", func(t *testing.T) {
@@ -96,9 +98,40 @@ func TestShellOutputLinksOmitUnverifiedOutputs(t *testing.T) {
 	})
 }
 
+func TestShellPreviewListingDoesNotBecomeDownloadLinks(t *testing.T) {
+	t.Setenv("WEKNORA_SKILL_OUTPUT_DIR", "/workspace/output")
+	doc := sandbox.RemoteDirEntry{Path: "/workspace/output/report.docx", Type: sandbox.RemoteEntryFile, Size: 100}
+	executor := &outputLinkExecutor{
+		fakeShellExecutor: fakeShellExecutor{result: &sandbox.ExecuteResult{
+			Stdout: "page-1.png\npage-2.png\npage-3.png\npage-4.png\n",
+		}},
+		before: []sandbox.RemoteDirEntry{doc},
+		after:  []sandbox.RemoteDirEntry{doc},
+	}
+	result, err := NewShellExecTool(executor, nil).Execute(
+		shellExecTestContext(), json.RawMessage(`{"command":"ls /tmp/task/previews/"}`),
+	)
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Empty(t, result.OutputFiles)
+	require.NotNil(t, result.OutputFiles, "a completed inspection should explicitly report no output changes")
+	registry := modelcontext.NewRegistry(true)
+	modelOutput := registry.ModelToolResultForTool(ToolShellExec, result)
+	require.Contains(t, modelOutput, "page-1.png", "preserve stdout for the model to inspect")
+	require.Contains(t, modelOutput, "Output files: none identified by this call.")
+	require.NotContains(t, modelOutput, "sandbox:")
+}
+
 func TestOutputLinksEscapeNamesAndStayInsideOutputDirectory(t *testing.T) {
 	t.Setenv("WEKNORA_SKILL_OUTPUT_DIR", "/workspace/output")
-	links := sandboxOutputLinks("/workspace/output/report [1](final).pdf", "/workspace/script.py", "/workspace/output/../input/a.pdf")
+	links := sandboxOutputLinks(
+		"/workspace/output/report [1](final).pdf",
+		"/workspace/script.py",
+		"/workspace/output/../input/a.pdf",
+		"/tmp/task/previews/page-1.png",
+		"/workspace/output-previews/page-1.png",
+		"/workspace/output/../../tmp/task/previews/page-1.png",
+	)
 	require.Equal(t, []string{"sandbox:report%20%5B1%5D%28final%29.pdf"}, links)
 	require.Equal(t, []string{"sandbox:比赛信息.pptx"}, sandboxOutputLinks("/workspace/output/比赛信息.pptx"))
 }

@@ -61,6 +61,27 @@ func TestOutputFilesAreRenderedOnlyForLiveModelResults(t *testing.T) {
 	require.Contains(t, registry.ModelToolResultForTool("shell_exec", result), "sandbox:比赛信息.pptx")
 }
 
+func TestEmptyOutputInspectionIsExplicitOnlyInLiveModelResults(t *testing.T) {
+	for _, registry := range []*Registry{NewRegistry(true), nil} {
+		result := &types.ToolResult{Success: true, Output: "page-1.png", OutputFiles: []string{}}
+		modelOutput := registry.ModelToolResultForTool("shell_exec", result)
+		require.Equal(t, "page-1.png\nOutput files: none identified by this call.", modelOutput)
+		require.NotContains(t, modelOutput, "sandbox:page-1.png")
+		encoded, err := json.Marshal(result)
+		require.NoError(t, err)
+		var restored types.ToolResult
+		require.NoError(t, json.Unmarshal(encoded, &restored))
+		require.Equal(t, "page-1.png", registry.ModelToolResultForTool("shell_exec", &restored))
+		result.Success = false
+		result.Error = "command timed out"
+		modelOutput = registry.ModelToolResultForTool("shell_exec", result)
+		require.Contains(t, modelOutput, "command timed out")
+		require.Contains(t, modelOutput, "Output files: none identified by this call.")
+		result.OutputFiles = nil
+		require.NotContains(t, registry.ModelToolResultForTool("shell_exec", result), "Output files:")
+	}
+}
+
 func TestRegistryAuditsUnresolvedAndPartiallyResolvedToolHandles(t *testing.T) {
 	registry := NewRegistry(true)
 	registry.RegisterKnowledgeBase("kb-real")
