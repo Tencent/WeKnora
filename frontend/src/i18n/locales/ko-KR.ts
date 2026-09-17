@@ -4842,6 +4842,12 @@ export default {
     me: '나',
     confirm: '확인',
     cancel: '취소',
+    unsavedChanges: {
+      title: '저장되지 않은 변경 사항',
+      body: '지금 닫으면 변경 사항이 사라집니다. 닫으시겠습니까?',
+      discard: '변경 사항 버리기',
+      keepEditing: '계속 편집',
+    },
     save: '저장',
     delete: '삭제',
     edit: '편집',

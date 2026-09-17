@@ -2404,6 +2404,12 @@ export default {
     me: '自分',
     confirm: '確認',
     cancel: 'キャンセル',
+    unsavedChanges: {
+      title: '未保存の変更があります',
+      body: '閉じると現在の変更は失われます。閉じますか？',
+      discard: '変更を破棄',
+      keepEditing: '編集を続ける',
+    },
     save: '保存',
     delete: '削除',
     edit: '編集',

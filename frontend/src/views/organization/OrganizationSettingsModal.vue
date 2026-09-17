@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="visible" class="settings-overlay" @click.self="handleClose">
+      <div v-if="visible" class="settings-overlay" @click.self="modalShell.requestClose">
         <div class="settings-modal">
           <!-- 关闭按钮 -->
-          <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
+          <button class="close-btn" @click="modalShell.requestClose" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
               <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
@@ -804,7 +804,7 @@
 
               <!-- 底部操作按钮 -->
               <div class="settings-footer">
-                <t-button variant="outline" @click="handleClose">{{ $t('common.cancel') }}</t-button>
+                <t-button variant="outline" @click="modalShell.requestClose">{{ $t('common.cancel') }}</t-button>
                 <t-button v-if="isAdmin" theme="primary" :loading="submitting" @click="handleSave">
                   {{ isCreateMode ? $t('common.create') : $t('common.save') }}
                 </t-button>
@@ -821,6 +821,7 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useModalShell } from '@/composables/useModalShell'
 import { useI18n } from 'vue-i18n'
 import { copyWithToast } from '@/utils/clipboard'
 import {
@@ -1302,6 +1303,12 @@ const handleClose = () => {
   emit('update:visible', false)
 }
 
+const modalShell = useModalShell({
+  visible: () => props.visible,
+  close: handleClose,
+  snapshot: () => formData.value,
+})
+
 const fetchOrgDetail = async () => {
   if (!props.orgId) return
   try {
@@ -1322,6 +1329,7 @@ const fetchOrgDetail = async () => {
       }
       inviteCode.value = res.data.invite_code || ''
       inviteCodeExpiresAt.value = res.data.invite_code_expires_at ?? null
+      modalShell.markClean()
       // 初始化是否有待处理的升级申请
       hasPendingUpgrade.value = res.data.has_pending_upgrade || false
     }
@@ -1857,6 +1865,7 @@ watch(() => props.visible, (newVal) => {
     if (props.mode === 'create') {
       // 创建模式：重置表单
       formData.value = { name: '', description: '', avatar: '', require_approval: false, searchable: false, invite_code_validity_days: 7, member_limit: 50 }
+      modalShell.markClean()
       orgStore.clearCurrentOrganizationContext()
       sharedKnowledgeBases.value = []
       inviteCode.value = ''

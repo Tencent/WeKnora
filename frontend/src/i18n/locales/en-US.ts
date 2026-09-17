@@ -2404,6 +2404,12 @@ export default {
     me: 'Me',
     confirm: 'Confirm',
     cancel: 'Cancel',
+    unsavedChanges: {
+      title: 'Unsaved changes',
+      body: 'Your changes will be lost if you close now. Close anyway?',
+      discard: 'Discard changes',
+      keepEditing: 'Keep editing',
+    },
     save: 'Save',
     delete: 'Delete',
     edit: 'Edit',

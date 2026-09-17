@@ -1,13 +1,13 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="visible" class="settings-overlay" @click.self="handleClose">
+      <div v-if="visible" class="settings-overlay" @click.self="modalShell.requestClose">
         <div class="settings-modal">
           <div v-if="editorInitializing" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
             <t-loading size="medium" :text="$t('common.loading')" />
           </div>
           <!-- 关闭按钮 -->
-          <button class="close-btn" @click="handleClose" :aria-label="$t('common.close')">
+          <button class="close-btn" @click="modalShell.requestClose" :aria-label="$t('common.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
               <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
             </svg>
@@ -1782,7 +1782,7 @@
                   </span>
                 </p>
                 <div class="settings-footer-actions">
-                  <t-button variant="outline" @click="handleClose">{{ props.readOnly ? $t('common.close') :
+                  <t-button variant="outline" @click="modalShell.requestClose">{{ props.readOnly ? $t('common.close') :
                     $t('common.cancel')
                     }}</t-button>
                   <t-button v-if="!props.readOnly" theme="primary" data-guide="agent-create-submit" :loading="saving"
@@ -1837,6 +1837,7 @@ import { selectInitialModelId } from '@/utils/modelDefaults';
 import { hydrateAgentPromptRefs, serializeAgentPrompts } from '@/utils/agentPromptTemplates';
 import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
+import { useModalShell } from '@/composables/useModalShell'
 import {
   createAgent,
   updateAgent,
@@ -3550,6 +3551,7 @@ watch(() => props.visible, async (val) => {
     } finally {
       if (generation === editorInitializationGeneration && props.visible) {
         editorInitializing.value = false;
+        modalShell.markClean();
       }
     }
   } else {
@@ -3937,6 +3939,19 @@ const handleClose = () => {
   fallbackPromptPopup.value.show = false;
   emit('update:visible', false);
 };
+
+const modalShell = useModalShell({
+  visible: () => props.visible,
+  close: handleClose,
+  snapshot: () => formData.value,
+  ignoreEscape: () =>
+    showPlaceholderPopup.value ||
+    showContextPlaceholderPopup.value ||
+    intentPromptPopup.value.show ||
+    rewriteSystemPopup.value.show ||
+    rewriteUserPopup.value.show ||
+    fallbackPromptPopup.value.show,
+});
 
 // 过滤后的占位符列表
 const filteredPlaceholders = computed(() => {
@@ -4828,6 +4843,7 @@ const handleSave = async () => {
       }
       savedAgent.value = created;
       formData.value.id = created.id;
+      modalShell.markClean();
       markContextualGuideDone('agentCreate')
       currentSection.value = 'basic';
       void loadAgentIntegrationCounts(created.id);

@@ -1,13 +1,13 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="visible" class="settings-overlay" @click.self="handleClose">
+      <div v-if="visible" class="settings-overlay" @click.self="modalShell.requestClose">
         <div class="settings-modal">
           <div v-if="loading" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
             <t-loading size="medium" :text="$t('common.loading')" />
           </div>
           <!-- 关闭按钮 -->
-          <button class="close-btn" @click="handleClose" :aria-label="$t('general.close')">
+          <button class="close-btn" @click="modalShell.requestClose" :aria-label="$t('general.close')">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
               <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
             </svg>
@@ -445,7 +445,7 @@
                   </span>
                 </p>
                 <div class="settings-footer-actions">
-                  <t-button theme="default" variant="outline" @click="handleClose">
+                  <t-button theme="default" variant="outline" @click="modalShell.requestClose">
                     {{ $t('common.cancel') }}
                   </t-button>
                   <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving"
@@ -470,6 +470,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import KbCreateContextualGuide from '@/components/KbCreateContextualGuide.vue'
 import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config/contextualGuides'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
+import { useModalShell } from '@/composables/useModalShell'
 import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { useChatResourcesStore } from '@/stores/chatResources'
@@ -964,6 +965,7 @@ const loadKBData = async (
   } finally {
     if (isCurrentKBLoad(generation, kbId)) {
       loading.value = false
+      modalShell.markClean()
     }
   }
 }
@@ -1555,12 +1557,19 @@ const handleClose = () => {
   }, 300)
 }
 
+const modalShell = useModalShell({
+  visible: () => props.visible,
+  close: handleClose,
+  snapshot: () => formData.value,
+})
+
 // 监听弹窗打开/关闭
 watch(() => props.visible, async (newVal) => {
   const generation = ++kbEditorLoadGeneration
   if (newVal) {
     // 打开弹窗时，先重置状态
     resetState()
+    modalShell.markClean()
     loading.value = true
     const targetKbId = props.kbId
     
@@ -1584,6 +1593,7 @@ watch(() => props.visible, async (newVal) => {
       hasFiles.value = false
       applyDefaultModelsIfEmpty()
       loading.value = false
+      modalShell.markClean()
     }
   } else {
     // 关闭弹窗时，延迟重置状态（等待动画结束）

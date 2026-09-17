@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="modal">
-      <div v-if="visible" class="settings-overlay">
+      <div v-if="visible" class="settings-overlay" @click.self="modalShell.requestClose">
         <div class="settings-modal">
           <!-- 关闭按钮 -->
           <button class="close-btn" @click="handleClose" :aria-label="$t('general.close')">
@@ -233,6 +233,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useModalShell } from '@/composables/useModalShell'
 import SystemInfo from './SystemInfo.vue'
 import TenantInfo from './TenantInfo.vue'
 import UserProfile from './UserProfile.vue'
@@ -601,12 +602,11 @@ watch(navItems, (items) => {
   }
 })
 
-// ESC 键关闭
-const handleEscape = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && visible.value) {
-    handleClose()
-  }
-}
+// Esc / 遮罩点击关闭（与其他设置类弹窗共用同一壳层交互）
+const modalShell = useModalShell({
+  visible: () => visible.value,
+  close: handleClose,
+})
 
 // 处理快捷导航事件
 const handleSettingsNav = (e: CustomEvent) => {
@@ -634,7 +634,6 @@ const handleSettingsNav = (e: CustomEvent) => {
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', handleEscape)
   window.addEventListener('settings-nav', handleSettingsNav as EventListener)
 })
 
@@ -645,7 +644,6 @@ watch(currentSection, () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleEscape)
   window.removeEventListener('settings-nav', handleSettingsNav as EventListener)
 })
 </script>

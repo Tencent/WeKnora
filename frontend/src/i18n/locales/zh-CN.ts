@@ -4844,6 +4844,12 @@ export default {
     me: '我',
     confirm: '确认',
     cancel: '取消',
+    unsavedChanges: {
+      title: '有未保存的更改',
+      body: '关闭后当前修改将丢失，确定要关闭吗？',
+      discard: '放弃更改',
+      keepEditing: '继续编辑',
+    },
     save: '保存',
     delete: '删除',
     edit: '编辑',
