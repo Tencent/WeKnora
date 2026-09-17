@@ -120,3 +120,45 @@ func TestBindContentResourcesIsInertWithoutCatalog(t *testing.T) {
 	// claim and keeps the pre-binding behaviour.
 	svc.bindContentResources(context.Background(), 7, "kn-1", "![a]("+contentRef("f")+")")
 }
+
+// TestBindContentResourcesClaimsParsedDocumentMarkdown pins the claim step
+// ProcessDocument now performs on convertResult.MarkdownContent. Parser output
+// mixes shapes the other ingestion paths never produce — HTML <img> tags next
+// to Markdown images, and the same handle repeated across pages — so every
+// unique handle must be claimed exactly once, with the document itself as
+// owner, or its images stay unreachable through the KB file proxy.
+func TestBindContentResourcesClaimsParsedDocumentMarkdown(t *testing.T) {
+	chart := contentRef("x")
+	photo := contentRef("y")
+	catalog := &resolvingCatalog{tenantByRef: map[string]uint64{chart: 7, photo: 7}}
+	svc := &knowledgeService{resourceCatalog: catalog}
+
+	// The same chart appears twice (page 2 and page 9); the photo only as an
+	// HTML img tag, which the converter emits for floating images.
+	markdown := "# Report\n\n" +
+		"![chart page 2](" + chart + ")\n\n" +
+		"<img src=\"" + photo + "\" alt=\"photo page 5\" />\n\n" +
+		"## Appendix\n\nSee ![chart again](" + chart + ")\n"
+
+	svc.bindContentResources(context.Background(), 7, "kn-doc-1", markdown)
+
+	if len(catalog.binds) != 2 {
+		t.Fatalf("binds = %v, want one per unique handle", catalog.binds)
+	}
+	byRef := map[string]bindCall{}
+	for _, b := range catalog.binds {
+		byRef[b.ref] = b
+	}
+	for _, ref := range []string{chart, photo} {
+		b, ok := byRef[ref]
+		if !ok {
+			t.Fatalf("handle %q not claimed", ref)
+		}
+		if b.ownerType != types.ResourceOwnerKnowledge || b.ownerID != "kn-doc-1" {
+			t.Fatalf("handle %q owner = (%q, %q), want (knowledge, kn-doc-1)", ref, b.ownerType, b.ownerID)
+		}
+		if b.relation != types.ResourceRelationAttachment {
+			t.Fatalf("handle %q relation = %q, want %q", ref, b.relation, types.ResourceRelationAttachment)
+		}
+	}
+}
