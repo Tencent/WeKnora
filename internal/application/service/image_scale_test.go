@@ -124,8 +124,8 @@ func TestNormalizeClassifyMaxEdge(t *testing.T) {
 		"explicit value is kept":    {1024, 1024},
 	}
 	for name, tc := range cases {
-		if got := types.NormalizeClassifyMaxEdge(tc.in); got != tc.want {
-			t.Errorf("%s: NormalizeClassifyMaxEdge(%d) = %d, want %d", name, tc.in, got, tc.want)
+		if got := types.NormalizeImageClassifyMaxEdge(tc.in); got != tc.want {
+			t.Errorf("%s: NormalizeImageClassifyMaxEdge(%d) = %d, want %d", name, tc.in, got, tc.want)
 		}
 	}
 }

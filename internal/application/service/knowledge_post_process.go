@@ -29,6 +29,12 @@ type KnowledgePostProcessService struct {
 	pendingRepo   interfaces.TaskPendingOpsRepository
 	redisClient   *redis.Client
 	spanTracker   SpanTracker
+	// tenantRepo rebuilds the tenant context an HTTP request would carry. The
+	// image rules run inside an Asynq worker, and the chunk edit they perform is
+	// reindexed through the retrieve-engine factory, which reads the full tenant
+	// configuration rather than only the tenant id. The summary refresh worker
+	// has the same constraint and solves it the same way.
+	tenantRepo interfaces.TenantRepository
 }
 
 func NewKnowledgePostProcessService(
@@ -40,6 +46,7 @@ func NewKnowledgePostProcessService(
 	pendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
 	spanTracker SpanTracker,
+	tenantRepo interfaces.TenantRepository,
 ) interfaces.TaskHandler {
 	return &KnowledgePostProcessService{
 		knowledgeRepo: knowledgeRepo,
@@ -50,6 +57,7 @@ func NewKnowledgePostProcessService(
 		pendingRepo:   pendingRepo,
 		redisClient:   redisClient,
 		spanTracker:   spanTracker,
+		tenantRepo:    tenantRepo,
 	}
 }
 
@@ -186,6 +194,16 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 		if c.ChunkType == types.ChunkTypeText || c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
 			textChunks = append(textChunks, c)
 		}
+	}
+
+	// Image rules run here: after the chunks are gathered and before graph
+	// selection and the subtask count. Both of those are derived from this list,
+	// so a rule that retires an image has to have run first — otherwise the
+	// graph would still be handed the rows it exists to remove, and the expected
+	// subtask count would describe a document that no longer exists.
+	if eff.PostProcessImageEnabled {
+		textChunks = s.applyImagePostProcessRules(
+			ctx, payload.TenantID, payload.KnowledgeID, kb, textChunks, postSpan, eff.ImageClassPolicies)
 	}
 
 	graphChunks := selectGraphChunks(textChunks)

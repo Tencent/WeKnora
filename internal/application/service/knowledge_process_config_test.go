@@ -59,6 +59,30 @@ func TestResolveProcessConfig_OverrideTogglesParentChild(t *testing.T) {
 	require.True(t, effOn.ChunkingConfig.EnableParentChild)
 }
 
+// The image post-processing switch follows the knowledge base until a single
+// upload overrides it, either way. The default is off: a knowledge base that
+// never heard of the engine must not have its documents rewritten.
+func TestResolveProcessConfig_ImagePostProcessOverride(t *testing.T) {
+	t.Parallel()
+
+	kbOff := &types.KnowledgeBase{}
+	kbOn := &types.KnowledgeBase{}
+	kbOn.ImageProcessingConfig.PostProcessImageEnabled = true
+
+	require.False(t, ResolveProcessConfig(kbOff, nil).PostProcessImageEnabled,
+		"the engine must be off for a knowledge base that never enabled it")
+	require.True(t, ResolveProcessConfig(kbOn, nil).PostProcessImageEnabled,
+		"the knowledge base's switch must survive a nil override")
+
+	require.True(t, ResolveProcessConfig(kbOff, &types.KnowledgeProcessOverrides{
+		PostProcessImageEnabled: processConfigBoolPtr(true),
+	}).PostProcessImageEnabled, "a single upload must be able to turn the engine on")
+
+	require.False(t, ResolveProcessConfig(kbOn, &types.KnowledgeProcessOverrides{
+		PostProcessImageEnabled: processConfigBoolPtr(false),
+	}).PostProcessImageEnabled, "a single upload must be able to turn the engine off")
+}
+
 func TestResolveProcessConfig_GraphDisabled(t *testing.T) {
 	t.Parallel()
 
@@ -524,6 +548,43 @@ func TestBuildParentChildConfigs_PropagatesStrategy(t *testing.T) {
 	require.Equal(t, 512/5, child.ChunkOverlap)
 	require.Equal(t, base.Separators, parent.Separators)
 	require.Equal(t, base.Separators, child.Separators)
+}
+
+func TestResolveProcessConfig_ImagePipelineOverrides(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ImageProcessingConfig: types.ImageProcessingConfig{
+			PostProcessImageEnabled:  true,
+			BatchSize:                4,
+			ClassifyMaxEdge:          640,
+			ClassifyDownscaleEnabled: processConfigBoolPtr(true),
+		},
+	}
+
+	// nil override fields keep every KB value.
+	eff := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{})
+	require.True(t, eff.PostProcessImageEnabled)
+	require.Equal(t, 4, eff.ImageBatchSize)
+	require.True(t, eff.ImageClassifyDownscaleEnabled)
+	require.Equal(t, types.DefaultImageClassPolicies()["decorative"], eff.ImageClassPolicies["decorative"])
+
+	// Non-nil override fields win, per-class policies fold on top of the KB table.
+	batch := 24 // out of range, must clamp to 16
+	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		PostProcessImageEnabled:       processConfigBoolPtr(false),
+		ImageBatchSize:                &batch,
+		ImageClassifyDownscaleEnabled: processConfigBoolPtr(false),
+		ImageClassPolicies: map[string]types.ImageClassPolicy{
+			"chart": {OCR: true, Caption: true, Disabled: true},
+		},
+	})
+	require.False(t, eff.PostProcessImageEnabled)
+	require.Equal(t, 16, eff.ImageBatchSize)
+	require.False(t, eff.ImageClassifyDownscaleEnabled)
+	require.True(t, eff.ImageClassPolicies["chart"].Disabled)
+	// Untouched classes still come from the KB (folded onto defaults).
+	require.Equal(t, types.DefaultImageClassPolicies()["photo"], eff.ImageClassPolicies["photo"])
 }
 
 func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {

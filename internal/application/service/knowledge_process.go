@@ -251,8 +251,14 @@ func markKnowledgeProcessing(knowledge *types.Knowledge, now time.Time) {
 	knowledge.UpdatedAt = now
 }
 
-// buildSplitterConfigFromChunking normalizes effective chunking settings with
-// the shared chunker defaults.
+// buildSplitterConfig creates a SplitterConfig with fallbacks from a KnowledgeBase.
+// Defaults mirror chunker.DefaultChunkSize / DefaultChunkOverlap so behavior is
+// identical whether callers come through this path or invoke the chunker
+// directly with a zero-value config.
+func buildSplitterConfig(kb *types.KnowledgeBase) chunker.SplitterConfig {
+	return buildSplitterConfigFromChunking(kb.ChunkingConfig)
+}
+
 func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterConfig {
 	return chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
 		ChunkSize:    cc.ChunkSize,
@@ -706,10 +712,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
 	if options.EnableMultimodel && len(options.StoredImages) > 0 {
+		// Counts only, no policy claims: whether a given image is OCR'd is
+		// decided per image once its class is known, so a boolean here would
+		// assert something the pipeline has not decided yet — and would drift
+		// from what actually happened.
+		multimodalBatch := imageMultimodalTaskBatchSize(kb, knowledge)
 		s.beginStage(ctx, knowledge.ID, types.StageMultimodal, types.JSONMap{
-			"image_count":    len(options.StoredImages),
-			"enable_ocr":     true,
-			"enable_caption": true,
+			"image_count": len(options.StoredImages),
+			"batch_count": (len(options.StoredImages) + multimodalBatch - 1) / multimodalBatch,
 		})
 		s.enqueueImageMultimodalTasks(ctx, knowledge, kb, options.StoredImages, chunks, options.Metadata)
 	} else {
@@ -4059,7 +4069,42 @@ func imageClassifyMaxEdge(kb *types.KnowledgeBase) int {
 	if kb == nil {
 		return 0
 	}
-	return types.NormalizeClassifyMaxEdge(kb.ImageProcessingConfig.ClassifyMaxEdge)
+	return types.NormalizeImageClassifyMaxEdge(kb.ImageProcessingConfig.ClassifyMaxEdge)
+}
+
+// imagePipelineEnabled resolves whether this document runs the classified
+// image pipeline (describe round, per-class OCR, post-process rules) or the
+// upstream legacy behaviour. A per-upload override wins over the KB default.
+func imagePipelineEnabled(kb *types.KnowledgeBase, knowledge *types.Knowledge) bool {
+	if kb == nil {
+		return false
+	}
+	overrides, _ := knowledge.ProcessOverrides()
+	return ResolveProcessConfig(kb, overrides).PostProcessImageEnabled
+}
+
+// imageMultimodalTaskBatchSize resolves the batch size a document's multimodal
+// tasks run with. Legacy mode (post-processing off) always reports 1: upstream
+// processed one image per task, and the stage's batch_count is derived from
+// this value, so it must agree with what enqueueImageMultimodalTasks uses.
+func imageMultimodalTaskBatchSize(kb *types.KnowledgeBase, knowledge *types.Knowledge) int {
+	if !imagePipelineEnabled(kb, knowledge) {
+		return 1
+	}
+	overrides, _ := knowledge.ProcessOverrides()
+	return ResolveProcessConfig(kb, overrides).ImageBatchSize
+}
+
+// imageClassPolicies resolves the class→work table for a knowledge base,
+// folded on top of the built-in defaults. The table travels with the task so
+// the worker does not need a second config lookup per image, and so a task
+// keeps the policy it was enqueued with even if the KB is reconfigured
+// meanwhile.
+func imageClassPolicies(kb *types.KnowledgeBase) map[string]types.ImageClassPolicy {
+	if kb == nil {
+		return types.DefaultImageClassPolicies()
+	}
+	return types.MergeImageClassPolicies(kb.ImageProcessingConfig.ClassPolicies)
 }
 
 // enqueueImageMultimodalTasks enqueues asynq tasks for multimodal image processing.
@@ -4096,8 +4141,20 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	}
 
 	lang := types.LanguageFromContextOrDefault(ctx)
-	batchSize := imageMultimodalBatchSize(kb)
-	classifyMaxEdge := imageClassifyMaxEdge(kb)
+	// Legacy mode pins every knob to the upstream behaviour: one image per
+	// task, no downscaling. Only the classified pipeline reads batch_size,
+	// the downscale switch, and the class table.
+	overrides, _ := knowledge.ProcessOverrides()
+	eff := ResolveProcessConfig(kb, overrides)
+	postProcessEnabled := eff.PostProcessImageEnabled
+	batchSize := 1
+	classifyMaxEdge := 0
+	if postProcessEnabled {
+		batchSize = eff.ImageBatchSize
+		if eff.ImageClassifyDownscaleEnabled {
+			classifyMaxEdge = imageClassifyMaxEdge(kb)
+		}
+	}
 	for batchStart := 0; batchStart < len(refs); batchStart += batchSize {
 		batchEnd := batchStart + batchSize
 		if batchEnd > len(refs) {
@@ -4106,19 +4163,21 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		batch := refs[batchStart:batchEnd]
 
 		payload := types.ImageMultimodalPayload{
-			TenantID:        knowledge.TenantID,
-			KnowledgeID:     knowledge.ID,
-			KnowledgeBaseID: kb.ID,
-			ChunkID:         batch[0].ChunkID,
-			ImageURL:        batch[0].URL,
-			EnableOCR:       true,
-			EnableCaption:   true,
-			Language:        lang,
-			ImageSourceType: metadata["image_source_type"],
-			Attempt:         attempt,
-			ImageIndex:      batch[0].Index,
-			Images:          batch,
-			ClassifyMaxEdge: classifyMaxEdge,
+			TenantID:                knowledge.TenantID,
+			KnowledgeID:             knowledge.ID,
+			KnowledgeBaseID:         kb.ID,
+			ChunkID:                 batch[0].ChunkID,
+			ImageURL:                batch[0].URL,
+			EnableOCR:               true,
+			EnableCaption:           true,
+			PostProcessImageEnabled: postProcessEnabled,
+			ClassPolicies:           eff.ImageClassPolicies,
+			Language:                lang,
+			ImageSourceType:         metadata["image_source_type"],
+			Attempt:                 attempt,
+			ImageIndex:              batch[0].Index,
+			Images:                  batch,
+			ClassifyMaxEdge:         classifyMaxEdge,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

@@ -510,6 +510,10 @@ type ImageMultimodalPayload struct {
 	ChunkID         string `json:"chunk_id"`         // parent text chunk
 	ImageURL        string `json:"image_url"`        // provider:// URL (e.g. local://..., minio://...)
 	ImageLocalPath  string `json:"image_local_path"` // deprecated: kept for backward compat with in-flight tasks
+	// EnableOCR and EnableCaption are whole-task switches applied on top of the
+	// per-class policy: a step runs only when both this switch and the image's
+	// class policy allow it. Normal parsing leaves both true and lets the class
+	// decide.
 	EnableOCR       bool   `json:"enable_ocr"`
 	EnableCaption   bool   `json:"enable_caption"`
 	Language        string `json:"language,omitempty"`          // Request locale for {{language}} in prompt templates
@@ -528,13 +532,27 @@ type ImageMultimodalPayload struct {
 	// tasks that were already in flight when batching shipped; ImageRefs()
 	// normalises both shapes so workers only ever see a slice.
 	Images []ImageBatchRef `json:"images,omitempty"`
+	// PostProcessImageEnabled selects which image pipeline the task runs.
+	// True is the classified pipeline: one describe round that also
+	// classifies (batched when configured), then per-class OCR, then the
+	// post-process rules. False is the upstream legacy behaviour: every
+	// image gets a caption and then OCR, one image per request, no
+	// classification, no downscaling. In-flight tasks enqueued before the
+	// field existed read false, which matches the pipeline that enqueued
+	// them only for pre-batching tasks — a narrow window that a reparse
+	// resolves, and the reason the flag travels in the payload rather than
+	// being re-read from the knowledge base at handle time.
+	PostProcessImageEnabled bool `json:"post_process_image_enabled,omitempty"`
 	// ClassifyMaxEdge is the longest edge, in pixels, that images are scaled
-	// down to before the batch describe round. 0 disables downscaling. It is
-	// resolved from the knowledge base's image processing config when the task
-	// is enqueued, so the worker needs no second config lookup. It only applies
-	// to batched tasks: a single-image payload runs the historical pipeline,
-	// which never downscales.
+	// down to before the describe round. 0 disables downscaling. It is resolved
+	// from the knowledge base's image processing config when the task is
+	// enqueued, so the worker needs no second config lookup.
 	ClassifyMaxEdge int `json:"classify_max_edge,omitempty"`
+	// ClassPolicies is the class→work table, resolved from the KB config at
+	// enqueue time. A task without it — one already in flight when
+	// classification shipped — falls back to the conservative policy: run OCR
+	// and keep the caption.
+	ClassPolicies map[string]ImageClassPolicy `json:"class_policies,omitempty"`
 }
 
 // ImageBatchRef identifies one image inside an ImageMultimodalPayload batch.

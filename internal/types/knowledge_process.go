@@ -11,7 +11,20 @@ type KnowledgeProcessOverrides struct {
 	ASRConfig                *ASRConfig                `json:"asr_config,omitempty"`
 	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
 	GraphEnabled             *bool                     `json:"graph_enabled,omitempty"`
-	ExtractConfig            *ExtractConfig            `json:"extract_config,omitempty"`
+	// PostProcessImageEnabled overrides the knowledge base's image post-processing
+	// switch for this one document. nil keeps the knowledge base's setting.
+	PostProcessImageEnabled *bool `json:"post_process_image_enabled,omitempty"`
+	// ImageBatchSize overrides the describe-round batch size for this document.
+	// nil keeps the knowledge base's setting.
+	ImageBatchSize *int `json:"image_batch_size,omitempty"`
+	// ImageClassifyDownscaleEnabled overrides the describe-round downscale
+	// switch for this document. nil keeps the knowledge base's setting.
+	ImageClassifyDownscaleEnabled *bool `json:"image_classify_downscale_enabled,omitempty"`
+	// ImageClassPolicies overrides per-class rows of the class->work table for
+	// this document (merged per class on top of the knowledge base's table).
+	// nil keeps the knowledge base's setting.
+	ImageClassPolicies map[string]ImageClassPolicy `json:"image_class_policies,omitempty"`
+	ExtractConfig      *ExtractConfig              `json:"extract_config,omitempty"`
 	// ParserEngineOverrides passes key-value configuration to docreader parsers
 	// (e.g. pdf_force_scanned=true). Merged with workspace-level overrides in the
 	// parse pipeline; per-upload values take priority on conflict.
@@ -20,12 +33,16 @@ type KnowledgeProcessOverrides struct {
 
 // EffectiveProcessConfig is the merged view used by the parse pipeline.
 type EffectiveProcessConfig struct {
-	SummaryEnabled           bool
-	ChunkingConfig           ChunkingConfig
-	EnableMultimodel         bool
-	VLMConfig                VLMConfig
-	ASRConfig                ASRConfig
-	QuestionGenerationConfig QuestionGenerationConfig
-	GraphEnabled             bool
-	ExtractConfig            ExtractConfig
+	SummaryEnabled                bool
+	ChunkingConfig                ChunkingConfig
+	EnableMultimodel              bool
+	VLMConfig                     VLMConfig
+	ASRConfig                     ASRConfig
+	QuestionGenerationConfig      QuestionGenerationConfig
+	GraphEnabled                  bool
+	PostProcessImageEnabled       bool
+	ImageBatchSize                int
+	ImageClassifyDownscaleEnabled bool
+	ImageClassPolicies            map[string]ImageClassPolicy
+	ExtractConfig                 ExtractConfig
 }

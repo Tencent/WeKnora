@@ -145,8 +145,9 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) e
 	// A payload carries either one image (legacy) or a batch; normalise once
 	// here so the rest of the pipeline never branches on the payload shape.
 	refs := payload.ImageRefs()
-	logger.Infof(ctx, "[ImageMultimodal] Processing %d image(s): knowledge=%s, ocr=%v, caption=%v",
-		len(refs), payload.KnowledgeID, payload.EnableOCR, payload.EnableCaption)
+	logger.Infof(ctx,
+		"[ImageMultimodal] Processing %d image(s): knowledge=%s, class_policies=%d, classify_max_edge=%d",
+		len(refs), payload.KnowledgeID, len(payload.ClassPolicies), payload.ClassifyMaxEdge)
 
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
 	if payload.Language != "" {
@@ -282,7 +283,10 @@ func (s *ImageMultimodalService) processImageBatch(
 	}
 
 	descriptions := map[int]batchImageEntry{}
-	if len(loaded) > 0 {
+	// Legacy mode skips the batch describe round altogether: upstream never
+	// classified, so every image gets its own caption call below and the
+	// downscaled copies would be wasted work.
+	if payload.PostProcessImageEnabled && len(loaded) > 0 {
 		// The describe round works on downscaled copies: measurements showed
 		// that a short long-edge cuts prompt tokens to roughly a seventh
 		// without changing what the model reports. The per-image round below
@@ -330,6 +334,7 @@ func (s *ImageMultimodalService) processImageBatch(
 			Described:    described,
 			HasDescribed: hasDescribed,
 			BatchSize:    len(refs),
+			Legacy:       !payload.PostProcessImageEnabled,
 			Out:          outs[i],
 		})
 		if out != nil {
@@ -366,7 +371,8 @@ func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) 
 			"Rules:\n"+
 			"- Replace <n> with the image number, starting at 1.\n"+
 			"- CLASS must be exactly one of the listed values, with no extra words.\n"+
-			"- %s: artwork that carries no information, such as a logo, divider, background fill, or decorative icon.\n"+
+			"- %s: artwork that carries no information, such as a divider, background fill, or purely ornamental graphic. A brand mark is never decorative.\n"+
+			"- %s: a brand mark — a logo, badge, coat of arms, or emblem that identifies a company, product, or organisation, usually combining a name or wordmark with a graphic. When an image could be either decorative or a logo, classify it as %s.\n"+
 			"- %s: a photograph or a picture of a physical thing.\n"+
 			"- %s: a screenshot or scan whose content is mostly body text.\n"+
 			"- %s: a table rendered as an image.\n"+
@@ -375,7 +381,9 @@ func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) 
 			"- Produce %d blocks in total: one per image, none merged, none skipped.\n"+
 			"- Output only the blocks. No preamble, no summary, no extra commentary.\n",
 		count, language, types.ImageClassList(),
-		types.ImageClassDecorative, types.ImageClassPhoto, types.ImageClassTextScreenshot,
+		types.ImageClassDecorative,
+		types.ImageClassLogo, types.ImageClassLogo,
+		types.ImageClassPhoto, types.ImageClassTextScreenshot,
 		types.ImageClassTableImage, types.ImageClassChart, types.ImageClassOther,
 		count)
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
@@ -498,8 +506,54 @@ type imageProcessInput struct {
 	// BatchSize is how many images shared this task's batch request. Values
 	// above 1 mark the image as a batch member on the trace.
 	BatchSize int
+	// Legacy selects the upstream pipeline for this image: a plain caption
+	// prompt instead of the classify-and-describe protocol, and OCR for
+	// every image regardless of any class policy.
+	Legacy bool
 	// Out receives the per-image trace map. Nil uses a fresh map.
 	Out types.JSONMap
+}
+
+// runImageOCR runs the second pipeline round: text extraction at full
+// resolution. Both pipelines share it — the classified one gates the call on
+// the class policy, legacy mode runs it for every image. OCR keeps the
+// original bytes on purpose: downscaling before OCR makes models invent text.
+func (s *ImageMultimodalService) runImageOCR(
+	ctx context.Context,
+	payload *types.ImageMultimodalPayload,
+	ref types.ImageBatchRef,
+	vlmModel vlm.VLM,
+	imgBytes []byte,
+	imageInfo *types.ImageInfo,
+	out types.JSONMap,
+	vlmCfg types.VLMConfig,
+) {
+	prompt := vlmOCRPrompt
+	if payload.ImageSourceType == "scanned_pdf" {
+		prompt = vlmOCRScannedPDFPrompt
+		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", ref.URL)
+		out["ocr_prompt"] = "scanned_pdf"
+	} else {
+		out["ocr_prompt"] = "default"
+	}
+	prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
+
+	ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
+	if ocrErr != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", ref.URL, ocrErr)
+		out["ocr_error"] = ocrErr.Error()
+		return
+	}
+	ocrText = sanitizeOCRText(ocrText)
+	if ocrText != "" {
+		imageInfo.OCRText = ocrText
+		out["ocr_chars"] = len([]rune(ocrText))
+		out["ocr_preview"] = previewText(ocrText, 200)
+	} else {
+		logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", ref.URL)
+		out["ocr_chars"] = 0
+		out["ocr_skipped"] = "empty_or_invalid"
+	}
 }
 
 // processOneImage runs the multimodal pipeline for one image and persists the
@@ -534,12 +588,19 @@ func (s *ImageMultimodalService) processOneImage(
 		parent := tracker.LookupStage(ctx, payload.KnowledgeID, payload.Attempt, types.StageMultimodal)
 		if parent != nil {
 			name := fmt.Sprintf("multimodal.image[%d]", ref.Index)
+			// The class, and the policy it resolves to, are only known after
+			// the describe round, so they land on the span's output (see
+			// out["image_class"] and out["class_policy"]) instead of here.
 			spanInput := types.JSONMap{
 				"image_url":         ref.URL,
 				"image_source_type": payload.ImageSourceType,
-				"enable_ocr":        payload.EnableOCR,
-				"enable_caption":    payload.EnableCaption,
 				"parent_chunk_id":   ref.ChunkID,
+				// Which pipeline the trace is looking at: classified (describe
+				// round that also classifies, per-class OCR) or legacy (caption
+				// then OCR for every image, no classification). Reading
+				// image_info alone cannot tell a legacy run from a classified
+				// run that skipped OCR.
+				"pipeline": map[bool]string{true: "classified", false: "legacy"}[payload.PostProcessImageEnabled],
 			}
 			if in.BatchSize > 1 {
 				spanInput["batched"] = true
@@ -590,36 +651,26 @@ func (s *ImageMultimodalService) processOneImage(
 		OriginalURL: ref.URL,
 	}
 
-	if payload.EnableOCR {
-		prompt := vlmOCRPrompt
-		if payload.ImageSourceType == "scanned_pdf" {
-			prompt = vlmOCRScannedPDFPrompt
-			logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", ref.URL)
-			out["ocr_prompt"] = "scanned_pdf"
-		} else {
-			out["ocr_prompt"] = "default"
-		}
-		prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
-
-		ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-		if ocrErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", ref.URL, ocrErr)
-			out["ocr_error"] = ocrErr.Error()
-		} else {
-			ocrText = sanitizeOCRText(ocrText)
-			if ocrText != "" {
-				imageInfo.OCRText = ocrText
-				out["ocr_chars"] = len([]rune(ocrText))
-				out["ocr_preview"] = previewText(ocrText, 200)
-			} else {
-				logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", ref.URL)
-				out["ocr_chars"] = 0
-				out["ocr_skipped"] = "empty_or_invalid"
+	// Describe and classify first: the class decides whether OCR is worth
+	// running at all, so it has to be known before any OCR call is made. This
+	// is the ordering that makes "classify, then act" possible.
+	//
+	// Legacy mode (post-processing off) has no classification step: the image
+	// gets the plain caption prompt upstream shipped, and OCR below runs for
+	// every image regardless of any class.
+	if in.Legacy {
+		if payload.EnableCaption {
+			raw, capErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, buildVLMCaptionPrompt(ctx, vlmCfg))
+			if capErr != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] Caption failed for %s: %v", ref.URL, capErr)
+				out["caption_error"] = capErr.Error()
+			} else if text := strings.TrimSpace(raw); text != "" {
+				imageInfo.Caption = text
+				out["caption_chars"] = len([]rune(text))
+				out["caption_preview"] = previewText(text, 200)
 			}
 		}
-	}
-
-	if in.HasDescribed {
+	} else if in.HasDescribed {
 		// The describe round already covered this image; reuse its verdict
 		// instead of paying for a second call.
 		applyImageDescription(&imageInfo, in.Described, out)
@@ -644,7 +695,30 @@ func (s *ImageMultimodalService) processOneImage(
 		}
 	}
 
-	// Build child chunks for OCR and caption results
+	// The class decides what else this image is worth. An unknown or unset class
+	// resolves to the conservative policy, so a classification miss costs one
+	// call rather than losing text. Legacy mode has no class, so the policy
+	// step and its trace field are skipped entirely.
+	policy := types.ResolveImageClassPolicy(payload.ClassPolicies, imageInfo.Class)
+	ocrWanted := payload.EnableOCR
+	if !in.Legacy {
+		out["class_policy"] = types.JSONMap{"ocr": policy.OCR, "caption": policy.Caption, "disabled": policy.Disabled}
+		ocrWanted = ocrWanted && policy.OCR
+	}
+
+	if ocrWanted {
+		s.runImageOCR(ctx, payload, ref, vlmModel, imgBytes, &imageInfo, out, vlmCfg)
+	} else if in.Legacy {
+		// Recorded explicitly so the trace explains the missing OCR chunk
+		// rather than leaving it to be inferred from an absence.
+		out["ocr_skipped"] = "disabled"
+	} else {
+		out["ocr_skipped"] = "class_policy"
+		logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (class=%q)", ref.URL, imageInfo.Class)
+	}
+
+	// Build child chunks for the work the policy kept.
+	keepCaption := payload.EnableCaption && (in.Legacy || policy.Caption)
 	imageInfoJSON, _ := json.Marshal([]types.ImageInfo{imageInfo})
 	var newChunks []*types.Chunk
 
@@ -665,7 +739,7 @@ func (s *ImageMultimodalService) processOneImage(
 		})
 	}
 
-	if imageInfo.Caption != "" {
+	if keepCaption && imageInfo.Caption != "" {
 		newChunks = append(newChunks, &types.Chunk{
 			ID:              uuid.New().String(),
 			TenantID:        payload.TenantID,

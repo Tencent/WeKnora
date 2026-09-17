@@ -196,8 +196,11 @@ func TestNormalizeImageClass(t *testing.T) {
 	t.Parallel()
 	cases := map[string]types.ImageClass{
 		"decorative":        types.ImageClassDecorative,
-		"Decorative logo":   types.ImageClassDecorative,
-		"logo":              types.ImageClassDecorative,
+		"Decorative logo":   types.ImageClassLogo,
+		"logo":              types.ImageClassLogo,
+		"brand_logo":        types.ImageClassLogo,
+		"decoration":        types.ImageClassDecorative,
+		"watermark":         types.ImageClassDecorative,
 		"photo":             types.ImageClassPhoto,
 		"photograph":        types.ImageClassPhoto,
 		"text_screenshot":   types.ImageClassTextScreenshot,
@@ -365,11 +368,12 @@ func TestProcessImageBatchDescribesOnceAndFallsBack(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:        1,
-		KnowledgeID:     "k-1",
-		KnowledgeBaseID: "kb-1",
-		EnableOCR:       true,
-		EnableCaption:   true,
+		TenantID:                1,
+		KnowledgeID:             "k-1",
+		KnowledgeBaseID:         "kb-1",
+		EnableOCR:               true,
+		EnableCaption:           true,
+		PostProcessImageEnabled: true,
 	}
 
 	outs, err := svc.processImageBatch(
@@ -440,6 +444,73 @@ func TestProcessImageBatchDescribesOnceAndFallsBack(t *testing.T) {
 	}
 }
 
+// TestProcessImageBatchLegacyPipeline pins the upstream behaviour the master
+// switch falls back to: no classification, one caption request per image with
+// the plain prompt, and OCR for every image regardless of any class policy.
+func TestProcessImageBatchLegacyPipeline(t *testing.T) {
+	t.Parallel()
+
+	fileSvc := &batchFileService{body: []byte("fake-image-bytes")}
+	repo := &batchChunkRepo{}
+	svc := newBatchTestService(fileSvc, repo)
+
+	refs := []types.ImageBatchRef{
+		{Index: 0, URL: "local://img/0.png"},
+		{Index: 1, URL: "local://img/1.png"},
+	}
+
+	fake := &batchFakeVLM{}
+	fake.reply = func(prompt string, images int) (string, error) {
+		if strings.Contains(prompt, "OCR assistant") {
+			return "OCR-TEXT", nil
+		}
+		if images != 1 {
+			return "", fmt.Errorf("legacy caption carried %d images, want 1", images)
+		}
+		if strings.Contains(prompt, "CLASS:") {
+			return "", fmt.Errorf("legacy caption must not ask for a class")
+		}
+		return "plain caption", nil
+	}
+
+	payload := &types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		EnableOCR:       true,
+		EnableCaption:   true,
+		// A table is present but the legacy pipeline must ignore it: even a
+		// photo, which the classified pipeline would not OCR, gets its call.
+		ClassPolicies: types.DefaultImageClassPolicies(),
+	}
+
+	outs, err := svc.processImageBatch(
+		context.Background(), payload, refs, fake, types.VLMConfig{}, noopSpanTracker{})
+	if err != nil {
+		t.Fatalf("processImageBatch: %v", err)
+	}
+
+	// Two captions + two OCR calls; no batch describe round at all.
+	if len(fake.calls) != 4 {
+		t.Fatalf("legacy pipeline made %d VLM calls, want 4 (2 caption + 2 OCR): %+v",
+			len(fake.calls), fake.calls)
+	}
+	for _, c := range fake.calls {
+		if c.images != 1 {
+			t.Errorf("legacy request carried %d images, want 1 (no batching)", c.images)
+		}
+	}
+	if len(repo.created) != 4 {
+		t.Errorf("persisted chunks = %d, want 4 (caption + OCR per image)", len(repo.created))
+	}
+	if got := outs[0]["ocr_skipped"]; got != nil {
+		t.Errorf("legacy OCR must run for every image, got ocr_skipped=%v", got)
+	}
+	if got := outs[0]["class_policy"]; got != nil {
+		t.Errorf("legacy pipeline must not emit a class policy, got %v", got)
+	}
+}
+
 // TestProcessImageBatchFailsOnTransportError makes sure an API error fails the
 // task (so asynq retries it) instead of being silently absorbed into a batch
 // with no captions.
@@ -458,7 +529,10 @@ func TestProcessImageBatchFailsOnTransportError(t *testing.T) {
 		return "x", nil
 	}
 
-	payload := &types.ImageMultimodalPayload{TenantID: 1, KnowledgeID: "k-1", KnowledgeBaseID: "kb-1"}
+	payload := &types.ImageMultimodalPayload{
+		TenantID: 1, KnowledgeID: "k-1", KnowledgeBaseID: "kb-1",
+		PostProcessImageEnabled: true,
+	}
 	refs := []types.ImageBatchRef{
 		{Index: 0, URL: "local://img/0.png"},
 		{Index: 1, URL: "local://img/1.png"},
@@ -505,11 +579,12 @@ func TestProcessImageBatchSkipsUnreadableImage(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:        1,
-		KnowledgeID:     "k-1",
-		KnowledgeBaseID: "kb-1",
-		EnableOCR:       true,
-		EnableCaption:   true,
+		TenantID:                1,
+		KnowledgeID:             "k-1",
+		KnowledgeBaseID:         "kb-1",
+		EnableOCR:               true,
+		EnableCaption:           true,
+		PostProcessImageEnabled: true,
 	}
 	refs := []types.ImageBatchRef{
 		{Index: 0, URL: "local://img/0.png"},
@@ -593,5 +668,169 @@ func TestProcessOneImageReusesCallerVerdict(t *testing.T) {
 	// The class must land on the persisted row, not just the trace.
 	if got := persistedClasses(t, repo.created); !equalCounts(got, map[string]int{"chart": 2}) {
 		t.Errorf("persisted classes = %v, want one chart image", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Class policy routing (2d / 2e)
+// ---------------------------------------------------------------------------
+
+// samePolicyTable compares two class→work tables by value. ImageClassPolicy is two
+// bools, so it is directly comparable and needs no deeper walk.
+func samePolicyTable(got, want map[string]types.ImageClassPolicy) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for class, policy := range want {
+		if got[class] != policy {
+			return false
+		}
+	}
+	return true
+}
+
+// TestImageClassPoliciesReadsKBConfig pins 2e: the class table comes from the KB
+// config and falls back to the built-in one when unset.
+func TestImageClassPoliciesReadsKBConfig(t *testing.T) {
+	t.Parallel()
+
+	if got := imageClassPolicies(nil); !samePolicyTable(got, types.DefaultImageClassPolicies()) {
+		t.Fatalf("nil KB should take the built-in table, got %v", got)
+	}
+	if got := imageClassPolicies(&types.KnowledgeBase{}); !samePolicyTable(got, types.DefaultImageClassPolicies()) {
+		t.Fatalf("unconfigured KB should take the built-in table, got %v", got)
+	}
+
+	// The configured rows replace the default rows per class; classes the
+	// table does not mention keep the built-in values.
+	kb := &types.KnowledgeBase{}
+	kb.ImageProcessingConfig.ClassPolicies = map[string]types.ImageClassPolicy{
+		string(types.ImageClassChart): {OCR: false, Caption: false},
+	}
+	got := imageClassPolicies(kb)
+	want := types.DefaultImageClassPolicies()
+	want[string(types.ImageClassChart)] = types.ImageClassPolicy{OCR: false, Caption: false}
+	if !samePolicyTable(got, want) {
+		t.Fatalf("configured rows not merged over the defaults: %v", got)
+	}
+}
+
+// TestProcessOneImageHonoursClassPolicy pins 2d: the class decides which work
+// runs. A decorative image must not cost an OCR call even while the whole-task
+// switch is on, and its description must survive as the only child chunk.
+func TestProcessOneImageHonoursClassPolicy(t *testing.T) {
+	t.Parallel()
+
+	fileSvc := &batchFileService{body: []byte("decorative-bytes")}
+	repo := &batchChunkRepo{}
+	svc := newBatchTestService(fileSvc, repo)
+
+	fake := &batchFakeVLM{}
+	fake.reply = func(prompt string, _ int) (string, error) {
+		if strings.Contains(prompt, "OCR assistant") {
+			return "SHOULD-NOT-BE-ASKED", nil
+		}
+		return "ignored", nil
+	}
+
+	payload := &types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		EnableOCR:       true, // whole-task switch stays on; the class is what vetoes
+		EnableCaption:   true,
+		ClassPolicies: map[string]types.ImageClassPolicy{
+			string(types.ImageClassDecorative): {OCR: false, Caption: true},
+		},
+	}
+	out, err := svc.processOneImage(context.Background(), payload,
+		types.ImageBatchRef{Index: 0, URL: "local://img/0.png", ChunkID: "chunk-a"},
+		fake, types.VLMConfig{}, noopSpanTracker{}, imageProcessInput{
+			Bytes:        []byte("decorative-bytes"),
+			Described:    batchImageEntry{class: types.ImageClassDecorative, description: "a plain divider rule"},
+			HasDescribed: true,
+			BatchSize:    4,
+		})
+	if err != nil {
+		t.Fatalf("processOneImage: %v", err)
+	}
+
+	for _, c := range fake.calls {
+		if strings.Contains(c.prompt, "OCR assistant") {
+			t.Fatalf("a decorative image must not be OCR'd, got call %q", c.prompt)
+		}
+	}
+	if got := out["ocr_skipped"]; got != "class_policy" {
+		t.Errorf("ocr_skipped = %v, want class_policy", got)
+	}
+	if got, ok := out["class_policy"].(types.JSONMap); !ok || got["ocr"] != false || got["caption"] != true {
+		t.Errorf("class_policy = %v, want {ocr:false caption:true}", out["class_policy"])
+	}
+	if len(repo.created) != 1 {
+		t.Fatalf("persisted chunks = %d, want 1 (caption only)", len(repo.created))
+	}
+	if got := repo.created[0].Content; !strings.Contains(got, "a plain divider rule") {
+		t.Errorf("persisted caption chunk missing the description: %q", got)
+	}
+	if got := repo.created[0].ChunkType; got != types.ChunkTypeImageCaption {
+		t.Errorf("persisted chunk type = %v, want the caption chunk", got)
+	}
+}
+
+// TestProcessOneImageConservativeWhenClassUnset pins the other half of 2d: an
+// image whose class never parsed must still be OCR'd, because a missed block of
+// text costs more than one extra call.
+func TestProcessOneImageConservativeWhenClassUnset(t *testing.T) {
+	t.Parallel()
+
+	fileSvc := &batchFileService{body: []byte("bytes")}
+	repo := &batchChunkRepo{}
+	svc := newBatchTestService(fileSvc, repo)
+
+	fake := &batchFakeVLM{}
+	fake.reply = func(prompt string, _ int) (string, error) {
+		if strings.Contains(prompt, "OCR assistant") {
+			return "OCR-TEXT", nil
+		}
+		return "x", nil
+	}
+
+	payload := &types.ImageMultimodalPayload{
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		EnableOCR:       true,
+		EnableCaption:   true,
+		ClassPolicies: map[string]types.ImageClassPolicy{
+			string(types.ImageClassDecorative): {OCR: false, Caption: true},
+		},
+	}
+	out, err := svc.processOneImage(context.Background(), payload,
+		types.ImageBatchRef{Index: 0, URL: "local://img/0.png", ChunkID: "chunk-a"},
+		fake, types.VLMConfig{}, noopSpanTracker{}, imageProcessInput{
+			Bytes: []byte("bytes"),
+			// The describe round returned free text, so no class was parsed.
+			Described:    batchImageEntry{description: "unstructured answer"},
+			HasDescribed: true,
+			BatchSize:    4,
+		})
+	if err != nil {
+		t.Fatalf("processOneImage: %v", err)
+	}
+
+	ocrCalls := 0
+	for _, c := range fake.calls {
+		if strings.Contains(c.prompt, "OCR assistant") {
+			ocrCalls++
+		}
+	}
+	if ocrCalls != 1 {
+		t.Errorf("OCR calls = %d, want 1 (an unknown class must not skip OCR)", ocrCalls)
+	}
+	if got, ok := out["ocr_skipped"]; ok {
+		t.Errorf("OCR must not be reported skipped, got %v", got)
+	}
+	if got, ok := out["class_policy"].(types.JSONMap); !ok || got["ocr"] != true {
+		t.Errorf("class_policy = %v, want the conservative default", out["class_policy"])
 	}
 }
