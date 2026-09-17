@@ -68,6 +68,83 @@ func TestPruneMarkdownImagesOutsideRange(t *testing.T) {
 	}
 }
 
+func TestDropMarkdownImagesByURLs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes only the named image and keeps the prose", func(t *testing.T) {
+		content := "Pump overview.\n\n![a divider](local://img/a.png)\n\n![a diagram](local://img/b.png)\n\nEnd."
+		got := DropMarkdownImagesByURLs(content, map[string]bool{"local://img/a.png": true})
+		if strings.Contains(got, "local://img/a.png") {
+			t.Errorf("the dropped image is still referenced: %q", got)
+		}
+		if !strings.Contains(got, "local://img/b.png") {
+			t.Errorf("an unrelated image was removed too: %q", got)
+		}
+		for _, want := range []string{"Pump overview.", "End."} {
+			if !strings.Contains(got, want) {
+				t.Errorf("prose %q was lost: %q", want, got)
+			}
+		}
+	})
+
+	t.Run("matches the original url as well as the current one", func(t *testing.T) {
+		content := "![x](https://example.test/raw.png)"
+		got := DropMarkdownImagesByURLs(content, map[string]bool{"https://example.test/raw.png": true})
+		if got != "" {
+			t.Errorf("got %q, want the reference removed by its original URL", got)
+		}
+	})
+
+	// An HTML-only removal is the case that matters most: leaving the tag behind
+	// would keep the chunk referencing an image whose extraction was retired,
+	// and the child rows would stay enabled.
+	t.Run("removes html img tags", func(t *testing.T) {
+		content := `before<img alt="divider" src="local://img/a.png" width="10">after`
+		got := DropMarkdownImagesByURLs(content, map[string]bool{"local://img/a.png": true})
+		if strings.Contains(got, "<img") {
+			t.Errorf("the img tag survived: %q", got)
+		}
+		if !strings.Contains(got, "before") || !strings.Contains(got, "after") {
+			t.Errorf("surrounding text was lost: %q", got)
+		}
+	})
+
+	t.Run("removes both syntaxes in one pass", func(t *testing.T) {
+		content := "![x](local://img/a.png)\n\n<img src=\"local://img/a.png\">"
+		if got := DropMarkdownImagesByURLs(content, map[string]bool{"local://img/a.png": true}); got != "" {
+			t.Errorf("got %q, want both references removed", got)
+		}
+	})
+
+	t.Run("leaves html alone when the src is not in the set", func(t *testing.T) {
+		content := `<img src="local://img/keep.png">`
+		got := DropMarkdownImagesByURLs(content, map[string]bool{"local://img/drop.png": true})
+		if got != content {
+			t.Errorf("got %q, want the tag untouched", got)
+		}
+	})
+
+	t.Run("collapses the blank lines a removal leaves behind", func(t *testing.T) {
+		content := "alpha\n\n![x](local://img/a.png)\n\nbravo"
+		if got := DropMarkdownImagesByURLs(content, map[string]bool{"local://img/a.png": true}); got != "alpha\n\nbravo" {
+			t.Errorf("got %q, want the gap collapsed", got)
+		}
+	})
+
+	t.Run("is a no-op without urls", func(t *testing.T) {
+		content := "![x](local://img/a.png)"
+		if got := DropMarkdownImagesByURLs(content, nil); got != content {
+			t.Errorf("got %q, want the content untouched", got)
+		}
+		if got := DropMarkdownImagesByURLs(content, map[string]bool{}); got != content {
+			t.Errorf("got %q, want the content untouched", got)
+		}
+		if got := DropMarkdownImagesByURLs("", map[string]bool{"u": true}); got != "" {
+			t.Errorf("got %q, want the empty string back", got)
+		}
+	})
+}
+
 func TestPruneMarkdownImagesByImageInfoIgnoresShiftedOffsets(t *testing.T) {
 	content := "a manually inserted prefix that shifts every parser offset\n\n" +
 		"![p1](u1)\n\nbody\n\n![p2](u2)"
