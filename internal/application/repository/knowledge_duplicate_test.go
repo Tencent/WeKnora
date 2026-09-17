@@ -99,3 +99,42 @@ func TestCheckKnowledgeExists_FileSourceIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckKnowledgeExists_ParseStatusMatrix(t *testing.T) {
+	// Pins the duplicate-check status policy (issue #3338): failed and
+	// deleting rows must not block an upload — a deleting row is on its way
+	// out regardless of how the async delete task concludes — while pending,
+	// processing and completed rows remain real duplicates.
+	for _, tc := range []struct {
+		parseStatus string
+		want        bool
+	}{
+		{"failed", false},
+		{"deleting", false},
+		{"pending", true},
+		{"processing", true},
+		{"completed", true},
+	} {
+		t.Run("parse_status="+tc.parseStatus, func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db)
+			require.NoError(t, db.Exec(`
+				INSERT INTO knowledges (id, tenant_id, knowledge_base_id, type, file_name, file_type, file_size, file_hash, parse_status)
+				VALUES (?, 1, 'kb-1', 'file', 'doc.md', 'md', 10, 'hash-1', ?)
+			`, uuid.NewString(), tc.parseStatus).Error)
+
+			exists, _, err := repo.CheckKnowledgeExists(context.Background(), 1, "kb-1", &types.KnowledgeCheckParams{
+				Type: "file", FileHash: "hash-1", FileType: "md",
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, exists)
+
+			// The filename/size fallback path shares the same base filter.
+			exists, _, err = repo.CheckKnowledgeExists(context.Background(), 1, "kb-1", &types.KnowledgeCheckParams{
+				Type: "file", FileName: "doc.md", FileSize: 10,
+			})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, exists)
+		})
+	}
+}

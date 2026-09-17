@@ -362,8 +362,16 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	kbID string,
 	params *types.KnowledgeCheckParams,
 ) (bool, *types.Knowledge, error) {
+	// Failed rows never block a retry, and neither do rows whose deletion is
+	// in flight: a deleting row is on its way out, so an upload landing while
+	// the async delete task is still queued/running ends with exactly one
+	// live row whichever way the task concludes (success soft-deletes the old
+	// row; exhaustion marks it failed). Letting deleting rows block the
+	// duplicate check turned a task that never finishes into a permanent
+	// "document already exists" that only manual SQL could clear (issue #3338).
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?", tenantID, kbID, "failed")
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status NOT IN ?",
+			tenantID, kbID, []string{"failed", "deleting"})
 
 	switch params.Type {
 	case "file":
