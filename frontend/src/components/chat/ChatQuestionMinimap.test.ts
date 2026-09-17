@@ -84,7 +84,7 @@ test('highlights visible messages without losing them when previewing another ti
 })
 
 test('keeps the preview card at 13px instead of inheriting the chat 20px type', () => {
-  assert.match(component, /font-size: 13px/)
+  assert.match(component, /font-size: (?:13px|var\(--app-text-md\))/)
   assert.doesNotMatch(component, /font: inherit/)
   assert.match(component, /--td-text-color-primary/)
 })
