@@ -15,11 +15,19 @@ fi
 if [ "$SKILL_MB" -gt 512 ] 2>/dev/null; then
   SKILL_MB=512
 fi
+BACKUP_MB=${MAX_BACKUP_ARCHIVE_SIZE_MB:-4096}
+if [ "$BACKUP_MB" -lt "$FILE_MB" ] 2>/dev/null; then
+  BACKUP_MB=$FILE_MB
+fi
+if [ "$BACKUP_MB" -gt 32768 ] 2>/dev/null; then
+  BACKUP_MB=32768
+fi
 
 cat > /usr/share/nginx/html/config.js << EOF
 window.__RUNTIME_CONFIG__ = {
   MAX_FILE_SIZE_MB: ${FILE_MB},
   MAX_SKILL_BUNDLE_SIZE_MB: ${SKILL_MB},
+  MAX_BACKUP_ARCHIVE_SIZE_MB: ${BACKUP_MB},
   DEFAULT_LOCALE: "${RUNTIME_DEFAULT_LOCALE}"
 };
 EOF
@@ -27,13 +35,15 @@ EOF
 # 处理 nginx 配置。
 # 两个上限分开注入：全站保持知识库的 MAX_FILE_SIZE，只有技能 zip 上传的两条
 # 集合路由放宽到 MAX_SKILL_BUNDLE_SIZE（不含 /install、PATCH 等子路径）。
-# 合成一个全站上限会让每个上传端点都能收到技能包那么大的 body。
+# 备份恢复另有独立 location，上限为 MAX_BACKUP_ARCHIVE_SIZE。
+# 合成一个全站上限会让每个上传端点都能收到技能包或备份那么大的 body。
 export MAX_FILE_SIZE=${FILE_MB}M
 export MAX_SKILL_BUNDLE_SIZE=${SKILL_MB}M
+export MAX_BACKUP_ARCHIVE_SIZE=${BACKUP_MB}M
 export APP_HOST=${APP_HOST:-app}
 export APP_PORT=${APP_PORT:-8080}
 export APP_SCHEME=${APP_SCHEME:-http}
-envsubst '${MAX_FILE_SIZE} ${MAX_SKILL_BUNDLE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME}' \
+envsubst '${MAX_FILE_SIZE} ${MAX_SKILL_BUNDLE_SIZE} ${MAX_BACKUP_ARCHIVE_SIZE} ${APP_HOST} ${APP_PORT} ${APP_SCHEME}' \
   < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf
 
 # 启动 nginx
