@@ -744,6 +744,12 @@ func (h *InitializationHandler) processInitializationModels(
 
 	for _, descriptor := range descriptors {
 		model := descriptor.toModel()
+		// Stamp the KB's tenant before insert: toModel() carries no tenant and
+		// modelRepository.GetByID filters on (tenant_id = ? OR is_builtin), so
+		// an unstamped row lands at tenant_id = 0 where no tenant — not even
+		// the one that just configured the KB — can ever read it back
+		// (issue #3333).
+		model.TenantID = kb.TenantID
 		existingModelID := h.findExistingModelID(kb, descriptor.modelType)
 
 		var existingModel *types.Model
