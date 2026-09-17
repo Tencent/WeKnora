@@ -14,6 +14,7 @@ import (
 
 	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -101,6 +102,41 @@ func isValidURL(url string) bool {
 		return true
 	}
 	return false
+}
+
+// readMultipartFileContent reads the full upload payload and rewinds the
+// underlying reader so later SaveFile / hash steps still see the bytes.
+func readMultipartFileContent(file *multipart.FileHeader) ([]byte, error) {
+	f, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// validateJSONUploadContent rejects malformed .json uploads before they are
+// stored and queued. Shares the same validity gate as the simple JSON reader.
+func validateJSONUploadContent(fileName string, file *multipart.FileHeader) error {
+	if normalizeFileExtension(getFileType(fileName)) != "json" {
+		return nil
+	}
+	data, err := readMultipartFileContent(file)
+	if err != nil {
+		return err
+	}
+	if err := docparser.ValidateJSONContent(data); err != nil {
+		return werrors.NewBadRequestError(err.Error())
+	}
+	return nil
 }
 
 // calculateFileHash calculates MD5 hash of a file

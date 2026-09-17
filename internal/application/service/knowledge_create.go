@@ -76,6 +76,12 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, ErrInvalidFileType
 	}
 
+	// Reject malformed JSON before hash / storage / async parse retries.
+	if err := validateJSONUploadContent(fileName, file); err != nil {
+		logger.Errorf(ctx, "Invalid JSON upload content for %s: %v", fileName, err)
+		return nil, err
+	}
+
 	// Calculate file hash for deduplication
 	logger.Info(ctx, "Calculating file hash")
 	hash, err := calculateFileHash(file)
