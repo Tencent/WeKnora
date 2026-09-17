@@ -246,7 +246,6 @@ const handleThemeChange = (val: ThemeMode) => {
     localTheme.value = currentTheme.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 // 处理字体变化
@@ -255,7 +254,6 @@ const handleSansFontChange = (val: FontKey) => {
     localSansFont.value = currentSans.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 const handleMonoFontChange = (val: MonoFontKey) => {
@@ -263,7 +261,6 @@ const handleMonoFontChange = (val: MonoFontKey) => {
     localMonoFont.value = currentMono.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 
 const handleFontSizeChange = (val: FontSizeKey) => {
@@ -271,7 +268,6 @@ const handleFontSizeChange = (val: FontSizeKey) => {
     localFontSize.value = currentSize.value
     return
   }
-  MessagePlugin.success(t('common.success'))
 }
 </script>
 

@@ -1768,7 +1768,7 @@ export default {
     deleteConfirmMessage: '确定要删除共享空间「{name}」吗？删除后所有成员将被移除，此操作不可撤销。',
     deleteSuccess: '共享空间已删除',
     deleteFailed: '删除共享空间失败',
-    createSuccess: '共享空间创建成功',
+    createSuccess: '已创建共享空间',
     createFailed: '创建共享空间失败',
     joinSuccess: '成功加入共享空间',
     joinFailed: '加入共享空间失败',
@@ -1824,7 +1824,7 @@ export default {
       searchTenantHint: '仅按完整空间 ID 查找，也可通过邀请链接加入组织',
       selectRole: '分配角色',
       confirmBtn: '添加',
-      success: '成员添加成功',
+      success: '已添加成员',
       failed: '添加失败'
     },
     upgrade: {
@@ -3010,7 +3010,7 @@ export default {
       bulkApply: {
         label: '应用到所有现有空间',
         tooltip: '保存的值默认只对之后新建的空间生效；点击此按钮将当前值同步写入所有现有空间。',
-        confirmBtn: '确认应用',
+        confirmBtn: '应用',
         confirmBody: '将把所有现有空间的存储配额覆盖为 {value} GB。如有空间被运维单独调整过的配额，也会一并被覆盖。是否继续？',
         success: '已将 {count} 个空间的存储配额更新为 {gb} GB',
         failed: '应用到所有空间失败'
@@ -3027,7 +3027,7 @@ export default {
         newPasswordPlaceholder: '请输入新密码',
         confirmPasswordLabel: '确认新密码',
         confirmPasswordPlaceholder: '再次输入新密码',
-        confirmBtn: '确认重置',
+        confirmBtn: '重置',
         success: '密码已重置，该用户的现有会话已失效',
         failed: '重置密码失败',
       },
@@ -3085,19 +3085,19 @@ export default {
           revoke: {
             header: '撤销系统管理员',
             body: '确认撤销 {email} 的系统管理员权限？撤销后该用户将无法再访问任何系统级功能。',
-            confirmBtn: '确认撤销'
+            confirmBtn: '撤销'
           },
           promote: {
             header: '提升为系统管理员',
             body: '确认将 {email} 提升为系统管理员？该用户将获得平台级权限，可访问所有空间、修改系统设置、管理其他管理员。',
-            confirmBtn: '确认提升'
+            confirmBtn: '提升'
           }
         }
       },
       reset: {
         label: '重置',
         tooltip: '清除当前 UI 覆盖，恢复使用环境变量或内置默认值',
-        confirmBtn: '确认重置',
+        confirmBtn: '重置',
         confirmBody: '确定要重置「{label}」吗？该操作会删除数据库中的覆盖值，回退到环境变量或内置默认值。',
         success: '已重置为默认值',
         failed: '重置失败'
@@ -3113,12 +3113,12 @@ export default {
             remove: {
               header: '移除 SSRF 白名单条目',
               body: '确认从 SSRF 白名单中移除 {entry}？移除后该条目将重新受 SSRF 防护拦截。',
-              confirmBtn: '确认移除'
+              confirmBtn: '移除'
             },
             add: {
               header: '添加 SSRF 白名单条目',
               body: '确认把 {entry} 加入 SSRF 白名单？该条目匹配到的主机 / IP / 网段会绕过 SSRF 防护，可能让 Agent 访问内网服务，请仅在确知用途时添加。',
-              confirmBtn: '确认添加'
+              confirmBtn: '添加'
             }
           }
         }
@@ -3514,7 +3514,7 @@ export default {
       confirmTitle: '删除当前空间？',
       confirmBody: '此操作将删除空间「{name}」，并使其中的知识库、智能体、成员与 API Key 不再可用。此操作不可撤销。',
       confirmHint: '请输入空间名称「{name}」以确认删除。',
-      confirm: '确认删除',
+      confirm: '删除',
       nameMismatch: '空间名称不匹配',
       success: '空间已删除',
       failed: '删除空间失败'
@@ -3569,7 +3569,7 @@ export default {
       descriptionPlaceholder: '简单描述一下这个空间的用途',
       submit: '创建',
       cancel: '取消',
-      success: '空间创建成功',
+      success: '已创建空间',
       failed: '空间创建失败',
       disabled: '当前系统只允许通过邀请加入空间，不能自行创建空间。'
     },
@@ -3959,7 +3959,7 @@ export default {
       deleteSuccess: '选中条目已删除',
       previewCount: '共解析 {count} 条记录',
       previewMore: '还有 {count} 条未展示',
-      importSuccess: '导入成功',
+      importSuccess: '已导入',
       parseFailed: '解析文件失败',
       invalidJSON: 'JSON 文件格式不正确',
       unsupportedFormat: '暂不支持该文件格式',
@@ -4049,11 +4049,11 @@ export default {
       nameRequired: '请输入知识库名称',
       summaryRequired: '请选择 Summary 模型',
       multimodalInvalid: '多模态配置验证失败',
-      createSuccess: '知识库创建成功',
+      createSuccess: '已创建知识库',
       createFailed: '创建知识库失败',
       missingId: '缺少知识库 ID',
       buildDataFailed: '数据构建失败',
-      updateSuccess: '配置保存成功',
+      updateSuccess: '配置已保存',
       indexModeRequired: '请选择 FAQ 的索引方式',
       storageChangeConfirm: '知识库中已有文件，更改存储引擎后旧文件可能无法正常访问。是否确认更改？'
     },
@@ -4646,7 +4646,7 @@ export default {
     delete: {
       confirmTitle: '删除确认',
       confirmMessage: '确认要删除知识库"{name}"？删除后不可恢复',
-      confirmButton: '确认删除'
+      confirmButton: '删除'
     },
     empty: {
       title: '暂无知识库',
@@ -4858,7 +4858,7 @@ export default {
     edit: '编辑',
     copy: '复制',
     copied: '已复制',
-    copySuccess: '复制成功',
+    copySuccess: '已复制',
     default: '默认',
     create: '创建',
     download: '下载',
@@ -4887,11 +4887,11 @@ export default {
     on: '开启',
     off: '关闭',
     confirmDelete: '确认删除',
-    createSuccess: '创建成功',
-    deleteSuccess: '删除成功',
+    createSuccess: '已创建',
+    deleteSuccess: '已删除',
     deleteFailed: '删除失败',
-    updateSuccess: '更新成功',
-    saveSuccess: '保存成功',
+    updateSuccess: '已更新',
+    saveSuccess: '已保存',
     saveFailed: '保存失败',
     operationFailed: '操作失败',
     file: '文件',
@@ -5933,7 +5933,7 @@ export default {
       docs: '文档',
       testConnection: '测试连接',
       loadFailed: '加载失败',
-      saveSuccess: '保存成功',
+      saveSuccess: '已保存',
       saveFailed: '保存失败',
       unknownError: '未知错误',
       requestFailed: '请求失败'
@@ -5973,7 +5973,7 @@ export default {
       testSuccess: '连接成功',
       testFailed: '连接失败',
       nameRequired: '请输入名称',
-      saveSuccess: '保存成功',
+      saveSuccess: '已保存',
       saveFailed: '保存失败',
       defaultUpdated: '默认存储已更新',
       deleteTitle: '删除存储实例',
@@ -6016,7 +6016,7 @@ export default {
       checkDoneStatusUpdated: '已使用当前填写参数检测，上方状态已更新',
       checkSuccess: '测试连接成功',
       checkFailed: '检测失败',
-      saveSuccess: '保存成功',
+      saveSuccess: '已保存',
       saveFailed: '保存失败',
       mineruEndpointPlaceholder: '如 https://your-mineru.example.com',
       defaultPipeline: '默认 pipeline',
@@ -6051,7 +6051,7 @@ export default {
       usageTitle: '使用说明',
       usageSteps: '1. 填写并保存 APPID / APPSECRET\n2. 在下方「云模型接入」中按行添加 chat、embedding、rerank、vlm\n3. 文档解析：知识库设置 → 解析引擎，选择 WeKnora Cloud 引擎',
       fillRequired: '请填写 APPID 和 APPSECRET',
-      saveSuccess: '凭证保存成功',
+      saveSuccess: '凭证已保存',
       saveFailed: '凭证保存失败',
       credentialConfigured: 'WeKnoraCloud 凭证已配置',
       credentialExpired: '凭证已失效，请重新配置。',
@@ -6288,12 +6288,12 @@ export default {
       skillsInfoContent: '技能是预装的专业知识模块，脚本在所选沙箱中隔离执行。可用列表来自该沙箱已安装的技能；同一会话的沙箱一旦创建，后续附件、产物与销毁都会锁定在创建时那份配置上，改沙箱只影响之后新建的会话。'
     },
     messages: {
-      created: '智能体创建成功',
-      updated: '智能体更新成功',
+      created: '已创建智能体',
+      updated: '智能体已更新',
       deleted: '智能体已删除',
       deleteFailed: '删除失败',
       saveFailed: '保存失败',
-      copied: '智能体复制成功',
+      copied: '已复制智能体',
       copyFailed: '复制失败',
       disabled: '已停用',
       enabled: '已启用'
@@ -6301,7 +6301,7 @@ export default {
     delete: {
       confirmTitle: '删除智能体',
       confirmMessage: '确定要删除智能体「{name}」吗？此操作不可恢复。',
-      confirmButton: '确认删除'
+      confirmButton: '删除'
     },
     shareScope: {
       title: '共享范围说明',
@@ -6525,7 +6525,7 @@ export default {
     name: '名称',
     description: '描述',
     settings: '设置',
-    tagUpdateSuccess: '标签更新成功',
+    tagUpdateSuccess: '标签已更新',
     tagEditDialogHeading: '编辑标签',
     tagEditSearch: '搜索标签...',
     tagEditSelectedSection: '已选标签',
@@ -6580,8 +6580,8 @@ export default {
     tagSearchPlaceholder: '输入标签名称关键字',
     tagNamePlaceholder: '请输入标签名称',
     tagNameRequired: '请先输入标签名称',
-    tagCreateSuccess: '标签创建成功',
-    tagEditSuccess: '标签更新成功',
+    tagCreateSuccess: '已创建标签',
+    tagEditSuccess: '标签已更新',
     tagDeleteDescDoc: '确定删除标签"{name}"？该标签下的所有文档将被一并删除',
     tagDeleteSuccess: '标签已删除',
     tagEditAction: '重命名',
@@ -6590,7 +6590,7 @@ export default {
     tagLabel: '标签',
     tagPlaceholder: '请选择标签',
     noTags: '暂无标签',
-    uploadSuccess: '文件上传成功！',
+    uploadSuccess: '已上传文件',
     uploadFailed: '文件上传失败！',
     fileExists: '文件已存在',
     uploadAllSuccess: '成功上传 {count} 个文件！',
@@ -6605,7 +6605,7 @@ export default {
     importURLTitle: '导入网页',
     urlRequired: '请输入URL',
     invalidURL: '请输入有效的URL',
-    urlImportSuccess: 'URL导入成功！',
+    urlImportSuccess: '已导入 URL',
     urlImportFailed: 'URL导入失败！',
     urlExists: '该URL已存在',
     urlLabel: 'URL地址',
@@ -6739,7 +6739,7 @@ export default {
     documentSummary: '摘要',
     detailSectionMeta: '基本信息',
     confirmDeleteDocument: '确认删除文档"{fileName}"，删除后将无法恢复',
-    confirmDelete: '确认删除',
+    confirmDelete: '删除',
     viewModeGrid: '卡片视图',
     viewModeList: '列表视图',
     viewModeToggle: '切换视图',
@@ -6826,7 +6826,7 @@ export default {
     allUploadSuccess: '所有文件上传成功（{count}个）',
     partialUploadSuccess: '部分文件上传成功（成功：{success}，失败：{fail}）',
     allUploadFailed: '所有文件上传失败（{count}个）',
-    deleteSuccess: '知识删除成功！',
+    deleteSuccess: '已删除知识',
     chunkLoadFailed: '分块加载失败',
     infoCard: {
       tooltip: '查看知识库信息',
@@ -6888,7 +6888,7 @@ export default {
     deleteConfirmTitle: '删除对话',
     deleteConfirmBody: '确定要删除选中的 {count} 条对话吗？删除后无法恢复。',
     deleteAllConfirmBody: '确定要删除所有对话吗？此操作无法恢复。',
-    deleteSuccess: '删除成功',
+    deleteSuccess: '已删除',
     deleteFailed: '删除失败，请稍后再试'
   },
   contextualGuide: {
