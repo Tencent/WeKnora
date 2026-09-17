@@ -282,7 +282,7 @@ Wiki 模式允许 Agent 根据原始文档自动生成并维护一套结构化�
 
 ## 20. pgvector 检索变慢或刚升级后需要做什么？
 
-0.6.2 新增迁移 `000059_embeddings_hnsw_1024`，为 **1024 维** embedding（如 bge-m3）在 PostgreSQL pgvector 上创建 HNSW 索引。服务启动会自动执行迁移；若你使用其他维度，该索引可能不适用，需按自身 embedding 维度另行调优。升级后首次大批量入库期间索引构建可能占用额外 I/O，属正常现象。
+0.6.2 新增迁移 `000059_embeddings_hnsw_1024`，为 **1024 维** embedding（如 bge-m3）在 PostgreSQL pgvector 上创建 HNSW 索引。服务启动会自动执行迁移。其他维度的索引由服务自己建：某个维度第一次写入或检索时，在后台执行一次 `CREATE INDEX CONCURRENTLY`（索引名与迁移一致，如 `embeddings_embedding_idx_2560`），建好前该维度的检索仍走顺序扫描；已经手建过索引的不会重复建；`AUTO_MIGRATE=false` 时不建，需自行创建。升级后首次大批量入库期间索引构建可能占用额外 I/O，属正常现象。
 
 ## 21. 如何在网站嵌入 WeKnora 智能体（Embed Widget）？
 
