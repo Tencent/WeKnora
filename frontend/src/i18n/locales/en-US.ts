@@ -3234,6 +3234,9 @@ export default {
       save: 'Save Configuration',
       saveAndClose: 'Save and Close',
     },
+    footer: {
+      instantEffect: 'Changes on this page take effect immediately; no save needed',
+    },
     postCreateHint: {
       title: 'Created successfully',
       footer: 'Keep adjusting settings, configure sharing and data sources, then click "Save and Close".',

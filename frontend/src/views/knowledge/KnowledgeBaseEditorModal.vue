@@ -444,14 +444,23 @@
                     {{ $t('knowledgeEditor.postCreateHint.footer') }}
                   </span>
                 </p>
+                <p v-if="isInstantSection" class="settings-footer-note">
+                  <t-icon name="info-circle-filled" class="settings-footer-note__icon" />
+                  <span>{{ $t('knowledgeEditor.footer.instantEffect') }}</span>
+                </p>
                 <div class="settings-footer-actions">
-                  <t-button theme="default" variant="outline" @click="modalShell.requestClose">
-                    {{ $t('common.cancel') }}
+                  <t-button v-if="isInstantSection" theme="default" variant="outline" @click="modalShell.requestClose">
+                    {{ $t('common.close') }}
                   </t-button>
-                  <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving"
-                    :disabled="loading">
-                    {{ saveButtonLabel }}
-                  </t-button>
+                  <template v-else>
+                    <t-button theme="default" variant="outline" @click="modalShell.requestClose">
+                      {{ $t('common.cancel') }}
+                    </t-button>
+                    <t-button theme="primary" data-guide="kb-create-submit" @click="handleSubmit" :loading="saving"
+                      :disabled="loading">
+                      {{ saveButtonLabel }}
+                    </t-button>
+                  </template>
                 </div>
               </div>
             </div>
@@ -600,6 +609,11 @@ const DEFAULT_CHUNKING_PRESET = {
   chunkOverlap: 80,
   enableParentChild: true,
 } as const
+
+// 这些分区的操作在点击时即时生效（共享 / 数据源 / 活动记录），不经过底部「保存」，
+// 因此底部只显示「关闭」并提示，避免用户以为需要再点保存或以为「取消」能撤销。
+const INSTANT_SECTIONS = new Set(['datasource', 'share', 'activity'])
+const isInstantSection = computed(() => INSTANT_SECTIONS.has(currentSection.value))
 
 const navItems = computed(() => {
   const items: { key: string; icon: string; label: string; badge?: number }[] = [

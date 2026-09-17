@@ -4070,6 +4070,9 @@ export default {
       save: '保存配置',
       saveAndClose: '保存并关闭',
     },
+    footer: {
+      instantEffect: '此页的更改即时生效，无需保存',
+    },
     postCreateHint: {
       title: '创建成功',
       footer: '可继续调整配置，设置共享与数据源，完成后点击「保存并关闭」。',

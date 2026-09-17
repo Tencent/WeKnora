@@ -3234,6 +3234,9 @@ export default {
       save: '設定を保存',
       saveAndClose: '保存して閉じる',
     },
+    footer: {
+      instantEffect: 'このページの変更は即時に反映されます。保存は不要です',
+    },
     postCreateHint: {
       title: '作成しました',
       footer: '設定の調整を続け、共有やデータソースを設定してから「保存して閉じる」をクリックしてください。',

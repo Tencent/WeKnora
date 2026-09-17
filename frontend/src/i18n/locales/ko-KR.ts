@@ -4068,6 +4068,9 @@ export default {
       save: '설정 저장',
       saveAndClose: '저장 후 닫기',
     },
+    footer: {
+      instantEffect: '이 페이지의 변경 사항은 즉시 적용되며 저장할 필요가 없습니다',
+    },
     postCreateHint: {
       title: '생성 완료',
       footer: '설정을 계속 조정하고 공유·데이터 소스를 구성한 뒤 "저장 후 닫기"를 클릭하세요.',
