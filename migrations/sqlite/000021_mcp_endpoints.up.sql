@@ -1,4 +1,4 @@
--- Mirrors versioned migration 000100_mcp_endpoints:
+-- Mirrors versioned migration 000101_mcp_endpoints:
 -- workspace-published MCP server endpoints with per-endpoint token, KB scope
 -- and tool allowlist.
 

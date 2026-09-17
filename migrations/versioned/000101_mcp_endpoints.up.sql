@@ -1,7 +1,7 @@
--- Migration: 000100_mcp_endpoints
+-- Migration: 000101_mcp_endpoints
 -- Workspace-published MCP server endpoints: each row is one bearer-token
 -- protected MCP surface with its own knowledge-base scope and tool allowlist.
-DO $$ BEGIN RAISE NOTICE '[Migration 000100] Creating mcp_endpoints table'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000101] Creating mcp_endpoints table'; END $$;
 
 CREATE TABLE IF NOT EXISTS mcp_endpoints (
     id VARCHAR(36) PRIMARY KEY DEFAULT uuid_generate_v4(),

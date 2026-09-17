@@ -367,7 +367,7 @@ flowchart LR
 
 #### 数据模型与管理 API
 
-`mcp_endpoints` 表（PostgreSQL 迁移 `000100_mcp_endpoints`，SQLite `000020_mcp_endpoints`）每行一个端点：`tenant_id`、`name`、`enabled`、`token_hash`（SHA-256）、`token_hint`（前缀展示用）、`knowledge_base_ids`（空数组表示空间内全部）、`tools`（白名单）、`default_agent_id`、`rate_limit_per_minute`、`last_used_at`。类型定义在 `internal/types/mcp_endpoint.go`，工具目录在 `internal/types/mcp_endpoint_tools.go`。
+`mcp_endpoints` 表（PostgreSQL 迁移 `000101_mcp_endpoints`，SQLite `000021_mcp_endpoints`）每行一个端点：`tenant_id`、`name`、`enabled`、`token_hash`（SHA-256）、`token_hint`（前缀展示用）、`knowledge_base_ids`（空数组表示空间内全部）、`tools`（白名单）、`default_agent_id`、`rate_limit_per_minute`、`last_used_at`。类型定义在 `internal/types/mcp_endpoint.go`，工具目录在 `internal/types/mcp_endpoint_tools.go`。
 
 管理接口挂在 `/api/v1/mcp-endpoints`，读取需 Viewer，变更需 Admin，API Key 需要 `manage_channels` 能力：
 
