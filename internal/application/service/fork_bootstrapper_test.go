@@ -276,6 +276,12 @@ func TestForkResetScriptPrunesLaterCommits(t *testing.T) {
 		t.Skip("git not available")
 	}
 	dir := t.TempDir()
+	// Git hooks export repository overrides. Use disposable paths to reproduce
+	// that environment without risking the repository running this test.
+	inheritedRepo := t.TempDir()
+	t.Setenv("GIT_DIR", filepath.Join(inheritedRepo, "repo.git"))
+	t.Setenv("GIT_WORK_TREE", inheritedRepo)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(inheritedRepo, "index"))
 	env := isolatedGitEnv(t)
 	runGit := func(args ...string) string {
 		t.Helper()
@@ -287,6 +293,8 @@ func TestForkResetScriptPrunesLaterCommits(t *testing.T) {
 	}
 
 	runGit("init")
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	require.NoError(t, err, "git init must use the test directory")
 	runGit("config", "user.email", "agent@weknora.local")
 	runGit("config", "user.name", "WeKnora Agent")
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "keep.txt"), []byte("early"), 0o644))
@@ -322,7 +330,15 @@ func TestForkResetScriptPrunesLaterCommits(t *testing.T) {
 
 func isolatedGitEnv(t *testing.T) []string {
 	t.Helper()
-	return append(os.Environ(),
+	// Neither the temporary repository commands nor the reset script may
+	// inherit the caller's repository, index, object store or config overrides.
+	env := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "GIT_") {
+			env = append(env, entry)
+		}
+	}
+	return append(env,
 		"GIT_CONFIG_GLOBAL="+filepath.Join(t.TempDir(), "gitconfig"),
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=WeKnora Agent",

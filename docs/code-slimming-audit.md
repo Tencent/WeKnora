@@ -91,11 +91,12 @@
 基于第四批合入后的 `d645334d0`，逐包核实原有 16 个候选，全部确认无调用；同时删除仅被候选使用的 `collectTableAliases` 与 `escapeDoubleQuotes`。共移除 18 个私有函数和 3 个失效 import，生产 Go 源码净减少 235 行。
 
 - 使用 Go AST 检查候选所属 12 个包目录中的 894 个 Go 文件，包括测试、带构建标签和平台后缀的源码；删除集合以外没有对应标识符引用。全仓搜索同时检查文档、脚本和特殊链接引用。
-- 对修改文件逐函数比较：453 个保留函数的签名与函数体完全一致。Qdrant 的 `tokenizeQuery`、Agent 工具包的 `formatFileSize`、JSON 解析包的 `formatValue` 等同名活跃实现继续保留。
+- 对修改的生产 Go 文件逐函数比较：453 个保留函数的签名与函数体完全一致。Qdrant 的 `tokenizeQuery`、Agent 工具包的 `formatFileSize`、JSON 解析包的 `formatValue` 等同名活跃实现继续保留。
 - 更新分块配置相关注释和开发文档，指向仍在使用的 `buildSplitterConfigFromChunking` / `NormalizeSplitterConfig`；迁移历史注释保留旧名称。
 - 13 个受影响包执行 `go test -count=1`：12 个包通过，微信适配包无测试文件但编译通过；3,529 项顶层测试通过、1 项原有测试跳过，计入子测试为 5,274 项通过。跳过项为需要可替换连接探测或真实后端的向量存储创建测试。
 - `integration,e2b_integration,docker_integration` 标签下的 sandbox/tools 测试代码编译通过，未执行需要外部服务的集成测试。未修改前端，未运行前端或浏览器检查。
 - 本批只删除无调用代码，复用现有包测试和编译检查，没有添加仅断言函数不存在的测试。
+- 推送检查暴露新合入的 fork 测试未隔离 Git hook 环境：继承的 `GIT_DIR` 等变量使临时仓库操作指向当前仓库。测试辅助函数现清除继承的 `GIT_*` 变量；真实仓库测试主动注入指向临时路径的仓库变量，验证旧实现失败、修复后通过。该测试修复单独提交，不改变生产逻辑。
 
 ## 后续优先级
 
