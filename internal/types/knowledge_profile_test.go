@@ -37,6 +37,15 @@ func TestTopicKeyFoldsCaseWhitespaceAndPunctuation(t *testing.T) {
 	assert.NotEqual(t, TopicKey("K8s"), TopicKey("Kubernetes"), "synonyms are left to the model")
 }
 
+func TestKnowledgeProfileCloneIsIndependent(t *testing.T) {
+	assert.Nil(t, (*KnowledgeProfile)(nil).Clone())
+	src := &KnowledgeProfile{Gist: "g", Topics: []string{"a", "b"}}
+	dst := src.Clone()
+	dst.Topics[0] = "changed"
+	assert.Equal(t, "a", src.Topics[0])
+	assert.Equal(t, "g", dst.Gist)
+}
+
 func TestKnowledgeProfileScanRoundTrip(t *testing.T) {
 	src := KnowledgeProfile{Gist: "g", Topics: []string{"a"}, DocType: "t", TypicalQuestion: "q"}
 	raw, err := src.Value()

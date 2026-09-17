@@ -55,6 +55,7 @@ func (s *knowledgeService) cloneKnowledge(
 		Channel:          src.Channel,
 		Title:            src.Title,
 		Description:      src.Description,
+		Profile:          src.Profile.Clone(),
 		Source:           src.Source,
 		ParseStatus:      "processing",
 		EnableStatus:     "disabled",

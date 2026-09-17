@@ -63,6 +63,19 @@ func (p *KnowledgeProfile) Scan(value interface{}) error {
 	return json.Unmarshal(b, p)
 }
 
+// Clone returns an independent copy (nil-safe) so a cloned document does
+// not share the topic slice with its source.
+func (p *KnowledgeProfile) Clone() *KnowledgeProfile {
+	if p == nil {
+		return nil
+	}
+	out := *p
+	if p.Topics != nil {
+		out.Topics = append([]string(nil), p.Topics...)
+	}
+	return &out
+}
+
 // IsEmpty reports whether the profile carries no usable field.
 func (p *KnowledgeProfile) IsEmpty() bool {
 	if p == nil {

@@ -213,8 +213,8 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 	if err := s.executeKnowledgeClone(ctx, source, target, nil); err != nil {
 		return err
 	}
-	// The cloned documents carry their profiles; the target's description
-	// has to be derived from them now rather than on the next upload.
+	// Derive the target's description from the cloned documents now rather
+	// than on the next upload.
 	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, target, false)
 	return nil
 }
@@ -602,9 +602,12 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
 		logger.Errorf(ctx, "Failed to update KB clone progress to completed: %v", err)
 	}
-	// The cloned documents carry their profiles; derive the target's
-	// description from them now instead of waiting for the next upload.
-	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, target, false)
+	// Derive the target's description from the cloned documents now instead
+	// of waiting for the next upload. dstKB is the loaded target (type and
+	// profile_config included); `target` above is only the reservation stub
+	// when the clone created the knowledge base, and the refresh helper
+	// would reject it.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, dstKB, false)
 
 	logger.Infof(ctx, "KB clone task completed: %s", payload.TaskID)
 	recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneCompleted,
