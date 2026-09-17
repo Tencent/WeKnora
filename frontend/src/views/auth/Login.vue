@@ -618,7 +618,13 @@ const loadOIDCConfig = async () => {
 const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
-    registrationEnabled.value = response.registration_mode !== 'invite_only'
+    const inviteOnly = response.registration_mode === 'invite_only'
+    registrationEnabled.value = !inviteOnly
+    // invite_only only hides self-serve registration; keep the login card
+    // active so existing accounts can still sign in (issue #3296).
+    if (inviteOnly) {
+      isRegisterMode.value = false
+    }
     complexPasswordEnabled.value = response.complex_password_enabled
   } catch {
     registrationEnabled.value = true

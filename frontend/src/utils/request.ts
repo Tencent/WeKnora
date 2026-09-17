@@ -214,7 +214,16 @@ instance.interceptors.response.use(
         errorMessage = data?.message;
       }
     } else if (typeof data === 'string') {
-      errorMessage = data;
+      // Gateways / misrouted proxies (e.g. SearXNG on a colliding host port)
+      // often reply with an HTML 404 body. Surfacing that raw markup in the
+      // login toast (#3296) hides the real problem; treat it as a network /
+      // routing failure instead.
+      const trimmed = data.trim();
+      if (/^<!DOCTYPE html/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) {
+        errorMessage = t('error.networkError');
+      } else {
+        errorMessage = data;
+      }
     }
     return Promise.reject(withHttpStatus({
       status,

@@ -261,6 +261,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 // @Success      200      {object}  types.LoginResponse
 // @Failure      401      {object}  errors.AppError  "认证失败"
 // @Router       /auth/login [post]
+//
+// Login is intentionally NOT gated by auth.registration_mode / the legacy
+// DISABLE_REGISTRATION env. invite_only only closes public /auth/register;
+// existing accounts must keep signing in (issue #3296). A SearXNG HTML 404
+// on the login request indicates the HTTP call never reached this handler
+// (port/proxy misroute), not a registration-mode rejection.
 func (h *AuthHandler) Login(c *gin.Context) {
 	ctx := c.Request.Context()
 
