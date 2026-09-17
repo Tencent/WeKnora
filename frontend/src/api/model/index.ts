@@ -171,6 +171,7 @@ export interface ModelDebugOptions {
   top_p?: number
   max_tokens?: number
   thinking?: boolean
+  thinking_effort?: 'no_think' | 'low' | 'high' | 'max'
 }
 
 export interface ModelDebugResult {

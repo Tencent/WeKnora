@@ -4563,7 +4563,15 @@ export default {
         thinkingType: {
           label: 'thinking.type',
           hint: 'Volcengine Ark; Tencent LKEAP (DeepSeek V3, etc.; default for LKEAP; use “Do not send” for R1)'
-        }
+        },
+        reasoningEffort: {
+          label: 'reasoning_effort',
+          hint: 'Sends no_think, low, high, or max through chat_template_kwargs (vLLM / Hunyuan Hy / self-hosted GLM)'
+        },
+        glmReasoningEffort: {
+          label: 'reasoning_effort (GLM)',
+          hint: 'Zhipu GLM-5.x: sends low, high, or max as top-level reasoning_effort (thinking cannot be disabled)'
+        },
       },
       dimensionHint: 'Model selected. Click "Detect Dimension" to fetch the vector dimension automatically.',
       loadModelListFailed: 'Failed to load model list',
@@ -5994,6 +6002,12 @@ export default {
       selected: 'Selected',
       disabled: 'Disabled'
     },
+    thinkingEffort: {
+      noThink: 'Thinking off',
+      low: 'Low effort',
+      high: 'High effort',
+      max: 'Max effort'
+    },
     desc: {
       name: 'Set an easily identifiable name for the agent',
       description: 'Briefly describe the purpose and features of the agent',
@@ -6006,6 +6020,8 @@ export default {
       maxTokens: 'Maximum tokens for the model reply. Default is 2048. Custom values are saved as entered.',
       maxTokensAgent: 'Maximum tokens generated in each reasoning round, including tool-call JSON. Default is 4096 without a sandbox, or 24576 when a sandbox can write or edit files. A custom value is saved as entered and is not changed later.',
       thinking: 'Enable extended thinking capability (requires model support)',
+      thinkingEffort: 'Set reasoning_effort via chat_template_kwargs; Hy3 supports off, low, and high, Hy4 supports off and high, other models may also use max',
+      thinkingEffortGlm: 'Set GLM-5.x reasoning_effort; supports low, high, and max. This family cannot turn reasoning off',
       conversationSection: 'Configure multi-turn conversation and query rewriting parameters',
       conversationSectionAgent: 'How much earlier conversation each turn carries. Smart reasoning is always multi-turn',
       multiTurn: 'When enabled, historical conversation context will be preserved',

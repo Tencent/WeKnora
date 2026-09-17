@@ -108,17 +108,84 @@ func TestChatTemplateKwargs(t *testing.T) {
 	assert.Contains(t, string(body), "chat_template_kwargs")
 }
 
+func TestReasoningEffort(t *testing.T) {
+	s := reasoningEffort()
+	req := openai.ChatCompletionRequest{Model: "hy4-preview"}
+
+	custom, raw := s.Apply(&req, &ChatOptions{ThinkingEffort: "no_think"}, true)
+	require.True(t, raw)
+	out := custom.(*openai.ChatCompletionRequest)
+	assert.Equal(t, "no_think", out.ChatTemplateKwargs["reasoning_effort"])
+
+	custom, raw = s.Apply(&req, &ChatOptions{ThinkingEffort: "low", Thinking: ptrBool(false)}, true)
+	require.True(t, raw)
+	assert.Equal(t, "low", custom.(*openai.ChatCompletionRequest).ChatTemplateKwargs["reasoning_effort"])
+
+	custom, raw = s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+	require.True(t, raw)
+	assert.Equal(t, "high", custom.(*openai.ChatCompletionRequest).ChatTemplateKwargs["reasoning_effort"])
+
+	custom, raw = s.Apply(&req, &ChatOptions{Thinking: ptrBool(false)}, true)
+	require.True(t, raw)
+	assert.Equal(t, "no_think", custom.(*openai.ChatCompletionRequest).ChatTemplateKwargs["reasoning_effort"])
+
+	custom, raw = s.Apply(&req, &ChatOptions{ThinkingEffort: "medium"}, true)
+	assert.Nil(t, custom)
+	assert.False(t, raw)
+
+	custom, raw = s.Apply(&req, &ChatOptions{ThinkingEffort: "max"}, true)
+	require.True(t, raw)
+	assert.Equal(t, "max", custom.(*openai.ChatCompletionRequest).ChatTemplateKwargs["reasoning_effort"])
+}
+
+func TestGLMReasoningEffort(t *testing.T) {
+	s := glmReasoningEffort()
+	req := openai.ChatCompletionRequest{Model: "glm-5.3"}
+
+	for _, level := range []string{"low", "high", "max"} {
+		custom, raw := s.Apply(&req, &ChatOptions{ThinkingEffort: level}, true)
+		require.True(t, raw)
+		out, ok := custom.(GLMChatCompletionRequest)
+		require.True(t, ok)
+		assert.Equal(t, level, out.ReasoningEffort)
+		require.NotNil(t, out.Thinking)
+		assert.Equal(t, "enabled", out.Thinking.Type)
+	}
+
+	// GLM-5.x cannot disable reasoning, so no_think degrades to the lightest
+	// level instead of dropping out of the request.
+	custom, raw := s.Apply(&req, &ChatOptions{ThinkingEffort: "no_think"}, true)
+	require.True(t, raw)
+	assert.Equal(t, "low", custom.(GLMChatCompletionRequest).ReasoningEffort)
+
+	custom, raw = s.Apply(&req, &ChatOptions{Thinking: ptrBool(true)}, true)
+	require.True(t, raw)
+	assert.Equal(t, "high", custom.(GLMChatCompletionRequest).ReasoningEffort)
+
+	custom, raw = s.Apply(&req, &ChatOptions{Thinking: ptrBool(false)}, true)
+	require.True(t, raw)
+	assert.Equal(t, "low", custom.(GLMChatCompletionRequest).ReasoningEffort)
+
+	custom, raw = s.Apply(&req, &ChatOptions{ThinkingEffort: "medium"}, true)
+	assert.Nil(t, custom)
+	assert.False(t, raw)
+}
+
 func TestParseThinkingOverride(t *testing.T) {
-	cases := map[string]ThinkingStrategy{
-		"none":                 noThinking{},
-		"enable_thinking":      enableThinking{},
-		"thinking_type":        thinkingTypeField{},
-		"chat_template_kwargs": chatTemplateKwargs{},
-		"something-unknown":    chatTemplateKwargs{}, // legacy default-mode fallback
+	// Compared by thinking_control name rather than Go type: the two effort
+	// selectors share the effortStrategy type and differ only by name.
+	cases := map[string]string{
+		"none":                 "none",
+		"enable_thinking":      "enable_thinking",
+		"thinking_type":        "thinking_type",
+		"chat_template_kwargs": "chat_template_kwargs",
+		"reasoning_effort":     "reasoning_effort",
+		"glm_reasoning_effort": "glm_reasoning_effort",
+		"something-unknown":    "chat_template_kwargs", // legacy default-mode fallback
 	}
 	for value, want := range cases {
 		got := parseThinkingOverride(map[string]string{ExtraConfigThinkingControl: value})
-		assert.IsType(t, want, got, "value=%q", value)
+		assert.Equal(t, want, thinkingStrategyName(got), "value=%q", value)
 	}
 
 	assert.Nil(t, parseThinkingOverride(nil))
@@ -140,5 +207,20 @@ func TestEffectiveThinkingControl(t *testing.T) {
 		Provider:    "generic",
 		ModelName:   "qwen3",
 		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "none"},
+	}))
+	assert.Equal(t, "reasoning_effort", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "hunyuan",
+		ModelName:   "hy4-preview",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "reasoning_effort"},
+	}))
+	assert.Equal(t, "reasoning_effort", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "generic",
+		ModelName:   "hy4-preview",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "reasoning_effort"},
+	}))
+	assert.Equal(t, "reasoning_effort", EffectiveThinkingControl(&ChatConfig{
+		Provider:    "generic",
+		ModelName:   "qwen3",
+		ExtraConfig: map[string]string{ExtraConfigThinkingControl: "reasoning_effort"},
 	}))
 }

@@ -85,6 +85,26 @@ const (
 
 模型级字段还包括 `name`（运行期实际调用的模型名）、`display_name`、`type`、`source`、`is_default`（同一 `(tenant_id, type)` 桶内唯一默认）、`is_builtin`、`managed_by`、`status`（`active` / `downloading` / `download_failed`）。
 
+#### 思考参数格式与 Hy 系列
+
+远程 Chat 模型通过 `extra_config.thinking_control` 指定思考参数的线格式。除
+`none`、`enable_thinking`、`thinking_type`、`chat_template_kwargs` 外，
+`reasoning_effort` 专用于 `hunyuan` Provider 下的混元 Hy3 / Hy4：
+
+```json
+{
+  "chat_template_kwargs": {
+    "reasoning_effort": "no_think"
+  }
+}
+```
+
+智能体的 `thinking_effort` 可取 `no_think`、`low`、`high`；Hy3 支持三档，
+Hy4 仅支持 `no_think` 和 `high`。旧版 `thinking` 布尔值继续兼容：
+`false` 映射到 `no_think`，`true` 映射到 `high`。模型编辑器会根据
+`hunyuan` Provider 下的 `Hy3*` / `Hy4*` 模型名自动选择 `reasoning_effort`，模型调试器与智能体编辑器
+会显示对应的级别选择。
+
 #### 管理 API（`internal/router/router.go`）
 
 | 方法 & 路径 | 说明 |

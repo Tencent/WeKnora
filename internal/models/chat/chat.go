@@ -38,6 +38,7 @@ type ChatOptions struct {
 	FrequencyPenalty    float64         `json:"frequency_penalty"`             // 频率惩罚
 	PresencePenalty     float64         `json:"presence_penalty"`              // 存在惩罚
 	Thinking            *bool           `json:"thinking"`                      // 是否启用思考
+	ThinkingEffort      string          `json:"thinking_effort,omitempty"`     // 思考强度: no_think, low, high
 	Tools               []Tool          `json:"tools,omitempty"`               // 可用工具列表
 	ToolChoice          string          `json:"tool_choice,omitempty"`         // "auto", "required", "none", or specific tool
 	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用（默认 nil 表示由模型决定）

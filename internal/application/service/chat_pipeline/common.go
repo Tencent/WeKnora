@@ -52,6 +52,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		ThinkingEffort:      chatManage.SummaryConfig.ThinkingEffort,
 		PromptCacheKey:      chatManage.SessionID,
 	}
 	if opt.Thinking != nil {

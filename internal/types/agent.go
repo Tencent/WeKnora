@@ -132,6 +132,8 @@ type AgentConfig struct {
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
+	// Provider-specific thinking effort (no_think, low, high).
+	ThinkingEffort string `json:"thinking_effort,omitempty"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true.
 	CitationEnabled *bool `json:"citation_enabled"`
 	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)

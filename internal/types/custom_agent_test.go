@@ -44,6 +44,29 @@ func TestEnsureDefaults_ThinkingPreservesTrue(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaults_ThinkingEffortControlsLegacyBoolean(t *testing.T) {
+	disabled := &CustomAgent{Config: CustomAgentConfig{ThinkingEffort: "no_think"}}
+	disabled.EnsureDefaults()
+	if disabled.Config.Thinking == nil || *disabled.Config.Thinking {
+		t.Fatal("no_think must set Thinking=false")
+	}
+
+	enabled := &CustomAgent{Config: CustomAgentConfig{ThinkingEffort: " LOW "}}
+	enabled.EnsureDefaults()
+	if enabled.Config.Thinking == nil || !*enabled.Config.Thinking {
+		t.Fatal("low must set Thinking=true")
+	}
+	if enabled.Config.ThinkingEffort != "low" {
+		t.Fatalf("ThinkingEffort = %q, want low", enabled.Config.ThinkingEffort)
+	}
+
+	invalid := &CustomAgent{Config: CustomAgentConfig{ThinkingEffort: "medium"}}
+	invalid.EnsureDefaults()
+	if invalid.Config.ThinkingEffort != "" {
+		t.Fatalf("invalid ThinkingEffort should be cleared, got %q", invalid.Config.ThinkingEffort)
+	}
+}
+
 func TestEnsureDefaults_MaxCompletionTokensByMode(t *testing.T) {
 	qa := &CustomAgent{Config: CustomAgentConfig{AgentMode: AgentModeQuickAnswer}}
 	qa.EnsureDefaults()

@@ -1266,6 +1266,8 @@ export default {
       maxTokens: 'Максимум токенов в ответе. «По умолчанию» — 2048. «Своё» сохраняет введённое число.',
       maxTokensAgent: 'Максимум токенов за один раунд рассуждения, включая JSON вызовов инструментов. «По умолчанию»: 4096 без песочницы, 24576 с записью/правкой файлов. «Своё» сохраняет введённое число и больше не меняется.',
       thinking: 'Включить расширенное мышление модели (требуется поддержка модели)',
+      thinkingEffort: 'Настройка reasoning_effort через chat_template_kwargs: Hy3 — выкл., низкий и высокий; Hy4 — выкл. и высокий; у других моделей также есть максимальный',
+      thinkingEffortGlm: 'Настройка GLM-5.x reasoning_effort: низкий, высокий и максимальный. Это семейство не может отключить размышление',
       conversationSection: 'Настройка параметров многооборотного диалога и перефразирования вопросов',
       conversationSectionAgent: 'Объём предыдущего диалога в каждом ходе. Умные рассуждения всегда многооборотные',
       multiTurn: 'При включении сохраняется контекст истории диалога',
@@ -1299,6 +1301,12 @@ export default {
       all: 'Все',
       selected: 'Выбранные',
       disabled: 'Отключено'
+    },
+    thinkingEffort: {
+      noThink: 'Без размышления',
+      low: 'Низкий уровень',
+      high: 'Высокий уровень',
+      max: 'Максимальный уровень'
     },
     promptNav: {
       ariaLabel: 'Оглавление промптов',
@@ -2789,6 +2797,14 @@ export default {
         chatTemplateKwargs: {
           label: 'chat_template_kwargs',
           hint: 'Пользовательские OpenAI-совместимые шлюзы, NVIDIA NIM, vLLM / локальный Qwen'
+        },
+        reasoningEffort: {
+          label: 'reasoning_effort',
+          hint: 'Передаёт no_think, low, high или max через chat_template_kwargs (vLLM / Hunyuan Hy / свой GLM)'
+        },
+        glmReasoningEffort: {
+          label: 'reasoning_effort (GLM)',
+          hint: 'Zhipu GLM-5.x: передаёт low, high или max в поле reasoning_effort верхнего уровня (размышление нельзя отключить)'
         },
         none: {
           label: 'Не отправлять параметры размышления',

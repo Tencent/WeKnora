@@ -153,6 +153,9 @@ type CustomAgentConfig struct {
 	MaxCompletionTokens int `yaml:"max_completion_tokens" json:"max_completion_tokens"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `yaml:"thinking" json:"thinking"`
+	// ThinkingEffort selects a provider-specific reasoning effort. Hy models accept
+	// no_think/high, and Hy3 additionally accepts low.
+	ThinkingEffort string `yaml:"thinking_effort,omitempty" json:"thinking_effort,omitempty"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true
 	// so agents saved before this option was introduced keep their existing behavior.
 	CitationEnabled *bool `yaml:"citation_enabled" json:"citation_enabled"`
@@ -559,6 +562,21 @@ func (a *CustomAgent) EnsureDefaults() {
 	// Agent mode should always enable multi-turn conversation
 	if a.Config.AgentMode == AgentModeSmartReasoning {
 		a.Config.MultiTurnEnabled = true
+	}
+	a.Config.ThinkingEffort = strings.ToLower(strings.TrimSpace(a.Config.ThinkingEffort))
+	switch a.Config.ThinkingEffort {
+	case "no_think":
+		disabled := false
+		a.Config.Thinking = &disabled
+	case "low", "high":
+		enabled := true
+		a.Config.Thinking = &enabled
+	case "max":
+		// GLM-5.x deepest reasoning; thinking is always on for GLM models.
+		enabled := true
+		a.Config.Thinking = &enabled
+	default:
+		a.Config.ThinkingEffort = ""
 	}
 	// Pin thinking to an explicit false when unset so provider-specific wire
 	// formats (e.g. thinking_control=thinking_type) always receive a value.

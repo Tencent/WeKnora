@@ -46,6 +46,8 @@ type SummaryConfig struct {
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	// Thinking - whether to enable thinking mode
 	Thinking *bool `json:"thinking"`
+	// ThinkingEffort selects a provider-specific reasoning effort.
+	ThinkingEffort string `json:"thinking_effort,omitempty"`
 }
 
 // ContextCompressionStrategy represents the strategy for context compression

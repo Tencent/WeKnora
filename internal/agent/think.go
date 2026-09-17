@@ -255,6 +255,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		MaxCompletionTokens: budget,
 		Tools:               tools,
 		Thinking:            e.config.Thinking,
+		ThinkingEffort:      e.config.ThinkingEffort,
 		ParallelToolCalls:   &parallelToolCalls,
 		PromptCacheKey:      sessionID,
 	}

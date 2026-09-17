@@ -1266,6 +1266,8 @@ export default {
       maxTokens: '모델 응답의 최대 토큰 수. 「기본값」은 2048입니다. 「사용자 지정」은 입력한 값을 그대로 저장합니다.',
       maxTokensAgent: '각 추론 라운드에서 생성할 최대 토큰 수(도구 호출 JSON 포함). 「기본값」은 샌드박스 없으면 4096, 파일 쓰기/편집이 가능하면 24576입니다. 「사용자 지정」은 입력한 값을 그대로 저장합니다.',
       thinking: '모델의 확장 사고 기능 활성화 (모델 지원 필요)',
+      thinkingEffort: 'chat_template_kwargs로 reasoning_effort 설정: Hy3는 끄기, 낮음, 높음; Hy4는 끄기와 높음; 기타 모델은 최대도 선택 가능',
+      thinkingEffortGlm: 'GLM-5.x reasoning_effort 설정: 낮음, 높음, 최대 지원. 이 계열은 사고를 끌 수 없습니다',
       conversationSection: '다중 턴 대화 및 질문 재작성 관련 매개변수 설정',
       conversationSectionAgent: '매 턴에 실어 보낼 이전 대화 분량 설정 (스마트 추론은 항상 다중 턴)',
       multiTurn: '활성화하면 대화 기록 컨텍스트가 유지됩니다',
@@ -1299,6 +1301,12 @@ export default {
       all: '전체',
       selected: '지정',
       disabled: '비활성화'
+    },
+    thinkingEffort: {
+      noThink: '사고 끄기',
+      low: '낮은 사고 강도',
+      high: '높은 사고 강도',
+      max: '최대 사고 강도'
     },
     promptNav: {
       ariaLabel: '프롬프트 목차',
@@ -2789,6 +2797,14 @@ export default {
         chatTemplateKwargs: {
           label: 'chat_template_kwargs',
           hint: '사용자 정의 OpenAI 호환, NVIDIA NIM, vLLM / 로컬 Qwen 배포'
+        },
+        reasoningEffort: {
+          label: 'reasoning_effort',
+          hint: 'chat_template_kwargs로 no_think, low, high 또는 max 전송 (vLLM / Hunyuan Hy / 자체 호스팅 GLM)'
+        },
+        glmReasoningEffort: {
+          label: 'reasoning_effort (GLM)',
+          hint: 'Zhipu GLM-5.x: 최상위 reasoning_effort로 low, high 또는 max 전송(사고 비활성화 불가)'
         },
         none: {
           label: '사고 매개변수 전송 안 함',

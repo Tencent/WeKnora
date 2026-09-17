@@ -69,6 +69,9 @@ func buildOptionsSection(opts *ChatOptions) string {
 	if opts.ToolChoice != "" {
 		parts = append(parts, fmt.Sprintf("ToolChoice=%s", opts.ToolChoice))
 	}
+	if opts.ThinkingEffort != "" {
+		parts = append(parts, fmt.Sprintf("ThinkingEffort=%s", opts.ThinkingEffort))
+	}
 	if len(opts.Format) > 0 {
 		parts = append(parts, "ResponseFormat=json_object")
 	}

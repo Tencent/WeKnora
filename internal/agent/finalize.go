@@ -49,6 +49,7 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 	answerDoneEmitted := false
 
 	budget := e.clampCompletionBudgetToContext(e.tokenEstimator.EstimateMessages(messages))
+	thinkingDisabled := false
 	llmResult, err := e.streamLLMToEventBus(
 		ctx,
 		messages,
@@ -57,6 +58,8 @@ func (e *AgentEngine) streamFinalAnswerToEventBus(
 			MaxCompletionTokens: budget,
 			PromptCacheKey:      sessionID,
 			ToolChoice:          "none",
+			Thinking:            &thinkingDisabled,
+			ThinkingEffort:      "no_think",
 		}, // Thinking disabled for final answer synthesis
 		func(chunk *types.StreamResponse, fullContent string) {
 			// Defensive filter: only emit answer content, skip thinking chunks

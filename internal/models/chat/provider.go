@@ -156,6 +156,61 @@ func (deepseekProvider) ShapeRequest(req *openai.ChatCompletionRequest, opts *Ch
 	}
 }
 
+func modelLeaf(model string) string {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(model)), "/")
+	return parts[len(parts)-1]
+}
+
+func isHyReasoningEffortModel(model string) bool {
+	leaf := modelLeaf(model)
+	for _, prefix := range []string{"hy3", "hy4"} {
+		if leaf == prefix || strings.HasPrefix(leaf, prefix+"-") ||
+			strings.HasPrefix(leaf, prefix+"_") || strings.HasPrefix(leaf, prefix+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func isGLMReasoningEffortModel(model string) bool {
+	leaf := modelLeaf(model)
+	return leaf == "glm-5" || strings.HasPrefix(leaf, "glm-5.") ||
+		strings.HasPrefix(leaf, "glm-5-") || strings.HasPrefix(leaf, "glm-5_")
+}
+
+// --- Hunyuan Hy3/Hy4: thinking via chat_template_kwargs.reasoning_effort ---
+
+type hunyuanReasoningProvider struct{ baseProvider }
+
+func (hunyuanReasoningProvider) Name() provider.ProviderName { return provider.ProviderHunyuan }
+func (hunyuanReasoningProvider) Matches(model string) bool   { return isHyReasoningEffortModel(model) }
+func (hunyuanReasoningProvider) Thinking() ThinkingStrategy  { return reasoningEffort() }
+
+// --- Zhipu GLM-5.x: thinking via top-level reasoning_effort (always on) ---
+
+type zhipuReasoningProvider struct{ baseProvider }
+
+func (zhipuReasoningProvider) Name() provider.ProviderName { return provider.ProviderZhipu }
+func (zhipuReasoningProvider) Matches(model string) bool {
+	return isGLMReasoningEffortModel(model)
+}
+func (zhipuReasoningProvider) Thinking() ThinkingStrategy { return glmReasoningEffort() }
+
+// kwargsReasoningEffortProvider covers OpenAI-compatible backends (vLLM,
+// NVIDIA, LiteLLM) that serve Hy or GLM-5 templates and read
+// chat_template_kwargs.reasoning_effort. Distinct from zhipuReasoningProvider,
+// which uses the BigModel top-level field.
+type kwargsReasoningEffortProvider struct {
+	baseProvider
+	name provider.ProviderName
+}
+
+func (p kwargsReasoningEffortProvider) Name() provider.ProviderName { return p.name }
+func (kwargsReasoningEffortProvider) Matches(model string) bool {
+	return isHyReasoningEffortModel(model) || isGLMReasoningEffortModel(model)
+}
+func (kwargsReasoningEffortProvider) Thinking() ThinkingStrategy { return reasoningEffort() }
+
 // --- Generic (vLLM) / NVIDIA / LiteLLM: thinking via chat_template_kwargs ---
 
 type genericProvider struct{ baseProvider }
@@ -281,6 +336,11 @@ var providerRegistry = []providerAdapter{
 	qwenThinkingProvider{},
 	lkeapProvider{},
 	deepseekProvider{},
+	hunyuanReasoningProvider{},
+	zhipuReasoningProvider{},
+	kwargsReasoningEffortProvider{name: provider.ProviderGeneric},
+	kwargsReasoningEffortProvider{name: provider.ProviderNvidia},
+	kwargsReasoningEffortProvider{name: provider.ProviderLiteLLM},
 	genericProvider{},
 	liteLLMProvider{},
 	geminiProvider{},

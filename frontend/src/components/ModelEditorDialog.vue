@@ -431,6 +431,7 @@ import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
 import {
   defaultThinkingControl,
+  isGlmReasoningEffortModel,
   resolveThinkingControl,
   type ThinkingControlValue,
 } from '@/utils/thinkingControl'
@@ -740,10 +741,24 @@ const applyThinkingControlFromModelData = () => {
 }
 
 const thinkingControlOptions = computed(() => {
-  const keys = ['none', 'chatTemplateKwargs', 'enableThinking', 'thinkingType'] as const
-  const values = ['none', 'chat_template_kwargs', 'enable_thinking', 'thinking_type'] as const
-  return keys.map((key, i) => ({
-    value: values[i],
+  const entries: Array<{
+    key: 'none' | 'chatTemplateKwargs' | 'enableThinking' | 'thinkingType' | 'reasoningEffort' | 'glmReasoningEffort'
+    value: ThinkingControlValue
+  }> = [
+    { key: 'none', value: 'none' },
+    { key: 'chatTemplateKwargs', value: 'chat_template_kwargs' },
+    { key: 'enableThinking', value: 'enable_thinking' },
+    { key: 'thinkingType', value: 'thinking_type' },
+  ]
+  if (
+    formData.value.provider === 'zhipu'
+    && isGlmReasoningEffortModel(formData.value.modelName || '')
+  ) {
+    entries.push({ key: 'glmReasoningEffort', value: 'glm_reasoning_effort' })
+  }
+  entries.push({ key: 'reasoningEffort', value: 'reasoning_effort' })
+  return entries.map(({ key, value }) => ({
+    value,
     label: t(`model.editor.thinkingControl.${key}.label`),
     hint: t(`model.editor.thinkingControl.${key}.hint`),
   }))

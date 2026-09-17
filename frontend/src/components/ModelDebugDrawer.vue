@@ -140,7 +140,10 @@
           </div>
           <div v-if="supportsThinking" class="form-item">
             <label class="form-label">{{ $t('modelSettings.debug.thinking') }}</label>
-            <div class="switch-field">
+            <div v-if="usesThinkingEffort">
+              <t-select v-model="thinkingEffort" :options="thinkingEffortOptions" />
+            </div>
+            <div v-else class="switch-field">
               <t-switch v-model="thinking" />
               <span class="form-desc form-desc--inline">{{ $t('modelSettings.debug.thinkingDesc') }}</span>
             </div>
@@ -204,7 +207,13 @@ import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { debugModel, type ModelConfig, type ModelDebugResult } from '@/api/model'
 import { fileSizeVerification } from '@/utils'
-import { modelSupportsThinking } from '@/utils/thinkingControl'
+import {
+  THINKING_EFFORT_LABEL_KEYS,
+  clampThinkingEffort,
+  modelSupportsThinking,
+  thinkingEffortLevels,
+  type ThinkingEffortLevel,
+} from '@/utils/thinkingControl'
 import {
   formatContextWindow,
   modelHasContextWindow,
@@ -234,6 +243,7 @@ const documentsText = ref('')
 const file = ref<File | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const thinking = ref(false)
+const thinkingEffort = ref<ThinkingEffortLevel>('no_think')
 const temperature = ref(0.7)
 const topP = ref(1)
 const maxTokens = ref(1024)
@@ -252,6 +262,25 @@ const selectedModel = computed(() => props.models.find(model => model.id === sel
 const filteredModels = computed(() => props.models.filter(model => model.type === selectedModelType.value))
 const isChat = computed(() => selectedModel.value?.type === 'KnowledgeQA')
 const supportsThinking = computed(() => selectedModel.value ? modelSupportsThinking(selectedModel.value) : false)
+// Non-null when the model takes an effort level instead of an on/off switch.
+const effortLevels = computed(() => thinkingEffortLevels(
+  selectedModel.value?.parameters?.provider || '',
+  selectedModel.value?.name || '',
+  selectedModel.value?.parameters?.extra_config?.thinking_control,
+))
+const usesThinkingEffort = computed(() => effortLevels.value !== null)
+const thinkingEffortOptions = computed(() =>
+  (effortLevels.value || []).map(level => ({
+    value: level,
+    label: t(THINKING_EFFORT_LABEL_KEYS[level]),
+  })),
+)
+
+// Keep the picker on a level the newly selected model accepts.
+watch(effortLevels, (levels) => {
+  if (!levels) return
+  thinkingEffort.value = clampThinkingEffort(thinkingEffort.value, levels)
+})
 const needsFile = computed(() => ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
 const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
 const canRun = computed(() => {
@@ -417,7 +446,10 @@ const formatBytes = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const historyLabel = (thinkingValue: boolean) => {
+const historyLabel = (thinkingValue: boolean, effort?: string) => {
+  if (usesThinkingEffort.value && effort) {
+    return thinkingEffortOptions.value.find(option => option.value === effort)?.label || effort
+  }
   if (supportsThinking.value) {
     return thinkingValue ? t('modelSettings.debug.thinkOn') : t('modelSettings.debug.thinkOff')
   }
@@ -428,7 +460,11 @@ const runDebug = async () => {
   if (!selectedModel.value?.id || !canRun.value || running.value) return
   running.value = true
   try {
-    const thinkingValue = supportsThinking.value ? thinking.value : false
+    const effort = usesThinkingEffort.value ? thinkingEffort.value : undefined
+    // Level sets without no_think (GLM-5.x) always resolve to thinking on.
+    const thinkingValue = usesThinkingEffort.value
+      ? thinkingEffort.value !== 'no_think'
+      : supportsThinking.value ? thinking.value : false
     const nextResult = await debugModel(selectedModel.value.id, {
       input: input.value.trim(),
       documents: documents.value,
@@ -439,12 +475,13 @@ const runDebug = async () => {
         top_p: topP.value,
         max_tokens: maxTokens.value,
         thinking: thinkingValue,
+        thinking_effort: effort,
       } : {},
     })
     result.value = nextResult
     history.value.unshift({
       id: ++runSequence,
-      label: historyLabel(thinkingValue),
+      label: historyLabel(thinkingValue, effort),
       result: nextResult,
     })
     history.value = history.value.slice(0, 6)

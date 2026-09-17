@@ -82,6 +82,7 @@ type AgentConfig struct {
 	Temperature                 float64                   `json:"temperature"`
 	MaxCompletionTokens         int                       `json:"max_completion_tokens"`
 	Thinking                    *bool                     `json:"thinking"`
+	ThinkingEffort              string                    `json:"thinking_effort,omitempty"`
 	CitationEnabled             *bool                     `json:"citation_enabled"`
 	MaxIterations               int                       `json:"max_iterations"` // -1 = unlimited
 	LLMCallTimeout              int                       `json:"llm_call_timeout,omitempty"`

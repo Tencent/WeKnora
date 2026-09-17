@@ -238,6 +238,9 @@ func buildLangfuseModelParams(opts *ChatOptions) map[string]interface{} {
 	if opts.ToolChoice != "" {
 		params["tool_choice"] = opts.ToolChoice
 	}
+	if opts.ThinkingEffort != "" {
+		params["thinking_effort"] = opts.ThinkingEffort
+	}
 	if len(params) == 0 {
 		return nil
 	}

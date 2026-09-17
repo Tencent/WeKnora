@@ -1268,6 +1268,8 @@ export default {
       maxTokens: '模型生成回复的最大 Token 数。选「默认」时为 2048；选「自定义」后按你填的数保存。',
       maxTokensAgent: '每一轮推理的最大生成 Token（含工具调用 JSON）。选「默认」时，未绑沙箱为 4096，绑了沙箱（可写/改文件）为 24576。选「自定义」后按你填的数保存，不再自动改。',
       thinking: '启用模型的扩展思考能力（需要模型支持）',
+      thinkingEffort: '通过 chat_template_kwargs 设置 reasoning_effort；Hy3 支持关闭、低、高，Hy4 支持关闭、高，其它模型另可选择最深',
+      thinkingEffortGlm: '设置 GLM-5.x 的 reasoning_effort；支持低、高、最深，该系列无法关闭思考',
       conversationSection: '配置多轮对话开关与问题改写开关（改写提示词见「提示词」）',
       conversationSectionAgent: '配置每轮携带多少历史对话。智能推理始终为多轮模式。',
       multiTurn: '开启后将保留历史对话上下文',
@@ -1301,6 +1303,12 @@ export default {
       all: '全部',
       selected: '指定',
       disabled: '禁用'
+    },
+    thinkingEffort: {
+      noThink: '关闭思考',
+      low: '低强度思考',
+      high: '高强度思考',
+      max: '最深思考'
     },
     promptNav: {
       ariaLabel: '提示词目录',
@@ -2791,6 +2799,14 @@ export default {
         chatTemplateKwargs: {
           label: 'chat_template_kwargs',
           hint: '自定义 OpenAI 兼容、NVIDIA NIM、vLLM / 本地 Qwen 部署'
+        },
+        reasoningEffort: {
+          label: 'reasoning_effort',
+          hint: '通过 chat_template_kwargs 传递 no_think、low、high 或 max（vLLM / 混元 Hy / 自建 GLM）'
+        },
+        glmReasoningEffort: {
+          label: 'reasoning_effort (GLM)',
+          hint: '智谱 GLM-5.x：通过顶层 reasoning_effort 传递 low、high 或 max（思考不可关闭）'
         },
         none: {
           label: '不写入思考参数',

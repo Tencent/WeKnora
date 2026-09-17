@@ -637,14 +637,20 @@
                       </div>
                     </div>
 
-                    <!-- 思考模式 -->
+                    <!-- 思考模式：支持 effort 的模型显示档位下拉，其余显示开关 -->
                     <div class="setting-row">
                       <div class="setting-info">
                         <label>{{ $t('agent.editor.thinking') }}</label>
-                        <p class="desc">{{ $t('agentEditor.desc.thinking') }}</p>
+                        <p class="desc">{{ thinkingEffortDesc }}</p>
                       </div>
                       <div class="setting-control">
-                        <t-switch v-model="thinkingEnabled" />
+                        <t-select
+                          v-if="usesThinkingEffort"
+                          v-model="thinkingEffort"
+                          :options="thinkingEffortOptions"
+                          style="width: 180px"
+                        />
+                        <t-switch v-else v-model="thinkingEnabled" />
                       </div>
                     </div>
 
@@ -1834,6 +1840,12 @@ import {
 } from '@/config/contextualGuides';
 import { useI18n } from 'vue-i18n';
 import { selectInitialModelId } from '@/utils/modelDefaults';
+import {
+  THINKING_EFFORT_LABEL_KEYS,
+  clampThinkingEffort,
+  thinkingEffortLevels,
+  type ThinkingEffortLevel,
+} from '@/utils/thinkingControl';
 import { hydrateAgentPromptRefs, serializeAgentPrompts } from '@/utils/agentPromptTemplates';
 import { copyWithToast } from '@/utils/clipboard';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -2731,6 +2743,7 @@ const defaultFormData = {
     temperature: 0.7,
     max_completion_tokens: 0,
     thinking: false, // 默认禁用思考模式
+    thinking_effort: 'no_think' as 'no_think' | 'low' | 'high',
     citation_enabled: true, // 默认输出知识库/网页来源引用
     // Agent模式设置
     max_iterations: 10,
@@ -3354,7 +3367,69 @@ const onAgentTypeChange = (val: AgentType) => {
 // 思考模式计算属性（直接绑定 boolean）
 const thinkingEnabled = computed({
   get: () => formData.value.config.thinking === true,
-  set: (val: boolean) => { formData.value.config.thinking = val; }
+  set: (val: boolean) => {
+    formData.value.config.thinking = val;
+    formData.value.config.thinking_effort = val ? 'high' : 'no_think';
+  }
+});
+
+const selectedChatModel = computed(() =>
+  allModels.value.find(model => model.id === formData.value.config.model_id)
+);
+
+// Non-null when the selected model takes an effort level instead of an on/off
+// switch. Level sets live in thinkingControl.ts alongside the backend mirror.
+const effortLevels = computed(() => thinkingEffortLevels(
+  selectedChatModel.value?.parameters?.provider || '',
+  selectedChatModel.value?.name || '',
+  selectedChatModel.value?.parameters?.extra_config?.thinking_control,
+));
+
+const usesThinkingEffort = computed(() => effortLevels.value !== null);
+
+const thinkingEffortDesc = computed(() => {
+  if (!usesThinkingEffort.value) return t('agentEditor.desc.thinking');
+  return effortLevels.value?.includes('no_think')
+    ? t('agentEditor.desc.thinkingEffort')
+    : t('agentEditor.desc.thinkingEffortGlm');
+});
+
+const thinkingEffortOptions = computed(() =>
+  (effortLevels.value || []).map(level => ({
+    value: level,
+    label: t(THINKING_EFFORT_LABEL_KEYS[level]),
+  })),
+);
+
+const thinkingEffort = computed({
+  get: () => {
+    const levels = effortLevels.value;
+    if (!levels) return 'no_think';
+    const stored = formData.value.config.thinking_effort;
+    if (stored) return clampThinkingEffort(stored, levels);
+    // Agents saved before effort levels existed only carry the boolean.
+    return clampThinkingEffort(
+      formData.value.config.thinking === true ? 'high' : 'no_think',
+      levels,
+    );
+  },
+  set: (effort: ThinkingEffortLevel) => {
+    formData.value.config.thinking_effort = effort;
+    // Level sets that cannot express no_think (GLM-5.x) always mean thinking on.
+    formData.value.config.thinking = effort !== 'no_think';
+  },
+});
+
+// Switching model families can leave an effort the new model cannot express
+// (no_think on GLM-5.x, max or low on Hy4). Write the clamped level back so the
+// dropdown and the persisted value never disagree.
+watch(effortLevels, (levels) => {
+  if (!levels) return;
+  const stored = formData.value.config.thinking_effort;
+  if (!stored || levels.includes(stored as ThinkingEffortLevel)) return;
+  const clamped = clampThinkingEffort(stored, levels);
+  formData.value.config.thinking_effort = clamped;
+  formData.value.config.thinking = clamped !== 'no_think';
 });
 
 // 是否为内置智能体
@@ -3411,9 +3486,13 @@ watch(() => props.visible, async (val) => {
       }
 
       // 补全可能缺失的字段
+      const hadThinkingEffort = agentData.config.thinking_effort != null;
       agentData.config = { ...defaultFormData.config, ...agentData.config };
       if (agentData.config.thinking == null) {
         agentData.config.thinking = false;
+      }
+      if (!hadThinkingEffort) {
+        agentData.config.thinking_effort = agentData.config.thinking ? 'high' : 'no_think';
       }
 
       agentData.config.question_suggestions = {

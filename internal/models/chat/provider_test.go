@@ -26,6 +26,13 @@ func TestResolveProvider(t *testing.T) {
 		{"lkeap v3", provider.ProviderLKEAP, "deepseek-v3.1", lkeapProvider{}},
 		{"lkeap r1 falls back", provider.ProviderLKEAP, "deepseek-r1", baseProvider{}},
 		{"qwen thinking", provider.ProviderAliyun, "qwen3-32b", qwenThinkingProvider{}},
+		{"hunyuan Hy3", provider.ProviderHunyuan, "Hy3", hunyuanReasoningProvider{}},
+		{"hunyuan Hy4 namespaced", provider.ProviderHunyuan, "tencent/Hy4-preview", hunyuanReasoningProvider{}},
+		{"zhipu GLM-5.3", provider.ProviderZhipu, "glm-5.3", zhipuReasoningProvider{}},
+		{"zhipu GLM-5.3-flash", provider.ProviderZhipu, "glm-5.3-flash", zhipuReasoningProvider{}},
+		{"zhipu GLM-4 falls back", provider.ProviderZhipu, "glm-4", baseProvider{}},
+		{"generic Hy stays generic", provider.ProviderGeneric, "Hy4-preview", kwargsReasoningEffortProvider{name: provider.ProviderGeneric}},
+		{"generic GLM-5 uses kwargs effort", provider.ProviderGeneric, "glm-5.3", kwargsReasoningEffortProvider{name: provider.ProviderGeneric}},
 		{"generic", provider.ProviderGeneric, "anything", genericProvider{}},
 		{"litellm", provider.ProviderLiteLLM, "anything", liteLLMProvider{}},
 		{"gemini", provider.ProviderGemini, "gemini-3-flash-preview", geminiProvider{}},
@@ -85,6 +92,97 @@ func TestBuildOutbound_Thinking(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, useRaw)
 		assert.Contains(t, mustJSON(t, body), "chat_template_kwargs")
+	})
+
+	t.Run("Hunyuan Hy reasoning effort", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderHunyuan), "Hy4-preview", nil)
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			ThinkingEffort: "no_think",
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"chat_template_kwargs"`)
+		assert.Contains(t, js, `"reasoning_effort":"no_think"`)
+		assert.NotContains(t, js, `"enable_thinking"`)
+	})
+
+	t.Run("reasoning effort override is honored outside Hunyuan", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderGeneric), "Hy4-preview",
+			map[string]string{ExtraConfigThinkingControl: "reasoning_effort"})
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			ThinkingEffort: "no_think",
+			Thinking:       ptrBool(false),
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"reasoning_effort":"no_think"`)
+		assert.Contains(t, js, `"chat_template_kwargs"`)
+		assert.NotContains(t, js, `"enable_thinking"`)
+	})
+
+	t.Run("generic GLM-5 uses chat_template_kwargs reasoning_effort including max", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderGeneric), "glm-5.3", nil)
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			ThinkingEffort: "max",
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"chat_template_kwargs"`)
+		assert.Contains(t, js, `"reasoning_effort":"max"`)
+		assert.NotContains(t, js, `"thinking":{"type":"enabled"}`)
+	})
+
+	t.Run("GLM reasoning effort high", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderZhipu), "glm-5.3", nil)
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			ThinkingEffort: "high",
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"reasoning_effort":"high"`)
+		assert.Contains(t, js, `"thinking":{"type":"enabled"}`)
+		assert.NotContains(t, js, `"chat_template_kwargs"`)
+	})
+
+	t.Run("GLM reasoning effort max", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderZhipu), "glm-5.3-flash", nil)
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			ThinkingEffort: "max",
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"reasoning_effort":"max"`)
+	})
+
+	t.Run("GLM no_think maps to low", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderZhipu), "glm-5.3", nil)
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			ThinkingEffort: "no_think",
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"reasoning_effort":"low"`)
+	})
+
+	t.Run("GLM reasoning effort override is ignored outside Zhipu", func(t *testing.T) {
+		c := newOutboundChat(t, string(provider.ProviderGeneric), "glm-5.3",
+			map[string]string{ExtraConfigThinkingControl: "glm_reasoning_effort"})
+		body, _, useRaw, err := c.buildOutbound(context.Background(), msgs, &ChatOptions{
+			ThinkingEffort: "high",
+			Thinking:       ptrBool(true),
+		}, true)
+		require.NoError(t, err)
+		require.True(t, useRaw)
+		js := mustJSON(t, body)
+		assert.Contains(t, js, `"chat_template_kwargs"`)
+		assert.Contains(t, js, `"reasoning_effort":"high"`)
+		assert.NotContains(t, js, `"thinking":{"type":"enabled"}`)
 	})
 
 	t.Run("none keeps the standard SDK request", func(t *testing.T) {

@@ -34,8 +34,9 @@ type RemoteAPIChat struct {
 
 	// adapter 承载所有 provider 特定行为（thinking / 参数特判 / endpoint / 鉴权 / 消息变换）。
 	adapter providerAdapter
-	// thinkingOverride 来自 extra_config.thinking_control，非 nil 时覆盖 adapter.Thinking()。
-	thinkingOverride ThinkingStrategy
+	// thinking 是已解析的思考编码方式：extra_config.thinking_control 适用于本
+	// provider 时取它，否则取 adapter.Thinking()。
+	thinking ThinkingStrategy
 }
 
 // NewRemoteAPIChat 创建远程 API 聊天实例
@@ -98,18 +99,21 @@ func NewRemoteAPIChat(chatConfig *ChatConfig) (*RemoteAPIChat, error) {
 		}
 	}
 
+	adapter := resolveProvider(providerName, modelName)
+	thinking := resolveThinkingStrategy(adapter, chatConfig.ExtraConfig)
+
 	return &RemoteAPIChat{
-		modelName:        modelName,
-		client:           openai.NewClientWithConfig(config),
-		modelID:          chatConfig.ModelID,
-		baseURL:          strings.TrimRight(config.BaseURL, "/"),
-		apiKey:           apiKey,
-		provider:         providerName,
-		appID:            chatConfig.AppID,
-		appSecret:        chatConfig.AppSecret,
-		customHeaders:    chatConfig.CustomHeaders,
-		adapter:          resolveProvider(providerName, modelName),
-		thinkingOverride: parseThinkingOverride(chatConfig.ExtraConfig),
+		modelName:     modelName,
+		client:        openai.NewClientWithConfig(config),
+		modelID:       chatConfig.ModelID,
+		baseURL:       strings.TrimRight(config.BaseURL, "/"),
+		apiKey:        apiKey,
+		provider:      providerName,
+		appID:         chatConfig.AppID,
+		appSecret:     chatConfig.AppSecret,
+		customHeaders: chatConfig.CustomHeaders,
+		adapter:       adapter,
+		thinking:      thinking,
 	}, nil
 }
 
@@ -136,11 +140,7 @@ func (c *RemoteAPIChat) buildOutbound(
 ) (body any, endpoint string, useRawHTTP bool, err error) {
 	req := c.shapedRequest(messages, opts, isStream)
 
-	thinking := c.thinkingOverride
-	if thinking == nil {
-		thinking = c.adapter.Thinking()
-	}
-	customBody, useRaw := thinking.Apply(&req, opts, isStream)
+	customBody, useRaw := c.thinking.Apply(&req, opts, isStream)
 
 	body = &req
 	if customBody != nil {

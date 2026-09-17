@@ -210,11 +210,12 @@ const modelDebugMaxInputBytes = 64 * 1024
 // ModelDebugOptions contains the cross-provider parameters exposed by the
 // model debugger. Pointer fields preserve explicit zero/false values.
 type ModelDebugOptions struct {
-	SystemPrompt string   `json:"system_prompt,omitempty"`
-	Temperature  *float64 `json:"temperature,omitempty"`
-	TopP         *float64 `json:"top_p,omitempty"`
-	MaxTokens    *int     `json:"max_tokens,omitempty"`
-	Thinking     *bool    `json:"thinking,omitempty"`
+	SystemPrompt   string   `json:"system_prompt,omitempty"`
+	Temperature    *float64 `json:"temperature,omitempty"`
+	TopP           *float64 `json:"top_p,omitempty"`
+	MaxTokens      *int     `json:"max_tokens,omitempty"`
+	Thinking       *bool    `json:"thinking,omitempty"`
+	ThinkingEffort string   `json:"thinking_effort,omitempty"`
 }
 
 func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
@@ -233,6 +234,11 @@ func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
 	}
 	if opts.TopP != nil && (*opts.TopP <= 0 || *opts.TopP > 1) {
 		return opts, fmt.Errorf("top_p must be greater than 0 and at most 1")
+	}
+	switch opts.ThinkingEffort {
+	case "", "no_think", "low", "high", "max":
+	default:
+		return opts, fmt.Errorf("thinking_effort must be one of no_think, low, high, max")
 	}
 	return opts, nil
 }
@@ -454,12 +460,14 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			chatOpts.MaxTokens = *opts.MaxTokens
 		}
 		chatOpts.Thinking = opts.Thinking
+		chatOpts.ThinkingEffort = opts.ThinkingEffort
 		chatConfig := chat.ConfigFromModel(model, "", "")
 		thinkingControl := chat.EffectiveThinkingControl(chatConfig)
 		observations["stream"] = true
 		observations["requested_thinking"] = opts.Thinking != nil && *opts.Thinking
+		observations["requested_thinking_effort"] = opts.ThinkingEffort
 		observations["thinking_control"] = thinkingControl
-		observations["thinking_parameter_sent"] = opts.Thinking != nil && thinkingControl != "none"
+		observations["thinking_parameter_sent"] = (opts.Thinking != nil || opts.ThinkingEffort != "") && thinkingControl != "none"
 
 		stream, callErr := instance.ChatStream(ctx, messages, chatOpts)
 		if callErr != nil {

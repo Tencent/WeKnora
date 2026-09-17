@@ -34,6 +34,13 @@ func TestParseModelDebugOptionsPreservesExplicitThinkingFalse(t *testing.T) {
 func TestParseModelDebugOptionsRejectsOutOfRangeValues(t *testing.T) {
 	_, err := parseModelDebugOptions(`{"top_p":0}`)
 	require.ErrorContains(t, err, "top_p")
+
+	opts, err := parseModelDebugOptions(`{"thinking":true,"thinking_effort":"low"}`)
+	require.NoError(t, err)
+	assert.Equal(t, "low", opts.ThinkingEffort)
+
+	_, err = parseModelDebugOptions(`{"thinking_effort":"medium"}`)
+	require.ErrorContains(t, err, "thinking_effort")
 }
 
 func TestRedactedDebugConfig(t *testing.T) {

@@ -4563,6 +4563,14 @@ export default {
         thinkingType: {
           label: 'thinking.type',
           hint: 'Volcengine Ark、Tencent LKEAP（DeepSeek V3など。LKEAPのデフォルト値。R1では「送信しない」を使用）'
+        },
+        reasoningEffort: {
+          label: 'reasoning_effort',
+          hint: 'chat_template_kwargsでno_think、low、high、maxを送信（vLLM / Hunyuan Hy / 自前GLM）'
+        },
+        glmReasoningEffort: {
+          label: 'reasoning_effort (GLM)',
+          hint: 'Zhipu GLM-5.x：トップレベルのreasoning_effortでlow、high、maxを送信（思考は無効化できません）'
         }
       },
       dimensionHint: 'モデルを選択しました。「次元数を検出」をクリックするとベクトル次元数を自動取得できます。',
@@ -5994,6 +6002,12 @@ export default {
       selected: '選択済み',
       disabled: '無効'
     },
+    thinkingEffort: {
+      noThink: '思考を無効化',
+      low: '低い思考強度',
+      high: '高い思考強度',
+      max: '最大の思考強度'
+    },
     desc: {
       name: 'エージェントを識別しやすい名前を設定します',
       description: 'エージェントの目的と特徴を簡潔に説明します',
@@ -6006,6 +6020,8 @@ export default {
       maxTokens: 'モデルの応答の最大トークン数。デフォルトは2048です。カスタム値は入力したとおりに保存されます。',
       maxTokensAgent: '推論の各ラウンドで生成される最大トークン数（ツール呼び出しのJSONを含む）。デフォルトは、サンドボックスなしの場合4096、サンドボックスがファイルの書き込みや編集を行える場合は24576です。カスタム値は入力したとおりに保存され、以降変更されません。',
       thinking: '拡張思考機能を有効にします（モデルの対応が必要）',
+      thinkingEffort: 'chat_template_kwargsでreasoning_effortを設定します。Hy3はオフ・低・高、Hy4はオフ・高、その他のモデルは最大も選択できます',
+      thinkingEffortGlm: 'GLM-5.xのreasoning_effortを設定します。低・高・最大に対応し、このシリーズは思考を無効化できません',
       conversationSection: 'マルチターン会話とクエリのリライトに関するパラメータを設定します',
       conversationSectionAgent: '各ターンで引き継ぐ過去の会話の量。スマート推論は常にマルチターンです',
       multiTurn: '有効にすると、過去の会話のコンテキストが保持されます',
