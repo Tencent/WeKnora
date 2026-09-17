@@ -1860,7 +1860,7 @@ const handleCancel = () => {
   }
 
   &:hover:not(.is-active) {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
     color: var(--td-text-color-primary);
   }
 
@@ -2101,9 +2101,9 @@ const handleCancel = () => {
   }
 
   &--warn {
-    background: var(--td-warning-color-light, #fff7ed);
-    border: 1px solid var(--td-warning-color-focus, #fed7aa);
-    border-left: 3px solid var(--td-warning-color, #f97316);
+    background: var(--td-warning-color-light);
+    border: 1px solid var(--td-warning-color-focus);
+    border-left: 3px solid var(--td-warning-color);
   }
 
   .hint-icon {
@@ -2116,7 +2116,7 @@ const handleCancel = () => {
     }
 
     &--warn {
-      color: var(--td-warning-color, #f97316);
+      color: var(--td-warning-color);
     }
 
     &--loading {
@@ -2198,7 +2198,7 @@ const handleCancel = () => {
       top: 0;
       bottom: 0;
       width: var(--progress, 0%);
-      background: linear-gradient(90deg, rgba(7, 192, 95, 0.08), rgba(7, 192, 95, 0.15));
+      background: linear-gradient(90deg, color-mix(in srgb, var(--td-brand-color) 8%, transparent), color-mix(in srgb, var(--td-brand-color) 15%, transparent));
       transition: width 0.3s ease;
       z-index: 0;
       border-radius: 5px 0 0 5px;
@@ -2400,12 +2400,12 @@ const handleCancel = () => {
     transition: all 0.2s ease;
 
     &:hover {
-      background: rgba(7, 192, 95, 0.08) !important;
+      background: color-mix(in srgb, var(--td-brand-color) 8%, transparent) !important;
       color: var(--td-brand-color-active) !important;
     }
 
     &:active {
-      background: rgba(7, 192, 95, 0.12) !important;
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent) !important;
     }
 
     .t-icon {

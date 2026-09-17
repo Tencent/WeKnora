@@ -216,7 +216,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
     border-radius: 8px !important;
     background: var(--td-bg-color-container) !important;
     border: 1px solid var(--td-component-stroke) !important;
-    box-shadow: var(--td-shadow-2, 0 3px 14px 2px rgba(0, 0, 0, 0.05)) !important;
+    box-shadow: var(--td-shadow-2) !important;
   }
 }
 

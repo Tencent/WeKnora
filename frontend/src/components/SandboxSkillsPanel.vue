@@ -1698,7 +1698,7 @@ onUnmounted(() => {
   align-items: flex-start;
   gap: 10px;
   padding: 8px 0 4px;
-  color: var(--td-success-color, var(--td-brand-color));
+  color: var(--td-success-color);
 
   p {
     margin: 0;
@@ -1735,7 +1735,7 @@ onUnmounted(() => {
 }
 
 .skill-envs__name {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 12px;
   color: var(--td-text-color-primary);
   overflow-wrap: anywhere;
@@ -1800,7 +1800,7 @@ onUnmounted(() => {
 
   &--focused {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
   }
 
   &--bare {
@@ -1921,10 +1921,10 @@ onUnmounted(() => {
   background: var(--td-bg-color-secondarycontainer);
 
   &--on {
-    color: var(--td-success-color-7, #118053);
+    color: var(--td-success-color-7);
 
     .skill-card__status-dot {
-      background: var(--td-success-color, #118053);
+      background: var(--td-success-color);
     }
   }
 
@@ -1945,10 +1945,10 @@ onUnmounted(() => {
   }
 
   &--failed {
-    color: var(--td-warning-color-7, #b85c00);
+    color: var(--td-warning-color-7);
 
     .skill-card__status-dot {
-      background: var(--td-warning-color, #e37318);
+      background: var(--td-warning-color);
     }
   }
 }
@@ -2027,7 +2027,7 @@ onUnmounted(() => {
   }
 
   &--danger:hover:not(:disabled) {
-    background: var(--td-error-color-1, var(--td-bg-color-secondarycontainer));
+    background: var(--td-error-color-1);
     color: var(--td-error-color);
   }
 }
@@ -2243,7 +2243,7 @@ onUnmounted(() => {
   }
 
   .skill-envs__name {
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+    font-family: var(--td-font-family-mono);
     font-size: 12px;
     color: var(--td-text-color-primary);
     overflow-wrap: anywhere;

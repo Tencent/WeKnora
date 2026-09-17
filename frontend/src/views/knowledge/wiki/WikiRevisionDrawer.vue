@@ -555,7 +555,7 @@ function formatShortTime(iso?: string): string {
   font-weight: 400;
   font-size: 14px;
   line-height: 20px;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   color: var(--td-text-color-primary);
   transition: color 0.15s ease;
 }
@@ -629,7 +629,7 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-detail-range {
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 15px;
   font-weight: 600;
   line-height: 1.4;
@@ -740,7 +740,7 @@ function formatShortTime(iso?: string): string {
   border-radius: 8px;
   font-size: 12px;
   line-height: 1.7;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -758,7 +758,7 @@ function formatShortTime(iso?: string): string {
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.7;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -768,7 +768,7 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-diff-line--add {
-  background: rgba(7, 192, 95, 0.08);
+  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
   color: var(--td-text-color-primary);
 }
 

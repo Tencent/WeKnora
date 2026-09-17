@@ -2991,17 +2991,17 @@ async function createNewSession(value: string): Promise<void> {
       border: 0;
       background: transparent;
       border-radius: 4px;
-      color: var(--td-text-color-secondary, #888);
+      color: var(--td-text-color-secondary);
       cursor: pointer;
       transition: background-color 0.12s ease, color 0.12s ease;
 
       &:hover {
-        color: var(--td-text-color-primary, #232323);
+        color: var(--td-text-color-primary);
       }
 
       &.active {
-        background: var(--td-bg-color-container, #fff);
-        color: var(--td-brand-color, #0052d9);
+        background: var(--td-bg-color-container);
+        color: var(--td-brand-color);
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
       }
     }

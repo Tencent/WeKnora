@@ -807,13 +807,13 @@ onUnmounted(() => {
     font-weight: 500;
     color: var(--td-text-color-primary);
     word-break: break-all;
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
   }
 
   .audit-target-diff {
     font-size: 12px;
     color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     word-break: break-all;
     line-height: 1.4;
   }
@@ -870,7 +870,7 @@ onUnmounted(() => {
 }
 
 .mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
 }
 
 .data-table-shell {

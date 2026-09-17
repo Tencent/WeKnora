@@ -826,7 +826,7 @@ onMounted(async () => {
     cursor: pointer;
 
     &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      border-color: var(--td-brand-color-3);
       box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
     }
 
@@ -919,7 +919,7 @@ onMounted(async () => {
 // 选择器叠了一层 .store-card 是为了胜过 `.store-card--<engine> .store-card__badge`
 // 那条更具体的品牌底色规则。
 .store-card .store-card__badge--logo {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 
@@ -955,7 +955,7 @@ onMounted(async () => {
   color: #0089FF;
 }
 .store-card--weaviate .store-card__badge {
-  background: rgba(7, 192, 95, 0.12);
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   color: #07A050;
 }
 .store-card--elasticsearch .store-card__badge,
@@ -1023,8 +1023,8 @@ onMounted(async () => {
   font-weight: 500;
   line-height: 16px;
   border-radius: 3px;
-  color: var(--td-warning-color-7, #B85C00);
-  background: var(--td-warning-color-1, #FEF3E6);
+  color: var(--td-warning-color-7);
+  background: var(--td-warning-color-1);
 }
 
 .store-card__more {
@@ -1288,7 +1288,7 @@ onMounted(async () => {
 <style lang="less">
 // 彩色 logo 时给 header-icon 容器一个白底 + 1px 边
 .vectorstore-drawer .setting-drawer__header-icon:has(.header-icon__img) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 
@@ -1301,7 +1301,7 @@ onMounted(async () => {
   color: #0089FF;
 }
 .vectorstore-drawer--weaviate .setting-drawer__header-icon {
-  background: rgba(7, 192, 95, 0.12);
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   color: #07A050;
 }
 .vectorstore-drawer--elasticsearch .setting-drawer__header-icon,

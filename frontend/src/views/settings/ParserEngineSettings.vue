@@ -792,13 +792,13 @@ onMounted(loadAll)
   min-width: 0;
 
   &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
 
   &--active {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.06));
+    background: var(--td-brand-color-1);
   }
 }
 
@@ -821,7 +821,7 @@ onMounted(loadAll)
 // 解析引擎徽章配色 —— 内置/官方系绿，外部工具按性质各取一色。
 .engine-card--builtin .engine-card__badge,
 .engine-card--weknoracloud .engine-card__badge {
-  background: rgba(7, 192, 95, 0.12);
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   color: #07C05F;
 }
 .engine-card--simple .engine-card__badge {
@@ -882,15 +882,15 @@ onMounted(loadAll)
   background: var(--td-bg-color-secondarycontainer);
 
   &--on {
-    color: var(--td-success-color-7, #118053);
+    color: var(--td-success-color-7);
 
-    .engine-card__status-dot { background: var(--td-success-color, #118053); }
+    .engine-card__status-dot { background: var(--td-success-color); }
   }
 
   &--err {
-    color: var(--td-error-color-7, #C93E3E);
+    color: var(--td-error-color-7);
 
-    .engine-card__status-dot { background: var(--td-error-color, #C93E3E); }
+    .engine-card__status-dot { background: var(--td-error-color); }
   }
 
   &--help {
@@ -1041,7 +1041,7 @@ onMounted(loadAll)
   color: var(--td-text-color-primary);
 
   .inline-alert__icon {
-    color: var(--td-warning-color, #f97316);
+    color: var(--td-warning-color);
   }
 }
 
@@ -1170,7 +1170,7 @@ onMounted(loadAll)
 <style lang="less">
 .parser-engine-drawer--builtin .setting-drawer__header-icon,
 .parser-engine-drawer--weknoracloud .setting-drawer__header-icon {
-  background: rgba(7, 192, 95, 0.12);
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   color: #07C05F;
 }
 .parser-engine-drawer--simple .setting-drawer__header-icon {

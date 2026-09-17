@@ -1196,7 +1196,7 @@ const handleClose = () => {
   }
 
   &__textarea :deep(textarea) {
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     font-size: 12px;
   }
 

@@ -109,7 +109,7 @@ const dismiss = () => {
   transition: background-color .2s, color .2s;
 }
 .follow-ups__actions button:hover:not(:disabled) {
-  background: var(--td-bg-color-container-hover, rgba(0, 0, 0, .06));
+  background: var(--td-bg-color-container-hover);
   color: var(--td-brand-color);
 }
 .follow-ups__actions button:disabled {

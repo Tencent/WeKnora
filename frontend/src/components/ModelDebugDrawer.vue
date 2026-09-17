@@ -524,7 +524,7 @@ onBeforeUnmount(() => {
   }
 
   &:hover:not(.is-active) {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
     color: var(--td-text-color-primary);
   }
 

@@ -302,8 +302,8 @@ const closePreImg = () => {
     gap: 10px;
     padding: 8px 12px;
     border-radius: 8px;
-    border: 1px solid var(--td-border-level-1-color, #e7e7e7);
-    background: var(--td-bg-color-container, #fff);
+    border: 1px solid var(--td-border-level-1-color);
+    background: var(--td-bg-color-container);
     max-width: 260px;
     min-width: 160px;
     cursor: default;
@@ -313,7 +313,7 @@ const closePreImg = () => {
         transition: border-color 0.2s, box-shadow 0.2s;
 
         &:hover {
-            border-color: var(--td-brand-color-2, rgba(0, 82, 217, 0.25));
+            border-color: var(--td-brand-color-2);
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
         }
     }
@@ -336,7 +336,7 @@ const closePreImg = () => {
     .attachment_card_name {
         font-size: 13px;
         font-weight: 500;
-        color: var(--td-text-color-primary, #333);
+        color: var(--td-text-color-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -344,7 +344,7 @@ const closePreImg = () => {
 
     .attachment_card_meta {
         font-size: 11px;
-        color: var(--td-text-color-secondary, #999);
+        color: var(--td-text-color-secondary);
         white-space: nowrap;
         box-sizing: border-box;
     }
@@ -356,7 +356,7 @@ const closePreImg = () => {
     object-fit: cover;
     border-radius: 6px;
     cursor: pointer;
-    border: 1px solid var(--td-border-level-2-color, #e7e7e7);
+    border: 1px solid var(--td-border-level-2-color);
     transition: opacity 0.2s;
 
     &:hover {
@@ -374,24 +374,24 @@ const closePreImg = () => {
     line-height: 18px;
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-placeholder);
-    border: 1px solid var(--td-border-level-2-color, #e7e7e7);
+    border: 1px solid var(--td-border-level-2-color);
 
     &.channel-web {
         color: var(--td-brand-color);
         background: var(--td-brand-color-light);
-        border-color: var(--td-brand-color-2, rgba(0, 82, 217, 0.1));
+        border-color: var(--td-brand-color-2);
     }
 
     &.channel-api {
         color: var(--td-success-color);
-        background: var(--td-success-color-1, rgba(0, 168, 112, 0.06));
-        border-color: var(--td-success-color-2, rgba(0, 168, 112, 0.15));
+        background: var(--td-success-color-1);
+        border-color: var(--td-success-color-2);
     }
 
     &.channel-im {
         color: var(--td-warning-color);
-        background: var(--td-warning-color-1, rgba(237, 123, 0, 0.06));
-        border-color: var(--td-warning-color-2, rgba(237, 123, 0, 0.15));
+        background: var(--td-warning-color-1);
+        border-color: var(--td-warning-color-2);
     }
 }
 

@@ -356,8 +356,8 @@ onUnmounted(stop)
   flex-shrink: 0;
   margin-top: 12px;
   padding-top: 12px;
-  background: var(--td-bg-color-container, #fff);
-  border-top: 1px solid var(--td-component-stroke, #e7e7e7);
+  background: var(--td-bg-color-container);
+  border-top: 1px solid var(--td-component-stroke);
 
   // Cover the timeline's padding too, so scrolling text cannot peek around
   // the sticky composer. Its z-index keeps this backdrop above the transcript.
@@ -392,8 +392,8 @@ onUnmounted(stop)
   display: flex;
   flex-direction: column;
   padding: 12px;
-  background: var(--td-bg-color-secondarycontainer, #f7f7f7);
-  border: 1px solid var(--td-component-stroke, #e7e7e7);
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 8px;
 }
 
@@ -406,10 +406,10 @@ onUnmounted(stop)
   margin: 0;
   padding: 8px 10px;
   overflow-y: auto;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   line-height: 1.6;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   border-radius: 6px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -417,7 +417,7 @@ onUnmounted(stop)
 
 .skill-timeline__empty {
   margin: 8px 0;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   font-size: 13px;
 }
 

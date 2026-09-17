@@ -156,7 +156,7 @@ const copyAll = async () => {
 
 .chat-request-value {
   flex: 1;
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 11px;
   color: var(--td-text-color-primary);
   word-break: break-all;

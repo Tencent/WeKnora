@@ -329,7 +329,7 @@ function acknowledge() {
 
 .create-user-reveal-value--mono {
   margin: 0;
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 12px;
   line-height: 18px;
   white-space: pre-wrap;

@@ -1045,15 +1045,15 @@ onBeforeUnmount(() => {
   transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 
   &:hover {
-    border-color: rgba(7, 192, 95, 0.45);
-    background: rgba(7, 192, 95, 0.06);
+    border-color: color-mix(in srgb, var(--td-brand-color) 45%, transparent);
+    background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
     color: var(--td-brand-color);
-    box-shadow: 0 2px 6px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   }
 
   &.is-preview {
-    border-color: rgba(7, 192, 95, 0.5);
-    background: rgba(7, 192, 95, 0.1);
+    border-color: color-mix(in srgb, var(--td-brand-color) 50%, transparent);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color);
   }
 
@@ -1104,7 +1104,7 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn:hover {
-  background: rgba(7, 192, 95, 0.08);
+  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
   color: var(--td-brand-color);
   
   .t-icon {
@@ -1113,7 +1113,7 @@ onBeforeUnmount(() => {
 }
 
 .toolbar-btn.active {
-  background: rgba(7, 192, 95, 0.12);
+  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   color: var(--td-brand-color);
   
   .t-icon {
@@ -1123,11 +1123,11 @@ onBeforeUnmount(() => {
 
 .toolbar-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.25);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 25%, transparent);
 }
 
 .toolbar-btn:active {
-  background: rgba(7, 192, 95, 0.15);
+  background: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
   transform: translateY(0.5px);
 }
 
@@ -1146,7 +1146,7 @@ onBeforeUnmount(() => {
 
   &:focus-within {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   }
 }
 
@@ -1225,7 +1225,7 @@ onBeforeUnmount(() => {
     padding-left: 12px;
     color: var(--td-text-color-secondary);
     margin: 16px 0;
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
   }
 
   :deep(a) {

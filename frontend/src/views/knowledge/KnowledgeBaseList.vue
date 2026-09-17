@@ -635,7 +635,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -663,7 +663,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('knowledgeList.empty.title') }}</span>
           <span class="empty-desc">{{ $t('knowledgeList.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="kb-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="kb-create-btn empty-state-btn"
             data-guide="kb-list-create" @click="handleCreateKnowledgeBase">
             <template #icon><t-icon name="folder-add" /></template>
             {{ $t('knowledgeList.create') }}
@@ -1835,16 +1835,6 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 }
 
-.kb-create-btn {
-  background: linear-gradient(135deg, var(--td-brand-color) 0%, #00a67e 100%);
-  border: none;
-  color: var(--td-text-color-anti);
-
-  &:hover {
-    background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
-  }
-}
-
 .kb-list-main {
   flex: 1;
   min-width: 0;
@@ -1870,7 +1860,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  background: rgba(7, 192, 95, 0.1);
+  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   border-radius: 4px;
   font-size: 12px;
   color: var(--td-brand-color);
@@ -1887,24 +1877,24 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .header-action-btn {
-  padding: 0 !important;
-  min-width: 28px !important;
-  width: 28px !important;
-  height: 28px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: var(--td-bg-color-secondarycontainer) !important;
-  border: 1px solid var(--td-component-stroke) !important;
-  border-radius: 6px !important;
+  padding: 0;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
   transition: background 0.2s, border-color 0.2s, color 0.2s;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer) !important;
-    border-color: var(--td-component-stroke) !important;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-component-stroke);
     color: var(--td-text-color-primary);
   }
 
@@ -1966,7 +1956,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  background: rgba(7, 192, 95, 0.1);
+  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   border-radius: 4px;
   font-size: 12px;
   color: var(--td-brand-color);
@@ -1983,7 +1973,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
-  background: rgba(7, 192, 95, 0.06);
+  background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
@@ -2017,7 +2007,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
-  background: rgba(7, 192, 95, 0.06);
+  background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
   border-radius: 6px;
   font-size: 11px;
   line-height: 1.4;
@@ -2040,16 +2030,16 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   // 共享知识库根据类型显示不同样式
   &.kb-type-document {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%) !important;
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 4%, transparent) 100%) !important;
 
     &:hover {
       border-color: var(--td-brand-color) !important;
-      box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12) !important;
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.08) 100%) !important;
+      box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent) !important;
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%) !important;
     }
 
     &::after {
-      background: linear-gradient(135deg, rgba(7, 192, 95, 0.08) 0%, transparent 100%) !important;
+      background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 0%, transparent 100%) !important;
     }
   }
 
@@ -2239,7 +2229,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &:focus-visible {
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 82, 217, 0.2));
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
   }
 
   // Icons inherit the section header's text color so the whole row
@@ -2316,7 +2306,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   &:hover {
     border-color: var(--td-brand-color);
-    box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   }
 
   &.uninitialized {
@@ -2325,11 +2315,11 @@ const handleUploadFinishedEvent = (event: Event) => {
 
   // 文档类型样式
   &.kb-type-document {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%);
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 4%, transparent) 100%);
 
     &:hover {
       border-color: var(--td-brand-color);
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.08) 100%);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
     }
 
     // 右上角装饰
@@ -2340,7 +2330,7 @@ const handleUploadFinishedEvent = (event: Event) => {
       right: 0;
       width: 60px;
       height: 60px;
-      background: linear-gradient(135deg, rgba(7, 192, 95, 0.08) 0%, transparent 100%);
+      background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 0%, transparent 100%);
       border-radius: 0 12px 0 100%;
       pointer-events: none;
       z-index: 0;
@@ -2394,12 +2384,12 @@ const handleUploadFinishedEvent = (event: Event) => {
 
     &:hover {
       background: var(--td-bg-color-secondarycontainer);
-      color: var(--td-warning-color, #e37318);
+      color: var(--td-warning-color);
     }
 
     &.is-favorited {
       opacity: 1;
-      color: var(--td-warning-color, #e37318);
+      color: var(--td-warning-color);
     }
   }
 
@@ -2622,14 +2612,14 @@ const handleUploadFinishedEvent = (event: Event) => {
   transition: background 0.2s ease;
 
   &.type-document {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color-active);
     width: auto;
     padding: 0 6px;
     gap: 3px;
 
     &:hover {
-      background: rgba(7, 192, 95, 0.12);
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     }
 
     .badge-count {
@@ -2700,11 +2690,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &.role-admin {
-    background: rgba(7, 192, 95, 0.1);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color-active);
 
     &:hover {
-      background: rgba(7, 192, 95, 0.15);
+      background: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
     }
   }
 
@@ -2740,19 +2730,19 @@ const handleUploadFinishedEvent = (event: Event) => {
 @keyframes highlightFlash {
   0% {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 0 rgba(7, 192, 95, 0.4);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-brand-color) 40%, transparent);
     transform: scale(1);
   }
 
   50% {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 8px rgba(7, 192, 95, 0);
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--td-brand-color) 0%, transparent);
     transform: scale(1.02);
   }
 
   100% {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 0 rgba(7, 192, 95, 0);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--td-brand-color) 0%, transparent);
     transform: scale(1);
   }
 }
@@ -2760,7 +2750,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 .kb-card.highlight-flash {
   animation: highlightFlash 0.6s ease-in-out 3;
   border-color: var(--td-brand-color) !important;
-  box-shadow: 0 0 12px rgba(7, 192, 95, 0.3) !important;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--td-brand-color) 30%, transparent) !important;
 }
 
 .card-time {
@@ -2947,7 +2937,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 
   &:hover {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color);
   }
 }

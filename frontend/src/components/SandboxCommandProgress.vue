@@ -38,8 +38,8 @@ onUnmounted(() => clearInterval(timer))
   margin: 8px 0;
   padding: 8px 10px;
   border-radius: 4px;
-  background: var(--td-bg-color-secondarycontainer, #f7f7f7);
-  color: var(--td-text-color-secondary, #666);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   font-size: 12px;
   line-height: 1.5;
 
@@ -64,7 +64,7 @@ onUnmounted(() => clearInterval(timer))
     padding-top: 8px;
     overflow: auto;
     overscroll-behavior: contain;
-    border-top: 1px solid var(--td-component-stroke, #e7e7e7);
+    border-top: 1px solid var(--td-component-stroke);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -78,7 +78,7 @@ onUnmounted(() => clearInterval(timer))
 }
 .sandbox-command-elapsed {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }

@@ -267,14 +267,14 @@ onUnmounted(() => {
   width: 100%;
   max-width: 800px;
   margin: 0 auto;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   border-radius: 12px;
-  border: 0.5px solid var(--td-component-border, #e7e7e7);
+  border: 0.5px solid var(--td-component-border);
   box-shadow: 0 6px 6px rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
   transition: border-color 0.15s ease;
 
   &:focus-within {
-    border-color: var(--embed-primary, var(--td-brand-color, #07c05f));
+    border-color: var(--embed-primary, var(--td-brand-color));
   }
 
   &__files {
@@ -349,7 +349,7 @@ onUnmounted(() => {
   max-width: 220px;
   padding: 6px 10px;
   border-radius: 8px;
-  background: var(--td-bg-color-secondarycontainer, #f3f3f3);
+  background: var(--td-bg-color-secondarycontainer);
   font-size: 12px;
 
   &__name {
@@ -373,7 +373,7 @@ onUnmounted(() => {
   height: 56px;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid var(--td-component-border, #e7e7e7);
+  border: 1px solid var(--td-component-border);
 
   img {
     width: 100%;
@@ -418,7 +418,7 @@ onUnmounted(() => {
   }
 
   &.active {
-    color: var(--embed-primary, var(--td-brand-color, #07c05f));
+    color: var(--embed-primary, var(--td-brand-color));
     background: color-mix(in srgb, var(--embed-primary, #07c05f) 12%, transparent);
   }
 }
@@ -433,7 +433,7 @@ onUnmounted(() => {
   border: none;
   border-radius: 6px;
   cursor: pointer;
-  background: var(--embed-primary, var(--td-brand-color, #07c05f));
+  background: var(--embed-primary, var(--td-brand-color));
   transition: background 0.15s ease, opacity 0.15s ease;
 
   &:hover:not(.disabled) {

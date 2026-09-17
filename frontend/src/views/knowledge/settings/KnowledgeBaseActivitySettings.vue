@@ -821,7 +821,7 @@ onUnmounted(() => detachInfiniteScroll())
 
   &.active {
     color: var(--td-brand-color);
-    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+    background: var(--td-brand-color-light);
   }
 }
 
@@ -865,7 +865,7 @@ onUnmounted(() => detachInfiniteScroll())
   }
 
   &.active {
-    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+    background: var(--td-brand-color-light);
     color: var(--td-brand-color);
     font-weight: 500;
   }
@@ -974,7 +974,7 @@ onUnmounted(() => detachInfiniteScroll())
   .audit-target-diff {
     font-size: 12px;
     color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     word-break: break-all;
     line-height: 1.4;
   }
@@ -1074,7 +1074,7 @@ onUnmounted(() => detachInfiniteScroll())
 }
 
 .mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
 }
 
 .narrow-scrollbar {

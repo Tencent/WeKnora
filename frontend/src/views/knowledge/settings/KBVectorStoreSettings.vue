@@ -275,7 +275,7 @@ onMounted(async () => {
 
 .go-settings {
   font-size: 13px;
-  color: var(--td-brand-color, #0052d9);
+  color: var(--td-brand-color);
   margin-top: 8px;
   text-decoration: none;
 

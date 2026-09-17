@@ -524,7 +524,7 @@ onMounted(async () => {
     gap: 6px;
     margin: 14px 0 0;
     font-size: 13px;
-    color: var(--td-success-color, #2ba471);
+    color: var(--td-success-color);
   }
 
   &__ready-icon {

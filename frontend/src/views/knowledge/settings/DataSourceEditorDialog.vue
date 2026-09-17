@@ -2156,14 +2156,14 @@ const drawerConfirmText = computed(() => {
   height: 32px;
   padding: 0 4px 0 12px;
   background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-border, var(--td-component-stroke));
+  border: 1px solid var(--td-component-border);
   border-radius: 6px;
   font-size: 13px;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .credential-faux-input:hover {
-  border-color: var(--td-brand-color-hover, var(--td-brand-color));
+  border-color: var(--td-brand-color-hover);
 }
 
 .credential-faux-input.is-empty {
@@ -2516,7 +2516,7 @@ const drawerConfirmText = computed(() => {
   width: 16px;
   height: 16px;
   border-radius: 3px;
-  border: 1.5px solid var(--td-component-border, var(--td-component-stroke));
+  border: 1.5px solid var(--td-component-border);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2777,7 +2777,7 @@ const drawerConfirmText = computed(() => {
 -->
 <style lang="less">
 .datasource-editor-drawer .setting-drawer__header-icon:has(.datasource-header-icon__img) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 

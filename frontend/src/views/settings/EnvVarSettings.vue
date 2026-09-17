@@ -866,7 +866,7 @@ onMounted(() => {
   flex: 1;
 
   code {
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+    font-family: var(--td-font-family-mono);
     font-size: 13px;
     color: var(--td-text-color-primary);
     overflow-wrap: anywhere;
@@ -899,7 +899,7 @@ onMounted(() => {
   gap: 6px;
 
   code {
-    font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+    font-family: var(--td-font-family-mono);
     font-size: 13px;
     color: var(--td-text-color-primary);
     overflow-wrap: anywhere;

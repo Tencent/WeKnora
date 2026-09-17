@@ -184,7 +184,7 @@ const headerTitle = computed(() => {
     }
     &.updated {
       color: var(--td-brand-color);
-      background: rgba(7, 192, 95, 0.1);
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     }
     &.renamed {
       color: var(--td-warning-color);
@@ -217,8 +217,8 @@ const headerTitle = computed(() => {
   }
   &.updated {
     color: var(--td-brand-color);
-    background: rgba(7, 192, 95, 0.1);
-    border: 1px solid rgba(7, 192, 95, 0.2);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--td-brand-color) 20%, transparent);
   }
   &.renamed {
     color: var(--td-warning-color);

@@ -324,8 +324,8 @@ defineExpose({
   gap: 10px;
   padding: 8px 32px 8px 10px;
   border-radius: 8px;
-  border: 1px solid var(--td-border-level-1-color, #e7e7e7);
-  background: var(--td-bg-color-container, #fff);
+  border: 1px solid var(--td-border-level-1-color);
+  background: var(--td-bg-color-container);
   max-width: 240px;
   min-width: 140px;
   cursor: default;
@@ -348,7 +348,7 @@ defineExpose({
   .attachment-preview-name {
     font-size: 13px;
     font-weight: 500;
-    color: var(--td-text-color-primary, #333);
+    color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -356,7 +356,7 @@ defineExpose({
 
   .attachment-preview-meta {
     font-size: 11px;
-    color: var(--td-text-color-secondary, #999);
+    color: var(--td-text-color-secondary);
     white-space: nowrap;
   }
 
@@ -366,10 +366,10 @@ defineExpose({
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 11px;
-    color: var(--td-text-color-secondary, #999);
+    color: var(--td-text-color-secondary);
 
-    &.is-ready { color: var(--td-success-color, #2ba471); }
-    &.is-failed { color: var(--td-error-color, #d54941); }
+    &.is-ready { color: var(--td-success-color); }
+    &.is-failed { color: var(--td-error-color); }
   }
 
   .attachment-status-spinner {

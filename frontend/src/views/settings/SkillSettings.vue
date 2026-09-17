@@ -1224,7 +1224,7 @@ onUnmounted(() => {
   border-radius: 6px !important;
   border: 1px solid var(--td-component-stroke) !important;
   background: var(--td-bg-color-container) !important;
-  box-shadow: var(--td-shadow-2, 0 3px 14px 2px rgba(0, 0, 0, 0.05)) !important;
+  box-shadow: var(--td-shadow-2) !important;
 }
 
 .loading-container {
@@ -1277,7 +1277,7 @@ onUnmounted(() => {
 
   &--focused {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 168, 112, 0.18));
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
   }
 
   &--installed .skill-card__badge {
@@ -1519,7 +1519,7 @@ onUnmounted(() => {
   }
 
   &--installed .skill-card__entry-status {
-    color: var(--td-success-color, var(--td-brand-color));
+    color: var(--td-success-color);
   }
 
   &.skill-card__entry--stale {
@@ -1562,7 +1562,7 @@ onUnmounted(() => {
 }
 
 .skill-card__entry--ready .skill-card__entry-status {
-  color: var(--td-success-color, var(--td-brand-color));
+  color: var(--td-success-color);
 }
 
 .skill-card__chip-go {

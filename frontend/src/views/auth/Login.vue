@@ -1349,7 +1349,7 @@ onMounted(async () => {
   padding: 12px 14px;
   margin-bottom: 20px;
   border-radius: 10px;
-  background: var(--td-bg-color-container-hover, rgba(0, 0, 0, 0.03));
+  background: var(--td-bg-color-container-hover);
   border: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-primary);
 }
@@ -1382,9 +1382,9 @@ onMounted(async () => {
 }
 
 .invite-banner--error {
-  background: var(--td-error-color-1, rgba(220, 38, 38, 0.06));
-  border-color: var(--td-error-color-3, rgba(220, 38, 38, 0.2));
-  color: var(--td-error-color, #b91c1c);
+  background: var(--td-error-color-1);
+  border-color: var(--td-error-color-3);
+  color: var(--td-error-color);
   font-size: 13px;
 }
 
@@ -1412,7 +1412,7 @@ onMounted(async () => {
   margin: 10px 0 0;
   padding: 8px 12px;
   border-radius: 8px;
-  background: var(--td-success-color-light, rgba(7, 192, 95, 0.08));
+  background: var(--td-success-color-light);
   color: var(--td-brand-color-active);
   font-size: 12.5px;
   line-height: 1.5;
@@ -1460,7 +1460,7 @@ onMounted(async () => {
     &:hover {
       border-color: var(--td-brand-color-active);
       color: var(--td-brand-color-active);
-      background: var(--td-success-color-light, rgba(7, 192, 95, 0.08));
+      background: var(--td-success-color-light);
     }
   }
 }
@@ -1491,7 +1491,7 @@ onMounted(async () => {
 
     &:focus-within {
       border-color: var(--td-brand-color);
-      box-shadow: 0 0 0 3px rgba(7, 192, 95, 0.1);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     }
 
     &:hover {

@@ -641,7 +641,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
           <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="agent-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn empty-state-btn"
             data-guide="agent-list-create" @click="handleCreateAgent">
             <template #icon>
               <span class="btn-icon-wrapper">
@@ -682,7 +682,7 @@
           <img class="empty-img" src="@/assets/img/upload.svg" alt="">
           <span class="empty-txt">{{ $t('agent.empty.title') }}</span>
           <span class="empty-desc">{{ $t('agent.empty.description') }}</span>
-          <t-button v-if="authStore.hasRole('contributor')" class="agent-create-btn empty-state-btn"
+          <t-button v-if="authStore.hasRole('contributor')" theme="primary" class="agent-create-btn empty-state-btn"
             @click="handleCreateAgent">
             <template #icon>
               <span class="btn-icon-wrapper">
@@ -1653,7 +1653,7 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  background: rgba(7, 192, 95, 0.1);
+  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   border-radius: 4px;
   font-size: 12px;
   color: var(--td-brand-color);
@@ -1689,74 +1689,6 @@ defineExpose({
   }
 }
 
-:deep(.agent-create-btn) {
-  --ripple-color: rgba(118, 75, 162, 0.3) !important;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-  border: none !important;
-  color: var(--td-text-color-anti) !important;
-  position: relative;
-  overflow: hidden;
-
-  &:hover,
-  &:active,
-  &:focus,
-  &.t-is-active,
-  &[data-state="active"] {
-    background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%) !important;
-    border: none !important;
-    color: var(--td-text-color-anti) !important;
-  }
-
-  --td-button-primary-bg-color: #667eea !important;
-  --td-button-primary-border-color: #667eea !important;
-  --td-button-primary-active-bg-color: #5a6fd6 !important;
-  --td-button-primary-active-border-color: #5a6fd6 !important;
-
-  .btn-icon-wrapper {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .sparkles-icon {
-    animation: twinkle 2s ease-in-out infinite;
-  }
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: linear-gradient(45deg,
-        transparent 30%,
-        rgba(255, 255, 255, 0.1) 50%,
-        transparent 70%);
-    transform: translateX(-100%);
-    transition: transform 0.6s ease;
-    z-index: 0;
-  }
-
-  &:hover::before {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes twinkle {
-
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 0.8;
-    transform: scale(0.95);
-  }
-}
-
 .header-subtitle {
   margin: 0;
   color: var(--td-text-color-placeholder);
@@ -1767,24 +1699,24 @@ defineExpose({
 }
 
 .header-action-btn {
-  padding: 0 !important;
-  min-width: 28px !important;
-  width: 28px !important;
-  height: 28px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: var(--td-bg-color-secondarycontainer) !important;
-  border: 1px solid var(--td-component-stroke) !important;
-  border-radius: 6px !important;
+  padding: 0;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 6px;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
   transition: background 0.2s, border-color 0.2s, color 0.2s;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer) !important;
-    border-color: var(--td-component-stroke) !important;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-component-stroke);
     color: var(--td-text-color-primary);
   }
 
@@ -1911,7 +1843,7 @@ defineExpose({
   }
 
   &:focus-visible {
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 82, 217, 0.2));
+    box-shadow: 0 0 0 2px var(--td-brand-color-focus);
   }
 
   .t-icon {
@@ -2003,7 +1935,7 @@ defineExpose({
 
   &:hover {
     border-color: var(--td-brand-color);
-    box-shadow: 0 4px 12px rgba(7, 192, 95, 0.12);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   }
 
   .agent-favorite-star {
@@ -2028,12 +1960,12 @@ defineExpose({
 
     &:hover {
       background: var(--td-bg-color-secondarycontainer);
-      color: var(--td-warning-color, #e37318);
+      color: var(--td-warning-color);
     }
 
     &.is-favorited {
       opacity: 1;
-      color: var(--td-warning-color, #e37318);
+      color: var(--td-warning-color);
     }
   }
 
@@ -2043,19 +1975,19 @@ defineExpose({
 
   // 普通模式样式
   &.agent-mode-normal {
-    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.04) 100%);
+    background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 4%, transparent) 100%);
 
     &:hover {
       border-color: var(--td-brand-color);
-      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, rgba(7, 192, 95, 0.08) 100%);
+      background: linear-gradient(135deg, var(--td-bg-color-container) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
     }
 
     .card-decoration {
-      color: rgba(7, 192, 95, 0.35);
+      color: color-mix(in srgb, var(--td-brand-color) 35%, transparent);
     }
 
     &:hover .card-decoration {
-      color: rgba(7, 192, 95, 0.5);
+      color: color-mix(in srgb, var(--td-brand-color) 50%, transparent);
     }
   }
 
@@ -2212,7 +2144,7 @@ defineExpose({
   }
 
   &.normal {
-    background: linear-gradient(135deg, rgba(7, 192, 95, 0.15) 0%, rgba(7, 192, 95, 0.08) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 15%, transparent) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
     color: var(--td-brand-color-active);
   }
 
@@ -2329,11 +2261,11 @@ defineExpose({
   transition: background 0.2s ease;
 
   &.mode-normal {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color-active);
 
     &:hover {
-      background: rgba(7, 192, 95, 0.12);
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     }
   }
 
@@ -2356,11 +2288,11 @@ defineExpose({
   }
 
   &.knowledge {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color-active);
 
     &:hover {
-      background: rgba(7, 192, 95, 0.12);
+      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     }
   }
 

@@ -1464,7 +1464,7 @@ onUnmounted(() => {
 
 <style lang="less">
 .im-channel-drawer .setting-drawer__header-icon:has(.drawer-platform-icon) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 

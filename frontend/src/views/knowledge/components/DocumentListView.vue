@@ -822,7 +822,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 }
 
 .row-muted {
-  color: var(--td-text-color-disabled, #bbb);
+  color: var(--td-text-color-disabled);
 }
 
 .row-mono {

@@ -652,7 +652,7 @@ const tierTheme = (tier: StrategyTier) => {
 .chunk-pos {
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
+  font-family: var(--td-font-family-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -665,7 +665,7 @@ const tierTheme = (tier: StrategyTier) => {
   color: var(--td-brand-color);
   border-radius: 10px;
   font-size: 11px;
-  font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
+  font-family: var(--td-font-family-mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -696,7 +696,7 @@ const tierTheme = (tier: StrategyTier) => {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--td-text-color-primary);
-  font-family: var(--td-font-family-mono, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace);
+  font-family: var(--td-font-family-mono);
 }
 
 // Collapsed preview: clamp the visible lines so each card stays compact, but

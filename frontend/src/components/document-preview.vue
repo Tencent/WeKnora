@@ -928,7 +928,7 @@ onUnmounted(() => {
       max-width: 100%;
       max-height: calc(100vh - 280px);
       border-radius: @border-radius;
-      box-shadow: 0 2px 12px rgba(7, 192, 95, 0.08);
+      box-shadow: 0 2px 12px color-mix(in srgb, var(--td-brand-color) 8%, transparent);
       object-fit: contain;
     }
     .image-info { font-size: 12px; color: @text-tertiary; }

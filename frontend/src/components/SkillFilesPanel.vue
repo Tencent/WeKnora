@@ -781,7 +781,7 @@ watch(
     white-space: pre-wrap;
 
     &.is-code {
-      font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+      font-family: var(--td-font-family-mono);
       font-size: 11px;
     }
   }
@@ -797,7 +797,7 @@ watch(
   padding: 0;
   background: transparent;
   overflow: visible;
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 12px;
   line-height: 1.55;
   color: var(--td-text-color-primary);

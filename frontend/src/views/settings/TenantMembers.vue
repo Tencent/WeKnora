@@ -2242,7 +2242,7 @@ watch(
   .audit-target-diff {
     font-size: 12px;
     color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     word-break: break-all;
     line-height: 1.4;
   }
@@ -2253,7 +2253,7 @@ watch(
 }
 
 .audit-path {
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 12px;
   color: var(--td-text-color-secondary);
   word-break: break-all;
@@ -2326,7 +2326,7 @@ watch(
 }
 
 .mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
 }
 </style>
 

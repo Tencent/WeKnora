@@ -419,7 +419,7 @@ onMounted(load)
   min-width: 0;
 
   &:hover {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
   }
 
@@ -495,7 +495,7 @@ onMounted(load)
 }
 
 .backend-card .backend-card__badge--logo {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 
@@ -527,7 +527,7 @@ onMounted(load)
 .backend-card--tos .backend-card__badge { background: rgba(0, 137, 255, 0.12); color: #0089FF; }
 .backend-card--s3 .backend-card__badge { background: rgba(255, 153, 0, 0.12); color: #D97706; }
 .backend-card--oss .backend-card__badge { background: rgba(255, 90, 0, 0.12); color: #E55A00; }
-.backend-card--ks3 .backend-card__badge { background: rgba(7, 192, 95, 0.12); color: #07A050; }
+.backend-card--ks3 .backend-card__badge { background: color-mix(in srgb, var(--td-brand-color) 12%, transparent); color: #07A050; }
 .backend-card--obs .backend-card__badge { background: rgba(206, 17, 38, 0.1); color: #CE1126; }
 
 .backend-card__body {
@@ -757,7 +757,7 @@ onMounted(load)
 -->
 <style lang="less">
 .storage-backend-drawer .setting-drawer__header-icon:has(.header-icon__img) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 
@@ -767,6 +767,6 @@ onMounted(load)
 .storage-backend-drawer--tos .setting-drawer__header-icon { background: rgba(0, 137, 255, 0.12); color: #0089FF; }
 .storage-backend-drawer--s3 .setting-drawer__header-icon { background: rgba(255, 153, 0, 0.12); color: #D97706; }
 .storage-backend-drawer--oss .setting-drawer__header-icon { background: rgba(255, 90, 0, 0.12); color: #E55A00; }
-.storage-backend-drawer--ks3 .setting-drawer__header-icon { background: rgba(7, 192, 95, 0.12); color: #07A050; }
+.storage-backend-drawer--ks3 .setting-drawer__header-icon { background: color-mix(in srgb, var(--td-brand-color) 12%, transparent); color: #07A050; }
 .storage-backend-drawer--obs .setting-drawer__header-icon { background: rgba(206, 17, 38, 0.1); color: #CE1126; }
 </style>

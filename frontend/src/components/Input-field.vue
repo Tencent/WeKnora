@@ -2971,8 +2971,8 @@ const getImgSrc = (url: string) => {
   box-sizing: border-box;
   max-height: 140px;
   overflow-y: auto;
-  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
-  border: 1px solid var(--td-component-stroke, #dcdcdc);
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
   border-bottom: 0;
   border-radius: 10px 10px 0 0;
 }
@@ -2985,7 +2985,7 @@ const getImgSrc = (url: string) => {
 }
 
 .steer-queue-item + .steer-queue-item {
-  border-top: 1px solid var(--td-component-stroke, #dcdcdc);
+  border-top: 1px solid var(--td-component-stroke);
 }
 
 .steer-queue-text {
@@ -3038,13 +3038,13 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 100%;
   max-width: 960px;
-  background: var(--td-bg-color-container, #FFF);
+  background: var(--td-bg-color-container);
   border-radius: 12px;
-  border: 1px solid var(--td-component-stroke, #dcdcdc);
+  border: 1px solid var(--td-component-stroke);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 8px 16px -4px rgba(0, 0, 0, 0.06);
 
   &:focus-within {
-    border-color: var(--td-brand-color, #07C05F);
+    border-color: var(--td-brand-color);
   }
 }
 
@@ -3055,8 +3055,8 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 5px;
   padding: 6px 12px 6px;
-  border-bottom: 1px solid var(--td-component-stroke, #dcdcdc);
-  background: var(--td-bg-color-container, #fff);
+  border-bottom: 1px solid var(--td-component-stroke);
+  background: var(--td-bg-color-container);
   border-radius: 11px 11px 0 0;
   /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
 }
@@ -3069,7 +3069,7 @@ const getImgSrc = (url: string) => {
   gap: 5px;
   min-height: 26px;
   padding: 3px 7px 3px 6px;
-  border-radius: var(--td-radius-medium, 6px);
+  border-radius: var(--td-radius-medium);
   box-sizing: border-box;
   font-size: 12px;
   font-weight: 500;
@@ -3108,7 +3108,7 @@ const getImgSrc = (url: string) => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--td-bg-color-secondarycontainer, #f0f2f5);
+  background: var(--td-bg-color-secondarycontainer);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
   display: flex;
   align-items: center;
@@ -3155,7 +3155,7 @@ const getImgSrc = (url: string) => {
 .mention-chip__remove:hover {
   opacity: 1;
   background: var(--td-bg-color-component);
-  color: var(--td-text-color-primary, #1f2937);
+  color: var(--td-text-color-primary);
 }
 
 /* 标签表面保持中性，仅用图标颜色表达资源类型。 */
@@ -3164,7 +3164,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip--kb .mention-chip__icon-wrap {
-  color: var(--td-brand-color, #07c05f);
+  color: var(--td-brand-color);
 }
 
 .mention-chip--faq {
@@ -3180,7 +3180,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip--file .mention-chip__icon-wrap {
-  color: var(--td-text-color-secondary, #6b7280);
+  color: var(--td-text-color-secondary);
 }
 
 .mention-chip--tag,
@@ -3212,7 +3212,7 @@ const getImgSrc = (url: string) => {
   max-height: 152px !important;
   min-height: 72px !important;
   resize: none;
-  color: var(--td-text-color-primary, #000000e6);
+  color: var(--td-text-color-primary);
   font-size: 16px;
   font-weight: 400;
   line-height: 24px;
@@ -3230,7 +3230,7 @@ const getImgSrc = (url: string) => {
   }
 
   &::placeholder {
-    color: var(--td-text-color-placeholder, #00000066);
+    color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
     font-size: 16px;
     font-weight: 400;
@@ -3280,14 +3280,14 @@ const getImgSrc = (url: string) => {
   gap: 4px;
   padding: 6px 10px;
   border-radius: 6px;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
   user-select: none;
   flex-shrink: 0;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
+    background: var(--td-bg-color-secondarycontainer-hover);
   }
 
   &.disabled {
@@ -3295,7 +3295,7 @@ const getImgSrc = (url: string) => {
     cursor: not-allowed;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 }
@@ -3306,7 +3306,7 @@ const getImgSrc = (url: string) => {
   min-width: auto;
   font-weight: 500;
   position: relative;
-  border: .5px solid var(--td-component-border, #e7e7e7);
+  border: .5px solid var(--td-component-border);
 }
 
 .agent-icon {
@@ -3323,12 +3323,12 @@ const getImgSrc = (url: string) => {
   height: 20px;
   border-radius: 5px;
   flex-shrink: 0;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 }
 
 .agent-mode-text {
   font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
   margin: 0 4px;
@@ -3347,7 +3347,7 @@ const getImgSrc = (url: string) => {
   position: relative;
 
   &:hover:not(.disabled):not(.active) {
-    color: var(--td-text-color-primary, #333);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3365,7 +3365,7 @@ const getImgSrc = (url: string) => {
     opacity: 0.85;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
 
     &.active:hover {
@@ -3398,7 +3398,7 @@ const getImgSrc = (url: string) => {
 
 .kb-btn-text {
   font-size: 13px;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -3417,11 +3417,11 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: center;
   position: relative;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
-    color: var(--td-text-color-primary, #333);
+    background: var(--td-bg-color-secondarycontainer-hover);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3456,11 +3456,11 @@ const getImgSrc = (url: string) => {
   align-items: center;
   justify-content: center;
   position: relative;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
-    color: var(--td-text-color-primary, #333);
+    background: var(--td-bg-color-secondarycontainer-hover);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3498,7 +3498,7 @@ const getImgSrc = (url: string) => {
   height: 60px;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid var(--td-border-level-1-color, #e7e7e7);
+  border: 1px solid var(--td-border-level-1-color);
 
   .image-preview-thumb {
     width: 100%;
@@ -3535,7 +3535,7 @@ const getImgSrc = (url: string) => {
   background: transparent;
 
   &:hover:not(.disabled):not(.active) {
-    color: var(--td-text-color-primary, #333);
+    color: var(--td-text-color-primary);
   }
 
   &.active {
@@ -3590,14 +3590,14 @@ const getImgSrc = (url: string) => {
 
   &:not(.active) {
     .websearch-icon {
-      color: var(--td-text-color-secondary, #666);
+      color: var(--td-text-color-secondary);
     }
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer-hover, #f0f0f0);
+      background: var(--td-bg-color-secondarycontainer-hover);
 
       .websearch-icon {
-        color: var(--td-text-color-primary, #333);
+        color: var(--td-text-color-primary);
       }
     }
   }
@@ -3607,7 +3607,7 @@ const getImgSrc = (url: string) => {
     opacity: 0.85;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
 
     &.active:hover {
@@ -3619,7 +3619,7 @@ const getImgSrc = (url: string) => {
 :global(.input-field-tooltip) {
   .t-popup__content {
     box-shadow: var(--td-shadow-2);
-    border: .5px solid var(--td-component-border, #e7e7e7);
+    border: .5px solid var(--td-component-border);
   }
 }
 
@@ -3629,7 +3629,7 @@ const getImgSrc = (url: string) => {
   gap: 6px;
   max-width: 220px;
   font-size: 12px;
-  color: var(--td-text-color-primary, #333);
+  color: var(--td-text-color-primary);
 }
 
 :global(.tooltip-with-link a) {
@@ -3719,12 +3719,12 @@ const getImgSrc = (url: string) => {
   min-width: 100px;
   height: 22px;
   border-radius: 6px;
-  border: .5px solid var(--td-component-border, #e7e7e7);
+  border: .5px solid var(--td-component-border);
   transition: background 0.12s, border-color 0.12s;
   cursor: pointer;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer-hover, #e6e6e6);
+    background: var(--td-bg-color-secondarycontainer-hover);
   }
 
   &.disabled {
@@ -3732,7 +3732,7 @@ const getImgSrc = (url: string) => {
     cursor: not-allowed;
 
     &:hover {
-      background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+      background: var(--td-bg-color-secondarycontainer);
     }
   }
 }
@@ -3741,7 +3741,7 @@ const getImgSrc = (url: string) => {
   flex: 1;
   font-size: 12px;
   font-weight: 500;
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3751,7 +3751,7 @@ const getImgSrc = (url: string) => {
   flex-shrink: 0;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   font-weight: 400;
 
   &.is-default {
@@ -3762,7 +3762,7 @@ const getImgSrc = (url: string) => {
 .model-dropdown-arrow {
   width: 10px;
   height: 10px;
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
   flex-shrink: 0;
   transition: transform 0.12s;
 
@@ -3772,7 +3772,7 @@ const getImgSrc = (url: string) => {
 }
 
 .model-selector-trigger.disabled .model-dropdown-arrow {
-  color: var(--td-text-color-placeholder, #999);
+  color: var(--td-text-color-placeholder);
 }
 
 .model-selector-overlay {
@@ -3960,10 +3960,10 @@ const getImgSrc = (url: string) => {
 .agent-mode-selector-dropdown {
   position: fixed !important;
   z-index: 9999;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   border-radius: 10px;
-  box-shadow: var(--td-shadow-2, 0 6px 28px rgba(15, 23, 42, 0.08));
-  border: 1px solid var(--td-component-border, #e7e9eb);
+  box-shadow: var(--td-shadow-2);
+  border: 1px solid var(--td-component-border);
   overflow: hidden;
   padding: 6px 8px;
   min-width: 200px;
@@ -3986,7 +3986,7 @@ const getImgSrc = (url: string) => {
   margin: 4px 6px;
 
   &:hover:not(.disabled) {
-    background: var(--td-bg-color-container-hover, #f6f8f7);
+    background: var(--td-bg-color-container-hover);
   }
 
   &.disabled {
@@ -3999,7 +3999,7 @@ const getImgSrc = (url: string) => {
   }
 
   &.selected {
-    background: var(--td-brand-color-light, #eefdf5);
+    background: var(--td-brand-color-light);
 
     .agent-mode-option-name {
       color: var(--td-success-color);
@@ -4019,14 +4019,14 @@ const getImgSrc = (url: string) => {
 .agent-mode-option-name {
   font-size: 12px;
   font-weight: 600;
-  color: var(--td-text-color-primary, #222);
+  color: var(--td-text-color-primary);
   line-height: 1.4;
   transition: color 0.12s;
 }
 
 .agent-mode-option-desc {
   font-size: 11px;
-  color: var(--td-text-color-secondary, #8b9196);
+  color: var(--td-text-color-secondary);
   line-height: 1.3;
 }
 
@@ -4051,9 +4051,9 @@ const getImgSrc = (url: string) => {
 
 .agent-mode-footer {
   padding: 6px 10px;
-  border-top: 1px solid var(--td-component-border, #f2f4f5);
+  border-top: 1px solid var(--td-component-border);
   margin-top: 2px;
-  background: var(--td-bg-color-secondarycontainer, #fafcfc);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .agent-mode-link {

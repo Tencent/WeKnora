@@ -2088,7 +2088,7 @@ onUnmounted(stopTemplatePolling)
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
   &:hover:not(.is-disabled):not(.template-row--offer) {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
   }
 
   &.is-active {
@@ -2116,7 +2116,7 @@ onUnmounted(stopTemplatePolling)
   height: 14px;
   margin-top: 3px;
   box-sizing: border-box;
-  border: 1.5px solid var(--td-border-level-2-color, var(--td-component-stroke));
+  border: 1.5px solid var(--td-border-level-2-color);
   border-radius: 50%;
   background: var(--td-bg-color-container);
 
@@ -2214,7 +2214,7 @@ onUnmounted(stopTemplatePolling)
     white-space: nowrap;
 
     &.is-mono {
-      font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-family: var(--td-font-family-mono);
       font-size: 11px;
     }
   }

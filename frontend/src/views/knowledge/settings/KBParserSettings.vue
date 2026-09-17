@@ -498,7 +498,7 @@ watch(() => props.parserEngineRules, (v) => {
   .settings-group {
     border: 1px solid var(--td-component-stroke);
     border-radius: 8px;
-    background: var(--td-bg-color-secondarycontainer, #f8f9fb);
+    background: var(--td-bg-color-secondarycontainer);
     overflow: hidden;
   }
 
@@ -507,7 +507,7 @@ watch(() => props.parserEngineRules, (v) => {
     align-items: center;
     gap: 16px;
     padding: 10px 14px;
-    background: var(--td-bg-color-container, #fff);
+    background: var(--td-bg-color-container);
     border-bottom: 1px solid var(--td-component-stroke);
 
     &:last-child {

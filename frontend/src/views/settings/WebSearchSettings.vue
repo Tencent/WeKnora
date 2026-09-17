@@ -772,7 +772,7 @@ onMounted(async () => {
     cursor: pointer;
 
     &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      border-color: var(--td-brand-color-3);
       box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
     }
 
@@ -852,7 +852,7 @@ onMounted(async () => {
 // 真实品牌 logo：白底 + 细边，logo 用 mask-image 染成 currentColor（沿用品牌色）。
 // 多套一层 .provider-card 以胜过 `.provider-card--<id> .provider-card__badge` 的具体规则。
 .provider-card .provider-card__badge--logo {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 
@@ -1159,7 +1159,7 @@ onMounted(async () => {
 // 彩色 logo 时给 header-icon 容器一个白底 + 1px 边，避免品牌色浅底压在
 // 彩色图标上影响对比度。
 .websearch-drawer .setting-drawer__header-icon:has(.header-icon__img) {
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   box-shadow: inset 0 0 0 1px var(--td-component-stroke);
 }
 

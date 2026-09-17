@@ -415,7 +415,7 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
     height: 7px;
     background: var(--td-error-color);
     border-radius: 50%;
-    border: 1.5px solid var(--td-bg-color-container, #fff);
+    border: 1.5px solid var(--td-bg-color-container);
   }
 
   :deep(.t-icon) {
@@ -531,7 +531,7 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
 }
 
 .kb-info-card-value-mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 11px;
   color: var(--td-text-color-secondary);
 }
@@ -541,9 +541,9 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
   align-items: center;
   padding: 1px 6px;
   border-radius: 3px;
-  background: var(--td-bg-color-component, #f5f7fa);
+  background: var(--td-bg-color-component);
   color: var(--td-text-color-secondary);
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--td-font-family-mono);
   font-size: 11px;
   line-height: 1.4;
 }

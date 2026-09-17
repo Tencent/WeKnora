@@ -162,8 +162,8 @@ const tooltipText = computed(() => {
   }
 
   &.origin-space {
-    color: var(--td-warning-color-7, #b86e02);
-    background: var(--td-warning-color-1, #fff7e6);
+    color: var(--td-warning-color-7);
+    background: var(--td-warning-color-1);
   }
 
   &.origin-shared {

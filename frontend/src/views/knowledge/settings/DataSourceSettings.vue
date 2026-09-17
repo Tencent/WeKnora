@@ -456,7 +456,7 @@ onBeforeUnmount(stopPolling)
     font-size: 15px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    background: rgba(7, 192, 95, 0.12);
+    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     color: #07c05f;
     overflow: hidden;
   }
@@ -466,7 +466,7 @@ onBeforeUnmount(stopPolling)
   &--yuque .ds-card__badge,
   &--ima .ds-card__badge,
   &--rss .ds-card__badge {
-    background: var(--td-bg-color-container, #fff);
+    background: var(--td-bg-color-container);
     box-shadow: inset 0 0 0 1px var(--td-component-stroke);
   }
 

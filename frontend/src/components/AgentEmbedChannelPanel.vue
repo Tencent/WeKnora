@@ -1322,13 +1322,13 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   margin-top: 12px;
   padding: 12px 14px;
   border-radius: 8px;
-  background: var(--td-warning-color-1, #fff7e6);
-  border: 1px solid var(--td-warning-color-3, #ffd591);
+  background: var(--td-warning-color-1);
+  border: 1px solid var(--td-warning-color-3);
 
   &__icon {
     flex-shrink: 0;
     margin-top: 1px;
-    color: var(--td-warning-color, #e37318);
+    color: var(--td-warning-color);
     font-size: 16px;
   }
 
@@ -1435,13 +1435,13 @@ const toggleEnabled = async (ch: EmbedChannel, enabled: boolean) => {
   font-size: 12px;
   line-height: 1.45;
   color: var(--td-text-color-secondary);
-  background: color-mix(in srgb, var(--td-warning-color, #ed7b2f) 8%, var(--td-bg-color-container));
-  border: 1px solid color-mix(in srgb, var(--td-warning-color, #ed7b2f) 20%, transparent);
+  background: color-mix(in srgb, var(--td-warning-color) 8%, var(--td-bg-color-container));
+  border: 1px solid color-mix(in srgb, var(--td-warning-color) 20%, transparent);
 }
 
 .snippet-note--ok {
-  background: color-mix(in srgb, var(--td-success-color, #2ba471) 8%, var(--td-bg-color-container));
-  border-color: color-mix(in srgb, var(--td-success-color, #2ba471) 20%, transparent);
+  background: color-mix(in srgb, var(--td-success-color) 8%, var(--td-bg-color-container));
+  border-color: color-mix(in srgb, var(--td-success-color) 20%, transparent);
 }
 
 .code-panel {

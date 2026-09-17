@@ -135,7 +135,7 @@ const formatFileSize = (bytes: number): string => {
   height: 120px;
   object-fit: cover;
   border-radius: 6px;
-  border: 1px solid var(--td-border-level-2-color, #e7e7e7);
+  border: 1px solid var(--td-border-level-2-color);
   cursor: pointer;
 }
 
@@ -150,8 +150,8 @@ const formatFileSize = (bytes: number): string => {
 .user_attachment_card {
   padding: 8px 12px;
   border-radius: 8px;
-  border: 1px solid var(--td-border-level-1-color, #e7e7e7);
-  background: var(--td-bg-color-container, #fff);
+  border: 1px solid var(--td-border-level-1-color);
+  background: var(--td-bg-color-container);
   max-width: 260px;
   min-width: 120px;
 }
@@ -166,7 +166,7 @@ const formatFileSize = (bytes: number): string => {
 
 .attachment_card_meta {
   font-size: 11px;
-  color: var(--td-text-color-secondary, #999);
+  color: var(--td-text-color-secondary);
 }
 
 html[theme-mode='dark'] .user_msg {

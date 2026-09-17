@@ -789,7 +789,7 @@ onMounted(() => {
     cursor: pointer;
 
     &:hover {
-      border-color: var(--td-brand-color-3, var(--td-brand-color));
+      border-color: var(--td-brand-color-3);
       box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
     }
 
@@ -921,7 +921,7 @@ onMounted(() => {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: var(--td-warning-color-7, var(--td-warning-color));
+    color: var(--td-warning-color-7);
     font-size: 12px;
     line-height: 1.4;
   }

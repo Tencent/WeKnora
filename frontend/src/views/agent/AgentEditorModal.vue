@@ -5258,7 +5258,7 @@ const handleSave = async () => {
       bottom: 18px;
       width: 3px;
       border-radius: 2px;
-      background: var(--td-brand-color, #0052d9);
+      background: var(--td-brand-color);
     }
 
     .setting-info label {
@@ -5280,7 +5280,7 @@ const handleSave = async () => {
   }
 
   50% {
-    background-color: var(--td-warning-color-light, #fff7e8);
+    background-color: var(--td-warning-color-light);
     box-shadow: inset 0 0 0 1px rgba(237, 123, 47, 0.35);
   }
 }
@@ -5327,7 +5327,7 @@ const handleSave = async () => {
     line-height: 1.5;
 
     .hint {
-      color: var(--td-warning-color, var(--td-text-color-placeholder));
+      color: var(--td-warning-color);
     }
   }
 }
@@ -5855,8 +5855,8 @@ const handleSave = async () => {
 
   &--warn {
     color: var(--td-warning-color);
-    background: var(--td-warning-color-1, rgba(237, 118, 20, 0.08));
-    border-color: var(--td-warning-color-light, #fcd7b6);
+    background: var(--td-warning-color-1);
+    border-color: var(--td-warning-color-light);
 
     .t-icon {
       color: var(--td-warning-color);
@@ -5918,8 +5918,8 @@ const handleSave = async () => {
     padding: 2px 8px;
     font-size: 12px;
     color: var(--td-warning-color);
-    background: var(--td-warning-color-1, rgba(237, 118, 20, 0.08));
-    border: 1px solid var(--td-warning-color-light, #fcd7b6);
+    background: var(--td-warning-color-1);
+    border: 1px solid var(--td-warning-color-light);
     border-radius: 999px;
 
     .t-icon {
@@ -5930,7 +5930,7 @@ const handleSave = async () => {
 
 // 不同分组的左侧色条
 .tool-group--base .tool-group-bar {
-  background: var(--td-gray-color-6, #a0a7ab);
+  background: var(--td-gray-color-6);
 }
 
 .tool-group--rag .tool-group-bar {
@@ -5938,11 +5938,11 @@ const handleSave = async () => {
 }
 
 .tool-group--wiki_read .tool-group-bar {
-  background: var(--td-success-color, #2ba471);
+  background: var(--td-success-color);
 }
 
 .tool-group--wiki_edit .tool-group-bar {
-  background: var(--td-warning-color, #ed7b2f);
+  background: var(--td-warning-color);
 }
 
 .tool-group--wiki_issue .tool-group-bar {
@@ -5978,7 +5978,7 @@ const handleSave = async () => {
 
   &:hover:not(.tool-card--disabled) {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.06));
+    background: var(--td-brand-color-1);
   }
 
   // checkbox 的勾选框 + label 改造
@@ -5995,7 +5995,7 @@ const handleSave = async () => {
 
   &.t-is-checked {
     border-color: var(--td-brand-color);
-    background: var(--td-brand-color-1, rgba(7, 192, 95, 0.08));
+    background: var(--td-brand-color-1);
   }
 
   &--disabled {
@@ -6004,16 +6004,16 @@ const handleSave = async () => {
   }
 
   &--danger {
-    border-color: var(--td-warning-color-light, #fcd7b6);
+    border-color: var(--td-warning-color-light);
 
     &:hover:not(.tool-card--disabled) {
       border-color: var(--td-warning-color);
-      background: var(--td-warning-color-1, rgba(237, 118, 20, 0.06));
+      background: var(--td-warning-color-1);
     }
 
     &.t-is-checked {
       border-color: var(--td-warning-color);
-      background: var(--td-warning-color-1, rgba(237, 118, 20, 0.08));
+      background: var(--td-warning-color-1);
     }
   }
 }
@@ -6051,7 +6051,7 @@ const handleSave = async () => {
   padding: 3px 6px;
   color: var(--td-warning-color);
   background: transparent;
-  border: 1px solid var(--td-warning-color-light, #fcd7b6);
+  border: 1px solid var(--td-warning-color-light);
   border-radius: 4px;
   letter-spacing: 0.3px;
 }
@@ -6364,14 +6364,14 @@ const handleSave = async () => {
 }
 
 .intent-toggle-group :deep(.intent-toggle-btn--active) {
-  background-color: rgba(7, 192, 95, 0.1);
+  background-color: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   border-color: var(--td-brand-color);
   color: var(--td-brand-color);
   font-weight: 500;
 
   &:hover,
   &:focus-visible {
-    background-color: rgba(7, 192, 95, 0.14);
+    background-color: color-mix(in srgb, var(--td-brand-color) 14%, transparent);
     border-color: var(--td-brand-color);
     color: var(--td-brand-color);
   }
@@ -6440,12 +6440,12 @@ const handleSave = async () => {
   }
 
   .placeholder-label {
-    color: var(--td-text-color-secondary, #666);
+    color: var(--td-text-color-secondary);
     flex-shrink: 0;
   }
 
   .placeholder-hint {
-    color: var(--td-text-color-placeholder, #999);
+    color: var(--td-text-color-placeholder);
     font-size: 11px;
     user-select: none;
     flex-shrink: 0;
@@ -6458,8 +6458,8 @@ const handleSave = async () => {
     border-radius: 3px;
     font-family: var(--app-font-family-mono);
     font-size: 11px;
-    color: var(--td-text-color-primary, #333);
-    background-color: var(--td-bg-color-secondarycontainer, #f3f3f3);
+    color: var(--td-text-color-primary);
+    background-color: var(--td-bg-color-secondarycontainer);
     cursor: pointer;
     transition: all 0.2s;
     user-select: none;
@@ -6467,13 +6467,13 @@ const handleSave = async () => {
     flex-shrink: 0;
 
     &:hover {
-      color: var(--td-brand-color, #0052d9);
-      background-color: var(--td-brand-color-light, #ecf2fe);
-      border-color: var(--td-brand-color-focus, #d0e0fd);
+      color: var(--td-brand-color);
+      background-color: var(--td-brand-color-light);
+      border-color: var(--td-brand-color-focus);
     }
 
     &:active {
-      background-color: var(--td-brand-color-focus, #d0e0fd);
+      background-color: var(--td-brand-color-focus);
     }
   }
 }
@@ -6485,8 +6485,8 @@ const handleSave = async () => {
 }
 
 .placeholder-popup {
-  background: var(--td-bg-color-container, #fff);
-  border: 1px solid var(--td-component-stroke, #e5e7eb);
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   max-width: 320px;
@@ -6503,25 +6503,25 @@ const handleSave = async () => {
 
   &:hover,
   &.active {
-    background-color: var(--td-bg-color-container-hover, #f5f7fa);
+    background-color: var(--td-bg-color-container-hover);
   }
 
   .placeholder-name {
     margin-bottom: 2px;
 
     code {
-      background: var(--td-bg-color-container-hover, #f5f7fa);
+      background: var(--td-bg-color-container-hover);
       padding: 2px 5px;
       border-radius: 3px;
       font-family: var(--app-font-family-mono);
       font-size: 11px;
-      color: var(--td-brand-color, #0052d9);
+      color: var(--td-brand-color);
     }
   }
 
   .placeholder-desc {
     font-size: 11px;
-    color: var(--td-text-color-secondary, #666);
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -6557,7 +6557,7 @@ const handleSave = async () => {
   flex-shrink: 0;
 
   &.normal {
-    background: linear-gradient(135deg, rgba(7, 192, 95, 0.15) 0%, rgba(7, 192, 95, 0.08) 100%);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--td-brand-color) 15%, transparent) 0%, color-mix(in srgb, var(--td-brand-color) 8%, transparent) 100%);
     color: var(--td-brand-color-active);
   }
 
@@ -6657,8 +6657,8 @@ const handleSave = async () => {
 .kb-option-disabled-hint {
   flex-shrink: 0;
   font-size: 11px;
-  color: var(--td-warning-color-6, #d46b08);
-  background: var(--td-warning-color-1, #fff7e6);
+  color: var(--td-warning-color-6);
+  background: var(--td-warning-color-1);
   padding: 1px 6px;
   border-radius: 4px;
   max-width: 240px;

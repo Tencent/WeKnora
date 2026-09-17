@@ -534,14 +534,14 @@ watch(customInput, () => {
 }
 
 .page-desc {
-  color: var(--td-text-color-secondary, #666);
+  color: var(--td-text-color-secondary);
   font-size: 14px;
   margin-bottom: 32px;
 }
 
 .test-section {
   margin-bottom: 36px;
-  border-bottom: 1px solid var(--td-component-stroke, #e5e5e5);
+  border-bottom: 1px solid var(--td-component-stroke);
   padding-bottom: 24px;
 
   h2 {
@@ -553,7 +553,7 @@ watch(customInput, () => {
 
 .test-hint {
   font-size: 13px;
-  color: var(--td-text-color-secondary, #999);
+  color: var(--td-text-color-secondary);
   margin-bottom: 8px;
 }
 
@@ -562,7 +562,7 @@ watch(customInput, () => {
 }
 
 .test-raw {
-  background: var(--td-bg-color-secondarycontainer, #f5f5f5);
+  background: var(--td-bg-color-secondarycontainer);
   padding: 6px 10px;
   border-radius: 4px;
   margin-bottom: 6px;
@@ -577,9 +577,9 @@ watch(customInput, () => {
 
 .test-rendered {
   padding: 8px 12px;
-  border: 1px solid var(--td-component-stroke, #e5e5e5);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
 }
 
 .stream-controls {
@@ -591,14 +591,14 @@ watch(customInput, () => {
 
 .btn {
   padding: 4px 16px;
-  border: 1px solid var(--td-component-stroke, #ccc);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 4px;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   cursor: pointer;
   font-size: 13px;
 
   &:hover {
-    background: var(--td-bg-color-container-hover, #f0f0f0);
+    background: var(--td-bg-color-container-hover);
   }
 
   &:disabled {
@@ -623,7 +623,7 @@ watch(customInput, () => {
   padding: 10px;
   font-family: var(--app-font-family-mono);
   font-size: 13px;
-  border: 1px solid var(--td-component-stroke, #ccc);
+  border: 1px solid var(--td-component-stroke);
   border-radius: 6px;
   resize: vertical;
   box-sizing: border-box;

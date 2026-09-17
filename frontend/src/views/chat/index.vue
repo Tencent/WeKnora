@@ -1596,7 +1596,6 @@ onBeforeRouteUpdate((to, from, next) => {
 </script>
 <style lang="less" scoped>
 .chat {
-    font-size: 20px;
     // 右侧不留 padding，滚动条贴到内容区最右缘
     padding: 0 0 20px 20px;
     // 右侧抽屉让出的宽度。回到底部按钮按「剩余聊天列」居中，而不是整页 50%。

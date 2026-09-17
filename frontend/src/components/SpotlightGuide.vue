@@ -443,7 +443,7 @@ defineExpose({ open, close })
   box-sizing: border-box;
   pointer-events: none;
   border: 2px solid var(--td-brand-color);
-  box-shadow: 0 0 0 4px rgba(7, 192, 95, 0.18);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--td-brand-color) 18%, transparent);
   transition:
     top 0.28s cubic-bezier(0.4, 0, 0.2, 1),
     left 0.28s cubic-bezier(0.4, 0, 0.2, 1),
@@ -516,7 +516,7 @@ defineExpose({ open, close })
   }
 
   &.is-done {
-    background: rgba(7, 192, 95, 0.4);
+    background: color-mix(in srgb, var(--td-brand-color) 40%, transparent);
   }
 }
 

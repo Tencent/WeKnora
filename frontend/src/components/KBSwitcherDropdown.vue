@@ -124,7 +124,7 @@ const handleSelect = (id: string): void => {
   }
 
   &.active {
-    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+    background: var(--td-brand-color-light);
     color: var(--td-brand-color);
     font-weight: 500;
   }

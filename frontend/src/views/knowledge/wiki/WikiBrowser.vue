@@ -4084,8 +4084,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       btnBg.setAttribute('cx', String(btnX))
       btnBg.setAttribute('cy', String(btnY))
       btnBg.setAttribute('r', '8')
-      btnBg.setAttribute('fill', 'var(--td-bg-color-container, #fff)')
-      btnBg.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnBg.setAttribute('fill', 'var(--td-bg-color-container)')
+      btnBg.setAttribute('stroke', 'var(--td-brand-color)')
       btnBg.setAttribute('stroke-width', '1.5')
       bloomBtn.appendChild(btnBg)
 
@@ -4095,7 +4095,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       btnCrossV.setAttribute('x2', String(btnX))
       btnCrossV.setAttribute('y1', String(btnY - 4))
       btnCrossV.setAttribute('y2', String(btnY + 4))
-      btnCrossV.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnCrossV.setAttribute('stroke', 'var(--td-brand-color)')
       btnCrossV.setAttribute('stroke-width', '1.8')
       btnCrossV.setAttribute('stroke-linecap', 'round')
       bloomBtn.appendChild(btnCrossV)
@@ -4105,7 +4105,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       btnCrossH.setAttribute('x2', String(btnX + 4))
       btnCrossH.setAttribute('y1', String(btnY))
       btnCrossH.setAttribute('y2', String(btnY))
-      btnCrossH.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnCrossH.setAttribute('stroke', 'var(--td-brand-color)')
       btnCrossH.setAttribute('stroke-width', '1.8')
       btnCrossH.setAttribute('stroke-linecap', 'round')
       bloomBtn.appendChild(btnCrossH)
@@ -5514,7 +5514,7 @@ onUnmounted(() => {
 }
 
 .wiki-badge--ver {
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -5604,7 +5604,7 @@ onUnmounted(() => {
   :deep(.t-input:focus-within),
   :deep(.t-textarea:focus-within) {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   }
 }
 
@@ -5634,7 +5634,7 @@ onUnmounted(() => {
 
 .wiki-edit-field--content {
   :deep(.t-textarea__inner) {
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     font-size: 14px;
     line-height: 1.7;
     padding: 12px 14px;
@@ -5780,12 +5780,12 @@ onUnmounted(() => {
   font-family: var(--app-font-family-mono);
   font-size: 12px;
   padding: 2px 8px;
-  background: rgba(7, 192, 95, 0.06);
+  background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
   border-radius: 4px;
   transition: background 0.15s;
 
   &:hover {
-    background: rgba(7, 192, 95, 0.12);
+    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   }
 }
 
@@ -6590,3 +6590,4 @@ onUnmounted(() => {
   }
 }
 </style>
+<style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>

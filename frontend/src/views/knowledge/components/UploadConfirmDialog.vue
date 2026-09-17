@@ -1531,7 +1531,7 @@ const handleConfirm = () => {
   flex-direction: column;
   flex-shrink: 0;
   width: 220px;
-  background: var(--td-bg-color-settings-modal, var(--td-bg-color-secondarycontainer));
+  background: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
 }
 
@@ -1812,7 +1812,7 @@ const handleConfirm = () => {
   flex-shrink: 0;
   width: 216px;
   min-height: 0;
-  background-color: var(--td-bg-color-settings-modal, var(--td-bg-color-secondarycontainer));
+  background-color: var(--td-bg-color-settings-modal);
   border-right: 1px solid var(--td-component-stroke);
 }
 
