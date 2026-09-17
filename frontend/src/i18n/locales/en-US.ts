@@ -787,6 +787,11 @@ export default {
     chunkLoadFailed: 'Failed to load chunks'
   },
   uploadConfirm: {
+    documentSummary: "Document summary",
+    documentSummaryDescription: "Choose whether to automatically summarize documents in this import.",
+    generateSummary: "Generate document summaries",
+    generateSummaryHint: "Enabled by default. Disable to skip summaries while parsing, indexing, and other configured steps continue.",
+
     title: 'Confirm Upload',
     parseConfig: 'Parse settings',
     configNav: 'Parse settings navigation',

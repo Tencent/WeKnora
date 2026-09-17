@@ -1385,6 +1385,9 @@ const processConfigLines = computed<string[]>(() => {
   if (o.asr_config?.enabled != null) lines.push(`${t(k('asr'))}: ${onOff(o.asr_config.enabled)}`)
 
   const qg = o.question_generation_config
+  if (o.summary_enabled != null) {
+    lines.push(`${t('uploadConfirm.documentSummary')}: ${onOff(o.summary_enabled)}`)
+  }
   if (qg?.enabled != null) {
     lines.push(`${t(k('question'))}: ${qg.enabled ? t(k('questionOn'), { n: qg.question_count ?? 3 }) : t(k('off'))}`)
   }

@@ -39,6 +39,7 @@ func normalizeParserFileType(fileType string) string {
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
 func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {
 	eff := types.EffectiveProcessConfig{
+		SummaryEnabled:           true,
 		ChunkingConfig:           kb.ChunkingConfig,
 		EnableMultimodel:         kb.IsMultimodalEnabled(),
 		VLMConfig:                kb.VLMConfig,
@@ -49,6 +50,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	}
 	if overrides == nil {
 		return eff
+	}
+	if overrides.SummaryEnabled != nil {
+		eff.SummaryEnabled = *overrides.SummaryEnabled
 	}
 
 	if overrides.ChunkingConfig != nil {

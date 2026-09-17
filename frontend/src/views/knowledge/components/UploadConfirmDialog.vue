@@ -480,6 +480,26 @@
                     </div>
                   </div>
 
+                  <div v-show="activeSection === 'summary'" class="section" data-section="summary">
+                    <div class="kb-settings-block">
+                      <div class="section-header">
+                        <h2 class="section-title">{{ t('uploadConfirm.documentSummary') }}</h2>
+                        <p class="section-desc">{{ t('uploadConfirm.documentSummaryDescription') }}</p>
+                      </div>
+                      <div class="settings-group">
+                        <div class="setting-row">
+                          <div class="setting-info">
+                            <label>{{ t('uploadConfirm.generateSummary') }}</label>
+                            <p class="desc">{{ t('uploadConfirm.generateSummaryHint') }}</p>
+                          </div>
+                          <div class="setting-control">
+                            <t-switch v-model="uiState.summaryEnabled" size="medium" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   <div v-show="activeSection === 'question'" class="section">
                     <div class="kb-settings-block">
                       <div class="section-header">
@@ -576,7 +596,7 @@ import type {
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg']
 
-type ConfigSectionKey = 'tags' | 'parser' | 'chunking' | 'multimodal' | 'asr' | 'question' | 'graph'
+type ConfigSectionKey = 'tags' | 'parser' | 'chunking' | 'multimodal' | 'asr' | 'summary' | 'question' | 'graph'
 type IssueSectionKey = 'multimodal' | 'asr'
 
 interface ChunkingUIConfig {
@@ -598,6 +618,7 @@ interface ChunkingUIConfig {
 }
 
 interface UploadUIState {
+  summaryEnabled: boolean
   chunkingConfig: ChunkingUIConfig
   multimodalConfig: { enabled: boolean; vllmModelId: string; descriptionLanguage?: string; customInstructions?: string }
   asrConfig: { enabled: boolean; modelId: string; language: string }
@@ -936,6 +957,7 @@ const navItems = computed(() => {
     t('knowledgeEditor.sidebar.asr'),
     issueSectionKeys.value.has('asr'),
   )
+  push('summary', 'file', t('uploadConfirm.documentSummary'))
   push('question', 'chat', t('knowledgeEditor.advanced.questionGeneration.label'))
   if (isGraphSectionAvailable.value) {
     push('graph', 'chart-bubble', t('knowledgeEditor.sidebar.graph'))
@@ -997,6 +1019,10 @@ function getSectionNavStatus(
         statusTone: asr.modelId ? undefined : 'warning',
       }
     }
+    case 'summary':
+      return uiState.value.summaryEnabled
+        ? { status: t('uploadConfirm.statusOn') }
+        : { status: t('uploadConfirm.statusOff'), statusTone: 'muted' }
     case 'question': {
       const question = uiState.value.questionGenerationConfig
       if (!question.enabled) {
@@ -1056,6 +1082,7 @@ function goToSection(key: ConfigSectionKey) {
 
 function createDefaultUIState(): UploadUIState {
   return {
+    summaryEnabled: true,
     chunkingConfig: {
       chunkSize: 512,
       chunkOverlap: 80,
@@ -1092,6 +1119,7 @@ function initFromKbInfo(kb: any) {
   }
 
   uiState.value = {
+    summaryEnabled: true,
     chunkingConfig: {
       chunkSize: kb.chunking_config?.chunk_size || 512,
       chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
@@ -1142,6 +1170,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
   const chunking = state.chunkingConfig
 
   const overrides: KnowledgeProcessOverrides = {
+    summary_enabled: state.summaryEnabled,
     parser_engine_rules: chunking.parserEngineRules,
     chunking_config: {
       chunk_size: chunking.chunkSize,
@@ -1195,6 +1224,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
 function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   if (!o) return
   const s = uiState.value
+  if (o.summary_enabled != null) s.summaryEnabled = o.summary_enabled
   const cc = o.chunking_config
   if (cc) {
     if (cc.chunk_size != null) s.chunkingConfig.chunkSize = cc.chunk_size

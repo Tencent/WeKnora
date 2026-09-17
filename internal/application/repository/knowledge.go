@@ -698,6 +698,24 @@ func (r *knowledgeRepository) SetFinalizing(
 	return res.RowsAffected > 0, nil
 }
 
+// CompleteProcessingWithoutSubtasks is the zero-enrichment counterpart of
+// SetFinalizing. Keep the state check and completion fields in one write so a
+// concurrent cancel/delete or duplicate delivery cannot be overwritten.
+func (r *knowledgeRepository) CompleteProcessingWithoutSubtasks(ctx context.Context, id string) (bool, error) {
+	now := time.Now()
+	res := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("id = ? AND parse_status = ?", id, types.ParseStatusProcessing).
+		Updates(map[string]interface{}{
+			"parse_status":           types.ParseStatusCompleted,
+			"summary_status":         types.SummaryStatusNone,
+			"pending_subtasks_count": 0,
+			"error_message":          "",
+			"processed_at":           now,
+			"updated_at":             now,
+		})
+	return res.RowsAffected > 0, res.Error
+}
+
 // CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base
 func (r *knowledgeRepository) CountKnowledgeByKnowledgeBaseID(
 	ctx context.Context,

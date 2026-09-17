@@ -6448,6 +6448,11 @@ export default {
     }
   },
   uploadConfirm: {
+    documentSummary: "문서 요약",
+    documentSummaryDescription: "이번에 가져오는 문서의 요약을 자동으로 생성할지 선택합니다.",
+    generateSummary: "문서 요약 생성",
+    generateSummaryHint: "기본적으로 활성화됩니다. 비활성화하면 요약 생성을 건너뛰며 파싱, 인덱싱 및 기타 단계는 설정대로 진행됩니다.",
+
     title: '문서 업로드 확인',
     parseConfig: '파싱 설정',
     configNav: '파싱 설정 탐색',

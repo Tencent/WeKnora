@@ -326,6 +326,9 @@ type KnowledgeRepository interface {
 	// whether the transition took place (false when the row's parse_status
 	// was no longer "processing", e.g. user cancelled / deleted in flight).
 	SetFinalizing(ctx context.Context, id string, expectedSubtasks int) (bool, error)
+	// CompleteProcessingWithoutSubtasks atomically completes a still-processing
+	// document that has no enrichment tasks, without overriding cancel/delete.
+	CompleteProcessingWithoutSubtasks(ctx context.Context, id string) (bool, error)
 	// CountKnowledgeByKnowledgeBaseID counts the number of knowledge items in a knowledge base.
 	CountKnowledgeByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) (int64, error)
 	// CountKnowledgeByStatus counts the number of knowledge items with the specified parse status.

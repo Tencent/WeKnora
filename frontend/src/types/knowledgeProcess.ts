@@ -60,6 +60,7 @@ export interface ExtractConfigOverride {
 }
 
 export interface KnowledgeProcessOverrides {
+  summary_enabled?: boolean
   parser_engine_rules?: ParserEngineRule[]
   chunking_config?: ChunkingConfigOverride
   enable_multimodel?: boolean

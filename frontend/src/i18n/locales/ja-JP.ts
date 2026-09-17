@@ -787,6 +787,11 @@ export default {
     chunkLoadFailed: 'チャンクの読み込みに失敗しました'
   },
   uploadConfirm: {
+    documentSummary: "ドキュメントの要約",
+    documentSummaryDescription: "今回インポートするドキュメントの要約を自動生成するか選択します。",
+    generateSummary: "ドキュメントの要約を生成",
+    generateSummaryHint: "既定で有効です。無効にすると要約生成をスキップし、解析、インデックス作成、その他の処理は設定どおり実行されます。",
+
     title: 'アップロードの確認',
     parseConfig: '解析設定',
     configNav: '解析設定のナビゲーション',

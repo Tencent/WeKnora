@@ -6450,6 +6450,11 @@ export default {
     }
   },
   uploadConfirm: {
+    documentSummary: "文档摘要",
+    documentSummaryDescription: "为本次导入的文档选择是否自动生成摘要。",
+    generateSummary: "生成文档摘要",
+    generateSummaryHint: "默认开启。关闭后跳过摘要生成，文档解析、索引及其他处理步骤仍按配置执行。",
+
     title: '上传文档确认',
     parseConfig: '解析配置',
     configNav: '解析配置导航',

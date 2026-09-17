@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -419,4 +420,47 @@ func TestUpdateActiveDeletingKnowledgeColumns_GuardsStateAndSoftDelete(t *testin
 	assert.Equal(t, types.ParseStatusCompleted, status)
 	status, _ = reloadKnowledgeRow(t, db, deletedDeletingID)
 	assert.Equal(t, types.ParseStatusDeleting, status)
+}
+
+func TestCompleteProcessingWithoutSubtasks(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		deleted bool
+		want    bool
+	}{
+		{types.ParseStatusProcessing, false, true},
+		{types.ParseStatusCancelled, false, false},
+		{types.ParseStatusDeleting, false, false},
+		{types.ParseStatusCompleted, false, false},
+		{types.ParseStatusFinalizing, false, false},
+		{types.ParseStatusProcessing, true, false},
+	} {
+		t.Run(tc.status+"/deleted="+fmt.Sprint(tc.deleted), func(t *testing.T) {
+			db := setupKnowledgeTestDB(t)
+			repo := NewKnowledgeRepository(db)
+			id := insertKnowledgeWithStatus(t, db, tc.status, tc.deleted)
+			require.NoError(t, db.Exec(
+				`UPDATE knowledges SET summary_status = 'pending', error_message = 'old error' WHERE id = ?`, id,
+			).Error)
+			completed, err := repo.CompleteProcessingWithoutSubtasks(context.Background(), id)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, completed)
+			status, count := reloadKnowledgeRow(t, db, id)
+			var summary string
+			require.NoError(t, db.Raw(`SELECT summary_status FROM knowledges WHERE id = ?`, id).Scan(&summary).Error)
+			if tc.want {
+				require.Equal(t, types.ParseStatusCompleted, status)
+				require.Zero(t, count)
+				require.Equal(t, types.SummaryStatusNone, summary)
+				require.Empty(t, reloadKnowledgeErrorMessage(t, db, id))
+				completed, err = repo.CompleteProcessingWithoutSubtasks(context.Background(), id)
+				require.NoError(t, err)
+				require.False(t, completed, "duplicate delivery must not complete twice")
+			} else {
+				require.Equal(t, tc.status, status)
+				require.Equal(t, types.SummaryStatusPending, summary)
+				require.Equal(t, "old error", reloadKnowledgeErrorMessage(t, db, id))
+			}
+		})
+	}
 }
