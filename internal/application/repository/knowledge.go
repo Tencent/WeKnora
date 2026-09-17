@@ -724,7 +724,8 @@ func (r *knowledgeRepository) CountKnowledgeByKnowledgeBaseID(
 ) (int64, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status <> ?",
+			tenantID, kbID, types.ParseStatusDeleting).
 		Count(&count).Error
 	return count, err
 }
