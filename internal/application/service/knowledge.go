@@ -82,6 +82,10 @@ type knowledgeService struct {
 	// which has a no-op fallback. See knowledge_span_tracker.go.
 	spanTracker SpanTracker
 	audit       interfaces.AuditLogService
+
+	// youtubeSource fetches YouTube playlists and transcripts. Nil uses the
+	// shared yt-dlp client configured from YOUTUBE_* env vars.
+	youtubeSource youTubeSource
 }
 
 const (

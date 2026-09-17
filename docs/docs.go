@@ -5542,7 +5542,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式",
+                "description": "从指定URL抓取内容并创建知识条目。当提供 file_name/file_type 或 URL 路径含已知文件扩展名时，自动切换为文件下载模式。\nYouTube 视频链接会抓取字幕（无字幕时下载音频并用知识库的 ASR 模型转写），再用摘要模型整理为文档；播放列表或批量链接请使用 youtube 接口",
                 "consumes": [
                     "application/json"
                 ],
@@ -5613,6 +5613,78 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/knowledge-bases/{id}/knowledge/youtube": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "接收一组 YouTube 视频或播放列表链接（最多 100 个），展开播放列表并按视频去重后，为每个视频创建一条 URL 知识\n（异步抓取字幕或转写音频后生成文档并入库）。无法识别的链接与失败的视频计入 failed，已存在的视频计入 duplicates，\n均不会导致整体失败；单个视频放入 folder_path，每个播放列表的视频放入 folder_path 下以播放列表标题命名的子文件夹；\n单次导入的视频数上限由 YOUTUBE_MAX_VIDEOS_PER_IMPORT 控制",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "知识管理"
+                ],
+                "summary": "批量导入YouTube视频与播放列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "知识库ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "导入请求",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "folder_path": {
+                                    "type": "string"
+                                },
+                                "tag_ids": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "urls": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "导入结果",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportResult"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误或没有可导入的视频",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -19280,6 +19352,147 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.Knowledge": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "description": "Channel indicates through which channel the knowledge was ingested (web, api, browser_extension, wechat, etc.)",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time of the knowledge",
+                    "type": "string"
+                },
+                "custom_metadata": {
+                    "description": "CustomMetadata is user-authored descriptive metadata. It is deliberately\nseparate from Metadata, which contains internal ingestion state and IDs.",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "deleted_at": {
+                    "description": "Deletion time of the knowledge",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/gorm.DeletedAt"
+                        }
+                    ]
+                },
+                "description": {
+                    "description": "Description of the knowledge",
+                    "type": "string"
+                },
+                "embedding_model_id": {
+                    "description": "ID of the embedding model",
+                    "type": "string"
+                },
+                "enable_status": {
+                    "description": "Enable status of the knowledge",
+                    "type": "string"
+                },
+                "error_message": {
+                    "description": "Error message of the knowledge",
+                    "type": "string"
+                },
+                "file_hash": {
+                    "description": "File hash of the knowledge",
+                    "type": "string"
+                },
+                "file_name": {
+                    "description": "File name of the knowledge",
+                    "type": "string"
+                },
+                "file_path": {
+                    "description": "File path of the knowledge",
+                    "type": "string"
+                },
+                "file_size": {
+                    "description": "File size of the knowledge",
+                    "type": "integer"
+                },
+                "file_type": {
+                    "description": "File type of the knowledge",
+                    "type": "string"
+                },
+                "folder_path": {
+                    "description": "FolderPath is the canonical relative directory this entry belongs to\ninside the knowledge base, e.g. \"docs/spec\" for a folder upload of\n\"docs/spec/design.md\". Empty means the knowledge base root. It is a\ndisplay/navigation concern only: it never affects where the file is\nphysically stored (see FilePath).",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Unique identifier of the knowledge",
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "description": "ID of the knowledge base",
+                    "type": "string"
+                },
+                "knowledge_base_name": {
+                    "description": "Knowledge base name (not stored in database, populated on query)",
+                    "type": "string"
+                },
+                "last_faq_import_result": {
+                    "description": "Last FAQ import result (for FAQ type knowledge only)",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "metadata": {
+                    "description": "Metadata of the knowledge",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "parse_status": {
+                    "description": "Parse status of the knowledge",
+                    "type": "string"
+                },
+                "pending_subtasks_count": {
+                    "description": "PendingSubtasksCount is the outstanding enrichment subtask count\n(summary + question + graph chunks). Only meaningful while\nParseStatus == \"finalizing\"; defaults to 0 in any terminal state.",
+                    "type": "integer"
+                },
+                "processed_at": {
+                    "description": "Processed time of the knowledge",
+                    "type": "string"
+                },
+                "source": {
+                    "description": "Source of the knowledge (e.g. URL address for url type, \"manual\" for manual type)",
+                    "type": "string"
+                },
+                "storage_size": {
+                    "description": "Storage size of the knowledge",
+                    "type": "integer"
+                },
+                "summary_status": {
+                    "description": "Summary status for async summary generation",
+                    "type": "string"
+                },
+                "tags": {
+                    "description": "Tags holds the tags associated with this knowledge (populated on query, not persisted directly).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeTag"
+                    }
+                },
+                "tenant_id": {
+                    "description": "Workspace ID",
+                    "type": "integer"
+                },
+                "title": {
+                    "description": "Title of the knowledge",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "Type of the knowledge",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "Last updated time of the knowledge",
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.KnowledgeBase": {
             "type": "object",
             "properties": {
@@ -19667,6 +19880,47 @@ const docTemplate = `{
                 },
                 "vlm_config": {
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.VLMConfig"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.KnowledgeTag": {
+            "type": "object",
+            "properties": {
+                "color": {
+                    "description": "Optional display color",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Unique identifier of the tag (UUID)",
+                    "type": "string"
+                },
+                "knowledge_base_id": {
+                    "description": "Knowledge base ID that this tag belongs to",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Tag name, unique within the same knowledge base",
+                    "type": "string"
+                },
+                "seq_id": {
+                    "description": "SeqID is an auto-increment integer ID for external API usage",
+                    "type": "integer"
+                },
+                "sort_order": {
+                    "description": "Sort order within the same knowledge base",
+                    "type": "integer"
+                },
+                "tenant_id": {
+                    "description": "Workspace ID",
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "description": "Last updated time",
+                    "type": "string"
                 }
             }
         },
@@ -23617,6 +23871,86 @@ const docTemplate = `{
                 },
                 "total_pages": {
                     "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportItem": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "description": "URL is the canonical video URL, or the link as submitted when it could\nnot be resolved to a video.",
+                    "type": "string"
+                },
+                "video_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportPlaylist": {
+            "type": "object",
+            "properties": {
+                "folder_path": {
+                    "description": "FolderPath is the folder this playlist's videos were placed in.",
+                    "type": "string"
+                },
+                "playlist_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                },
+                "videos": {
+                    "description": "Videos is the number of importable videos taken from this playlist.",
+                    "type": "integer"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.YouTubeImportResult": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                    }
+                },
+                "duplicates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportItem"
+                    }
+                },
+                "failed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportItem"
+                    }
+                },
+                "playlists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.YouTubeImportPlaylist"
+                    }
+                },
+                "total_videos": {
+                    "description": "TotalVideos is the number of distinct videos considered.",
+                    "type": "integer"
+                },
+                "truncated": {
+                    "description": "Truncated reports that the links resolved to more videos than\nYOUTUBE_MAX_VIDEOS_PER_IMPORT and only the first ones were imported.",
+                    "type": "boolean"
                 }
             }
         },

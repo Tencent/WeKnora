@@ -17,6 +17,7 @@ import (
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	"github.com/Tencent/WeKnora/internal/infrastructure/youtube"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -3490,8 +3491,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			return nil
 		}
 	} else if payload.URL != "" {
-		// URL import
-		convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
+		// URL import; YouTube videos are imported from their transcript
+		if link, ok := youtube.ParseURL(payload.URL); ok && link.Kind == youtube.LinkVideo {
+			convertResult, err = s.convertYouTube(ctx, payload, kb, knowledge, eff, isLastRetry, link.VideoID)
+		} else {
+			convertResult, err = s.convert(ctx, payload, kb, knowledge, eff, isLastRetry)
+		}
 		if err != nil {
 			return err
 		}

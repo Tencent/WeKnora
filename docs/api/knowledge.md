@@ -7,7 +7,8 @@
 | 方法   | 路径                                       | 描述                                       |
 | ------ | ------------------------------------------ | ------------------------------------------ |
 | POST   | `/knowledge-bases/:id/knowledge/file`      | 上传文件创建知识（multipart）             |
-| POST   | `/knowledge-bases/:id/knowledge/url`       | 从 URL 创建知识（网页抓取或文件下载）       |
+| POST   | `/knowledge-bases/:id/knowledge/url`       | 从 URL 创建知识（网页抓取、文件下载或 YouTube 视频） |
+| POST   | `/knowledge-bases/:id/knowledge/youtube`   | 批量导入 YouTube 视频与播放列表           |
 | POST   | `/knowledge-bases/:id/knowledge/manual`    | 创建手工 Markdown 知识                     |
 | GET    | `/knowledge-bases/:id/knowledge`           | 列出知识库下的知识（支持分页/筛选）         |
 | GET    | `/knowledge-bases/:id/knowledge/folders`   | 获取知识库文件夹目录树                       |
@@ -117,8 +118,18 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 可创建**网页知识**或**远程文件知识**。后端根据下列规则自动判定：
 
+- YouTube 视频链接（`youtube.com/watch?v=`、`youtu.be/`、`/shorts/`、`/live/`、`/embed/`）按"YouTube 模式"处理，见下文；
 - 当 `file_name` / `file_type` 任一被显式提供，或 URL 路径含已知文件扩展名时，按"文件下载模式"处理（拉取远端文件保存）；
 - 否则按"网页抓取模式"处理。
+
+**YouTube 模式**：链接会被规范化为 `https://www.youtube.com/watch?v=<id>`（同一视频不同写法按重复 URL 处理），异步任务中：
+
+1. 通过 `yt-dlp` 获取视频字幕，优先顺序为：原语言人工字幕 → 原语言自动字幕 → 英文人工字幕 → 其他人工字幕 → 英文自动字幕；
+2. 没有可用字幕时，若知识库配置了 ASR 模型，则下载音频、按 `YOUTUBE_ASR_SEGMENT_SECONDS` 切段后逐段转写；未配置 ASR 时解析失败并提示配置 ASR 模型；
+3. 若知识库配置了摘要模型，按转写内容生成结构化文档（按界面语言输出，保留时间戳引用）；
+4. 入库的 Markdown 包含视频元信息、简介、生成的文档（若有）以及带 `[m:ss]` 时间戳的完整转写。
+
+`watch?v=...&list=...` 形式的链接只导入当前视频；导入播放列表或一次导入多个链接请使用 `youtube` 批量接口，向本接口提交播放列表链接会返回 400。服务器需安装 `yt-dlp` 与 `ffmpeg`（Docker app 镜像已内置），相关环境变量见 `.env.example` 的 `J4. YouTube 导入` 小节。
 
 URL 会经过 SSRF 安全校验，禁止指向内网/回环地址。
 
@@ -193,6 +204,98 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
     "success": true
 }
 ```
+
+**请求（YouTube 视频）**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/url' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "url": "https://youtu.be/jNQXAC9IVRw"
+}'
+```
+
+## POST `/knowledge-bases/:id/knowledge/youtube` - 批量导入 YouTube 视频与播放列表
+
+一次提交多个 YouTube 视频和/或播放列表链接（最多 100 个）。后端按提交顺序展开播放列表（私有/已删除视频会被跳过），按视频去重后为每个视频创建一条 URL 知识，随后按上文"YouTube 模式"异步处理。权限与 `knowledge/url` 相同。
+
+- 单个视频链接放入 `folder_path` 指定的文件夹；每个播放列表的视频放入 `folder_path` 下以播放列表标题命名的子文件夹（标题中的 `/` 会替换为 `-`，无标题时使用列表 ID）；同一视频出现多次时按首次出现的位置归档；
+- 无法识别的链接、读取失败的播放列表、创建失败的视频计入 `failed`；已在知识库中的视频计入 `duplicates`；均不会导致整体失败；
+- 单次请求最多导入 `YOUTUBE_MAX_VIDEOS_PER_IMPORT` 个不同视频（默认 200），超出时 `truncated` 为 `true`，仅导入靠前的视频；
+- 所有链接都无法得到可导入的视频时返回 400；服务器未安装 `yt-dlp` 时返回 500。
+
+**请求体**:
+
+| 字段                | 类型     | 必填 | 说明                                                  |
+| ------------------- | -------- | ---- | ----------------------------------------------------- |
+| `urls`              | string[] | 是   | YouTube 视频或播放列表链接，1–100 个                  |
+| `folder_path`       | string   | 否   | 目标文件夹，默认知识库根目录                          |
+| `enable_multimodel` | boolean  | 否   | 是否启用多模态解析                                    |
+| `tag_ids`           | string[] | 否   | 应用到每个视频的标签 ID                               |
+| `channel`           | string   | 否   | 来源渠道标识                                          |
+| `process_config`    | object   | 否   | 应用到每个视频的解析覆盖配置                          |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/youtube' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "urls": [
+        "https://youtu.be/jNQXAC9IVRw",
+        "https://www.youtube.com/playlist?list=PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH",
+        "https://example.com/not-youtube"
+    ]
+}'
+```
+
+**响应**（HTTP 201）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "total_videos": 3,
+        "truncated": false,
+        "playlists": [
+            {
+                "url": "https://www.youtube.com/playlist?list=PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH",
+                "playlist_id": "PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH",
+                "title": "Coding Challenges",
+                "folder_path": "Coding Challenges",
+                "videos": 2
+            }
+        ],
+        "created": [
+            {
+                "id": "9c8af585-ae15-44ce-8f73-45ad18394651",
+                "type": "url",
+                "title": "",
+                "source": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+                "parse_status": "pending"
+            }
+        ],
+        "duplicates": [
+            {
+                "url": "https://www.youtube.com/watch?v=exampleId02",
+                "video_id": "exampleId02",
+                "title": "Lesson 2",
+                "knowledge_id": "4d0c9a1e-6f0b-4c43-9a55-0e5f7f3d2b11"
+            }
+        ],
+        "failed": [
+            {
+                "url": "https://example.com/not-youtube",
+                "error": "not a YouTube video or playlist link"
+            }
+        ]
+    }
+}
+```
+
+（示例中 `created` 仅展示一条并省略了部分字段。）单个视频链接创建时标题为空，解析时会自动填入视频标题。
 
 ## POST `/knowledge-bases/:id/knowledge/manual` - 创建手工 Markdown 知识
 

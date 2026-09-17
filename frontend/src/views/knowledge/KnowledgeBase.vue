@@ -30,6 +30,7 @@ import {
   updateKnowledgeTagBatch,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
+  createKnowledgeFromYouTube,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
@@ -47,6 +48,7 @@ import {
 import { isBatchDownloadableKnowledge } from './knowledgeDownloadFileName';
 import { waitForKnowledgeDeletion } from '@/utils/knowledgeDeletion';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
+import { isYouTubeUrl, YOUTUBE_IMPORT_BATCH_SIZE } from '@/utils/youtube';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
@@ -1705,6 +1707,70 @@ const executeUploadBatch = async (
   return { successCount, failCount };
 };
 
+// YouTube links (videos and playlists) are imported in batches through one
+// endpoint that expands playlists and de-duplicates videos, so a pasted list
+// produces a single summary instead of one toast per link.
+const executeYouTubeImport = async (
+  urls: string[],
+  processConfig?: KnowledgeProcessOverrides,
+  tagIds?: string[],
+  targetFolder?: string,
+) => {
+  const targetKbId = kbId.value;
+  if (!targetKbId) {
+    MessagePlugin.error(t('error.missingKbId'));
+    return;
+  }
+
+  const tagIdsToUpload = tagIds && tagIds.length > 0 ? [...tagIds] : undefined;
+  MessagePlugin.info(t('knowledgeBase.youtubeImporting', { count: urls.length }));
+  let createdCount = 0;
+  let duplicateCount = 0;
+  let failedCount = 0;
+  let truncated = false;
+  let queuedAny = false;
+  for (let i = 0; i < urls.length; i += YOUTUBE_IMPORT_BATCH_SIZE) {
+    const batch = urls.slice(i, i + YOUTUBE_IMPORT_BATCH_SIZE);
+    try {
+      const responseData: any = await createKnowledgeFromYouTube(targetKbId, {
+        urls: batch,
+        folder_path: targetFolder || undefined,
+        tag_ids: tagIdsToUpload,
+        process_config: processConfig,
+      });
+      const result = responseData?.data;
+      if (!responseData?.success || !result) {
+        throw responseData;
+      }
+      createdCount += result.created?.length || 0;
+      duplicateCount += result.duplicates?.length || 0;
+      failedCount += result.failed?.length || 0;
+      truncated = truncated || !!result.truncated;
+      queuedAny = queuedAny || (result.created?.length || 0) > 0;
+    } catch (error: any) {
+      MessagePlugin.error(error?.error?.message || error?.message || t('knowledgeBase.youtubeImportFailed'));
+    }
+  }
+
+  if (queuedAny) {
+    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
+      detail: { kbId: targetKbId },
+    }));
+  }
+  if (createdCount > 0) {
+    MessagePlugin.success(t('knowledgeBase.youtubeImportSuccess', { count: createdCount }));
+  }
+  if (duplicateCount > 0) {
+    MessagePlugin.info(t('knowledgeBase.youtubeImportDuplicates', { count: duplicateCount }));
+  }
+  if (failedCount > 0) {
+    MessagePlugin.warning(t('knowledgeBase.youtubeImportFailures', { count: failedCount }));
+  }
+  if (truncated) {
+    MessagePlugin.warning(t('knowledgeBase.youtubeImportTruncated'));
+  }
+};
+
 const executeUrlImport = async (
   url: string,
   processConfig?: KnowledgeProcessOverrides,
@@ -1772,7 +1838,11 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
     });
   }
 
-  for (const url of urls) {
+  const youTubeUrls = urls.filter(isYouTubeUrl);
+  if (youTubeUrls.length > 0) {
+    await executeYouTubeImport(youTubeUrls, processConfig, tagIds, result.targetFolder || ROOT_FOLDER_PATH);
+  }
+  for (const url of urls.filter((candidate) => !isYouTubeUrl(candidate))) {
     await executeUrlImport(url, processConfig, tagIds);
   }
 };
@@ -1806,9 +1876,9 @@ const handleUploadSourceFiles = (files: File[]) => {
   openUploadConfirmDialog(files);
 };
 
-const handleUploadSourceUrl = (url: string) => {
+const handleUploadSourceUrls = (urls: string[]) => {
   if (!ensureDocumentKbReady()) return;
-  openUploadConfirmDialog([], [url]);
+  openUploadConfirmDialog([], urls);
 };
 
 const handleManualCreate = () => {
@@ -2526,7 +2596,7 @@ async function createNewSession(value: string): Promise<void> {
                       :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
-                      @url="handleUploadSourceUrl" @manual="handleManualCreate" />
+                      @urls="handleUploadSourceUrls" @manual="handleManualCreate" />
                   </div>
                 </div>
               </div>

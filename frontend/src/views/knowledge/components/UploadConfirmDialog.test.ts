@@ -25,6 +25,37 @@ test('uses confirmed tags for file and URL imports instead of reading the list f
   )
 })
 
+test('imports pasted links in bulk: YouTube links as one batch, other links one by one', () => {
+  const dropdown = readFileSync(new URL('./KbUploadSourceDropdown.vue', import.meta.url), 'utf8')
+  assert.match(dropdown, /<t-textarea[\s\S]*?v-model="urlInputValue"/)
+  assert.match(dropdown, /parseImportUrls\(urlInputValue\.value\)/)
+  assert.match(dropdown, /emit\('urls', urls\)/)
+  assert.match(dialog, /@urls="appendUrls"/)
+  assert.match(knowledgeBase, /@urls="handleUploadSourceUrls"/)
+  assert.match(knowledgeBase, /const youTubeUrls = urls\.filter\(isYouTubeUrl\)/)
+  assert.match(
+    knowledgeBase,
+    /executeYouTubeImport\(youTubeUrls, processConfig, tagIds, result\.targetFolder \|\| ROOT_FOLDER_PATH\)/,
+  )
+  assert.match(knowledgeBase, /folder_path: targetFolder \|\| undefined/)
+  assert.match(knowledgeBase, /urls\.filter\(\(candidate\) => !isYouTubeUrl\(candidate\)\)/)
+})
+
+test('imports YouTube links from the URL dialog with a live link preview instead of a separate entry', () => {
+  const dropdown = readFileSync(new URL('./KbUploadSourceDropdown.vue', import.meta.url), 'utf8')
+  assert.doesNotMatch(dropdown, /importYouTube/)
+  assert.match(dropdown, /summarizeImportUrls\(urlInputValue\.value\)/)
+  assert.match(dropdown, /v-for="part in urlPreviewParts"/)
+  assert.match(dropdown, /knowledgeBase\.urlPreviewYouTubePlaylists/)
+})
+
+test('flags speech recognition for YouTube links without blocking confirmation', () => {
+  assert.match(dialog, /const hasYouTube = computed\(\(\) => localUrls\.value\.some\(isYouTubeUrl\)\)/)
+  assert.match(dialog, /if \(hasAudio\.value \|\| hasYouTube\.value\) \{/)
+  assert.match(dialog, /hasAudio \? 'uploadConfirm\.asrSetupHint' : 'uploadConfirm\.asrYouTubeHint'/)
+  assert.doesNotMatch(dialog, /if \(hasYouTube\.value\) \{\s*if \(!uiState\.value\.asrConfig\.enabled[\s\S]{0,80}return false/)
+})
+
 // Browsing a folder pre-fills the upload destination, so the dialog must show it
 // and the batch must use the folder the user confirmed there — never the sidebar
 // selection as it stands when the uploads actually start.

@@ -244,9 +244,32 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/file \
 
 响应：201 `{"success":true,"data":{Knowledge}}`；重复 URL 返回 409。
 
+YouTube 视频链接会抓取字幕（无字幕且配置了 ASR 模型时下载音频转写），再用摘要模型整理为文档，与带时间戳的完整转写一起入库；播放列表链接返回 400，导入播放列表或多个链接请改用下面的 `youtube` 批量接口。
+
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com/doc"}'
+```
+
+### POST /api/v1/knowledge-bases/:id/knowledge/youtube
+
+用途：批量导入 YouTube 视频与播放列表链接。展开播放列表、按视频去重后，为每个视频创建一条 URL 知识（按上面的 YouTube 方式异步处理）。权限/API key 同上。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `urls` | []string | 是（`binding:"required,min=1,max=100"`） | YouTube 视频或播放列表链接 |
+| `folder_path` | string | 否 | 目标文件夹；每个播放列表的视频放入其下以列表标题命名的子文件夹 |
+| `enable_multimodel` | *bool | 否 | 多模态开关 |
+| `tag_ids` | []string | 否 | 应用到每个视频的标签 |
+| `channel` | string | 否 | 渠道 |
+| `process_config` | object | 否 | 应用到每个视频的解析覆盖 |
+
+响应：201 `{"success":true,"data":{"total_videos","truncated","playlists":[...],"created":[Knowledge],"duplicates":[...],"failed":[...]}}`。无法识别的链接与失败项计入 `failed`，已存在的视频计入 `duplicates`；单次视频数上限由 `YOUTUBE_MAX_VIDEOS_PER_IMPORT`（默认 200）控制。
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/youtube -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"urls":["https://youtu.be/VIDEO_ID","https://www.youtube.com/playlist?list=PL..."]}'
 ```
 
 ### POST /api/v1/knowledge-bases/:id/knowledge/manual
