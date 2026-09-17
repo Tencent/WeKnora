@@ -345,9 +345,8 @@ func (s *knowledgeService) prepareWikiForReparse(ctx context.Context, knowledge 
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title").
 func removeSourceRef(refs types.StringArray, knowledgeID string) types.StringArray {
 	var result types.StringArray
-	prefix := knowledgeID + "|"
 	for _, ref := range refs {
-		if ref == knowledgeID || strings.HasPrefix(ref, prefix) {
+		if types.WikiSourceRefMatchesKnowledge(ref, knowledgeID) {
 			continue
 		}
 		result = append(result, ref)

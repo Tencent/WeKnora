@@ -480,7 +480,7 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool)
 		r.RegisterDocument(value)
 	case spaceDocumentRef:
 		// Stored refs use "knowledgeID|title"; only the ID part is durable.
-		r.RegisterDocument(strings.TrimSpace(strings.SplitN(value, "|", 2)[0]))
+		r.RegisterDocument(types.WikiSourceKnowledgeID(value))
 	case spaceKnowledgeBase:
 		r.RegisterKnowledgeBase(value)
 	case spaceWeb:

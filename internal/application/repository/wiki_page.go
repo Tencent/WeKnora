@@ -896,10 +896,7 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 	out := make(map[string]string, len(rows))
 	for _, r := range rows {
 		for _, ref := range r.SourceRefs {
-			refKID := ref
-			if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
-				refKID = ref[:pipeIdx]
-			}
+			refKID := types.WikiSourceKnowledgeID(ref)
 			if _, want := kidSet[refKID]; !want {
 				continue
 			}

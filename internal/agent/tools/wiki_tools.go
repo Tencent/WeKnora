@@ -204,25 +204,6 @@ func scopeKnowledgeFilter(scope WikiScope) (map[string]bool, bool) {
 	return set, true
 }
 
-// extractSourceKnowledgeIDs parses SourceRefs ("uuid" or "uuid|title") and
-// returns the bare knowledge IDs.
-func extractSourceKnowledgeIDs(page *types.WikiPage) []string {
-	if page == nil || len(page.SourceRefs) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(page.SourceRefs))
-	for _, ref := range page.SourceRefs {
-		kid := ref
-		if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
-			kid = ref[:pipeIdx]
-		}
-		if kid != "" {
-			ids = append(ids, kid)
-		}
-	}
-	return ids
-}
-
 // isStructuralPage reports whether a page is the wiki-level index rather than
 // a content page tied to specific source documents. The index is never
 // filtered by knowledge_ids scope because it describes wiki topology.
@@ -270,7 +251,7 @@ func pageIntersectsKnowledgeIDs(page *types.WikiPage, allowed map[string]bool) b
 	if len(allowed) == 0 {
 		return true
 	}
-	for _, kid := range extractSourceKnowledgeIDs(page) {
+	for _, kid := range page.SourceKnowledgeIDs() {
 		if allowed[kid] {
 			return true
 		}
@@ -296,7 +277,7 @@ func pagePassesWikiScope(
 	if isStructuralPage(page) {
 		return false, nil
 	}
-	sourceKnowledgeIDs := extractSourceKnowledgeIDs(page)
+	sourceKnowledgeIDs := page.SourceKnowledgeIDs()
 	if len(sourceKnowledgeIDs) == 0 {
 		return false, nil
 	}
@@ -575,12 +556,9 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		}
 
 		for _, ref := range page.SourceRefs {
-			// SourceRefs might be "knowledgeID" or "knowledgeID|Title"
-			kid := ref
-			title := ""
-			if pipeIdx := strings.Index(ref, "|"); pipeIdx > 0 {
-				kid = ref[:pipeIdx]
-				title = ref[pipeIdx+1:]
+			kid, title := types.ParseWikiSourceRef(ref)
+			if kid == "" {
+				continue
 			}
 			if title != "" {
 				resolved.sources = append(resolved.sources, fmt.Sprintf(`<source knowledge_id="%s">%s</source>`, kid, title))
@@ -1003,36 +981,6 @@ func parseStringOrArray(val any) []string {
 		return res
 	}
 	return nil
-}
-
-// resolveSourceRefs enriches plain knowledge UUIDs to "uuid|title" format.
-// Refs already in "uuid|title" format are left unchanged.
-func resolveSourceRefs(ctx context.Context, knowledgeService interfaces.KnowledgeService, refs []string) []string {
-	if len(refs) == 0 || knowledgeService == nil {
-		return refs
-	}
-	resolved := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		if strings.Contains(ref, "|") {
-			resolved = append(resolved, ref)
-			continue
-		}
-		kn, err := knowledgeService.GetKnowledgeByIDOnly(ctx, ref)
-		if err != nil || kn == nil {
-			resolved = append(resolved, ref)
-			continue
-		}
-		title := kn.Title
-		if title == "" {
-			title = kn.FileName
-		}
-		if title != "" {
-			resolved = append(resolved, ref+"|"+title)
-		} else {
-			resolved = append(resolved, ref)
-		}
-	}
-	return resolved
 }
 
 func extractSnippet(content string, query string) string {
