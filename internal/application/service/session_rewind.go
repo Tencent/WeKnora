@@ -186,14 +186,8 @@ func (s *SessionRewindService) Rewind(
 		return nil, ErrRewindSourceBusy
 	}
 
-	if s.sandbox != nil {
-		busy, turnErr := s.sandbox.HasActiveTurn(ctx, sessionID)
-		if turnErr != nil {
-			return nil, fmt.Errorf("session rewind: check turn state: %w", turnErr)
-		}
-		if busy {
-			return nil, ErrRewindSourceBusy
-		}
+	if err := s.rejectIfBusy(ctx, sessionID); err != nil {
+		return nil, err
 	}
 
 	history, err := s.messages.ListMessagesBySessionUpTo(
@@ -204,20 +198,30 @@ func (s *SessionRewindService) Rewind(
 	}
 	history = historyThroughForkPoint(history, rewindPoint)
 
-	workspaceReset, reason, resetErr := s.resetWorkspaceIfPossible(ctx, sessionID, history)
+	// Client abort must not leave git reset applied and messages intact.
+	// Once we are past the cheap busy reject, finish reset+truncate even if
+	// the HTTP request is gone.
+	persistCtx := context.WithoutCancel(ctx)
+
+	workspaceReset, reason, resetErr := s.resetWorkspaceIfPossible(persistCtx, sessionID, history)
 	if resetErr != nil {
 		return nil, resetErr
+	}
+	if !workspaceReset {
+		if err := s.rejectIfBusy(persistCtx, sessionID); err != nil {
+			return nil, err
+		}
 	}
 
 	inclusive := rewindPoint.Role == "user"
 	deleted, err := s.messages.DeleteMessagesFrom(
-		ctx, sessionID, rewindPoint.CreatedAt, rewindPoint.ID, inclusive,
+		persistCtx, sessionID, rewindPoint.CreatedAt, rewindPoint.ID, inclusive,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("session rewind: delete messages: %w", err)
 	}
 
-	s.cleanupDeleted(ctx, source.TenantID, sessionID, deleted)
+	s.cleanupDeleted(persistCtx, source.TenantID, sessionID, deleted)
 
 	logger.Infof(ctx,
 		"[SessionRewind] session=%s rewind_point=%s deleted=%d workspace_reset=%v reason=%s",
@@ -248,12 +252,32 @@ func (s *SessionRewindService) resetWorkspaceIfPossible(
 		return false, RewindSkipSandboxReplaced, nil
 	}
 
+	// Re-check immediately before git reset --hard. The entry check is a
+	// cheap reject; a turn can start while we look up the checkpoint.
+	if err := s.rejectIfBusy(ctx, sessionID); err != nil {
+		return false, "", err
+	}
+
 	workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceResetTimeout)
 	defer cancel()
 	if err := resetWorkspaceToCommit(workCtx, s.sandbox, sessionID, checkpoint.CommitSHA); err != nil {
 		return false, "", fmt.Errorf("session rewind: reset workspace: %w", err)
 	}
 	return true, "", nil
+}
+
+func (s *SessionRewindService) rejectIfBusy(ctx context.Context, sessionID string) error {
+	if s.sandbox == nil {
+		return nil
+	}
+	busy, turnErr := s.sandbox.HasActiveTurn(ctx, sessionID)
+	if turnErr != nil {
+		return fmt.Errorf("session rewind: check turn state: %w", turnErr)
+	}
+	if busy {
+		return ErrRewindSourceBusy
+	}
+	return nil
 }
 
 func (s *SessionRewindService) cleanupDeleted(

@@ -312,8 +312,11 @@ func (f *fakeMessageStore) GetSessionArtifacts(ctx context.Context, sessionID st
 }
 
 func (f *fakeMessageStore) DeleteMessagesFrom(
-	_ context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
+	ctx context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
 ) ([]*types.Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	f.deleteFromCalls++
 	inc := inclusive
 	f.lastDeleteInclusive = &inc

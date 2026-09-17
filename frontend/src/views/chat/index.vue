@@ -164,7 +164,7 @@
                                 @retry-steer="handleRetrySteer"
                                 @stop-generation="handleStopGeneration"
                                 @stop-confirmed="handleStopConfirmed"
-                                @stop-failed="handleStopFailed" :isReplying="isReplying" :sessionId="session_id"
+                                @stop-failed="handleStopFailed" :isReplying="isReplying" :composer-locked="composerLocked" :sessionId="session_id"
                                 :assistantMessageId="currentAssistantMessageId" :embeddedMode="embeddedMode"
                                 :queuedSteers="steerQueue.filter(item => item.delivery === 'after')" :canSteer="isAgentStreamSession()"></InputField>
                         </div>
@@ -201,6 +201,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession, rewindSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
 import { rewindSkipMessage } from './rewindNotice';
+import { rewindPrefillText, shouldApplyRewindLocally } from './rewindView';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -333,7 +334,11 @@ function forkAffordanceOf(messageId) {
 
 const FORK_PREFILL_KEY = 'weknora:fork-prefill'
 let forkInFlight = false
-let rewindInFlight = false
+const rewindInFlight = ref(false)
+const rewindLockSessionId = ref('')
+const composerLocked = computed(() =>
+    rewindInFlight.value && String(session_id.value || '') === rewindLockSessionId.value
+)
 
 function stashForkLanding(sessionId, text) {
     const payload = JSON.stringify({ sessionId, text })
@@ -379,7 +384,7 @@ function applyForkLanding() {
 
 async function handleFork(messageId) {
     if (props.embeddedMode) return
-    if (forkInFlight || rewindInFlight) return
+    if (forkInFlight || composerLocked.value) return
     if (!messageId || !session_id.value) return
     const source = messagesList.find((m) => m.id === messageId)
     if (!source) return
@@ -422,29 +427,39 @@ async function handleFork(messageId) {
     }
 }
 
-function truncateMessagesAt(messageId, inclusive) {
-    const index = messagesList.findIndex((m) => m.id === messageId)
-    if (index < 0) return
-    messagesList.splice(inclusive ? index : index + 1)
-}
-
 async function handleRewind(messageId) {
     if (props.embeddedMode) return
-    if (forkInFlight || rewindInFlight) return
+    if (forkInFlight || composerLocked.value) return
     if (!messageId || !session_id.value) return
-    const source = messagesList.find((m) => m.id === messageId)
+    const source = messagesList.find((m) => m.id === messageId || persistedAssistantId(m) === messageId)
     if (!source) return
     const sourceSessionId = session_id.value
+    const sourceRole = source.role
+    const sourceContent = source.content
 
-    rewindInFlight = true
+    rewindInFlight.value = true
+    rewindLockSessionId.value = sourceSessionId
     try {
         const res = await rewindSession(sourceSessionId, { message_id: messageId })
         const data = res?.data
         if (!data) return
+        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
 
-        truncateMessagesAt(messageId, source.role === 'user')
-        if (source.role === 'user') {
-            inputFieldRef.value?.prefill(String(source.content ?? ''))
+        created_at.value = ''
+        messagesList.splice(0)
+        steerQueue.value = []
+        historyLoading.value = true
+        hasMoreHistory.value = true
+        await getmsgList({
+            session_id: sourceSessionId,
+            created_at: '',
+            limit: limit.value,
+        })
+        if (!shouldApplyRewindLocally(String(session_id.value || ''), sourceSessionId)) return
+
+        const prefill = rewindPrefillText(sourceRole, sourceContent)
+        if (prefill) {
+            inputFieldRef.value?.prefill(prefill)
         }
 
         if (data.workspace_reset) {
@@ -462,7 +477,8 @@ async function handleRewind(messageId) {
         }
         MessagePlugin.error(t('chat.rewind.failed'))
     } finally {
-        rewindInFlight = false
+        rewindInFlight.value = false
+        rewindLockSessionId.value = ''
     }
 }
 
@@ -943,7 +959,10 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
         if (historyLoadingMore.value || !hasMoreHistory.value) return;
         historyLoadingMore.value = true;
     }
-    fetchMessageList(data).then(async (res) => {
+    return fetchMessageList(data).then(async (res) => {
+        if (data?.session_id && String(data.session_id) !== String(session_id.value || '')) {
+            return
+        }
         const batch = res?.data;
         if (!batch?.length) {
             if (isScrollType) {
@@ -1011,6 +1030,7 @@ const findSteerQueueItem = (steerId) =>
 
 // Enter queues a follow-up; an explicit inject appears in the transcript immediately.
 const handleSteerMsg = async (value, mentionedItems = [], delivery = 'after', retryId = '') => {
+    if (composerLocked.value) return
     if (!session_id.value || !value?.trim()) return;
     if (!isReplying.value && !retryId) {
         // 空闲时没有运行中的 turn 可排队：直接走正常发送，而不是把
@@ -1284,6 +1304,7 @@ const attachSteerFollowUp = async (completedAssistantId) => {
 };
 
 const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
+    if (composerLocked.value) return
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
