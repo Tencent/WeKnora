@@ -80,6 +80,15 @@ type fakeKBRepo struct {
 	createErr error
 }
 
+func (r *fakeKBRepo) UpdateKnowledgeBaseGeneratedProfile(
+	_ context.Context, id string, profile *types.KnowledgeBaseProfile,
+) error {
+	if kb, ok := r.rows[id]; ok {
+		kb.GeneratedProfile = profile
+	}
+	return nil
+}
+
 func newFakeKBRepo() *fakeKBRepo { return &fakeKBRepo{rows: map[string]*types.KnowledgeBase{}} }
 
 func (r *fakeKBRepo) CreateKnowledgeBase(_ context.Context, kb *types.KnowledgeBase) error {

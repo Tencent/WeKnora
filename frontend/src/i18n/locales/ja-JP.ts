@@ -3013,7 +3013,22 @@ export default {
       nameLabel: 'ナレッジベース名',
       namePlaceholder: 'ナレッジベース名を入力してください',
       descriptionLabel: 'ナレッジベースの説明',
-      descriptionPlaceholder: 'ナレッジベースの説明を入力してください（任意）'
+      descriptionPlaceholder: 'ナレッジベースの説明を入力してください（任意）',
+      profile: {
+        title: 'AI 生成の説明',
+        hint: 'ドキュメントプロファイルの集計から生成されます。上の手入力の説明を上書きすることはなく、エージェントは両方を読んで質問がこのナレッジベースに属するか判断します。',
+        empty: 'まだ生成されていません。ドキュメントをアップロードし要約が完了したら、下のボタンで生成してください。',
+        noDocuments: 'このナレッジベースには解析済みのドキュメントがまだありません。',
+        questions: '典型的な質問',
+        generate: 'AI 説明を生成',
+        regenerate: '再生成',
+        adopt: '説明として使用',
+        generated: 'AI 説明を生成しました',
+        generateFailed: 'AI 説明の生成に失敗しました',
+        adopted: '説明欄にコピーしました。保存すると反映されます',
+        failed: '前回の生成に失敗しました：{error}',
+        generatedAt: '{time} に生成 · {count} 件のドキュメントに基づく'
+      }
     },
     wiki: {
       title: 'Wiki設定',
@@ -3491,6 +3506,16 @@ export default {
         instructionsLabel: '質問生成の指示',
         instructionsDescription: '出力形式はシステム側で固定したまま、対象読者、利用シーン、表現を指定できます',
         instructionsPlaceholder: '例: カスタマーサポートで自然に出てくる質問を生成し、試験問題のような表現は避ける…'
+      },
+      profile: {
+        label: 'ナレッジベース説明の自動生成',
+        description: 'ドキュメントの追加・削除・要約更新後に、ドキュメントプロファイルの集計から説明を自動生成します。集計自体はモデルを呼び出さず、集計結果が変化したときのみ小さなモデル呼び出しを1回行います。',
+        modelLabel: '生成モデル',
+        modelDescription: '空欄の場合はナレッジベースの要約モデルを使用します。',
+        modelPlaceholder: '生成モデルを選択',
+        instructionsLabel: '説明生成の指示',
+        instructionsDescription: '対象読者、残すべき用語、文体などを補足します。出力形式は固定のままです。',
+        instructionsPlaceholder: '例：サポート担当者向けに、製品ラインを平易に説明し、型番は残す…'
       },
       autoTag: {
         label: '自動タグ付け',

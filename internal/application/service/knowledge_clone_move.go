@@ -1179,6 +1179,10 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	progress.Error = ""
 	_ = s.saveKnowledgeMoveProgress(ctx, progress)
 	record(types.AuditActionKnowledgeMoveCompleted, types.AuditOutcomeSuccess)
+	// A move is a delete on the source and an add on the target as far as
+	// the description aggregation is concerned.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, sourceKB, false)
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, targetKB, false)
 	return nil
 }
 

@@ -178,6 +178,61 @@
                         />
                       </div>
 
+                      <!-- AI 生成的知识库描述（仅编辑模式、文档型知识库） -->
+                      <div v-if="editorMode === 'edit' && !isFAQ" class="form-item">
+                        <label class="form-label">{{ $t('knowledgeEditor.basic.profile.title') }}</label>
+                        <p class="form-tip">{{ $t('knowledgeEditor.basic.profile.hint') }}</p>
+                        <div class="kb-profile-card">
+                          <template v-if="generatedProfileHasText">
+                            <p v-if="generatedProfile?.gist" class="kb-profile-gist">{{ generatedProfile.gist }}</p>
+                            <div v-if="generatedProfile?.topics?.length" class="kb-profile-topics">
+                              <t-tag
+                                v-for="topic in generatedProfile.topics"
+                                :key="topic"
+                                size="small"
+                                variant="light"
+                              >{{ topic }}</t-tag>
+                            </div>
+                            <div v-if="generatedProfile?.typical_questions?.length" class="kb-profile-questions">
+                              <p class="kb-profile-subtitle">{{ $t('knowledgeEditor.basic.profile.questions') }}</p>
+                              <ul>
+                                <li v-for="q in generatedProfile.typical_questions" :key="q">{{ q }}</li>
+                              </ul>
+                            </div>
+                          </template>
+                          <p v-else class="kb-profile-empty">
+                            {{ generatedProfile?.status === 'empty'
+                              ? $t('knowledgeEditor.basic.profile.noDocuments')
+                              : $t('knowledgeEditor.basic.profile.empty') }}
+                          </p>
+                          <p v-if="generatedProfile?.status === 'failed'" class="kb-profile-error">
+                            {{ $t('knowledgeEditor.basic.profile.failed', { error: generatedProfile.error || '' }) }}
+                          </p>
+                          <p v-if="generatedProfileMeta" class="kb-profile-meta">{{ generatedProfileMeta }}</p>
+                          <div class="kb-profile-actions">
+                            <t-button
+                              size="small"
+                              theme="primary"
+                              variant="outline"
+                              :loading="generatingProfile"
+                              @click="handleGenerateProfile"
+                            >
+                              {{ generatedProfileHasText
+                                ? $t('knowledgeEditor.basic.profile.regenerate')
+                                : $t('knowledgeEditor.basic.profile.generate') }}
+                            </t-button>
+                            <t-button
+                              v-if="generatedProfile?.gist"
+                              size="small"
+                              variant="text"
+                              @click="handleAdoptProfileGist"
+                            >
+                              {{ $t('knowledgeEditor.basic.profile.adopt') }}
+                            </t-button>
+                          </div>
+                        </div>
+                      </div>
+
                       <!-- Wiki 合成模型移至模型配置页 -->
                     </div>
                   </div>
@@ -410,11 +465,13 @@
                     v-if="formData"
                     :question-generation="formData.questionGenerationConfig"
                     :auto-tag="formData.autoTagConfig"
+                    :profile-config="formData.profileConfig"
                     :rag-enabled="formData.indexingStrategy?.vectorEnabled || formData.indexingStrategy?.keywordEnabled"
                     :all-models="allModels"
                     :table-metadata-instructions="formData.chunkingConfig.tableMetadataInstructions"
                     @update:question-generation="handleQuestionGenerationUpdate"
                     @update:auto-tag="(value) => { if (formData) formData.autoTagConfig = value }"
+                    @update:profile-config="(value) => { if (formData) formData.profileConfig = value }"
                     @update:table-metadata-instructions="(value: string) => { if (formData) formData.chunkingConfig.tableMetadataInstructions = value }"
                   />
                 </div>
@@ -470,7 +527,15 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import KbCreateContextualGuide from '@/components/KbCreateContextualGuide.vue'
 import { KB_EDITOR_FOCUS_SECTION_EVENT, markContextualGuideDone } from '@/config/contextualGuides'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
-import { createKnowledgeBase, getKnowledgeBaseById, listKnowledgeFiles, updateKnowledgeBase, rebuildKBIndex } from '@/api/knowledge-base'
+import {
+  createKnowledgeBase,
+  getKnowledgeBaseById,
+  listKnowledgeFiles,
+  updateKnowledgeBase,
+  rebuildKBIndex,
+  generateKnowledgeBaseProfile,
+  type KnowledgeBaseProfile,
+} from '@/api/knowledge-base'
 import { updateKBConfig, type KBModelConfigRequest } from '@/api/initialization'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { selectInitialModelId } from '@/utils/modelDefaults'
@@ -546,6 +611,24 @@ const saving = ref(false)
 const loading = ref(false)
 const allModels = ref<any[]>([])
 const hasFiles = ref(false)
+// AI-generated knowledge-base description (edit mode only). Kept outside
+// formData because it is never submitted: the backend owns it.
+const generatedProfile = ref<KnowledgeBaseProfile | null>(null)
+const generatingProfile = ref(false)
+const generatedProfileHasText = computed(() => {
+  const p = generatedProfile.value
+  return !!(p && (p.gist || p.topics?.length || p.typical_questions?.length))
+})
+const generatedProfileMeta = computed(() => {
+  const p = generatedProfile.value
+  if (!p || !p.generated_at) return ''
+  const when = new Date(p.generated_at)
+  const stamp = isNaN(when.getTime()) ? p.generated_at : when.toLocaleString()
+  return t('knowledgeEditor.basic.profile.generatedAt', {
+    time: stamp,
+    count: p.stats?.document_count ?? 0,
+  })
+})
 const initialStorageProvider = ref<string>('')
 /** Tenant-wide default from Settings → Storage engine (used when creating a KB). */
 const tenantDefaultStorageProvider = ref('local')
@@ -781,6 +864,11 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       maxTags: 3,
       skipIfTagged: true
     },
+    profileConfig: {
+      enabled: false,
+      modelId: '',
+      customInstructions: ''
+    },
     wikiConfig: {
       synthesisModelId: '',
       maxPagesPerIngest: 0,
@@ -850,6 +938,7 @@ const loadKBData = async (
 
     const kb = kbInfo.data
     hasFiles.value = (filesResult as any)?.total > 0
+    generatedProfile.value = (kb as any).generated_profile || null
     kbCreatorId.value = (kb as any).creator_id || ''
     kbTenantId.value = Number((kb as any).tenant_id || 0)
 
@@ -921,6 +1010,11 @@ const loadKBData = async (
         // Absent on knowledge bases saved before the toggle existed; the
         // backend treats that as "skip", so mirror it here.
         skipIfTagged: kb.auto_tag_config?.skip_if_tagged ?? true
+      },
+      profileConfig: {
+        enabled: kb.profile_config?.enabled || false,
+        modelId: kb.profile_config?.model_id || '',
+        customInstructions: kb.profile_config?.custom_instructions || ''
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -1133,6 +1227,35 @@ const handleQuestionGenerationUpdate = (config: any) => {
   }
 }
 
+// Regenerate the AI description now (synchronous: one aggregation + one
+// small model call). The result replaces the card but never the manual
+// description; "adopt" copies the gist over explicitly.
+const handleGenerateProfile = async () => {
+  const kbId = activeKbId.value
+  if (!kbId || generatingProfile.value) return
+  generatingProfile.value = true
+  try {
+    const result: any = await generateKnowledgeBaseProfile(kbId)
+    if (!result?.success) {
+      throw new Error(result?.message || t('knowledgeEditor.basic.profile.generateFailed'))
+    }
+    generatedProfile.value = result.data || null
+    MessagePlugin.success(t('knowledgeEditor.basic.profile.generated'))
+  } catch (error: any) {
+    console.error('Generate knowledge base profile failed:', error)
+    MessagePlugin.error(error?.message || t('knowledgeEditor.basic.profile.generateFailed'))
+  } finally {
+    generatingProfile.value = false
+  }
+}
+
+const handleAdoptProfileGist = () => {
+  const gist = generatedProfile.value?.gist
+  if (!gist || !formData.value) return
+  formData.value.description = gist.slice(0, 200)
+  MessagePlugin.success(t('knowledgeEditor.basic.profile.adopted'))
+}
+
 const handleNodeExtractUpdate = (config: any) => {
   if (formData.value) {
     formData.value.nodeExtractConfig = { ...config }
@@ -1286,6 +1409,12 @@ const buildSubmitData = () => {
     skip_if_tagged: formData.value.autoTagConfig?.skipIfTagged ?? true
   }
 
+  data.profile_config = {
+    enabled: formData.value.profileConfig?.enabled || false,
+    model_id: formData.value.profileConfig?.modelId || '',
+    custom_instructions: formData.value.profileConfig?.customInstructions || ''
+  }
+
   if (formData.value.type === 'faq') {
     data.faq_config = {
       index_mode: formData.value.faqConfig?.indexMode || 'question_only',
@@ -1411,6 +1540,7 @@ const doSubmit = async () => {
       }
       if (formData.value.type !== 'faq') {
         updateConfig.auto_tag_config = data.auto_tag_config
+        updateConfig.profile_config = data.profile_config
         updateConfig.indexing_strategy = {
           vector_enabled: formData.value.indexingStrategy?.vectorEnabled ?? true,
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
@@ -2130,6 +2260,66 @@ watch(() => chatResources.allModels, (list) => {
     color: var(--td-error-color);
     margin-left: 2px;
     font-weight: 500;
+  }
+}
+
+.kb-profile-card {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+
+  .kb-profile-gist {
+    margin: 0 0 8px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--td-text-color-primary);
+  }
+
+  .kb-profile-topics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .kb-profile-subtitle {
+    margin: 0 0 4px;
+    font-size: 12px;
+    color: var(--td-text-color-secondary);
+  }
+
+  .kb-profile-questions ul {
+    margin: 0 0 8px;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--td-text-color-primary);
+  }
+
+  .kb-profile-empty {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  .kb-profile-error {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: var(--td-error-color);
+  }
+
+  .kb-profile-meta {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: var(--td-text-color-placeholder);
+  }
+
+  .kb-profile-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
   }
 }
 </style>

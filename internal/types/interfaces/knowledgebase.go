@@ -238,6 +238,10 @@ type KnowledgeBaseRepository interface {
 	SetUserKBPin(
 		ctx context.Context, tenantID uint64, userID string, kbID string, pinned bool,
 	) (pinnedAt *time.Time, err error)
+	// UpdateKnowledgeBaseGeneratedProfile writes only the generated_profile
+	// column so a background regeneration never races a concurrent settings
+	// save on the rest of the row.
+	UpdateKnowledgeBaseGeneratedProfile(ctx context.Context, id string, profile *types.KnowledgeBaseProfile) error
 
 	// ListUserKBPinIDs returns the kb_id → pinned_at map of every KB the
 	// given user has personally pinned in this tenant. Used by the list

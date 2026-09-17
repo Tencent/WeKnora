@@ -3013,7 +3013,22 @@ export default {
       nameLabel: 'Knowledge Base Name',
       namePlaceholder: 'Enter knowledge base name',
       descriptionLabel: 'Knowledge Base Description',
-      descriptionPlaceholder: 'Enter knowledge base description (optional)'
+      descriptionPlaceholder: 'Enter knowledge base description (optional)',
+      profile: {
+        title: 'AI-generated description',
+        hint: 'Derived from the document profiles. It never overwrites the manual description above; agents read both to decide whether a question belongs to this knowledge base.',
+        empty: 'Not generated yet. Upload documents, let their summaries finish, then use the button below.',
+        noDocuments: 'No parsed documents in this knowledge base yet.',
+        questions: 'Typical questions',
+        generate: 'Generate AI description',
+        regenerate: 'Regenerate',
+        adopt: 'Use as description',
+        generated: 'AI description generated',
+        generateFailed: 'Failed to generate the AI description',
+        adopted: 'Copied into the description; save to apply',
+        failed: 'Last generation failed: {error}',
+        generatedAt: 'Generated {time} · based on {count} documents'
+      }
     },
     wiki: {
       title: 'Wiki Settings',
@@ -3491,6 +3506,16 @@ export default {
         instructionsLabel: 'Question Generation Instructions',
         instructionsDescription: 'Specify audience, scenario, and wording while the system retains the stable output format',
         instructionsPlaceholder: 'For example: generate natural customer-support questions and avoid exam-style wording…'
+      },
+      profile: {
+        label: 'Auto-generate knowledge base description',
+        description: 'After documents are added, removed or re-summarized, derive the description from the aggregated document profiles. The aggregation itself makes no model call; one small call runs only when the aggregate changed.',
+        modelLabel: 'Generation model',
+        modelDescription: 'Leave empty to reuse the knowledge-base summary model.',
+        modelPlaceholder: 'Select a generation model',
+        instructionsLabel: 'Description instructions',
+        instructionsDescription: 'Name the audience, terms to keep or the tone; the output format stays fixed.',
+        instructionsPlaceholder: 'e.g. Written for support agents; describe product lines in plain words and keep model numbers…'
       },
       autoTag: {
         label: 'Automatic Tagging',

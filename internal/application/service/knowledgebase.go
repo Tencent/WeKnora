@@ -515,6 +515,7 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	}
 
 	changedFields := make([]string, 0, 3)
+	profileWasEnabled := kb.ProfileConfig.IsEnabled()
 	if kb.Name != name {
 		changedFields = append(changedFields, "name")
 	}
@@ -540,6 +541,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		if config.AutoTagConfig != nil {
 			config.AutoTagConfig.Normalize()
 			kb.AutoTagConfig = config.AutoTagConfig
+		}
+		if config.ProfileConfig != nil {
+			profileWasEnabled = kb.ProfileConfig.IsEnabled()
+			kb.ProfileConfig = config.ProfileConfig
 		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
@@ -574,6 +579,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		"knowledge_base", kb.ID, types.AuditOutcomeSuccess, map[string]any{
 			"name": kb.Name, "changed_fields": changedFields,
 		})
+	// Turning automatic description generation on should produce a
+	// description now, not after the next upload.
+	if !profileWasEnabled && kb.ProfileConfig.IsEnabled() {
+		_ = requestKnowledgeBaseProfileRefresh(ctx, s.asynqClient, kb, false)
+	}
 
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil

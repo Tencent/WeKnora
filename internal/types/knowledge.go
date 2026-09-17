@@ -152,6 +152,11 @@ type Knowledge struct {
 	PendingSubtasksCount int `json:"pending_subtasks_count" gorm:"type:int;not null;default:0"`
 	// Summary status for async summary generation
 	SummaryStatus string `json:"summary_status"     gorm:"type:varchar(32);default:none"`
+	// Profile is the structured companion of Description: a one-line gist,
+	// topic keywords, a document type and one typical question. It is produced
+	// by the same model call as the summary and feeds the knowledge-base
+	// level description aggregation. nil when no summary has been generated.
+	Profile *KnowledgeProfile `json:"profile,omitempty" gorm:"column:profile;type:json"`
 	// Enable status of the knowledge
 	EnableStatus string `json:"enable_status"`
 	// ID of the embedding model

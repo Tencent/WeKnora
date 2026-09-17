@@ -596,6 +596,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		byKB[knowledge.KnowledgeBaseID] = append(byKB[knowledge.KnowledgeBaseID], knowledge)
 	}
 	for kbID, knowledges := range byKB {
+		// Deleted documents simply drop out of the description aggregation;
+		// the refresh recomputes counts and topics from what remains.
+		_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, knowledgeBases[kbID], false)
 		knowledgeIDs := make([]string, 0, len(knowledges))
 		titles := make([]string, 0, len(knowledges))
 		for _, knowledge := range knowledges {

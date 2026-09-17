@@ -114,6 +114,50 @@
         </div>
       </div>
 
+      <div class="setting-row">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.advanced.profile.label') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.advanced.profile.description') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-switch v-model="localProfile.enabled" size="medium" @change="emitProfile" />
+        </div>
+      </div>
+
+      <div v-if="localProfile.enabled" class="subsection">
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.profile.modelLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.profile.modelDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <ModelSelector
+              model-type="KnowledgeQA"
+              :selected-model-id="localProfile.modelId"
+              :all-models="allModels"
+              clearable
+              :placeholder="$t('knowledgeEditor.advanced.profile.modelPlaceholder')"
+              @update:selected-model-id="(value: string) => { localProfile.modelId = value; emitProfile() }"
+            />
+          </div>
+        </div>
+        <div class="setting-row setting-row-vertical">
+          <div class="setting-info">
+            <label>{{ $t('knowledgeEditor.advanced.profile.instructionsLabel') }}</label>
+            <p class="desc">{{ $t('knowledgeEditor.advanced.profile.instructionsDescription') }}</p>
+          </div>
+          <div class="setting-control">
+            <t-textarea
+              v-model="localProfile.customInstructions"
+              :placeholder="$t('knowledgeEditor.advanced.profile.instructionsPlaceholder')"
+              :maxlength="2000"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              @change="emitProfile"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="setting-row setting-row-vertical">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.advanced.tableMetadataInstructions.label') }}</label>
@@ -151,9 +195,16 @@ interface AutoTagConfig {
   skipIfTagged: boolean
 }
 
+interface ProfileConfig {
+  enabled: boolean
+  modelId: string
+  customInstructions: string
+}
+
 interface Props {
   questionGeneration?: QuestionGenerationConfig
   autoTag?: AutoTagConfig
+  profileConfig?: ProfileConfig
   ragEnabled?: boolean
   allModels?: any[]
   embedded?: boolean
@@ -167,8 +218,23 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:questionGeneration': [value: QuestionGenerationConfig]
   'update:autoTag': [value: AutoTagConfig]
+  'update:profileConfig': [value: ProfileConfig]
   'update:tableMetadataInstructions': [value: string]
 }>()
+
+const localProfile = ref<ProfileConfig>(
+  props.profileConfig
+    ? { ...props.profileConfig }
+    : { enabled: false, modelId: '', customInstructions: '' }
+)
+
+watch(() => props.profileConfig, (newVal) => {
+  if (newVal) localProfile.value = { ...newVal }
+}, { deep: true })
+
+const emitProfile = () => {
+  emit('update:profileConfig', { ...localProfile.value })
+}
 
 const localQuestionGeneration = ref<QuestionGenerationConfig>(
   props.questionGeneration

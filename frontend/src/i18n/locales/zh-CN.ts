@@ -3805,6 +3805,16 @@ export default {
         instructionsDescription: '指定问题面向的人群、场景和表达方式，系统仍维护稳定输出格式',
         instructionsPlaceholder: '例如：生成客服用户常问的自然语言问题，避免考试题式表达…'
       },
+      profile: {
+        label: '自动生成知识库描述',
+        description: '文档新增、删除或摘要更新后，从文档画像聚合自动生成知识库描述。聚合本身不调用模型，仅当聚合结果变化时才发起一次小模型调用。',
+        modelLabel: '生成模型',
+        modelDescription: '留空时使用知识库摘要模型。',
+        modelPlaceholder: '请选择生成模型',
+        instructionsLabel: '描述生成要求',
+        instructionsDescription: '补充面向的读者、需要保留的术语或表达风格，系统仍维护稳定的输出格式。',
+        instructionsPlaceholder: '例如：面向售后客服，用通俗说法描述产品线，保留产品型号…'
+      },
       autoTag: {
         label: '自动关联标签',
         description: '文档解析完成后，从当前知识库已有标签中选择合适标签自动关联。不会创建或删除标签，并会增加一次模型调用。',
@@ -4294,7 +4304,22 @@ export default {
       nameLabel: '知识库名称',
       namePlaceholder: '请输入知识库名称',
       descriptionLabel: '知识库描述',
-      descriptionPlaceholder: '请输入知识库描述（可选）'
+      descriptionPlaceholder: '请输入知识库描述（可选）',
+      profile: {
+        title: 'AI 生成描述',
+        hint: '由文档画像聚合生成，不会覆盖上方手写描述；智能体会同时读取两者来判断问题是否该在本知识库中检索。',
+        empty: '尚未生成。上传文档并生成摘要后，点击下方按钮即可生成。',
+        noDocuments: '知识库中还没有已解析完成的文档。',
+        questions: '典型问题',
+        generate: '生成 AI 描述',
+        regenerate: '重新生成',
+        adopt: '用作知识库描述',
+        generated: 'AI 描述已生成',
+        generateFailed: 'AI 描述生成失败',
+        adopted: '已填入知识库描述，保存后生效',
+        failed: '上次生成失败：{error}',
+        generatedAt: '生成于 {time} · 基于 {count} 篇文档'
+      }
     },
     errors: {
       vectorStoreBindingInvalid: '无法使用所选向量存储。请选择其他存储或使用系统默认值。',

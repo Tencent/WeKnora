@@ -61,6 +61,9 @@ func ValidateKnowledgeBasePromptInstructions(kb *KnowledgeBase) error {
 	if kb.QuestionGenerationConfig != nil {
 		fields["question generation instructions"] = kb.QuestionGenerationConfig.CustomInstructions
 	}
+	if kb.ProfileConfig != nil {
+		fields["knowledge base description instructions"] = kb.ProfileConfig.CustomInstructions
+	}
 	if kb.ExtractConfig != nil {
 		fields["graph extraction instructions"] = kb.ExtractConfig.CustomInstructions
 	}

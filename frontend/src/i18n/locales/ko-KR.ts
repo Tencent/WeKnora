@@ -3803,6 +3803,16 @@ export default {
         instructionsDescription: '안정적인 출력 형식을 유지하면서 대상, 상황 및 표현 방식을 지정합니다',
         instructionsPlaceholder: '예: 시험 문제 형식을 피하고 자연스러운 고객 지원 질문을 생성…'
       },
+      profile: {
+        label: '지식베이스 설명 자동 생성',
+        description: '문서 추가·삭제·요약 갱신 후 문서 프로필 집계에서 설명을 자동 생성합니다. 집계 자체는 모델을 호출하지 않으며, 집계 결과가 바뀔 때만 작은 모델 호출을 한 번 수행합니다.',
+        modelLabel: '생성 모델',
+        modelDescription: '비워 두면 지식베이스 요약 모델을 사용합니다.',
+        modelPlaceholder: '생성 모델 선택',
+        instructionsLabel: '설명 생성 요구사항',
+        instructionsDescription: '대상 독자, 유지할 용어, 문체 등을 보충합니다. 출력 형식은 고정됩니다.',
+        instructionsPlaceholder: '예: 고객지원 담당자 대상, 제품군을 쉬운 말로 설명하고 모델 번호는 유지…'
+      },
       autoTag: {
         label: '자동 태그 연결',
         description: '문서 파싱 후 현재 지식베이스의 기존 태그 중 적합한 태그를 연결합니다. 태그를 생성하거나 삭제하지 않으며 모델 호출이 한 번 추가됩니다.',
@@ -4292,7 +4302,22 @@ export default {
       nameLabel: '지식베이스 이름',
       namePlaceholder: '지식베이스 이름을 입력해주세요',
       descriptionLabel: '지식베이스 설명',
-      descriptionPlaceholder: '지식베이스 설명을 입력해주세요 (선택)'
+      descriptionPlaceholder: '지식베이스 설명을 입력해주세요 (선택)',
+      profile: {
+        title: 'AI 생성 설명',
+        hint: '문서 프로필 집계에서 생성됩니다. 위의 수동 설명을 덮어쓰지 않으며, 에이전트는 두 설명을 함께 읽어 질문이 이 지식베이스에 속하는지 판단합니다.',
+        empty: '아직 생성되지 않았습니다. 문서를 업로드하고 요약이 완료된 뒤 아래 버튼으로 생성하세요.',
+        noDocuments: '이 지식베이스에 파싱이 완료된 문서가 아직 없습니다.',
+        questions: '대표 질문',
+        generate: 'AI 설명 생성',
+        regenerate: '다시 생성',
+        adopt: '설명으로 사용',
+        generated: 'AI 설명이 생성되었습니다',
+        generateFailed: 'AI 설명 생성에 실패했습니다',
+        adopted: '설명란에 복사했습니다. 저장하면 적용됩니다',
+        failed: '마지막 생성 실패: {error}',
+        generatedAt: '{time} 생성 · 문서 {count}개 기준'
+      }
     },
     errors: {
       vectorStoreBindingInvalid: '선택한 벡터 스토어를 사용할 수 없습니다. 다른 스토어를 선택하거나 시스템 기본값을 사용하세요.',

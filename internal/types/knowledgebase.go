@@ -109,6 +109,13 @@ type KnowledgeBase struct {
 	QuestionGenerationConfig *QuestionGenerationConfig `yaml:"question_generation_config" json:"question_generation_config" gorm:"column:question_generation_config;type:json"`
 	// AutoTagConfig controls asynchronous association of existing tags after parsing.
 	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config" gorm:"type:json"`
+	// ProfileConfig controls automatic generation of the knowledge-base
+	// description from per-document profiles (document knowledge bases only).
+	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config" gorm:"column:profile_config;type:json"` //nolint:lll // one-line struct tag
+	// GeneratedProfile is the machine-generated description: a gist, merged
+	// topics, typical questions and the aggregate snapshot they came from. It
+	// never overwrites the user-authored Description; both are shown to agents.
+	GeneratedProfile *KnowledgeBaseProfile `yaml:"generated_profile" json:"generated_profile,omitempty" gorm:"column:generated_profile;type:json"` //nolint:lll // one-line struct tag
 	// WikiConfig stores wiki-specific configuration (only for wiki type knowledge bases)
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
@@ -160,6 +167,9 @@ type KnowledgeBaseConfig struct {
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"`
 	// AutoTagConfig controls optional automatic association of existing KB tags.
 	AutoTagConfig *AutoTagConfig `yaml:"auto_tag_config" json:"auto_tag_config"`
+	// ProfileConfig controls optional automatic knowledge-base description
+	// generation. nil means "no change" when updating.
+	ProfileConfig *KnowledgeBaseProfileConfig `yaml:"profile_config" json:"profile_config"`
 	// IndexingStrategy controls which indexing pipelines are active.
 	// nil means "no change" when updating (preserves existing strategy).
 	IndexingStrategy *IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"`
@@ -737,6 +747,7 @@ func (kb *KnowledgeBase) EnsureDefaults() {
 	}
 	if kb.Type != KnowledgeBaseTypeDocument {
 		kb.AutoTagConfig = nil
+		kb.ProfileConfig = nil
 	} else if kb.AutoTagConfig != nil {
 		kb.AutoTagConfig.Normalize()
 	}

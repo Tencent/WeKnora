@@ -372,4 +372,8 @@ type KnowledgeRepository interface {
 	GetKnowledgeTags(ctx context.Context, knowledgeIDs []string) (map[string][]*types.KnowledgeTag, error)
 	// DeleteKnowledgeTagRelations deletes all tag relations for a knowledge entry.
 	DeleteKnowledgeTagRelations(ctx context.Context, knowledgeID string) error
+	// ListKnowledgeProfileRows returns the lightweight projection used to
+	// aggregate a knowledge-base description: every enabled document that has
+	// finished parsing (completed or finalizing), without content columns.
+	ListKnowledgeProfileRows(ctx context.Context, tenantID uint64, kbID string) ([]*types.KnowledgeProfileRow, error)
 }
