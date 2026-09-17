@@ -516,6 +516,11 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 	// of those stages does not poison the parse result.
 	s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt,
 		types.SpanStatusDone, postOutput, "", "")
+	// The document now counts (title, type, folder, tags) in the knowledge-base
+	// description aggregation even before its summary lands; the summary task
+	// requests another refresh once the profile exists. No-op unless the KB
+	// opted in, and debounced so a batch upload costs one aggregation.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.taskEnqueuer, kb, false)
 	return nil
 }
 

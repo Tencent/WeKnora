@@ -55,6 +55,7 @@ func (s *knowledgeService) cloneKnowledge(
 		Channel:          src.Channel,
 		Title:            src.Title,
 		Description:      src.Description,
+		Profile:          src.Profile.Clone(),
 		Source:           src.Source,
 		ParseStatus:      "processing",
 		EnableStatus:     "disabled",
@@ -745,8 +746,73 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	logger.GetLogger(ctx).Infof("processChunks successfully")
 }
 
-// defaultMaxInputChars is the default maximum characters used as input for summary generation.
-const defaultMaxInputChars = 1024 * 24
+// defaultMaxInputChars is the default maximum characters used as input for
+// summary generation. The document profile (short summary, gist, topics,
+// type, one question) is decided by the head of a document; 8k characters
+// keeps the per-document cost a quarter of the previous 24k without changing
+// what the profile can say.
+const defaultMaxInputChars = 1024 * 8
+
+// defaultSummaryMaxTokens bounds the JSON profile reply; every field is short.
+const defaultSummaryMaxTokens = 1024
+
+// documentSummaryResult is what one profiling call yields: the short summary
+// stored in knowledge.Description plus the structured profile, when the model
+// returned parseable JSON.
+type documentSummaryResult struct {
+	Summary string
+	Profile *types.KnowledgeProfile
+}
+
+// documentProfileOutput mirrors the JSON contract of generate_summary.yaml.
+type documentProfileOutput struct {
+	Summary         string   `json:"summary"`
+	Gist            string   `json:"gist"`
+	Topics          []string `json:"topics"`
+	DocType         string   `json:"doc_type"`
+	TypicalQuestion string   `json:"typical_question"`
+}
+
+// parseDocumentSummaryOutput accepts both the structured JSON reply and a
+// legacy plain-text summary (custom templates, older models). Plain text is
+// stored as the summary with no profile, so nothing that worked before
+// regresses; only the knowledge-base aggregation loses that document's topics.
+func parseDocumentSummaryOutput(content string) *documentSummaryResult {
+	content = strings.TrimSpace(content)
+	var out documentProfileOutput
+	if err := common.ParseLLMJsonResponse(content, &out); err != nil {
+		return &documentSummaryResult{Summary: content}
+	}
+	summary := strings.TrimSpace(out.Summary)
+	profile := (&types.KnowledgeProfile{
+		Gist:            out.Gist,
+		Topics:          out.Topics,
+		DocType:         out.DocType,
+		TypicalQuestion: out.TypicalQuestion,
+	}).Normalize()
+	if summary == "" && profile != nil {
+		summary = profile.Gist
+	}
+	if summary == "" {
+		// JSON without usable text: fall back to the raw content so the
+		// caller's empty-output handling still applies.
+		return &documentSummaryResult{Summary: content}
+	}
+	return &documentSummaryResult{Summary: summary, Profile: profile}
+}
+
+// buildSummaryChunkContent is the text embedded for the document-level
+// summary chunk. The gist leads so the vector reflects the headline first.
+func buildSummaryChunkContent(summary string, profile *types.KnowledgeProfile) string {
+	summary = strings.TrimSpace(summary)
+	if profile != nil {
+		gist := strings.TrimSpace(profile.Gist)
+		if gist != "" && !strings.EqualFold(gist, summary) {
+			return "# Summary\n" + gist + "\n\n" + summary
+		}
+	}
+	return "# Summary\n" + summary
+}
 
 // imageDominatedTextThreshold is the rune count below which a document is
 // considered "image-dominated" — i.e. the body text is so sparse that we
@@ -810,6 +876,7 @@ func applyRetryableSummaryFailureState(
 	}
 	fallback := firstTextChunkSummaryFallback(textChunks)
 	knowledge.Description = fallback
+	knowledge.Profile = nil
 	knowledge.SummaryStatus = types.SummaryStatusFailed
 	return fallback
 }
@@ -873,10 +940,10 @@ func sortChunksForSummary(chunks []*types.Chunk) []*types.Chunk {
 // getSummary generates a summary for knowledge content using an AI model
 func (s *knowledgeService) getSummary(ctx context.Context,
 	summaryModel chat.Chat, knowledge *types.Knowledge, chunks []*types.Chunk,
-) (string, error) {
+) (*documentSummaryResult, error) {
 	// Get knowledge info from the first chunk
 	if len(chunks) == 0 {
-		return "", fmt.Errorf("no chunks provided for summary generation")
+		return nil, fmt.Errorf("no chunks provided for summary generation")
 	}
 
 	// Determine max input chars from config
@@ -956,7 +1023,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// hallucinate a scanner manual instead of admitting the document had no
 	// extractable text.
 	if err := checkSufficientSummaryContent(ctx, knowledge.ID, chunkContents); err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// User-authored metadata is trusted document context. Internal ingestion
@@ -968,7 +1035,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	contentWithMetadata = sampleLongContent(contentWithMetadata, maxInputChars)
 
 	// Determine max output tokens from config
-	maxTokens := 2048
+	maxTokens := defaultSummaryMaxTokens
 	if s.config.Conversation.Summary != nil && s.config.Conversation.Summary.MaxCompletionTokens > 0 {
 		maxTokens = s.config.Conversation.Summary.MaxCompletionTokens
 	}
@@ -995,15 +1062,17 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	})
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
-		return "", err
+		return nil, err
 	}
 	content, err := validateSummaryOutput(summary)
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned no usable content")
-		return "", err
+		return nil, err
 	}
-	logger.GetLogger(ctx).WithField("summary", content).Infof("GetSummary success")
-	return content, nil
+	result := parseDocumentSummaryOutput(content)
+	logger.GetLogger(ctx).WithField("summary", result.Summary).
+		WithField("has_profile", result.Profile != nil).Infof("GetSummary success")
+	return result, nil
 }
 
 // sampleLongContent returns content that fits within maxChars.
@@ -1105,6 +1174,9 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		})
 	var summaryErr error
 	summaryOut := types.JSONMap{}
+	// profileKB is the knowledge base once loaded; the deferred handler uses
+	// it to schedule the knowledge-base description refresh on terminal exit.
+	var profileKB *types.KnowledgeBase
 	defer func() {
 		// Decrement the parent's enrichment counter on terminal exit.
 		// "Terminal" is keyed on the value RETURNED to asynq, not on
@@ -1117,6 +1189,13 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// we only drain on the final attempt.
 		finalizeSubtaskDetached(ctx, s.repo, payload.KnowledgeID, "summary",
 			retErr, false, isFinalAsynqAttempt(ctx))
+		// Every terminal exit changes what the knowledge-base aggregation
+		// sees (a new profile, a cleared one, or a document that will never
+		// get one), so the debounced refresh is requested regardless of
+		// outcome. It is a no-op unless the KB opted in.
+		if retErr == nil && profileKB != nil {
+			_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, profileKB, false)
+		}
 		if span == nil {
 			return
 		}
@@ -1139,6 +1218,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	// seeing WHICH chat model was actually used (kb config drift, fall-
 	// throughs to a slow upstream, etc.).
 	summaryOut["model_id"] = kb.SummaryModelID
+	profileKB = kb
 
 	if kb.SummaryModelID == "" {
 		logger.Warn(ctx, "Knowledge base summary model ID is empty, skipping summary generation")
@@ -1202,6 +1282,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	if len(textChunks) == 0 {
 		logger.Infof(ctx, "No text chunks found for knowledge: %s", payload.KnowledgeID)
 		knowledge.Description = ""
+		knowledge.Profile = nil
 		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
 		s.repo.UpdateKnowledge(ctx, knowledge)
@@ -1272,7 +1353,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 	}
 
 	// Generate summary
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summaryResult, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to generate summary for knowledge %s: %v", payload.KnowledgeID, err)
 		// Surface the underlying LLM/IO error on the span so the trace UI
@@ -1288,6 +1369,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		// and surfacing it in the description is misleading.
 		if errors.Is(err, errInsufficientSummaryContent) {
 			knowledge.Description = ""
+			knowledge.Profile = nil
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
 			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
@@ -1318,11 +1400,14 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 		return nil
 	}
 
-	// Update knowledge description
+	// Update knowledge description and structured profile
+	summary := summaryResult.Summary
 	knowledge.Description = summary
+	knowledge.Profile = summaryResult.Profile
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	summaryOut["summary_chars"] = len([]rune(summary))
+	summaryOut["has_profile"] = summaryResult.Profile != nil
 	// Preview the generated summary on the span output so the trace
 	// viewer can show "this is what the LLM produced" at a glance,
 	// without hopping to the knowledge-detail page. Capped to keep
@@ -1355,7 +1440,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			TenantID:        knowledge.TenantID,
 			KnowledgeID:     knowledge.ID,
 			KnowledgeBaseID: knowledge.KnowledgeBaseID,
-			Content:         fmt.Sprintf("# Summary\n%s", summary),
+			Content:         buildSummaryChunkContent(summary, summaryResult.Profile),
 			ChunkIndex:      maxChunkIndex + 1,
 			IsEnabled:       true,
 			CreatedAt:       time.Now(),
@@ -2328,11 +2413,13 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	}
 	if len(textChunks) == 0 {
 		knowledge.Description = ""
+		knowledge.Profile = nil
 		knowledge.SummaryStatus = types.SummaryStatusFailed
 		knowledge.UpdatedAt = time.Now()
 		if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
 			return knowledge, updateErr
 		}
+		_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, kb, false)
 		return knowledge, errInsufficientSummaryContent
 	}
 	sort.Slice(textChunks, func(i, j int) bool {
@@ -2346,6 +2433,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	handleGenerationFailure := func(generationErr error) (*types.Knowledge, error) {
 		if errors.Is(generationErr, errInsufficientSummaryContent) {
 			knowledge.Description = ""
+			knowledge.Profile = nil
 			knowledge.SummaryStatus = types.SummaryStatusFailed
 			knowledge.UpdatedAt = time.Now()
 			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
@@ -2384,7 +2472,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 	if err != nil {
 		return handleGenerationFailure(fmt.Errorf("get chat model: %w", err))
 	}
-	summary, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
+	summaryResult, err := s.getSummary(ctx, chatModel, knowledge, textChunks)
 	if err != nil {
 		return handleGenerationFailure(err)
 	}
@@ -2398,12 +2486,16 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		logger.Infof(ctx, "Discarding stale summary refresh for knowledge %s", knowledgeID)
 		return nil, ErrSummaryRefreshStale
 	}
+	summary := summaryResult.Summary
 	knowledge.Description = summary
+	knowledge.Profile = summaryResult.Profile
 	knowledge.SummaryStatus = types.SummaryStatusCompleted
 	knowledge.UpdatedAt = time.Now()
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		return nil, err
 	}
+	summaryChunkContent := buildSummaryChunkContent(summary, summaryResult.Profile)
+	defer func() { _ = requestKnowledgeBaseProfileRefresh(ctx, s.task, kb, false) }()
 	if kb.NeedsEmbeddingModel() {
 		maxIndex := 0
 		for _, chunk := range allChunks {
@@ -2424,7 +2516,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		}
 		summaryChunks := make([]*types.Chunk, 0, len(existingSummaries))
 		for _, chunk := range existingSummaries {
-			chunk.Content = "# Summary\n" + summary
+			chunk.Content = summaryChunkContent
 			chunk.SourceContent = chunk.Content
 			chunk.IsEnabled = true
 			chunk.UpdatedAt = time.Now()
@@ -2436,7 +2528,7 @@ func (s *knowledgeService) RegenerateKnowledgeSummary(
 		if len(summaryChunks) == 0 {
 			summaryChunk := &types.Chunk{
 				ID: uuid.NewString(), TenantID: tenantID, KnowledgeID: knowledge.ID,
-				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: "# Summary\n" + summary,
+				KnowledgeBaseID: knowledge.KnowledgeBaseID, Content: summaryChunkContent,
 				ChunkIndex: maxIndex + 1, IsEnabled: true, ChunkType: types.ChunkTypeSummary,
 				ParentChunkID: textChunks[0].ID, CreatedAt: time.Now(), UpdatedAt: time.Now(),
 			}

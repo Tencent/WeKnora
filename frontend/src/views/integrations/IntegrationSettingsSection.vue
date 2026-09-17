@@ -36,6 +36,14 @@
         <ApiIntegrationSettings />
       </div>
 
+      <div v-if="tab === 'mcpserver'" class="section">
+        <div class="section-header">
+          <h2>{{ $t('integrations.mcpserver.title') }}</h2>
+          <p class="section-description">{{ $t('integrations.mcpserver.subtitle') }}</p>
+        </div>
+        <McpServerIntegrationSettings />
+      </div>
+
       <ChromeExtensionLanding v-if="tab === 'chrome'" />
       <ClawSkillLanding v-if="tab === 'claw'" />
       <CliIntegrationLanding v-if="tab === 'cli'" />
@@ -49,6 +57,7 @@ import { useRoute } from 'vue-router'
 import IMChannelPanel from '@/components/IMChannelPanel.vue'
 import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue'
 import ApiIntegrationSettings from '@/views/integrations/ApiIntegrationSettings.vue'
+import McpServerIntegrationSettings from '@/views/integrations/McpServerIntegrationSettings.vue'
 import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.vue'
 import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue'
 import CliIntegrationLanding from '@/views/integrations/CliIntegrationLanding.vue'

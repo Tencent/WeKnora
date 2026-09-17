@@ -145,43 +145,6 @@ func validateKnowledgeBaseIDsInSearchTargets(searchTargets types.SearchTargets, 
 	return nil
 }
 
-// resolveAuthorizedSourceRefs validates Wiki source_refs/suspected IDs against
-// the same Agent scope and rebuilds the stored "uuid|title" representation
-// from server data instead of trusting a model-supplied title suffix.
-func resolveAuthorizedSourceRefs(
-	ctx context.Context,
-	searchTargets types.SearchTargets,
-	refs []string,
-	knowledgeService interfaces.KnowledgeService,
-) ([]string, error) {
-	resolved := make([]string, 0, len(refs))
-	seen := make(map[string]struct{}, len(refs))
-	for _, ref := range refs {
-		knowledgeID := strings.TrimSpace(strings.SplitN(ref, "|", 2)[0])
-		if knowledgeID == "" {
-			continue
-		}
-		knowledge, err := authorizeKnowledgeInSearchTargets(ctx, searchTargets, knowledgeID, knowledgeService)
-		if err != nil {
-			return nil, err
-		}
-		if _, exists := seen[knowledge.ID]; exists {
-			continue
-		}
-		seen[knowledge.ID] = struct{}{}
-		title := strings.TrimSpace(knowledge.Title)
-		if title == "" {
-			title = strings.TrimSpace(knowledge.FileName)
-		}
-		if title == "" {
-			resolved = append(resolved, knowledge.ID)
-		} else {
-			resolved = append(resolved, knowledge.ID+"|"+title)
-		}
-	}
-	return resolved, nil
-}
-
 type knowledgeTagsFetcher func(context.Context, []string) (map[string][]*types.KnowledgeTag, error)
 
 func searchTargetsAllowKnowledgeID(

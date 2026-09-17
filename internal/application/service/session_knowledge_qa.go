@@ -984,6 +984,10 @@ func (s *sessionService) handleModelFallback(ctx context.Context, chatManage *ty
 
 	// Start streaming response
 	fallbackMessages, modelContext := prepareFallbackMessages(chatManage, promptContent)
+	if leaks := modelContext.LeakedIdentifiers(fallbackMessages); len(leaks) > 0 {
+		logger.Warnf(ctx, "[Fallback][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
+			len(leaks), modelcontext.SummarizeLeaks(leaks))
+	}
 	responseChan, err := chatModel.ChatStream(ctx, fallbackMessages, opt)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to start streaming fallback response: %v, falling back to fixed response", err)

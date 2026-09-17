@@ -83,6 +83,11 @@ type KnowledgeBaseInfo struct {
 	// significantly more reliable than running probing searches.
 	Capabilities []string
 	RecentDocs   []RecentDocInfo // Recently added documents (up to 10)
+	// Profile is the generated description (gist, merged topics, typical
+	// questions) derived from document profiles. It complements the manual
+	// Description: that one says what the KB is for, this one says what is
+	// actually in it. nil when never generated.
+	Profile *types.KnowledgeBaseProfile
 }
 
 // PlaceholderDefinition defines a placeholder exposed to UI/configuration
@@ -131,6 +136,7 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 		if kb.Description != "" {
 			fmt.Fprintf(&b, "<description>%s</description>\n", escapeXMLAttr(formatDocSummary(kb.Description, 240)))
 		}
+		writeKnowledgeBaseProfile(&b, kb.Profile)
 		if len(kb.RecentDocs) > 0 {
 			b.WriteString("<recent_documents>\n")
 			for j, doc := range kb.RecentDocs {
@@ -157,6 +163,35 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 	}
 	b.WriteString("</knowledge_bases>")
 	return b.String()
+}
+
+// writeKnowledgeBaseProfile renders the generated description so the model
+// can route a question to the right bound knowledge base without probing it.
+// Every value is untrusted model output stored in the database, so it is
+// escaped and capped like the manual description.
+func writeKnowledgeBaseProfile(b *strings.Builder, profile *types.KnowledgeBaseProfile) {
+	if profile == nil || !profile.HasText() {
+		return
+	}
+	b.WriteString("<generated_profile>\n")
+	if gist := strings.TrimSpace(profile.Gist); gist != "" {
+		fmt.Fprintf(b, "<gist>%s</gist>\n", escapeXMLAttr(formatDocSummary(gist, 300)))
+	}
+	if len(profile.Topics) > 0 {
+		fmt.Fprintf(b, "<topics>%s</topics>\n",
+			escapeXMLAttr(formatDocSummary(strings.Join(profile.Topics, ", "), 300)))
+	}
+	if len(profile.TypicalQuestions) > 0 {
+		b.WriteString("<typical_questions>\n")
+		for i, q := range profile.TypicalQuestions {
+			if i >= types.KnowledgeBaseProfileMaxQuestions {
+				break
+			}
+			fmt.Fprintf(b, "<question>%s</question>\n", escapeXMLAttr(formatDocSummary(q, 160)))
+		}
+		b.WriteString("</typical_questions>\n")
+	}
+	b.WriteString("</generated_profile>\n")
 }
 
 // renderPromptPlaceholders renders placeholders in the prompt template.

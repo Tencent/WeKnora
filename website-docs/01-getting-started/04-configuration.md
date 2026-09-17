@@ -66,7 +66,8 @@ flowchart LR
 | `enable_rerank` | bool | true | 启用 Rerank |
 | `fallback_prompt_id` | string | "default_fallback_prompt" | 兜底 prompt 模板 ID（`prompt_templates/fallback.yaml`，mode:"model"） |
 | `rewrite_prompt_id` | string | "default_rewrite" | 改写模板 ID（含 content 系统侧 + user 用户侧） |
-| `generate_summary_prompt_id` | string | "default_summary" | 文档摘要模板 ID |
+| `generate_summary_prompt_id` | string | "default_summary" | 文档画像模板 ID（短摘要 + gist/主题/类型/典型问题，JSON 输出） |
+| `generate_kb_description_prompt_id` | string | "default_kb_description" | 知识库描述模板 ID（输入为文档画像聚合，不是文档正文） |
 | `generate_session_title_prompt_id` | string | "default_session_title" | 会话标题生成模板 ID |
 | `extract_entities_prompt_id` / `extract_relationships_prompt_id` | string | "default_extract_entities" / "default_extract_relationships" | 图谱抽取模板 ID（`graph_extraction.yaml`） |
 | `generate_questions_prompt_id` | string | "default_generate_questions" | 预生成问题模板 ID |
@@ -75,10 +76,10 @@ flowchart LR
 
 | 名称 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `max_input_chars` | int | 16384 | 送入 LLM 的最大字符数 |
+| `max_input_chars` | int | 8192 | 送入 LLM 的最大字符数。文档画像只需要文档开头即可判断主题，8k 足够；旧值 16384/24576 会成倍增加每篇文档的摘要成本 |
 | `temperature` | float | 0.3 | 生成温度 |
 | `repeat_penalty` | float | 1.0 | 重复惩罚 |
-| `max_completion_tokens` | int | 2048 | 最大生成 token |
+| `max_completion_tokens` | int | 1024 | 最大生成 token（画像 JSON 各字段都很短） |
 | `no_match_prefix` | string | `<think>\n</think>\nNO_MATCH` | 模型输出以此为前缀时判定「未命中」触发 fallback |
 | `prompt_id` | string | "default_kb" | 系统 Prompt 模板 ID（`system_prompt.yaml`） |
 | `context_template_id` | string | "default_context" | 上下文拼装模板 ID（`context_template.yaml`） |

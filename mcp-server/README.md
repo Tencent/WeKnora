@@ -1,5 +1,11 @@
 # WeKnora MCP Server
 
+> **⚠️ 已弃用（Deprecated）**
+>
+> WeKnora 现已内置 MCP Server：在「设置 → 发布与集成 → MCP Server」中为空间创建端点即可，支持多个端点、按端点选择知识库范围和工具，客户端通过 Streamable HTTP 直接连接 `/mcp/<endpoint_id>`，无需再部署本目录的 Python 进程。本目录仅为兼容旧部署保留，后续版本将移除。
+>
+> WeKnora now ships a built-in MCP server: create endpoints under "Settings → Publish & Integrations → MCP Server", each with its own token, knowledge-base scope and tool list, and connect clients to `/mcp/<endpoint_id>` over Streamable HTTP. This Python package is kept only for existing deployments and will be removed in a future release.
+
 这是一个 Model Context Protocol (MCP) 服务器，提供对 WeKnora 知识管理 API 的访问。
 
 ## 快速开始

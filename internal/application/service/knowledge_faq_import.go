@@ -1593,17 +1593,19 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			indexDuration,
 		)
 
-		// 更新chunks的Status为已索引
-		chunksToUpdate := make([]*types.Chunk, 0, len(chunks))
+		// 更新chunks的Status为已索引：所有行写同一个值，一条 UPDATE ... WHERE id IN 即可，
+		// 不需要把 content 等字段再回传一遍。
 		for _, chunk := range chunks {
 			chunk.Status = int(types.ChunkStatusIndexed) // indexed
-			chunksToUpdate = append(chunksToUpdate, chunk)
 		}
-		if err := s.chunkService.UpdateChunks(ctx, chunksToUpdate); err != nil {
+		if err := s.chunkRepo.UpdateChunkFieldsByIDs(ctx, tenantID, chunkIds, map[string]interface{}{
+			"status": int(types.ChunkStatusIndexed),
+		}); err != nil {
 			return fmt.Errorf("failed to update chunks status: %w", err)
 		}
 
-		// 收集成功条目信息
+		// 收集成功条目信息（tag 信息按批一次查出，避免每条一次查询）
+		tagsByID := s.loadFAQTagsForChunks(ctx, tenantID, chunks)
 		for idx, chunk := range chunks {
 			entryIdx := i + idx + processedCount // 原始条目索引
 			meta, _ := chunk.FAQMetadata()
@@ -1611,15 +1613,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			if meta != nil {
 				standardQ = meta.StandardQuestion
 			}
-			// 获取 tag info
-			var tagID int64
-			tagName := ""
-			if chunk.TagID != "" {
-				if tag, err := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID); err == nil && tag != nil {
-					tagID = tag.SeqID
-					tagName = tag.Name
-				}
-			}
+			tagID, tagName := faqTagInfo(tagsByID, chunk.TagID)
 			progress.SuccessEntries = append(progress.SuccessEntries, types.FAQSuccessEntry{
 				Index:            entryIdx,
 				SeqID:            chunk.SeqID,
@@ -2687,17 +2681,11 @@ func (s *knowledgeService) executeFAQMergeOperations(
 		}
 
 		// 5. 收集成功条目信息
+		tagsByID := s.loadFAQTagsForChunks(ctx, tenantID, mergedChunks)
 		for i, op := range batch {
 			chunk := mergedChunks[i]
 			meta := op.MergedMeta
-			var tagID int64
-			tagName := ""
-			if chunk.TagID != "" {
-				if tag, tErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID); tErr == nil && tag != nil {
-					tagID = tag.SeqID
-					tagName = tag.Name
-				}
-			}
+			tagID, tagName := faqTagInfo(tagsByID, chunk.TagID)
 			progress.SuccessEntries = append(progress.SuccessEntries, types.FAQSuccessEntry{
 				Index:            op.Detail.Index,
 				SeqID:            chunk.SeqID,
@@ -2713,6 +2701,53 @@ func (s *knowledgeService) executeFAQMergeOperations(
 	}
 
 	return mergedCount, nil
+}
+
+// loadFAQTagsForChunks resolves every distinct tag referenced by chunks with a
+// single query. Lookup failures are logged and yield an empty map so the
+// import result degrades to "no tag info" instead of aborting the batch.
+func (s *knowledgeService) loadFAQTagsForChunks(
+	ctx context.Context, tenantID uint64, chunks []*types.Chunk,
+) map[string]*types.KnowledgeTag {
+	tagsByID := make(map[string]*types.KnowledgeTag)
+	seen := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.TagID == "" {
+			continue
+		}
+		if _, ok := seen[chunk.TagID]; ok {
+			continue
+		}
+		seen[chunk.TagID] = struct{}{}
+		ids = append(ids, chunk.TagID)
+	}
+	if len(ids) == 0 {
+		return tagsByID
+	}
+	tags, err := s.tagRepo.GetByIDs(ctx, tenantID, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load FAQ tags for import result: %v", err)
+		return tagsByID
+	}
+	for _, tag := range tags {
+		if tag != nil {
+			tagsByID[tag.ID] = tag
+		}
+	}
+	return tagsByID
+}
+
+// faqTagInfo returns the external (seq_id, name) pair for tagID, or zero values
+// when the chunk has no tag or the tag could not be loaded.
+func faqTagInfo(tagsByID map[string]*types.KnowledgeTag, tagID string) (int64, string) {
+	if tagID == "" {
+		return 0, ""
+	}
+	if tag, ok := tagsByID[tagID]; ok && tag != nil {
+		return tag.SeqID, tag.Name
+	}
+	return 0, ""
 }
 
 // buildFAQImportResultMessage 构建 FAQ 导入 / 验证最终结果的人类可读消息。

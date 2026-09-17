@@ -99,6 +99,28 @@ func (r *knowledgeRepository) ListKnowledgeByKnowledgeBaseID(
 	return knowledges, nil
 }
 
+// ListKnowledgeProfileRows selects only the columns the knowledge-base
+// description aggregation needs. Documents still in "finalizing" are
+// included on purpose: their title and file type already count, and the
+// summary task that completes them re-triggers the aggregation with their
+// profile attached.
+func (r *knowledgeRepository) ListKnowledgeProfileRows(
+	ctx context.Context, tenantID uint64, kbID string,
+) ([]*types.KnowledgeProfileRow, error) {
+	var rows []*types.KnowledgeProfileRow
+	err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Select("id", "title", "file_name", "file_type", "folder_path", "created_at", "profile").
+		Where("tenant_id = ? AND knowledge_base_id = ?", tenantID, kbID).
+		Where("parse_status IN ?", []string{types.ParseStatusCompleted, types.ParseStatusFinalizing}).
+		Where("enable_status = ?", "enabled").
+		Order("created_at ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // applyKnowledgeListFilter applies the optional filter dimensions of
 // KnowledgeListFilter to a GORM query. Tenant / knowledge base scoping must be
 // applied by the caller before invoking this helper.

@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -82,6 +83,9 @@ type RouterParams struct {
 	IMHandler                    *handler.IMHandler
 	EmbedChannelHandler          *handler.EmbedChannelHandler
 	EmbedChannelService          interfaces.EmbedChannelService
+	MCPEndpointHandler           *handler.MCPEndpointHandler
+	MCPEndpointService           interfaces.MCPEndpointService
+	MCPServer                    *mcpserver.Server
 	RedisClient                  *redis.Client
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
@@ -117,8 +121,11 @@ func NewRouter(params RouterParams) *gin.Engine {
 		AllowHeaders: []string{
 			"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID",
 			"X-Embed-Session", "X-External-User-ID", "X-External-User-Token", "X-WeKnora-Desktop-Token",
+			// Streamable HTTP MCP clients running in a browser send these on
+			// the /mcp/:endpoint_id surface.
+			"MCP-Protocol-Version", "Mcp-Session-Id", "Last-Event-ID",
 		},
-		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
+		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin", "Mcp-Session-Id"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
@@ -174,6 +181,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		params.StorageBackendResolver,
 		params.ResourceCatalog,
 	)
+
+	// Workspace MCP server surface (/mcp/:endpoint_id): bearer-token auth per
+	// endpoint, so it must precede the global Auth middleware.
+	RegisterMCPServerRoutes(r, params.MCPServer, params.MCPEndpointService, params.TenantService)
 
 	// Short-lived capability URLs for IM and other clients that cannot attach
 	// WeKnora authentication headers.
@@ -305,6 +316,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
+		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)

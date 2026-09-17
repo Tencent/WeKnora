@@ -1879,14 +1879,14 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		}
 
 		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			var refKnowledgeID, refTitle string
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-				refTitle = ref[pipeIdx+1:]
-			} else {
-				refKnowledgeID = ref
-				refTitle = ref
+			refKnowledgeID, refTitle := types.ParseWikiSourceRef(ref)
+			if refKnowledgeID == "" {
+				continue
+			}
+			if refTitle == "" {
+				// Legacy bare refs carry no title; the ID is the only label
+				// available for the retract prompt.
+				refTitle = refKnowledgeID
 			}
 
 			if retractKIDs[refKnowledgeID] {
@@ -1905,12 +1905,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 
 		newRefs := types.StringArray{}
 		for _, ref := range page.SourceRefs {
-			pipeIdx := strings.Index(ref, "|")
-			refKnowledgeID := ref
-			if pipeIdx > 0 {
-				refKnowledgeID = ref[:pipeIdx]
-			}
-			if !retractKIDs[refKnowledgeID] {
+			if !retractKIDs[types.WikiSourceKnowledgeID(ref)] {
 				newRefs = append(newRefs, ref)
 			}
 		}

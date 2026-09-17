@@ -3,7 +3,7 @@
 MCP 用于智能体与外部工具之间的连接。WeKnora 支持接入外部 MCP 服务，也提供独立 MCP Server 供其他客户端调用：
 
 1. **WeKnora 作为 MCP 客户端**：在「MCP 服务」设置中接入任意外部 MCP server（SSE / Streamable HTTP），其工具自动注册进 Agent 的工具箱，供 Agent 在对话中调用。支持 API Key / Bearer / OAuth 2.0（含动态客户端注册与 PKCE）三种认证策略、按工具粒度的人工审批，以及会话内（in-conversation）OAuth 授权。
-2. **WeKnora 作为 MCP Server**：仓库 `mcp-server/` 目录提供一个独立的 Python MCP server（PyPI 包 `tencent-weknora-mcp`，入口命令 `weknora-mcp-server`），把 WeKnora 的知识库、检索、会话、Agent 问答、Wiki 等 REST API 封装成 31 个 MCP 工具，供 Claude Desktop、VS Code Copilot 等外部 MCP 客户端使用。
+2. **WeKnora 作为 MCP Server**：在「发布与集成 → MCP Server」中为当前空间创建一个或多个 MCP 端点，每个端点有独立的令牌、知识库范围和工具清单，Claude Desktop、Cursor、Claude Code、VS Code Copilot 等 MCP 客户端通过 Streamable HTTP 直接连接，无需额外部署进程。仓库 `mcp-server/` 目录下的 Python 服务是旧方案，已标记弃用。
 
 接入外部服务可扩展 WeKnora 智能体的工具；运行 WeKnora MCP Server 可让外部客户端使用知识库检索、问答和管理能力。
 
@@ -26,20 +26,31 @@ OAuth 服务按调用者分别授权。工具需要审批时，在对话中检�
 
 ## 供外部客户端调用
 
-在外部客户端所在环境安装 `tencent-weknora-mcp`，配置 WeKnora API 地址与 API Key，再启动 `weknora-mcp-server`。客户端可调用知识库、检索、会话和 Wiki 等 31 个工具，范围受 API Key 权限约束。
+在「设置 → 发布与集成 → MCP Server」新建端点：填写名称、选择可访问的知识库（留空为全部）、勾选要暴露的工具，需要问答时再指定默认 Agent。创建后会一次性展示令牌和地址 `/mcp/<endpoint_id>`，页面同时给出 Cursor / VS Code / Claude Desktop 的 `mcpServers` 配置、Claude Code 的一行命令，以及仅支持 stdio 的客户端通过 `mcp-remote` 桥接的写法。
 
-安装命令、环境变量、传输模式和客户端配置示例见下方 MCP Server 参考。
+一个空间可以创建多个端点。例如给客服团队一个只开检索和问答、只看两个知识库的端点，给内容团队另一个开了写入工具的端点。令牌可随时轮换，端点可随时停用，删除端点后使用它的客户端立即断开。
+
+端点暴露的工具按四组勾选，默认只开只读工具：
+
+| 组 | 工具 | 说明 |
+|---|---|---|
+| 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；语义搜索与关键词正则搜索分开 |
+| 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
+| Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效 |
+| 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
+
+工具实现直接复用 Agent 的原生工具（`internal/agent/tools/`），鉴权复用 API Key 的作用域模型：端点被换算成一把仅含 retrieve / chat / ingest 等能力、限定知识库范围的作用域，所以后端各服务对它的检查与对受限 API Key 完全一致。实现细节见下方内置 MCP Server 参考。
 
 ## 接入方式对照 {#两个方向的对照速览}
 
 | 维度 | WeKnora 作为 MCP 客户端 | WeKnora 作为 MCP Server |
 |---|---|---|
-| 代码位置 | `internal/mcp/` + handler/service/repository + `internal/agent/tools/` | `mcp-server/`（Python） |
-| 协议库 | `github.com/mark3labs/mcp-go` | `mcp`（官方 Python SDK，2.x 高层 `MCPServer` API） |
-| 传输 | SSE、Streamable HTTP（stdio 因安全禁用） | stdio（默认）、SSE、Streamable HTTP |
-| 认证 | API Key / Bearer / OAuth 2.0（DCR + PKCE，token AES 加密、按 principal 隔离） | 出站 `X-API-Key`（WeKnora API Key）；入站网络传输 `MCP_SERVER_AUTH_TOKEN` |
-| 安全控制 | 工具级人工审批、SSRF 校验、不可信输出前缀、DTO 级密钥隔离 | 上传目录白名单、网络传输强制鉴权、SSL 校验默认开启 |
-| 消费者 | WeKnora Agent（对话中自动调用） | Claude Desktop / VS Code Copilot 等任意 MCP 客户端 |
+| 代码位置 | `internal/mcp/` + handler/service/repository + `internal/agent/tools/` | `internal/mcpserver/` + `internal/middleware/mcp_endpoint_auth.go` + `internal/handler/mcp_endpoint.go` |
+| 协议库 | `github.com/mark3labs/mcp-go`（client） | `github.com/mark3labs/mcp-go`（server，Streamable HTTP，无状态模式） |
+| 传输 | SSE、Streamable HTTP（stdio 因安全禁用） | Streamable HTTP；stdio 客户端用 `mcp-remote` 桥接 |
+| 认证 | API Key / Bearer / OAuth 2.0（DCR + PKCE，token AES 加密、按 principal 隔离） | 入站 `Authorization: Bearer mcp_…`，每个端点独立令牌（SHA-256 存储，可轮换） |
+| 安全控制 | 工具级人工审批、SSRF 校验、不可信输出前缀、DTO 级密钥隔离 | 端点级工具白名单（列表与调用双重校验）、知识库范围、每分钟限流、令牌只展示一次 |
+| 消费者 | WeKnora Agent（对话中自动调用） | Claude Desktop / Cursor / Claude Code / VS Code Copilot 等任意 MCP 客户端 |
 
 ## 配置与实现参考
 
@@ -352,7 +363,78 @@ flowchart LR
 
 ---
 
-### MCP Server 参考 {#第二部分-weknora-作为-mcp-server-mcp-server}
+### 内置 MCP Server 参考 {#第二部分-weknora-作为-mcp-server}
+
+#### 数据模型与管理 API
+
+`mcp_endpoints` 表（PostgreSQL 迁移 `000102_mcp_endpoints`，SQLite `000022_mcp_endpoints`）每行一个端点：`tenant_id`、`name`、`enabled`、`token_hash`（SHA-256）、`token_hint`（前缀展示用）、`knowledge_base_ids`（空数组表示空间内全部）、`tools`（白名单）、`default_agent_id`、`rate_limit_per_minute`、`last_used_at`。类型定义在 `internal/types/mcp_endpoint.go`，工具目录在 `internal/types/mcp_endpoint_tools.go`。
+
+管理接口挂在 `/api/v1/mcp-endpoints`，读取需 Viewer，变更需 Admin，API Key 需要 `manage_channels` 能力：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/mcp-endpoints` | 列表 |
+| GET | `/mcp-endpoints/tools` | 工具目录（分组、默认勾选） |
+| POST | `/mcp-endpoints` | 创建，响应含一次性 `token` |
+| GET / PUT / DELETE | `/mcp-endpoints/:endpoint_id` | 详情 / 更新 / 删除 |
+| POST | `/mcp-endpoints/:endpoint_id/rotate-token` | 轮换令牌，响应含新 `token` |
+
+#### 请求链路
+
+```mermaid
+flowchart LR
+    C["MCP 客户端"] -->|"POST /mcp/:endpoint_id<br/>Authorization: Bearer mcp_…"| A["MCPEndpointAuth<br/>（internal/middleware）"]
+    A -->|"注入 tenant / principal /<br/>TenantAPIKeyScope / *MCPEndpoint"| S["mcp-go StreamableHTTPServer<br/>（internal/mcpserver）"]
+    S -->|"tools/list"| F["ToolFilter：按端点白名单过滤"]
+    S -->|"tools/call"| G["Guard：白名单 + 限流 + last_used"]
+    G --> T["工具处理器：复用 internal/agent/tools<br/>KnowledgeSearch / GrepChunks / ListChunks / Wiki…"]
+    G --> Q["ask：SessionService.AgentQA / KnowledgeQA<br/>同步收集 final_answer + references"]
+```
+
+- 公开路由 `/mcp/:endpoint_id` 注册在全局 Auth 中间件之前，与 embed 公开路由同级；`MCPEndpointAuth` 解析令牌后通过 `applyAuthSession` 写入租户、合成用户、`mcp_endpoint` principal，以及由端点换算出的 `TenantAPIKeyScope`（`types.MCPEndpointScope`），下游服务据此做知识库范围和能力检查。
+- 全局只有一个 `MCPServer` 实例注册完整工具目录；`WithToolFilter` 按请求上下文里的端点过滤 `tools/list`，`WithToolHandlerMiddleware` 在 `tools/call` 再校验一次白名单并做每端点滑动窗口限流（Redis 优先，本地回退）。
+- 传输使用 `WithStateLess(true)`，任意副本都能处理任意请求，客户端无需保持 `Mcp-Session-Id`。
+- `ask` 工具的会话归属为 `mcp_endpoint:<tenant>:<endpoint>`，续聊时校验 `session_id` 属于同一端点；单次回答上限 4 分钟。
+- 文档级工具（列表、阅读、写入）先用 `access.ResolveKB` 解析权限，再在知识库所属空间下执行，因此组织分享过来的知识库也能读写，且新建文档落在所有者空间。
+
+#### 客户端配置示例
+
+```json
+{
+  "mcpServers": {
+    "weknora-docs": {
+      "url": "https://your-weknora.example.com/mcp/<endpoint_id>",
+      "headers": { "Authorization": "Bearer mcp_xxxxxxxx" }
+    }
+  }
+}
+```
+
+Claude Code：
+
+```bash
+claude mcp add --transport http weknora-docs https://your-weknora.example.com/mcp/<endpoint_id> --header "Authorization: Bearer mcp_xxxxxxxx"
+```
+
+仅支持 stdio 的客户端：
+
+```json
+{
+  "mcpServers": {
+    "weknora-docs": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://your-weknora.example.com/mcp/<endpoint_id>", "--header", "Authorization: Bearer mcp_xxxxxxxx"]
+    }
+  }
+}
+```
+
+### Python MCP Server 参考（旧版，已弃用） {#第二部分-weknora-作为-mcp-server-mcp-server}
+
+::: warning 已弃用
+`mcp-server/` 下的 Python 服务是内置 MCP Server 之前的方案：每个进程绑定一把 API Key，只能访问一个空间，工具与 REST 接口一一对应。新部署请使用上面的内置 MCP Server；本节仅供仍在使用旧方案的用户参考，后续版本会移除该目录。
+:::
+
 
 `mcp-server/` 是一个独立的 Python 包，PyPI 名 **`tencent-weknora-mcp`**（当前 1.1.1，Python ≥ 3.10，依赖 `mcp>=2,<3`、`requests>=2.31.0`、`starlette`、`uvicorn`），核心实现在 `mcp-server/weknora_mcp_server.py`：`WeKnoraClient` 用 `requests.Session` 携带 `X-API-Key` 调 WeKnora REST API，`MCPServer("weknora-server", version="1.1.1")` 注册工具并通过所选传输对外服务。
 

@@ -33,40 +33,56 @@ func NewChunkRepository(db *gorm.DB) interfaces.ChunkRepository {
 	return &chunkRepository{db: db}
 }
 
-// CreateChunks creates multiple chunks in batches.
-// Uses Omit("SeqID") so GORM won't include the auto-increment column in the
-// INSERT, which avoids MySQL generating ON DUPLICATE KEY UPDATE and the
-// resulting gap-lock deadlocks under concurrent writes.
-// A deadlock retry wrapper is kept as defense-in-depth for any remaining
-// edge cases on secondary unique indexes.
+// createChunksBatchSize is the number of rows per INSERT statement. Chunk rows
+// carry long text columns, so the batch is kept well below the bind-parameter
+// limits of the supported drivers while still amortizing round trips.
+const createChunksBatchSize = 500
+
+// updateChunksBatchSize bounds the rows per batch UPDATE so the bind-parameter
+// count (6 per row) stays far below the PostgreSQL limit of 65535.
+const updateChunksBatchSize = 1000
+
+// updateByIDsBatchSize bounds the IN list for UPDATE ... WHERE id IN (...).
+const updateByIDsBatchSize = 5000
+
+// CreateChunks creates multiple chunks in batches inside a single transaction.
+//
+// SourceContent is intentionally left empty on create. It records the parser
+// output only once a user edits the chunk (see chunkService.UpdateDocumentChunk,
+// which backfills it from Content on the first edit). Writing a copy of Content
+// for every chunk doubled the insert volume and the TOAST footprint for no
+// benefit.
 func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chunk) error {
+	if len(chunks) == 0 {
+		return nil
+	}
 	for _, chunk := range chunks {
 		chunk.Content = common.CleanInvalidUTF8(chunk.Content)
 		chunk.ContextHeader = common.CleanInvalidUTF8(chunk.ContextHeader)
-		if chunk.SourceContent == "" {
-			chunk.SourceContent = chunk.Content
+		if chunk.SourceContent != "" {
+			chunk.SourceContent = common.CleanInvalidUTF8(chunk.SourceContent)
 		}
 		if chunk.IndexStatus == "" {
 			chunk.IndexStatus = "ready"
 		}
 	}
 
-	db := r.db.WithContext(ctx)
-
-	// SQLite doesn't support autoIncrement on non-PK columns,
-	// so we must pre-assign SeqIDs manually (safe: single connection).
-	// PostgreSQL / MySQL use DB sequences — skip to avoid duplicate key
-	// races under concurrent inserts.
-	if db.Dialector.Name() == "sqlite" {
-		if err := types.AssignChunkSeqIDs(db, chunks); err != nil {
-			return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// SQLite doesn't support autoIncrement on non-PK columns, so SeqIDs are
+		// pre-assigned from MAX(seq_id). Doing it inside the write transaction
+		// keeps the read and the insert on the same connection.
+		// PostgreSQL uses a DB sequence — skip to avoid duplicate key races.
+		if tx.Name() == "sqlite" {
+			if err := types.AssignChunkSeqIDs(tx, chunks); err != nil {
+				return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
+			}
 		}
-	}
 
-	// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
-	// explicitly inserted, bypassing GORM's default value behavior.
-	// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
-	return db.Select("*").CreateInBatches(chunks, 100).Error
+		// Select("*") ensures zero-value fields (IsEnabled=false, Flags=0) are
+		// explicitly inserted, bypassing GORM's default value behavior.
+		// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
+		return tx.Select("*").CreateInBatches(chunks, createChunksBatchSize).Error
+	})
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID
@@ -414,109 +430,127 @@ func (r *chunkRepository) SaveChunks(ctx context.Context, chunks []*types.Chunk)
 //   - other fields not listed above
 //
 // If you need to update metadata or content_hash, use UpdateChunk (single) instead.
+//
+// On PostgreSQL the rows are joined against a VALUES list, so the statement
+// costs O(N) instead of the O(N²) of a CASE-per-column chain. Other dialects
+// run one small UPDATE per row inside a single transaction, which is also
+// O(N) and keeps the statement well within their bind-parameter limits.
 func (r *chunkRepository) UpdateChunks(ctx context.Context, chunks []*types.Chunk) error {
 	if len(chunks) == 0 {
 		return nil
 	}
 
-	// Build batch update SQL with CASE expressions
-	var ids []string
-	contentCases := make([]string, 0, len(chunks))
-	isEnabledCases := make([]string, 0, len(chunks))
-	tagIDCases := make([]string, 0, len(chunks))
-	flagsCases := make([]string, 0, len(chunks))
-	statusCases := make([]string, 0, len(chunks))
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for start := 0; start < len(chunks); start += updateChunksBatchSize {
+			end := start + updateChunksBatchSize
+			if end > len(chunks) {
+				end = len(chunks)
+			}
+			batch := chunks[start:end]
 
-	var contentArgs []interface{}
-	var isEnabledArgs []interface{}
-	var tagIDArgs []interface{}
-	var flagsArgs []interface{}
-	var statusArgs []interface{}
-
-	for _, chunk := range chunks {
-		ids = append(ids, chunk.ID)
-		content := common.CleanInvalidUTF8(chunk.Content)
-
-		contentCases = append(contentCases, "WHEN id = ? THEN ?")
-		contentArgs = append(contentArgs, chunk.ID, content)
-
-		// Convert bool to string for PostgreSQL compatibility
-		isEnabledStr := "false"
-		if chunk.IsEnabled {
-			isEnabledStr = "true"
+			var err error
+			if tx.Name() == "postgres" {
+				err = updateChunksPostgres(tx, batch)
+			} else {
+				err = updateChunksRowByRow(tx, batch)
+			}
+			if err != nil {
+				return err
+			}
 		}
-		isEnabledCases = append(isEnabledCases, "WHEN id = ? THEN ?")
-		isEnabledArgs = append(isEnabledArgs, chunk.ID, isEnabledStr)
+		return nil
+	})
+}
 
-		tagIDCases = append(tagIDCases, "WHEN id = ? THEN ?")
-		tagIDArgs = append(tagIDArgs, chunk.ID, chunk.TagID)
-
-		flagsCases = append(flagsCases, "WHEN id = ? THEN ?")
-		flagsArgs = append(flagsArgs, chunk.ID, fmt.Sprintf("%d", chunk.Flags))
-
-		statusCases = append(statusCases, "WHEN id = ? THEN ?")
-		statusArgs = append(statusArgs, chunk.ID, fmt.Sprintf("%d", chunk.Status))
-	}
-
-	// Build IN clause placeholders
-	inPlaceholders := make([]string, len(ids))
-	for i := range ids {
-		inPlaceholders[i] = "?"
-	}
-
-	// Combine args in correct order: content, is_enabled, tag_id, flags, status, then IN clause
-	var args []interface{}
-	args = append(args, contentArgs...)
-	args = append(args, isEnabledArgs...)
-	args = append(args, tagIDArgs...)
-	args = append(args, flagsArgs...)
-	args = append(args, statusArgs...)
-	for _, id := range ids {
-		args = append(args, id)
-	}
-
-	isPostgres := r.db.Dialector.Name() == "postgres"
-
-	var sql string
-	if isPostgres {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = (CASE %s END)::boolean,
-				tag_id = CASE %s END,
-				flags = (CASE %s END)::integer,
-				status = (CASE %s END)::integer,
-				updated_at = NOW()
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
-		)
-	} else {
-		sql = fmt.Sprintf(`
-			UPDATE chunks SET
-				content = CASE %s END,
-				is_enabled = CASE %s END,
-				tag_id = CASE %s END,
-				flags = CASE %s END,
-				status = CASE %s END,
-				updated_at = datetime('now')
-			WHERE id IN (%s)
-		`,
-			strings.Join(contentCases, " "),
-			strings.Join(isEnabledCases, " "),
-			strings.Join(tagIDCases, " "),
-			strings.Join(flagsCases, " "),
-			strings.Join(statusCases, " "),
-			strings.Join(inPlaceholders, ","),
+// updateChunksPostgres issues a single UPDATE ... FROM (VALUES ...) statement.
+// Every value is cast explicitly so PostgreSQL can type the VALUES columns
+// without inspecting the bind parameters.
+func updateChunksPostgres(tx *gorm.DB, chunks []*types.Chunk) error {
+	rows := make([]string, 0, len(chunks))
+	args := make([]interface{}, 0, len(chunks)*6)
+	for _, chunk := range chunks {
+		rows = append(rows, "(?::varchar, ?::text, ?::boolean, ?::varchar, ?::integer, ?::integer)")
+		args = append(args,
+			chunk.ID,
+			common.CleanInvalidUTF8(chunk.Content),
+			chunk.IsEnabled,
+			chunk.TagID,
+			int(chunk.Flags),
+			chunk.Status,
 		)
 	}
 
-	return r.db.WithContext(ctx).Exec(sql, args...).Error
+	sql := fmt.Sprintf(`
+		UPDATE chunks AS c SET
+			content = v.content,
+			is_enabled = v.is_enabled,
+			tag_id = v.tag_id,
+			flags = v.flags,
+			status = v.status,
+			updated_at = NOW()
+		FROM (VALUES %s) AS v(id, content, is_enabled, tag_id, flags, status)
+		WHERE c.id = v.id
+	`, strings.Join(rows, ",\n"))
+
+	return tx.Exec(sql, args...).Error
+}
+
+// updateChunksRowByRow updates each chunk with its own statement. GORM sets
+// updated_at automatically for map-based Updates, which also sidesteps the
+// NOW() vs datetime('now') dialect difference.
+func updateChunksRowByRow(tx *gorm.DB, chunks []*types.Chunk) error {
+	for _, chunk := range chunks {
+		err := tx.Unscoped().Model(&types.Chunk{}).
+			Where("id = ?", chunk.ID).
+			Updates(map[string]interface{}{
+				"content":    common.CleanInvalidUTF8(chunk.Content),
+				"is_enabled": chunk.IsEnabled,
+				"tag_id":     chunk.TagID,
+				"flags":      int(chunk.Flags),
+				"status":     chunk.Status,
+			}).Error
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpdateChunkFieldsByIDs sets the same column values on every listed chunk
+// with one UPDATE per batch of IDs. Use it for uniform state transitions
+// (for example flipping status after indexing) instead of UpdateChunks, which
+// has to ship every row's content back to the database.
+//
+// fields maps column names to values. updated_at is set automatically.
+func (r *chunkRepository) UpdateChunkFieldsByIDs(
+	ctx context.Context, tenantID uint64, ids []string, fields map[string]interface{},
+) error {
+	if len(ids) == 0 || len(fields) == 0 {
+		return nil
+	}
+	updates := make(map[string]interface{}, len(fields)+1)
+	for column, value := range fields {
+		updates[column] = value
+	}
+	if _, ok := updates["updated_at"]; !ok {
+		updates["updated_at"] = time.Now()
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for start := 0; start < len(ids); start += updateByIDsBatchSize {
+			end := start + updateByIDsBatchSize
+			if end > len(ids) {
+				end = len(ids)
+			}
+			err := tx.Model(&types.Chunk{}).
+				Where("tenant_id = ? AND id IN ?", tenantID, ids[start:end]).
+				Updates(updates).Error
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // DeleteChunk deletes a chunk by its ID

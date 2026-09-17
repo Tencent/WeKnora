@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -133,4 +134,17 @@ func firstPipelineTitle(result *types.SearchResult) string {
 		return result.KnowledgeTitle
 	}
 	return result.KnowledgeFilename
+}
+
+// reportModelContextLeaks logs any durable identifier that survived encoding
+// so the producing prompt or tool can be fixed; see modelcontext/leaks.go.
+func reportModelContextLeaks(
+	ctx context.Context, scope string, registry *modelcontext.Registry, messages []chat.Message,
+) {
+	leaks := registry.LeakedIdentifiers(messages)
+	if len(leaks) == 0 {
+		return
+	}
+	logger.Warnf(ctx, "[%s][ModelContext] %d message field(s) carry raw identifiers after encoding: %s",
+		scope, len(leaks), modelcontext.SummarizeLeaks(leaks))
 }
