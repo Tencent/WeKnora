@@ -809,7 +809,7 @@ onMounted(async () => {
   &--clickable {
     .provider-card-interactive();
 
-    
+
   }
 
   &--env:not(.store-card--clickable):hover {
@@ -825,7 +825,7 @@ onMounted(async () => {
       box-shadow: none;
     }
 
-    
+
 
     &__icon {
       display: flex;

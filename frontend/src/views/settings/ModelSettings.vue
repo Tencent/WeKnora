@@ -951,7 +951,7 @@ onMounted(() => {
       box-shadow: none;
     }
 
-    
+
 
     &__icon {
       display: flex;
@@ -984,7 +984,7 @@ onMounted(() => {
   &--clickable {
     .provider-card-interactive();
 
-    
+
   }
 }
 

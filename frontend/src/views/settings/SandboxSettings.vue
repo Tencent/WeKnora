@@ -739,7 +739,7 @@ onMounted(() => {
   &--clickable {
     .provider-card-interactive();
 
-    
+
   }
 
   &--add {
@@ -762,7 +762,7 @@ onMounted(() => {
       box-shadow: none;
     }
 
-    
+
 
     &__icon {
       display: flex;

@@ -396,7 +396,7 @@ onMounted(load)
   &--clickable {
     cursor: pointer;
 
-    
+
   }
 
   &--add {
@@ -407,7 +407,7 @@ onMounted(load)
       box-shadow: none;
     }
 
-    
+
 
     &__icon {
       display: flex;

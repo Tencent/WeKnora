@@ -753,7 +753,7 @@ onMounted(async () => {
   &--clickable {
     .provider-card-interactive();
 
-    
+
   }
 
   &--add {
@@ -764,7 +764,7 @@ onMounted(async () => {
       box-shadow: none;
     }
 
-    
+
 
     &__icon {
       display: flex;

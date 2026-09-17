@@ -126,8 +126,8 @@
 
             <div class="form-item" data-guide="kb-create-name">
               <label class="form-label required">{{ $t('knowledgeEditor.basic.nameLabel') }}</label>
-              <t-input 
-                v-model="formData.name" 
+              <t-input
+                v-model="formData.name"
                 :placeholder="$t('knowledgeEditor.basic.namePlaceholder')"
                 :maxlength="50"
               />
