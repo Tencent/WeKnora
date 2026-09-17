@@ -387,6 +387,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		return pinned
 	}))
 	must(container.Provide(service.NewSessionForkServiceFromRepos))
+	must(container.Provide(func(
+		mgr sandbox.Manager,
+		pinned *service.PinnedSessionSandbox,
+	) service.SessionRewindSandboxPort {
+		if port, ok := mgr.(service.SessionRewindSandboxPort); ok {
+			return port
+		}
+		if pinned == nil {
+			return nil
+		}
+		return pinned
+	}))
+	must(container.Provide(service.NewSessionRewindServiceFromRepos))
 
 	// SandboxTerminalService opens interactive PTYs on session sandboxes for
 	// the frontend terminal panel. First-use provisioning takes a sandbox
