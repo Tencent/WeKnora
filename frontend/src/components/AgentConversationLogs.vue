@@ -38,6 +38,10 @@
           <div class="stat-card__value">{{ countBySource('embed') }}</div>
         </div>
         <div class="stat-card">
+          <div class="stat-card__label">{{ $t('agentEditor.logs.statGuest') }}</div>
+          <div class="stat-card__value">{{ countBySource('guest') }}</div>
+        </div>
+        <div class="stat-card">
           <div class="stat-card__label">{{ $t('agentEditor.logs.statIm') }}</div>
           <div class="stat-card__value">{{ countBySource('im') }}</div>
         </div>
@@ -125,6 +129,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { getSessionsList } from '@/api/chat'
 import { listIMChannels } from '@/api/agent'
 import { listEmbedChannels } from '@/api/embed'
+import { getAgentGuestLink } from '@/api/guest-link'
 import { removeSession } from '@/components/sessionMutations'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
@@ -179,6 +184,7 @@ const sourceOptions = computed(() => [
   { label: t('agentEditor.logs.sourceAll'), value: '' },
   { label: t('agentEditor.workspace.logsSourceWeb'), value: 'web' },
   { label: t('agentEditor.workspace.logsSourceEmbed'), value: 'embed' },
+  { label: t('agentEditor.logs.sourceGuest'), value: 'guest' },
   { label: t('agentEditor.logs.sourceIm'), value: 'im' },
 ])
 
@@ -296,26 +302,97 @@ async function loadWebSessions(): Promise<LogRow[]> {
   )
 }
 
+interface EmbedLikeChannelQuery {
+  id: string
+  sourceKey: 'embed' | 'guest'
+  sourceLabel: string
+}
+
+async function resolveEmbedLikeChannels(): Promise<EmbedLikeChannelQuery[]> {
+  const channels: EmbedLikeChannelQuery[] = []
+  const embedResp = await listEmbedChannels(props.agentId)
+  for (const channel of embedResp?.data || []) {
+    if (!channel?.id) continue
+    channels.push({
+      id: String(channel.id),
+      sourceKey: 'embed',
+      sourceLabel: t('agentEditor.workspace.logsSourceEmbed'),
+    })
+  }
+  // Guest-link (/w/:slug) sessions reuse embed_channel:{id} markers but live
+  // in guest_link_channels — listEmbedChannels never returns them.
+  try {
+    const guestResp = await getAgentGuestLink(props.agentId)
+    const guestId = guestResp?.data?.id
+    if (guestId) {
+      channels.push({
+        id: String(guestId),
+        sourceKey: 'guest',
+        sourceLabel: t('agentEditor.logs.sourceGuest'),
+      })
+    }
+  } catch {
+    // Guest link may be absent or inaccessible; embed channels still load.
+  }
+  return channels
+}
+
+async function loadSessionsForEmbedChannel(
+  channel: EmbedLikeChannelQuery,
+): Promise<LogRow[]> {
+  const source = `embed:${channel.id}`
+  try {
+    const sessions = await loadAllSessionPages((page) =>
+      getSessionsList(page, PAGE_SIZE, source) as Promise<SessionsPageResponse>,
+    )
+    return sessions.map((session) =>
+      toRow(session, channel.sourceKey, channel.sourceLabel),
+    )
+  } catch {
+    // Channel may be gone or inaccessible; skip and continue others.
+    return []
+  }
+}
+
+async function loadOrphanEmbedSessions(
+  knownIds: Set<string>,
+): Promise<LogRow[]> {
+  // Catch sessions whose channel was deleted: still tagged embed_channel:*
+  // and agent_config.agent_id matches after the first chat turn.
+  try {
+    const sessions = await loadAllSessionPages((page) =>
+      getSessionsList(
+        page,
+        PAGE_SIZE,
+        'embed',
+        props.agentId,
+      ) as Promise<SessionsPageResponse>,
+    )
+    return sessions
+      .filter((session) => !knownIds.has(String(session.id)))
+      .map((session) =>
+        toRow(session, 'embed', t('agentEditor.workspace.logsSourceEmbed')),
+      )
+  } catch {
+    return []
+  }
+}
+
 async function loadEmbedSessions(): Promise<LogRow[]> {
   if (!authStore.hasRole('admin') || !props.agentId) return []
-  const channelResp = await listEmbedChannels(props.agentId)
-  const channels = channelResp?.data || []
+  const channels = await resolveEmbedLikeChannels()
   const matched: LogRow[] = []
+  const seenIds = new Set<string>()
   for (const channel of channels) {
-    const source = `embed:${channel.id}`
-    try {
-      const sessions = await loadAllSessionPages((page) =>
-        getSessionsList(page, PAGE_SIZE, source) as Promise<SessionsPageResponse>,
-      )
-      for (const session of sessions) {
-        matched.push(
-          toRow(session, 'embed', t('agentEditor.workspace.logsSourceEmbed')),
-        )
-      }
-    } catch {
-      // Channel may be gone or inaccessible; skip and continue others.
+    const rowsForChannel = await loadSessionsForEmbedChannel(channel)
+    for (const row of rowsForChannel) {
+      if (seenIds.has(row.id)) continue
+      seenIds.add(row.id)
+      matched.push(row)
     }
   }
+  const orphans = await loadOrphanEmbedSessions(seenIds)
+  matched.push(...orphans)
   return matched
 }
 
@@ -494,7 +571,7 @@ function csvEscape(value: string): string {
 
 .logs-dashboard {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
