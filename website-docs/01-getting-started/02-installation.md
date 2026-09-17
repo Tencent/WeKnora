@@ -11,7 +11,6 @@ WeKnora 支持 Docker Compose、Kubernetes Helm、Lite 单二进制和桌面应�
 | Helm | `helm/` | ParadeDB（chart 内置） | Redis（chart 内置） | Kubernetes >= 1.25 |
 | Lite 单二进制 | `make build-lite` / `scripts/package-lite.sh` | SQLite（FTS5 + sqlite-vec） | 内存（无 Redis） | 个人 / 离线 / 低资源环境 |
 | 桌面应用（**未正式发布**） | `cmd/desktop`（Wails v2）+ `scripts/package-mac-app.sh` | SQLite | 内存 | 桌面单机使用，带图形界面与本地数据目录 |
-| Homebrew | `Formula/weknora-lite.rb` | SQLite | 内存 | macOS / Linux 命令行安装 Lite |
 
 ```mermaid
 flowchart TB
@@ -214,9 +213,9 @@ helm install weknora ./helm -n weknora --create-namespace \
   --set secrets.jwtSecret=xxx --set secrets.systemAesKey=$(openssl rand -hex 16)
 ```
 
-## 七、桌面端（Lite 模式 / 桌面应用 / Homebrew）
+## 七、桌面端（Lite 模式 / 桌面应用）
 
-桌面端面向本机与低资源环境，底层都是同一套 Lite 运行时（单进程 + SQLite + 内存队列），只是分发与启动方式不同：**单二进制**（命令行启动，也可作为后台服务）、**桌面应用**（图形界面，双击启动）、**Homebrew**（macOS/Linux 命令行安装 Lite）。三者能力范围一致。
+桌面端面向本机与低资源环境，底层都是同一套 Lite 运行时（单进程 + SQLite + 内存队列），只是分发与启动方式不同：**单二进制**（命令行启动，也可作为后台服务）、**桌面应用**（图形界面，双击启动）。两者能力范围一致。
 
 ### Lite 运行时（零外部依赖） {#_7-1-lite-运行时-零外部依赖}
 
@@ -252,15 +251,6 @@ Lite 还提供 `POST /auth/auto-setup` 一键生成本地账号（仅 lite editi
 make package-mac-app
 ```
 
-### Homebrew（Formula/weknora-lite.rb） {#_7-3-homebrew-formula-weknora-lite-rb}
-
-```bash
-brew install weknora-lite            # 从 GitHub Releases 下载 WeKnora-lite_v{ver}_{os}_{arch}.tar.gz
-brew services start weknora-lite     # 作为后台服务运行（keep_alive，日志 var/log/weknora-lite.log）
-```
-
-Formula 描述为 "Knowledge base management system — single-binary Lite edition"，支持 macOS/Linux 的 arm64 与 amd64。包装脚本首次运行会把 `.env.lite.example` 复制为 `~/.config/weknora/.env.lite`（可用 `WEKNORA_CONFIG_DIR` / `WEKNORA_DATA_DIR` 覆盖配置与数据目录，数据默认在 `~/.local/share/weknora`）。
-
 ## 八、源码编译运行
 
 ```bash
@@ -295,7 +285,7 @@ flowchart TB
         A2 --> PVC1[("PVC: postgres 10Gi / redis 1Gi / data-files 10Gi")]
         A2 --> D2["docreader Deployment"]
     end
-    subgraph laptop["个人：Lite / 桌面 / Homebrew"]
+    subgraph laptop["个人：Lite / 桌面"]
         direction LR
         U3["用户"] --> L1["WeKnora-lite 单进程 (内嵌前端 + SQLite + 内存队列)"]
         L1 --> O3["Ollama / 远程 OpenAI 兼容 API"]

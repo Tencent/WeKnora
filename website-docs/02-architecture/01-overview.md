@@ -40,7 +40,7 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 
 - **Lite 模式**：`DB_DRIVER=sqlite`（内置 sqlite-vec 向量扩展）+ 不配置 `REDIS_ADDR`（Asynq 退化为进程内 `SyncTaskExecutor`），单二进制运行，前端静态资源内嵌（`handler.Edition == "lite"` 时由 Go 进程直接托管）；
 - **桌面版**：`cmd/desktop` 基于 Wails v2 打包为桌面应用；
-- **Kubernetes**：`helm/` Chart；**裸机**：`deploy/` systemd 单元；**macOS**：`Formula/` Homebrew 配方。
+- **Kubernetes**：`helm/` Chart；**裸机**：`deploy/` systemd 单元。
 
 ## 技术栈清单 {#_2-技术栈清单}
 
@@ -196,7 +196,6 @@ sequenceDiagram
 | `dataset/` | 评估用 QA 数据集及生成脚本 |
 | `scripts/` | 构建/启动/迁移辅助脚本（如 `start_all.sh`；`build_frontend_dist.sh` 供 Lite / 桌面打包，UI 镜像由 `frontend/Dockerfile` 多阶段构建） |
 | `tests/`、`testdata/` | 集成测试与测试数据 |
-| `Formula/` | Homebrew 安装配方（macOS） |
 | `misc/` | 杂项（如 `dex-config.yaml` OIDC 测试配置） |
 | `packages/` | 预留的本地包目录 |
 | `docs/` | 早期文档，部分内容已过时 |
