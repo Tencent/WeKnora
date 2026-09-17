@@ -26,7 +26,6 @@
              field are kept so a future "filter by member" entry point
              (e.g. clicking an avatar) can deep-link without re-plumbing. -->
 
-
         <!-- 未初始化知识库提示 -->
         <div v-if="hasUninitializedKbs" class="warning-banner">
           <t-icon name="info-circle" size="16px" />
@@ -1914,7 +1913,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-
 // 共享知识库卡片样式
 // 共享标识（文档类型默认绿色，位置贴右上角）
 .shared-badge {
@@ -2050,7 +2048,6 @@ const handleUploadFinishedEvent = (event: Event) => {
     max-width: fit-content;
   }
 }
-
 
 .warning-banner {
   display: flex;
@@ -2373,7 +2370,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     }
 
     .processing-icon {
-      animation: spin 1s linear infinite;
+      animation: wk-spin 1s linear infinite;
     }
   }
 
@@ -2394,7 +2391,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     }
 
     .processing-icon {
-      animation: spin 1s linear infinite;
+      animation: wk-spin 1s linear infinite;
     }
   }
 
@@ -2462,16 +2459,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   }
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @keyframes highlightFlash {
   0% {
     border-color: var(--td-brand-color);
@@ -2497,7 +2484,6 @@ const handleUploadFinishedEvent = (event: Event) => {
   border-color: var(--td-brand-color) !important;
   box-shadow: 0 0 12px color-mix(in srgb, var(--td-brand-color) 30%, transparent) !important;
 }
-
 
 // 响应式布局
 @media (min-width: 900px) {

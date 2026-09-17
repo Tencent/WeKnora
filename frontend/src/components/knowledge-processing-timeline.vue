@@ -2011,21 +2011,15 @@ const processConfigLines = computed<string[]>(() => {
 }
 
 .kp-icon-btn-spin :deep(.t-icon) {
-  animation: kpSpin 0.9s linear infinite;
+  animation: wk-spin 0.9s linear infinite;
 }
 
 /* Slow rotation while auto-polling — visually distinct from the
    manual-refresh fast spin. Tells the user "refresh is happening on
    its own" without an extra label or badge. */
 .kp-icon-btn-autoflow :deep(.t-icon) {
-  animation: kpSpin 4s linear infinite;
+  animation: wk-spin 4s linear infinite;
   color: var(--td-warning-color);
-}
-
-@keyframes kpSpin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .kp-meta-glyph {

@@ -227,13 +227,7 @@ const confirmDangerAction = (): void => {
   border: 1.5px solid var(--td-component-stroke);
   border-top-color: currentColor;
   border-radius: 50%;
-  animation: session-running-spin 0.8s linear infinite;
-}
-
-@keyframes session-running-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: wk-spin 0.8s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

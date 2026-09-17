@@ -325,7 +325,6 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
           </div>
         </div>
 
-
         <div class="cell cell-tag">
           <template v-if="item.tags && item.tags.length > 0">
             <t-tooltip v-if="hasTagOverflow(item.id, (item.tags || []).length)"
@@ -837,13 +836,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 }
 
 .icon-spin {
-  animation: doc-list-spin 0.9s linear infinite;
-}
-
-@keyframes doc-list-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: wk-spin 0.9s linear infinite;
 }
 
 .row-more-btn {

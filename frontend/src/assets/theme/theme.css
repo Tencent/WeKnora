@@ -208,3 +208,10 @@ select:-webkit-autofill {
 :root[theme-mode="dark"] {
     --app-accent-purple: #9d7cff;
 }
+
+/* 全局旋转动画：spinner / 刷新图标统一用 `animation: wk-spin 0.8s linear infinite` */
+@keyframes wk-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

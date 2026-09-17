@@ -621,12 +621,7 @@ onBeforeUnmount(stopPolling)
 }
 
 .ds-icon-spin {
-  animation: ds-spin 1s linear infinite;
-}
-
-@keyframes ds-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  animation: wk-spin 1s linear infinite;
 }
 
 :deep(.t-dropdown__item.ds-dropdown-delete-item) {

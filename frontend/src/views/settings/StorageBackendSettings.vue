@@ -362,6 +362,8 @@ onMounted(load)
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/provider-card.less';
+
 @import (reference) '@/components/css/settings-section.less';
 
 .storage-backend-settings {
@@ -388,56 +390,24 @@ onMounted(load)
 }
 
 .backend-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-  min-width: 0;
-
-  &:hover {
-    border-color: var(--td-brand-color-3);
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
+  .provider-card();
+  .provider-card-interactive();
 
   &--clickable {
     cursor: pointer;
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+    
   }
 
   &--add {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 68px;
-    border-style: dashed;
-    background: transparent;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    font: inherit;
-    text-align: center;
+    .provider-card-add();
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
     }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+    
 
     &__icon {
       display: flex;
@@ -460,84 +430,49 @@ onMounted(load)
 }
 
 .backend-card__badge {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 1px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
-}
-
-.backend-card .backend-card__badge--logo {
-  background: var(--td-bg-color-container);
-  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
-}
-
-.backend-card .backend-card__badge--mono::before {
-  content: '';
-  width: 22px;
-  height: 22px;
-  background-color: currentColor;
-  -webkit-mask-image: var(--logo-url);
-  -webkit-mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-  mask-image: var(--logo-url);
-  mask-position: center;
-  mask-repeat: no-repeat;
-  mask-size: contain;
+  .provider-card-badge();
+  .provider-card-badge-color(#0052d9);
 }
 
 .backend-card__badge-img {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  display: block;
+  .provider-card-badge-img();
 }
 
-.backend-card--local .backend-card__badge { background: rgba(70, 70, 70, 0.1); color: #464646; }
-.backend-card--minio .backend-card__badge { background: rgba(225, 38, 38, 0.12); color: #C0382B; }
-.backend-card--cos .backend-card__badge { background: rgba(0, 82, 217, 0.1); color: #0052D9; }
-.backend-card--tos .backend-card__badge { background: rgba(0, 137, 255, 0.12); color: #0089FF; }
-.backend-card--s3 .backend-card__badge { background: rgba(255, 153, 0, 0.12); color: #D97706; }
-.backend-card--oss .backend-card__badge { background: rgba(255, 90, 0, 0.12); color: #E55A00; }
-.backend-card--ks3 .backend-card__badge { background: color-mix(in srgb, var(--td-brand-color) 12%, transparent); color: #07A050; }
-.backend-card--obs .backend-card__badge { background: rgba(206, 17, 38, 0.1); color: #CE1126; }
+.backend-card--local .backend-card__badge {
+  .provider-card-badge-color(#464646);
+}
+.backend-card--minio .backend-card__badge {
+  .provider-card-badge-color(#c0382b);
+}
+.backend-card--cos .backend-card__badge {
+  .provider-card-badge-color(#0052d9);
+}
+.backend-card--tos .backend-card__badge {
+  .provider-card-badge-color(#0089ff);
+}
+.backend-card--s3 .backend-card__badge {
+  .provider-card-badge-color(#d97706);
+}
+.backend-card--oss .backend-card__badge {
+  .provider-card-badge-color(#e55a00);
+}
+.backend-card--ks3 .backend-card__badge {
+  .provider-card-badge-color(#07a050);
+}
+.backend-card--obs .backend-card__badge {
+  .provider-card-badge-color(#ce1126);
+}
 
 .backend-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 2px;
+  .provider-card-body();
 }
 
 .backend-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .backend-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 .backend-card__subtitle {

@@ -405,7 +405,7 @@ onMounted(async () => {
   gap: 12px;
 
   .status-icon.spinning {
-    animation: spin 1s linear infinite;
+    animation: wk-spin 1s linear infinite;
   }
 }
 
@@ -558,12 +558,4 @@ onMounted(async () => {
   }
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
 </style>

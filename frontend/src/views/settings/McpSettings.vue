@@ -240,6 +240,8 @@ onMounted(() => {
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/provider-card.less';
+
 @import (reference) '@/components/css/settings-section.less';
 
 .mcp-settings {
@@ -339,15 +341,8 @@ onMounted(() => {
 }
 
 .service-card__badge {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-secondary);
+  .provider-card-badge(26px, 7px);
+  font-size: 13px;
 
   :deep(.t-icon) {
     display: block;

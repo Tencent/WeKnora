@@ -487,18 +487,9 @@ function handleMenuClick(data: { value: string }): void {
 }
 
 .chat-header__menu-loading {
-  animation: chat-header-spin 0.8s linear infinite;
+  animation: wk-spin 0.8s linear infinite;
 }
 
-@keyframes chat-header-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
 </style>
 
 <style lang="less">

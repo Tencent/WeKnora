@@ -3029,8 +3029,7 @@ const getImgSrc = (url: string) => {
   &:disabled { opacity: 0.4; cursor: default; }
 }
 
-.steer-sending { animation: steer-spin 1s linear infinite; }
-@keyframes steer-spin { to { transform: rotate(360deg); } }
+.steer-sending { animation: wk-spin 1s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .steer-sending { animation: none; } }
 
 /* 富文本输入框容器 */

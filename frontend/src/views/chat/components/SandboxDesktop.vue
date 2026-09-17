@@ -160,10 +160,7 @@ defineExpose({ start })
 }
 
 .sandbox-desktop__spinner {
-  animation: sandbox-desktop-spin 1s linear infinite;
+  animation: wk-spin 1s linear infinite;
 }
 
-@keyframes sandbox-desktop-spin {
-  to { transform: rotate(360deg); }
-}
 </style>

@@ -2173,7 +2173,7 @@ const handleCancel = () => {
   padding: 0 4px;
 
   .spinning {
-    animation: spin 1s linear infinite;
+    animation: wk-spin 1s linear infinite;
     font-size: 14px;
     color: var(--td-brand-color);
   }
@@ -2225,16 +2225,6 @@ const handleCancel = () => {
 
 .refresh-btn {
   flex-shrink: 0;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 // 维度控制样式

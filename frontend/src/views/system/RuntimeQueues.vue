@@ -1059,17 +1059,7 @@ onUnmounted(() => {
 }
 
 .rq-refresh-spin {
-  animation: rq-refresh-rotate 0.8s linear infinite;
-}
-
-@keyframes rq-refresh-rotate {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  animation: wk-spin 0.8s linear infinite;
 }
 
 .rq-auto-refresh {

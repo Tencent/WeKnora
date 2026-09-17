@@ -383,13 +383,7 @@ async function handleDownload(item: SessionArtifactItem) {
 }
 
 .artifact-panel-banner-spin {
-  animation: artifact-panel-spin 0.8s linear infinite;
-}
-
-@keyframes artifact-panel-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: wk-spin 0.8s linear infinite;
 }
 
 .artifact-list {

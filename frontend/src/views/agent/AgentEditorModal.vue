@@ -4736,10 +4736,6 @@ const handleSave = async () => {
     }
   }
 
-
-
-
-
   // 校验占位符（普通模式 + 开启多轮对话改写）
   if (!isAgentMode.value && formData.value.config.multi_turn_enabled && formData.value.config.enable_rewrite) {
     const rewritePrompt = formData.value.config.rewrite_prompt_user || '';
@@ -5999,13 +5995,8 @@ const handleSave = async () => {
   color: var(--td-brand-color);
 
   .t-icon {
-    animation: skill-pick-spin 1s linear infinite;
+    animation: wk-spin 1s linear infinite;
   }
-}
-
-@keyframes skill-pick-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .skill-desc {
@@ -6071,7 +6062,6 @@ const handleSave = async () => {
     font-style: normal;
   }
 }
-
 
 // textarea 与模板选择器容器
 .textarea-with-template {

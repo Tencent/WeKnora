@@ -714,6 +714,8 @@ onMounted(async () => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
 @import (reference) '@/components/css/settings-section.less';
 
 .websearch-settings {
@@ -746,55 +748,23 @@ onMounted(async () => {
 // 现阶段两份样式各自维护避免过度抽象；如果后续 Mcp / 第四个消费者出现，
 // 再把共用片段抽到 components/settings/ 下的基类。
 .provider-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px 14px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-  min-width: 0;
+  .provider-card();
 
   &--clickable {
-    cursor: pointer;
+    .provider-card-interactive();
 
-    &:hover {
-      border-color: var(--td-brand-color-3);
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+    
   }
 
   &--add {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 68px;
-    border-style: dashed;
-    background: transparent;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    font: inherit;
-    text-align: center;
+    .provider-card-add();
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
     }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+    
 
     &__icon {
       display: flex;
@@ -821,131 +791,59 @@ onMounted(async () => {
 }
 
 .provider-card__badge {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 1px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  // 默认色，被 provider 修饰覆盖
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge();
+  .provider-card-badge-color(#0052d9);
 }
 
 // 真实品牌 logo：白底 + 细边，logo 用 mask-image 染成 currentColor（沿用品牌色）。
 // 多套一层 .provider-card 以胜过 `.provider-card--<id> .provider-card__badge` 的具体规则。
-.provider-card .provider-card__badge--logo {
-  background: var(--td-bg-color-container);
-  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
-}
-
-.provider-card .provider-card__badge--mono::before {
-  content: '';
-  width: 22px;
-  height: 22px;
-  background-color: currentColor;
-  -webkit-mask-image: var(--logo-url);
-  -webkit-mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-  mask-image: var(--logo-url);
-  mask-position: center;
-  mask-repeat: no-repeat;
-  mask-size: contain;
-}
-
 .provider-card__badge-img {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  display: block;
+  .provider-card-badge-img();
 }
 
 // 各搜索源的徽章配色 —— 不强求与官方 logo 一致，挑同色系低饱和版即可。
 .provider-card--duckduckgo .provider-card__badge {
-  background: rgba(222, 88, 51, 0.12);
-  color: #DE5833;
+  .provider-card-badge-color(#de5833);
 }
 .provider-card--bing .provider-card__badge {
-  background: rgba(0, 137, 255, 0.12);
-  color: #0089FF;
+  .provider-card-badge-color(#0089ff);
 }
 .provider-card--google .provider-card__badge {
-  background: rgba(66, 133, 244, 0.12);
-  color: #4285F4;
+  .provider-card-badge-color(#4285f4);
 }
 .provider-card--tavily .provider-card__badge {
-  background: rgba(98, 53, 187, 0.12);
-  color: #6235BB;
+  .provider-card-badge-color(#6235bb);
 }
 .provider-card--baidu .provider-card__badge {
-  // 百度官方主色（搜索框 du 标识那个蓝），#2932E1。低饱和版用 12% alpha
-  // 浅底，跟其他 provider 一致。之前误填红色（混淆了百度地图等子产品）。
-  background: rgba(41, 50, 225, 0.12);
-  color: #2932E1;
+  .provider-card-badge-color(#2932e1);
 }
 .provider-card--searxng .provider-card__badge {
-  background: rgba(33, 86, 137, 0.12);
-  color: #215689;
+  .provider-card-badge-color(#215689);
 }
 .provider-card--ollama .provider-card__badge {
-  background: rgba(70, 70, 70, 0.12);
-  color: #464646;
+  .provider-card-badge-color(#464646);
 }
 .provider-card--keenable .provider-card__badge {
-  background: rgba(20, 158, 130, 0.12);
-  color: #149E82;
+  .provider-card-badge-color(#149e82);
 }
 .provider-card--zhipu .provider-card__badge {
-  background: rgba(37, 99, 235, 0.12);
-  color: #2563EB;
+  .provider-card-badge-color(#2563eb);
 }
 
 .provider-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  .provider-card-body();
 }
 
 .provider-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .provider-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 .provider-card__more {
-  flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
-  padding: 2px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-
-  &:hover,
-  &:focus-visible {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
-  }
+  .provider-card-more();
 }
 
 .provider-card:hover .provider-card__more,
@@ -955,14 +853,7 @@ onMounted(async () => {
 }
 
 .provider-card__subtitle {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
-  min-width: 0;
+  .provider-card-subtitle();
 }
 
 .provider-card__type {

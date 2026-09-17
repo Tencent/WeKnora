@@ -1194,7 +1194,6 @@ const searchForm = reactive({
   matchCount: 10,
 })
 
-
 const getTagName = (tagId?: number) => {
   if (!tagId) return t('knowledgeBase.untagged')
   return tagMapBySeqId.value[tagId]?.name || t('knowledgeBase.untagged')
@@ -2999,7 +2998,6 @@ watch(() => entries.value.map(e => ({
   }
 }
 
-
 // 导入结果入口：默认仅图标，hover / 点击展开浮层
 .faq-import-host {
   position: relative;
@@ -3057,7 +3055,6 @@ watch(() => entries.value.map(e => ({
   }
 }
 
-
 // FAQ 导入提示条（紧凑单行）
 .faq-import-strip {
   display: inline-flex;
@@ -3079,7 +3076,7 @@ watch(() => entries.value.map(e => ({
     color: var(--td-text-color-placeholder);
 
     &.is-spinning {
-      animation: faq-import-spin 1s linear infinite;
+      animation: wk-spin 1s linear infinite;
     }
   }
 
@@ -3191,17 +3188,6 @@ watch(() => entries.value.map(e => ({
   }
 }
 
-@keyframes faq-import-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-
 .tag-filter-bar {
   display: flex;
   align-items: center;
@@ -3213,7 +3199,6 @@ watch(() => entries.value.map(e => ({
     font-size: 14px;
   }
 }
-
 
 .kb-settings-button {
   width: 30px;
@@ -3737,7 +3722,6 @@ watch(() => entries.value.map(e => ({
   padding: 8px 0;
   font-family: var(--app-font-family);
 }
-
 
 .faq-load-more,
 .faq-no-more {
@@ -4316,7 +4300,6 @@ watch(() => entries.value.map(e => ({
   width: 100%;
   margin-top: 8px;
 }
-
 
 .item-row {
   display: flex;

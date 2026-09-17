@@ -755,6 +755,8 @@ onMounted(async () => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
 @import (reference) '@/components/css/settings-section.less';
 
 .vectorstore-settings {
@@ -797,31 +799,17 @@ onMounted(async () => {
 // 与 Parser / Storage / Model 等同形：徽章 + 三段式。env 来源走 secondaryContainer
 // 底色暗示只读；test 按钮做成 text 模式，避免在标题行抢眼。
 .store-card {
-  display: flex;
+  .provider-card();
   flex-direction: column;
-  padding: 14px 14px 14px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-  min-width: 0;
 
   &--env {
     background: var(--td-bg-color-secondarycontainer);
   }
 
   &--clickable {
-    cursor: pointer;
+    .provider-card-interactive();
 
-    &:hover {
-      border-color: var(--td-brand-color-3);
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-    }
-
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+    
   }
 
   &--env:not(.store-card--clickable):hover {
@@ -830,30 +818,14 @@ onMounted(async () => {
   }
 
   &--add {
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 68px;
-    border-style: dashed;
-    background: transparent;
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    font: inherit;
-    text-align: center;
+    .provider-card-add();
 
     &:hover,
     &:focus-visible {
-      color: var(--td-brand-color);
-      border-color: var(--td-brand-color);
-      background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
       box-shadow: none;
     }
 
-    &:focus-visible {
-      outline: 2px solid var(--td-brand-color);
-      outline-offset: 2px;
-    }
+    
 
     &__icon {
       display: flex;
@@ -887,121 +859,61 @@ onMounted(async () => {
 }
 
 .store-card__badge {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 1px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge();
+  .provider-card-badge-color(#0052d9);
 }
 
 // 真实品牌 logo 的渲染：保留每个 engine 类的 color 作为品牌色，
 // 把背景换成中性白 + 细边框；用 ::before mask-image 把单色 SVG 染成 currentColor。
 // 选择器叠了一层 .store-card 是为了胜过 `.store-card--<engine> .store-card__badge`
 // 那条更具体的品牌底色规则。
-.store-card .store-card__badge--logo {
-  background: var(--td-bg-color-container);
-  box-shadow: inset 0 0 0 1px var(--td-component-stroke);
-}
-
-.store-card .store-card__badge--mono::before {
-  content: '';
-  width: 22px;
-  height: 22px;
-  background-color: currentColor;
-  -webkit-mask-image: var(--logo-url);
-  -webkit-mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: contain;
-  mask-image: var(--logo-url);
-  mask-position: center;
-  mask-repeat: no-repeat;
-  mask-size: contain;
-}
-
 .store-card__badge-img {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  display: block;
+  .provider-card-badge-img();
 }
 
 // 各 vector engine 配色（覆盖 11 类常见后端，未列出的回落到默认蓝）
 .store-card--qdrant .store-card__badge {
-  background: rgba(225, 38, 38, 0.12);
-  color: #E12626;
+  .provider-card-badge-color(#e12626);
 }
 .store-card--milvus .store-card__badge {
-  background: rgba(0, 137, 255, 0.12);
-  color: #0089FF;
+  .provider-card-badge-color(#0089ff);
 }
 .store-card--weaviate .store-card__badge {
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: #07A050;
+  .provider-card-badge-color(#07a050);
 }
 .store-card--elasticsearch .store-card__badge,
 .store-card--elasticfaiss .store-card__badge {
-  background: rgba(255, 153, 0, 0.12);
-  color: #D97706;
+  .provider-card-badge-color(#d97706);
 }
 .store-card--postgres .store-card__badge {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge-color(#0052d9);
 }
 .store-card--opensearch .store-card__badge {
-  background: rgba(98, 53, 187, 0.12);
-  color: #6235BB;
+  .provider-card-badge-color(#6235bb);
 }
 .store-card--infinity .store-card__badge {
-  background: rgba(98, 53, 187, 0.12);
-  color: #6235BB;
+  .provider-card-badge-color(#6235bb);
 }
 .store-card--tencent_vectordb .store-card__badge {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge-color(#0052d9);
 }
 .store-card--doris .store-card__badge {
-  background: rgba(255, 90, 0, 0.12);
-  color: #E55A00;
+  .provider-card-badge-color(#e55a00);
 }
 .store-card--sqlite .store-card__badge {
-  background: rgba(70, 70, 70, 0.1);
-  color: #464646;
+  .provider-card-badge-color(#464646);
 }
 
 .store-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  .provider-card-body();
 }
 
 .store-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .store-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 .store-card__pill {
@@ -1016,17 +928,7 @@ onMounted(async () => {
 }
 
 .store-card__more {
-  flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
-  padding: 2px;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-
-  &:hover,
-  &:focus-visible {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-primary);
-  }
+  .provider-card-more();
 }
 
 .store-card:hover .store-card__more,
@@ -1036,14 +938,7 @@ onMounted(async () => {
 }
 
 .store-card__subtitle {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
-  min-width: 0;
+  .provider-card-subtitle();
 }
 
 .store-card__type {

@@ -424,16 +424,7 @@ defineExpose({
 }
 
 .sandbox-terminal__spinner {
-    animation: sandbox-terminal-spin 0.9s linear infinite;
+    animation: wk-spin 0.9s linear infinite;
 }
 
-@keyframes sandbox-terminal-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
 </style>

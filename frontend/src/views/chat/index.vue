@@ -1929,13 +1929,7 @@ onBeforeRouteUpdate((to, from, next) => {
         border: 1.5px solid var(--td-component-stroke);
         border-top-color: var(--td-text-color-secondary);
         border-radius: 50%;
-        animation: chatGlobalWaitSpin 0.8s linear infinite;
-    }
-}
-
-@keyframes chatGlobalWaitSpin {
-    to {
-        transform: rotate(360deg);
+        animation: wk-spin 0.8s linear infinite;
     }
 }
 

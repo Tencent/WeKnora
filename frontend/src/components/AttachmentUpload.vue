@@ -380,7 +380,7 @@ defineExpose({
     border: 1px solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;
-    animation: attachment-spin .8s linear infinite;
+    animation: wk-spin .8s linear infinite;
   }
 
   .attachment-preview-remove {
@@ -405,7 +405,4 @@ defineExpose({
   }
 }
 
-@keyframes attachment-spin {
-  to { transform: rotate(360deg); }
-}
 </style>

@@ -719,6 +719,8 @@ onMounted(loadAll)
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/provider-card.less';
+
 @import (reference) '@/components/css/settings-section.less';
 
 .parser-engine-settings {
@@ -765,24 +767,12 @@ onMounted(loadAll)
 // 与 ModelSettings / WebSearchSettings / McpSettings 同形的提供者卡片。
 // 这里整张卡是一个 button —— 单击即打开配置抽屉；active 状态用品牌色描边。
 .engine-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 14px 14px 14px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
-  background: var(--td-bg-color-container);
+  .provider-card();
+  .provider-card-interactive();
   text-align: left;
   font: inherit;
   color: inherit;
   cursor: pointer;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
-  min-width: 0;
-
-  &:hover {
-    border-color: var(--td-brand-color-3);
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
-  }
 
   &--active {
     border-color: var(--td-brand-color);
@@ -791,69 +781,38 @@ onMounted(loadAll)
 }
 
 .engine-card__badge {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  border-radius: 9px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 1px;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
+  .provider-card-badge();
+  .provider-card-badge-color(#0052d9);
 }
 
 // 解析引擎徽章配色 —— 内置/官方系绿，外部工具按性质各取一色。
 .engine-card--builtin .engine-card__badge,
 .engine-card--weknoracloud .engine-card__badge {
-  background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-  color: #07C05F;
+  .provider-card-badge-color(#07c05f);
 }
 .engine-card--simple .engine-card__badge {
-  background: rgba(70, 70, 70, 0.1);
-  color: #464646;
+  .provider-card-badge-color(#464646);
 }
 .engine-card--markitdown .engine-card__badge {
-  background: rgba(0, 137, 255, 0.12);
-  color: #0089FF;
+  .provider-card-badge-color(#0089ff);
 }
 .engine-card--mineru .engine-card__badge,
 .engine-card--mineru_cloud .engine-card__badge,
 .engine-card--paddleocr_vl .engine-card__badge,
 .engine-card--paddleocr_vl_cloud .engine-card__badge {
-  background: rgba(98, 53, 187, 0.12);
-  color: #6235BB;
+  .provider-card-badge-color(#6235bb);
 }
 
 .engine-card__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  .provider-card-body();
 }
 
 .engine-card__header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  .provider-card-header();
 }
 
 .engine-card__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--td-text-color-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  .provider-card-title();
 }
 
 // 与 McpSettings 一致的 dot+文字状态徽章。on=绿、err=红、help 用 cursor:help 提示。
@@ -1059,13 +1018,8 @@ onMounted(loadAll)
   }
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 .spinning {
-  animation: spin 1s linear infinite;
+  animation: wk-spin 1s linear infinite;
 }
 
 // ---- 表单切换组（公式/表格/OCR） ----
