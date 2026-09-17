@@ -1596,8 +1596,10 @@ onBeforeRouteUpdate((to, from, next) => {
 </script>
 <style lang="less" scoped>
 .chat {
-    // 右侧不留 padding，滚动条贴到内容区最右缘
-    padding: 0 0 20px 20px;
+    // 水平方向不留 padding，让滚动条贴到内容区最右缘；
+    // 消息列与输入列各自用 --chat-content-inset 做左右对称的留白（窄屏时才可见）。
+    padding: 0 0 20px 0;
+    --chat-content-inset: 20px;
     // 右侧抽屉让出的宽度。回到底部按钮按「剩余聊天列」居中，而不是整页 50%。
     --chat-right-inset: 0px;
     box-sizing: border-box;
@@ -1861,6 +1863,11 @@ onBeforeRouteUpdate((to, from, next) => {
     box-sizing: border-box;
     position: relative;
 
+    &:not(.is-embedded) {
+        padding: 0 var(--chat-content-inset, 20px);
+        max-width: calc(960px + 2 * var(--chat-content-inset, 20px));
+    }
+
     &.is-embedded {
         max-width: 100%;
         width: 100%;
@@ -1880,6 +1887,12 @@ onBeforeRouteUpdate((to, from, next) => {
     flex: 1;
     margin: 0 auto;
     width: 100%;
+    box-sizing: border-box;
+
+    &:not(.is-embedded) {
+        padding: 0 var(--chat-content-inset, 20px);
+        max-width: calc(960px + 2 * var(--chat-content-inset, 20px));
+    }
 
     /*
       给每条消息加 layout/style containment：
