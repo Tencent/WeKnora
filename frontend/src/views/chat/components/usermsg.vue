@@ -58,11 +58,22 @@
                         <t-icon name="git-branch" />
                     </button>
                 </t-tooltip>
-                <t-tooltip v-if="canRewind" :content="rewindTooltip">
-                    <button type="button" class="user_msg_action" :aria-label="rewindTooltip" @click="emit('rewind', messageId)">
-                        <t-icon name="rollback" />
-                    </button>
-                </t-tooltip>
+                <t-popconfirm
+                    v-if="canRewind"
+                    :content="t('chat.rewind.confirmBody')"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    theme="warning"
+                    placement="top"
+                    overlay-class-name="chat-rewind-popconfirm"
+                    @confirm="emit('rewind', messageId)"
+                >
+                    <t-tooltip :content="rewindTooltip">
+                        <button type="button" class="user_msg_action" :aria-label="rewindTooltip" @click.stop>
+                            <t-icon name="rollback" />
+                        </button>
+                    </t-tooltip>
+                </t-popconfirm>
             </div>
         </div>
         <div v-if="steerFailed" class="steer-failure" role="status">

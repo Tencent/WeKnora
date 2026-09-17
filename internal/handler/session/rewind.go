@@ -34,7 +34,7 @@ type RewindSessionRequest struct {
 
 // RewindSession godoc
 // @Summary      回滚会话
-// @Description  将当前会话回滚到指定的用户或助手消息：删除该点之后的消息，并在可到达时把沙箱工作区 git reset 到对应 checkpoint。用户消息：删除自身及之后并预填该问题；助手消息：保留该回答，删除其后的内容。
+// @Description  回滚当前会话到指定用户或助手消息：删除其后消息，可到达时 git reset 工作区。
 // @Tags         会话
 // @Accept       json
 // @Produce      json

@@ -210,7 +210,7 @@ import { persistedAssistantId, previewSteerMessage, discardSteerPreview, reconci
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useBrowserConnectionStore } from '@/stores/browserConnection';
-import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next';
+import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
@@ -436,46 +436,34 @@ async function handleRewind(messageId) {
     if (!source) return
     const sourceSessionId = session_id.value
 
-    const dialog = DialogPlugin.confirm({
-        header: t('chat.rewind.confirmTitle'),
-        body: t('chat.rewind.confirmBody'),
-        confirmBtn: { content: t('chat.rewind.confirmButton'), theme: 'danger' },
-        cancelBtn: t('chat.rewind.cancelButton'),
-        theme: 'warning',
-        onConfirm: async () => {
-            dialog.destroy()
-            if (forkInFlight || rewindInFlight) return
-            rewindInFlight = true
-            try {
-                const res = await rewindSession(sourceSessionId, { message_id: messageId })
-                const data = res?.data
-                if (!data) return
+    rewindInFlight = true
+    try {
+        const res = await rewindSession(sourceSessionId, { message_id: messageId })
+        const data = res?.data
+        if (!data) return
 
-                truncateMessagesAt(messageId, source.role === 'user')
-                if (source.role === 'user') {
-                    inputFieldRef.value?.prefill(String(source.content ?? ''))
-                }
+        truncateMessagesAt(messageId, source.role === 'user')
+        if (source.role === 'user') {
+            inputFieldRef.value?.prefill(String(source.content ?? ''))
+        }
 
-                if (data.workspace_reset) {
-                    MessagePlugin.success(t('chat.rewind.success'))
-                    return
-                }
-                const skip = rewindSkipMessage(String(data.reason || ''), t)
-                if (skip) {
-                    MessagePlugin.info(skip)
-                }
-            } catch (err) {
-                if (err?.status === 409 || err?.$httpStatus === 409) {
-                    MessagePlugin.warning(t('chat.rewind.busy'))
-                    return
-                }
-                MessagePlugin.error(t('chat.rewind.failed'))
-            } finally {
-                rewindInFlight = false
-            }
-        },
-        onCancel: () => dialog.destroy(),
-    })
+        if (data.workspace_reset) {
+            MessagePlugin.success(t('chat.rewind.success'))
+            return
+        }
+        const skip = rewindSkipMessage(String(data.reason || ''), t)
+        if (skip) {
+            MessagePlugin.info(skip)
+        }
+    } catch (err) {
+        if (err?.status === 409 || err?.$httpStatus === 409) {
+            MessagePlugin.warning(t('chat.rewind.busy'))
+            return
+        }
+        MessagePlugin.error(t('chat.rewind.failed'))
+    } finally {
+        rewindInFlight = false
+    }
 }
 
 const sessionArtifacts = computed(() => collectSessionArtifacts(messagesList));
@@ -2069,5 +2057,18 @@ onBeforeRouteUpdate((to, from, next) => {
 .sq-fade-enter-from,
 .sq-fade-leave-to {
     opacity: 0;
+}
+</style>
+
+<style lang="less">
+.chat-rewind-popconfirm {
+    max-width: 260px;
+
+    .t-popconfirm__content,
+    .t-popup__content {
+        max-width: 260px;
+        white-space: normal;
+        line-height: 1.5;
+    }
 }
 </style>
