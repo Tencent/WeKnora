@@ -319,29 +319,6 @@ func (h *TenantHandler) CreateTenant(c *gin.Context) {
 		}
 	}
 
-	// Apply the system-setting-driven default storage quota when the
-	// caller didn't specify one (always true for self-serve; sometimes
-	// true for the superuser branch when the JSON omits storage_quota).
-	// We resolve at create time on purpose — the on-disk row should
-	// carry an explicit value, so changing the setting later doesn't
-	// silently shrink/grow established tenants. Negative values are
-	// treated as "use default" so a misconfigured setting can't yield
-	// a negative quota that the storage-used checks would interpret as
-	// "unlimited" (StorageQuota <= 0 disables enforcement in
-	// knowledge_create.go).
-	if tenantData.StorageQuota <= 0 {
-		gb := h.systemSettingSvc.GetInt(
-			ctx,
-			"tenant.default_storage_quota_gb",
-			"WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_GB",
-			10,
-		)
-		if gb <= 0 {
-			gb = 10
-		}
-		tenantData.StorageQuota = gb * 1024 * 1024 * 1024
-	}
-
 	logger.Infof(ctx, "Creating tenant, name: %s", secutils.SanitizeForLog(tenantData.Name))
 
 	createdTenant, err := h.service.CreateTenant(ctx, &tenantData)

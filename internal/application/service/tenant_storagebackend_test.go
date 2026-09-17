@@ -20,7 +20,7 @@ func TestCreateTenantCreatesConcreteDefaultStorageBackend(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.StorageBackend{}))
 	tenantRepo := repository.NewTenantRepository(db)
 	storageRepo := repository.NewStorageBackendRepository(db)
-	tenantSvc := service.NewTenantService(tenantRepo, storageRepo)
+	tenantSvc := service.NewTenantService(tenantRepo, storageRepo, nil)
 
 	tenant, err := tenantSvc.CreateTenant(context.Background(), &types.Tenant{Name: "workspace"})
 	require.NoError(t, err)

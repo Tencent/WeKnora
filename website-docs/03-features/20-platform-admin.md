@@ -64,7 +64,8 @@
 | `auth.default_tenant_mode` | `create_personal` / `tenantless` | `create_personal` | 只影响之后注册的新用户 |
 | `tenant.self_service_creation_enabled` | bool | `true` | 立即 |
 | `tenant.max_owned_per_user` | int | `10`（0 = 用内置默认，负数 = 关闭限额） | 每次建空间时读取 |
-| `tenant.default_storage_quota_gb` | int | `10` | **仅新建空间时读取**，不回写已有空间 |
+| `tenant.default_storage_quota_gb` | int | `10` | MB 设置未启用时的新空间默认配额（GB） |
+| `tenant.default_storage_quota_mb` | int | `0` | 正数优先于 GB；0 或负数沿用 GB。包含注册自动创建的个人空间 |
 | `tenant.auto_create_api_key` | bool | `false` | 每次建空间时读取 |
 | `ssrf.whitelist` | 字符串列表 | 空 | 立即（`SSRF_WHITELIST_EXTRA` 仍只由部署方维护，不在此覆盖） |
 | `asynq.core/postprocess/enrichment/maintenance/shared/wiki_concurrency` | int | 见[异步任务系统](../02-architecture/05-async-tasks.md) | 各 worker pool 重新装配 |
@@ -96,3 +97,18 @@
 - `cmd/server/bootstrap.go`：首个系统管理员引导。
 - `frontend/src/config/settingsAccess.ts`：平台设置分区。
 - `internal/application/service/system_setting.go`：运行时设置注册表。
+
+### 默认空间存储配额
+
+手动创建空间、普通注册及 OIDC 注册自动创建个人空间，均在创建服务中写入相同的默认配额。
+例如设置 `WEKNORA_TENANT_DEFAULT_STORAGE_QUOTA_MB=50`，新空间获得 50 × 1024² 字节。
+MB 设置为正数时优先于 GB 设置；MB 为 0 或负数时沿用原有 GB 设置，GB 为非正数时回退到 10 GB。
+每个设置分别遵循 **数据库覆盖值 > 环境变量 > 内置默认值**，因此保存 MB 为 0 可覆盖环境变量并恢复 GB 配置。
+超出 int64 字节范围的 MB 值回退到 GB；GB 溢出时回退到 10 GB，不会产生无限配额。
+
+默认值只影响之后新建的空间。显式指定的正数 `storage_quota`（字节）继续生效；已有空间不会自动改写。
+如需更新存量空间，管理员可使用“应用到所有现有空间”，确认框展示当前实际生效的 MB/GB 配额。
+该操作会覆盖所有现有空间的配额，包括单独调整过的值。
+
+无需修改数据库列默认值。服务写入显式字节值，可避免手工 `ALTER TABLE ... SET DEFAULT` 在升级时被 GORM
+模型中的默认值重置；原有列默认值保留以兼容直接 SQL 等未经过服务的写入。
