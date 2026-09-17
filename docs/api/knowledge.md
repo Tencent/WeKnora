@@ -259,7 +259,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 ## GET `/knowledge-bases/:id/knowledge` - 列出知识库下的知识
 
-支持分页与按标签/关键词/文件类型筛选。
+支持分页、按标签/关键词/文件类型筛选，以及按更新时间、创建时间或文件名称排序。
 
 **路径参数**:
 
@@ -273,6 +273,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 | -------------- | ------- | ---- | --------------------------------------------------------------------------------------------------- |
 | `page`         | integer | 1    | 页码（从 1 开始）                                                                                   |
 | `page_size`    | integer | 20   | 每页条数                                                                                            |
+| `sort_by`      | string  | `updated_at` | 排序字段：`updated_at`、`created_at`、`file_name` |
+| `sort_order`   | string  | `desc` | 排序方向：`asc`（升序）、`desc`（降序） |
 | `tag_id`       | string  | -    | 按标签 ID 过滤                                                                                      |
 | `keyword`      | string  | -    | 按标题/内容关键词过滤                                                                               |
 | `file_type`    | string  | -    | 按单个文件扩展名过滤（如 `pdf`）；特殊值 `manual` / `url` 命中 `type` 列                              |
@@ -284,6 +286,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 | `folder_recursive` | bool | false | 为 `true` 时同时返回 `folder_path` 子目录内的文档；仅在传入 `folder_path` 时生效 |
 
 > **文件夹筛选语义**：`folder_path` 是否出现在 query 中决定列表模式，不能仅凭空字符串区分「根目录」与「不按文件夹过滤」。集成方若需要浏览某一文件夹，应显式传 `folder_path`（根目录传 `folder_path=`）；若需要全库扁平列表，则省略该参数。
+
+排序在服务端对筛选后的全部结果生效，再进行分页；排序值相同时按文档 ID 升序排列。名称排序忽略大小写，文件名为空时依次使用标题、来源。非法排序字段或方向返回 HTTP 400。不传排序参数时，默认按更新时间倒序；需要按上传时间浏览的客户端可以显式传入 `sort_by=created_at&sort_order=desc`。
 
 **请求**:
 
