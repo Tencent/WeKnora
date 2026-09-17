@@ -210,7 +210,13 @@ func (s *knowledgeService) CloneKnowledgeBase(ctx context.Context, srcID, dstID 
 		p := &types.KBCloneProgress{TaskID: access.TransferTaskID(ctx), SourceID: source.ID, TargetID: target.ID}
 		return s.cloneFAQKnowledgeBase(ctx, source, target, p, func(*types.KBCloneProgress, error, string) {})
 	}
-	return s.executeKnowledgeClone(ctx, source, target, nil)
+	if err := s.executeKnowledgeClone(ctx, source, target, nil); err != nil {
+		return err
+	}
+	// The cloned documents carry their profiles; the target's description
+	// has to be derived from them now rather than on the next upload.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, target, false)
+	return nil
 }
 
 // CloneChunk clone chunks from one knowledge to another
@@ -596,6 +602,9 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	if err := s.saveKBCloneProgress(ctx, progress); err != nil {
 		logger.Errorf(ctx, "Failed to update KB clone progress to completed: %v", err)
 	}
+	// The cloned documents carry their profiles; derive the target's
+	// description from them now instead of waiting for the next upload.
+	_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, target, false)
 
 	logger.Infof(ctx, "KB clone task completed: %s", payload.TaskID)
 	recordKBActivity(ctx, s.audit, payload.TenantID, payload.TargetID, types.AuditActionKBCloneCompleted,

@@ -1222,6 +1222,11 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			cfg := *sourceKB.FAQConfig
 			faqConfig = &cfg
 		}
+		var profileConfig *types.KnowledgeBaseProfileConfig
+		if sourceKB.ProfileConfig != nil {
+			cfg := *sourceKB.ProfileConfig
+			profileConfig = &cfg
+		}
 		// Preserve VectorStoreID so the cloned KB lands on the same
 		// physical index. GORM `<-:create` permits the value at INSERT.
 		targetKB = &types.KnowledgeBase{
@@ -1240,6 +1245,7 @@ func (s *knowledgeBaseService) CopyKnowledgeBase(ctx context.Context,
 			StorageBackendID:      sourceKB.StorageBackendID,
 			StorageConfig:         sourceKB.StorageConfig,
 			FAQConfig:             faqConfig,
+			ProfileConfig:         profileConfig,
 			VectorStoreID:         sourceKB.VectorStoreID,
 		}
 		// The clone is owned by the caller, not the original creator —
@@ -1281,6 +1287,11 @@ func (s *knowledgeBaseService) DuplicateKnowledgeBase(
 	if err != nil {
 		return nil, err
 	}
+	// A duplicate copies settings, not content. The generated description is
+	// derived from the source's documents, so carrying it over would describe
+	// documents the copy does not have; ProfileConfig is kept so the copy
+	// produces its own once documents arrive.
+	targetKB.GeneratedProfile = nil
 	targetKB.ID = uuid.New().String()
 	targetKB.TenantID = tenantID
 	targetKB.Name = s.buildDuplicateKnowledgeBaseName(ctx, tenantID, sourceKB.Name)

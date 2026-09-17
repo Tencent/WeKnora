@@ -327,6 +327,47 @@ func TestCreateKnowledgeBase_VectorStoreBinding(t *testing.T) {
 // CopyKnowledgeBase — embedding model + vector store defenses
 // ---------------------------------------------------------------------------
 
+func TestCopyKnowledgeBase_CarriesProfileConfigButNotGeneratedProfile(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["src"] = &types.KnowledgeBase{
+		ID: "src", Name: "src", TenantID: 1, EmbeddingModelID: "embed-1",
+		ProfileConfig: &types.KnowledgeBaseProfileConfig{
+			Enabled: true, ModelID: "m", CustomInstructions: "audience",
+		},
+		GeneratedProfile: &types.KnowledgeBaseProfile{
+			Gist: "source gist", Status: types.KnowledgeBaseProfileStatusReady,
+		},
+	}
+	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+
+	_, tgt, err := svc.CopyKnowledgeBase(copyTaskTestContext(t, repo, ""), "src", "")
+	require.NoError(t, err)
+	require.NotNil(t, tgt.ProfileConfig)
+	assert.Equal(t, *repo.rows["src"].ProfileConfig, *tgt.ProfileConfig)
+	assert.NotSame(t, repo.rows["src"].ProfileConfig, tgt.ProfileConfig, "config is copied, not shared")
+	assert.Nil(t, tgt.GeneratedProfile, "the clone derives its own description after its documents land")
+}
+
+func TestDuplicateKnowledgeBase_DropsGeneratedProfile(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["src"] = &types.KnowledgeBase{
+		ID: "src", Name: "src", TenantID: 1, EmbeddingModelID: "embed-1",
+		Type:          types.KnowledgeBaseTypeDocument,
+		ProfileConfig: &types.KnowledgeBaseProfileConfig{Enabled: true},
+		GeneratedProfile: &types.KnowledgeBaseProfile{
+			Gist: "source gist", Status: types.KnowledgeBaseProfileStatusReady,
+		},
+	}
+	svc := newPR3KBService(repo, &fakeRegistry{}, &fakeOwnership{})
+
+	dup, err := svc.DuplicateKnowledgeBase(ctxWithTenant(1), "src")
+	require.NoError(t, err)
+	assert.Nil(t, dup.GeneratedProfile, "an empty duplicate must not advertise the source's documents")
+	require.NotNil(t, dup.ProfileConfig)
+	assert.True(t, dup.ProfileConfig.Enabled)
+	assert.Nil(t, repo.rows[dup.ID].GeneratedProfile)
+}
+
 func TestCopyKnowledgeBase_Defenses(t *testing.T) {
 	mkKB := func(id string, tenant uint64, embed string, vsid *string) *types.KnowledgeBase {
 		return &types.KnowledgeBase{
