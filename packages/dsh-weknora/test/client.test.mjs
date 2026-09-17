@@ -50,6 +50,28 @@ test('resourceUrls=public is forwarded as a query parameter', async () => {
   assert.equal(mock.requests.at(-1).query.resource_urls, 'public')
 })
 
+test('resourceUrls defaults to public so figures are loadable', async () => {
+  const { mock, client } = await harness()
+  await client.listKnowledgeBases(never)
+  assert.equal(mock.requests.at(-1).query.resource_urls, 'public')
+})
+
+test('handle mode omits the resource_urls query parameter', async () => {
+  const { mock, client } = await harness({ resourceUrls: 'handle' })
+  await client.listKnowledgeBases(never)
+  assert.equal(mock.requests.at(-1).query.resource_urls, undefined)
+})
+
+test('a knowledge-base-restricted key falls back from public URLs to handles', async () => {
+  const { mock, client } = await harness({}, { forbidPublicResourceUrls: true })
+  const bases = await client.listKnowledgeBases(never)
+  assert.equal(bases.length, 2)
+  assert.equal(mock.requests[0].query.resource_urls, 'public')
+  assert.equal(mock.requests[1].query.resource_urls, undefined)
+  await client.listKnowledgeBases(never)
+  assert.equal(mock.requests.at(-1).query.resource_urls, undefined, 'later calls must not retry public mode')
+})
+
 test('chunk pages carry their pagination envelope', async () => {
   const { client } = await harness()
   const page = await client.listChunks({ knowledgeId: 'doc-retrieval-pipeline', page: 1, pageSize: 2 }, never)

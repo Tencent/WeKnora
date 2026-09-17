@@ -41,6 +41,7 @@ type fakeSandboxSkillService struct {
 	installSource string
 	sourceErr     error
 	reinstallErr  error
+	stopErr       error
 	removeErr     error
 
 	files    []service.SkillFileEntry
@@ -63,9 +64,17 @@ type fakeSandboxSkillService struct {
 	installConfig string
 	installBytes  []byte
 
-	reinstallTenant uint64
-	reinstallConfig string
-	reinstallSkill  string
+	reinstallTenant       uint64
+	reinstallConfig       string
+	reinstallSkill        string
+	reinstallInstructions []string
+	guidanceArgs          []string
+	guidanceTenant        uint64
+	guidanceErr           error
+
+	stopTenant uint64
+	stopConfig string
+	stopSkill  string
 
 	removeTenant uint64
 	removeConfig string
@@ -201,10 +210,28 @@ func (f *fakeSandboxSkillService) InstallSkillFromSource(
 }
 
 func (f *fakeSandboxSkillService) ReinstallSkill(
-	_ context.Context, tenantID uint64, configID, skillID string,
+	_ context.Context, tenantID uint64, configID, skillID string, instructions ...string,
 ) (string, error) {
 	f.reinstallTenant, f.reinstallConfig, f.reinstallSkill = tenantID, configID, skillID
+	f.reinstallInstructions = instructions
 	return f.installID, f.reinstallErr
+}
+
+func (f *fakeSandboxSkillService) StopSkill(
+	_ context.Context, tenantID uint64, configID, skillID string,
+) (*types.TenantSkillEntity, error) {
+	f.stopTenant, f.stopConfig, f.stopSkill = tenantID, configID, skillID
+	if f.stopErr != nil {
+		return nil, f.stopErr
+	}
+	skill := f.skills[skillID]
+	if skill == nil {
+		return nil, apperrors.NewNotFoundError("skill not found")
+	}
+	if tenantID != testSkillTenantID || skill.SandboxConfigID != configID {
+		return nil, apperrors.NewNotFoundError("skill not found")
+	}
+	return skill, nil
 }
 
 func (f *fakeSandboxSkillService) RemoveSkill(
@@ -278,6 +305,9 @@ func newSkillTestRouter(h *SandboxSkillHandler) *gin.Engine {
 	r.GET("/sandbox-configs/:id/skills/:skillId/files", h.ListFiles)
 	r.GET("/sandbox-configs/:id/skills/:skillId/files/content", h.GetFile)
 	r.POST("/sandbox-configs/:id/skills/:skillId/reinstall", h.Reinstall)
+	r.POST("/sandbox-configs/:id/skills/:skillId/guidance", h.SteerInstall)
+	r.GET("/sandbox-configs/:id/skills/:skillId/guidance", h.InstallGuidance)
+	r.POST("/sandbox-configs/:id/skills/:skillId/stop", h.Stop)
 	r.PATCH("/sandbox-configs/:id/skills/:skillId", h.Patch)
 	r.DELETE("/sandbox-configs/:id/skills/:skillId", h.Delete)
 	r.GET("/sandbox-configs/:id/skills/:skillId/install-events", h.InstallEvents)
@@ -304,6 +334,7 @@ func skillUploadRequest(t *testing.T, configID string, archive []byte) *http.Req
 // layer, before the whole body is buffered for the parser.
 func TestSandboxSkillUploadOverLimitReturns400(t *testing.T) {
 	t.Setenv("MAX_FILE_SIZE_MB", "1")
+	t.Setenv("MAX_SKILL_BUNDLE_SIZE_MB", "1")
 	svc := &fakeSandboxSkillService{installID: "skill-1"}
 	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
 
@@ -420,6 +451,21 @@ func TestSandboxSkillInstallFromSourceAmbiguousShorthandReturns400(t *testing.T)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), "ambiguous")
 	require.Equal(t, "owner/slug", svc.installSource)
+}
+
+func TestSandboxSkillInstallFromSourceRejectsAnOversizedJSONBody(t *testing.T) {
+	svc := &fakeSandboxSkillService{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	req := httptest.NewRequest(http.MethodPost, "/sandbox-configs/cfg-a/skills",
+		strings.NewReader(string(oversizedSkillSourceJSON(1))))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "skill source request is too large")
+	require.Empty(t, svc.installSource)
 }
 
 func TestSandboxSkillUploadWithoutFileReturns400(t *testing.T) {
@@ -561,6 +607,26 @@ func TestSandboxSkillPatchWithoutEnabledFieldReturns400(t *testing.T) {
 	require.True(t, svc.skills["skill-1"].Enabled)
 }
 
+func TestSandboxSkillPatchRejectsAnOversizedJSONBody(t *testing.T) {
+	svc := &fakeSandboxSkillService{skills: map[string]*types.TenantSkillEntity{
+		"skill-1": {
+			ID: "skill-1", TenantID: testSkillTenantID, SandboxConfigID: "cfg-a",
+			Name: "pdf", Status: types.SkillStatusReady, Enabled: true,
+		},
+	}}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	req := httptest.NewRequest(http.MethodPatch, "/sandbox-configs/cfg-a/skills/skill-1",
+		bytes.NewReader(oversizedSkillSourceJSON(1)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Contains(t, w.Body.String(), "skill request is too large")
+	require.Equal(t, 0, svc.patchCalls)
+}
+
 // Removal rebuilds the image, so it is accepted and followed, never awaited.
 func TestSandboxSkillDeleteIsAccepted(t *testing.T) {
 	svc := &fakeSandboxSkillService{}
@@ -592,6 +658,42 @@ func TestSandboxSkillReinstallIsAccepted(t *testing.T) {
 	require.Equal(t, "cfg-a", svc.reinstallConfig)
 	require.Equal(t, "skill-1", svc.reinstallSkill)
 	require.Contains(t, w.Body.String(), `"skill_id":"skill-1"`)
+}
+
+func TestSandboxSkillStopReturnsTheSkill(t *testing.T) {
+	svc := &fakeSandboxSkillService{
+		skills: map[string]*types.TenantSkillEntity{
+			"skill-1": {
+				ID: "skill-1", SandboxConfigID: "cfg-a",
+				Status: types.SkillStatusFailed, Enabled: true,
+			},
+		},
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+		"/sandbox-configs/cfg-a/skills/skill-1/stop", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, testSkillTenantID, svc.stopTenant,
+		"a stop must be scoped to the caller's workspace")
+	require.Equal(t, "cfg-a", svc.stopConfig)
+	require.Equal(t, "skill-1", svc.stopSkill)
+	require.Contains(t, w.Body.String(), `"id":"skill-1"`)
+}
+
+func TestSandboxSkillStopReportsAMissingSkill(t *testing.T) {
+	svc := &fakeSandboxSkillService{
+		stopErr: apperrors.NewNotFoundError("skill not found"),
+	}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+		"/sandbox-configs/cfg-a/skills/nope/stop", nil))
+
+	require.Equal(t, http.StatusNotFound, w.Code)
 }
 
 func TestSandboxSkillReinstallReportsAMissingSkill(t *testing.T) {
@@ -880,6 +982,46 @@ func (m *transcriptStreamManager) GetEvents(
 	return out, len(m.events), nil
 }
 
+func (m *transcriptStreamManager) AppendSteerEvents(
+	_ context.Context, _, _ string, _ []interfaces.StreamEvent,
+) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) GetSteerEvents(
+	_ context.Context, _, _ string, from int,
+) ([]interfaces.StreamEvent, int, error) {
+	return nil, from, nil
+}
+
+func (m *transcriptStreamManager) UpdateSteerEventData(
+	context.Context, string, string, string, map[string]interface{},
+) (bool, error) {
+	return false, nil
+}
+
+func (m *transcriptStreamManager) DeleteSteerEvent(
+	context.Context, string, string, string,
+) (bool, error) {
+	return false, nil
+}
+
+func (m *transcriptStreamManager) SetLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) ClaimLiveRun(context.Context, string, string, string) error {
+	return nil
+}
+
+func (m *transcriptStreamManager) GetLiveRun(context.Context, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (m *transcriptStreamManager) ClearLiveRun(context.Context, string, string) error {
+	return nil
+}
+
 func (m *transcriptStreamManager) readKey() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1132,4 +1274,72 @@ func TestSandboxSkillGetFileInvalidPathReturns400(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body=%s", w.Body.String())
 	require.Equal(t, "../secret", svc.filePath)
+}
+
+func (f *fakeSandboxSkillService) InstallGuidance(
+	context.Context,
+	uint64,
+	string,
+	string,
+) (*service.SkillInstallGuidanceState, error) {
+	return &service.SkillInstallGuidanceState{}, nil
+}
+
+func (f *fakeSandboxSkillService) SteerInstall(
+	_ context.Context,
+	tenantID uint64,
+	configID, skillID, expectedID, steerID, content string,
+) error {
+	f.guidanceTenant = tenantID
+	f.guidanceArgs = []string{configID, skillID, expectedID, steerID, content}
+	return f.guidanceErr
+}
+
+func TestSandboxSkillGuidancePinsTheAuthorizedTargetAndRun(t *testing.T) {
+	svc := &fakeSandboxSkillService{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(
+		w,
+		httptest.NewRequest(
+			http.MethodPost,
+			"/sandbox-configs/cfg-a/skills/skill-1/guidance",
+			strings.NewReader(`{"expected_message_id":"run-1","steer_id":"id-1","content":"Install bsk"}`),
+		),
+	)
+	require.Equal(t, http.StatusAccepted, w.Code)
+	require.Equal(t, testSkillTenantID, svc.guidanceTenant)
+	require.Equal(t, []string{"cfg-a", "skill-1", "run-1", "id-1", "Install bsk"}, svc.guidanceArgs)
+}
+
+func TestSandboxSkillGuidanceRejectsMissingRun(t *testing.T) {
+	svc := &fakeSandboxSkillService{}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(
+		w,
+		httptest.NewRequest(
+			http.MethodPost,
+			"/sandbox-configs/cfg-a/skills/skill-1/guidance",
+			strings.NewReader(`{"content":"Install bsk"}`),
+		),
+	)
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Empty(t, svc.guidanceArgs)
+}
+
+func TestSandboxSkillReinstallForwardsInstructions(t *testing.T) {
+	svc := &fakeSandboxSkillService{installID: "skill-1"}
+	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(
+		w,
+		httptest.NewRequest(
+			http.MethodPost,
+			"/sandbox-configs/cfg-a/skills/skill-1/reinstall",
+			strings.NewReader(`{"instructions":"Use the official CLI installer"}`),
+		),
+	)
+	require.Equal(t, http.StatusAccepted, w.Code)
+	require.Equal(t, []string{"Use the official CLI installer"}, svc.reinstallInstructions)
 }

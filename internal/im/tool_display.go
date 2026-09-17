@@ -306,6 +306,59 @@ func FormatIMRagPipelineLine(step IMToolStep) string {
 	}
 }
 
+func imSandboxMutationTitle(step IMToolStep, pending bool) string {
+	name := imLocalizedToolName(step.ToolName)
+	path := imSandboxFilePath(step)
+	stat := imSandboxDiffStat(step)
+	base := name
+	if pending {
+		base = name + "..."
+	}
+	if path != "" {
+		base = imAppendQueryTitle(name, path)
+		if pending {
+			base += "..."
+		}
+	}
+	if stat != "" {
+		return base + " " + stat
+	}
+	return base
+}
+
+func imSandboxFilePath(step IMToolStep) string {
+	if step.Data != nil {
+		if p, ok := step.Data["path"].(string); ok && strings.TrimSpace(p) != "" {
+			return strings.TrimSpace(p)
+		}
+	}
+	if step.Arguments != nil {
+		if p, ok := step.Arguments["path"].(string); ok && strings.TrimSpace(p) != "" {
+			return strings.TrimSpace(p)
+		}
+	}
+	return ""
+}
+
+func imSandboxDiffStat(step IMToolStep) string {
+	added := imIntField(step.Arguments, "added_lines")
+	removed := imIntField(step.Arguments, "removed_lines")
+	if added == 0 && removed == 0 {
+		added = imIntField(step.Data, "added_lines")
+		removed = imIntField(step.Data, "removed_lines")
+	}
+	switch {
+	case added > 0 && removed > 0:
+		return fmt.Sprintf("+%d -%d", added, removed)
+	case added > 0:
+		return fmt.Sprintf("+%d", added)
+	case removed > 0:
+		return fmt.Sprintf("-%d", removed)
+	default:
+		return ""
+	}
+}
+
 func imAgentToolTitle(step IMToolStep) string {
 	if step.Pending {
 		switch step.ToolName {
@@ -313,6 +366,8 @@ func imAgentToolTitle(step IMToolStep) string {
 			return "正在查看图片内容..."
 		case "wiki_search", "wiki_read_page":
 			return imLocalizedToolName(step.ToolName) + "..."
+		case "write_sandbox_file", "edit_sandbox_file":
+			return imSandboxMutationTitle(step, true)
 		default:
 			return fmt.Sprintf("正在调用 %s...", imLocalizedToolName(step.ToolName))
 		}
@@ -354,6 +409,10 @@ func imAgentToolTitle(step IMToolStep) string {
 		}
 		base := imToolStatusDescription(step)
 		return imAppendQueryTitle(base, pageLabel)
+	}
+
+	if toolName == "write_sandbox_file" || toolName == "edit_sandbox_file" {
+		return imSandboxMutationTitle(step, false)
 	}
 
 	if summary := imToolHeaderSummary(step); summary != "" {

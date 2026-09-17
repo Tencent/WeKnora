@@ -1,6 +1,6 @@
 # API 参考：FAQ 与 Wiki
 
-路由注册：`internal/router/router.go` 的 `RegisterFAQRoutes` 与 `RegisterWikiPageRoutes`。Handler：`internal/handler/faq.go`、`internal/handler/wiki_page.go`。
+管理知识库中的 FAQ 条目与 Wiki 页面，支持导入、检索、编辑和版本恢复。
 
 两组均为 KB 内容子资源：读为 Viewer+ 且 KB read（API key `retrieve`/full）；写为“KB 创建者 OR Admin+”且 KB write（API key `ingest`/full），并受 KB 白名单约束。
 
@@ -455,3 +455,7 @@ curl $BASE/api/v1/knowledgebase/kb-1/wiki/issues -H "Authorization: Bearer $TOKE
 curl -X PUT $BASE/api/v1/knowledgebase/kb-1/wiki/issues/i-1/status -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"status":"resolved"}'
 ```
+
+## 实现参考
+
+路由注册：`internal/router/router.go` 的 `RegisterFAQRoutes` 与 `RegisterWikiPageRoutes`。Handler：`internal/handler/faq.go`、`internal/handler/wiki_page.go`。

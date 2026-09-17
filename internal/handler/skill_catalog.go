@@ -50,8 +50,8 @@ func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
 		return
 	}
-	maxBytes := secutils.GetMaxFileSize()
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+skillUploadEnvelopeSlack)
+	maxBytes := secutils.GetMaxSkillBundleSize()
+	limitSkillUploadBody(c, maxBytes)
 
 	if strings.HasPrefix(c.ContentType(), "application/json") {
 		h.registerCatalogFromSource(c)
@@ -60,8 +60,7 @@ func (h *SkillHandler) RegisterCatalog(c *gin.Context) {
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if stderrors.As(err, &tooLarge) {
+		if isRequestBodyTooLarge(err) {
 			_ = c.Error(skillTooLargeError())
 			return
 		}
@@ -98,7 +97,7 @@ func (h *SkillHandler) registerCatalogFromSource(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
-			_ = c.Error(skillTooLargeError())
+			_ = c.Error(skillSourceRequestTooLargeError())
 			return
 		}
 		_ = c.Error(apperrors.NewBadRequestError("invalid skill source request"))
@@ -137,8 +136,13 @@ func (h *SkillHandler) InstallCatalog(c *gin.Context) {
 		_ = c.Error(apperrors.NewInternalServerError("skill catalog is not configured"))
 		return
 	}
+	limitJSONBody(c, skillSourceJSONMaxBytes)
 	var req catalogInstallRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		if isRequestBodyTooLarge(err) {
+			_ = c.Error(skillJSONRequestTooLargeError())
+			return
+		}
 		_ = c.Error(apperrors.NewBadRequestError("invalid install request"))
 		return
 	}

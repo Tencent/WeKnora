@@ -301,7 +301,8 @@
 
               <t-form-item :label="$t('auth.confirmPassword')" name="confirmPassword">
                 <t-input v-model="registerData.confirmPassword" :placeholder="$t('auth.confirmPasswordPlaceholder')"
-                  type="password" autocomplete="new-password" size="large" :disabled="loading" @enter="handleRegister" />
+                  type="password" autocomplete="new-password" size="large" :disabled="loading"
+                  @enter="handleRegister" />
               </t-form-item>
 
               <t-button type="submit" theme="primary" size="large" block :loading="loading" class="submit-button">
@@ -344,6 +345,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
+import { newPasswordRules } from '@/utils/passwordPolicy'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { Autoplay, EffectFade, Pagination } from 'swiper/modules'
 import 'swiper/css'
@@ -418,6 +420,7 @@ const oidcProviderName = ref('')
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
 // In invite_only mode the link/card are hidden.
 const registrationEnabled = ref(true)
+const complexPasswordEnabled = ref(false)
 
 // invite-link state. When the URL carries ?token=xxx we resolve it to
 // the originating tenant + role and switch the form into a "register
@@ -435,7 +438,8 @@ const languageOptions = [
   { value: 'zh-CN', label: '简体中文', shortLabel: '中文', flag: '🇨🇳' },
   { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
   { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
-  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' }
+  { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' },
+  { value: 'ja-JP', label: '日本語', shortLabel: '日本語', flag: '🇯🇵' }
 ]
 
 const currentLanguage = computed(() => locale.value)
@@ -470,10 +474,8 @@ const formRules = computed(() => ({
   password: [
     { required: true, message: t('auth.passwordRequired'), type: 'error' },
     { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ]
+    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' }
+  ],
 }))
 
 // Register form validation rules
@@ -492,13 +494,7 @@ const registerRules = computed(() => ({
     { required: true, message: t('auth.emailRequired'), type: 'error' },
     { email: true, message: t('auth.emailInvalid'), type: 'error' }
   ],
-  password: [
-    { required: true, message: t('auth.passwordRequired'), type: 'error' },
-    { min: 8, message: t('auth.passwordMinLength'), type: 'error' },
-    { max: 32, message: t('auth.passwordMaxLength'), type: 'error' },
-    { pattern: /[a-zA-Z]/, message: t('auth.passwordMustContainLetter'), type: 'error' },
-    { pattern: /\d/, message: t('auth.passwordMustContainNumber'), type: 'error' }
-  ],
+  password: newPasswordRules(t, complexPasswordEnabled.value),
   confirmPassword: [
     { required: true, message: t('auth.confirmPasswordRequired'), type: 'error' },
     {
@@ -623,8 +619,10 @@ const loadAuthConfig = async () => {
   try {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
+    complexPasswordEnabled.value = response.complex_password_enabled
   } catch {
     registrationEnabled.value = true
+    complexPasswordEnabled.value = false
   }
 }
 
@@ -1186,7 +1184,7 @@ onMounted(async () => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 40px 50px 100px 30px;
+  padding: 112px 50px 100px 30px;
   box-sizing: border-box;
   position: relative;
 }

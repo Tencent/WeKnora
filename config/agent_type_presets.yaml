@@ -43,6 +43,9 @@ agent_type_presets:
       zh-TW:
         label: "RAG 問答"
         description: "基於文件分塊的檢索式問答，適合未啟用 Wiki 的文件 / FAQ 知識庫。"
+      ja-JP:
+        label: "RAG Q&A"
+        description: "ドキュメントのチャンクに基づく根拠付きの検索型回答。Wikiを有効にしていないドキュメント/FAQナレッジベースに最適です。"
     config:
       system_prompt_id: "progressive_rag_agent"
       temperature: 0.7
@@ -76,6 +79,9 @@ agent_type_presets:
       zh-TW:
         label: "Wiki 問答"
         description: "以 Wiki 為主的檢索與圖譜跳轉回答，必須綁定已啟用 Wiki 的知識庫。"
+      ja-JP:
+        label: "Wiki Q&A"
+        description: "Wikiを主体とした回答。Wikiページを検索・閲覧し、リンクをたどります。Wikiを有効にしたナレッジベースが必要です。"
     config:
       system_prompt_id: "wiki_researcher"
       temperature: 0.7
@@ -107,6 +113,9 @@ agent_type_presets:
       zh-TW:
         label: "Wiki + RAG 混合"
         description: "先用 Wiki 建立導覽和背景，再用分塊檢索精確引用。需綁定同時啟用 Wiki 與向量/關鍵詞索引的知識庫。"
+      ja-JP:
+        label: "ハイブリッド（Wiki + RAG）"
+        description: "Wikiページで全体像と背景を把握し、そこからチャンクを掘り下げて正確に引用します。Wikiとチャンクインデックスの両方を有効にしたナレッジベースが必要です。"
     config:
       system_prompt_id: "hybrid_rag_wiki_agent"
       temperature: 0.7
@@ -154,6 +163,9 @@ agent_type_presets:
       zh-TW:
         label: "數據分析"
         description: "對 CSV / Excel 等表格檔案執行 SQL 查詢和統計分析。請綁定包含數據檔案的知識庫。"
+      ja-JP:
+        label: "データ分析"
+        description: "表形式ファイル（CSV/Excel）に対するSQLクエリと統計分析。データファイルを含むナレッジベースと組み合わせてください。"
     config:
       system_prompt_id: "data_analyst"
       temperature: 0.3
@@ -195,5 +207,8 @@ agent_type_presets:
       zh-TW:
         label: "自訂"
         description: "完全自訂：自行選擇工具、提示詞和知識庫。"
+      ja-JP:
+        label: "カスタム"
+        description: "完全に自由に設定。ツール、プロンプト、ナレッジベースの範囲を手動で選択します。"
     # No `config:` block → preset applies no auto-fill.
     # No `kb_filter:`    → all KBs are selectable.

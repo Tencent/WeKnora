@@ -3,6 +3,7 @@ export function getAgentToolIconName(
   toolName: string,
   searchSource?: 'knowledge' | 'web' | 'mixed',
 ): string {
+  if (toolName === 'local_browser') return 'internet'
   if (toolName === 'thinking') {
     return 'ai-search'
   }
@@ -36,7 +37,10 @@ export function getAgentToolIconName(
   if (toolName === 'attachment_parsing') {
     return 'attach'
   }
-  if (toolName.startsWith('mcp_')) {
+  if (toolName === 'discover_mcp_tools') {
+    return 'search'
+  }
+  if (toolName === 'call_mcp_tool' || toolName.startsWith('mcp_')) {
     return 'terminal'
   }
   if (toolName === 'shell_exec') {
@@ -45,7 +49,7 @@ export function getAgentToolIconName(
   if (toolName === 'list_sandbox_files') {
     return 'folder'
   }
-  if (toolName === 'read_sandbox_file' || toolName === 'read_skill') {
+  if (toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'read_skill') {
     return 'file'
   }
   if (toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {

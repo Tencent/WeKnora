@@ -66,14 +66,13 @@ type suggestionKBShareService struct {
 	allowed map[string]bool
 }
 
-func (s *suggestionKBShareService) HasTenantKBPermission(
+func (s *suggestionKBShareService) CheckTenantKBPermission(
 	_ context.Context,
 	kbID string,
 	_ uint64,
 	_ types.TenantRole,
-	_ types.OrgMemberRole,
-) (bool, error) {
-	return s.allowed[kbID], nil
+) (types.OrgMemberRole, bool, error) {
+	return types.OrgRoleViewer, s.allowed[kbID], nil
 }
 
 func TestResolveSuggestionTagScopes_UsesSourceTenantForSharedKB(t *testing.T) {
@@ -97,8 +96,7 @@ func TestResolveSuggestionTagScopes_UsesSourceTenantForSharedKB(t *testing.T) {
 	}
 
 	resolved, err := svc.resolveSuggestionTagScopes(
-		context.Background(),
-		callerTenant,
+		context.WithValue(context.Background(), types.TenantIDContextKey, callerTenant),
 		[]types.TagScope{{KnowledgeBaseID: kbID, TagIDs: []string{tagID}}},
 	)
 	require.NoError(t, err)

@@ -38,8 +38,14 @@ const title = computed(() => {
 const meta = computed(() => {
   const size = record.value.size
   const replacements = record.value.replacements
+  const added = record.value.added_lines
+  const removed = record.value.removed_lines
   const isEdit = record.value.display_type === 'edit_sandbox_file' || typeof replacements === 'number'
   const parts = [t(isEdit ? 'agentStream.sandboxFiles.edited' : 'agentStream.sandboxFiles.wrote')]
+  const addedN = typeof added === 'number' && Number.isFinite(added) ? added : 0
+  const removedN = typeof removed === 'number' && Number.isFinite(removed) ? removed : 0
+  if (addedN > 0) parts.push(`+${addedN}`)
+  if (removedN > 0) parts.push(`-${removedN}`)
   if (isEdit && typeof replacements === 'number' && Number.isFinite(replacements)) {
     parts.push(t('agentStream.sandboxFiles.replacements', { count: replacements }))
   }

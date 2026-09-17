@@ -16,20 +16,22 @@ var persistStripFields = map[string][]string{
 // persistStripFieldsByTool drops binary / duplicate blobs. stdout/stderr stay
 // (compacted separately) so a history reload can still render the card.
 var persistStripFieldsByTool = map[string][]string{
-	ToolShellExec:        {"content", "content_base64"},
-	ToolReadSandboxFile:  {"content", "content_base64"},
-	ToolWriteSandboxFile: {"content", "content_base64"},
-	ToolEditSandboxFile:  {"content", "content_base64"},
+	ToolReadFile:              {"content", "content_base64", "instructions"},
+	ToolShellExec:             {"content", "content_base64"},
+	LegacyToolReadSandboxFile: {"content", "content_base64"},
+	ToolWriteSandboxFile:      {"content", "content_base64"},
+	ToolEditSandboxFile:       {"content", "content_base64"},
 }
 
 // clientStripFieldsByTool is the lighter omit list for live SSE. The UI
 // needs stdout/stderr to render a terminal card; those streams are already
 // capped by the tool. Persist still uses persistStripFieldsByTool.
 var clientStripFieldsByTool = map[string][]string{
-	ToolShellExec:        {"content", "content_base64"},
-	ToolReadSandboxFile:  {"content", "content_base64"},
-	ToolWriteSandboxFile: {"content", "content_base64"},
-	ToolEditSandboxFile:  {"content", "content_base64"},
+	ToolReadFile:              {"content", "content_base64", "instructions"},
+	ToolShellExec:             {"content", "content_base64"},
+	LegacyToolReadSandboxFile: {"content", "content_base64"},
+	ToolWriteSandboxFile:      {"content", "content_base64"},
+	ToolEditSandboxFile:       {"content", "content_base64"},
 }
 
 const historicalSandboxOutputChars = 4 * 1024
@@ -125,6 +127,10 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 				continue
 			}
 			result := *tc.Result
+			if tc.Name == "local_browser" {
+				// Screenshot bytes already live in Data for the result card.
+				result.Images = nil
+			}
 			if isSandboxContentTool(tc.Name) {
 				// display_type is for the live card; history still needs the
 				// command, exit, and a head+tail of the streams. Replacing
@@ -166,7 +172,7 @@ func CompactToolOutputForHistory(toolName string, result *types.ToolResult) stri
 }
 
 func isSandboxContentTool(toolName string) bool {
-	return toolName == ToolShellExec || toolName == ToolReadSandboxFile || toolName == ToolExecuteSkillScript
+	return toolName == ToolShellExec || toolName == ToolReadFile || toolName == LegacyToolReadSandboxFile || toolName == LegacyToolExecuteSkillScript
 }
 
 // failedToolVisibleContent keeps stdout/stderr (in Output) when a tool fails.
@@ -332,6 +338,11 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		path := stringField(data, "path")
 		size := intField(data, "size")
 		if path != "" {
+			added := intField(data, "added_lines")
+			removed := intField(data, "removed_lines")
+			if stat := formatSandboxDiffStat(added, removed); stat != "" {
+				return fmt.Sprintf("Wrote %s (%s, %d bytes)", path, stat, size)
+			}
 			return fmt.Sprintf("Wrote %s (%d bytes)", path, size)
 		}
 	case "edit_sandbox_file":
@@ -339,6 +350,11 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		size := intField(data, "size")
 		n := intField(data, "replacements")
 		if path != "" {
+			added := intField(data, "added_lines")
+			removed := intField(data, "removed_lines")
+			if stat := formatSandboxDiffStat(added, removed); stat != "" {
+				return fmt.Sprintf("Edited %s (%s, %d replacement(s), %d bytes)", path, stat, n, size)
+			}
 			return fmt.Sprintf("Edited %s (%d replacement(s), %d bytes)", path, n, size)
 		}
 	case "attachment_parsing":

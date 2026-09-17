@@ -1,5 +1,8 @@
 Tencent is pleased to support the open source community by making this project available.
 
+Additional component notices, licenses and corresponding source are supplied in
+THIRD_PARTY_NOTICES.md and the licenses/ directory. These supplement the notices below.
+
 Copyright (C) 2025 Tencent. All rights reserved. 
 
 This project is licensed under the MIT License except for the third-party components listed below, which is licensed under different terms. Tencent does not impose any additional limitations beyond what is outlined in the respective licenses of these third-party components. Users must comply with all terms and conditions of original licenses of these third-party components and must ensure that the usage of the third party components adheres to all relevant laws and regulations. 

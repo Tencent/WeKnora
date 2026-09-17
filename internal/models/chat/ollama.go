@@ -36,6 +36,7 @@ func NewOllamaChat(config *ChatConfig, ollamaService *ollama.OllamaService) (*Ol
 func (c *OllamaChat) convertMessages(messages []Message) []ollamaapi.Message {
 	ollamaMessages := make([]ollamaapi.Message, 0, len(messages))
 	for _, msg := range messages {
+		msg = neutralizeMessageSpecialTokens(msg)
 		msgOllama := ollamaapi.Message{
 			Role:      msg.Role,
 			Content:   msg.Content,
@@ -103,8 +104,8 @@ func (c *OllamaChat) buildChatRequest(messages []Message, opts *ChatOptions, isS
 		if opts.TopP > 0 {
 			chatReq.Options["top_p"] = opts.TopP
 		}
-		if opts.MaxTokens > 0 {
-			chatReq.Options["num_predict"] = opts.MaxTokens
+		if budget := opts.CompletionBudget(); budget > 0 {
+			chatReq.Options["num_predict"] = budget
 		}
 		if opts.Thinking != nil {
 			chatReq.Think = &ollamaapi.ThinkValue{

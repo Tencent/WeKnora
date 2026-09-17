@@ -156,9 +156,9 @@
                 :class="{ 'option-chip--active': formData.mode === 'websocket' }"
                 :disabled="formData.platform === 'mattermost'"
                 @click="formData.mode = 'websocket'">
-                WebSocket
+                {{ formData.platform === 'dingtalk' ? 'Stream' : 'WebSocket' }}
               </button>
-              <button type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
+              <button v-if="formData.platform !== 'dingtalk' && formData.platform !== 'qqbot'" type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
                 @click="formData.mode = 'webhook'">
                 Webhook
               </button>
@@ -585,6 +585,7 @@ import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { copyWithToast } from '@/utils/clipboard';
+import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
   getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
@@ -787,6 +788,7 @@ function platformSupportsThread(platform: string): boolean {
 watch(
   () => formData.value.platform,
   (p) => {
+    if (p === 'dingtalk' || p === 'qqbot') formData.value.mode = 'websocket';
     if (p === 'mattermost') {
       formData.value.mode = 'webhook';
       if (typeof formData.value.credentials.post_to_main !== 'boolean') {
@@ -1037,7 +1039,7 @@ async function handleSave() {
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: formData.value.knowledge_base_id,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
         enabled: editingEnabled.value,
         ...(formData.value.target_agent_id ? { agent_id: formData.value.target_agent_id } : {}),
@@ -1055,7 +1057,7 @@ async function handleSave() {
         mode: formData.value.mode,
         output_mode: formData.value.output_mode,
         session_mode: formData.value.session_mode,
-        knowledge_base_id: formData.value.knowledge_base_id,
+        knowledge_base_id: normalizeOptionalString(formData.value.knowledge_base_id),
         credentials: formData.value.credentials,
       });
       MessagePlugin.success(t('common.createSuccess'));

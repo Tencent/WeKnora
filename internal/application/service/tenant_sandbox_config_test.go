@@ -34,6 +34,31 @@ func testGlobalSandboxConfig() *sandbox.Config {
 	return cfg
 }
 
+func TestSandboxConfigHasSecretsIncludesInjectedHeaders(t *testing.T) {
+	cfg := &types.TenantSandboxConfig{
+		Network: &types.SandboxNetworkPolicy{
+			CubeRules: []types.CubeEgressRule{{
+				Inject: []types.CubeHeaderInject{{Secret: "cube-secret"}},
+			}},
+		},
+	}
+	require.True(t, sandboxConfigHasSecrets(cfg))
+
+	cfg.Network.CubeRules = nil
+	cfg.Network.E2BHostRules = []types.E2BHostRule{{
+		Headers: map[string]string{"X-Key": "e2b-secret"},
+	}}
+	require.True(t, sandboxConfigHasSecrets(cfg))
+
+	cfg.Network = &types.SandboxNetworkPolicy{
+		DenyEgressByDefault: true,
+		CubeRules: []types.CubeEgressRule{{
+			Inject: []types.CubeHeaderInject{{Header: "X-Key"}},
+		}},
+	}
+	require.False(t, sandboxConfigHasSecrets(cfg))
+}
+
 func e2bCfg(key, url, domain, template string, ttl int) *types.TenantSandboxConfig {
 	return &types.TenantSandboxConfig{
 		SandboxType: "e2b",
@@ -304,15 +329,19 @@ func (s stubAgentRepo) ListNamesBySandboxConfigID(
 }
 
 type stubProviderClient struct {
-	inventories [][]sandbox.RemoteSandboxSummary
-	templates   []sandbox.RemoteTemplate
-	ensured     *sandbox.RemoteTemplate
+	inventories    [][]sandbox.RemoteSandboxSummary
+	templates      []sandbox.RemoteTemplate
+	ensured        *sandbox.RemoteTemplate
+	ensuredDesktop *sandbox.RemoteTemplate
 	// ensureDelay widens the window in which concurrent provisioning requests
 	// overlap, which is the only way to observe whether they were collapsed.
-	ensureDelay time.Duration
+	ensureDelay      time.Duration
+	ensureDesktopErr error
 
-	ensureCalls  atomic.Int32
-	replaceCalls atomic.Int32
+	ensureCalls         atomic.Int32
+	ensureDesktopCalls  atomic.Int32
+	replaceCalls        atomic.Int32
+	replaceDesktopCalls atomic.Int32
 
 	listCalls        int
 	deleted          []string
@@ -347,6 +376,45 @@ func (s *stubProviderClient) ReplaceStandardTemplate(ctx context.Context) (*sand
 		return &copyTpl, nil
 	}
 	return s.EnsureStandardTemplate(ctx)
+}
+
+func (s *stubProviderClient) EnsureDesktopTemplate(context.Context) (*sandbox.RemoteTemplate, error) {
+	s.ensureDesktopCalls.Add(1)
+	if s.ensureDelay > 0 {
+		time.Sleep(s.ensureDelay)
+	}
+	if s.ensureDesktopErr != nil {
+		return nil, s.ensureDesktopErr
+	}
+	if s.ensuredDesktop != nil {
+		copyTpl := *s.ensuredDesktop
+		return &copyTpl, nil
+	}
+	return &sandbox.RemoteTemplate{ID: "tpl-desktop", Name: "weknora-desktop", Status: "building", Desktop: true}, nil
+}
+
+func (s *stubProviderClient) ReplaceDesktopTemplate(ctx context.Context) (*sandbox.RemoteTemplate, error) {
+	s.replaceDesktopCalls.Add(1)
+	if s.ensureDelay > 0 {
+		time.Sleep(s.ensureDelay)
+	}
+	if s.ensureDesktopErr != nil {
+		return nil, s.ensureDesktopErr
+	}
+	if s.ensuredDesktop != nil {
+		copyTpl := *s.ensuredDesktop
+		return &copyTpl, nil
+	}
+	return s.EnsureDesktopTemplate(ctx)
+}
+
+func (s *stubProviderClient) DeleteSupersededDesktopTemplates(_ context.Context, keepID string) error {
+	for _, item := range s.templates {
+		if item.Desktop && item.ID != "" && item.ID != keepID {
+			s.deletedTemplates = append(s.deletedTemplates, item.ID)
+		}
+	}
+	return nil
 }
 
 func (s *stubProviderClient) DeleteSupersededStandardTemplates(_ context.Context, keepID string) error {
@@ -412,6 +480,79 @@ func TestQueryTemplatesEnsuresMissingWeKnoraTemplate(t *testing.T) {
 	require.Equal(t, "tpl-weknora", result.StandardTemplateID)
 	require.Len(t, result.Templates, 2)
 	require.True(t, result.Templates[0].Standard, "standard template should sort first")
+}
+
+func TestQueryTemplatesEnsuresMissingDesktopTemplate(t *testing.T) {
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-weknora", Name: "weknora", Status: "ready", Standard: true},
+		},
+		ensuredDesktop: &sandbox.RemoteTemplate{
+			ID: "tpl-desktop", Name: "weknora-desktop", Status: "building", Desktop: true,
+		},
+	}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	result, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		Config:        e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+		EnsureDesktop: true,
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.Provisioned)
+	require.Equal(t, "tpl-weknora", result.StandardTemplateID)
+	require.Equal(t, "tpl-desktop", result.DesktopTemplateID)
+	require.Equal(t, int32(0), client.ensureCalls.Load(), "creating desktop must not rebuild the CLI template")
+	require.Equal(t, int32(1), client.ensureDesktopCalls.Load())
+	var sawDesktop bool
+	for _, item := range result.Templates {
+		if item.Desktop && item.ID == "tpl-desktop" {
+			sawDesktop = true
+		}
+	}
+	require.True(t, sawDesktop)
+}
+
+func TestQueryTemplatesEnsureDesktopFailureKeepsCatalog(t *testing.T) {
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-weknora", Name: "weknora", Status: "ready", Standard: true},
+		},
+		ensureDesktopErr: stderrors.New("hub missing main-desktop"),
+	}
+	svc := newTestConfigService(t, &fakeConfigRepo{}, client, stubAgentRepo{})
+
+	result, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		Config:        e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "", 300),
+		EnsureDesktop: true,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "tpl-weknora", result.StandardTemplateID)
+	require.Empty(t, result.DesktopTemplateID)
+	require.Equal(t, int32(1), client.ensureDesktopCalls.Load())
+	require.Equal(t, 1, len(result.Templates))
+}
+
+func TestQueryTemplatesReplaceDesktopFailureIsFatal(t *testing.T) {
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "tpl-desktop", 300)
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID: "cfg-a", TenantID: 7, SandboxType: "e2b", Config: stored,
+	}}
+	client := &stubProviderClient{
+		templates: []sandbox.RemoteTemplate{
+			{ID: "tpl-desktop", Name: "weknora-desktop", Status: "ready", Desktop: true},
+		},
+		ensureDesktopErr: stderrors.New("rebuild refused"),
+	}
+	svc := newTestConfigService(t, repo, client, stubAgentRepo{})
+
+	_, err := svc.QueryTemplates(context.Background(), 7, SandboxTemplateQueryInput{
+		ConfigID:       "cfg-a",
+		ReplaceDesktop: true,
+	})
+	require.Error(t, err)
+	require.Equal(t, int32(1), client.replaceDesktopCalls.Load())
 }
 
 // Provisioning only becomes idempotent once the build shows up in the
@@ -757,6 +898,29 @@ func TestUpdateRefusesTemplateChangeWhenSkillSnapshotExists(t *testing.T) {
 	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
 		Name:   "prod",
 		Config: e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t2", 300),
+	})
+	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
+	require.Nil(t, repo.updated)
+}
+
+func TestUpdateRefusesDesktopEnabledChangeWhenSkillSnapshotExists(t *testing.T) {
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	stored := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	stored.SkillImage = &types.SkillImageConfig{SnapshotID: "snap-1"}
+	repo := &fakeConfigRepo{entity: &types.TenantSandboxConfigEntity{
+		ID:          "cfg-a",
+		TenantID:    7,
+		Name:        "prod",
+		SandboxType: "e2b",
+		Config:      stored,
+	}}
+	svc := newTestConfigService(t, repo, &stubProviderClient{}, stubAgentRepo{})
+
+	incoming := e2bCfg("key-a", "https://api.e2b.app", "e2b.app", "t1", 300)
+	incoming.DesktopEnabled = true
+	_, err := svc.Update(context.Background(), 7, "cfg-a", UpdateSandboxConfigInput{
+		Name:   "prod",
+		Config: incoming,
 	})
 	require.ErrorIs(t, err, ErrSkillSnapshotBlocksTemplateChange)
 	require.Nil(t, repo.updated)
@@ -1297,6 +1461,20 @@ func TestSanitizeSandboxConfigPreservesRedactedSecret(t *testing.T) {
 	require.Equal(t, "stored-key", out.E2B.APIKey)
 }
 
+func TestSanitizeSandboxConfigRejectsDomainAllowWithoutDenyAll(t *testing.T) {
+	_, err := SanitizeSandboxConfig(&types.TenantSandboxConfig{
+		SandboxType: "cube",
+		Cube: &types.CubeSandboxConfig{
+			APIURL: "https://cube.example.com", ProxyURL: "https://cube.example.com",
+			SandboxDomain: "cube.app", TemplateID: "tpl-1",
+		},
+		Network: &types.SandboxNetworkPolicy{AllowOut: []string{"api.example.com"}},
+	}, nil)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "0.0.0.0/0")
+}
+
 func TestSanitizeSandboxConfigPreservesSkillImage(t *testing.T) {
 	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
 	existing := &types.TenantSandboxConfig{
@@ -1428,6 +1606,9 @@ func TestSanitizeSandboxConfigRefusesSecretsWithoutAESKey(t *testing.T) {
 	require.Error(t, err)
 
 	// A config without secrets is still allowed in that deployment.
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
 	_, err = SanitizeSandboxConfig(&types.TenantSandboxConfig{
 		SandboxType: "docker",
 		Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
@@ -1442,6 +1623,9 @@ func TestSandboxesStillLiveErrorSupportsErrorsIs(t *testing.T) {
 }
 
 func TestCreateAcceptsDockerNamedSandboxBackend(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
 	repo := &fakeConfigRepo{}
 	svc := newTestConfigService(t, repo, nil, stubAgentRepo{})
 
@@ -1467,6 +1651,9 @@ func TestCreateRejectsRemovedLocalBackend(t *testing.T) {
 }
 
 func TestCreateRejectsDockerWithoutImage(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "true")
 	svc := newTestConfigService(t, &fakeConfigRepo{}, nil, stubAgentRepo{})
 
 	_, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
@@ -1475,6 +1662,22 @@ func TestCreateRejectsDockerWithoutImage(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, sandbox.ErrSandboxConfigIncomplete)
+}
+
+func TestCreateRejectsDockerWhenDisabled(t *testing.T) {
+	sandbox.ClearDockerBackendEnabledOverride()
+	t.Cleanup(sandbox.ClearDockerBackendEnabledOverride)
+	t.Setenv(sandbox.DockerBackendEnabledEnv, "")
+	svc := newTestConfigService(t, &fakeConfigRepo{}, nil, stubAgentRepo{})
+
+	_, err := svc.Create(context.Background(), 7, CreateSandboxConfigInput{
+		Name: "docker-dev",
+		Config: &types.TenantSandboxConfig{
+			SandboxType: "docker",
+			Docker:      &types.DockerSandboxConfig{Image: "weknora:test"},
+		},
+	})
+	require.ErrorIs(t, err, sandbox.ErrDockerBackendDisabled)
 }
 
 func TestWorkspaceScriptsDisabledPolicy(t *testing.T) {
@@ -1513,10 +1716,52 @@ func TestDeleteReleasesSkillSnapshotsBeforeSoftDelete(t *testing.T) {
 	require.NotContains(t, fx.skills.marks, "row-0:"+types.SkillSnapshotStateDeleted)
 	require.Empty(t, fx.skills.skills, "tenant_skills rows must be dropped before SoftDelete")
 	require.True(t, fx.skills.ledgerCleared)
-	require.Equal(t, []string{"bundle://skill-a.zip"}, fx.files.deleted)
+	require.Empty(t, fx.files.deleted,
+		"deleting a sandbox must not drop the catalog archive")
 	// DeleteSkill only takes values filed under a skill; the config-wide ones
 	// would outlive the config without this.
 	require.Equal(t, []string{"7:cfg-a"}, fx.skills.envVarsClearedFor)
+}
+
+// An install row names an archive only when a re-register replaced the
+// definition's copy and this sandbox kept running the image built from the old
+// one. Deleting the config drops the only reader those bytes will ever have, so
+// they have to go with it — nothing else records that the version existed.
+func TestDeleteReclaimsArchivePinnedOnlyByThisConfig(t *testing.T) {
+	fx := newSnapshotReleaseFixture(t, nil)
+	fx.skills.skills[0].BundleRef = "bundle://skill-a-v1.zip"
+
+	require.NoError(t, fx.svc.Delete(context.Background(), 7, "cfg-a", false))
+
+	require.Equal(t, []string{"bundle://skill-a-v1.zip"}, fx.files.deleted)
+}
+
+func TestDeleteKeepsArchiveAnotherConfigStillPins(t *testing.T) {
+	fx := newSnapshotReleaseFixture(t, nil)
+	fx.skills.skills[0].BundleRef = "bundle://skill-a-v1.zip"
+	// A sibling sandbox was built from the same replaced archive and is not
+	// being deleted, so the pin is not this config's to release.
+	fx.skills.skills = append(fx.skills.skills, &types.TenantSkillEntity{
+		ID: "sk-2", TenantID: 7, SandboxConfigID: "cfg-b",
+		BundleRef: "bundle://skill-a-v1.zip",
+	})
+
+	require.NoError(t, fx.svc.Delete(context.Background(), 7, "cfg-a", false))
+
+	require.Empty(t, fx.files.deleted)
+}
+
+// A list that cannot be read is not evidence that nothing needs the bytes. A
+// leaked archive costs storage; a deleted one costs some other sandbox its
+// files, so an unreadable table keeps it.
+func TestDeleteKeepsPinnedArchiveWhenReadersCannotBeListed(t *testing.T) {
+	fx := newSnapshotReleaseFixture(t, nil)
+	fx.skills.skills[0].BundleRef = "bundle://skill-a-v1.zip"
+	fx.skills.listTenantErr = stderrors.New("database unavailable")
+
+	require.NoError(t, fx.svc.Delete(context.Background(), 7, "cfg-a", false))
+
+	require.Empty(t, fx.files.deleted)
 }
 
 func TestDeleteRefusesWhenSnapshotReleaseFailsWithoutForce(t *testing.T) {
@@ -1674,6 +1919,12 @@ func newSnapshotReleaseFixture(t *testing.T, failDelete map[string]error) *snaps
 				ID: "sk-1", TenantID: 7, SandboxConfigID: "cfg-a",
 				BundleRef: "bundle://skill-a.zip",
 			}},
+			// The install names the archive the definition itself holds, so
+			// dropping the config must leave those bytes where they are.
+			catalogs: []*types.TenantSkillCatalogEntity{{
+				ID: "cat-1", TenantID: 7, Name: "skill-a",
+				BundleRef: "bundle://skill-a.zip",
+			}},
 		},
 		files: &deleteBundleResolver{},
 	}
@@ -1753,9 +2004,14 @@ func (c *snapshotReleaseClient) DeleteSnapshot(ctx context.Context, snapshotID s
 type deleteSkillStore struct {
 	snapshots         []*types.TenantSkillSnapshotEntity
 	skills            []*types.TenantSkillEntity
+	catalogs          []*types.TenantSkillCatalogEntity
 	marks             []string
 	ledgerCleared     bool
 	envVarsClearedFor []string
+
+	// listTenantErr makes the tenant-wide lookups fail, which is what decides
+	// whether a pinned archive is kept rather than deleted on a bad read.
+	listTenantErr error
 }
 
 func (s *deleteSkillStore) snapshot(id string) *types.TenantSkillSnapshotEntity {
@@ -1813,6 +2069,44 @@ func (s *deleteSkillStore) ListSkillsByConfig(
 	var out []*types.TenantSkillEntity
 	for _, row := range s.skills {
 		if row.TenantID == tenantID && row.SandboxConfigID == configID {
+			cp := *row
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *deleteSkillStore) ListSkillsByTenant(
+	ctx context.Context, tenantID uint64,
+) ([]*types.TenantSkillEntity, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.listTenantErr != nil {
+		return nil, s.listTenantErr
+	}
+	var out []*types.TenantSkillEntity
+	for _, row := range s.skills {
+		if row.TenantID == tenantID {
+			cp := *row
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (s *deleteSkillStore) ListCatalogsByTenant(
+	ctx context.Context, tenantID uint64,
+) ([]*types.TenantSkillCatalogEntity, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.listTenantErr != nil {
+		return nil, s.listTenantErr
+	}
+	var out []*types.TenantSkillCatalogEntity
+	for _, row := range s.catalogs {
+		if row.TenantID == tenantID {
 			cp := *row
 			out = append(out, &cp)
 		}

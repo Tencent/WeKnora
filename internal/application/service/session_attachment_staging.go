@@ -272,7 +272,13 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment) string
 			escapeAttachmentXML(attachment.Path),
 		)
 	}
-	b.WriteString("  <instruction>Use these absolute paths as read-only inputs. Inspect them with read_sandbox_file or list_sandbox_files, or pass them to shell commands or skill script arguments when those tools are available. Create generated files with write_sandbox_file; patch existing ones with edit_sandbox_file; put downloadable artifacts under $WEKNORA_SKILL_OUTPUT_DIR.</instruction>\n")
+	b.WriteString("  <instruction>These are the user's files: read them at the absolute paths above " +
+		"and do not write into /workspace/input. Inspect them with read_file, " +
+		"or with shell_exec (ls/find) when a shell is available. " +
+		"Create generated files with write_sandbox_file " +
+		"and patch existing ones with edit_sandbox_file. $WEKNORA_SKILL_OUTPUT_DIR (/workspace/output) " +
+		"is the only directory collected for download, so put finished deliverables there " +
+		"and keep drafts and intermediate files in any other directory under /workspace.</instruction>\n")
 	b.WriteString("</sandbox_attachments>")
 	return b.String()
 }

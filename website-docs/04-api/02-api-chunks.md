@@ -1,8 +1,6 @@
 # API 参考：分块与标签
 
-分块（chunk）是检索的最小单元，标签用于给文档分类。两组接口都挂在知识库之下，与[知识库与知识](./02-api-knowledge.md)共用同一套权限规则：读为 Viewer+ 且对父 KB 有 read 权限（API key `retrieve`），写为「KB 创建者 OR Admin+」且有 write 权限（API key `ingest`），均受 API key 的 KB 白名单约束。
-
-路由注册：`internal/router/routes_knowledge.go` 的 `RegisterChunkRoutes`、`RegisterKnowledgeTagRoutes`、`RegisterChunkerDebugRoutes`。
+分块（chunk）是检索的最小单元，标签用于给文档分类。两组接口均属于知识库资源，与[知识库与知识](./02-api-knowledge.md)共用同一套权限规则：读为 Viewer+ 且对父 KB 有 read 权限（API key `retrieve`），写为「KB 创建者 OR Admin+」且有 write 权限（API key `ingest`），均受 API key 的 KB 白名单约束。
 
 通用约定（Base URL、认证、错误码、分页）见 [API 总览](./01-api-overview.md)。
 
@@ -216,3 +214,7 @@ curl -X DELETE "$BASE/api/v1/knowledge-bases/kb-1/tags/t-1?force=true" -H "Autho
 curl -X POST $BASE/api/v1/chunker/preview -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"text":"# 标题\n正文...","chunking_config":{"chunk_size":512}}'
 ```
+
+## 实现参考
+
+路由注册：`internal/router/routes_knowledge.go` 的 `RegisterChunkRoutes`、`RegisterKnowledgeTagRoutes`、`RegisterChunkerDebugRoutes`。

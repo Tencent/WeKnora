@@ -1,10 +1,10 @@
 # Claw Skill
 
-Claw Skill 是把 WeKnora 挂给 AI Agent 用的一种方式：安装之后，OpenClaw 生态里的 Agent 就能通过 WeKnora 的 REST API 往知识库里写内容、跨库检索。
+Claw Skill 为 OpenClaw 生态中的智能体提供 WeKnora 接入能力，通过 REST API 上传文档、导入网页和执行跨库检索。
 
-Skill 托管在 ClawHub，包名 [`@lyingbug/weknora`](https://clawhub.ai/lyingbug/weknora)（MIT-0）。它是一层薄封装，实际能力就是 WeKnora 的 REST 接口。
+技能托管在 ClawHub，包名为 [`@lyingbug/weknora`](https://clawhub.ai/lyingbug/weknora)，许可证为 MIT-0。调用能力与权限由所连接的 WeKnora API 决定。
 
-## 能做什么
+## 主要功能 {#能做什么}
 
 | 能力 | 对应接口 |
 | --- | --- |
@@ -14,12 +14,12 @@ Skill 托管在 ClawHub，包名 [`@lyingbug/weknora`](https://clawhub.ai/lyingb
 | 混合检索 | 单库 `hybrid-search` 与跨库 `knowledge-search`，向量 + 关键词召回 |
 | 浏览知识库 | 列出知识库与条目、查看详情 |
 
-## 怎么配
+## 安装与连接 {#怎么配}
 
-WeKnora 界面里有引导页：「设置 → 集成 → Claw Skill」，会带上当前实例的 API 地址与可复制的环境变量示例、安装命令。步骤：
+在「设置 → 集成 → Claw Skill」查看安装指引，复制当前实例的 API 地址、环境变量示例和安装命令。
 
-1. **拿 API 凭证**：「设置 → API 信息」里复制 API Key 与 API 地址；
-2. **配环境变量**：在终端或 `~/.zshrc` / `~/.bashrc` 里设置
+1. **获取 API 凭证**：「设置 → API 信息」里复制 API Key 与 API 地址；
+2. **设置环境变量**：在终端或 `~/.zshrc` / `~/.bashrc` 里设置
 
    ```bash
    export WEKNORA_BASE_URL=https://your-weknora.example.com/api/v1
@@ -31,19 +31,19 @@ WeKnora 界面里有引导页：「设置 → 集成 → Claw Skill」，会带�
 
 ## 和 MCP 的关系
 
-两者都是「把 WeKnora 给外部 Agent 用」，选哪个取决于对方生态：
+Claw Skill 和 MCP Server 均可供外部智能体调用，选择取决于客户端支持的接入方式及所需功能：
 
 | | Claw Skill | MCP Server |
 | --- | --- | --- |
 | 面向 | OpenClaw / ClawHub 生态的 Agent | 支持 MCP 协议的客户端（Claude Desktop、VS Code Copilot 等） |
 | 安装 | ClawHub 安装 Skill | `pip install tencent-weknora-mcp` 或 `uvx` 运行 |
 | 传输 | 直接调 REST | stdio / SSE / Streamable HTTP |
-| 能力范围 | 导入、检索、浏览（5 类） | 29 个工具，另含租户、模型、会话、Agent 问答、Wiki |
+| 能力范围 | 导入、检索、浏览（5 类） | 31 个工具，另含租户、模型、会话、Agent 问答、Wiki |
 | 文档 | 本篇 | [MCP 集成](../03-features/08-mcp.md) |
 
-需要更完整的能力（跑 Agent 对话、管模型、读 Wiki）时用 MCP Server；只是想让 Agent 存取资料，Skill 更轻。
+需要会话、模型管理或 Wiki 工具时，使用 MCP Server；导入、检索和浏览资料可使用 Claw Skill。
 
-## 相关
+## 相关文档 {#相关}
 
 - 凭证与能力收窄：[租户、用户与认证授权](../03-features/01-tenant-auth.md)
 - 底层接口：[API 总览](../04-api/01-api-overview.md)

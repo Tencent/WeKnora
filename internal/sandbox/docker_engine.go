@@ -373,7 +373,7 @@ func dockerError(op string, err error) error {
 		return err
 	}
 	return &RemoteError{
-		Kind:     dockerErrorKind(op, err),
+		Kind:     snapshotDeleteKind(op, dockerErrorKind(op, err), err.Error()),
 		Provider: SandboxTypeDocker,
 		Op:       op,
 		Message:  err.Error(),

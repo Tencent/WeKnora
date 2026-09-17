@@ -24,7 +24,6 @@ const (
 	envMilvusCollection   = "MILVUS_COLLECTION"
 	envMilvusMetricType   = "MILVUS_METRIC_TYPE"
 	defaultCollectionName = "weknora_embeddings"
-	fieldContent          = "content"
 	fieldSourceID         = "source_id"
 	fieldSourceType       = "source_type"
 	fieldChunkID          = "chunk_id"
@@ -38,7 +37,7 @@ const (
 )
 
 var (
-	allFields = []string{fieldID, fieldContent, fieldSourceID, fieldSourceType, fieldChunkID,
+	allFields = []string{fieldID, fieldContent, fieldLanguage, fieldSourceID, fieldSourceType, fieldChunkID,
 		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding}
 )
 
@@ -83,6 +82,42 @@ func (m *milvusRepository) getCollectionName(dimension int) string {
 	return fmt.Sprintf("%s_%d", m.collectionBaseName, dimension)
 }
 
+// collectionAnalyzerMode inspects a collection once and caches whether it
+// uses the multilingual schema. Older WeKnora collections do not have the
+// language field, so they must continue using the legacy upsert and search
+// paths until they are migrated.
+func (m *milvusRepository) collectionAnalyzerMode(
+	ctx context.Context,
+	collectionName string,
+) (collectionAnalyzerMode, error) {
+	if value, ok := m.collectionAnalyzerModes.Load(collectionName); ok {
+		mode, ok := value.(collectionAnalyzerMode)
+		if ok {
+			return mode, nil
+		}
+		m.collectionAnalyzerModes.Delete(collectionName)
+	}
+
+	collection, err := m.client.DescribeCollection(
+		ctx,
+		client.NewDescribeCollectionOption(collectionName),
+	)
+	if err != nil {
+		return collectionAnalyzerLegacy, fmt.Errorf(
+			"describe Milvus collection %s: %w", collectionName, err,
+		)
+	}
+	if collection == nil || collection.Schema == nil {
+		return collectionAnalyzerLegacy, fmt.Errorf(
+			"collection %s has no schema", collectionName,
+		)
+	}
+
+	mode := analyzerModeFromSchema(collection.Schema)
+	m.collectionAnalyzerModes.Store(collectionName, mode)
+	return mode, nil
+}
+
 // ensureCollection ensures the collection exists for the given dimension
 func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) error {
 	collectionName := m.getCollectionName(dimension)
@@ -124,7 +159,13 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 					WithDataType(entity.FieldTypeVarChar).
 					WithMaxLength(65535).
 					WithEnableAnalyzer(true).
-					WithEnableMatch(true),
+					// Multi-language analyzer fields are used by the BM25 function;
+					// Milvus does not allow enable_match on the same field.
+					WithMultiAnalyzerParams(multiAnalyzerParams()),
+				entity.NewField().
+					WithName(fieldLanguage).
+					WithDataType(entity.FieldTypeVarChar).
+					WithMaxLength(32),
 				entity.NewField().
 					WithName(fieldContentSparse).
 					WithDataType(entity.FieldTypeSparseVector),
@@ -187,6 +228,13 @@ func (m *milvusRepository) ensureCollection(ctx context.Context, dimension int) 
 		}
 
 		log.Infof("[Milvus] Successfully created collection %s", collectionName)
+		m.collectionAnalyzerModes.Store(collectionName, collectionAnalyzerMulti)
+	} else {
+		// Existing collections may have been created by an older WeKnora
+		// version. Keep them readable and writable until they are migrated.
+		if _, err := m.collectionAnalyzerMode(ctx, collectionName); err != nil {
+			return err
+		}
 	}
 
 	loadOpt := client.NewLoadCollectionOption(collectionName)
@@ -252,11 +300,19 @@ func (m *milvusRepository) Save(ctx context.Context,
 	}
 
 	collectionName := m.getCollectionName(dimension)
+	collectionMode, err := m.collectionAnalyzerMode(ctx, collectionName)
+	if err != nil {
+		return err
+	}
 
 	embeddingDB.ID = uuid.New().String()
-	opts := createUpsert(collectionName, []*MilvusVectorEmbedding{embeddingDB})
+	opts := createUpsert(
+		collectionName,
+		[]*MilvusVectorEmbedding{embeddingDB},
+		collectionMode == collectionAnalyzerMulti,
+	)
 
-	_, err := m.client.Upsert(ctx, opts)
+	_, err = m.client.Upsert(ctx, opts)
 	if err != nil {
 		log.Errorf("[Milvus] Failed to save index: %v", err)
 		return err
@@ -306,6 +362,10 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 		}
 
 		collectionName := m.getCollectionName(dimension)
+		collectionMode, err := m.collectionAnalyzerMode(ctx, collectionName)
+		if err != nil {
+			return err
+		}
 		n := len(embeddings)
 		embeddingDBList := make([]*MilvusVectorEmbedding, 0, n)
 
@@ -314,8 +374,12 @@ func (m *milvusRepository) BatchSave(ctx context.Context,
 			embeddingDB.ID = uuid.New().String()
 			embeddingDBList = append(embeddingDBList, embeddingDB)
 		}
-		opts := createUpsert(collectionName, embeddingDBList)
-		_, err := m.client.Upsert(ctx, opts)
+		opts := createUpsert(
+			collectionName,
+			embeddingDBList,
+			collectionMode == collectionAnalyzerMulti,
+		)
+		_, err = m.client.Upsert(ctx, opts)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to execute batch operation for dimension %d: %v", dimension, err)
 			return fmt.Errorf("failed to batch save (dimension %d): %w", dimension, err)
@@ -454,8 +518,7 @@ func updateChunkEnabledStatusInCollections(
 ) error {
 	var updateErrs []error
 	for _, collectionName := range collections {
-		if len(collectionName) <= len(collectionBaseName) ||
-			collectionName[:len(collectionBaseName)] != collectionBaseName {
+		if !matchesDimensionCollection(collectionName, collectionBaseName) {
 			continue
 		}
 		if err := update(ctx, collectionName, enabledChunkIDs, true); err != nil {
@@ -496,7 +559,11 @@ func (m *milvusRepository) updateChunkEnabledStatusInCollection(
 		return nil
 	}
 
-	req := createUpsert(collectionName, upsertEmbeddings)
+	collectionMode, err := m.collectionAnalyzerMode(ctx, collectionName)
+	if err != nil {
+		return err
+	}
+	req := createUpsert(collectionName, upsertEmbeddings, collectionMode == collectionAnalyzerMulti)
 	if _, err := m.client.Upsert(ctx, req); err != nil {
 		return err
 	}
@@ -558,9 +625,7 @@ func (m *milvusRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 	// Update in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(m.collectionBaseName) ||
-			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
+		if !matchesDimensionCollection(collectionName, m.collectionBaseName) {
 			continue
 		}
 		// Update chunks for each tag ID
@@ -580,7 +645,12 @@ func (m *milvusRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 				upsertEmbeddings = append(upsertEmbeddings, &embedding.MilvusVectorEmbedding)
 			}
 			if len(upsertEmbeddings) > 0 {
-				req := createUpsert(collectionName, upsertEmbeddings)
+				collectionMode, modeErr := m.collectionAnalyzerMode(ctx, collectionName)
+				if modeErr != nil {
+					log.Warnf("[Milvus] Failed to inspect collection %s analyzer mode: %v", collectionName, modeErr)
+					continue
+				}
+				req := createUpsert(collectionName, upsertEmbeddings, collectionMode == collectionAnalyzerMulti)
 				_, err := m.client.Upsert(ctx, req)
 				if err != nil {
 					log.Warnf("[Milvus] Failed to update chunks in %s: %v", collectionName, err)
@@ -725,10 +795,10 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 		log.Errorf("[Milvus] Failed to convert result set: %v", err)
 		return nil, fmt.Errorf("failed to convert result set: %w", err)
 	}
-	var results []*types.IndexWithScore
-	for i, set := range sets {
-		set.Score = scores[i]
-		results = append(results, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeEmbedding))
+	results, err := buildMilvusIndexResults(sets, scores, types.MatchTypeEmbedding)
+	if err != nil {
+		log.Errorf("[Milvus] Failed to attach vector scores: %v", err)
+		return nil, fmt.Errorf("failed to attach vector scores: %w", err)
 	}
 	if len(results) == 0 {
 		log.Warnf("[Milvus] No vector matches found that meet threshold %.4f", params.Threshold)
@@ -757,9 +827,12 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 
 	// Search in all matching collections
 	for _, collectionName := range collections {
-		// Only process collections that start with our base name
-		if len(collectionName) <= len(m.collectionBaseName) ||
-			collectionName[:len(m.collectionBaseName)] != m.collectionBaseName {
+		if !matchesDimensionCollection(collectionName, m.collectionBaseName) {
+			continue
+		}
+		collectionMode, modeErr := m.collectionAnalyzerMode(ctx, collectionName)
+		if modeErr != nil {
+			log.Errorf("[Milvus] Failed to inspect collection %s analyzer mode: %v", collectionName, modeErr)
 			continue
 		}
 
@@ -770,6 +843,15 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 		}
 		searchOpt := client.NewSearchOption(collectionName, params.TopK, []entity.Vector{entity.Text(params.Query)})
 		searchOpt.WithANNSField(fieldContentSparse)
+		if collectionMode == collectionAnalyzerMulti {
+			analyzerName := detectAnalyzerName(params.Query)
+			ann := index.NewCustomAnnParam()
+			ann.WithExtraParam("metric_type", "BM25")
+			ann.WithExtraParam("analyzer_name", analyzerName)
+			ann.WithExtraParam("drop_ratio_search", 0)
+			searchOpt.WithAnnParam(&ann)
+			log.Debugf("[Milvus] BM25 analyzer: collection=%s, analyzer=%s", collectionName, analyzerName)
+		}
 		if expr != "" {
 			searchOpt.WithFilter(expr)
 			for k, v := range paramsMap {
@@ -782,19 +864,41 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 			log.Errorf("[Milvus] Keywords search failed: %v", err)
 			continue
 		}
-		sets, _, err := convertResultSet(resultSet)
+		sets, scores, err := convertResultSet(resultSet)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to convert result set: %v", err)
 			continue
 		}
-		for _, set := range sets {
-			set.Score = 1.0
-			allResults = append(allResults, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeKeywords))
+		results, scoreErr := buildMilvusIndexResults(sets, scores, types.MatchTypeKeywords)
+		if scoreErr != nil {
+			log.Errorf("[Milvus] Failed to attach keyword scores: %v", scoreErr)
+			continue
 		}
+		allResults = append(allResults, results...)
 	}
 
-	// Limit results to topK
-	if len(allResults) > params.TopK {
+	// Searches across multiple collections return one score-sorted page per
+	// collection. Re-sort the combined list before applying the global TopK;
+	// otherwise the first collection can crowd out better matches from later
+	// collections.
+	slices.SortStableFunc(allResults, func(a, b *types.IndexWithScore) int {
+		if a.Score > b.Score {
+			return -1
+		}
+		if a.Score < b.Score {
+			return 1
+		}
+		if a.ChunkID < b.ChunkID {
+			return -1
+		}
+		if a.ChunkID > b.ChunkID {
+			return 1
+		}
+		return 0
+	})
+
+	// Limit results to topK after sorting the merged collection results.
+	if params.TopK > 0 && len(allResults) > params.TopK {
 		allResults = allResults[:params.TopK]
 	}
 
@@ -830,6 +934,10 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 	collectionName := m.getCollectionName(dimension)
 	// Ensure target collection exists
 	if err := m.ensureCollection(ctx, dimension); err != nil {
+		return err
+	}
+	collectionMode, err := m.collectionAnalyzerMode(ctx, collectionName)
+	if err != nil {
 		return err
 	}
 
@@ -877,6 +985,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 			targetEmbedding := &MilvusVectorEmbedding{
 				ID:              uuid.New().String(),
 				Content:         sourceEmbedding.Content,
+				Language:        sourceEmbedding.Language,
 				SourceID:        targetSourceID,
 				SourceType:      sourceEmbedding.SourceType,
 				ChunkID:         targetChunkID,
@@ -889,7 +998,7 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 			targetEmbeddings = append(targetEmbeddings, targetEmbedding)
 		}
 		if len(targetEmbeddings) > 0 {
-			opts := createUpsert(collectionName, targetEmbeddings)
+			opts := createUpsert(collectionName, targetEmbeddings, collectionMode == collectionAnalyzerMulti)
 			_, err := m.client.Upsert(ctx, opts)
 			if err != nil {
 				log.Errorf("[Milvus] Failed to batch upsert target points: %v", err)
@@ -924,10 +1033,40 @@ func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.Re
 	}
 }
 
+// buildMilvusIndexResults attaches the score returned by Milvus to the
+// corresponding document. Search scores are meaningful for both vector and
+// BM25 searches; replacing keyword scores with a constant destroys the
+// ordering and makes retrieval observability misleading.
+func buildMilvusIndexResults(
+	documents []*MilvusVectorEmbeddingWithScore,
+	scores []float64,
+	matchType types.MatchType,
+) ([]*types.IndexWithScore, error) {
+	if len(documents) != len(scores) {
+		return nil, fmt.Errorf(
+			"result and score count mismatch: documents=%d scores=%d",
+			len(documents), len(scores),
+		)
+	}
+
+	results := make([]*types.IndexWithScore, 0, len(documents))
+	for i, document := range documents {
+		if document == nil {
+			return nil, fmt.Errorf("nil result at index %d", i)
+		}
+		document.Score = scores[i]
+		results = append(results,
+			fromMilvusVectorEmbedding(document.ID, document, matchType),
+		)
+	}
+	return results, nil
+}
+
 func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding) int64 {
 	// Payload fields
 	payloadSizeBytes := int64(0)
 	payloadSizeBytes += int64(len(embedding.Content))         // content string
+	payloadSizeBytes += int64(len(embedding.Language))        // language selector
 	payloadSizeBytes += int64(len(embedding.SourceID))        // source_id string
 	payloadSizeBytes += int64(len(embedding.ChunkID))         // chunk_id string
 	payloadSizeBytes += int64(len(embedding.KnowledgeID))     // knowledge_id string
@@ -959,6 +1098,7 @@ func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding
 func toMilvusVectorEmbedding(embedding *types.IndexInfo, additionalParams map[string]interface{}) *MilvusVectorEmbedding {
 	vector := &MilvusVectorEmbedding{
 		Content:         embedding.Content,
+		Language:        detectAnalyzerName(embedding.Content),
 		SourceID:        embedding.SourceID,
 		SourceType:      int(embedding.SourceType),
 		ChunkID:         embedding.ChunkID,
@@ -994,10 +1134,15 @@ func fromMilvusVectorEmbedding(id string,
 	}
 }
 
-func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) client.UpsertOption {
+func createUpsert(
+	collectionName string,
+	embeddings []*MilvusVectorEmbedding,
+	includeLanguage bool,
+) client.UpsertOption {
 	ids := make([]string, 0, len(embeddings))
 	embeddingsData := make([][]float32, 0, len(embeddings))
 	contents := make([]string, 0, len(embeddings))
+	languages := make([]string, 0, len(embeddings))
 	sourceIDs := make([]string, 0, len(embeddings))
 	sourceTypes := make([]int64, 0, len(embeddings))
 	chunkIDs := make([]string, 0, len(embeddings))
@@ -1010,6 +1155,9 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 		ids = append(ids, embedding.ID)
 		embeddingsData = append(embeddingsData, embedding.Embedding)
 		contents = append(contents, embedding.Content)
+		if includeLanguage {
+			languages = append(languages, analyzerNameForUpsert(embedding))
+		}
 		sourceIDs = append(sourceIDs, embedding.SourceID)
 		sourceTypes = append(sourceTypes, int64(embedding.SourceType))
 		chunkIDs = append(chunkIDs, embedding.ChunkID)
@@ -1030,6 +1178,10 @@ func createUpsert(collectionName string, embeddings []*MilvusVectorEmbedding) cl
 		WithVarcharColumn(fieldKnowledgeBaseID, knowledgeBaseIDs).
 		WithVarcharColumn(fieldTagID, tagIDs).
 		WithBoolColumn(fieldIsEnabled, isEnableds)
+	if includeLanguage {
+		// New multilingual collections require one analyzer selector per row.
+		opt.WithVarcharColumn(fieldLanguage, languages)
+	}
 	return opt
 }
 
@@ -1073,6 +1225,15 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 					return nil, nil, err
 				}
 				docs[i].Content = val
+			}
+		}
+		if field == fieldLanguage {
+			for i := 0; i < columns.Len(); i++ {
+				val, err := columns.GetAsString(i)
+				if err != nil {
+					return nil, nil, err
+				}
+				docs[i].Language = val
 			}
 		}
 		if field == fieldSourceID {
@@ -1139,20 +1300,31 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 			}
 		}
 		if field == fieldEmbedding {
-			vectorColumn, ok := columns.(*column.ColumnDoubleArray)
-			if !ok {
-				continue
-			}
-			for i := 0; i < vectorColumn.Len(); i++ {
-				val, err := vectorColumn.Value(i)
-				if err != nil {
-					return nil, nil, fmt.Errorf("get vector failed: %w", err)
+			switch vectorColumn := columns.(type) {
+			case *column.ColumnFloatVector:
+				for i := 0; i < vectorColumn.Len(); i++ {
+					val, err := vectorColumn.Value(i)
+					if err != nil {
+						return nil, nil, fmt.Errorf("get float vector failed: %w", err)
+					}
+					embedding := make([]float32, len(val))
+					copy(embedding, val)
+					docs[i].Embedding = embedding
 				}
-				embedding := make([]float32, len(val))
-				for j, v := range val {
-					embedding[j] = float32(v)
+			case *column.ColumnDoubleArray:
+				// Keep compatibility with Milvus responses that expose vectors
+				// through the legacy double-array representation.
+				for i := 0; i < vectorColumn.Len(); i++ {
+					val, err := vectorColumn.Value(i)
+					if err != nil {
+						return nil, nil, fmt.Errorf("get double vector failed: %w", err)
+					}
+					embedding := make([]float32, len(val))
+					for j, v := range val {
+						embedding[j] = float32(v)
+					}
+					docs[i].Embedding = embedding
 				}
-				docs[i].Embedding = embedding
 			}
 		}
 	}

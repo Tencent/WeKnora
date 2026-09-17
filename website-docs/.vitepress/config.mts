@@ -58,7 +58,6 @@ function tokenize(text: string): string[] {
 }
 
 const repo = 'https://github.com/Tencent/WeKnora'
-const site = 'https://weknora.weixin.qq.com'
 
 export default withMermaid(
   defineConfig({
@@ -68,12 +67,17 @@ export default withMermaid(
     lang: 'zh-CN',
     base: '/docs/',
     cleanUrls: true,
+    appearance: { storageKey: 'vitepress-theme-appearance' },
     lastUpdated: true,
-    srcExclude: ['README.md'],
+    srcExclude: ['README.md', 'homepage/**', 'shared/**', 'scripts/**', 'deploy/**', 'static-site/**', 'releases/**'],
     metaChunk: true,
+    transformPageData(pageData) {
+      // The shared masthead replaces the default documentation navbar.
+      pageData.frontmatter.navbar = false
+    },
 
     head: [
-      ['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }],
+      ['link', { rel: 'icon', href: '/docs/favicon.ico', type: 'image/x-icon' }],
       ['meta', { name: 'theme-color', content: '#101f38' }],
       ['meta', { property: 'og:type', content: 'website' }],
       ['meta', { property: 'og:title', content: 'WeKnora 文档' }],
@@ -100,18 +104,10 @@ export default withMermaid(
     },
 
     themeConfig: {
-      logo: { light: '/logo-mark.svg', dark: '/logo-mark-dark.svg', alt: 'WeKnora' },
+      logoLink: { link: '/', target: '_self' },
       siteTitle: 'WeKnora',
 
-      nav: [
-        { text: '快速开始', link: '/01-getting-started/01-introduction', activeMatch: '/01-getting-started/' },
-        { text: '架构', link: '/02-architecture/01-overview', activeMatch: '/02-architecture/' },
-        { text: '功能', link: '/03-features/01-tenant-auth', activeMatch: '/03-features/' },
-        { text: 'API', link: '/04-api/01-api-overview', activeMatch: '/04-api/' },
-        { text: '客户端', link: '/05-clients/01-frontend', activeMatch: '/05-clients/' },
-        { text: '开发', link: '/06-development/01-dev-guide', activeMatch: '/06-development/' },
-        { text: '官网', link: site },
-      ],
+      nav: [],
 
       weknoraVersion: repoVersionLabel,
 

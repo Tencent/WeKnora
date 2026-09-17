@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -39,17 +41,23 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	}
 
 	// 验证知识库是否存在且有效
-	kb, err := s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
+		return "", err
+	}
+	if err := s.validateFAQImportTags(ctx, kb, payload.Entries); err != nil {
 		return "", err
 	}
 
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 
-	// 使用传入的TaskID，如果没传则生成增强的TaskID
-	taskID := payload.TaskID
+	// 使用传入的TaskID，如果没传则生成增强的TaskID。
+	// 客户端传入的 task_id 会进文件名和 Redis key，必须是无路径分隔符的标识符。
+	taskID := strings.TrimSpace(payload.TaskID)
 	if taskID == "" {
 		taskID = secutils.GenerateTaskID("faq_import", tenantID, kbID)
+	} else if err := secutils.ValidateTaskID(taskID); err != nil {
+		return "", werrors.NewBadRequestError("task_id 格式不合法")
 	}
 
 	var knowledgeID string
@@ -156,7 +164,10 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 		logger.Infof(ctx, "FAQ entries size: %d bytes, uploading to object storage", len(entriesData))
 
 		// 上传到私有桶（主桶），任务处理完成后清理
-		fileName := fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt)
+		fileName, err := faqImportEntriesFileName(taskID, enqueuedAt)
+		if err != nil {
+			return "", fmt.Errorf("invalid task id for object name: %w", err)
+		}
 		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
@@ -182,7 +193,10 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	if len(payloadBytes) > payloadSizeThreshold && taskPayload.EntriesURL == "" {
 		// payload 太大但还没上传，现在上传
 		entriesData, _ := json.Marshal(payload.Entries)
-		fileName := fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt)
+		fileName, nameErr := faqImportEntriesFileName(taskID, enqueuedAt)
+		if nameErr != nil {
+			return "", fmt.Errorf("invalid task id for object name: %w", nameErr)
+		}
 		entriesURL, err := s.fileSvc.SaveBytes(ctx, entriesData, tenantID, fileName, false)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to upload FAQ entries to object storage: %v", err)
@@ -235,6 +249,10 @@ func (s *knowledgeService) UpsertFAQEntries(ctx context.Context,
 	return taskID, nil
 }
 
+func faqImportEntriesFileName(taskID string, enqueuedAt int64) (string, error) {
+	return secutils.SafeFileName(fmt.Sprintf("faq_import_entries_%s_%d.json", taskID, enqueuedAt))
+}
+
 // generateFailedEntriesCSV 生成失败条目的 CSV 文件并上传
 func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 	tenantID uint64, taskID string, failedEntries []types.FAQFailedEntry,
@@ -280,7 +298,10 @@ func (s *knowledgeService) generateFailedEntriesCSV(ctx context.Context,
 	}
 
 	// 上传 CSV 文件到临时存储（会自动过期）
-	fileName := fmt.Sprintf("faq_dryrun_failed_%s.csv", taskID)
+	fileName, err := secutils.SafeFileName(fmt.Sprintf("faq_dryrun_failed_%s.csv", taskID))
+	if err != nil {
+		return "", fmt.Errorf("invalid task id for object name: %w", err)
+	}
 	filePath, err := s.fileSvc.SaveBytes(ctx, []byte(buf.String()), tenantID, fileName, true)
 	if err != nil {
 		return "", fmt.Errorf("failed to save CSV file: %w", err)
@@ -1370,7 +1391,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		}
 	}()
 
-	kb, err = s.validateFAQKnowledgeBase(ctx, kbID)
+	kb, ctx, err = s.writableFAQKnowledgeBase(ctx, kbID)
 	if err != nil {
 		return err
 	}
@@ -2229,7 +2250,29 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	ctx = logger.WithRequestID(ctx, uuid.New().String())
 	ctx = logger.WithField(ctx, "faq_import", payload.TaskID)
-	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = types.WithExecutionTenant(ctx, payload.TenantID)
+	kb, err := s.validateFAQKnowledgeBase(ctx, payload.KBID)
+	if err != nil {
+		if errors.Is(err, repository.ErrKnowledgeBaseNotFound) {
+			return fmt.Errorf("%w: FAQ task KB no longer exists", asynq.SkipRetry)
+		}
+		return err
+	}
+	ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		return fmt.Errorf("%w: FAQ task KB does not belong to its tenant", asynq.SkipRetry)
+	}
+	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if err != nil {
+		if errors.Is(err, repository.ErrKnowledgeNotFound) {
+			return fmt.Errorf("%w: FAQ task document no longer exists", asynq.SkipRetry)
+		}
+		return err
+	}
+	if knowledge == nil || knowledge.TenantID != payload.TenantID || knowledge.KnowledgeBaseID != payload.KBID ||
+		knowledge.Type != types.KnowledgeTypeFAQ {
+		return fmt.Errorf("%w: FAQ task document does not belong to its KB", asynq.SkipRetry)
+	}
 
 	// 获取任务重试信息，用于判断是否是最后一次重试
 	retryCount, _ := asynq.GetRetryCount(ctx)
@@ -2271,6 +2314,9 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 
 	logger.Infof(ctx, "Processing FAQ import task: task_id=%s, kb_id=%s, total_entries=%d, dry_run=%v, retry=%d/%d",
 		payload.TaskID, payload.KBID, len(payload.Entries), payload.DryRun, retryCount, maxRetry)
+	if err := s.validateFAQImportTags(ctx, kb, payload.Entries); err != nil {
+		return err
+	}
 
 	// 保存原始总数量
 	originalTotalEntries := len(payload.Entries)
@@ -2343,31 +2389,6 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	progress.UpdatedAt = time.Now().Unix()
 	if err := s.saveFAQImportProgress(ctx, progress); err != nil {
 		logger.Warnf(ctx, "Failed to update FAQ import progress: %v", err)
-	}
-
-	// 幂等性检查：获取knowledge记录（FAQ任务使用knowledge ID作为taskID）
-	knowledge, err := s.repo.GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get FAQ knowledge: %v", err)
-		return nil
-	}
-
-	if knowledge == nil {
-		return nil
-	}
-
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KBID)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge base: %v", err)
-		// 如果是最后一次重试，更新状态为失败
-		if isLastRetry {
-			if updateErr := s.updateFAQImportProgressStatus(ctx, payload.TaskID, payload.InstanceID, payload.EnqueuedAt, types.FAQImportStatusFailed, 0, originalTotalEntries, 0, "获取知识库失败", err.Error()); updateErr != nil {
-				logger.Errorf(ctx, "Failed to update task status to failed: %v", updateErr)
-			}
-			s.recordFAQImportKBActivity(ctx, &payload, progress, originalTotalEntries, types.AuditActionFAQImportFailed, types.AuditOutcomeFailed)
-		}
-		s.cleanupFAQEntriesFileOnFinalFailure(ctx, payload.EntriesURL, retryCount, maxRetry)
-		return fmt.Errorf("failed to get knowledge base: %w", err)
 	}
 
 	// 检查任务状态 - 幂等性处理（复用之前获取的 existingProgress）
@@ -2809,8 +2830,11 @@ func (s *knowledgeService) UpdateLastFAQImportResultDisplayStatus(ctx context.Co
 		return werrors.NewBadRequestError("invalid display status, must be 'open' or 'close'")
 	}
 
-	// 获取当前空间ID
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
+	kb, ctx, err := s.writableFAQKnowledgeBase(ctx, kbID)
+	if err != nil {
+		return err
+	}
+	tenantID := kb.TenantID
 
 	// 查找FAQ类型的knowledge
 	knowledgeList, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, tenantID, kbID)

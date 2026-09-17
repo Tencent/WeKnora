@@ -87,13 +87,21 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// Check if file already exists
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
-	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
+	checkParams := &types.KnowledgeCheckParams{
 		Type:     "file",
 		FileName: fileName,
 		FileType: getFileType(fileName),
 		FileSize: file.Size,
 		FileHash: hash,
-	})
+	}
+	// Same-bytes files from different source identities are still distinct
+	// documents (GitLab README templates, copied Confluence pages). Scope the
+	// hash check to datasource_id + external_id so retries stay idempotent.
+	if usesSourceIdentityDuplicateCheck(channel) {
+		checkParams.DataSourceID = metadata["datasource_id"]
+		checkParams.ExternalID = metadata["external_id"]
+	}
+	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, checkParams)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
 		return nil, err
@@ -1017,21 +1025,18 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 		return nil, werrors.NewValidationError("状态仅支持 draft 或 publish")
 	}
 
-	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
-	existing, err := s.repo.GetKnowledgeByID(ctx, tenantID, knowledgeID)
+	existing, kb, err := loadKnowledgeWrite(ctx, s.repo, s.kbService, knowledgeID)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to load knowledge: %v", err)
 		return nil, err
 	}
 	if !existing.IsManual() {
 		return nil, werrors.NewBadRequestError("仅支持手工知识的在线编辑")
 	}
-
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, existing.KnowledgeBaseID)
+	ctx, err = withKBWriteTenantInfo(ctx, kb, s.tenantRepo)
 	if err != nil {
-		logger.Errorf(ctx, "Failed to get knowledge base for manual update: %v", err)
 		return nil, err
 	}
+	tenantID := existing.TenantID
 
 	var version int
 	if meta, err := existing.ManualMetadata(); err == nil && meta != nil {
@@ -1115,7 +1120,7 @@ func (s *knowledgeService) UpdateManualKnowledge(ctx context.Context,
 
 // enqueueManualProcessing enqueues a manual:process Asynq task for async cleanup + re-indexing.
 func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
-	knowledge *types.Knowledge, content string, needCleanup bool,
+	knowledge *types.Knowledge, content string, needCleanup bool, options ...asynq.Option,
 ) (string, error) {
 	requestID, _ := types.RequestIDFromContext(ctx)
 	payload := types.ManualProcessPayload{
@@ -1134,7 +1139,7 @@ func (s *knowledgeService) enqueueManualProcessing(ctx context.Context,
 
 	task := asynq.NewTask(types.TypeManualProcess, payloadBytes,
 		asynq.Queue(types.QueueDefault), asynq.MaxRetry(3), asynq.Timeout(30*time.Minute))
-	info, err := s.task.Enqueue(task)
+	info, err := s.task.Enqueue(task, options...)
 	if err != nil {
 		return "", fmt.Errorf("failed to enqueue manual process task: %w", err)
 	}
@@ -1153,6 +1158,15 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 	knowledge.ErrorMessage = "Failed to enqueue processing task"
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to mark knowledge as failed after enqueue error: %v", err)
+	}
+}
+
+func usesSourceIdentityDuplicateCheck(channel string) bool {
+	switch channel {
+	case types.ConnectorTypeGitLab, types.ChannelConfluence:
+		return true
+	default:
+		return false
 	}
 }
 

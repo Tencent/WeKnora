@@ -403,6 +403,39 @@ func (e *elasticsearchRepository) Retrieve(ctx context.Context,
 	return nil, err
 }
 
+// vectorScoreScriptSource scores every document by its cosine similarity to the
+// query vector, floored at 0. Lucene rejects negative final script_score values
+// ("script_score script returned an invalid score ... Must be a non-negative
+// score!"), so an unclamped negative cosine — which occurs whenever any stored
+// vector points away from the query — fails the entire search request with a
+// 400 (all shards failed) instead of merely ranking that document last. The
+// floor keeps the score in the [0, 1] range the shared retriever score
+// normalizer documents for this engine; documents clamped to 0 fall below any
+// positive min_score threshold.
+var vectorScoreScriptSource = "Math.max(cosineSimilarity(params.query_vector, 'embedding'), 0.0)"
+
+// buildVectorScriptScoreQuery wraps the cosine-similarity scoring script in a
+// script_score query over the request's base filter conditions.
+func (e *elasticsearchRepository) buildVectorScriptScoreQuery(
+	params typesLocal.RetrieveParams,
+) (*types.ScriptScoreQuery, error) {
+	queryVectorJSON, err := json.Marshal(params.Embedding)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal query embedding: %w", err)
+	}
+	minScore := float32(params.Threshold)
+	return &types.ScriptScoreQuery{
+		Query: types.Query{Bool: &types.BoolQuery{Filter: e.getBaseConds(params)}},
+		Script: types.Script{
+			Source: &vectorScoreScriptSource,
+			Params: map[string]json.RawMessage{
+				"query_vector": json.RawMessage(queryVectorJSON),
+			},
+		},
+		MinScore: &minScore,
+	}, nil
+}
+
 // VectorRetrieve performs vector similarity search using cosine similarity
 // Returns a slice of RetrieveResult containing matching documents
 func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
@@ -412,26 +445,10 @@ func (e *elasticsearchRepository) VectorRetrieve(ctx context.Context,
 	log.Infof("[Elasticsearch] Vector retrieval: dim=%d, topK=%d, threshold=%.4f",
 		len(params.Embedding), params.TopK, params.Threshold)
 
-	filter := e.getBaseConds(params)
-
-	// Build script scoring query with cosine similarity
-	queryVectorJSON, err := json.Marshal(params.Embedding)
+	scriptScore, err := e.buildVectorScriptScoreQuery(params)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to marshal query vector: %v", err)
-		return nil, fmt.Errorf("failed to marshal query embedding: %w", err)
-	}
-
-	scoreSource := "cosineSimilarity(params.query_vector, 'embedding')"
-	minScore := float32(params.Threshold)
-	scriptScore := &types.ScriptScoreQuery{
-		Query: types.Query{Bool: &types.BoolQuery{Filter: filter}},
-		Script: types.Script{
-			Source: &scoreSource,
-			Params: map[string]json.RawMessage{
-				"query_vector": json.RawMessage(queryVectorJSON),
-			},
-		},
-		MinScore: &minScore,
+		return nil, err
 	}
 	// Exclude embedding field from source to reduce response size
 	sourceFilter := &types.SourceFilter{

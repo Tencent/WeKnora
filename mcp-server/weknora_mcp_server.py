@@ -301,13 +301,23 @@ class WeKnoraClient:
 
     # Knowledge Management - Methods for creating and managing knowledge entries
     def create_knowledge_from_file(
-        self, kb_id: str, file_path: str, enable_multimodel: bool = True
+        self,
+        kb_id: str,
+        file_path: str,
+        enable_multimodel: bool = True,
+        file_name: str = "",
     ) -> Dict:
-        """Create knowledge from a local file with optional multimodal processing"""
+        """Create knowledge from a local file with optional multimodal processing.
+
+        ``file_name`` may be a path-qualified name (``docs/spec/design.pdf``);
+        the backend splits it into ``folder_path`` + display name.
+        """
         safe_path = resolve_upload_file_path(file_path)
         with open(safe_path, "rb") as f:
             files = {"file": f}
             data = {"enable_multimodel": str(enable_multimodel).lower()}
+            if file_name:
+                data["fileName"] = file_name
             # Temporarily remove Content-Type header for multipart/form-data request
             # (requests will set it automatically with boundary)
             headers = self.session.headers.copy()
@@ -360,9 +370,45 @@ class WeKnoraClient:
             "POST", f"/knowledge-bases/{kb_id}/knowledge/manual", json=data
         )
 
-    def list_knowledge(self, kb_id: str, page: int = 1, page_size: int = 20) -> Dict:
-        """List knowledge in a knowledge base"""
+    def update_knowledge_from_text(
+        self,
+        knowledge_id: str,
+        content: str,
+        title: str = "",
+        status: str = "publish",
+    ) -> Dict:
+        """Update an existing manual Markdown knowledge entry.
+
+        An empty ``title`` keeps the current title. ``status`` defaults to
+        ``"publish"`` so the updated content is re-indexed immediately; pass
+        ``"draft"`` to save it without indexing.
+        """
+        data = {
+            "title": title,
+            "content": content,
+            "status": status,
+        }
+        return self._request("PUT", f"/knowledge/manual/{knowledge_id}", json=data)
+
+    def list_knowledge(
+        self,
+        kb_id: str,
+        page: int = 1,
+        page_size: int = 20,
+        folder_path: str | None = None,
+        folder_scope: str = "",
+    ) -> Dict:
+        """List knowledge in a knowledge base.
+
+        ``folder_path`` filters to one folder (empty string = root).
+        ``folder_scope`` is passed through when the backend supports
+        scoped folder listing.
+        """
         params = {"page": page, "page_size": page_size}
+        if folder_path is not None:
+            params["folder_path"] = folder_path
+        if folder_scope:
+            params["folder_scope"] = folder_scope
         return self._request(
             "GET", f"/knowledge-bases/{kb_id}/knowledge", params=params
         )
@@ -724,9 +770,18 @@ def create_knowledge_from_file(
     kb_id: str,
     file_path: str,
     enable_multimodel: bool = True,
+    file_name: str = "",
 ) -> dict:
-    """Create knowledge from a local file on the server filesystem."""
-    return client.create_knowledge_from_file(kb_id, file_path, enable_multimodel)
+    """Create knowledge from a local file on the server filesystem.
+
+    ``file_name`` is optional. Pass a path-qualified name such as
+    ``docs/spec/design.pdf`` to place the entry under a knowledge folder
+    (backend splits folder path + display name). Omit it to keep the
+    original filename at the knowledge-base root.
+    """
+    return client.create_knowledge_from_file(
+        kb_id, file_path, enable_multimodel, file_name=file_name
+    )
 
 
 @mcp.tool()
@@ -761,9 +816,40 @@ def create_knowledge_from_text(
 
 
 @mcp.tool()
-def list_knowledge(kb_id: str, page: int = 1, page_size: int = 20) -> dict:
-    """List knowledge entries in a knowledge base."""
-    return client.list_knowledge(kb_id, page, page_size)
+def update_knowledge_from_text(
+    knowledge_id: str,
+    content: str,
+    title: str = "",
+    status: str = "publish",
+) -> dict:
+    """Update an existing manual Markdown knowledge entry.
+
+    ``knowledge_id`` is the ID returned by ``create_knowledge_from_text`` or
+    ``list_knowledge``. ``content`` is required. Leave ``title`` empty to keep
+    the current title. ``status`` defaults to ``"publish"`` so the new content
+    is re-indexed; pass ``"draft"`` to save without indexing.
+    """
+    return client.update_knowledge_from_text(
+        knowledge_id, content, title=title, status=status
+    )
+
+
+@mcp.tool()
+def list_knowledge(
+    kb_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    folder_path: str | None = None,
+    folder_scope: str = "",
+) -> dict:
+    """List knowledge entries in a knowledge base.
+
+    ``folder_path`` optionally filters to one folder (``""`` = root).
+    ``folder_scope`` is forwarded when the backend supports scoped listing.
+    """
+    return client.list_knowledge(
+        kb_id, page, page_size, folder_path=folder_path, folder_scope=folder_scope
+    )
 
 
 @mcp.tool()

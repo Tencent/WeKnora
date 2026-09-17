@@ -30,6 +30,7 @@ const SYSTEM_GLOBAL_AUDIT_ACTION_LABELS_EN: Record<string, string> = {
   'system.api_key_revoked': 'Platform API key revoked',
   'system.admin_revoked': 'System admin revoked',
   'system.user_password_reset': 'User password reset',
+  'system.user_created': 'User created',
   'system.queue_task_retried': 'Failed task run again',
   'system.queue_task_deleted': 'Failed task record cleared',
   'system.queue_task_run_now': 'Queue task run now',

@@ -172,3 +172,50 @@ func TestImageURLsInContent(t *testing.T) {
 		t.Fatalf("urls: %#v", urls)
 	}
 }
+
+func TestClearImageInfoTextMatchingBody_ClearsOnlyHitField(t *testing.T) {
+	raw, err := json.Marshal([]types.ImageInfo{
+		{URL: "u1", OCRText: "page one ocr body", Caption: "page one caption"},
+		{URL: "u2", OCRText: "page two ocr body", Caption: "page two caption"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := ClearImageInfoTextMatchingBody(string(raw), "page one ocr body", string(types.ChunkTypeImageOCR))
+	var infos []types.ImageInfo
+	if err := json.Unmarshal([]byte(got), &infos); err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("entries: %d", len(infos))
+	}
+	if infos[0].URL != "u1" || infos[0].OCRText != "" || infos[0].Caption != "page one caption" {
+		t.Fatalf("hit entry: %+v", infos[0])
+	}
+	if infos[1].URL != "u2" || infos[1].OCRText != "page two ocr body" {
+		t.Fatalf("sibling entry stripped: %+v", infos[1])
+	}
+
+	gotCaption := ClearImageInfoTextMatchingBody(string(raw), "page two caption", string(types.ChunkTypeImageCaption))
+	if err := json.Unmarshal([]byte(gotCaption), &infos); err != nil {
+		t.Fatal(err)
+	}
+	if infos[1].Caption != "" || infos[1].OCRText != "page two ocr body" || infos[0].Caption != "page one caption" {
+		t.Fatalf("caption clear: %+v", infos)
+	}
+}
+
+func TestClearImageInfoTextMatchingBody_UnchangedWhenNoMatch(t *testing.T) {
+	raw, err := json.Marshal([]types.ImageInfo{{URL: "u1", OCRText: "kept ocr"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ClearImageInfoTextMatchingBody(string(raw), "other body", string(types.ChunkTypeImageOCR))
+	if got != string(raw) {
+		t.Fatalf("expected original JSON, got %q", got)
+	}
+	if got := ClearImageInfoTextMatchingBody("", "body", string(types.ChunkTypeImageOCR)); got != "" {
+		t.Fatalf("empty JSON: %q", got)
+	}
+}

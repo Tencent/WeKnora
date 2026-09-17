@@ -4,33 +4,25 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/skills"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestFormatSkillsMetadataIncludesShellGuidanceOnlyWhenEnabled(t *testing.T) {
+func TestToolGuidanceUsesActualCapabilities(t *testing.T) {
 	metadata := []*skills.SkillMetadata{{Name: "demo", Description: "demo skill"}}
-
-	enabled := formatSkillsMetadata(metadata, true)
-	require.Contains(t, enabled, "shell_exec")
-	for _, command := range []string{"find", "ls", "cat", "head", "tail", "sed", "grep", "awk"} {
-		assert.Contains(t, enabled, command)
-	}
-	assert.Contains(t, enabled, "Freely execute shell commands")
-	assert.Contains(t, enabled, "Binary output is suppressed")
-	assert.Contains(t, enabled, "use `file` for an unknown type")
-	assert.NotContains(t, enabled, "do not `apt-get install file`")
-	assert.Contains(t, enabled, "write_sandbox_file")
-	assert.Contains(t, enabled, "edit_sandbox_file")
-	assert.Contains(t, enabled, "python3 -c")
-	assert.Contains(t, enabled, "execute_skill_script")
-	assert.Contains(t, enabled, "/workspace/...")
-	assert.Contains(t, enabled, "do not `list_sandbox_files`")
-	assert.Contains(t, enabled, "read_skill(skill_name, file_path)")
-	assert.Contains(t, enabled, ".skill-packages")
-	assert.Contains(t, enabled, "install_deps.py")
-	assert.Contains(t, enabled, "never nest ASCII")
-
-	disabled := formatSkillsMetadata(metadata, false)
-	assert.NotContains(t, disabled, "shell_exec")
+	text := formatSkillsMetadata(metadata, true)
+	require.Contains(t, text, "read_file")
+	require.NotContains(t, text, "execute_skill_script")
+	require.NotContains(t, text, "MANDATORY")
+	shell := formatToolGuidance([]string{"shell_exec", "read_file", "write_sandbox_file", "edit_sandbox_file"})
+	require.Contains(t, shell, "shell_exec(skill_name=")
+	require.Contains(t, shell, "/workspace/output")
+	require.Contains(t, shell, "sandbox:<file name>")
+	require.Contains(t, shell, "translate execute_skill_script")
+	require.NotContains(t, formatToolGuidance([]string{"knowledge_search"}), "/workspace")
+	require.NotContains(t, formatToolGuidance([]string{"read_file"}), "shell_exec")
+	require.NotContains(t, formatToolGuidance([]string{"read_file"}), "execute_skill_script")
+	require.Empty(t, formatToolGuidance(nil))
+	require.NotContains(t, formatToolGuidance([]string{"execute_skill_script"}), "execute_skill_script is available")
+	require.NotContains(t, shell, "Browser source:")
+	require.Contains(t, formatToolGuidance([]string{"local_browser"}), "requires no shell command")
 }

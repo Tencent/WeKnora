@@ -72,6 +72,41 @@ export function getSandboxToolPath(event: ToolEventLike | null | undefined): str
   return stringField(eventFields(event), 'path')
 }
 
+export type SandboxDiffStat = {
+  added: number
+  removed: number
+}
+
+function numberField(record: Record<string, unknown>, key: string): number {
+  const value = record[key]
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return 0
+}
+
+export function getSandboxDiffStat(event: ToolEventLike | null | undefined): SandboxDiffStat | null {
+  const fields = eventFields(event)
+  const added = Math.max(0, Math.trunc(numberField(fields, 'added_lines')))
+  const removed = Math.max(0, Math.trunc(numberField(fields, 'removed_lines')))
+  if (added <= 0 && removed <= 0) return null
+  return { added, removed }
+}
+
+export function getSandboxFilePreview(event: ToolEventLike | null | undefined): string {
+  return stringField(eventFields(event), 'preview')
+}
+
+export function sandboxPreviewRemaining(event: ToolEventLike | null | undefined): number {
+  const stat = getSandboxDiffStat(event)
+  const preview = getSandboxFilePreview(event)
+  if (!stat || !preview) return 0
+  const previewLines = preview.split('\n').filter((line, index, lines) => !(index === lines.length - 1 && line === '')).length
+  return Math.max(0, stat.added - previewLines)
+}
+
 export function skillScriptTitleCommand(skillName: string, command: string): string {
   const trimmed = command.trim()
   if (!trimmed) return ''

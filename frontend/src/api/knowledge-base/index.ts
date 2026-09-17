@@ -378,6 +378,15 @@ export function downKnowledgeDetails(id: string) {
   return getDown(`/api/v1/knowledge/${id}/download`);
 }
 
+// 使用已有登录和租户请求头下载 ZIP，不将凭据放入下载链接。
+export function batchDownloadKnowledge(kbId: string, ids: string[], signal?: AbortSignal): Promise<Blob> {
+  return post<Blob>(`/api/v1/knowledge-bases/${encodeURIComponent(kbId)}/knowledge/batch-download`, { ids }, {
+    responseType: 'blob',
+    timeout: 300000,
+    signal,
+  });
+}
+
 export function previewKnowledgeFile(id: string) {
   return getDown(`/api/v1/knowledge/${id}/preview`);
 }
@@ -500,7 +509,14 @@ const buildQuery = (params?: Record<string, any>) => {
 
 export function listFAQEntries(
   kbId: string,
-  params?: { page?: number; page_size?: number; tag_id?: number; tag_ids?: string; keyword?: string },
+  params?: {
+    page?: number
+    page_size?: number
+    tag_id?: number
+    tag_ids?: string
+    keyword?: string
+    is_enabled?: boolean
+  },
 ) {
   const query = buildQuery(params);
   return get(`/api/v1/knowledge-bases/${kbId}/faq/entries${query}`);

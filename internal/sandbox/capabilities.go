@@ -15,6 +15,8 @@ package sandbox
 import (
 	"context"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // SessionShellExecutor executes ad-hoc shell commands inside a session-
@@ -66,9 +68,20 @@ type SessionFileStore interface {
 	// travel through shell_exec heredocs.
 	WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error
 
+	// WriteSessionWorkspaceFiles writes many workspace files after preparing
+	// the session layout once. Host-skill staging must use this instead of
+	// looping WriteSessionWorkspaceFile.
+	WriteSessionWorkspaceFiles(ctx context.Context, sessionID string, files []SessionWorkspaceFile) error
+
 	// RemoveSessionInputPath deletes a staged attachment. No-op when the
 	// session has no live sandbox.
 	RemoveSessionInputPath(ctx context.Context, sessionID, targetPath string) error
+}
+
+// SessionWorkspaceFile is one path/content pair for WriteSessionWorkspaceFiles.
+type SessionWorkspaceFile struct {
+	Path    string
+	Content []byte
 }
 
 // SessionCapabilityProvider is implemented by managers that MAY offer
@@ -81,9 +94,10 @@ type SessionCapabilityProvider interface {
 }
 
 // SessionInstallShellExecutor runs install/maintenance shell commands, which
-// need root and the skills image root. It is a separate interface from
-// SessionShellExecutor so the privilege is something a caller must ask for by
-// name: ordinary chat sessions keep the non-root, /workspace-only contract.
+// need the skills image root. It is a separate interface from
+// SessionShellExecutor so reaching outside /workspace is something a caller
+// must ask for by name: ordinary chat sessions keep the /workspace-only
+// contract even though they already run as root.
 type SessionInstallShellExecutor interface {
 	ExecShellCommandWithOptions(
 		ctx context.Context,
@@ -112,6 +126,69 @@ type SessionDestroyer interface {
 // the current runtime cannot honour the capability.
 type SessionInstallCapabilityProvider interface {
 	SessionInstallShellExecutor() SessionInstallShellExecutor
+}
+
+// SessionTerminalManager opens interactive PTYs on the sandbox bound to a
+// session. Like the file store it is provider-neutral: the WebSocket
+// handler bridges browser terminal frames to it without knowing whether
+// E2B or Cube serves the session.
+type SessionTerminalManager interface {
+	// OpenSessionTerminal connects to the session's currently bound sandbox
+	// and opens a PTY. It is lookup-only: when no live sandbox is bound it
+	// returns ErrNoLiveSessionSandbox instead of provisioning one, because
+	// the terminal entry point lacks the agent's config-pin context and
+	// must not create microVMs as a side effect. A bound sandbox that is
+	// not confirmed running returns ErrSandboxPaused unless opts.AllowResume
+	// is set, so a panel open cannot silently resume (and re-bill) a paused
+	// instance. A backend that cannot stream PTYs returns
+	// ErrTerminalUnsupported, not "no sandbox".
+	OpenSessionTerminal(ctx context.Context, sessionID string, opts RemoteTerminalOptions) (RemoteTerminalSession, error)
+}
+
+// SessionTerminalProvider is implemented by managers that MAY offer
+// interactive terminals. The accessor returns nil when the current runtime
+// cannot honour the capability.
+type SessionTerminalProvider interface {
+	SessionTerminalManager() SessionTerminalManager
+}
+
+// SessionDesktopConn is one dialled desktop leg.
+//
+// SandboxID is the sandbox this connection actually reached. It is returned
+// rather than looked up afterwards because a skill install landing between
+// the dial and the lookup would report the new sandbox for a connection held
+// on the old one, and the handler's rebuild check would silently miss.
+type SessionDesktopConn struct {
+	Conn      *websocket.Conn
+	SandboxID string
+
+	// StartTTLRefresh extends the provider idle timeout for as long as ctx
+	// is live. The WebSocket handler must pass the relay ctx (WithoutCancel),
+	// not the HTTP request ctx used to dial. Nil when the backend has no
+	// timeout to refresh (Docker).
+	StartTTLRefresh func(ctx context.Context)
+}
+
+// SessionDesktopManager relays a WebSocket to the graphical desktop of the
+// sandbox bound to a session. Like the terminal it is provider-neutral: the
+// WebSocket handler bridges browser RFB frames to it without knowing whether
+// E2B or Cube serves the session.
+type SessionDesktopManager interface {
+	// OpenSessionDesktop dials the desktop port of the session's currently
+	// bound sandbox. It is lookup-only by design: the caller (the desktop
+	// service) has already provisioned and started the desktop through the
+	// normal execution path, so a missing binding here means the sandbox
+	// disappeared between the two steps, not "please create one".
+	// ErrNoLiveSessionSandbox says exactly that; a backend that cannot relay
+	// desktops returns ErrDesktopUnsupported.
+	OpenSessionDesktop(ctx context.Context, sessionID string, opts RemoteDesktopOptions) (*SessionDesktopConn, error)
+}
+
+// SessionDesktopProvider is implemented by managers that MAY offer a
+// graphical desktop. The accessor returns nil when the current runtime cannot
+// honour the capability.
+type SessionDesktopProvider interface {
+	SessionDesktopManager() SessionDesktopManager
 }
 
 // SessionTurnHolder marks the start and end of one chat turn on a session's

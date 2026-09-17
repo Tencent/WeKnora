@@ -28,12 +28,37 @@ test('settings OAuth polling cannot accept a pre-existing token as fresh authori
   )
 })
 
+test('in-chat OAuth success refreshes the caller MCP directory', () => {
+  assert.match(cardSource, /refreshMCPMetadata/)
+  assert.match(
+    cardSource,
+    /await resolveMCPOAuth\(props\.pendingId, \{ service_id: props\.serviceId, decision: 'authorize' \}\)/,
+  )
+  assert.match(cardSource, /await refreshMCPMetadata\(props\.serviceId\)/)
+})
+
 test('OAuth status API sends the attempt id to the backend', () => {
   assert.match(apiSource, /authorization_attempt=\$\{encodeURIComponent\(authorizationAttempt\)\}/)
 })
 
 test('settings distinguishes refreshable tokens from usable authorization', () => {
-  assert.match(settingsSource, /getMCPOAuthAuthorizationStatus\(props\.service\.id\)/)
+  assert.match(settingsSource, /getMCPOAuthAuthorizationStatus\(currentService\.value\.id\)/)
+  assert.match(settingsSource, /savedService\.value \?\? props\.service/)
   assert.match(settingsSource, /oauthTokenState === 'refreshable'/)
   assert.match(apiSource, /state: data\?\.state \?\? 'reauth_required'/)
+})
+
+test('settings wizard requires a synchronized directory before save', () => {
+  assert.match(settingsSource, /step === 1 && !toolsSynced/)
+  assert.match(settingsSource, /mcpMetadata\.syncRequired/)
+  assert.match(settingsSource, /formRef\.value\?\.validate\(\)/)
+  assert.match(settingsSource, /if \(valid !== true\) return null/)
+})
+
+test('tools step auto-fetches a missing directory without a banner CTA', () => {
+  const panelSource = readFileSync(join(here, '../../settings/components/McpMetadataPanel.vue'), 'utf8')
+  assert.match(panelSource, /if \(!saved && !props\.disabled\)/)
+  assert.match(panelSource, /refreshFrom\(current\)/)
+  assert.match(panelSource, /variant="text"/)
+  assert.doesNotMatch(panelSource, /t-alert/)
 })

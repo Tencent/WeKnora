@@ -124,7 +124,18 @@ func (r *messageRepository) ListMessagesBySessionAfterTime(
 	return messages, nil
 }
 
-// UpdateMessage updates an existing message
+// ListMessagesBySessionAfterCursor uses a stable tie-breaker for memory paging.
+func (r *messageRepository) ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error) {
+	var messages []*types.Message
+	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
+	if !cursor.At.IsZero() || cursor.ID != "" {
+		query = query.Where("created_at > ? OR (created_at = ? AND id > ?)", cursor.At, cursor.At, cursor.ID)
+	}
+	err := query.Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error
+	return messages, err
+}
+
+// UpdateMessage updates an existing message.
 func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Message) error {
 	return r.db.WithContext(ctx).Model(&types.Message{}).Where(
 		"id = ? AND session_id = ?", message.ID, message.SessionID,
@@ -169,12 +180,21 @@ func (r *messageRepository) GetMessageByRequestID(
 	return &message, nil
 }
 
-// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
+// SearchMessagesByKeyword searches messages by keyword across sessions for a tenant
 func (r *messageRepository) SearchMessagesByKeyword(
 	ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int,
 ) ([]*types.MessageWithSession, error) {
 	if limit <= 0 {
 		limit = 20
+	}
+
+	// ILIKE is Postgres-only; SQLite (Lite build) and MySQL lack the keyword,
+	// so mirror the session-list search with LOWER() on both sides. ESCAPE ?
+	// pairs with escapeLikeKeyword: SQLite has no default LIKE escape
+	// character, so without it \% and \_ would never match a literal wildcard.
+	contentLikeExpr := "LOWER(messages.content) LIKE LOWER(?) ESCAPE ?"
+	if r.db.Name() == "postgres" {
+		contentLikeExpr = "messages.content ILIKE ? ESCAPE ?"
 	}
 
 	var results []*types.MessageWithSession
@@ -185,7 +205,7 @@ func (r *messageRepository) SearchMessagesByKeyword(
 		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
 		Where("sessions.tenant_id = ?", tenantID).
 		Where("messages.deleted_at IS NULL").
-		Where("messages.content ILIKE ?", "%"+escapeLikeKeyword(keyword)+"%")
+		Where(contentLikeExpr, "%"+escapeLikeKeyword(keyword)+"%", likeEscapeChar)
 
 	// Matches the scoping used when listing sessions, including the legacy
 	// allowance for tenant-level sessions created before per-user ownership.

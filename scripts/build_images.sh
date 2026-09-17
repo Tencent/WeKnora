@@ -183,7 +183,7 @@ build_docreader_image() {
     fi
 }
 
-# 构建前端镜像
+# 构建前端镜像（多阶段：npm 在 builder 内执行，无需宿主机预构建 dist）
 build_frontend_image() {
     log_info "构建前端镜像 (weknora-ui)..."
     
@@ -192,11 +192,11 @@ build_frontend_image() {
     # 获取版本信息（用于注入前端 commit hash）
     get_version_info
 
-    log_info "构建前端静态资源..."
-    VITE_IS_DOCKER=true VITE_FRONTEND_COMMIT="$COMMIT_ID" "$SCRIPT_DIR/build_frontend_dist.sh"
-
     docker build \
         --platform $PLATFORM \
+        --build-arg VITE_FRONTEND_COMMIT="$COMMIT_ID" \
+        ${NPM_REGISTRY:+--build-arg NPM_REGISTRY="$NPM_REGISTRY"} \
+        ${NODE_MAX_OLD_SPACE_SIZE:+--build-arg NODE_MAX_OLD_SPACE_SIZE="$NODE_MAX_OLD_SPACE_SIZE"} \
         -f frontend/Dockerfile \
         -t wechatopenai/weknora-ui:latest \
         frontend/
@@ -220,6 +220,7 @@ build_sandbox_image() {
     # 而 Docker 后端只在本地缺失时才去拉，本地不打这个标签就等于白构建。
     docker build \
         --platform $PLATFORM \
+        --build-arg TARGETPLATFORM=$PLATFORM \
         -f docker/Dockerfile.sandbox \
         --target sandbox \
         -t wechatopenai/weknora-sandbox:latest \
@@ -238,17 +239,54 @@ build_sandbox_image() {
 
     docker build \
         --platform linux/amd64 \
+        --build-arg TARGETPLATFORM=linux/amd64 \
+        --build-arg TARGETARCH=amd64 \
         -f docker/Dockerfile.sandbox \
         --target cube \
         -t wechatopenai/weknora-sandbox:latest-cube \
         -t wechatopenai/weknora-sandbox:main-cube \
         .
 
+    if [ $? -ne 0 ]; then
+        log_error "沙箱镜像 Cube 变体构建失败"
+        return 1
+    fi
+
+    # Desktop variant: XFCE + x11vnc + websockify. Tagged for E2B template
+    # builds; the Docker backend does not consume this image yet.
+    log_info "构建沙箱镜像桌面变体 (weknora-sandbox:main-desktop)..."
+
+    docker build \
+        --platform $PLATFORM \
+        --build-arg TARGETPLATFORM=$PLATFORM \
+        -f docker/Dockerfile.sandbox \
+        --target desktop \
+        -t wechatopenai/weknora-sandbox:latest-desktop \
+        -t wechatopenai/weknora-sandbox:main-desktop \
+        .
+
+    if [ $? -ne 0 ]; then
+        log_error "沙箱镜像桌面变体构建失败"
+        return 1
+    fi
+
+    log_info "构建沙箱镜像桌面 Cube 变体 (weknora-sandbox:main-desktop-cube)..."
+
+    docker build \
+        --platform linux/amd64 \
+        --build-arg TARGETPLATFORM=linux/amd64 \
+        --build-arg TARGETARCH=amd64 \
+        -f docker/Dockerfile.sandbox \
+        --target desktop-cube \
+        -t wechatopenai/weknora-sandbox:latest-desktop-cube \
+        -t wechatopenai/weknora-sandbox:main-desktop-cube \
+        .
+
     if [ $? -eq 0 ]; then
         log_success "沙箱镜像构建成功"
         return 0
     else
-        log_error "沙箱镜像 Cube 变体构建失败"
+        log_error "沙箱镜像桌面 Cube 变体构建失败"
         return 1
     fi
 }
@@ -337,8 +375,12 @@ clean_images() {
     docker rmi wechatopenai/weknora-ui:latest 2>/dev/null || true
     docker rmi wechatopenai/weknora-sandbox:latest 2>/dev/null || true
     docker rmi wechatopenai/weknora-sandbox:latest-cube 2>/dev/null || true
+    docker rmi wechatopenai/weknora-sandbox:latest-desktop 2>/dev/null || true
+    docker rmi wechatopenai/weknora-sandbox:latest-desktop-cube 2>/dev/null || true
     docker rmi wechatopenai/weknora-sandbox:main 2>/dev/null || true
     docker rmi wechatopenai/weknora-sandbox:main-cube 2>/dev/null || true
+    docker rmi wechatopenai/weknora-sandbox:main-desktop 2>/dev/null || true
+    docker rmi wechatopenai/weknora-sandbox:main-desktop-cube 2>/dev/null || true
     
     docker image prune -f
     

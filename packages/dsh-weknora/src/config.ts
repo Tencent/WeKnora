@@ -28,7 +28,11 @@ export interface Config {
   requestTimeoutMs?: number
   /** Timeout for a streamed answer, which includes model and tool time. */
   chatTimeoutMs?: number
-  /** `public` asks WeKnora for directly loadable file URLs in citations. */
+  /**
+   * `public` asks WeKnora for directly loadable file URLs in answers and
+   * citations (the default: dsh can render `https://` Markdown images, not
+   * `resource://` handles). `handle` keeps the internal references.
+   */
   resourceUrls?: 'handle' | 'public'
   /** Tool-name prefix, so two instances can serve two deployments. */
   toolPrefix?: string
@@ -58,7 +62,7 @@ const DEFAULTS = {
   maxChunkChars: 1200,
   requestTimeoutMs: 30_000,
   chatTimeoutMs: 300_000,
-  resourceUrls: 'handle',
+  resourceUrls: 'public',
   toolPrefix: 'weknora',
 } as const
 

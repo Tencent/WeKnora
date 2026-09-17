@@ -15,6 +15,7 @@ from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.utils import endecode
 from docreader.utils.ssrf import is_ssrf_safe_url
+from docreader.utils.ssrf_proxy import SSRFProxy
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ async def read_visible_text(page: Page) -> str:
 
 
 async def install_ssrf_route_guard(page: Page) -> None:
-    """Block navigation/subresource requests to SSRF-restricted targets (incl. redirects)."""
+    """Reject initial URLs early; SSRFProxy enforces every actual connection."""
 
     async def handle_route(route) -> None:
         safe, reason = is_ssrf_safe_url(route.request.url)
@@ -189,14 +190,11 @@ class StdWebParser(BaseParser):
                 error=f"URL blocked by SSRF guard: {reason}",
             )
         try:
-            async with async_playwright() as p:
-                kwargs = {}
-                # Configure proxy if available
-                if self.proxy:
-                    kwargs["proxy"] = {"server": self.proxy}
+            async with SSRFProxy(self.proxy) as proxy, async_playwright() as p:
+                kwargs = {"proxy": {"server": proxy.url, "bypass": ""}}
                 logger.info("Launching WebKit browser")
                 browser = await p.webkit.launch(**kwargs)
-                page = await browser.new_page()
+                page = await browser.new_page(service_workers="block")
                 await install_ssrf_route_guard(page)
 
                 logger.info(f"Navigating to URL: {url}")

@@ -2,10 +2,12 @@ package qdrant
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -370,11 +372,15 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 
 	log.Infof("[Qdrant] Batch updating chunk enabled status, count: %d", len(chunkStatusMap))
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get all collections that match our base name pattern
 	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to list collections: %v", err)
-		return fmt.Errorf("failed to list collections: %w", err)
+		return fmt.Errorf("failed to list collections: %w", errors.Join(err, ctx.Err()))
 	}
 
 	// Group chunks by enabled status for batch updates
@@ -389,6 +395,7 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 		}
 	}
 
+	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
 		// Only process collections that start with our base name
@@ -399,9 +406,12 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 
 		// Update enabled chunks
 		if len(enabledChunkIDs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: true}),
+				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: true}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, enabledChunkIDs...),
@@ -410,14 +420,18 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update enabled chunks in %s: %v", collectionName, err)
+				updateErr = errors.Join(updateErr, fmt.Errorf("enable chunks in collection %s: %w", collectionName, err))
 			}
 		}
 
 		// Update disabled chunks
 		if len(disabledChunkIDs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldIsEnabled: false}),
+				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: false}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, disabledChunkIDs...),
@@ -426,8 +440,13 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update disabled chunks in %s: %v", collectionName, err)
+				updateErr = errors.Join(updateErr, fmt.Errorf("disable chunks in collection %s: %w", collectionName, err))
 			}
 		}
+	}
+
+	if err := errors.Join(updateErr, ctx.Err()); err != nil {
+		return err
 	}
 
 	log.Infof("[Qdrant] Batch update chunk enabled status completed")
@@ -444,11 +463,15 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 	log.Infof("[Qdrant] Batch updating chunk tag ID, count: %d", len(chunkTagMap))
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	// Get all collections that match our base name pattern
 	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to list collections: %v", err)
-		return fmt.Errorf("failed to list collections: %w", err)
+		return fmt.Errorf("failed to list collections: %w", errors.Join(err, ctx.Err()))
 	}
 
 	// Group chunks by tag ID for batch updates
@@ -457,6 +480,7 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 		tagGroups[tagID] = append(tagGroups[tagID], chunkID)
 	}
 
+	var updateErr error
 	// Update in all matching collections
 	for _, collectionName := range collections {
 		// Only process collections that start with our base name
@@ -467,9 +491,12 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 
 		// Update chunks for each tag ID
 		for tagID, chunkIDs := range tagGroups {
+			if err := ctx.Err(); err != nil {
+				return errors.Join(updateErr, err)
+			}
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
-				Payload:        qdrant.NewValueMap(map[string]any{fieldTagID: tagID}),
+				Payload:        newQdrantValueMap(map[string]any{fieldTagID: tagID}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
 						qdrant.NewMatchKeywords(fieldChunkID, chunkIDs...),
@@ -478,8 +505,14 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 			})
 			if err != nil {
 				log.Warnf("[Qdrant] Failed to update chunks with tag_id %s in %s: %v", tagID, collectionName, err)
+				updateErr = errors.Join(updateErr,
+					fmt.Errorf("set chunk tag_id %q in collection %s: %w", tagID, collectionName, err))
 			}
 		}
+	}
+
+	if err := errors.Join(updateErr, ctx.Err()); err != nil {
+		return err
 	}
 
 	log.Infof("[Qdrant] Batch update chunk tag ID completed")
@@ -808,7 +841,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 			if v, ok := payload[fieldIsEnabled]; ok {
 				isEnabled = v.GetBoolValue()
 			}
-			newPayload := qdrant.NewValueMap(map[string]any{
+			newPayload := newQdrantValueMap(map[string]any{
 				fieldContent:         payload[fieldContent].GetStringValue(),
 				fieldSourceID:        targetSourceID,
 				fieldSourceType:      payload[fieldSourceType].GetIntegerValue(),
@@ -879,7 +912,20 @@ func createPayload(embedding *QdrantVectorEmbedding) map[string]*qdrant.Value {
 		fieldTagID:           embedding.TagID,
 		fieldIsEnabled:       embedding.IsEnabled,
 	}
-	return qdrant.NewValueMap(payload)
+	return newQdrantValueMap(payload)
+}
+
+func newQdrantValueMap(payload map[string]any) map[string]*qdrant.Value {
+	sanitizedPayload := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if stringValue, ok := value.(string); ok {
+			if strings.IndexByte(stringValue, 0) != -1 || !utf8.ValidString(stringValue) {
+				value = common.CleanInvalidUTF8(stringValue)
+			}
+		}
+		sanitizedPayload[key] = value
+	}
+	return qdrant.NewValueMap(sanitizedPayload)
 }
 
 func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.RetrieverType) []*types.RetrieveResult {

@@ -21,9 +21,8 @@ import (
 // -----------------------------------------------------------------------------
 // Test doubles
 //
-// The download handler only touches three collaborators: SessionService (for
-// ownership check), MessageService (for the message + artifact list), and
-// FileService (for the blob stream). We embed the full interfaces so the
+// The download handler checks session ownership, persisted artifacts and
+// source sharing before resolving the owner's file storage. We embed interfaces so the
 // zero-value struct compiles, then override just the methods each test
 // exercises. A stray call to an un-stubbed method deliberately nil-panics
 // so the failure surfaces immediately.
@@ -58,18 +57,63 @@ func (s *stubMessageServiceForArtifacts) GetSessionArtifacts(ctx context.Context
 // fakeArtifactFileService serves canned bytes for a single URL.
 type fakeArtifactFileService struct {
 	interfaces.FileService
-	url  string
-	data []byte
+	url   string
+	data  []byte
+	calls int
 }
 
 func (f *fakeArtifactFileService) GetFile(_ context.Context, url string) (io.ReadCloser, error) {
+	f.calls++
 	if url != f.url {
 		return nil, stderrors.New("not found")
 	}
 	return io.NopCloser(strings.NewReader(string(f.data))), nil
 }
 
-func (f *fakeArtifactFileService) SaveFile(_ context.Context, _ *multipart.FileHeader, _ uint64, _ string) (string, error) {
+type artifactCatalogStub struct {
+	interfaces.ResourceCatalog
+	resource *types.StoredResource
+}
+
+func (s *artifactCatalogStub) ResolvePath(context.Context, string) (string, *types.StoredResource, error) {
+	return s.resource.PhysicalPath, s.resource, nil
+}
+
+type artifactTenantStub struct {
+	interfaces.TenantService
+	t *testing.T
+}
+
+func (s *artifactTenantStub) GetTenantByID(ctx context.Context, id uint64) (*types.Tenant, error) {
+	if id != 7 || types.MustTenantIDFromContext(ctx) != 7 || types.CallerFromContext(ctx).TenantID != 42 {
+		s.t.Fatal("artifact storage must use its owner while preserving the caller")
+	}
+	return &types.Tenant{ID: id}, nil
+}
+
+type artifactStorageStub struct {
+	interfaces.StorageBackendResolver
+	t    *testing.T
+	file interfaces.FileService
+}
+
+func (s *artifactStorageStub) ResolveFileService(
+	_ context.Context,
+	tenant *types.Tenant,
+	backendID, provider, _ string,
+) (interfaces.FileService, string, error) {
+	if tenant.ID != 7 || backendID != "backend-7" || provider != "local" {
+		s.t.Fatalf("unexpected storage target: tenant=%d backend=%s provider=%s", tenant.ID, backendID, provider)
+	}
+	return s.file, provider, nil
+}
+
+func (f *fakeArtifactFileService) SaveFile(
+	_ context.Context,
+	_ *multipart.FileHeader,
+	_ uint64,
+	_ string,
+) (string, error) {
 	return "", nil
 }
 
@@ -92,7 +136,10 @@ func (f *fakeArtifactFileService) DeleteFile(_ context.Context, _ string) error 
 func newArtifactTestRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(middleware.ErrorHandler())
+	r.Use(middleware.ErrorHandler(), func(c *gin.Context) {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(42)))
+		c.Next()
+	})
 	// Match the production route's wildcard names (see router.go — GET tree
 	// binds :id to align with /sessions/:id) so paramSessionID resolves via
 	// the same code path exercised in prod.
@@ -109,7 +156,7 @@ func newArtifactTestRouter(h *Handler) *gin.Engine {
 func TestDownloadMessageArtifact_HappyPath(t *testing.T) {
 	sessionID := "sess-1"
 	messageID := "msg-1"
-	url := "fake://tenant-42/report.pptx"
+	url := "local://42/exports/report.pptx"
 	body := []byte("PPTX-BYTES")
 
 	h := &Handler{
@@ -177,6 +224,60 @@ func TestDownloadMessageArtifact_SessionNotOwnedReturns404(t *testing.T) {
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestDownloadMessageArtifact_SourceStorageAndShareRevocation(t *testing.T) {
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	const physical = "local://7/exports/report.pdf"
+	shares := &resolveAgentShareStub{agent: &types.CustomAgent{ID: "agent", TenantID: 7}}
+	ownerFiles := &fakeArtifactFileService{url: physical, data: []byte("PDF-BYTES")}
+	globalFiles := &fakeArtifactFileService{}
+	h := &Handler{
+		sessionService: &stubSessionServiceForArtifacts{
+			getSession: func(context.Context, string) (*types.Session, error) {
+				return &types.Session{ID: "sess-1", TenantID: 42}, nil
+			},
+		},
+		messageService: &stubMessageServiceForArtifacts{
+			getMessage: func(context.Context, string, string) (*types.Message, error) {
+				return &types.Message{
+					ID: "msg-1", AgentID: "agent", AgentTenantID: 7,
+					Artifacts: types.MessageArtifacts{{URL: ref, FileName: "report.pdf"}},
+				}, nil
+			},
+		},
+		agentShareService: shares,
+		resourceCatalog: &artifactCatalogStub{resource: &types.StoredResource{
+			TenantID: 7, PhysicalPath: physical, StorageBackendID: "backend-7",
+		}},
+		tenantService:   &artifactTenantStub{t: t},
+		storageResolver: &artifactStorageStub{t: t, file: ownerFiles},
+		fileService:     globalFiles,
+	}
+	router := newArtifactTestRouter(h)
+	request := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(
+			w,
+			httptest.NewRequest(http.MethodGet, "/sessions/sess-1/messages/msg-1/artifacts/0/download", nil),
+		)
+		return w
+	}
+	w := request()
+	if w.Code != http.StatusOK || w.Body.String() != "PDF-BYTES" ||
+		w.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("status=%d body=%q cache=%q", w.Code, w.Body.String(), w.Header().Get("Cache-Control"))
+	}
+	shares.agent = nil
+	w = request()
+	if w.Code != http.StatusNotFound || ownerFiles.calls != 1 || globalFiles.calls != 0 {
+		t.Fatalf(
+			"revoked artifact: status=%d owner reads=%d global reads=%d",
+			w.Code,
+			ownerFiles.calls,
+			globalFiles.calls,
+		)
 	}
 }
 
@@ -268,4 +369,12 @@ func TestBuildAttachmentHeader_CJK(t *testing.T) {
 	if strings.ContainsRune(got, '报') {
 		t.Fatalf("filename* contains raw CJK: %q", got)
 	}
+}
+
+func (s *artifactCatalogStub) GetMessageFileBindings(
+	_ context.Context,
+	_ uint64,
+	_, messageID string,
+) (*types.MessageFileBindings, error) {
+	return &types.MessageFileBindings{MessageArtifact: messageID == "msg-1"}, nil
 }

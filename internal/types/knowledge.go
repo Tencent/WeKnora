@@ -33,6 +33,7 @@ const (
 	ChannelSlack            = "slack"             // Slack
 	ChannelIM               = "im"                // Generic IM channel
 	ChannelNotion           = "notion"            // Notion
+	ChannelConfluence       = "confluence"        // Atlassian Confluence
 	ChannelYuque            = "yuque"             // Yuque (语雀)
 	ChannelRSS              = "rss"               // RSS / Atom feed
 	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
@@ -335,6 +336,9 @@ func (k *Knowledge) ManualMetadata() (*ManualKnowledgeMetadata, error) {
 	return &metadata, nil
 }
 
+// KnowledgeTransferMetadataKey is reserved for server-owned transfer recovery state.
+const KnowledgeTransferMetadataKey = "_knowledge_transfer"
+
 // SetManualMetadata sets manual knowledge metadata onto the knowledge instance.
 func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	if meta == nil {
@@ -344,6 +348,23 @@ func (k *Knowledge) SetManualMetadata(meta *ManualKnowledgeMetadata) error {
 	jsonValue, err := meta.ToJSON()
 	if err != nil {
 		return err
+	}
+	// Manual processing may finish before the move worker acknowledges its
+	// task. Preserve the recovery marker when updating manual content/status.
+	old, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if state, ok := old[KnowledgeTransferMetadataKey]; ok {
+		fields, err := jsonValue.Map()
+		if err != nil {
+			return err
+		}
+		fields[KnowledgeTransferMetadataKey] = state
+		jsonValue, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
 	}
 	k.Metadata = jsonValue
 	return nil
@@ -468,6 +489,9 @@ type KnowledgeCheckParams struct {
 	FileType string
 	FileSize int64
 	FileHash string
+	// When both are set, file deduplication is scoped to this source item.
+	DataSourceID string
+	ExternalID   string
 	// URL parameters
 	URL string
 	// Text passage parameters

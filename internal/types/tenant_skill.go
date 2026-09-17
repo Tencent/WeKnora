@@ -64,7 +64,9 @@ type TenantSkillEntity struct {
 	// Instructions is the SKILL.md body (level 2 disclosure).
 	Instructions string `gorm:"type:text"`
 
-	// BundleRef locates the uploaded archive in the tenant's file service.
+	// BundleRef is a leftover locator from when each install owned a zip.
+	// New installs leave this empty: the catalog row owns the archive, and
+	// readers follow CatalogID. Older rows may still name an object.
 	BundleRef    string `gorm:"type:varchar(1024)"`
 	BundleSHA256 string `gorm:"type:varchar(64)"`
 
@@ -145,6 +147,8 @@ type TenantSkillCatalogEntity struct {
 	Version      string `gorm:"type:varchar(64)"`
 	Description  string `gorm:"type:text"`
 	Instructions string `gorm:"type:text"`
+	// BundleRef locates the one stored zip for this definition. Install rows
+	// do not own a copy: sandbox uninstall must not delete this object.
 	BundleRef    string `gorm:"type:varchar(1024)"`
 	BundleSHA256 string `gorm:"type:varchar(64)"`
 	CreatedAt    time.Time

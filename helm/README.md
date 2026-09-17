@@ -148,6 +148,7 @@ helm install weknora ./helm \
 |-----------|-------------|---------|
 | `global.storageClass` | Storage class for PVCs | `""` |
 | `global.imagePullSecrets` | Image pull secrets | `[]` |
+| `global.maxFileSizeMB` | Maximum upload size in MB (frontend, app, docreader) | `50` |
 | `global.podSecurityContext` | Pod security context | See values.yaml |
 | `global.containerSecurityContext` | Container security context | See values.yaml |
 

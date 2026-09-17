@@ -46,7 +46,10 @@ type CustomAgentService interface {
 	// Returns:
 	//   - Updated agent object
 	//   - Possible errors such as not existing, insufficient permissions, cannot modify built-in, etc.
-	UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error)
+	// avatar carries field presence the agent struct cannot express: nil means
+	// the caller did not send an avatar and the stored one must survive, while
+	// a pointer to "" is an explicit clear.
+	UpdateAgent(ctx context.Context, agent *types.CustomAgent, avatar *string) (*types.CustomAgent, error)
 
 	// DeleteAgent deletes an agent
 	// Parameters:
@@ -136,6 +139,11 @@ type CustomAgentRepository interface {
 	// CountByModelID counts active agents in the tenant whose config references
 	// the given model ID (chat, rerank, VLM, ASR, query-understand, etc.).
 	CountByModelID(ctx context.Context, tenantID uint64, modelID string) (int64, error)
+	// ListModelUsages returns the minimal active agent projections that
+	// reference the model, with every matching binding merged per object.
+	// Implementations must cap the result at types.ModelUsageListLimit;
+	// callers that need the untruncated size should use CountByModelID.
+	ListModelUsages(ctx context.Context, tenantID uint64, modelID string) ([]types.ModelUsageResource, error)
 
 	// CountBySandboxConfigID counts agents pointing at a sandbox config.
 	//

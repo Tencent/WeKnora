@@ -398,3 +398,155 @@ func TestEmbedAuthSessionTokenMismatch(t *testing.T) {
 		t.Fatalf("status = %d, want %d, body = %s", w.Code, http.StatusUnauthorized, w.Body.String())
 	}
 }
+
+// The host allowlist contains A; browser API requests originate in iframe B.
+func TestEmbedAuthHostAllowlist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name, method, target, origin, referer, fetchSite, forwardedProto string
+		sessionToken, emptyList                                          bool
+		want                                                             int
+	}{
+		{
+			name:      "iframe POST with only A allowed",
+			method:    "POST",
+			target:    "https://b.example/api",
+			origin:    "https://b.example",
+			fetchSite: "same-origin",
+			want:      200,
+		},
+		{
+			name:      "iframe GET referer fallback",
+			method:    "GET",
+			target:    "https://b.example/api",
+			referer:   "https://b.example/embed/channel",
+			fetchSite: "same-origin",
+			want:      200,
+		},
+		{
+			name:         "secure mode session token",
+			method:       "POST",
+			target:       "https://b.example/api",
+			origin:       "https://b.example",
+			fetchSite:    "same-origin",
+			sessionToken: true,
+			want:         200,
+		},
+		{
+			name:   "HTTP custom port without fetch metadata",
+			method: "POST",
+			target: "http://b.example:8080/api",
+			origin: "http://b.example:8080",
+			want:   200,
+		},
+		{
+			name:           "HTTPS proxy without fetch metadata",
+			method:         "POST",
+			target:         "http://b.example/api",
+			origin:         "https://b.example",
+			forwardedProto: "https",
+			want:           200,
+		},
+		{
+			name:      "proxy rewrites authority",
+			method:    "POST",
+			target:    "http://backend:8080/api",
+			origin:    "https://b.example",
+			fetchSite: "same-origin",
+			want:      200,
+		},
+		{
+			name:   "server exchange from allowed A",
+			method: "POST",
+			target: "https://b.example/api",
+			origin: "https://a.example",
+			want:   200,
+		},
+		{
+			name:      "cross origin C rejected",
+			method:    "POST",
+			target:    "https://b.example/api",
+			origin:    "https://c.example",
+			fetchSite: "cross-site",
+			want:      403,
+		},
+		{
+			name:      "same site C rejected",
+			method:    "POST",
+			target:    "https://b.example/api",
+			origin:    "https://c.example",
+			fetchSite: "same-site",
+			want:      403,
+		},
+		{
+			name:   "wrong port rejected",
+			method: "POST",
+			target: "http://b.example:8080/api",
+			origin: "http://b.example:9090",
+			want:   403,
+		},
+		{
+			name:      "opaque origin rejected",
+			method:    "POST",
+			target:    "https://b.example/api",
+			origin:    "null",
+			fetchSite: "same-origin",
+			want:      403,
+		},
+		{
+			name:      "no-referrer iframe GET",
+			method:    "GET",
+			target:    "https://b.example/api",
+			fetchSite: "same-origin",
+			want:      200,
+		},
+		{
+			name:   "missing origin rejected",
+			method: "GET",
+			target: "https://b.example/api",
+			want:   403,
+		},
+		{
+			name:      "empty allowlist still rejected",
+			method:    "POST",
+			target:    "https://b.example/api",
+			origin:    "https://b.example",
+			fetchSite: "same-origin",
+			emptyList: true,
+			want:      403,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			origins := []byte(`["https://a.example"]`)
+			if tc.emptyList {
+				origins = []byte(`[]`)
+			}
+			svc := &fakeEmbedChannelService{channels: map[string]*types.EmbedChannel{
+				"channel": {
+					ID: "channel", TenantID: 11, Enabled: true, PublishToken: "em_test", AllowedOrigins: origins,
+				},
+			}, sessions: map[string]string{"ems_test": "channel"}}
+			r := gin.New()
+			tenantSvc := &fakeTenantService{tenant: &types.Tenant{ID: 11}}
+			r.Any("/api/v1/embed/:channel_id/config", EmbedAuth(svc, tenantSvc, nil), func(c *gin.Context) {
+				c.Status(200)
+			})
+			req := httptest.NewRequest(tc.method, tc.target, nil)
+			req.URL.Path = "/api/v1/embed/channel/config"
+			token := "em_test"
+			if tc.sessionToken {
+				token = "ems_test"
+			}
+			req.Header.Set("Authorization", "Embed "+token)
+			req.Header.Set("Origin", tc.origin)
+			req.Header.Set("Referer", tc.referer)
+			req.Header.Set("Sec-Fetch-Site", tc.fetchSite)
+			req.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+		})
+	}
+}

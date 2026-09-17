@@ -84,6 +84,23 @@ func RunnableWorkspaceScript(scriptPath string) (string, bool) {
 	return clean, true
 }
 
+// ValidatedSessionOutputDir normalises a configured artifact directory and
+// reports whether it may be used.
+//
+// It is the single gate for every WEKNORA_SKILL_OUTPUT_DIR override, wherever
+// it comes from: the host environment the app reads at startup, or a tenant's
+// sandbox config. Without it the two disagreed — execution validated the path
+// and fell back to SessionOutputRoot, while the tools and the artifact
+// collector took the host value as-is, so an override pointing outside
+// /workspace moved the readers somewhere the writers never wrote.
+func ValidatedSessionOutputDir(dir string) (string, bool) {
+	clean, err := cleanSessionWorkDir(dir, false)
+	if err != nil {
+		return "", false
+	}
+	return clean, true
+}
+
 // ValidatedImageSkillDir reports whether skillDir is exactly one installed
 // skill directory under SkillsImageRoot (for example /opt/weknora/tenant/skills/pdf).
 func ValidatedImageSkillDir(skillDir string) (string, bool) {
@@ -146,20 +163,6 @@ func SkillDirForImageScript(scriptPath string) (string, bool) {
 	return dir, true
 }
 
-// SessionSkillPackageDir is the per-session extra-packages overlay for one
-// skill. The image venv is frozen after install (root-owned, mode 555, and
-// often created with `uv venv` so it has no pip). Skills that lazily
-// `pip install` on first use cannot write there; packages installed with
-// `python3 -m pip install --target` this directory are visible to
-// execute_skill_script via PYTHONPATH / NODE_PATH. The directory is under
-// /workspace so it dies with the session and never mutates the snapshot.
-func SessionSkillPackageDir(skillName string) string {
-	if !IsValidSkillName(skillName) {
-		return path.Join(SessionWorkspaceRoot, ".skill-packages")
-	}
-	return path.Join(SessionWorkspaceRoot, ".skill-packages", skillName)
-}
-
 // SkillVenvPython is where a skill's own Python interpreter lives when the
 // install created one. It is exported because the model needs to be told: the
 // system python3 deliberately carries no skill dependencies, so anything that
@@ -203,4 +206,10 @@ func SkillInterpreterCommand(skillDir, scriptPath string) (string, []string) {
 	default:
 		return "/bin/sh", []string{scriptPath}
 	}
+}
+
+// SkillCommandPath is shared by normal skill execution and installation verification.
+func SkillCommandPath(dir string) string {
+	return path.Join(dir, ".venv", "bin") + ":" +
+		path.Join(dir, "node_modules", ".bin") + ":" + path.Join(dir, ".weknora", "bin")
 }

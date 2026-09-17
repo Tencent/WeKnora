@@ -30,10 +30,13 @@ const (
 	skillFileEncodingBinary = "binary"
 
 	// The settings drawer lists the tree then immediately opens SKILL.md, and
-	// every later click is another read of the same zip. A handful of recent
-	// archives covers that without holding a 256 MiB upload in RAM.
+	// every later click is another read of the same zip. Keep a modest
+	// process-wide budget: 512 MiB is the install/decompress cap, not RAM
+	// this cache is allowed to pin. A zip larger than the budget is still
+	// cached so a large skill's drawer does not re-download on every click,
+	// but it is the only occupant until something else is opened.
 	skillBundleArchiveCacheSlots = 8
-	skillBundleArchiveCacheBytes = 64 << 20 // 64 MiB across cached zips
+	skillBundleArchiveCacheBytes = 64 << 20
 )
 
 // SkillFileEntry is one path in an installed skill's stored archive.
@@ -100,28 +103,41 @@ func (s *TenantSkillService) skillBundleArchive(
 	if skill == nil {
 		return nil, apperrors.NewNotFoundError("skill not found")
 	}
-	hasRef := strings.TrimSpace(skill.BundleRef) != ""
+	// An object named by the row itself is the archive this sandbox was built
+	// from, so it answers first and needs no digest check.
 	if archive, ok := s.trySkillBundle(ctx, tenantID, skill); ok {
 		return archive, nil
 	}
-	if hasRef {
-		// The install named a blob that we could not read. Only substitute the
-		// catalog copy when it is the same digest — otherwise the admin would
-		// be looking at a different version than the image.
-		if archive, err := s.sameDigestCatalogArchive(ctx, tenantID, skill); err == nil && len(archive) > 0 {
+	// Otherwise the definition holds the zip. It answers for this install only
+	// while the digests agree: registering the skill again replaces the catalog
+	// object in place, while every sandbox keeps running the image built from
+	// the archive its row names. Serving the newer bytes would show the admin
+	// (and read_skill) a tree that image does not have.
+	if archive, err := s.sameDigestCatalogArchive(ctx, tenantID, skill); err == nil && len(archive) > 0 {
+		return archive, nil
+	}
+	if strings.TrimSpace(skill.BundleSHA256) == "" {
+		// A row that recorded no digest predates the catalog and has nothing to
+		// check against, so the definition's copy is the only answer available.
+		if archive, err := s.anyCatalogArchiveFor(ctx, tenantID, skill); err == nil && len(archive) > 0 {
 			return archive, nil
 		}
-		return nil, apperrors.NewNotFoundError("skill files are not available")
 	}
+	return nil, apperrors.NewNotFoundError("skill files are not available")
+}
+
+// anyCatalogArchiveFor resolves the definition an install belongs to without
+// checking what it holds. It exists for rows written before the catalog, which
+// carry neither a bundle reference nor a digest.
+func (s *TenantSkillService) anyCatalogArchiveFor(
+	ctx context.Context, tenantID uint64, skill *types.TenantSkillEntity,
+) ([]byte, error) {
 	if cid := strings.TrimSpace(skill.CatalogID); cid != "" {
 		if archive, err := s.loadCatalogArchive(ctx, tenantID, cid); err == nil && len(archive) > 0 {
 			return archive, nil
 		}
 	}
-	if archive, err := s.loadCatalogArchive(ctx, tenantID, skill.ID); err == nil && len(archive) > 0 {
-		return archive, nil
-	}
-	return nil, apperrors.NewNotFoundError("skill files are not available")
+	return s.loadCatalogArchive(ctx, tenantID, skill.ID)
 }
 
 func (s *TenantSkillService) sameDigestCatalogArchive(
@@ -221,8 +237,10 @@ func (s *TenantSkillService) storeSkillBundle(key string, archive []byte) {
 }
 
 type skillBundleArchiveCache struct {
-	mu      sync.Mutex
-	entries []cachedSkillArchive
+	mu       sync.Mutex
+	entries  []cachedSkillArchive
+	slots    int
+	maxBytes int
 }
 
 type cachedSkillArchive struct {
@@ -231,7 +249,10 @@ type cachedSkillArchive struct {
 }
 
 func newSkillBundleArchiveCache() *skillBundleArchiveCache {
-	return &skillBundleArchiveCache{}
+	return &skillBundleArchiveCache{
+		slots:    skillBundleArchiveCacheSlots,
+		maxBytes: skillBundleArchiveCacheBytes,
+	}
 }
 
 func (c *skillBundleArchiveCache) get(key string) []byte {
@@ -252,10 +273,7 @@ func (c *skillBundleArchiveCache) get(key string) []byte {
 }
 
 func (c *skillBundleArchiveCache) put(key string, archive []byte) {
-	if c == nil || key == "" {
-		return
-	}
-	if len(archive) > skillBundleArchiveCacheBytes {
+	if c == nil || key == "" || len(archive) == 0 {
 		return
 	}
 	c.mu.Lock()
@@ -268,7 +286,14 @@ func (c *skillBundleArchiveCache) put(key string, archive []byte) {
 		break
 	}
 	c.entries = append([]cachedSkillArchive{{key: key, archive: archive}}, c.entries...)
-	for len(c.entries) > skillBundleArchiveCacheSlots || c.cachedBytes() > skillBundleArchiveCacheBytes {
+	slots, maxBytes := c.slots, c.maxBytes
+	if slots <= 0 {
+		slots = skillBundleArchiveCacheSlots
+	}
+	if maxBytes <= 0 {
+		maxBytes = skillBundleArchiveCacheBytes
+	}
+	for len(c.entries) > 1 && (len(c.entries) > slots || c.cachedBytes() > maxBytes) {
 		c.entries = c.entries[:len(c.entries)-1]
 	}
 }

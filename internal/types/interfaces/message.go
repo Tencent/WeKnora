@@ -87,6 +87,8 @@ type MessageRepository interface {
 	ListMessagesBySessionAfterTime(
 		ctx context.Context, sessionID string, afterTime time.Time, limit int,
 	) ([]*types.Message, error)
+	// ListMessagesBySessionAfterCursor uses (created_at, id) for lossless paging.
+	ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error)
 	// UpdateMessage updates a message
 	UpdateMessage(ctx context.Context, message *types.Message) error
 	// UpdateMessageImages updates only the images JSONB column for a message
@@ -99,7 +101,7 @@ type MessageRepository interface {
 	DeleteMessagesBySessionID(ctx context.Context, sessionID string) error
 	// GetFirstMessageOfUser gets the first message of a user
 	GetFirstMessageOfUser(ctx context.Context, sessionID string) (*types.Message, error)
-	// SearchMessagesByKeyword searches messages by keyword (ILIKE) across sessions for a tenant
+	// SearchMessagesByKeyword searches messages by keyword across sessions for a tenant
 	// OwnedSessionIDs narrows a set of session ids to the ones this person owns.
 	OwnedSessionIDs(ctx context.Context, tenantID uint64, ownerID string, sessionIDs []string) (map[string]bool, error)
 	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
