@@ -384,6 +384,11 @@
               </div>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
                 class="answer-toolbar">
+                <t-tooltip v-if="canFork" :content="forkTooltip">
+                  <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
+                    <t-icon name="git-branch" />
+                  </t-button>
+                </t-tooltip>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -961,11 +966,25 @@ const props = defineProps<{
   embedVisitorId?: string;
   ragMode?: boolean;
   followUpLoading?: boolean;
+  canFork?: boolean;
+  willDegrade?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
+  (event: 'fork', messageId: string): void;
 }>();
+
+const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const forkTooltip = computed(() =>
+  props.willDegrade
+    ? '从这条回答继续分叉（将创建全新沙箱环境）'
+    : '从这条回答继续分叉',
+)
+const emitFork = () => {
+  const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
+  if (messageId) emit('fork', messageId)
+}
 
 const embedAuthProps = computed(() => ({
   embeddedMode: props.embeddedMode,

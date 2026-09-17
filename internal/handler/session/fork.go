@@ -26,9 +26,9 @@ type sessionForker interface {
 
 // ForkSessionRequest is the fork endpoint's body.
 type ForkSessionRequest struct {
-	// MessageID is the user message to branch at. Messages strictly before it
-	// are copied into the new session; this one is not, so the client can
-	// prefill it for editing.
+	// MessageID is the message to branch at. A user message copies history
+	// strictly before it (the client prefills that question). An assistant
+	// message copies history through that answer so the branch continues after it.
 	MessageID string `json:"message_id" binding:"required"`
 	// Title is optional. Empty falls back to the source title plus a suffix.
 	Title string `json:"title"`
@@ -36,14 +36,14 @@ type ForkSessionRequest struct {
 
 // ForkSession godoc
 // @Summary      分叉会话
-// @Description  从指定的用户消息处分叉出一个新会话，继承分叉点之前的历史与沙箱状态
+// @Description  从指定的用户或助手消息处分叉出一个新会话。用户消息：复制其之前的历史并预填该问题；助手消息：复制含该回答在内的历史，从该轮沙箱状态继续。
 // @Tags         会话
 // @Accept       json
 // @Produce      json
 // @Param        session_id  path      string              true  "源会话 ID"
 // @Param        request     body      ForkSessionRequest  true  "分叉请求"
 // @Success      200         {object}  map[string]interface{}  "新会话"
-// @Failure      400         {object}  errors.AppError         "请求参数错误 / 分叉点不是 user 消息"
+// @Failure      400         {object}  errors.AppError         "请求参数错误 / 分叉点角色不支持"
 // @Failure      404         {object}  errors.AppError         "会话或消息不存在"
 // @Failure      409         {object}  errors.AppError         "源会话正在生成中"
 // @Security     Bearer
@@ -103,7 +103,7 @@ func (h *Handler) ForkSession(c *gin.Context) {
 			return
 		}
 		if stderrors.Is(err, service.ErrForkMessageNotUser) {
-			c.Error(errors.NewBadRequestError("fork point must be a user message"))
+			c.Error(errors.NewBadRequestError("fork point must be a user or assistant message"))
 			return
 		}
 		logger.Errorf(ctx, "fork session %s failed: %v", sessionID, err)

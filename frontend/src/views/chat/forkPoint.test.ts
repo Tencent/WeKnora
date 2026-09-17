@@ -41,12 +41,38 @@ test('取最近的一条前置 assistant 消息，而不是更早那条', () => 
   assert.deepEqual(resolveForkAffordance(messages, 'u3'), { canFork: true, willDegrade: true })
 })
 
-test('assistant 消息不能作为分叉点', () => {
+test('assistant 消息可以分叉，有 checkpoint 时不降级', () => {
   const messages = [
     { id: 'u1', role: 'user' },
-    { id: 'a1', role: 'assistant', sandbox_checkpoint: checkpoint },
+    { id: 'a1', role: 'assistant', sandbox_checkpoint: checkpoint, is_completed: true },
   ]
-  assert.deepEqual(resolveForkAffordance(messages, 'a1'), { canFork: false, willDegrade: false })
+  assert.deepEqual(resolveForkAffordance(messages, 'a1'), { canFork: true, willDegrade: false })
+})
+
+test('assistant 消息没有 checkpoint 时仍可分叉但会降级', () => {
+  const messages = [
+    { id: 'u1', role: 'user' },
+    { id: 'a1', role: 'assistant', is_completed: true },
+  ]
+  assert.deepEqual(resolveForkAffordance(messages, 'a1'), { canFork: true, willDegrade: true })
+})
+
+test('assistant 分叉用本条 checkpoint，不是更早那条', () => {
+  const messages = [
+    { id: 'u1', role: 'user' },
+    { id: 'a1', role: 'assistant', sandbox_checkpoint: checkpoint, is_completed: true },
+    { id: 'u2', role: 'user' },
+    { id: 'a2', role: 'assistant', is_completed: true },
+  ]
+  assert.deepEqual(resolveForkAffordance(messages, 'a2'), { canFork: true, willDegrade: true })
+})
+
+test('未知角色不能作为分叉点', () => {
+  const messages = [
+    { id: 'u1', role: 'user' },
+    { id: 's1', role: 'system' },
+  ]
+  assert.deepEqual(resolveForkAffordance(messages, 's1'), { canFork: false, willDegrade: false })
 })
 
 test('未知消息 ID 不能分叉', () => {

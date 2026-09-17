@@ -124,6 +124,9 @@
                                 :user-query="getUserQuery(index)" @scroll-bottom="scrollToBottom"
                                 :isFirstEnter="isFirstEnter" :embeddedMode="embeddedMode"
                                 :follow-up-loading="Boolean(session.suggestionLoading && !session.suggestionSet?.questions?.length)"
+                                :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
+                                :will-degrade="forkAffordanceOf(session.id).willDegrade"
+                                @fork="handleFork"
                                 @render-complete-change="(ready) => handleAnswerRenderComplete(session, ready)">
                             </botmsg>
                             <FollowUpSuggestions v-if="session.answerFullyRendered && !session.steerForked && !session.suggestionsDismissed"
@@ -377,7 +380,8 @@ async function handleFork(messageId) {
         // Carry the question across navigation in sessionStorage: the chat view
         // is reused across chat/:chatid, and history reload / composer reset
         // would clobber an in-memory prefill if we applied it too early.
-        stashForkLanding(data.session_id, String(source.content ?? ''))
+        const prefill = source.role === 'user' ? String(source.content ?? '') : ''
+        stashForkLanding(data.session_id, prefill)
 
         const now = new Date().toISOString()
         const sourceTitle = currentSession.value?.title || t('menu.newSession')

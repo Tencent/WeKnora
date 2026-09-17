@@ -1,8 +1,8 @@
 // Package service - session fork.
 //
-// Fork copies a session's history up to a chosen user message into a brand new
-// session, and arranges for that new session's first sandbox to boot from a
-// snapshot of the source sandbox rolled back to the fork point.
+// Fork copies a session's history through a chosen user or assistant message
+// into a brand new session, and arranges for that new session's first sandbox
+// to boot from a snapshot of the source sandbox rolled back to the fork point.
 //
 // The whole operation is cheap and synchronous: it writes the database and
 // takes one provider snapshot. No sandbox is created here — provisioning stays
@@ -66,9 +66,9 @@ var (
 	// belongs to a different session. HTTP 404.
 	ErrForkMessageNotFound = errors.New("session fork: fork point message not found")
 
-	// ErrForkMessageNotUser is returned when the fork point exists but is not
-	// a user message. HTTP 400.
-	ErrForkMessageNotUser = errors.New("session fork: fork point must be a user message")
+	// ErrForkMessageNotUser is returned when the fork point exists but is
+	// neither a user nor an assistant message. HTTP 400.
+	ErrForkMessageNotUser = errors.New("session fork: fork point must be a user or assistant message")
 )
 
 // forkSnapshotTimeout bounds the provider snapshot plus the persist that
@@ -194,8 +194,13 @@ func (s *SessionForkService) Fork(
 	if forkPoint == nil {
 		return nil, ErrForkMessageNotFound
 	}
-	if forkPoint.Role != "user" {
+	if forkPoint.Role != "user" && forkPoint.Role != "assistant" {
 		return nil, ErrForkMessageNotUser
+	}
+	// An unfinished assistant answer is still the live turn. Snapshotting
+	// would pause the sandbox under it; treat it like a busy source.
+	if forkPoint.Role == "assistant" && !forkPoint.IsCompleted {
+		return nil, ErrForkSourceBusy
 	}
 
 	// Refuse before doing anything observable: snapshotting pauses the source
@@ -217,6 +222,7 @@ func (s *SessionForkService) Fork(
 	if err != nil {
 		return nil, fmt.Errorf("session fork: load history: %w", err)
 	}
+	history = historyThroughForkPoint(history, forkPoint)
 
 	workCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), forkSnapshotTimeout)
 	defer cancel()
@@ -443,6 +449,18 @@ func hasAssistantMessage(history []*types.Message) bool {
 	return false
 }
 
+// historyThroughForkPoint is exclusive of a user fork point (the client
+// prefills that question) and inclusive of an assistant fork point (the
+// branch continues after that answer).
+func historyThroughForkPoint(listed []*types.Message, forkPoint *types.Message) []*types.Message {
+	if forkPoint == nil || forkPoint.Role != "assistant" {
+		return listed
+	}
+	out := make([]*types.Message, 0, len(listed)+1)
+	out = append(out, listed...)
+	return append(out, forkPoint)
+}
+
 // copyMessagesInto clones history into the new session.
 //
 // Every copy gets a fresh primary key but keeps its original CreatedAt so the
@@ -453,7 +471,8 @@ func hasAssistantMessage(history []*types.Message) bool {
 // Copies deliberately keep their Artifacts and Attachments. Artifact URLs are
 // persisted on the message row, so the forked session's 产物 tab can list and
 // download the same files. Attachment storage handles live in
-// temporary_documents and are resolved by ID at staging time.
+// temporary_documents (still scoped to the parent session) and are resolved
+// by ID at preview and staging time when the copied messages reference them.
 func copyMessagesInto(newSessionID string, history []*types.Message) []*types.Message {
 	copies := make([]*types.Message, 0, len(history))
 	requestIDs := make(map[string]string, len(history))

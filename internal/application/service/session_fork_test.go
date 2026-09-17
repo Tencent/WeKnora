@@ -651,12 +651,84 @@ func TestForkRefusesWhileSourceTurnIsActive(t *testing.T) {
 	require.Nil(t, sessions.created, "拒绝时不得留下半个会话")
 }
 
-func TestForkRejectsAssistantMessageAsForkPoint(t *testing.T) {
+func TestForkAtAssistantCopiesTurnAndUsesItsCheckpoint(t *testing.T) {
 	turn := checkpointedTurn("u-msg-1", "a-msg-1", "sbx-1", "sha1", 0)
+	turn[1].IsCompleted = true
+	later := &types.Message{
+		ID: "u-msg-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
+	svc, sessions, _ := newForkFixture(t, port, append(turn, later))
+
+	got, err := svc.Fork(context.Background(), 1, "u1", "src", "a-msg-1", "")
+
+	require.NoError(t, err)
+	require.False(t, got.Degraded)
+	require.Equal(t, 1, port.snapshotCalls)
+	require.Equal(t, "a-msg-1", sessions.created.ForkedFromMessageID)
+	require.Len(t, sessions.copiedMessages, 2, "assistant fork must include the clicked answer, not stop before it")
+	require.Equal(t, "user", sessions.copiedMessages[0].Role)
+	require.Equal(t, "assistant", sessions.copiedMessages[1].Role)
+	require.Equal(t, "sha1", sessions.copiedMessages[1].SandboxCheckpoint.CommitSHA)
+	require.Equal(t, "sbx-1", sessions.created.ForkBootstrap.SourceSandboxID)
+}
+
+func TestForkAtAssistantUsesThisTurnsCheckpointNotAnEarlierOne(t *testing.T) {
+	first := checkpointedTurn("u-msg-1", "a-msg-1", "sbx-1", "sha-old", 0)
+	first[1].IsCompleted = true
+	second := checkpointedTurn("u-msg-2", "a-msg-2", "sbx-1", "sha-new", 10*time.Second)
+	second[1].IsCompleted = true
+	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-2"}
+	svc, sessions, _ := newForkFixture(t, port, append(first, second...))
+
+	_, err := svc.Fork(context.Background(), 1, "u1", "src", "a-msg-2", "")
+
+	require.NoError(t, err)
+	require.Len(t, sessions.copiedMessages, 4)
+	require.Equal(t, "assistant", sessions.copiedMessages[3].Role)
+	require.Equal(t, "sha-new", sessions.copiedMessages[3].SandboxCheckpoint.CommitSHA)
+}
+
+func TestForkAtAssistantWithoutCheckpointDegrades(t *testing.T) {
+	turn := []*types.Message{
+		{ID: "u-msg-1", SessionID: "src", Role: "user", CreatedAt: forkBase},
+		{ID: "a-msg-1", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(time.Second), IsCompleted: true},
+	}
+	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
+	svc, sessions, _ := newForkFixture(t, port, turn)
+
+	got, err := svc.Fork(context.Background(), 1, "u1", "src", "a-msg-1", "")
+
+	require.NoError(t, err)
+	require.True(t, got.Degraded)
+	require.Equal(t, ForkDegradeNoCheckpoint, got.Reason)
+	require.Zero(t, port.snapshotCalls)
+	require.Len(t, sessions.copiedMessages, 2)
+	require.Equal(t, "assistant", sessions.copiedMessages[1].Role)
+	require.Nil(t, sessions.created.ForkBootstrap)
+}
+
+func TestForkRejectsIncompleteAssistantAsForkPoint(t *testing.T) {
+	turn := checkpointedTurn("u-msg-1", "a-msg-1", "sbx-1", "sha1", 0)
+	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
+	svc, sessions, _ := newForkFixture(t, port, turn)
+
+	_, err := svc.Fork(context.Background(), 1, "u1", "src", "a-msg-1", "")
+
+	require.ErrorIs(t, err, ErrForkSourceBusy)
+	require.Zero(t, port.snapshotCalls)
+	require.Nil(t, sessions.created)
+}
+
+func TestForkRejectsNonUserNonAssistantForkPoint(t *testing.T) {
+	turn := checkpointedTurn("u-msg-1", "a-msg-1", "sbx-1", "sha1", 0)
+	turn = append(turn, &types.Message{
+		ID: "sys-1", SessionID: "src", Role: "system", CreatedAt: forkBase.Add(2 * time.Second),
+	})
 	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
 	svc, _, _ := newForkFixture(t, port, turn)
 
-	_, err := svc.Fork(context.Background(), 1, "u1", "src", "a-msg-1", "")
+	_, err := svc.Fork(context.Background(), 1, "u1", "src", "sys-1", "")
 
 	require.ErrorIs(t, err, ErrForkMessageNotUser)
 	require.Zero(t, port.snapshotCalls)

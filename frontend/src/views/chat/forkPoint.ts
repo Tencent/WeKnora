@@ -4,6 +4,9 @@
  *
  * The backend re-derives all of this; this is purely so the UI can show the
  * right button state and tooltip without an extra round trip.
+ *
+ * User messages fork *at* the question (history excludes it, composer prefills
+ * it). Assistant messages fork *after* the answer (history includes it).
  */
 
 export interface ForkCandidateMessage {
@@ -30,13 +33,21 @@ export function resolveForkAffordance(
   messageId: string,
 ): ForkAffordance {
   const index = messages.findIndex((m) => m.id === messageId)
-  if (index < 0 || messages[index].role !== 'user') {
+  if (index < 0) {
     return REFUSED
   }
 
   // A turn still streaming means the source session holds an active sandbox
   // lease. The backend would answer 409, so do not offer the button.
   if (messages.some((m) => m.role === 'assistant' && m.is_completed === false)) {
+    return REFUSED
+  }
+
+  const target = messages[index]
+  if (target.role === 'assistant') {
+    return { canFork: true, willDegrade: !target.sandbox_checkpoint }
+  }
+  if (target.role !== 'user') {
     return REFUSED
   }
 

@@ -113,8 +113,10 @@ type Session struct {
 	// with it. A dangling value simply renders as an ordinary session.
 	ParentSessionID string `json:"parent_session_id,omitempty" gorm:"type:varchar(36);index"`
 
-	// ForkedFromMessageID is the user message, IN THE PARENT SESSION, that the
-	// fork branched at. Messages strictly before it were copied here.
+	// ForkedFromMessageID is the user or assistant message, IN THE PARENT
+	// SESSION, that the fork branched at. For a user point, messages strictly
+	// before it were copied here. For an assistant point, that answer is
+	// included so the branch continues after it.
 	ForkedFromMessageID string `json:"forked_from_message_id,omitempty" gorm:"type:varchar(36)"`
 
 	// ForkBootstrap holds the one-shot sandbox provisioning instructions for a
