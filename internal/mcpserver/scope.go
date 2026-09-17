@@ -56,25 +56,41 @@ func (s *Server) resolveKB(
 	return access.ResolveKB(ctx, request, kb, required, s.kbShareService, nil)
 }
 
-// grantContext resolves every knowledge base at the required permission and
-// returns a context carrying the matching grants, so downstream services that
-// consume access.RequireKBWrite see an explicit authorization instead of an
-// implicit "same tenant". Missing permission on any knowledge base fails the
-// whole call.
-func (s *Server) grantContext(
-	ctx context.Context, kbs []*types.KnowledgeBase, required types.OrgMemberRole,
+// scopedKBContext authorizes one knowledge base at the required permission
+// and returns the context every document-level call must run under: it
+// carries the resolved grant (so access.RequireKBWrite sees an explicit
+// authorization instead of an implicit "same tenant") and switches the
+// execution tenant to the knowledge base owner, which is what makes shared
+// knowledge bases work. Their documents are stored under the owner tenant,
+// so listing, reading and writing them through the caller's tenant would
+// either find nothing or create rows under the wrong tenant.
+//
+// TenantInfo is swapped to the owner as well so model and storage settings
+// resolve against the workspace that holds the data, mirroring the service
+// layer's withKBWriteTenantInfo.
+func (s *Server) scopedKBContext(
+	ctx context.Context, kb *types.KnowledgeBase, required types.OrgMemberRole,
 ) (context.Context, error) {
-	for _, kb := range kbs {
-		grant, err := s.resolveKB(ctx, kb, required)
-		if err != nil {
-			if errors.Is(err, access.ErrForbidden) || errors.Is(err, access.ErrUnauthorized) {
-				return ctx, fmt.Errorf("this endpoint is not allowed to write to knowledge base %q", kb.ID)
+	grant, err := s.resolveKB(ctx, kb, required)
+	if err != nil {
+		if errors.Is(err, access.ErrForbidden) || errors.Is(err, access.ErrUnauthorized) {
+			if required == types.OrgRoleViewer {
+				return ctx, fmt.Errorf("this endpoint is not allowed to read knowledge base %q", kb.ID)
 			}
-			return ctx, err
+			return ctx, fmt.Errorf("this endpoint is not allowed to write to knowledge base %q", kb.ID)
 		}
-		ctx = grant.WithGrant(ctx)
+		return ctx, err
 	}
-	return ctx, nil
+	scoped := grant.Context(ctx)
+	caller := types.CallerFromContext(ctx)
+	if kb.TenantID != caller.TenantID && s.tenantService != nil {
+		owner, err := s.tenantService.GetTenantByID(ctx, kb.TenantID)
+		if err != nil || owner == nil {
+			return ctx, fmt.Errorf("the workspace owning knowledge base %q is unavailable", kb.ID)
+		}
+		scoped = context.WithValue(scoped, types.TenantInfoContextKey, owner)
+	}
+	return scoped, nil
 }
 
 // selectKnowledgeBases narrows the allowed set to the ones a caller named,
@@ -180,7 +196,9 @@ func wikiScopesFor(kbs []*types.KnowledgeBase) []tools.WikiScope {
 }
 
 // knowledgeInScope loads a document and confirms it belongs to a knowledge
-// base the endpoint may touch.
+// base the endpoint may touch. The lookup is tenant-agnostic because a shared
+// knowledge base's documents live under the owner tenant; the document must
+// then match an allowed knowledge base and that knowledge base's tenant.
 func (s *Server) knowledgeInScope(
 	ctx context.Context, ep *types.MCPEndpoint, knowledgeID string,
 ) (*types.Knowledge, *types.KnowledgeBase, error) {
@@ -188,7 +206,7 @@ func (s *Server) knowledgeInScope(
 	if knowledgeID == "" {
 		return nil, nil, fmt.Errorf("knowledge_id is required")
 	}
-	k, err := s.knowledgeService.GetKnowledgeByID(ctx, knowledgeID)
+	k, err := s.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil || k == nil {
 		return nil, nil, fmt.Errorf("document %q was not found", knowledgeID)
 	}
@@ -197,7 +215,7 @@ func (s *Server) knowledgeInScope(
 		return nil, nil, err
 	}
 	kb := matchKnowledgeBase(allowed, k.KnowledgeBaseID)
-	if kb == nil {
+	if kb == nil || kb.TenantID != k.TenantID {
 		return nil, nil, fmt.Errorf("document %q is outside this endpoint's scope", knowledgeID)
 	}
 	return k, kb, nil

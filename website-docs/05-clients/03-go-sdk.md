@@ -291,6 +291,14 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `GetMCPServiceTools` / `GetMCPServiceResources` | 列出 MCP 工具/资源 |
 | `ResolveToolApproval` | 处理工具调用审批 |
 
+### MCP 端点（WeKnora 作为 MCP Server）— `client/mcp_endpoint.go`
+
+| 方法 | 说明 |
+|---|---|
+| `ListMCPEndpoints` / `GetMCPEndpoint` / `CreateMCPEndpoint` / `UpdateMCPEndpoint` / `DeleteMCPEndpoint` | 工作空间对外发布的 MCP 端点 CRUD；创建响应中的 `Token` 只返回一次 |
+| `RotateMCPEndpointToken` | 轮换端点令牌，旧令牌立即失效 |
+| `GetMCPEndpointToolCatalog` | 端点可勾选的工具目录、分组与默认勾选 |
+
 ### 初始化与模型检测 — `client/initialization.go`
 
 | 方法 | 说明 |

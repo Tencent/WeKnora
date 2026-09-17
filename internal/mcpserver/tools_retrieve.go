@@ -209,6 +209,11 @@ func (s *Server) handleListDocuments(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	kb := kbs[0]
+	// Documents live under the knowledge base owner; run the listing there.
+	ctx, err = s.scopedKBContext(ctx, kb, types.OrgRoleViewer)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 	page := req.GetInt("page", 1)
 	if page < 1 {
 		page = 1
@@ -253,6 +258,10 @@ func (s *Server) handleReadDocument(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError("knowledge_id is required"), nil
 	}
 	k, kb, err := s.knowledgeInScope(ctx, ep, knowledgeID)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	ctx, err = s.scopedKBContext(ctx, kb, types.OrgRoleViewer)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

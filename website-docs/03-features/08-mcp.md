@@ -35,7 +35,7 @@ OAuth 服务按调用者分别授权。工具需要审批时，在对话中检�
 | 组 | 工具 | 说明 |
 |---|---|---|
 | 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；语义搜索与关键词正则搜索分开 |
-| 问答 | `ask` | 服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可 |
+| 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
 | Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
 
@@ -395,6 +395,7 @@ flowchart LR
 - 全局只有一个 `MCPServer` 实例注册完整工具目录；`WithToolFilter` 按请求上下文里的端点过滤 `tools/list`，`WithToolHandlerMiddleware` 在 `tools/call` 再校验一次白名单并做每端点滑动窗口限流（Redis 优先，本地回退）。
 - 传输使用 `WithStateLess(true)`，任意副本都能处理任意请求，客户端无需保持 `Mcp-Session-Id`。
 - `ask` 工具的会话归属为 `mcp_endpoint:<tenant>:<endpoint>`，续聊时校验 `session_id` 属于同一端点；单次回答上限 4 分钟。
+- 文档级工具（列表、阅读、写入）先用 `access.ResolveKB` 解析权限，再在知识库所属空间下执行，因此组织分享过来的知识库也能读写，且新建文档落在所有者空间。
 
 #### 客户端配置示例
 

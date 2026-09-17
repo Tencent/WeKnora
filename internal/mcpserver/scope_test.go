@@ -106,7 +106,45 @@ func TestSelectKnowledgeBasesMatchesIDOrName(t *testing.T) {
 	}
 }
 
-func TestGrantContextEnablesWritesOnlyForOwnedKnowledgeBases(t *testing.T) {
+type stubKBShareService struct {
+	interfaces.KBShareService
+	shared map[string]types.OrgMemberRole // kb id -> permission granted to any caller
+}
+
+func (s *stubKBShareService) CheckTenantKBPermission(
+	_ context.Context, kbID string, _ uint64, _ types.TenantRole,
+) (types.OrgMemberRole, bool, error) {
+	perm, ok := s.shared[kbID]
+	return perm, ok, nil
+}
+
+type stubTenantService struct {
+	interfaces.TenantService
+	tenants map[uint64]*types.Tenant
+}
+
+func (s *stubTenantService) GetTenantByID(_ context.Context, id uint64) (*types.Tenant, error) {
+	t, ok := s.tenants[id]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return t, nil
+}
+
+type stubKnowledgeService struct {
+	interfaces.KnowledgeService
+	docs map[string]*types.Knowledge
+}
+
+func (s *stubKnowledgeService) GetKnowledgeByIDOnly(_ context.Context, id string) (*types.Knowledge, error) {
+	k, ok := s.docs[id]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return k, nil
+}
+
+func TestScopedKBContextEnablesWritesOnlyForAuthorizedKnowledgeBases(t *testing.T) {
 	own := &types.KnowledgeBase{ID: "kb-own", TenantID: 1}
 	foreign := &types.KnowledgeBase{ID: "kb-foreign", TenantID: 2}
 	srv := newScopeTestServer(own, foreign)
@@ -114,29 +152,90 @@ func TestGrantContextEnablesWritesOnlyForOwnedKnowledgeBases(t *testing.T) {
 	ctx := mcpCallContext(1, ep)
 
 	if err := access.RequireKBWrite(ctx, own); err == nil {
-		t.Fatal("no grant must exist before grantContext runs")
+		t.Fatal("no grant must exist before scopedKBContext runs")
 	}
-	granted, err := srv.grantContext(ctx, []*types.KnowledgeBase{own}, types.OrgRoleEditor)
+	scoped, err := srv.scopedKBContext(ctx, own, types.OrgRoleEditor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := access.RequireKBWrite(granted, own); err != nil {
+	if err := access.RequireKBWrite(scoped, own); err != nil {
 		t.Fatalf("owned knowledge base must be writable after grant: %v", err)
 	}
-	if _, err := srv.grantContext(ctx, []*types.KnowledgeBase{foreign}, types.OrgRoleEditor); err == nil {
+	if got := types.MustTenantIDFromContext(scoped); got != 1 {
+		t.Fatalf("execution tenant = %d, want owner 1", got)
+	}
+	if _, err := srv.scopedKBContext(ctx, foreign, types.OrgRoleEditor); err == nil {
 		t.Fatal("foreign knowledge base must not receive a write grant")
 	}
 
 	readOnly := &types.MCPEndpoint{
 		ID: "ep2", TenantID: 1, Tools: types.StringArray{types.MCPEndpointToolSearchKnowledge},
 	}
-	roCtx := mcpCallContext(1, readOnly)
-	roGranted, err := srv.grantContext(roCtx, []*types.KnowledgeBase{own}, types.OrgRoleEditor)
+	roScoped, err := srv.scopedKBContext(mcpCallContext(1, readOnly), own, types.OrgRoleEditor)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := access.RequireKBWrite(roGranted, own); err == nil {
+	if err := access.RequireKBWrite(roScoped, own); err == nil {
 		t.Fatal("an endpoint without ingest tools must lack the ingest capability and be refused")
+	}
+}
+
+func TestSharedKnowledgeBaseRunsUnderOwnerTenant(t *testing.T) {
+	shared := &types.KnowledgeBase{ID: "kb-shared", TenantID: 2, Name: "Shared"}
+	srv := newScopeTestServer(shared)
+	srv.kbShareService = &stubKBShareService{shared: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleEditor}}
+	srv.tenantService = &stubTenantService{tenants: map[uint64]*types.Tenant{2: {ID: 2, Name: "Owner"}}}
+	srv.knowledgeService = &stubKnowledgeService{docs: map[string]*types.Knowledge{
+		"doc-shared": {ID: "doc-shared", TenantID: 2, KnowledgeBaseID: "kb-shared"},
+		"doc-spoof":  {ID: "doc-spoof", TenantID: 1, KnowledgeBaseID: "kb-shared"},
+	}}
+	ep := &types.MCPEndpoint{
+		ID: "ep", TenantID: 1, KnowledgeBaseIDs: types.StringArray{"kb-shared"},
+		Tools: types.StringArray{types.MCPEndpointToolUpdateDocument},
+	}
+	ctx := context.WithValue(mcpCallContext(1, ep), types.TenantInfoContextKey, &types.Tenant{ID: 1, Name: "Caller"})
+
+	// The shared knowledge base is visible through the organization share.
+	kbs, err := srv.allowedKnowledgeBases(ctx, ep)
+	if err != nil || len(kbs) != 1 {
+		t.Fatalf("shared knowledge base must be in scope: %v %v", knowledgeBaseIDs(kbs), err)
+	}
+
+	// Its document resolves even though it lives under tenant 2 ...
+	k, kb, err := srv.knowledgeInScope(ctx, ep, "doc-shared")
+	if err != nil || k.ID != "doc-shared" || kb.ID != "kb-shared" {
+		t.Fatalf("shared document must be in scope: %v %v %v", k, kb, err)
+	}
+	// ... but a document whose tenant does not match its knowledge base is not.
+	if _, _, err := srv.knowledgeInScope(ctx, ep, "doc-spoof"); err == nil {
+		t.Fatal("document with mismatched tenant must be rejected")
+	}
+
+	// Writes run under the owner tenant with an editor grant and owner TenantInfo.
+	scoped, err := srv.scopedKBContext(ctx, kb, types.OrgRoleEditor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := types.MustTenantIDFromContext(scoped); got != 2 {
+		t.Fatalf("execution tenant = %d, want owner 2", got)
+	}
+	if info, ok := types.TenantInfoFromContext(scoped); !ok || info.ID != 2 {
+		t.Fatalf("tenant info must be swapped to the owner, got %+v", info)
+	}
+	if err := access.RequireKBWrite(scoped, kb); err != nil {
+		t.Fatalf("editor share must allow writes: %v", err)
+	}
+	if caller := types.CallerFromContext(scoped); caller.TenantID != 1 {
+		t.Fatalf("caller must stay the endpoint tenant, got %+v", caller)
+	}
+
+	// A viewer share must not mint a write grant.
+	srv.kbShareService = &stubKBShareService{shared: map[string]types.OrgMemberRole{"kb-shared": types.OrgRoleViewer}}
+	if _, err := srv.scopedKBContext(ctx, kb, types.OrgRoleEditor); err == nil {
+		t.Fatal("viewer share must not allow writes")
+	}
+	if _, err := srv.scopedKBContext(ctx, kb, types.OrgRoleViewer); err != nil {
+		t.Fatalf("viewer share must allow reads: %v", err)
 	}
 }
 
