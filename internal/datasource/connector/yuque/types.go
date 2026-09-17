@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -223,37 +222,6 @@ func parseContentUpdatedAt(ts string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-// sanitizeFileName removes characters that are invalid in filenames and
-// truncates to a safe length at a UTF-8 rune boundary. Raw byte truncation
-// would split a multi-byte codepoint (Chinese characters are 3 bytes in UTF-8)
-// and produce an invalid UTF-8 string, which downstream filename validation
-// (utf8.ValidString) rejects with "文件名包含非法字符".
-func sanitizeFileName(name string) string {
-	if name == "" {
-		return "untitled"
-	}
-	replacer := strings.NewReplacer(
-		"/", "_", "\\", "_", ":", "_", "*", "_",
-		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
-	)
-	result := replacer.Replace(name)
-	const maxBytes = 200
-	if len(result) > maxBytes {
-		result = result[:maxBytes]
-		// Peel any trailing bytes that no longer form a complete rune.
-		// DecodeLastRuneInString returns (RuneError, 1) for a partial UTF-8
-		// sequence — at most 3 bytes need peeling since a rune is ≤ 4 bytes.
-		for len(result) > 0 {
-			r, size := utf8.DecodeLastRuneInString(result)
-			if r != utf8.RuneError || size != 1 {
-				break
-			}
-			result = result[:len(result)-1]
-		}
-	}
-	return result
 }
 
 // redactToken returns a masked form of the token for logging (never log the full token).

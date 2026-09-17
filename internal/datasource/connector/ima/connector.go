@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -437,7 +436,7 @@ func fetchNote(
 		return types.FetchedItem{}, fetchSkipped
 	}
 
-	fileName := sanitizeFileName(f.Title)
+	fileName := datasource.SanitizeFileName(f.Title)
 	if !strings.HasSuffix(strings.ToLower(fileName), ".md") {
 		fileName += ".md"
 	}
@@ -540,7 +539,7 @@ func fetchOneMedia(
 		ct = mimeForExtension(ext)
 	}
 
-	fileName := sanitizeFileName(f.Title)
+	fileName := datasource.SanitizeFileName(f.Title)
 	if !strings.HasSuffix(strings.ToLower(fileName), "."+ext) {
 		fileName = fileName + "." + ext
 	}
@@ -584,29 +583,4 @@ func baseMetadata(
 		m["notebook_id"] = info.NotebookExtInfo.NotebookID
 	}
 	return m
-}
-
-// sanitizeFileName removes filesystem-hostile characters and truncates to a
-// safe UTF-8 boundary.
-func sanitizeFileName(name string) string {
-	if name == "" {
-		return "untitled"
-	}
-	replacer := strings.NewReplacer(
-		"/", "_", "\\", "_", ":", "_", "*", "_",
-		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
-	)
-	result := replacer.Replace(name)
-	const maxBytes = 200
-	if len(result) > maxBytes {
-		result = result[:maxBytes]
-		for len(result) > 0 {
-			r, size := utf8.DecodeLastRuneInString(result)
-			if r != utf8.RuneError || size != 1 {
-				break
-			}
-			result = result[:len(result)-1]
-		}
-	}
-	return result
 }

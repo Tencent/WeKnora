@@ -509,3 +509,35 @@ func TestConnectorIsRegisteredInMetadata(t *testing.T) {
 		t.Errorf("metadata type = %q, want %q", meta.Type, types.ConnectorTypeIMA)
 	}
 }
+
+func TestFetchAll_FileNamePolicy(t *testing.T) {
+	for _, media := range []struct {
+		name string
+		kind int32
+	}{{"media", mediaTypeMarkdown}, {"note", mediaTypeNote}} {
+		for _, tt := range []struct{ name, title, want string }{
+			{"punctuation", "A/B:C", "A_B_C.md"},
+			{"existing extension and whitespace", " \tA/B.MD", " \tA_B.MD"},
+			{"long title", strings.Repeat("测", 100) + ".MD", strings.Repeat("测", 66) + ".md"},
+		} {
+			t.Run(media.name+"/"+tt.name, func(t *testing.T) {
+				f := newFakeIMA(t)
+				f.setKB("kb1", []fakeFile{{
+					MediaID: "file", Title: tt.title, MediaType: media.kind,
+					Body: "# content", NotebookID: "123", NoteBody: "# content",
+				}})
+				items, err := NewConnector().FetchAll(context.Background(), f.config("kb1"), []string{"kb1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(items) != 1 {
+					t.Fatalf("got %d items, want 1", len(items))
+				}
+				if items[0].Title != tt.title || items[0].FileName != tt.want {
+					t.Fatalf("title = %q, filename = %q; want %q, %q",
+						items[0].Title, items[0].FileName, tt.title, tt.want)
+				}
+			})
+		}
+	}
+}
