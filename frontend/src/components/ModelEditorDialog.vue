@@ -260,23 +260,15 @@
               above and the 自定义请求头 controls below — no more
               "card inside a card" feel.
               Create mode: the resource doesn't exist yet, so we render a
-              plain password input with a leading lock icon and a trailing
-              show/hide eye toggle.
+              plain password input with a leading lock icon; TDesign's password
+              input provides the show/hide toggle.
             -->
             <CredentialResource v-if="isEdit && props.modelData?.id" :api="credentialApi" :fields="credentialFields"
               :meta="credentialMeta" @changed="invalidateConnectionTest()" />
-            <t-input v-else v-model="formData.apiKey" :type="showApiKey ? 'text' : 'password'"
+            <t-input v-else v-model="formData.apiKey" type="password"
               :placeholder="isSignedRerank ? signedRerankAccessKeyPlaceholder : apiKeyPlaceholder"
               class="api-key-input" autocomplete="off" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
-              <template #suffix-icon>
-                <t-icon
-                  :name="showApiKey ? 'browse-off' : 'browse'"
-                  class="api-key-toggle"
-                  :aria-label="showApiKey ? 'Hide' : 'Show'"
-                  @click.stop="showApiKey = !showApiKey"
-                />
-              </template>
             </t-input>
             <p v-if="isSignedRerank" class="form-desc">{{ signedRerankCredentialHint }}</p>
           </div>
@@ -862,7 +854,6 @@ watch(() => props.visible && saving.value, (locked) => {
 // affordance for everyday use. Reset every time the drawer closes (see
 // reset block in the visible watcher) so we never leak the previous value
 // across editor sessions.
-const showApiKey = ref(false)
 const modelChecked = ref(false)
 const modelAvailable = ref(false)
 const checking = ref(false)
@@ -1229,7 +1220,6 @@ const resetForm = () => {
   dimensionChecked.value = false
   dimensionSuccess.value = false
   dimensionMessage.value = ''
-  showApiKey.value = false
 }
 
 // 处理厂商选择变化 (自动填充默认 URL)
@@ -1968,15 +1958,6 @@ const handleCancel = () => {
     color: var(--td-text-color-placeholder);
   }
 
-  .api-key-toggle {
-    cursor: pointer;
-    transition: color 0.15s ease;
-    font-size: 16px;
-
-    &:hover {
-      color: var(--td-text-color-primary);
-    }
-  }
 }
 
 // API 测试区域 — 弱卡片化：用浅底 + dashed 边把"操作 + 反馈"框成一块，
