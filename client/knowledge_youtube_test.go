@@ -1,0 +1,61 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestCreateKnowledgeFromYouTubePlaylist(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/v1/knowledge-bases/kb-1/knowledge/youtube-playlist" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["url"] != "https://www.youtube.com/playlist?list=PL1" {
+			t.Fatalf("url = %v", body["url"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"data": map[string]interface{}{
+				"playlist_id":    "PL1",
+				"playlist_title": "Course",
+				"total_videos":   2,
+				"truncated":      false,
+				"created":        []map[string]interface{}{{"id": "k-1", "title": "Lesson 1"}},
+				"duplicates": []map[string]interface{}{{
+					"video_id": "bbbbbbbbbbb", "title": "Lesson 2", "knowledge_id": "k-0",
+				}},
+				"failed": []interface{}{},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, WithAPIKey("sk-test"))
+	result, err := c.CreateKnowledgeFromYouTubePlaylist(context.Background(), "kb-1",
+		CreateKnowledgeFromYouTubePlaylistRequest{URL: "https://www.youtube.com/playlist?list=PL1"})
+	if err != nil {
+		t.Fatalf("CreateKnowledgeFromYouTubePlaylist() error = %v", err)
+	}
+	if result.PlaylistTitle != "Course" || result.TotalVideos != 2 {
+		t.Fatalf("unexpected result %+v", result)
+	}
+	if len(result.Created) != 1 || result.Created[0].ID != "k-1" {
+		t.Fatalf("Created = %+v", result.Created)
+	}
+	if len(result.Duplicates) != 1 || result.Duplicates[0].KnowledgeID != "k-0" {
+		t.Fatalf("Duplicates = %+v", result.Duplicates)
+	}
+}

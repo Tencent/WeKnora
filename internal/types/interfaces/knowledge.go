@@ -27,6 +27,7 @@ type KnowledgeService interface {
 	// CreateKnowledgeFromURL creates knowledge from a URL.
 	// When fileName or fileType is provided (or the URL path has a known file extension),
 	// the URL is treated as a direct file download instead of a web page crawl.
+	// YouTube video links are imported from the video's transcript instead.
 	// channel identifies the ingestion channel; empty defaults to "web".
 	CreateKnowledgeFromURL(
 		ctx context.Context,
@@ -40,6 +41,17 @@ type KnowledgeService interface {
 		channel string,
 		processOverrides *types.KnowledgeProcessOverrides,
 	) (*types.Knowledge, error)
+	// CreateKnowledgeFromYouTubePlaylist queues one knowledge entry per video in a
+	// YouTube playlist; each video is then imported from its transcript.
+	CreateKnowledgeFromYouTubePlaylist(
+		ctx context.Context,
+		kbID string,
+		url string,
+		enableMultimodel *bool,
+		tagIDs []string,
+		channel string,
+		processOverrides *types.KnowledgeProcessOverrides,
+	) (*types.YouTubePlaylistImportResult, error)
 	// CreateKnowledgeFromPassage creates knowledge from text passages.
 	// channel identifies the ingestion channel; empty defaults to "web".
 	CreateKnowledgeFromPassage(ctx context.Context, kbID string, passage []string, channel string) (*types.Knowledge, error)

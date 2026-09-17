@@ -7,7 +7,8 @@
 | 方法   | 路径                                       | 描述                                       |
 | ------ | ------------------------------------------ | ------------------------------------------ |
 | POST   | `/knowledge-bases/:id/knowledge/file`      | 上传文件创建知识（multipart）             |
-| POST   | `/knowledge-bases/:id/knowledge/url`       | 从 URL 创建知识（网页抓取或文件下载）       |
+| POST   | `/knowledge-bases/:id/knowledge/url`       | 从 URL 创建知识（网页抓取、文件下载或 YouTube 视频） |
+| POST   | `/knowledge-bases/:id/knowledge/youtube-playlist` | 从 YouTube 播放列表批量创建知识        |
 | POST   | `/knowledge-bases/:id/knowledge/manual`    | 创建手工 Markdown 知识                     |
 | GET    | `/knowledge-bases/:id/knowledge`           | 列出知识库下的知识（支持分页/筛选）         |
 | GET    | `/knowledge-bases/:id/knowledge/folders`   | 获取知识库文件夹目录树                       |
@@ -117,8 +118,18 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
 
 可创建**网页知识**或**远程文件知识**。后端根据下列规则自动判定：
 
+- YouTube 视频链接（`youtube.com/watch?v=`、`youtu.be/`、`/shorts/`、`/live/`、`/embed/`）按"YouTube 模式"处理，见下文；
 - 当 `file_name` / `file_type` 任一被显式提供，或 URL 路径含已知文件扩展名时，按"文件下载模式"处理（拉取远端文件保存）；
 - 否则按"网页抓取模式"处理。
+
+**YouTube 模式**：链接会被规范化为 `https://www.youtube.com/watch?v=<id>`（同一视频不同写法按重复 URL 处理），异步任务中：
+
+1. 通过 `yt-dlp` 获取视频字幕，优先顺序为：原语言人工字幕 → 原语言自动字幕 → 英文人工字幕 → 其他人工字幕 → 英文自动字幕；
+2. 没有可用字幕时，若知识库配置了 ASR 模型，则下载音频、按 `YOUTUBE_ASR_SEGMENT_SECONDS` 切段后逐段转写；未配置 ASR 时解析失败并提示配置 ASR 模型；
+3. 若知识库配置了摘要模型，按转写内容生成结构化文档（按界面语言输出，保留时间戳引用）；
+4. 入库的 Markdown 包含视频元信息、简介、生成的文档（若有）以及带 `[m:ss]` 时间戳的完整转写。
+
+`watch?v=...&list=...` 形式的链接只导入当前视频；导入整个播放列表请使用 `youtube-playlist` 接口，向本接口提交播放列表链接会返回 400。服务器需安装 `yt-dlp` 与 `ffmpeg`（Docker app 镜像已内置），相关环境变量见 `.env.example` 的 `J4. YouTube 导入` 小节。
 
 URL 会经过 SSRF 安全校验，禁止指向内网/回环地址。
 
@@ -193,6 +204,76 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowle
     "success": true
 }
 ```
+
+**请求（YouTube 视频）**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/url' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "url": "https://youtu.be/jNQXAC9IVRw"
+}'
+```
+
+## POST `/knowledge-bases/:id/knowledge/youtube-playlist` - 从 YouTube 播放列表创建知识
+
+读取播放列表（最多 `YOUTUBE_PLAYLIST_MAX_VIDEOS` 个视频，默认 200，私有/已删除视频会被跳过），为每个视频创建一条 URL 知识，随后按上文"YouTube 模式"异步处理。已在知识库中的视频计入 `duplicates`，不会导致整体失败。权限与 `knowledge/url` 相同。
+
+**请求体**:
+
+| 字段                | 类型     | 必填 | 说明                                                  |
+| ------------------- | -------- | ---- | ----------------------------------------------------- |
+| `url`               | string   | 是   | 播放列表链接，如 `https://www.youtube.com/playlist?list=...` |
+| `enable_multimodel` | boolean  | 否   | 是否启用多模态解析                                    |
+| `tag_ids`           | string[] | 否   | 应用到每个视频的标签 ID                               |
+| `channel`           | string   | 否   | 来源渠道标识                                          |
+| `process_config`    | object   | 否   | 应用到每个视频的解析覆盖配置                          |
+
+**请求**:
+
+```curl
+curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001/knowledge/youtube-playlist' \
+--header 'X-API-Key: sk-xxxxx' \
+--header 'Content-Type: application/json' \
+--data '{
+    "url": "https://www.youtube.com/playlist?list=PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH"
+}'
+```
+
+**响应**（HTTP 201）:
+
+```json
+{
+    "success": true,
+    "data": {
+        "playlist_id": "PLRqwX-V7Uu6ZiZxtDDRCi6uhfTH4FilpH",
+        "playlist_title": "Coding Challenges",
+        "total_videos": 2,
+        "truncated": false,
+        "created": [
+            {
+                "id": "9c8af585-ae15-44ce-8f73-45ad18394651",
+                "type": "url",
+                "title": "Coding Challenge 1: Starfield Simulation",
+                "source": "https://www.youtube.com/watch?v=17WoOqgXsRM",
+                "parse_status": "pending"
+            }
+        ],
+        "duplicates": [
+            {
+                "video_id": "exampleId02",
+                "title": "Lesson 2",
+                "url": "https://www.youtube.com/watch?v=exampleId02",
+                "knowledge_id": "4d0c9a1e-6f0b-4c43-9a55-0e5f7f3d2b11"
+            }
+        ],
+        "failed": []
+    }
+}
+```
+
+`truncated` 为 `true` 表示播放列表超过上限，仅导入了前 `total_videos` 个视频。播放列表无法读取或没有可导入视频时返回 400；服务器未安装 `yt-dlp` 时返回 500。
 
 ## POST `/knowledge-bases/:id/knowledge/manual` - 创建手工 Markdown 知识
 

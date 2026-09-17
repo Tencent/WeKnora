@@ -308,8 +308,14 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	logger.Info(ctx, "Start creating knowledge from URL")
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
+	// YouTube video links are fetched as transcripts, never as file downloads.
+	rawURL, isYouTube, err := normalizeYouTubeImportURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
 	// Route to file_url logic when the URL points to a downloadable file
-	if isFileURL(rawURL, fileName, fileType) {
+	if !isYouTube && isFileURL(rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURL(
 			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
 		)

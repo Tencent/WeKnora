@@ -244,9 +244,30 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/file \
 
 响应：201 `{"success":true,"data":{Knowledge}}`；重复 URL 返回 409。
 
+YouTube 视频链接会抓取字幕（无字幕且配置了 ASR 模型时下载音频转写），再用摘要模型整理为文档，与带时间戳的完整转写一起入库；播放列表链接返回 400，请改用下面的 `youtube-playlist` 接口。
+
 ```bash
 curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/url -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"url":"https://example.com/doc"}'
+```
+
+### POST /api/v1/knowledge-bases/:id/knowledge/youtube-playlist
+
+用途：为 YouTube 播放列表中的每个视频创建一条 URL 知识（按上面的 YouTube 方式异步处理）。权限/API key 同上。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `url` | string | 是（`binding:"required"`） | 播放列表链接 `https://www.youtube.com/playlist?list=...` |
+| `enable_multimodel` | *bool | 否 | 多模态开关 |
+| `tag_ids` | []string | 否 | 应用到每个视频的标签 |
+| `channel` | string | 否 | 渠道 |
+| `process_config` | object | 否 | 应用到每个视频的解析覆盖 |
+
+响应：201 `{"success":true,"data":{"playlist_id","playlist_title","total_videos","truncated","created":[Knowledge],"duplicates":[...],"failed":[...]}}`。已存在的视频计入 `duplicates`；视频数上限由 `YOUTUBE_PLAYLIST_MAX_VIDEOS`（默认 200）控制。
+
+```bash
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/youtube-playlist -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"url":"https://www.youtube.com/playlist?list=PL..."}'
 ```
 
 ### POST /api/v1/knowledge-bases/:id/knowledge/manual

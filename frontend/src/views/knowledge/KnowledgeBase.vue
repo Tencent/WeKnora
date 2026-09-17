@@ -29,6 +29,7 @@ import {
   updateKnowledgeTagBatch,
   uploadKnowledgeFile,
   createKnowledgeFromURL,
+  createKnowledgeFromYouTubePlaylist,
   reparseKnowledge,
   cancelKnowledgeParse,
   batchDeleteKnowledge,
@@ -46,6 +47,7 @@ import {
 import { isBatchDownloadableKnowledge } from './knowledgeDownloadFileName';
 import { waitForKnowledgeDeletion } from '@/utils/knowledgeDeletion';
 import { knowledgeSpansPayloadHasTrace } from '@/utils/knowledgeTrace';
+import { isYouTubePlaylistUrl } from '@/utils/youtube';
 import FAQEntryManager from './components/FAQEntryManager.vue';
 import DocumentListView from './components/DocumentListView.vue';
 import DocumentCardView from './components/DocumentCardView.vue';
@@ -1774,6 +1776,49 @@ const executeUploadBatch = async (
   return { successCount, failCount };
 };
 
+const executeYouTubePlaylistImport = async (
+  targetKbId: string,
+  url: string,
+  processConfig?: KnowledgeProcessOverrides,
+  tagIds?: string[],
+) => {
+  MessagePlugin.info(t('knowledgeBase.youtubePlaylistImporting'));
+  try {
+    const responseData: any = await createKnowledgeFromYouTubePlaylist(targetKbId, {
+      url,
+      tag_ids: tagIds,
+      process_config: processConfig,
+    });
+    const result = responseData?.data;
+    if (!responseData?.success || !result) {
+      throw responseData;
+    }
+    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
+      detail: { kbId: targetKbId },
+    }));
+    const createdCount = result.created?.length || 0;
+    const duplicateCount = result.duplicates?.length || 0;
+    const failedCount = result.failed?.length || 0;
+    if (createdCount > 0) {
+      MessagePlugin.success(t('knowledgeBase.youtubePlaylistImportSuccess', {
+        count: createdCount,
+        title: result.playlist_title || 'YouTube',
+      }));
+    }
+    if (duplicateCount > 0) {
+      MessagePlugin.info(t('knowledgeBase.youtubePlaylistImportDuplicates', { count: duplicateCount }));
+    }
+    if (failedCount > 0) {
+      MessagePlugin.warning(t('knowledgeBase.youtubePlaylistImportFailures', { count: failedCount }));
+    }
+    if (result.truncated) {
+      MessagePlugin.warning(t('knowledgeBase.youtubePlaylistTruncated', { count: result.total_videos }));
+    }
+  } catch (error: any) {
+    MessagePlugin.error(error?.error?.message || error?.message || t('knowledgeBase.youtubePlaylistImportFailed'));
+  }
+};
+
 const executeUrlImport = async (
   url: string,
   processConfig?: KnowledgeProcessOverrides,
@@ -1786,6 +1831,10 @@ const executeUrlImport = async (
   }
 
   const tagIdsToUpload = tagIds && tagIds.length > 0 ? [...tagIds] : undefined;
+  if (isYouTubePlaylistUrl(url)) {
+    await executeYouTubePlaylistImport(targetKbId, url, processConfig, tagIdsToUpload);
+    return;
+  }
   try {
     const responseData: any = await createKnowledgeFromURL(targetKbId, {
       url,
