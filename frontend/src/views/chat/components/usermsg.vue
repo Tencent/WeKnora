@@ -43,17 +43,22 @@
         <div class="user_msg">
             {{ content }}
         </div>
-        <div v-if="canFork" class="user_msg_actions">
-            <t-tooltip :content="forkTooltip">
-                <t-button
-                    variant="text"
-                    size="small"
-                    class="user_msg_action"
-                    @click="emit('fork', messageId)"
-                >
-                    <t-icon name="git-branch" />
-                </t-button>
-            </t-tooltip>
+        <div v-if="timestamp || content || canFork" class="user_msg_meta">
+            <time v-if="timestamp" class="user_msg_time" :datetime="timestamp.datetime" :title="fullTimestamp">
+                {{ timestamp.time }}
+            </time>
+            <div v-if="content || canFork" class="user_msg_actions">
+                <t-tooltip v-if="content" :content="t('agent.copy')">
+                    <button type="button" class="user_msg_action" :aria-label="t('agent.copy')" @click="handleCopy">
+                        <t-icon name="copy" />
+                    </button>
+                </t-tooltip>
+                <t-tooltip v-if="canFork" :content="forkTooltip">
+                    <button type="button" class="user_msg_action" :aria-label="forkTooltip" @click="emit('fork', messageId)">
+                        <t-icon name="git-branch" />
+                    </button>
+                </t-tooltip>
+            </div>
         </div>
         <div v-if="steerFailed" class="steer-failure" role="status">
             <span>{{ t('input.messages.steerFailed') }}</span>
@@ -71,6 +76,8 @@ import { useI18n } from 'vue-i18n';
 import { useChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { isPreviewableAttachment, resolveAttachmentFileType } from '@/utils/attachmentPreview';
 import { SKILL_ICON } from '@/types/mention';
+import { copyWithToast } from '@/utils/clipboard';
+import { formatMessageTimestamp, getConversationTimestampModel } from '@/utils/messageTimestamp';
 const emit = defineEmits(['retry-steer', 'remove-steer', 'fork']);
 
 const { t } = useI18n();
@@ -125,6 +132,10 @@ const props = defineProps({
         type: String,
         default: ''
     },
+    createdAt: {
+        type: String,
+        default: ''
+    },
     canFork: {
         type: Boolean,
         default: false
@@ -133,6 +144,9 @@ const props = defineProps({
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode);
 const forkTooltip = '从这里分叉出新会话';
+const timestamp = computed(() => getConversationTimestampModel(props.createdAt));
+const fullTimestamp = computed(() => formatMessageTimestamp(props.createdAt));
+const handleCopy = () => copyWithToast(props.content, 'common.copySuccess', 'common.copyFailed');
 
 const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
@@ -395,9 +409,72 @@ html[theme-mode="dark"] {
 .steer-failure button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
 .steer-failure button:hover { background: var(--td-bg-color-secondarycontainer); }
 
+.user_msg_meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-height: 28px;
+    padding-right: 4px;
+    color: var(--td-text-color-placeholder);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 140ms ease;
+}
+
+.user_msg_time {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    line-height: 20px;
+}
+
 .user_msg_actions {
     display: flex;
-    justify-content: flex-end;
-    padding-top: 2px;
+    align-items: center;
+    gap: 2px;
+}
+
+.user_msg_container:hover .user_msg_meta,
+.user_msg_container:focus-within .user_msg_meta {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.user_msg_action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.user_msg_action:hover {
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-container-hover);
+}
+
+.user_msg_action:focus-visible {
+    outline: 2px solid var(--td-text-color-secondary);
+    outline-offset: 2px;
+}
+
+@media (hover: none) {
+    .user_msg_meta {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .user_msg_meta {
+        transition: none;
+    }
 }
 </style>

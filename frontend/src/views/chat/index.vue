@@ -110,6 +110,7 @@
                                 :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
                                 :session-id="session_id"
                                 :message-id="session.id"
+                                :created-at="session.created_at"
                                 :can-fork="!embeddedMode && forkAffordanceOf(session.id).canFork"
                                 :steer-failed="Boolean(session._steerFailed)"
                                 @retry-steer="handleRetrySteer(session.steer_id)"

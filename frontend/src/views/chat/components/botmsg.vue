@@ -388,7 +388,7 @@ const handleCopyAnswer = async () => {
         return;
     }
 
-    await copyWithToast(content, 'chat.copySuccess', 'chat.copyFailed');
+    await copyWithToast(content, 'common.copySuccess', 'common.copyFailed');
 };
 
 // 添加到知识库
