@@ -1627,7 +1627,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &:not(.is-embedded) {
         @media (min-width: 960px) {
-            transition: padding-right 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+            transition: padding-right var(--app-motion-slow) cubic-bezier(0.22, 0.61, 0.36, 1);
         }
     }
 
@@ -1719,7 +1719,7 @@ onBeforeRouteUpdate((to, from, next) => {
     display: inline-flex;
     align-items: center;
     padding: 2px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     box-sizing: border-box;
     background: color-mix(in srgb, var(--td-bg-color-container) 88%, transparent);
     backdrop-filter: blur(8px);
@@ -1739,7 +1739,7 @@ onBeforeRouteUpdate((to, from, next) => {
     color: var(--td-text-color-placeholder);
     background: transparent;
     cursor: pointer;
-    transition: background-color 0.15s ease, color 0.15s ease;
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     &:hover {
         color: var(--td-text-color-primary);
@@ -1795,7 +1795,7 @@ onBeforeRouteUpdate((to, from, next) => {
     justify-content: center;
     cursor: pointer;
     color: var(--td-text-color-secondary);
-    transition: left 0.3s cubic-bezier(0.22, 0.61, 0.36, 1), background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+    transition: left var(--app-motion-slow) cubic-bezier(0.22, 0.61, 0.36, 1), background-color var(--app-motion-base) ease, color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
 
     &:hover {
         background: var(--td-bg-color-container-hover);
@@ -1810,7 +1810,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .scroll-btn-fade-enter-active,
 .scroll-btn-fade-leave-active {
-    transition: opacity 0.2s ease, transform 0.2s ease;
+    transition: opacity var(--app-motion-base) ease, transform var(--app-motion-base) ease;
 }
 
 .scroll-btn-fade-enter-from,
@@ -1952,7 +1952,7 @@ onBeforeRouteUpdate((to, from, next) => {
 @import '../../components/css/suggested-questions.less';
 
 .suggested-questions-container {
-    transition: min-height 0.3s @suggested-ease;
+    transition: min-height var(--app-motion-slow) @suggested-ease;
 }
 
 .suggested-questions-inner {

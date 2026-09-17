@@ -323,7 +323,7 @@ defineExpose({
   align-items: center;
   gap: 10px;
   padding: 8px 32px 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px solid var(--td-border-level-1-color);
   background: var(--td-bg-color-container);
   max-width: 240px;
@@ -346,7 +346,7 @@ defineExpose({
   }
 
   .attachment-preview-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -355,7 +355,7 @@ defineExpose({
   }
 
   .attachment-preview-meta {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
     white-space: nowrap;
   }
@@ -365,7 +365,7 @@ defineExpose({
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
 
     &.is-ready { color: var(--td-success-color); }
@@ -395,7 +395,7 @@ defineExpose({
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     cursor: pointer;
     line-height: 1;
 

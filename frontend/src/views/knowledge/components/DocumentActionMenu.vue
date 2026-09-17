@@ -132,12 +132,12 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 20px;
   color: var(--td-text-color-primary);
   cursor: pointer;
-  border-radius: 6px;
-  transition: background-color 0.15s cubic-bezier(0.2, 0, 0, 1), transform 0.12s ease;
+  border-radius: var(--app-radius-sm);
+  transition: background-color var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1), transform var(--app-motion-instant) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -149,9 +149,9 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
   }
 
   .icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-secondary);
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
   }
 
   &:hover .icon {

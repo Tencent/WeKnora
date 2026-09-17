@@ -871,12 +871,12 @@ onMounted(() => {
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 }
 
 .builtin-hint-label {
   margin: 0 0 4px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-placeholder);
   letter-spacing: 0.02em;
@@ -884,13 +884,13 @@ onMounted(() => {
 
 .builtin-hint-text {
   margin: 0 0 6px 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
 
 .builtin-models-hint .doc-link {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .model-list-loading {
@@ -901,7 +901,7 @@ onMounted(() => {
   margin-bottom: 16px;
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-tabs__nav-item-wrapper) {
@@ -959,14 +959,14 @@ onMounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -1042,10 +1042,10 @@ onMounted(() => {
   height: 18px;
   color: var(--td-text-color-placeholder);
   opacity: 0.6;
-  transition: color 0.15s ease, opacity 0.15s ease;
+  transition: color var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
 
   .t-icon {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 }
 
@@ -1056,7 +1056,7 @@ onMounted(() => {
 
 .model-card__subtitle {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   overflow: hidden;
@@ -1094,7 +1094,7 @@ onMounted(() => {
   flex-shrink: 0;
   padding: 2px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease;
 }
 
 .model-card__more {
@@ -1119,7 +1119,7 @@ onMounted(() => {
   text-align: center;
 
   :deep(.t-empty__description) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
@@ -1144,7 +1144,7 @@ onMounted(() => {
 
   h3 {
     margin: 0 0 8px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -1154,7 +1154,7 @@ onMounted(() => {
     padding: 0;
     list-style: none;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     overflow: hidden;
   }
 
@@ -1173,7 +1173,7 @@ onMounted(() => {
 
 .model-usage-truncated {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -1200,7 +1200,7 @@ onMounted(() => {
 .model-usage-memory {
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .model-usage-dialog__actions {

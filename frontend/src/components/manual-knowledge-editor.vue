@@ -956,7 +956,7 @@ onBeforeUnmount(() => {
 }
 
 .form-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
 
@@ -969,7 +969,7 @@ onBeforeUnmount(() => {
 
 .form-desc {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -1064,7 +1064,7 @@ onBeforeUnmount(() => {
 
   :deep(.t-button__icon) {
     margin-right: 5px;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
   }
 }
 
@@ -1085,19 +1085,19 @@ onBeforeUnmount(() => {
   width: 28px;
   height: 28px;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
   border: none;
   background: transparent;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   display: flex;
   align-items: center;
   justify-content: center;
   
   .t-icon {
     color: var(--td-text-color-secondary);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     width: 16px;
     height: 16px;
   }
@@ -1139,10 +1139,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   background: var(--td-bg-color-container);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
 
   &:focus-within {
     border-color: var(--td-brand-color);
@@ -1174,7 +1174,7 @@ onBeforeUnmount(() => {
     border-radius: 0;
     padding: 14px 16px;
     font-family: var(--app-font-family-mono);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.7;
     background: var(--td-bg-color-container);
 
@@ -1194,7 +1194,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   padding: 16px;
   background: var(--td-bg-color-container);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.7;
   color: var(--td-text-color-primary);
 
@@ -1209,14 +1209,14 @@ onBeforeUnmount(() => {
   :deep(code) {
     background: var(--td-bg-color-container-hover);
     padding: 2px 4px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     font-family: var(--app-font-family-mono);
   }
 
   :deep(pre) {
     background: var(--td-bg-color-container-hover);
     padding: 12px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     overflow: auto;
   }
 

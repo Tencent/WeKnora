@@ -886,12 +886,12 @@ onMounted(async () => {
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   line-height: 0;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   :deep(.t-icon) {
     display: block;
@@ -914,16 +914,16 @@ onMounted(async () => {
   gap: 8px;
   padding: 12px 16px;
   margin-bottom: 16px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-warning-color-1);
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .status-hint {
   margin: 12px 0 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
 }
 
@@ -963,7 +963,7 @@ onMounted(async () => {
   gap: 8px;
 
   h3 {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0;
@@ -971,7 +971,7 @@ onMounted(async () => {
 }
 
 .list-count {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -991,7 +991,7 @@ onMounted(async () => {
   }
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   .status-tab-label {
@@ -1054,7 +1054,7 @@ onMounted(async () => {
 
 .memory-content {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.6;
   color: var(--td-text-color-primary);
   word-break: break-word;
@@ -1069,7 +1069,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-text-color-placeholder);
 
@@ -1101,7 +1101,7 @@ onMounted(async () => {
 
   > span {
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 18px;
     color: var(--td-text-color-placeholder);
   }
@@ -1138,14 +1138,14 @@ onMounted(async () => {
 }
 
 .empty-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   margin: 0 0 4px 0;
 }
 
 .empty-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   margin: 0;
 }
@@ -1160,7 +1160,7 @@ onMounted(async () => {
     padding: 0 !important;
     width: 380px;
     max-width: calc(100vw - 24px);
-    border-radius: 12px !important;
+    border-radius: var(--app-radius-xl) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -1174,14 +1174,14 @@ onMounted(async () => {
   }
 
   .usage-popup-title {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   .usage-popup-intro {
     margin: 4px 0 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-placeholder);
   }
@@ -1201,7 +1201,7 @@ onMounted(async () => {
 
   .usage-popup-label {
     flex: 0 0 88px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
@@ -1209,7 +1209,7 @@ onMounted(async () => {
   .usage-popup-text {
     flex: 1;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 }
@@ -1230,7 +1230,7 @@ onMounted(async () => {
     padding: 14px 16px !important;
     width: 320px;
     max-width: calc(100vw - 24px);
-    border-radius: 12px !important;
+    border-radius: var(--app-radius-xl) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -1246,7 +1246,7 @@ onMounted(async () => {
   }
 
   .add-popup-title {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -1258,12 +1258,12 @@ onMounted(async () => {
   }
 
   .add-label {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .add-kind-hint {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 18px;
     color: var(--td-text-color-placeholder);
   }

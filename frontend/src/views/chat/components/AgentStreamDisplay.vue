@@ -3373,7 +3373,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     border-left: 0;
     overflow: visible;
     position: relative;
-    transition: border-color 0.2s ease;
+    transition: border-color var(--app-motion-base) ease;
     box-shadow: none;
 
     >* {
@@ -3409,7 +3409,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   .tool-summary {
     padding: 6px 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-primary);
     background: var(--td-bg-color-container);
     border-top: 1px solid var(--td-component-stroke);
@@ -3439,7 +3439,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
         background: var(--td-bg-color-secondarycontainer);
         padding: 2px 5px;
         border-radius: 3px;
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         color: var(--td-brand-color);
         font-weight: 500;
       }
@@ -3461,7 +3461,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   min-height: 24px;
   cursor: pointer;
   user-select: none;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease;
 
   &:hover {
     background-color: transparent;
@@ -3533,7 +3533,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     border-radius: 9px;
     background: var(--stream-brand-10);
     color: color-mix(in srgb, var(--td-brand-color) 80%, var(--td-text-color-secondary));
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 500;
     white-space: nowrap;
     flex-shrink: 0;
@@ -3592,7 +3592,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   gap: 6px;
   margin-left: 4px;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   flex-shrink: 0;
   letter-spacing: 0.02em;
@@ -3610,11 +3610,11 @@ const handleAddToKnowledge = (answerEvent: any) => {
   margin: 6px 0 0;
   padding: 8px 10px;
   font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 
   pre {
     margin: 0;
@@ -3627,12 +3627,12 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
 .sandbox-file-preview-more {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
 .action-show-icon {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   padding: 0 2px;
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
@@ -3688,7 +3688,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     flex-wrap: wrap;
 
     .status-icon {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       flex-shrink: 0;
 
       &.in-progress {
@@ -3750,7 +3750,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     padding: 0 4px;
 
     .fallback-label {
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       color: var(--td-text-color-secondary);
       font-weight: 500;
       line-height: 1.5;
@@ -3761,14 +3761,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
     position: relative;
     background: var(--td-bg-color-secondarycontainer);
     border: 1px solid var(--td-component-stroke);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     overflow: hidden;
     margin: 0;
     padding: 0;
 
     .detail-output {
       font-family: var(--app-font-family-mono);
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       color: var(--td-text-color-primary);
       padding: 12px;
       margin: 0;
@@ -3812,7 +3812,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
     margin-bottom: 6px;
 
     .arguments-label {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       font-weight: 600;
       color: var(--td-text-color-secondary);
       text-transform: uppercase;
@@ -3821,10 +3821,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .detail-code {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     background: var(--td-bg-color-container);
     padding: 10px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     font-family: var(--app-font-family-mono);
     color: var(--td-text-color-primary);
     margin: 0;
@@ -3971,7 +3971,7 @@ const handleAddToKnowledge = (answerEvent: any) => {
   }
 
   .tree-root .action-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
   }
 

@@ -1796,7 +1796,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 32px;
   }
@@ -1829,8 +1829,8 @@ const handleUploadFinishedEvent = (event: Event) => {
   align-items: center;
   padding: 2px 6px;
   background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   color: var(--td-brand-color);
   margin-left: 6px;
 }
@@ -1839,7 +1839,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   margin: 0;
   color: var(--td-text-color-placeholder);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
 }
@@ -1854,11 +1854,11 @@ const handleUploadFinishedEvent = (event: Event) => {
   justify-content: center;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
-  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  transition: background var(--app-motion-base), border-color var(--app-motion-base), color var(--app-motion-base);
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -1885,11 +1885,11 @@ const handleUploadFinishedEvent = (event: Event) => {
     cursor: pointer;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
     user-select: none;
     position: relative;
-    transition: color 0.2s ease;
+    transition: color var(--app-motion-base) ease;
 
     &:hover {
       color: var(--td-text-color-primary);
@@ -1924,8 +1924,8 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 4px;
   padding: 2px 8px;
   background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   color: var(--td-brand-color);
   font-weight: 500;
 
@@ -1941,12 +1941,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 5px;
   padding: 3px 8px;
   background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-secondary);
   max-width: 140px;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease;
 
   span {
     overflow: hidden;
@@ -1975,12 +1975,12 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 5px;
   padding: 3px 8px;
   background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-  border-radius: 6px;
-  font-size: 11px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-xs);
   line-height: 1.4;
   color: var(--td-text-color-secondary);
   font-weight: 500;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease;
 
   span {
     font-weight: 500;
@@ -2038,13 +2038,13 @@ const handleUploadFinishedEvent = (event: Event) => {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     border-color: color-mix(in srgb, var(--td-brand-color) 15%, transparent);
     color: var(--td-brand-color);
     background: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
     font-weight: 500;
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     max-width: fit-content;
   }
 }
@@ -2057,10 +2057,10 @@ const handleUploadFinishedEvent = (event: Event) => {
   margin-bottom: 20px;
   background: var(--td-warning-color-light);
   border: 1px solid var(--td-warning-color-focus);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-warning-color);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 
   .t-icon {
     color: var(--td-warning-color);
@@ -2081,7 +2081,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 12px;
   padding: 12px 16px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
 }
 
@@ -2099,7 +2099,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 .progress-title {
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 22px;
   margin-bottom: 2px;
@@ -2108,7 +2108,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 .progress-subtitle {
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
 }
 
@@ -2125,7 +2125,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 .progress-bar {
   width: 100%;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-secondarycontainer);
   margin-top: 10px;
   overflow: hidden;
@@ -2134,7 +2134,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 .progress-bar-inner {
   height: 100%;
   background: linear-gradient(90deg, var(--td-brand-color-active) 0%, var(--td-brand-color) 100%);
-  transition: width 0.2s ease;
+  transition: width var(--app-motion-base) ease;
 }
 
 @keyframes contentFadeIn {
@@ -2180,7 +2180,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   padding: 6px 4px 6px 0;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 20px;
   cursor: pointer;
@@ -2207,7 +2207,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   .kb-section-toggle {
     margin-left: 4px;
     opacity: 0.7;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease;
   }
 
   // 共享给我的两个子分组共用一个主图标 usergroup-add，再用子图标
@@ -2222,10 +2222,10 @@ const handleUploadFinishedEvent = (event: Event) => {
   .kb-section-count {
     margin-left: 2px;
     padding: 0 6px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 16px;
     font-weight: 500;
   }
@@ -2305,11 +2305,11 @@ const handleUploadFinishedEvent = (event: Event) => {
     justify-content: center;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     color: var(--td-text-color-secondary);
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     &:hover {
       background: var(--td-bg-color-secondarycontainer);
@@ -2345,7 +2345,7 @@ const handleUploadFinishedEvent = (event: Event) => {
   flex-shrink: 0;
 
   .card-time {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 }
@@ -2365,7 +2365,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     }
 
     .badge-count {
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       font-weight: 500;
     }
 
@@ -2386,7 +2386,7 @@ const handleUploadFinishedEvent = (event: Event) => {
     }
 
     .badge-count {
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       font-weight: 500;
     }
 
@@ -2533,13 +2533,13 @@ const handleUploadFinishedEvent = (event: Event) => {
   gap: 4px;
   padding: 4px 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-brand-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-family: var(--app-font-family);
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   .t-icon {
     flex-shrink: 0;
@@ -2586,7 +2586,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 
 .shared-detail-drawer-title {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -2595,14 +2595,14 @@ const handleUploadFinishedEvent = (event: Event) => {
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -2626,13 +2626,13 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 .shared-detail-drawer-body .shared-detail-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
 
 .shared-detail-drawer-body .shared-detail-value {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
   line-height: 1.5;
   word-break: break-word;
@@ -2694,7 +2694,7 @@ const handleUploadFinishedEvent = (event: Event) => {
 .create-kb-dialog {
   .t-form-item__label {
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }

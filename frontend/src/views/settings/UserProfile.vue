@@ -87,7 +87,7 @@
               trigger="click"
               placement="bottom-end"
               destroy-on-close
-              overlay-class-name="user-profile-password-popup-overlay"
+              overlay-class-name="wk-popover user-profile-password-popup-overlay"
             >
               <t-button
                 theme="default"
@@ -351,7 +351,7 @@ onMounted(loadInfo)
   padding: 40px 0;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .error-inline {
@@ -376,7 +376,7 @@ onMounted(loadInfo)
   .setting-control();
 
   .info-value {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     text-align: right;
     word-break: break-word;
@@ -401,7 +401,7 @@ onMounted(loadInfo)
 }
 
 .password-popup-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 8px;
@@ -410,7 +410,7 @@ onMounted(loadInfo)
 
 .password-popup-hint {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
@@ -438,20 +438,6 @@ onMounted(loadInfo)
 .user-profile-password-popup-overlay {
   z-index: 3050 !important;
 
-  .t-popup__content {
-    padding: 14px 16px !important;
-    min-width: 300px;
-    max-width: min(392px, calc(100vw - 24px));
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-  }
 }
 
 :root[theme-mode='dark'] .user-profile-password-popup-overlay .t-popup__content {

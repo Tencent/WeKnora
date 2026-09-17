@@ -727,7 +727,7 @@ onMounted(async () => {
 }
 
 .list-section-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 16px 0;
@@ -772,14 +772,14 @@ onMounted(async () => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -873,7 +873,7 @@ onMounted(async () => {
 
 .provider-card__url {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
@@ -887,7 +887,7 @@ onMounted(async () => {
   text-align: center;
 
   :deep(.t-empty__description) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
@@ -908,7 +908,7 @@ onMounted(async () => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -924,7 +924,7 @@ onMounted(async () => {
 
 .form-desc {
   margin: 4px 0 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 
@@ -938,7 +938,7 @@ onMounted(async () => {
 :deep(.t-textarea),
 :deep(.t-input-number) {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 // 隐藏 t-form 默认的 form-item 容器 — 我们走自定义 .form-item / .form-label。
@@ -954,7 +954,7 @@ onMounted(async () => {
 
 // ---- footer-left 测试按钮的状态 icon（与 ModelEditorDialog/MCP 同款） ----
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 
   &.available {
@@ -990,7 +990,7 @@ onMounted(async () => {
 }
 
 .header-icon__text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -999,28 +999,28 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   text-decoration: none;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color-active);
   }
 
   .link-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   &--inline {
     margin-left: 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     vertical-align: baseline;
 
     .link-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 }

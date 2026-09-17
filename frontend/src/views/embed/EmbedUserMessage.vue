@@ -109,11 +109,11 @@ const formatFileSize = (bytes: number): string => {
   width: max-content;
   max-width: min(76%, 680px);
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   margin-left: auto;
   color: var(--td-text-color-primary);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   line-height: 1.6;
   text-align: left;
   word-break: break-word;
@@ -134,7 +134,7 @@ const formatFileSize = (bytes: number): string => {
   width: 120px;
   height: 120px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: 1px solid var(--td-border-level-2-color);
   cursor: pointer;
 }
@@ -149,7 +149,7 @@ const formatFileSize = (bytes: number): string => {
 
 .user_attachment_card {
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px solid var(--td-border-level-1-color);
   background: var(--td-bg-color-container);
   max-width: 260px;
@@ -157,7 +157,7 @@ const formatFileSize = (bytes: number): string => {
 }
 
 .attachment_card_name {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -165,7 +165,7 @@ const formatFileSize = (bytes: number): string => {
 }
 
 .attachment_card_meta {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 }
 

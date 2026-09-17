@@ -142,7 +142,7 @@ function showBadge(item: SettingsModalNavItem): boolean {
     height: 780px;
     max-height: calc(100vh - 40px);
     background: var(--td-bg-color-container);
-    border-radius: 12px;
+    border-radius: var(--app-radius-xl);
     box-shadow: var(--td-shadow-3);
     overflow: hidden;
     display: flex;
@@ -167,13 +167,13 @@ function showBadge(item: SettingsModalNavItem): boolean {
     height: 32px;
     border: none;
     background: transparent;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--td-text-color-secondary);
-    transition: background 0.2s ease, color 0.2s ease;
+    transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
     z-index: 10;
 
     &:hover {
@@ -207,7 +207,7 @@ function showBadge(item: SettingsModalNavItem): boolean {
 
   .sidebar-title {
     margin: 0;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -239,7 +239,7 @@ function showBadge(item: SettingsModalNavItem): boolean {
   .nav-group-title {
     padding: 8px 14px 2px;
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     letter-spacing: 0.02em;
   }
@@ -253,10 +253,10 @@ function showBadge(item: SettingsModalNavItem): boolean {
     align-items: center;
     padding: 6px 12px;
     margin-bottom: 2px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease;
-    font-size: 14px;
+    transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     user-select: none;
 
@@ -274,7 +274,7 @@ function showBadge(item: SettingsModalNavItem): boolean {
 
   .nav-icon {
     margin-right: 9px;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -287,7 +287,7 @@ function showBadge(item: SettingsModalNavItem): boolean {
     }
 
     &.nav-icon-emoji {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       line-height: 1;
     }
   }
@@ -300,10 +300,10 @@ function showBadge(item: SettingsModalNavItem): boolean {
     flex-shrink: 0;
     margin-left: 2px;
     padding: 0 6px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 16px;
     font-weight: 500;
     text-align: center;
@@ -369,7 +369,7 @@ function showBadge(item: SettingsModalNavItem): boolean {
     display: flex;
     align-items: flex-start;
     gap: 6px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 20px;
     color: var(--td-text-color-secondary);
 
@@ -382,7 +382,7 @@ function showBadge(item: SettingsModalNavItem): boolean {
     &__icon {
       flex-shrink: 0;
       margin-top: 2px;
-      font-size: 14px;
+      font-size: var(--app-text-base);
       color: var(--td-success-color);
     }
   }
@@ -395,10 +395,10 @@ function showBadge(item: SettingsModalNavItem): boolean {
 }
 
 .settings-modal-shell-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--app-motion-base) ease;
 
   .settings-modal {
-    transition: transform 0.2s ease, opacity 0.2s ease;
+    transition: transform var(--app-motion-base) ease, opacity var(--app-motion-base) ease;
   }
 }
 

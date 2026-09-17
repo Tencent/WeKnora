@@ -106,16 +106,16 @@ onMounted(() => { document.addEventListener('visibilitychange', onVisible); void
 onBeforeUnmount(() => { alive = false; document.removeEventListener('visibilitychange', onVisible); revision++; cancelTimer?.(); controller.abort(); preview.value = '' })
 </script>
 <style scoped>
-.browser-task-preview { position: absolute; right: 20px; bottom: 16px; width: 240px; max-width: calc(100% - 40px); max-height: calc(100% - 24px); box-sizing: border-box; z-index: 5; overflow: auto; background: var(--td-bg-color-container); border: 1px solid var(--td-component-border); border-radius: 12px; box-shadow: 0 4px 20px #0000000d; }
+.browser-task-preview { position: absolute; right: 20px; bottom: 16px; width: 240px; max-width: calc(100% - 40px); max-height: calc(100% - 24px); box-sizing: border-box; z-index: 5; overflow: auto; background: var(--td-bg-color-container); border: 1px solid var(--td-component-border); border-radius: var(--app-radius-xl); box-shadow: 0 4px 20px #0000000d; }
 .preview-browser-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
-.preview-heading { display: flex; align-items: center; gap: 7px; padding: 10px 12px; cursor: grab; touch-action: none; user-select: none; position: sticky; top: 0; z-index: 1; background: var(--td-bg-color-container); }.is-dragging .preview-heading { cursor: grabbing; }.preview-heading strong { font-size: 12px; font-weight: 500; flex: 1; }.preview-heading span { color: var(--td-text-color-secondary); font-size: 11px; }
-.preview-image { width: 100%; height: 126px; border: 0; border-block: 1px solid var(--td-component-border); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); display: grid; place-items: center; position: relative; cursor: pointer; padding: 0; font-size: 12px; }.preview-image:disabled { cursor: default; }.preview-image img { width: 100%; height: 100%; object-fit: contain; object-position: top; }.preview-image:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; }.locate { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 8px; padding: 4px 8px; border-radius: 5px; background: var(--td-bg-color-container); color: var(--td-text-color-primary); box-shadow: 0 1px 5px #00000014; }.preview-image:hover .locate { color: var(--td-brand-color); }
-.preview-progress, .preview-address, .preview-sync, .preview-help, .preview-scope { font-size: 11px; line-height: 1.5; margin: 6px 12px; color: var(--td-text-color-secondary); }
+.preview-heading { display: flex; align-items: center; gap: 7px; padding: 10px 12px; cursor: grab; touch-action: none; user-select: none; position: sticky; top: 0; z-index: 1; background: var(--td-bg-color-container); }.is-dragging .preview-heading { cursor: grabbing; }.preview-heading strong { font-size: var(--app-text-sm); font-weight: 500; flex: 1; }.preview-heading span { color: var(--td-text-color-secondary); font-size: var(--app-text-xs); }
+.preview-image { width: 100%; height: 126px; border: 0; border-block: 1px solid var(--td-component-border); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-secondary); display: grid; place-items: center; position: relative; cursor: pointer; padding: 0; font-size: var(--app-text-sm); }.preview-image:disabled { cursor: default; }.preview-image img { width: 100%; height: 100%; object-fit: contain; object-position: top; }.preview-image:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; }.locate { position: absolute; display: inline-flex; align-items: center; gap: 5px; bottom: 8px; padding: 4px 8px; border-radius: 5px; background: var(--td-bg-color-container); color: var(--td-text-color-primary); box-shadow: 0 1px 5px #00000014; }.preview-image:hover .locate { color: var(--td-brand-color); }
+.preview-progress, .preview-address, .preview-sync, .preview-help, .preview-scope { font-size: var(--app-text-xs); line-height: 1.5; margin: 6px 12px; color: var(--td-text-color-secondary); }
 .preview-address { overflow-wrap: anywhere; }
 .preview-help { color: var(--td-brand-color); }
-.preview-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: space-between; padding: 5px 8px; }.preview-error { margin: 8px 12px; color: var(--td-error-color); font-size: 12px; line-height: 1.5; }
+.preview-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: space-between; padding: 5px 8px; }.preview-error { margin: 8px 12px; color: var(--td-error-color); font-size: var(--app-text-sm); line-height: 1.5; }
 @media(max-width:720px){.browser-task-preview { right: 12px; bottom: 12px; width: 200px; }.preview-image { height: 100px; }}
-.preview-popout { display: grid; place-items: center; flex-shrink: 0; padding: 3px; border: 0; border-radius: 4px; background: transparent; color: var(--td-text-color-secondary); cursor: pointer; }
+.preview-popout { display: grid; place-items: center; flex-shrink: 0; padding: 3px; border: 0; border-radius: var(--app-radius-xs); background: transparent; color: var(--td-text-color-secondary); cursor: pointer; }
 .preview-popout:hover { background: var(--td-bg-color-secondarycontainer); color: var(--td-brand-color); }
 .preview-popout:focus-visible { outline: 2px solid var(--td-brand-color); }
 .preview-popout:disabled { opacity: .5; cursor: wait; }
@@ -124,8 +124,8 @@ onBeforeUnmount(() => { alive = false; document.removeEventListener('visibilityc
 .is-pip .preview-image { height: clamp(126px, 45vh, 480px); }
 .browser-task-preview.needs-help { width: 420px; }
 .preview-handoff { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px; border-top: 1px solid var(--td-component-border); background: var(--td-bg-color-secondarycontainer); overflow-wrap: anywhere; }
-.preview-handoff strong { font-size: 13px; font-weight: 600; color: var(--td-text-color-primary); }
-.preview-handoff p { font-size: 12px; line-height: 1.6; margin: 0; color: var(--td-text-color-secondary); white-space: pre-wrap; }
+.preview-handoff strong { font-size: var(--app-text-md); font-weight: 600; color: var(--td-text-color-primary); }
+.preview-handoff p { font-size: var(--app-text-sm); line-height: 1.6; margin: 0; color: var(--td-text-color-secondary); white-space: pre-wrap; }
 .preview-handoff .handoff-prompt { max-height: 22vh; overflow-y: auto; color: var(--td-text-color-primary); }
 .preview-handoff .handoff-locate { align-self: flex-end; flex-shrink: 0; max-width: 100%; margin-top: 2px; }
 .needs-help .preview-image { height: clamp(140px, 30vh, 260px); }

@@ -50,7 +50,7 @@ defineEmits<{
   align-items: center;
   gap: 6px;
   padding: 4px 12px 2px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   letter-spacing: 0.3px;
   color: var(--td-text-color-placeholder);
@@ -70,8 +70,8 @@ defineEmits<{
   border: none;
   background: transparent;
   padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-xs);
   color: var(--td-brand-color);
   cursor: pointer;
   text-transform: none;

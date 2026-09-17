@@ -14,7 +14,7 @@
   min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
@@ -66,7 +66,7 @@
   height: @size;
   border-radius: @radius;
   margin-top: 1px;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   letter-spacing: 0.02em;
   background: var(--td-bg-color-secondarycontainer);
@@ -125,7 +125,7 @@
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -140,7 +140,7 @@
   flex-wrap: wrap;
   gap: 4px;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-secondary);
 }
@@ -151,7 +151,7 @@
   padding: 2px;
   color: var(--td-text-color-placeholder);
   opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 
   &:hover,
   &:focus-visible {

@@ -4,7 +4,7 @@
       <div class="share-panel-header-row">
         <div class="share-panel-titlewrap">
           <h2 class="share-panel-title">{{ $t('organization.share.title') }}</h2>
-          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="share-hint-popup-overlay"
+          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="wk-popover share-hint-popup-overlay"
             :overlay-inner-style="shareHintPopupInnerStyle">
             <button type="button" class="share-hint-trigger-btn" :aria-label="$t('agent.shareScope.title')"
               :title="$t('agent.shareScope.title')">

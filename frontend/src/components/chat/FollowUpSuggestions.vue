@@ -72,7 +72,7 @@ const dismiss = () => {
   margin-right: auto;
   padding: 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   background: var(--td-bg-color-secondarycontainer);
 }
 .follow-ups__header {
@@ -81,7 +81,7 @@ const dismiss = () => {
   justify-content: space-between;
   margin-bottom: 8px;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 .follow-ups__title {
@@ -93,7 +93,7 @@ const dismiss = () => {
   width: 14px;
   height: 14px;
   color: var(--td-text-color-placeholder);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 .follow-ups__actions { display: flex; gap: 4px; }
 .follow-ups__actions button {
@@ -102,11 +102,11 @@ const dismiss = () => {
   gap: 4px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: background-color .2s, color .2s;
+  transition: background-color var(--app-motion-base), color var(--app-motion-base);
 }
 .follow-ups__actions button:hover:not(:disabled) {
   background: var(--td-bg-color-container-hover);
@@ -125,13 +125,13 @@ const dismiss = () => {
   width: 100%;
   padding: 9px 11px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   text-align: left;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background var(--app-motion-base) ease;
 }
 .follow-ups__item:hover {
   .suggestion-chip-hover();

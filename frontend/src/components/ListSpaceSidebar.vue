@@ -339,7 +339,7 @@ onBeforeUnmount(() => {
   border-radius: 1px;
   background: var(--td-bg-color-component-disabled);
   opacity: 0.45;
-  transition: opacity 0.2s ease, background 0.2s ease;
+  transition: opacity var(--app-motion-base) ease, background var(--app-motion-base) ease;
 }
 
 /* ========== Icon strip (collapsed) ========== */
@@ -364,7 +364,7 @@ onBeforeUnmount(() => {
 .icon-item-labeled {
   width: 46px;
   padding: 5px 0 2px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -372,7 +372,7 @@ onBeforeUnmount(() => {
   gap: 2px;
   cursor: pointer;
   color: var(--td-text-color-secondary);
-  transition: all 0.15s ease;
+  transition: all var(--app-motion-fast) ease;
   flex-shrink: 0;
 
   &:hover {
@@ -396,12 +396,12 @@ onBeforeUnmount(() => {
   :deep(.space-avatar) {
     width: 20px;
     height: 20px;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
   }
 }
 
 .icon-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.25;
   color: var(--td-text-color-secondary);
   max-width: 52px;
@@ -409,7 +409,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 
@@ -448,9 +448,9 @@ onBeforeUnmount(() => {
   border-radius: 7px;
   color: var(--td-text-color-primary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--app-motion-fast) ease;
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   -webkit-font-smoothing: antialiased;
 
   .item-left {
@@ -464,8 +464,8 @@ onBeforeUnmount(() => {
   .item-icon {
     flex-shrink: 0;
     color: var(--td-text-color-secondary);
-    font-size: 14px;
-    transition: color 0.15s ease;
+    font-size: var(--app-text-base);
+    transition: color var(--app-motion-fast) ease;
   }
 
   .item-avatar {
@@ -478,22 +478,22 @@ onBeforeUnmount(() => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 430;
     line-height: 1.4;
     letter-spacing: 0.01em;
   }
 
   .item-count {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     font-weight: 500;
     padding: 2px 7px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     margin-left: 6px;
     flex-shrink: 0;
-    transition: all 0.15s ease;
+    transition: all var(--app-motion-fast) ease;
   }
 
   &:hover {
@@ -541,7 +541,7 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--td-component-stroke);
 
   .section-title {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     font-weight: 600;
     line-height: 1.4;

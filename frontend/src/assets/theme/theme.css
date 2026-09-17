@@ -215,3 +215,55 @@ select:-webkit-autofill {
         transform: rotate(360deg);
     }
 }
+
+/* ============================================================
+ * 应用级设计令牌
+ * 按代码库的事实刻度整理（圆角 4/6/8/10/12、字号 10~24、4px 间距网格、
+ * 150/200ms 动效），值与既有写法一致，目的是让后续调整只改这里。
+ * 新代码请引用令牌，样式守卫会统计残留字面量。
+ * ============================================================ */
+:root {
+    /* 圆角 */
+    --app-radius-xs: 4px;
+    --app-radius-sm: 6px;
+    --app-radius-md: 8px;
+    --app-radius-lg: 10px;
+    --app-radius-xl: 12px;
+    --app-radius-pill: 999px;
+
+    /* 字号 */
+    --app-text-2xs: 10px;
+    --app-text-xs: 11px;
+    --app-text-sm: 12px;
+    --app-text-md: 13px;
+    --app-text-base: 14px;
+    --app-text-lg: 15px;
+    --app-text-xl: 16px;
+    --app-text-2xl: 18px;
+    --app-text-3xl: 20px;
+    --app-text-4xl: 24px;
+
+    /* 间距（4px 网格） */
+    --app-space-1: 4px;
+    --app-space-2: 8px;
+    --app-space-3: 12px;
+    --app-space-4: 16px;
+    --app-space-5: 20px;
+    --app-space-6: 24px;
+    --app-space-8: 32px;
+    --app-space-10: 40px;
+
+    /* 动效时长 */
+    --app-motion-instant: 120ms;
+    --app-motion-fast: 150ms;
+    --app-motion-base: 200ms;
+    --app-motion-slow: 300ms;
+
+    /* 层级：页面内 sticky < 下拉 < 全屏弹窗壳 < TDesign 抽屉/弹窗(2500) < 弹层 < 通知 */
+    --z-sticky: 10;
+    --z-dropdown: 1000;
+    --z-modal: 1100;
+    --z-drawer: 2500;
+    --z-popover: 3000;
+    --z-toast: 5000;
+}

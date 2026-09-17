@@ -75,7 +75,7 @@ withDefaults(
 
 .wk-empty-state__title {
   color: var(--td-text-color-primary);
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 22px;
 }
@@ -84,7 +84,7 @@ withDefaults(
   margin-top: 6px;
   max-width: 360px;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 20px;
 }
 

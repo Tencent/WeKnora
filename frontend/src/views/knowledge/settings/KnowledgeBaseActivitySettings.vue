@@ -737,7 +737,7 @@ onUnmounted(() => detachInfiniteScroll())
   .section-title {
     margin: 0;
     font-family: var(--app-font-family);
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -745,7 +745,7 @@ onUnmounted(() => detachInfiniteScroll())
   .section-desc {
     margin: 0;
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     line-height: 22px;
   }
@@ -756,7 +756,7 @@ onUnmounted(() => detachInfiniteScroll())
     flex-wrap: wrap;
     gap: 8px;
     margin: 6px 0 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     line-height: 20px;
   }
@@ -779,7 +779,7 @@ onUnmounted(() => detachInfiniteScroll())
   border: none;
   background: none;
   color: var(--td-brand-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 20px;
   cursor: pointer;
 
@@ -808,11 +808,11 @@ onUnmounted(() => detachInfiniteScroll())
   height: 22px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -851,14 +851,14 @@ onUnmounted(() => detachInfiniteScroll())
   gap: 8px;
   padding: 6px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -913,13 +913,13 @@ onUnmounted(() => detachInfiniteScroll())
   justify-content: center;
   gap: 10px;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .audit-end-hint {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-disabled);
   padding: 8px 0 14px;
   margin: 0;
@@ -932,12 +932,12 @@ onUnmounted(() => detachInfiniteScroll())
   line-height: 1.3;
 
   .audit-time-date {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .audit-time-clock {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     font-variant-numeric: tabular-nums;
@@ -948,7 +948,7 @@ onUnmounted(() => detachInfiniteScroll())
   min-width: 0;
 
   .audit-actor-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -966,13 +966,13 @@ onUnmounted(() => detachInfiniteScroll())
   padding: 2px 0;
 
   .audit-target-key {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     word-break: break-word;
   }
 
   .audit-target-diff {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     font-family: var(--td-font-family-mono);
     word-break: break-all;
@@ -986,13 +986,13 @@ onUnmounted(() => detachInfiniteScroll())
 
 .data-table-shell {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-container);
 
   &:deep(thead th) {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   &:deep(.t-table td),
@@ -1044,7 +1044,7 @@ onUnmounted(() => detachInfiniteScroll())
   dt {
     margin: 0;
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     white-space: nowrap;
   }
@@ -1052,7 +1052,7 @@ onUnmounted(() => detachInfiniteScroll())
   dd {
     margin: 0;
     color: var(--td-text-color-primary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
     word-break: break-all;
   }
@@ -1061,12 +1061,12 @@ onUnmounted(() => detachInfiniteScroll())
 .audit-detail-json {
   margin: 0;
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: min(420px, 50vh);

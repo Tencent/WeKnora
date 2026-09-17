@@ -2991,7 +2991,7 @@ const getImgSrc = (url: string) => {
 .steer-queue-text {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-primary);
   white-space: nowrap;
@@ -3008,7 +3008,7 @@ const getImgSrc = (url: string) => {
 
 .steer-queue-icon {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-secondary);
 }
 
@@ -3020,10 +3020,10 @@ const getImgSrc = (url: string) => {
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   cursor: pointer;
   &:hover:not(:disabled) { background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); }
   &:disabled { opacity: 0.4; cursor: default; }
@@ -3038,7 +3038,7 @@ const getImgSrc = (url: string) => {
   width: 100%;
   max-width: 960px;
   background: var(--td-bg-color-container);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   border: 1px solid var(--td-component-stroke);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 8px 16px -4px rgba(0, 0, 0, 0.06);
 
@@ -3070,10 +3070,10 @@ const getImgSrc = (url: string) => {
   padding: 3px 7px 3px 6px;
   border-radius: var(--td-radius-medium);
   box-sizing: border-box;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   cursor: default;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background var(--app-motion-fast), border-color var(--app-motion-fast);
   line-height: 18px;
 
   &:hover {
@@ -3093,7 +3093,7 @@ const getImgSrc = (url: string) => {
 }
 
 .mention-chip__icon {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3137,12 +3137,12 @@ const getImgSrc = (url: string) => {
   height: 14px;
   margin-left: 1px;
   border-radius: 50%;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1;
   font-weight: 400;
   cursor: pointer;
   opacity: 0.5;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  transition: opacity var(--app-motion-fast), background var(--app-motion-fast), color var(--app-motion-fast);
   color: currentColor;
   flex-shrink: 0;
 }
@@ -3212,7 +3212,7 @@ const getImgSrc = (url: string) => {
   min-height: 72px !important;
   resize: none;
   color: var(--td-text-color-primary);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 400;
   line-height: 24px;
   font-family: var(--app-font-family);
@@ -3231,7 +3231,7 @@ const getImgSrc = (url: string) => {
   &::placeholder {
     color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     font-weight: 400;
     line-height: 24px;
   }
@@ -3239,7 +3239,7 @@ const getImgSrc = (url: string) => {
 
 /* 当没有选中标签时，textarea 样式 */
 .rich-input-container:not(:has(.selected-tags-inline)) :deep(.t-textarea__inner) {
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   padding-top: 16px;
 }
 
@@ -3278,10 +3278,10 @@ const getImgSrc = (url: string) => {
   justify-content: center;
   gap: 4px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--app-motion-instant), color var(--app-motion-instant);
   user-select: none;
   flex-shrink: 0;
 
@@ -3326,7 +3326,7 @@ const getImgSrc = (url: string) => {
 }
 
 .agent-mode-text {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
@@ -3388,7 +3388,7 @@ const getImgSrc = (url: string) => {
   border-radius: 7px;
   background: var(--td-brand-color);
   color: var(--td-text-color-anti);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -3396,7 +3396,7 @@ const getImgSrc = (url: string) => {
 }
 
 .kb-btn-text {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
@@ -3434,7 +3434,7 @@ const getImgSrc = (url: string) => {
     right: -2px;
     background: #07C05F;
     color: #fff;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
     border-radius: 50%;
@@ -3473,7 +3473,7 @@ const getImgSrc = (url: string) => {
     right: -2px;
     background: #07C05F;
     color: #fff;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
     border-radius: 50%;
@@ -3495,7 +3495,7 @@ const getImgSrc = (url: string) => {
   position: relative;
   width: 60px;
   height: 60px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   border: 1px solid var(--td-border-level-1-color);
 
@@ -3517,7 +3517,7 @@ const getImgSrc = (url: string) => {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     cursor: pointer;
     line-height: 1;
 
@@ -3627,7 +3627,7 @@ const getImgSrc = (url: string) => {
   flex-direction: column;
   gap: 6px;
   max-width: 220px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
 }
 
@@ -3650,7 +3650,7 @@ const getImgSrc = (url: string) => {
   width: 10px;
   height: 10px;
   margin-left: 2px;
-  transition: transform 0.12s;
+  transition: transform var(--app-motion-instant);
 
   &.rotate {
     transform: rotate(180deg);
@@ -3668,7 +3668,7 @@ const getImgSrc = (url: string) => {
   height: 28px;
   padding: 0;
   box-sizing: border-box;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   line-height: 1;
 
   &:focus-visible {
@@ -3717,9 +3717,9 @@ const getImgSrc = (url: string) => {
   padding: 2px 8px;
   min-width: 100px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: .5px solid var(--td-component-border);
-  transition: background 0.12s, border-color 0.12s;
+  transition: background var(--app-motion-instant), border-color var(--app-motion-instant);
   cursor: pointer;
 
   &:hover {
@@ -3738,7 +3738,7 @@ const getImgSrc = (url: string) => {
 
 .model-selector-name {
   flex: 1;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   overflow: hidden;
@@ -3748,7 +3748,7 @@ const getImgSrc = (url: string) => {
 
 .model-selector-ctx {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-placeholder);
   font-weight: 400;
@@ -3763,7 +3763,7 @@ const getImgSrc = (url: string) => {
   height: 10px;
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
-  transition: transform 0.12s;
+  transition: transform var(--app-motion-instant);
 
   &.rotate {
     transform: rotate(180deg);
@@ -3787,7 +3787,7 @@ const getImgSrc = (url: string) => {
   z-index: 10000;
   background: var(--td-bg-color-container);
   border: .5px solid var(--td-component-border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   box-shadow: var(--td-shadow-2);
   overflow: hidden;
   display: flex;
@@ -3818,7 +3818,7 @@ const getImgSrc = (url: string) => {
   padding: 8px 10px;
   border-bottom: .5px solid var(--td-component-stroke);
   background: var(--td-bg-color-container);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-secondary);
 }
@@ -3838,17 +3838,17 @@ const getImgSrc = (url: string) => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: .5px solid transparent;
   background: transparent;
   color: var(--td-brand-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--app-motion-instant);
 
   .add-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1;
     font-weight: 400;
   }
@@ -3866,8 +3866,8 @@ const getImgSrc = (url: string) => {
   gap: 8px;
   padding: 6px 8px;
   cursor: pointer;
-  transition: background 0.12s;
-  border-radius: 6px;
+  transition: background var(--app-motion-instant);
+  border-radius: var(--app-radius-sm);
   margin-bottom: 4px;
 
   &:last-child {
@@ -3918,7 +3918,7 @@ const getImgSrc = (url: string) => {
 }
 
 .model-option-name {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -3927,19 +3927,19 @@ const getImgSrc = (url: string) => {
 }
 
 .model-option-raw-name {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
 }
 
 .model-option-ctx {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   line-height: 18px;
 
   &.is-default {
@@ -3960,7 +3960,7 @@ const getImgSrc = (url: string) => {
   position: fixed !important;
   z-index: 9999;
   background: var(--td-bg-color-container);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   box-shadow: var(--td-shadow-2);
   border: 1px solid var(--td-component-border);
   overflow: hidden;
@@ -3979,8 +3979,8 @@ const getImgSrc = (url: string) => {
   justify-content: space-between;
   padding: 8px 10px;
   cursor: pointer;
-  transition: background 0.12s;
-  border-radius: 6px;
+  transition: background var(--app-motion-instant);
+  border-radius: var(--app-radius-sm);
   position: relative;
   margin: 4px 6px;
 
@@ -4016,15 +4016,15 @@ const getImgSrc = (url: string) => {
 }
 
 .agent-mode-option-name {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   color: var(--td-text-color-primary);
   line-height: 1.4;
-  transition: color 0.12s;
+  transition: color var(--app-motion-instant);
 }
 
 .agent-mode-option-desc {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   line-height: 1.3;
 }
@@ -4044,7 +4044,7 @@ const getImgSrc = (url: string) => {
 
   .warning-icon {
     color: var(--td-warning-color);
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
@@ -4058,12 +4058,12 @@ const getImgSrc = (url: string) => {
 .agent-mode-link {
   color: var(--td-success-color);
   text-decoration: none;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  transition: all 0.12s;
+  transition: all var(--app-motion-instant);
 
   &:hover {
     color: var(--td-brand-color-active);

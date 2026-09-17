@@ -36,7 +36,7 @@ onUnmounted(() => window.removeEventListener(RESOURCE_PREVIEW_EVENT, open))
   max-width: 100%;
   padding: 14px 18px;
   border: 1px solid var(--td-component-border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   overflow-wrap: anywhere;

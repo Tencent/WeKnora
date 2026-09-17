@@ -236,14 +236,14 @@ defineExpose({ openUrlDialog })
 .url-import-form {
   .url-input-label {
     margin-bottom: 8px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   .url-input-tip {
     margin-top: 8px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-placeholder);
   }

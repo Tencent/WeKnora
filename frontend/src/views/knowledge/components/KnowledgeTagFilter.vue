@@ -154,7 +154,7 @@ const manage = () => {
 
 .tag-filter-popup .t-popup__content {
   padding: 0 !important;
-  border-radius: 8px !important;
+  border-radius: var(--app-radius-md) !important;
   background: var(--td-bg-color-container) !important;
   border: 0.5px solid var(--td-component-stroke) !important;
   box-shadow:
@@ -180,10 +180,10 @@ const manage = () => {
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
+  transition: background var(--app-motion-base) ease, border-color var(--app-motion-base) ease;
 
   &:hover,
   &.open {
@@ -222,7 +222,7 @@ const manage = () => {
   &__caret {
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
-    transition: transform 0.2s ease, color 0.2s ease;
+    transition: transform var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
     &.open {
       color: var(--td-brand-color);
@@ -235,7 +235,7 @@ const manage = () => {
     margin-left: 0;
   }
   :deep(.t-input__suffix-clear) {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 }
 
@@ -247,7 +247,7 @@ const manage = () => {
   flex-direction: column;
   padding: 12px 14px;
   box-sizing: border-box;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
 }
 
@@ -262,12 +262,12 @@ const manage = () => {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
 }
 
 .tag-filter-panel__count {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-weight: 400;
 }
@@ -298,10 +298,10 @@ const manage = () => {
   height: 24px;
   padding: 0 8px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   cursor: pointer;
 }
 
@@ -319,7 +319,7 @@ const manage = () => {
 }
 
 .tag-filter-chip__count {
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   color: var(--td-text-color-placeholder);
 }
 
@@ -333,7 +333,7 @@ const manage = () => {
   text-align: center;
   padding: 10px 6px;
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .tag-load-more {
@@ -352,10 +352,10 @@ const manage = () => {
   padding: 0;
 }
 .tag-filter-panel--documents .tag-search-bar :deep(.t-input) {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   background-color: var(--td-bg-color-secondarycontainer);
   border-color: transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   box-shadow: none !important;
 }
 .tag-filter-panel--documents .tag-search-bar :deep(.t-input):hover,
@@ -366,7 +366,7 @@ const manage = () => {
   box-shadow: none !important;
 }
 .tag-filter-panel--documents .tag-search-bar :deep(.t-input__inner) {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 .tag-filter-panel--documents .tag-search-bar :deep(.t-input__prefix-icon) {
   margin-right: 0;
@@ -395,7 +395,7 @@ const manage = () => {
   font-weight: 400;
   line-height: 24px;
   outline: none;
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
   -webkit-font-smoothing: antialiased;
 }
 .tag-filter-panel--documents .tag-filter-chip:hover:not(.active) {
@@ -436,12 +436,12 @@ const manage = () => {
   padding: 0;
   height: auto;
   min-height: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   border: none !important;
   background: transparent !important;
   box-shadow: none !important;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 .tag-filter-panel--documents .tag-filter-panel__footer :deep(.tag-manage-link.t-button):hover,
 .tag-filter-panel--documents .tag-filter-panel__footer :deep(.tag-manage-link.t-button):focus-visible {
@@ -452,12 +452,12 @@ const manage = () => {
 }
 .tag-filter-panel--documents .tag-load-more :deep(.t-button) {
   padding: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 .tag-filter-panel--documents .tag-empty-state {
   padding: 6px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 </style>

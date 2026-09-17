@@ -1125,7 +1125,7 @@ onUnmounted(() => {
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 32px;
   }
@@ -1142,7 +1142,7 @@ onUnmounted(() => {
   border-color: color-mix(in srgb, var(--td-brand-color) 50%, transparent);
   color: var(--td-brand-color);
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   .t-icon {
     color: var(--td-brand-color);
@@ -1169,7 +1169,7 @@ onUnmounted(() => {
   margin: 0;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
 }
@@ -1184,11 +1184,11 @@ onUnmounted(() => {
   justify-content: center;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
-  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  transition: background var(--app-motion-base), border-color var(--app-motion-base), color var(--app-motion-base);
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -1221,11 +1221,11 @@ onUnmounted(() => {
     cursor: pointer;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
     user-select: none;
     position: relative;
-    transition: color 0.2s ease;
+    transition: color var(--app-motion-base) ease;
 
     &:hover {
       color: var(--td-text-color-secondary);
@@ -1286,7 +1286,7 @@ onUnmounted(() => {
   padding: 6px 4px 6px 0;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 20px;
   cursor: pointer;
@@ -1308,16 +1308,16 @@ onUnmounted(() => {
   .org-section-toggle {
     margin-left: 4px;
     opacity: 0.7;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease;
   }
 
   .org-section-count {
     margin-left: 2px;
     padding: 0 6px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 16px;
     font-weight: 500;
   }
@@ -1363,7 +1363,7 @@ onUnmounted(() => {
   justify-content: flex-end;
   pointer-events: none;
   z-index: 0;
-  transition: color 0.3s ease;
+  transition: color var(--app-motion-slow) ease;
 
   .card-deco-svg {
     display: block;
@@ -1452,8 +1452,8 @@ onUnmounted(() => {
   align-items: center;
   height: 22px;
   padding: 0 6px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
   font-weight: 500;
   background: rgba(250, 173, 20, 0.12);
   color: var(--td-warning-color);
@@ -1473,8 +1473,8 @@ onUnmounted(() => {
   gap: 4px;
   height: 22px;
   padding: 0 6px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
   font-weight: 500;
   font-family: var(--app-font-family);
   background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
@@ -1568,7 +1568,7 @@ onUnmounted(() => {
 .join-org-dialog {
   .t-form-item__label {
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
@@ -1599,7 +1599,7 @@ onUnmounted(() => {
   max-width: 480px;
   max-height: 90vh;
   background: var(--td-bg-color-container);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   overflow: hidden;
   display: flex;
@@ -1627,13 +1627,13 @@ onUnmounted(() => {
   height: 32px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -1643,7 +1643,7 @@ onUnmounted(() => {
 
 .invite-preview-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   flex: 1;
@@ -1658,13 +1658,13 @@ onUnmounted(() => {
   height: 32px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
   z-index: 10;
 
   &:hover {
@@ -1711,7 +1711,7 @@ onUnmounted(() => {
   &::-webkit-scrollbar-thumb {
     background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
-    transition: background 0.2s;
+    transition: background var(--app-motion-base);
 
     &:hover {
       background: var(--td-brand-color);
@@ -1731,14 +1731,14 @@ onUnmounted(() => {
   align-items: center;
   padding: 6px 14px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover,
   &:focus-visible {
@@ -1764,21 +1764,21 @@ onUnmounted(() => {
   .join-form-label {
     display: block;
     margin-bottom: 4px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   .join-form-desc {
     margin: 0 0 10px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     line-height: 1.5;
   }
 
   .join-form-tip {
     margin: 8px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     line-height: 1.45;
   }
@@ -1792,7 +1792,7 @@ onUnmounted(() => {
 
 // Tab 内容容器 - 平滑高度过渡
 .join-tab-content-wrapper {
-  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: height var(--app-motion-slow) cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 
@@ -1811,7 +1811,7 @@ onUnmounted(() => {
   overflow-y: auto;
   margin-bottom: 16px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
 
   &::-webkit-scrollbar {
@@ -1826,7 +1826,7 @@ onUnmounted(() => {
   &::-webkit-scrollbar-thumb {
     background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
-    transition: background 0.2s;
+    transition: background var(--app-motion-base);
 
     &:hover {
       background: var(--td-brand-color);
@@ -1851,7 +1851,7 @@ onUnmounted(() => {
   padding: 12px 14px;
   border-bottom: 1px solid var(--td-component-stroke);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 
   &:last-child {
     border-bottom: none;
@@ -1883,7 +1883,7 @@ onUnmounted(() => {
 }
 
 .searchable-row-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
   overflow: hidden;
@@ -1892,7 +1892,7 @@ onUnmounted(() => {
 }
 
 .searchable-row-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1910,7 +1910,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -1921,10 +1921,10 @@ onUnmounted(() => {
     gap: 8px;
     margin-bottom: 12px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-error-color-light);
     color: var(--td-error-color);
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   .invite-preview-footer-single {
@@ -1943,7 +1943,7 @@ onUnmounted(() => {
   gap: 20px;
 
   .invite-preview-loading-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
   }
@@ -1962,7 +1962,7 @@ onUnmounted(() => {
   }
 
   .invite-preview-error-title {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 8px;
@@ -1970,7 +1970,7 @@ onUnmounted(() => {
   }
 
   .invite-preview-error-desc {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0 0 24px;
     line-height: 1.5;
@@ -2000,7 +2000,7 @@ onUnmounted(() => {
 
 .preview-space-name {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   font-weight: 600;
   line-height: 1.35;
   color: var(--td-text-color-primary);
@@ -2013,7 +2013,7 @@ onUnmounted(() => {
 .preview-space-desc {
   margin: 0 0 14px;
   max-width: 360px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -2035,17 +2035,17 @@ onUnmounted(() => {
   max-width: 100%;
   padding: 4px 10px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-secondarycontainer);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   code {
     font-family: var(--app-font-family-mono);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
     background: transparent;
     border: none;
@@ -2074,7 +2074,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   padding: 12px 0 4px;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-brand-color);
 }
@@ -2093,14 +2093,14 @@ onUnmounted(() => {
 }
 
 .preview-info-label {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .preview-info-desc {
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 
@@ -2139,7 +2139,7 @@ onUnmounted(() => {
 
 .modal-enter-active,
 .modal-leave-active {
-  transition: all 0.3s ease;
+  transition: all var(--app-motion-slow) ease;
 }
 
 .modal-enter-from,

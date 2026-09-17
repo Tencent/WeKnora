@@ -266,11 +266,11 @@ const closePreImg = () => {
     align-items: flex-start;
     gap: 4px;
     flex: 1 0 0;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     margin-left: auto;
     color: var(--td-text-color-primary);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     line-height: 1.6;
     text-align: left;
     word-break: break-word;
@@ -301,7 +301,7 @@ const closePreImg = () => {
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     border: 1px solid var(--td-border-level-1-color);
     background: var(--td-bg-color-container);
     max-width: 260px;
@@ -310,7 +310,7 @@ const closePreImg = () => {
 
     &.is-previewable {
         cursor: pointer;
-        transition: border-color 0.2s, box-shadow 0.2s;
+        transition: border-color var(--app-motion-base), box-shadow var(--app-motion-base);
 
         &:hover {
             border-color: var(--td-brand-color-2);
@@ -334,7 +334,7 @@ const closePreImg = () => {
     }
 
     .attachment_card_name {
-        font-size: 13px;
+        font-size: var(--app-text-md);
         font-weight: 500;
         color: var(--td-text-color-primary);
         overflow: hidden;
@@ -343,7 +343,7 @@ const closePreImg = () => {
     }
 
     .attachment_card_meta {
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         color: var(--td-text-color-secondary);
         white-space: nowrap;
         box-sizing: border-box;
@@ -354,10 +354,10 @@ const closePreImg = () => {
     width: 120px;
     height: 120px;
     object-fit: cover;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
     border: 1px solid var(--td-border-level-2-color);
-    transition: opacity 0.2s;
+    transition: opacity var(--app-motion-base);
 
     &:hover {
         opacity: 0.85;
@@ -369,7 +369,7 @@ const closePreImg = () => {
     align-items: center;
     padding: 1px 6px;
     border-radius: 3px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 500;
     line-height: 18px;
     background: var(--td-bg-color-secondarycontainer);
@@ -404,9 +404,9 @@ html[theme-mode="dark"] {
 </style>
 
 <style scoped>
-.steer-failure { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: 12px; color: var(--td-text-color-secondary); margin-bottom: 4px; }
+.steer-failure { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: var(--app-text-sm); color: var(--td-text-color-secondary); margin-bottom: 4px; }
 .steer-failure { margin-top: 6px; color: var(--td-error-color); }
-.steer-failure button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.steer-failure button { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border: 0; border-radius: var(--app-radius-sm); background: transparent; color: inherit; cursor: pointer; }
 .steer-failure button:hover { background: var(--td-bg-color-secondarycontainer); }
 
 .user_msg_meta {
@@ -423,7 +423,7 @@ html[theme-mode="dark"] {
 }
 
 .user_msg_time {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-variant-numeric: tabular-nums;
     line-height: 20px;
 }
@@ -448,10 +448,10 @@ html[theme-mode="dark"] {
     height: 28px;
     padding: 0;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: transparent;
     color: inherit;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     cursor: pointer;
 }
 

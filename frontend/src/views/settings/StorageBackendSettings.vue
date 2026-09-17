@@ -415,14 +415,14 @@ onMounted(load)
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -477,7 +477,7 @@ onMounted(load)
 
 .backend-card__subtitle {
   margin: 2px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   display: flex;
@@ -509,7 +509,7 @@ onMounted(load)
   padding: 2px;
   color: var(--td-text-color-placeholder);
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease;
 
   &:hover,
   &:focus-visible {
@@ -547,7 +547,7 @@ onMounted(load)
 }
 
 .header-icon__text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -560,7 +560,7 @@ onMounted(load)
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -576,7 +576,7 @@ onMounted(load)
 
 .form-desc {
   margin: 4px 0 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 
@@ -589,7 +589,7 @@ onMounted(load)
 :deep(.t-select),
 :deep(.t-textarea) {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .vision-toggle {
@@ -606,7 +606,7 @@ onMounted(load)
   padding: 3px;
   background: var(--td-bg-color-component);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .source-option {
@@ -617,13 +617,13 @@ onMounted(load)
   height: 28px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   line-height: 1;
-  transition: all 0.15s ease;
+  transition: all var(--app-motion-fast) ease;
 
   &:disabled {
     cursor: not-allowed;
@@ -645,7 +645,7 @@ onMounted(load)
 }
 
 .source-option__icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   flex-shrink: 0;
 }
 
@@ -654,7 +654,7 @@ onMounted(load)
 }
 
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 
   &.available {

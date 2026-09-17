@@ -331,7 +331,7 @@ onUnmounted(() => {
   padding: 40px 0;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .error-inline {
@@ -360,7 +360,7 @@ onUnmounted(() => {
 
 .migration-error-desc {
   margin: 0 0 8px 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-primary);
 }
@@ -369,8 +369,8 @@ onUnmounted(() => {
   margin: 0 0 12px 0;
   padding: 8px 12px;
   background: var(--td-bg-color-container-hover);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
@@ -383,7 +383,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   .migration-error-actions-sep {
     color: var(--td-text-color-placeholder);
@@ -394,14 +394,14 @@ onUnmounted(() => {
   .setting-control();
 
   .info-value {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     text-align: right;
     word-break: break-word;
 
     .commit-info {
       color: var(--td-text-color-placeholder);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       margin-left: 6px;
     }
   }

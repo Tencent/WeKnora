@@ -1419,7 +1419,7 @@ onUnmounted(() => {
 
 .installer-model-hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1433,10 +1433,10 @@ onUnmounted(() => {
   width: 100%;
   min-height: 44px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, background var(--app-motion-base) ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1459,7 +1459,7 @@ onUnmounted(() => {
 
   &--large {
     min-height: 180px;
-    border-radius: 12px;
+    border-radius: var(--app-radius-xl);
     border-width: 2px;
   }
 }
@@ -1498,11 +1498,11 @@ onUnmounted(() => {
 }
 
 .file-upload-area--large .upload-primary-text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
 }
 
 .file-upload-area--large .upload-secondary-text {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .upload-icon {
@@ -1520,18 +1520,18 @@ onUnmounted(() => {
 }
 
 .upload-primary-text {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .upload-secondary-text {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .upload-file-name {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-brand-color);
 }
@@ -1542,7 +1542,7 @@ onUnmounted(() => {
 
 .upload-hint {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   line-height: 1.5;
 }
@@ -1561,7 +1561,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   margin: 10px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 
   &::before,
@@ -1630,14 +1630,14 @@ onUnmounted(() => {
   label {
     display: block;
     margin-bottom: 4px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   p {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -1653,7 +1653,7 @@ onUnmounted(() => {
 
   h4 {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -1669,7 +1669,7 @@ onUnmounted(() => {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     line-height: 1;
     color: var(--td-brand-color);
@@ -1687,7 +1687,7 @@ onUnmounted(() => {
 
 .skill-manage__remove-stage {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1702,7 +1702,7 @@ onUnmounted(() => {
 
   p {
     margin: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.55;
     color: var(--td-text-color-primary);
   }
@@ -1710,7 +1710,7 @@ onUnmounted(() => {
 
 .skill-envs__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1736,16 +1736,16 @@ onUnmounted(() => {
 
 .skill-envs__name {
   font-family: var(--td-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   overflow-wrap: anywhere;
 }
 
 .skill-envs__tag {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
 }
@@ -1761,7 +1761,7 @@ onUnmounted(() => {
 }
 
 .skill-envs__desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 }
@@ -1793,7 +1793,7 @@ onUnmounted(() => {
   gap: 12px;
   padding: 14px 14px 14px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
@@ -1843,14 +1843,14 @@ onUnmounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -1899,7 +1899,7 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -1914,10 +1914,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 5px;
   padding: 1px 8px 1px 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 16px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
 
   &--on {
@@ -2001,7 +2001,7 @@ onUnmounted(() => {
   color: var(--td-text-color-placeholder);
   cursor: pointer;
   line-height: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   :deep(.t-icon) {
     display: block;
@@ -2042,7 +2042,7 @@ onUnmounted(() => {
 }
 
 .skill-card__type {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 1.3;
   color: var(--td-text-color-placeholder);
@@ -2056,14 +2056,14 @@ onUnmounted(() => {
   overflow: hidden;
   min-width: 0;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
 }
 
 .skill-card__log {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 }
@@ -2071,7 +2071,7 @@ onUnmounted(() => {
 .skill-card__error {
   margin: 2px 0 0;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   word-break: break-word;
   list-style: none;
@@ -2106,7 +2106,7 @@ onUnmounted(() => {
     padding: 0 !important;
     width: 420px;
     max-width: min(420px, calc(100vw - 32px));
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 1px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -2135,7 +2135,7 @@ onUnmounted(() => {
   }
 
   &__title {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     line-height: 1.35;
     color: var(--td-text-color-primary);
@@ -2149,7 +2149,7 @@ onUnmounted(() => {
     align-items: center;
     gap: 6px;
     margin-top: 2px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 1.4;
     color: var(--td-text-color-placeholder);
   }
@@ -2217,7 +2217,7 @@ onUnmounted(() => {
 
   .skill-envs__hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -2244,16 +2244,16 @@ onUnmounted(() => {
 
   .skill-envs__name {
     font-family: var(--td-font-family-mono);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-primary);
     overflow-wrap: anywhere;
   }
 
   .skill-envs__tag {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 18px;
     padding: 0 8px;
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
   }
@@ -2269,7 +2269,7 @@ onUnmounted(() => {
   }
 
   .skill-envs__desc {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }

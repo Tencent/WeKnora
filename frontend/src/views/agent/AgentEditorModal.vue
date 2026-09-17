@@ -4871,7 +4871,7 @@ const handleSave = async () => {
   }
 
   .section-description {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 }
 
@@ -4888,14 +4888,14 @@ const handleSave = async () => {
     gap: 5px;
     padding: 5px 12px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-bg-color-secondarycontainer);
     font: inherit;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.4;
     color: var(--td-text-color-secondary);
     cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
     &:hover,
     &:focus-visible {
@@ -4968,14 +4968,14 @@ const handleSave = async () => {
   }
 
   h2 {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 6px 0;
   }
 
   .section-description {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -5002,7 +5002,7 @@ const handleSave = async () => {
 
     label {
       display: block;
-      font-size: 15px;
+      font-size: var(--app-text-lg);
       font-weight: 500;
       color: var(--td-text-color-primary);
       margin-bottom: 4px;
@@ -5010,7 +5010,7 @@ const handleSave = async () => {
 
     .desc {
       margin: 0;
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
       line-height: 1.5;
     }
@@ -5063,7 +5063,7 @@ const handleSave = async () => {
   }
 
   &.setting-row--field-highlight {
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     animation: agent-field-flash 0.8s ease-in-out 3;
   }
 }
@@ -5104,7 +5104,7 @@ const handleSave = async () => {
   }
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -5117,7 +5117,7 @@ const handleSave = async () => {
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -5190,7 +5190,7 @@ const handleSave = async () => {
   justify-content: flex-end;
 
   &__stat {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
 
     &.integration-inline__link {
@@ -5212,7 +5212,7 @@ const handleSave = async () => {
 
   &__sep {
     color: var(--td-component-stroke);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   &__link {
@@ -5223,7 +5223,7 @@ const handleSave = async () => {
     padding: 0;
     border: none;
     background: transparent;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1;
     color: var(--td-brand-color);
     cursor: pointer;
@@ -5247,7 +5247,7 @@ const handleSave = async () => {
 }
 
 .go-settings-link {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-brand-color);
   margin-top: 0;
   text-decoration: none;
@@ -5268,7 +5268,7 @@ const handleSave = async () => {
 
 .sandbox-select-links__sep {
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .sandbox-select-control {
@@ -5306,7 +5306,7 @@ const handleSave = async () => {
 .sandbox-option__type {
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .sandbox-option__target {
@@ -5314,14 +5314,14 @@ const handleSave = async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.35;
 }
 
 .sandbox-selected-meta {
   margin: 6px 0 0;
   max-width: 280px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
   word-break: break-word;
@@ -5347,7 +5347,7 @@ const handleSave = async () => {
   padding: 6px 8px 6px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 
   .agent-id-value {
     flex: 1;
@@ -5357,7 +5357,7 @@ const handleSave = async () => {
     background: none;
     border: none;
     font-family: var(--app-font-family-mono);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -5399,10 +5399,10 @@ const handleSave = async () => {
   align-items: center;
   padding: 10px 14px;
   background: var(--td-success-color-light);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: 1px solid var(--td-success-color-focus);
   color: var(--td-brand-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
 }
 
@@ -5423,14 +5423,14 @@ const handleSave = async () => {
   width: 40px;
   text-align: right;
   font-family: var(--app-font-family-mono);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 }
 
 .max-tokens-value {
   font-family: var(--app-font-family-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -5457,7 +5457,7 @@ const handleSave = async () => {
   margin-bottom: 4px;
 
   :deep(.t-tabs__nav-item) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   :deep(.t-tabs__operations) {
@@ -5476,7 +5476,7 @@ const handleSave = async () => {
   gap: 12px;
   padding: 4px 0 2px;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
 
   &::before,
@@ -5507,9 +5507,9 @@ const handleSave = async () => {
   height: 20px;
   display: inline-flex;
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
 }
@@ -5529,7 +5529,7 @@ const handleSave = async () => {
   margin-bottom: 12px;
   padding: 12px 14px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
 }
 
@@ -5551,15 +5551,15 @@ const handleSave = async () => {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-container);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   border: 1px solid var(--td-component-stroke);
 
   .t-icon {
     color: var(--td-text-color-secondary);
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .tools-status-metric {
@@ -5568,7 +5568,7 @@ const handleSave = async () => {
     gap: 4px;
 
     strong {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
@@ -5618,7 +5618,7 @@ const handleSave = async () => {
   }
 
   .tool-group-title {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     color: var(--td-text-color-primary);
     letter-spacing: 0.2px;
@@ -5627,10 +5627,10 @@ const handleSave = async () => {
   .tool-group-count {
     min-width: 20px;
     padding: 0 6px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     text-align: center;
     line-height: 18px;
   }
@@ -5641,14 +5641,14 @@ const handleSave = async () => {
     align-items: center;
     gap: 4px;
     padding: 2px 8px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-warning-color);
     background: var(--td-warning-color-1);
     border: 1px solid var(--td-warning-color-light);
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
 
     .t-icon {
-      font-size: 13px;
+      font-size: var(--app-text-md);
     }
   }
 }
@@ -5695,9 +5695,9 @@ const handleSave = async () => {
   margin: 0; // 清掉 TDesign checkbox 默认外边距
   padding: 12px 14px;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px solid var(--td-component-stroke);
-  transition: border-color .2s, background .2s;
+  transition: border-color var(--app-motion-base), background var(--app-motion-base);
   cursor: pointer;
   overflow: hidden;
 
@@ -5777,12 +5777,12 @@ const handleSave = async () => {
   color: var(--td-warning-color);
   background: transparent;
   border: 1px solid var(--td-warning-color-light);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   letter-spacing: 0.3px;
 }
 
 .tool-card-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
   display: -webkit-box;
@@ -5792,7 +5792,7 @@ const handleSave = async () => {
 }
 
 .tool-card-hint {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-warning-color);
   font-style: italic;
   line-height: 1.4;
@@ -5813,7 +5813,7 @@ const handleSave = async () => {
   gap: 6px;
   padding: 12px;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px dashed var(--td-component-stroke);
   min-height: 52px;
   align-items: flex-start;
@@ -5824,12 +5824,12 @@ const handleSave = async () => {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-brand-color);
   background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   border: 1px solid color-mix(in srgb, var(--td-brand-color) 22%, transparent);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   max-width: 100%;
 }
 
@@ -5838,7 +5838,7 @@ const handleSave = async () => {
 }
 
 .effective-chip-reason {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-warning-color);
   font-style: normal;
 
@@ -5860,7 +5860,7 @@ const handleSave = async () => {
 }
 
 .effective-tools-empty {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-style: italic;
 }
@@ -5898,7 +5898,7 @@ const handleSave = async () => {
 }
 
 .skill-pick-group__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   letter-spacing: 0.2px;
@@ -5907,10 +5907,10 @@ const handleSave = async () => {
 .skill-pick-group__count {
   min-width: 20px;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   text-align: center;
   line-height: 18px;
 }
@@ -5923,7 +5923,7 @@ const handleSave = async () => {
   padding: 8px 10px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .skill-pick--pending {
@@ -5973,7 +5973,7 @@ const handleSave = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -5983,7 +5983,7 @@ const handleSave = async () => {
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 
   .t-icon {
@@ -6006,7 +6006,7 @@ const handleSave = async () => {
   line-clamp: 2;
   margin: 2px 0 0;
   overflow: hidden;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.45;
   white-space: pre-line;
@@ -6019,7 +6019,7 @@ const handleSave = async () => {
   justify-content: center;
   padding: 2px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: help;
@@ -6042,14 +6042,14 @@ const handleSave = async () => {
 .hint-popover__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .hint-popover__text {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
@@ -6117,7 +6117,7 @@ const handleSave = async () => {
 
 .intent-active-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   line-height: 1.5;
 }
@@ -6126,7 +6126,7 @@ const handleSave = async () => {
 .system-prompt-textarea {
   width: 100%;
   font-family: var(--app-font-family-mono);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   :deep(textarea) {
     resize: vertical !important;
@@ -6140,7 +6140,7 @@ const handleSave = async () => {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   overflow-x: auto;
   white-space: nowrap;
@@ -6165,7 +6165,7 @@ const handleSave = async () => {
 
   .placeholder-hint {
     color: var(--td-text-color-placeholder);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     user-select: none;
     flex-shrink: 0;
   }
@@ -6176,11 +6176,11 @@ const handleSave = async () => {
     padding: 1px 5px;
     border-radius: 3px;
     font-family: var(--app-font-family-mono);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-primary);
     background-color: var(--td-bg-color-secondarycontainer);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--app-motion-base);
     user-select: none;
     border: 1px solid transparent;
     flex-shrink: 0;
@@ -6206,7 +6206,7 @@ const handleSave = async () => {
 .placeholder-popup {
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   max-width: 320px;
   max-height: 240px;
@@ -6217,8 +6217,8 @@ const handleSave = async () => {
 .placeholder-item {
   padding: 6px 10px;
   cursor: pointer;
-  transition: background-color 0.15s;
-  border-radius: 4px;
+  transition: background-color var(--app-motion-fast);
+  border-radius: var(--app-radius-xs);
 
   &:hover,
   &.active {
@@ -6233,13 +6233,13 @@ const handleSave = async () => {
       padding: 2px 5px;
       border-radius: 3px;
       font-family: var(--app-font-family-mono);
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       color: var(--td-brand-color);
     }
   }
 
   .placeholder-desc {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
   }
 }
@@ -6248,10 +6248,10 @@ const handleSave = async () => {
   display: inline-flex;
   align-items: center;
   color: var(--td-text-color-placeholder);
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   line-height: 1;
   cursor: help;
-  transition: color 0.2s;
+  transition: color var(--app-motion-base);
 
   &:hover,
   &:focus-visible {
@@ -6272,7 +6272,7 @@ const handleSave = async () => {
   justify-content: center;
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   flex-shrink: 0;
 
   &.normal {
@@ -6294,7 +6294,7 @@ const handleSave = async () => {
   margin-top: 12px;
 
   .prompt-toggle-label {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 }
@@ -6302,11 +6302,11 @@ const handleSave = async () => {
 // 提示词禁用提示
 .prompt-disabled-hint {
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-style: italic;
   padding: 12px 16px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 }
 
 // 系统提示词Tabs
@@ -6335,8 +6335,8 @@ const handleSave = async () => {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
-  font-size: 14px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-base);
 
   // Document KB
   &.doc-icon {
@@ -6356,17 +6356,17 @@ const handleSave = async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
 }
 
 .kb-option-org {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-secondarycontainer);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   max-width: 100px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6375,11 +6375,11 @@ const handleSave = async () => {
 
 .kb-option-disabled-hint {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-warning-color-6);
   background: var(--td-warning-color-1);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6389,7 +6389,7 @@ const handleSave = async () => {
 .agent-type-preset-desc {
   margin-top: 4px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 }
 
@@ -6401,16 +6401,16 @@ const handleSave = async () => {
 
 .kb-option-count {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-secondarycontainer);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .kb-option-tag {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 500;
   padding: 0 5px;
   border-radius: 3px;
@@ -6459,14 +6459,14 @@ const handleSave = async () => {
 }
 
 .agent-type-option-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
 }
 
 .agent-type-option-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.4;
   white-space: normal;

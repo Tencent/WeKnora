@@ -268,10 +268,10 @@ onUnmounted(() => {
   max-width: 800px;
   margin: 0 auto;
   background: var(--td-bg-color-container);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   border: 0.5px solid var(--td-component-border);
   box-shadow: 0 6px 6px rgba(0, 0, 0, 0.04), 0 12px 12px -1px rgba(0, 0, 0, 0.08);
-  transition: border-color 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease;
 
   &:focus-within {
     border-color: var(--embed-primary, var(--td-brand-color));
@@ -299,7 +299,7 @@ onUnmounted(() => {
       box-shadow: none;
       background: transparent;
       padding: 14px 16px 52px;
-      font-size: 14px;
+      font-size: var(--app-text-base);
       line-height: 1.5;
       resize: none;
     }
@@ -348,9 +348,9 @@ onUnmounted(() => {
   gap: 6px;
   max-width: 220px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 
   &__name {
     overflow: hidden;
@@ -371,7 +371,7 @@ onUnmounted(() => {
   position: relative;
   width: 56px;
   height: 56px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   border: 1px solid var(--td-component-border);
 
@@ -406,11 +406,11 @@ onUnmounted(() => {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   color: var(--td-text-color-secondary);
   background: transparent;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -431,10 +431,10 @@ onUnmounted(() => {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   background: var(--embed-primary, var(--td-brand-color));
-  transition: background 0.15s ease, opacity 0.15s ease;
+  transition: background var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
 
   &:hover:not(.disabled) {
     filter: brightness(0.94);
@@ -459,7 +459,7 @@ onUnmounted(() => {
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);

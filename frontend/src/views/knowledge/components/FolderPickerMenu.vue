@@ -250,7 +250,7 @@ const commitNewFolder = async () => {
   margin-bottom: 2px;
   border-bottom: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   cursor: pointer;
 
   &:hover {
@@ -280,11 +280,11 @@ const commitNewFolder = async () => {
   height: 30px;
   box-sizing: border-box;
   padding: 0 8px 0 calc(var(--folder-picker-depth, 0) * var(--folder-picker-indent) + 10px);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -320,7 +320,7 @@ const commitNewFolder = async () => {
 
 .folder-picker__icon {
   flex: 0 0 auto;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   color: var(--td-text-color-placeholder);
 }
 
@@ -342,13 +342,13 @@ const commitNewFolder = async () => {
   margin-right: -2px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   opacity: 0;
   pointer-events: none;
   cursor: pointer;
-  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -358,7 +358,7 @@ const commitNewFolder = async () => {
 
 .folder-picker__current {
   flex: 0 0 auto;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
 }
 
@@ -368,11 +368,11 @@ const commitNewFolder = async () => {
   height: 24px;
   padding: 0 6px;
   border: 1px solid var(--td-brand-color);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   outline: none;
 }
 </style>

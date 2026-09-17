@@ -20,7 +20,7 @@
 
   .share-panel-title {
     margin: 0;
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     line-height: 1.35;
     color: var(--td-text-color-primary);
@@ -28,7 +28,7 @@
 
   .share-panel-desc {
     margin: 8px 0 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -44,12 +44,12 @@
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   line-height: 0;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   :deep(.t-icon) {
     display: block;
@@ -89,7 +89,7 @@
 }
 
 .share-panel-list-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -101,10 +101,10 @@
   min-width: 22px;
   height: 20px;
   padding: 0 7px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   line-height: 1;
 }
@@ -136,7 +136,7 @@
   align-items: center;
   gap: 8px;
   padding: 20px 0 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
 }
 
@@ -146,13 +146,13 @@
 
 .share-panel-table-shell {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-container);
 
   :deep(thead th) {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-table td),
@@ -173,7 +173,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     min-width: 0;
@@ -186,7 +186,7 @@
   }
 
   .share-space-meta {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 

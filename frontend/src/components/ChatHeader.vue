@@ -360,7 +360,7 @@ function handleMenuClick(data: { value: string }): void {
   max-width: min(280px, calc(100% - 24px));
   min-width: 0;
   padding: 2px 2px 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-sizing: border-box;
   background: color-mix(in srgb, var(--td-bg-color-container) 88%, transparent);
   backdrop-filter: blur(8px);
@@ -390,7 +390,7 @@ function handleMenuClick(data: { value: string }): void {
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
       box-sizing: border-box;
-      transition: border-color 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+      transition: border-color var(--app-motion-slow) cubic-bezier(0.22, 0.61, 0.36, 1);
 
       &.is-editing {
         max-width: none;
@@ -415,7 +415,7 @@ function handleMenuClick(data: { value: string }): void {
   border-radius: 5px;
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 26px;
   outline: none;
   box-sizing: border-box;
@@ -434,7 +434,7 @@ function handleMenuClick(data: { value: string }): void {
   margin: 0;
   padding: 0;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   line-height: 20px;
   cursor: default;
@@ -465,7 +465,7 @@ function handleMenuClick(data: { value: string }): void {
   color: var(--td-text-color-placeholder);
   background: transparent;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover:not(:disabled) {
     color: var(--td-text-color-primary);
@@ -501,7 +501,7 @@ function handleMenuClick(data: { value: string }): void {
     margin-top: 2px !important;
     min-width: 168px !important;
     width: max-content !important;
-    border-radius: 8px !important;
+    border-radius: var(--app-radius-md) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -534,14 +534,14 @@ function handleMenuClick(data: { value: string }): void {
 .chat-header-confirm__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   line-height: 20px;
 }
 
 .chat-header-confirm__body {
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.5;
   word-break: break-word;
 }
@@ -558,13 +558,13 @@ function handleMenuClick(data: { value: string }): void {
   height: 30px;
   padding: 0 12px;
   border: 0.5px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 28px;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease;
 
   &:hover:not(:disabled) {
     background: var(--td-bg-color-container-hover);
@@ -597,7 +597,7 @@ function handleMenuClick(data: { value: string }): void {
   border-radius: 5px;
   color: var(--td-text-color-primary);
   background: transparent;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 20px;
   text-align: left;
   white-space: nowrap;
@@ -623,7 +623,7 @@ function handleMenuClick(data: { value: string }): void {
 
 .chat-header-menu__icon {
   flex: 0 0 auto;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   color: var(--td-text-color-secondary);
 }
 

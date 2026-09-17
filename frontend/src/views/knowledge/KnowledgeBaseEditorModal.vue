@@ -1620,7 +1620,7 @@ watch(() => chatResources.allModels, (list) => {
   .section-title {
     margin: 0 0 6px 0;
     font-family: var(--app-font-family);
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -1628,7 +1628,7 @@ watch(() => chatResources.allModels, (list) => {
   .section-desc {
     margin: 0;
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     line-height: 22px;
   }
@@ -1650,7 +1650,7 @@ watch(() => chatResources.allModels, (list) => {
   display: block;
   margin-bottom: 8px;
   font-family: var(--app-font-family);
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 500;
   color: var(--td-text-color-primary);
 
@@ -1663,7 +1663,7 @@ watch(() => chatResources.allModels, (list) => {
 
 .form-tip {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -1677,7 +1677,7 @@ watch(() => chatResources.allModels, (list) => {
   padding: 6px 8px 6px 12px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 
   .kb-id-value {
     flex: 1;
@@ -1687,7 +1687,7 @@ watch(() => chatResources.allModels, (list) => {
     background: none;
     border: none;
     font-family: var(--app-font-family-mono);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -1730,11 +1730,11 @@ watch(() => chatResources.allModels, (list) => {
   gap: 6px;
   padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   cursor: pointer;
   user-select: none;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, background var(--app-motion-base) ease;
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -1786,7 +1786,7 @@ watch(() => chatResources.allModels, (list) => {
   padding: 0 6px;
   height: 16px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 600;
   line-height: 1;
   letter-spacing: 0.4px;
@@ -1797,7 +1797,7 @@ watch(() => chatResources.allModels, (list) => {
 .indexing-check-desc {
   margin: 0;
   padding-left: 24px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-text-color-placeholder);
 }
@@ -1805,10 +1805,10 @@ watch(() => chatResources.allModels, (list) => {
 .faq-guide {
   margin-top: 20px;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 20px;
 }
 
@@ -1821,14 +1821,14 @@ watch(() => chatResources.allModels, (list) => {
     margin-bottom: 20px;
 
     h2 {
-      font-size: 20px;
+      font-size: var(--app-text-3xl);
       font-weight: 600;
       color: var(--td-text-color-primary);
       margin: 0 0 6px 0;
     }
 
     .section-description {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.5;
@@ -1858,7 +1858,7 @@ watch(() => chatResources.allModels, (list) => {
     padding-right: 24px;
 
     label {
-      font-size: 15px;
+      font-size: var(--app-text-lg);
       font-weight: 500;
       color: var(--td-text-color-primary);
       display: block;
@@ -1866,7 +1866,7 @@ watch(() => chatResources.allModels, (list) => {
     }
 
     .desc {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.5;

@@ -470,13 +470,13 @@ onUnmounted(() => {
     justify-content: center;
     background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
 }
 
 .artifact-drawer-header-title {
     min-width: 0;
     flex: 1;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 1.4;
     color: var(--td-text-color-primary);
@@ -501,7 +501,7 @@ onUnmounted(() => {
     gap: 8px;
     padding: 48px 16px;
     color: var(--td-text-color-placeholder);
-    font-size: 13px;
+    font-size: var(--app-text-md);
 }
 
 .artifact-list {
@@ -516,7 +516,7 @@ onUnmounted(() => {
     gap: 10px;
     padding: 10px 4px;
     border-bottom: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
 
     &:last-child {
         border-bottom: none;
@@ -539,14 +539,14 @@ onUnmounted(() => {
     flex-shrink: 0;
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 }
 
 .artifact-body {
@@ -555,7 +555,7 @@ onUnmounted(() => {
 }
 
 .artifact-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     letter-spacing: 0.01em;
     line-height: 1.35;
@@ -567,7 +567,7 @@ onUnmounted(() => {
 
 .artifact-meta {
     margin-top: 2px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.3;
     color: var(--td-text-color-placeholder);
     display: flex;
@@ -615,7 +615,7 @@ onUnmounted(() => {
     border-radius: 1px;
     background: var(--td-component-border);
     opacity: 0.55;
-    transition: opacity 0.15s ease, background 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 }
 
 .artifact-preview-resize-handle:hover .artifact-preview-resize-line,

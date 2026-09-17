@@ -316,7 +316,7 @@ const handleFontSizeChange = (val: FontSizeKey) => {
   border-radius: var(--td-radius-medium);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.4;
   text-align: left;
   box-sizing: border-box;

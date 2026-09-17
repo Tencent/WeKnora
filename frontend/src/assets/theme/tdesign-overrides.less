@@ -1,0 +1,22 @@
+// 对 TDesign 组件的全局意图覆盖。组件内只做局部微调，不要在 scoped 样式里用 !important 和 TDesign 打架。
+
+// 悬浮面板皮肤：给 t-popup / t-select 等的 overlayClassName 加上 `wk-popover` 即可。
+// 用两级选择器压过 TDesign 默认的 .t-popup__content，不需要 !important。
+.wk-popover .t-popup__content {
+  padding: 0;
+  border-radius: var(--app-radius-xl);
+  background: var(--td-bg-color-container);
+  border: 0.5px solid var(--td-component-stroke);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.03),
+    0 2px 4px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  overflow: hidden;
+}
+
+:root[theme-mode="dark"] .wk-popover .t-popup__content {
+  background: rgba(36, 36, 36, 0.92);
+  border-color: rgba(255, 255, 255, 0.08);
+}

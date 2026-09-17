@@ -45,7 +45,7 @@
     padding: 4px !important;
     margin-top: 4px !important;
     min-width: 148px;
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -74,19 +74,19 @@
   gap: 10px;
   padding: 8px 12px;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+  transition: all var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1);
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   position: relative;
 
   .menu-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     flex-shrink: 0;
     color: var(--td-text-color-secondary);
-    transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+    transition: all var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1);
   }
 
   &:hover {
@@ -149,7 +149,7 @@
     margin-top: 4px !important;
     min-width: 148px;
     width: auto;
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -186,9 +186,9 @@
     padding: 8px 12px;
     cursor: pointer;
     color: var(--td-text-color-primary);
-    transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
-    border-radius: 6px;
-    font-size: 14px;
+    transition: all var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1);
+    border-radius: var(--app-radius-sm);
+    font-size: var(--app-text-base);
     line-height: 20px;
 
     &:hover {
@@ -201,9 +201,9 @@
     }
 
     .icon {
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       color: var(--td-text-color-secondary);
-      transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+      transition: all var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1);
     }
 
     &:hover .icon {
@@ -249,7 +249,7 @@
     align-items: center;
     gap: 6px;
     padding: 8px 12px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     border-bottom: 1px solid var(--td-component-stroke);
@@ -269,7 +269,7 @@
 
   .move-menu-empty {
     padding: 12px 16px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     text-align: center;
     line-height: 1.5;
@@ -283,7 +283,7 @@
   }
 
   .move-target-count {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 
@@ -296,8 +296,8 @@
       gap: 6px;
       padding: 6px 8px;
       background: var(--td-bg-color-container-hover);
-      border-radius: 6px;
-      font-size: 13px;
+      border-radius: var(--app-radius-sm);
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
       margin-bottom: 8px;
     }
@@ -307,7 +307,7 @@
       align-items: flex-start;
       gap: 6px;
       padding: 6px 8px;
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
       cursor: pointer;
       margin-bottom: 4px;
 
@@ -325,13 +325,13 @@
         gap: 2px;
 
         .move-mode-label {
-          font-size: 13px;
+          font-size: var(--app-text-md);
           font-weight: 500;
           color: var(--td-text-color-primary);
         }
 
         .move-mode-desc {
-          font-size: 11px;
+          font-size: var(--app-text-xs);
           color: var(--td-text-color-placeholder);
           line-height: 1.4;
         }
@@ -368,7 +368,7 @@
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
-    transition: scrollbar-color 0.2s ease;
+    transition: scrollbar-color var(--app-motion-base) ease;
 
     &::-webkit-scrollbar {
       width: 6px;
@@ -381,8 +381,8 @@
     &::-webkit-scrollbar-thumb {
       background-color: transparent;
       border: none;
-      border-radius: 6px;
-      transition: background-color 0.2s ease;
+      border-radius: var(--app-radius-sm);
+      transition: background-color var(--app-motion-base) ease;
     }
 
     &:hover {
@@ -400,10 +400,10 @@
 
   .t-dropdown__item {
     padding: 8px 12px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     margin: 1px 0;
-    transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
-    font-size: 14px;
+    transition: all var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1);
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     cursor: pointer;
     min-width: auto !important;
@@ -429,10 +429,10 @@
       color: var(--td-text-color-secondary);
       display: flex;
       align-items: center;
-      transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+      transition: all var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1);
 
       .t-icon {
-        font-size: 16px;
+        font-size: var(--app-text-xl);
       }
     }
 
@@ -442,7 +442,7 @@
 
     .t-dropdown__item-text {
       color: inherit !important;
-      font-size: 14px !important;
+      font-size: var(--app-text-base) !important;
       line-height: 20px !important;
       white-space: nowrap !important;
       overflow: hidden !important;
@@ -496,7 +496,7 @@
     padding: 4px !important;
     margin-top: 4px !important;
     min-width: 120px;
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -517,7 +517,7 @@
   .t-popup__content {
     padding: 4px !important;
     margin-top: 4px !important;
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -545,12 +545,12 @@
     align-items: center;
     gap: 6px;
     padding: 6px 8px;
-    border-radius: 6px;
-    font-size: 13px;
+    border-radius: var(--app-radius-sm);
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     cursor: pointer;
     line-height: 1.2;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--app-motion-fast) ease;
 
     &:hover {
       background: var(--td-bg-color-container-hover);
@@ -563,7 +563,7 @@
   }
 
   .tag-popup-check {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-brand-color);
     visibility: hidden;
     flex-shrink: 0;
@@ -619,7 +619,7 @@
     padding: 14px 16px !important;
     min-width: 300px;
     max-width: min(392px, calc(100vw - 24px));
-    border-radius: 12px !important;
+    border-radius: var(--app-radius-xl) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -636,7 +636,7 @@
 }
 
 .anchored-form-popup-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 12px;
@@ -646,7 +646,7 @@
 .anchored-form-popup-body {
   padding: 0 0 4px;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.6;
   word-break: break-word;
 }
@@ -663,7 +663,7 @@
   padding: 14px 16px;
   min-width: 300px;
   max-width: min(392px, calc(100vw - 24px));
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   background: var(--td-bg-color-container);
   border: 0.5px solid var(--td-component-stroke);
   box-shadow:

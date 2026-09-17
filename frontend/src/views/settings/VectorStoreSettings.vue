@@ -779,7 +779,7 @@ onMounted(async () => {
 }
 
 .list-section-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 16px 0;
@@ -833,14 +833,14 @@ onMounted(async () => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -919,7 +919,7 @@ onMounted(async () => {
 .store-card__pill {
   flex-shrink: 0;
   padding: 1px 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 16px;
   border-radius: 3px;
@@ -951,7 +951,7 @@ onMounted(async () => {
 
 .store-card__endpoint {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -965,7 +965,7 @@ onMounted(async () => {
   text-align: center;
 
   :deep(.t-empty__description) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
   }
@@ -979,7 +979,7 @@ onMounted(async () => {
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -995,7 +995,7 @@ onMounted(async () => {
 
 .form-desc {
   margin: 4px 0 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 
@@ -1009,7 +1009,7 @@ onMounted(async () => {
 :deep(.t-select),
 :deep(.t-textarea) {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 // 隐藏 t-form 默认 form-item 容器 — 走自定义 .form-item / .form-label
@@ -1028,7 +1028,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   flex-wrap: wrap;
@@ -1036,7 +1036,7 @@ onMounted(async () => {
   white-space: pre-line;
 
   &__icon {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
   }
@@ -1057,7 +1057,7 @@ onMounted(async () => {
 .readonly-fields {
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .readonly-row {
@@ -1065,7 +1065,7 @@ onMounted(async () => {
   align-items: baseline;
   gap: 8px;
   padding: 4px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   border-bottom: 1px solid var(--td-component-stroke);
 
@@ -1074,14 +1074,14 @@ onMounted(async () => {
 
 .readonly-label {
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   white-space: nowrap;
   min-width: 80px;
 }
 
 .readonly-value {
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   word-break: break-all;
 }
@@ -1092,7 +1092,7 @@ onMounted(async () => {
   align-items: center;
   gap: 4px;
   padding: 4px 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   background: transparent;
   border: none;
@@ -1103,7 +1103,7 @@ onMounted(async () => {
 
   &:hover { color: var(--td-brand-color); }
 
-  .t-icon { font-size: 14px; }
+  .t-icon { font-size: var(--app-text-base); }
 }
 
 // ---- Number input：去原生 spinner（与 MCP 高级配置同款）----
@@ -1145,14 +1145,14 @@ onMounted(async () => {
 }
 
 .header-icon__text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 
 // ---- footer-left 测试按钮的状态 icon ----
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 
   &.available { color: var(--td-brand-color); }

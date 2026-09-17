@@ -111,6 +111,6 @@ watch(
 }
 
 .link-icon {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 </style>

@@ -538,13 +538,13 @@ onBeforeUnmount(() => {
     max-height: 300px;
     width: auto;
     height: auto;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     display: block;
     cursor: pointer;
     object-fit: contain;
     margin: 8px 0 8px 16px;
     border: 0.5px solid var(--td-component-stroke);
-    transition: transform 0.2s ease;
+    transition: transform var(--app-motion-base) ease;
 
     &:hover {
         transform: scale(1.02);
@@ -553,9 +553,9 @@ onBeforeUnmount(() => {
 
 .bot_msg {
     // background: var(--td-bg-color-container);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     color: var(--td-text-color-primary);
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     // padding: 10px 12px;
     margin-right: auto;
     width: 100%;
@@ -579,10 +579,10 @@ onBeforeUnmount(() => {
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     gap: 4px;
     margin-left: 16px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
 }
 
 :deep(.t-loading__gradient-conic) {

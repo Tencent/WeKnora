@@ -435,7 +435,7 @@ watch(
 
   &__title {
     margin: 0 0 8px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-secondary);
   }
@@ -451,12 +451,12 @@ watch(
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--td-component-stroke);
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     background: var(--td-bg-color-container);
     text-align: left;
     cursor: pointer;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+    transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
     &:hover {
       border-color: color-mix(in srgb, var(--td-text-color-primary) 10%, var(--td-component-stroke));
@@ -475,7 +475,7 @@ watch(
   }
 
   &__text {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.45;
     color: var(--td-text-color-primary);
   }
@@ -491,7 +491,7 @@ watch(
     margin: 0;
     max-width: min(88%, 520px);
     padding: 10px 14px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.55;
     color: var(--td-text-color-primary);
     white-space: pre-wrap;
@@ -572,7 +572,7 @@ watch(
 
 .sk-line {
   height: 14px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: linear-gradient(90deg, #f0f0f0 25%, #e6e6e6 50%, #f0f0f0 75%);
   background-size: 200% 100%;
   animation: sk-shimmer 1.2s ease-in-out infinite;
@@ -607,7 +607,7 @@ watch(
 
 .scroll-btn-fade-enter-active,
 .scroll-btn-fade-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition: opacity var(--app-motion-base) ease, transform var(--app-motion-base) ease;
 }
 
 .scroll-btn-fade-enter-from,

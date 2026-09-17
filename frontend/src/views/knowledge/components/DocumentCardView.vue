@@ -716,12 +716,12 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-border);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   background: var(--td-bg-color-container);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background-color var(--app-motion-base) ease;
 
   &:hover {
     border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
@@ -756,7 +756,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 .folder-card__title {
   flex: 1;
   min-height: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   line-height: 20px;
   max-height: 40px;
@@ -772,7 +772,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   flex-shrink: 0;
   padding: 8px 14px;
   border-top: 1px solid var(--td-component-stroke);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 }
@@ -783,14 +783,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   flex-direction: column;
   border: 1px solid var(--td-component-border);
   height: 136px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background-color var(--app-motion-base) ease;
 
   &:hover {
     border-color: color-mix(in srgb, var(--td-component-stroke) 55%, var(--td-brand-color));
@@ -836,14 +836,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   .card-analyze-loading {
     display: block;
     color: var(--td-brand-color);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     margin-top: 2px;
   }
 
   .card-analyze-txt {
     color: var(--td-brand-color);
     font-family: var(--app-font-family);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     margin-left: 8px;
   }
 
@@ -871,9 +871,9 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     color: var(--td-brand-color);
     cursor: pointer;
     line-height: 1;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
 
-    :deep(.t-icon) { font-size: 14px; }
+    :deep(.t-icon) { font-size: var(--app-text-base); }
     &:hover { background: var(--td-bg-color-component-hover); }
   }
 
@@ -900,7 +900,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     white-space: nowrap;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     letter-spacing: 0.01em;
     margin-right: 8px;
@@ -932,7 +932,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     overflow: hidden;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 400;
     line-height: 19px;
   }
@@ -955,7 +955,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     flex-shrink: 0;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 400;
     white-space: nowrap;
   }
@@ -971,9 +971,9 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     background: transparent;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     cursor: pointer;
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 
     &:hover {
       color: var(--td-brand-color);
@@ -988,7 +988,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 
     .t-icon {
       flex: 0 0 auto;
-      font-size: 13px;
+      font-size: var(--app-text-md);
     }
   }
 
@@ -996,7 +996,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     flex-shrink: 0;
     color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 500;
     padding: 0;
     background: transparent;
@@ -1025,7 +1025,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
 
 .card-draft-tip {
   color: var(--td-warning-color);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 // --- Tag selector ---
@@ -1048,13 +1048,13 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     height: 18px;
     min-width: 18px;
     padding: 0 5px;
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     border: 1px solid var(--td-component-stroke);
     color: var(--td-text-color-placeholder);
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     line-height: 1;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
 
     &:hover {
       border-color: var(--td-brand-color);
@@ -1068,12 +1068,12 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     max-width: 120px;
     height: 18px;
     line-height: 18px;
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     border-color: var(--td-component-stroke);
     color: var(--td-text-color-secondary);
     padding: 0 6px;
     background: transparent;
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
 
     &:hover {
       border-color: var(--td-brand-color);
@@ -1089,7 +1089,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     text-overflow: ellipsis;
     white-space: nowrap;
     vertical-align: middle;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
   }
 
   .card-tag-add {
@@ -1098,14 +1098,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     gap: 2px;
     height: 18px;
     padding: 0 6px;
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     border: 1px dashed var(--td-component-stroke);
     color: var(--td-text-color-placeholder);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
 
-    .t-icon { font-size: 12px; }
+    .t-icon { font-size: var(--app-text-sm); }
 
     &:hover {
       border-color: var(--td-brand-color);
@@ -1126,10 +1126,10 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   padding: 12px 14px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   font-family: var(--app-font-family);
-  transition: opacity 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease;
   will-change: transform;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
@@ -1137,7 +1137,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   -webkit-transform: translateZ(0);
 
   .card-popover-title {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin-bottom: 8px;
@@ -1147,7 +1147,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   }
 
   .card-popover-status {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     margin-bottom: 6px;
     display: flex;
     align-items: center;
@@ -1159,7 +1159,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   }
 
   .card-popover-desc {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     line-height: 1.5;
     margin-bottom: 8px;
@@ -1171,7 +1171,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
   }
 
   .card-popover-source {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-brand-color);
     margin-bottom: 6px;
     display: flex;
@@ -1188,7 +1188,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     align-items: center;
     flex-wrap: wrap;
     gap: 10px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
     margin-bottom: 6px;
   }
@@ -1201,7 +1201,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
   }
 
@@ -1209,7 +1209,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     padding: 1px 6px;
     background: var(--td-warning-color-light);
     color: var(--td-warning-color);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 
   .card-popover-tags {
@@ -1224,7 +1224,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     max-width: 120px;
     height: 18px;
     line-height: 18px;
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     border-color: var(--td-component-stroke);
     color: var(--td-text-color-secondary);
     padding: 0 6px;
@@ -1237,7 +1237,7 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
       text-overflow: ellipsis;
       white-space: nowrap;
       vertical-align: middle;
-      font-size: 11px;
+      font-size: var(--app-text-xs);
     }
   }
 
@@ -1245,14 +1245,14 @@ const handleAction = (action: 'download' | 'edit' | 'view-trace' | 'reparse' | '
     padding: 1px 6px;
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 
   .card-popover-hint {
     margin-top: 8px;
     padding-top: 8px;
     border-top: 1px solid var(--td-component-stroke);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
   }
 }

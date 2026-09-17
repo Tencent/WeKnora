@@ -29,7 +29,7 @@ test('mention button matches icon controls and the stream artifact count badge',
   assert.match(count, /right: -2px/)
   assert.match(count, /min-width: 14px/)
   assert.match(count, /height: 14px/)
-  assert.match(count, /font-size: 10px/)
+  assert.match(count, /font-size: (?:10px|var\(--app-text-2xs\))/)
   assert.match(count, /border-radius: 7px/)
   assert.match(count, /font-variant-numeric: tabular-nums/)
   assert.doesNotMatch(count, /border: 2px solid/)

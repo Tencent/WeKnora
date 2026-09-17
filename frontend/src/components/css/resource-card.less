@@ -24,12 +24,12 @@
   min-height: 136px;
   padding: 12px 14px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   overflow: hidden;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background var(--app-motion-base) ease;
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -91,7 +91,7 @@
     flex: 1;
     min-width: 0;
     color: var(--td-text-color-primary);
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 22px;
     letter-spacing: 0.01em;
@@ -120,11 +120,11 @@
     width: 28px;
     height: 28px;
     flex-shrink: 0;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     color: var(--td-text-color-placeholder);
     cursor: pointer;
     opacity: 0;
-    transition: background 0.2s ease, opacity 0.2s ease, color 0.2s ease;
+    transition: background var(--app-motion-base) ease, opacity var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
     &:hover,
     &.active-more {
@@ -176,7 +176,7 @@
     line-clamp: 2;
     overflow: hidden;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 400;
     line-height: 17px;
   }
@@ -192,7 +192,7 @@
 
   .card-time {
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 400;
   }
 
@@ -214,17 +214,17 @@
   padding: 0 5px;
   box-sizing: border-box;
   border-radius: 5px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   cursor: default;
-  transition: background 0.2s ease;
+  transition: background var(--app-motion-base) ease;
 
   .t-icon {
     flex-shrink: 0;
   }
 
   .badge-count {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 500;
     line-height: 1;
   }

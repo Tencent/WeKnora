@@ -692,7 +692,7 @@ onMounted(() => {
   padding: 40px 0;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .error-inline {
@@ -725,7 +725,7 @@ onMounted(() => {
   padding-right: 24px;
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -733,7 +733,7 @@ onMounted(() => {
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -746,7 +746,7 @@ onMounted(() => {
   min-width: 0;
 
   .info-value {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     text-align: right;
     /* anywhere 比 break-word 激进：连无空格的长串（"WorkspaceDefault..." 这种）
@@ -822,7 +822,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: 20px;
   padding: 16px 18px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-secondarycontainer);
   box-sizing: border-box;
@@ -836,7 +836,7 @@ onMounted(() => {
 }
 
 .leave-space-panel-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -845,7 +845,7 @@ onMounted(() => {
 
 .leave-space-panel-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
@@ -878,7 +878,7 @@ onMounted(() => {
   //   gap: 12px;
 
   .usage-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     min-width: 50px;

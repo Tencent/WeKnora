@@ -72,8 +72,8 @@ const displayName = computed(() => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   background: var(--td-bg-color-component);
   color: var(--td-text-color-primary);
@@ -100,12 +100,12 @@ const displayName = computed(() => {
 }
 
 .vs-badge-icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .vs-badge-engine {
   opacity: 0.7;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .vs-badge-warn-tag {

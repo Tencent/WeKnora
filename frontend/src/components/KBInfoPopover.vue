@@ -389,7 +389,7 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
   justify-content: center;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
   padding: 0;
 
   &:hover:not(:disabled) {
@@ -419,7 +419,7 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
   }
 
   :deep(.t-icon) {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 }
 
@@ -433,14 +433,14 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
   display: flex;
   flex-direction: column;
   padding: 12px 16px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   overflow: hidden;
 }
 
 .kb-info-card-header {
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   margin-bottom: 8px;
   padding-bottom: 8px;
@@ -477,7 +477,7 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
 }
 
 .kb-info-card-body .setting-drawer__section-title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 4px;
@@ -532,7 +532,7 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
 
 .kb-info-card-value-mono {
   font-family: var(--td-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 }
 
@@ -544,12 +544,12 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
   background: var(--td-bg-color-component);
   color: var(--td-text-color-secondary);
   font-family: var(--td-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.4;
 }
 
 .kb-info-card-hint {
   color: var(--td-text-color-placeholder);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 </style>

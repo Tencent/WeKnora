@@ -110,13 +110,13 @@ const handleSelect = (id: string): void => {
   gap: 8px;
   padding: 6px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   text-align: left;
 
   &:hover {
@@ -154,7 +154,7 @@ const handleSelect = (id: string): void => {
 .kb-switcher-empty {
   padding: 16px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 </style>

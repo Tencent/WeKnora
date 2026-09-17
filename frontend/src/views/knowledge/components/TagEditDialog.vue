@@ -154,7 +154,7 @@ function handleOpenManage() {
 .tag-edit-dialog {
   overflow: hidden;
   padding: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .tag-edit-dialog .t-dialog__header {
@@ -171,7 +171,7 @@ function handleOpenManage() {
   right: 16px;
   width: 28px;
   height: 28px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   color: var(--td-text-color-secondary);
   transition: background 0.18s ease;
 }
@@ -211,7 +211,7 @@ function handleOpenManage() {
 
 .tag-edit-title {
   color: var(--td-text-color-primary);
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 22px;
   letter-spacing: 0.2px;
@@ -222,7 +222,7 @@ function handleOpenManage() {
   min-width: 0;
   overflow: hidden;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 400;
   line-height: 18px;
   text-overflow: ellipsis;
@@ -253,7 +253,7 @@ function handleOpenManage() {
 }
 
 .tag-edit-body .setting-drawer__section-title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 4px;
@@ -288,13 +288,13 @@ function handleOpenManage() {
 .tag-edit-section-head :deep(.t-button) {
   height: auto;
   padding: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   flex-shrink: 0;
   border: none !important;
   background: transparent !important;
   box-shadow: none !important;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .tag-edit-section-head :deep(.tag-edit-manage-link.t-button:hover),
@@ -310,10 +310,10 @@ function handleOpenManage() {
 }
 
 .tag-edit-search-bar :deep(.t-input) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   background-color: var(--td-bg-color-secondarycontainer);
   border-color: transparent;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   box-shadow: none !important;
 }
 
@@ -350,11 +350,11 @@ function handleOpenManage() {
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 22px;
   text-align: center;
   cursor: pointer;
@@ -362,7 +362,7 @@ function handleOpenManage() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -390,7 +390,7 @@ function handleOpenManage() {
 .tag-edit-section-empty {
   margin: 0;
   min-height: 22px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 22px;
   color: var(--td-text-color-placeholder);
 }
@@ -407,11 +407,11 @@ function handleOpenManage() {
 }
 
 .tag-edit-create-row :deep(.t-input) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   background-color: transparent;
   border-style: dashed;
   border-color: var(--td-component-stroke);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   box-shadow: none !important;
 }
 
@@ -434,7 +434,7 @@ function handleOpenManage() {
 }
 
 .tag-edit-selected-count {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
 }

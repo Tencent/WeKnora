@@ -155,7 +155,7 @@ defineExpose({ start })
 
 .sandbox-desktop__overlay-text {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.6;
 }
 

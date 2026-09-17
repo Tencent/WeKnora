@@ -738,7 +738,7 @@ onMounted(loadAll)
   gap: 8px;
   padding: 48px 0;
   color: var(--td-text-color-placeholder);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .error-inline {
@@ -750,7 +750,7 @@ onMounted(loadAll)
   text-align: center;
 
   .empty-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     margin: 0;
   }
@@ -822,10 +822,10 @@ onMounted(loadAll)
   align-items: center;
   gap: 5px;
   padding: 1px 8px 1px 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   line-height: 16px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-secondarycontainer);
 
   &--on {
@@ -852,7 +852,7 @@ onMounted(loadAll)
 }
 
 .engine-card__desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   margin: 0;
   line-height: 1.5;
@@ -872,7 +872,7 @@ onMounted(loadAll)
 .form-label {
   display: block;
   margin-bottom: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   line-height: 1.4;
@@ -889,7 +889,7 @@ onMounted(loadAll)
 
 .form-desc {
   margin: 4px 0 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -900,14 +900,14 @@ onMounted(loadAll)
 :deep(.t-textarea),
 :deep(.t-input-number) {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 :deep(.t-checkbox) {
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   .t-checkbox__label {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
   }
 }
@@ -920,7 +920,7 @@ onMounted(loadAll)
   padding: 12px 14px;
   background: var(--td-bg-color-container-hover);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 
   .form-desc {
     margin-top: 0;
@@ -935,7 +935,7 @@ onMounted(loadAll)
 }
 
 .env-hint {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -952,11 +952,11 @@ onMounted(loadAll)
   align-items: center;
   height: 22px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-component);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   letter-spacing: 0.02em;
 }
@@ -968,14 +968,14 @@ onMounted(loadAll)
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   flex-wrap: wrap;
 }
 
 .inline-alert__icon {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
 }
@@ -1002,19 +1002,19 @@ onMounted(loadAll)
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color-active);
   }
 
   .t-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
@@ -1032,7 +1032,7 @@ onMounted(loadAll)
 
 // ---- footer-left 测试连接消息（与 ModelEditorDialog 同款） ----
 .footer-test-message {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   flex: 1;
   min-width: 0;
@@ -1050,7 +1050,7 @@ onMounted(loadAll)
 }
 
 .status-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
 
   &.available {
@@ -1067,36 +1067,36 @@ onMounted(loadAll)
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-brand-color);
   text-decoration: none;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color-active);
   }
 
   .link-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   // 副标题里的 inline 文档链接：与描述文字平铺一行，体量等同小字
   &--inline {
     margin-left: 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     vertical-align: baseline;
 
     .link-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 }
 
 // ---- Header 图标的首字母 monogram（per-engine 配色见非 scoped 块）----
 .header-icon__text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   letter-spacing: 0.02em;
 }

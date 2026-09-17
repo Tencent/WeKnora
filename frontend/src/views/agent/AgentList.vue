@@ -1624,8 +1624,8 @@ defineExpose({
   align-items: center;
   padding: 2px 6px;
   background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   color: var(--td-brand-color);
   margin-left: 6px;
 }
@@ -1653,7 +1653,7 @@ defineExpose({
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 32px;
   }
@@ -1663,7 +1663,7 @@ defineExpose({
   margin: 0;
   color: var(--td-text-color-placeholder);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
 }
@@ -1678,11 +1678,11 @@ defineExpose({
   justify-content: center;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
-  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  transition: background var(--app-motion-base), border-color var(--app-motion-base), color var(--app-motion-base);
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -1719,9 +1719,9 @@ defineExpose({
     cursor: pointer;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
-    transition: color 0.2s;
+    transition: color var(--app-motion-base);
 
     &:hover {
       color: var(--td-text-color-primary);
@@ -1745,7 +1745,7 @@ defineExpose({
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container-hover);
   flex-shrink: 0;
 }
@@ -1759,7 +1759,7 @@ defineExpose({
 .org-source-text {
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -1769,11 +1769,11 @@ defineExpose({
   align-items: center;
   gap: 3px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container-hover);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -1801,7 +1801,7 @@ defineExpose({
   padding: 6px 4px 6px 0;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 20px;
   cursor: pointer;
@@ -1823,7 +1823,7 @@ defineExpose({
   .agent-section-toggle {
     margin-left: 4px;
     opacity: 0.7;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease;
   }
 
   // 共享给我的两个子分组：主图标 usergroup-add 表达"共享"语义，
@@ -1837,10 +1837,10 @@ defineExpose({
   .agent-section-count {
     margin-left: 2px;
     padding: 0 6px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 16px;
     font-weight: 500;
   }
@@ -1885,11 +1885,11 @@ defineExpose({
     justify-content: center;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     color: var(--td-text-color-secondary);
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     &:hover {
       background: var(--td-bg-color-secondarycontainer);
@@ -1946,13 +1946,13 @@ defineExpose({
   .builtin-avatar {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
   }
 
   .edit-btn {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
   }
 }
 
@@ -1982,11 +1982,11 @@ defineExpose({
   align-items: center;
   gap: 3px;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container-hover);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -1997,11 +1997,11 @@ defineExpose({
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   flex-shrink: 0;
 
   &.agent-emoji {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     line-height: 1;
     background: var(--td-bg-color-container-hover);
   }
@@ -2023,10 +2023,10 @@ defineExpose({
   height: 32px;
   justify-content: center;
   align-items: center;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   color: var(--td-text-color-disabled);
 
   &:hover {
@@ -2177,7 +2177,7 @@ defineExpose({
 
 .shared-detail-drawer-title {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -2186,14 +2186,14 @@ defineExpose({
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -2217,7 +2217,7 @@ defineExpose({
 }
 
 .shared-detail-drawer-body .shared-detail-section-title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 20px 0 12px 0;
@@ -2226,13 +2226,13 @@ defineExpose({
 }
 
 .shared-detail-drawer-body .shared-detail-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
 
 .shared-detail-drawer-body .shared-detail-value {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
   line-height: 1.5;
   word-break: break-word;

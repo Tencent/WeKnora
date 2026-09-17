@@ -66,7 +66,7 @@ test('follow-up loading is shown compactly inside both answer toolbars', () => {
   assert.match(botMessage, /transition name="follow-up-toolbar-loading"/)
   assert.match(agentStream, /transition name="follow-up-toolbar-loading"/)
   assert.match(sharedStyles, /border-left: 1px solid/)
-  assert.match(sharedStyles, /font-size: 12px/)
+  assert.match(sharedStyles, /font-size: (?:12px|var\(--app-text-sm\))/)
   assert.match(sharedStyles, /followUpToolbarShimmer 1\.5s linear infinite/)
   assert.match(sharedStyles, /background-clip: text/)
   assert.match(sharedStyles, /follow-up-toolbar-loading-leave-to/)

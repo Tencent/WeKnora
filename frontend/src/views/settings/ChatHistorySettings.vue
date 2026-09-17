@@ -242,7 +242,7 @@ onMounted(async () => {
 }
 
 .stats-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 16px 0;
@@ -256,7 +256,7 @@ onMounted(async () => {
 
 .stat-card {
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   padding: 20px;
   text-align: center;
 }
@@ -269,26 +269,26 @@ onMounted(async () => {
 }
 
 .stat-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
 }
 
 .stats-empty {
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   padding: 24px;
   text-align: center;
 }
 
 .stats-empty-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   margin: 0 0 4px 0;
 }
 
 .stats-empty-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   margin: 0;
 }

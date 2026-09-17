@@ -312,7 +312,7 @@ onMounted(loadConfig)
   gap: 10px;
   padding: 14px 16px;
   margin-bottom: 8px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -324,14 +324,14 @@ onMounted(loadConfig)
 
 .intro-title {
   margin: 0 0 4px 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .intro-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.6;
   color: var(--td-text-color-secondary);
 }

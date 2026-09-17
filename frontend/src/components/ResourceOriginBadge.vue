@@ -130,8 +130,8 @@ const tooltipText = computed(() => {
   align-items: center;
   gap: 3px;
   padding: 1px 6px;
-  border-radius: 8px;
-  font-size: 11px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-xs);
   line-height: 1.4;
   font-weight: 500;
   max-width: 140px;

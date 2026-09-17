@@ -299,7 +299,7 @@ function startResize(event: MouseEvent) {
     bottom: 0;
     width: 1px;
     background: transparent;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--app-motion-fast) ease;
   }
 
   &:hover::after,
@@ -314,13 +314,13 @@ function startResize(event: MouseEvent) {
   color: var(--td-text-color-secondary);
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: color-mix(in srgb, var(--td-text-color-primary) 8%, var(--td-bg-color-secondarycontainer));
@@ -351,13 +351,13 @@ function startResize(event: MouseEvent) {
   gap: 6px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-text-color-primary);
@@ -380,10 +380,10 @@ function startResize(event: MouseEvent) {
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 16px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -417,7 +417,7 @@ function startResize(event: MouseEvent) {
   justify-content: center;
   gap: 10px;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   p {
     margin: 0;

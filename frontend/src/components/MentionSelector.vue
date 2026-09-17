@@ -622,7 +622,7 @@ const scrollToItem = (index: number) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 }
 
 .mention-group-entry:hover,
@@ -639,7 +639,7 @@ const scrollToItem = (index: number) => {
   align-items: center;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 }
 
 .mention-group-entry__label,
@@ -658,7 +658,7 @@ const scrollToItem = (index: number) => {
   flex-shrink: 0;
   min-width: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-placeholder);
   font-size: var(--td-font-size-mark-small);
@@ -670,7 +670,7 @@ const scrollToItem = (index: number) => {
 .mention-group-entry__arrow {
   flex-shrink: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 }
 
 .mention-back-row {
@@ -714,7 +714,7 @@ const scrollToItem = (index: number) => {
   color: var(--td-text-color-primary);
   font-size: var(--td-font-size-body-medium);
   font-family: var(--app-font-family);
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 }
 
 .mention-item:hover {
@@ -740,7 +740,7 @@ const scrollToItem = (index: number) => {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 }
 
 /* 右下角组织角标：柔和小圆 + 绿色/灰色 icon，不刺眼 */
@@ -944,7 +944,7 @@ const scrollToItem = (index: number) => {
 }
 .mention-detail-content .detail-icon {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
   margin-right: 2px;
   display: inline-flex;
@@ -986,7 +986,7 @@ const scrollToItem = (index: number) => {
   cursor: pointer;
   text-decoration: underline;
   text-decoration-color: var(--td-text-color-placeholder);
-  transition: color 0.2s, text-decoration-color 0.2s;
+  transition: color var(--app-motion-base), text-decoration-color var(--app-motion-base);
 }
 .mention-detail-content .detail-value.clickable:hover {
   color: var(--td-brand-color);

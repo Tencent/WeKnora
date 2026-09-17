@@ -289,10 +289,10 @@ function handleGoToOrgSettings(orgId: string) {
   gap: 8px;
   padding: 12px;
   background: var(--td-bg-color-container-hover);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   margin-top: 8px;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   
   .t-icon {
@@ -341,8 +341,8 @@ function handleGoToOrgSettings(orgId: string) {
   padding: 14px 16px;
   background: var(--td-bg-color-container-hover);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  transition: background 0.2s, border-color 0.2s;
+  border-radius: var(--app-radius-md);
+  transition: background var(--app-motion-base), border-color var(--app-motion-base);
 }
 
 .share-item:hover {
@@ -371,9 +371,9 @@ function handleGoToOrgSettings(orgId: string) {
   height: auto;
   align-items: center;
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   margin: 1px 6px;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 }
 
 :deep(.t-select-option:hover),
@@ -414,7 +414,7 @@ function handleGoToOrgSettings(orgId: string) {
 
   .org-option-name {
     font-family: var(--app-font-family);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -428,7 +428,7 @@ function handleGoToOrgSettings(orgId: string) {
   align-items: center;
   gap: 6px;
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 
   .org-meta-tag {
@@ -437,7 +437,7 @@ function handleGoToOrgSettings(orgId: string) {
     gap: 3px;
     padding: 0px 4px;
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 
   .org-meta-icon {
@@ -447,7 +447,7 @@ function handleGoToOrgSettings(orgId: string) {
   }
 
   .org-meta-icon-user {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   .org-meta-icon-kb {
@@ -457,7 +457,7 @@ function handleGoToOrgSettings(orgId: string) {
   }
 
   .org-meta-icon-agent {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     opacity: 0.75;
   }
@@ -470,7 +470,7 @@ function handleGoToOrgSettings(orgId: string) {
   padding: 4px 0;
   max-height: 320px;
   overflow-y: auto;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   box-shadow: var(--td-shadow-2);
 }
 
@@ -478,7 +478,7 @@ function handleGoToOrgSettings(orgId: string) {
   height: auto;
   align-items: center;
   padding: 6px 12px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   margin: 1px 6px;
 }
 

@@ -631,8 +631,8 @@ onUnmounted(() => {
 /* 左侧导航栏：略紧凑于最初版，字号与留白适中 */
 .expand-icon {
   margin-left: 4px;
-  font-size: 14px;
-  transition: transform 0.2s ease;
+  font-size: var(--app-text-base);
+  transition: transform var(--app-motion-base) ease;
 }
 
 /* 子菜单 */
@@ -645,11 +645,11 @@ onUnmounted(() => {
 .submenu-item {
   padding: 5px 12px;
   margin-bottom: 2px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   cursor: pointer;
   color: var(--td-text-color-primary);
-  font-size: 13px;
-  transition: all 0.2s ease;
+  font-size: var(--app-text-md);
+  transition: all var(--app-motion-base) ease;
   user-select: none;
 
   &:hover {
@@ -671,7 +671,7 @@ onUnmounted(() => {
 /* 子菜单动画 */
 .submenu-enter-active,
 .submenu-leave-active {
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 }
 
 .submenu-enter-from {
@@ -754,13 +754,13 @@ onUnmounted(() => {
   }
 
   .role-denied-title {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   .role-denied-desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     max-width: 360px;
     line-height: 1.6;

@@ -370,7 +370,7 @@ watch(visible, (open) => {
 
 .chat-references-panel__title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   line-height: 1.4;
@@ -387,16 +387,16 @@ watch(visible, (open) => {
   color: var(--td-text-color-secondary);
   width: 36px;
   height: 36px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   :deep(.t-icon) {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
   }
 
   &:hover {
@@ -415,7 +415,7 @@ watch(visible, (open) => {
   padding: 24px 8px;
   text-align: center;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .chat-references-panel__section {
@@ -431,7 +431,7 @@ watch(visible, (open) => {
 .chat-references-panel__section-title {
   margin: 0 0 8px;
   padding: 0 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
   text-transform: uppercase;
@@ -439,8 +439,8 @@ watch(visible, (open) => {
 }
 
 .reference-item {
-  border-radius: 12px;
-  transition: background-color 0.15s ease;
+  border-radius: var(--app-radius-xl);
+  transition: background-color var(--app-motion-fast) ease;
 
   &:hover:not(.is-highlighted) {
     background: color-mix(in srgb, var(--td-text-color-primary) 4%, transparent);
@@ -473,7 +473,7 @@ watch(visible, (open) => {
   flex-shrink: 0;
   width: 18px;
   margin-top: 3px;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   color: var(--td-text-color-primary);
 }
 
@@ -494,14 +494,14 @@ watch(visible, (open) => {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   object-fit: cover;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
 }
 
 .reference-item__domain {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.35;
   color: var(--td-text-color-placeholder);
   overflow: hidden;
@@ -520,7 +520,7 @@ watch(visible, (open) => {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -537,7 +537,7 @@ watch(visible, (open) => {
   color: var(--td-text-color-placeholder);
   line-height: 1;
   opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .reference-item:hover .reference-item__open,
@@ -551,7 +551,7 @@ watch(visible, (open) => {
 
 .reference-item__snippet {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -562,7 +562,7 @@ watch(visible, (open) => {
 
 .reference-item__content {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
   white-space: pre-wrap;
@@ -594,7 +594,7 @@ watch(visible, (open) => {
 }
 
 .references-backdrop-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity var(--app-motion-slow) ease;
 }
 
 .references-backdrop-enter-from,

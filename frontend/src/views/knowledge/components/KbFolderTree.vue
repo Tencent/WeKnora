@@ -267,7 +267,7 @@ watch(
 }
 
 .kb-folder-tree__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   white-space: nowrap;
@@ -280,14 +280,14 @@ watch(
   height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -325,15 +325,15 @@ watch(
   width: 100%;
   height: 30px;
   padding: 0 8px 0 calc(var(--kb-folder-depth, 0) * var(--kb-folder-indent));
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   text-align: left;
   cursor: pointer;
   user-select: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -367,7 +367,7 @@ watch(
   align-items: center;
   justify-content: center;
   color: var(--td-text-color-placeholder);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .kb-folder-row__toggle {
@@ -379,13 +379,13 @@ watch(
   }
 
   .t-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
 .kb-folder-row__icon {
   flex: 0 0 auto;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   color: var(--td-text-color-placeholder);
 }
 
@@ -408,7 +408,7 @@ watch(
 }
 
 .kb-folder-row__count {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -420,13 +420,13 @@ watch(
   height: 20px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition: color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -434,7 +434,7 @@ watch(
   }
 
   .t-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
@@ -463,11 +463,11 @@ watch(
   height: 22px;
   padding: 0 6px;
   border: 1px solid var(--td-brand-color);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   outline: none;
 }
 </style>

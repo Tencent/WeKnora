@@ -608,7 +608,7 @@ onMounted(() => {
   align-items: center;
   gap: 5px;
   color: var(--td-brand-color);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   text-decoration: none;
 
@@ -633,7 +633,7 @@ onMounted(() => {
   justify-content: center;
   padding: 2px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: help;
@@ -655,14 +655,14 @@ onMounted(() => {
 .hint-popover__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .hint-popover__text {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
@@ -696,7 +696,7 @@ onMounted(() => {
   margin-bottom: 0;
 
   :deep(.t-tabs__nav-item) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-tabs__nav-item-wrapper) {
@@ -770,14 +770,14 @@ onMounted(() => {
       justify-content: center;
       width: 32px;
       height: 32px;
-      border-radius: 8px;
+      border-radius: var(--app-radius-md);
       background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
       color: var(--td-brand-color);
-      font-size: 18px;
+      font-size: var(--app-text-2xl);
     }
 
     &__label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       font-weight: 500;
       line-height: 1.4;
     }
@@ -817,7 +817,7 @@ onMounted(() => {
 
 .sandbox-card__url {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
@@ -839,7 +839,7 @@ onMounted(() => {
     align-items: center;
     gap: 4px;
     color: var(--td-warning-color-7);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.4;
   }
 }
@@ -869,7 +869,7 @@ onMounted(() => {
 
 .sandbox-empty-hint {
   margin: 16px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -895,7 +895,7 @@ onMounted(() => {
   margin: 0;
   padding: 6px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -926,13 +926,13 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
 }
 
 .inventory-row__meta {
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
 }
 
@@ -945,7 +945,7 @@ onMounted(() => {
 .inventory-agents {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
 }
 </style>

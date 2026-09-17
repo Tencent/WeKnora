@@ -280,7 +280,7 @@ const handleKBEditorSuccess = (kbId: string) => {
         height: 32px;
         justify-content: center;
         align-items: center;
-        border-radius: 6px;
+        border-radius: var(--app-radius-sm);
         background: var(--td-bg-color-container);
         box-shadow: var(--td-shadow-1);
         margin-right: 12px;
@@ -320,7 +320,7 @@ const handleKBEditorSuccess = (kbId: string) => {
 }
 
 .sq-slide-fade-leave-active {
-    transition: opacity 0.15s cubic-bezier(0.4, 0, 1, 1),
+    transition: opacity var(--app-motion-fast) cubic-bezier(0.4, 0, 1, 1),
         transform 0.15s cubic-bezier(0.4, 0, 1, 1);
 }
 

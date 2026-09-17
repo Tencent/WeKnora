@@ -2692,16 +2692,16 @@ async function createNewSession(value: string): Promise<void> {
   align-items: center;
   padding: 8px 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
 }
 
 .tag-more-popup .tag-menu-item .menu-icon {
   margin-right: 8px;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 }
 
 .tag-more-popup .tag-menu-item:hover {
@@ -2728,7 +2728,7 @@ async function createNewSession(value: string): Promise<void> {
   cursor: pointer;
   color: var(--td-text-color-placeholder);
   font-weight: 400;
-  transition: color 0.15s;
+  transition: color var(--app-motion-fast);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -2751,7 +2751,7 @@ async function createNewSession(value: string): Promise<void> {
   display: inline-flex;
   align-items: center;
   color: var(--td-brand-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1;
 }
 
@@ -2821,11 +2821,11 @@ async function createNewSession(value: string): Promise<void> {
     margin-right: 4px;
     padding: 0;
     border: 1px solid var(--td-component-border);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-bg-color-container);
     color: var(--td-text-color-secondary);
     cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+    transition: border-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
     &:hover {
       border-color: var(--td-brand-color);
@@ -2838,17 +2838,17 @@ async function createNewSession(value: string): Promise<void> {
     max-width: 220px;
     padding: 2px 4px;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: transparent;
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 18px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
     &:hover {
       color: var(--td-brand-color);
@@ -2869,7 +2869,7 @@ async function createNewSession(value: string): Promise<void> {
 
   &__sep {
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 }
@@ -2979,7 +2979,7 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     padding: 2px;
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     gap: 0;
 
     .doc-view-toggle-btn {
@@ -2990,10 +2990,10 @@ async function createNewSession(value: string): Promise<void> {
       justify-content: center;
       border: 0;
       background: transparent;
-      border-radius: 4px;
+      border-radius: var(--app-radius-xs);
       color: var(--td-text-color-secondary);
       cursor: pointer;
-      transition: background-color 0.12s ease, color 0.12s ease;
+      transition: background-color var(--app-motion-instant) ease, color var(--app-motion-instant) ease;
 
       &:hover {
         color: var(--td-text-color-primary);
@@ -3023,10 +3023,10 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   :deep(.t-input) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     background-color: var(--td-bg-color-secondarycontainer);
     border-color: transparent;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     box-shadow: none !important;
 
     &:hover,
@@ -3040,10 +3040,10 @@ async function createNewSession(value: string): Promise<void> {
 
   :deep(.t-select) {
     .t-input {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       background-color: var(--td-bg-color-secondarycontainer);
       border-color: transparent;
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
       box-shadow: none !important;
 
       &:hover,
@@ -3147,7 +3147,7 @@ async function createNewSession(value: string): Promise<void> {
     align-items: center;
     gap: 6px;
     margin: 0;
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -3163,8 +3163,8 @@ async function createNewSession(value: string): Promise<void> {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    border-radius: 6px;
-    transition: all 0.12s ease;
+    border-radius: var(--app-radius-sm);
+    transition: all var(--app-motion-instant) ease;
 
     &:hover:not(:disabled) {
       color: var(--td-success-color);
@@ -3180,8 +3180,8 @@ async function createNewSession(value: string): Promise<void> {
       padding-right: 6px;
 
       :deep(.t-icon) {
-        font-size: 14px;
-        transition: transform 0.12s ease;
+        font-size: var(--app-text-base);
+        transition: transform var(--app-motion-instant) ease;
       }
 
       &:hover:not(:disabled) {
@@ -3193,7 +3193,7 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   .breadcrumb-separator {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
   }
 
@@ -3206,7 +3206,7 @@ async function createNewSession(value: string): Promise<void> {
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 32px;
   }
@@ -3215,7 +3215,7 @@ async function createNewSession(value: string): Promise<void> {
     margin: 0;
     color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
     line-height: 20px;
   }
@@ -3226,10 +3226,10 @@ async function createNewSession(value: string): Promise<void> {
     gap: 4px;
     margin: 2px 0 0;
     color: var(--td-warning-color);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.4;
     cursor: pointer;
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 
     &:hover {
       color: var(--td-warning-color-active);
@@ -3240,7 +3240,7 @@ async function createNewSession(value: string): Promise<void> {
     }
 
     .parser-hint-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       flex-shrink: 0;
     }
 
@@ -3257,10 +3257,10 @@ async function createNewSession(value: string): Promise<void> {
     gap: 4px;
     margin: 2px 0 0;
     color: var(--td-warning-color);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.4;
     cursor: pointer;
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
 
     &:hover {
       color: var(--td-warning-color-active);
@@ -3271,7 +3271,7 @@ async function createNewSession(value: string): Promise<void> {
     }
 
     .warning-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       flex-shrink: 0;
     }
 
@@ -3299,7 +3299,7 @@ async function createNewSession(value: string): Promise<void> {
   justify-content: center;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   padding: 0;
 
   &:hover:not(:disabled) {
@@ -3314,7 +3314,7 @@ async function createNewSession(value: string): Promise<void> {
   }
 
   :deep(.t-icon) {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
   }
 }
 
@@ -3437,14 +3437,14 @@ async function createNewSession(value: string): Promise<void> {
   flex-direction: column;
   border: 1px solid var(--td-component-border);
   height: 136px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   box-sizing: border-box;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   background: var(--td-bg-color-container);
   position: relative;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background-color var(--app-motion-base) ease;
 
   .card-content {
     flex: 1;

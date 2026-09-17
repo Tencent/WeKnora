@@ -269,7 +269,7 @@
             <div class="section-header-titlewrap">
               <h2>{{ $t('organization.manageMembers') }}</h2>
               <t-popup placement="bottom-start" trigger="hover"
-                overlay-class-name="org-permissions-popup-overlay"
+                overlay-class-name="wk-popover org-permissions-popup-overlay"
                 :overlay-inner-style="permissionsPopupInnerStyle">
                 <button type="button" class="permissions-trigger-btn"
                   :aria-label="$t('organization.editor.permissionsTitle')"
@@ -596,7 +596,7 @@
             <div class="section-header-titlewrap">
               <h2>{{ $t('organization.share.sharedKnowledgeBase') }}</h2>
               <t-popup placement="bottom-start" trigger="hover"
-                overlay-class-name="org-permissions-popup-overlay"
+                overlay-class-name="wk-popover org-permissions-popup-overlay"
                 :overlay-inner-style="permissionsHintPopupInnerStyle">
                 <button type="button" class="permissions-trigger-btn"
                   :aria-label="$t('organization.settings.permissionCalcFormula')"
@@ -690,7 +690,7 @@
             <div class="section-header-titlewrap">
               <h2>{{ $t('organization.settings.sharedAgents') }}</h2>
               <t-popup placement="bottom-start" trigger="hover"
-                overlay-class-name="org-permissions-popup-overlay"
+                overlay-class-name="wk-popover org-permissions-popup-overlay"
                 :overlay-inner-style="permissionsHintPopupInnerStyle">
                 <button type="button" class="permissions-trigger-btn"
                   :aria-label="$t('organization.settings.sharedAgentsKbHintShort')"
@@ -1900,8 +1900,8 @@ watch(addMemberPopupVisible, (visible) => {
   padding: 10px 12px;
   background: var(--td-warning-color-light);
   border: 1px solid var(--td-warning-color-focus);
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-warning-color-active);
 
@@ -1923,7 +1923,7 @@ watch(addMemberPopupVisible, (visible) => {
     h2 {
       margin: 0;
       font-family: var(--app-font-family);
-      font-size: 20px;
+      font-size: var(--app-text-3xl);
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
@@ -1935,7 +1935,7 @@ watch(addMemberPopupVisible, (visible) => {
     .section-description {
       margin: 8px 0 0;
       font-family: var(--app-font-family);
-      font-size: 14px;
+      font-size: var(--app-text-base);
       color: var(--td-text-color-secondary);
       line-height: 1.5;
     }
@@ -1949,7 +1949,7 @@ watch(addMemberPopupVisible, (visible) => {
         gap: 6px;
         cursor: help;
         color: var(--td-text-color-secondary);
-        font-size: 13px;
+        font-size: var(--app-text-md);
       }
     }
   }
@@ -2003,7 +2003,7 @@ watch(addMemberPopupVisible, (visible) => {
 
     label {
       display: block;
-      font-size: 15px;
+      font-size: var(--app-text-lg);
       font-weight: 500;
       color: var(--td-text-color-primary);
       margin-bottom: 4px;
@@ -2015,7 +2015,7 @@ watch(addMemberPopupVisible, (visible) => {
     }
 
     .desc {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.5;
@@ -2068,8 +2068,8 @@ watch(addMemberPopupVisible, (visible) => {
   cursor: pointer;
   flex-shrink: 0;
   padding: 4px;
-  border-radius: 12px;
-  transition: background 0.2s ease;
+  border-radius: var(--app-radius-xl);
+  transition: background var(--app-motion-base) ease;
 }
 
 .avatar-trigger-wrap:hover {
@@ -2077,7 +2077,7 @@ watch(addMemberPopupVisible, (visible) => {
 }
 
 .avatar-change-hint {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   line-height: 1.2;
 }
@@ -2103,7 +2103,7 @@ watch(addMemberPopupVisible, (visible) => {
 
 .permission-card {
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   padding: 16px;
   border: 1px solid var(--td-component-stroke);
 }
@@ -2118,7 +2118,7 @@ watch(addMemberPopupVisible, (visible) => {
 .permission-icon {
   width: 40px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2143,7 +2143,7 @@ watch(addMemberPopupVisible, (visible) => {
   gap: 8px;
 
   .role-name {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -2159,18 +2159,18 @@ watch(addMemberPopupVisible, (visible) => {
     align-items: center;
     gap: 8px;
     padding: 6px 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 
   .check-icon {
     color: var(--td-brand-color);
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .close-icon {
     color: var(--td-error-color);
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
@@ -2181,9 +2181,9 @@ watch(addMemberPopupVisible, (visible) => {
   margin-top: 20px;
   padding: 12px 16px;
   background: var(--td-brand-color-light);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   color: var(--td-brand-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 20px;
 
   .t-icon {
@@ -2200,7 +2200,7 @@ watch(addMemberPopupVisible, (visible) => {
 
 .avatar-popover-title {
   margin: 0 0 10px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   line-height: 1.4;
 }
@@ -2220,11 +2220,11 @@ watch(addMemberPopupVisible, (visible) => {
   height: 36px;
   padding: 0;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, background var(--app-motion-base) ease;
 }
 
 .avatar-popover-content .avatar-emoji-btn:hover {
@@ -2240,7 +2240,7 @@ watch(addMemberPopupVisible, (visible) => {
 .avatar-popover-content .avatar-clear-btn {
   margin-top: 10px;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .avatar-popover-content .avatar-clear-btn:hover {
@@ -2251,7 +2251,7 @@ watch(addMemberPopupVisible, (visible) => {
 .invite-card {
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   padding: 16px;
 
   .invite-method {
@@ -2262,12 +2262,12 @@ watch(addMemberPopupVisible, (visible) => {
       margin-bottom: 10px;
 
       .invite-icon {
-        font-size: 16px;
+        font-size: var(--app-text-xl);
         color: @primary-color;
       }
 
       .invite-method-title {
-        font-size: 13px;
+        font-size: var(--app-text-md);
         font-weight: 600;
         color: var(--td-text-color-primary);
       }
@@ -2280,12 +2280,12 @@ watch(addMemberPopupVisible, (visible) => {
     justify-content: space-between;
     background: var(--td-bg-color-container);
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     padding: 10px 14px;
 
     .invite-code-value {
       font-family: var(--app-font-family-mono);
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       font-weight: 600;
       letter-spacing: 2px;
       color: @primary-color;
@@ -2299,12 +2299,12 @@ watch(addMemberPopupVisible, (visible) => {
 
   .invite-remaining {
     margin: 8px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .invite-validity-desc {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     margin: 4px 0 10px;
     line-height: 1.4;
@@ -2321,7 +2321,7 @@ watch(addMemberPopupVisible, (visible) => {
     margin-top: 8px;
 
     .member-limit-hint {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       color: var(--td-text-color-secondary);
     }
   }
@@ -2338,13 +2338,13 @@ watch(addMemberPopupVisible, (visible) => {
     justify-content: space-between;
     background: var(--td-bg-color-container);
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     padding: 10px 14px;
     gap: 12px;
 
     .invite-link-value {
       flex: 1;
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       color: var(--td-text-color-secondary);
       word-break: break-all;
       line-height: 1.4;
@@ -2357,7 +2357,7 @@ watch(addMemberPopupVisible, (visible) => {
     gap: 12px;
 
     .approval-desc {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-placeholder);
     }
   }
@@ -2398,12 +2398,12 @@ watch(addMemberPopupVisible, (visible) => {
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   line-height: 0;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   :deep(.t-icon) {
     display: block;
@@ -2443,7 +2443,7 @@ watch(addMemberPopupVisible, (visible) => {
 }
 
 .members-list-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -2455,10 +2455,10 @@ watch(addMemberPopupVisible, (visible) => {
   min-width: 22px;
   height: 20px;
   padding: 0 7px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background-color: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   line-height: 1;
 }
@@ -2502,14 +2502,14 @@ watch(addMemberPopupVisible, (visible) => {
 
 .empty-state-title {
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .empty-state-desc {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
 }
 
@@ -2519,14 +2519,14 @@ watch(addMemberPopupVisible, (visible) => {
 
   .permission-hint-title {
     margin: 0 0 6px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   .permission-hint-desc {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -2547,7 +2547,7 @@ watch(addMemberPopupVisible, (visible) => {
 .resource-name {
   display: block;
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2555,7 +2555,7 @@ watch(addMemberPopupVisible, (visible) => {
 }
 
 .resource-meta {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
 }
 
@@ -2571,7 +2571,7 @@ watch(addMemberPopupVisible, (visible) => {
     align-items: center;
     gap: 6px;
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2580,7 +2580,7 @@ watch(addMemberPopupVisible, (visible) => {
   }
 
   .member-email {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
     overflow: hidden;
@@ -2595,7 +2595,7 @@ watch(addMemberPopupVisible, (visible) => {
     padding: 0 5px;
     height: 16px;
     border-radius: 3px;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     font-weight: 500;
     flex-shrink: 0;
   }
@@ -2613,13 +2613,13 @@ watch(addMemberPopupVisible, (visible) => {
 
 .data-table-shell {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-container);
 
   :deep(thead th) {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   :deep(.t-table td),
@@ -2660,13 +2660,13 @@ watch(addMemberPopupVisible, (visible) => {
     margin-bottom: 16px;
 
     .permissions-compact-title {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
     }
 
     .permissions-compact-desc {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
     }
   }
@@ -2679,10 +2679,10 @@ watch(addMemberPopupVisible, (visible) => {
 
   .perm-role-block {
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     padding: 14px 16px;
     background: var(--td-bg-color-container);
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
 
     &.is-me {
       border-color: var(--td-brand-color);
@@ -2693,19 +2693,19 @@ watch(addMemberPopupVisible, (visible) => {
       display: flex;
       align-items: center;
       gap: 6px;
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
       margin-bottom: 12px;
 
       .me-badge {
         margin-left: auto;
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         font-weight: 500;
         color: var(--td-brand-color);
         padding: 2px 8px;
         background: var(--td-brand-color-light);
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
       }
     }
 
@@ -2718,7 +2718,7 @@ watch(addMemberPopupVisible, (visible) => {
         display: flex;
         align-items: flex-start;
         gap: 6px;
-        font-size: 13px;
+        font-size: var(--app-text-md);
         line-height: 1.5;
 
         .t-icon {
@@ -2757,11 +2757,11 @@ watch(addMemberPopupVisible, (visible) => {
       margin-bottom: 10px;
 
       .permissions-compact-title {
-        font-size: 13px;
+        font-size: var(--app-text-md);
       }
 
       .permissions-compact-desc {
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         line-height: 1.4;
       }
     }
@@ -2773,15 +2773,15 @@ watch(addMemberPopupVisible, (visible) => {
 
     .perm-role-block {
       padding: 8px 10px;
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
 
       .perm-role-tag {
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         margin-bottom: 6px;
         gap: 4px;
 
         .me-badge {
-          font-size: 10px;
+          font-size: var(--app-text-2xs);
           padding: 1px 5px;
         }
       }
@@ -2790,7 +2790,7 @@ watch(addMemberPopupVisible, (visible) => {
         gap: 3px;
 
         .perm-item {
-          font-size: 11px;
+          font-size: var(--app-text-xs);
           line-height: 1.35;
           gap: 4px;
 
@@ -2830,7 +2830,7 @@ watch(addMemberPopupVisible, (visible) => {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 
@@ -2838,7 +2838,7 @@ watch(addMemberPopupVisible, (visible) => {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
 
     .t-icon {
@@ -2877,10 +2877,10 @@ watch(addMemberPopupVisible, (visible) => {
 .add-member-tip {
   margin: 0 0 14px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 }
@@ -2891,7 +2891,7 @@ watch(addMemberPopupVisible, (visible) => {
 }
 
 .member-invite-popup-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 12px;
@@ -2927,7 +2927,7 @@ watch(addMemberPopupVisible, (visible) => {
 
   .field-hint {
     margin: 6px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     line-height: 1.45;
   }
@@ -2948,26 +2948,12 @@ watch(addMemberPopupVisible, (visible) => {
 .org-permissions-popup-overlay {
   z-index: 3050 !important;
 
-  .t-popup__content {
-    padding: 0 !important;
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    overflow: hidden;
-  }
-
   .permission-hint-popover {
     padding: 14px 16px;
 
     .permission-hint-title {
       margin: 0 0 6px;
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
       line-height: 1.35;
@@ -2975,7 +2961,7 @@ watch(addMemberPopupVisible, (visible) => {
 
     .permission-hint-desc {
       margin: 0;
-      font-size: 13px;
+      font-size: var(--app-text-md);
       line-height: 1.55;
       color: var(--td-text-color-secondary);
     }
@@ -2995,13 +2981,13 @@ watch(addMemberPopupVisible, (visible) => {
       margin-bottom: 10px;
 
       .permissions-compact-title {
-        font-size: 13px;
+        font-size: var(--app-text-md);
         font-weight: 600;
         color: var(--td-text-color-primary);
       }
 
       .permissions-compact-desc {
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         line-height: 1.45;
         color: var(--td-text-color-secondary);
       }
@@ -3015,7 +3001,7 @@ watch(addMemberPopupVisible, (visible) => {
 
     .perm-role-block {
       border: 1px solid var(--td-component-stroke);
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
       padding: 8px 10px;
       background: var(--td-bg-color-container);
 
@@ -3028,19 +3014,19 @@ watch(addMemberPopupVisible, (visible) => {
         display: flex;
         align-items: center;
         gap: 4px;
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         font-weight: 600;
         color: var(--td-text-color-primary);
         margin-bottom: 6px;
 
         .me-badge {
           margin-left: auto;
-          font-size: 10px;
+          font-size: var(--app-text-2xs);
           font-weight: 500;
           color: var(--td-brand-color);
           padding: 1px 5px;
           background: var(--td-brand-color-light);
-          border-radius: 4px;
+          border-radius: var(--app-radius-xs);
         }
       }
 
@@ -3053,7 +3039,7 @@ watch(addMemberPopupVisible, (visible) => {
           display: flex;
           align-items: flex-start;
           gap: 4px;
-          font-size: 11px;
+          font-size: var(--app-text-xs);
           line-height: 1.35;
           color: var(--td-text-color-secondary);
 
@@ -3102,7 +3088,7 @@ watch(addMemberPopupVisible, (visible) => {
 
   .t-popup__content {
     padding: 16px;
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     border: 1px solid var(--td-component-stroke);
     box-shadow: var(--td-shadow-2), 0 8px 24px rgba(15, 23, 42, 0.08);
   }
@@ -3119,7 +3105,7 @@ watch(addMemberPopupVisible, (visible) => {
 
   .member-invite-popup-title {
     margin: 0 0 10px;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 1.35;
     color: var(--td-text-color-primary);
@@ -3128,10 +3114,10 @@ watch(addMemberPopupVisible, (visible) => {
   .add-member-tip {
     margin: 0 0 12px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     border: 1px solid var(--td-component-stroke);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     line-height: 1.5;
   }
@@ -3143,13 +3129,13 @@ watch(addMemberPopupVisible, (visible) => {
     gap: 12px;
     margin-bottom: 14px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     border: 1px solid var(--td-component-stroke);
   }
 
   .upgrade-current-role-label {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 
@@ -3170,7 +3156,7 @@ watch(addMemberPopupVisible, (visible) => {
   .org-upgrade-field-label {
     display: block;
     margin: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     line-height: 1.4;
     color: var(--td-text-color-primary);
@@ -3188,14 +3174,14 @@ watch(addMemberPopupVisible, (visible) => {
     align-items: center;
     padding: 6px 14px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-bg-color-secondarycontainer);
     font: inherit;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.4;
     color: var(--td-text-color-secondary);
     cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
     &:hover,
     &:focus-visible {

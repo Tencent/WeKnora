@@ -214,7 +214,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
 .connection-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   padding: 20px;
   background: var(--td-bg-color-container);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
@@ -230,7 +230,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   flex-shrink: 0;
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   object-fit: cover;
   box-shadow:
     0 1px 2px rgba(15, 23, 42, 0.08),
@@ -256,7 +256,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   min-width: 0;
 
   strong {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     font-weight: 600;
     line-height: 24px;
     color: var(--td-text-color-primary);
@@ -278,7 +278,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
 .product-desc {
   margin: 4px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
@@ -289,10 +289,10 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   gap: 6px;
   margin-left: auto;
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 18px;
   flex-shrink: 0;
@@ -334,20 +334,20 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   gap: 8px 12px;
 
   strong {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   span {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 }
 
 .device-hint {
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
@@ -394,7 +394,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   border-radius: 50%;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
 }
 
@@ -404,14 +404,14 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
   strong {
     display: block;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   p {
     margin: 4px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.6;
     color: var(--td-text-color-secondary);
   }
@@ -420,7 +420,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 .package-hint,
 .empty-hint {
   margin: 12px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.65;
   color: var(--td-text-color-secondary);
 }
@@ -428,14 +428,14 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 .pairing-feedback {
   margin-top: 16px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: color-mix(in srgb, var(--td-success-color) 10%, transparent);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 
   :deep(.t-icon) {
@@ -446,7 +446,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
     width: 100%;
     padding: 8px;
     border: 1px solid var(--td-component-border);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-bg-color-container);
   }
 }
@@ -456,7 +456,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
   h3 {
     margin: 0 0 16px;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -500,7 +500,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
   border-radius: 50%;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   z-index: 1;
 }
@@ -512,14 +512,14 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
   strong {
     display: block;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   p {
     margin: 4px 0 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.65;
     color: var(--td-text-color-secondary);
   }
@@ -527,7 +527,7 @@ onBeforeUnmount(() => { alive = false; controller.abort(); clearTimeout(timer); 
 
 .error {
   color: var(--td-error-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   margin: 0 0 16px;
 }
 

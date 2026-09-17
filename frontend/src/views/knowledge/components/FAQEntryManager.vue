@@ -2719,7 +2719,7 @@ watch(() => entries.value.map(e => ({
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease;
 }
 
 .fade-enter-from,
@@ -2819,10 +2819,10 @@ watch(() => entries.value.map(e => ({
   }
 
   :deep(.t-input) {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     background-color: var(--td-bg-color-secondarycontainer);
     border-color: transparent;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     box-shadow: none !important;
 
     &:hover,
@@ -2849,15 +2849,15 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   padding: 8px 16px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
 
   .menu-icon {
     margin-right: 8px;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 
   &:hover {
@@ -2924,7 +2924,7 @@ watch(() => entries.value.map(e => ({
     align-items: center;
     gap: 6px;
     margin: 0;
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -2940,8 +2940,8 @@ watch(() => entries.value.map(e => ({
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    border-radius: 6px;
-    transition: all 0.12s ease;
+    border-radius: var(--app-radius-sm);
+    transition: all var(--app-motion-instant) ease;
 
     &:hover:not(:disabled) {
       color: var(--td-success-color);
@@ -2957,8 +2957,8 @@ watch(() => entries.value.map(e => ({
       padding-right: 6px;
 
       :deep(.t-icon) {
-        font-size: 14px;
-        transition: transform 0.12s ease;
+        font-size: var(--app-text-base);
+        transition: transform var(--app-motion-instant) ease;
       }
 
       &:hover:not(:disabled) {
@@ -2970,7 +2970,7 @@ watch(() => entries.value.map(e => ({
   }
 
   .breadcrumb-separator {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
   }
 
@@ -2983,7 +2983,7 @@ watch(() => entries.value.map(e => ({
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 32px;
   }
@@ -2992,7 +2992,7 @@ watch(() => entries.value.map(e => ({
     margin: 0;
     color: var(--td-text-color-placeholder);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
     line-height: 20px;
   }
@@ -3014,7 +3014,7 @@ watch(() => entries.value.map(e => ({
     color: var(--td-success-color);
     cursor: pointer;
     line-height: 1;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease;
 
     &:hover {
       opacity: 0.75;
@@ -3030,7 +3030,7 @@ watch(() => entries.value.map(e => ({
     visibility: hidden;
     pointer-events: none;
     transform: translateY(-4px);
-    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+    transition: opacity var(--app-motion-fast) ease, transform var(--app-motion-fast) ease, visibility var(--app-motion-fast) ease;
   }
 
   &:hover .faq-import-panel,
@@ -3045,7 +3045,7 @@ watch(() => entries.value.map(e => ({
   .faq-import-strip--panel {
     margin-bottom: 0;
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     white-space: nowrap;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 
@@ -3064,8 +3064,8 @@ watch(() => entries.value.map(e => ({
   max-width: 100%;
   margin-bottom: 10px;
   padding: 4px 8px 4px 10px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
@@ -3102,19 +3102,19 @@ watch(() => entries.value.map(e => ({
     height: 100%;
     border-radius: 2px;
     background: var(--td-brand-color);
-    transition: width 0.3s ease;
+    transition: width var(--app-motion-slow) ease;
   }
 
   &__count {
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-variant-numeric: tabular-nums;
     color: var(--td-text-color-placeholder);
   }
 
   &__time {
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     white-space: nowrap;
   }
@@ -3123,7 +3123,7 @@ watch(() => entries.value.map(e => ({
     flex-shrink: 0;
     padding: 0 4px;
     height: auto;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   &__close {
@@ -3136,11 +3136,11 @@ watch(() => entries.value.map(e => ({
     margin: 0;
     padding: 0;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: transparent;
     color: var(--td-text-color-placeholder);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     &:hover {
       background: rgba(0, 0, 0, 0.06);
@@ -3196,7 +3196,7 @@ watch(() => entries.value.map(e => ({
 
   .tag-filter-label {
     color: var(--td-text-color-secondary);
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 }
 
@@ -3211,7 +3211,7 @@ watch(() => entries.value.map(e => ({
   justify-content: center;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   padding: 0;
 
   &:hover:not(:disabled) {
@@ -3225,7 +3225,7 @@ watch(() => entries.value.map(e => ({
   }
 
   :deep(.t-icon) {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
   }
 }
 
@@ -3306,7 +3306,7 @@ watch(() => entries.value.map(e => ({
 
 .faq-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   padding: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
@@ -3317,7 +3317,7 @@ watch(() => entries.value.map(e => ({
   max-width: 100%;
   overflow: hidden;
   cursor: default;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background-color var(--app-motion-base) ease;
   box-sizing: border-box;
   height: fit-content;
 
@@ -3374,18 +3374,18 @@ watch(() => entries.value.map(e => ({
   align-items: baseline;
   gap: 5px;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
 
   .meta-label {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
     font-weight: 500;
   }
 
   .meta-value {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-primary);
     font-weight: 600;
   }
@@ -3416,15 +3416,15 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
 
   .status-icon {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-placeholder);
 
     &.warning {
@@ -3442,18 +3442,18 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   gap: 6px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
   }
 
   .status-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     flex-shrink: 0;
 
     &.warning {
@@ -3483,15 +3483,15 @@ watch(() => entries.value.map(e => ({
     cursor: pointer;
     max-width: 120px;
     height: 20px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     border-color: var(--td-component-stroke);
     color: var(--td-text-color-disabled);
     padding: 0 6px;
     background: var(--td-bg-color-container-hover);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 400;
     font-family: var(--app-font-family);
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
 
     &:hover {
       border-color: var(--td-brand-color);
@@ -3511,7 +3511,7 @@ watch(() => entries.value.map(e => ({
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 400;
     color: var(--td-text-color-disabled);
   }
@@ -3523,7 +3523,7 @@ watch(() => entries.value.map(e => ({
   height: 28px;
   justify-content: center;
   align-items: center;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   flex-shrink: 0;
   opacity: 0.6;
@@ -3549,7 +3549,7 @@ watch(() => entries.value.map(e => ({
   flex: 1;
   color: var(--td-text-color-primary);
   font-family: var(--app-font-family);
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.5;
   word-break: break-word;
@@ -3581,7 +3581,7 @@ watch(() => entries.value.map(e => ({
   .faq-section-label {
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -3603,7 +3603,7 @@ watch(() => entries.value.map(e => ({
       cursor: pointer;
       user-select: none;
       padding: 2px 0;
-      border-radius: 4px;
+      border-radius: var(--app-radius-xs);
 
       &:hover {
         color: var(--td-text-color-primary);
@@ -3616,7 +3616,7 @@ watch(() => entries.value.map(e => ({
     }
 
     .collapse-icon {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-placeholder);
       flex-shrink: 0;
       margin-left: auto; // 让箭头靠右对齐
@@ -3666,7 +3666,7 @@ watch(() => entries.value.map(e => ({
 }
 
 .question-tag {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   padding: 3px 8px;
   max-width: 100%;
   min-width: 0;
@@ -3717,7 +3717,7 @@ watch(() => entries.value.map(e => ({
 
 .empty-tip {
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-style: italic;
   padding: 8px 0;
   font-family: var(--app-font-family);
@@ -3730,7 +3730,7 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   padding: 24px 16px;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-family: var(--app-font-family);
 }
 
@@ -3764,7 +3764,7 @@ watch(() => entries.value.map(e => ({
   .empty-text {
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     font-weight: 600;
     line-height: 28px;
   }
@@ -3772,7 +3772,7 @@ watch(() => entries.value.map(e => ({
   .empty-desc {
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
     line-height: 22px;
   }
@@ -3797,7 +3797,7 @@ watch(() => entries.value.map(e => ({
   max-width: 600px;
   max-height: 90vh;
   background: var(--td-bg-color-container);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
   display: flex;
@@ -3811,13 +3811,13 @@ watch(() => entries.value.map(e => ({
     height: 32px;
     border: none;
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--td-text-color-secondary);
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
     z-index: 10;
 
     &:hover {
@@ -3842,7 +3842,7 @@ watch(() => entries.value.map(e => ({
   .import-title {
     margin: 0;
     font-family: var(--app-font-family);
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -3869,7 +3869,7 @@ watch(() => entries.value.map(e => ({
   &::-webkit-scrollbar-thumb {
     background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
-    transition: background 0.2s;
+    transition: background var(--app-motion-base);
 
     &:hover {
       background: var(--td-brand-color);
@@ -3910,14 +3910,14 @@ watch(() => entries.value.map(e => ({
   align-items: center;
   gap: 6px;
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
   cursor: pointer;
   white-space: nowrap;
 
@@ -3932,7 +3932,7 @@ watch(() => entries.value.map(e => ({
   }
 
   :deep(.t-icon) {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 }
 
@@ -3941,7 +3941,7 @@ watch(() => entries.value.map(e => ({
   display: block;
   margin-bottom: 0;
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
   letter-spacing: -0.2px;
@@ -3976,10 +3976,10 @@ watch(() => entries.value.map(e => ({
   width: 100%;
   min-height: 120px;
   border: 2px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all var(--app-motion-slow) ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4007,7 +4007,7 @@ watch(() => entries.value.map(e => ({
 
 .upload-icon {
   color: var(--td-brand-color);
-  transition: transform 0.2s ease;
+  transition: transform var(--app-motion-base) ease;
 }
 
 .file-upload-area:hover .upload-icon {
@@ -4022,20 +4022,20 @@ watch(() => entries.value.map(e => ({
 
 .upload-primary-text {
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .upload-secondary-text {
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .upload-file-name {
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-brand-color);
   word-break: break-all;
@@ -4045,7 +4045,7 @@ watch(() => entries.value.map(e => ({
 .import-form-tip {
   margin-top: 8px;
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-disabled);
   line-height: 18px;
 }
@@ -4056,7 +4056,7 @@ watch(() => entries.value.map(e => ({
   padding: 16px;
   background: var(--td-bg-color-secondarycontainer);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
 }
 
 .preview-header {
@@ -4075,7 +4075,7 @@ watch(() => entries.value.map(e => ({
 
 .preview-title {
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -4094,8 +4094,8 @@ watch(() => entries.value.map(e => ({
   padding: 10px 12px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
-  transition: all 0.2s ease;
+  border-radius: var(--app-radius-sm);
+  transition: all var(--app-motion-base) ease;
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -4112,16 +4112,16 @@ watch(() => entries.value.map(e => ({
   justify-content: center;
   background: linear-gradient(135deg, var(--td-brand-color) 0%, var(--td-brand-color-active) 100%);
   color: var(--td-text-color-anti);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
 }
 
 .preview-question {
   flex: 1;
   font-family: var(--app-font-family);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   line-height: 1.5;
   word-break: break-word;
@@ -4132,7 +4132,7 @@ watch(() => entries.value.map(e => ({
   padding-top: 8px;
   border-top: 1px solid var(--td-component-stroke);
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   text-align: center;
 }
@@ -4155,7 +4155,7 @@ watch(() => entries.value.map(e => ({
     padding: 20px 24px;
     border-bottom: 1px solid var(--td-component-stroke);
     font-family: var(--app-font-family);
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -4185,7 +4185,7 @@ watch(() => entries.value.map(e => ({
   &::-webkit-scrollbar-thumb {
     background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
-    transition: background 0.2s;
+    transition: background var(--app-motion-base);
 
     &:hover {
       background: var(--td-brand-color);
@@ -4236,14 +4236,14 @@ watch(() => entries.value.map(e => ({
     min-width: 32px;
     padding: 0;
     font-family: var(--app-font-family);
-    transition: all 0.2s ease;
-    border-radius: 8px;
+    transition: all var(--app-motion-base) ease;
+    border-radius: var(--app-radius-md);
   }
 
   :deep(.add-item-btn) {
     background: var(--td-brand-color) !important;
     border: 1px solid var(--td-brand-color) !important;
-    border-radius: 8px !important;
+    border-radius: var(--app-radius-md) !important;
     color: var(--td-text-color-anti) !important;
     display: flex;
     align-items: center;
@@ -4271,7 +4271,7 @@ watch(() => entries.value.map(e => ({
     }
 
     .t-icon {
-      font-size: 16px;
+      font-size: var(--app-text-xl);
     }
   }
 }
@@ -4284,7 +4284,7 @@ watch(() => entries.value.map(e => ({
 }
 
 .item-count {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
   font-weight: 500;
@@ -4308,8 +4308,8 @@ watch(() => entries.value.map(e => ({
   padding: 10px 14px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  border-radius: var(--app-radius-md);
+  transition: all var(--app-motion-base) ease;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   position: relative;
 
@@ -4338,7 +4338,7 @@ watch(() => entries.value.map(e => ({
 
   .item-content {
     flex: 1;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.6;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
@@ -4358,8 +4358,8 @@ watch(() => entries.value.map(e => ({
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
-    transition: all 0.2s ease;
+    border-radius: var(--app-radius-sm);
+    transition: all var(--app-motion-base) ease;
     background: transparent;
     border: none;
     cursor: pointer;
@@ -4374,7 +4374,7 @@ watch(() => entries.value.map(e => ({
     }
 
     :deep(.t-icon) {
-      font-size: 14px;
+      font-size: var(--app-text-base);
     }
   }
 
@@ -4385,7 +4385,7 @@ watch(() => entries.value.map(e => ({
 
 .form-tip {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-disabled);
   font-family: var(--app-font-family);
 }
@@ -4526,7 +4526,7 @@ watch(() => entries.value.map(e => ({
   padding-right: 24px;
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -4534,7 +4534,7 @@ watch(() => entries.value.map(e => ({
   }
 
   .required-label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     color: var(--td-text-color-primary);
     display: inline-flex;
@@ -4546,11 +4546,11 @@ watch(() => entries.value.map(e => ({
   .required-mark {
     color: var(--td-error-color);
     font-weight: 600;
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .optional-label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     color: var(--td-text-color-primary);
     display: block;
@@ -4558,14 +4558,14 @@ watch(() => entries.value.map(e => ({
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
 
   .optional-desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
   }
 }
@@ -4613,11 +4613,11 @@ watch(() => entries.value.map(e => ({
 // Input 组件样式 - 与登录页面一致
 :deep(.t-input) {
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -4633,7 +4633,7 @@ watch(() => entries.value.map(e => ({
     box-shadow: none !important;
     outline: none !important;
     background: transparent;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-family: var(--app-font-family);
     padding: 6px 12px;
     color: var(--td-text-color-primary);
@@ -4658,11 +4658,11 @@ watch(() => entries.value.map(e => ({
 // Textarea 组件样式
 :deep(.t-textarea) {
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   &:hover {
     border-color: var(--td-brand-color);
@@ -4678,7 +4678,7 @@ watch(() => entries.value.map(e => ({
     box-shadow: none !important;
     outline: none !important;
     background: transparent;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-family: var(--app-font-family);
     line-height: 1.6;
     resize: vertical;
@@ -4700,14 +4700,14 @@ watch(() => entries.value.map(e => ({
 // 导入弹窗动画
 .modal-enter-active,
 .modal-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--app-motion-base) ease;
 }
 
 .modal-enter-active .faq-import-modal,
 .modal-leave-active .faq-import-modal,
 .modal-enter-active .batch-tag-modal,
 .modal-leave-active .batch-tag-modal {
-  transition: transform 0.2s ease, opacity 0.2s ease;
+  transition: transform var(--app-motion-base) ease, opacity var(--app-motion-base) ease;
 }
 
 .modal-enter-from,
@@ -4749,7 +4749,7 @@ watch(() => entries.value.map(e => ({
     padding: 20px 24px;
     border-bottom: 1px solid var(--td-component-stroke);
     font-family: var(--app-font-family);
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -4828,7 +4828,7 @@ watch(() => entries.value.map(e => ({
     margin-bottom: 8px;
 
     label {
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 500;
       color: var(--td-text-color-primary);
       display: block;
@@ -4836,7 +4836,7 @@ watch(() => entries.value.map(e => ({
     }
 
     .desc {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.4;
@@ -4863,21 +4863,21 @@ watch(() => entries.value.map(e => ({
   min-width: 50px;
   text-align: right;
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
   padding: 4px 8px;
   background: var(--td-bg-color-container);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 }
 
 .search-button {
   height: 36px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   &:hover:not(:disabled) {
     transform: translateY(-1px);
@@ -4907,7 +4907,7 @@ watch(() => entries.value.map(e => ({
   margin-right: 0;
   padding-left: 0;
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
   flex-shrink: 0;
@@ -4925,10 +4925,10 @@ watch(() => entries.value.map(e => ({
   padding: 48px 16px;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   text-align: center;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   border: 1px dashed var(--td-component-stroke);
 }
 
@@ -4940,10 +4940,10 @@ watch(() => entries.value.map(e => ({
 
 .result-card {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   padding: 14px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   width: 100%;
   box-sizing: border-box;
@@ -4967,7 +4967,7 @@ watch(() => entries.value.map(e => ({
   user-select: none;
   padding: 4px;
   margin: -4px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   position: relative;
 
   &:hover {
@@ -5002,7 +5002,7 @@ watch(() => entries.value.map(e => ({
 
 .result-question {
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
   line-height: 1.6;
@@ -5023,7 +5023,7 @@ watch(() => entries.value.map(e => ({
   align-items: flex-start;
   gap: 4px;
   padding-left: 20px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   .matched-label {
@@ -5036,7 +5036,7 @@ watch(() => entries.value.map(e => ({
     color: var(--td-warning-color-active);
     background: linear-gradient(90deg, rgba(251, 191, 36, 0.15) 0%, rgba(251, 191, 36, 0.05) 100%);
     padding: 1px 6px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     word-break: break-word;
   }
 }
@@ -5051,9 +5051,9 @@ watch(() => entries.value.map(e => ({
 
 .expand-icon {
   flex-shrink: 0;
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   color: var(--td-text-color-secondary);
-  transition: transform 0.2s ease;
+  transition: transform var(--app-motion-base) ease;
   cursor: pointer;
 
   &:hover {
@@ -5063,9 +5063,9 @@ watch(() => entries.value.map(e => ({
 
 .score-tag,
 .match-type-tag {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   font-family: var(--app-font-family);
 }
 
@@ -5082,14 +5082,14 @@ watch(() => entries.value.map(e => ({
 
 // Slide down animation - 优化性能
 .slide-down-enter-active {
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+  transition: opacity var(--app-motion-base) cubic-bezier(0.4, 0, 0.2, 1),
     transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   will-change: opacity, transform;
 }
 
 .slide-down-leave-active {
-  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+  transition: opacity var(--app-motion-base) cubic-bezier(0.4, 0, 0.2, 1),
     transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   will-change: opacity, transform;
@@ -5139,7 +5139,7 @@ watch(() => entries.value.map(e => ({
   width: 100%;
   max-width: 480px;
   background: var(--td-bg-color-container);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   box-shadow: 0 6px 28px rgba(15, 23, 42, 0.08);
   overflow: hidden;
   display: flex;
@@ -5153,13 +5153,13 @@ watch(() => entries.value.map(e => ({
     height: 32px;
     border: none;
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--td-text-color-secondary);
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
     z-index: 10;
 
     &:hover {
@@ -5181,7 +5181,7 @@ watch(() => entries.value.map(e => ({
 
   .batch-tag-title {
     margin: 0;
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     line-height: 1.4;
@@ -5201,8 +5201,8 @@ watch(() => entries.value.map(e => ({
   margin-bottom: 20px;
   background: var(--td-brand-color-light);
   border: 1px solid var(--td-brand-color-focus);
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-base);
   color: var(--td-brand-color);
   line-height: 1.5;
 
@@ -5221,7 +5221,7 @@ watch(() => entries.value.map(e => ({
   }
 
   :deep(.t-form-item__label) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     margin-bottom: 8px;
@@ -5245,12 +5245,12 @@ watch(() => entries.value.map(e => ({
   padding: 8px 12px;
   text-align: center;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .section-label {
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   color: var(--td-text-color-secondary);
   margin-bottom: 4px;
