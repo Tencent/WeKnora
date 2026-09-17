@@ -1620,6 +1620,12 @@ const doSubmit = async () => {
           graph_enabled: formData.value.indexingStrategy?.graphEnabled ?? false,
         }
       }
+      // 图片处理配置：buildSubmitData 只在与快照有差异时才产出该字段，带上即整体
+      // 替换（后端语义：字段缺失 = 保持不变）。编辑模式此前漏带，导致 KB 编辑器里
+      // 对图片后处理的修改被静默丢弃（新建时能存、之后再改无效）。
+      if (data.image_processing_config) {
+        updateConfig.image_processing_config = data.image_processing_config
+      }
       await updateKnowledgeBase(kbId, {
         name: data.name,
         description: data.description,
