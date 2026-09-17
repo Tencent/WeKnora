@@ -60,6 +60,8 @@ func newKS3Client(endpoint, region, accessKey, secretKey string) (*ks3s3.S3, err
 		return nil, fmt.Errorf("unsafe KS3 endpoint: %w", err)
 	}
 	creds := credentials.NewStaticCredentials(accessKey, secretKey, "")
+	httpClient := objectStorageHTTPClient()
+	checkRedirect := httpClient.CheckRedirect
 	client := ks3s3.New(&ks3aws.Config{
 		Credentials:      creds,
 		Region:           region,
@@ -68,8 +70,14 @@ func newKS3Client(endpoint, region, accessKey, secretKey string) (*ks3s3.S3, err
 		S3ForcePathStyle: false, // KS3 uses virtual-hosted style
 		SignerVersion:    "V2",  // KS3 recommends V2 signing
 		MaxRetries:       3,
-		HTTPClient:       objectStorageHTTPClient(),
+		HTTPClient:       httpClient,
 	})
+	// ks3s3.New installs the SDK's own redirect policy on the client it was
+	// handed: ten hops, no check of the target, and the previous hop's
+	// Authorization copied onto every redirect, cross-host included. Put the
+	// SSRF-safe policy back, so a redirect target is validated like any other
+	// request and the signature stays with the endpoint.
+	client.Config.HTTPClient.CheckRedirect = checkRedirect
 	return client, nil
 }
 
