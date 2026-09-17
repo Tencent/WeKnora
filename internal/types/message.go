@@ -228,18 +228,18 @@ func (m *MessageAttachments) Scan(value interface{}) error {
 // behalf and that WeKnora has persisted to its file service so the user can
 // download them after the sandbox is reaped.
 //
-// URL is the provider-scoped storage path (e.g. "local://tenant/..."), never
-// exposed directly to the client. SourcePath + ModTime form the sandbox-side
-// identity used by ArtifactCollector to de-duplicate files across multi-turn
-// runs (see docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
+// SourcePath + ModTime is the cheap identity for an unchanged sandbox file.
+// When mtime moves, ArtifactCollector compares content hashes so a git
+// checkout cannot duplicate a blob and a same-size rewrite still attaches.
 type MessageArtifact struct {
-	URL        string    `json:"url"`         // Storage URL (provider://path); persisted, not sent to client
-	FileName   string    `json:"file_name"`   // Original filename inside the sandbox
-	FileType   string    `json:"file_type"`   // File extension (e.g., ".pptx", ".pdf")
-	FileSize   int64     `json:"file_size"`   // File size in bytes
-	SourcePath string    `json:"source_path"` // Absolute path inside the sandbox (used for diff)
-	ModTime    time.Time `json:"mod_time"`    // Sandbox-side modification time (used for diff)
-	CreatedAt  time.Time `json:"created_at"`  // When WeKnora persisted the blob
+	URL         string    `json:"url"`                    // Storage URL (provider://path); persisted, not sent to client
+	FileName    string    `json:"file_name"`              // Original filename inside the sandbox
+	FileType    string    `json:"file_type"`              // File extension (e.g., ".pptx", ".pdf")
+	FileSize    int64     `json:"file_size"`              // File size in bytes
+	ContentHash string    `json:"content_hash,omitempty"` // SHA-256 of the persisted bytes
+	SourcePath  string    `json:"source_path"`            // Absolute path inside the sandbox (used for diff)
+	ModTime     time.Time `json:"mod_time"`               // Sandbox-side modification time (used for diff)
+	CreatedAt   time.Time `json:"created_at"`             // When WeKnora persisted the blob
 }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.
@@ -270,6 +270,36 @@ func (m *MessageArtifacts) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, m)
+}
+
+// WithRestoredMtime stamps sandbox mtime (and hash) onto the artifact at
+// sourcePath whose content already matched. Used after a fork checkout so
+// later collects can skip by path+mtime. Other versions at the same path
+// with a different hash are left alone. The returned slice is a copy.
+func (m MessageArtifacts) WithRestoredMtime(sourcePath string, mod time.Time, hash string) (MessageArtifacts, bool) {
+	if len(m) == 0 || sourcePath == "" {
+		return m, false
+	}
+	out := make(MessageArtifacts, len(m))
+	copy(out, m)
+	changed := false
+	for i := range out {
+		if out[i].SourcePath != sourcePath {
+			continue
+		}
+		if out[i].ContentHash != "" && hash != "" && out[i].ContentHash != hash {
+			continue
+		}
+		if out[i].ModTime.Equal(mod) && (hash == "" || out[i].ContentHash == hash) {
+			continue
+		}
+		out[i].ModTime = mod
+		if hash != "" {
+			out[i].ContentHash = hash
+		}
+		changed = true
+	}
+	return out, changed
 }
 
 // MentionedItems is a slice of MentionedItem for database storage

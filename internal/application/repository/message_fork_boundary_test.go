@@ -97,6 +97,33 @@ func TestListMessagesBySessionUpToSkipsSoftDeleted(t *testing.T) {
 	require.Equal(t, []string{"m1"}, messageIDs(got))
 }
 
+func TestRecordRestoredArtifactMtimeOnlyTouchesThisSession(t *testing.T) {
+	repo, db := newMessageRepositoryForForkTest(t)
+	ctx := context.Background()
+	at := time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)
+	oldMod := at
+	newMod := at.Add(time.Minute)
+	hash := "abc"
+	art := types.MessageArtifacts{{
+		SourcePath: "/workspace/output/report.pptx", FileName: "report.pptx",
+		ModTime: oldMod, FileSize: 4, ContentHash: hash,
+	}}
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Message{
+		ID: "parent-msg", SessionID: "parent", Role: "assistant", CreatedAt: at, Artifacts: art,
+	}).Error)
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Message{
+		ID: "fork-msg", SessionID: "fork-1", Role: "assistant", CreatedAt: at, Artifacts: art,
+	}).Error)
+
+	require.NoError(t, repo.RecordRestoredArtifactMtime(ctx, "fork-1", "/workspace/output/report.pptx", newMod, hash))
+
+	var parent, child types.Message
+	require.NoError(t, db.Where("id = ?", "parent-msg").First(&parent).Error)
+	require.NoError(t, db.Where("id = ?", "fork-msg").First(&child).Error)
+	require.True(t, parent.Artifacts[0].ModTime.Equal(oldMod), "parent artifact mtime must stay put")
+	require.True(t, child.Artifacts[0].ModTime.Equal(newMod), "fork artifact mtime should follow the restored sandbox")
+}
+
 func messageIDs(messages []*types.Message) []string {
 	ids := make([]string, 0, len(messages))
 	for _, m := range messages {

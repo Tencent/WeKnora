@@ -14,15 +14,17 @@
 //     sandbox and returns an empty slice when none exists.
 //   - Best-effort: individual errors are logged and skipped, never returned,
 //     so a stray unreadable file cannot block the assistant reply.
-//   - De-duplication by (SourcePath, ModTime) or (SourcePath, FileSize):
-//     an unchanged file whose mtime was refreshed by git checkout must not
-//     re-attach to a later message.
+//   - De-duplication by (SourcePath, ModTime), with a content-hash check
+//     when mtime changed: git checkout refreshes mtime on unchanged bytes
+//     and must not re-attach; a same-size in-place rewrite must.
 package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -47,10 +49,14 @@ type SandboxArtifactSource interface {
 // backed by the message repository; in tests it is stubbed with an in-memory
 // map so the collector can be exercised without a database.
 type SessionArtifactStore interface {
-	// KnownArtifacts returns every (SourcePath, ModTime) pair already
-	// attached to any prior message of the session. The returned set is
-	// unordered and safe to mutate by the caller.
+	// KnownArtifacts returns every artifact already attached to any prior
+	// message of the session. The collector uses SourcePath + ModTime as the
+	// cheap identity and ContentHash (or the stored blob) when mtime moved.
 	KnownArtifacts(ctx context.Context, sessionID string) ([]types.MessageArtifact, error)
+	// RecordRestoredMtime writes the sandbox mtime observed after a same-content
+	// restore onto this session's copied artifacts so the next collect can skip
+	// by path+mtime. It must not touch any other session. Best-effort.
+	RecordRestoredMtime(ctx context.Context, sessionID, sourcePath string, mod time.Time, hash string) error
 }
 
 // ArtifactCollectorConfig bounds the collector's I/O and storage footprint.
@@ -321,8 +327,8 @@ func (c *ArtifactCollector) collect(
 	// file when several turns share the sandbox. Errors here degrade to an
 	// empty set: attaching duplicates is a soft failure, aborting is not.
 	known := c.loadKnownSet(ctx, sessionID)
-	if len(known) > 0 {
-		logger.Infof(ctx, "[ArtifactCollector] known set size=%d (session=%s)", len(known), sessionID)
+	if known.len() > 0 {
+		logger.Infof(ctx, "[ArtifactCollector] known set size=%d (session=%s)", known.len(), sessionID)
 	}
 
 	pending := 0
@@ -346,17 +352,17 @@ func (c *ArtifactCollector) collect(
 		// pathological case where ListSessionFiles returns the same path
 		// twice (envd hasn't been observed to do so, but future-proofing
 		// the loop is cheap).
-		rememberKnown(known, art.SourcePath, art.ModTime, art.FileSize)
+		known.remember(art)
 	}
 	logger.Infof(ctx, "[ArtifactCollector] done session=%s listed=%d attached=%d",
 		sessionID, len(entries), len(artifacts))
 	return artifacts, nil
 }
 
-// loadKnownSet returns the (source_path, mod_time) tuples already recorded
-// against the session. Empty on error so the caller can proceed.
-func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) map[string]struct{} {
-	set := map[string]struct{}{}
+// loadKnownSet returns the artifacts already recorded against the session.
+// Empty on error so the caller can proceed.
+func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) *artifactKnownSet {
+	set := newArtifactKnownSet()
 	if c.store == nil {
 		return set
 	}
@@ -367,12 +373,12 @@ func (c *ArtifactCollector) loadKnownSet(ctx context.Context, sessionID string) 
 		return set
 	}
 	for _, p := range prev {
-		rememberKnown(set, p.SourcePath, p.ModTime, p.FileSize)
+		set.remember(p)
 	}
 	return set
 }
 
-func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known map[string]struct{}) bool {
+func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known *artifactKnownSet) bool {
 	if entry.Type != sandbox.RemoteEntryFile {
 		return false
 	}
@@ -382,15 +388,7 @@ func (c *ArtifactCollector) acceptEntry(entry sandbox.RemoteDirEntry, known map[
 	if entry.Size > c.config.MaxFileBytes {
 		return false
 	}
-	if _, seen := known[artifactKey(entry.Path, entry.ModTime)]; seen {
-		return false
-	}
-	if entry.Size > 0 {
-		if _, seen := known[artifactSizeKey(entry.Path, entry.Size)]; seen {
-			return false
-		}
-	}
-	return true
+	return !known.seenMtime(entry.Path, entry.ModTime)
 }
 
 // maybePersist runs the per-file pipeline (filter → download → upload →
@@ -404,7 +402,7 @@ func (c *ArtifactCollector) maybePersist(
 	messageID string,
 	tenantID uint64,
 	entry sandbox.RemoteDirEntry,
-	known map[string]struct{},
+	known *artifactKnownSet,
 ) (types.MessageArtifact, bool) {
 	if !c.acceptEntry(entry, known) {
 		if entry.Type == sandbox.RemoteEntryFile && entry.Size > c.config.MaxFileBytes {
@@ -420,11 +418,21 @@ func (c *ArtifactCollector) maybePersist(
 			sessionID, entry.Path, err)
 		return types.MessageArtifact{}, false
 	}
-	if actual := int64(len(data)); actual > 0 {
-		if _, seen := known[artifactSizeKey(entry.Path, actual)]; seen {
-			rememberKnown(known, entry.Path, entry.ModTime, actual)
-			return types.MessageArtifact{}, false
+	hash := artifactContentHash(data)
+	if c.knownSameContent(ctx, known, entry.Path, hash) {
+		// git checkout (or an equivalent restore) refreshed mtime on the
+		// same bytes. Persist the new mtime on THIS session's copied
+		// artifacts so later turns hit path+mtime and do not re-read.
+		known.remember(types.MessageArtifact{
+			SourcePath: entry.Path, ModTime: entry.ModTime, ContentHash: hash, FileSize: int64(len(data)),
+		})
+		if c.store != nil {
+			if err := c.store.RecordRestoredMtime(ctx, sessionID, entry.Path, entry.ModTime, hash); err != nil {
+				logger.Warnf(ctx, "[ArtifactCollector] persist restored mtime failed: session=%s path=%s err=%v",
+					sessionID, entry.Path, err)
+			}
 		}
+		return types.MessageArtifact{}, false
 	}
 	// A second guard: envd may report a stale size while the file is being
 	// re-written; enforce the cap against the actual byte count too.
@@ -449,14 +457,56 @@ func (c *ArtifactCollector) maybePersist(
 	c.bindArtifactResource(ctx, storagePath, messageID)
 
 	return types.MessageArtifact{
-		URL:        storagePath,
-		FileName:   entry.Name,
-		FileType:   strings.ToLower(filepath.Ext(entry.Name)),
-		FileSize:   int64(len(data)),
-		SourcePath: entry.Path,
-		ModTime:    entry.ModTime,
-		CreatedAt:  time.Now().UTC(),
+		URL:         storagePath,
+		FileName:    entry.Name,
+		FileType:    strings.ToLower(filepath.Ext(entry.Name)),
+		FileSize:    int64(len(data)),
+		ContentHash: hash,
+		SourcePath:  entry.Path,
+		ModTime:     entry.ModTime,
+		CreatedAt:   time.Now().UTC(),
 	}, true
+}
+
+func (c *ArtifactCollector) knownSameContent(ctx context.Context, known *artifactKnownSet, path, hash string) bool {
+	if known == nil || hash == "" {
+		return false
+	}
+	if known.seenHash(path, hash) {
+		return true
+	}
+	for _, art := range known.byPath[path] {
+		if art.ContentHash == hash {
+			return true
+		}
+		if art.ContentHash != "" {
+			continue
+		}
+		stored := c.hashStoredArtifact(ctx, art)
+		if stored != "" {
+			known.keys[artifactHashKey(path, stored)] = struct{}{}
+			if stored == hash {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *ArtifactCollector) hashStoredArtifact(ctx context.Context, art types.MessageArtifact) string {
+	if c == nil || c.fileService == nil || strings.TrimSpace(art.URL) == "" {
+		return ""
+	}
+	file, err := c.fileService.GetFile(ctx, art.URL)
+	if err != nil || file == nil {
+		return ""
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return ""
+	}
+	return artifactContentHash(data)
 }
 
 // bindArtifactResource records that the freshly-persisted artifact resource
@@ -523,18 +573,70 @@ func artifactKey(path string, mod time.Time) string {
 	return path + "\x00" + mod.UTC().Format(time.RFC3339Nano)
 }
 
-func artifactSizeKey(path string, size int64) string {
-	return path + "\x00s" + strconv.FormatInt(size, 10)
+func artifactHashKey(path, hash string) string {
+	return path + "\x00h" + hash
 }
 
-func rememberKnown(known map[string]struct{}, path string, mod time.Time, size int64) {
-	if known == nil {
+func artifactContentHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// artifactKnownSet is the per-collect de-dupe index. path+mtime is the cheap
+// skip for an untouched file; path+hash catches a restore that only changed
+// mtime. Size is never an identity key.
+type artifactKnownSet struct {
+	keys   map[string]struct{}
+	byPath map[string][]types.MessageArtifact
+}
+
+func newArtifactKnownSet() *artifactKnownSet {
+	return &artifactKnownSet{
+		keys:   map[string]struct{}{},
+		byPath: map[string][]types.MessageArtifact{},
+	}
+}
+
+func (k *artifactKnownSet) len() int {
+	if k == nil {
+		return 0
+	}
+	return len(k.keys)
+}
+
+func (k *artifactKnownSet) remember(art types.MessageArtifact) {
+	if k == nil {
 		return
 	}
-	known[artifactKey(path, mod)] = struct{}{}
-	if size > 0 {
-		known[artifactSizeKey(path, size)] = struct{}{}
+	if k.keys == nil {
+		k.keys = map[string]struct{}{}
 	}
+	if k.byPath == nil {
+		k.byPath = map[string][]types.MessageArtifact{}
+	}
+	k.keys[artifactKey(art.SourcePath, art.ModTime)] = struct{}{}
+	if art.ContentHash != "" {
+		k.keys[artifactHashKey(art.SourcePath, art.ContentHash)] = struct{}{}
+	}
+	if art.SourcePath != "" {
+		k.byPath[art.SourcePath] = append(k.byPath[art.SourcePath], art)
+	}
+}
+
+func (k *artifactKnownSet) seenMtime(path string, mod time.Time) bool {
+	if k == nil {
+		return false
+	}
+	_, ok := k.keys[artifactKey(path, mod)]
+	return ok
+}
+
+func (k *artifactKnownSet) seenHash(path, hash string) bool {
+	if k == nil || hash == "" {
+		return false
+	}
+	_, ok := k.keys[artifactHashKey(path, hash)]
+	return ok
 }
 
 // safeFileName strips slashes and backslashes from the original name before

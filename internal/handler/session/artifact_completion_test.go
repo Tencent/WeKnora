@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -25,6 +26,10 @@ type completionHistory struct{ previous []types.MessageArtifact }
 
 func (s completionHistory) KnownArtifacts(context.Context, string) ([]types.MessageArtifact, error) {
 	return s.previous, nil
+}
+
+func (s completionHistory) RecordRestoredMtime(context.Context, string, string, time.Time, string) error {
+	return nil
 }
 
 func TestCompletionPublishesReconciledArtifactContent(t *testing.T) {
