@@ -4452,7 +4452,6 @@ export default {
     }
   },
   thinking: {
-    unsupportedHint: '現在のモデルは思考モードに対応していません',
     levelLabel: '思考レベル',
     levelPlaceholder: 'モデルのデフォルトに従う',
     reset: 'リセット',

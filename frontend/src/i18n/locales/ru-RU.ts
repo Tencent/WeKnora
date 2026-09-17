@@ -2571,7 +2571,6 @@ export default {
     languageSaved: 'Настройки языка сохранены'
   },
   thinking: {
-    unsupportedHint: 'Текущая модель не поддерживает режим размышления',
     levelLabel: 'Уровень размышления',
     levelPlaceholder: 'По умолчанию для модели',
     reset: 'Сбросить',

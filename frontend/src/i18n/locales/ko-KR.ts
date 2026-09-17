@@ -2571,7 +2571,6 @@ export default {
     languageSaved: '언어 설정이 저장되었습니다'
   },
   thinking: {
-    unsupportedHint: '현재 모델은 사고 모드를 지원하지 않습니다',
     levelLabel: '사고 레벨',
     levelPlaceholder: '모델 기본값 따르기',
     reset: '초기화',

@@ -9,7 +9,8 @@
                勾选子集后默认档若不在子集内自动清空）。
 
   内部规则（design §8.1.5）：
-    !caps.Supported          → 整块置灰 + 说明（已存值由调用侧保留，不在此清除）
+    !caps.Supported          → 整块不渲染（不输出"不支持"说明；已存值由调用侧
+                               保留，不在此清除）
     CanDisable === false     → single 形态：开关锁定为开且禁用；levels 形态：开关不渲染（v1 行为）
     SupportedLevels 空       → 布尔思考（如 ollama think）：levels 形态 = 开关 + 档位提示；
                                single 形态 = 纯开关（档位控件不渲染）
@@ -18,12 +19,7 @@
 -->
 <template>
   <div class="thinking-controls">
-    <!-- 不支持思考：置灰说明 -->
-    <p v-if="!supported" class="thinking-controls__hint">
-      {{ t('thinking.unsupportedHint') }}
-    </p>
-
-    <template v-else>
+    <template v-if="supported">
       <!-- 思考开关：标题与其余字段标题同款（__label，上下分布） -->
       <div v-if="showToggle" class="thinking-controls__field">
         <label class="thinking-controls__label">{{ t('model.editor.thinkingToggleLabel') }}</label>

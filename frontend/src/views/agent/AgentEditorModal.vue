@@ -637,9 +637,9 @@
                       </div>
                     </div>
 
-                    <!-- 思考模式（档位单选，能力声明驱动 design §8.1.2；不支持置灰说明，
+                    <!-- 思考模式（档位单选，能力声明驱动 design §8.1.2；不支持整块隐藏，
                          切模型档位越界由下方 watcher 自动清空 + toast） -->
-                    <div class="setting-row" data-agent-field="thinking">
+                    <div v-if="agentThinkingAvailable" class="setting-row" data-agent-field="thinking">
                       <div class="setting-control setting-control-full">
                         <ThinkingControls
                           v-model="thinkingValue"
@@ -3380,8 +3380,9 @@ const agentThinkingCaps = computed(() => {
 });
 
 /** 模型记录主开关（模型管理页）关闭 → 思考不可用：caps 置 undefined 让
-    ThinkingControls 整块置灰并说明（已存值保留，运行时入口亦有硬门兜底），
-    与会话面板"消失不见"的语义同步（模型级开关 = 硬门）。 */
+    ThinkingControls 整块不渲染，宿主行随 agentThinkingAvailable 一并隐藏
+    （已存值保留，运行时入口亦有硬门兜底），与会话面板"消失不见"的语义
+    同步（模型级开关 = 硬门）。 */
 const agentThinkingAvailable = computed(() =>
   agentThinkingCaps.value?.supported === true
     && agentModelChatShard.value?.thinking_enabled !== false);

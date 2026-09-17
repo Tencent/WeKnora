@@ -2573,7 +2573,6 @@ export default {
     languageSaved: '语言设置已保存'
   },
   thinking: {
-    unsupportedHint: '当前模型不支持思考',
     levelLabel: '思考档位',
     levelPlaceholder: '跟随模型默认',
     reset: '重置',

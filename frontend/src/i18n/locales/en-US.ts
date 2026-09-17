@@ -4452,7 +4452,6 @@ export default {
     }
   },
   thinking: {
-    unsupportedHint: 'The current model does not support thinking',
     levelLabel: 'Thinking level',
     levelPlaceholder: 'Follow model default',
     reset: 'Reset',
