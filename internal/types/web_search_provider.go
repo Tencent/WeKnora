@@ -26,6 +26,7 @@ const (
 	WebSearchProviderTypeSearxng    WebSearchProviderType = "searxng"
 	WebSearchProviderTypeKeenable   WebSearchProviderType = "keenable"
 	WebSearchProviderTypeZhipu      WebSearchProviderType = "zhipu"
+	WebSearchProviderTypeZhipuPrime WebSearchProviderType = "zhipu_prime"
 	WebSearchProviderTypeExa        WebSearchProviderType = "exa"
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
@@ -270,6 +271,13 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					},
 				},
 			},
+		},
+		{
+			ID:             "zhipu_prime",
+			Name:           "Zhipu GLM Coding Plan",
+			RequiresAPIKey: true,
+			Description:    "GLM Coding Plan webSearchPrime MCP (requires a Coding Plan API key)",
+			DocsURL:        "https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server",
 		},
 		{
 			ID:             "zhipu",

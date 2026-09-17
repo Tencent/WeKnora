@@ -2,6 +2,23 @@ package types
 
 import "testing"
 
+func TestGetWebSearchProviderTypesZhipuPrime(t *testing.T) {
+	for _, provider := range GetWebSearchProviderTypes() {
+		if provider.ID != string(WebSearchProviderTypeZhipuPrime) {
+			continue
+		}
+		if !provider.RequiresAPIKey || provider.SupportsProxy || provider.RequiresBaseURL ||
+			len(provider.ConfigFields) != 0 {
+			t.Fatalf("unexpected Coding Plan metadata: %+v", provider)
+		}
+		if provider.DocsURL != "https://docs.bigmodel.cn/cn/coding-plan/mcp/search-mcp-server" {
+			t.Fatalf("unexpected Coding Plan documentation: %s", provider.DocsURL)
+		}
+		return
+	}
+	t.Fatal("Zhipu Prime provider type not found")
+}
+
 func TestGetWebSearchProviderTypesIncludesZhipuConfig(t *testing.T) {
 	var zhipu *WebSearchProviderTypeInfo
 	providerTypes := GetWebSearchProviderTypes()

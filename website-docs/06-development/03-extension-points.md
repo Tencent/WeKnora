@@ -385,7 +385,11 @@ func (r *Registry) CreateProvider(providerType string, params types.WebSearchPro
 
 ### 现有实现
 
-`internal/infrastructure/web_search/` 目录：`duckduckgo.go`、`google.go`、`bing.go`、`tavily.go`、`ollama.go`、`baidu.go`、`searxng.go`、`keenable.go`、`zhipu.go`（另有 `proxy.go` 出站代理支持）。类型常量在 `internal/types/web_search_provider.go`（`WebSearchProviderTypeBing/Google/DuckDuckGo/Tavily/Ollama/Baidu/Searxng/Keenable/Zhipu`）。
+`internal/infrastructure/web_search/` 目录：`duckduckgo.go`、`google.go`、`bing.go`、`tavily.go`、`ollama.go`、`baidu.go`、`searxng.go`、`keenable.go`、`zhipu.go`、`zhipu_prime.go`（另有 `proxy.go` 出站代理支持）。类型常量在 `internal/types/web_search_provider.go`（包括 `WebSearchProviderTypeZhipuPrime`）。
+
+`zhipu_prime.go` 是 MCP 搜索适配示例：复用 `internal/mcp.NewMCPClient` 的 Streamable HTTP、Bearer 鉴权与 SSRF 保护，
+按调用创建并释放会话，通过 `initialize`、`tools/list`、`tools/call` 取得搜索结果，再映射为 `WebSearchResult`。
+协议、会话隔离、取消和异常响应的回归测试位于 `zhipu_prime_test.go`。
 
 ### 新增步骤
 
