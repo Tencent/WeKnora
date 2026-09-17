@@ -124,7 +124,12 @@ const parentMd = ref<HTMLElement | null>(null)
 const embedChannelIdRef = computed(() => props.embedChannelId)
 const embedTokenRef = computed(() => props.embedToken)
 
-const { float: citationFloat, rebind: rebindCitations } = useEmbedCitationPopover(
+const {
+  float: citationFloat,
+  rebind: rebindCitations,
+  cancelClose: cancelCitationClose,
+  scheduleClose: scheduleCitationClose,
+} = useEmbedCitationPopover(
   parentMd,
   embedChannelIdRef,
   embedTokenRef,
@@ -132,20 +137,6 @@ const { float: citationFloat, rebind: rebindCitations } = useEmbedCitationPopove
     getKnowledgeReferences: () => props.session?.knowledge_references,
   },
 )
-
-let citationCloseTimer: number | null = null
-const cancelCitationClose = () => {
-  if (citationCloseTimer) {
-    window.clearTimeout(citationCloseTimer)
-    citationCloseTimer = null
-  }
-}
-const scheduleCitationClose = () => {
-  cancelCitationClose()
-  citationCloseTimer = window.setTimeout(() => {
-    citationFloat.value.visible = false
-  }, 120)
-}
 
 // Smooth the streamed answer into a steady typewriter cadence (shared with the
 // Agent path). History reloads arrive complete and snap to full.
