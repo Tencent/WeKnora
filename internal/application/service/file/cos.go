@@ -33,17 +33,15 @@ type cosFileService struct {
 const cosScheme = "cos://"
 
 func newCOSHTTPClient(secretID, secretKey string) *http.Client {
-	httpConfig := utils.DefaultSSRFSafeHTTPClientConfig()
-	client := utils.NewSSRFSafeHTTPClient(httpConfig)
+	client := objectStorageHTTPClient()
 	// COS GetCredential expects AuthorizationTransport to remain the outermost
-	// transport. Put the per-request SSRF guard immediately underneath it while
-	// retaining the safe client's redirect policy.
+	// transport. The per-request SSRF guard the client came with, over the
+	// bounded transport, goes immediately underneath it; the client keeps its
+	// redirect policy.
 	client.Transport = &cos.AuthorizationTransport{
 		SecretID:  secretID,
 		SecretKey: secretKey,
-		Transport: &utils.SSRFValidatingRoundTripper{
-			Base: utils.NewSSRFSafeTransport(httpConfig),
-		},
+		Transport: client.Transport,
 	}
 	return client
 }

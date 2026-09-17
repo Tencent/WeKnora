@@ -58,7 +58,7 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 	// Create S3 client with custom endpoint if provided.
 	// For S3-compatible services (non-AWS), use path-style addressing
 	// (endpoint/bucket/key) instead of virtual-hosted style (bucket.endpoint/key).
-	httpClient := utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig())
+	httpClient := objectStorageHTTPClient()
 	var client *s3.Client
 	if endpoint != "" {
 		usePathStyle := forcePathStyle || !strings.Contains(endpoint, "amazonaws.com")
@@ -103,13 +103,15 @@ func NewS3FileService(endpoint,
 	}
 
 	// Check if bucket exists
-	exists, err := svc.bucketExists(context.Background())
+	setupCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	exists, err := svc.bucketExists(setupCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check bucket: %w", err)
 	}
 
 	if !exists {
-		if err = svc.createBucket(context.Background()); err != nil {
+		if err = svc.createBucket(setupCtx); err != nil {
 			return nil, fmt.Errorf("failed to create bucket: %w", err)
 		}
 	}
@@ -124,12 +126,14 @@ func NewS3FileServiceWithOptions(endpoint, accessKey, secretKey, bucketName, reg
 	if err != nil {
 		return nil, err
 	}
-	exists, err := svc.bucketExists(context.Background())
+	setupCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	exists, err := svc.bucketExists(setupCtx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check bucket: %w", err)
 	}
 	if !exists {
-		if err = svc.createBucket(context.Background()); err != nil {
+		if err = svc.createBucket(setupCtx); err != nil {
 			return nil, fmt.Errorf("failed to create bucket: %w", err)
 		}
 	}

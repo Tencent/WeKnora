@@ -65,20 +65,22 @@ func newKS3Client(endpoint, region, accessKey, secretKey string) (*ks3s3.S3, err
 		S3ForcePathStyle: false, // KS3 uses virtual-hosted style
 		SignerVersion:    "V2",  // KS3 recommends V2 signing
 		MaxRetries:       3,
-		HTTPClient:       utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
+		HTTPClient:       objectStorageHTTPClient(),
 	})
 	return client, nil
 }
 
 func ensureKS3Bucket(client *ks3s3.S3, bucketName string) error {
-	_, err := client.HeadBucket(&ks3s3.HeadBucketInput{
+	setupCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	_, err := client.HeadBucketWithContext(setupCtx, &ks3s3.HeadBucketInput{
 		Bucket: ks3aws.String(bucketName),
 	})
 	if err == nil {
 		return nil
 	}
 	// Bucket doesn't exist, try to create it
-	_, createErr := client.CreateBucket(&ks3s3.CreateBucketInput{
+	_, createErr := client.CreateBucketWithContext(setupCtx, &ks3s3.CreateBucketInput{
 		Bucket: ks3aws.String(bucketName),
 	})
 	if createErr != nil {
@@ -94,20 +96,12 @@ func CheckKS3Connectivity(ctx context.Context, endpoint, region, accessKey, secr
 		return err
 	}
 
-	done := make(chan error, 1)
-	go func() {
-		_, err := client.HeadBucket(&ks3s3.HeadBucketInput{
-			Bucket: ks3aws.String(bucketName),
-		})
-		done <- err
-	}()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
-	}
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err = client.HeadBucketWithContext(checkCtx, &ks3s3.HeadBucketInput{
+		Bucket: ks3aws.String(bucketName),
+	})
+	return err
 }
 
 func joinKS3Key(parts ...string) string {
@@ -148,7 +142,7 @@ func (s *ks3FileService) SaveFile(ctx context.Context, file *multipart.FileHeade
 		contentType = utils.GetContentTypeByExt(ext)
 	}
 
-	_, err = s.client.PutObject(&ks3s3.PutObjectInput{
+	_, err = s.client.PutObjectWithContext(ctx, &ks3s3.PutObjectInput{
 		Bucket:      ks3aws.String(s.bucketName),
 		Key:         ks3aws.String(objectKey),
 		Body:        src,
@@ -169,7 +163,7 @@ func (s *ks3FileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 	ext := filepath.Ext(safeName)
 	objectKey := joinKS3Key(s.pathPrefix, fmt.Sprintf("%d", tenantID), "exports", uuid.New().String()+ext)
 
-	_, err = s.client.PutObject(&ks3s3.PutObjectInput{
+	_, err = s.client.PutObjectWithContext(ctx, &ks3s3.PutObjectInput{
 		Bucket:      ks3aws.String(s.bucketName),
 		Key:         ks3aws.String(objectKey),
 		Body:        bytes.NewReader(data),
@@ -199,7 +193,7 @@ func (s *ks3FileService) CopyFile(ctx context.Context,
 	ext := filepath.Ext(srcPath)
 	destKey := joinKS3Key(s.pathPrefix, fmt.Sprintf("%d", tenantID), knowledgeID, uuid.New().String()+ext)
 
-	_, err = s.client.CopyObject(&ks3s3.CopyObjectInput{
+	_, err = s.client.CopyObjectWithContext(ctx, &ks3s3.CopyObjectInput{
 		Bucket:       ks3aws.String(s.bucketName),
 		Key:          ks3aws.String(destKey),
 		SourceBucket: ks3aws.String(srcBucket),
@@ -223,7 +217,7 @@ func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		return nil, fmt.Errorf("invalid file path: %w", err)
 	}
 
-	resp, err := s.client.GetObject(&ks3s3.GetObjectInput{
+	resp, err := s.client.GetObjectWithContext(ctx, &ks3s3.GetObjectInput{
 		Bucket: ks3aws.String(s.bucketName),
 		Key:    ks3aws.String(objectKey),
 	})
@@ -243,7 +237,7 @@ func (s *ks3FileService) DeleteFile(ctx context.Context, filePath string) error 
 		return fmt.Errorf("invalid file path: %w", err)
 	}
 
-	_, err = s.client.DeleteObject(&ks3s3.DeleteObjectInput{
+	_, err = s.client.DeleteObjectWithContext(ctx, &ks3s3.DeleteObjectInput{
 		Bucket: ks3aws.String(s.bucketName),
 		Key:    ks3aws.String(objectKey),
 	})
@@ -254,19 +248,12 @@ func (s *ks3FileService) DeleteFile(ctx context.Context, filePath string) error 
 }
 
 func (s *ks3FileService) CheckConnectivity(ctx context.Context) error {
-	done := make(chan error, 1)
-	go func() {
-		_, err := s.client.HeadBucket(&ks3s3.HeadBucketInput{
-			Bucket: ks3aws.String(s.bucketName),
-		})
-		done <- err
-	}()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-done:
-		return err
-	}
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, err := s.client.HeadBucketWithContext(checkCtx, &ks3s3.HeadBucketInput{
+		Bucket: ks3aws.String(s.bucketName),
+	})
+	return err
 }
 
 func (s *ks3FileService) GetFileURL(ctx context.Context, filePath string) (string, error) {

@@ -54,7 +54,7 @@ func obsS3Options(endpoint, region, accessKey, secretAccessKey string) s3.Option
 		// trailing checksum negotiation; align with the S3 driver (s3.go).
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		UsePathStyle:               obsUsePathStyle(endpoint),
-		HTTPClient:                 utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
+		HTTPClient:                 objectStorageHTTPClient(),
 	}
 }
 
@@ -68,11 +68,13 @@ func NewObsFileService(
 
 	client := s3.New(obsS3Options(endpoint, region, accessKeyID, secretAccessKey))
 
-	_, err := client.HeadBucket(context.Background(), &s3.HeadBucketInput{
+	setupCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	_, err := client.HeadBucket(setupCtx, &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
 	})
 	if err != nil {
-		_, createErr := client.CreateBucket(context.Background(), &s3.CreateBucketInput{
+		_, createErr := client.CreateBucket(setupCtx, &s3.CreateBucketInput{
 			Bucket: aws.String(bucketName),
 		})
 		if createErr != nil {

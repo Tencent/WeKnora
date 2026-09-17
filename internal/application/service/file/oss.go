@@ -43,14 +43,16 @@ func newOSSClient(endpoint, region, accessKey, secretKey string) (*oss.Client, e
 		WithCredentialsProvider(creds).
 		WithRegion(region).
 		WithEndpoint(endpoint).
-		WithHttpClient(utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()))
+		WithHttpClient(objectStorageHTTPClient())
 
 	return oss.NewClient(cfg), nil
 }
 
 // ossEnsureBucket checks if the bucket exists and creates it if missing.
 func ossEnsureBucket(client *oss.Client, bucketName string) error {
-	exists, err := client.IsBucketExist(context.Background(), bucketName)
+	setupCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	exists, err := client.IsBucketExist(setupCtx, bucketName)
 	if err != nil {
 		return fmt.Errorf("failed to check OSS bucket: %w", err)
 	}
@@ -58,7 +60,7 @@ func ossEnsureBucket(client *oss.Client, bucketName string) error {
 		return nil
 	}
 
-	_, err = client.PutBucket(context.Background(), &oss.PutBucketRequest{
+	_, err = client.PutBucket(setupCtx, &oss.PutBucketRequest{
 		Bucket: oss.Ptr(bucketName),
 	})
 	if err != nil {
@@ -123,7 +125,9 @@ func CheckOssConnectivity(ctx context.Context, endpoint, region, accessKey, secr
 		return err
 	}
 
-	exists, err := client.IsBucketExist(ctx, bucketName)
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	exists, err := client.IsBucketExist(checkCtx, bucketName)
 	if err != nil {
 		return fmt.Errorf("failed to check OSS bucket: %w", err)
 	}
