@@ -80,159 +80,175 @@
       v-model:visible="showDrawer"
       class="mcp-endpoint-drawer"
       :title="editing ? $t('integrations.mcpserver.editTitle') : $t('integrations.mcpserver.createTitle')"
-      :description="$t('integrations.mcpserver.drawerDesc')"
+      :description="drawerStepDescription"
       icon="tools"
       storage-key="setting-drawer:mcp-endpoint"
       width="600px"
       :confirm-loading="saving"
-      :confirm-text="editing ? $t('common.save') : $t('integrations.mcpserver.create')"
+      :confirm-text="drawerConfirmText"
       :hide-footer="!isAdmin"
-      @confirm="saveForm"
+      :close-on-overlay-click="!freshToken"
+      @confirm="handleDrawerConfirm"
       @cancel="closeDrawer"
     >
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionBasic') }}</h4>
-        <div class="form-item">
-          <label class="form-label required">{{ $t('integrations.mcpserver.nameLabel') }}</label>
-          <t-input v-model="form.name" :placeholder="$t('integrations.mcpserver.namePlaceholder')" :maxlength="255" />
-        </div>
-        <div class="form-item">
-          <label class="form-label">{{ $t('integrations.mcpserver.descriptionLabel') }}</label>
-          <t-textarea v-model="form.description" :autosize="{ minRows: 2, maxRows: 4 }" :placeholder="$t('integrations.mcpserver.descriptionPlaceholder')" />
-        </div>
-        <div class="form-item enable-row">
-          <label class="form-label form-label--inline">{{ $t('integrations.mcpserver.enabledLabel') }}</label>
-          <t-switch v-model="form.enabled" size="small" />
-        </div>
-      </section>
+      <template v-if="wizardStep > 0 && editing" #footer-left>
+        <t-button variant="outline" @click="goToWizardStep(0)">
+          {{ $t('common.back') }}
+        </t-button>
+      </template>
 
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionScope') }}</h4>
-        <div class="form-item">
-          <label class="form-label">{{ $t('integrations.mcpserver.kbScopeLabel') }}</label>
-          <t-select
-            v-model="form.knowledge_base_ids"
-            multiple
-            filterable
-            clearable
-            :loading="kbLoading"
-            :options="kbOptions"
-            :placeholder="$t('integrations.mcpserver.kbScopePlaceholder')"
-          />
-          <p class="form-desc">{{ $t('integrations.mcpserver.kbScopeHint') }}</p>
-        </div>
-      </section>
+      <div class="im-steps">
+        <button
+          v-for="(title, i) in stepTitles"
+          :key="i"
+          type="button"
+          :class="['im-step', { active: wizardStep === i, done: wizardStep > i }]"
+          :disabled="!editing && i > 0"
+          @click="goToWizardStep(i)"
+        >
+          <span class="im-step-num">
+            <t-icon v-if="wizardStep > i" name="check" class="im-step-check" />
+            <template v-else>{{ i + 1 }}</template>
+          </span>
+          <span class="im-step-title">{{ title }}</span>
+        </button>
+      </div>
 
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionTools') }}</h4>
-        <p class="form-desc form-desc--block">{{ $t('integrations.mcpserver.toolsHint') }}</p>
-        <div class="tool-group-list">
-          <div v-for="group in groupedTools" :key="group.group" class="tool-group">
-            <div class="tool-group__header">
-              <span class="tool-group__name">{{ $t(`integrations.mcpserver.groups.${group.group}`) }}</span>
-              <t-button size="small" variant="text" @click="toggleGroup(group, !groupAllSelected(group))">
-                {{ groupAllSelected(group) ? $t('integrations.mcpserver.clearGroup') : $t('integrations.mcpserver.selectGroup') }}
-              </t-button>
-            </div>
-            <div class="tool-group__items">
-              <div v-for="tool in group.tools" :key="tool.name" class="tool-item" :class="{ 'tool-item--danger': tool.destructive }">
-                <t-checkbox :model-value="toolSelections[tool.name] === true" @change="(v: boolean) => setToolSelected(tool.name, v)">
-                  <span class="tool-item__label">
-                    {{ $t(`integrations.mcpserver.tools.${tool.name}`) }}
-                    <code class="tool-item__code">{{ tool.name }}</code>
-                  </span>
-                </t-checkbox>
-                <p class="form-desc">{{ $t(`integrations.mcpserver.tools.${tool.name}Desc`) }}</p>
+      <!-- Step 1: configuration -->
+      <div v-if="wizardStep === 0" class="im-step-body">
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionBasic') }}</h4>
+          <div class="form-item">
+            <label class="form-label required">{{ $t('integrations.mcpserver.nameLabel') }}</label>
+            <t-input v-model="form.name" :placeholder="$t('integrations.mcpserver.namePlaceholder')" :maxlength="255" />
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('integrations.mcpserver.descriptionLabel') }}</label>
+            <t-textarea v-model="form.description" :autosize="{ minRows: 2, maxRows: 4 }" :placeholder="$t('integrations.mcpserver.descriptionPlaceholder')" />
+          </div>
+          <div class="form-item enable-row">
+            <label class="form-label form-label--inline">{{ $t('integrations.mcpserver.enabledLabel') }}</label>
+            <t-switch v-model="form.enabled" size="small" />
+          </div>
+        </section>
+
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionScope') }}</h4>
+          <div class="form-item">
+            <label class="form-label">{{ $t('integrations.mcpserver.kbScopeLabel') }}</label>
+            <t-select
+              v-model="form.knowledge_base_ids"
+              multiple
+              filterable
+              clearable
+              :loading="kbLoading"
+              :options="kbOptions"
+              :placeholder="$t('integrations.mcpserver.kbScopePlaceholder')"
+            />
+            <p class="form-desc">{{ $t('integrations.mcpserver.kbScopeHint') }}</p>
+          </div>
+        </section>
+
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionTools') }}</h4>
+          <p class="form-desc form-desc--block">{{ $t('integrations.mcpserver.toolsHint') }}</p>
+          <div class="tool-group-list">
+            <div v-for="group in groupedTools" :key="group.group" class="tool-group">
+              <div class="tool-group__header">
+                <span class="tool-group__name">{{ $t(`integrations.mcpserver.groups.${group.group}`) }}</span>
+                <t-button size="small" variant="text" @click="toggleGroup(group, !groupAllSelected(group))">
+                  {{ groupAllSelected(group) ? $t('integrations.mcpserver.clearGroup') : $t('integrations.mcpserver.selectGroup') }}
+                </t-button>
+              </div>
+              <div class="tool-group__items">
+                <div v-for="tool in group.tools" :key="tool.name" class="tool-item" :class="{ 'tool-item--danger': tool.destructive }">
+                  <t-checkbox :model-value="toolSelections[tool.name] === true" @change="(v: boolean) => setToolSelected(tool.name, v)">
+                    <span class="tool-item__label">
+                      {{ $t(`integrations.mcpserver.tools.${tool.name}`) }}
+                      <code class="tool-item__code">{{ tool.name }}</code>
+                    </span>
+                  </t-checkbox>
+                  <p class="form-desc">{{ $t(`integrations.mcpserver.tools.${tool.name}Desc`) }}</p>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        <p v-if="selectedToolCount === 0" class="form-desc form-desc--error">{{ $t('integrations.mcpserver.toolsRequired') }}</p>
-      </section>
+          <p v-if="selectedToolCount === 0" class="form-desc form-desc--error">{{ $t('integrations.mcpserver.toolsRequired') }}</p>
+        </section>
 
-      <section v-if="askSelected" class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionAsk') }}</h4>
-        <div class="form-item">
-          <label class="form-label">{{ $t('integrations.mcpserver.defaultAgentLabel') }}</label>
-          <t-select
-            v-model="form.default_agent_id"
-            filterable
-            clearable
-            :loading="agentsLoading"
-            :options="agentOptions"
-            :placeholder="$t('integrations.mcpserver.defaultAgentPlaceholder')"
-          />
-          <p class="form-desc">{{ $t('integrations.mcpserver.defaultAgentHint') }}</p>
-        </div>
-      </section>
-
-      <section class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionLimits') }}</h4>
-        <div class="form-item">
-          <label class="form-label">{{ $t('integrations.mcpserver.rateLimitLabel') }}</label>
-          <t-input-number v-model="form.rate_limit_per_minute" class="form-number" :min="1" :max="6000" theme="column" />
-          <p class="form-desc">{{ $t('integrations.mcpserver.rateLimitHint') }}</p>
-        </div>
-      </section>
-
-      <section v-if="editing" class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionConnect') }}</h4>
-        <p class="form-desc form-desc--block">{{ $t('integrations.mcpserver.connectHintExisting', { hint: editing.token_hint }) }}</p>
-        <div class="code-toolbar">
-          <pre class="code-toolbar__code">{{ endpointUrl(editing) }}</pre>
-          <t-button class="code-toolbar__copy" size="small" variant="text" shape="square" :title="$t('common.copy')" @click="copyText(endpointUrl(editing))">
-            <t-icon name="file-copy" size="16px" />
-          </t-button>
-        </div>
-        <t-button size="small" variant="outline" @click="openConnectDialog(editing, '')">
-          {{ $t('integrations.mcpserver.showSnippets') }}
-        </t-button>
-      </section>
-    </SettingDrawer>
-
-    <t-dialog
-      v-model:visible="connectVisible"
-      :header="connectToken ? $t('integrations.mcpserver.tokenDialogTitle') : $t('integrations.mcpserver.connectDialogTitle')"
-      width="640px"
-      :footer="false"
-      :close-on-overlay-click="!connectToken"
-    >
-      <div class="connect-dialog">
-        <t-alert v-if="connectToken" theme="warning" :message="$t('integrations.mcpserver.tokenOnce')" class="connect-dialog__alert" />
-        <p v-else class="form-desc form-desc--block">{{ $t('integrations.mcpserver.connectPlaceholderHint') }}</p>
-
-        <div v-if="connectToken" class="form-item">
-          <label class="form-label">{{ $t('integrations.mcpserver.tokenLabel') }}</label>
-          <div class="code-toolbar">
-            <pre class="code-toolbar__code">{{ connectToken }}</pre>
-            <t-button class="code-toolbar__copy" size="small" variant="text" shape="square" :title="$t('common.copy')" @click="copyText(connectToken)">
-              <t-icon name="file-copy" size="16px" />
-            </t-button>
+        <section v-if="askSelected" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionAsk') }}</h4>
+          <div class="form-item">
+            <label class="form-label">{{ $t('integrations.mcpserver.defaultAgentLabel') }}</label>
+            <t-select
+              v-model="form.default_agent_id"
+              filterable
+              clearable
+              :loading="agentsLoading"
+              :options="agentOptions"
+              :placeholder="$t('integrations.mcpserver.defaultAgentPlaceholder')"
+            />
+            <p class="form-desc">{{ $t('integrations.mcpserver.defaultAgentHint') }}</p>
           </div>
-        </div>
+        </section>
 
-        <div class="form-item">
-          <label class="form-label">{{ $t('integrations.mcpserver.urlLabel') }}</label>
-          <div class="code-toolbar">
-            <pre class="code-toolbar__code">{{ connectUrl }}</pre>
-            <t-button class="code-toolbar__copy" size="small" variant="text" shape="square" :title="$t('common.copy')" @click="copyText(connectUrl)">
-              <t-icon name="file-copy" size="16px" />
-            </t-button>
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionLimits') }}</h4>
+          <div class="form-item">
+            <label class="form-label">{{ $t('integrations.mcpserver.rateLimitLabel') }}</label>
+            <t-input-number v-model="form.rate_limit_per_minute" class="form-number" :min="1" :max="6000" theme="column" />
+            <p class="form-desc">{{ $t('integrations.mcpserver.rateLimitHint') }}</p>
           </div>
-        </div>
-
-        <div v-for="snippet in connectSnippets" :key="snippet.key" class="form-item">
-          <label class="form-label">{{ $t(`integrations.mcpserver.snippet.${snippet.key}Title`) }}</label>
-          <p class="form-desc form-desc--block">{{ $t(`integrations.mcpserver.snippet.${snippet.key}Desc`) }}</p>
-          <div class="code-toolbar">
-            <pre class="code-toolbar__code">{{ snippet.text }}</pre>
-            <t-button class="code-toolbar__copy" size="small" variant="text" shape="square" :title="$t('common.copy')" @click="copyText(snippet.text)">
-              <t-icon name="file-copy" size="16px" />
-            </t-button>
-          </div>
-        </div>
+        </section>
       </div>
-    </t-dialog>
+
+      <!-- Step 2: connection (token shown once right after create / rotate) -->
+      <div v-else-if="editing" class="im-step-body">
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('integrations.mcpserver.sectionConnect') }}</h4>
+          <t-alert v-if="freshToken" theme="warning" :message="$t('integrations.mcpserver.tokenOnce')" class="connect-alert" />
+          <p v-else class="form-desc form-desc--block">
+            {{ $t('integrations.mcpserver.connectHintExisting', { hint: editing.token_hint }) }}
+          </p>
+
+          <div v-if="freshToken" class="form-item">
+            <label class="form-label">{{ $t('integrations.mcpserver.tokenLabel') }}</label>
+            <div class="code-toolbar">
+              <pre class="code-toolbar__code">{{ freshToken }}</pre>
+              <t-button class="code-toolbar__copy" size="small" variant="text" shape="square" :title="$t('common.copy')" @click="copyText(freshToken)">
+                <t-icon name="file-copy" size="16px" />
+              </t-button>
+            </div>
+          </div>
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('integrations.mcpserver.urlLabel') }}</label>
+            <div class="code-toolbar">
+              <pre class="code-toolbar__code">{{ endpointUrl(editing) }}</pre>
+              <t-button class="code-toolbar__copy" size="small" variant="text" shape="square" :title="$t('common.copy')" @click="copyText(endpointUrl(editing))">
+                <t-icon name="file-copy" size="16px" />
+              </t-button>
+            </div>
+          </div>
+
+          <div class="form-item">
+            <label class="form-label">{{ $t('integrations.mcpserver.snippetsLabel') }}</label>
+            <p v-if="!freshToken" class="form-desc form-desc--block">{{ $t('integrations.mcpserver.connectPlaceholderHint') }}</p>
+            <t-tabs v-model="snippetTab" size="medium" class="snippet-tabs">
+              <t-tab-panel v-for="snippet in connectSnippets" :key="snippet.key" :value="snippet.key" :label="$t(`integrations.mcpserver.snippet.${snippet.key}Title`)">
+                <p class="form-desc form-desc--block">{{ $t(`integrations.mcpserver.snippet.${snippet.key}Desc`) }}</p>
+                <div class="code-toolbar">
+                  <pre class="code-toolbar__code">{{ snippet.text }}</pre>
+                  <t-button class="code-toolbar__copy" size="small" variant="text" shape="square" :title="$t('common.copy')" @click="copyText(snippet.text)">
+                    <t-icon name="file-copy" size="16px" />
+                  </t-button>
+                </div>
+              </t-tab-panel>
+            </t-tabs>
+          </div>
+        </section>
+      </div>
+    </SettingDrawer>
   </div>
 </template>
 
@@ -287,6 +303,25 @@ const agentOptions = computed(() => agents.value.map((a) => ({ label: a.name, va
 const showDrawer = ref(false)
 const saving = ref(false)
 const editing = ref<McpEndpoint | null>(null)
+const wizardStep = ref(0)
+const snippetTab = ref('http')
+// Plaintext token from the create / rotate response; shown once on step 2.
+const freshToken = ref('')
+
+const stepTitles = computed(() => [
+  t('integrations.mcpserver.stepConfig'),
+  t('integrations.mcpserver.stepConnect'),
+])
+const drawerStepDescription = computed(() => {
+  if (wizardStep.value === 0) return t('integrations.mcpserver.drawerDesc')
+  return freshToken.value
+    ? t('integrations.mcpserver.tokenDialogTitle')
+    : t('integrations.mcpserver.connectDialogTitle')
+})
+const drawerConfirmText = computed(() => {
+  if (wizardStep.value > 0) return t('common.finish')
+  return editing.value ? t('common.save') : t('integrations.mcpserver.create')
+})
 const form = reactive({
   name: '',
   description: '',
@@ -302,18 +337,14 @@ const selectedToolNames = computed(() => catalog.value.tools.filter((tl) => tool
 const selectedToolCount = computed(() => selectedToolNames.value.length)
 const askSelected = computed(() => toolSelections.ask === true)
 
-const connectVisible = ref(false)
-const connectToken = ref('')
-const connectEndpoint = ref<McpEndpoint | null>(null)
-const connectUrl = computed(() => (connectEndpoint.value ? endpointUrl(connectEndpoint.value) : ''))
 const connectSnippets = computed(() => {
-  const ep = connectEndpoint.value
+  const ep = editing.value
   if (!ep) return []
   const url = endpointUrl(ep)
   return [
-    { key: 'http', text: buildHttpClientSnippet(ep.name, url, connectToken.value, ep.id) },
-    { key: 'claudeCode', text: buildClaudeCodeCommand(ep.name, url, connectToken.value, ep.id) },
-    { key: 'stdio', text: buildStdioBridgeSnippet(ep.name, url, connectToken.value, ep.id) },
+    { key: 'http', text: buildHttpClientSnippet(ep.name, url, freshToken.value, ep.id) },
+    { key: 'claudeCode', text: buildClaudeCodeCommand(ep.name, url, freshToken.value, ep.id) },
+    { key: 'stdio', text: buildStdioBridgeSnippet(ep.name, url, freshToken.value, ep.id) },
   ]
 })
 
@@ -382,20 +413,40 @@ async function loadOptions() {
 
 function openCreate() {
   editing.value = null
+  freshToken.value = ''
+  wizardStep.value = 0
   resetForm(null)
   showDrawer.value = true
   void loadOptions()
 }
 
-function openEdit(ep: McpEndpoint) {
+function openEdit(ep: McpEndpoint, step: 0 | 1 = 0, token = '') {
   editing.value = ep
+  freshToken.value = token
+  wizardStep.value = step
+  snippetTab.value = 'http'
   resetForm(ep)
   showDrawer.value = true
-  void loadOptions()
+  if (step === 0) void loadOptions()
+}
+
+function goToWizardStep(step: number) {
+  if (step < 0 || step >= stepTitles.value.length) return
+  if (step > 0 && !editing.value) return
+  wizardStep.value = step
 }
 
 function closeDrawer() {
   showDrawer.value = false
+  freshToken.value = ''
+}
+
+function handleDrawerConfirm() {
+  if (wizardStep.value > 0) {
+    closeDrawer()
+    return
+  }
+  void saveForm()
 }
 
 function buildPayload(): McpEndpointPayload {
@@ -430,9 +481,10 @@ async function saveForm() {
     } else {
       const res = await createMcpEndpoint(payload)
       MessagePlugin.success(t('integrations.mcpserver.created'))
-      showDrawer.value = false
       await load()
-      if (res?.data) openConnectDialog(res.data, res.data.token || '')
+      // Stay in the drawer and move to the connection step so the one-time
+      // token is read in place instead of in a second, taller dialog.
+      if (res?.data) openEdit(res.data, 1, res.data.token || '')
     }
   } catch (err: any) {
     MessagePlugin.error(err?.message || t('integrations.mcpserver.saveFailed'))
@@ -456,7 +508,7 @@ async function rotateToken(ep: McpEndpoint) {
     const res = await rotateMcpEndpointToken(ep.id)
     MessagePlugin.success(t('integrations.mcpserver.rotated'))
     await load()
-    if (res?.data) openConnectDialog(res.data, res.data.token || '')
+    if (res?.data) openEdit(res.data, 1, res.data.token || '')
   } catch (err: any) {
     MessagePlugin.error(err?.message || t('integrations.mcpserver.rotateFailed'))
   }
@@ -472,12 +524,6 @@ async function toggleEnabled(ep: McpEndpoint) {
   }
 }
 
-function openConnectDialog(ep: McpEndpoint, token: string) {
-  connectEndpoint.value = ep
-  connectToken.value = token
-  connectVisible.value = true
-}
-
 function menuOptions(ep: McpEndpoint) {
   return [
     { content: t('integrations.mcpserver.menuConnect'), value: 'connect' },
@@ -489,7 +535,7 @@ function menuOptions(ep: McpEndpoint) {
 function handleMenuClick(option: { value?: string | number }, ep: McpEndpoint) {
   switch (option?.value) {
     case 'connect':
-      openConnectDialog(ep, '')
+      openEdit(ep, 1)
       break
     case 'toggle':
       void toggleEnabled(ep)
@@ -641,13 +687,101 @@ onMounted(() => {
   right: 6px;
 }
 
-.connect-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.connect-alert {
+  margin-bottom: 8px;
 }
 
-.connect-dialog__alert {
-  margin-bottom: 4px;
+.snippet-tabs {
+  margin-top: 4px;
+
+  :deep(.t-tabs__content) {
+    padding-top: 8px;
+  }
+}
+
+/* Step rail, aligned with the embed / IM channel drawers. */
+.im-steps {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  padding-bottom: 12px;
+}
+
+.im-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--td-text-color-placeholder);
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: var(--td-text-color-secondary);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.im-step-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.im-step.active {
+  color: var(--td-brand-color);
+  font-weight: 500;
+}
+
+.im-step.done {
+  color: var(--td-text-color-secondary);
+  font-weight: 500;
+}
+
+.im-step-num {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--td-component-stroke);
+  color: var(--td-text-color-placeholder);
+  background: transparent;
+}
+
+.im-step.active .im-step-num {
+  background: var(--td-brand-color);
+  color: #fff;
+  border-color: var(--td-brand-color);
+}
+
+.im-step.done .im-step-num {
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-brand-color);
+  border-color: var(--td-component-stroke);
+}
+
+.im-step-check {
+  font-size: 12px;
+}
+
+.im-step-body {
+  display: flex;
+  flex-direction: column;
 }
 </style>
