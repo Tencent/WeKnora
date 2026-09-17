@@ -160,4 +160,8 @@ var _ SandboxShellRunner = (*PinnedSessionSandbox)(nil)
 
 var _ SessionForkSandboxPort = (*PinnedSessionSandbox)(nil)
 
+var _ SessionRewindSandboxPort = (*PinnedSessionSandbox)(nil)
+
 var _ SessionForkSandboxPort = (*sandbox.SessionBoundManager)(nil)
+
+var _ SessionRewindSandboxPort = (*sandbox.SessionBoundManager)(nil)

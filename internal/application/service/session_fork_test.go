@@ -215,9 +215,12 @@ func (f *fakeSessionStore) copiedFromIDs() []string {
 
 // fakeMessageStore is the narrow message port SessionForkService needs.
 type fakeMessageStore struct {
-	messages      []*types.Message
-	lastListedIDs []string
-	rewriteErr    error
+	messages            []*types.Message
+	lastListedIDs       []string
+	rewriteErr          error
+	deleteFromCalls     int
+	lastDeleteInclusive *bool
+	deleteFromErr       error
 }
 
 func newFakeMessageStore(messages []*types.Message) *fakeMessageStore {
@@ -308,6 +311,42 @@ func (f *fakeMessageStore) GetSessionArtifacts(ctx context.Context, sessionID st
 	return out, nil
 }
 
+func (f *fakeMessageStore) DeleteMessagesFrom(
+	_ context.Context, sessionID string, boundary time.Time, boundaryID string, inclusive bool,
+) ([]*types.Message, error) {
+	f.deleteFromCalls++
+	inc := inclusive
+	f.lastDeleteInclusive = &inc
+	if f.deleteFromErr != nil {
+		return nil, f.deleteFromErr
+	}
+	var deleted, kept []*types.Message
+	for _, m := range f.messages {
+		if m == nil {
+			continue
+		}
+		if m.SessionID != sessionID {
+			kept = append(kept, m)
+			continue
+		}
+		after := m.CreatedAt.After(boundary) || (m.CreatedAt.Equal(boundary) && m.ID > boundaryID)
+		atBoundary := m.CreatedAt.Equal(boundary) && m.ID == boundaryID
+		if after || (inclusive && atBoundary) {
+			deleted = append(deleted, m)
+			continue
+		}
+		kept = append(kept, m)
+	}
+	sort.Slice(deleted, func(i, j int) bool {
+		if !deleted[i].CreatedAt.Equal(deleted[j].CreatedAt) {
+			return deleted[i].CreatedAt.Before(deleted[j].CreatedAt)
+		}
+		return deleted[i].ID < deleted[j].ID
+	})
+	f.messages = kept
+	return deleted, nil
+}
+
 func (f *fakeMessageStore) RewriteSandboxCheckpoints(_ context.Context, sessionID, oldID, newID string) error {
 	if f.rewriteErr != nil {
 		return f.rewriteErr
@@ -335,6 +374,8 @@ var (
 	_ reaperSessionStore        = (*fakeSessionStore)(nil)
 	_ forkMessageStore          = (*fakeMessageStore)(nil)
 	_ forkBootstrapMessageStore = (*fakeMessageStore)(nil)
+	_ rewindSessionStore        = (*fakeSessionStore)(nil)
+	_ rewindMessageStore        = (*fakeMessageStore)(nil)
 	_ SessionForkSandboxPort    = (*fakeForkSandboxPort)(nil)
 )
 
