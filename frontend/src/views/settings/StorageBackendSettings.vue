@@ -356,7 +356,7 @@ async function save() {
 }
 async function makeDefault(backend: StorageBackend) { await setDefaultStorageBackend(backend.id); defaultID.value = backend.id; MessagePlugin.success(t('settings.storageBackend.defaultUpdated')) }
 function remove(backend: StorageBackend) {
-  const dialog = DialogPlugin.confirm({ header: t('settings.storageBackend.deleteTitle'), body: t('settings.storageBackend.deleteConfirm', { name: backend.name }), onConfirm: async () => { dialog.destroy(); try { await deleteStorageBackend(backend.id); await load(); MessagePlugin.success(t('settings.storageBackend.deleted')) } catch (e: any) { MessagePlugin.error(e?.message || t('settings.storageBackend.deleteFailed')) } }, onCancel: () => dialog.destroy() })
+  const dialog = DialogPlugin.confirm({ theme: 'danger', confirmBtn: { content: t('common.delete'), theme: 'danger' }, header: t('settings.storageBackend.deleteTitle'), body: t('settings.storageBackend.deleteConfirm', { name: backend.name }), onConfirm: async () => { dialog.destroy(); try { await deleteStorageBackend(backend.id); await load(); MessagePlugin.success(t('settings.storageBackend.deleted')) } catch (e: any) { MessagePlugin.error(e?.message || t('settings.storageBackend.deleteFailed')) } }, onCancel: () => dialog.destroy() })
 }
 onMounted(load)
 </script>

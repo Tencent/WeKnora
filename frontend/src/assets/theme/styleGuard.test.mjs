@@ -44,7 +44,7 @@ const RULES = [
     name: 'raster-icon',
     why: 'more.png / circle.png 位图图标请换成 t-icon',
     pattern: /(more|circle)\.png/g,
-    baseline: 14,
+    baseline: 10,
   },
 ]
 

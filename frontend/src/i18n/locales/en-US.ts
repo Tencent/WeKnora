@@ -3326,6 +3326,7 @@ export default {
       batchDisable: 'Disable selected',
       batchDelete: 'Delete selected',
       confirmBatchDelete: 'Delete the selected {count} FAQ entries? This action cannot be undone.',
+      confirmDelete: 'Delete this FAQ entry? This cannot be undone.',
       batchDeleteSuccess: 'Deleted {count} FAQ entries'
     },
     faqImport: {

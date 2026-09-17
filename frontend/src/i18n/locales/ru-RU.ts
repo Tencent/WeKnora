@@ -4027,6 +4027,7 @@ export default {
       batchDisable: 'Отключить выбранные',
       batchDelete: 'Удалить выбранные',
       confirmBatchDelete: 'Удалить выбранные записи FAQ ({count})? Это действие нельзя отменить.',
+      confirmDelete: 'Удалить эту запись FAQ? Это действие нельзя отменить.',
       batchDeleteSuccess: 'Удалено записей FAQ: {count}',
       modes: {
         questionOnly: 'Только вопросы',

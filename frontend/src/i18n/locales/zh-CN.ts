@@ -4029,6 +4029,7 @@ export default {
       batchDisable: '批量禁用',
       batchDelete: '批量删除',
       confirmBatchDelete: '确认删除选中的 {count} 个 FAQ 条目？删除后将无法恢复。',
+      confirmDelete: '确认删除该 FAQ 条目？删除后将无法恢复。',
       batchDeleteSuccess: '已删除 {count} 个 FAQ 条目',
       modes: {
         questionOnly: '仅标准问/相似问',

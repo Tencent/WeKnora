@@ -1985,6 +1985,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
                                     </t-tooltip>
                                     <t-popconfirm v-if="canDeleteGeneratedQuestion && !question.id.startsWith('legacy-')"
                                       theme="warning" :content="$t('knowledgeBase.confirmDeleteQuestion')"
+                                      :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
                                       @confirm="handleDeleteQuestion(chunk.original, index, question)">
                                       <t-button class="icon-action-btn delete-question-btn" theme="default" variant="text"
                                         shape="square" size="small" :loading="isDeleting(index, question.id)">

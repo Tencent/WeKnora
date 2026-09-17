@@ -3326,6 +3326,7 @@ export default {
       batchDisable: '選択項目を無効化',
       batchDelete: '選択項目を削除',
       confirmBatchDelete: '選択した{count}件のFAQエントリを削除しますか？この操作は取り消せません。',
+      confirmDelete: 'この FAQ エントリを削除しますか？この操作は元に戻せません。',
       batchDeleteSuccess: '{count}件のFAQエントリを削除しました'
     },
     faqImport: {

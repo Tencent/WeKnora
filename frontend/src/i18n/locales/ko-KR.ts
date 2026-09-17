@@ -4027,6 +4027,7 @@ export default {
       batchDisable: '일괄 비활성화',
       batchDelete: '일괄 삭제',
       confirmBatchDelete: '선택한 FAQ 항목 {count}개를 삭제하시겠습니까? 삭제 후에는 복구할 수 없습니다.',
+      confirmDelete: '이 FAQ 항목을 삭제하시겠습니까? 삭제 후 복구할 수 없습니다.',
       batchDeleteSuccess: 'FAQ 항목 {count}개를 삭제했습니다',
       modes: {
         questionOnly: '표준 질문/유사 질문만',

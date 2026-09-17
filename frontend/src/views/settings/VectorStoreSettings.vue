@@ -702,9 +702,9 @@ const handleAction = (action: { value: string }, store: VectorStoreEntity) => {
 const confirmDelete = (store: VectorStoreEntity) => {
   const dialog = DialogPlugin.confirm({
     header: t('vectorStoreSettings.deleteConfirm'),
-    confirmBtn: t('common.delete'),
+    confirmBtn: { content: t('common.delete'), theme: 'danger' },
     cancelBtn: t('common.cancel'),
-    theme: 'warning',
+    theme: 'danger',
     onConfirm: async () => {
       try {
         await deleteVectorStoreAPI(store.id!)

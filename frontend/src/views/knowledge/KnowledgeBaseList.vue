@@ -679,25 +679,6 @@
       </div>
     </div>
 
-    <!-- 删除确认对话框 -->
-    <t-dialog v-model:visible="deleteVisible" dialogClassName="del-knowledge-dialog" :closeBtn="false" :cancelBtn="null"
-      :confirmBtn="null">
-      <div class="circle-wrap">
-        <div class="dialog-header">
-          <img class="circle-img" src="@/assets/img/circle.png" alt="">
-          <span class="circle-title">{{ $t('knowledgeList.delete.confirmTitle') }}</span>
-        </div>
-        <span class="del-circle-txt">
-          {{ $t('knowledgeList.delete.confirmMessage', { name: deletingKb?.name ?? '' }) }}
-        </span>
-        <div class="circle-btn">
-          <span class="circle-btn-txt" @click="deleteVisible = false">{{ $t('common.cancel') }}</span>
-          <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('knowledgeList.delete.confirmButton')
-          }}</span>
-        </div>
-      </div>
-    </t-dialog>
-
     <!-- 知识库编辑器（创建/编辑统一组件） -->
     <KnowledgeBaseEditorModal :visible="uiStore.showKBEditorModal" :mode="uiStore.kbEditorMode"
       :kb-id="uiStore.currentKBId || undefined" :initial-type="uiStore.kbEditorType"
@@ -783,6 +764,7 @@
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteKnowledgeBase, duplicateKnowledgeBase, togglePinKnowledgeBase } from '@/api/knowledge-base'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
@@ -871,8 +853,7 @@ interface KB {
 
 const kbs = ref<KB[]>([])
 const loading = ref(false)
-const deleteVisible = ref(false)
-const deletingKb = ref<KB | null>(null)
+const confirmDelete = useConfirmDelete()
 const currentMoreIndex = ref<number>(-1)
 const highlightedKbId = ref<string | null>(null)
 const highlightedCardRef = ref<HTMLElement | null>(null)
@@ -1398,10 +1379,7 @@ const handleSettingsById = (id: string) => {
 // 通过 ID 处理删除（用于全部 Tab 下的知识库）
 const handleDeleteById = (id: string) => {
   const kb = kbs.value.find(k => k.id === id)
-  if (kb) {
-    deletingKb.value = kb
-    deleteVisible.value = true
-  }
+  if (kb) requestDelete(kb)
 }
 
 const handleTogglePin = async (kb: KB) => {
@@ -1528,24 +1506,26 @@ const goToSharedKbFromPanel = () => {
 const handleDelete = (kb: KB) => {
   // 手动关闭弹窗
   kb.showMore = false
-  deletingKb.value = kb
-  deleteVisible.value = true
+  requestDelete(kb)
 }
 
-const confirmDelete = () => {
-  if (!deletingKb.value) return
-
-  deleteKnowledgeBase(deletingKb.value.id).then((res: any) => {
-    if (res.success) {
-      MessagePlugin.success(t('knowledgeList.messages.deleted'))
-      deleteVisible.value = false
-      deletingKb.value = null
-      fetchList(true)
-    } else {
-      MessagePlugin.error(res.message || t('knowledgeList.messages.deleteFailed'))
-    }
-  }).catch((e: any) => {
-    MessagePlugin.error(e?.message || t('knowledgeList.messages.deleteFailed'))
+const requestDelete = (kb: KB) => {
+  confirmDelete({
+    title: t('knowledgeList.delete.confirmTitle'),
+    body: t('knowledgeList.delete.confirmMessage', { name: kb.name }),
+    onConfirm: async () => {
+      try {
+        const res: any = await deleteKnowledgeBase(kb.id)
+        if (res.success) {
+          MessagePlugin.success(t('knowledgeList.messages.deleted'))
+          fetchList(true)
+        } else {
+          MessagePlugin.error(res.message || t('knowledgeList.messages.deleteFailed'))
+        }
+      } catch (e: any) {
+        MessagePlugin.error(e?.message || t('knowledgeList.messages.deleteFailed'))
+      }
+    },
   })
 }
 
@@ -2830,88 +2810,10 @@ const handleUploadFinishedEvent = (event: Event) => {
 }
 
 // 删除确认对话框样式
-:deep(.del-knowledge-dialog) {
-  padding: 0px !important;
-  border-radius: 6px !important;
-
-  .t-dialog__header {
-    display: none;
-  }
-
-  .t-dialog__body {
-    padding: 16px;
-  }
-
-  .t-dialog__footer {
-    padding: 0;
-  }
-}
-
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
-.circle-wrap {
-  .dialog-header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .circle-img {
-    width: 20px;
-    height: 20px;
-    margin-right: 8px;
-  }
-
-  .circle-title {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 24px;
-  }
-
-  .del-circle-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    display: inline-block;
-    margin-left: 29px;
-    margin-bottom: 21px;
-  }
-
-  .circle-btn {
-    height: 22px;
-    width: 100%;
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .circle-btn-txt {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    cursor: pointer;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-
-  .confirm {
-    color: var(--td-error-color);
-    margin-left: 40px;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-}
 </style>
 
 <style lang="less">

@@ -203,42 +203,6 @@
     <OrganizationSettingsModal :visible="showSettingsModal" :org-id="settingsOrgId" :mode="settingsMode"
       @update:visible="showSettingsModal = $event" />
 
-    <!-- Delete Confirm Dialog -->
-    <t-dialog v-model:visible="deleteVisible" dialogClassName="del-org-dialog" :closeBtn="false" :cancelBtn="null"
-      :confirmBtn="null">
-      <div class="circle-wrap">
-        <div class="dialog-header">
-          <img class="circle-img" src="@/assets/img/circle.png" alt="">
-          <span class="circle-title">{{ $t('organization.deleteConfirmTitle') }}</span>
-        </div>
-        <span class="del-circle-txt">
-          {{ $t('organization.deleteConfirmMessage', { name: deletingOrg?.name ?? '' }) }}
-        </span>
-        <div class="circle-btn">
-          <span class="circle-btn-txt" @click="deleteVisible = false">{{ $t('common.cancel') }}</span>
-          <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('common.delete') }}</span>
-        </div>
-      </div>
-    </t-dialog>
-
-    <!-- Leave Confirm Dialog -->
-    <t-dialog v-model:visible="leaveVisible" dialogClassName="del-org-dialog" :closeBtn="false" :cancelBtn="null"
-      :confirmBtn="null">
-      <div class="circle-wrap">
-        <div class="dialog-header">
-          <img class="circle-img" src="@/assets/img/circle.png" alt="">
-          <span class="circle-title">{{ $t('organization.leaveConfirmTitle') }}</span>
-        </div>
-        <span class="del-circle-txt">
-          {{ $t('organization.leaveConfirmMessage', { name: leavingOrg?.name ?? '' }) }}
-        </span>
-        <div class="circle-btn">
-          <span class="circle-btn-txt" @click="leaveVisible = false">{{ $t('common.cancel') }}</span>
-          <span class="circle-btn-txt confirm" @click="confirmLeave">{{ $t('organization.leave') }}</span>
-        </div>
-      </div>
-    </t-dialog>
-
     <!-- 加入组织 / 邀请预览弹框（菜单与邀请链接共用同一弹框） -->
     <Teleport to="body">
       <Transition name="modal">
@@ -477,6 +441,7 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
 import type { Organization, OrganizationPreview, SearchableOrganizationItem } from '@/api/organization'
@@ -516,10 +481,7 @@ const inviteRequestMessage = ref('')
 const showSettingsModal = ref(false)
 const settingsOrgId = ref('')
 const settingsMode = ref<'create' | 'edit'>('edit')
-const deleteVisible = ref(false)
-const leaveVisible = ref(false)
-const deletingOrg = ref<Organization | null>(null)
-const leavingOrg = ref<Organization | null>(null)
+const confirmDelete = useConfirmDelete()
 
 // 邀请预览相关状态（与邀请链接共用同一弹框）
 const showInvitePreview = ref(false)
@@ -818,42 +780,39 @@ function handleSettings(org: OrgWithUI) {
 
 function handleLeave(org: OrgWithUI) {
   organizationMenuVisibility[org.id] = false
-  leavingOrg.value = org
-  leaveVisible.value = true
-}
-
-async function confirmLeave() {
-  if (!leavingOrg.value) return
-  const success = await orgStore.leave(leavingOrg.value.id)
-  if (success) {
-    MessagePlugin.success(t('organization.leaveSuccess'))
-    leaveVisible.value = false
-    leavingOrg.value = null
-  } else {
-    MessagePlugin.error(orgStore.error || t('organization.leaveFailed'))
-  }
+  confirmDelete({
+    title: t('organization.leaveConfirmTitle'),
+    body: t('organization.leaveConfirmMessage', { name: org.name }),
+    confirmText: t('organization.leave'),
+    onConfirm: async () => {
+      const success = await orgStore.leave(org.id)
+      if (success) {
+        MessagePlugin.success(t('organization.leaveSuccess'))
+      } else {
+        MessagePlugin.error(orgStore.error || t('organization.leaveFailed'))
+      }
+    },
+  })
 }
 
 function handleDelete(org: OrgWithUI) {
   organizationMenuVisibility[org.id] = false
-  deletingOrg.value = org
-  deleteVisible.value = true
-}
-
-async function confirmDelete() {
-  if (!deletingOrg.value) return
   if (!canManageOrg.value) {
     MessagePlugin.warning(t('organization.rbac.cannotManage'))
     return
   }
-  const success = await orgStore.remove(deletingOrg.value.id)
-  if (success) {
-    MessagePlugin.success(t('organization.deleteSuccess'))
-    deleteVisible.value = false
-    deletingOrg.value = null
-  } else {
-    MessagePlugin.error(orgStore.error || t('organization.deleteFailed'))
-  }
+  confirmDelete({
+    title: t('organization.deleteConfirmTitle'),
+    body: t('organization.deleteConfirmMessage', { name: org.name }),
+    onConfirm: async () => {
+      const success = await orgStore.remove(org.id)
+      if (success) {
+        MessagePlugin.success(t('organization.deleteSuccess'))
+      } else {
+        MessagePlugin.error(orgStore.error || t('organization.deleteFailed'))
+      }
+    },
+  })
 }
 
 // 处理邀请链接预览
@@ -1828,88 +1787,10 @@ onUnmounted(() => {
 }
 
 // 删除/离开确认对话框样式
-:deep(.del-org-dialog) {
-  padding: 0px !important;
-  border-radius: 6px !important;
-
-  .t-dialog__header {
-    display: none;
-  }
-
-  .t-dialog__body {
-    padding: 16px;
-  }
-
-  .t-dialog__footer {
-    padding: 0;
-  }
-}
-
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
-.circle-wrap {
-  .dialog-header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .circle-img {
-    width: 20px;
-    height: 20px;
-    margin-right: 8px;
-  }
-
-  .circle-title {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 24px;
-  }
-
-  .del-circle-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    display: inline-block;
-    margin-left: 29px;
-    margin-bottom: 21px;
-  }
-
-  .circle-btn {
-    height: 22px;
-    width: 100%;
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .circle-btn-txt {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    cursor: pointer;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-
-  .confirm {
-    color: var(--td-error-color);
-    margin-left: 40px;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-}
 </style>
 
 <style lang="less">

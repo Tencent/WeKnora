@@ -779,6 +779,7 @@
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
 import { MessagePlugin, DialogPlugin, Icon as TIcon } from 'tdesign-vue-next'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import type { FormRules, FormInstanceFunctions } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -848,6 +849,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const confirmDelete = useConfirmDelete()
 const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
@@ -1707,15 +1709,20 @@ const handleMenuEdit = (entry: FAQEntry) => {
   openEditor(entry)
 }
 
-const handleMenuDelete = async (entry: FAQEntry) => {
+const handleMenuDelete = (entry: FAQEntry) => {
   entry.showMore = false
-  try {
-    await deleteFAQEntries(props.kbId, [entry.id])
-    MessagePlugin.success(t('knowledgeEditor.faqImport.deleteSuccess'))
-    await loadEntries()
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'))
-  }
+  confirmDelete({
+    body: t('knowledgeEditor.faq.confirmDelete'),
+    onConfirm: async () => {
+      try {
+        await deleteFAQEntries(props.kbId, [entry.id])
+        MessagePlugin.success(t('knowledgeEditor.faqImport.deleteSuccess'))
+        await loadEntries()
+      } catch (error: any) {
+        MessagePlugin.error(error?.message || t('common.operationFailed'))
+      }
+    },
+  })
 }
 
 const openImportDialog = () => {

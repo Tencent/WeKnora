@@ -715,24 +715,6 @@
       </div>
     </div>
 
-    <!-- 删除确认对话框 -->
-    <t-dialog v-model:visible="deleteVisible" dialogClassName="del-agent-dialog" :closeBtn="false" :cancelBtn="null"
-      :confirmBtn="null">
-      <div class="circle-wrap">
-        <div class="dialog-header">
-          <img class="circle-img" src="@/assets/img/circle.png" alt="">
-          <span class="circle-title">{{ $t('agent.delete.confirmTitle') }}</span>
-        </div>
-        <span class="del-circle-txt">
-          {{ $t('agent.delete.confirmMessage', { name: deletingAgent?.name ?? '' }) }}
-        </span>
-        <div class="circle-btn">
-          <span class="circle-btn-txt" @click="deleteVisible = false">{{ $t('common.cancel') }}</span>
-          <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('agent.delete.confirmButton') }}</span>
-        </div>
-      </div>
-    </t-dialog>
-
     <!-- 共享智能体详情侧边栏 -->
     <Transition name="shared-detail-drawer">
       <div v-if="sharedDetailVisible && currentSharedAgent" class="shared-detail-drawer-overlay"
@@ -815,6 +797,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { deleteAgent, copyAgent, type CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { formatStringDate } from '@/utils/index'
@@ -1054,8 +1037,7 @@ const sortedSpaceAgentsList = computed(() => {
   })
 })
 const loading = ref(false)
-const deleteVisible = ref(false)
-const deletingAgent = ref<AgentWithUI | null>(null)
+const confirmDelete = useConfirmDelete()
 const sharedDetailVisible = ref(false)
 const currentSharedAgent = ref<SharedAgentInfo | null>(null)
 const sharedAgentUsesKb = computed(() => {
@@ -1487,8 +1469,23 @@ const spaceAgentSectionCounts = computed<Record<AgentSectionKey, number>>(() => 
 
 const handleDelete = (agent: AgentWithUI) => {
   openMoreAgentId.value = null
-  deletingAgent.value = agent
-  deleteVisible.value = true
+  confirmDelete({
+    title: t('agent.delete.confirmTitle'),
+    body: t('agent.delete.confirmMessage', { name: agent.name }),
+    onConfirm: async () => {
+      try {
+        const res: any = await deleteAgent(agent.id)
+        if (res.success) {
+          MessagePlugin.success(t('agent.messages.deleted'))
+          fetchList(true)
+        } else {
+          MessagePlugin.error(res.message || t('agent.messages.deleteFailed'))
+        }
+      } catch (e: any) {
+        MessagePlugin.error(e?.message || t('agent.messages.deleteFailed'))
+      }
+    },
+  })
 }
 
 const handleCopy = (agent: AgentWithUI) => {
@@ -1551,23 +1548,6 @@ const handleToggleSharedDisabledFromShared = (shared: SharedAgentInfo) => {
     }
   }).catch((e: any) => {
     MessagePlugin.error(e?.message || t('agent.messages.saveFailed'))
-  })
-}
-
-const confirmDelete = () => {
-  if (!deletingAgent.value) return
-
-  deleteAgent(deletingAgent.value.id).then((res: any) => {
-    if (res.success) {
-      MessagePlugin.success(t('agent.messages.deleted'))
-      deleteVisible.value = false
-      deletingAgent.value = null
-      fetchList(true)
-    } else {
-      MessagePlugin.error(res.message || t('agent.messages.deleteFailed'))
-    }
-  }).catch((e: any) => {
-    MessagePlugin.error(e?.message || t('agent.messages.deleteFailed'))
   })
 }
 
@@ -2391,88 +2371,10 @@ defineExpose({
 }
 
 // 删除确认对话框样式
-:deep(.del-agent-dialog) {
-  padding: 0px !important;
-  border-radius: 6px !important;
-
-  .t-dialog__header {
-    display: none;
-  }
-
-  .t-dialog__body {
-    padding: 16px;
-  }
-
-  .t-dialog__footer {
-    padding: 0;
-  }
-}
-
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
-.circle-wrap {
-  .dialog-header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-
-  .circle-img {
-    width: 20px;
-    height: 20px;
-    margin-right: 8px;
-  }
-
-  .circle-title {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 24px;
-  }
-
-  .del-circle-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    display: inline-block;
-    margin-left: 29px;
-    margin-bottom: 21px;
-  }
-
-  .circle-btn {
-    height: 22px;
-    width: 100%;
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .circle-btn-txt {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    cursor: pointer;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-
-  .confirm {
-    color: var(--td-error-color);
-    margin-left: 40px;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-}
 </style>
 
 <style lang="less">
