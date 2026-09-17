@@ -205,3 +205,49 @@ docker compose down -v         # 危险：清空数据库与文件卷
 | 模型 401 / 连不上 | 检查网关 IP、Key、容器出网；看 SSRF 白名单 |
 | 页面 502 | Nginx 是否指向 `127.0.0.1:18080`；`docker compose ps frontend` |
 | 上传大文件失败 | `.env` 的 `MAX_FILE_SIZE_MB` 与 Nginx `client_max_body_size` 保持一致 |
+| embed/控制台建会话 500，日志含 `sandbox_config_id` / `artifacts` does not exist | **schema 漂移**：`schema_migrations` 已是高版本，但真实表缺列。执行 `./scripts/check-schema-drift.sh`，再 `./scripts/repair-schema-drift.sh`（回拨 version 后重启 app 重跑迁移） |
+| 升级镜像后 app 启动报 `schema drift detected` | 同上；紧急拉起可临时 `SCHEMA_DRIFT_FATAL=false`，修完务必改回 |
+
+### Schema 漂移自检 / 修复
+
+```bash
+# bash 下加载 .env（dash/sh 用: set -a; . ./.env; set +a）
+set -a && source .env && set +a
+
+./scripts/check-schema-drift.sh          # 仅检查
+./scripts/repair-schema-drift.sh         # 回拨到 77 并重启 app 重跑迁移
+# REPAIR_TO=77 ./scripts/repair-schema-drift.sh
+```
+
+注意：库名默认是 **`TreeRAG`**（不是 `weknora`）；`psql` 必须显式 `-U "$DB_USER" -d "$DB_NAME"`。  
+`sh`（dash）没有 `source`，请用：`set -a; . ./.env; set +a`。
+
+若回拨后卡在 `relation "browser_devices" already exists`（旧镜像 093 非幂等）或
+`version=93 dirty=t`：
+
+```sh
+# 推荐一键收尾（补 078 + 清 dirty@93 + restart）
+./scripts/finish-schema-repair.sh
+```
+
+或手工：
+
+```sh
+# 1) 手工补 078（回拨到 78 会跳过它）
+sudo docker compose exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
+  psql -U "$DB_USER" -d "$DB_NAME" <<'SQL'
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS source_content TEXT NOT NULL DEFAULT '';
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS content_revision INT NOT NULL DEFAULT 0;
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS index_status VARCHAR(16) NOT NULL DEFAULT 'ready';
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS last_editor_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS context_header TEXT NOT NULL DEFAULT '';
+ALTER TABLE knowledges ADD COLUMN IF NOT EXISTS custom_metadata JSONB NOT NULL DEFAULT '{}'::JSONB;
+SQL
+
+# 2) 093 表已存在：清 dirty，从 94 继续
+sudo docker compose exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
+  psql -U "$DB_USER" -d "$DB_NAME" -c \
+  "UPDATE schema_migrations SET version = 93, dirty = false;"
+
+sudo docker compose restart app
+```

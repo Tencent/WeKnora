@@ -6,13 +6,13 @@ DO $$ BEGIN RAISE NOTICE '[Migration 000038] Adding agent_id to IM channel sessi
 -- 1. User-mode lookup: include agent_id so the same user talking to
 --    different agents gets separate sessions.
 DROP INDEX IF EXISTS idx_channel_lookup;
-CREATE UNIQUE INDEX idx_channel_lookup
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_lookup
     ON im_channel_sessions (platform, user_id, chat_id, tenant_id, agent_id)
     WHERE deleted_at IS NULL;
 
 -- 2. Thread-mode lookup: same fix for thread-based sessions.
 DROP INDEX IF EXISTS idx_channel_thread_lookup;
-CREATE UNIQUE INDEX idx_channel_thread_lookup
+CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_thread_lookup
     ON im_channel_sessions (platform, chat_id, thread_id, tenant_id, agent_id)
     WHERE deleted_at IS NULL AND thread_id != '';
 

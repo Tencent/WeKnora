@@ -2,10 +2,10 @@
 --   000034_add_attachments        messages.attachments
 --   000054_invitation_tokens      tenant_invitations.token / accepted_count
 
-ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachments TEXT NOT NULL DEFAULT '[]';
 
-ALTER TABLE tenant_invitations ADD COLUMN token VARCHAR(64) NOT NULL DEFAULT '';
-ALTER TABLE tenant_invitations ADD COLUMN accepted_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tenant_invitations ADD COLUMN IF NOT EXISTS token VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE tenant_invitations ADD COLUMN IF NOT EXISTS accepted_count INTEGER NOT NULL DEFAULT 0;
 
 -- Share-link rows use invitee_user_id=''; relax the pending uniqueness index
 -- so multiple share links can coexist on one tenant (see versioned 000054).

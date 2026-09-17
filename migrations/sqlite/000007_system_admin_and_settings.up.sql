@@ -1,7 +1,7 @@
 -- Mirrors versioned migration 000053_system_admin_and_settings:
 -- users.is_system_admin + system_settings table.
 
-ALTER TABLE users ADD COLUMN is_system_admin BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_system_admin BOOLEAN NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_users_is_system_admin ON users (is_system_admin);
 
 CREATE TABLE IF NOT EXISTS system_settings (

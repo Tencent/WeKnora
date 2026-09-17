@@ -1,7 +1,7 @@
 -- Folder tree support for knowledge bases (SQLite / lite mode).
 --
 -- Mirrors migrations/versioned/000079_knowledge_folder_path.up.sql.
-ALTER TABLE knowledges ADD COLUMN folder_path VARCHAR(1024) NOT NULL DEFAULT '';
+ALTER TABLE knowledges ADD COLUMN IF NOT EXISTS folder_path VARCHAR(1024) NOT NULL DEFAULT '';
 
 -- Backfill legacy folder uploads, which encoded their relative directory in
 -- file_name. SQLite has no regex, so the directory prefix is isolated with the

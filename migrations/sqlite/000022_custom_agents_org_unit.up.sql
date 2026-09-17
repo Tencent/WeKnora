@@ -1,6 +1,6 @@
 -- SQLite: mirror 000078_custom_agents_org_unit
 
-ALTER TABLE custom_agents ADD COLUMN org_unit_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS org_unit_id TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_custom_agents_tenant_org_unit
     ON custom_agents (tenant_id, org_unit_id);

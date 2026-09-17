@@ -1,7 +1,7 @@
 -- Sync Lite SQLite schema: wiki, indexing, processing spans, task queue, multi-tags.
 
-ALTER TABLE knowledge_bases ADD COLUMN wiki_config TEXT DEFAULT NULL;
-ALTER TABLE knowledge_bases ADD COLUMN indexing_strategy TEXT DEFAULT NULL;
+ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS wiki_config TEXT DEFAULT NULL;
+ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS indexing_strategy TEXT DEFAULT NULL;
 
 UPDATE knowledge_bases
 SET indexing_strategy = '{"vector_enabled":true,"keyword_enabled":true,"wiki_enabled":false,"graph_enabled":false}'

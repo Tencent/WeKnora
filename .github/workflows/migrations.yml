@@ -10,11 +10,15 @@ on:
     paths:
       - 'migrations/**'
       - 'scripts/check-migration-versions.sh'
+      - 'scripts/check-migration-idempotency.sh'
+      - 'internal/database/migration_idempotency_test.go'
       - '.github/workflows/migrations.yml'
   pull_request:
     paths:
       - 'migrations/**'
       - 'scripts/check-migration-versions.sh'
+      - 'scripts/check-migration-idempotency.sh'
+      - 'internal/database/migration_idempotency_test.go'
       - '.github/workflows/migrations.yml'
 
 permissions:
@@ -28,3 +32,11 @@ jobs:
       - uses: actions/checkout@v6
       - name: Check migration versions
         run: bash ./scripts/check-migration-versions.sh
+
+  check-idempotent-create-table:
+    name: idempotent CREATE TABLE
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check CREATE TABLE IF NOT EXISTS
+        run: bash ./scripts/check-migration-idempotency.sh

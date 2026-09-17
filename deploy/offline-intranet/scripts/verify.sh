@@ -48,5 +48,8 @@ curl -sS -m 30 -X POST "${RERANK_BASE_URL}/rerank" \
   | head -c 400
 echo
 
+printf '\n== schema drift ==\n'
+./scripts/check-schema-drift.sh
+
 printf '\n== app builtin model logs ==\n'
 docker compose logs app --tail 100 | grep -E 'Built-in model|nmg-rs|SSRF' || true

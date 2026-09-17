@@ -1,11 +1,11 @@
 -- Sync Lite SQLite schema with recent Postgres migrations (000053–000064).
 
-ALTER TABLE tenants ADD COLUMN api_principal_config TEXT DEFAULT NULL;
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS api_principal_config TEXT DEFAULT NULL;
 
-ALTER TABLE users ADD COLUMN is_system_admin BOOLEAN NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_system_admin BOOLEAN NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_users_is_system_admin ON users(is_system_admin);
 
-ALTER TABLE knowledges ADD COLUMN pending_subtasks_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE knowledges ADD COLUMN IF NOT EXISTS pending_subtasks_count INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS system_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

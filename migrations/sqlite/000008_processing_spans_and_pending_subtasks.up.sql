@@ -36,4 +36,4 @@ CREATE INDEX IF NOT EXISTS idx_kpspan_parent
     ON knowledge_processing_spans (parent_span_id)
     WHERE parent_span_id IS NOT NULL;
 
-ALTER TABLE knowledges ADD COLUMN pending_subtasks_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE knowledges ADD COLUMN IF NOT EXISTS pending_subtasks_count INTEGER NOT NULL DEFAULT 0;

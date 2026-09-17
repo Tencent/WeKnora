@@ -1,5 +1,5 @@
 -- Browser authorization is durable; live browser processes remain ephemeral.
-CREATE TABLE browser_devices (
+CREATE TABLE IF NOT EXISTS browser_devices (
  scope_key VARCHAR(32) PRIMARY KEY,
  id VARCHAR(32) NOT NULL UNIQUE,
  tenant BIGINT NOT NULL,
@@ -18,15 +18,15 @@ CREATE TABLE browser_devices (
  lease_key VARCHAR(32) NOT NULL DEFAULT '',
  lease_until DATETIME NOT NULL
 );
-CREATE TABLE browser_pairings (
+CREATE TABLE IF NOT EXISTS browser_pairings (
  scope_key VARCHAR(32) PRIMARY KEY,
  token_hash VARCHAR(64) NOT NULL UNIQUE,
  tenant BIGINT NOT NULL,
  "user" VARCHAR(36) NOT NULL,
  expires_at DATETIME NOT NULL
 );
-CREATE INDEX browser_pairings_expiry ON browser_pairings(expires_at);
-CREATE TABLE browser_task_interruptions (
+CREATE INDEX IF NOT EXISTS browser_pairings_expiry ON browser_pairings(expires_at);
+CREATE TABLE IF NOT EXISTS browser_task_interruptions (
  scope_key VARCHAR(32) NOT NULL,
  session VARCHAR(36) NOT NULL,
  PRIMARY KEY (scope_key, session)

@@ -43,9 +43,8 @@ CREATE INDEX IF NOT EXISTS idx_org_unit_members_tenant_user
     ON org_unit_members (tenant_id, user_id);
 
 -- knowledge_bases.org_unit_id may already exist on some Lite baselines;
--- ADD COLUMN fails if present, so we tolerate that at apply time via
--- migration runner or a no-op when the column exists.
-ALTER TABLE knowledge_bases ADD COLUMN org_unit_id TEXT NOT NULL DEFAULT '';
+-- IF NOT EXISTS keeps re-apply safe when the column is already present.
+ALTER TABLE knowledge_bases ADD COLUMN IF NOT EXISTS org_unit_id TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_bases_org_unit
     ON knowledge_bases (tenant_id, org_unit_id);

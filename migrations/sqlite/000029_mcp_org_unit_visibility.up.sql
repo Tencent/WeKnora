@@ -1,10 +1,10 @@
 -- SQLite: mirror 000085_mcp_org_unit_visibility
 
 ALTER TABLE mcp_services
-    ADD COLUMN org_unit_id TEXT NOT NULL DEFAULT '';
+    ADD COLUMN IF NOT EXISTS org_unit_id TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE mcp_services
-    ADD COLUMN share_with_descendants INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS share_with_descendants INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_mcp_services_tenant_org_unit
     ON mcp_services (tenant_id, org_unit_id)

@@ -1,9 +1,10 @@
 -- Per-session extraction progress and deferred proposal replacement.
-ALTER TABLE memory_subjects ADD COLUMN extraction_state JSONB;
-ALTER TABLE memory_items ADD COLUMN replaces_id VARCHAR(36) NOT NULL DEFAULT '';
+-- IF NOT EXISTS keeps repair/re-run safe when schema_migrations is forced back.
+ALTER TABLE memory_subjects ADD COLUMN IF NOT EXISTS extraction_state JSONB;
+ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS replaces_id VARCHAR(36) NOT NULL DEFAULT '';
 
 -- Progress is an indexed row per conversation; subject rows only hold a lease.
-CREATE TABLE memory_extraction_sessions (
+CREATE TABLE IF NOT EXISTS memory_extraction_sessions (
  tenant_id BIGINT NOT NULL,
  subject_id VARCHAR(512) NOT NULL,
  session_id VARCHAR(36) NOT NULL,
@@ -17,8 +18,8 @@ CREATE TABLE memory_extraction_sessions (
  failed_at TIMESTAMP WITH TIME ZONE, updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
  PRIMARY KEY (tenant_id, subject_id, session_id)
 );
-CREATE INDEX idx_memory_extraction_pending ON memory_extraction_sessions (tenant_id, subject_id, pending, updated_at, session_id);
-CREATE INDEX idx_memory_replaces ON memory_items (tenant_id, subject_id, replaces_id, status);
+CREATE INDEX IF NOT EXISTS idx_memory_extraction_pending ON memory_extraction_sessions (tenant_id, subject_id, pending, updated_at, session_id);
+CREATE INDEX IF NOT EXISTS idx_memory_replaces ON memory_items (tenant_id, subject_id, replaces_id, status);
 
 -- Recover the old active record when a legacy pending inference prematurely
 -- superseded it. Keep an explicit target so confirmation can still replace it.
@@ -30,7 +31,9 @@ SET replaces_id = (
       AND old.superseded_by = memory_items.id AND old.status = 'superseded'
     ORDER BY old.valid_from DESC, old.id DESC LIMIT 1
 )
-WHERE status = 'pending' AND EXISTS (
+WHERE status = 'pending'
+  AND (replaces_id IS NULL OR replaces_id = '')
+  AND EXISTS (
     SELECT 1 FROM memory_items AS old
     WHERE old.tenant_id = memory_items.tenant_id
       AND old.subject_id = memory_items.subject_id

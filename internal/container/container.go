@@ -800,6 +800,22 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		logger.Infof(context.Background(), "Auto-migration is disabled (AUTO_MIGRATE=false)")
 	}
 
+	// Fail closed when schema_migrations is ahead of real tables/columns
+	// (common after restoring an older DB dump then upgrading the image).
+	// Set SCHEMA_DRIFT_FATAL=false only for emergency bring-up.
+	if drifts := database.DetectSchemaDrift(db); len(drifts) > 0 {
+		driftErr := database.FormatSchemaDriftError(drifts)
+		logger.Errorf(context.Background(), "Schema drift: %v", driftErr)
+		if os.Getenv("SCHEMA_DRIFT_FATAL") != "false" {
+			return nil, driftErr
+		}
+		logger.Warnf(
+			context.Background(),
+			"Continuing despite schema drift (SCHEMA_DRIFT_FATAL=false); "+
+				"session/embed/sandbox APIs may return 500 until migrations are repaired",
+		)
+	}
+
 	// Get underlying SQL DB object
 	sqlDB, err := db.DB()
 	if err != nil {
