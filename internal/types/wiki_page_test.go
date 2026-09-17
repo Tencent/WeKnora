@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -231,6 +232,26 @@ func TestWikiGraphDataJSON(t *testing.T) {
 	}
 	if restored.Edges[0].Source != "entity/a" || restored.Edges[0].Target != "concept/b" {
 		t.Errorf("Edge mismatch: got %v", restored.Edges[0])
+	}
+}
+
+func TestWikiGraphDataJSONEmptyEdgesIsArrayNotNull(t *testing.T) {
+	// Mirrors computeGraphSubset's empty-edge return: must encode as [] so
+	// the frontend can iterate without "edges is not iterable".
+	graph := WikiGraphData{
+		Nodes: []WikiGraphNode{},
+		Edges: make([]WikiGraphEdge, 0),
+		Meta:  WikiGraphMeta{Mode: WikiGraphModeOverview},
+	}
+	data, err := json.Marshal(graph)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"edges":[]`)) {
+		t.Fatalf("expected empty edges array in JSON, got %s", data)
+	}
+	if bytes.Contains(data, []byte(`"edges":null`)) {
+		t.Fatalf("edges must not be null, got %s", data)
 	}
 }
 

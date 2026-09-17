@@ -22,6 +22,22 @@ type schemaRequirement struct {
 // schema_migrations was ahead of the real schema (TreeRAG offline upgrade).
 var criticalSchemaRequirements = []schemaRequirement{
 	{
+		table: "wiki_pages", column: "parent_slug", sinceMigration: 61,
+		symptomHint: "GET /wiki/index hierarchy fields",
+	},
+	{
+		table: "wiki_pages", column: "wiki_path", sinceMigration: 61,
+		symptomHint: "GET /wiki/index directory sort",
+	},
+	{
+		table: "wiki_pages", column: "last_edit_source", sinceMigration: 75,
+		symptomHint: "wiki page load / revisions",
+	},
+	{
+		table: "wiki_folders", sinceMigration: 61,
+		symptomHint: "wiki folder browser",
+	},
+	{
 		table: "knowledges", column: "custom_metadata", sinceMigration: 78,
 		symptomHint: "knowledge upload / custom metadata",
 	},

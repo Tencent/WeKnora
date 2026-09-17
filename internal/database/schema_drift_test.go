@@ -44,12 +44,14 @@ func TestDetectSchemaDriftReportsMissingCriticalObjects(t *testing.T) {
 	}
 	require.True(t, foundSessionCol, "expected sessions.sandbox_config_id drift")
 	require.True(t, foundSandboxTable, "expected tenant_sandbox_configs drift")
-	require.Equal(t, 77, LowestRepairVersion(drifts))
+	require.Equal(t, 60, LowestRepairVersion(drifts))
 }
 
 func TestDetectSchemaDriftClearWhenRequirementsPresent(t *testing.T) {
 	db := openDriftTestDB(t)
 	stmts := []string{
+		`CREATE TABLE wiki_pages (id TEXT, parent_slug TEXT, wiki_path TEXT, last_edit_source TEXT)`,
+		`CREATE TABLE wiki_folders (id TEXT)`,
 		`CREATE TABLE knowledges (id TEXT, folder_path TEXT, custom_metadata TEXT)`,
 		`CREATE TABLE chunks (id TEXT, source_content TEXT)`,
 		`CREATE TABLE messages (id TEXT, artifacts TEXT, usage TEXT)`,

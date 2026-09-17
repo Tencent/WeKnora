@@ -28,6 +28,49 @@ psql_exec() {
 printf '== before ==\n'
 psql_exec -c "SELECT version, dirty FROM schema_migrations;"
 
+printf '\n== apply migration 061/075 wiki columns (skipped when force-to-78+) ==\n'
+psql_exec <<'SQL'
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS parent_slug VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS category_path JSONB DEFAULT '[]'::JSONB;
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS wiki_path VARCHAR(1024) NOT NULL DEFAULT '';
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS depth INT NOT NULL DEFAULT 0;
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36) NOT NULL DEFAULT '';
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS last_edit_source VARCHAR(16) NOT NULL DEFAULT '';
+ALTER TABLE wiki_pages ADD COLUMN IF NOT EXISTS last_editor_id VARCHAR(64) NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS wiki_folders (
+    id                VARCHAR(36) PRIMARY KEY,
+    tenant_id         BIGINT NOT NULL DEFAULT 0,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    parent_id         VARCHAR(36) NOT NULL DEFAULT '',
+    name              VARCHAR(255) NOT NULL,
+    path              VARCHAR(1024) NOT NULL DEFAULT '',
+    depth             INT NOT NULL DEFAULT 0,
+    sort_order        INT NOT NULL DEFAULT 0,
+    created_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted_at        TIMESTAMP WITH TIME ZONE
+);
+CREATE TABLE IF NOT EXISTS wiki_page_revisions (
+    id              VARCHAR(36) PRIMARY KEY,
+    tenant_id       BIGINT NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL,
+    page_id         VARCHAR(36) NOT NULL,
+    slug            VARCHAR(255) NOT NULL,
+    version         INT NOT NULL,
+    title           VARCHAR(512) NOT NULL DEFAULT '',
+    page_type       VARCHAR(32) NOT NULL DEFAULT 'summary',
+    status          VARCHAR(32) NOT NULL DEFAULT 'published',
+    content         TEXT NOT NULL DEFAULT '',
+    summary         TEXT NOT NULL DEFAULT '',
+    aliases         JSONB DEFAULT '[]'::JSONB,
+    edit_source     VARCHAR(16) NOT NULL DEFAULT '',
+    editor_id       VARCHAR(64) NOT NULL DEFAULT '',
+    edited_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+SQL
+
 printf '\n== apply migration 078 columns (skipped when force-to-78) ==\n'
 psql_exec <<'SQL'
 ALTER TABLE chunks ADD COLUMN IF NOT EXISTS source_content TEXT NOT NULL DEFAULT '';
@@ -39,9 +82,10 @@ UPDATE chunks SET source_content = content WHERE source_content = '';
 ALTER TABLE knowledges ADD COLUMN IF NOT EXISTS custom_metadata JSONB NOT NULL DEFAULT '{}'::JSONB;
 SQL
 
-# If 093 tables already exist, mark 93 applied and clear dirty so 94+ can run.
-printf '\n== clear dirty at 93 (browser_* already present) ==\n'
-psql_exec -c "UPDATE schema_migrations SET version = 93, dirty = false;"
+# Advance past non-idempotent image migrations that already partially applied.
+# v0.8.24 image still has bare CREATE/ADD in 093/094; objects already exist.
+printf '\n== clear dirty / advance past 094 ==\n'
+psql_exec -c "UPDATE schema_migrations SET version = 94, dirty = false;"
 
 printf '\n== restart app (AUTO_MIGRATE 94→108) ==\n'
 sudo docker compose restart app

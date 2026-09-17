@@ -984,6 +984,25 @@ const globalIssues = ref<WikiPageIssue[]>([])
 const currentFixSessionId = ref('')
 const stats = ref<WikiStats | null>(null)
 const graphData = ref<WikiGraphData | null>(null)
+
+/** Backend may encode empty slices as null; keep the canvas iterable. */
+function normalizeWikiGraphData(raw: unknown): WikiGraphData {
+  const body = (raw && typeof raw === 'object' ? raw : {}) as Partial<WikiGraphData> & {
+    data?: Partial<WikiGraphData>
+  }
+  const payload = body.data && typeof body.data === 'object' ? body.data : body
+  return {
+    nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+    edges: Array.isArray(payload.edges) ? payload.edges : [],
+    meta: payload.meta ?? {
+      mode: 'overview',
+      total: 0,
+      returned: 0,
+      truncated: false,
+    },
+  }
+}
+
 const searchQuery = ref('')
 const graphSearchValue = ref('')
 const graphRef = ref<HTMLElement | null>(null)
@@ -1333,7 +1352,7 @@ const graphDrawerNeighborStatus = computed(() => {
   // outgoing edges count toward a visible neighbor, matching how
   // link_count is computed server-side (in+out).
   const neighbors = new Set<string>()
-  for (const e of data.edges) {
+  for (const e of data.edges ?? []) {
     if (e.source === page.slug) neighbors.add(e.target)
     else if (e.target === page.slug) neighbors.add(e.source)
   }
@@ -1418,7 +1437,7 @@ const graphFrontierCount = computed(() => {
   const data = graphData.value
   if (!data || data.meta?.mode !== 'ego') return 0
   const visibleDegree = new Map<string, number>()
-  for (const e of data.edges) {
+  for (const e of data.edges ?? []) {
     visibleDegree.set(e.source, (visibleDegree.get(e.source) ?? 0) + 1)
     visibleDegree.set(e.target, (visibleDegree.get(e.target) ?? 0) + 1)
   }
@@ -3171,7 +3190,7 @@ async function loadGraph() {
       limit: GRAPH_OVERVIEW_LIMIT,
       types: graphFilterTypesToArray(),
     })
-    graphData.value = (res as any).data || res as any
+    graphData.value = normalizeWikiGraphData(res)
     // Seed the search dropdown's empty-state with this overview snapshot
     // so opening the select without typing shows the top-500 by link_count
     // — matching what the old client-filter dropdown used to surface.
@@ -3224,7 +3243,7 @@ async function loadEgoGraph(slug: string, depth = GRAPH_EGO_DEFAULT_DEPTH) {
       limit: GRAPH_EGO_LIMIT,
       types: graphFilterTypesToArray(),
     })
-    graphData.value = (res as any).data || res as any
+    graphData.value = normalizeWikiGraphData(res)
     graphMode.value = 'ego'
     graphCenter.value = slug
     // Entering (or re-entering) a fresh ego view resets the bloom
@@ -3293,8 +3312,8 @@ async function loadBloomNeighbors(anchorSlug: string, depth = GRAPH_EGO_DEFAULT_
       limit: GRAPH_EGO_LIMIT,
       types: graphFilterTypesToArray(),
     })
-    const incoming = (res as any).data || res as any
-    if (!incoming || !Array.isArray(incoming.nodes)) return
+    const incoming = normalizeWikiGraphData(res)
+    if (incoming.nodes.length === 0 && incoming.edges.length === 0) return
 
     bloomCurrentGeneration += 1
     const merged = mergeGraphData(graphData.value, incoming, bloomCurrentGeneration)
@@ -3342,11 +3361,11 @@ function mergeGraphData(
   const edgeKey = (e: { source: string; target: string }) => `${e.source}→${e.target}`
   const edgeSeen = new Set<string>()
   const edges: WikiGraphData['edges'] = []
-  for (const e of base.edges) {
+  for (const e of base.edges ?? []) {
     const k = edgeKey(e)
     if (!edgeSeen.has(k)) { edgeSeen.add(k); edges.push(e) }
   }
-  for (const e of incoming.edges) {
+  for (const e of incoming.edges ?? []) {
     const k = edgeKey(e)
     if (!edgeSeen.has(k)) { edgeSeen.add(k); edges.push(e) }
   }
@@ -3484,8 +3503,7 @@ async function growFrontier() {
             limit: GRAPH_EGO_LIMIT,
             types: graphFilterTypesToArray(),
           })
-          const data = (res as any).data || res as any
-          if (data?.nodes) responses.push(data)
+          responses.push(normalizeWikiGraphData(res))
         } catch (e) {
           console.error(`growFrontier: ego fetch failed for ${slug}:`, e)
         }
@@ -3764,7 +3782,11 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     container.innerHTML = ''
     return
   }
-  const graph = data
+  const graph = {
+    ...data,
+    nodes: data.nodes ?? [],
+    edges: data.edges ?? [],
+  }
 
   // Stop any previous animation
   if (graphAnimFrame) { cancelAnimationFrame(graphAnimFrame); graphAnimFrame = 0 }
@@ -3807,7 +3829,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
 
   // Build adjacency for highlight
   const adjacency = new Map<string, Set<string>>()
-  for (const edge of graph.edges) {
+  for (const edge of graph.edges ?? []) {
     if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set())
     if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set())
     adjacency.get(edge.source)!.add(edge.target)
