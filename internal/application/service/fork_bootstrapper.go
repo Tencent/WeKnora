@@ -105,6 +105,35 @@ func (b *ForkBootstrapper) TemplateOverride(
 	return pending.SnapshotID, nil
 }
 
+// OnCreateFailed retires a fork snapshot that Create could not boot.
+//
+// AfterCreate never runs on this path, so git-reset abandon cannot fire.
+// NotFound / invalid template mean the snapshot will not start next time
+// either; leave transient errors (timeout, capacity, outage) on the row so
+// a later Resolve can retry the same snapshot.
+func (b *ForkBootstrapper) OnCreateFailed(
+	ctx context.Context, key sandbox.SessionSandboxKey, createErr error,
+) {
+	if b == nil || !forkSnapshotUnusable(createErr) {
+		return
+	}
+	pending, err := b.pendingBootstrap(ctx, key)
+	if err != nil {
+		logger.Warnf(ctx, "[ForkBootstrap] load bootstrap after create failure: %v", err)
+		return
+	}
+	if pending == nil {
+		return
+	}
+	logger.Warnf(ctx, "[ForkBootstrap] create from snapshot %s failed; abandoning bootstrap: %v",
+		pending.SnapshotID, createErr)
+	b.abandon(ctx, key.SessionID, pending)
+}
+
+func forkSnapshotUnusable(err error) bool {
+	return sandbox.IsRemoteNotFound(err) || sandbox.IsRemoteInvalidRequest(err)
+}
+
 // AfterCreate rolls the new sandbox back to the fork point.
 func (b *ForkBootstrapper) AfterCreate(
 	ctx context.Context, key sandbox.SessionSandboxKey, handle sandbox.RemoteSandboxHandle,
@@ -124,7 +153,14 @@ func (b *ForkBootstrapper) AfterCreate(
 		return err
 	}
 
-	b.rewriteCopiedCheckpoints(ctx, key.SessionID, pending.SourceSandboxID, handle)
+	if err := b.rewriteCopiedCheckpoints(ctx, key.SessionID, pending.SourceSandboxID, handle); err != nil {
+		// Git reset succeeded, so the snapshot is still the right disk.
+		// Leave bootstrap unconsumed: lifecycle destroys this sandbox and
+		// the next Resolve retries from the same snapshot instead of
+		// marking consumed with the parent's sandbox ID (SANDBOX_REPLACED
+		// on a nested fork).
+		return err
+	}
 
 	now := time.Now().UTC()
 	consumed := *pending
@@ -241,18 +277,19 @@ func (b *ForkBootstrapper) resetWorkspace(
 
 func (b *ForkBootstrapper) rewriteCopiedCheckpoints(
 	ctx context.Context, sessionID, oldSandboxID string, handle sandbox.RemoteSandboxHandle,
-) {
+) error {
 	if b.messages == nil || handle == nil {
-		return
+		return nil
 	}
 	newID := strings.TrimSpace(handle.ID())
 	oldID := strings.TrimSpace(oldSandboxID)
 	if newID == "" || oldID == "" || newID == oldID {
-		return
+		return nil
 	}
 	if err := b.messages.RewriteSandboxCheckpoints(ctx, sessionID, oldID, newID); err != nil {
-		logger.Warnf(ctx, "[ForkBootstrap] rewrite sandbox checkpoints for %s failed: %v", sessionID, err)
+		return fmt.Errorf("fork bootstrap: rewrite sandbox checkpoints: %w", err)
 	}
+	return nil
 }
 
 // abandon retires a bootstrap that could not be applied.
@@ -297,3 +334,4 @@ func (b *ForkBootstrapper) deleteSnapshot(ctx context.Context, snapshotID string
 
 var _ sandbox.SessionBootstrapper = (*ForkBootstrapper)(nil)
 var _ sandbox.SessionBootstrapperWithClient = (*ForkBootstrapper)(nil)
+var _ sandbox.SessionCreateFailureHandler = (*ForkBootstrapper)(nil)

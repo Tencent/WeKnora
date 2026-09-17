@@ -213,6 +213,7 @@ func (f *fakeSessionStore) copiedFromIDs() []string {
 type fakeMessageStore struct {
 	messages      []*types.Message
 	lastListedIDs []string
+	rewriteErr    error
 }
 
 func newFakeMessageStore(messages []*types.Message) *fakeMessageStore {
@@ -302,6 +303,9 @@ func (f *fakeMessageStore) GetSessionArtifacts(ctx context.Context, sessionID st
 }
 
 func (f *fakeMessageStore) RewriteSandboxCheckpoints(_ context.Context, sessionID, oldID, newID string) error {
+	if f.rewriteErr != nil {
+		return f.rewriteErr
+	}
 	if sessionID == "" || oldID == "" || newID == "" || oldID == newID {
 		return nil
 	}

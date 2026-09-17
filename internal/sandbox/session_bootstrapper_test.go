@@ -115,6 +115,17 @@ func TestTemplateOverrideErrorAbortsCreate(t *testing.T) {
 	require.Empty(t, client.lastCreatedID, "读不到 override 就不该建沙箱")
 }
 
+type recordingCreateFailureHandler struct {
+	recordingBootstrapper
+	failedCalls int
+	lastFailErr error
+}
+
+func (b *recordingCreateFailureHandler) OnCreateFailed(_ context.Context, _ SessionSandboxKey, err error) {
+	b.failedCalls++
+	b.lastFailErr = err
+}
+
 func TestNilBootstrapperIsANoOp(t *testing.T) {
 	lc, client, _ := newLifecycleForTest(t)
 	lc.bootstrapper = nil
@@ -123,4 +134,55 @@ func TestNilBootstrapperIsANoOp(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, lc.createRequest.TemplateID, client.lastCreateRequest.TemplateID)
+}
+
+// A missing fork snapshot must not be retried forever. Create using the
+// override failed, so the bootstrapper has to be told — AfterCreate never
+// runs, and abandon on git-reset-failure cannot fire.
+func TestCreateFailureWithOverrideNotifiesBootstrapper(t *testing.T) {
+	lc, client, _ := newLifecycleForTest(t)
+	handler := &recordingCreateFailureHandler{
+		recordingBootstrapper: recordingBootstrapper{override: "snap-1"},
+	}
+	lc.bootstrapper = handler
+	client.createErr = NewRemoteError(
+		SandboxTypeCube, "Create", RemoteErrorKindNotFound, "template gone", nil,
+	)
+
+	_, err := lc.Resolve(context.Background(), testSessionKey)
+
+	require.Error(t, err)
+	require.Equal(t, 1, handler.failedCalls)
+	require.True(t, IsRemoteNotFound(handler.lastFailErr))
+	require.Empty(t, client.lastCreatedID)
+}
+
+func TestCreateFailureWithoutOverrideDoesNotNotifyBootstrapper(t *testing.T) {
+	lc, client, _ := newLifecycleForTest(t)
+	handler := &recordingCreateFailureHandler{}
+	lc.bootstrapper = handler
+	client.createErr = NewRemoteError(
+		SandboxTypeCube, "Create", RemoteErrorKindNotFound, "template gone", nil,
+	)
+
+	_, err := lc.Resolve(context.Background(), testSessionKey)
+
+	require.Error(t, err)
+	require.Zero(t, handler.failedCalls)
+}
+
+func TestTransientCreateFailureWithOverrideStillNotifiesBootstrapper(t *testing.T) {
+	lc, client, _ := newLifecycleForTest(t)
+	handler := &recordingCreateFailureHandler{
+		recordingBootstrapper: recordingBootstrapper{override: "snap-1"},
+	}
+	lc.bootstrapper = handler
+	client.createErr = NewRemoteError(
+		SandboxTypeCube, "Create", RemoteErrorKindUnavailable, "provider down", nil,
+	)
+
+	_, err := lc.Resolve(context.Background(), testSessionKey)
+
+	require.Error(t, err)
+	require.Equal(t, 1, handler.failedCalls)
 }

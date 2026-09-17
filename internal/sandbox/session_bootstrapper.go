@@ -32,6 +32,18 @@ type SessionBootstrapper interface {
 	AfterCreate(ctx context.Context, key SessionSandboxKey, handle RemoteSandboxHandle) error
 }
 
+// SessionCreateFailureHandler is an optional SessionBootstrapper extension.
+//
+// AfterCreate only runs when Create succeeded. A fork snapshot that the
+// provider will never boot (deleted, unknown template) would otherwise stay
+// on the session forever: every Resolve retries the same dead ID. The
+// lifecycle calls this when Create used a TemplateOverride and still failed,
+// so the bootstrapper can retire that snapshot and let the next Resolve use
+// the ordinary template.
+type SessionCreateFailureHandler interface {
+	OnCreateFailed(ctx context.Context, key SessionSandboxKey, createErr error)
+}
+
 // SessionBootstrapperWithClient rebinds a bootstrapper to the client that
 // created the sandbox handle. AfterCreate runs under the session lifecycle
 // lock, which is not reentrant, so implementations must talk to `client`

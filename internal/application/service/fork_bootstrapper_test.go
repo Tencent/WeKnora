@@ -184,6 +184,33 @@ func TestAfterCreateRewritesCopiedCheckpointsToNewSandboxID(t *testing.T) {
 	require.True(t, sessions.updatedBootstrap.Consumed())
 }
 
+func TestAfterCreateRewriteFailureDoesNotConsumeBootstrap(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
+	snapshots := &fakeSnapshotDeleter{}
+	messages := newFakeMessageStore([]*types.Message{{
+		ID: "a1", SessionID: "fork-1", Role: "assistant",
+		SandboxCheckpoint: &types.SandboxCheckpoint{
+			SandboxID: "sbx-1", CommitSHA: "abc123",
+		},
+	}})
+	messages.rewriteErr = errors.New("db down")
+	b := NewForkBootstrapper(sessions, messages, runner, snapshots)
+
+	err := b.AfterCreate(context.Background(), forkKey(), fakeHandle{id: "sbx-2"})
+
+	require.Error(t, err)
+	require.False(t, sessions.bootstrapCleared)
+	require.Nil(t, sessions.updatedBootstrap)
+	require.False(t, sessions.source.ForkBootstrap.Consumed())
+	require.Empty(t, snapshots.deleted)
+	require.Equal(t, "sbx-1", messages.messages[0].SandboxCheckpoint.SandboxID)
+
+	got, overrideErr := b.TemplateOverride(context.Background(), forkKey())
+	require.NoError(t, overrideErr)
+	require.Equal(t, "snap-1", got, "retry must boot from the same snapshot")
+}
+
 func TestAfterCreateIsNoOpForOrdinarySession(t *testing.T) {
 	sessions := newFakeSessionStore(&types.Session{ID: "fork-1", TenantID: 1})
 	runner := &fakeShellRunner{result: &sandbox.ExecuteResult{ExitCode: 0}}
@@ -213,6 +240,67 @@ func TestAfterCreateFailsWhenResetFails(t *testing.T) {
 func TestWithClientNilReceiver(t *testing.T) {
 	var b *ForkBootstrapper
 	require.Nil(t, b.WithClient(&recordingRemoteClient{}))
+}
+
+func TestOnCreateFailedAbandonsWhenSnapshotIsGone(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, nil, nil, snapshots)
+
+	b.OnCreateFailed(context.Background(), forkKey(), sandbox.NewRemoteError(
+		sandbox.SandboxTypeCube, "Create", sandbox.RemoteErrorKindNotFound, "template gone", nil,
+	))
+
+	require.True(t, sessions.bootstrapCleared)
+	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
+
+	got, err := b.TemplateOverride(context.Background(), forkKey())
+	require.NoError(t, err)
+	require.Empty(t, got, "retry must boot an ordinary sandbox, not the dead snapshot")
+}
+
+func TestOnCreateFailedAbandonsWhenTemplateIsInvalid(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, nil, nil, snapshots)
+
+	// Create HTTP 404 is classified as invalid_request, not not_found.
+	b.OnCreateFailed(context.Background(), forkKey(), sandbox.NewRemoteError(
+		sandbox.SandboxTypeCube, "Create", sandbox.RemoteErrorKindInvalidRequest, "unknown template", nil,
+	))
+
+	require.True(t, sessions.bootstrapCleared)
+	require.Equal(t, []string{"snap-1"}, snapshots.deleted)
+}
+
+func TestOnCreateFailedKeepsBootstrapOnTransientError(t *testing.T) {
+	sessions := newFakeSessionStore(pendingForkSession())
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, nil, nil, snapshots)
+
+	b.OnCreateFailed(context.Background(), forkKey(), sandbox.NewRemoteError(
+		sandbox.SandboxTypeCube, "Create", sandbox.RemoteErrorKindUnavailable, "provider down", nil,
+	))
+
+	require.False(t, sessions.bootstrapCleared)
+	require.Empty(t, snapshots.deleted)
+
+	got, err := b.TemplateOverride(context.Background(), forkKey())
+	require.NoError(t, err)
+	require.Equal(t, "snap-1", got)
+}
+
+func TestOnCreateFailedIsNoOpWithoutPendingBootstrap(t *testing.T) {
+	sessions := newFakeSessionStore(&types.Session{ID: "fork-1", TenantID: 1})
+	snapshots := &fakeSnapshotDeleter{}
+	b := NewForkBootstrapper(sessions, nil, nil, snapshots)
+
+	b.OnCreateFailed(context.Background(), forkKey(), sandbox.NewRemoteError(
+		sandbox.SandboxTypeCube, "Create", sandbox.RemoteErrorKindNotFound, "template gone", nil,
+	))
+
+	require.False(t, sessions.bootstrapCleared)
+	require.Empty(t, snapshots.deleted)
 }
 
 func TestAfterCreateWithClientUsesHandleNotRunner(t *testing.T) {

@@ -461,6 +461,7 @@ func (l *remoteSessionLifecycle) createAndBind(
 	}
 	request.EnvVars = cloneMetadata(l.createRequest.EnvVars)
 
+	usedOverride := false
 	if l.bootstrapper != nil {
 		override, err := l.bootstrapper.TemplateOverride(ctx, key)
 		if err != nil {
@@ -468,11 +469,15 @@ func (l *remoteSessionLifecycle) createAndBind(
 		}
 		if strings.TrimSpace(override) != "" {
 			request.TemplateID = override
+			usedOverride = true
 		}
 	}
 
 	handle, err := l.client.Create(ctx, request)
 	if err != nil {
+		if usedOverride {
+			l.notifyCreateFailed(ctx, key, err)
+		}
 		return nil, fmt.Errorf("create remote sandbox: %w", err)
 	}
 	if err := l.validateHandle(handle, ""); err != nil {
@@ -569,6 +574,16 @@ func (l *remoteSessionLifecycle) runBootstrap(
 		return errors.Join(bootstrapErr, fmt.Errorf("delete binding after failed bootstrap: %w", delErr))
 	}
 	return errors.Join(bootstrapErr, l.cleanupCreated(cleanupCtx, handle))
+}
+
+func (l *remoteSessionLifecycle) notifyCreateFailed(
+	ctx context.Context, key SessionSandboxKey, createErr error,
+) {
+	handler, ok := l.bootstrapper.(SessionCreateFailureHandler)
+	if !ok {
+		return
+	}
+	handler.OnCreateFailed(context.WithoutCancel(ctx), key, createErr)
 }
 
 func (l *remoteSessionLifecycle) connectWinner(
