@@ -468,7 +468,7 @@ func (r *sessionRepository) ListUnconsumedForks(
 }
 
 func forkBootstrapJSONText(db *gorm.DB, key string) string {
-	if db.Dialector.Name() == "postgres" {
+	if db.Name() == "postgres" {
 		return "fork_bootstrap ->> '" + key + "'"
 	}
 	return "json_extract(fork_bootstrap, '$." + key + "')"

@@ -16,7 +16,8 @@ func TestGetMessagesByRequestIDsStaysInsideSession(t *testing.T) {
 	ctx := context.Background()
 	at := time.Date(2026, 9, 10, 9, 0, 0, 0, time.UTC)
 
-	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Session{ID: "parent", TenantID: 1}).Error)
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).
+		Create(&types.Session{ID: "parent", TenantID: 1}).Error)
 	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Session{ID: "fork", TenantID: 1}).Error)
 	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Message{
 		ID: "p-u", SessionID: "parent", RequestID: "req", Role: "user", CreatedAt: at,

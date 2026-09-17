@@ -738,8 +738,8 @@ export async function listOrgAgentShares(orgId: string): Promise<ApiResponse<Lis
 
 /**
  * Search candidate tenants for inviting to organization (excludes tenants
- * already in the org). The endpoint matches by tenant name, username, or
- * email and de-duplicates results by tenant_id.
+ * already in the org). The endpoint resolves one exact workspace ID; it does not expose
+ * global workspace-name, username, or email search.
  */
 export async function searchTenantsForInvite(
   orgId: string,

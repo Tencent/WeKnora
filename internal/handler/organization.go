@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -1833,25 +1834,16 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 	return resp
 }
 
-// SearchTenantsForInvite searches candidate tenants for inviting to organization.
-//
-// Plan 3 (#1303) makes the tenant the unit of membership. Because a single user
-// may belong to multiple workspaces, matching by username/email is ambiguous
-// (which workspace did the admin mean?), so this endpoint matches strictly by
-// tenant (workspace) name: it resolves matching tenants, filters out tenants
-// already in the org, and returns one row per candidate tenant.
-//
-// @Summary      搜索可邀请的空间
-// @Description  按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重
-// @Tags         组织管理
-// @Produce      json
-// @Param        id     path   string  true   "组织ID"
-// @Param        q      query  string  true   "搜索关键词（空间名）"
-// @Param        limit  query  int     false  "返回数量限制" default(10)
-// @Success      200    {object}  map[string]interface{}
-// @Failure      403    {object}  apperrors.AppError
-// @Security     Bearer
-// @Router       /organizations/{id}/search-tenants [get]
+// SearchTenantsForInvite resolves one exact workspace ID for an organization
+// administrator. Workspace names are never searched across tenants.
+// @Summary Resolve a workspace ID for invitation
+// @Tags 组织管理
+// @Produce json
+// @Param id path string true "组织ID"
+// @Param q query string true "Exact workspace ID"
+// @Success 200 {object} map[string]interface{}
+// @Security Bearer
+// @Router /organizations/{id}/search-tenants [get]
 func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -1874,93 +1866,32 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		return
 	}
 
-	limit := 10
-	if l := c.Query("limit"); l != "" {
-		if n, errConv := strconv.Atoi(l); errConv == nil && n > 0 && n <= 50 {
-			limit = n
-		}
-	}
-
-	// Exclude tenants already in the org.
-	existingMembers, _ := h.orgService.ListTenantMembers(ctx, orgID)
-	existingTenantIDs := make(map[uint64]bool, len(existingMembers))
-	for _, m := range existingMembers {
-		existingTenantIDs[m.TenantID] = true
-	}
-
-	// Match tenants by name only. A single user may belong to multiple
-	// workspaces, so resolving a query to "the user's tenant" is ambiguous;
-	// the membership unit is the tenant, so we invite by workspace name.
-	// SearchTenants uses page/pageSize; pageSize=limit*2 is a safe ceiling
-	// given the soft cap of 50 above.
-	tenantsByName, _, err := h.tenantService.SearchTenants(ctx, query, 0, 1, limit*2)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to search tenants: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to search candidates"))
+	candidates := []types.TenantInviteCandidate{}
+	targetID, parseErr := strconv.ParseUint(strings.TrimSpace(query), 10, 64)
+	if parseErr != nil || targetID == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 		return
 	}
-
-	// Insertion-ordered map: first match wins, preserving search ordering.
-	type entry struct {
-		idx       int // preserve search ordering
-		candidate types.TenantInviteCandidate
+	existingMembers, err := h.orgService.ListTenantMembers(ctx, orgID)
+	if err != nil {
+		_ = c.Error(apperrors.NewInternalServerError("Failed to load organization members"))
+		return
 	}
-	seen := make(map[uint64]*entry)
-	addTenantByID := func(tid uint64) {
-		if tid == 0 || existingTenantIDs[tid] {
+	for _, member := range existingMembers {
+		if member.TenantID == targetID {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 			return
 		}
-		if _, ok := seen[tid]; ok {
-			return
-		}
-		seen[tid] = &entry{
-			idx: len(seen),
-			candidate: types.TenantInviteCandidate{
-				TenantID: tid,
-			},
-		}
 	}
-	for _, t := range tenantsByName {
-		if t == nil {
-			continue
-		}
-		addTenantByID(t.ID)
+	tenants, err := h.tenantService.GetTenantsByIDs(ctx, []uint64{targetID})
+	if err != nil {
+		_ = c.Error(apperrors.NewInternalServerError("Failed to resolve workspace"))
+		return
 	}
-
-	// Resolve tenant names for all candidates in one round-trip.
-	ids := make([]uint64, 0, len(seen))
-	for tid := range seen {
-		ids = append(ids, tid)
+	if tenant := tenants[targetID]; tenant != nil {
+		candidates = append(candidates, types.TenantInviteCandidate{TenantID: tenant.ID, TenantName: tenant.Name})
 	}
-	tenantByID, _ := h.tenantService.GetTenantsByIDs(ctx, ids)
-	for tid, e := range seen {
-		if t, ok := tenantByID[tid]; ok && t != nil {
-			e.candidate.TenantName = t.Name
-		}
-	}
-
-	// Restore insertion order (idx is unique in [0, len(seen))).
-	byIdx := make([]types.TenantInviteCandidate, len(seen))
-	for _, e := range seen {
-		byIdx[e.idx] = e.candidate
-	}
-	// Drop tenants we couldn't resolve a name for (defunct rows or
-	// deleted tenants) and cap at `limit`.
-	sorted := make([]types.TenantInviteCandidate, 0, limit)
-	for _, c := range byIdx {
-		if c.TenantName == "" {
-			continue
-		}
-		sorted = append(sorted, c)
-		if len(sorted) >= limit {
-			break
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    sorted,
-	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 }
 
 // SearchUsersForInvite is retained as a thin compatibility shim that

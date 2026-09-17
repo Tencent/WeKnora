@@ -1,4 +1,4 @@
--- Mirrors versioned migration 000096_session_fork:
+-- Mirrors versioned migration 000097_session_fork:
 -- session lineage plus the per-turn sandbox checkpoint used as a fork point.
 -- Existing Lite databases are already at version 13 and never replay 000000_init,
 -- so these columns must be added here.

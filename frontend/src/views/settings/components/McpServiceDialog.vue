@@ -644,7 +644,7 @@ async function startAuthorize(serviceId: string) {
     // After the backend completes the exchange it bounces the popup here. The
     // app root is harmless; the popup is closed by the opener below once the
     // authorization status flips, so this page is only shown briefly.
-    const frontendRedirect = window.location.origin + '/'
+    const frontendRedirect = '/'
     const authorization = await getMCPOAuthAuthorizeURL(serviceId, {
       redirect_uri: redirectUri,
       frontend_redirect: frontendRedirect,

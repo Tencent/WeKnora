@@ -5,6 +5,11 @@
 // to the fork point with git. Git tracks the full tree, including input/ and
 // output/; object storage is not rewritten into the sandbox.
 //
+// The provider snapshot is the live sandbox at fork *time*, so reset must
+// also drop later-turn git objects. Otherwise `git checkout` of a post-fork
+// commit would restore files the working tree just rolled back. Packages and
+// other paths outside /workspace stay at the fork moment; that is intentional.
+//
 // It is all-or-nothing for the filesystem: handing back a sandbox that sits
 // at the fork MOMENT rather than the fork POINT would look normal while
 // silently working from the wrong baseline. Snapshot deletion is not part of
@@ -42,8 +47,9 @@ type forkBootstrapMessageStore interface {
 }
 
 // forkResetTimeout bounds the git rollback. clean -fdx may delete a large
-// untracked tree, so it is more generous than the per-turn checkpoint.
-const forkResetTimeout = 60 * time.Second
+// untracked tree, and gc --prune=now walks leftover objects from later turns,
+// so this is more generous than the per-turn checkpoint.
+const forkResetTimeout = 90 * time.Second
 
 // ForkBootstrapper provisions forked sessions' first sandbox.
 type ForkBootstrapper struct {
@@ -176,11 +182,14 @@ func (b *ForkBootstrapper) AfterCreate(
 	// hit the same delete — a create/destroy loop. Snapshot GC is best-effort;
 	// the reaper retries leftover IDs after the refs drop.
 	if keep, err := b.snapshotStillShared(ctx, key.SessionID, pending.SnapshotID); err != nil {
-		logger.Warnf(ctx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v", pending.SnapshotID, err)
+		logger.Warnf(ctx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v",
+			pending.SnapshotID, err)
 	} else if keep {
-		logger.Infof(ctx, "[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete", pending.SnapshotID)
+		logger.Infof(ctx, "[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete",
+			pending.SnapshotID)
 	} else if err := b.deleteSnapshot(ctx, pending.SnapshotID); err != nil {
-		logger.Warnf(ctx, "[ForkBootstrap] delete snapshot %s failed after reset; sandbox kept: %v", pending.SnapshotID, err)
+		logger.Warnf(ctx, "[ForkBootstrap] delete snapshot %s failed after reset; sandbox kept: %v",
+			pending.SnapshotID, err)
 	}
 	return nil
 }
@@ -214,11 +223,28 @@ func (b *ForkBootstrapper) snapshotStillShared(ctx context.Context, sessionID, s
 	return b.sessions.HasOtherUnconsumedForkSnapshot(ctx, snapshotID, sessionID)
 }
 
-func forkResetScript(sha string) string {
+func forkResetScript(workspace, sha string) (string, error) {
+	if !gitSHAPattern.MatchString(sha) {
+		return "", fmt.Errorf("fork bootstrap: invalid commit sha %q", truncateForLog(sha))
+	}
+	ws := shellSingleQuote(workspace)
 	return fmt.Sprintf(`set -e
 git config --global safe.directory %[1]s
 git -C %[1]s reset --hard %[2]s
-git -C %[1]s clean -fdx`, sandbox.SessionWorkspaceRoot, sha)
+current=$(git -C %[1]s symbolic-ref -q HEAD || true)
+for ref in $(git -C %[1]s for-each-ref --format='%%(refname)'); do
+  [ -z "$ref" ] && continue
+  [ "$ref" = "$current" ] && continue
+  git -C %[1]s update-ref -d "$ref"
+done
+rm -f %[1]s/.git/ORIG_HEAD %[1]s/.git/FETCH_HEAD
+git -C %[1]s reflog expire --expire=now --all
+git -C %[1]s gc --prune=now
+git -C %[1]s clean -fdx`, ws, sha), nil
+}
+
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, `'`, `'"'"'`) + "'"
 }
 
 func gitResetFailure(sha, stderr string) error {
@@ -227,13 +253,18 @@ func gitResetFailure(sha, stderr string) error {
 
 // resetWorkspace rolls /workspace back to sha.
 //
-// clean -fdx still runs after reset: input/ and output/ are tracked, so
-// reset --hard restores their fork-point tree. -x drops leftover untracked
-// files from the live snapshot that are not in that commit.
+// reset --hard restores tracked files (including input/ and output/). Other
+// refs, ORIG_HEAD, and reflogs still name later-turn commits from the live
+// snapshot, so those are deleted and gc'd before clean -fdx; otherwise the
+// working tree would look right while `git checkout` could resurrect later
+// files. -x then drops leftover untracked files that are not in that commit.
 func (b *ForkBootstrapper) resetWorkspace(
 	ctx context.Context, sessionID, sha string, handle sandbox.RemoteSandboxHandle,
 ) error {
-	script := forkResetScript(sha)
+	script, err := forkResetScript(sandbox.SessionWorkspaceRoot, strings.TrimSpace(sha))
+	if err != nil {
+		return err
+	}
 
 	if b.client != nil && handle != nil {
 		result, err := b.client.Exec(ctx, handle, sandbox.RemoteExecRequest{
@@ -305,9 +336,12 @@ func (b *ForkBootstrapper) abandon(ctx context.Context, sessionID string, pendin
 	}
 	if pending != nil {
 		if keep, err := b.snapshotStillShared(cleanupCtx, sessionID, pending.SnapshotID); err != nil {
-			logger.Warnf(cleanupCtx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v", pending.SnapshotID, err)
+			logger.Warnf(cleanupCtx, "[ForkBootstrap] lookup shared snapshot %s failed; leaving it: %v",
+				pending.SnapshotID, err)
 		} else if keep {
-			logger.Infof(cleanupCtx, "[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete", pending.SnapshotID)
+			logger.Infof(cleanupCtx,
+				"[ForkBootstrap] snapshot %s still referenced by another unopened fork; deferring delete",
+				pending.SnapshotID)
 		} else if err := b.deleteSnapshot(cleanupCtx, pending.SnapshotID); err != nil {
 			logger.Warnf(cleanupCtx, "[ForkBootstrap] delete snapshot %s failed: %v", pending.SnapshotID, err)
 		}
@@ -333,5 +367,6 @@ func (b *ForkBootstrapper) deleteSnapshot(ctx context.Context, snapshotID string
 }
 
 var _ sandbox.SessionBootstrapper = (*ForkBootstrapper)(nil)
+
 var _ sandbox.SessionBootstrapperWithClient = (*ForkBootstrapper)(nil)
 var _ sandbox.SessionCreateFailureHandler = (*ForkBootstrapper)(nil)

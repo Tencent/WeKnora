@@ -234,7 +234,8 @@ func TestSnapshotDeleteKindPromotesInUseToConflict(t *testing.T) {
 			name: "cube 130409 runtime refs as 500",
 			op:   "DeleteSnapshot",
 			kind: RemoteErrorKindInternal,
-			msg:  "unavailable: CubeMaster returned error code 130409: template attempt is already in progress: snapshot snap-6a6707d7b51246c68ad643ee still has 2 active runtime ref(s): a@host, b@host (HTTP 500)",
+			msg: "unavailable: CubeMaster returned error code 130409: template attempt is already in progress: " +
+				"snapshot snap-6a6707d7b51246c68ad643ee still has 2 active runtime ref(s): a@host, b@host (HTTP 500)",
 			want: RemoteErrorKindConflict,
 		},
 		{

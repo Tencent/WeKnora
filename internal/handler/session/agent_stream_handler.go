@@ -26,6 +26,7 @@ type SandboxIDLookup interface {
 }
 
 var _ SandboxIDLookup = (*sandbox.SessionBoundManager)(nil)
+
 var _ SandboxIDLookup = (*service.PinnedSessionSandbox)(nil)
 
 // AgentStreamHandler handles agent events for SSE streaming

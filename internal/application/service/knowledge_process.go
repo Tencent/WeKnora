@@ -314,6 +314,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk processing: %s", status, knowledge.ID)
 		return
 	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Knowledge source replaced, skipping chunk processing: %s", knowledge.ID)
+		return
+	}
 
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
 	var embeddingModel embedding.Embedder
@@ -525,6 +529,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Knowledge aborted (%s), skipping chunk write: %s", status, knowledge.ID)
 		return
 	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Knowledge source replaced, skipping chunk write: %s", knowledge.ID)
+		return
+	}
 
 	// Save chunks to database — ALWAYS, regardless of indexing strategy.
 	// Chunks are needed for wiki generation, graph extraction, and summary generation
@@ -609,6 +617,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// Check again before batch indexing (heavy operation).
 		// deleting → row is going away anyway, drop the chunks we just wrote.
 		// cancelled → user wants to keep what was already persisted, just stop.
+		if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+			logger.Infof(ctx, "Knowledge source replaced, skipping indexing: %s", knowledge.ID)
+			return
+		}
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) before indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
@@ -657,6 +669,10 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		// deleting → drop chunks+index we just wrote.
 		// cancelled → keep persisted data; the row stays in cancelled status
 		// and downstream stages skip via the entry guards.
+		if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+			logger.Infof(ctx, "Knowledge source replaced, skipping completion: %s", knowledge.ID)
+			return
+		}
 		if aborted, status := s.isKnowledgeAborted(ctx, knowledge.TenantID, knowledge.ID); aborted {
 			logger.Infof(ctx, "Knowledge aborted (%s) after indexing: %s", status, knowledge.ID)
 			if status == types.ParseStatusDeleting {
@@ -689,7 +705,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		now,
 	)
 
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
 	}
 
@@ -3346,9 +3362,21 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Knowledge aborted (%s) before marking processing: %s", status, knowledge.ID)
 		return nil
 	}
+	if payload.FilePath != "" && knowledge.FilePath != "" && payload.FilePath != knowledge.FilePath {
+		logger.Infof(ctx, "Document source replaced, skipping stale process task: %s", payload.KnowledgeID)
+		return nil
+	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Document source replaced, skipping stale process task: %s", payload.KnowledgeID)
+		return nil
+	}
 	markKnowledgeProcessing(knowledge, time.Now())
-	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
+	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "failed to update knowledge status to processing: %v", err)
+		return nil
+	}
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Document source replaced, aborting after status update: %s", payload.KnowledgeID)
 		return nil
 	}
 
@@ -3811,7 +3839,9 @@ func (s *knowledgeService) convert(
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = result.Error
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+			logger.Errorf(ctx, "failed to persist parser error for %s: %v", knowledge.ID, err)
+		}
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
 			werrors.ErrCodeDocReaderParseFailed, result.Error, nil)
 		return nil, nil
@@ -3910,11 +3940,17 @@ func (s *knowledgeService) failKnowledge(
 	args ...interface{},
 ) (*types.ReadResult, error) {
 	errMsg := fmt.Sprintf(format, args...)
+	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
+		logger.Infof(ctx, "Skip failing knowledge %s: source file was replaced", knowledge.ID)
+		return nil, nil
+	}
 	if isLastRetry {
 		knowledge.ParseStatus = "failed"
 		knowledge.ErrorMessage = errMsg
 		knowledge.UpdatedAt = time.Now()
-		s.repo.UpdateKnowledge(ctx, knowledge)
+		if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+			logger.Errorf(ctx, "failed to persist knowledge failure for %s: %v", knowledge.ID, err)
+		}
 	}
 	return nil, fmt.Errorf(format, args...)
 }

@@ -73,13 +73,9 @@ curl -X POST $BASE/api/v1/auth/login -H 'Content-Type: application/json' -d '{"e
 
 ### POST /api/v1/auth/auto-setup
 
-用途：一键初始化（本地/Lite 场景自动建号建空间）。免认证，无请求体。Handler: `internal/handler/auth.go`
+用途：原生桌面 Lite 自动建号、建空间及登录。必须携带桌面原生桥接提供的每进程随机 `X-WeKnora-Desktop-Token`，不接受匿名 HTTP 请求。普通浏览器使用注册/登录接口。Handler: `internal/handler/auth.go`
 
-响应：200，同 Login。
-
-```bash
-curl -X POST $BASE/api/v1/auth/auto-setup
-```
+响应：200，同 Login；缺少或错误的桌面凭据返回 401。
 
 ### GET /api/v1/auth/config
 

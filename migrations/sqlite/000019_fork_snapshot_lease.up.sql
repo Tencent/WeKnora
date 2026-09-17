@@ -1,4 +1,4 @@
--- Mirrors versioned migration 000097_fork_snapshot_lease:
+-- Mirrors versioned migration 000098_fork_snapshot_lease:
 -- durable snapshot IDs taken before the forked session row is committed.
 
 CREATE TABLE IF NOT EXISTS fork_snapshot_leases (

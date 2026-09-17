@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd/download cmd/download
 RUN go run cmd/download/duckdb/duckdb.go
 COPY . .
-RUN bash ./scripts/check-license-bundle.sh
+RUN --mount=type=cache,target=/go/pkg/mod bash ./scripts/copy-licenses.sh /license-bundle
 
 # Get version and commit info for build injection
 ARG VERSION_ARG
@@ -139,8 +139,7 @@ COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/dataset/samples ./dataset/samples
 COPY --from=builder /root/.duckdb /home/appuser/.duckdb
 COPY --from=builder /app/WeKnora .
-COPY LICENSE THIRD_PARTY_NOTICES.md ./
-COPY licenses ./licenses
+COPY --from=builder /license-bundle/ ./
 
 # Copy and make entrypoint script executable
 COPY --from=builder /app/scripts/docker-entrypoint.sh ./scripts/docker-entrypoint.sh

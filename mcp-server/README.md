@@ -156,3 +156,11 @@ python test_module.py
 ## 调用效果
 
 <img width="950" height="2063" alt="118d078426f42f3d4983c13386085d7f" src="https://github.com/user-attachments/assets/09111ec8-0489-415c-969d-aa3835778e14" />
+
+### Local upload directory boundary
+
+All transports, including stdio, restrict local file uploads to the working
+directory by default. Set `MCP_ALLOWED_UPLOAD_DIRS` to a comma-separated list of
+trusted absolute directories when additional roots are needed. Starting in a
+filesystem root requires an explicit directory configuration. Paths and symbolic
+links resolving outside the selected roots are rejected.
