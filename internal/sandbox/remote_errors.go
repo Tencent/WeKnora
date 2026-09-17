@@ -67,6 +67,20 @@ const (
 	RemoteErrorKindInternal RemoteErrorKind = "internal"
 )
 
+// ErrSkillSnapshotMissing marks a Create failure whose cause is that the skill
+// image a config points at is no longer present on the provider.
+//
+// It is a sentinel rather than a Kind because the two axes answer different
+// questions. Kind drives the session lifecycle, and a missing image on Create
+// must stay InvalidRequest: NotFound tells that lifecycle the binding may be
+// replaced, and replacing a binding cannot conjure an image the provider has
+// lost. The skill layer, by contrast, needs to recognise this one condition to
+// recover from it, and it cannot key off InvalidRequest because every other
+// bad-template failure shares that Kind.
+//
+// Callers match with errors.Is, which reaches it through RemoteError.Unwrap.
+var ErrSkillSnapshotMissing = errors.New("sandbox: skill snapshot image is missing")
+
 // RemoteError is the wire-agnostic error type returned by every
 // RemoteSandboxClient method.
 type RemoteError struct {

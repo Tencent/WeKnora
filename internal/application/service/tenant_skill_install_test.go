@@ -1980,6 +1980,11 @@ type installFixture struct {
 	// rmExitCode fails the removal's directory wipe, the one image step a
 	// removal has.
 	rmExitCode int
+	// removeDirErr fails the wipe with a transport error rather than a non-zero
+	// exit. It is how a test reproduces a provider that has lost the skill
+	// image: the executor cannot reach the sandbox that would run the command,
+	// so the failure arrives in place of the command's result.
+	removeDirErr error
 	// cancelDuringRemove models the lock renewal failing mid-run, which is
 	// when a real run loses its context.
 	cancelDuringRemove context.CancelFunc
@@ -2977,6 +2982,9 @@ func (m *installSandboxManager) ExecShellCommandWithOptions(
 		}
 		if m.fx.cancelDuringRemove != nil {
 			m.fx.cancelDuringRemove()
+		}
+		if m.fx.removeDirErr != nil {
+			return nil, m.fx.removeDirErr
 		}
 		return &sandbox.ExecuteResult{
 			ExitCode: m.fx.rmExitCode, Stderr: "rm: cannot remove",
