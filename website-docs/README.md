@@ -1,196 +1,132 @@
-# WeKnora 文档
+# WeKnora 官网与文档
 
-WeKnora（维娜拉）是腾讯开源的企业级知识库与 RAG（Retrieval-Augmented Generation）系统：Go 单体后端 + Vue 3 前端 + Python 文档解析微服务（docreader），支持多租户、多知识库、混合检索、Agent 智能体、知识图谱、Wiki 生成、MCP 集成、多平台 IM 接入与网页嵌入等能力。
+`website-docs/` 包含官网、文档、共享样式和全部构建部署脚本，可独立复制和构建，不依赖仓库外层文件。官网和文档共用一个域名、一次构建和一份部署产物。
 
-本目录是 WeKnora 的官方文档，按「入门 → 架构 → 功能 → API → 客户端 → 开发」六个部分组织。
+- `/`：产品首页。
+- `/docs/`：直接进入“快速上手”。
+- `/docs/…`：完整文档，保留分类导航、搜索和侧栏。
 
-## 文档站点
+顶栏高 64px、横向铺满。两边使用 README 原版商标，共用颜色、字体和深浅色偏好；Logo 在当前标签返回官网。官网和文档各自使用适合当前页面的导航。
 
-本目录同时是一个 VitePress 站点，Markdown 即页面，新增文件会自动进入侧边栏（标题取正文一级标题，目录顺序按文件名数字前缀）。
+## 发布方式：静态文件 + Nginx
+
+### 1. 准备部署包
+
+使用 Node.js 24，在仓库的 `website-docs/` 目录执行。首次构建或依赖锁文件变更后，先安装依赖：
 
 ```bash
-npm install
-npm run dev      # 本地预览
-npm run build    # 产物输出到 .vitepress/dist
-npm run preview  # 预览构建产物
+cd website-docs
+npm run setup
+npm run build
+npm run package:site
 ```
 
-主题位于 `.vitepress/theme/`：`style.css` 是排版与配色的单一来源，`Landing.vue` 是首页。
+`build` 会编译官网、检查文档链接和 Mermaid、编译文档，并校验合并后的资源路径。全部通过后更新 `static-site/`；`package:site` 将其打包到 `releases/`。
 
-## 写作约定
+### 2. 上传并解压
 
-- 首段直接说明功能、适用范围和操作结果。使用简洁、客观的表述，减少章节预告、反问、口语化比喻和设计辩解。
-- 快速开始按准备、操作、预期结果组织；功能指南以用户任务为主线，配置影响与限制紧跟相关操作；客户端文档先说明连接和使用方式。
-- API 参考先说明用途、认证和权限，再列请求、响应与错误；架构文档解释组件职责、数据流和设计约束；开发指南保留修改入口、实现步骤与验证方法。
-- 每段围绕一个结论展开。连续段落用于解释行为与原因，列表用于操作步骤，表格用于参数、权限和选项比较。避免用字段清单代替功能说明。
-- 接口、字段和默认值保持准确。功能页中的源码索引放在文末「实现参考」，详细实现与日常操作分节编排；迁移历史集中到开发文档或实现参考。
-- 标题使用明确的主题或动作，避免手工章节编号。修改已有标题时保留原锚点，或同步修正文内链接；不要用「见第几节」代替链接。
-- 涉及界面操作时使用 `<Screenshot>` 组件；只在有助于理解操作时增加截图。
+只需把压缩包上传到服务器。服务器不需要 Node.js，也不需要 WeKnora 后端或独立文档服务。
 
-## 截图
+每次发布使用一个新的空目录，避免混入旧站点文件。下面的 `20260915-1` 是示例发布编号，后续发布换一个编号：
 
-截图用全局组件 `<Screenshot>` 引用，图片放在 `public/screenshots/` 下：
-
-```md
-<Screenshot
-  src="/screenshots/kb-document-list.png"
-  caption="知识库文档列表：解析状态、标签与批量操作"
-  hint="展示文档列表页，包含解析状态列、标签列、顶部筛选栏与勾选后出现的批量操作栏。" />
+```bash
+sudo mkdir -p /srv/www/weknora/releases/20260915-1
+sudo tar -xzf weknora-site-v0.8.0.tar.gz -C /srv/www/weknora/releases/20260915-1
 ```
 
-图片文件不存在时，组件会渲染成一个带说明的虚线占位框，标出期望的文件路径与该图应当展示的内容；把同名图片放进 `website-docs/public/screenshots/` 即可自动生效，**不需要改 Markdown**。
+解压后该目录下应直接有 `index.html`、`docs/`、`_next/`，无需再套一层 `static-site/`。
 
-当前待补充的截图共 2 张：
+### 3. 配置域名根目录
 
-| 文件名（放在 `public/screenshots/` 下） | 出现位置 | 应当展示 |
-| --- | --- | --- |
-| `kb-folder-tree.png` | 知识库 | 文档列表的文件夹树 |
-| `kg-graph.png` | 知识图谱 | 实体关系图 |
+以 [deploy/nginx.conf](deploy/nginx.conf) 为模板添加站点配置，修改：
 
-仓库 `docs/images/` 下已有一批现成的产品截图（`qa.png`、`knowledgebases.png`、`wiki-browser.png`、`wiki-graph.png`、`settings.png`、`agent-qa.png`、`graph1-3.png`、`langfuse.png`、`rbac-*.png` 等），补图时可以先看看能否直接复用。
-
-## 阅读路径建议
-
-- **初次使用**：01 快速开始 四篇按顺序读完即可完成部署与首次问答。
-- **评估选型 / 了解原理**：02 架构 五篇给出系统全貌与两条核心流水线（文档入库、检索问答）。
-- **使用某项具体功能**：直接查 03 功能模块 对应章节。
-- **对接 API / 写集成**：04 API 参考 + 05 客户端（CLI / Go SDK）。
-- **二次开发 / 贡献代码**：06 开发指南，尤其是扩展点指南。
-
-## 目录
-
-### 快速开始 {#_01-快速开始}
-
-| 文档 | 内容 |
-| --- | --- |
-| [产品介绍](01-getting-started/01-introduction.md) | WeKnora 是什么、核心概念（租户/知识库/知识/分块/会话/Agent 等）、功能总览与系统组件图 |
-| [安装部署](01-getting-started/02-installation.md) | docker-compose（含 12 个可选 profile）、开发模式、Helm、Lite 单二进制与桌面应用、Homebrew |
-| [快速上手](01-getting-started/03-quickstart.md) | 注册 → 初始化向导 → 配置模型 → 建库 → 上传 → 问答的完整路径，含可直接执行的 curl 链路 |
-| [配置详解](01-getting-started/04-configuration.md) | config.yaml 全字段、约 150 个环境变量、prompt 模板、内置模型与内置 Agent 配置 |
-
-### 架构 {#_02-架构}
-
-| 文档 | 内容 |
-| --- | --- |
-| [总体架构](02-architecture/01-overview.md) | 组件构成、技术栈、进程间通信、顶层目录导览 |
-| [Go 后端设计](02-architecture/02-backend-design.md) | 四层架构、uber/dig 依赖注入、启动与优雅退出、路由与中间件、领域模型 ER 图 |
-| [文档入库流程](02-architecture/03-document-pipeline.md) | 上传/URL/手动创建 → 存储 → 解析 → 分块 → 向量化 → 索引 → 后处理的全链路与状态机 |
-| [检索问答流程](02-architecture/04-rag-pipeline.md) | chat_pipeline 插件流水线、跨库检索与融合、重排、流式输出（SSE）与引用生成 |
-| [异步任务系统](02-architecture/05-async-tasks.md) | asynq 队列拓扑、6 个 worker pool、Lite 同步模式、死信与任务巡检、事件总线 |
-
-### 功能模块 {#_03-功能模块}
-
-| 文档 | 内容 |
-| --- | --- |
-| [租户、用户与认证授权](03-features/01-tenant-auth.md) | 多租户模型、JWT / API Key / OIDC、RBAC 角色矩阵、组织与共享空间 |
-| [知识库与知识管理](03-features/02-knowledge-base.md) | 知识库类型与全部可配置项、树形文件夹、多标签、自动标签与批量打标、分块编辑与版本历史、自定义元数据、预览安全、复制与移动、活动流、配额 |
-| [文档解析服务 docreader](03-features/03-document-parsing.md) | gRPC 接口、三引擎注册表、解析器矩阵（含 HTML / MHTML / Excel 表头模式）、并发模型、部署与扩容 |
-| [分块机制](03-features/04-chunking.md) | 自适应分块架构（heading/heuristic/recursive）、父子分块、语义边界重叠、ContextHeader、调试端点 |
-| [检索引擎与向量存储](03-features/05-retrieval-engines.md) | 各检索引擎（向量/BM25/全文/混合）能力对比、驱动选择、维度管理、打分归一化 |
-| [模型管理](03-features/06-models.md) | 5 类模型、26 个厂商 Provider、内置模型机制、Ollama 本地模型、限流与用量 |
-| [Agent 引擎](03-features/07-agent.md) | ReAct 循环、内置与动态工具、上下文与记忆管理、技能系统与沙箱、自定义 Agent、建议问题 |
-| [MCP 集成](03-features/08-mcp.md) | MCP 客户端管理、OAuth 2.0 + PKCE 全流程、工具启停与审批、WeKnora MCP Server（`tencent-weknora-mcp`，31 个工具） |
-| [知识图谱](03-features/09-knowledge-graph.md) | 两级开关、LLM 实体关系抽取、Neo4j 存储、图谱增强检索 |
-| [数据源导入](03-features/10-datasource.md) | 连接器体系（飞书/Lark/GitLab/IMA/Notion/语雀/RSS）、凭据加密、同步调度与增量更新 |
-| [网络搜索与网页抓取](03-features/11-web-search.md) | 13 个搜索引擎、SSRF 防护、web_fetch 双实现、SearXNG 自托管 |
-| [IM 集成](03-features/12-im-integration.md) | 10 个 IM 平台适配、消息处理流水线、内置命令、流式渲染、多实例协同 |
-| [网页嵌入 Embed Channel](03-features/13-embed-channel.md) | 嵌入渠道配置、匿名会话与 token 交换、安全模式、webhook、接入示例 |
-| [Wiki 能力](03-features/14-wiki.md) | 基于知识库的 LLM Wiki 站点生成、四阶段管道、slug 机制、人工编辑与版本回滚、issue 闭环、变更并入知识库活动流 |
-| [评估能力](03-features/15-evaluation.md) | 评估任务、Parquet 数据集格式、12 项检索/生成指标 |
-| [可观测性与审计](03-features/16-observability.md) | 日志体系、Langfuse 追踪、审计日志与保留策略、限流、健康检查 |
-| [FAQ 能力](03-features/17-faq.md) | FAQ 条目模型、批量导入与去重、检索命中策略、克隆同步 |
-| [会话与对话体验](03-features/18-chat-experience.md) | 进度条、问题大纲与引用面板、生成文件、导出对话、会话内临时附件、渠道会话可见性、跨会话历史搜索 |
-| [存储后端](03-features/19-storage-backends.md) | 多实例注册、空间默认与按库绑定、连通性测试、legacy 别名迁移 |
-| [平台管理与系统管理员](03-features/20-platform-admin.md) | 平台级身份与空间 Owner 的边界、首个管理员引导、创建用户、控制台四分区、运行时系统设置 |
-| [图片与文件的对外访问](03-features/21-file-access.md) | 四种 URL 形式、各渠道怎么取、IM/API 图片不显示的排查表 |
-| [技能目录与沙箱](03-features/22-skills-sandbox.md) | 目录/安装、Docker/Cube/E2B、网络策略、个人变量、生成文件 |
-| [跨会话长期记忆](03-features/23-memory.md) | 空间/个人开关、自动提取、待确认项、主题/文档偏好与整理 |
-
-### API 参考 {#_04-api-参考}
-
-按资源分组列出端点、权限、参数、响应与 curl 示例。
-
-| 文档 | 内容 |
-| --- | --- |
-| [API 总览](04-api/01-api-overview.md) | Base URL、三种认证方式、通用响应包与错误码、分页规范、SSE 协议、限流 |
-| [认证与用户](04-api/02-api-auth.md) | /auth 注册登录、token 刷新、邀请 |
-| [租户与成员](04-api/02-api-tenant.md) | 租户、成员、邀请、API Key、审计 |
-| [组织与共享](04-api/02-api-org.md) | 组织、知识库共享、Agent 共享 |
-| [知识库与知识](04-api/02-api-knowledge.md) | 知识库、知识、文件夹 |
-| [分块与标签](04-api/02-api-chunks.md) | 分块读写与版本、生成问题、标签、分块预览 |
-| [FAQ 与 Wiki](04-api/02-api-faq-wiki.md) | FAQ 管理与导入、Wiki 读写 |
-| [会话与聊天](04-api/02-api-chat.md) | 会话、消息、知识问答与 Agent 对话（SSE） |
-| [模型与初始化](04-api/02-api-model-system.md) | 模型、初始化向导、WeKnoraCloud、评估 |
-| [系统与平台管理](04-api/02-api-system.md) | 系统信息、全局设置、运行时队列、平台 API Key、系统审计 |
-| [基础设施与数据源](04-api/02-api-infra.md) | 向量存储、存储后端、Web 搜索、数据源 |
-| [Agent 与 MCP](04-api/02-api-agent-mcp.md) | Agent、MCP 服务、OAuth、技能、收藏 |
-| [IM、Embed 与文件](04-api/02-api-channels.md) | IM 回调与渠道、微信扫码、Embed、文件服务 |
-| [沙箱、技能与个人变量](04-api/02-api-sandbox-skills.md) | 配置、模板、库存、安装与进度、目录、个人变量 |
-| [长期记忆](04-api/02-api-memory.md) | 空间配置、个人设置/条目、主题、文档偏好、导出与整理 |
-
-### 客户端 {#_05-客户端}
-
-| 文档 | 内容 |
-| --- | --- |
-| [Web 前端](05-clients/01-frontend.md) | Vue 3 + TDesign 技术栈、页面路由、状态管理、i18n、部署 |
-| [命令行工具 CLI](05-clients/02-cli.md) | 17 个命令组、多 profile 配置、输出格式与退出码、脚本化用法 |
-| [Go SDK](05-clients/03-go-sdk.md) | 资源与方法覆盖、流式对话、错误处理、完整示例 |
-| [微信小程序](05-clients/04-miniprogram.md) | 页面结构、后端地址与 API Key 配置、构建发布 |
-| [桌面端](05-clients/05-desktop.md) | 单机桌面应用（未正式发布）、数据目录与端口设置、偏好设置与自动更新 |
-| [Chrome 插件](05-clients/06-chrome-extension.md) | 网页侧边栏问答、剪藏与速记，凭证配置与排查 |
-| [Claw Skill](05-clients/07-claw-skill.md) | ClawHub 上的 WeKnora Skill、环境变量配置、与 MCP 的取舍 |
-| [DeepSeek Harness 插件](05-clients/08-deepseek-harness.md) | 安装与凭证、4 个工具、范围选择、引用图片与排查 |
-
-### 开发指南 {#_06-开发指南}
-
-| 文档 | 内容 |
-| --- | --- |
-| [开发指南](06-development/01-dev-guide.md) | 环境要求、Makefile 全目标、开发模式、四条测试线、CI 与代码规范、调试技巧 |
-| [数据库与迁移](06-development/02-database-schema.md) | 40+ 张表结构与 ER 图、golang-migrate 双路径（versioned / sqlite）、新增迁移步骤、故障排查 |
-| [扩展点指南](06-development/03-extension-points.md) | 9 大扩展点：解析器/分块策略/检索引擎/模型 Provider/搜索引擎/数据源连接器/IM 适配器/Agent 工具/存储后端 |
-
-## 系统组件速览
-
-```mermaid
-flowchart LR
-    subgraph Clients["客户端"]
-        FE["Web 前端 Vue 3"]
-        CLI["CLI weknora"]
-        SDK["Go SDK"]
-        MINI["微信小程序"]
-        EMBED["网页嵌入挂件"]
-        IM["IM 平台 x10"]
-    end
-    subgraph Core["核心服务"]
-        APP["app 主服务 Go/Gin :8080"]
-        DR["docreader 解析服务 Python gRPC :50051"]
-    end
-    subgraph Infra["基础设施"]
-        PG[("PostgreSQL / ParadeDB")]
-        RD[("Redis + asynq")]
-        VS[("向量/检索引擎 可选多种")]
-        OBJ[("对象存储 local/minio/cos/oss/s3 等")]
-        NEO[("Neo4j 知识图谱 可选")]
-    end
-    LLM["LLM / Embedding / Rerank / VLM 多厂商"]
-    FE --> APP
-    CLI --> APP
-    SDK --> APP
-    MINI --> APP
-    EMBED --> APP
-    IM --> APP
-    APP --> DR
-    APP --> PG
-    APP --> RD
-    APP --> VS
-    APP --> OBJ
-    APP --> NEO
-    APP --> LLM
+```nginx
+server_name 你的域名;
+root /srv/www/weknora/releases/20260915-1;
 ```
 
-## 文档约定
+如果域名已有 HTTPS 配置，保留原来的证书及监听设置，把模板中的 `root`、`index` 和 `location` 规则合入现有站点配置。域名应指向这台服务器。
 
-- 文中源码路径均相对仓库根目录，如 `internal/agent/engine.go`。
-- API 路径默认带 `/api/v1` 前缀；认证方式见 [API 总览](04-api/01-api-overview.md)。
-- 配置示例中的密钥均为占位符，生产环境务必替换（尤其 `JWT_SECRET`、`SYSTEM_AES_KEY`、数据库口令）。
-- 文档基于仓库根目录 `VERSION` 文件对应版本源码整理（VitePress 构建时自动读取），随代码变更同步维护。
+必须保留文档的 `.html` 路由解析规则；不要把所有未知路径回退到官网 `index.html`。当前构建部署在域名根路径，不支持直接放进 `/weknora/` 等子目录。
+
+检查配置后重载：
+
+```bash
+sudo nginx -t
+sudo nginx -s reload
+```
+
+### 4. 确认上线
+
+访问以下路径：
+
+- `/`：官网。
+- `/docs/`：快速上手。
+- `/docs/03-features/23-memory`：长期记忆文档，直接打开和刷新均正常。
+- `/docs/not-found`：返回 404。
+
+再确认搜索、深浅色切换和 Logo 返回官网正常。
+
+后续更新重复构建、打包、上传到新目录，再修改 Nginx `root` 并重载。需要回滚时，将 `root` 改回上一发布目录。确认新版本稳定后再清理旧发布目录。
+
+## 可选：Docker 部署
+
+从干净源码即可构建，无需在宿主机安装 Node.js 或提前生成静态文件。Dockerfile 使用两个阶段：Node.js 24 按两份锁文件安装依赖并构建官网与文档，最终 Nginx 镜像只包含静态产物和服务配置。
+
+在仓库根目录执行：
+
+```bash
+docker build -t weknora-site:0.8.0 website-docs
+docker run -d --name weknora-site --restart unless-stopped -p 8080:80 weknora-site:0.8.0
+```
+
+访问 `http://服务器地址:8080/`。如使用域名和 HTTPS，让现有反向代理转发到该端口即可。镜像内已经包含官网、文档和 Nginx 路由配置。
+
+也可以只复制 `website-docs/` 目录，在该目录执行 `docker build -t weknora-site:0.8.0 .`。构建上下文必须是 `website-docs/`，宿主机的依赖、旧构建产物和部署包由 `.dockerignore` 排除。
+
+从旧文档镜像迁移时，将容器端口映射或反向代理目标端口从 `8081` 改为 `80`（宿主机端口可自行选择，例如 `-p 8081:80`）。域名根路径 `/` 现在提供官网，`/docs/` 提供文档，反向代理需覆盖整个站点并保留请求路径。容器使用 Nginx 官方镜像的默认入口，无需额外的 `docker-entrypoint.sh`。
+
+构建后可在安装了 Node.js 24 和 Docker 的机器上执行以下检查，无需安装 npm 依赖。检查会临时启动容器并自动清理，验证两站路由、静态资源、404、压缩和响应头：
+
+```bash
+cd website-docs
+npm run test:docker -- weknora-site:0.8.0
+```
+
+## 本地开发
+
+使用 Node.js 24 LTS（目录内提供 `.nvmrc`，使用 nvm 时可执行 `nvm use`）。首次获取源码后安装依赖（分别按文档和官网的锁文件安装）：
+
+```bash
+cd website-docs
+npm run setup
+npm run build
+npm run preview
+```
+
+预览地址：`http://127.0.0.1:3000/`。修改源码后重新构建并刷新；可用 `npm run preview -- --port 8080` 指定其他端口。
+
+```bash
+npm run check
+npm run test:integration
+```
+
+集成检查需要安装 Google Chrome，验证主题同步、两边导航、搜索、手机端控件及直达文档路由。可用 `SITE_TEST_URL` 指定待验证的站点。
+
+开发时可分别使用 `npm run dev:homepage`（官网）和 `npm run dev:docs`（文档）获得热更新；完整站内跳转请使用统一构建后的 `npm run preview`。
+
+`npm run build:docs` 只编译文档，`npm run build:homepage` 只编译官网；正式发布使用 `npm run build`，输出会同时包含两者。`VERSION` 是这份站点构建使用的发布版本。
+
+## 工程目录（相对于 website-docs）
+
+- `homepage/`：Next.js 官网源码、品牌素材及独立依赖锁文件。
+- `01-getting-started/` 至 `06-development/`：文档正文，原有路径不变。
+- `.vitepress/`：文档站配置与主题。
+- `public/`、`sample-data/`：文档截图和示例。
+- `shared/`：品牌变量、顶栏样式及共用图标。
+- `scripts/`：统一构建、检查、预览和打包。
+- `static-site/`：唯一的部署目录，由构建生成。
+- `deploy/`、`Dockerfile`：Nginx 和 Docker 部署配置。
+- `releases/`：生成的部署压缩包。
+
+品牌素材来源见 [homepage/BRAND-ASSETS.md](homepage/BRAND-ASSETS.md)。产品视频使用 README 中的 GitHub 原始附件，播放需要访问 GitHub；页面、文档和截图随包部署。

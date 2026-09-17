@@ -159,9 +159,33 @@ function needsConnectionTest(): boolean {
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
+function hydrateConfluenceCredentialsFromSettings() {
+  if (form.value.type !== 'confluence') return
+  const settings = form.value.config.settings || {}
+  const creds = form.value.config.credentials || {}
+  form.value.config.credentials = {
+    ...creds,
+    edition: creds.edition || settings.edition || 'server',
+    base_url: creds.base_url || settings.base_url || '',
+    username: creds.username || settings.username || '',
+  }
+}
+
+function syncConfluencePublicFieldsToSettings() {
+  if (form.value.type !== 'confluence') return
+  const creds = form.value.config.credentials || {}
+  form.value.config.settings = {
+    ...(form.value.config.settings || {}),
+    ...(creds.edition ? { edition: creds.edition } : {}),
+    ...(creds.base_url ? { base_url: creds.base_url } : {}),
+    ...(creds.username ? { username: creds.username } : {}),
+  }
+}
+
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
   replaceCredentialsMode.value = true
+  hydrateConfluenceCredentialsFromSettings()
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -586,6 +610,20 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'confluence',
+    available: true,
+    docUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionDocUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionPageUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
+      { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
+      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true },
+      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true },
+    ],
+  },
+  {
     type: 'yuque',
     available: true,
     docUrl: 'https://www.yuque.com/yuque/developer/api',
@@ -654,6 +692,17 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+
+const displayedCredentialFields = computed(() => {
+  const fields = currentDef.value?.fields || []
+  if (form.value.type !== "confluence") return fields
+
+  return fields.filter((field) => {
+    if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
+    if (field.key === "api_token") return form.value.config.credentials.edition === "cloud"
+    return true
+  })
+})
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -783,7 +832,10 @@ function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
-  form.value.config.credentials = {}
+  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  if (def.type === 'confluence') {
+    form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
+  }
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
   step.value = 1
@@ -792,9 +844,10 @@ function selectType(def: ConnectorDef) {
 // --- Test connection ---
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = currentDef.value?.fields || []
+    const fields = displayedCredentialFields.value
     for (const f of fields) {
       if (f.optional || f.fieldType === 'custom_headers') continue
       if (!form.value.config.credentials[f.key]) {
@@ -839,6 +892,7 @@ async function testConnection() {
 async function loadResources() {
   loadingResources.value = true
   try {
+    syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
@@ -993,7 +1047,7 @@ function validateStep1Fields(): boolean {
     return true
   }
 
-  const fields = currentDef.value?.fields || []
+  const fields = displayedCredentialFields.value
   for (const f of fields) {
     if (f.optional || f.fieldType === 'custom_headers') continue
     if (!form.value.config.credentials[f.key]) {
@@ -1060,6 +1114,7 @@ function prevStep() {
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
   syncGitLabProjectsToSettings()
+  syncConfluencePublicFieldsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1073,6 +1128,7 @@ function buildConfigPayload(): Record<string, unknown> {
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
   syncRssAuthHeadersToCredentials()
+  syncConfluencePublicFieldsToSettings()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
   )
@@ -1500,8 +1556,15 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
+          <div v-if="form.type === 'confluence'" class="form-item">
+            <label class="form-label">{{ t('datasource.field.confluenceEdition') }}</label>
+            <t-select v-model="form.config.credentials.edition">
+              <t-option value="server" :label="t('datasource.field.confluenceEditionServer')" />
+              <t-option value="cloud" :label="t('datasource.field.confluenceEditionCloud')" />
+            </t-select>
+          </div>
           <div
-            v-for="field in currentDef?.fields || []"
+            v-for="field in displayedCredentialFields"
             :key="field.key"
             class="form-item"
           >
@@ -2710,7 +2773,7 @@ const drawerConfirmText = computed(() => {
 </style>
 
 <!--
-  Drawer header logo — same white badge as list cards / StorageEngineSettings.
+  Drawer header logo — same white badge as the data-source list cards.
 -->
 <style lang="less">
 .datasource-editor-drawer .setting-drawer__header-icon:has(.datasource-header-icon__img) {

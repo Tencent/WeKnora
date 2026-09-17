@@ -183,6 +183,10 @@ def _is_restricted_ip(ip: Union[ipaddress.IPv4Address, ipaddress.IPv6Address]) -
         # ::169.254.169.254 reads as an ordinary public IPv6 address.
         # Mirrors internal/ipclass on the Go side.
         packed = ip.packed
+        # RFC 8215 local-use NAT64 has deployment-specific IPv4 layouts.
+        # Reject the entire /48, matching internal/ipclass, on every Python version.
+        if packed[:6] == b"\x00\x64\xff\x9b\x00\x01":
+            return "local-use NAT64 translation address"
         if packed[0:4] == b"\x00\x64\xff\x9b" and packed[4:12] == bytes(8):
             reason = _is_restricted_ip(ipaddress.IPv4Address(packed[12:16]))
             if reason:

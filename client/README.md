@@ -91,6 +91,12 @@ knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID,
 if err != nil {
     // 处理错误
 }
+
+// 将同一知识库中的原始文件打包下载为 ZIP（最多 200 个 ID，合计 512 MiB）
+err = apiClient.DownloadKnowledgeFiles(context.Background(), kb.ID, []string{knowledge.ID}, "knowledge-files.zip")
+if err != nil {
+    // 处理错误
+}
 ```
 
 ### 示例：创建会话并进行问答

@@ -174,8 +174,8 @@ const authorize = async () => {
   try {
     const redirectUri = window.location.origin + MCP_OAUTH_CALLBACK_PATH
     const frontendRedirect = useEmbedOAuth()
-      ? window.location.origin + window.location.pathname + window.location.search
-      : window.location.origin + '/'
+      ? window.location.pathname + window.location.search
+      : '/'
     const authorization = useEmbedOAuth()
       ? await getEmbedMCPOAuthAuthorizeURL(
         props.embedChannelId!,

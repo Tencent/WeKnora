@@ -1161,8 +1161,8 @@ onMounted(loadAll)
 </style>
 
 <!--
-  Non-scoped block: per-engine header-icon coloring. Same approach as
-  StorageEngineSettings — keep these rules global so they always apply
+  Non-scoped block: per-engine header-icon coloring. Keep these rules global
+  so they always apply
   regardless of whether the drawer panel inherits the parent's scoped
   data attributes. Each rule mirrors the matching .engine-card--{name}
   .engine-card__badge from the scoped block above.

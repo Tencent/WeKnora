@@ -392,6 +392,16 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 		return
 	}
 
+	defaultMode := "websocket"
+	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
+		defaultMode = "webhook"
+	}
+	if im.ResolveMode(channel, defaultMode) != "webhook" ||
+		channel.Platform == "qqbot" || channel.Platform == "wechat" || channel.Platform == "dingtalk" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "HTTP callbacks are disabled for this channel"})
+		return
+	}
+
 	logger.Infof(ctx, "[IM] Callback received platform=%s path_channel_id=%s", channel.Platform, channelID)
 
 	// Handle URL verification

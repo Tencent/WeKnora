@@ -14,7 +14,7 @@
     <div class="cmdk-item__body">
       <div class="cmdk-item__title">
         <slot name="title">
-          <span v-html="title" />
+          <span>{{ title }}</span>
         </slot>
         <span v-if="badge" :class="['cmdk-item__badge', `cmdk-item__badge--${badgeVariant || 'default'}`]">
           {{ badge }}
@@ -23,7 +23,7 @@
       </div>
       <div v-if="$slots.subtitle || subtitle" class="cmdk-item__subtitle">
         <slot name="subtitle">
-          <span v-html="subtitle" />
+          <span>{{ subtitle }}</span>
         </slot>
       </div>
     </div>

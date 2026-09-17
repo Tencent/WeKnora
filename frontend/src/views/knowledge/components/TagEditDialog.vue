@@ -87,17 +87,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { createKnowledgeBaseTag } from '@/api/knowledge-base';
 
-interface Tag {
-  id: string;
-  name: string;
-  color?: string;
-  knowledge_count?: number;
-}
+import { useKnowledgeTagSelection, type KnowledgeTag as Tag } from '@/composables/useKnowledgeTagSelection';
 
 const props = defineProps<{
   visible: boolean;
@@ -117,101 +112,23 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 
-const searchQuery = ref('');
-const selectedSet = ref<Set<string>>(new Set());
-const creatingTag = ref(false);
-const saving = ref(false);
-const newTagName = ref('');
-
-watch(
-  () => props.visible,
-  (val) => {
-    if (val) {
-      selectedSet.value = new Set(props.selectedTags.map((t) => t.id));
-      searchQuery.value = '';
-      newTagName.value = '';
-    }
+const {
+  searchQuery, newTagName, selectedSet, creatingTag, selectedTagsList, availableTagsList,
+  toggleTag, clearAll, handleCreateTag, handleAddNewTag,
+} = useKnowledgeTagSelection({
+  visible: () => props.visible,
+  kbId: () => props.kbId,
+  tags: () => props.tagList,
+  selectedIds: () => props.selectedTags.map(tag => tag.id),
+  createTag: createKnowledgeBaseTag,
+  onCreated: () => {
+    emit('tag-created');
+    MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
   },
-);
-
-const tagMap = computed(() => new Map(props.tagList.map((tag) => [tag.id, tag])));
-
-const selectedTagsList = computed(() => {
-  return Array.from(selectedSet.value)
-    .map((id) => tagMap.value.get(id))
-    .filter((tag): tag is Tag => Boolean(tag));
+  onError: (error: any) => MessagePlugin.error(error?.message || t('common.operationFailed')),
 });
 
-const availableTagsList = computed(() => {
-  const query = searchQuery.value.trim().toLowerCase();
-  return props.tagList.filter((tag) => {
-    if (selectedSet.value.has(tag.id)) return false;
-    if (query && !(tag.name || '').toLowerCase().includes(query)) return false;
-    return true;
-  });
-});
-
-function toggleTag(tagId: string) {
-  const next = new Set(selectedSet.value);
-  if (next.has(tagId)) {
-    next.delete(tagId);
-  } else {
-    next.add(tagId);
-  }
-  selectedSet.value = next;
-}
-
-function clearAll() {
-  selectedSet.value = new Set();
-}
-
-async function handleCreateTag() {
-  const name = searchQuery.value.trim();
-  if (!name) return;
-  creatingTag.value = true;
-  try {
-    const res: any = await createKnowledgeBaseTag(props.kbId, { name });
-    const newTag = res?.data || res;
-    const next = new Set(selectedSet.value);
-    next.add(newTag.id);
-    selectedSet.value = next;
-    searchQuery.value = '';
-    emit('tag-created');
-    MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
-  } finally {
-    creatingTag.value = false;
-  }
-}
-
-async function handleAddNewTag() {
-  const name = newTagName.value.trim();
-  if (!name) return;
-  const exists = props.tagList.find((t) => t.name === name);
-  if (exists) {
-    const next = new Set(selectedSet.value);
-    next.add(exists.id);
-    selectedSet.value = next;
-    newTagName.value = '';
-    return;
-  }
-  creatingTag.value = true;
-  try {
-    const res: any = await createKnowledgeBaseTag(props.kbId, { name });
-    const newTag = res?.data || res;
-    const next = new Set(selectedSet.value);
-    next.add(newTag.id);
-    selectedSet.value = next;
-    newTagName.value = '';
-    emit('tag-created');
-    MessagePlugin.success(t('knowledgeBase.tagCreateSuccess'));
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
-  } finally {
-    creatingTag.value = false;
-  }
-}
+const saving = ref(false);
 
 async function handleConfirm() {
   saving.value = true;

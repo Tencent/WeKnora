@@ -381,18 +381,18 @@ SystemAdmin 可在 **系统管理 → 平台 API Key** 创建 `scope_type=platfo
 
 0.7.2 新增了完整的官方产品文档，位于仓库 [`website-docs/`](../website-docs/README.md) 目录，按「入门 → 架构 → 功能 → API → 客户端 → 开发」六个板块组织，覆盖约 360 个 API 端点、约 150 个环境变量与 9 大扩展点。
 
-该目录同时是一个 VitePress 站点，两种使用方式：
+该目录现在包含官网与 VitePress 文档站，统一构建和部署。以下命令分别从仓库根目录执行：
 
 ```bash
-# 本地预览
-cd website-docs && npm install && npm run dev
+# 本地预览（需要 Node.js 24）
+(cd website-docs && npm run setup && npm run build && npm run preview)
 
-# 独立容器部署（容器内 Nginx 监听 8081）
-docker build -t weknora-docs website-docs
-docker run -d -p 8081:8081 weknora-docs
+# 独立容器部署（容器内完成构建，Nginx 监听 80）
+docker build -t weknora-site website-docs
+docker run -d -p 8081:80 weknora-site
 ```
 
-站点的版本号在构建时自动读取仓库根目录的 `VERSION` 文件，因此升级版本后无需手动改文档。若某处截图显示为虚线占位框，说明 `website-docs/public/screenshots/` 下缺少同名图片，补图即可生效，不需要改 Markdown。
+官网位于 `/`，文档位于 `/docs/`。从旧文档容器迁移时注意将反向代理目标端口改为 `80`，并让域名根路径指向同一容器。站点版本号在构建时读取 `website-docs/VERSION`，发布时需同步更新；该目录可独立复制构建。完整部署说明见 [website-docs/README.md](../website-docs/README.md)。若某处截图显示为虚线占位框，说明 `website-docs/public/screenshots/` 下缺少同名图片，补图即可生效，不需要改 Markdown。
 
 `website-docs/sample-data/` 下还提供了 4 份 Markdown 样例文档与 1 份 FAQ 导入 JSON，可以直接用来跑一遍「建库 → 上传 → 问答」；`examples/mcp-demo/` 是一个可直接运行的本地 MCP 服务示例。
 

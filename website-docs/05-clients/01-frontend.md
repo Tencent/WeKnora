@@ -29,7 +29,7 @@ WeKnora 的 Web 前端是一个基于 **Vue 3 + TypeScript + Vite** 的单页应
 
 值得注意的依赖细节：
 
-- `xlsx` 不走 npm registry，而是安装本地 tarball：`"xlsx": "file:./packages/xlsx-0.20.2.tgz"`（即 `frontend/packages/` 目录的用途，锁定版本、离线可装）；
+- `xlsx` 从 SheetJS 官方固定地址安装 `0.20.2`，`package-lock.json` 保留完整性校验值；源码仓库不附带组件包，离线构建需提前准备 npm 缓存；
 - `frontend/pnpm-workspace.yaml` 并非声明子包 workspace，只包含 `allowBuilds` 白名单（允许 `@vue-office/pptx`、`esbuild`、`vue-demi` 执行构建脚本），用于 pnpm 的构建脚本安全策略；
 - `overrides` / `resolutions` 中禁用了 `lightningcss` 并统一 `esbuild`、`serialize-javascript` 版本。
 
@@ -94,7 +94,6 @@ flowchart TB
 | `frontend/src/wailsjs/` | Wails 桌面端自动生成绑定（勿手改） |
 | `frontend/src/directives/`、`frontend/src/types/`、`frontend/src/config/` | 自定义指令、类型定义、配置 |
 | `frontend/public/` | 静态资源：`weknora-widget.js`（第三方站点嵌入加载器）、`config.js`（运行时配置占位，容器启动时覆盖）、离线 TDesign 图标 |
-| `frontend/packages/` | 本地依赖 tarball（`xlsx-0.20.2.tgz`） |
 
 ## 页面路由清单
 
