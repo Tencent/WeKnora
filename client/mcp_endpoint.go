@@ -120,7 +120,9 @@ func (c *Client) GetMCPEndpoint(ctx context.Context, endpointID string) (*MCPEnd
 }
 
 // UpdateMCPEndpoint applies a partial update; omitted fields are kept.
-func (c *Client) UpdateMCPEndpoint(ctx context.Context, endpointID string, req *MCPEndpointRequest) (*MCPEndpoint, error) {
+func (c *Client) UpdateMCPEndpoint(
+	ctx context.Context, endpointID string, req *MCPEndpointRequest,
+) (*MCPEndpoint, error) {
 	resp, err := c.doRequest(ctx, http.MethodPut, fmt.Sprintf("/api/v1/mcp-endpoints/%s", endpointID), req, nil)
 	if err != nil {
 		return nil, err

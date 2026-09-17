@@ -170,6 +170,9 @@ func (s *Server) guardTool(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 
 // touchLastUsed records activity at most once a minute per endpoint.
 func (s *Server) touchLastUsed(ctx context.Context, endpointID string) {
+	if s.endpointRepo == nil {
+		return
+	}
 	now := time.Now()
 	if prev, ok := s.lastTouch.Load(endpointID); ok {
 		if last, ok := prev.(time.Time); ok && now.Sub(last) < lastUsedTouchEvery {

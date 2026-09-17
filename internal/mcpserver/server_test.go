@@ -9,19 +9,42 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
+
+// recordingEndpointRepo captures last_used touches so the guard's background
+// write can be asserted (and never dereferences a nil repository).
+type recordingEndpointRepo struct {
+	interfaces.MCPEndpointRepository
+	touched chan string
+}
+
+func (r *recordingEndpointRepo) TouchLastUsed(_ context.Context, id string) error {
+	select {
+	case r.touched <- id:
+	default:
+	}
+	return nil
+}
 
 // newTestEngine mounts the MCP server behind a middleware that injects the
 // given endpoint straight onto the request context, standing in for
 // middleware.MCPEndpointAuth so the transport, tool filter and call guard
 // can be exercised without a database.
 func newTestEngine(t *testing.T, ep *types.MCPEndpoint) *gin.Engine {
+	engine, _ := newTestEngineWithRepo(t, ep)
+	return engine
+}
+
+func newTestEngineWithRepo(t *testing.T, ep *types.MCPEndpoint) (*gin.Engine, *recordingEndpointRepo) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	repo := &recordingEndpointRepo{touched: make(chan string, 8)}
+	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil, nil, nil)
 	r := gin.New()
 	inject := func(c *gin.Context) {
 		if ep != nil {
@@ -32,7 +55,7 @@ func newTestEngine(t *testing.T, ep *types.MCPEndpoint) *gin.Engine {
 		c.Next()
 	}
 	r.POST("/mcp/:endpoint_id", inject, gin.WrapH(srv.Handler()))
-	return r
+	return r, repo
 }
 
 func rpc(t *testing.T, r *gin.Engine, method string, params any) map[string]any {
@@ -148,7 +171,7 @@ func TestRateLimitPerEndpoint(t *testing.T) {
 		ID: "ep-1", TenantID: 1, Enabled: true, RateLimitPerMinute: 1,
 		Tools: types.StringArray{types.MCPEndpointToolReadDocument},
 	}
-	r := newTestEngine(t, ep)
+	r, repo := newTestEngineWithRepo(t, ep)
 	call := func() string {
 		resp := rpc(t, r, "tools/call", map[string]any{
 			"name":      types.MCPEndpointToolReadDocument,
@@ -166,4 +189,17 @@ func TestRateLimitPerEndpoint(t *testing.T) {
 	if text := call(); !strings.Contains(text, "rate limit") {
 		t.Fatalf("second call should be rate limited: %q", text)
 	}
+	select {
+	case id := <-repo.touched:
+		if id != "ep-1" {
+			t.Fatalf("touched endpoint = %q", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected last_used_at to be touched after a guarded call")
+	}
+}
+
+func TestTouchLastUsedToleratesMissingRepository(_ *testing.T) {
+	srv := &Server{}
+	srv.touchLastUsed(context.Background(), "ep-1") // must not panic
 }
