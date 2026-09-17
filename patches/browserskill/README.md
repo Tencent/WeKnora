@@ -39,6 +39,9 @@ enter the native daemon's automation queue:
   `title`, and `captured_at`. The encoded image is at most 640 pixels wide.
   Captures are coalesced and restricted to a concrete owned tab. Authorization,
   document revision and debugger identity are checked before returning a frame.
+  UI previews include the extension's control and help overlays so periodic
+  captures do not hide and restore them in the user's browser. Agent screenshots
+  still suppress overlays to preserve unobstructed page content.
 - `gateway.task_focus`: explicitly activates an existing owned tab and its window;
   returns `{ "focused": true }`. It never creates a session.
 - `gateway.task_idle`: prevents further UI captures, waits for in-flight work,

@@ -234,10 +234,10 @@ index 0000000..7eae50f
 +});
 diff --git a/apps/extension/src/lib/__tests__/task-preview.test.ts b/apps/extension/src/lib/__tests__/task-preview.test.ts
 new file mode 100644
-index 0000000..88fe91e
+index 0000000..49d1e24
 --- /dev/null
 +++ b/apps/extension/src/lib/__tests__/task-preview.test.ts
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,167 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
 +import { runCdpCommand } from "@/browser-driver/command-deadline";
@@ -245,9 +245,6 @@ index 0000000..88fe91e
 +import { TaskActivity } from "../task-activity";
 +import { captureTaskPreview } from "../task-preview";
 +
-+vi.mock("@/lib/capture-suppress-bridge", () => ({
-+  withExtensionOverlayHidden: (_tab: number, run: () => unknown) => run(),
-+}));
 +afterEach(() => {
 +  vi.unstubAllGlobals();
 +  vi.useRealTimers();
@@ -280,6 +277,7 @@ index 0000000..88fe91e
 +    tabs: {
 +      query: vi.fn(async () => [{ id: 5, windowId: 10, active: true }]),
 +      get: vi.fn(async () => ({ id: 5, windowId: 10, title: "task" })),
++      sendMessage: vi.fn(async () => ({ ok: true })),
 +    },
 +  });
 +  vi.stubGlobal(
@@ -307,6 +305,18 @@ index 0000000..88fe91e
 +  return { task, manager, cdp, sizes, close };
 +}
 +describe("independent task preview", () => {
++  it("keeps control and help overlays visible across repeated preview captures", async () => {
++    const f = fixture();
++    for (let i = 0; i < 3; i++) {
++      await expect(captureTaskPreview(f.manager, f.cdp, "visible")).resolves.toMatchObject({
++        tab_id: 5,
++        image_base64: btoa("thumbnail"),
++      });
++    }
++    expect(f.cdp.send).toHaveBeenCalledTimes(3);
++    expect(chrome.tabs.sendMessage).not.toHaveBeenCalled();
++  });
++
 +  it("lets turn-end release finish after a stuck screenshot times out", async () => {
 +    vi.useFakeTimers();
 +    vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -537,12 +547,11 @@ index 0000000..91bc85a
 +}
 diff --git a/apps/extension/src/lib/task-preview.ts b/apps/extension/src/lib/task-preview.ts
 new file mode 100644
-index 0000000..3a1a361
+index 0000000..38d1917
 --- /dev/null
 +++ b/apps/extension/src/lib/task-preview.ts
-@@ -0,0 +1,109 @@
+@@ -0,0 +1,103 @@
 +import type { ChromiumCdp } from "@/browser-driver/chromium-cdp";
-+import { withExtensionOverlayHidden } from "@/lib/capture-suppress-bridge";
 +import { isAgentControlledTab, type SessionManager } from "@/session-manager/manager";
 +
 +const captures = new Map<string, Promise<unknown>>();
@@ -574,20 +583,15 @@ index 0000000..3a1a361
 +    throw new Error("Task ended during capture");
 +  const attachment = cdp.getAttachmentId(tabId);
 +  const revision = task.refStore.documentRevision(tabId);
-+  const shot = await withExtensionOverlayHidden(
-+    tabId,
-+    async () => {
-+      // captureBeyondViewport=false already limits the image to the viewport.
-+      // Avoid a separate layout read on every UI poll; resize the bitmap below.
-+      return cdp.send<{ data: string }>(tabId, "Page.captureScreenshot", {
-+        format: "jpeg",
-+        quality: 50,
-+        fromSurface: true,
-+        captureBeyondViewport: false,
-+      });
-+    },
-+    (id, message) => chrome.tabs.sendMessage(id, message),
-+  );
++  // UI previews retain overlays: hiding them on every poll makes the user's
++  // control border and help prompts flicker. Agent screenshots hide them separately.
++  // Capture only the viewport and resize the bitmap below without a layout read.
++  const shot = await cdp.send<{ data: string }>(tabId, "Page.captureScreenshot", {
++    format: "jpeg",
++    quality: 50,
++    fromSurface: true,
++    captureBeyondViewport: false,
++  });
 +  if (
 +    manager.get(sessionId) !== task ||
 +    !isAgentControlledTab(task, tabId) ||

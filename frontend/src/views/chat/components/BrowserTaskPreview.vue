@@ -8,7 +8,7 @@
       <strong>{{ t('localBrowser.needHelp') }}</strong>
       <p v-if="status.help_prompt" class="handoff-prompt">{{ status.help_prompt }}</p>
       <p>{{ t(status.action === 'tab_borrow' ? 'localBrowser.borrowHint' : 'localBrowser.helpHint') }}</p>
-      <t-button v-if="status.action !== 'tab_borrow'" theme="primary" :disabled="!status.connected || !status.task_id || busy || status.stopping" @click="act('focus')"><t-icon name="jump" />{{ t('localBrowser.locateWindow') }}</t-button>
+      <t-button v-if="status.action !== 'tab_borrow'" class="handoff-locate" theme="default" variant="outline" size="small" :disabled="!status.connected || !status.task_id || busy || status.stopping" @click="act('focus')"><t-icon name="jump" />{{ t('localBrowser.locateWindow') }}</t-button>
     </section>
     <button v-if="!(status.needs_help && status.action === 'tab_borrow')" class="preview-image" :disabled="!status.connected || !status.task_id || busy || status.stopping" :aria-label="t('localBrowser.locateWindow')" @click="act('focus')">
       <img v-if="preview" :src="preview" :alt="t('localBrowser.preview')" />
@@ -122,12 +122,12 @@ onBeforeUnmount(() => { alive = false; document.removeEventListener('visibilityc
 .browser-task-preview.is-pip { position: static; width: 100%; max-width: none; min-height: 100%; max-height: none; border: 0; border-radius: 0; box-shadow: none; }
 .is-pip .preview-heading { cursor: default; }
 .is-pip .preview-image { height: clamp(126px, 45vh, 480px); }
-.browser-task-preview.needs-help { width: 420px; border-color: var(--td-brand-color); }
-.preview-handoff { padding: 12px; background: var(--td-brand-color-light); overflow-wrap: anywhere; }
-.preview-handoff strong { font-size: 14px; color: var(--td-brand-color); }
-.preview-handoff p { font-size: 12px; line-height: 1.6; margin: 8px 0; white-space: pre-wrap; }
-.preview-handoff .handoff-prompt { max-height: 22vh; overflow-y: auto; }
-.preview-handoff .t-button { width: 100%; }
+.browser-task-preview.needs-help { width: 420px; }
+.preview-handoff { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 12px; border-top: 1px solid var(--td-component-border); background: var(--td-bg-color-secondarycontainer); overflow-wrap: anywhere; }
+.preview-handoff strong { font-size: 13px; font-weight: 600; color: var(--td-text-color-primary); }
+.preview-handoff p { font-size: 12px; line-height: 1.6; margin: 0; color: var(--td-text-color-secondary); white-space: pre-wrap; }
+.preview-handoff .handoff-prompt { max-height: 22vh; overflow-y: auto; color: var(--td-text-color-primary); }
+.preview-handoff .handoff-locate { align-self: flex-end; flex-shrink: 0; max-width: 100%; margin-top: 2px; }
 .needs-help .preview-image { height: clamp(140px, 30vh, 260px); }
 .needs-help .preview-heading { flex-wrap: wrap; }
 .browser-task-preview.is-pip.needs-help { width: 100%; }
