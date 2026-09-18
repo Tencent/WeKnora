@@ -11,8 +11,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// embedTaxonomyTexts uses the same BATCH_EMBED_SIZE pool as document indexing.
+func embedTaxonomyTexts(ctx context.Context, embedder embedding.Embedder, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	return embedder.BatchEmbedWithPool(ctx, embedder, texts)
+}
 
 // wikiTaxonomyItem is one entity/concept page to be filed into the directory.
 type wikiTaxonomyItem struct {
@@ -192,12 +201,12 @@ func (s *wikiIngestService) selectRelevantFolders(
 		itemTexts[i] = strings.TrimSpace(it.title + " " + previewText(it.about, 120))
 	}
 
-	folderVecs, err := embedder.BatchEmbed(ctx, folderTexts)
+	folderVecs, err := embedTaxonomyTexts(ctx, embedder, folderTexts)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan folder embed failed, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
 	}
-	itemVecs, err := embedder.BatchEmbed(ctx, itemTexts)
+	itemVecs, err := embedTaxonomyTexts(ctx, embedder, itemTexts)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan item embed failed, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)

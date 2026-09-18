@@ -1,10 +1,14 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/panjf2000/ants/v2"
 )
 
 func TestFormatExistingTaxonomyForPrompt(t *testing.T) {
@@ -125,5 +129,69 @@ func TestCollectTaxonomyItems(t *testing.T) {
 	}
 	if items[1].about != "about B" {
 		t.Fatalf("items[1].about = %q, want %q", items[1].about, "about B")
+	}
+}
+
+type taxonomyBatchEmbedder struct {
+	maxInput int
+	sizes    []int
+	pooler   embedding.EmbedderPooler
+}
+
+func (e *taxonomyBatchEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	vecs, err := e.BatchEmbed(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+	return vecs[0], nil
+}
+
+func (e *taxonomyBatchEmbedder) BatchEmbed(_ context.Context, texts []string) ([][]float32, error) {
+	e.sizes = append(e.sizes, len(texts))
+	if e.maxInput > 0 && len(texts) > e.maxInput {
+		return nil, fmt.Errorf("provider rejected %d inputs (max %d)", len(texts), e.maxInput)
+	}
+	out := make([][]float32, len(texts))
+	for i := range texts {
+		out[i] = []float32{1}
+	}
+	return out, nil
+}
+
+func (e *taxonomyBatchEmbedder) BatchEmbedWithPool(ctx context.Context, model embedding.Embedder, texts []string) ([][]float32, error) {
+	return e.pooler.BatchEmbedWithPool(ctx, model, texts)
+}
+
+func (e *taxonomyBatchEmbedder) GetModelName() string { return "tax" }
+func (e *taxonomyBatchEmbedder) GetDimensions() int   { return 1 }
+func (e *taxonomyBatchEmbedder) GetModelID() string   { return "tax" }
+
+func TestEmbedTaxonomyTextsRespectsBatchEmbedSize(t *testing.T) {
+	t.Setenv("BATCH_EMBED_SIZE", "5")
+	pool, err := ants.NewPool(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pool.Release() })
+
+	cap := &taxonomyBatchEmbedder{maxInput: 5, pooler: embedding.NewBatchEmbedder(pool)}
+	texts := make([]string, 23)
+	for i := range texts {
+		texts[i] = fmt.Sprintf("folder-%d", i)
+	}
+	vecs, err := embedTaxonomyTexts(context.Background(), cap, texts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vecs) != 23 {
+		t.Fatalf("got %d vecs, want 23", len(vecs))
+	}
+	for i, n := range cap.sizes {
+		if n > 5 {
+			t.Fatalf("batch %d had %d inputs, want <= 5: %v", i, n, cap.sizes)
+		}
+	}
+	if len(cap.sizes) < 2 {
+		t.Fatalf("expected multiple provider batches, got %v", cap.sizes)
 	}
 }
