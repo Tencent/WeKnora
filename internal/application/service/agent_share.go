@@ -90,6 +90,13 @@ func receiverAgentView(agent *types.CustomAgent) *types.CustomAgent {
 	view.Config.RewritePromptUser = ""
 	view.Config.FallbackPrompt = ""
 	view.Config.IntentPrompts = nil
+	if suggestions := view.Config.QuestionSuggestions; suggestions != nil {
+		// Starter questions are shown to receivers anyway; the instruction
+		// for generating follow-ups is a prompt like the others.
+		copied := *suggestions
+		copied.FollowUps.AdditionalInstruction = ""
+		view.Config.QuestionSuggestions = &copied
+	}
 	return &view
 }
 

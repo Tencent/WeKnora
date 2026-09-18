@@ -178,4 +178,13 @@ func TestReadableSuggestionKnowledgeIDs(t *testing.T) {
 		Config: types.CustomAgentConfig{KBSelectionMode: "selected", KnowledgeBases: []string{"agent-kb"}},
 	})
 	assert.Equal(t, []string{"own-doc", "scoped-doc"}, svc.readableSuggestionKnowledgeIDs(sharedRun, ids))
+
+	// Follow-up generation moves execution into the agent's workspace; with
+	// the caller pinned, its documents still need the agent's grant.
+	followUp := types.WithExecutionTenant(sharedRun, 84)
+	assert.Equal(t, []string{"own-doc", "scoped-doc"}, svc.readableSuggestionKnowledgeIDs(followUp, ids))
+	uncaptured := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	assert.Equal(t, []string{"own-doc"},
+		svc.readableSuggestionKnowledgeIDs(types.WithExecutionTenant(uncaptured, 84), ids),
+		"execution in the agent's workspace does not make its documents the caller's")
 }

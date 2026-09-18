@@ -1,6 +1,8 @@
 package file
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,4 +19,12 @@ func TestKS3ObjectKeyRequiresTheServiceBucket(t *testing.T) {
 	key, err := svc.objectKey("ks3://weknora/prefix/42/exports/a.png")
 	require.NoError(t, err)
 	assert.Equal(t, "prefix/42/exports/a.png", key)
+}
+
+// A server-side copy reads only this service's bucket; another bucket's path
+// is reported as a cross-backend copy so the caller streams it instead.
+func TestKS3CopyFileRejectsForeignBucket(t *testing.T) {
+	svc := &ks3FileService{bucketName: "weknora"}
+	_, err := svc.CopyFile(context.Background(), "ks3://other-bucket/prefix/7/knowledge/a.pdf", 42, "k-1")
+	require.True(t, errors.Is(err, ErrCrossBackendCopy), "err = %v", err)
 }

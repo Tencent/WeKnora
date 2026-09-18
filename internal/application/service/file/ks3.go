@@ -201,7 +201,10 @@ func (s *ks3FileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 func (s *ks3FileService) CopyFile(ctx context.Context,
 	srcPath string, tenantID uint64, knowledgeID string,
 ) (string, error) {
-	srcBucket, srcKey, err := parseKS3FilePath(srcPath)
+	// Like COS and S3, only this service's bucket is copied server-side; a
+	// path of another scheme or bucket falls back to a streamed copy through
+	// its own backend.
+	srcKey, err := s.objectKey(srcPath)
 	if err != nil {
 		return "", fmt.Errorf("ks3 copy rejected source %q: %w", srcPath, ErrCrossBackendCopy)
 	}
@@ -215,7 +218,7 @@ func (s *ks3FileService) CopyFile(ctx context.Context,
 	_, err = s.client.CopyObject(&ks3s3.CopyObjectInput{
 		Bucket:       ks3aws.String(s.bucketName),
 		Key:          ks3aws.String(destKey),
-		SourceBucket: ks3aws.String(srcBucket),
+		SourceBucket: ks3aws.String(s.bucketName),
 		SourceKey:    ks3aws.String(srcKey),
 	})
 	if err != nil {

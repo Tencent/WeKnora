@@ -779,4 +779,7 @@ func TestUpdateIssueStatus_ScopedToKnowledgeBase(t *testing.T) {
 
 	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
 	assert.Equal(t, "resolved", status())
+	// Setting the same status again is not "not found": both supported
+	// databases count matched rows, and updated_at changes anyway.
+	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
 }
