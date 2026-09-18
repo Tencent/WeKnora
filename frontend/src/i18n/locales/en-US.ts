@@ -5929,7 +5929,10 @@ export default {
     },
     knowledgeChunksList: {
       chunkRange: 'Loaded {fetched} / {total} chunks',
-      page: 'Page {page}, {pageSize} per page'
+      page: 'Page {page}, {pageSize} per page',
+      offsetRange: 'Chunks {from}–{to}',
+      queryMatches: '{count} matches for "{query}" in this document',
+      queryNoMatch: 'No matches for "{query}" in this document'
     },
     attachmentParsing: {
       parsedSummary: 'Parsed {count} attachment(s)',

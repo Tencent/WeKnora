@@ -617,6 +617,7 @@ func TestModelOutputRendersReadDocumentHeaderAndNavigation(t *testing.T) {
 	}})
 	require.Contains(t, empty, `<document id="d1" title="Engine Manual">`)
 	require.Contains(t, empty, `<matches query="absent" count="0" />`)
+	require.Contains(t, empty, "<hint>No chunk contains every word of the query.")
 }
 
 func TestModelOutputRendersDocumentListWithPagination(t *testing.T) {

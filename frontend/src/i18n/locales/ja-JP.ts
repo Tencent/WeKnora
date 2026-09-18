@@ -5929,7 +5929,10 @@ export default {
     },
     knowledgeChunksList: {
       chunkRange: '{fetched} / {total}チャンクを読み込みました',
-      page: '{page}ページ目、1ページあたり{pageSize}件'
+      page: '{page}ページ目、1ページあたり{pageSize}件',
+      offsetRange: 'チャンク {from}–{to}',
+      queryMatches: '文書内検索「{query}」: {count}件一致',
+      queryNoMatch: '文書内検索「{query}」: 一致なし'
     },
     attachmentParsing: {
       parsedSummary: '{count}件の添付ファイルを解析しました',

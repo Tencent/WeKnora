@@ -18,6 +18,9 @@ const (
 	readDocumentMaxContext   = 5
 	readDocumentMaxMatches   = 20
 	readDocumentScanPageSize = 100
+	// readDocumentChunkOverhead approximates the per-chunk tags and handles
+	// the model rendering adds around each chunk's content.
+	readDocumentChunkOverhead = 120
 )
 
 var readDocumentTool = BaseTool{
@@ -26,10 +29,13 @@ var readDocumentTool = BaseTool{
 		"id is a dN document handle (reads a page of chunks starting at offset) or a cN chunk handle (reads that " +
 		"chunk; set context to include neighbouring chunks on each side).\n" +
 		"query finds passages inside the document: matching chunks come back with one chunk of context on each " +
-		"side. query is a case-insensitive literal by default; set regex=true for a POSIX regular expression.\n" +
+		"side. By default query is case-insensitive and split on whitespace: a chunk matches when it contains " +
+		"every word, in any order. Set regex=true to match query as one POSIX regular expression instead.\n" +
 		"Page through long documents with offset and limit: offset counts chunks in reading order from 0 and is " +
 		"not a chunk index, so continue with the returned next_offset, and use id=cN with context to read around " +
-		"a specific chunk. Use search_knowledge first when you do not yet know which document holds the answer.",
+		"a specific chunk. A page holds fewer than limit chunks when they would exceed the output size budget; " +
+		"next_offset always points at the first chunk not yet returned. Reading a long document end to end " +
+		"costs many calls, so prefer query or search_knowledge to locate the relevant part first.",
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -51,11 +57,11 @@ var readDocumentTool = BaseTool{
     },
     "query": {
       "type": "string",
-      "description": "Text to find inside the document; returns matching chunks with context instead of a page"
+      "description": "Words a chunk must all contain; returns matching chunks with context instead of a page"
     },
     "regex": {
       "type": "boolean",
-      "description": "Interpret query as a POSIX regular expression (default false: literal match)"
+      "description": "Match query as one POSIX regular expression (default false: each word matched literally)"
     },
     "context": {
       "type": "integer",
@@ -150,26 +156,30 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 		return &types.ToolResult{Success: false, Error: err.Error()}, err
 	}
 
-	var matcher *regexp.Regexp
-	if query != "" {
-		pattern := query
-		if !input.Regex {
-			pattern = regexp.QuoteMeta(query)
-		}
-		compiled, cerr := regexp.Compile("(?i)" + pattern)
+	var matchers []*regexp.Regexp
+	switch {
+	case query == "":
+	case input.Regex:
+		compiled, cerr := regexp.Compile("(?i)" + query)
 		if cerr != nil {
 			return &types.ToolResult{
 				Success: false, Error: fmt.Sprintf("invalid regex query %q: %v", query, cerr),
 			}, cerr
 		}
-		matcher = compiled
+		matchers = []*regexp.Regexp{compiled}
+	default:
+		// Models write keyword queries ("sunflower f(n,k)"), not exact
+		// phrases, so each word is matched on its own and all must appear.
+		for _, term := range strings.Fields(query) {
+			matchers = append(matchers, regexp.MustCompile("(?i)"+regexp.QuoteMeta(term)))
+		}
 	}
 
 	// A query always searches the owning document, even when id named a
 	// chunk: silently returning the single chunk would read as "no match".
 	switch {
-	case matcher != nil:
-		return t.readByQuery(ctx, knowledge, query, matcher)
+	case len(matchers) > 0:
+		return t.readByQuery(ctx, knowledge, query, matchers)
 	case chunk != nil:
 		return t.readAroundChunk(ctx, knowledge, chunk, contextChunks)
 	default:
@@ -308,6 +318,7 @@ func (t *ReadDocumentTool) readPage(
 			},
 		}, nil
 	}
+	chunks = fitChunksToBudget(chunks, OutputBudget(ctx)*4/5)
 	enrichChunkImageInfo(ctx, t.chunkService.GetRepository(), t.tenantFor(knowledge), chunks)
 
 	rows := make([]readChunkRow, 0, len(chunks))
@@ -384,10 +395,11 @@ func (t *ReadDocumentTool) readAroundChunk(
 	}, nil
 }
 
-// readByQuery scans the document in order and returns matching chunks with
-// one chunk of context on each side, capped at readDocumentMaxMatches.
+// readByQuery scans the document in order and returns chunks matched by
+// every matcher, with one chunk of context on each side, capped at
+// readDocumentMaxMatches.
 func (t *ReadDocumentTool) readByQuery(
-	ctx context.Context, knowledge *types.Knowledge, query string, matcher *regexp.Regexp,
+	ctx context.Context, knowledge *types.Knowledge, query string, matchers []*regexp.Regexp,
 ) (*types.ToolResult, error) {
 	var rows []readChunkRow
 	emitted := make(map[string]bool)
@@ -398,7 +410,6 @@ func (t *ReadDocumentTool) readByQuery(
 	forceNext := false
 	page := 1
 	tenantID := t.tenantFor(knowledge)
-	compiled := []*regexp.Regexp{matcher}
 	// Stop collecting before the registry's head/tail truncation would cut
 	// rows in the middle; the header and tags take the remaining share.
 	budget := OutputBudget(ctx) * 4 / 5
@@ -406,7 +417,7 @@ func (t *ReadDocumentTool) readByQuery(
 	emit := func(row readChunkRow) {
 		rows = append(rows, row)
 		emitted[row.chunk.ID] = true
-		used += utf8.RuneCountInString(row.chunk.Content)
+		used += utf8.RuneCountInString(row.chunk.Content) + readDocumentChunkOverhead
 	}
 
 scan:
@@ -427,7 +438,7 @@ scan:
 			if q := faqStandardQuestion(c); q != "" {
 				haystack += "\n" + q
 			}
-			if matcher.MatchString(haystack) {
+			if matchesAll(matchers, haystack) {
 				if matchCount >= readDocumentMaxMatches || used >= budget {
 					truncated = true
 					break scan
@@ -437,7 +448,7 @@ scan:
 					emit(readChunkRow{chunk: prev, role: "context_before"})
 				}
 				if !emitted[c.ID] {
-					emit(readChunkRow{chunk: c, role: "match", snippet: extractChunkMatchSnippet(c, compiled)})
+					emit(readChunkRow{chunk: c, role: "match", snippet: extractChunkMatchSnippet(c, matchers)})
 				}
 				forceNext = true
 			} else if forceNext {
@@ -463,6 +474,30 @@ scan:
 		Output:  t.buildOutput(knowledge, total, rows, query),
 		Data:    data,
 	}, nil
+}
+
+// fitChunksToBudget keeps the leading chunks whose rendered size fits in
+// budget runes. The model sees the result rendered from Data, which the
+// registry's Output truncation never reaches, so a page must be bounded here;
+// the first chunk is always kept so paging makes progress.
+func fitChunksToBudget(chunks []*types.Chunk, budget int) []*types.Chunk {
+	used := 0
+	for i, c := range chunks {
+		used += utf8.RuneCountInString(c.Content) + readDocumentChunkOverhead
+		if used > budget && i > 0 {
+			return chunks[:i]
+		}
+	}
+	return chunks
+}
+
+func matchesAll(matchers []*regexp.Regexp, s string) bool {
+	for _, m := range matchers {
+		if !m.MatchString(s) {
+			return false
+		}
+	}
+	return true
 }
 
 // documentInfo is the metadata header shared by every read mode.

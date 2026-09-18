@@ -1559,7 +1559,10 @@ export default {
     },
     knowledgeChunksList: {
       chunkRange: '已加载 {fetched} / {total} 个分块',
-      page: '第 {page} 页，每页 {pageSize} 个'
+      page: '第 {page} 页，每页 {pageSize} 个',
+      offsetRange: '第 {from}–{to} 块',
+      queryMatches: '文档内搜索「{query}」命中 {count} 处',
+      queryNoMatch: '文档内搜索「{query}」无匹配'
     },
     grepResults: {
       chunkHits: '{count} 片段',

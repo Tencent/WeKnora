@@ -1557,7 +1557,10 @@ export default {
     },
     knowledgeChunksList: {
       chunkRange: 'Загружено {fetched} / {total} фрагментов',
-      page: 'Стр. {page}, по {pageSize} на странице'
+      page: 'Стр. {page}, по {pageSize} на странице',
+      offsetRange: 'Фрагменты {from}–{to}',
+      queryMatches: 'Поиск «{query}» в документе: совпадений {count}',
+      queryNoMatch: 'Поиск «{query}» в документе: совпадений нет'
     },
     grepResults: {
       chunkHits: '{count} фрагм.',

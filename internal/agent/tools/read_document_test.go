@@ -329,6 +329,33 @@ func TestReadDocumentQueryStopsAtOutputBudget(t *testing.T) {
 	}
 }
 
+func TestReadDocumentPageStopsAtOutputBudget(t *testing.T) {
+	tool, repo := newReadDocumentFixture(12)
+	for _, c := range repo.ordered {
+		c.Content = strings.Repeat("x", 400)
+	}
+	ctx := WithOutputBudget(context.Background(), 2000)
+	res, err := tool.Execute(ctx, json.RawMessage(`{"id":"doc-1","offset":2,"limit":10}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	got := chunkIDsFromData(t, res.Data)
+	if len(got) == 0 || len(got) >= 10 {
+		t.Fatalf("expected a partial, budget-bound page, got %v", got)
+	}
+	if res.Data["next_offset"] != 2+len(got) {
+		t.Fatalf("next_offset must resume after the last returned chunk: %+v", res.Data)
+	}
+
+	// A single chunk larger than the budget is still returned so paging
+	// always advances.
+	repo.ordered[0].Content = strings.Repeat("y", 5000)
+	res, err = tool.Execute(ctx, json.RawMessage(`{"id":"doc-1","limit":10}`))
+	if err != nil || !res.Success || res.Data["next_offset"] != 1 {
+		t.Fatalf("oversized first chunk: res=%+v err=%v", res, err)
+	}
+}
+
 func TestReadDocumentLastPageHasNoNextOffset(t *testing.T) {
 	tool, _ := newReadDocumentFixture(5)
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1","offset":0,"limit":20}`))
@@ -424,6 +451,20 @@ func TestReadDocumentQueryIsLiteralUnlessRegex(t *testing.T) {
 	res, err = tool.Execute(context.Background(), alternation)
 	if err != nil || !res.Success || res.Data["match_count"] != 1 {
 		t.Fatalf("regex alternation: res=%+v err=%v", res, err)
+	}
+}
+
+func TestReadDocumentQueryMatchesEveryWordInAnyOrder(t *testing.T) {
+	tool, repo := newReadDocumentFixture(4)
+	repo.ordered[1].Content = "Let f(n,k) be the least size forcing a sunflower."
+	repo.ordered[2].Content = "A sunflower alone."
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1","query":"Sunflower  f(n,k)"}`))
+	if err != nil || !res.Success || res.Data["match_count"] != 1 {
+		t.Fatalf("words should match in any order, and only together: res=%+v err=%v", res, err)
+	}
+	rows := res.Data["chunks"].([]map[string]interface{})
+	if rows[1]["chunk_id"] != "chunk-1" || rows[1]["role"] != "match" {
+		t.Fatalf("rows = %+v", rows)
 	}
 }
 

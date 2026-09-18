@@ -1557,7 +1557,10 @@ export default {
     },
     knowledgeChunksList: {
       chunkRange: '{fetched} / {total} 청크 로드됨',
-      page: '{page}페이지, 페이지당 {pageSize}개'
+      page: '{page}페이지, 페이지당 {pageSize}개',
+      offsetRange: '청크 {from}–{to}',
+      queryMatches: '문서 내 검색 "{query}": {count}건 일치',
+      queryNoMatch: '문서 내 검색 "{query}": 일치 없음'
     },
     grepResults: {
       chunkHits: '청크 {count}개',
