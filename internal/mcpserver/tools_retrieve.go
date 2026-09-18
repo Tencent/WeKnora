@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -29,10 +28,14 @@ func listKnowledgeBasesTool() mcp.Tool {
 
 func searchKnowledgeTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolSearchKnowledge,
-		mcp.WithDescription("Semantic search across the knowledge bases in scope. Returns the most relevant "+
-			"passages with their document ids and titles. Use a natural-language question or topic; use grep_chunks "+
-			"instead for exact keywords, codes or names."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("A natural-language question or topic to search for")),
+		mcp.WithDescription("Search the knowledge bases in scope and return the most relevant passages with their "+
+			"document ids and titles. mode hybrid (default) combines semantic and keyword retrieval; semantic "+
+			"ranks by meaning; keyword matches exact terms, identifiers, codes or names."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("A natural-language question, topic, or the exact "+
+			"terms to match")),
+		mcp.WithString("mode", mcp.Description("hybrid (default), semantic, or keyword"),
+			mcp.Enum(tools.SearchModeHybrid, tools.SearchModeSemantic, tools.SearchModeKeyword)),
+		mcp.WithNumber("limit", mcp.Description("Maximum passages to return, default 10, max 30")),
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search; defaults to every "+
 				"knowledge base in scope")),
@@ -42,11 +45,11 @@ func searchKnowledgeTool() mcp.Tool {
 
 func grepChunksTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolGrepChunks,
-		mcp.WithDescription("Case-insensitive regular-expression search over the raw text chunks of the knowledge "+
-			"bases in scope. Best for exact terms, identifiers, error codes or product names that semantic search "+
-			"may miss."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Regular expression (POSIX, case-insensitive) to "+
-			"match against chunk text")),
+		mcp.WithDescription("Keyword search over the text chunks of the knowledge bases in scope, served by the "+
+			"keyword index. Best for exact terms, identifiers, error codes or product names that semantic search "+
+			"may miss. Equivalent to search_knowledge with mode=keyword."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("The exact terms to match against chunk text")),
+		mcp.WithNumber("limit", mcp.Description("Maximum passages to return, default 10, max 30")),
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search")),
 		mcp.WithReadOnlyHintAnnotation(true),
@@ -68,11 +71,13 @@ func listDocumentsTool() mcp.Tool {
 func readDocumentTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolReadDocument,
 		mcp.WithDescription("Read a document's metadata and its text chunks in order. Page through long documents "+
-			"with offset and limit."),
+			"with offset and limit, or pass query to return only the chunks containing a phrase (with one chunk "+
+			"of context on each side)."),
 		mcp.WithString("knowledge_id", mcp.Required(),
 			mcp.Description("Document id from search results or list_documents")),
 		mcp.WithNumber("offset", mcp.Description("Chunk offset to start from, default 0")),
 		mcp.WithNumber("limit", mcp.Description("Number of chunks to return, default 20, max 100")),
+		mcp.WithString("query", mcp.Description("Optional case-insensitive phrase to find inside the document")),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
@@ -139,13 +144,27 @@ func (s *Server) handleSearchKnowledge(ctx context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultError(
 			"none of the selected knowledge bases supports semantic or keyword retrieval"), nil
 	}
-	tool := tools.NewKnowledgeSearchTool(
+	return s.runSearchKnowledge(ctx, kbs, strings.TrimSpace(query),
+		req.GetString("mode", tools.SearchModeHybrid), req.GetInt("limit", 0))
+}
+
+// runSearchKnowledge executes the shared search_knowledge agent tool for
+// both the search_knowledge and grep_chunks endpoint tools.
+func (s *Server) runSearchKnowledge(
+	ctx context.Context, kbs []*types.KnowledgeBase, query, mode string, limit int,
+) (*mcp.CallToolResult, error) {
+	tool := tools.NewSearchKnowledgeTool(
 		s.kbService, s.knowledgeService, s.chunkService, searchTargetsFor(kbs), nil, s.cfg,
 	)
-	args, _ := json.Marshal(map[string]any{
-		"queries":            []string{strings.TrimSpace(query)},
+	callArgs := map[string]any{
+		"query":              query,
+		"mode":               mode,
 		"knowledge_base_ids": knowledgeBaseIDs(kbs),
-	})
+	}
+	if limit > 0 {
+		callArgs["limit"] = limit
+	}
+	args, _ := json.Marshal(callArgs)
 	res, execErr := tool.Execute(ctx, args)
 	return toolResultFromAgentTool(res, execErr), nil
 }
@@ -163,10 +182,12 @@ func (s *Server) handleGrepChunks(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	tool := tools.NewGrepChunksTool(s.db, searchTargetsFor(kbs))
-	args, _ := json.Marshal(map[string]any{"query": strings.TrimSpace(query)})
-	res, execErr := tool.Execute(ctx, args)
-	return toolResultFromAgentTool(res, execErr), nil
+	kbs = retrievableKnowledgeBases(kbs)
+	if len(kbs) == 0 {
+		return mcp.NewToolResultError(
+			"none of the selected knowledge bases supports keyword retrieval"), nil
+	}
+	return s.runSearchKnowledge(ctx, kbs, strings.TrimSpace(query), tools.SearchModeKeyword, req.GetInt("limit", 0))
 }
 
 type documentSummary struct {
@@ -276,28 +297,27 @@ func (s *Server) handleReadDocument(ctx context.Context, req mcp.CallToolRequest
 	if offset < 0 {
 		offset = 0
 	}
-	tool := tools.NewListKnowledgeChunksTool(
+	tool := tools.NewReadDocumentTool(
 		s.knowledgeService, s.chunkService, searchTargetsFor([]*types.KnowledgeBase{kb}),
 	)
-	args, _ := json.Marshal(map[string]any{
-		"knowledge_id": k.ID,
-		"limit":        limit,
-		"offset":       offset,
-	})
+	callArgs := map[string]any{
+		"id":     k.ID,
+		"limit":  limit,
+		"offset": offset,
+	}
+	if query := strings.TrimSpace(req.GetString("query", "")); query != "" {
+		callArgs["query"] = query
+	}
+	args, _ := json.Marshal(callArgs)
 	res, execErr := tool.Execute(ctx, args)
 	if execErr != nil || res == nil || !res.Success {
 		return toolResultFromAgentTool(res, execErr), nil
 	}
-	header := fmt.Sprintf("Document: %s\nID: %s\nKnowledge base: %s (%s)\nType: %s\nStatus: %s\n",
-		k.Title, k.ID, kb.Name, kb.ID, k.FileType, k.ParseStatus)
-	if k.Description != "" {
-		header += "Summary: " + k.Description + "\n"
-	}
-	res.Output = header + "\n" + res.Output
 	if res.Data == nil {
 		res.Data = map[string]interface{}{}
 	}
 	res.Data["document"] = summarizeKnowledge(k)
+	res.Data["knowledge_base"] = map[string]any{"id": kb.ID, "name": kb.Name}
 	return toolResultFromAgentTool(res, nil), nil
 }
 

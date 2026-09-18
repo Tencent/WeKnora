@@ -22,7 +22,9 @@ func wikiSearchTool() mcp.Tool {
 		mcp.WithDescription("Search the generated wiki pages of the knowledge bases in scope by title, alias and "+
 			"content. Returns page slugs that wiki_read_page accepts. Only knowledge bases with a wiki are "+
 			"searched."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Search terms or a regular expression")),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Search text (case-insensitive literal), or a "+
+			"POSIX regular expression when regex is true")),
+		mcp.WithBoolean("regex", mcp.Description("Interpret query as a regular expression, default false")),
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search")),
 		mcp.WithNumber("limit", mcp.Description("Maximum pages to return, default 10, max 50")),
@@ -94,8 +96,9 @@ func (s *Server) handleWikiSearch(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	tool := tools.NewWikiSearchTool(s.wikiService, s.knowledgeService, wikiScopesFor(kbs), tools.NewWikiRouteResolver())
 	args, _ := json.Marshal(map[string]any{
-		"queries": []string{strings.TrimSpace(query)},
-		"limit":   limit,
+		"query": strings.TrimSpace(query),
+		"regex": req.GetBool("regex", false),
+		"limit": limit,
 	})
 	res, execErr := tool.Execute(ctx, args)
 	return toolResultFromAgentTool(res, execErr), nil

@@ -19,43 +19,10 @@ type graphConfigSummary struct {
 
 var queryKnowledgeGraphTool = BaseTool{
 	name: ToolQueryKnowledgeGraph,
-	description: `Query knowledge graph to explore entity relationships and knowledge networks.
-
-## Core Function
-Explores relationships between entities in knowledge bases that have graph extraction configured.
-
-## When to Use
-✅ **Use for**:
-- Understanding relationships between entities (e.g., "relationship between Docker and Kubernetes")
-- Exploring knowledge networks and concept associations
-- Finding related information about specific entities
-- Understanding technical architecture and system relationships
-
-❌ **Don't use for**:
-- General text search → use knowledge_search
-- Knowledge base without graph extraction configured
-- Need exact document content → use knowledge_search
-
-## Parameters
-- **knowledge_base_ids** (required): Array of short bN knowledge base IDs (1-10). Only KBs with graph extraction configured will be effective.
-- **query** (required): Query content - can be entity name, relationship query, or concept search.
-
-## Graph Configuration
-Knowledge graph must be pre-configured in knowledge bases:
-- **Entity types** (Nodes): e.g., "Technology", "Tool", "Concept"
-- **Relationship types** (Relations): e.g., "depends_on", "uses", "contains"
-
-If KB is not configured with graph, tool will return regular search results.
-
-## Workflow
-1. **Relationship exploration**: query_knowledge_graph → list_knowledge_chunks (for detailed content)
-2. **Network analysis**: query_knowledge_graph → knowledge_search (for comprehensive understanding)
-3. **Topic research**: knowledge_search → query_knowledge_graph (for deep entity relationships)
-
-## Notes
-- Results indicate graph configuration status
-- Cross-KB results are automatically deduplicated
-- Results are sorted by relevance`,
+	description: "Query the knowledge graph of graph-enabled knowledge bases to explore how entities relate " +
+		"(for example \"relationship between Docker and Kubernetes\"). Returns the chunks that carry those " +
+		"relationships with cN handles.\nUse search_knowledge for ordinary text retrieval and " +
+		"read_document(id=dN) to read a source in full.",
 	schema: utils.GenerateSchema[QueryKnowledgeGraphInput](),
 }
 
@@ -295,8 +262,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	}
 
 	if !hasGraphConfig {
-		output += "⚠️ None of the queried knowledge bases have graph extraction configured\n"
-		output += "💡 Hint: Configure entity and relationship types in knowledge base settings\n\n"
+		output += "⚠️ None of the queried knowledge bases have graph extraction configured\n\n"
 	}
 
 	// Display result counts by KB
@@ -310,11 +276,6 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 
 	// Display search results
 	output += "=== 🔍 Query Results ===\n\n"
-	if !hasGraphConfig {
-		output += "💡 Returning relevant document chunks (knowledge base has no graph configuration)\n\n"
-	} else {
-		output += "💡 Content retrieval based on graph configuration\n\n"
-	}
 
 	formattedResults := make([]map[string]interface{}, 0, len(allResults))
 	currentKB := ""
@@ -351,15 +312,6 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			"match_type":        FormatMatchType(result.MatchType),
 		})
 	}
-
-	output += "=== 💡 Tips ===\n"
-	output += "- ✓ Results are deduplicated across knowledge bases and sorted by relevance\n"
-	output += "- ✓ Use get_chunk_detail to get full content\n"
-	output += "- ✓ Use list_knowledge_chunks to explore context\n"
-	if !hasGraphConfig {
-		output += "- ⚠️ Configure graph extraction for more precise entity-relationship results\n"
-	}
-	output += "- ⏳ Full graph query language (Cypher) support is under development\n"
 
 	// Build structured graph data for frontend visualization
 	graphData := buildGraphVisualizationData(allResults)

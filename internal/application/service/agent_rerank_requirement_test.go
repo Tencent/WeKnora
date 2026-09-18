@@ -18,7 +18,7 @@ func TestAgentRequiresRerankModel(t *testing.T) {
 			name: "knowledge search with all knowledge bases",
 			agent: &types.CustomAgent{Config: types.CustomAgentConfig{
 				KBSelectionMode: "all",
-				AllowedTools:    []string{tools.ToolKnowledgeSearch},
+				AllowedTools:    []string{tools.ToolSearchKnowledge},
 			}},
 			want: true,
 		},
@@ -26,7 +26,7 @@ func TestAgentRequiresRerankModel(t *testing.T) {
 			name: "knowledge search with selected knowledge bases",
 			agent: &types.CustomAgent{Config: types.CustomAgentConfig{
 				KBSelectionMode: "selected",
-				AllowedTools:    []string{tools.ToolKnowledgeSearch},
+				AllowedTools:    []string{tools.ToolSearchKnowledge},
 			}},
 			want: true,
 		},
@@ -34,7 +34,7 @@ func TestAgentRequiresRerankModel(t *testing.T) {
 			name: "knowledge search with knowledge bases disabled",
 			agent: &types.CustomAgent{Config: types.CustomAgentConfig{
 				KBSelectionMode: "none",
-				AllowedTools:    []string{tools.ToolKnowledgeSearch},
+				AllowedTools:    []string{tools.ToolSearchKnowledge},
 			}},
 			want: false,
 		},

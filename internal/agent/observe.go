@@ -856,14 +856,18 @@ func countTotalToolCalls(steps []types.AgentStep) int {
 // may become stale across turns (KB can be switched, updated, or deleted).
 // Historical results from these tools are redacted to force fresh retrieval.
 var kbToolNames = map[string]bool{
-	agenttools.ToolKnowledgeSearch:     true,
-	agenttools.ToolGrepChunks:          true,
-	agenttools.ToolListKnowledgeChunks: true,
+	agenttools.ToolSearchKnowledge:     true,
+	agenttools.ToolReadDocument:        true,
+	agenttools.ToolListDocuments:       true,
 	agenttools.ToolQueryKnowledgeGraph: true,
-	agenttools.ToolGetDocumentInfo:     true,
 	agenttools.ToolWikiSearch:          true,
 	agenttools.ToolWikiReadPage:        true,
-	agenttools.ToolWikiReadSourceDoc:   true,
+	// Retired names still appear in stored histories.
+	agenttools.LegacyToolKnowledgeSearch:     true,
+	agenttools.LegacyToolGrepChunks:          true,
+	agenttools.LegacyToolListKnowledgeChunks: true,
+	agenttools.LegacyToolGetDocumentInfo:     true,
+	agenttools.LegacyToolWikiReadSourceDoc:   true,
 }
 
 // redactHistoryKBResults replaces full KB tool results in historical context

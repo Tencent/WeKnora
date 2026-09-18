@@ -56,17 +56,22 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 	"todo_write": {},
 
 	// ---- RAG / chunk retrieval (need at least one chunk-indexed KB) ----
+	"search_knowledge":      {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"read_document":         {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"list_documents":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"query_knowledge_graph": {AllOf: []KBCapability{CapGraph}, ConsumesFiles: true},
+	"database_query":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	// Retired names keep their requirement so a stored allowlist that has not
+	// been normalized yet still derives the same KB filter.
 	"knowledge_search":      {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"grep_chunks":           {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"list_knowledge_chunks": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
-	"query_knowledge_graph": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"get_document_info":     {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
-	"database_query":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 
 	// ---- Wiki (operates on wiki pages; doesn't consume arbitrary file IDs) ----
 	"wiki_search":          {AllOf: []KBCapability{CapWiki}},
 	"wiki_read_page":       {AllOf: []KBCapability{CapWiki}},
-	"wiki_read_source_doc": {AllOf: []KBCapability{CapWiki}},
+	"wiki_read_source_doc": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"wiki_flag_issue":      {AllOf: []KBCapability{CapWiki}},
 	"wiki_write_page":      {AllOf: []KBCapability{CapWiki}},
 	"wiki_replace_text":    {AllOf: []KBCapability{CapWiki}},

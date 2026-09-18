@@ -166,22 +166,22 @@ migration `000061_wiki_page_hierarchy.up.sql` 引入独立的 `wiki_folders` 表
 
 ### 与 Agent 的关系
 
-智能体可通过以下 10 个 Wiki 工具读取、修改页面并处理问题，工具定义位于 `internal/agent/tools/definitions.go`：
+智能体可通过以下 9 个 Wiki 工具读取、修改页面并处理问题（回读源文档则复用通用的 `read_document`），工具定义位于 `internal/agent/tools/definitions.go`：
 
 | 工具 | 作用 | 关键参数 |
 | --- | --- | --- |
 | `wiki_read_page` | 按 slug 批量读取页面全文 | `slugs: string[]` |
-| `wiki_search` | 正则搜索页面 | `queries`、`limit?`、`knowledge_base_id?` |
+| `wiki_search` | 搜索页面（标题 / slug / 别名 / 摘要 / 内容；默认字面量、大小写不敏感） | `query`、`regex?`、`knowledge_base_ids?`、`limit?`（旧参数 `queries`、`knowledge_base_id` 仍接受） |
 | `wiki_write_page` | 创建/整页覆盖（`synthesis`、`comparison` 页只能由此创建） | `slug`、`title`、`summary`、`content`、`page_type`、`aliases?`、`source_refs?` |
 | `wiki_replace_text` | 页内精确文本替换 | `slug`、`old_text`、`new_text` |
 | `wiki_rename_page` | 重命名 slug，自动更新反向链接 | `slug`、`new_slug` |
 | `wiki_delete_page` | 删除页面并清理死链 | `slug` |
-| `wiki_read_source_doc` | 回读源文档原文（带上下文） | 文档 ID |
+| `read_document` | 回读源文档原文：元数据头 + 分块，可分页或用 `query` 在文档内定位（替代原 `wiki_read_source_doc`） | `id`（`dN` / `cN`）、`offset?`、`limit?`、`query?`、`regex?`、`context?` |
 | `wiki_flag_issue` | 标记页面问题 | `slug`、`issue_type ∈ {mixed_entities, contradictory_facts, out_of_date, other}`、`description` |
 | `wiki_read_issue` | 查看问题详情 | 问题 ID |
 | `wiki_update_issue` | 更新问题状态 | 问题 ID、`status ∈ {pending, ignored, resolved}` |
 
-工具输出为 XML-like 结构（`<wiki_page><metadata>...<summary>...<content>...`），前端用 `frontend/src/utils/wikiToolReferences.ts` 的 `parseWikiToolReferences()` 解析成引用卡片渲染在对话中。
+推荐的阅读顺序是 `wiki_search` → `wiki_read_page` → `read_document`：先定位页面，再读整页，需要精确引用时回到原始来源的 `cN` 分块。工具输出为 XML-like 结构（`<wiki_page><metadata>...<summary>...<content>...`），前端用 `frontend/src/utils/wikiToolReferences.ts` 的 `parseWikiToolReferences()` 解析成引用卡片渲染在对话中。
 
 配套机制：
 

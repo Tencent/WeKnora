@@ -81,7 +81,7 @@ func TestAnalyzeResponse_ToolCall_DoesNotTerminate(t *testing.T) {
 				ID:   "call-1",
 				Type: "function",
 				Function: types.FunctionCall{
-					Name:      agenttools.ToolKnowledgeSearch,
+					Name:      agenttools.ToolSearchKnowledge,
 					Arguments: `{"query": "hi"}`,
 				},
 			},

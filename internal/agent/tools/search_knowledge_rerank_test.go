@@ -38,8 +38,8 @@ func (s *stubReranker) Rerank(
 func (s *stubReranker) GetModelName() string { return "stub-rerank" }
 func (s *stubReranker) GetModelID() string   { return "stub-rerank-id" }
 
-func newRerankTestTool(model rerank.Reranker) *KnowledgeSearchTool {
-	return &KnowledgeSearchTool{
+func newRerankTestTool(model rerank.Reranker) *SearchKnowledgeTool {
+	return &SearchKnowledgeTool{
 		rerankModel: model,
 		config: &config.Config{
 			Conversation: &config.ConversationConfig{RerankThreshold: 0.3},
@@ -96,7 +96,7 @@ func TestFilterRerankRankResults_thresholdAndFallback(t *testing.T) {
 
 func TestApplyModelRerankScores_faqUsesCompositeScale(t *testing.T) {
 	t.Parallel()
-	tool := &KnowledgeSearchTool{
+	tool := &SearchKnowledgeTool{
 		config: &config.Config{
 			Conversation: &config.ConversationConfig{RerankThreshold: 0.3},
 		},
@@ -192,7 +192,7 @@ func TestRerankResults_withoutModelIsPassthrough(t *testing.T) {
 
 func TestRerankThreshold_default(t *testing.T) {
 	t.Parallel()
-	tool := &KnowledgeSearchTool{}
+	tool := &SearchKnowledgeTool{}
 	if got := tool.rerankThreshold(); got != 0.3 {
 		t.Fatalf("default threshold = %v, want 0.3", got)
 	}

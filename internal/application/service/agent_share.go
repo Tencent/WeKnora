@@ -20,22 +20,25 @@ var (
 	ErrAgentNotFoundForShare   = errors.New("agent not found")
 	ErrNotAgentOwner           = errors.New("only agent owner can share")
 	ErrOrgRoleCannotShareAgent = errors.New("only editors and admins can share agents to this organization")
-	ErrAgentNotConfigured      = errors.New("agent is not fully configured (missing required chat model, or rerank model when the knowledge_search tool is enabled)")
+	ErrAgentNotConfigured      = errors.New(
+		"agent is not fully configured (missing required chat model, or rerank model when the search_knowledge " +
+			"tool is enabled)",
+	)
 )
 
 // agentRequiresRerankModel returns true when the agent's configured scope and
 // tools will actually invoke the reranker at runtime. An agent whose knowledge
-// base scope is explicitly disabled cannot run knowledge_search, so it does not
+// base scope is explicitly disabled cannot run search_knowledge, so it does not
 // need a rerank model even if that tool remains in AllowedTools.
 //
 // This mirrors the runtime check in session_agent_qa.go: only
-// `knowledge_search` with an enabled knowledge-base scope uses the reranker.
+// `search_knowledge` with an enabled knowledge-base scope uses the reranker.
 // Wiki-first agents (wiki_search / wiki_read_page / …) never call it and
 // therefore don't need a rerank model configured, even when knowledge bases
 // are attached.
 //
 // When AllowedTools is empty the runtime falls back to
-// tools.DefaultAllowedTools(), which includes knowledge_search, so we treat
+// tools.DefaultAllowedTools(), which includes search_knowledge, so we treat
 // that case as requiring the reranker.
 func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 	if agent == nil {
@@ -49,7 +52,7 @@ func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 		allowed = tools.DefaultAllowedTools()
 	}
 	for _, t := range allowed {
-		if t == tools.ToolKnowledgeSearch {
+		if tools.SuccessorToolName(t) == tools.ToolSearchKnowledge {
 			return true
 		}
 	}

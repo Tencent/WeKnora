@@ -65,9 +65,9 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 
 | 预设 ID | 系统提示词模板 | 温度 | 最大迭代 | 预填工具 | KB 过滤 |
 | --- | --- | --- | --- | --- | --- |
-| `rag-qa` | `progressive_rag_agent` | 0.7 | 30 | knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info | 由工具派生：any_of vector/keyword |
-| `wiki-qa` | `wiki_researcher` | 0.7 | 30 | wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue | 由工具派生：any_of wiki |
-| `hybrid-rag-wiki` | `hybrid_rag_wiki_agent` | 0.7 | 40 | wiki_search、wiki_read_page、knowledge_search、grep_chunks、list_knowledge_chunks、get_document_info、wiki_flag_issue | any_of vector/keyword/wiki |
+| `rag-qa` | `progressive_rag_agent` | 0.7 | 30 | search_knowledge、read_document、list_documents | 由工具派生：any_of vector/keyword |
+| `wiki-qa` | `wiki_researcher` | 0.7 | 30 | wiki_search、wiki_read_page、read_document、wiki_flag_issue | 由工具派生：any_of wiki |
+| `hybrid-rag-wiki` | `hybrid_rag_wiki_agent` | 0.7 | 40 | wiki_search、wiki_read_page、search_knowledge、read_document、list_documents、wiki_flag_issue | any_of vector/keyword/wiki |
 | `data-analysis` | `data_analyst` | 0.3 | 30 | data_schema、data_analysis；关闭 web 搜索；限定文件类型 csv/xlsx | 显式 `none_of: [faq]` |
 | `custom` | 无 | — | — | 不预填 | 不限制 |
 
@@ -102,14 +102,14 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 
 Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAgent`、`ListAgents`、`UpdateAgent`、`DeleteAgent`、`CopyAgent`、`GetPlaceholders`（返回 `types.PlaceholdersByField(PromptFieldAgentSystemPrompt)` 的占位符清单）、`GetAgentTypePresets`（带 i18n 的预设列表）、`GetSuggestedQuestions`。创建/更新时经 `authorizeAgentKnowledgeScope` 校验受限 API Key 的 KB 范围：`kb_selection_mode: all` 对 KB 受限 key 直接 403，`selected` 逐一鉴权。
 
-运行时映射：`buildAgentConfig`（`session_agent_qa.go`）把 `CustomAgentConfig` 转换为引擎的 `types.AgentConfig`（`internal/types/agent.go`），并叠加：web 搜索需 Agent 与请求同时开启（`customAgent.Config.WebSearchEnabled && req.WebSearchEnabled`）、web provider 回退租户默认、`SearchTargets` 由 KB/@文档/@标签 scope 统一构建、`MaxContextTokens` 兜底 200000、`@Skill` 的每轮优先提示与 `@MCP` 的每轮范围收窄（共享 Agent 的 @MCP 只能落在 Agent 预设集合内）。另外只有当 `knowledge_search` 实际可用时才要求配置 rerank 模型（`agentRequiresRerankModel`）。
+运行时映射：`buildAgentConfig`（`session_agent_qa.go`）把 `CustomAgentConfig` 转换为引擎的 `types.AgentConfig`（`internal/types/agent.go`），并叠加：web 搜索需 Agent 与请求同时开启（`customAgent.Config.WebSearchEnabled && req.WebSearchEnabled`）、web provider 回退租户默认、`SearchTargets` 由 KB/@文档/@标签 scope 统一构建、`MaxContextTokens` 兜底 200000、`@Skill` 的每轮优先提示与 `@MCP` 的每轮范围收窄（共享 Agent 的 @MCP 只能落在 Agent 预设集合内）。另外只有当 `search_knowledge` 实际可用时才要求配置 rerank 模型（`agentRequiresRerankModel`，旧名 `knowledge_search` / `grep_chunks` 经 `SuccessorToolName` 归一后同样计入）。
 
 #### 分享机制（agent_share） {#_7-3-分享机制-agent-share}
 
 `internal/application/service/agent_share.go`：Agent 可分享给**组织（Organization）**：
 
 - 仅 Agent 属主租户可分享（`ErrNotAgentOwner`）；分享者所在租户须为组织 Editor+ 成员；
-- 分享前校验 Agent 配置完整：必须有 `model_id`；若 `knowledge_search` 在其工具集内（或工具集为空回退默认集）且 KB scope 未禁用，还必须有 `rerank_model_id`，否则 `ErrAgentNotConfigured`；
+- 分享前校验 Agent 配置完整：必须有 `model_id`；若 `search_knowledge` 在其工具集内（或工具集为空回退默认集）且 KB scope 未禁用，还必须有 `rerank_model_id`，否则 `ErrAgentNotConfigured`；
 - **权限强制为只读**：`permission = types.OrgRoleViewer`（跨租户编辑不在 v1 范围）；重复分享则幂等更新；
 - 接收方租户可通过 `TenantDisabledSharedAgentRepository` 把某个共享 Agent 在本租户禁用；
 - 使用共享 Agent 对话时（`session_agent_qa.go`），检索与模型 scope 切到 **Agent 属主租户**（`resolveRetrievalTenantID`），因此共享方的 KB 对使用方可用，而使用方自己的 MCP @提及会被限制在 Agent 预设内。
@@ -121,9 +121,9 @@ Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAg
 | ID | 名称（zh-CN） | agent_mode / agent_type | 关键配置 |
 | --- | --- | --- | --- |
 | `builtin-quick-answer` | 快速问答 | `quick-answer` | 模板 `default_kb` + `default_context`；temperature 0.7；FAQ 优先（直接回答阈值 0.9、加权 1.2）；query expansion + rewrite；web 搜索开、5 条；不进 Agent 引擎 |
-| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：knowledge_search、grep_chunks、list_knowledge_chunks、query_knowledge_graph、get_document_info；web 搜索开；多轮 5 轮 |
+| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：search_knowledge、read_document、list_documents、query_knowledge_graph；web 搜索开；多轮 5 轮 |
 | `builtin-data-analyst` | 数据分析师 | `smart-reasoning` / `data-analysis` | 模板 `data_analyst`；temperature 0.3；`max_iterations: 30`；工具仅 data_schema + data_analysis；限定 csv/xlsx；关闭 web 搜索；历史 10 轮 |
-| `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、wiki_read_source_doc、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
+| `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、read_document、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
 | `builtin-wiki-fixer` | 维基修订 | `smart-reasoning` / `custom` | 模板 `wiki_fixer`；`retain_retrieval_history: true`（修订需要跨轮记住页面内容）；工具含全部 wiki 写操作（wiki_write_page、wiki_replace_text、wiki_rename_page、wiki_delete_page、wiki_read_issue、wiki_update_issue 等 9 个）；`kb_selection_mode: selected` |
 
 补充两点（来自 `internal/types/custom_agent.go`）：
@@ -241,7 +241,7 @@ flowchart TB
         REG["tools.ToolRegistry"]
     end
     subgraph Tools["工具集"]
-        KB["KB 检索工具<br/>knowledge_search / grep_chunks / ..."]
+        KB["KB 检索工具<br/>search_knowledge / read_document / list_documents"]
         WIKI["Wiki 工具 x10"]
         WEB["web_search / web_fetch"]
         DATA["data_schema / data_analysis（DuckDB）"]
@@ -289,7 +289,7 @@ flowchart TB
 
 **运行时上下文（runtime_context）**：与 system prompt 不同，绑定 KB 的完整详情（capabilities、最近文档/FAQ 列表）、@提及的固定文档（pinned_documents）、当前时间、会话 ID，是以 XML 块 `<runtime_context scope="this_turn">` 注入到**当前轮用户消息**里的（`internal/agent/observe.go` 的 `buildRuntimeContextBlock`），且**不持久化**到历史，避免过期 scope 干扰后续轮次。块内还固定携带两条指令：
 
-- `<communication_instruction>`：禁止在答案/思考中出现内部工具名和内部 ID（要求说"关键词检索"而非 `grep_chunks` 等）；
+- `<communication_instruction>`：禁止在答案/思考中出现内部工具名和内部 ID（要求说"知识库检索"而非 `search_knowledge` 等）；
 - `<answer_instruction>`：信息足够后直接以纯文本写出完整答案并停止（不要再发起工具调用）——这就是 Agent 的终止协议。
 
 当用户 @提及了 MCP 服务或技能时，`buildMustUseBlock` 会额外注入 `<must_use>` 块，强制模型使用对应前缀的 MCP 工具或先用 `read_file` 读取技能说明。
@@ -411,11 +411,10 @@ flowchart TD
 | --- | --- | --- |
 | `thinking` | `thought`\*、`next_thought_needed`\*、`thought_number`\*、`total_thoughts`\*、`is_revision`、`revises_thought`、`branch_from_thought`、`branch_id`、`needs_more_thoughts` | Sequential Thinking：记录/修订/分支思考步骤；返回思考进度（含 `incomplete_steps`），提示禁止在思考里出现工具名和最终答案 |
 | `todo_write` | `task`、`steps[]`\*（`id`/`description`/`status`：pending/in_progress/completed） | 创建/更新检索类任务计划，仅限检索任务（总结交给 thinking）；返回格式化计划，`display_type: "plan"` |
-| `knowledge_search` | `queries[]`\*（1–5 条语义问题）、`knowledge_base_ids[]` | 语义/向量检索，可选 rerank；默认 topK=5、vector 阈值 0.6、keyword 阈值 0.5；`minScore` 参数虽然仍可传入且默认 0.3，但**后置过滤已被跳过**——`HybridSearch` 改用 RRF 融合后分数落在 [0, ~0.033] 区间，旧的 [0,1] 阈值不再适用，阈值过滤在 RRF 之前就已由各引擎完成，重排阶段另有 `rerankThreshold()`（优先取全局配置）；结果带 `cN`/`dN` 短 ID；会话内已见 chunk 去重压缩 |
-| `grep_chunks` | `query`\*（单条 POSIX 正则，支持 `\|` 交替） | 直接在 DB 做大小写不敏感正则匹配（PostgreSQL `~*` / MySQL `REGEXP`）；上限 30 条，>10 条时做 MMR（λ=0.7）去冗；返回 `<match>` 片段、按文档聚合摘要（最多 20 行）；已见 chunk 标 `already_seen` |
-| `list_knowledge_chunks` | `faq_id` / `chunk_id` / `knowledge_id`（三选一）、`limit`（默认 20 上限 100）、`offset` | 读取单个 FAQ/chunk 或分页遍历某文档全部分块；校验 KB 在 searchTargets 内及 @mention 范围 |
-| `query_knowledge_graph` | `knowledge_base_ids[]`\*（1–10 个 `bN`）、`query`\* | 并发查询各 KB 知识图谱的实体与关系；未配置图谱的 KB 退化为普通检索结果 |
-| `get_document_info` | `knowledge_ids[]`（`dN`）、`faq_ids[]`（`cN`）（至少一个） | 并发批量返回文档元数据（标题、类型、大小、parse_status、分块数）或 FAQ 标准问/答案 |
+| `search_knowledge` | `query`\*（一条自然语言问题或短语；keyword 模式下写精确词）、`mode`（`hybrid` 默认 / `semantic` / `keyword`）、`knowledge_base_ids[]`（`bN`）、`limit`（默认 10，上限 30） | 唯一的知识库检索入口：`hybrid` 走向量 + 关键词的 RRF 融合，`semantic` 只走向量，`keyword` 由关键词索引（BM25 / 引擎关键词检索）提供，不再对 chunks 表做无索引的正则扫描；默认 vector 阈值 0.6、keyword 阈值 0.5，阈值过滤在 RRF 之前由各引擎完成；有 rerank 模型时重排（`rerankThreshold()` 优先取全局配置），候选超过 `limit` 时做 MMR（λ=0.7）去冗；结果带 `cN`/`dN` 短 ID，会话内已见 chunk 去重压缩；所选 KB 没有对应索引时（如 FAQ 库无关键词索引）直接提示换 `mode` |
+| `read_document` | `id`\*（`dN` 文档句柄或 `cN` 分块句柄）、`offset`（零基 chunk 下标）、`limit`（默认 20，上限 100）、`query`（文档内查找，默认字面量、大小写不敏感）、`regex`（把 `query` 当 POSIX 正则）、`context`（`cN` 前后各带几个相邻分块，上限 5） | 始终先返回文档元数据头（标题、类型、parse_status、分块数、metadata），再按需返回分块：`dN` 从 `offset` 起分页遍历；`cN` 读取该分块并可带前后 `context`；`query` 返回命中分块及前后各一块上下文（最多 20 处命中）；FAQ 条目按同样方式读取；校验 KB 在 searchTargets 内及 @mention 范围 |
+| `list_documents` | `knowledge_base_id`\*（`bN`）、`keyword`（标题子串过滤）、`page`（默认 1）、`page_size`（默认 20，上限 100） | 分页列出单个知识库的文档，返回可直接交给 `read_document` 的 `dN` 句柄 |
+| `query_knowledge_graph` | `knowledge_base_ids[]`\*（1–10 个 `bN`）、`query`\* | 并发查询各 KB 知识图谱的实体与关系；只有当作用域内存在启用图谱的 KB 时才会提供给模型（`agent_service.go` 装配白名单时移除），能力要求 `all_of: [graph]` |
 | `database_query` | SQL（SELECT-only） | 只读查询白名单表（`knowledge_bases`/`knowledges`/`chunks`），自动注入 tenant_id 过滤与 `deleted_at IS NULL`；SQL 参数在 UI/Langfuse 中脱敏 |
 | `data_schema` | `knowledge_id`\*（`dN`） | 读取 CSV/Excel 文件的 `table_summary` + `table_column` 类型分块，返回列信息与行数；并告知模型该文档在 `data_analysis` 中固定以表名 `dataset` 访问 |
 | `data_analysis` | `knowledge_id`\*、`sql`\* | 把 CSV/Excel 载入 DuckDB 后执行 SQL。文档由 `knowledge_id` 选定，SQL 中固定以表名 `dataset` 引用它（每次查询在独立连接上建临时视图映射到物理表，模型永远不需要在 SQL 里写文档 ID）；多 Sheet Excel 合并为一张表并暴露 `__sheet_name` 列；自动纠正列名大小写/空格差异；会话结束 Cleanup 时 DROP 所建表 |
@@ -428,9 +427,8 @@ flowchart TD
 | `edit_sandbox_file` | path、edits | 基于原版本批量精确替换 |
 | `search_memory` | query、limit | 按当前调用者作用域查长期记忆 |
 | `search_conversations` | 查询与范围 | 检索当前调用者可用的历史对话 |
-| `wiki_search` | `queries[]`\*（正则）、`limit`（默认 10）、`knowledge_base_id` | 在 Wiki 页面（标题/内容/slug/摘要）上做 POSIX 正则搜索，返回带 `bN` 标记的页面与摘要；已见 slug 去重 |
+| `wiki_search` | `query`\*（默认字面量、大小写不敏感）、`regex`（按 POSIX 正则解释，如 `stardust\|skyvault`）、`knowledge_base_ids[]`（`bN`）、`limit`（每个 KB 默认 10，上限 50）；旧参数 `queries[]`、`knowledge_base_id` 仍接受 | 在 Wiki 页面（标题/slug/别名/摘要/内容）上搜索，返回带 `bN` 标记的页面 slug 与摘要；已见 slug 去重 |
 | `wiki_read_page` | `slugs[]`\*、`knowledge_base_id` | 按 slug 读取 Wiki 页面全文、元数据、出入链（链接附摘要，已见的省略）；`index` slug 返回按类型分组的目录概览（每类 top 20） |
-| `wiki_read_source_doc` | `knowledge_id`\*（`dN`）、`query`（正则）、`start_chunk_index`、`end_chunk_index` | 深入阅读 Wiki 页面的源文档：正则过滤或按 chunk 区间取连续内容；都不传则返回文档开头 |
 | `wiki_write_page` | `slug`\*、`title`\*、`summary`\*、`content`\*、`page_type`\*、`aliases[]`、`source_refs[]` | 新建或整页覆盖 Wiki 页面；写入前规范化并校验 slug；自动处理出链 |
 | `wiki_replace_text` | `slug`\*、`old_text`\*、`new_text`\*、`source_refs[]` | 精确文本替换，适合小修订 |
 | `wiki_rename_page` | `slug`\*、`new_slug`\* | 重命名 slug 并级联更新所有引用它的页面链接 |
@@ -440,7 +438,11 @@ flowchart TD
 | `wiki_update_issue` | `issue_id`\*、`status`\*（resolved/ignored/pending） | 更新 issue 状态 |
 | `mcp_{service}_{tool}`（动态） | 由 MCP 服务的 InputSchema 决定 | 包装外部 MCP 工具；描述前缀 `[MCP Service: X (external)]` 提示不可信来源；可挂人工审批与会话内 OAuth |
 
-默认工具白名单 `DefaultAllowedTools()`（旧 Agent 未配置 `allowed_tools` 时的回退）：`thinking`、`todo_write`、`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`database_query`、`data_analysis`、`data_schema`。
+默认工具白名单 `DefaultAllowedTools()`（新建 Agent 的默认值，也是旧 Agent 未配置 `allowed_tools` 时的回退）：`search_knowledge`、`read_document`、`list_documents`、`search_conversations`（`search_memory` 与 `web_search` 一样不在此列表里，由记忆 / 联网开关在注册工具时注入或剔除）。
+
+**旧工具名的兼容**：`knowledge_search`、`grep_chunks` 已合并为 `search_knowledge`；`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc` 已合并为 `read_document`。`definitions.go` 的 `legacyToolSuccessors` 记录这组映射，`NormalizeAllowedTools` 在注册工具时把已保存 Agent 配置、预设与 API 调用里的旧名字自动改写为新工具，无需数据迁移；历史消息中记录的旧工具名仍能正常渲染。
+
+**推荐的检索工作流**：`search_knowledge`（按问题选择 `mode`：默认 `hybrid`，精确词 / 报错信息 / 标识符用 `keyword`，改写或概念性问题用 `semantic`）→ `read_document`（按 `dN` 分页阅读上下文，或用 `query` 在文档内定位）→ 在答案里以 `cN` 句柄引用。Wiki 知识库则是 `wiki_search` → `wiki_read_page` → `read_document` 回读原始来源。
 
 #### 工具注册表（ToolRegistry） {#_3-2-工具注册表-toolregistry}
 
@@ -461,8 +463,12 @@ flowchart TD
 var ToolCapabilityRequirements = map[string]ToolRequirement{
 	"thinking":   {},
 	"todo_write": {},
-	"knowledge_search":      {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
-	"grep_chunks":           {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"search_knowledge":      {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"read_document":         {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"list_documents":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"query_knowledge_graph": {AllOf: []KBCapability{CapGraph}, ConsumesFiles: true},
+	// 旧名 knowledge_search / grep_chunks / list_knowledge_chunks / get_document_info / wiki_read_source_doc
+	// 保留同样的声明，以便旧配置在归一化之前也能通过能力校验
 	// ...
 	"wiki_search":          {AllOf: []KBCapability{CapWiki}},
 	// ...
@@ -516,7 +522,7 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 - 每轮展开为：user 消息（含图片 caption 与附件 prompt；忽略 `RenderedContent` 快照，避免将旧渲染协议带入上下文）→ 每个含工具调用的 `AgentStep` 展开为 assistant(with tool_calls) + 若干 tool 消息 → 末尾一条规范化最终答案 assistant 消息（剥离 `<think>` 块）；
 - 历史中的 tool 消息内容用 `CompactToolOutputForHistory`（`internal/agent/tools/persist.go`）压缩：带 `display_type` 的大载荷（如 `knowledge_chunks_list` 的 chunks、`grep_results` 的 chunk_results）替换为一行摘要（如 `"Listed 20/87 chunks from X (content omitted from history)"`）。
 
-进入引擎后，`buildMessagesWithLLMContext` 还会做**历史 KB 结果脱敏**（`redactHistoryKBResults`）：除非 Agent 开启 `RetainRetrievalHistory`，历史轮次中 KB 类工具（`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`query_knowledge_graph`、`get_document_info`、`wiki_search`、`wiki_read_page`、`wiki_read_source_doc`）的结果一律替换为 `"[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]"`，强制模型对可能已变更的知识库做新鲜检索。
+进入引擎后，`buildMessagesWithLLMContext` 还会做**历史 KB 结果脱敏**（`redactHistoryKBResults`）：除非 Agent 开启 `RetainRetrievalHistory`，历史轮次中 KB 类工具（`search_knowledge`、`read_document`、`list_documents`、`query_knowledge_graph`、`wiki_search`、`wiki_read_page`，以及历史里可能残留的旧名 `knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc`）的结果一律替换为 `"[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]"`，强制模型对可能已变更的知识库做新鲜检索。
 
 持久化侧，`SanitizeAgentStepsForStorage` 在把 `AgentSteps` 写入 DB / SSE 重放前剥离 LLM-only 大载荷，只留紧凑摘要。
 

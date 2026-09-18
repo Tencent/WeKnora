@@ -13,7 +13,7 @@ import (
 // redundancy of every candidate against every already-selected result on each
 // round, re-tokenizing the selected passages every time. It is kept here purely
 // as the reference oracle for the incremental implementation.
-func (t *KnowledgeSearchTool) applyMMRNaive(
+func (t *SearchKnowledgeTool) applyMMRNaive(
 	ctx context.Context,
 	results []*searchResultWithMeta,
 	k int,
@@ -102,7 +102,7 @@ func mmrTestCorpus(n int) []*searchResultWithMeta {
 func TestApplyMMR_matchesNaiveSelection(t *testing.T) {
 	t.Parallel()
 
-	tool := &KnowledgeSearchTool{}
+	tool := &SearchKnowledgeTool{}
 	ctx := context.Background()
 	results := mmrTestCorpus(40)
 
@@ -136,7 +136,7 @@ func TestApplyMMR_matchesNaiveSelection(t *testing.T) {
 func TestApplyMMR_emptyAndNonPositiveK(t *testing.T) {
 	t.Parallel()
 
-	tool := &KnowledgeSearchTool{}
+	tool := &SearchKnowledgeTool{}
 	ctx := context.Background()
 
 	if got := tool.applyMMR(ctx, mmrTestCorpus(3), 0, 0.7); got != nil {
@@ -148,7 +148,7 @@ func TestApplyMMR_emptyAndNonPositiveK(t *testing.T) {
 }
 
 func BenchmarkApplyMMR(b *testing.B) {
-	tool := &KnowledgeSearchTool{}
+	tool := &SearchKnowledgeTool{}
 	ctx := context.Background()
 	results := mmrTestCorpus(250)
 

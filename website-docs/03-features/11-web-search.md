@@ -70,7 +70,7 @@ CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/router.go`）
 
 ## Agent 搜索与读页
 
-`web_search` 负责发现来源，`web_fetch` 负责读取选中的页面。用户指定网页时可直接读页；用户要求外部或实时信息时可直接搜索。知识库是否需要检索取决于任务相关性与当前可用工具，不再强制先调用 `grep_chunks` 和 `knowledge_search`。
+`web_search` 负责发现来源，`web_fetch` 负责读取选中的页面。用户指定网页时可直接读页；用户要求外部或实时信息时可直接搜索。知识库是否需要检索取决于任务相关性与当前可用工具，不再强制先调用 `search_knowledge`。
 
 ```mermaid
 flowchart TD

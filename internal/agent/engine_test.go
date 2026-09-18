@@ -240,9 +240,9 @@ func TestRunToolCallRejectsUnresolvedHandlesBeforeExecution(t *testing.T) {
 			ID: "call-1",
 			Function: types.FunctionCall{
 				Name:      tool.Name(),
-				Arguments: `{"knowledge_id":"d99"}`,
+				Arguments: `{"id":"d99"}`,
 			},
-			ModelArguments:     `{"knowledge_id":"d99"}`,
+			ModelArguments:     `{"id":"d99"}`,
 			ArgumentResolution: modelcontext.ArgumentResolutionUnresolved,
 			UnresolvedHandles:  []string{"d99"},
 		},
@@ -258,7 +258,7 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 	newEngine := func() (*AgentEngine, *countingTool) {
 		engine := newTestEngine(t, &mockChat{})
 		engine.toolRegistry = agenttools.NewToolRegistry()
-		tool := newCountingTool(agenttools.ToolListKnowledgeChunks)
+		tool := newCountingTool(agenttools.ToolReadDocument)
 		engine.toolRegistry.RegisterTool(tool)
 		return engine, tool
 	}
@@ -268,8 +268,8 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 		context.Background(),
 		types.LLMToolCall{
 			ID:             "call-unknown",
-			Function:       types.FunctionCall{Name: unknownTool.Name(), Arguments: `{"knowledge_id":"d99",}`},
-			ModelArguments: `{"knowledge_id":"d99",}`,
+			Function:       types.FunctionCall{Name: unknownTool.Name(), Arguments: `{"id":"d99",}`},
+			ModelArguments: `{"id":"d99",}`,
 		},
 		0, 0, 1, "session", "message",
 	)
@@ -283,14 +283,14 @@ func TestRunToolCallDecodesHandlesAfterJSONRepair(t *testing.T) {
 		context.Background(),
 		types.LLMToolCall{
 			ID:             "call-known",
-			Function:       types.FunctionCall{Name: knownTool.Name(), Arguments: `{"knowledge_id":"d1",}`},
-			ModelArguments: `{"knowledge_id":"d1",}`,
+			Function:       types.FunctionCall{Name: knownTool.Name(), Arguments: `{"id":"d1",}`},
+			ModelArguments: `{"id":"d1",}`,
 		},
 		0, 0, 1, "session", "message",
 	)
 	require.Equal(t, 1, knownTool.calls)
 	require.True(t, known.Result.Success)
-	require.Equal(t, "doc-real", known.Args["knowledge_id"])
+	require.Equal(t, "doc-real", known.Args["id"])
 }
 
 func (m *mockChat) Chat(_ context.Context, _ []chat.Message, _ *chat.ChatOptions) (*types.ChatResponse, error) {

@@ -33,9 +33,8 @@ func formatGroundingGuidance(names []string) string {
 	}
 	var kbTools []string
 	for _, name := range []string{
-		tools.ToolKnowledgeSearch, tools.ToolGrepChunks, tools.ToolListKnowledgeChunks,
-		tools.ToolGetDocumentInfo, tools.ToolWikiSearch, tools.ToolWikiReadPage,
-		tools.ToolWikiReadSourceDoc, tools.ToolQueryKnowledgeGraph,
+		tools.ToolSearchKnowledge, tools.ToolReadDocument, tools.ToolListDocuments,
+		tools.ToolWikiSearch, tools.ToolWikiReadPage, tools.ToolQueryKnowledgeGraph,
 		tools.ToolDataSchema, tools.ToolDataAnalysis, tools.ToolDatabaseQuery,
 	} {
 		if slices.Contains(names, name) {
