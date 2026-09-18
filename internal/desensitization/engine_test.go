@@ -60,12 +60,12 @@ func TestValidateConfigRejectsCloudParserAndBadRegexp(t *testing.T) {
 
 func TestApplyPresidioMergesAnalyzerHits(t *testing.T) {
 	text := "邮箱 user@example.com"
+	prefix := []rune("邮箱 ")
+	email := []rune("user@example.com")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/analyze", r.URL.Path)
-		start := len("邮箱 ")
-		end := start + len("user@example.com")
 		require.NoError(t, json.NewEncoder(w).Encode([]map[string]any{{
-			"start": start, "end": end, "score": 0.99, "entity_type": "EMAIL_ADDRESS",
+			"start": len(prefix), "end": len(prefix) + len(email), "score": 0.99, "entity_type": "EMAIL_ADDRESS",
 		}}))
 	}))
 	t.Cleanup(srv.Close)
@@ -79,6 +79,40 @@ func TestApplyPresidioMergesAnalyzerHits(t *testing.T) {
 	assert.Contains(t, out, "<邮箱>")
 	assert.NotContains(t, out, "user@example.com")
 	assert.Equal(t, types.DesensitizationEnginePresidio, report["engine"])
+}
+
+func TestApplyPresidioUsesRuneOffsetsWithCJKPrefix(t *testing.T) {
+	text := "中文 +1 212-555-5555"
+	phone := "+1 212-555-5555"
+	runes := []rune(text)
+	start := -1
+	for i := 0; i <= len(runes)-len([]rune(phone)); i++ {
+		if string(runes[i:i+len([]rune(phone))]) == phone {
+			start = i
+			break
+		}
+	}
+	require.GreaterOrEqual(t, start, 0)
+	end := start + len([]rune(phone))
+	require.NotEqual(t, start, len("中文 "), "byte offset must differ from rune offset")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewEncoder(w).Encode([]map[string]any{{
+			"start": start, "end": end, "score": 0.99, "entity_type": "PHONE_NUMBER",
+		}}))
+	}))
+	t.Cleanup(srv.Close)
+
+	out, _, err := Apply(context.Background(), text, types.DesensitizationConfig{
+		Enabled:     true,
+		Engine:      types.DesensitizationEnginePresidio,
+		EntityTypes: []string{types.DesensitizationEntityCNMobile},
+	}, Deps{PresidioAnalyzerURL: srv.URL, HTTPClient: srv.Client()})
+	require.NoError(t, err)
+	assert.Contains(t, out, "中文")
+	assert.Contains(t, out, "<手机号>")
+	assert.NotContains(t, out, "212-555-5555")
+	assert.NotContains(t, out, "+1 212")
 }
 
 func TestApplyPresidioFailsClosedWithoutURL(t *testing.T) {

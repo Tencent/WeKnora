@@ -322,6 +322,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		return
 	}
 
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		logger.Errorf(ctx, "desensitization failed for knowledge title %s: %v", knowledge.ID, maskErr)
+		_ = persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+		return
+	}
+
 	// Get embedding model for vectorization — only needed when vector/keyword indexing is enabled
 	var embeddingModel embedding.Embedder
 	if kb.NeedsEmbeddingModel() {
@@ -583,7 +590,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			// when the chunker populated it during Tier-1 splitting; falls back
 			// to plain Content otherwise. The document title sits outermost;
 			// custom metadata remains document-scoped model context.
-			indexContent := buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent())
+			indexContent := buildKnowledgeIndexContent(indexKB, chunk.EmbeddingContent())
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
 				Content:         indexContent,
 				SourceID:        chunk.ID,
@@ -1038,6 +1045,17 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 	// metadata remains excluded because it contains IDs and pipeline controls.
 	contentWithMetadata := chunkContents
 	if custom := knowledge.CustomMetadataText(); custom != "" {
+		if s.kbService != nil && knowledge.KnowledgeBaseID != "" {
+			kb, kbErr := s.kbService.GetKnowledgeBaseByID(ctx, knowledge.KnowledgeBaseID)
+			if kbErr != nil {
+				return nil, kbErr
+			}
+			masked, maskErr := s.maskParsedMarkdown(ctx, kb, custom)
+			if maskErr != nil {
+				return nil, maskErr
+			}
+			custom = masked
+		}
 		contentWithMetadata = "Document metadata:\n" + custom + "\n\nDocument content:\n" + chunkContents
 	}
 	contentWithMetadata = sampleLongContent(contentWithMetadata, maxInputChars)
@@ -1703,6 +1721,12 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		qErr = err
 		return nil
 	}
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		exitStatus = "desensitization_failed"
+		qErr = maskErr
+		return maskErr
+	}
 	// Short-circuit when the user cancelled parsing or the row is being deleted.
 	if knowledge != nil {
 		switch knowledge.ParseStatus {
@@ -1823,7 +1847,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		generationRevision := chunk.ContentRevision
 		llmCallAttempts++
 		questions, err := s.generateQuestionsWithContext(ctx, chatModel, enrichContent(chunk), prevContent, nextContent,
-			knowledge.Title, questionCount, customInstructions)
+			indexKB.Title, questionCount, customInstructions)
 		if err != nil {
 			llmCallFailed++
 			logger.Warnf(ctx, "Failed to generate questions for chunk %s: %v", chunk.ID, err)
@@ -1877,7 +1901,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 		for _, gq := range generatedQuestions {
 			sourceID := types.GeneratedQuestionSourceID(chunk.ID, gq.ID)
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         buildKnowledgeIndexContent(knowledge, gq.Question),
+				Content:         buildKnowledgeIndexContent(indexKB, gq.Question),
 				SourceID:        sourceID,
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -2042,6 +2066,12 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		qErr = err
 		return nil
 	}
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		exitStatus = "desensitization_failed"
+		qErr = maskErr
+		return maskErr
+	}
 	// Short-circuit when the user cancelled parsing or the row is being
 	// deleted — batched fan-out means we get this check for free on every
 	// batch, so a cancel stops burning LLM quota on the remaining batches.
@@ -2162,7 +2192,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 		generationRevision := chunk.ContentRevision
 		questions, gerr := s.generateQuestionsWithContext(
-			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), knowledge.Title, questionCount,
+			ctx, chatModel, enrich(chunk), prevContentAt(i), nextContentAt(i), indexKB.Title, questionCount,
 			customInstructions)
 		if gerr != nil {
 			llmCallFailed++
@@ -2206,7 +2236,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 		}
 		for _, gq := range generatedQuestions {
 			indexInfoList = append(indexInfoList, &types.IndexInfo{
-				Content:         buildKnowledgeIndexContent(knowledge, gq.Question),
+				Content:         buildKnowledgeIndexContent(indexKB, gq.Question),
 				SourceID:        types.GeneratedQuestionSourceID(chunk.ID, gq.ID),
 				SourceType:      types.ChunkSourceType,
 				ChunkID:         chunk.ID,
@@ -2354,9 +2384,13 @@ func (s *knowledgeService) RegenerateChunkQuestions(
 	if count > 10 {
 		count = 10
 	}
+	indexKB, maskErr := s.indexKnowledge(ctx, kb, knowledge)
+	if maskErr != nil {
+		return nil, maskErr
+	}
 	questions, err := s.generateQuestionsWithContext(
 		ctx, chatModel, chunk.Content, resolveNeighbor(chunk.PreChunkID),
-		resolveNeighbor(chunk.NextChunkID), knowledge.Title, count, config.CustomInstructions,
+		resolveNeighbor(chunk.NextChunkID), indexKB.Title, count, config.CustomInstructions,
 	)
 	if err != nil {
 		return nil, err
@@ -2996,6 +3030,10 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 		knowledge := knowledgeCache[chunk.KnowledgeID]
 		if knowledge == nil {
 			knowledge, err = s.repo.GetKnowledgeByID(ctx, chunk.TenantID, chunk.KnowledgeID)
+			if err != nil {
+				return err
+			}
+			knowledge, err = s.indexKnowledge(ctx, sourceKB, knowledge)
 			if err != nil {
 				return err
 			}

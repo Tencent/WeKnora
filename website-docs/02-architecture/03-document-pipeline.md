@@ -298,7 +298,7 @@ transcriptionResult, err := asrModel.Transcribe(ctx, convertResult.AudioData, kn
 
 ### 分块（Stage: chunking） {#_6-4-分块-stage-chunking}
 
-若知识库开启 `desensitization_config`，Go 侧在分块前对 `MarkdownContent` 调用 `maskParsedMarkdown`（`internal/application/service/knowledge_desensitization.go`）。默认关闭；开启后禁止云解析。失败则该文档解析失败（fail-closed）。对象存储中的原件不改。
+若知识库开启 `desensitization_config`，Go 侧在分块前对 `MarkdownContent` 调用 `maskParsedMarkdown`（`internal/application/service/knowledge_desensitization.go`）。默认关闭；开启后禁止云解析。失败则该文档解析失败（fail-closed）。对象存储中的原件不改。库存标题和自定义元数据保持明文；拼进 Embedding / 摘要 / 问题生成的副本会再走同一套打码。
 
 分块在 **Go 侧**完成（`internal/infrastructure/chunker`，详见《分块机制》一章）：
 
