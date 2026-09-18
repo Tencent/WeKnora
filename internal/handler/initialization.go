@@ -572,7 +572,30 @@ func (h *InitializationHandler) getKnowledgeBaseForInitialization(ctx context.Co
 		logger.Error(ctx, "Knowledge base not found")
 		return nil, errors.NewNotFoundError("知识库不存在")
 	}
+	// Initialization rewrites the models the KB points at, and those rows
+	// belong to the KB's workspace. A shared-KB editor passes the route's
+	// KBAccessWrite guard (which moves execution into that workspace), so
+	// without this check it could repoint the owner's models at its own
+	// endpoint and key.
+	if kb.TenantID != types.CallerFromContext(ctx).TenantID {
+		return nil, errors.NewForbiddenError("只有知识库所属空间可以初始化知识库")
+	}
 	return kb, nil
+}
+
+// canUpdateTenantModels mirrors the PUT /models/:id guard: rewriting a stored
+// model changes every KB and agent that uses it, so initializing a KB must not
+// let a KB creator do what the model settings page reserves for admins.
+func (h *InitializationHandler) canUpdateTenantModels(ctx context.Context) bool {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return scope.FullAccess || scope.HasCapability(types.APIKeyCapabilityManageModels)
+	}
+	if types.CallerFromContext(ctx).Role.HasPermission(types.TenantRoleAdmin) || types.IsSystemAdminFromContext(ctx) {
+		return true
+	}
+	// Same rollout switch as the route guards: role checks only log while
+	// RBAC enforcement is off.
+	return h.config == nil || !h.config.Tenant.IsRBACEnforced()
 }
 
 func (h *InitializationHandler) validateInitializationConfigs(ctx context.Context, req *InitializationRequest) error {
@@ -763,6 +786,9 @@ func (h *InitializationHandler) processInitializationModels(
 		}
 
 		if existingModel != nil {
+			if !h.canUpdateTenantModels(ctx) {
+				return nil, errors.NewForbiddenError("修改已有模型配置需要空间管理员权限")
+			}
 			existingModel.Name = model.Name
 			existingModel.Source = model.Source
 			existingModel.Description = model.Description

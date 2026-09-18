@@ -165,6 +165,11 @@ type AgentConfig struct {
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.
 	SharedAgentReadOnly bool `json:"-"`
+	// WritableKBIDs are the SearchTargets KBs this caller may modify (its own
+	// workspace's, or shared to it as editor+). Search targets only need read
+	// access, so tools that write (wiki pages and issues) are limited to this
+	// set; empty means read-only. Runtime only, derived per turn.
+	WritableKBIDs []string `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 

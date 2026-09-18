@@ -182,6 +182,8 @@ curl $BASE/api/v1/initialization/config/kb-1 -H "Authorization: Bearer $TOKEN"
 
 用途：初始化 KB 的模型与解析配置（首次配置向导）。权限：KB 创建者 OR Admin+，KB write。
 
+只有 KB 所属空间可以调用；通过组织分享获得编辑权限的空间会被拒绝（403）。KB 已绑定模型时，该接口会原地更新这些模型的配置，这一步需要与 `PUT /models/:id` 相同的权限（Admin+，或拥有 `manage_models` 能力的 API key），否则 403。
+
 主要字段（`InitializationRequest`）：
 
 | 字段 | 类型 | 必填 | 说明 |

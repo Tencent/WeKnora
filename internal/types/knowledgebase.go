@@ -815,14 +815,25 @@ func (kb *KnowledgeBase) Capabilities() KBCapabilities {
 
 // MarshalJSON augments the default JSON encoding of KnowledgeBase with a computed
 // `capabilities` field so clients (agent editor) can filter KBs by feature.
-// It preserves all existing fields verbatim.
+//
+// The legacy inline credentials (storage_config secret_id / secret_key and
+// vlm_config api_key) are withheld. Their DB columns are written by
+// StorageConfig.Value / VLMConfig.Value, so persistence is unaffected, while
+// every JSON rendering of a KB is an API or tool response — including the
+// lists shown to org-share receivers, who must never see the owner's keys.
+// Clients only need these fields' presence, which /initialization/config
+// reports separately.
 func (kb *KnowledgeBase) MarshalJSON() ([]byte, error) {
 	type alias KnowledgeBase
+	redacted := *kb
+	redacted.StorageConfig.SecretID = ""
+	redacted.StorageConfig.SecretKey = ""
+	redacted.VLMConfig.APIKey = ""
 	aux := struct {
 		*alias
 		Capabilities KBCapabilities `json:"capabilities"`
 	}{
-		alias:        (*alias)(kb),
+		alias:        (*alias)(&redacted),
 		Capabilities: kb.Capabilities(),
 	}
 	return json.Marshal(aux)

@@ -20,7 +20,11 @@ var (
 	ErrAgentNotFoundForShare   = errors.New("agent not found")
 	ErrNotAgentOwner           = errors.New("only agent owner can share")
 	ErrOrgRoleCannotShareAgent = errors.New("only editors and admins can share agents to this organization")
-	ErrAgentNotConfigured      = errors.New(
+	// ErrBuiltinAgentNotShareable is returned for built-in agents: every
+	// workspace has its own copy under the same ID, so a shared built-in would
+	// be indistinguishable from the receiver's own agent.
+	ErrBuiltinAgentNotShareable = errors.New("built-in agents cannot be shared")
+	ErrAgentNotConfigured       = errors.New(
 		"agent is not fully configured (missing required chat model, or rerank model when the search_knowledge " +
 			"tool is enabled)",
 	)
@@ -57,6 +61,14 @@ func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 		}
 	}
 	return false
+}
+
+// isBuiltinAgent guards sharing. Shares of built-in agents created before
+// ErrBuiltinAgentNotShareable are hidden from receivers and never resolved,
+// since the ID collides with the receiver's own built-in agent; the source
+// tenant still lists its row so it can remove it.
+func isBuiltinAgent(agent *types.CustomAgent) bool {
+	return agent != nil && (agent.IsBuiltin || types.IsBuiltinAgentID(agent.ID))
 }
 
 // agentShareService implements AgentShareService.
@@ -161,6 +173,9 @@ func (s *agentShareService) ShareAgent(ctx context.Context, agentID string, orgI
 	if agent.TenantID != tenantID {
 		return nil, ErrNotAgentOwner
 	}
+	if isBuiltinAgent(agent) {
+		return nil, ErrBuiltinAgentNotShareable
+	}
 
 	if agent.Config.ModelID == "" {
 		return nil, ErrAgentNotConfigured
@@ -223,9 +238,8 @@ func (s *agentShareService) ShareAgent(ctx context.Context, agentID string, orgI
 	return share, nil
 }
 
-// RemoveShare removes an agent share.
-// Same authz envelope as KB-share remove (see kbshare.callerCanManageShare):
-// original sharer, OR source-tenant Admin+, OR target-org admin.
+// RemoveShare removes an agent share. Same authorization as KB shares; see
+// canManageShare.
 func (s *agentShareService) RemoveShare(ctx context.Context, shareID string, userID string, tenantID uint64) error {
 	share, err := s.shareRepo.GetByID(ctx, shareID)
 	if err != nil {
@@ -234,21 +248,14 @@ func (s *agentShareService) RemoveShare(ctx context.Context, shareID string, use
 		}
 		return err
 	}
-	// (1) Original sharer.
-	if share.SharedByUserID == userID {
-		return s.shareRepo.Delete(ctx, shareID)
+	record := shareRecord{
+		sharedByUserID: share.SharedByUserID, sourceTenantID: share.SourceTenantID,
+		orgID: share.OrganizationID, permission: share.Permission,
 	}
-	// (2) Source-tenant Admin+ — Plan 3 ownership is tenant-level.
-	if tenantID != 0 && tenantID == share.SourceTenantID {
-		if types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
-			return s.shareRepo.Delete(ctx, shareID)
-		}
+	if !canManageShare(ctx, s.orgRepo, record, "", userID, tenantID) {
+		return ErrAgentSharePermission
 	}
-	// (3) Org admin in the target org (governance / sharer-left repair).
-	if tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID); err == nil && tm.Role == types.OrgRoleAdmin {
-		return s.shareRepo.Delete(ctx, shareID)
-	}
-	return ErrAgentSharePermission
+	return s.shareRepo.Delete(ctx, shareID)
 }
 
 // ListSharesByAgent lists all shares for an agent owned by tenantID.
@@ -289,7 +296,7 @@ func (s *agentShareService) ListSharedAgents(ctx context.Context, tenantID uint6
 		if share.SourceTenantID == tenantID {
 			continue
 		}
-		if share.Agent == nil {
+		if share.Agent == nil || isBuiltinAgent(share.Agent) {
 			continue
 		}
 		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
@@ -351,7 +358,7 @@ func (s *agentShareService) ListSharedAgentsInOrganization(ctx context.Context, 
 	result := make([]*types.OrganizationSharedAgentItem, 0, len(shares))
 	webSearchReadyCache := make(map[string]bool)
 	for _, share := range shares {
-		if share.Agent == nil {
+		if share.Agent == nil || (share.SourceTenantID != tenantID && isBuiltinAgent(share.Agent)) {
 			continue
 		}
 
@@ -415,7 +422,7 @@ func (s *agentShareService) ListSharedAgentsInOrganizations(ctx context.Context,
 		tm := members[orgID]
 		result := make([]*types.OrganizationSharedAgentItem, 0, len(list))
 		for _, share := range list {
-			if share.Agent == nil {
+			if share.Agent == nil || (share.SourceTenantID != tenantID && isBuiltinAgent(share.Agent)) {
 				continue
 			}
 			effective := types.MinOrgRole(share.Permission, tm.Role)
@@ -462,7 +469,7 @@ func (s *agentShareService) GetSharedAgentForTenant(
 	agentID string,
 	sourceTenantID ...uint64,
 ) (*types.CustomAgent, error) {
-	if agentID == "" {
+	if agentID == "" || types.IsBuiltinAgentID(agentID) {
 		return nil, ErrAgentShareNotFound
 	}
 	if len(sourceTenantID) > 0 && sourceTenantID[0] != 0 {
@@ -477,7 +484,7 @@ func (s *agentShareService) GetSharedAgentForTenant(
 			return nil, err
 		}
 		agent, err := s.agentRepo.GetAgentByID(ctx, agentID, share.SourceTenantID)
-		if err != nil || agent == nil {
+		if err != nil || agent == nil || isBuiltinAgent(agent) {
 			return nil, ErrAgentNotFoundForShare
 		}
 		types.ApplyBuiltinAgentLocalization(ctx, agent)
@@ -497,6 +504,9 @@ func (s *agentShareService) GetSharedAgentForTenant(
 			return nil, ErrAgentNotFoundForShare
 		}
 		return nil, err
+	}
+	if isBuiltinAgent(agent) {
+		return nil, ErrAgentNotFoundForShare
 	}
 	types.ApplyBuiltinAgentLocalization(ctx, agent)
 	_ = callerTenantRole

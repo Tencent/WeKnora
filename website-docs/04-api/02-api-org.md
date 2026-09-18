@@ -347,6 +347,14 @@ curl $BASE/api/v1/knowledge-bases/kb-1/shares -H "Authorization: Bearer $TOKEN"
 
 用途：修改分享权限。权限：KB 创建者 OR Admin+。请求体：`{"permission":"editor"}`（必填）。
 
+服务层规则（与取消分享共用）：
+
+- 原分享人需在 KB 所属空间内操作，且空间角色为 Contributor+；
+- KB 所属空间的 Admin+ 可以管理本空间的全部分享；
+- 目标组织中角色为 admin 的空间，其 Admin+ 用户只能**降低**权限或取消分享，不能把权限提升到超过当前值。
+
+`share_id` 必须属于路径中的 KB，否则 404。
+
 响应：200 `{"success":true,"message":"Share permission updated successfully"}`
 
 ```bash
@@ -356,7 +364,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/shares/s-1 -H "Authorization: Bear
 
 ### DELETE /api/v1/knowledge-bases/:id/shares/:share_id
 
-用途：取消分享。权限：KB 创建者 OR Admin+。
+用途：取消分享。权限：KB 创建者 OR Admin+，服务层规则同上。`share_id` 必须属于路径中的 KB，否则 404。
 
 响应：200 `{"success":true,"message":"Share removed successfully"}`
 
@@ -370,7 +378,7 @@ API key：仅 full-access。Handler: `internal/handler/organization.go`
 
 ### POST /api/v1/agents/:id/shares
 
-用途：把 Agent 分享到组织。权限：Agent 创建者 OR Admin+。请求体同 KB 分享（`organization_id` + `permission`，必填）。
+用途：把 Agent 分享到组织。权限：Agent 创建者 OR Admin+。请求体同 KB 分享（`organization_id` + `permission`，必填）。内置智能体不能分享（400）：每个空间都有同 ID 的内置智能体，分享后接收方无法区分。
 
 响应：201 `{"success":true,"data":{AgentShare}}`
 
@@ -391,7 +399,7 @@ curl $BASE/api/v1/agents/agent-1/shares -H "Authorization: Bearer $TOKEN"
 
 ### DELETE /api/v1/agents/:id/shares/:share_id
 
-用途：取消 Agent 分享。权限：Agent 创建者 OR Admin+。
+用途：取消 Agent 分享。权限：Agent 创建者 OR Admin+，服务层规则同 KB 取消分享。`share_id` 必须属于路径中的 Agent，否则 404。
 
 响应：200 `{"success":true,"message":"Share removed successfully"}`
 

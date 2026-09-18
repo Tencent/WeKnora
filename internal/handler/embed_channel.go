@@ -697,6 +697,9 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 		payload = make(map[string]any)
 	}
 	payload["agent_id"] = ch.AgentID
+	// The channel's agent belongs to the channel's workspace; a visitor-supplied
+	// source workspace would switch it to another workspace's share of that ID.
+	delete(payload, types.AgentSourceTenantIDParam)
 	payload["knowledge_base_ids"] = []string{}
 	clientWebSearch := false
 	if v, ok := payload["web_search_enabled"].(bool); ok {

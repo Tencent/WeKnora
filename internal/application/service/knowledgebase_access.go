@@ -18,6 +18,34 @@ func kbReadPermissions(ctx context.Context, shares access.KBShareLookup) *access
 	return access.NewKBPermissions(ctx, shares)
 }
 
+// kbWritableIDs returns the target KBs the caller may modify: those of its own
+// workspace, and those shared to it with at least editor permission (capped by
+// the caller's tenant role). A read grant — a viewer share or a shared agent's
+// scope — never makes a KB writable.
+func kbWritableIDs(ctx context.Context, shares access.KBShareLookup, targets types.SearchTargets) []string {
+	caller := types.CallerFromContext(ctx)
+	if caller.UserID == "" {
+		shares = nil
+	}
+	permissions := access.NewKBSharePermissions(ctx, shares, caller.TenantID, caller.Role)
+	seen := make(map[string]bool, len(targets))
+	var ids []string
+	for _, target := range targets {
+		if target == nil || target.KnowledgeBaseID == "" || seen[target.KnowledgeBaseID] {
+			continue
+		}
+		seen[target.KnowledgeBaseID] = true
+		writable := caller.TenantID != 0 && target.TenantID == caller.TenantID
+		if !writable {
+			writable, _ = permissions.Check(target.KnowledgeBaseID, types.OrgRoleEditor)
+		}
+		if writable {
+			ids = append(ids, target.KnowledgeBaseID)
+		}
+	}
+	return ids
+}
+
 func resolveKBReadTenant(ctx context.Context, kb *types.KnowledgeBase, shares access.KBShareLookup) (uint64, error) {
 	if kb != nil {
 		allowed, err := kbReadPermissions(ctx, shares).Check(kb.ID, kb.TenantID, types.OrgRoleViewer)

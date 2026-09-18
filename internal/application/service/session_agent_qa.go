@@ -412,6 +412,9 @@ func (s *sessionService) buildAgentConfig(
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
+	if !req.SharedAgentReadOnly {
+		agentConfig.WritableKBIDs = kbWritableIDs(ctx, s.kbShareService, searchTargets)
+	}
 	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve

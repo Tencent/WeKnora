@@ -184,7 +184,7 @@ func TestEmbedExchangeFlowIntegration(t *testing.T) {
 
 func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	ch := &types.EmbedChannel{AgentID: "agent-embed-42"}
-	body := `{"query":"hello","agent_id":"client-override","web_search_enabled":true}`
+	body := `{"query":"hello","agent_id":"client-override","agent_source_tenant_id":84,"web_search_enabled":true}`
 
 	patched, err := patchEmbedChatPayload(strings.NewReader(body), ch, false)
 	if err != nil {
@@ -199,6 +199,10 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	}
 	if payload["query"] != "hello" {
 		t.Fatalf("query = %v, want preserved client field", payload["query"])
+	}
+	if _, ok := payload[types.AgentSourceTenantIDParam]; ok {
+		t.Fatalf("agent_source_tenant_id = %v, want dropped so the channel agent stays local",
+			payload[types.AgentSourceTenantIDParam])
 	}
 	if payload["web_search_enabled"] != false {
 		t.Fatalf("web_search_enabled = %v, want false", payload["web_search_enabled"])

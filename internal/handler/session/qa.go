@@ -548,7 +548,8 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 	return cloned
 }
 
-// resolveAgent resolves the custom agent by ID, trying shared agent first, then own agent.
+// resolveAgent resolves the custom agent by ID: the caller's own agent unless a
+// source workspace is given, otherwise (or when no own agent matches) a share.
 // Returns (nil, 0) if agentID is empty or not found.
 func (h *Handler) resolveAgent(
 	ctx context.Context,
@@ -562,44 +563,39 @@ func (h *Handler) resolveAgent(
 
 	logger.Infof(ctx, "Resolving agent, agent ID: %s", secutils.SanitizeForLog(agentID))
 
-	// Try shared agent first
-	var customAgent *types.CustomAgent
-	var effectiveTenantID uint64
-	var sharedAgentReadOnly bool
+	// Without a source workspace the ID names the caller's own agent first.
+	// Built-in IDs exist in every workspace, so trying shares first would let
+	// any org member that shares an agent under such an ID take over the
+	// caller's default agent (and run the caller's chats in its workspace).
+	// A rejected shared selector (sourceTenantID != 0) must likewise never
+	// fall back to a same-ID local agent.
+	var ownErr error
+	if sourceTenantID == 0 {
+		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
+		if err == nil && agent != nil {
+			logger.Infof(ctx, "Using own agent: ID=%s, Name=%s, AgentMode=%s",
+				agent.ID, agent.Name, agent.Config.AgentMode)
+			return agent, 0, false
+		}
+		ownErr = err
+	}
+
 	userIDVal, _ := c.Get(types.UserIDContextKey.String())
 	currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		var agent *types.CustomAgent
-		var err error
-		agent, err = h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
+		agent, err := h.agentShareService.GetSharedAgentForTenant(
+			ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
 		if err == nil && agent != nil {
-			effectiveTenantID = agent.TenantID
-			customAgent = agent
-			sharedAgentReadOnly = true
-			logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, effectiveTenantID=%d (retrieval scope)",
-				customAgent.ID, customAgent.Name, effectiveTenantID)
+			logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
+				agent.ID, agent.Name, agent.IsBuiltin, agent.Config.AgentMode, agent.TenantID)
+			return agent, agent.TenantID, true
 		}
 	}
 
-	// Fall back to an own agent only when no source workspace was requested.
-	// A rejected shared selector must not silently run a same-ID local builtin.
-	if customAgent == nil && sourceTenantID == 0 {
-		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
-		if err == nil {
-			customAgent = agent
-			logger.Infof(ctx, "Using own agent: ID=%s, Name=%s, AgentMode=%s",
-				customAgent.ID, customAgent.Name, customAgent.Config.AgentMode)
-		} else {
-			logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
-				secutils.SanitizeForLog(agentID), err)
-		}
-	} else if customAgent != nil {
-		logger.Infof(ctx, "Using custom agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
-			customAgent.ID, customAgent.Name, customAgent.IsBuiltin, customAgent.Config.AgentMode, effectiveTenantID)
-	}
-
-	return customAgent, effectiveTenantID, sharedAgentReadOnly
+	logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
+		secutils.SanitizeForLog(agentID), ownErr)
+	return nil, 0, false
 }
 
 // mergeKnowledgeTargets merges request KB/knowledge IDs with @mentioned items into deduplicated slices.

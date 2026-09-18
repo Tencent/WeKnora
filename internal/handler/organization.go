@@ -1171,6 +1171,9 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if !h.kbShareOnPath(c, shareID) {
+		return
+	}
 
 	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to update share permission: %v", err)
@@ -1182,6 +1185,38 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 		"success": true,
 		"message": "Share permission updated successfully",
 	})
+}
+
+// kbShareOnPath binds share_id to the route's :id. The route's ownership guard
+// is evaluated against :id, so a share of another KB must not be reachable
+// through an unrelated (or nonexistent) KB path.
+func (h *OrganizationHandler) kbShareOnPath(c *gin.Context, shareID string) bool {
+	share, err := h.shareService.GetShare(c.Request.Context(), shareID)
+	if err != nil && !errors.Is(err, service.ErrShareNotFound) {
+		logger.Errorf(c.Request.Context(), "Failed to load share: %v", err)
+		_ = c.Error(apperrors.NewInternalServerError("Failed to load share"))
+		return false
+	}
+	if share == nil || share.KnowledgeBaseID != c.Param("id") {
+		_ = c.Error(apperrors.NewNotFoundError("Share not found"))
+		return false
+	}
+	return true
+}
+
+// agentShareOnPath is kbShareOnPath for /agents/:id/shares/:share_id.
+func (h *OrganizationHandler) agentShareOnPath(c *gin.Context, shareID string) bool {
+	share, err := h.agentShareService.GetShare(c.Request.Context(), shareID)
+	if err != nil && !errors.Is(err, service.ErrAgentShareNotFound) {
+		logger.Errorf(c.Request.Context(), "Failed to load agent share: %v", err)
+		_ = c.Error(apperrors.NewInternalServerError("Failed to load share"))
+		return false
+	}
+	if share == nil || share.AgentID != c.Param("id") {
+		_ = c.Error(apperrors.NewNotFoundError("Share not found"))
+		return false
+	}
+	return true
 }
 
 // RemoveShare removes a share
@@ -1200,6 +1235,9 @@ func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
 	shareID := c.Param("share_id")
 	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if !h.kbShareOnPath(c, shareID) {
+		return
+	}
 
 	if err := h.shareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove share: %v", err)
@@ -1352,6 +1390,10 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model, and set the rerank model if the knowledge_search tool is enabled in agent settings."))
 			return
 		}
+		if errors.Is(err, service.ErrBuiltinAgentNotShareable) {
+			_ = c.Error(apperrors.NewValidationError("Built-in agents cannot be shared"))
+			return
+		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}
@@ -1415,6 +1457,9 @@ func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 	shareID := c.Param("share_id")
 	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if !h.agentShareOnPath(c, shareID) {
+		return
+	}
 	if err := h.agentShareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove agent share: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
