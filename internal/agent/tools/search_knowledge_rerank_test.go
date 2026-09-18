@@ -2,7 +2,9 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/config"
@@ -217,6 +219,67 @@ func TestRerankScores_prefixDocumentTitle(t *testing.T) {
 		if model.documents[i] != w {
 			t.Fatalf("passage %d = %q, want %q", i, model.documents[i], w)
 		}
+	}
+}
+
+// Title is shared by every chunk of a document, so a passage whose body never
+// names the query subject still goes to the reranker as title + chunk.
+func TestRerankPassage_prefixesTitleWhenChunkOmitsSubject(t *testing.T) {
+	t.Parallel()
+	got := (&SearchKnowledgeTool{}).rerankPassage(context.Background(), &types.SearchResult{
+		Content:        "installation prerequisites and docker compose flags",
+		KnowledgeTitle: "Show HN: Echo – Fable-level results at 1/3 the cost using open-weight models",
+		ChunkType:      string(types.ChunkTypeText),
+	})
+	if !strings.HasPrefix(got, "Show HN: Echo") {
+		t.Fatalf("expected document title prefix, got %q", got)
+	}
+	if !strings.Contains(got, "installation prerequisites") {
+		t.Fatalf("chunk body must still be present: %q", got)
+	}
+}
+
+// Execute must surface rerank_rejected through Data and the empty statement
+// when the model scores every retrieved candidate below the fallback floor.
+func TestExecuteReportsRerankRejection(t *testing.T) {
+	t.Parallel()
+	model := &stubReranker{scores: []float64{0.10, 0.04}}
+	svc := &stubKnowledgeBaseService{
+		results: []*types.SearchResult{
+			{
+				ID: "c1", Content: "comments section", KnowledgeID: "d1", KnowledgeBaseID: "kb-1",
+				KnowledgeTitle: "Show HN: Echo", Score: 0.8,
+			},
+			{
+				ID: "c2", Content: "unrelated notes", KnowledgeID: "d2", KnowledgeBaseID: "kb-1",
+				KnowledgeTitle: "Other", Score: 0.7,
+			},
+		},
+	}
+	tool := NewSearchKnowledgeTool(
+		svc, nil, nil,
+		types.SearchTargets{{
+			Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1,
+		}},
+		model,
+		&config.Config{Conversation: &config.ConversationConfig{RerankThreshold: 0.3}},
+	)
+	res, err := tool.Execute(context.Background(), json.RawMessage(
+		`{"query":"Why does Echo use open-weight models to cut cost?"}`,
+	))
+	if err != nil || res == nil || !res.Success {
+		t.Fatalf("Execute: res=%+v err=%v", res, err)
+	}
+	if got, _ := res.Data["rerank_rejected"].(int); got != 2 {
+		t.Fatalf("rerank_rejected = %v, want 2; data=%+v", res.Data["rerank_rejected"], res.Data)
+	}
+	if !strings.Contains(res.Output, "found 2 candidate chunks") ||
+		!strings.Contains(res.Output, "Repeating the same query") ||
+		!strings.Contains(res.Output, "mode=keyword") {
+		t.Fatalf("empty statement = %q", res.Output)
+	}
+	if strings.Contains(res.Output, "switching mode will not help") {
+		t.Fatalf("statement must not forbid a keyword retry: %q", res.Output)
 	}
 }
 

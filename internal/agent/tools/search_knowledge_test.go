@@ -89,14 +89,18 @@ func TestResolveKBSearchModesFallsBackPerKnowledgeBase(t *testing.T) {
 }
 
 // When the rerank model rejected every candidate, the statement must not
-// read as "nothing was found": switching mode cannot get past that check.
+// read as "nothing was found": repeating the same query in another mode is
+// usually wasted, but keyword mode remains the retry for exact terms.
 func TestEmptySearchStatementReportsRerankRejection(t *testing.T) {
 	data := map[string]interface{}{"mode": SearchModeHybrid, "rerank_rejected": 18}
 	msg := emptySearchStatement("Echo open-weight cost", data, 20)
-	for _, want := range []string{"found 18 candidate chunks", "switching mode will not help", "complete question"} {
+	for _, want := range []string{"found 18 candidate chunks", "Repeating the same query", "mode=keyword"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("statement missing %q: %q", want, msg)
 		}
+	}
+	if strings.Contains(msg, "switching mode will not help") {
+		t.Fatalf("statement must not forbid switching to keyword: %q", msg)
 	}
 	if plain := emptySearchStatement("x", map[string]interface{}{"mode": SearchModeHybrid}, 1); !strings.HasPrefix(
 		plain, "No matching chunks") {

@@ -41,11 +41,12 @@ var searchKnowledgeTool = BaseTool{
 		"names the subject and what you want to know (\"Why does Echo use open-weight models to cut cost?\"), " +
 		"not a keyword list (\"Echo open-weight cost\"): results are ranked by a relevance model that scores " +
 		"meaning. In keyword mode write the exact terms. Pass knowledge_base_ids to focus on the bases whose " +
-		"profile fits the question. When nothing passes the relevance check, rephrase the question; switching " +
-		"mode alone does not help.\n" +
+		"profile fits the question. When nothing passes the relevance check, rephrase with terms the documents " +
+		"would use; repeating the same query in another mode usually does not help. For identifiers, error " +
+		"codes or exact names retry with mode=keyword.\n" +
 		"Every chunk carries a cN handle and belongs to a dN document. Use read_document(id=dN) to read the " +
-		"surrounding context or the whole document. Searches match chunk text only; to find a document by its " +
-		"title or file name use list_documents(keyword=...).",
+		"surrounding context or the whole document. Retrieval matches chunk text; the relevance model also " +
+		"sees the document title. To find a document by its title or file name use list_documents(keyword=...).",
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -305,16 +306,17 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 // emptySearchStatement describes an empty result, including any mode
 // fallback, so the model does not read "no semantic neighbours" as "the
 // exact term does not occur". When retrieval found candidates and the rerank
-// model rejected all of them, it says so: every mode shares that relevance
-// check, so the model should rephrase instead of cycling through modes.
+// model rejected all of them, it says so: repeating the same query in
+// another mode is usually wasted, but keyword mode can still surface a
+// different candidate set for identifiers and exact terms.
 func emptySearchStatement(query string, data map[string]interface{}, kbCount int) string {
 	mode, _ := data["mode"].(string)
 	msg := fmt.Sprintf("No matching chunks for %q (mode=%s) in %d knowledge base(s).", query, mode, kbCount)
 	if rejected, _ := data["rerank_rejected"].(int); rejected > 0 {
 		msg = fmt.Sprintf("No chunk passed the relevance check for %q (mode=%s) in %d knowledge base(s): "+
 			"retrieval found %d candidate chunks but the relevance model scored none of them as answering the "+
-			"query. Every mode applies the same check, so switching mode will not help; rephrase as a complete "+
-			"question that names the subject, or use terms the documents themselves would use.",
+			"query. Repeating the same query in another mode usually will not help; rephrase with terms the "+
+			"documents would use. For identifiers, error codes or exact names retry with mode=keyword.",
 			query, mode, kbCount, rejected)
 	}
 	fallbacks, _ := data["mode_fallbacks"].([]map[string]interface{})
