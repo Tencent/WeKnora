@@ -139,19 +139,19 @@ func (r *messageRepository) GetSessionArtifacts(
 	return result, nil
 }
 
-// RecordRestoredArtifactMtime updates ModTime (and ContentHash) on artifacts
-// in this session whose source path matches a same-content sandbox restore.
-// Only rows whose mtime actually differs are touched, mirroring
-// MessageArtifacts.WithRestoredMtime.
+// RecordRestoredArtifactMtime stamps a same-content sandbox restore's mtime
+// onto this session's artifacts at sourcePath whose content already hashed to
+// hash, mirroring MessageArtifacts.WithRestoredMtime: other versions at the
+// path and empty-hash legacy rows are left alone.
 func (r *messageRepository) RecordRestoredArtifactMtime(
 	ctx context.Context, sessionID, sourcePath string, mod time.Time, hash string,
 ) error {
-	if sessionID == "" || sourcePath == "" {
+	if sessionID == "" || sourcePath == "" || hash == "" {
 		return nil
 	}
 	var rows []types.MessageArtifactRecord
 	if err := r.db.WithContext(ctx).
-		Where("session_id = ? AND source_path = ?", sessionID, sourcePath).
+		Where("session_id = ? AND source_path = ? AND content_hash = ?", sessionID, sourcePath, hash).
 		Find(&rows).Error; err != nil {
 		return err
 	}
@@ -159,14 +159,10 @@ func (r *messageRepository) RecordRestoredArtifactMtime(
 		if types.ParseArtifactModTime(row.ModTime).Equal(mod) {
 			continue
 		}
-		updates := map[string]any{"mod_time": types.FormatArtifactModTime(mod)}
-		if hash != "" {
-			updates["content_hash"] = hash
-		}
 		if err := r.db.WithContext(ctx).
 			Model(&types.MessageArtifactRecord{}).
 			Where("id = ?", row.ID).
-			Updates(updates).Error; err != nil {
+			Update("mod_time", types.FormatArtifactModTime(mod)).Error; err != nil {
 			return err
 		}
 	}
@@ -180,7 +176,9 @@ func (r *messageRepository) RecordRestoredArtifactMtime(
 // same tenant, not deleted, owned by the user or a legacy tenant-level row, and
 // not a skill-maintenance session. Artifacts of soft-deleted messages are
 // hidden. Versions are grouped by (session, source path); artifacts without a
-// source path stand alone.
+// source path stand alone. A later answer that references an earlier file
+// stores another row with the same URL, so versions are counted as distinct
+// URLs (the max DENSE_RANK over url, since window functions reject DISTINCT).
 func (r *messageRepository) ListArtifactLibrary(
 	ctx context.Context, q *types.ArtifactLibraryQuery,
 ) ([]*types.ArtifactLibraryItem, int64, error) {
@@ -205,20 +203,24 @@ func (r *messageRepository) ListArtifactLibrary(
 		args = append(args, q.FileTypes)
 	}
 
-	ranked := `SELECT ma.session_id, ma.message_id, ma.position, ma.url, ma.file_name,
+	grouped := `SELECT ma.session_id, ma.message_id, ma.position, ma.url, ma.file_name,
 			ma.file_type, ma.file_size, ma.source_path, ma.created_at, ma.id,
 			s.title AS session_title,
+			CASE WHEN ma.source_path = '' THEN ma.id ELSE ma.source_path END AS version_key,
 			ROW_NUMBER() OVER (
 				PARTITION BY ma.session_id, CASE WHEN ma.source_path = '' THEN ma.id ELSE ma.source_path END
 				ORDER BY ma.created_at DESC, m.created_at DESC, ma.position DESC
 			) AS version_rank,
-			COUNT(*) OVER (
+			DENSE_RANK() OVER (
 				PARTITION BY ma.session_id, CASE WHEN ma.source_path = '' THEN ma.id ELSE ma.source_path END
-			) AS version_count
+				ORDER BY ma.url
+			) AS url_rank
 		FROM message_artifacts ma
 		JOIN messages m ON m.id = ma.message_id AND m.deleted_at IS NULL
 		JOIN sessions s ON s.id = ma.session_id
 		WHERE ` + strings.Join(where, " AND ")
+	ranked := `SELECT g.*, MAX(g.url_rank) OVER (PARTITION BY g.session_id, g.version_key) AS version_count
+		FROM (` + grouped + `) g`
 
 	var total int64
 	if err := r.db.WithContext(ctx).

@@ -112,23 +112,32 @@ func TestRecordRestoredArtifactMtimeUpdatesMatchingRows(t *testing.T) {
 	ctx := context.Background()
 	created := time.Date(2026, 9, 1, 2, 0, 0, 0, time.UTC)
 
+	withHash := func(a types.MessageArtifact, hash string) types.MessageArtifact {
+		a.ContentHash = hash
+		return a
+	}
+	v1 := withHash(testArtifact("a.pptx", "/w/a.pptx", created), "hash-a")
+	v2 := withHash(testArtifact("a.pptx", "/w/a.pptx", created.Add(time.Hour)), "hash-b")
+	v2.URL = "local://blobs/a-v2.pptx"
 	msg, err := repo.CreateMessage(ctx, &types.Message{
 		SessionID: "s1", RequestID: "r1", Role: "assistant",
-		Artifacts: types.MessageArtifacts{
-			testArtifact("a.pptx", "/w/a.pptx", created),
-			testArtifact("b.pptx", "/w/b.pptx", created),
-		},
+		Artifacts: types.MessageArtifacts{v1, v2, testArtifact("b.pptx", "/w/b.pptx", created)},
 	})
 	require.NoError(t, err)
+	originalMod := testArtifact("", "", created).ModTime
 
 	restored := time.Date(2026, 9, 2, 8, 30, 0, 987654321, time.UTC)
-	require.NoError(t, repo.RecordRestoredArtifactMtime(ctx, "s1", "/w/a.pptx", restored, "newhash"))
+	require.NoError(t, repo.RecordRestoredArtifactMtime(ctx, "s1", "/w/a.pptx", restored, "hash-a"))
+	// An empty hash never matches, so it must change nothing.
+	require.NoError(t, repo.RecordRestoredArtifactMtime(ctx, "s1", "/w/b.pptx", restored, ""))
 
 	got, err := repo.GetMessage(ctx, "s1", msg.ID)
 	require.NoError(t, err)
-	require.True(t, got.Artifacts[0].ModTime.Equal(restored))
-	require.Equal(t, "newhash", got.Artifacts[0].ContentHash)
-	require.True(t, got.Artifacts[1].ModTime.Equal(testArtifact("", "", created).ModTime), "other paths untouched")
+	require.True(t, got.Artifacts[0].ModTime.Equal(restored), "the version whose content matches gets the mtime")
+	require.Equal(t, "hash-a", got.Artifacts[0].ContentHash)
+	require.True(t, got.Artifacts[1].ModTime.Equal(originalMod), "other versions at the path stay put")
+	require.Equal(t, "hash-b", got.Artifacts[1].ContentHash, "hashes are never rewritten")
+	require.True(t, got.Artifacts[2].ModTime.Equal(originalMod), "empty-hash restores are ignored")
 }
 
 func TestCreateForkedCopiesArtifactRows(t *testing.T) {
@@ -174,14 +183,21 @@ func TestListArtifactLibraryScopesAndGroupsVersions(t *testing.T) {
 	}
 	// report.pptx regenerated twice in the same session: one item, 2 versions.
 	add(mine, base, testArtifact("report.pptx", "/w/report.pptx", base))
+	// Each regeneration is persisted as a new blob.
+	regenerated := testArtifact("report.pptx", "/w/report.pptx", base.Add(time.Hour))
+	regenerated.URL = "local://blobs/report-v2.pptx"
 	latest := add(mine, base.Add(time.Hour),
-		testArtifact("report.pptx", "/w/report.pptx", base.Add(time.Hour)),
+		regenerated,
 		types.MessageArtifact{
 			URL: "local://blobs/data.csv", FileName: "data.csv", FileType: ".csv",
 			SourcePath: "/w/data.csv", CreatedAt: base.Add(2 * time.Hour),
 		},
 	)
-	add(legacy, base.Add(3*time.Hour), testArtifact("old.pptx", "/w/old.pptx", base.Add(3*time.Hour)))
+	// A later answer that references old.pptx again stores a second row with
+	// the same URL; that is not a new version.
+	oldDeck := testArtifact("old.pptx", "/w/old.pptx", base.Add(3*time.Hour))
+	add(legacy, base.Add(3*time.Hour), oldDeck)
+	add(legacy, base.Add(3*time.Hour+time.Minute), oldDeck)
 	add(bobs, base, testArtifact("bob.pptx", "/w/bob.pptx", base))
 	add(otherTenant, base, testArtifact("elsewhere.pptx", "/w/e.pptx", base))
 	add(maintenance, base, testArtifact("maint.pptx", "/w/m.pptx", base))
@@ -197,6 +213,7 @@ func TestListArtifactLibraryScopesAndGroupsVersions(t *testing.T) {
 	require.Equal(t, []string{"old.pptx", "data.csv", "report.pptx"},
 		[]string{items[0].FileName, items[1].FileName, items[2].FileName}, "newest first")
 	require.Equal(t, "旧会话", items[0].SessionTitle)
+	require.Equal(t, 1, items[0].VersionCount, "re-referencing a file does not add a version")
 
 	report := items[2]
 	require.Equal(t, 2, report.VersionCount)
