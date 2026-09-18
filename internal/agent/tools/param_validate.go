@@ -99,6 +99,18 @@ func validateProperty(name string, val any, prop map[string]any) []ValidationErr
 		return errs // skip further checks if type is wrong
 	}
 
+	// Array items: check each element so that a wrong element type is
+	// reported here instead of surfacing as a Go decode error in the tool.
+	if targetType == "array" {
+		if items, ok := prop["items"].(map[string]any); ok {
+			if list, ok := val.([]any); ok {
+				for i, item := range list {
+					errs = append(errs, validateProperty(fmt.Sprintf("%s[%d]", name, i), item, items)...)
+				}
+			}
+		}
+	}
+
 	// Enum check
 	if enumRaw, ok := prop["enum"]; ok {
 		if enumList, ok := enumRaw.([]any); ok && len(enumList) > 0 {

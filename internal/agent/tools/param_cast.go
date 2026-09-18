@@ -41,12 +41,7 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		if !ok {
 			continue
 		}
-		targetType, _ := prop["type"].(string)
-		if targetType == "" {
-			continue
-		}
-
-		newVal, didCast := castValue(val, targetType)
+		newVal, didCast := castProperty(val, prop)
 		if didCast {
 			argsMap[key] = newVal
 			changed = true
@@ -62,6 +57,54 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		return args
 	}
 	return result
+}
+
+// castProperty casts val against one property schema. For string arrays it
+// also unwraps elements that arrive as single-string objects. Other element
+// types are deliberately left to validation: external MCP schemas are
+// enforced strictly, and "2" in an integer array must stay an error there.
+func castProperty(val interface{}, prop map[string]interface{}) (interface{}, bool) {
+	targetType, _ := prop["type"].(string)
+	if targetType == "" {
+		return val, false
+	}
+	newVal, changed := castValue(val, targetType)
+	if targetType != "array" {
+		return newVal, changed
+	}
+	items, _ := prop["items"].(map[string]interface{})
+	if itemType, _ := items["type"].(string); itemType != "string" {
+		return newVal, changed
+	}
+	list, ok := newVal.([]interface{})
+	if !ok {
+		return newVal, changed
+	}
+	out := make([]interface{}, len(list))
+	for i, item := range list {
+		out[i] = item
+		if s, ok := unwrapSingleString(item); ok {
+			out[i] = s
+			changed = true
+		}
+	}
+	return out, changed
+}
+
+// unwrapSingleString returns the string inside an object that carries
+// exactly one string field, e.g. {"text": "..."} or {"query": "..."}.
+// Models occasionally wrap scalar arguments this way; the intent is
+// unambiguous, and passing the object on only yields an opaque decode error.
+func unwrapSingleString(val interface{}) (string, bool) {
+	obj, ok := val.(map[string]interface{})
+	if !ok || len(obj) != 1 {
+		return "", false
+	}
+	for _, v := range obj {
+		s, ok := v.(string)
+		return s, ok
+	}
+	return "", false
 }
 
 // castValue attempts to convert val to the expected targetType.
@@ -120,6 +163,9 @@ func castValue(val interface{}, targetType string) (interface{}, bool) {
 		}
 
 	case "string":
+		if s, ok := unwrapSingleString(val); ok {
+			return s, true
+		}
 		// Non-string values -> string (e.g., number or bool passed as non-string)
 		switch v := val.(type) {
 		case bool:
