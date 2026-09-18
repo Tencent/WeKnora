@@ -39,6 +39,8 @@ OAuth 服务按调用者分别授权。工具需要审批时，在对话中检�
 | Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
 
+> **`grep_chunks` 的召回有上限。** 它基于索引取候选，每次最多 30 条，再用正则筛选，所以返回的每条都匹配模式，但不保证穷尽：库里存在的匹配也可能没进候选池。容易漏的情况有三类：`foo.*bar` 这类组合模式，候选按 foo、bar 的相关度排序，真正相邻出现的分块可能排不进前 30；`C++` 这类几乎只剩符号的模式，抽出的字面词只有 `C`，在索引里几乎没有区分度；没有关键词索引的库改用语义索引取候选，字面匹配更依赖运气。旧实现对 chunks 表做全表正则扫描，能保证"有就能找到"，但数据量大时代价过高，已经移除。需要在某篇文档里穷尽查找时，用 `read_document` 的 `query`，它会顺序扫完整篇文档。
+
 工具实现直接复用 Agent 的原生工具（`internal/agent/tools/`），鉴权复用 API Key 的作用域模型：端点被换算成一把仅含 retrieve / chat / ingest 等能力、限定知识库范围的作用域，所以后端各服务对它的检查与对受限 API Key 完全一致。实现细节见下方内置 MCP Server 参考。
 
 ## 接入方式对照 {#两个方向的对照速览}
