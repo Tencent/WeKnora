@@ -39,7 +39,8 @@ var searchKnowledgeTool = BaseTool{
 		"Pass knowledge_base_ids to focus on the bases whose profile fits the question. Run the tool again with a " +
 		"different query or mode when the results are thin.\n" +
 		"Every chunk carries a cN handle and belongs to a dN document. Use read_document(id=dN) to read the " +
-		"surrounding context or the whole document.",
+		"surrounding context or the whole document. Searches match chunk text only; to find a document by its " +
+		"title or file name use list_documents(keyword=...).",
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {

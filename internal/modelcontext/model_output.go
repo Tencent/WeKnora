@@ -309,7 +309,11 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 		b.WriteString("  </document>\n</retrieval>")
 		return b.String()
 	}
-	output := r.modelKnowledgeOutput("deep_read", rows, fallback)
+	chunks := r.modelChunksFromRows("deep_read", rows)
+	if len(chunks) == 0 {
+		return r.CompactKnownText(fallback)
+	}
+	output := renderKnowledgeChunks("deep_read", chunks, info)
 	if info == nil {
 		// Legacy list_knowledge_chunks payloads carry no document header.
 		remaining := intValue(data, "total_chunks") - intValue(data, "fetched_chunks")
@@ -320,9 +324,6 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 		}
 		return output
 	}
-	// Re-render with the document header and the navigation footer.
-	chunks := r.modelChunksFromRows("deep_read", rows)
-	output = renderKnowledgeChunks("deep_read", chunks, info)
 	var footer strings.Builder
 	if query := stringValue(data, "query"); query != "" {
 		fmt.Fprintf(&footer, "  <matches query=\"%s\" count=\"%d\"", escapeAttr(query), intValue(data, "match_count"))
@@ -330,12 +331,13 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 			footer.WriteString(" truncated=\"true\"")
 		}
 		footer.WriteString(" />\n")
-	} else if next, ok := data["next_offset"]; ok {
+	} else if _, ok := data["next_offset"]; ok {
 		remaining := intValue(data, "total_chunks") - (intValue(data, "offset") + intValue(data, "fetched_chunks"))
 		if remaining < 0 {
 			remaining = 0
 		}
-		fmt.Fprintf(&footer, "  <pagination next_offset=\"%d\" remaining=\"%d\" />\n", toInt(next), remaining)
+		fmt.Fprintf(&footer, "  <pagination next_offset=\"%d\" remaining=\"%d\" />\n",
+			intValue(data, "next_offset"), remaining)
 	}
 	if footer.Len() > 0 {
 		output = strings.TrimSuffix(output, "</retrieval>") + footer.String() + "</retrieval>"
@@ -384,22 +386,6 @@ func writeDocumentInfo(b *strings.Builder, info map[string]interface{}) {
 		b.WriteString("</metadata>\n")
 	}
 	b.WriteString("    </info>\n")
-}
-
-func toInt(value interface{}) int {
-	switch typed := value.(type) {
-	case int:
-		return typed
-	case int64:
-		return int(typed)
-	case float64:
-		return int(typed)
-	case json.Number:
-		if n, err := typed.Int64(); err == nil {
-			return int(n)
-		}
-	}
-	return 0
 }
 
 func renderKnowledgeChunks(mode string, chunks []modelChunk, info map[string]interface{}) string {

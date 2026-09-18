@@ -191,6 +191,66 @@ func TestReadDocumentPagesFromExactOffset(t *testing.T) {
 	}
 }
 
+func TestReadDocumentUnalignedWindowReachesDocumentEnd(t *testing.T) {
+	tool, repo := newReadDocumentFixture(9)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1","offset":6,"limit":4}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if got := chunkIDsFromData(t, res.Data); strings.Join(got, ",") != "chunk-6,chunk-7,chunk-8" {
+		t.Fatalf("window past the document end = %v, want every remaining chunk", got)
+	}
+	if _, ok := res.Data["next_offset"]; ok {
+		t.Fatalf("nothing remains after chunk-8: %+v", res.Data)
+	}
+	if len(repo.requests) != 2 {
+		t.Fatalf("expected the second page to be fetched, requests=%v", repo.requests)
+	}
+}
+
+func TestReadDocumentChunkContextNearDocumentEnd(t *testing.T) {
+	tool, _ := newReadDocumentFixture(9)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"chunk-7","context":2}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if got := chunkIDsFromData(t, res.Data); strings.Join(got, ",") != "chunk-5,chunk-6,chunk-7,chunk-8" {
+		t.Fatalf("context near the end = %v", got)
+	}
+	if res.Data["total_chunks"] != int64(9) {
+		t.Fatalf("total must come from the window fetch: %+v", res.Data)
+	}
+}
+
+func TestReadDocumentQueryWithChunkHandleSearchesOwningDocument(t *testing.T) {
+	tool, _ := newReadDocumentFixture(12)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"chunk-1","query":"psionic"}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if res.Data["match_count"] != 2 || res.Data["query"] != "psionic" {
+		t.Fatalf("query must run against the owning document, data=%+v", res.Data)
+	}
+}
+
+func TestReadDocumentQueryStopsAtOutputBudget(t *testing.T) {
+	tool, repo := newReadDocumentFixture(12)
+	for _, c := range repo.ordered {
+		c.Content = "needle " + strings.Repeat("x", 400)
+	}
+	ctx := WithOutputBudget(context.Background(), 1500)
+	res, err := tool.Execute(ctx, json.RawMessage(`{"id":"doc-1","query":"needle"}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if res.Data["truncated"] != true {
+		t.Fatalf("budget exhaustion must be reported: %+v", res.Data)
+	}
+	if fetched := res.Data["fetched_chunks"].(int); fetched == 0 || fetched >= 12 {
+		t.Fatalf("expected a partial, budget-bound result, fetched=%d", fetched)
+	}
+}
+
 func TestReadDocumentLastPageHasNoNextOffset(t *testing.T) {
 	tool, _ := newReadDocumentFixture(5)
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1","offset":0,"limit":20}`))

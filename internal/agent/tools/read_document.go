@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -163,11 +164,13 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 		matcher = compiled
 	}
 
+	// A query always searches the owning document, even when id named a
+	// chunk: silently returning the single chunk would read as "no match".
 	switch {
-	case chunk != nil:
-		return t.readAroundChunk(ctx, knowledge, chunk, contextChunks)
 	case matcher != nil:
 		return t.readByQuery(ctx, knowledge, query, matcher)
+	case chunk != nil:
+		return t.readAroundChunk(ctx, knowledge, chunk, contextChunks)
 	default:
 		return t.readPage(ctx, knowledge, offset, limit)
 	}
@@ -179,7 +182,7 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 // masked as "not found".
 func (t *ReadDocumentTool) resolveTarget(ctx context.Context, id string) (*types.Knowledge, *types.Chunk, error) {
 	if knowledge, err := t.knowledgeService.GetKnowledgeByIDOnly(ctx, id); err == nil && knowledge != nil {
-		authorized, authErr := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, id, t.knowledgeService)
+		authorized, authErr := authorizeLoadedKnowledge(ctx, t.searchTargets, knowledge, t.knowledgeService)
 		if authErr != nil {
 			return nil, nil, fmt.Errorf("document is not accessible: %w", authErr)
 		}
@@ -261,7 +264,9 @@ func (t *ReadDocumentTool) fetchWindow(
 		} else {
 			chunks = nil
 		}
-		if int64(offset+limit) <= total {
+		// The next page exists whenever the first page did not already reach
+		// the end of the document, regardless of how far the window extends.
+		if int64(firstPage*limit) < total {
 			next, _, err := t.listChunks(ctx, knowledge, firstPage+1, limit)
 			if err != nil {
 				return nil, 0, err
@@ -326,17 +331,18 @@ func (t *ReadDocumentTool) readPage(
 func (t *ReadDocumentTool) readAroundChunk(
 	ctx context.Context, knowledge *types.Knowledge, focus *types.Chunk, contextChunks int,
 ) (*types.ToolResult, error) {
-	total := t.countChunks(ctx, knowledge)
+	var total int64
 	rows := []readChunkRow{{chunk: focus, role: "focus"}}
 	if contextChunks > 0 && focus.ChunkType != types.ChunkTypeFAQ {
 		start := focus.ChunkIndex - contextChunks
 		if start < 0 {
 			start = 0
 		}
-		window, _, err := t.fetchWindow(ctx, knowledge, start, focus.ChunkIndex-start+contextChunks+1)
+		window, windowTotal, err := t.fetchWindow(ctx, knowledge, start, focus.ChunkIndex-start+contextChunks+1)
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: err.Error()}, err
 		}
+		total = windowTotal
 		rows = rows[:0]
 		found := false
 		for _, c := range window {
@@ -355,6 +361,8 @@ func (t *ReadDocumentTool) readAroundChunk(
 		if !found {
 			rows = append([]readChunkRow{{chunk: focus, role: "focus"}}, rows...)
 		}
+	} else {
+		total = t.countChunks(ctx, knowledge)
 	}
 	chunks := make([]*types.Chunk, 0, len(rows))
 	for _, r := range rows {
@@ -391,6 +399,15 @@ func (t *ReadDocumentTool) readByQuery(
 	page := 1
 	tenantID := t.tenantFor(knowledge)
 	compiled := []*regexp.Regexp{matcher}
+	// Stop collecting before the registry's head/tail truncation would cut
+	// rows in the middle; the header and tags take the remaining share.
+	budget := OutputBudget(ctx) * 4 / 5
+	used := 0
+	emit := func(row readChunkRow) {
+		rows = append(rows, row)
+		emitted[row.chunk.ID] = true
+		used += utf8.RuneCountInString(row.chunk.Content)
+	}
 
 scan:
 	for {
@@ -411,28 +428,21 @@ scan:
 				haystack += "\n" + q
 			}
 			if matcher.MatchString(haystack) {
-				if matchCount >= readDocumentMaxMatches {
+				if matchCount >= readDocumentMaxMatches || used >= budget {
 					truncated = true
 					break scan
 				}
 				matchCount++
 				if prev != nil && !emitted[prev.ID] {
-					rows = append(rows, readChunkRow{chunk: prev, role: "context_before"})
-					emitted[prev.ID] = true
+					emit(readChunkRow{chunk: prev, role: "context_before"})
 				}
 				if !emitted[c.ID] {
-					rows = append(rows, readChunkRow{
-						chunk:   c,
-						role:    "match",
-						snippet: extractChunkMatchSnippet(c, compiled),
-					})
-					emitted[c.ID] = true
+					emit(readChunkRow{chunk: c, role: "match", snippet: extractChunkMatchSnippet(c, compiled)})
 				}
 				forceNext = true
 			} else if forceNext {
-				if !emitted[c.ID] {
-					rows = append(rows, readChunkRow{chunk: c, role: "context_after"})
-					emitted[c.ID] = true
+				if !emitted[c.ID] && used < budget {
+					emit(readChunkRow{chunk: c, role: "context_after"})
 				}
 				forceNext = false
 			}

@@ -128,19 +128,25 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	// A pinned @file / @tag scope narrows the listing to the documents the
 	// turn may actually read.
+	pageIDs := make([]string, 0, len(knowledges))
+	for _, k := range knowledges {
+		if k != nil {
+			pageIDs = append(pageIDs, k.ID)
+		}
+	}
+	allowedIDs, scopeErr := knowledgeIDsAllowedInSearchTargets(ctx, t.searchTargets, kbID, pageIDs, t.knowledgeService)
+	if scopeErr != nil {
+		return &types.ToolResult{
+			Success: false, Error: fmt.Sprintf("failed to validate document scope: %v", scopeErr),
+		}, scopeErr
+	}
 	filtered := make([]*types.Knowledge, 0, len(knowledges))
 	hiddenByScope := 0
 	for _, k := range knowledges {
 		if k == nil {
 			continue
 		}
-		allowed, scopeErr := searchTargetsAllowKnowledgeID(ctx, t.searchTargets, k.ID, kbID, t.knowledgeService)
-		if scopeErr != nil {
-			return &types.ToolResult{
-				Success: false, Error: fmt.Sprintf("failed to validate document scope: %v", scopeErr),
-			}, scopeErr
-		}
-		if !allowed {
+		if !allowedIDs[k.ID] {
 			hiddenByScope++
 			continue
 		}
