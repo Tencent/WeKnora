@@ -2,7 +2,6 @@ package im
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -45,7 +44,9 @@ func (c *lifecycleFactoryCounters) factory() AdapterFactory {
 
 func newLifecycleTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:im-lifecycle-%d?mode=memory&cache=shared", time.Now().UnixNano())), &gorm.Config{})
+	// t.Name() is unique per test, unlike the wall clock: two tests started in
+	// the same tick used to collide on one shared in-memory database.
+	db, err := gorm.Open(sqlite.Open("file:im-lifecycle-"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -72,6 +73,28 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("create im_channels: %v", err)
 	}
 	return db
+}
+
+// Regression test for a shared in-memory database between two lifecycle
+// tests: run the subtests in parallel, the closest a test can get to the
+// original wall-clock collision, and confirm the second's table is empty
+// rather than seeing the first's row or a "table already exists" error.
+func TestNewLifecycleTestDBIsolatesConcurrentTests(t *testing.T) {
+	t.Run("seeds a channel", func(t *testing.T) {
+		t.Parallel()
+		createLifecycleChannel(t, newLifecycleTestDB(t), "marker", "agent-1")
+	})
+	t.Run("starts from an empty table", func(t *testing.T) {
+		t.Parallel()
+		db := newLifecycleTestDB(t)
+		var count int64
+		if err := db.Table("im_channels").Count(&count).Error; err != nil {
+			t.Fatalf("count im_channels: %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("im_channels has %d rows, want a fresh database isolated from other tests", count)
+		}
+	})
 }
 
 func newLifecycleTestService(db *gorm.DB, redisClient *redis.Client, instanceID string) *Service {
