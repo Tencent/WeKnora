@@ -6,6 +6,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -29,7 +30,7 @@ func (t *KnowledgeSearchTool) applyMMRNaive(
 
 	tokenSets := make([]map[string]struct{}, len(candidates))
 	for i, r := range candidates {
-		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
+		tokenSets[i] = searchutil.TokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
 	}
 
 	for len(selected) < k && len(candidates) > 0 {
@@ -40,8 +41,8 @@ func (t *KnowledgeSearchTool) applyMMRNaive(
 			relevance := r.Score
 			redundancy := 0.0
 			for _, s := range selected {
-				selectedTokens := t.tokenizeSimple(t.getEnrichedPassage(ctx, s.SearchResult))
-				redundancy = math.Max(redundancy, t.jaccard(tokenSets[i], selectedTokens))
+				selectedTokens := searchutil.TokenizeSimple(t.getEnrichedPassage(ctx, s.SearchResult))
+				redundancy = math.Max(redundancy, searchutil.Jaccard(tokenSets[i], selectedTokens))
 			}
 			mmr := lambda*relevance - (1.0-lambda)*redundancy
 			if mmr > bestScore {

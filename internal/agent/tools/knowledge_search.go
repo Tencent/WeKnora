@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -1206,46 +1205,23 @@ func (t *KnowledgeSearchTool) getEnrichedPassage(ctx context.Context, result *ty
 	return combinedText
 }
 
-// compositeScore calculates a composite score considering multiple factors
+// compositeScore calculates a composite score considering multiple factors.
+// The weighted combination and the source weighting live in
+// searchutil.CompositeRawScore; this tool additionally applies the agent-only
+// position prior (see searchutil.PositionPrior) and clamps the product.
 func (t *KnowledgeSearchTool) compositeScore(
 	result *searchResultWithMeta,
 	modelScore, baseScore float64,
 ) float64 {
-	// Source weight: web_search results get slightly lower weight
-	sourceWeight := 1.0
-	if strings.ToLower(result.KnowledgeSource) == "web_search" {
-		sourceWeight = 0.95
-	}
-
-	// Position prior: slightly favor chunks earlier in the document
-	positionPrior := 1.0
-	if result.StartAt >= 0 && result.EndAt > result.StartAt {
-		// Calculate position ratio and apply small boost for earlier positions
-		positionRatio := 1.0 - float64(result.StartAt)/float64(result.EndAt+1)
-		positionPrior += t.clampFloat(positionRatio, -0.05, 0.05)
-	}
-
-	// Composite formula: weighted combination of model score, base score, and source weight
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
-	composite *= positionPrior
-
-	// Clamp to [0, 1]
-	if composite < 0 {
-		composite = 0
-	}
-	if composite > 1 {
-		composite = 1
-	}
-
-	return composite
+	composite := searchutil.CompositeRawScore(result.KnowledgeSource, modelScore, baseScore)
+	composite *= searchutil.PositionPrior(result.StartAt, result.EndAt)
+	return searchutil.ClampFloat(composite, 0, 1)
 }
 
-// clampFloat clamps a float value to the specified range
-func (t *KnowledgeSearchTool) clampFloat(v, minV, maxV float64) float64 {
-	return searchutil.ClampFloat(v, minV, maxV)
-}
-
-// applyMMR applies Maximal Marginal Relevance algorithm to reduce redundancy
+// applyMMR applies Maximal Marginal Relevance algorithm to reduce redundancy.
+// Scoring and selection live in searchutil.ApplyMMR; this wrapper keeps the
+// tool-specific concerns: sequential tokenization of enriched passages and the
+// tool's logger output.
 func (t *KnowledgeSearchTool) applyMMR(
 	ctx context.Context,
 	results []*searchResultWithMeta,
@@ -1259,76 +1235,24 @@ func (t *KnowledgeSearchTool) applyMMR(
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] Applying MMR: lambda=%.2f, k=%d, candidates=%d",
 		lambda, k, len(results))
 
-	selected := make([]*searchResultWithMeta, 0, k)
-	candidates := make([]*searchResultWithMeta, len(results))
-	copy(candidates, results)
-
 	// Pre-compute token sets for all candidates
-	tokenSets := make([]map[string]struct{}, len(candidates))
-	for i, r := range candidates {
-		tokenSets[i] = t.tokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
+	tokenSets := make([]map[string]struct{}, len(results))
+	for i, r := range results {
+		tokenSets[i] = searchutil.TokenizeSimple(t.getEnrichedPassage(ctx, r.SearchResult))
 	}
 
-	// MMR selection loop, incremental form: maxRedundancy[i] caches candidate i's
-	// maximum jaccard against everything selected so far, so each round only needs
-	// one comparison per remaining candidate instead of one per (candidate, selected)
-	// pair. Selection output is identical to the naive form, including tie-breaking,
-	// because the candidate iteration order is unchanged.
-	selectedTokenSets := make([]map[string]struct{}, 0, k)
-	maxRedundancy := make([]float64, len(candidates))
-	for len(selected) < k && len(candidates) > 0 {
-		bestIdx := 0
-		bestScore := -1.0
-
-		for i, r := range candidates {
-			// MMR score: balance relevance and diversity
-			mmr := lambda*r.Score - (1.0-lambda)*maxRedundancy[i]
-			if mmr > bestScore {
-				bestScore = mmr
-				bestIdx = i
-			}
-		}
-
-		// Add best candidate to selected and remove from candidates
-		selected = append(selected, candidates[bestIdx])
-		chosenTokens := tokenSets[bestIdx]
-		selectedTokenSets = append(selectedTokenSets, chosenTokens)
-		candidates = append(candidates[:bestIdx], candidates[bestIdx+1:]...)
-		// Remove corresponding token set and cached redundancy
-		tokenSets = append(tokenSets[:bestIdx], tokenSets[bestIdx+1:]...)
-		maxRedundancy = append(maxRedundancy[:bestIdx], maxRedundancy[bestIdx+1:]...)
-
-		// Fold the freshly selected result into every remaining candidate's cache
-		for i := range candidates {
-			maxRedundancy[i] = math.Max(maxRedundancy[i], t.jaccard(tokenSets[i], chosenTokens))
-		}
-	}
-
-	// Compute average redundancy among selected results, reusing the cached token
-	// sets instead of re-tokenizing every pair
-	avgRed := 0.0
-	if len(selectedTokenSets) > 1 {
-		pairs := 0
-		for i := 0; i < len(selectedTokenSets); i++ {
-			for j := i + 1; j < len(selectedTokenSets); j++ {
-				avgRed += t.jaccard(selectedTokenSets[i], selectedTokenSets[j])
-				pairs++
-			}
-		}
-		if pairs > 0 {
-			avgRed /= float64(pairs)
-		}
-	}
+	selected, avgRed := searchutil.ApplyMMR(
+		results,
+		func(r *searchResultWithMeta) float64 { return r.Score },
+		tokenSets,
+		k,
+		lambda,
+	)
 
 	logger.Infof(ctx, "[Tool][KnowledgeSearch] MMR completed: selected=%d, avg_redundancy=%.4f",
 		len(selected), avgRed)
 
 	return selected
-}
-
-// tokenizeSimple tokenizes text into a set of words (simple whitespace-based)
-func (t *KnowledgeSearchTool) tokenizeSimple(text string) map[string]struct{} {
-	return searchutil.TokenizeSimple(text)
 }
 
 // extractSnippetForQueries tries to produce a short contextual snippet around
@@ -1387,9 +1311,4 @@ func extractSnippetForQueries(content string, queries []string) string {
 		snippet = strings.ReplaceAll(snippet, "  ", " ")
 	}
 	return "... " + strings.TrimSpace(snippet) + " ..."
-}
-
-// jaccard calculates Jaccard similarity between two token sets
-func (t *KnowledgeSearchTool) jaccard(a, b map[string]struct{}) float64 {
-	return searchutil.Jaccard(a, b)
 }
