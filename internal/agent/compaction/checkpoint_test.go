@@ -2,6 +2,7 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -161,4 +162,51 @@ func TestCheckpointCarriesTheLoadedSummaryForward(t *testing.T) {
 	assert.Contains(t, llm.prompts[0], "earlier work")
 	assert.Contains(t, result.Checkpoint.Summary, "/workspace/old.txt")
 	assert.Contains(t, result.Checkpoint.Summary, "/workspace/c.txt")
+}
+
+// History can reach the whole window by design, so the part being summarized
+// can outgrow one summarization request. An overflowing request degrades to a
+// raw archive, which is never persisted, so every later turn would fail the
+// same way. The oldest messages are left out instead, the prompt says so, and
+// their file paths are still recorded.
+func TestSummarizerInputIsFittedToTheWindow(t *testing.T) {
+	est := newEstimator(t)
+	llm := &stubChat{response: "## Goal\nsummary"}
+	settings := Settings{Enabled: true, MaxContextTokens: 20000, ReserveTokens: 8000, KeepRecentTokens: 2000}
+	c := New(llm, est, settings)
+
+	msgs := []chat.Message{{Role: "system", Content: "you are an agent"}}
+	for i := 0; i < 150; i++ {
+		id := fmt.Sprintf("turn-%03d", i)
+		msgs = append(msgs, storedTurn(id, 1, "/workspace/"+id+".txt")...)
+	}
+	msgs = append(msgs, chat.Message{Role: "user", Content: "next"})
+
+	result, err := c.Compact(context.Background(), msgs, ReasonThreshold)
+	require.NoError(t, err)
+	require.False(t, result.Degraded)
+	require.Positive(t, result.Omitted)
+
+	prompt := llm.prompts[0]
+	request := est.EstimateString(summarizationSystemPrompt) + est.EstimateString(prompt) +
+		c.Settings().summaryBudget()
+	assert.LessOrEqual(t, request, settings.MaxContextTokens, "the request must fit the window")
+	assert.Contains(t, prompt, fmt.Sprintf("[%d earlier messages are not shown", result.Omitted))
+	assert.NotContains(t, prompt, "question turn-000", "the oldest messages are the ones left out")
+	assert.Contains(t, prompt, "question turn-140", "the newest summarized messages stay")
+
+	require.NotNil(t, result.Checkpoint)
+	assert.Contains(t, result.Checkpoint.Summary, "/workspace/turn-000.txt",
+		"paths come from every summarized message, not only the ones shown")
+}
+
+func TestSummarizerInputIsUntouchedWhenItFits(t *testing.T) {
+	llm := &stubChat{response: "## Goal\nsummary"}
+	c := New(llm, newEstimator(t), testSettings())
+
+	result, err := c.Compact(context.Background(),
+		withStoredHistory(reactTurn(12), storedTurn("turn-a", 1, "/workspace/a.txt")), ReasonThreshold)
+	require.NoError(t, err)
+	assert.Zero(t, result.Omitted)
+	assert.NotContains(t, llm.prompts[0], "earlier messages are not shown")
 }

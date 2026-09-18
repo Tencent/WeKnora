@@ -48,7 +48,8 @@ type AgentEngine struct {
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
-	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management
+	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management, calibrated
+	rawEstimator         *agenttoken.Estimator   // Same tokenizer at scale 1, for measuring the calibration
 	compactor            *compaction.Compactor   // Summarizes older history to fit the context window (nil = disabled)
 	lastUsage            types.TokenUsage        // Token usage from the most recent LLM call
 	lastSentMsgCount     int                     // Number of messages sent in the most recent LLM call
@@ -64,7 +65,14 @@ type AgentEngine struct {
 	// checkpointSink, when set, persists compactions that end on a stored
 	// turn so later turns start from them. Nil keeps compaction turn-local.
 	checkpointSink types.ContextCheckpointSink
-	modelContext   *modelcontext.Registry // single request-local boundary for every model handle
+	// calibration learns the provider's tokens per estimated token from
+	// consecutive requests (see calibrateEstimator).
+	calibration tokenCalibration
+	// contextRewrites counts compactions and tool-result trims. Either one
+	// changes messages an earlier request already sent, so the next request
+	// cannot be compared with that one for calibration.
+	contextRewrites int
+	modelContext    *modelcontext.Registry // single request-local boundary for every model handle
 	// steerSink, when set, lets users append messages into the running turn.
 	// Drained at every round boundary; nil disables mid-run injection.
 	steerSink         types.SteerSink
@@ -99,6 +107,9 @@ func NewAgentEngine(
 	if err != nil {
 		return nil
 	}
+	// The previous turn's measured scale, so this turn's first compaction
+	// check is calibrated before it has a provider count of its own.
+	tokenEst.SetScale(config.ContextTokenScale)
 	engine := &AgentEngine{
 		config:               config,
 		toolRegistry:         toolRegistry,
@@ -109,6 +120,7 @@ func NewAgentEngine(
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
+		rawEstimator:         tokenEst.Unscaled(),
 		modelContext:         modelcontext.NewRegistry(config.CitationsEnabled()),
 	}
 
@@ -722,6 +734,7 @@ func (e *AgentEngine) runReActIteration(
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)
+		e.calibrateEstimator(ctx, round, *messagesPtr, tools, response.Usage, state)
 		logger.Infof(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d, "+
 			"cache_read=%d, cache_write=%d, cache_hit_rate=%.1f%%, cache_status=%s",
 			round, response.Usage.PromptTokens,

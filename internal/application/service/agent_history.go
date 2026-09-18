@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
+	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -17,15 +19,14 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// agentHistoryFetchMultiplier controls how many raw DB messages to fetch
-// when assembling history. Each turn contributes ~2 rows (user + assistant);
-// we ask for a generous multiple so we never under-fetch when some pairs are
-// incomplete (e.g. an in-flight turn).
-const agentHistoryFetchMultiplier = 4
+// agentHistoryPageSize is how many rows one backwards page reads. A turn is
+// two rows plus one per steered message.
+const agentHistoryPageSize = 200
 
-// agentHistoryFetchMin is the floor for the DB fetch limit, used when
-// maxRounds is small or unset.
-const agentHistoryFetchMin = 50
+// agentHistoryMaxRows bounds one load however the session is shaped. The token
+// budget normally stops the read long before this; a run of turns that never
+// completed contributes no tokens and would otherwise page the whole session.
+const agentHistoryMaxRows = 5000
 
 var agentHistoryThinkTagRegex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
@@ -43,14 +44,27 @@ var agentHistoryThinkTagRegex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 //  3. A final assistant message with the canonical answer (msg.Content with
 //     <think> blocks stripped).
 //
-// Turns lacking either user or assistant content are skipped. The newest
-// maxRounds turns are returned in chronological order.
+// Turns lacking either user or assistant content are skipped. Turns are
+// returned in chronological order.
 //
-// When a turn carries a context checkpoint (a compaction summary persisted by
-// an earlier run), history starts from it: the summary replaces that turn and
-// everything before it, and only later turns are replayed. Every replayed
-// message is tagged with its turn's assistant message ID so this run's
-// compaction can persist a new checkpoint in turn.
+// History is sized in tokens, not turns. When a turn carries a context
+// checkpoint (a compaction summary persisted by an earlier run), history starts
+// from it: the summary replaces that turn and everything before it. The newest
+// turns after that are replayed while they fit tokenBudget. A turn left out
+// is gone (neither replayed nor summarized), so the budget is the whole window
+// (agent.HistoryTokenBudget), past the compaction threshold: overflow reaches
+// the first round's compaction, which summarizes it into a new checkpoint.
+// Compaction, not a turn count, keeps a long session in the window. Every
+// replayed message is tagged with its turn's assistant message ID so this
+// run's compaction can persist that checkpoint.
+//
+// Rows are read backwards a page at a time and stop at the checkpoint or once
+// the budget is full, so a long session is never read whole. Turns are priced
+// as the engine sends them, so retainRetrievalHistory must be the run's
+// setting, and in the provider's tokens: estimates are scaled by the newest
+// turn's measured ContextTokenScale, which is also returned so the engine's
+// first compaction check uses the same scale. Budget and trigger must agree,
+// or turns the loader drops can sit below a trigger that never fires.
 //
 // DB is treated as the single source of truth — there is no Redis/in-memory
 // cache layer above this function. Callers are expected to invoke it once
@@ -59,27 +73,143 @@ func LoadAgentHistory(
 	ctx context.Context,
 	messageRepo interfaces.MessageRepository,
 	sessionID string,
-	maxRounds int,
-) ([]chat.Message, error) {
-	if maxRounds <= 0 {
-		return []chat.Message{}, nil
+	tokenBudget int,
+	retainRetrievalHistory bool,
+) ([]chat.Message, float64, error) {
+	if tokenBudget <= 0 {
+		return []chat.Message{}, 0, nil
 	}
-
-	fetchLimit := maxRounds * agentHistoryFetchMultiplier
-	if fetchLimit < agentHistoryFetchMin {
-		fetchLimit = agentHistoryFetchMin
-	}
-
-	rows, err := messageRepo.GetRecentMessagesBySession(ctx, sessionID, fetchLimit)
+	estimator, err := agenttoken.NewEstimator()
 	if err != nil {
-		return nil, fmt.Errorf("load agent history: %w", err)
+		return nil, 0, fmt.Errorf("load agent history: %w", err)
 	}
+
+	checkpoint := loadContextCheckpoint(ctx, messageRepo, sessionID)
+	out := []chat.Message{}
+	if checkpoint != nil {
+		out = append(out, compaction.SummaryMessage(checkpoint.ContextCheckpoint.Summary))
+	}
+
+	var (
+		rows         []*types.Message
+		turns        []*agentHistoryTurn
+		dropped      bool
+		before       time.Time
+		beforeID     string
+		reachedStart bool
+		scale        float64
+		used         int
+		replay       *historyReplay
+	)
+	for len(rows) < agentHistoryMaxRows {
+		page, err := messageRepo.ListMessagesBySessionBeforeCursor(
+			ctx, sessionID, before, beforeID, agentHistoryPageSize,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("load agent history: %w", err)
+		}
+		rows = append(rows, page...)
+		if replay == nil {
+			// Price everything in the provider's tokens, with the scale the
+			// engine will start from, or loading and the first compaction
+			// check disagree on where the window ends.
+			scale = latestContextTokenScale(rows)
+			estimator.SetScale(scale)
+			used = estimator.EstimateMessages(out)
+			replay = newHistoryReplay(estimator, tokenBudget-used, retainRetrievalHistory)
+		}
+		reachedStart = len(page) < agentHistoryPageSize
+		turns, dropped = replay.newestWithin(turnsAfterCheckpoint(completeHistoryTurns(rows, reachedStart), checkpoint))
+		if reachedStart || dropped {
+			break
+		}
+		oldest := page[len(page)-1]
+		if checkpoint != nil && sortsAtOrBefore(oldest, checkpoint) {
+			break
+		}
+		before, beforeID = oldest.CreatedAt, oldest.ID
+	}
+
+	for _, t := range turns {
+		out = append(out, replay.messages(t)...)
+		used += replay.tokens[t.assistant.ID]
+	}
+	checkpointID := ""
+	if checkpoint != nil {
+		checkpointID = checkpoint.ID
+	}
+	logger.Infof(ctx, "Agent history: %d turn(s), ~%d of %d tokens (scale %.2f), %d row(s) read, "+
+		"checkpoint=%q, older turns dropped for the budget=%v",
+		len(turns), used, tokenBudget, estimator.Scale(), len(rows), checkpointID, dropped)
+	if checkpoint != nil && dropped {
+		// Turns between the summary and the kept ones are missing. Normal
+		// compaction keeps this from happening; it takes several turns in a
+		// row whose compactions could not be persisted.
+		logger.Warnf(ctx, "Agent history after checkpoint %s exceeds the budget; "+
+			"older turns after it were dropped", checkpointID)
+	}
+	return out, scale, nil
+}
+
+// latestContextTokenScale is the scale the newest calibrated turn among rows
+// measured (TokenUsage.ContextTokenScale), or 0 when none did. The first page
+// holds the newest turns, so a session that calibrates at all has one there.
+func latestContextTokenScale(rows []*types.Message) float64 {
+	var newest *types.Message
+	for _, msg := range rows {
+		if msg.Role != "assistant" || msg.Usage == nil || msg.Usage.ContextTokenScale <= 0 {
+			continue
+		}
+		if newest == nil || sortsAtOrBefore(newest, msg) {
+			newest = msg
+		}
+	}
+	if newest == nil {
+		return 0
+	}
+	return newest.Usage.ContextTokenScale
+}
+
+// agentHistoryTurn is one stored turn. A turn is not always one user message.
+// Mid-run steering persists every injected message under the running turn's
+// request ID, so a turn can be user → tools → user → tools → answer. Keeping
+// only the last user row would drop the original question from the next
+// turn's context.
+type agentHistoryTurn struct {
+	users     []*types.Message
+	assistant *types.Message
+	createdAt time.Time
+}
+
+// completeHistoryTurns groups rows into completed turns, oldest first. Unless
+// the read reached the session's first row, the turn owning the oldest row
+// read may be missing its earlier rows — its original question above all — so
+// it is left out. When that oldest row is itself a user message the turn is
+// whole: steered messages are written after the turn's assistant row, so a
+// user row older than it can only be the question, and a steered row with no
+// assistant read after it leaves the turn incomplete anyway.
+func completeHistoryTurns(rows []*types.Message, reachedStart bool) []*agentHistoryTurn {
 	if len(rows) == 0 {
-		return []chat.Message{}, nil
+		return nil
+	}
+	partialRequest, dropPartial := "", false
+	if !reachedStart {
+		oldest := rows[0]
+		for _, msg := range rows[1:] {
+			if sortsAtOrBefore(msg, oldest) {
+				oldest = msg
+			}
+		}
+		if oldest.Role != "user" {
+			partialRequest, dropPartial = oldest.RequestID, true
+		}
 	}
 
 	turns := make(map[string]*agentHistoryTurn)
 	for _, msg := range rows {
+		if dropPartial && msg.RequestID == partialRequest {
+			continue
+		}
 		t, ok := turns[msg.RequestID]
 		if !ok {
 			t = &agentHistoryTurn{}
@@ -96,56 +226,89 @@ func LoadAgentHistory(
 		}
 	}
 
-	completeTurns := make([]*agentHistoryTurn, 0, len(turns))
+	complete := make([]*agentHistoryTurn, 0, len(turns))
 	for _, t := range turns {
 		if len(t.users) > 0 && t.assistant != nil && t.assistant.IsCompleted {
 			sort.SliceStable(t.users, func(i, j int) bool {
 				return t.users[i].CreatedAt.Before(t.users[j].CreatedAt)
 			})
-			completeTurns = append(completeTurns, t)
+			complete = append(complete, t)
 		}
 	}
-
-	sort.Slice(completeTurns, func(i, j int) bool {
-		return completeTurns[i].createdAt.Before(completeTurns[j].createdAt)
+	sort.Slice(complete, func(i, j int) bool {
+		return complete[i].createdAt.Before(complete[j].createdAt)
 	})
-
-	summary := ""
-	if checkpoint := loadContextCheckpoint(ctx, messageRepo, sessionID); checkpoint != nil {
-		completeTurns = turnsAfterCheckpoint(completeTurns, checkpoint)
-		summary = checkpoint.ContextCheckpoint.Summary
-		logger.Infof(ctx, "Agent history resumes from the context checkpoint on %s, %d turn(s) after it",
-			checkpoint.ID, len(completeTurns))
-	}
-
-	if len(completeTurns) > maxRounds {
-		completeTurns = completeTurns[len(completeTurns)-maxRounds:]
-	}
-
-	out := make([]chat.Message, 0, len(completeTurns)*4+1)
-	if summary != "" {
-		out = append(out, compaction.SummaryMessage(summary))
-	}
-	for _, t := range completeTurns {
-		start := len(out)
-		out = append(out, buildUserHistoryMessage(t.users[0]))
-		out = append(out, buildTurnBodyMessages(t.assistant, t.users[1:])...)
-		for i := start; i < len(out); i++ {
-			out[i].TurnID = t.assistant.ID
-		}
-	}
-	return out, nil
+	return complete
 }
 
-// agentHistoryTurn is one stored turn. A turn is not always one user message.
-// Mid-run steering persists every injected message under the running turn's
-// request ID, so a turn can be user → tools → user → tools → answer. Keeping
-// only the last user row would drop the original question from the next
-// turn's context.
-type agentHistoryTurn struct {
-	users     []*types.Message
-	assistant *types.Message
-	createdAt time.Time
+// sortsAtOrBefore reports whether msg sorts at or before boundary in the
+// (created_at, id) order the backwards read pages in.
+func sortsAtOrBefore(msg, boundary *types.Message) bool {
+	return msg.CreatedAt.Before(boundary.CreatedAt) ||
+		(msg.CreatedAt.Equal(boundary.CreatedAt) && msg.ID <= boundary.ID)
+}
+
+// historyReplay builds and prices each turn's replayed messages once, however
+// many pages the read takes.
+type historyReplay struct {
+	estimator              *agenttoken.Estimator
+	budget                 int
+	retainRetrievalHistory bool
+	built                  map[string][]chat.Message
+	tokens                 map[string]int
+}
+
+func newHistoryReplay(
+	estimator *agenttoken.Estimator, budget int, retainRetrievalHistory bool,
+) *historyReplay {
+	return &historyReplay{
+		estimator:              estimator,
+		budget:                 budget,
+		retainRetrievalHistory: retainRetrievalHistory,
+		built:                  make(map[string][]chat.Message),
+		tokens:                 make(map[string]int),
+	}
+}
+
+// messages replays one turn, tagged with its assistant message ID. The turn is
+// priced as the engine will send it (agent.HistoryAsSent), not as stored: a
+// retrieval result redacted to one line must not use up the budget in full.
+func (r *historyReplay) messages(t *agentHistoryTurn) []chat.Message {
+	id := t.assistant.ID
+	if msgs, ok := r.built[id]; ok {
+		return msgs
+	}
+	msgs := append([]chat.Message{buildUserHistoryMessage(t.users[0])},
+		buildTurnBodyMessages(t.assistant, t.users[1:])...)
+	for i := range msgs {
+		msgs[i].TurnID = id
+	}
+	sent := agent.HistoryAsSent(msgs, r.retainRetrievalHistory)
+	tokens := 0
+	for i := range sent {
+		tokens += r.estimator.EstimateMessage(&sent[i])
+	}
+	r.built[id] = msgs
+	r.tokens[id] = tokens
+	return msgs
+}
+
+// newestWithin keeps the newest turns that fit the budget and reports whether
+// an older one had to be left out. It stops at the first turn that does not
+// fit, so what is kept stays contiguous. The newest turn is kept regardless:
+// it is what the next message most likely refers to, and compaction can split
+// a turn too large to fit on its own.
+func (r *historyReplay) newestWithin(turns []*agentHistoryTurn) ([]*agentHistoryTurn, bool) {
+	used := 0
+	for i := len(turns) - 1; i >= 0; i-- {
+		r.messages(turns[i])
+		cost := r.tokens[turns[i].assistant.ID]
+		if used+cost > r.budget && i < len(turns)-1 {
+			return turns[i+1:], true
+		}
+		used += cost
+	}
+	return turns, false
 }
 
 // loadContextCheckpoint returns the session's newest usable checkpoint, or nil.
@@ -167,9 +330,18 @@ func loadContextCheckpoint(
 }
 
 // turnsAfterCheckpoint drops the turns a checkpoint already covers: its own
-// turn and every turn before it. A checkpoint older than the loaded window is
-// matched by time instead, which keeps every loaded turn.
+// turn and every turn before it. A nil checkpoint covers nothing.
+//
+// When the checkpoint's own turn was not read whole (the budget filled first,
+// or the read ended on it), a turn is kept when its assistant row sorts after
+// the checkpoint's in the (created_at, id) order the read pages in. Comparing
+// assistant row with assistant row keeps a turn whose question shares the
+// checkpoint's timestamp; a turn's first user time against the checkpoint's
+// assistant time dropped it.
 func turnsAfterCheckpoint(turns []*agentHistoryTurn, checkpoint *types.Message) []*agentHistoryTurn {
+	if checkpoint == nil {
+		return turns
+	}
 	for i, t := range turns {
 		if t.assistant.ID == checkpoint.ID {
 			return turns[i+1:]
@@ -177,7 +349,7 @@ func turnsAfterCheckpoint(turns []*agentHistoryTurn, checkpoint *types.Message) 
 	}
 	after := make([]*agentHistoryTurn, 0, len(turns))
 	for _, t := range turns {
-		if t.createdAt.After(checkpoint.CreatedAt) {
+		if !sortsAtOrBefore(t.assistant, checkpoint) {
 			after = append(after, t)
 		}
 	}

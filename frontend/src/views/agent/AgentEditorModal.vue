@@ -846,9 +846,9 @@
         </div>
       </div>
 
-      <!-- 多轮对话。Agent 模式下 history_turns 同样生效（session_agent_qa.go
-           经 LoadAgentHistory 读取），所以本组不再整体按模式隐藏；开关本身仍由
-           EnsureDefaults 强制开启，故只在普通模式展示。 -->
+      <!-- 多轮对话。两种模式都保留本组：Agent 模式在这里说明历史按上下文窗口
+           自动管理，并承载跨轮保留检索结果；开关由 EnsureDefaults 强制开启，
+           故只在普通模式展示。 -->
       <div v-show="currentSection === 'conversation'" class="section">
         <div class="section-header">
           <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
@@ -868,8 +868,9 @@
             </div>
           </div>
 
-          <!-- 保留轮数（Agent 模式恒为多轮，故不受开关状态影响） -->
-          <div v-if="formData.config.multi_turn_enabled || isAgentMode" class="setting-row">
+          <!-- 保留轮数（仅普通模式：Agent 模式按上下文窗口加载历史、超出时压缩成
+               摘要，见 session_agent_qa.go -> LoadAgentHistory，不读 history_turns） -->
+          <div v-if="!isAgentMode && formData.config.multi_turn_enabled" class="setting-row">
             <div class="setting-info">
               <label>{{ $t('agent.editor.historyTurns') }}</label>
               <p class="desc">{{ $t('agentEditor.desc.historyRounds') }}</p>
@@ -2687,7 +2688,7 @@ const navItems = computed(() => {
     { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
     { key: 'suggestions', icon: 'help-circle', label: t('agentEditor.questionSuggestions.navLabel') },
   ];
-  // 多轮对话（两种模式都需要：Agent 模式同样按 history_turns 截断历史）
+  // 多轮对话（两种模式都需要：Agent 模式在这里说明历史自动管理、保留检索结果）
   items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });

@@ -48,7 +48,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_tool_approvals": {"enabled"},                                                          // 000091
 }
 
-const expectedSQLiteMigrationVersion = 24
+const expectedSQLiteMigrationVersion = 25
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -76,6 +76,9 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 			)
 		}
 	}
+
+	require.True(t, sqliteIndexExists(t, db, "idx_messages_session_context_checkpoint"),
+		"SQLite migrations must add the partial index for context checkpoints") // 000106
 
 	assertSQLiteShareLinkInvitationsWork(t, db)
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
@@ -216,6 +219,16 @@ func sqliteTableExists(t *testing.T, db *sql.DB, table string) bool {
 	require.NoError(t, db.QueryRow(
 		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
 		table,
+	).Scan(&n))
+	return n == 1
+}
+
+func sqliteIndexExists(t *testing.T, db *sql.DB, index string) bool {
+	t.Helper()
+	var n int
+	require.NoError(t, db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?",
+		index,
 	).Scan(&n))
 	return n == 1
 }

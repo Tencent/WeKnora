@@ -101,13 +101,19 @@ func (e *AgentEngine) runCompaction(
 		logger.Warnf(ctx, "[Agent][Round-%d] Compaction freed too little (%d → %d tokens); "+
 			"not attempting again at this size", round, result.TokensBefore, result.TokensAfter)
 		e.compactionExhaustedAt = len(messages)
+		// This context keeps its messages, but the stored history was still
+		// summarized, and that summary is as good a checkpoint as any. The
+		// usual case is a large live turn next to a short stored history:
+		// discarding it would have the next turn summarize the same history
+		// again.
+		e.saveContextCheckpoint(ctx, result.Checkpoint, round)
 		return messages, false
 	}
 
 	logger.Infof(ctx, "[Agent][Round-%d] Compacted (%s): %d → %d tokens, %d → %d messages "+
-		"(split_turn=%v, degraded=%v)",
+		"(split_turn=%v, degraded=%v, omitted=%d)",
 		round, result.Reason, result.TokensBefore, result.TokensAfter,
-		result.MessagesBefore, result.MessagesAfter, result.SplitTurn, result.Degraded)
+		result.MessagesBefore, result.MessagesAfter, result.SplitTurn, result.Degraded, result.Omitted)
 	// Where the surviving tokens went. If the retained tail is far larger than
 	// keep_recent, the cut point could not reach past one oversized message.
 	logger.Debugf(ctx, "[Agent][Round-%d][ctx] post-compaction: summary=%d tail=%d "+
@@ -125,6 +131,7 @@ func (e *AgentEngine) runCompaction(
 	})
 	e.emitContextCompacted(ctx, result, round)
 	e.saveContextCheckpoint(ctx, result.Checkpoint, round)
+	e.contextRewrites++
 
 	// The usage baseline described the pre-compaction context; keeping it
 	// would have the next round estimate against history that no longer
@@ -193,6 +200,7 @@ func (e *AgentEngine) trimToolResults(
 		return messages, false
 	}
 	logger.Infof(ctx, "[Agent][Round-%d] Trimmed tool results to the token budget", round)
+	e.contextRewrites++
 	return trimmed, true
 }
 
@@ -929,6 +937,19 @@ func redactHistoryKBResults(llmContext []chat.Message) []chat.Message {
 	return redacted
 }
 
+// HistoryAsSent is stored history as the engine sends it. Unless the agent
+// retains retrieval history, KB and Wiki tool results from earlier turns are
+// redacted, so the model does not reuse retrieval data the knowledge base may
+// have outgrown. The history loader prices turns with it too, so its token
+// budget is spent on what reaches the model, not on a wiki page that goes out
+// as one line.
+func HistoryAsSent(history []chat.Message, retainRetrievalHistory bool) []chat.Message {
+	if retainRetrievalHistory {
+		return history
+	}
+	return redactHistoryKBResults(history)
+}
+
 // buildMessagesWithLLMContext builds the message array with LLM context
 func (e *AgentEngine) buildMessagesWithLLMContext(
 	systemPrompt, currentQuery, sessionID string,
@@ -940,14 +961,10 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	}
 
 	if len(llmContext) > 0 {
-		var sanitized []chat.Message
+		sanitized := HistoryAsSent(llmContext, e.config.RetainRetrievalHistory)
 		if e.config.RetainRetrievalHistory {
-			sanitized = llmContext
 			logger.Infof(context.Background(), "Retaining full retrieval history in context (RetainRetrievalHistory=true)")
 		} else {
-			// Redact KB tool results from previous turns to prevent the LLM
-			// from reusing stale retrieval data when the KB has been modified.
-			sanitized = redactHistoryKBResults(llmContext)
 			logger.Infof(context.Background(), "Added %d history messages to context (KB tool results redacted)", len(llmContext))
 		}
 

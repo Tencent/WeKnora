@@ -1378,7 +1378,7 @@ export default {
       maxTokensAgent: '각 추론 라운드에서 생성할 최대 토큰 수(도구 호출 JSON 포함). 「기본값」은 샌드박스 없으면 4096, 파일 쓰기/편집이 가능하면 24576입니다. 「사용자 지정」은 입력한 값을 그대로 저장합니다.',
       thinking: '모델의 확장 사고 기능 활성화 (모델 지원 필요)',
       conversationSection: '다중 턴 대화 및 질문 재작성 관련 매개변수 설정',
-      conversationSectionAgent: '매 턴에 실어 보낼 이전 대화 분량 설정 (스마트 추론은 항상 다중 턴)',
+      conversationSectionAgent: '스마트 추론은 항상 다중 턴입니다. 이전 대화는 모델의 컨텍스트 창 범위까지 유지되며, 초과하면 오래된 내용이 자동으로 요약됩니다',
       multiTurn: '활성화하면 대화 기록 컨텍스트가 유지됩니다',
       historyRounds: '컨텍스트로 유지할 최근 대화 라운드 수',
       retainRetrievalHistory: '이전 턴의 지식베이스 검색 결과를 유지합니다. 끄면 매 턴 새로 검색합니다',

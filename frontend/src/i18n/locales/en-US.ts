@@ -6150,7 +6150,7 @@ export default {
       maxTokensAgent: 'Maximum tokens generated in each reasoning round, including tool-call JSON. Default is 4096 without a sandbox, or 24576 when a sandbox can write or edit files. A custom value is saved as entered and is not changed later.',
       thinking: 'Enable extended thinking capability (requires model support)',
       conversationSection: 'Configure multi-turn conversation and query rewriting parameters',
-      conversationSectionAgent: 'How much earlier conversation each turn carries. Smart reasoning is always multi-turn',
+      conversationSectionAgent: 'Smart reasoning is always multi-turn. Earlier conversation is kept up to the model context window, and older turns are summarized automatically once it fills',
       multiTurn: 'When enabled, historical conversation context will be preserved',
       historyRounds: 'Number of recent conversation rounds to keep as context',
       retainRetrievalHistory: 'Keep knowledge base results from earlier turns. When off, each turn searches again',

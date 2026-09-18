@@ -8,6 +8,8 @@
 // per round achieving nothing.
 package compaction
 
+import agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
+
 // DefaultReserveTokens is the floor on room kept free for the next response.
 const DefaultReserveTokens = 16384
 
@@ -104,6 +106,35 @@ func (s Settings) summaryBudget() int {
 	}
 	return max(budget, 1024)
 }
+
+// summarizerInputBudget is how much transcript one summarization request can
+// carry: the window less the reply, the previous summary and the prompt's own
+// text, with a tenth held back because the provider counts tokens its own way.
+// Zero means unbounded (no window configured).
+func (s Settings) summarizerInputBudget(
+	estimator *agenttoken.Estimator, previousSummary string, maxTokens int,
+) int {
+	if s.MaxContextTokens <= 0 {
+		return 0
+	}
+	fixed := maxTokens + summarizerPromptTokens(estimator) + estimator.EstimateString(previousSummary)
+	return max((s.MaxContextTokens-fixed)*9/10, 1)
+}
+
+// summarizerPromptTokens is the prompt text that surrounds the transcript:
+// the system prompt and the longest instructions, plus the tags around them.
+func summarizerPromptTokens(estimator *agenttoken.Estimator) int {
+	instructions := max(
+		estimator.EstimateString(initialSummarizationInstructions),
+		estimator.EstimateString(updateSummarizationInstructions),
+		estimator.EstimateString(turnPrefixInstructions),
+	)
+	return estimator.EstimateString(summarizationSystemPrompt) + instructions + summarizerPromptSlack
+}
+
+// summarizerPromptSlack covers the tags and the omission note the prompt adds
+// around the transcript.
+const summarizerPromptSlack = 256
 
 // turnPrefixBudget is the smaller cap for summarizing the discarded prefix of
 // a split turn: it only has to explain the retained suffix, not the session.

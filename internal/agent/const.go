@@ -115,11 +115,15 @@ const contextSafetyTokens = 4096
 // provider. Unset without a sandbox is 4096; unset with a sandbox
 // (write_sandbox_file / edit_sandbox_file) is 24576.
 func (e *AgentEngine) getCompletionTokenBudget() int {
+	return completionTokenBudgetFor(e.config)
+}
+
+func completionTokenBudgetFor(cfg *types.AgentConfig) int {
 	configured := 0
 	sandboxID := ""
-	if e.config != nil {
-		configured = e.config.MaxCompletionTokens
-		sandboxID = e.config.SandboxConfigID
+	if cfg != nil {
+		configured = cfg.MaxCompletionTokens
+		sandboxID = cfg.SandboxConfigID
 	}
 	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
 }
@@ -130,7 +134,30 @@ func (e *AgentEngine) getCompletionTokenBudget() int {
 // emit 24576 tokens needs at least that much free, or the request is accepted
 // and the reply is truncated.
 func (e *AgentEngine) contextReserveTokens() int {
-	return max(e.getCompletionTokenBudget()+contextSafetyTokens, compaction.DefaultReserveTokens)
+	return reserveTokensFor(e.config)
+}
+
+func reserveTokensFor(cfg *types.AgentConfig) int {
+	return max(completionTokenBudgetFor(cfg)+contextSafetyTokens, compaction.DefaultReserveTokens)
+}
+
+// HistoryTokenBudget is how much stored history one run of cfg may load: the
+// whole context window, deliberately more than the compaction threshold.
+//
+// The loader drops the oldest turns that do not fit, and what it drops is
+// lost: it is neither replayed nor summarized. With a budget equal to the
+// threshold the loader always trimmed first, so whenever one turn was larger
+// than the system prompt plus the new question the request never crossed the
+// threshold, nothing was summarized, and the session became a sliding window
+// that never got a checkpoint. Loading up to the window leaves the overflow
+// to the first round's compaction instead, which summarizes it and persists a
+// checkpoint. The compactor bounds its own summarizer input, so a history this
+// large cannot make the summarization request itself overflow.
+func HistoryTokenBudget(cfg *types.AgentConfig) int {
+	if cfg != nil && cfg.MaxContextTokens > 0 {
+		return cfg.MaxContextTokens
+	}
+	return types.DefaultMaxContextTokens
 }
 
 // clampCompletionBudgetToContext shrinks the round's completion budget to what

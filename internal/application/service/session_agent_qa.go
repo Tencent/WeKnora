@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -146,19 +147,20 @@ func (s *sessionService) AgentQA(
 	// AgentSteps on each historical assistant message are expanded into proper
 	// assistant_with_tool_calls + tool messages so the model can see what was
 	// tried last turn — except final_answer, which is replayed as the trailing
-	// canonical assistant message.
+	// canonical assistant message. History is sized by the window, not by a
+	// turn count: compaction and its persisted checkpoints keep it in bounds.
 	var llmContext []chat.Message
 	if agentConfig.MultiTurnEnabled {
-		historyTurns := agentConfig.HistoryTurns
-		if historyTurns <= 0 {
-			historyTurns = 5
-		}
-		llmContext, err = LoadAgentHistory(ctx, s.messageRepo, sessionID, historyTurns)
+		budget := agent.HistoryTokenBudget(agentConfig)
+		llmContext, agentConfig.ContextTokenScale, err = LoadAgentHistory(
+			ctx, s.messageRepo, sessionID, budget, agentConfig.RetainRetrievalHistory,
+		)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to load agent history from DB: %v, continuing without history", err)
 			llmContext = []chat.Message{}
 		}
-		logger.Infof(ctx, "Loaded %d history messages from DB (turns=%d)", len(llmContext), historyTurns)
+		logger.Infof(ctx, "Loaded %d history messages from DB (budget=%d tokens, token scale=%.2f)",
+			len(llmContext), budget, agentConfig.ContextTokenScale)
 	} else {
 		logger.Infof(ctx, "Multi-turn disabled for this agent, running without history")
 		llmContext = []chat.Message{}
@@ -313,7 +315,6 @@ func (s *sessionService) buildAgentConfig(
 		WebSearchMaxResults:         customAgent.Config.WebSearchMaxResults,
 		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
 		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
-		HistoryTurns:                customAgent.Config.HistoryTurns,
 		MemoryEnabled:               customAgent.Config.MemoryEnabled,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
 		MCPServices:                 customAgent.Config.MCPServices,

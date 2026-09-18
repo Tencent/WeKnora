@@ -18994,7 +18994,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "history_turns": {
-                    "description": "Number of history turns to keep in context",
+                    "description": "Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window",
                     "type": "integer"
                 },
                 "image_storage_provider": {
@@ -23015,6 +23015,10 @@ const docTemplate = `{
                 },
                 "completion_tokens": {
                     "type": "integer"
+                },
+                "context_token_scale": {
+                    "description": "ContextTokenScale is provider prompt tokens per cl100k-estimated token,\nmeasured over the turn's rounds. Persisted with the turn so the next\nturn's history loading and first compaction check are calibrated before\nany provider count of their own. Zero when the turn measured none.",
+                    "type": "number"
                 },
                 "prompt_tokens": {
                     "type": "integer"

@@ -101,7 +101,7 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 | 文件 | `supported_file_types`、`chat_parser_engine_rules`、`attachment_image_understanding`、`attachment_ocr_max_pages`、`attachment_parse_wait_timeout_sec` | 数据分析型 Agent 常限定 csv/xlsx |
 | FAQ | `faq_priority_enabled`、`faq_direct_answer_threshold`、`faq_score_boost` | — |
 | Web | `web_search_enabled`、`web_search_max_results`、`web_search_provider_id`、`web_fetch_enabled`、`web_fetch_top_n` | max_results 默认 5 |
-| 多轮 | `multi_turn_enabled`、`history_turns` | history_turns 默认 5；smart-reasoning 强制 multi_turn |
+| 多轮 | `multi_turn_enabled`、`history_turns` | history_turns 默认 5，只约束普通模式（KnowledgeQA）；smart-reasoning 强制 multi_turn，历史按上下文窗口加载，不读 history_turns |
 | 检索 | `embedding_top_k`（10）、`keyword_threshold`（0.3）、`vector_threshold`（0.5）、`rerank_top_k`（5）、`rerank_threshold` | 括号内为默认值 |
 | 高级 | `enable_query_expansion`、`enable_rewrite`、`rewrite_prompt_*`、`query_understand_model_id`、`fallback_strategy`（默认 model）、`fallback_response`、`fallback_prompt`、`intent_prompts`、`data_analysis_enabled` | 主要作用于 quick-answer 管道 |
 | 建议 | `question_suggestions`（starters / follow_ups） | starters 默认 hybrid 模式 6 条；follow_ups 默认关闭、3 条 |
@@ -127,8 +127,8 @@ Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAg
 | ID | 名称（zh-CN） | agent_mode / agent_type | 关键配置 |
 | --- | --- | --- | --- |
 | `builtin-quick-answer` | 快速问答 | `quick-answer` | 模板 `default_kb` + `default_context`；temperature 0.7；FAQ 优先（直接回答阈值 0.9、加权 1.2）；query expansion + rewrite；web 搜索开、5 条；不进 Agent 引擎 |
-| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：search_knowledge、read_document、list_documents、query_knowledge_graph；web 搜索开；多轮 5 轮 |
-| `builtin-data-analyst` | 数据分析师 | `smart-reasoning` / `data-analysis` | 模板 `data_analyst`；temperature 0.3；`max_iterations: 30`；工具仅 data_schema + data_analysis；限定 csv/xlsx；关闭 web 搜索；历史 10 轮 |
+| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：search_knowledge、read_document、list_documents、query_knowledge_graph；web 搜索开；多轮（历史按上下文窗口加载） |
+| `builtin-data-analyst` | 数据分析师 | `smart-reasoning` / `data-analysis` | 模板 `data_analyst`；temperature 0.3；`max_iterations: 30`；工具仅 data_schema + data_analysis；限定 csv/xlsx；关闭 web 搜索；多轮（历史按上下文窗口加载） |
 | `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、read_document、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
 | `builtin-wiki-fixer` | 维基修订 | `smart-reasoning` / `custom` | 模板 `wiki_fixer`；`retain_retrieval_history: true`（修订需要跨轮记住页面内容）；工具含全部 wiki 写操作（wiki_write_page、wiki_replace_text、wiki_rename_page、wiki_delete_page、wiki_read_issue、wiki_update_issue 等 9 个）；`kb_selection_mode: selected` |
 
@@ -507,6 +507,7 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 - 上下文预算：`AgentConfig.MaxContextTokens`，`buildAgentConfig` 未设置时兜底 `types.DefaultMaxContextTokens = 200000`；
 - `token.Estimator`（`internal/agent/token/estimator.go`）用 tiktoken 的 **cl100k_base** 编码估算，常量 `perMessageOverhead = 3`、`perConversationTail = 3`；编码失败时退化为 `len(s)/4` 近似；
 - **权威值优先**：真正的 token 数以模型 API 返回的 `Usage` 为准。引擎的 `estimateCurrentTokens` 用上一轮 API 报告的 `lastUsage.TotalTokens` 作基线，只对新增消息（assistant 回复 + tool 结果）做 BPE 增量估算；首轮无 Usage 时才全量估算。
+- **估算校准**：cl100k 不是各家模型的分词器，中文在 cl100k 下约每字 1 token，而 Qwen、DeepSeek 约 0.6，英文与 JSON 则基本一致。估算器因此带一个校准系数（`Estimator.SetScale`，限制在 0.5–1.5），只作用于文本，每条消息的固定开销和图片的固定估值不乘。系数由引擎在同一轮对话的相邻两次请求之间测量：两次请求的工具定义、system prompt 和已有消息都相同，模型报告的 prompt token 增量只对应新追加的消息（上一次回复、工具结果、追加消息），用它除以这些消息的估算即得对话内容的系数，不受各家渲染工具定义方式的影响。中间发生过压缩或工具结果裁剪、样本含图片、比值不可信（< 0.3 或 > 3）、或累计样本不足 256 估算 token 时不计入。测得的系数随本轮 usage 存为 `context_token_scale`；下一轮 `LoadAgentHistory` 取最近一条带系数的消息，按它给历史计价并把系数交给引擎作为起点。加载器、首轮压缩判断和压缩器（保留原文预算、摘要输入上限）共用同一个估算器，因此同一把尺子：只校准压缩判断而不校准加载会让加载器先丢轮次，这一点由 `agent_history_cadence_test.go` 覆盖。首轮压缩判断仍只计消息、不计工具定义。
 
 #### 上下文压缩与溢出恢复 {#_4-2-上下文压缩与溢出恢复}
 
@@ -516,11 +517,13 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 旧摘要参与更新，较老历史生成结构化摘要；结果以带标记的 user 消息放在 system 与保留尾部之间。摘要预算由 reserve、模型输出上限和保留预算计算，不再固定为 2000。每次摘要最多尝试 2 次，每次 60 秒；失败时回退原始文本归档，并标记 degraded。
 
+**摘要输入上限**。历史可以装到整个窗口，待摘要部分可能超出单次摘要请求能容纳的量。请求超窗会被拒绝并退化成原始归档，而退化结果不写压缩点，下一轮会原样再失败一次。因此 `Prepare` 只保留能装进一次请求的最新消息（窗口减去回复预算、上一次摘要和提示词，再留 10% 余量），并在提示里注明省略了多少条较早的消息；文件路径仍从全部待摘要消息中提取。省略条数记在 `Result.Omitted`，引擎日志里可见。
+
 `internal/agent/compaction/fileops.go` 机械提取被压缩消息中的文件读写路径，并继承旧摘要的文件清单，避免模型忘记已经落盘的产物。普通读取使用 read_file，历史旧读取名仍可兼容识别。
 
 若压缩后仍超预算，最后才裁短工具结果，工具结果预算取窗口的 20%，限制在 8192–32768 Token。没有可压缩内容或释放空间不足 5% 时，记下当前消息数量，避免在同一上下文大小反复花费模型调用。成功压缩会清除旧 usage 基线，并发出 context_compacted 事件，包含前后 Token/消息数、原因、split_turn 与 degraded。
 
-**压缩点持久化**。当摘要的历史部分恰好结束在某个已落库轮次的末尾时，引擎把这段摘要作为压缩点（`messages.context_checkpoint`）写回该轮的 assistant 消息，下一轮直接从它开始，不再对同一段历史重复摘要。历史消息在重建时带上所属轮次的 assistant 消息 ID（`chat.Message.TurnID`，不上线），据此判断切点是否落在轮次边界。以下情况不写压缩点：切点落在某个已落库轮次内部（例如停在追加消息处）；摘要只覆盖当前轮；历史摘要回退成了原始归档（degraded）。切分轮前半段的摘要不写入压缩点，因为该轮下次会被完整重放。写入只更新这一列，失败时仅记日志，不影响本轮。压缩点存在被覆盖的那一轮上，所以会话分叉复制该轮时会一起复制，删除该轮时压缩点也随之失效。
+**压缩点持久化**。当摘要的历史部分恰好结束在某个已落库轮次的末尾时，引擎把这段摘要作为压缩点（`messages.context_checkpoint`）写回该轮的 assistant 消息，下一轮直接从它开始，不再对同一段历史重复摘要。历史消息在重建时带上所属轮次的 assistant 消息 ID（`chat.Message.TurnID`，不上线），据此判断切点是否落在轮次边界。以下情况不写压缩点：切点落在某个已落库轮次内部（例如停在追加消息处）；摘要只覆盖当前轮；历史摘要回退成了原始归档（degraded）。切分轮前半段的摘要不写入压缩点，因为该轮下次会被完整重放。压缩因释放不足 5% 被放弃时，本轮上下文保持不变，但只要历史部分给出了压缩点，照样写入，避免下一轮重复摘要同一段历史。写入只更新这一列，未匹配到该会话的 assistant 行时视为失败；失败时仅记日志，不影响本轮。按会话取最新压缩点的查询由部分索引 `idx_messages_session_context_checkpoint` 支撑。压缩点存在被覆盖的那一轮上，所以会话分叉复制该轮时会一起复制，删除该轮时压缩点也随之失效。
 
 提供商报告上下文超限（错误或响应截断判据）时，还可强制压缩并重试一次。仅因生成耗尽 completion 预算的截断不应误判成上下文超限。具体提供商错误识别见 `internal/agent/compaction/overflow.go`。
 
@@ -528,9 +531,10 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 跨轮历史由 `LoadAgentHistory`（`internal/application/service/agent_history.go`）每轮从 messages 表重建（DB 是唯一事实来源，无 Redis/内存缓存）：
 
-- 取 `HistoryTurns × 4`（最低 50）条原始消息，按 `RequestID` 配对 user/assistant，只保留 assistant 已完成（`IsCompleted`）的完整轮，按时间排序；
-- 会话中存在压缩点（见[上下文压缩与溢出恢复](#_4-2-上下文压缩与溢出恢复)）时，取最新的一个：它所在的轮及更早的轮由一条摘要消息代替，放在历史最前面，之后的轮原样重放。压缩点早于本次读取范围时按时间判断，读到的轮都在它之后。压缩点查询失败时退回无压缩点的历史；
-- 再取最近 `HistoryTurns` 轮。这个上限只约束压缩点之后原样重放的轮，不包括摘要；
+- 历史按 Token 预算加载，不按轮数，`history_turns` 在 Agent 模式下不生效。预算是整个上下文窗口（`agent.HistoryTokenBudget`），刻意大于压缩阈值：加载器放不下的轮既不重放也不进摘要，等于丢失；若预算只到阈值，加载器会先裁掉旧轮，请求可能再也越不过阈值，压缩与压缩点都不会发生，会话退化成滑动窗口。预算到窗口时，超出阈值的部分交给首轮压缩摘要并写入压缩点，下一轮从新压缩点开始，历史随之回落；会话再次填满时才再压缩（`agent_history_cadence_test.go` 逐轮模拟验证：压缩点之后的轮不会缺失，压缩不会连续两轮发生）；
+- 会话中存在压缩点（见[上下文压缩与溢出恢复](#_4-2-上下文压缩与溢出恢复)）时，取最新的一个：它所在的轮及更早的轮由一条摘要消息代替，放在历史最前面，之后的轮原样重放。压缩点所在轮未被读到时（预算先装满），按 assistant 行的 `(created_at, id)` 顺序判断哪些轮在它之后。压缩点查询失败时退回无压缩点的历史；
+- 按 `(created_at, id)` 从新到旧分页读取（每页 200 行，单次最多 5000 行），按 `RequestID` 配对 user/assistant，只保留 assistant 已完成（`IsCompleted`）的完整轮。读到压缩点或预算装满即停止，长会话不会整段读出。读取未到会话开头且最旧一行不是 user 消息时，该行所在的轮缺少原始问题，会被舍弃；
+- 从最新的轮往前放入预算，遇到第一个放不下的轮即停止，保证保留的轮连续。最新一轮即使单独超出预算也会保留，由压缩负责切分。每轮按引擎实际发送的内容计价（`agent.HistoryAsSent`）：未开启 `RetainRetrievalHistory` 时，历史中的 KB/Wiki 结果只以一行占位发送，也只按一行计入预算；
 - 每轮展开为：user 消息（含图片 caption 与附件 prompt；忽略 `RenderedContent` 快照，避免将旧渲染协议带入上下文）→ 每个含工具调用的 `AgentStep` 展开为 assistant(with tool_calls) + 若干 tool 消息 → 末尾一条规范化最终答案 assistant 消息（剥离 `<think>` 块）；
 - 历史中的 tool 消息内容用 `CompactToolOutputForHistory`（`internal/agent/tools/persist.go`）压缩：带 `display_type` 的大载荷（如 `knowledge_chunks_list` 的 chunks、`grep_results` 的 chunk_results）替换为一行摘要（如 `"Listed 20/87 chunks from X (content omitted from history)"`）。
 

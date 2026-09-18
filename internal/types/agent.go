@@ -120,7 +120,6 @@ type AgentConfig struct {
 	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
 	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
 	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
-	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
 	MemoryEnabled           *bool         `json:"memory_enabled,omitempty"`             // nil inherits workspace
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
 	// MCP service selection
@@ -185,6 +184,12 @@ type AgentConfig struct {
 	// Maximum context window tokens for the agent. Zero means "use the
 	// model's context_window, or DefaultMaxContextTokens (200000)".
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
+
+	// ContextTokenScale is the provider's tokens per estimated token that the
+	// session's last calibrated turn measured (TokenUsage.ContextTokenScale).
+	// The engine starts its estimator at this scale. Zero means uncalibrated.
+	// Runtime only.
+	ContextTokenScale float64 `json:"-"`
 
 	// How much recent conversation a compaction keeps verbatim. Zero means
 	// compaction.DefaultKeepRecentTokens, scaled down on small windows. This

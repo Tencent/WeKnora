@@ -21,6 +21,8 @@ package token
 
 import (
 	"fmt"
+	"math"
+	"sync/atomic"
 
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/tiktoken-go/tokenizer"
@@ -39,20 +41,64 @@ const (
 	estimatedImageTokens = 1200
 )
 
+// Scale bounds. cl100k counts Chinese at about one token a character, where
+// Qwen and DeepSeek spend about 0.6, so a scale near the floor is expected for
+// Chinese sessions on those models. Anything outside the bounds says more
+// about a provider's usage report than about its tokenizer.
+const (
+	MinScale = 0.5
+	MaxScale = 1.5
+)
+
 // Estimator counts tokens for messages and strings using BPE tokenization.
 // It is intended for incremental (delta) estimation between LLM calls; the
 // authoritative token count comes from the API's Usage response.
+//
+// cl100k is not the provider's tokenizer, so text counts are multiplied by a
+// scale learned from the provider's own counts (see SetScale). Every budget an
+// estimate is compared with is in provider tokens, so one scaled estimator
+// keeps them all consistent: history loading, the compaction trigger, and
+// compaction's own cut point and summarizer budget.
 type Estimator struct {
 	codec tokenizer.Codec
+	// scale holds float64 bits. The engine recalibrates between rounds, which
+	// must not race an estimate a tool is still taking.
+	scale atomic.Uint64
 }
 
-// NewEstimator creates a token estimator using the cl100k_base encoding.
+// NewEstimator creates a token estimator using the cl100k_base encoding, at
+// scale 1.
 func NewEstimator() (*Estimator, error) {
 	codec, err := tokenizer.Get(tokenizer.Cl100kBase)
 	if err != nil {
 		return nil, fmt.Errorf("token: failed to initialize tokenizer: %w", err)
 	}
-	return &Estimator{codec: codec}, nil
+	e := &Estimator{codec: codec}
+	e.SetScale(1)
+	return e, nil
+}
+
+// Scale is the factor text counts are multiplied by.
+func (e *Estimator) Scale() float64 {
+	return math.Float64frombits(e.scale.Load())
+}
+
+// SetScale sets the factor text counts are multiplied by, clamped to
+// [MinScale, MaxScale]. A non-positive scale means uncalibrated, which is 1.
+func (e *Estimator) SetScale(scale float64) {
+	if scale <= 0 || math.IsNaN(scale) {
+		scale = 1
+	}
+	scale = min(max(scale, MinScale), MaxScale)
+	e.scale.Store(math.Float64bits(scale))
+}
+
+// Unscaled returns an estimator with the same tokenizer at scale 1, for
+// measuring the raw count a scale is derived from.
+func (e *Estimator) Unscaled() *Estimator {
+	u := &Estimator{codec: e.codec}
+	u.SetScale(1)
+	return u
 }
 
 // EstimateMessages returns the estimated token count for a slice of messages.
@@ -71,11 +117,14 @@ func (e *Estimator) EstimateString(s string) int {
 	if len(s) == 0 {
 		return 0
 	}
-	ids, _, err := e.codec.Encode(s)
-	if err != nil {
-		return (len(s) + 3) / 4
+	count := (len(s) + 3) / 4
+	if ids, _, err := e.codec.Encode(s); err == nil {
+		count = len(ids)
 	}
-	return len(ids)
+	if scale := e.Scale(); scale != 1 {
+		return int(math.Round(float64(count) * scale))
+	}
+	return count
 }
 
 // EstimateMessage returns the token count for a single message.

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -159,6 +160,27 @@ func (r *messageRepository) ListMessagesBySessionAfterCursor(ctx context.Context
 		query = query.Where("created_at > ? OR (created_at = ? AND id > ?)", cursor.At, cursor.At, cursor.ID)
 	}
 	if err := query.Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
+// ListMessagesBySessionBeforeCursor pages a session backwards: up to limit
+// messages sorting strictly before the (before, beforeID) cursor, newest first.
+// A zero cursor starts from the newest message. The ID tie-breaker keeps a page
+// boundary from skipping messages that share a timestamp.
+func (r *messageRepository) ListMessagesBySessionBeforeCursor(
+	ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
+	if !before.IsZero() || beforeID != "" {
+		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", before, before, beforeID)
+	}
+	if err := query.Order("created_at DESC, id DESC").Limit(limit).Find(&messages).Error; err != nil {
 		return nil, err
 	}
 	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
@@ -407,26 +429,37 @@ func (r *messageRepository) UpdateMessageRenderedContent(ctx context.Context, se
 }
 
 // UpdateMessageContextCheckpoint updates only the context_checkpoint column, so
-// it cannot race a full-row write of the same message.
+// it cannot race a full-row write of the same message. A write that matches no
+// row (the turn was deleted, or the ID is not this session's assistant
+// message) is an error rather than a silent success.
 func (r *messageRepository) UpdateMessageContextCheckpoint(
 	ctx context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
 ) error {
-	return r.db.WithContext(ctx).
+	result := r.db.WithContext(ctx).
 		Model(&types.Message{}).
-		Where("id = ? AND session_id = ? AND role = ?", messageID, sessionID, "assistant").
-		Update("context_checkpoint", checkpoint).Error
+		Where("id = ? AND session_id = ? AND role = 'assistant'", messageID, sessionID).
+		Update("context_checkpoint", checkpoint)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no assistant message %s in session %s", messageID, sessionID)
+	}
+	return nil
 }
 
 // GetLatestContextCheckpoint returns the newest checkpointed assistant message.
 // Only the identity and ordering columns come back with the checkpoint: the
-// caller matches it against turns it has already loaded.
+// caller matches it against turns it has already loaded. The role is a literal
+// so the query matches the partial index idx_messages_session_context_checkpoint
+// even as a prepared statement.
 func (r *messageRepository) GetLatestContextCheckpoint(
 	ctx context.Context, sessionID string,
 ) (*types.Message, error) {
 	var messages []*types.Message
 	if err := r.db.WithContext(ctx).
 		Select("id", "session_id", "request_id", "role", "created_at", "context_checkpoint").
-		Where("session_id = ? AND role = ? AND context_checkpoint IS NOT NULL", sessionID, "assistant").
+		Where("session_id = ? AND role = 'assistant' AND context_checkpoint IS NOT NULL", sessionID).
 		Order("created_at DESC, id DESC").
 		Limit(1).
 		Find(&messages).Error; err != nil {

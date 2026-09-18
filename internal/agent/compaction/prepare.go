@@ -32,7 +32,14 @@ type Preparation struct {
 	// than summarized again.
 	PreviousSummary string
 	TokensBefore    int
-	fileOps         fileOps
+	// OmittedHistory and OmittedTurnPrefix count the oldest messages of each
+	// range left out because one summarization request could not carry them
+	// (see fitSummarizerInput). Their file paths are still recorded.
+	OmittedHistory    int
+	OmittedTurnPrefix int
+	fileOps           fileOps
+	// historyFileOps is fileOps without the turn prefix, for the checkpoint.
+	historyFileOps fileOps
 	// storedTurnID is the stored turn MessagesToSummarize ends exactly on, or
 	// "" when it ends inside a turn or reaches into the live one.
 	storedTurnID string
@@ -84,16 +91,46 @@ func Prepare(messages []chat.Message, s Settings, estimator *agenttoken.Estimato
 		return nil
 	}
 
-	return &Preparation{
-		FirstKeptIdx:        cut.FirstKeptIdx,
-		MessagesToSummarize: toSummarize,
-		TurnPrefixMessages:  turnPrefix,
-		IsSplitTurn:         cut.IsSplitTurn,
-		PreviousSummary:     previousSummary,
-		TokensBefore:        estimator.EstimateMessages(messages),
-		fileOps:             extractFileOps(previousSummary, toSummarize, turnPrefix),
-		storedTurnID:        storedTurnEndingAt(messages, historyEnd),
+	p := &Preparation{
+		FirstKeptIdx:    cut.FirstKeptIdx,
+		IsSplitTurn:     cut.IsSplitTurn,
+		PreviousSummary: previousSummary,
+		TokensBefore:    estimator.EstimateMessages(messages),
+		fileOps:         extractFileOps(previousSummary, toSummarize, turnPrefix),
+		historyFileOps:  extractFileOps(previousSummary, toSummarize),
+		storedTurnID:    storedTurnEndingAt(messages, historyEnd),
 	}
+	p.MessagesToSummarize, p.OmittedHistory = fitSummarizerInput(
+		toSummarize, s.summarizerInputBudget(estimator, previousSummary, s.summaryBudget()), estimator)
+	p.TurnPrefixMessages, p.OmittedTurnPrefix = fitSummarizerInput(
+		turnPrefix, s.summarizerInputBudget(estimator, "", s.turnPrefixBudget()), estimator)
+	return p
+}
+
+// fitSummarizerInput keeps the newest messages whose transcript fits budget
+// and reports how many older ones it left out. The newest message is kept
+// regardless; transcripts truncate each message, so one alone never matters.
+//
+// History can reach the whole window by design (the loader leaves overflow to
+// compaction), so the part being summarized can be larger than one request
+// can carry. An overflowing request is rejected, the summary degrades to a raw
+// archive, and a degraded summary is never persisted, so the next turn would
+// load the same history and fail the same way. Leaving the oldest messages out
+// breaks that loop; the prompt says so rather than hiding it.
+func fitSummarizerInput(
+	messages []chat.Message, budget int, estimator *agenttoken.Estimator,
+) ([]chat.Message, int) {
+	if budget <= 0 {
+		return messages, 0
+	}
+	used := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		used += estimator.EstimateString(serializeConversation(messages[i : i+1]))
+		if used > budget && i < len(messages)-1 {
+			return messages[i+1:], i + 1
+		}
+	}
+	return messages, 0
 }
 
 // checkpoint returns the history summary as a Checkpoint when it ends exactly
@@ -105,8 +142,7 @@ func (p *Preparation) checkpoint(history string, degraded bool) *Checkpoint {
 	if p.storedTurnID == "" || len(p.MessagesToSummarize) == 0 || degraded {
 		return nil
 	}
-	ops := extractFileOps(p.PreviousSummary, p.MessagesToSummarize)
-	return &Checkpoint{TurnID: p.storedTurnID, Summary: history + ops.format()}
+	return &Checkpoint{TurnID: p.storedTurnID, Summary: history + p.historyFileOps.format()}
 }
 
 // storedTurnEndingAt returns the stored turn that ends immediately before end,

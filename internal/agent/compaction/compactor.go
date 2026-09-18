@@ -62,6 +62,9 @@ type Result struct {
 	// Checkpoint is the part of this compaction a later turn can start from,
 	// or nil when there is none (see Preparation.checkpoint).
 	Checkpoint *Checkpoint
+	// Omitted counts the oldest messages left out of the summarization
+	// requests because they did not fit (see fitSummarizerInput).
+	Omitted int
 }
 
 // Checkpoint is a summary that ends exactly on a stored turn. Persisted onto
@@ -132,6 +135,7 @@ func (c *Compactor) Compact(
 		Degraded:       historyDegraded || prefixDegraded,
 		SplitTurn:      prep.IsSplitTurn,
 		Checkpoint:     prep.checkpoint(history, historyDegraded),
+		Omitted:        prep.OmittedHistory + prep.OmittedTurnPrefix,
 	}, nil
 }
 
@@ -146,7 +150,7 @@ func (c *Compactor) summarizeHistory(ctx context.Context, p *Preparation) (strin
 		instructions = updateSummarizationInstructions
 	}
 	text, err := c.summarize(
-		ctx, p.MessagesToSummarize, p.PreviousSummary, instructions, c.settings.summaryBudget(),
+		ctx, p.MessagesToSummarize, p.OmittedHistory, p.PreviousSummary, instructions, c.settings.summaryBudget(),
 	)
 	if err != nil {
 		// The previous summary is still the best record of everything
@@ -165,7 +169,7 @@ func (c *Compactor) appendTurnPrefix(ctx context.Context, p *Preparation, histor
 	}
 	degraded := false
 	prefix, err := c.summarize(
-		ctx, p.TurnPrefixMessages, "", turnPrefixInstructions, c.settings.turnPrefixBudget(),
+		ctx, p.TurnPrefixMessages, p.OmittedTurnPrefix, "", turnPrefixInstructions, c.settings.turnPrefixBudget(),
 	)
 	if err != nil {
 		degraded = true
@@ -181,10 +185,11 @@ func (c *Compactor) appendTurnPrefix(ctx context.Context, p *Preparation, histor
 func (c *Compactor) summarize(
 	ctx context.Context,
 	messages []chat.Message,
+	omitted int,
 	previousSummary, instructions string,
 	maxTokens int,
 ) (string, error) {
-	prompt := buildSummarizationPrompt(messages, previousSummary, instructions)
+	prompt := buildSummarizationPrompt(messages, omitted, previousSummary, instructions)
 	var lastErr error
 
 	for attempt := 1; attempt <= maxSummarizationAttempts; attempt++ {
@@ -235,9 +240,13 @@ func validateSummary(resp *types.ChatResponse) error {
 // buildSummarizationPrompt wraps the transcript in a tag and puts the
 // instructions last, so the summarizer cannot mistake conversation text for
 // its own instructions.
-func buildSummarizationPrompt(messages []chat.Message, previousSummary, instructions string) string {
+func buildSummarizationPrompt(messages []chat.Message, omitted int, previousSummary, instructions string) string {
 	var sb strings.Builder
 	sb.WriteString("<conversation>\n")
+	if omitted > 0 {
+		fmt.Fprintf(&sb, "[%d earlier messages are not shown: they did not fit in one summarization "+
+			"request, and no previous summary covers them. Do not guess at what they said.]\n\n", omitted)
+	}
 	sb.WriteString(serializeConversation(messages))
 	sb.WriteString("\n</conversation>\n\n")
 	if previousSummary != "" {
