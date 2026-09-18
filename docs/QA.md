@@ -172,6 +172,23 @@ docker compose restart app
 
 列入白名单的地址会在 URL 校验等处绕过常规 SSRF 规则，**生产环境请谨慎配置**，仅加入确实需要且可信的目标。
 
+### 仅允许白名单出站（`SSRF_DNS_WHITELIST_ONLY`）
+
+默认关闭。设为 `true` 时，白名单就是全部出站策略：不在白名单里的主机在发起 **DNS 查询之前**即被拒绝（URL 校验处连 IP 直连一并拒绝），域名只按名字匹配，不再通过解析结果匹配 CIDR。取值按布尔解析（`1/t/true` 开、`0/f/false` 关）；**非空且无法解析为布尔的值按「开」处理**，避免把 `yes` 这类写法静默当成关闭。适合私有化 / 离线部署。
+
+开启前需要把所有出站地址加入 `SSRF_WHITELIST` 或 `SSRF_WHITELIST_EXTRA`。注意 compose 里那份默认 `SSRF_WHITELIST_EXTRA`（`searxng,qdrant,milvus,weaviate,doris-fe,doris-be,minio`）**只给了 app 服务，docreader 的同名变量默认是空的**；docreader 也要访问这些主机时，请写进两个服务共用的 `SSRF_WHITELIST`。此外通常还要补上：
+
+- 模型服务地址（chat / embedding / rerank / VLM / ASR，含本机 Ollama 的 `localhost`）
+- OIDC 登录的 `dex`（或你的 IdP 域名）、MCP 服务地址、`docreader`
+- 对象存储（外部 S3/COS/OSS 等）、外部向量库、Langfuse 地址
+- 沙箱控制面地址：开启后 `AllowPrivate`（允许私网端点）不再能绕过白名单
+
+未覆盖的出站路径，按影响排序：
+
+1. **gRPC 向量库的运行时解析**：qdrant / milvus 客户端由 gRPC 自己的 resolver 解析 target，之后拨号器拿到的已是地址。因此这类主机是在**建客户端之前按名字**判断的（env 配置在启动时判断，控制台里保存的配置走 URL 校验），而不是每次连接前；白名单内的主机仍会被 gRPC 正常解析。
+2. **Langfuse 的 OTLP 导出器**自带 HTTP 客户端，完全不走本机制（`LANGFUSE_HOST` 默认是 SaaS 地址，离线部署请关掉追踪或改成内网地址）。
+3. **HTTP(S)_PROXY**：拨号器对代理主机放行的判断是「拨号地址与代理 URL 的 host 完全相等」。相等时，代理主机即使不在白名单也会被解析和连接；不相等时（例如代理 URL 没写端口），代理主机会被当成非白名单直接拒掉。离线部署请 unset 代理，或把代理主机一并写进白名单。
+
 示例（与 `.env.example` 一致，可按需取消注释并修改）：
 
 ```bash
