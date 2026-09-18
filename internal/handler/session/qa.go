@@ -219,6 +219,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		}
 	}
 
+	// A per-request model override resolves in the workspace the run executes
+	// in. For a shared agent, or the wiki fixer moved into a shared KB's
+	// workspace, that is the owner's, where it could select any of the owner's
+	// models; it would also be stored as the message's model for follow-ups.
+	if effectiveTenantID != 0 && effectiveTenantID != c.GetUint64(types.TenantIDContextKey.String()) {
+		request.SummaryModelID = ""
+	}
+
 	if request.LocalBrowserEnabled && (customAgent == nil || !customAgent.IsAgentMode()) {
 		return nil, nil, errors.NewBadRequestError("Local browser requires an agent with tool calling enabled")
 	}
@@ -1695,6 +1703,27 @@ func (h *Handler) completeQuickAnswerTurn(
 	h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
 }
 
+// sessionTenantInfoContext makes the tenant info match the session owner (the
+// context's tenant here). The chat history KB is read from the tenant info,
+// and a shared agent's run carries the agent workspace's: the receiver's
+// conversation would be indexed into the owner's chat history KB. When the
+// session tenant cannot be loaded the message is not indexed at all.
+func (h *Handler) sessionTenantInfoContext(ctx context.Context) (context.Context, bool) {
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	if info, ok := types.TenantInfoFromContext(ctx); ok && info != nil && info.ID == tenantID {
+		return ctx, true
+	}
+	if tenantID == 0 || h.tenantService == nil {
+		return ctx, false
+	}
+	tenant, err := h.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil || tenant == nil {
+		logger.Warnf(ctx, "Skipping chat history index: session tenant %d unavailable: %v", tenantID, err)
+		return ctx, false
+	}
+	return context.WithValue(ctx, types.TenantInfoContextKey, tenant), true
+}
+
 // completeAssistantMessage marks an assistant message as complete, updates it,
 // and asynchronously indexes the Q&A pair into the chat history knowledge base.
 func (h *Handler) completeAssistantMessage(
@@ -1707,7 +1736,10 @@ func (h *Handler) completeAssistantMessage(
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
 	bgCtx := context.WithoutCancel(ctx)
-	go h.messageService.IndexMessageToKB(bgCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+	if indexCtx, ok := h.sessionTenantInfoContext(bgCtx); ok {
+		go h.messageService.IndexMessageToKB(
+			indexCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+	}
 	if userQuery != "" && h.suggestionService != nil {
 		go func() {
 			if _, err := h.suggestionService.EnsureFollowUps(

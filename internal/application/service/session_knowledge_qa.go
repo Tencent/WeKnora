@@ -25,12 +25,13 @@ func (s *sessionService) KnowledgeQA(
 	req *types.QARequest,
 	eventBus *event.EventBus,
 ) error {
+	webSearchEnabled := resolveWebSearchEnabled(req)
 	logger.Infof(
 		ctx,
 		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
 		req.Session.ID,
 		req.Query,
-		req.WebSearchEnabled,
+		webSearchEnabled,
 	)
 
 	// Span the request setup (KB / model resolution, search target building,
@@ -125,7 +126,7 @@ func (s *sessionService) KnowledgeQA(
 			EnableQueryExpansion:    s.cfg.Conversation.EnableQueryExpansion,
 			RewritePromptSystem:     s.cfg.Conversation.RewritePromptSystem,
 			RewritePromptUser:       s.cfg.Conversation.RewritePromptUser,
-			WebSearchEnabled:        req.WebSearchEnabled,
+			WebSearchEnabled:        webSearchEnabled,
 			WebSearchProviderID:     s.resolveWebSearchProviderID(ctx, req, retrievalTenantID),
 			WebSearchMaxResults:     s.resolveWebSearchMaxResults(ctx, req),
 			WebFetchEnabled:         s.resolveWebFetchEnabled(req),
@@ -165,7 +166,7 @@ func (s *sessionService) KnowledgeQA(
 	// empty but produce SearchTargets, so the unified targets must participate in
 	// this decision or the request is incorrectly downgraded to pure chat.
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
-	needsRAG := hasKB || req.WebSearchEnabled
+	needsRAG := hasKB || webSearchEnabled
 	hasHistory := chatManage.MaxRounds > 0
 
 	var pipeline []types.EventType
@@ -197,7 +198,7 @@ func (s *sessionService) KnowledgeQA(
 			Add(types.QUERY_UNDERSTAND).
 			Add(types.CHUNK_SEARCH_PARALLEL).
 			Add(types.CHUNK_RERANK).
-			AddIf(req.WebSearchEnabled, types.WEB_FETCH).
+			AddIf(webSearchEnabled, types.WEB_FETCH).
 			Add(types.CHUNK_MERGE).
 			Add(types.FILTER_TOP_K).
 			AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
@@ -207,7 +208,7 @@ func (s *sessionService) KnowledgeQA(
 	}
 
 	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, webSearch=%v, history=%v",
-		len(pipeline), hasKB, req.WebSearchEnabled, hasHistory)
+		len(pipeline), hasKB, webSearchEnabled, hasHistory)
 
 	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
@@ -1262,6 +1263,17 @@ func (s *sessionService) resolveWebSearchProviderID(ctx context.Context, req *ty
 		}
 	}
 	return ""
+}
+
+// resolveWebSearchEnabled combines the request switch with the agent's own
+// setting, as agent mode does: the switch only opts a turn in, so a client
+// cannot turn on a search (and spend the agent workspace's provider quota)
+// that the agent disables. Requests without an agent keep the switch.
+func resolveWebSearchEnabled(req *types.QARequest) bool {
+	if req.CustomAgent != nil {
+		return req.CustomAgent.Config.WebSearchEnabled && req.WebSearchEnabled
+	}
+	return req.WebSearchEnabled
 }
 
 // resolveWebFetchEnabled returns whether auto web fetch is enabled for this request.

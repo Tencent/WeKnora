@@ -21,6 +21,8 @@
         </div>
       </div>
       <p class="share-panel-desc">{{ $t('organization.share.agentShareDesc') }}</p>
+      <t-alert v-if="sharesSkillSecrets" theme="warning" class="share-panel-alert"
+        :message="$t('agent.shareScope.skillSecretsWarning')" />
     </div>
 
     <div class="share-panel-list-wrap">
@@ -141,6 +143,16 @@ interface Props {
 }
 
 const props = defineProps<Props>()
+
+// Members run this agent's skills in this workspace's sandbox, with the
+// environment values its admins configured for them, and can have the model
+// print those values. Sharing stays allowed; the owner is told before sharing.
+const sharesSkillSecrets = computed(() => {
+  const config = props.agent?.config
+  if (!config?.sandbox_config_id) return false
+  return config.skills_selection_mode === 'all'
+    || (config.skills_selection_mode === 'selected' && (config.selected_skills?.length ?? 0) > 0)
+})
 
 const shareHintPopupInnerStyle = {
   boxSizing: 'border-box' as const,

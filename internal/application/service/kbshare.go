@@ -488,6 +488,14 @@ func (s *kbShareService) CheckTenantKBPermission(ctx context.Context, kbID strin
 	isShared := false
 
 	for _, share := range shares {
+		// A share lapses with its organization and with its source tenant's
+		// membership (see kbShareSourceMemberJoin).
+		if share.Organization == nil {
+			continue
+		}
+		if _, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, share.SourceTenantID); err != nil {
+			continue
+		}
 		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, callerTenantID)
 		if err != nil {
 			continue

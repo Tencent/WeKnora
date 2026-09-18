@@ -140,7 +140,7 @@ curl -X DELETE $BASE/api/v1/organizations/org-1 -H "Authorization: Bearer $TOKEN
 
 ### POST /api/v1/organizations/:id/leave
 
-用途：本空间退出组织。权限：Admin+。无请求体。
+用途：本空间退出组织。权限：Admin+。无请求体。本空间分享进该组织的知识库和 Agent 会被一并撤销。
 
 响应：200 `{"success":true,"message":"Left organization successfully"}`
 
@@ -238,7 +238,7 @@ curl -X PUT $BASE/api/v1/organizations/org-1/members/2 -H "Authorization: Bearer
 
 ### DELETE /api/v1/organizations/:id/members/:tenant_id
 
-用途：移除成员空间（含自移除）。权限：Admin+。
+用途：移除成员空间（含自移除）。权限：Admin+。被移除空间分享进该组织的知识库和 Agent 会被一并撤销。
 
 响应：200 `{"success":true,"message":"Member removed successfully"}`
 
@@ -378,7 +378,7 @@ API key：仅 full-access。Handler: `internal/handler/organization.go`
 
 ### POST /api/v1/agents/:id/shares
 
-用途：把 Agent 分享到组织。权限：Agent 创建者 OR Admin+。请求体同 KB 分享（`organization_id` + `permission`，必填）。内置智能体不能分享（400）：每个空间都有同 ID 的内置智能体，分享后接收方无法区分。
+用途：把 Agent 分享到组织。权限：Agent 创建者 OR Admin+。请求体同 KB 分享（`organization_id` + `permission`，必填）。内置智能体不能分享（400）：每个空间都有同 ID 的内置智能体，分享后接收方无法区分。Agent 的知识库范围会开放给组织成员，因此调用者必须有权直接分享其中每个知识库（知识库创建者或 Admin+），`kb_selection_mode: all` 只有 Admin+ 可以分享，否则 403。
 
 响应：201 `{"success":true,"data":{AgentShare}}`
 

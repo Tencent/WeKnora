@@ -149,6 +149,9 @@ type KBShareRepository interface {
 	DeleteByKnowledgeBaseID(ctx context.Context, kbID string) error
 	// DeleteByOrganizationID soft-deletes all shares for an organization (e.g. when the org is deleted)
 	DeleteByOrganizationID(ctx context.Context, orgID string) error
+	// DeleteByOrganizationAndSourceTenant soft-deletes the shares a tenant made
+	// into an organization (e.g. when the tenant leaves or is removed)
+	DeleteByOrganizationAndSourceTenant(ctx context.Context, orgID string, sourceTenantID uint64) error
 
 	// List
 	ListByKnowledgeBase(ctx context.Context, kbID string) ([]*types.KnowledgeBaseShare, error)
@@ -201,6 +204,7 @@ type AgentShareRepository interface {
 	Delete(ctx context.Context, id string) error
 	DeleteByAgentIDAndSourceTenant(ctx context.Context, agentID string, sourceTenantID uint64) error
 	DeleteByOrganizationID(ctx context.Context, orgID string) error
+	DeleteByOrganizationAndSourceTenant(ctx context.Context, orgID string, sourceTenantID uint64) error
 	ListByAgent(ctx context.Context, agentID string) ([]*types.AgentShare, error)
 	ListByOrganization(ctx context.Context, orgID string) ([]*types.AgentShare, error)
 	ListByOrganizations(ctx context.Context, orgIDs []string) ([]*types.AgentShare, error)

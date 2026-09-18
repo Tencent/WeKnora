@@ -43,6 +43,7 @@ type customAgentService struct {
 	wikiPageRepo   interfaces.WikiPageRepository
 	tagRepo        interfaces.KnowledgeTagRepository
 	knowledgeRepo  interfaces.KnowledgeRepository
+	agentShareRepo interfaces.AgentShareRepository
 }
 
 // NewCustomAgentService creates a new custom agent service
@@ -54,6 +55,7 @@ func NewCustomAgentService(
 	wikiPageRepo interfaces.WikiPageRepository,
 	tagRepo interfaces.KnowledgeTagRepository,
 	knowledgeRepo interfaces.KnowledgeRepository,
+	agentShareRepo interfaces.AgentShareRepository,
 ) interfaces.CustomAgentService {
 	return &customAgentService{
 		repo:           repo,
@@ -63,6 +65,7 @@ func NewCustomAgentService(
 		wikiPageRepo:   wikiPageRepo,
 		tagRepo:        tagRepo,
 		knowledgeRepo:  knowledgeRepo,
+		agentShareRepo: agentShareRepo,
 	}
 }
 
@@ -304,6 +307,9 @@ func (s *customAgentService) UpdateAgent(
 		}
 		existingAgent.Avatar = *avatar
 	}
+	if err := s.checkSharedAgentKBScope(ctx, existingAgent, agent.Config); err != nil {
+		return nil, err
+	}
 	existingAgent.Config = agent.Config
 	existingAgent.UpdatedAt = time.Now()
 
@@ -324,6 +330,35 @@ func (s *customAgentService) UpdateAgent(
 
 	logger.Infof(ctx, "Custom agent updated successfully, ID: %s", agent.ID)
 	return existingAgent, nil
+}
+
+// checkSharedAgentKBScope keeps an edit from widening a shared agent's KB
+// scope beyond what the editor could share: the share was checked when it was
+// made, and receivers see the agent's current scope.
+func (s *customAgentService) checkSharedAgentKBScope(
+	ctx context.Context, existing *types.CustomAgent, config types.CustomAgentConfig,
+) error {
+	if s.agentShareRepo == nil || s.kbService == nil {
+		return nil
+	}
+	shares, err := s.agentShareRepo.ListByAgent(ctx, existing.ID)
+	if err != nil {
+		return err
+	}
+	shared := false
+	for _, share := range shares {
+		if share != nil && share.SourceTenantID == existing.TenantID {
+			shared = true
+			break
+		}
+	}
+	if !shared {
+		return nil
+	}
+	updated := *existing
+	updated.Config = config
+	userID, _ := types.UserIDFromContext(ctx)
+	return checkAgentKBScopeShareable(ctx, s.kbService.GetKnowledgeBasesByIDsOnly, existing, &updated, userID)
 }
 
 // updateBuiltinAgent updates a built-in agent's configuration (but not basic info)

@@ -1394,6 +1394,10 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 			_ = c.Error(apperrors.NewValidationError("Built-in agents cannot be shared"))
 			return
 		}
+		if errors.Is(err, service.ErrAgentKBScopeNotShareable) {
+			_ = c.Error(apperrors.NewForbiddenError(err.Error()))
+			return
+		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
 		return
 	}

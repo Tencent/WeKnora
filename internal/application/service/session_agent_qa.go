@@ -319,6 +319,13 @@ func (s *sessionService) buildAgentConfig(
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
 	}
+	// An unset MCP mode means "all" at runtime, but the share scope and the
+	// agent UI both present it as none. A shared run must not hand receivers
+	// every MCP service (with the owner's credentials) that its owner believes
+	// is off.
+	if req.SharedAgentReadOnly && agentConfig.MCPSelectionMode == "" {
+		agentConfig.MCPSelectionMode = "none"
+	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
 	if agentConfig.LLMCallTimeout == 0 && s.cfg.Agent != nil && s.cfg.Agent.LLMCallTimeout > 0 {

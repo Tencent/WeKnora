@@ -68,7 +68,7 @@ func TestCustomAgentAvatarAndErrorResponses(t *testing.T) {
 				agent: &types.CustomAgent{ID: "custom-1", Name: "old", Avatar: "🤖", TenantID: 1},
 				err:   tc.repoErr,
 			}
-			svc := service.NewCustomAgentService(repo, nil, nil, nil, nil, nil, nil)
+			svc := service.NewCustomAgentService(repo, nil, nil, nil, nil, nil, nil, nil)
 			h := &CustomAgentHandler{service: svc}
 			router := gin.New()
 			router.Use(middleware.ErrorHandler())
