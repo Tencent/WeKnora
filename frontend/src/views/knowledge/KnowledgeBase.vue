@@ -28,7 +28,6 @@ import {
   batchQueryKnowledge,
   listKnowledgeTags,
   updateKnowledgeTagBatch,
-  uploadKnowledgeFile,
   createKnowledgeFromURL,
   reparseKnowledge,
   cancelKnowledgeParse,
@@ -58,6 +57,7 @@ import BatchTagDialog from './components/BatchTagDialog.vue';
 import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
+import { useUploadTasksStore } from '@/stores/uploadTasks';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -74,7 +74,6 @@ import {
   folderBreadcrumbs as buildFolderBreadcrumbs,
   folderPathExists as folderExistsInTree,
   isFilteringDocuments,
-  isFolderUpload,
   ROOT_FOLDER_PATH,
 } from './folderTree';
 import { useI18n } from 'vue-i18n';
@@ -85,7 +84,6 @@ const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
-const uploading = ref(false);
 const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
@@ -1178,6 +1176,10 @@ const handleFileUploaded = (event: CustomEvent) => {
   const uploadedKbId = event.detail.kbId;
   console.log('接收到文件上传事件，上传的知识库ID:', uploadedKbId, '当前知识库ID:', kbId.value);
   if (uploadedKbId && uploadedKbId === kbId.value && !isFAQ.value) {
+    // Reloading resets the list to its first page. While a batch is still
+    // uploading, don't yank a user who scrolled further; the batch's final
+    // (settled) event refreshes regardless.
+    if (event.detail.settled === false && page > 1) return;
     console.log('匹配当前知识库，开始刷新文件列表');
     // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
     resetPage(); // Reset page counter when reloading files after upload
@@ -1591,43 +1593,11 @@ const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
-const getFolderUploadFileName = (file: File, targetFolder: string) =>
-  buildUploadFileName(file, targetFolder);
+const uploadTasksStore = useUploadTasksStore();
 
-const showUploadResultMessages = (
-  successCount: number,
-  failCount: number,
-  totalCount: number,
-  mode: 'document' | 'folder',
-) => {
-  if (mode === 'folder') {
-    if (failCount === 0) {
-      MessagePlugin.success(t('knowledgeBase.uploadAllSuccess', { count: successCount }));
-    } else if (successCount > 0) {
-      MessagePlugin.warning(t('knowledgeBase.uploadPartialSuccess', { success: successCount, fail: failCount }));
-    } else {
-      MessagePlugin.error(t('knowledgeBase.uploadAllFailed'));
-    }
-    return;
-  }
-
-  if (totalCount === 1) {
-    if (successCount === 1) {
-      MessagePlugin.success(t('knowledgeBase.uploadSuccess'));
-    }
-    return;
-  }
-
-  if (failCount === 0) {
-    MessagePlugin.success(t('knowledgeBase.allUploadSuccess', { count: successCount }));
-  } else if (successCount > 0) {
-    MessagePlugin.warning(t('knowledgeBase.partialUploadSuccess', { success: successCount, fail: failCount }));
-  } else {
-    MessagePlugin.error(t('knowledgeBase.allUploadFailed', { count: failCount }));
-  }
-};
-
-const executeUploadBatch = async (
+// Hands the batch to the global upload queue, which runs the transfers,
+// reports progress in its floating panel and refreshes this page as files land.
+const enqueueUploads = (
   files: File[],
   options: {
     processConfig?: KnowledgeProcessOverrides;
@@ -1637,72 +1607,16 @@ const executeUploadBatch = async (
   } = {},
 ) => {
   const targetKbId = kbId.value;
-  if (!targetKbId || files.length === 0) {
-    return { successCount: 0, failCount: files.length };
-  }
-
-  const tagIdsToUpload = options.tagIds && options.tagIds.length > 0
-    ? [...options.tagIds]
-    : undefined;
-  let successCount = 0;
-  let failCount = 0;
-  const totalCount = files.length;
-  const hasFolderPaths = files.some(isFolderUpload);
-
-  for (const file of files) {
-    try {
-      const uploadData: {
-        file: File
-        tag_ids?: string[]
-        fileName?: string
-        process_config?: KnowledgeProcessOverrides
-      } = { file, tag_ids: tagIdsToUpload };
-
-      const fileName = getFolderUploadFileName(file, options.targetFolder || ROOT_FOLDER_PATH);
-      if (fileName) uploadData.fileName = fileName;
-      if (options.processConfig) {
-        uploadData.process_config = options.processConfig;
-      }
-
-      const responseData: any = await uploadKnowledgeFile(targetKbId, uploadData);
-      const isSuccess = responseData?.success || responseData?.code === 200 || responseData?.status === 'success' || (!responseData?.error && responseData);
-      if (isSuccess) {
-        successCount++;
-      } else {
-        failCount++;
-        if (totalCount === 1) {
-          let errorMessage = t('knowledgeBase.uploadFailed');
-          if (responseData?.error?.message) {
-            errorMessage = responseData.error.message;
-          } else if (responseData?.message) {
-            errorMessage = responseData.message;
-          }
-          if (responseData?.code === 'duplicate_file' || responseData?.error?.code === 'duplicate_file') {
-            errorMessage = t('knowledgeBase.fileExists');
-          }
-          MessagePlugin.error(errorMessage);
-        }
-      }
-    } catch (error: any) {
-      failCount++;
-      if (totalCount === 1) {
-        let errorMessage = error?.error?.message || error?.message || t('knowledgeBase.uploadFailed');
-        if (error?.code === 'duplicate_file') {
-          errorMessage = t('knowledgeBase.fileExists');
-        }
-        MessagePlugin.error(errorMessage);
-      }
-    }
-  }
-
-  if (successCount > 0) {
-    window.dispatchEvent(new CustomEvent('knowledgeFileUploaded', {
-      detail: { kbId: targetKbId },
-    }));
-  }
-
-  showUploadResultMessages(successCount, failCount, totalCount, hasFolderPaths ? 'folder' : 'document');
-  return { successCount, failCount };
+  if (!targetKbId || files.length === 0) return;
+  const targetFolder = options.targetFolder || ROOT_FOLDER_PATH;
+  uploadTasksStore.enqueue({
+    kbId: targetKbId,
+    kbName: kbInfo.value?.name || '',
+    targetFolder,
+    tagIds: options.tagIds,
+    processConfig: options.processConfig,
+    uploads: files.map(file => ({ file, fileName: buildUploadFileName(file, targetFolder) })),
+  });
 };
 
 const executeUrlImport = async (
@@ -1761,11 +1675,7 @@ const handleUploadConfirmResult = async (result: UploadConfirmResult) => {
   const tagIds = result.tagIds || [];
 
   if (files.length > 0) {
-    const hasFolderPaths = files.some(isFolderUpload);
-    if (hasFolderPaths) {
-      MessagePlugin.info(t('knowledgeBase.uploadingFolder', { total: files.length }));
-    }
-    await executeUploadBatch(files, {
+    enqueueUploads(files, {
       processConfig,
       tagIds,
       targetFolder: result.targetFolder || ROOT_FOLDER_PATH,

@@ -589,13 +589,6 @@ export default {
     tagLabel: 'Tag',
     tagPlaceholder: 'Select tags',
     noTags: 'No tags',
-    uploadSuccess: 'File uploaded successfully!',
-    uploadFailed: 'File upload failed!',
-    fileExists: 'File already exists',
-    uploadAllSuccess: 'Successfully uploaded {count} files!',
-    uploadPartialSuccess: 'Upload completed: {success} succeeded, {fail} failed',
-    uploadAllFailed: 'All files failed to upload',
-    uploadingFolder: 'Uploading {total} files from folder...',
     videosFilteredNoVLM: 'Skipped {count} video file(s) (video upload is not supported)',
     unsupportedTypesHint: 'Some document types ({types}) have no available parser engine and cannot be processed',
     goToParserSettings: 'Configure',
@@ -822,9 +815,6 @@ export default {
     operationNotSupportedForType: 'This operation is not supported for the current knowledge base type',
     allFilesSkippedNoEngine: 'All selected files were skipped due to no available parser engine',
     filesSkippedNoEngine: '{count} file(s) skipped due to no available parser engine',
-    allUploadSuccess: 'All files uploaded successfully ({count} files)',
-    partialUploadSuccess: 'Partial upload success (success: {success}, failed: {fail})',
-    allUploadFailed: 'All files failed to upload ({count} files)',
     deleteSuccess: 'Knowledge deleted successfully!',
     chunkLoadFailed: 'Failed to load chunks'
   },
@@ -2755,16 +2745,6 @@ export default {
       questionGeneration: 'Question Generation',
       wiki: 'Wiki'
     },
-    uploadProgress: {
-      uploadingTitle: 'Uploading folder documents to "{name}"',
-      detail: '{completed}/{total} files finished',
-      keepPageOpen: 'Please keep this page open while files upload.',
-      completedTitle: 'Upload finished for "{name}"',
-      completedDetail: 'All {total} files uploaded. Refreshing list to show parsing status...',
-      refreshing: 'Refreshing list to show parsing status...',
-      errorTip: 'Some files failed to upload. Please check the notifications.',
-      unknownKb: 'Knowledge Base {id}'
-    }
   },
   embedPublish: {
     create: 'New embed channel',
@@ -4889,6 +4869,55 @@ export default {
     uploadFolder: 'Upload Folder',
     onlineEdit: 'Online Edit',
     deleteRecord: 'Delete Record'
+  },
+  uploadTasks: {
+    panelLabel: 'Uploads',
+    titleUploading: 'Uploading {done} of {total}',
+    titleParsing: 'Parsing {done} of {total}',
+    titleDone: 'All done',
+    titleDoneWithIssues: '{ok} done, {bad} not completed',
+    titleCancelled: 'Upload cancelled',
+    destination: 'Destination: {name}',
+    destinationMany: 'Destination: {count} knowledge bases',
+    remaining: 'about {time} left',
+    eta: {
+      seconds: '{n} sec',
+      minutes: '{n} min',
+      hours: '{n} hr'
+    },
+    hintUploading: 'Keep this page open until the upload finishes',
+    hintParsing: 'All files are uploaded. Parsing continues in the background, so you can leave this page',
+    legend: {
+      ready: 'Searchable',
+      active: 'In progress',
+      waiting: 'Queued',
+      failed: 'Failed',
+      duplicate: 'Already exists'
+    },
+    filterAll: 'All',
+    filterIssues: 'Not completed',
+    phaseWaiting: 'Queued',
+    phaseSaving: 'Saving…',
+    phasePending: 'Waiting to parse',
+    phaseParsing: 'Parsing',
+    phaseFinalizing: 'Searchable, still optimizing',
+    phaseReady: 'Done',
+    phaseUploadFailed: 'Upload failed',
+    phaseParseFailed: 'Parsing failed',
+    phaseDuplicate: 'Same file already in this knowledge base',
+    phaseCancelled: 'Cancelled',
+    phaseDeleted: 'Deleted',
+    cancel: 'Cancel',
+    cancelAll: 'Cancel all',
+    retry: 'Retry',
+    retryFailed: 'Retry ({count})',
+    open: 'Open',
+    collapse: 'Collapse',
+    expand: 'Expand',
+    close: 'Close',
+    closeConfirm: 'Closing stops the unfinished uploads ({count})',
+    closeConfirmOk: 'Cancel upload',
+    closeConfirmKeep: 'Keep uploading'
   },
   agentSettings: {
     modelRecommendation: {

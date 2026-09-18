@@ -32,44 +32,6 @@
           <span>{{ $t('knowledgeList.uninitializedBanner') }}</span>
         </div>
 
-        <!-- 上传进度提示 -->
-        <div v-if="uploadSummaries.length" class="upload-progress-panel">
-          <div v-for="summary in uploadSummaries" :key="summary.kbId" class="upload-progress-item">
-            <div class="upload-progress-icon">
-              <t-icon :name="summary.completed === summary.total ? 'check-circle-filled' : 'upload'" size="20px" />
-            </div>
-            <div class="upload-progress-content">
-              <div class="progress-title">
-                {{
-                  summary.completed === summary.total
-                    ? $t('knowledgeList.uploadProgress.completedTitle', { name: summary.kbName })
-                    : $t('knowledgeList.uploadProgress.uploadingTitle', { name: summary.kbName })
-                }}
-              </div>
-              <div class="progress-subtitle">
-                {{
-                  summary.completed === summary.total
-                    ? $t('knowledgeList.uploadProgress.completedDetail', { total: summary.total })
-                    : $t('knowledgeList.uploadProgress.detail', { completed: summary.completed, total: summary.total })
-                }}
-              </div>
-              <div class="progress-subtitle secondary">
-                {{
-                  summary.completed === summary.total
-                    ? $t('knowledgeList.uploadProgress.refreshing')
-                    : $t('knowledgeList.uploadProgress.keepPageOpen')
-                }}
-              </div>
-              <div v-if="summary.hasError" class="progress-subtitle error">
-                {{ $t('knowledgeList.uploadProgress.errorTip') }}
-              </div>
-              <div class="progress-bar">
-                <div class="progress-bar-inner" :style="{ width: summary.progress + '%' }"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- 骨架屏占位 -->
         <div v-if="loading && kbs.length === 0" class="kb-card-wrap">
           <div v-for="n in 6" :key="'skel-' + n" class="kb-card kb-card-skeleton is-skeleton">
@@ -843,10 +805,7 @@ const confirmDelete = useConfirmDelete()
 const currentMoreIndex = ref<number>(-1)
 const highlightedKbId = ref<string | null>(null)
 const highlightedCardRef = ref<HTMLElement | null>(null)
-const uploadTasks = ref<UploadTaskState[]>([])
-const uploadCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
 let uploadRefreshTimer: ReturnType<typeof setTimeout> | null = null
-const UPLOAD_CLEANUP_DELAY = 10000
 
 // Share dialog state
 const shareDialogVisible = ref(false)
@@ -1163,24 +1122,6 @@ const showKbListContextualGuide = computed(
   () => showKbListEmpty.value && !uiStore.showKBEditorModal,
 )
 
-interface UploadTaskState {
-  uploadId: string
-  kbId: string
-  fileName?: string
-  progress: number
-  status: 'uploading' | 'success' | 'error'
-  error?: string
-}
-
-interface UploadSummary {
-  kbId: string
-  kbName: string
-  total: number
-  completed: number
-  progress: number
-  hasError: boolean
-}
-
 const applyKbListData = (data: any[]) => {
   kbs.value = data.map((kb: any) => ({
     ...kb,
@@ -1255,20 +1196,12 @@ onMounted(() => {
     }
   })
 
-  window.addEventListener('knowledgeFileUploadStart', handleUploadStartEvent as EventListener)
-  window.addEventListener('knowledgeFileUploadProgress', handleUploadProgressEvent as EventListener)
-  window.addEventListener('knowledgeFileUploadComplete', handleUploadCompleteEvent as EventListener)
   window.addEventListener('knowledgeFileUploaded', handleUploadFinishedEvent as EventListener)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('knowledgeFileUploadStart', handleUploadStartEvent as EventListener)
-  window.removeEventListener('knowledgeFileUploadProgress', handleUploadProgressEvent as EventListener)
-  window.removeEventListener('knowledgeFileUploadComplete', handleUploadCompleteEvent as EventListener)
   window.removeEventListener('knowledgeFileUploaded', handleUploadFinishedEvent as EventListener)
 
-  uploadCleanupTimers.forEach(timer => clearTimeout(timer))
-  uploadCleanupTimers.clear()
   if (uploadRefreshTimer) {
     clearTimeout(uploadRefreshTimer)
     uploadRefreshTimer = null
@@ -1533,101 +1466,6 @@ const hasUninitializedKbs = computed(() => {
   return kbs.value.some(kb => !isInitialized(kb))
 })
 
-const getKbDisplayName = (kbId: string) => {
-  const target = kbs.value.find(kb => kb.id === kbId)
-  if (target?.name) return target.name
-  return t('knowledgeList.uploadProgress.unknownKb', { id: kbId }) as string
-}
-
-const uploadSummaries = computed<UploadSummary[]>(() => {
-  if (!uploadTasks.value.length) return []
-  const grouped: Record<string, UploadTaskState[]> = {}
-  uploadTasks.value.forEach(task => {
-    const kbKey = String(task.kbId)
-    if (!grouped[kbKey]) grouped[kbKey] = []
-    grouped[kbKey].push(task)
-  })
-  return Object.entries(grouped).map(([kbId, tasks]) => {
-    const total = tasks.length
-    const completed = tasks.filter(task => task.status !== 'uploading').length
-    const progressSum = tasks.reduce((sum, task) => sum + (task.progress ?? 0), 0)
-    const avgProgress = total === 0 ? 0 : Math.min(100, Math.max(0, Math.round(progressSum / total)))
-    const hasError = tasks.some(task => task.status === 'error')
-    return {
-      kbId,
-      kbName: getKbDisplayName(kbId),
-      total,
-      completed,
-      progress: avgProgress,
-      hasError
-    }
-  }).sort((a, b) => a.kbName.localeCompare(b.kbName))
-})
-
-const clampProgress = (value: number) => Math.min(100, Math.max(0, Math.round(value)))
-
-const addUploadTask = (task: UploadTaskState) => {
-  uploadTasks.value = [
-    ...uploadTasks.value.filter(item => item.uploadId !== task.uploadId),
-    task,
-  ]
-}
-
-const patchUploadTask = (uploadId: string, patch: Partial<UploadTaskState>) => {
-  const index = uploadTasks.value.findIndex(task => task.uploadId === uploadId)
-  if (index === -1) return
-  const nextTasks = [...uploadTasks.value]
-  nextTasks[index] = { ...nextTasks[index], ...patch }
-  uploadTasks.value = nextTasks
-}
-
-const removeUploadTask = (uploadId: string) => {
-  uploadTasks.value = uploadTasks.value.filter(task => task.uploadId !== uploadId)
-  const timer = uploadCleanupTimers.get(uploadId)
-  if (timer) {
-    clearTimeout(timer)
-    uploadCleanupTimers.delete(uploadId)
-  }
-}
-
-const scheduleUploadTaskCleanup = (uploadId: string) => {
-  const existing = uploadCleanupTimers.get(uploadId)
-  if (existing) {
-    clearTimeout(existing)
-  }
-  const timer = setTimeout(() => {
-    removeUploadTask(uploadId)
-  }, UPLOAD_CLEANUP_DELAY)
-  uploadCleanupTimers.set(uploadId, timer)
-}
-
-type UploadEventDetail = {
-  uploadId: string
-  kbId?: string | number
-  fileName?: string
-  progress?: number
-  status?: UploadTaskState['status']
-  error?: string
-}
-
-const ensureUploadTaskEntry = (detail?: UploadEventDetail) => {
-  if (!detail?.uploadId) return null
-  const existing = uploadTasks.value.find(task => task.uploadId === detail.uploadId)
-  if (existing) return existing
-  if (!detail.kbId) return null
-  const initialProgress = typeof detail.progress === 'number' ? clampProgress(detail.progress) : 0
-  const newTask: UploadTaskState = {
-    uploadId: detail.uploadId,
-    kbId: String(detail.kbId),
-    fileName: detail.fileName,
-    progress: initialProgress,
-    status: detail.status || 'uploading',
-    error: detail.error
-  }
-  addUploadTask(newTask)
-  return newTask
-}
-
 const handleCardClick = (kb: KB) => {
   // Track this open in the per-user "recent" list before navigating —
   // matches the user mental model "this is what I last worked on".
@@ -1701,42 +1539,6 @@ const triggerHighlightFlash = (kbId: string) => {
       highlightedKbId.value = null
     }, 3000)
   })
-}
-
-const handleUploadStartEvent = (event: Event) => {
-  const detail = (event as CustomEvent<UploadEventDetail>).detail
-  if (!detail?.uploadId || !detail?.kbId) return
-  addUploadTask({
-    uploadId: detail.uploadId,
-    kbId: String(detail.kbId),
-    fileName: detail.fileName,
-    progress: typeof detail.progress === 'number' ? clampProgress(detail.progress) : 0,
-    status: 'uploading'
-  })
-}
-
-const handleUploadProgressEvent = (event: Event) => {
-  const detail = (event as CustomEvent<UploadEventDetail>).detail
-  if (!detail?.uploadId || typeof detail.progress !== 'number') return
-  if (!ensureUploadTaskEntry(detail)) return
-  patchUploadTask(detail.uploadId, {
-    progress: clampProgress(detail.progress)
-  })
-}
-
-const handleUploadCompleteEvent = (event: Event) => {
-  const detail = (event as CustomEvent<UploadEventDetail>).detail
-  if (!detail?.uploadId) return
-  const progress = typeof detail.progress === 'number'
-    ? clampProgress(detail.progress)
-    : 100
-  if (!ensureUploadTaskEntry({ ...detail, progress })) return
-  patchUploadTask(detail.uploadId, {
-    status: detail.status || 'success',
-    progress,
-    error: detail.error
-  })
-  scheduleUploadTaskCleanup(detail.uploadId)
 }
 
 const handleUploadFinishedEvent = (event: Event) => {
@@ -2066,75 +1868,6 @@ const handleUploadFinishedEvent = (event: Event) => {
     color: var(--td-warning-color);
     flex-shrink: 0;
   }
-}
-
-.upload-progress-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.upload-progress-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-md);
-  background: var(--td-bg-color-container);
-}
-
-.upload-progress-icon {
-  color: var(--td-brand-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.upload-progress-content {
-  flex: 1;
-}
-
-.progress-title {
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-base);
-  font-weight: 600;
-  line-height: 22px;
-  margin-bottom: 2px;
-}
-
-.progress-subtitle {
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-sm);
-  line-height: 18px;
-}
-
-.progress-subtitle.secondary {
-  color: var(--td-text-color-placeholder);
-  margin-top: 2px;
-}
-
-.progress-subtitle.error {
-  color: var(--td-error-color);
-  margin-top: 4px;
-}
-
-.progress-bar {
-  width: 100%;
-  height: 6px;
-  border-radius: var(--app-radius-pill);
-  background: var(--td-bg-color-secondarycontainer);
-  margin-top: 10px;
-  overflow: hidden;
-}
-
-.progress-bar-inner {
-  height: 100%;
-  background: linear-gradient(90deg, var(--td-brand-color-active) 0%, var(--td-brand-color) 100%);
-  transition: width var(--app-motion-base) ease;
 }
 
 @keyframes contentFadeIn {

@@ -589,13 +589,6 @@ export default {
     tagLabel: 'タグ',
     tagPlaceholder: 'タグを選択',
     noTags: 'タグなし',
-    uploadSuccess: 'ファイルをアップロードしました。',
-    uploadFailed: 'ファイルのアップロードに失敗しました。',
-    fileExists: 'ファイルは既に存在します',
-    uploadAllSuccess: '{count}件のファイルをアップロードしました。',
-    uploadPartialSuccess: 'アップロード完了: 成功{success}件、失敗{fail}件',
-    uploadAllFailed: 'すべてのファイルのアップロードに失敗しました',
-    uploadingFolder: 'フォルダ内の{total}件のファイルをアップロード中...',
     videosFilteredNoVLM: '{count}件の動画ファイルをスキップしました（動画のアップロードには対応していません）',
     unsupportedTypesHint: '一部のドキュメント形式（{types}）は利用できる解析エンジンがないため、アップロードしても解析できません',
     goToParserSettings: '設定を開く',
@@ -822,9 +815,6 @@ export default {
     operationNotSupportedForType: 'この操作は現在のナレッジベースのタイプでは利用できません',
     allFilesSkippedNoEngine: '利用可能な解析エンジンがないため、選択したすべてのファイルをスキップしました',
     filesSkippedNoEngine: '利用可能な解析エンジンがないため、{count}件のファイルをスキップしました',
-    allUploadSuccess: 'すべてのファイルをアップロードしました（{count}件）',
-    partialUploadSuccess: '一部のファイルをアップロードしました（成功: {success}件、失敗: {fail}件）',
-    allUploadFailed: 'すべてのファイルのアップロードに失敗しました（{count}件）',
     deleteSuccess: 'ナレッジを削除しました。',
     chunkLoadFailed: 'チャンクの読み込みに失敗しました'
   },
@@ -2755,16 +2745,6 @@ export default {
       questionGeneration: '質問生成',
       wiki: 'Wiki'
     },
-    uploadProgress: {
-      uploadingTitle: '「{name}」にフォルダ内のドキュメントをアップロード中',
-      detail: '{completed}/{total}ファイル完了',
-      keepPageOpen: 'アップロード中はこのページを開いたままにしてください。',
-      completedTitle: '「{name}」へのアップロードが完了しました',
-      completedDetail: '{total}件のファイルをすべてアップロードしました。解析ステータスを表示するため一覧を更新しています...',
-      refreshing: '解析ステータスを表示するため一覧を更新しています...',
-      errorTip: '一部のファイルのアップロードに失敗しました。通知を確認してください。',
-      unknownKb: 'ナレッジベース{id}'
-    }
   },
   embedPublish: {
     create: '埋め込みチャネルを作成',
@@ -4889,6 +4869,55 @@ export default {
     uploadFolder: 'フォルダをアップロード',
     onlineEdit: 'オンライン編集',
     deleteRecord: '記録を削除'
+  },
+  uploadTasks: {
+    panelLabel: 'アップロード',
+    titleUploading: 'アップロード中 {done}/{total}',
+    titleParsing: '解析中 {done}/{total}',
+    titleDone: 'すべて完了',
+    titleDoneWithIssues: '{ok}件完了、{bad}件未完了',
+    titleCancelled: 'アップロードをキャンセルしました',
+    destination: 'アップロード先：{name}',
+    destinationMany: 'アップロード先：{count}件のナレッジベース',
+    remaining: '残り約{time}',
+    eta: {
+      seconds: '{n}秒',
+      minutes: '{n}分',
+      hours: '{n}時間'
+    },
+    hintUploading: 'アップロードが完了するまでページを閉じたり再読み込みしたりしないでください',
+    hintParsing: 'すべてのファイルをアップロードしました。解析はバックグラウンドで続くため、このページを離れても問題ありません',
+    legend: {
+      ready: '検索可能',
+      active: '処理中',
+      waiting: '待機中',
+      failed: '失敗',
+      duplicate: '既存'
+    },
+    filterAll: 'すべて',
+    filterIssues: '未完了',
+    phaseWaiting: 'アップロード待ち',
+    phaseSaving: '保存中…',
+    phasePending: '解析待ち',
+    phaseParsing: '解析中',
+    phaseFinalizing: '検索可能・バックグラウンドで最適化中',
+    phaseReady: '完了',
+    phaseUploadFailed: 'アップロード失敗',
+    phaseParseFailed: '解析失敗',
+    phaseDuplicate: '同じファイルが既にあります',
+    phaseCancelled: 'キャンセル済み',
+    phaseDeleted: '削除済み',
+    cancel: 'キャンセル',
+    cancelAll: 'すべてキャンセル',
+    retry: '再試行',
+    retryFailed: '{count}件を再試行',
+    open: '開く',
+    collapse: '折りたたむ',
+    expand: '展開',
+    close: '閉じる',
+    closeConfirm: '閉じると、残り{count}件のアップロードがキャンセルされます',
+    closeConfirmOk: 'アップロードをキャンセル',
+    closeConfirmKeep: 'アップロードを続ける'
   },
   agentSettings: {
     modelRecommendation: {
