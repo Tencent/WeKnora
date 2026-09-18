@@ -1278,8 +1278,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 
 	// Normalize inline HTML tables before chunking, for the same reason as the
 	// file-processing path: parser/OCR output may embed raw <table> blocks that
-	// the chunker cannot split. Central here so manual markdown goes through the
-	// identical normalization regardless of engine.
+	// the chunker cannot split. Fenced code examples are left untouched.
 	clean = docparser.NormalizeHTMLTables(clean)
 
 	// Manual content is markdown - chunk directly with Go chunker

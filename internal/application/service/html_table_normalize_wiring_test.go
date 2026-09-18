@@ -13,12 +13,6 @@ import (
 // paddleocr-vl converters, so tables emitted by other engines (e.g. MinerU)
 // reached the chunker as raw single-line <table> blocks and were force-cut at
 // the absolute size limit.
-//
-// Coverage level: the two call sites live inline inside side-effectful
-// unexported methods (processKnowledge / triggerManualProcessing), so the
-// runtime behavior below asserts the docparser.NormalizeHTMLTables contract that
-// those call sites rely on, and TestHTMLEmbeddedTableWiring_CallSitesPresent
-// statically asserts the call sites exist at the chunking boundary.
 func TestHTMLEmbeddedTableWiring_ProducesChunkableOutput(t *testing.T) {
 	input := strings.Join([]string{
 		"# 检测报告",
@@ -36,36 +30,39 @@ func TestHTMLEmbeddedTableWiring_ProducesChunkableOutput(t *testing.T) {
 
 	got := docparser.NormalizeHTMLTables(input)
 
-	if strings.Contains(got, "<table") {
-		// Property (2): any remaining HTML table must have every <tr> preceded by
-		// a newline so the chunker can split it.
-		for i := 0; ; {
-			idx := strings.Index(got[i:], "<tr")
-			if idx < 0 {
-				break
-			}
-			abs := i + idx
-			if abs == 0 || got[abs-1] != '\n' {
-				t.Fatalf("remaining <tr> at offset %d is not preceded by a newline:\n%s", abs, got)
-			}
-			i = abs + 1
-		}
-	} else {
-		// Property (1): fully converted to GFM with a separator row.
-		if !strings.Contains(got, "|") || !strings.Contains(got, "-") {
-			t.Fatalf("expected GFM table output, got:\n%s", got)
-		}
-	}
-
-	// The colspan=1 table must not survive as HTML.
 	if strings.Contains(got, `colspan="1"`) {
 		t.Fatalf("redundant colspan=1 table was not normalized:\n%s", got)
 	}
+	if !strings.Contains(got, "|") || !strings.Contains(got, "拉伸强度") {
+		t.Fatalf("expected colspan=1 table to become GFM, got:\n%s", got)
+	}
+	if !strings.Contains(got, "<table") {
+		t.Fatalf("expected colspan=6 table to remain HTML, got:\n%s", got)
+	}
+	for i := 0; ; {
+		idx := strings.Index(got[i:], "<tr")
+		if idx < 0 {
+			break
+		}
+		abs := i + idx
+		if abs == 0 || got[abs-1] != '\n' {
+			t.Fatalf("remaining <tr> at offset %d is not preceded by a newline:\n%s", abs, got)
+		}
+		i = abs + 1
+	}
+}
+
+func lastCallBefore(src, call, anchor string) int {
+	idx := strings.Index(src, anchor)
+	if idx < 0 {
+		return -1
+	}
+	return strings.LastIndex(src[:idx], call)
 }
 
 // TestHTMLEmbeddedTableWiring_CallSitesPresent is a lightweight static guard:
-// it fails if the central normalization call is removed from either pre-chunk
-// location (the exact regression this change fixes).
+// it fails if the central normalization call is removed from a pre-chunk
+// (or pre-image-resolution) location.
 func TestHTMLEmbeddedTableWiring_CallSitesPresent(t *testing.T) {
 	call := "docparser.NormalizeHTMLTables("
 
@@ -74,28 +71,34 @@ func TestHTMLEmbeddedTableWiring_CallSitesPresent(t *testing.T) {
 		t.Fatalf("read knowledge_process.go: %v", err)
 	}
 	process := string(processSrc)
-	processCall := strings.Index(process, call)
-	if processCall < 0 {
-		t.Fatalf("knowledge_process.go is missing the pre-chunk %s call", call)
+	if lastCallBefore(process, call, "s.imageResolver.ResolveAndStore") < 0 {
+		t.Fatalf("knowledge_process.go: %s must run before image resolution", call)
 	}
-	// The chunker config is built immediately before chunking; the normalization
-	// call must precede it. (Anchored on the chunking call rather than a comment,
-	// so upstream comment reshuffles don't break this guard.)
-	if cfg := strings.Index(process, "chunkCfg := buildSplitterConfigFromChunking"); cfg < 0 || processCall > cfg {
-		t.Fatalf("knowledge_process.go: %s is not before the chunking step", call)
+	if lastCallBefore(process, call, "chunkCfg := buildSplitterConfigFromChunking") < 0 {
+		t.Fatalf("knowledge_process.go: %s must run before the chunking step", call)
 	}
 
 	createSrc, err := os.ReadFile("knowledge_create.go")
 	if err != nil {
 		t.Fatalf("read knowledge_create.go: %v", err)
 	}
-	create := string(createSrc)
-	createCall := strings.Index(create, call)
-	if createCall < 0 {
-		t.Fatalf("knowledge_create.go is missing the pre-chunk %s call", call)
+	if lastCallBefore(string(createSrc), call, "chunkCfg := buildSplitterConfigFromChunking") < 0 {
+		t.Fatalf("knowledge_create.go: %s must run before buildSplitterConfigFromChunking", call)
 	}
-	// The splitter config is built immediately before chunking; the call must precede it.
-	if cfg := strings.Index(create, "chunkCfg := buildSplitterConfigFromChunking"); cfg < 0 || createCall > cfg {
-		t.Fatalf("knowledge_create.go: %s is not before buildSplitterConfigFromChunking", call)
+
+	tempSrc, err := os.ReadFile("temporary_document.go")
+	if err != nil {
+		t.Fatalf("read temporary_document.go: %v", err)
+	}
+	if lastCallBefore(string(tempSrc), call, "chunker.Split(") < 0 {
+		t.Fatalf("temporary_document.go: %s must run before chunker.Split", call)
+	}
+
+	previewSrc, err := os.ReadFile("../../handler/chunker_debug.go")
+	if err != nil {
+		t.Fatalf("read chunker_debug.go: %v", err)
+	}
+	if !strings.Contains(string(previewSrc), call) {
+		t.Fatalf("chunker_debug.go is missing the preview %s call", call)
 	}
 }

@@ -117,6 +117,15 @@ func TestProtectedSpans_MarkdownLinksAndImagesStillProtected(t *testing.T) {
 // TestProtectedSpans_LiteralCrossLineExample documents that an isolated
 // malformed bracket pair with NO complete '](...)' construct is never treated
 // as a protected link/image region.
+func TestProtectedSpans_MultilineLinkIntentionallyUnprotected(t *testing.T) {
+	// CommonMark allows a single soft line break in link text. The protected
+	// patterns still refuse it so a stray OCR '[' cannot swallow a paragraph.
+	doc := "[link\ntext](http://example.com)"
+	if spans := protectedSpans(doc); len(spans) != 0 {
+		t.Fatalf("expected multiline link to stay unprotected, got %v", spans)
+	}
+}
+
 func TestProtectedSpans_LiteralCrossLineExample(t *testing.T) {
 	doc := "[公章】\n\n第一段。\n\n第二段。\n\n第三段（北京)"
 	if spans := protectedSpans(doc); len(spans) != 0 {

@@ -15,6 +15,10 @@ var (
 	// block, the form OCR/layout engines such as PaddleOCR-VL emit tables in.
 	htmlTableBlockPattern = regexp.MustCompile(`(?is)<table\b[^>]*>.*?</table>`)
 
+	// fencedCodeBlockPattern matches CommonMark fenced code blocks so HTML
+	// <table> examples inside them are left untouched.
+	fencedCodeBlockPattern = regexp.MustCompile("(?s)(?:```|~~~)[^\\n]*\\n.*?(?:```|~~~)")
+
 	// htmlLayoutAttrPattern matches presentational HTML attributes that carry
 	// no semantic value (text-align styles, CSS classes, sizing). Structural
 	// attributes like rowspan/colspan are intentionally excluded.
@@ -31,11 +35,13 @@ var (
 	// htmlTableRowPattern matches the opening <tr> tag of each table row, used
 	// to put every row on its own line so the chunker can split degraded HTML
 	// tables at "\n" boundaries.
-	htmlTableRowPattern = regexp.MustCompile(`(?i)(<tr\b)`)
+	htmlTableRowPattern = regexp.MustCompile(`(?i)<tr\b`)
 
-	// markdownTableSeparatorPattern matches the |---|---| delimiter row that a
-	// valid GFM table must contain.
-	markdownTableSeparatorPattern = regexp.MustCompile(`(?m)^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$`)
+	// markdownTableSeparatorPattern matches the |---| delimiter row that a
+	// valid GFM table must contain. The repeating column group is optional so
+	// single-column tables (|---|) are accepted; requiring two or more columns
+	// discarded successful conversions of MinerU figure/TOC tables.
+	markdownTableSeparatorPattern = regexp.MustCompile(`(?m)^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$`)
 )
 
 // NormalizeHTMLTables rewrites inline HTML <table> blocks embedded in OCR
@@ -44,10 +50,18 @@ var (
 // by the chunker's table-protection logic, so large tables get split mid-row.
 //
 // Each table block is converted to a GFM Markdown table when possible. Tables
-// that use rowspan/colspan (which Markdown cannot express) fall back to having
-// their presentational attributes stripped so they stay intact as HTML.
+// that use rowspan/colspan (which Markdown cannot express), or that the
+// converter cannot turn into a valid GFM table (cell <br>, nested lists, …),
+// fall back to presentational-attribute stripping plus one row per line so
+// the chunker can still split on "\n". Tables inside fenced code blocks are
+// left unchanged.
 func NormalizeHTMLTables(md string) string {
 	if !strings.Contains(strings.ToLower(md), "<table") {
+		return md
+	}
+
+	locs := htmlTableBlockPattern.FindAllStringIndex(md, -1)
+	if len(locs) == 0 {
 		return md
 	}
 
@@ -58,23 +72,60 @@ func NormalizeHTMLTables(md string) string {
 			table.NewTablePlugin(),
 		),
 	)
+	fences := fencedCodeBlockPattern.FindAllStringIndex(md, -1)
 
-	return htmlTableBlockPattern.ReplaceAllStringFunc(md, func(block string) string {
-		if htmlSpanAttrPattern.MatchString(block) {
-			return splitHTMLTableRows(stripHTMLLayoutAttrs(block))
+	var b strings.Builder
+	last := 0
+	for _, loc := range locs {
+		b.WriteString(md[last:loc[0]])
+		block := md[loc[0]:loc[1]]
+		if indexInsideSpans(loc[0], fences) {
+			b.WriteString(block)
+			last = loc[1]
+			continue
 		}
-		converted, err := conv.ConvertString(block)
-		if err != nil {
-			return stripHTMLLayoutAttrs(block)
+		// Isolate the rewritten table with blank lines without stacking pads
+		// on repeated NormalizeHTMLTables calls.
+		out := strings.TrimRight(b.String(), "\n")
+		b.Reset()
+		b.WriteString(out)
+		b.WriteString("\n\n")
+		b.WriteString(normalizeOneHTMLTable(conv, block))
+		last = loc[1]
+		for last < len(md) && md[last] == '\n' {
+			last++
 		}
-		converted = strings.TrimSpace(converted)
-		if converted == "" || !markdownTableSeparatorPattern.MatchString(converted) {
-			return stripHTMLLayoutAttrs(block)
+		b.WriteString("\n\n")
+	}
+	b.WriteString(md[last:])
+	return b.String()
+}
+
+func normalizeOneHTMLTable(conv *converter.Converter, block string) string {
+	fallback := func() string {
+		return splitHTMLTableRows(stripHTMLLayoutAttrs(block))
+	}
+	if htmlSpanAttrPattern.MatchString(block) {
+		return fallback()
+	}
+	converted, err := conv.ConvertString(block)
+	if err != nil {
+		return fallback()
+	}
+	converted = unescapeMarkdownImageSyntax(strings.TrimSpace(converted))
+	if converted == "" || !markdownTableSeparatorPattern.MatchString(converted) {
+		return fallback()
+	}
+	return converted
+}
+
+func indexInsideSpans(pos int, spans [][]int) bool {
+	for _, s := range spans {
+		if pos >= s[0] && pos < s[1] {
+			return true
 		}
-		// Pad with blank lines so the Markdown table is a standalone block that
-		// the chunker recognizes (and protects) as a table.
-		return "\n\n" + converted + "\n\n"
-	})
+	}
+	return false
 }
 
 // stripHTMLLayoutAttrs removes presentational attributes from an HTML fragment
@@ -83,12 +134,26 @@ func stripHTMLLayoutAttrs(html string) string {
 	return htmlLayoutAttrPattern.ReplaceAllString(html, "")
 }
 
-// splitHTMLTableRows puts each table row on its own line and pads the block with
-// blank lines. The chunker splits on "\n", so a single-line HTML table would
-// otherwise be unsplittable and get force-cut at the absolute max size. Whitespace
-// between tags is insignificant in HTML, and newlines are only inserted before
-// <tr> (never inside a tag), so the table's meaning is preserved.
+// splitHTMLTableRows puts each table row on its own line. The chunker splits
+// on "\n", so a single-line HTML table would otherwise be unsplittable and get
+// force-cut at the absolute max size. Whitespace between tags is insignificant
+// in HTML, and newlines are only inserted before <tr> (never inside a tag).
+// A <tr> that already starts on its own line is left alone.
 func splitHTMLTableRows(block string) string {
-	withRows := htmlTableRowPattern.ReplaceAllString(block, "\n$1")
-	return "\n\n" + strings.TrimSpace(withRows) + "\n\n"
+	locs := htmlTableRowPattern.FindAllStringIndex(block, -1)
+	if len(locs) == 0 {
+		return strings.TrimSpace(block)
+	}
+	var b strings.Builder
+	last := 0
+	for _, loc := range locs {
+		b.WriteString(block[last:loc[0]])
+		if loc[0] == 0 || block[loc[0]-1] != '\n' {
+			b.WriteByte('\n')
+		}
+		b.WriteString(block[loc[0]:loc[1]])
+		last = loc[1]
+	}
+	b.WriteString(block[last:])
+	return strings.TrimSpace(b.String())
 }
