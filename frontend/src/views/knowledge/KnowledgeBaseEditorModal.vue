@@ -269,7 +269,16 @@
       <div v-if="!isFAQ && formData && currentSection === 'parser'" class="section">
         <KBParserSettings
           :parser-engine-rules="formData.chunkingConfig.parserEngineRules"
+          :block-cloud-engines="!!formData.desensitizationConfig?.enabled"
           @update:parser-engine-rules="handleParserEngineRulesUpdate"
+        />
+      </div>
+
+      <!-- 文档脱敏 -->
+      <div v-if="!isFAQ && formData && currentSection === 'desensitization'" class="section">
+        <KBDesensitizationSettings
+          :config="formData.desensitizationConfig"
+          @update:config="(value) => { if (formData) formData.desensitizationConfig = value }"
         />
       </div>
 
@@ -514,6 +523,7 @@ import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import KBModelConfig from './settings/KBModelConfig.vue'
 import KBParserSettings from './settings/KBParserSettings.vue'
+import KBDesensitizationSettings from './settings/KBDesensitizationSettings.vue'
 import KBStorageSettings from './settings/KBStorageSettings.vue'
 import KBChunkingSettings from './settings/KBChunkingSettings.vue'
 import KBVectorStoreSettings from './settings/KBVectorStoreSettings.vue'
@@ -671,6 +681,7 @@ const navItems = computed(() => {
   } else {
     items.push(
       { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
+      { key: 'desensitization', icon: 'lock-on', label: t('knowledgeEditor.sidebar.desensitization') },
       { key: 'multimodal', icon: 'image', label: t('knowledgeEditor.sidebar.multimodal') },
       { key: 'asr', icon: 'sound', label: t('knowledgeEditor.sidebar.asr') },
       { key: 'storage', icon: 'cloud', label: t('knowledgeEditor.sidebar.storage') },
@@ -705,7 +716,7 @@ const navGroups = computed(() => {
     {
       key: 'processing',
       label: t('knowledgeEditor.navGroups.processing'),
-      items: pickItems(['parser', 'chunking', 'multimodal', 'asr', 'graph', 'advanced']),
+      items: pickItems(['parser', 'chunking', 'desensitization', 'multimodal', 'asr', 'graph', 'advanced']),
     },
     {
       key: 'data',
@@ -842,6 +853,14 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       enabled: false,
       modelId: '',
       customInstructions: ''
+    },
+    desensitizationConfig: {
+      enabled: false,
+      engine: 'builtin' as 'builtin' | 'presidio',
+      maskStyle: 'replace',
+      entityTypes: ['cn_id_card', 'cn_mobile', 'cn_bank_card', 'cn_uscc'],
+      rules: [] as { name: string; pattern: string; replacement: string }[],
+      llmModelId: ''
     },
     wikiConfig: {
       synthesisModelId: '',
@@ -989,6 +1008,18 @@ const loadKBData = async (
         enabled: kb.profile_config?.enabled || false,
         modelId: kb.profile_config?.model_id || '',
         customInstructions: kb.profile_config?.custom_instructions || ''
+      },
+      desensitizationConfig: {
+        enabled: kb.desensitization_config?.enabled || false,
+        engine: kb.desensitization_config?.engine === 'presidio' ? 'presidio' : 'builtin',
+        maskStyle: kb.desensitization_config?.mask_style || 'replace',
+        entityTypes: kb.desensitization_config?.entity_types || ['cn_id_card', 'cn_mobile', 'cn_bank_card', 'cn_uscc'],
+        rules: (kb.desensitization_config?.rules || []).map((rule: any) => ({
+          name: rule.name || '',
+          pattern: rule.pattern || '',
+          replacement: rule.replacement || ''
+        })),
+        llmModelId: kb.desensitization_config?.llm_model_id || ''
       },
       wikiConfig: {
         synthesisModelId: kb.wiki_config?.synthesis_model_id || '',
@@ -1285,6 +1316,16 @@ const validateForm = (): boolean => {
     return false
   }
 
+  if (formData.value.type !== 'faq' && formData.value.desensitizationConfig?.enabled) {
+    const rules = formData.value.chunkingConfig?.parserEngineRules || []
+    const cloud = new Set(['weknoracloud', 'mineru_cloud', 'paddleocr_vl_cloud'])
+    if (rules.some((rule: any) => cloud.has(rule.engine))) {
+      MessagePlugin.warning(t('knowledgeEditor.desensitization.cloudParserForbidden'))
+      currentSection.value = 'parser'
+      return false
+    }
+  }
+
   return true
 }
 
@@ -1388,6 +1429,21 @@ const buildSubmitData = () => {
     enabled: formData.value.profileConfig?.enabled || false,
     model_id: formData.value.profileConfig?.modelId || '',
     custom_instructions: formData.value.profileConfig?.customInstructions || ''
+  }
+
+  data.desensitization_config = {
+    enabled: formData.value.desensitizationConfig?.enabled || false,
+    engine: formData.value.desensitizationConfig?.engine || 'builtin',
+    mask_style: formData.value.desensitizationConfig?.maskStyle || 'replace',
+    entity_types: formData.value.desensitizationConfig?.entityTypes || [],
+    rules: (formData.value.desensitizationConfig?.rules || [])
+      .filter((rule: any) => rule.pattern && rule.pattern.trim())
+      .map((rule: any) => ({
+        name: rule.name || '',
+        pattern: rule.pattern,
+        replacement: rule.replacement || ''
+      })),
+    llm_model_id: formData.value.desensitizationConfig?.llmModelId || ''
   }
 
   if (formData.value.type === 'faq') {
@@ -1516,6 +1572,7 @@ const doSubmit = async () => {
       if (formData.value.type !== 'faq') {
         updateConfig.auto_tag_config = data.auto_tag_config
         updateConfig.profile_config = data.profile_config
+        updateConfig.desensitization_config = data.desensitization_config
         updateConfig.indexing_strategy = {
           vector_enabled: formData.value.indexingStrategy?.vectorEnabled ?? true,
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,

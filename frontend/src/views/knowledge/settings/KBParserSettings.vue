@@ -105,12 +105,15 @@ interface Props {
   embedded?: boolean
   /** When set, only show file-type groups matching these extensions */
   relevantExtensions?: string[]
+  /** Hide hosted cloud parsers (required when document desensitization is on). */
+  blockCloudEngines?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   parserEngineRules: () => [],
   embedded: false,
   relevantExtensions: () => [],
+  blockCloudEngines: false,
 })
 
 const emit = defineEmits<{
@@ -200,8 +203,10 @@ function getEngineOptions(extensions: string[]): EngineOption[] {
     }
   }
   const defaultName = pickDefaultEngineName(raw, extensions)
+  const cloud = new Set(['weknoracloud', 'mineru_cloud', 'paddleocr_vl_cloud'])
   return raw
     .filter(e => e.available)
+    .filter(e => !props.blockCloudEngines || !cloud.has(e.name))
     .map(e => ({
       value: e.name,
       selectLabel: buildOptionLabel(e.name, defaultName !== '' && e.name === defaultName),
@@ -335,6 +340,16 @@ watch(showSettingsModal, (open, wasOpen) => {
 watch(() => props.parserEngineRules, (v) => {
   localEngineRules.value = v?.length ? [...v] : []
 }, { deep: true })
+
+watch(() => props.blockCloudEngines, (blocked) => {
+  if (!blocked) return
+  const cloud = new Set(['weknoracloud', 'mineru_cloud', 'paddleocr_vl_cloud'])
+  const next = localEngineRules.value.filter(rule => !cloud.has(rule.engine))
+  if (next.length !== localEngineRules.value.length) {
+    localEngineRules.value = next
+    emit('update:parserEngineRules', next)
+  }
+})
 </script>
 
 <style lang="less" scoped>

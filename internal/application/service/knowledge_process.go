@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -163,13 +164,20 @@ func (s *knowledgeService) processDocumentFromPassage(ctx context.Context,
 		return
 	}
 
-	// Convert passages to chunks
+	// Convert passages to chunks after masking so embedding/summary see only redacted text.
 	chunks := make([]types.ParsedChunk, 0, len(passage))
 	start, end := 0, 0
 	for i, p := range passage {
 		if p == "" {
 			continue
 		}
+		masked, maskErr := s.maskParsedMarkdown(ctx, kb, p)
+		if maskErr != nil {
+			logger.Errorf(ctx, "desensitization failed for passage knowledge %s: %v", knowledge.ID, maskErr)
+			_ = persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+			return
+		}
+		p = masked
 		end += len([]rune(p))
 		chunks = append(chunks, types.ParsedChunk{
 			Content: p,
@@ -3610,6 +3618,11 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 			if p == "" {
 				continue
 			}
+			masked, maskErr := s.maskParsedMarkdown(ctx, kb, p)
+			if maskErr != nil {
+				return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+			}
+			p = masked
 			end += len([]rune(p))
 			passageChunks = append(passageChunks, types.ParsedChunk{
 				Content: p,
@@ -3719,10 +3732,16 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
-	// Step 3: Split into chunks using Go chunker. Browser textareas normalize
-	// pasted content to LF, so normalize uploaded source text before calculating
-	// chunk boundaries as well.
+	// Step 3: Optionally mask the parsed markdown, then split into chunks.
+	// Browser textareas normalize pasted content to LF, so normalize uploaded
+	// source text before calculating chunk boundaries as well.
 	sanitizeReadResult(convertResult)
+	masked, maskErr := s.maskParsedMarkdown(ctx, kb, convertResult.MarkdownContent)
+	if maskErr != nil {
+		logger.Errorf(ctx, "desensitization failed for knowledge %s: %v", knowledge.ID, maskErr)
+		return persistDesensitizationFailure(ctx, s.repo, knowledge, maskErr)
+	}
+	convertResult.MarkdownContent = masked
 	convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
@@ -3860,6 +3879,16 @@ func (s *knowledgeService) convert(
 	parserEngine := eff.ChunkingConfig.ResolveParserEngine(fileType)
 	if isURL {
 		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
+	}
+	if err := desensitization.ValidateParserEngine(kb.DesensitizationConfig, parserEngine); err != nil {
+		logger.Errorf(ctx, "[convert] desensitization forbids cloud parser kb=%s engine=%q: %v", kb.ID, parserEngine, err)
+		knowledge.ParseStatus = "failed"
+		knowledge.ErrorMessage = "Cloud parser engines cannot be used when desensitization is enabled"
+		knowledge.UpdatedAt = time.Now()
+		s.repo.UpdateKnowledge(ctx, knowledge)
+		s.failStage(ctx, knowledge.ID, types.StageDocReader,
+			werrors.ErrCodeDocReaderParseFailed, knowledge.ErrorMessage, err)
+		return nil, nil
 	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",

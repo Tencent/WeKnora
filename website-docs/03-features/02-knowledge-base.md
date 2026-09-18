@@ -41,6 +41,8 @@
 
 开启自动标签后，系统在解析完成时从已有候选标签中选择匹配项。默认每篇最多关联 3 个，已有标签时跳过。配置只影响后续解析，不自动补齐历史文档，模型失败也不会阻塞文档完成。
 
+知识库可在「处理 → 文档脱敏」打开文本脱敏：解析得到 Markdown 后、切块前打码，再进入 Embedding 与摘要。默认关闭，已有知识库与已入库文档不变。开启后禁止云解析（weknoracloud / mineru_cloud / paddleocr_vl_cloud）。
+
 <Screenshot
   src="/screenshots/kb-batch-tag.png"
   caption="批量打标签：已选文档的共有标签会被预选中"
@@ -220,6 +222,18 @@ graph TB
 | custom_instructions | 空 | 追加到系统提示词的补充要求，如面向读者、需保留的术语 |
 
 无论是否开启自动刷新，知识库设置页都可以点击"生成 AI 描述"立即生成一次，并可一键把 gist 采纳为手写描述。`generated_profile.status` 为 `ready`/`empty`（无已解析文档，不调模型）/`failed`（保留上一次文案并记录错误）。关闭了文档摘要的上传只贡献标题、类型和标签，不贡献主题词。
+
+#### 文档脱敏
+
+`desensitization_config` 为知识库级 opt-in，默认关闭（`NULL` 或 `enabled: false` 时解析路径不改写）。开启后在本地解析得到 Markdown 后、切块前打码，Embedding、摘要和问答只接触打码后文本；对象存储中的原件不改。开启后禁止云解析引擎。试跑接口：`POST /desensitization/preview`。不保证检出全部 PII，也不处理图片 / OCR。
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| enabled | false | 是否启用文本脱敏 |
+| engine | builtin | `builtin` 或 `presidio` |
+| mask_style | replace | `replace` 占位符，`partial` 局部遮罩 |
+| entity_types | 空 | 预置类型：`cn_id_card` / `cn_mobile` / `cn_landline` / `cn_bank_card` / `cn_uscc` / `cn_plate` / `email` |
+| rules | 空 | 自定义正则（Go RE2），在预置类型之后应用 |
 
 ### 知识（Knowledge）管理 {#_3-知识-knowledge-管理}
 
