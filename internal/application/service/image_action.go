@@ -280,7 +280,9 @@ func BuildImageCandidates(parent *types.Chunk, children []*types.Chunk) []*Image
 	}
 
 	// A stable order keeps a plan reproducible and a test readable.
-	sort.SliceStable(ordered, func(i, j int) bool { return imageCandidateKey(ordered[i]) < imageCandidateKey(ordered[j]) })
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return imageCandidateKey(ordered[i]) < imageCandidateKey(ordered[j])
+	})
 	return ordered
 }
 

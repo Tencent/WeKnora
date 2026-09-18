@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"image"
 	"image/color"
-	_ "image/gif"
+	_ "image/gif" // register the GIF decoder for image.Decode
 	"image/jpeg"
-	_ "image/png"
+	_ "image/png" // register the PNG decoder for image.Decode
 
 	"golang.org/x/image/draw"
-	_ "golang.org/x/image/webp"
+	_ "golang.org/x/image/webp" // register the WebP decoder for image.Decode
 )
 
 // downscaleForDescribe shrinks an encoded image so its longest edge is at most

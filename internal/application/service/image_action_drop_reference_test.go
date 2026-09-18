@@ -528,7 +528,8 @@ func TestApplyImagePostProcessRulesFallsBackToTheDefaultRuleSet(t *testing.T) {
 	if len(got) != len(textChunks) {
 		t.Errorf("returned %d chunk(s), want %d: nothing was retired", len(got), len(textChunks))
 	}
-	if rules := imageDisableRules(types.DefaultImageClassPolicies()); len(rules) != 1 || rules[0].Action != DropImageReferenceActionName {
+	rules := imageDisableRules(types.DefaultImageClassPolicies())
+	if len(rules) != 1 || rules[0].Action != DropImageReferenceActionName {
 		t.Errorf("default rules = %+v, want the single drop_image_reference rule", rules)
 	}
 }
@@ -570,8 +571,10 @@ func TestApplyImagePostProcessRulesIgnoresUnusableRules(t *testing.T) {
 	kb.ImageProcessingConfig.PostProcessImageRules = append(kb.ImageProcessingConfig.PostProcessImageRules,
 		types.ImageRule{ID: "ghost", Match: types.ImageMatchSpec{Classes: []string{"decorative"}}, Action: "ghost"},
 		types.ImageRule{ID: "empty", Match: types.ImageMatchSpec{}, Action: DropImageReferenceActionName},
-		types.ImageRule{ID: "off", Enabled: boolPtr(false),
-			Match: types.ImageMatchSpec{Classes: []string{"decorative"}}, Action: DropImageReferenceActionName},
+		types.ImageRule{
+			ID: "off", Enabled: boolPtr(false),
+			Match: types.ImageMatchSpec{Classes: []string{"decorative"}}, Action: DropImageReferenceActionName,
+		},
 	)
 
 	got := service.applyImagePostProcessRules(context.Background(), 1, "k-1", kb, textChunks, nil, nil)

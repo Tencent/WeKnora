@@ -126,7 +126,8 @@ func TestDropMarkdownImagesByURLs(t *testing.T) {
 
 	t.Run("collapses the blank lines a removal leaves behind", func(t *testing.T) {
 		content := "alpha\n\n![x](local://img/a.png)\n\nbravo"
-		if got := DropMarkdownImagesByURLs(content, map[string]bool{"local://img/a.png": true}); got != "alpha\n\nbravo" {
+		got := DropMarkdownImagesByURLs(content, map[string]bool{"local://img/a.png": true})
+		if got != "alpha\n\nbravo" {
 			t.Errorf("got %q, want the gap collapsed", got)
 		}
 	})

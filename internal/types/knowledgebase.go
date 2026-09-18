@@ -555,7 +555,7 @@ type ImageProcessingConfig struct {
 	// saving is large and the classification is unchanged. A model that
 	// handles full-resolution images well can switch it off by setting it
 	// to false.
-	ClassifyDownscaleEnabled *bool `yaml:"classify_downscale_enabled,omitempty" json:"classify_downscale_enabled,omitempty"`
+	ClassifyDownscaleEnabled *bool `yaml:"classify_downscale_enabled,omitempty" json:"classify_downscale_enabled,omitempty"` //nolint:lll // one-line struct tag
 	// ClassPolicies overrides the built-in class→work table (see
 	// DefaultImageClassPolicies). A class the map does not mention keeps the
 	// conservative default: run OCR and keep the caption.
@@ -565,11 +565,11 @@ type ImageProcessingConfig struct {
 	// an existing deployment never changes what happens to documents already
 	// being ingested. A single upload can override it per document through
 	// KnowledgeProcessOverrides.PostProcessImageEnabled.
-	PostProcessImageEnabled bool `yaml:"post_process_image_enabled,omitempty" json:"post_process_image_enabled,omitempty"`
+	PostProcessImageEnabled bool `yaml:"post_process_image_enabled,omitempty" json:"post_process_image_enabled,omitempty"` //nolint:lll // one-line struct tag
 	// PostProcessImageRules are the declarative rules the engine evaluates, in order.
 	// A rule naming an action that is not registered is reported and skipped
 	// rather than failing the document.
-	PostProcessImageRules []ImageRule `yaml:"post_process_image_rules,omitempty" json:"post_process_image_rules,omitempty"`
+	PostProcessImageRules []ImageRule `yaml:"post_process_image_rules,omitempty" json:"post_process_image_rules,omitempty"` //nolint:lll // one-line struct tag
 }
 
 // ImageClassPolicy declares which per-image work is worth doing for a class of

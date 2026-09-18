@@ -38,6 +38,7 @@ func normalizeParserFileType(fileType string) string {
 
 // ResolveProcessConfig merges KB defaults with per-upload overrides for the parse pipeline.
 func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgeProcessOverrides) types.EffectiveProcessConfig {
+	imageCfg := kb.ImageProcessingConfig
 	eff := types.EffectiveProcessConfig{
 		SummaryEnabled:                true,
 		ChunkingConfig:                kb.ChunkingConfig,
@@ -47,10 +48,10 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		QuestionGenerationConfig:      defaultQuestionGenerationConfig(kb),
 		GraphEnabled:                  kb.IsGraphEnabled(),
 		ExtractConfig:                 derefExtractConfig(kb.ExtractConfig),
-		PostProcessImageEnabled:       kb.ImageProcessingConfig.PostProcessImageEnabled,
-		ImageBatchSize:                types.NormalizeImageBatchSize(kb.ImageProcessingConfig.BatchSize),
-		ImageClassifyDownscaleEnabled: types.NormalizeImageClassifyDownscale(kb.ImageProcessingConfig.ClassifyDownscaleEnabled),
-		ImageClassPolicies:            types.MergeImageClassPolicies(kb.ImageProcessingConfig.ClassPolicies),
+		PostProcessImageEnabled:       imageCfg.PostProcessImageEnabled,
+		ImageBatchSize:                types.NormalizeImageBatchSize(imageCfg.BatchSize),
+		ImageClassifyDownscaleEnabled: types.NormalizeImageClassifyDownscale(imageCfg.ClassifyDownscaleEnabled),
+		ImageClassPolicies:            types.MergeImageClassPolicies(imageCfg.ClassPolicies),
 	}
 	if overrides == nil {
 		return eff

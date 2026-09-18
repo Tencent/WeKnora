@@ -362,7 +362,8 @@ func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) 
 		language = types.LanguageNameFromContext(ctx)
 	}
 	prompt := fmt.Sprintf(
-		"You are given %d images, in order: image 1 is the first image after this instruction, image 2 the second, and so on.\n"+
+		"You are given %d images, in order: image 1 is the first image after "+
+			"this instruction, image 2 the second, and so on.\n"+
 			"For each image, classify it and describe its main content in %s.\n\n"+
 			"Output exactly one block per image, in ascending order, using this format:\n\n"+
 			"### IMAGE <n>\n"+
@@ -371,8 +372,13 @@ func buildBatchImagePrompt(ctx context.Context, cfg types.VLMConfig, count int) 
 			"Rules:\n"+
 			"- Replace <n> with the image number, starting at 1.\n"+
 			"- CLASS must be exactly one of the listed values, with no extra words.\n"+
-			"- %s: artwork that carries no information, such as a divider, background fill, or purely ornamental graphic. A brand mark is never decorative.\n"+
-			"- %s: a brand mark — a logo, badge, coat of arms, or emblem that identifies a company, product, or organisation, usually combining a name or wordmark with a graphic. When an image could be either decorative or a logo, classify it as %s.\n"+
+			"- %s: artwork that carries no information, such as a divider, "+
+			"background fill, or purely ornamental graphic. A brand mark is never "+
+			"decorative.\n"+
+			"- %s: a brand mark — a logo, badge, coat of arms, or emblem that "+
+			"identifies a company, product, or organisation, usually combining a "+
+			"name or wordmark with a graphic. When an image could be either "+
+			"decorative or a logo, classify it as %s.\n"+
 			"- %s: a photograph or a picture of a physical thing.\n"+
 			"- %s: a screenshot or scan whose content is mostly body text.\n"+
 			"- %s: a table rendered as an image.\n"+
@@ -923,7 +929,8 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		}
 	}
 
-	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for knowledge %s", len(chunks), payload.KnowledgeID)
+	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for knowledge %s",
+		len(chunks), payload.KnowledgeID)
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,

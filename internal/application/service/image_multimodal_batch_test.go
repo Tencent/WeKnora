@@ -522,7 +522,7 @@ func TestProcessImageBatchFailsOnTransportError(t *testing.T) {
 
 	sentinel := fmt.Errorf("upstream unavailable")
 	fake := &batchFakeVLM{}
-	fake.reply = func(prompt string, images int) (string, error) {
+	fake.reply = func(_ string, images int) (string, error) {
 		if images > 1 {
 			return "", sentinel
 		}

@@ -224,13 +224,23 @@ func TestCompiledMatchSpecMatches(t *testing.T) {
 	}{
 		{"class match", types.ImageMatchSpec{Classes: []string{"decorative"}}, decorative, true},
 		{"logo class match", types.ImageMatchSpec{Classes: []string{"logo"}}, logo, true},
-		{"logo is no longer an alias of decorative",
-			types.ImageMatchSpec{Classes: []string{"logo"}}, decorative, false},
-		{"decorative rule does not take a logo",
-			types.ImageMatchSpec{Classes: []string{"decorative"}}, logo, false},
+		{
+			"logo is no longer an alias of decorative",
+			types.ImageMatchSpec{Classes: []string{"logo"}},
+			decorative, false,
+		},
+		{
+			"decorative rule does not take a logo",
+			types.ImageMatchSpec{Classes: []string{"decorative"}},
+			logo, false,
+		},
 		{"class mismatch", types.ImageMatchSpec{Classes: []string{"decorative"}}, chart, false},
 		{"class list is alternatives", types.ImageMatchSpec{Classes: []string{"chart", "decorative"}}, chart, true},
-		{"unclassified never matches a class rule", types.ImageMatchSpec{Classes: []string{"other"}}, unclassified, false},
+		{
+			"unclassified never matches a class rule",
+			types.ImageMatchSpec{Classes: []string{"other"}},
+			unclassified, false,
+		},
 		{"caption equals", types.ImageMatchSpec{CaptionEquals: []string{"[[decorative]]"}}, decorative, true},
 		{
 			"caption equals compares the normalised forms",
@@ -244,8 +254,11 @@ func TestCompiledMatchSpecMatches(t *testing.T) {
 			false,
 		},
 		{"caption contains", types.ImageMatchSpec{CaptionContains: []string{"divider"}}, decorative, false},
-		{"caption contains hits", types.ImageMatchSpec{CaptionContains: []string{"divider"}},
-			&ImageCandidate{Caption: "A plain divider rule."}, true},
+		{
+			"caption contains hits",
+			types.ImageMatchSpec{CaptionContains: []string{"divider"}},
+			&ImageCandidate{Caption: "A plain divider rule."}, true,
+		},
 		{"regex hits", types.ImageMatchSpec{CaptionRegex: `^\[\[decorative\]\]$`}, decorative, true},
 		{"regex misses", types.ImageMatchSpec{CaptionRegex: `^\[\[decorative\]\]$`}, chart, false},
 		{"ocr empty holds", types.ImageMatchSpec{OCRState: types.OCRStateEmpty}, decorative, true},
@@ -516,7 +529,10 @@ func TestPlanImageActionsReportsUnusableRules(t *testing.T) {
 	registry := NewImageActionRegistry(&fakeImageAction{name: "act"})
 	candidates := []*ImageCandidate{{URL: "local://img/a.png", Class: "decorative"}}
 	rules := []types.ImageRule{
-		{ID: "r1", Name: "no such action", Match: types.ImageMatchSpec{Classes: []string{"decorative"}}, Action: "ghost"},
+		{
+			ID: "r1", Name: "no such action", Action: "ghost",
+			Match: types.ImageMatchSpec{Classes: []string{"decorative"}},
+		},
 		{ID: "r2", Name: "no conditions", Action: "act"},
 		{ID: "r3", Name: "bad pattern", Match: types.ImageMatchSpec{CaptionRegex: "("}, Action: "act"},
 		{Name: "bad state", Match: types.ImageMatchSpec{OCRState: "maybe"}, Action: "act"},
