@@ -172,6 +172,8 @@ Handler: `internal/handler/initialization.go`。KB 配置类：API key `manage_k
 
 用途：读取 KB 当前模型/解析配置。权限：Viewer+，KB read。
 
+模型 `baseUrl` 仅对 KB 所属空间的 Admin+（或 full-access / `manage_tenant_settings` API key）返回。通过组织分享访问的空间只能看到凭证是否已配置（`credentials.*`），看不到来源空间的模型地址和存储桶信息。
+
 响应：200 `{"success":true,"data":{"hasFiles",llm,embedding,rerank,multimodal,documentSplitting,nodeExtract,questionGeneration}}`
 
 ```bash
@@ -210,6 +212,8 @@ curl -X POST $BASE/api/v1/initialization/initialize/kb-1 -H "Authorization: Bear
 ### PUT /api/v1/initialization/config/:kbId
 
 用途：更新 KB 模型/分块配置（`KBModelConfigRequest`：`llmModelId` 必填，`embeddingModelId`、`vlm_config`、`asr_config`、`documentSplitting.*`、`multimodal.enabled`、`storageProvider`、`storageBackendId`、`nodeExtract.*`、`questionGeneration.*` 可选）。权限：KB 创建者 OR Admin+，KB write。
+
+通过组织分享访问时，需要有效分享权限为 admin；editor 只能编辑内容，不能改设置（403）。存储绑定（`storageBackendId` / `storageProvider`）只有 KB 所属空间可以修改，其他空间提交与当前不同的值会返回 403。
 
 响应：200 `{"success":true,"message":"配置更新成功"}`
 

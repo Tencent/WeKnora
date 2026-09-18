@@ -580,6 +580,7 @@ func (h *Handler) resolveAgent(
 		ownErr = err
 	}
 
+	var shareErr error
 	userIDVal, _ := c.Get(types.UserIDContextKey.String())
 	currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
@@ -591,10 +592,11 @@ func (h *Handler) resolveAgent(
 				agent.ID, agent.Name, agent.IsBuiltin, agent.Config.AgentMode, agent.TenantID)
 			return agent, agent.TenantID, true
 		}
+		shareErr = err
 	}
 
-	logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
-		secutils.SanitizeForLog(agentID), ownErr)
+	logger.Warnf(ctx, "Failed to get agent, agent ID: %s, source tenant: %d, own error: %v, share error: %v, "+
+		"using default config", secutils.SanitizeForLog(agentID), sourceTenantID, ownErr, shareErr)
 	return nil, 0, false
 }
 

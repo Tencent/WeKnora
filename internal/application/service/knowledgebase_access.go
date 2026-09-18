@@ -22,8 +22,23 @@ func kbReadPermissions(ctx context.Context, shares access.KBShareLookup) *access
 // workspace, and those shared to it with at least editor permission (capped by
 // the caller's tenant role). A read grant — a viewer share or a shared agent's
 // scope — never makes a KB writable.
-func kbWritableIDs(ctx context.Context, shares access.KBShareLookup, targets types.SearchTargets) []string {
+//
+// The caller must also be allowed to write KB content at all, as on the HTTP
+// write routes: Contributor+ (a tenant Viewer, and the IM, embed and MCP
+// endpoint principals that run as Viewer, stay read-only), or for a scoped API
+// key the ingest capability, as in access.RequireKBWrite. roleEnforced mirrors
+// the RBAC rollout switch, under which role checks only log.
+func kbWritableIDs(
+	ctx context.Context, shares access.KBShareLookup, targets types.SearchTargets, roleEnforced bool,
+) []string {
 	caller := types.CallerFromContext(ctx)
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		if !scope.FullAccess && !scope.HasCapability(types.APIKeyCapabilityIngest) {
+			return nil
+		}
+	} else if roleEnforced && !caller.Role.HasPermission(types.TenantRoleContributor) {
+		return nil
+	}
 	if caller.UserID == "" {
 		shares = nil
 	}

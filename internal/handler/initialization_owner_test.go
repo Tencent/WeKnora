@@ -4,12 +4,18 @@ import (
 	"context"
 	stderrors "errors"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/config"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 )
 
 type stubInitializationKBService struct {
@@ -102,6 +108,82 @@ func TestInitializationExistingModelUpdateRequiresModelAuthority(t *testing.T) {
 			if len(svc.updated) != 0 {
 				t.Fatalf("model was updated despite missing authority")
 			}
+		})
+	}
+}
+
+type stubInitializationKBRepo struct {
+	interfaces.KnowledgeBaseRepository
+	updated *types.KnowledgeBase
+}
+
+func (r *stubInitializationKBRepo) UpdateKnowledgeBase(_ context.Context, kb *types.KnowledgeBase) error {
+	r.updated = kb
+	return nil
+}
+
+// PUT /initialization/config shares the route guard (KBAccessWrite) that
+// admits share editors. KB settings belong to the owner and to admin shares
+// only, and a share admin still cannot rebind the owner's storage.
+func TestUpdateKBConfigFromAnotherWorkspace(t *testing.T) {
+	backend := "backend-of-owner"
+	cases := []struct {
+		name       string
+		permission types.OrgMemberRole
+		body       string
+		wantStatus int
+	}{
+		{
+			name: "share editor", permission: types.OrgRoleEditor,
+			body: `{"llmModelId":"m-llm"}`, wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "share admin rebinding storage", permission: types.OrgRoleAdmin,
+			body: `{"llmModelId":"m-llm","storageBackendId":"backend-of-receiver"}`, wantStatus: http.StatusForbidden,
+		},
+		{
+			name: "share admin keeping storage", permission: types.OrgRoleAdmin,
+			body:       `{"llmModelId":"m-llm","storageBackendId":"backend-of-owner","storageProvider":"minio"}`,
+			wantStatus: http.StatusOK,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 7, StorageBackendID: &backend}
+			repo := &stubInitializationKBRepo{}
+			models := &stubTenantStampModelService{getModelByID: func(context.Context, string) (*types.Model, error) {
+				return &types.Model{ID: "m-llm", TenantID: 7}, nil
+			}}
+			h := &InitializationHandler{
+				kbService:    &stubInitializationKBService{kb: kb},
+				kbRepository: repo,
+				modelService: models,
+			}
+
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Params = gin.Params{{Key: "kbId", Value: "kb-1"}}
+			req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			caller := types.Caller{TenantID: 42, UserID: "u", Role: types.TenantRoleAdmin}
+			ctx := types.WithExecutionTenant(types.WithCaller(req.Context(), caller), 7)
+			c.Request = req.WithContext(ctx)
+			c.Set(middleware.KBAccessContextKey, &access.KBAccess{
+				KnowledgeBase: kb, Caller: caller, EffectiveTenantID: 7, Permission: tc.permission,
+			})
+
+			h.UpdateKBConfig(c)
+
+			if tc.wantStatus == http.StatusOK {
+				require.Empty(t, c.Errors)
+				require.NotNil(t, repo.updated)
+				require.Equal(t, backend, *repo.updated.StorageBackendID)
+				return
+			}
+			require.Len(t, c.Errors, 1)
+			requireForbidden(t, c.Errors[0].Err)
+			require.Nil(t, repo.updated, "KB must not be written")
 		})
 	}
 }

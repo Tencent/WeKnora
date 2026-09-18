@@ -33,11 +33,24 @@ func TestKBWritableIDs(t *testing.T) {
 	caller := func(role types.TenantRole, userID string) context.Context {
 		return types.WithCaller(context.Background(), types.Caller{TenantID: 42, UserID: userID, Role: role})
 	}
+	apiKey := func(scope types.TenantAPIKeyScope) context.Context {
+		return types.WithTenantAPIKeyScope(caller(types.TenantRoleViewer, "system-42"), scope)
+	}
 
 	require.Equal(t, []string{"own", "shared-editor"},
-		kbWritableIDs(caller(types.TenantRoleContributor, "u"), shares, targets))
-	require.Equal(t, []string{"own"}, kbWritableIDs(caller(types.TenantRoleViewer, "u"), shares, targets),
-		"a tenant Viewer never gets write access through a share")
-	require.Equal(t, []string{"own"}, kbWritableIDs(caller(types.TenantRoleContributor, ""), shares, targets),
+		kbWritableIDs(caller(types.TenantRoleContributor, "u"), shares, targets, true))
+	require.Equal(t, []string{"own"}, kbWritableIDs(caller(types.TenantRoleContributor, ""), shares, targets, true),
 		"callers without a user do not expand through org shares")
+
+	// A tenant Viewer (also the IM / embed / MCP endpoint principals) is
+	// read-only, like on the HTTP write routes; with RBAC enforcement off the
+	// role check only logs, but a share never grants a Viewer more than read.
+	require.Empty(t, kbWritableIDs(caller(types.TenantRoleViewer, "u"), shares, targets, true))
+	require.Equal(t, []string{"own"}, kbWritableIDs(caller(types.TenantRoleViewer, "u"), shares, targets, false))
+
+	// Scoped API keys write only with the ingest capability.
+	chatOnly := types.TenantAPIKeyScope{Capabilities: types.StringArray{string(types.APIKeyCapabilityChat)}}
+	require.Empty(t, kbWritableIDs(apiKey(chatOnly), shares, targets, true))
+	ingest := types.TenantAPIKeyScope{Capabilities: types.StringArray{string(types.APIKeyCapabilityIngest)}}
+	require.Equal(t, []string{"own"}, kbWritableIDs(apiKey(ingest), shares, targets, true))
 }
