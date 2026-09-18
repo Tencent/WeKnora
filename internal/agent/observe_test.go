@@ -271,7 +271,7 @@ func TestBuildRuntimeContextBlock_QuestionOrigin(t *testing.T) {
 	assert.Contains(t, block, "Search it before answering")
 
 	baseOnly := buildRuntimeContextBlock("sess-1", nil, nil, &QuestionOriginInfo{KnowledgeBaseID: "kb-1"})
-	assert.Contains(t, baseOnly, "<question_origin")
+	assert.Contains(t, baseOnly, `<question_origin knowledge_base_id="kb-1">`, "an unknown name is omitted, not empty")
 	assert.NotContains(t, baseOnly, "<document")
 
 	assert.NotContains(t, buildRuntimeContextBlock("sess-1", nil, nil, nil), "question_origin")

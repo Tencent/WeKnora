@@ -354,7 +354,6 @@ func (s *sessionService) buildAgentConfig(
 	}
 	agentConfig.KnowledgeBases = kbIDs
 	agentConfig.KnowledgeIDs = knowledgeIDs
-	agentConfig.QuestionOrigin = questionOriginInScope(ctx, req.QuestionOrigin, kbIDs)
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults
 	if len(customAgent.Config.AllowedTools) > 0 {
@@ -413,6 +412,7 @@ func (s *sessionService) buildAgentConfig(
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
+	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the
@@ -650,22 +650,51 @@ func (s *sessionService) configureSkillsFromAgent(
 	}
 }
 
-// questionOriginInScope keeps a suggested question's origin only when its
-// knowledge base is already part of this turn's resolved scope, so a client
-// cannot use the hint to reach a base the agent was not given.
-func questionOriginInScope(
-	ctx context.Context, origin *types.QuestionOrigin, kbIDs []string,
+// questionOriginInTargets keeps a suggested question's origin only when this
+// turn's search targets reach it, so the hint never points the model at
+// anything the tools cannot read. The base must be searched this turn (a whole
+// base, or a document/tag scope inside it); the document is kept only when a
+// target for that base covers it.
+func questionOriginInTargets(
+	ctx context.Context, origin *types.QuestionOrigin, targets types.SearchTargets,
 ) *types.QuestionOrigin {
 	if origin == nil {
 		return nil
 	}
 	kbID := strings.TrimSpace(origin.KnowledgeBaseID)
-	if kbID == "" || !slices.Contains(kbIDs, kbID) {
-		if kbID != "" {
-			logger.Infof(ctx, "Ignoring question origin: knowledge base %s is outside this turn's scope",
-				secutils.SanitizeForLog(kbID))
-		}
+	if kbID == "" {
 		return nil
 	}
-	return &types.QuestionOrigin{KnowledgeBaseID: kbID, KnowledgeID: strings.TrimSpace(origin.KnowledgeID)}
+	if !targets.ContainsKB(kbID) {
+		logger.Infof(ctx, "Ignoring question origin: knowledge base %s is outside this turn's search targets",
+			secutils.SanitizeForLog(kbID))
+		return nil
+	}
+	kept := &types.QuestionOrigin{KnowledgeBaseID: kbID}
+	if docID := strings.TrimSpace(origin.KnowledgeID); docID != "" && targetsCoverDocument(targets, kbID, docID) {
+		kept.KnowledgeID = docID
+	}
+	return kept
+}
+
+// targetsCoverDocument reports whether a target for kbID can read docID: an
+// unfiltered whole-base target, or a document scope that lists it. A
+// tag-filtered base cannot be checked per document here, so it does not count.
+func targetsCoverDocument(targets types.SearchTargets, kbID, docID string) bool {
+	for _, t := range targets {
+		if t == nil || t.KnowledgeBaseID != kbID {
+			continue
+		}
+		switch t.Type {
+		case types.SearchTargetTypeKnowledgeBase:
+			if len(t.TagIDs) == 0 {
+				return true
+			}
+		case types.SearchTargetTypeKnowledge:
+			if slices.Contains(t.KnowledgeIDs, docID) {
+				return true
+			}
+		}
+	}
+	return false
 }

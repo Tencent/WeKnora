@@ -61,7 +61,7 @@ import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
-import { originForSentText, questionOriginFromSuggestion, type PendingQuestionOrigin } from '@/utils/questionOrigin';
+import { questionOriginFromSuggestion, type SendMessageOptions } from '@/utils/questionOrigin';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
@@ -182,20 +182,17 @@ onMounted(() => { fetchSuggestedQuestions(); });
 
 const inputFieldRef = ref();
 
-// Carried to the new session's first request so the agent searches the
-// suggestion's source before answering.
-let pendingQuestionOrigin: PendingQuestionOrigin | null = null;
-
+// The suggestion's source rides with this send to the new session's first
+// request, so the agent searches it before answering.
 const handleSuggestedQuestionClick = (item: SuggestedQuestion) => {
-    pendingQuestionOrigin = questionOriginFromSuggestion(item);
-    inputFieldRef.value?.triggerSend(item.question);
+    inputFieldRef.value?.triggerSend(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
 };
 
-const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
-    createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles);
+const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
+    createNewSession(value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
 }
 
-async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = []) {
+async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) {
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
@@ -215,7 +212,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     try {
         const res = await createSessions(sessionData);
         if (res.data && res.data.id) {
-            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles);
+            await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
             console.error('[createChat] Failed to create session');
             MessagePlugin.error(t('createChat.messages.createFailed'));
@@ -226,7 +223,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     }
 }
 
-const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
+const navigateToSession = async (sessionId: string, value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
     const now = new Date().toISOString();
     let obj = {
         title: t('createChat.newSessionTitle'),
@@ -239,9 +236,7 @@ const navigateToSession = async (sessionId: string, value: string, modelId: stri
     };
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
-    const questionOrigin = originForSentText(pendingQuestionOrigin, value) ?? null;
-    pendingQuestionOrigin = null;
-    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles, questionOrigin);
+    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles, options.questionOrigin ?? null);
     router.push(`/platform/chat/${sessionId}`);
 }
 

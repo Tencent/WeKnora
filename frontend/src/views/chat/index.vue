@@ -155,7 +155,7 @@
         </transition>
         <div class="input-container" :class="{ 'is-embedded': embeddedMode }">
             <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount"
-                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles)"
+                @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
                 @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
                 @promote-steer="handlePromoteSteer"
                 @remove-steer="handleRemoveSteer"
@@ -189,7 +189,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
 import { getSuggestedQuestions } from "@/api/agent/index";
-import { originForSentText, questionOriginFromSuggestion } from '@/utils/questionOrigin';
+import { questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
 import { listSteerSession, promoteSteerSession, removeSteerSession, steerSession } from '@/api/chat/steer';
@@ -497,8 +497,6 @@ let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
 let pendingSuggestionAttribution = null;
 let pendingSuggestionKnowledgeBaseIds = [];
-// Source of a picked suggested question, sent with it as a retrieval hint.
-let pendingQuestionOrigin = null;
 
 const cancelSuggestedQuestionsFetch = () => {
     suggestedQuestionsFetchId++;
@@ -548,12 +546,13 @@ const fetchSuggestedQuestions = async () => {
     }
 };
 
+// The suggestion's source rides with this send only, as a retrieval hint.
 const handleSuggestedQuestionClick = (item) => {
-    pendingQuestionOrigin = questionOriginFromSuggestion(item);
+    const options = { questionOrigin: questionOriginFromSuggestion(item) };
     if (inputFieldRef.value?.triggerSend) {
-        inputFieldRef.value.triggerSend(item.question);
+        inputFieldRef.value.triggerSend(item.question, options);
     } else {
-        sendMsg(item.question);
+        sendMsg(item.question, '', [], [], [], options);
     }
 };
 
@@ -1225,7 +1224,7 @@ const attachSteerFollowUp = async (completedAssistantId) => {
     }
 };
 
-const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = []) => {
+const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = [], attachmentFiles = [], options = {}) => {
     stopStream();
     prepareForNewOutgoingMessage();
     activitySessionId.value = String(session_id.value);
@@ -1385,8 +1384,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const suggestionAttribution = pendingSuggestionAttribution;
     pendingSuggestionAttribution = null;
     pendingSuggestionKnowledgeBaseIds = [];
-    const questionOrigin = agentEnabled ? originForSentText(pendingQuestionOrigin, value) : undefined;
-    pendingQuestionOrigin = null;
     await startStream({
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
@@ -1406,7 +1403,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
         query: value,
         suggestion_attribution: suggestionAttribution || undefined,
-        question_origin: questionOrigin,
+        question_origin: options?.questionOrigin,
         method: 'POST',
         url: endpoint,
     });
@@ -1555,10 +1552,7 @@ onMounted(async () => {
                 rerankModelId: '',
             });
         }
-        pendingQuestionOrigin = firstQuestionOrigin.value
-            ? { question: firstQuery.value, origin: firstQuestionOrigin.value }
-            : null;
-        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
+        sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || [], { questionOrigin: firstQuestionOrigin.value || undefined });
         usemenuStore.changeFirstQuery('', [], '', [], []);
     } else {
         scrollLock.value = false;

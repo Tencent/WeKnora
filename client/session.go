@@ -207,18 +207,30 @@ type ImageAttachment struct {
 	Caption string `json:"caption,omitempty"` // VLM analysis result
 }
 
+// QuestionOrigin names the knowledge source a suggested question was generated
+// from (SuggestedQuestion.KnowledgeBaseID / KnowledgeID). Send it with the
+// question the user picked: the agent searches that source before answering.
+// It is a hint inside the request's retrieval scope and never widens it; for an
+// agent that retrieves only on @mention, it selects the origin base when the
+// agent may read it.
+type QuestionOrigin struct {
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	KnowledgeID     string `json:"knowledge_id,omitempty"`
+}
+
 // KnowledgeQARequest knowledge Q&A request
 type KnowledgeQARequest struct {
-	Query            string            `json:"query"`              // Query text for knowledge base search
-	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"` // Selected knowledge base IDs for this request
-	KnowledgeIDs     []string          `json:"knowledge_ids"`      // Selected knowledge IDs for this request
-	AgentEnabled     bool              `json:"agent_enabled"`      // Whether agent mode is enabled for this request
-	AgentID          string            `json:"agent_id"`           // Selected custom agent ID for this request
-	WebSearchEnabled bool              `json:"web_search_enabled"` // Whether web search is enabled for this request
-	SummaryModelID   string            `json:"summary_model_id"`   // Optional summary model ID (overrides session default)
-	DisableTitle     bool              `json:"disable_title"`      // Whether to disable auto title generation
-	Images           []ImageAttachment `json:"images,omitempty"`   // Attached images for multimodal chat
-	Channel          string            `json:"channel,omitempty"`  // Source channel: "web", "api", "im", etc.
+	Query            string            `json:"query"`                     // Query text for knowledge base search
+	KnowledgeBaseIDs []string          `json:"knowledge_base_ids"`        // Selected knowledge base IDs for this request
+	KnowledgeIDs     []string          `json:"knowledge_ids"`             // Selected knowledge IDs for this request
+	AgentEnabled     bool              `json:"agent_enabled"`             // Whether agent mode is enabled for this request
+	AgentID          string            `json:"agent_id"`                  // Selected custom agent ID for this request
+	WebSearchEnabled bool              `json:"web_search_enabled"`        // Whether web search is enabled for this request
+	SummaryModelID   string            `json:"summary_model_id"`          // Optional summary model ID (overrides session default)
+	DisableTitle     bool              `json:"disable_title"`             // Whether to disable auto title generation
+	Images           []ImageAttachment `json:"images,omitempty"`          // Attached images for multimodal chat
+	Channel          string            `json:"channel,omitempty"`         // Source channel: "web", "api", "im", etc.
+	QuestionOrigin   *QuestionOrigin   `json:"question_origin,omitempty"` // Source of a picked suggested question
 }
 
 // LLMToolCall represents a function/tool call from the LLM

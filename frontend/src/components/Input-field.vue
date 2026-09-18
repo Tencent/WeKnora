@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
+import type { SendMessageOptions } from '@/utils/questionOrigin';
 import { useSettingsStore } from '@/stores/settings';
 import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useUIStore } from '@/stores/ui';
@@ -1948,7 +1949,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], options: SendMessageOptions): void;
   (e: 'stop-generation'): void;
   (e: 'stop-confirmed'): void;
   (e: 'stop-failed'): void;
@@ -1960,7 +1961,13 @@ const emit = defineEmits<{
   (e: 'retry-steer', steerId: string): void;
 }>();
 
-const createSession = async (val: string, delivery: 'inject' | 'after' = 'after') => {
+// options ride along with this one send only: a send that returns early (or
+// steers into the running turn) drops them instead of leaving them behind.
+const createSession = async (
+  val: string,
+  delivery: 'inject' | 'after' = 'after',
+  options: SendMessageOptions = {},
+) => {
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
@@ -2017,7 +2024,7 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
 
   // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
   if (props.embeddedMode) {
-    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    emit('send-msg', val, selectedModelId.value || '', [], [], [], options);
     clearvalue();
     void focusInput();
     return;
@@ -2080,7 +2087,7 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
 
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, options);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2610,10 +2617,10 @@ onBeforeRouteUpdate((to, from, next) => {
 
 defineExpose({
   focusInput,
-  triggerSend(text: string) {
+  triggerSend(text: string, options: SendMessageOptions = {}) {
     if (!text.trim()) return;
     query.value = text;
-    nextTick(() => createSession(text));
+    nextTick(() => createSession(text, 'after', options));
   },
   /**
    * Puts text in the composer WITHOUT sending it. Session fork uses this so

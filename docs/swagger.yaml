@@ -2930,6 +2930,13 @@ definitions:
           10)'
         type: integer
     type: object
+  github_com_Tencent_WeKnora_internal_types.QuestionOrigin:
+    properties:
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig:
     properties:
       follow_ups:
@@ -6423,6 +6430,11 @@ definitions:
       query:
         description: Query text for knowledge base search
         type: string
+      question_origin:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionOrigin'
+        description: QuestionOrigin is the knowledge source of a picked suggested
+          question.
       skill_names:
         description: Per-request Skills selected via @mention
         items:

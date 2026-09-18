@@ -580,8 +580,11 @@ func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
 	if origin == nil || origin.KnowledgeBaseID == "" {
 		return
 	}
-	fmt.Fprintf(sb, "  <question_origin knowledge_base_id=\"%s\" name=\"%s\">\n",
-		escapeXMLAttr(origin.KnowledgeBaseID), escapeXMLAttr(origin.KnowledgeBaseName))
+	fmt.Fprintf(sb, "  <question_origin knowledge_base_id=\"%s\"", escapeXMLAttr(origin.KnowledgeBaseID))
+	if origin.KnowledgeBaseName != "" {
+		fmt.Fprintf(sb, " name=\"%s\"", escapeXMLAttr(origin.KnowledgeBaseName))
+	}
+	sb.WriteString(">\n")
 	if d := origin.Document; d != nil && d.KnowledgeID != "" {
 		title := d.Title
 		if title == "" {

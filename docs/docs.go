@@ -21545,6 +21545,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.QuestionOrigin": {
+            "type": "object",
+            "properties": {
+                "knowledge_base_id": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig": {
             "type": "object",
             "properties": {
@@ -26186,6 +26197,14 @@ const docTemplate = `{
                 "query": {
                     "description": "Query text for knowledge base search",
                     "type": "string"
+                },
+                "question_origin": {
+                    "description": "QuestionOrigin is the knowledge source of a picked suggested question.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionOrigin"
+                        }
+                    ]
                 },
                 "skill_names": {
                     "description": "Per-request Skills selected via @mention",
