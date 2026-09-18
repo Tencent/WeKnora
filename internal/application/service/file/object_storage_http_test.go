@@ -1,10 +1,14 @@
 package file
 
 import (
+	"context"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/ks3sdklib/aws-sdk-go/aws/awserr"
 	"github.com/stretchr/testify/require"
 	"github.com/tencentyun/cos-go-sdk-v5"
 
@@ -27,7 +31,7 @@ func TestObjectStorageTransportBoundsConnectionSetup(t *testing.T) {
 	transport := objectStorageTransport()
 
 	require.Equal(t, 10*time.Second, transport.TLSHandshakeTimeout)
-	require.Equal(t, 60*time.Second, transport.ResponseHeaderTimeout)
+	require.Equal(t, objectStorageResponseHeaderTimeout, transport.ResponseHeaderTimeout)
 	require.Equal(t, time.Second, transport.ExpectContinueTimeout)
 	require.Equal(t, 90*time.Second, transport.IdleConnTimeout)
 	require.NotNil(t, transport.DialContext, "the SSRF-safe dialer must stay in place")
@@ -52,7 +56,7 @@ func TestCOSHTTPClientHasNoWholeRequestTimeout(t *testing.T) {
 	require.True(t, ok, "the SSRF guard must stay underneath the signer")
 	base, ok := guard.Base.(*http.Transport)
 	require.True(t, ok)
-	require.Equal(t, 60*time.Second, base.ResponseHeaderTimeout)
+	require.Equal(t, objectStorageResponseHeaderTimeout, base.ResponseHeaderTimeout)
 }
 
 func TestOBSClientHasNoWholeRequestTimeout(t *testing.T) {
@@ -82,4 +86,51 @@ func TestKS3ClientHasNoWholeRequestTimeout(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Zero(t, client.Config.HTTPClient.Timeout)
+}
+
+func TestOSSClientHasNoWholeRequestTimeout(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "oss-cn-hangzhou.aliyuncs.com")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	client, err := newOSSClient("https://oss-cn-hangzhou.aliyuncs.com", "cn-hangzhou", "ak", "sk")
+	require.NoError(t, err)
+	require.NotNil(t, client)
+	require.Zero(t, objectStorageHTTPClient().Timeout)
+}
+
+func TestObjectStorageTransferContextAddsFallbackDeadline(t *testing.T) {
+	ctx, cancel := objectStorageTransferContext(context.Background())
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	remain := time.Until(deadline)
+	require.Greater(t, remain, 29*time.Minute)
+	require.Less(t, remain, 31*time.Minute)
+}
+
+func TestObjectStorageTransferContextKeepsCallerDeadline(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ctx, stop := objectStorageTransferContext(parent)
+	defer stop()
+	require.Equal(t, parent, ctx)
+}
+
+func TestObjectStorageBoundReaderCancelsOnClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	body := objectStorageBoundReader(io.NopCloser(strings.NewReader("x")), cancel)
+	require.NoError(t, body.Close())
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+}
+
+func TestKS3BucketMissingDetection(t *testing.T) {
+	require.True(t, isKS3BucketMissing(awserr.NewRequestFailure(
+		awserr.New("NoSuchBucket", "missing", nil), http.StatusNotFound, "req")))
+	require.True(t, isKS3BucketMissing(awserr.NewRequestFailure(
+		awserr.New("NotFound", "missing", nil), http.StatusNotFound, "req")))
+	require.False(t, isKS3BucketMissing(awserr.NewRequestFailure(
+		awserr.New("AccessDenied", "denied", nil), http.StatusForbidden, "req")))
+	require.False(t, isKS3BucketMissing(context.DeadlineExceeded))
 }

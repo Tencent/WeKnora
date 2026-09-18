@@ -101,21 +101,9 @@ func NewS3FileService(endpoint,
 	if err != nil {
 		return nil, err
 	}
-
-	// Check if bucket exists
-	setupCtx, cancel := objectStorageSetupContext()
-	defer cancel()
-	exists, err := svc.bucketExists(setupCtx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check bucket: %w", err)
+	if err := ensureS3Bucket(svc); err != nil {
+		return nil, err
 	}
-
-	if !exists {
-		if err = svc.createBucket(setupCtx); err != nil {
-			return nil, fmt.Errorf("failed to create bucket: %w", err)
-		}
-	}
-
 	return svc, nil
 }
 
@@ -126,18 +114,28 @@ func NewS3FileServiceWithOptions(endpoint, accessKey, secretKey, bucketName, reg
 	if err != nil {
 		return nil, err
 	}
-	setupCtx, cancel := objectStorageSetupContext()
-	defer cancel()
-	exists, err := svc.bucketExists(setupCtx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check bucket: %w", err)
-	}
-	if !exists {
-		if err = svc.createBucket(setupCtx); err != nil {
-			return nil, fmt.Errorf("failed to create bucket: %w", err)
-		}
+	if err := ensureS3Bucket(svc); err != nil {
+		return nil, err
 	}
 	return svc, nil
+}
+
+func ensureS3Bucket(svc *s3FileService) error {
+	headCtx, cancel := objectStorageSetupContext()
+	exists, err := svc.bucketExists(headCtx)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("failed to check bucket: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	createCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	if err := svc.createBucket(createCtx); err != nil {
+		return fmt.Errorf("failed to create bucket: %w", err)
+	}
+	return nil
 }
 
 // bucketExists checks if the bucket exists
@@ -242,6 +240,9 @@ func (s *s3FileService) SaveFile(ctx context.Context,
 		contentType = utils.GetContentTypeByExt(ext)
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
 	// Upload file to S3
 	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(s.bucketName),
@@ -264,15 +265,17 @@ func (s *s3FileService) GetFile(ctx context.Context, filePath string) (io.ReadCl
 		return nil, err
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
 	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucketName),
 		Key:    aws.String(objectName),
 	})
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to get file from S3: %w", err)
 	}
 
-	return resp.Body, nil
+	return objectStorageBoundReader(resp.Body, cancel), nil
 }
 
 // DeleteFile deletes a file
@@ -281,6 +284,9 @@ func (s *s3FileService) DeleteFile(ctx context.Context, filePath string) error {
 	if err != nil {
 		return err
 	}
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 
 	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucketName),
@@ -310,6 +316,9 @@ func (s *s3FileService) CopyFile(ctx context.Context,
 	// CopySource is "bucket/key"; the '/' separators must NOT be percent-encoded
 	// (url.PathEscape would turn them into %2F and break the bucket/key split).
 	// srcKey is already validated by parseS3FilePath -> SafeObjectKey.
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
 	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(s.bucketName),
 		CopySource: aws.String(s.bucketName + "/" + srcKey),
@@ -333,6 +342,9 @@ func (s *s3FileService) SaveBytes(ctx context.Context, data []byte, tenantID uin
 	}
 	ext := filepath.Ext(safeName)
 	objectName := fmt.Sprintf("%s%d/exports/%s%s", s.pathPrefix, tenantID, uuid.New().String(), ext)
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 
 	// Upload bytes to S3
 	reader := bytes.NewReader(data)
