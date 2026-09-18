@@ -395,6 +395,18 @@ func TestValidateProcessOverrides_NonMediaFileTypes(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestValidateProcessOverrides_RejectsCloudParserWhenDesensitizationEnabled(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		DesensitizationConfig: &types.DesensitizationConfig{Enabled: true},
+	}
+	err := ValidateProcessOverrides(context.Background(), kb, &types.KnowledgeProcessOverrides{
+		ParserEngineRules: []types.ParserEngineRule{{Engine: "mineru_cloud", FileTypes: []string{"pdf"}}},
+	}, []string{"pdf"})
+	require.Error(t, err)
+}
+
 func TestValidateProcessOverrides_ImageAllowsStorageFallback(t *testing.T) {
 	t.Parallel()
 

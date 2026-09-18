@@ -35,6 +35,29 @@ func TestBuildKnowledgeIndexContentWithoutTitleReturnsContent(t *testing.T) {
 	require.Equal(t, "Chunk body", buildKnowledgeIndexContent(nil, "Chunk body"))
 }
 
+func TestBuildKnowledgeIndexContentDoesNotLeakUnmaskedTitle(t *testing.T) {
+	t.Parallel()
+	stored := &types.Knowledge{Title: "劳动合同-张三-13800138000"}
+	kb := &types.KnowledgeBase{
+		ID: "kb-desensitize",
+		DesensitizationConfig: &types.DesensitizationConfig{
+			Enabled:     true,
+			Engine:      types.DesensitizationEngineBuiltin,
+			EntityTypes: []string{types.DesensitizationEntityCNMobile},
+		},
+	}
+	svc := &knowledgeService{}
+	maskedTitle, err := svc.maskParsedMarkdown(context.Background(), kb, stored.Title)
+	require.NoError(t, err)
+	require.NotContains(t, maskedTitle, "13800138000")
+
+	indexKB := knowledgeWithIndexTitle(stored, maskedTitle)
+	content := buildKnowledgeIndexContent(indexKB, "合同正文<手机号>")
+	require.NotContains(t, content, "13800138000")
+	require.Contains(t, content, "<手机号>")
+	require.Equal(t, "劳动合同-张三-13800138000", stored.Title)
+}
+
 type metadataUpdateKnowledgeRepo struct {
 	interfaces.KnowledgeRepository
 	knowledge           *types.Knowledge

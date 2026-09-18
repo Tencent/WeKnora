@@ -17,22 +17,23 @@ import (
 
 // Config 应用程序总配置
 type Config struct {
-	Conversation    *ConversationConfig    `yaml:"conversation"     json:"conversation"`
-	Server          *ServerConfig          `yaml:"server"           json:"server"`
-	KnowledgeBase   *KnowledgeBaseConfig   `yaml:"knowledge_base"   json:"knowledge_base"`
-	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
-	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
-	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
-	Models          []ModelConfig          `yaml:"models"           json:"models"`
-	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
-	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
-	StreamManager   *StreamManagerConfig   `yaml:"stream_manager"   json:"stream_manager"`
-	ExtractManager  *ExtractManagerConfig  `yaml:"extract"          json:"extract"`
-	WebSearch       *WebSearchConfig       `yaml:"web_search"       json:"web_search"`
-	PromptTemplates *PromptTemplatesConfig `yaml:"prompt_templates" json:"prompt_templates"`
-	IM              *IMConfig              `yaml:"im"               json:"im"`
-	Agent           *AgentConfig           `yaml:"agent"            json:"agent"`
+	Conversation    *ConversationConfig           `yaml:"conversation"     json:"conversation"`
+	Server          *ServerConfig                 `yaml:"server"           json:"server"`
+	KnowledgeBase   *KnowledgeBaseConfig          `yaml:"knowledge_base"   json:"knowledge_base"`
+	Tenant          *TenantConfig                 `yaml:"tenant"           json:"tenant"`
+	Auth            *AuthConfig                   `yaml:"auth"             json:"auth"`
+	Audit           *AuditConfig                  `yaml:"audit"            json:"audit"`
+	OIDCAuth        *OIDCAuthConfig               `yaml:"oidc_auth"        json:"oidc_auth"`
+	Models          []ModelConfig                 `yaml:"models"           json:"models"`
+	VectorDatabase  *VectorDatabaseConfig         `yaml:"vector_database"  json:"vector_database"`
+	DocReader       *DocReaderConfig              `yaml:"docreader"        json:"docreader"`
+	Desensitization *DesensitizationRuntimeConfig `yaml:"desensitization" json:"desensitization"`
+	StreamManager   *StreamManagerConfig          `yaml:"stream_manager"   json:"stream_manager"`
+	ExtractManager  *ExtractManagerConfig         `yaml:"extract"          json:"extract"`
+	WebSearch       *WebSearchConfig              `yaml:"web_search"       json:"web_search"`
+	PromptTemplates *PromptTemplatesConfig        `yaml:"prompt_templates" json:"prompt_templates"`
+	IM              *IMConfig                     `yaml:"im"               json:"im"`
+	Agent           *AgentConfig                  `yaml:"agent"            json:"agent"`
 	// FrontendBaseURL is the externally-visible origin of the SPA, used
 	// to compose absolute share-link URLs. Empty falls back to a host-
 	// relative URL ("/register?token=…") which the SPA then resolves
@@ -84,6 +85,11 @@ type DocReaderConfig struct {
 	Addr string `yaml:"addr" json:"addr"`
 	// Transport: "grpc" (default) or "http"
 	Transport string `yaml:"transport" json:"transport"`
+}
+
+// DesensitizationRuntimeConfig holds optional sidecar endpoints for non-builtin engines.
+type DesensitizationRuntimeConfig struct {
+	PresidioAnalyzerURL string `yaml:"presidio_analyzer_url" json:"presidio_analyzer_url"`
 }
 
 type VectorDatabaseConfig struct {
@@ -778,6 +784,12 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 		if d, err := time.ParseDuration(value); err == nil && d > 0 {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
+	}
+	if cfg.Desensitization == nil {
+		cfg.Desensitization = &DesensitizationRuntimeConfig{}
+	}
+	if value := strings.TrimSpace(os.Getenv("PRESIDIO_ANALYZER_URL")); value != "" {
+		cfg.Desensitization.PresidioAnalyzerURL = value
 	}
 }
 

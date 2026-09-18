@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -186,6 +187,10 @@ func ValidateProcessOverrides(
 
 	if err := types.ValidateEffectiveProcessPromptInstructions(eff); err != nil {
 		return werrors.NewBadRequestError(err.Error())
+	}
+
+	if err := desensitization.ValidateAgainstParsers(kb.DesensitizationConfig, eff.ChunkingConfig); err != nil {
+		return werrors.NewBadRequestError("Cloud parser engines cannot be used when desensitization is enabled")
 	}
 
 	return nil

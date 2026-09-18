@@ -26,6 +26,7 @@ flowchart TD
         C1["convert: DocReader 解析<br/>(gRPC/HTTP → docreader)"]
         C1a["ASR 转写<br/>(音频文件)"]
         C2["ImageResolver<br/>(图片提取并上传存储)"]
+        C2a["maskParsedMarkdown<br/>(可选文本脱敏)"]
         C3["chunker.Split /<br/>SplitParentChild (分块)"]
         C4["processChunks:<br/>CreateChunks (写 DB)"]
         C5["BatchIndex<br/>(Embedding + 向量/关键词索引)"]
@@ -44,7 +45,7 @@ flowchart TD
     A3 --> B3
     A4 --> B4
     B4 -->|"Queue: default"| C1
-    C1 --> C1a --> C2 --> C3 --> C4 --> C5
+    C1 --> C1a --> C2 --> C2a --> C3 --> C4 --> C5
     C5 -->|"Queue: multimodal"| D1
     C5 -->|"TypeKnowledgePostProcess"| D2
     C5 --> D3
@@ -255,7 +256,7 @@ type IndexingStrategy struct {
 
 Worker 消费 `TypeDocumentProcess` 后按五个规范化阶段推进，每个阶段对应一个 Span（见 [Housekeeping 自愈（knowledge_housekeeping.go）](#_8-housekeeping-自愈-knowledge-housekeeping-go)）：
 
-`docreader → chunking → embedding → multimodal → postprocess`
+`docreader → desensitization (optional) → chunking → embedding → multimodal → postprocess`
 
 ### 解析（convert，Stage: docreader） {#_6-1-解析-convert-stage-docreader}
 
@@ -296,6 +297,8 @@ transcriptionResult, err := asrModel.Transcribe(ctx, convertResult.AudioData, kn
 随后 `ResolveRemoteImages` 再把 Markdown 里的外部 `http(s)` 图片下载转存（同样受 SSRF 防护）。产出 `storedImages []docparser.StoredImage` 供多模态阶段使用。
 
 ### 分块（Stage: chunking） {#_6-4-分块-stage-chunking}
+
+若知识库开启 `desensitization_config`，Go 侧在分块前对 `MarkdownContent` 调用 `maskParsedMarkdown`（`internal/application/service/knowledge_desensitization.go`）。默认关闭；开启后禁止云解析。失败则该文档解析失败（fail-closed）。对象存储中的原件不改。库存标题和自定义元数据保持明文；拼进 Embedding / 摘要 / 问题生成的副本会再走同一套打码。
 
 分块在 **Go 侧**完成（`internal/infrastructure/chunker`，详见《分块机制》一章）：
 

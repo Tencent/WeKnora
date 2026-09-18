@@ -195,6 +195,7 @@
                     <KBParserSettings
                       :relevant-extensions="batchFileExts"
                       :parser-engine-rules="uiState.chunkingConfig.parserEngineRules"
+                      :block-cloud-engines="!!kbInfo?.desensitization_config?.enabled"
                       @update:parser-engine-rules="handleParserEngineRulesUpdate"
                     />
                     <div v-if="hasPdf" class="kb-settings-block">

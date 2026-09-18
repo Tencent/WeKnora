@@ -39,7 +39,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenants":            {"api_principal_config"},                                          // 000064
 	"users":              {"is_system_admin"},                                               // 000053
 	"knowledges":         {"pending_subtasks_count", "profile"},                             // 000056, 000101
-	"knowledge_bases":    {"profile_config", "generated_profile"},                           // 000101
+	"knowledge_bases":    {"profile_config", "generated_profile", "desensitization_config"}, // 000101, sqlite 000023
 	"messages":           {"attachments", "usage", "sandbox_checkpoint"},                    // 000034, 000085, 000097
 	"sessions":           {"parent_session_id", "forked_from_message_id", "fork_bootstrap"}, // 000097
 	"tenant_invitations": {"token", "accepted_count"},                                       // 000054
