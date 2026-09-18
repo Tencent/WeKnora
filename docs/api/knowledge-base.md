@@ -78,7 +78,16 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
         "child_chunk_size": 384
     },
     "image_processing_config": {
-        "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e"
+        "model_id": "f2083ad7-63e3-486d-a610-e6c56e58d72e",
+        "post_process_image_enabled": true,
+        "batch_size": 4,
+        "classify_downscale_enabled": true,
+        "classify_max_edge": 640,
+        "class_policies": {
+            "decorative": { "ocr": false, "caption": true, "disabled": true },
+            "logo": { "ocr": false, "caption": true, "disabled": false },
+            "table_image": { "ocr": true, "caption": true, "disabled": false }
+        }
     },
     "embedding_model_id": "dff7bc94-7885-4dd1-bfd5-bd96e4df2fc3",
     "summary_model_id": "8aea788c-bb30-4898-809e-e40c14ffb48c",
@@ -216,6 +225,42 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
 
 候选标签按知识库排序取前 500 个参与分类；标签数超出时会记录告警并使用该前缀，不会跳过任务。模型按候选序号返回结果，服务端会校验序号范围并映射回标签 ID，越界或重复的序号将被丢弃。
 
+### 图片处理配置
+
+`image_processing_config` 控制图片在解析时如何被理解。默认（`post_process_image_enabled=false`）沿用历史行为：每张图片各发一次描述请求、各发一次 OCR 请求，不做分类、不批量、不降分辨率。
+
+| 字段                          | 类型    | 默认值  | 说明 |
+| ----------------------------- | ------- | ------- | ---- |
+| `model_id`                    | string  | `""`    | 图片描述使用的 VLM 模型 ID |
+| `post_process_image_enabled`  | boolean | `false` | 图片处理总开关。关闭时为历史行为，开启后走「先分类、再按类决定 OCR」的两轮管线 |
+| `batch_size`                  | integer | `1`     | 单次 VLM 请求携带的图片数，取值 `1`–`16`，超出会被收敛到区间内。`1` 表示逐图请求 |
+| `classify_downscale_enabled`  | boolean | `true`  | 分类描述前是否先把图片缩小到 `classify_max_edge`。实测可显著降低提示令牌量且不影响分类结果 |
+| `classify_max_edge`           | integer | `640`   | 缩放后的最长边像素数。`0` 表示「未设置」，取默认值 `640`；**负数表示关闭缩放**。当日志中出现 `classify_max_edge=0` 时，含义是「本次不缩放」——可能来自负值，也可能来自 `classify_downscale_enabled=false`（关闭时该字段被忽略）。OCR 始终使用原图字节，不使用缩小后的副本 |
+| `class_policies`              | object  | 见下    | 类别 → 工作策略的覆盖表；未提及的类别沿用内置默认值 |
+| `post_process_image_rules`    | array   | `[]`    | 声明式规则列表，在类别策略之上按顺序求值 |
+
+`post_process_image_enabled=true` 时，图片先被分类为 `chart` / `decorative` / `logo` / `photo` / `table_image` / `text_screenshot` / `other` 之一，再由 `class_policies` 决定该类图片做哪些工作：
+
+| 策略字段   | 类型    | 说明 |
+| ---------- | ------- | ---- |
+| `ocr`      | boolean | 该类图片是否执行 OCR 文字提取 |
+| `caption`  | boolean | 是否保留图片描述分块 |
+| `disabled` | boolean | 是否「停用」该类图片：其正文引用会从文本块中摘除，派生的描述分块被软禁用（`is_enabled=false`，内容仍保留并可检索） |
+
+内置默认策略表刻意保守——只要类别可能含文字就仍执行 OCR（漏掉整段文字的代价高于多一次调用），仅当文字可靠地不存在、或已被描述覆盖时才跳过。默认只有 `decorative` 被停用：
+
+| 类别              | `ocr` | `caption` | `disabled` |
+| ----------------- | ----- | --------- | ---------- |
+| `chart`           | true  | true      | false      |
+| `decorative`      | false | true      | **true**   |
+| `logo`            | false | true      | false      |
+| `photo`           | false | true      | false      |
+| `table_image`     | true  | true      | false      |
+| `text_screenshot` | true  | true      | false      |
+| `other`           | true  | true      | false      |
+
+上述设置也可在单次上传/重新解析时按文档临时覆盖：请求体中的 `process_config`（`KnowledgeProcessOverrides`）支持 `post_process_image_enabled`、`image_batch_size`、`image_classify_downscale_enabled`、`image_class_policies`；未传的项沿用知识库设置，`image_class_policies` 按类别与知识库的默认表合并。详见「上传文档」接口。
+
 **`vector_store_*` 响应字段说明**:
 
 | 字段                       | 类型   | 说明                                                                                                       |
@@ -298,6 +343,8 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases/kb-00000001' \
 | name        | string | 是   | 知识库名称                                                    |
 | description | string | 否   | 知识库描述                                                    |
 | config      | object | 否   | 更新配置；包含 `chunking_config` / `image_processing_config` / `faq_config` / `wiki_config` / `indexing_strategy` |
+
+> **`image_processing_config` 的更新语义**：请求中**不携带**该字段表示「不改动现有图片处理配置」；一旦携带对象，即使对象为空，也会**整体替换**原有图片处理配置。`chunking_config` 则是全量替换语义：未携带时会被重置为默认值，因此更新时请把 `chunking_config` 与 `image_processing_config` 一并提交。
 
 **请求**:
 
