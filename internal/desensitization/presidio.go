@@ -51,7 +51,8 @@ func maskWithPresidio(ctx context.Context, text string, cfg types.Desensitizatio
 	}
 	extra := 0
 	for _, hit := range hits {
-		if hit.Start < 0 || hit.End > len(text) || hit.Start >= hit.End {
+		orig, ok := presidioSpanText(text, hit.Start, hit.End)
+		if !ok {
 			continue
 		}
 		mapped := mapPresidioEntity(hit.EntityType)
@@ -61,7 +62,6 @@ func maskWithPresidio(ctx context.Context, text string, cfg types.Desensitizatio
 		if _, ok := enabled[mapped]; !ok {
 			continue
 		}
-		orig := text[hit.Start:hit.End]
 		if orig == "" || !strings.Contains(out, orig) {
 			continue
 		}
@@ -119,4 +119,14 @@ func analyzePresidio(ctx context.Context, client *http.Client, base, text string
 		return nil, fmt.Errorf("%w: decode presidio response: %v", ErrEngineUnavailable, err)
 	}
 	return hits, nil
+}
+
+// presidioSpanText maps Presidio character (rune) offsets to a Go substring.
+// Python/Presidio indexes Unicode code points; Go string indexes UTF-8 bytes.
+func presidioSpanText(text string, start, end int) (string, bool) {
+	runes := []rune(text)
+	if start < 0 || end > len(runes) || start >= end {
+		return "", false
+	}
+	return string(runes[start:end]), true
 }

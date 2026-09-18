@@ -13,27 +13,50 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-func (s *knowledgeService) maskParsedMarkdown(ctx context.Context, kb *types.KnowledgeBase, text string) (string, error) {
+func maskModelFacingText(ctx context.Context, kb *types.KnowledgeBase, text string, deps desensitization.Deps) (string, error) {
 	if kb == nil || !kb.DesensitizationConfig.IsEnabled() {
 		return text, nil
 	}
 	cfg := *kb.DesensitizationConfig
 	cfg.Normalize()
+	out, _, err := desensitization.Apply(ctx, text, cfg, deps)
+	return out, err
+}
+
+func (s *knowledgeService) desensitizationDeps(kb *types.KnowledgeBase) desensitization.Deps {
 	deps := desensitization.Deps{}
-	if s.config != nil && s.config.Desensitization != nil {
+	if s != nil && s.config != nil && s.config.Desensitization != nil {
 		deps.PresidioAnalyzerURL = s.config.Desensitization.PresidioAnalyzerURL
 	}
-	if cfg.Engine == types.DesensitizationEngineLLM {
+	if kb != nil && kb.DesensitizationConfig != nil && kb.DesensitizationConfig.Engine == types.DesensitizationEngineLLM {
 		deps.Complete = s.desensitizationCompleter(kb)
 	}
-	out, report, err := desensitization.Apply(ctx, text, cfg, deps)
+	return deps
+}
+
+func (s *knowledgeService) maskParsedMarkdown(ctx context.Context, kb *types.KnowledgeBase, text string) (string, error) {
+	if kb == nil || !kb.DesensitizationConfig.IsEnabled() {
+		return text, nil
+	}
+	out, err := maskModelFacingText(ctx, kb, text, s.desensitizationDeps(kb))
 	if err != nil {
 		return "", err
 	}
-	if report != nil {
-		logger.Infof(ctx, "Desensitized markdown for kb=%s engine=%v spans=%v", kb.ID, report["engine"], report["span_count"])
-	}
+	logger.Infof(ctx, "Desensitized markdown for kb=%s", kb.ID)
 	return out, nil
+}
+
+// indexKnowledge returns a model-facing copy whose Title is masked. The stored
+// knowledge.Title is left unchanged so operators can still match the original file.
+func (s *knowledgeService) indexKnowledge(ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge) (*types.Knowledge, error) {
+	if knowledge == nil {
+		return nil, nil
+	}
+	masked, err := s.maskParsedMarkdown(ctx, kb, knowledge.Title)
+	if err != nil {
+		return nil, err
+	}
+	return knowledgeWithIndexTitle(knowledge, masked), nil
 }
 
 func (s *knowledgeService) desensitizationCompleter(kb *types.KnowledgeBase) desensitization.Completer {

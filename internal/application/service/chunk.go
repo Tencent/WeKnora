@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -692,8 +693,13 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	if err != nil {
 		return err
 	}
+	maskedTitle, err := maskModelFacingText(ctx, kb, knowledge.Title, desensitization.Deps{})
+	if err != nil {
+		return err
+	}
+	indexKB := knowledgeWithIndexTitle(knowledge, maskedTitle)
 	items := []*types.IndexInfo{{
-		Content: buildKnowledgeIndexContent(knowledge, chunk.EmbeddingContent()), SourceID: chunk.ID,
+		Content: buildKnowledgeIndexContent(indexKB, chunk.EmbeddingContent()), SourceID: chunk.ID,
 		SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 		KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 		KnowledgeType: kb.Type, IsEnabled: true,
@@ -708,7 +714,7 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 				continue
 			}
 			items = append(items, &types.IndexInfo{
-				Content: buildKnowledgeIndexContent(knowledge, question.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
+				Content: buildKnowledgeIndexContent(indexKB, question.Question), SourceID: types.GeneratedQuestionSourceID(chunk.ID, question.ID),
 				SourceType: types.ChunkSourceType, ChunkID: chunk.ID,
 				KnowledgeID: chunk.KnowledgeID, KnowledgeBaseID: chunk.KnowledgeBaseID,
 				KnowledgeType: kb.Type, IsEnabled: true,
