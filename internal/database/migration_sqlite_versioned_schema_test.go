@@ -39,7 +39,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenants":            {"api_principal_config"},                                          // 000064
 	"users":              {"is_system_admin"},                                               // 000053
 	"knowledges":         {"pending_subtasks_count", "profile"},                             // 000056, 000101
-	"knowledge_bases":    {"profile_config", "generated_profile"},                           // 000101
+	"knowledge_bases":    {"profile_config", "generated_profile", "document_tag_ready"},     // 000101
 	"messages":           {"attachments", "usage", "sandbox_checkpoint"},                    // 000034, 000085, 000097
 	"sessions":           {"parent_session_id", "forked_from_message_id", "fork_bootstrap"}, // 000097
 	"tenant_invitations": {"token", "accepted_count"},                                       // 000054
@@ -48,7 +48,41 @@ var versionedSQLiteColumns = map[string][]string{
 	"mcp_tool_approvals": {"enabled"},                                                       // 000091
 }
 
-const expectedSQLiteMigrationVersion = 23
+const expectedSQLiteMigrationVersion = 24
+
+func TestSQLiteReadyMigrationUpgradesPreviousPrototypeAfterArtifactRepair(t *testing.T) {
+	repoRoot := sqliteRepoRoot(t)
+	legacyRoot := copySQLiteMigrationsThrough(t, repoRoot, 22)
+	legacyMigration := filepath.Join(legacyRoot, "migrations", "sqlite", "000023_document_tag_revision.up.sql")
+	require.NoError(t, os.WriteFile(legacyMigration, []byte("ALTER TABLE knowledge_bases ADD COLUMN document_tag_revision BIGINT NOT NULL DEFAULT 0;"), 0600))
+	chdirAndRestore(t, legacyRoot)
+	dbPath := filepath.Join(t.TempDir(), "revision-prototype.db")
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	db := openSQLiteDB(t, dbPath)
+	version, dirty := sqliteMigrationState(t, db)
+	require.Equal(t, 23, version)
+	require.False(t, dirty)
+	_, err := db.Exec("INSERT INTO knowledge_bases(id,name,tenant_id,embedding_model_id,summary_model_id) VALUES ('legacy-kb','legacy',1,'embedding','summary')")
+	require.NoError(t, err)
+	// The unmerged prototype used version 23, which upstream subsequently
+	// assigned to message_artifacts. Its SQL must be applied explicitly before
+	// normal upgrades, as documented; the version runner would otherwise skip it.
+	require.False(t, sqliteTableExists(t, db, "message_artifacts"))
+	artifactSQL, err := os.ReadFile(filepath.Join(repoRoot, "migrations", "sqlite", "000023_message_artifacts_table.up.sql"))
+	require.NoError(t, err)
+	_, err = db.Exec(string(artifactSQL))
+	require.NoError(t, err)
+	chdirAndRestore(t, repoRoot)
+	require.NoError(t, RunMigrationsWithOptions("sqlite3://unused", MigrationOptions{SQLiteDBPath: dbPath}))
+	version, dirty = sqliteMigrationState(t, db)
+	require.Equal(t, 24, version)
+	require.False(t, dirty)
+	var ready bool
+	require.NoError(t, db.QueryRow("SELECT document_tag_ready FROM knowledge_bases WHERE id='legacy-kb'").Scan(&ready))
+	require.False(t, ready)
+	require.True(t, sqliteTableExists(t, db, "message_artifacts"))
+	require.True(t, sqliteColumnExists(t, db, "knowledge_bases", "document_tag_revision"), "old column stays inert for rollback compatibility")
+}
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -81,6 +115,8 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
 	require.False(t, sqliteColumnExists(t, db, "knowledges", "tag_id"),
 		"SQLite migrations must drop legacy knowledges.tag_id after multi-tag migration")
+	require.False(t, sqliteColumnExists(t, db, "knowledge_bases", "document_tag_revision"),
+		"fresh databases must not create the abandoned revision field")
 }
 
 func TestSQLiteMigrationsUpgradeV4PreservesData(t *testing.T) {

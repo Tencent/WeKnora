@@ -35,6 +35,7 @@ type IndexInfo struct {
 	KnowledgeID     string     // ID of the knowledge
 	KnowledgeBaseID string     // ID of the knowledge base
 	KnowledgeType   string     // Type of the knowledge (e.g., "faq", "manual")
+	TagIDs          []string   // All document tags; FAQ continues to use TagID
 	TagID           string     // Tag ID for categorization (used for FAQ priority filtering)
 	IsEnabled       bool       // Whether the chunk is enabled for retrieval
 	IsRecommended   bool       // Whether the chunk is recommended

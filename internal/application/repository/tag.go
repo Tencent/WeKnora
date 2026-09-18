@@ -11,12 +11,17 @@ import (
 
 // knowledgeTagRepository is a repository for knowledge tags
 type knowledgeTagRepository struct {
-	db *gorm.DB
+	db      *gorm.DB
+	tagSync interfaces.DocumentTagSync
 }
 
 // NewKnowledgeTagRepository creates a new tag repository.
 func NewKnowledgeTagRepository(db *gorm.DB) interfaces.KnowledgeTagRepository {
 	return &knowledgeTagRepository{db: db}
+}
+
+func NewKnowledgeTagRepositoryWithTagSync(db *gorm.DB, tagSync interfaces.DocumentTagSync) interfaces.KnowledgeTagRepository {
+	return &knowledgeTagRepository{db: db, tagSync: tagSync}
 }
 
 // Create creates a new knowledge tag
@@ -137,9 +142,29 @@ func (r *knowledgeTagRepository) ListByKB(
 
 // Delete deletes a knowledge tag
 func (r *knowledgeTagRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND id = ?", tenantID, id).
-		Delete(&types.KnowledgeTag{}).Error
+	var ids []string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var tag types.KnowledgeTag
+		if err := tx.Where("tenant_id = ? AND id = ?", tenantID, id).First(&tag).Error; err != nil {
+			return err
+		}
+		if err := tx.Table("knowledge_tag_relations AS ktr").Joins("JOIN knowledges k ON k.id = ktr.knowledge_id").
+			Where("ktr.tag_id = ? AND k.tenant_id = ? AND k.knowledge_base_id = ?", id, tenantID, tag.KnowledgeBaseID).
+			Pluck("ktr.knowledge_id", &ids).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("tag_id = ?", id).Delete(&types.KnowledgeTagRelation{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&types.KnowledgeTag{}).Error
+	})
+	if err != nil {
+		return err
+	}
+	if r.tagSync != nil && len(ids) > 0 {
+		return r.tagSync.Sync(ctx, ids)
+	}
+	return nil
 }
 
 // CountReferences returns the number of knowledges and chunks that reference this tag

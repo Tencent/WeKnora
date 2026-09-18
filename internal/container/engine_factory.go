@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
 	elasticsearchRepoV8 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v8"
@@ -43,10 +44,10 @@ import (
 // injected into VectorStoreService for dynamic registry updates. The
 // EngineFactory type itself is unchanged — the audit sink is captured in the
 // closure rather than added to the signature.
-func NewEngineFactory(db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService) interfaces.EngineFactory {
+func NewEngineFactory(db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService, task interfaces.TaskEnqueuer) interfaces.EngineFactory {
 	sink := newAuditSinkAdapter(auditSvc)
 	return func(ctx context.Context, store types.VectorStore) (interfaces.RetrieveEngineService, error) {
-		return createEngineServiceFromStore(ctx, store, db, cfg, sink)
+		return createEngineServiceFromStore(ctx, store, db, cfg, sink, task)
 	}
 }
 
@@ -59,7 +60,13 @@ func createEngineServiceFromStore(
 	db *gorm.DB,
 	cfg *config.Config,
 	auditSink openSearchRepo.AuditSink,
-) (interfaces.RetrieveEngineService, error) {
+	task interfaces.TaskEnqueuer,
+) (svc interfaces.RetrieveEngineService, err error) {
+	defer func() {
+		if err == nil {
+			configureDocumentTagIndex(svc, db, task)
+		}
+	}()
 	if err := validateRuntimeVectorStoreAddresses(store); err != nil {
 		return nil, err
 	}
@@ -388,4 +395,12 @@ func createTencentVectorDBEngine(store types.VectorStore) (interfaces.RetrieveEn
 	}
 	repo := tencentVectorDBRepo.NewTencentVectorDBRetrieveEngineRepository(client, cc.Database, &store.IndexConfig)
 	return retriever.NewKVHybridRetrieveEngine(repo, types.TencentVectorDBRetrieverEngineType), nil
+}
+
+func configureDocumentTagIndex(svc interfaces.RetrieveEngineService, db *gorm.DB, task interfaces.TaskEnqueuer) {
+	if engine, ok := svc.(*retriever.KeywordsVectorHybridRetrieveEngineService); ok {
+		engine.WrapRepository(func(repo interfaces.RetrieveEngineRepository) interfaces.RetrieveEngineRepository {
+			return repository.NewDocumentTagIndexRepository(repo, db, task)
+		})
+	}
 }

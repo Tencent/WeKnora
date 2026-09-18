@@ -154,10 +154,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTenantInvitationRepository))
 	must(container.Provide(repository.NewAuditLogRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
-	must(container.Provide(repository.NewKnowledgeRepository))
+	must(container.Provide(service.NewDocumentTagSyncService))
+	must(container.Provide(func(s *service.DocumentTagSyncService) interfaces.DocumentTagSync { return s }))
+	must(container.Provide(repository.NewKnowledgeRepositoryWithTagSync))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
-	must(container.Provide(repository.NewKnowledgeTagRepository))
+	must(container.Provide(repository.NewKnowledgeTagRepositoryWithTagSync))
 	must(container.Provide(repository.NewSessionRepository))
 	must(container.Provide(repository.NewMessageRepository))
 	must(container.Provide(repository.NewMessageSuggestionRepository))
@@ -565,6 +567,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+	must(container.Invoke(func(s *service.DocumentTagSyncService) { startDocumentTagRecovery(ctx, s) }))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
@@ -1213,6 +1216,7 @@ func initRawFileService(_ *config.Config) (interfaces.FileService, error) {
 func initRetrieveEngineRegistry(
 	db *gorm.DB, cfg *config.Config, auditSvc interfaces.AuditLogService,
 	storeRepo interfaces.VectorStoreRepository, engineFactory interfaces.EngineFactory,
+	task interfaces.TaskEnqueuer,
 ) (interfaces.RetrieveEngineRegistry, error) {
 	// storeRepo and engineFactory let the registry rebuild a store engine that
 	// is absent from this process, which happens when startup skipped it after
@@ -1517,9 +1521,12 @@ func initRetrieveEngineRegistry(
 			}
 		}
 	}
+	for _, engine := range registry.GetAllRetrieveEngineServices() {
+		configureDocumentTagIndex(engine, db, task)
+	}
 	// ─── DB store registration (byStoreID) ───
 	if storeReg, ok := registry.(*retriever.RetrieveEngineRegistry); ok {
-		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink)
+		loadDBStoresIntoRegistry(storeReg, db, cfg, auditSink, task)
 	}
 
 	return registry, nil
@@ -1529,6 +1536,7 @@ func initRetrieveEngineRegistry(
 // in the registry's byStoreID map. Failures are logged and skipped (non-fatal).
 func loadDBStoresIntoRegistry(
 	storeRegistry interfaces.StoreRegistry, db *gorm.DB, cfg *config.Config, auditSink openSearchRepo.AuditSink,
+	task interfaces.TaskEnqueuer,
 ) {
 	ctx := context.Background()
 	log := logger.GetLogger(ctx)
@@ -1546,7 +1554,7 @@ func loadDBStoresIntoRegistry(
 
 	log.Infof("Loading %d vector store(s) from database", len(stores))
 	for _, store := range stores {
-		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink)
+		svc, err := createEngineServiceFromStore(ctx, store, db, cfg, auditSink, task)
 		if err != nil {
 			log.Errorf("Failed to create engine for store %s (%s): %v", store.ID, store.Name, err)
 			continue

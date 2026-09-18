@@ -25,11 +25,12 @@ const (
 	fieldKnowledgeID     = "knowledge_id"
 	fieldKnowledgeBaseID = "knowledge_base_id"
 	fieldTagID           = "tag_id"
+	fieldTagIDs          = "tag_ids"
 	fieldIsEnabled       = "is_enabled"
 )
 
 type repository struct {
-	client             *tcvectordb.RpcClient
+	client             tcvectordb.DatabaseInterface
 	databaseName       string
 	collectionBaseName string
 	useDimensionSuffix bool
@@ -50,6 +51,7 @@ type vectorEmbedding struct {
 	KnowledgeID     string
 	KnowledgeBaseID string
 	TagID           string
+	TagIDs          []string
 	Embedding       []float32
 	SparseVector    []encoder.SparseVecItem
 	IsEnabled       bool

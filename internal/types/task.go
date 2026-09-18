@@ -81,7 +81,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueMemory, Pool: WorkerPoolEnrichment, Weight: 1, SharedWeight: 1, TaskTypes: []string{TypeMemoryExtract}},
 	{Name: QueueSync, Pool: WorkerPoolMaintenance, Weight: 2, TaskTypes: []string{TypeDataSourceSync}},
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
-		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
+		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete, TypeDocumentTagSync,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
@@ -232,6 +232,7 @@ type WorkerServerStat struct {
 }
 
 const (
+	TypeDocumentTagSync          = "document:tags:sync"
 	TypeChunkExtract             = "chunk:extract"
 	TypeDocumentProcess          = "document:process"           // 文档处理任务
 	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）

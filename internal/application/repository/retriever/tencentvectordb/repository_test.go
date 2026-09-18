@@ -50,6 +50,7 @@ func TestBaseFilterBuildsTencentVectorDBCondition(t *testing.T) {
 	repo := &repository{}
 
 	filter := repo.baseFilter(types.RetrieveParams{
+		KnowledgeType:       types.KnowledgeTypeFAQ,
 		KnowledgeBaseIDs:    []string{"kb-1"},
 		KnowledgeIDs:        []string{"knowledge-1", "knowledge-2"},
 		TagIDs:              []string{"tag-1"},

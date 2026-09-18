@@ -76,6 +76,7 @@ type KnowledgeBaseInfo struct {
 	Type        string // Knowledge base type: "document" or "faq"
 	Description string
 	DocCount    int
+	TagScoped   bool // This turn searches only the user's selected tags, not the whole KB.
 	// Capabilities lists the retrieval surfaces this KB exposes. Any subset of
 	// {"wiki", "chunks"}. "chunks" is present when the KB has vector and/or
 	// keyword (BM25) indexing enabled. This is the *deterministic* source of
@@ -130,9 +131,16 @@ func formatKnowledgeBaseList(kbInfos []*KnowledgeBaseInfo) string {
 		if kbType == "" {
 			kbType = "document"
 		}
-		fmt.Fprintf(&b, "<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\" doc_count=\"%d\" capabilities=\"%s\">\n",
-			escapeXMLAttr(kb.ID), escapeXMLAttr(formatDocSummary(kb.Name, 160)), escapeXMLAttr(kbType), kb.DocCount,
+		docCount := fmt.Sprintf(" doc_count=\"%d\"", kb.DocCount)
+		if kb.TagScoped {
+			docCount = "" // The matching document count is deliberately not enumerated.
+		}
+		fmt.Fprintf(&b, "<knowledge_base id=\"%s\" name=\"%s\" type=\"%s\"%s capabilities=\"%s\">\n",
+			escapeXMLAttr(kb.ID), escapeXMLAttr(formatDocSummary(kb.Name, 160)), escapeXMLAttr(kbType), docCount,
 			escapeXMLAttr(strings.Join(kb.Capabilities, ",")))
+		if kb.TagScoped {
+			b.WriteString("<retrieval_scope>Only documents or entries matching the user's selected tags are in scope. Use retrieval tools to discover them; the tools enforce this scope. Pinned documents, when present, further restrict the selected tags.</retrieval_scope>\n")
+		}
 		if kb.Description != "" {
 			fmt.Fprintf(&b, "<description>%s</description>\n", escapeXMLAttr(formatDocSummary(kb.Description, 240)))
 		}

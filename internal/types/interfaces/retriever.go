@@ -169,3 +169,26 @@ type KnowledgeIndexMover interface {
 		knowledgeType string,
 	) error
 }
+
+// DocumentTagIndexer is optional. Implementations must update all indices for
+// each document (including question/summary/image indices) without re-embedding.
+// PrepareDocumentTagIndex must reject legacy schemas until the array filter is
+// usable. Both vector and keyword retrieval must use OR membership for TagIDs
+// on non-FAQ queries. FAQ retains its existing scalar tag filter.
+type DocumentTagIndexer interface {
+	PrepareDocumentTagIndex(context.Context) error
+	UpdateDocumentTags(ctx context.Context, kbID string, tags map[string][]string) error
+}
+
+// DocumentTagProjection synchronizes current relational tags to supported
+// backends. Unsupported members of a composite retain relational filtering.
+type DocumentTagProjection interface {
+	SupportsDocumentTags() bool
+	SyncDocumentTags(ctx context.Context, kbID string, knowledgeIDs []string) error
+}
+
+// DocumentTagSync runs after relational tag transactions commit. An error
+// means the relation was saved but the index projection could not be synced.
+type DocumentTagSync interface {
+	Sync(ctx context.Context, knowledgeIDs []string) error
+}

@@ -57,6 +57,9 @@ const (
 
 // KnowledgeBase represents a knowledge base entity
 type KnowledgeBase struct {
+	// DocumentTagReady records completion of legacy tag projection bootstrap.
+	// Incremental write failures do not invalidate this marker.
+	DocumentTagReady bool `json:"-" yaml:"-" gorm:"not null;default:false"`
 	// Unique identifier of the knowledge base
 	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey"`
 	// Name of the knowledge base

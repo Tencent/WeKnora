@@ -17,7 +17,7 @@ func (r *knowledgeRepository) SetKnowledgeTags(
 	knowledgeID string,
 	tagIDs []string,
 ) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Delete all existing tag relations for this knowledge
 		if err := tx.Where("knowledge_id = ?", knowledgeID).
 			Delete(&types.KnowledgeTagRelation{}).Error; err != nil {
@@ -49,6 +49,10 @@ func (r *knowledgeRepository) SetKnowledgeTags(
 		}
 		return tx.Create(&relations).Error
 	})
+	if err != nil {
+		return err
+	}
+	return r.syncDocumentTags(ctx, []string{knowledgeID})
 }
 
 // AddKnowledgeTagRelations incrementally adds validated relations and never
@@ -76,7 +80,7 @@ func (r *knowledgeRepository) AddKnowledgeTagRelations(
 		return nil
 	}
 
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var knowledgeCount int64
 		if err := tx.Model(&types.Knowledge{}).
 			Where("id = ? AND tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", knowledgeID, tenantID, kbID).
@@ -113,6 +117,10 @@ func (r *knowledgeRepository) AddKnowledgeTagRelations(
 		}
 		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&relations).Error
 	})
+	if err != nil {
+		return err
+	}
+	return r.syncDocumentTags(ctx, []string{knowledgeID})
 }
 
 // GetKnowledgeTags returns tags for multiple knowledge IDs.
@@ -153,7 +161,11 @@ func (r *knowledgeRepository) DeleteKnowledgeTagRelations(
 	ctx context.Context,
 	knowledgeID string,
 ) error {
-	return r.db.WithContext(ctx).
+	err := r.db.WithContext(ctx).
 		Where("knowledge_id = ?", knowledgeID).
 		Delete(&types.KnowledgeTagRelation{}).Error
+	if err != nil {
+		return err
+	}
+	return r.syncDocumentTags(ctx, []string{knowledgeID})
 }

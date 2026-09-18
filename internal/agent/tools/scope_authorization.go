@@ -21,8 +21,8 @@ func effectiveSearchTargetTagIDs(target *types.SearchTarget) []string {
 // searchTargetScope returns what a SINGLE search target authorizes.
 //
 // Inside one target, KnowledgeIDs and tags are an intersection, never a union.
-// A tag-scoped mention is built by resolving the tag relation table into
-// KnowledgeIDs and intersecting that with any explicitly mentioned documents;
+// Explicitly mentioned documents are validated against the selected tags
+// before their IDs are placed in KnowledgeIDs; tag-only targets keep no IDs.
 // TagIDs/ScopeTagIDs are kept alongside as the physical index filter and as
 // the logical scope record. Treating them as an independent way to authorize a
 // document would re-admit every document carrying the tag and silently undo
