@@ -53,22 +53,61 @@ func (q *qdrantRepository) getCollectionName(dimension int) string {
 	return fmt.Sprintf("%s_%d", q.collectionBaseName, dimension)
 }
 
+// collectionExists reports whether the dimension-specific collection is
+// present. Collections are created lazily on the first write for a dimension,
+// so callers that only need to know whether there is anything to act on must
+// tolerate "does not exist" instead of treating it as a failure.
+//
+// A dimension already registered as initialized in this process short-circuits
+// the RPC, which keeps the common path at one round-trip per delete.
+func (q *qdrantRepository) collectionExists(ctx context.Context, dimension int) (bool, error) {
+	if _, ok := q.initializedCollections.Load(dimension); ok {
+		return true, nil
+	}
+
+	exists, err := q.client.CollectionExists(ctx, q.getCollectionName(dimension))
+	if err != nil {
+		return false, fmt.Errorf("failed to check collection existence: %w", err)
+	}
+	return exists, nil
+}
+
+// deleteTarget resolves the collection a delete should run against and reports
+// whether the delete is worth issuing. A dimension-specific collection that was
+// never created holds no points, so deleting from it is a no-op — the same rule
+// VectorRetrieve already applies to reads.
+//
+// This matters because the ingest paths re-index a chunk by deleting first and
+// writing second (see knowledgeService.updateChunkVector and
+// chunkService.syncChunkIndex). When that delete is the first touch of a
+// dimension, failing on the missing collection aborts the write that would have
+// created it, so ingestion fails with "Collection ... doesn't exist!" (#3337).
+func (q *qdrantRepository) deleteTarget(ctx context.Context, dimension int) (string, bool, error) {
+	collectionName := q.getCollectionName(dimension)
+
+	exists, err := q.collectionExists(ctx, dimension)
+	if err != nil {
+		return collectionName, false, err
+	}
+	if !exists {
+		logger.GetLogger(ctx).Infof(
+			"[Qdrant] Collection %s does not exist, nothing to delete", collectionName)
+		return collectionName, false, nil
+	}
+	return collectionName, true, nil
+}
+
 // ensureCollection ensures the collection exists for the given dimension
 func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) error {
 	collectionName := q.getCollectionName(dimension)
 
-	// Check cache first
-	if _, ok := q.initializedCollections.Load(dimension); ok {
-		return nil
-	}
-
 	log := logger.GetLogger(ctx)
 
-	// Check if collection exists
-	exists, err := q.client.CollectionExists(ctx, collectionName)
+	// Cached dimensions and existing collections need no creation work.
+	exists, err := q.collectionExists(ctx, dimension)
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
-		return fmt.Errorf("failed to check collection existence: %w", err)
+		return err
 	}
 
 	if !exists {
@@ -281,10 +320,18 @@ func (q *qdrantRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 		return nil
 	}
 
-	collectionName := q.getCollectionName(dimension)
+	collectionName, ok, err := q.deleteTarget(ctx, dimension)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
 	log.Infof("[Qdrant] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+	_, err = q.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
@@ -311,10 +358,18 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 		return nil
 	}
 
-	collectionName := q.getCollectionName(dimension)
+	collectionName, ok, err := q.deleteTarget(ctx, dimension)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
 	log.Infof("[Qdrant] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+	_, err = q.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
@@ -341,10 +396,18 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 		return nil
 	}
 
-	collectionName := q.getCollectionName(dimension)
+	collectionName, ok, err := q.deleteTarget(ctx, dimension)
+	if err != nil {
+		log.Errorf("[Qdrant] Failed to check collection existence: %v", err)
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
 	log.Infof("[Qdrant] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+	_, err = q.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: collectionName,
 		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 			Must: []*qdrant.Condition{
