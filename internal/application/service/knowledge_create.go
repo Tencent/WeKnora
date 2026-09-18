@@ -1276,6 +1276,12 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	processOverrides, _ := knowledge.ProcessOverrides()
 	eff := ResolveProcessConfig(kb, processOverrides)
 
+	// Normalize inline HTML tables before chunking, for the same reason as the
+	// file-processing path: parser/OCR output may embed raw <table> blocks that
+	// the chunker cannot split. Central here so manual markdown goes through the
+	// identical normalization regardless of engine.
+	clean = docparser.NormalizeHTMLTables(clean)
+
 	// Manual content is markdown - chunk directly with Go chunker
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 

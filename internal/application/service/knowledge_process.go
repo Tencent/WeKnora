@@ -3724,6 +3724,16 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// chunk boundaries as well.
 	sanitizeReadResult(convertResult)
 	convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
+
+	// Normalize inline HTML tables from ANY parser engine (MinerU, builtin,
+	// markitdown, paddleocr-vl, ...) into GFM, or row-newline-separated HTML for
+	// merged cells, so the chunker can split them. Central catch-all: individual
+	// parser converters no longer need to wire this in themselves.
+	// Runs after line-ending normalization so the rows we inject are plain LF.
+	if convertResult != nil && convertResult.MarkdownContent != "" {
+		convertResult.MarkdownContent = docparser.NormalizeHTMLTables(convertResult.MarkdownContent)
+	}
+
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{
