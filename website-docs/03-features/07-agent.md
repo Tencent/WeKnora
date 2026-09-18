@@ -95,7 +95,7 @@ smart-reasoning 下还可选**类型预设**（`Config.AgentType`，定义在 `c
 | 文件 | `supported_file_types`、`chat_parser_engine_rules`、`attachment_image_understanding`、`attachment_ocr_max_pages`、`attachment_parse_wait_timeout_sec` | 数据分析型 Agent 常限定 csv/xlsx |
 | FAQ | `faq_priority_enabled`、`faq_direct_answer_threshold`、`faq_score_boost` | — |
 | Web | `web_search_enabled`、`web_search_max_results`、`web_search_provider_id`、`web_fetch_enabled`、`web_fetch_top_n` | max_results 默认 5 |
-| 多轮 | `multi_turn_enabled`、`history_turns` | history_turns 默认 5，只约束普通模式（KnowledgeQA）；smart-reasoning 强制 multi_turn，历史按上下文窗口加载，不读 history_turns |
+| 多轮 | `multi_turn_enabled`、`history_turns` | history_turns 默认 5；smart-reasoning 强制 multi_turn |
 | 检索 | `embedding_top_k`（10）、`keyword_threshold`（0.3）、`vector_threshold`（0.5）、`rerank_top_k`（5）、`rerank_threshold` | 括号内为默认值 |
 | 高级 | `enable_query_expansion`、`enable_rewrite`、`rewrite_prompt_*`、`query_understand_model_id`、`fallback_strategy`（默认 model）、`fallback_response`、`fallback_prompt`、`intent_prompts`、`data_analysis_enabled` | 主要作用于 quick-answer 管道 |
 | 建议 | `question_suggestions`（starters / follow_ups） | starters 默认 hybrid 模式 6 条；follow_ups 默认关闭、3 条 |
@@ -121,7 +121,7 @@ Handler 层（`internal/handler/custom_agent.go`）提供 `CreateAgent`、`GetAg
 | ID | 名称（zh-CN） | agent_mode / agent_type | 关键配置 |
 | --- | --- | --- | --- |
 | `builtin-quick-answer` | 快速问答 | `quick-answer` | 模板 `default_kb` + `default_context`；temperature 0.7；FAQ 优先（直接回答阈值 0.9、加权 1.2）；query expansion + rewrite；web 搜索开、5 条；不进 Agent 引擎 |
-| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：search_knowledge、read_document、list_documents、query_knowledge_graph；web 搜索开；多轮（历史按上下文窗口加载） |
+| `builtin-smart-reasoning` | 智能推理 | `smart-reasoning` / `rag-qa` | `max_iterations: 50`；工具：search_knowledge、read_document、list_documents、query_knowledge_graph；web 搜索开；多轮 5 轮 |
 | `builtin-data-analyst` | 数据分析师 | `smart-reasoning` / `data-analysis` | 模板 `data_analyst`；temperature 0.3；`max_iterations: 30`；工具仅 data_schema + data_analysis；限定 csv/xlsx；关闭 web 搜索；历史 10 轮 |
 | `builtin-wiki-researcher` | 维基问答 | `smart-reasoning` / `wiki-qa` | 模板 `wiki_researcher`；`max_iterations: 30`；工具：wiki_search、wiki_read_page、read_document、wiki_flag_issue（只读 + 报障）；关闭 web 搜索 |
 | `builtin-wiki-fixer` | 维基修订 | `smart-reasoning` / `custom` | 模板 `wiki_fixer`；`retain_retrieval_history: true`（修订需要跨轮记住页面内容）；工具含全部 wiki 写操作（wiki_write_page、wiki_replace_text、wiki_rename_page、wiki_delete_page、wiki_read_issue、wiki_update_issue 等 9 个）；`kb_selection_mode: selected` |
@@ -522,10 +522,9 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 跨轮历史由 `LoadAgentHistory`（`internal/application/service/agent_history.go`）每轮从 messages 表重建（DB 是唯一事实来源，无 Redis/内存缓存）：
 
-- 历史按 Token 预算加载，不按轮数：预算等于本次运行的压缩阈值（窗口减去 reserve，`agent.HistoryTokenBudget`），`history_turns` 在 Agent 模式下不生效。加载到阈值后，首轮即触发压缩并写入新的压缩点，之后的轮次从压缩点开始，历史规模由压缩维持；
-- 会话中存在压缩点（见[上下文压缩与溢出恢复](#_4-2-上下文压缩与溢出恢复)）时，取最新的一个：它所在的轮及更早的轮由一条摘要消息代替，放在历史最前面，之后的轮原样重放。压缩点查询失败时退回无压缩点的历史；
-- 按 `(created_at, id)` 从新到旧分页读取（每页 200 行，单次最多 5000 行），按 `RequestID` 配对 user/assistant，只保留 assistant 已完成（`IsCompleted`）的完整轮。读到压缩点或预算装满即停止，长会话不会整段读出。读取未到会话开头时，最旧一行所在的轮可能不完整（缺少原始问题），会被舍弃；
-- 从最新的轮往前放入预算，遇到第一个放不下的轮即停止，保证保留的轮连续。最新一轮即使单独超出预算也会保留，由压缩负责切分；
+- 取 `HistoryTurns × 4`（最低 50）条原始消息，按 `RequestID` 配对 user/assistant，只保留 assistant 已完成（`IsCompleted`）的完整轮，按时间排序；
+- 会话中存在压缩点（见[上下文压缩与溢出恢复](#_4-2-上下文压缩与溢出恢复)）时，取最新的一个：它所在的轮及更早的轮由一条摘要消息代替，放在历史最前面，之后的轮原样重放。压缩点早于本次读取范围时按时间判断，读到的轮都在它之后。压缩点查询失败时退回无压缩点的历史；
+- 再取最近 `HistoryTurns` 轮。这个上限只约束压缩点之后原样重放的轮，不包括摘要；
 - 每轮展开为：user 消息（含图片 caption 与附件 prompt；忽略 `RenderedContent` 快照，避免将旧渲染协议带入上下文）→ 每个含工具调用的 `AgentStep` 展开为 assistant(with tool_calls) + 若干 tool 消息 → 末尾一条规范化最终答案 assistant 消息（剥离 `<think>` 块）；
 - 历史中的 tool 消息内容用 `CompactToolOutputForHistory`（`internal/agent/tools/persist.go`）压缩：带 `display_type` 的大载荷（如 `knowledge_chunks_list` 的 chunks、`grep_results` 的 chunk_results）替换为一行摘要（如 `"Listed 20/87 chunks from X (content omitted from history)"`）。
 

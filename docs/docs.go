@@ -18994,7 +18994,7 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "history_turns": {
-                    "description": "Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window",
+                    "description": "Number of history turns to keep in context",
                     "type": "integer"
                 },
                 "image_storage_provider": {

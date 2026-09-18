@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -16,44 +14,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// historyRepo pages a fixed message list backwards the way the database does
-// and serves one checkpoint lookup.
-type historyRepo struct {
+// checkpointHistoryRepo serves a fixed message list and one checkpoint lookup.
+type checkpointHistoryRepo struct {
 	interfaces.MessageRepository
 	rows          []*types.Message
 	checkpoint    *types.Message
 	checkpointErr error
 	updates       []string
-	pages         int
 }
 
-func (r *historyRepo) ListMessagesBySessionBeforeCursor(
-	_ context.Context, _ string, before time.Time, beforeID string, limit int,
+func (r *checkpointHistoryRepo) GetRecentMessagesBySession(
+	context.Context, string, int,
 ) ([]*types.Message, error) {
-	r.pages++
-	sorted := append([]*types.Message(nil), r.rows...)
-	sort.Slice(sorted, func(i, j int) bool { return !sortsAtOrBefore(sorted[i], sorted[j]) })
-	var out []*types.Message
-	for _, m := range sorted {
-		cursor := &types.Message{ID: beforeID, CreatedAt: before}
-		if (!before.IsZero() || beforeID != "") && sortsAtOrBefore(cursor, m) {
-			continue
-		}
-		out = append(out, m)
-		if len(out) == limit {
-			break
-		}
-	}
-	return out, nil
+	return r.rows, nil
 }
 
-func (r *historyRepo) GetLatestContextCheckpoint(
+func (r *checkpointHistoryRepo) GetLatestContextCheckpoint(
 	context.Context, string,
 ) (*types.Message, error) {
 	return r.checkpoint, r.checkpointErr
 }
 
-func (r *historyRepo) UpdateMessageContextCheckpoint(
+func (r *checkpointHistoryRepo) UpdateMessageContextCheckpoint(
 	_ context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
 ) error {
 	r.updates = append(r.updates, sessionID+"/"+messageID+"/"+checkpoint.Summary)
@@ -62,17 +44,12 @@ func (r *historyRepo) UpdateMessageContextCheckpoint(
 
 var historyBase = time.Date(2026, 9, 18, 9, 0, 0, 0, time.UTC)
 
-// storedTurnsOfSize builds n completed turns; turn i has user u<i> and
-// assistant a<i>, and its answer is padded to roughly answerTokens tokens.
-func storedTurnsOfSize(n, answerTokens int) []*types.Message {
+// storedTurns builds n completed turns; turn i has user u<i> and assistant a<i>.
+func storedTurns(n int) []*types.Message {
 	var rows []*types.Message
 	for i := 1; i <= n; i++ {
 		at := historyBase.Add(time.Duration(i) * time.Minute)
 		req := fmt.Sprintf("req-%d", i)
-		answer := fmt.Sprintf("answer %d", i)
-		if answerTokens > 0 {
-			answer += " " + strings.Repeat("word ", answerTokens)
-		}
 		rows = append(rows,
 			&types.Message{
 				ID: fmt.Sprintf("u%d", i), RequestID: req, Role: "user",
@@ -80,14 +57,12 @@ func storedTurnsOfSize(n, answerTokens int) []*types.Message {
 			},
 			&types.Message{
 				ID: fmt.Sprintf("a%d", i), RequestID: req, Role: "assistant",
-				Content: answer, IsCompleted: true, CreatedAt: at.Add(time.Second),
+				Content: fmt.Sprintf("answer %d", i), IsCompleted: true, CreatedAt: at.Add(time.Second),
 			},
 		)
 	}
 	return rows
 }
-
-func storedTurns(n int) []*types.Message { return storedTurnsOfSize(n, 0) }
 
 func checkpointOn(msg *types.Message, summary string) *types.Message {
 	return &types.Message{
@@ -104,24 +79,12 @@ func contents(msgs []chat.Message) []string {
 	return out
 }
 
-func questions(msgs []chat.Message) []string {
-	var out []string
-	for _, m := range msgs {
-		if m.Role == "user" && m.Kind == "" {
-			out = append(out, m.Content)
-		}
-	}
-	return out
-}
-
-const unlimitedBudget = 1 << 30
-
 // Without a checkpoint history is what it always was, plus the turn tags the
 // engine needs to recognize a summary that ends on a stored turn.
 func TestLoadAgentHistoryTagsEveryMessageWithItsTurn(t *testing.T) {
-	repo := &historyRepo{rows: storedTurns(2)}
+	repo := &checkpointHistoryRepo{rows: storedTurns(2)}
 
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", unlimitedBudget)
+	got, err := LoadAgentHistory(context.Background(), repo, "s1", 5)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"question 1", "answer 1", "question 2", "answer 2"}, contents(got))
@@ -130,23 +93,13 @@ func TestLoadAgentHistoryTagsEveryMessageWithItsTurn(t *testing.T) {
 	}
 }
 
-// The turn count no longer bounds history: every turn that fits the budget is
-// replayed, however many there are.
-func TestLoadAgentHistoryIsNotCappedByTurnCount(t *testing.T) {
-	repo := &historyRepo{rows: storedTurns(40)}
-
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", unlimitedBudget)
-	require.NoError(t, err)
-	assert.Len(t, questions(got), 40)
-}
-
 // The summary replaces its own turn and every turn before it; later turns are
 // replayed verbatim after it.
 func TestLoadAgentHistoryResumesFromTheCheckpoint(t *testing.T) {
 	rows := storedTurns(4)
-	repo := &historyRepo{rows: rows, checkpoint: checkpointOn(rows[3], "## Goal\nturns one and two")}
+	repo := &checkpointHistoryRepo{rows: rows, checkpoint: checkpointOn(rows[3], "## Goal\nturns one and two")}
 
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", unlimitedBudget)
+	got, err := LoadAgentHistory(context.Background(), repo, "s1", 5)
 	require.NoError(t, err)
 
 	require.Len(t, got, 5)
@@ -159,106 +112,54 @@ func TestLoadAgentHistoryResumesFromTheCheckpoint(t *testing.T) {
 	assert.Equal(t, "a4", got[4].TurnID)
 }
 
-// Rows the checkpoint already covers are never needed, so the read stops at
-// the page that reaches it instead of walking the whole session.
-func TestLoadAgentHistoryStopsReadingAtTheCheckpoint(t *testing.T) {
-	rows := storedTurns(300) // 600 rows, three pages
-	repo := &historyRepo{rows: rows, checkpoint: checkpointOn(rows[2*250-1], "## Goal\nthe first 250 turns")}
+// A checkpoint can predate the rows fetched for the window. It still covers
+// everything before it, and every fetched turn is newer.
+func TestLoadAgentHistoryUsesACheckpointOlderThanTheWindow(t *testing.T) {
+	rows := storedTurns(4)
+	repo := &checkpointHistoryRepo{rows: rows[4:], checkpoint: checkpointOn(rows[1], "## Goal\nturn one")}
 
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", unlimitedBudget)
+	got, err := LoadAgentHistory(context.Background(), repo, "s1", 5)
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, repo.pages)
-	qs := questions(got)
-	require.Len(t, qs, 50)
-	assert.Equal(t, "question 251", qs[0])
-	assert.Equal(t, "question 300", qs[49])
+	require.Len(t, got, 5)
+	assert.Contains(t, got[0].Content, "turn one")
+	assert.Equal(t, []string{"question 3", "answer 3", "question 4", "answer 4"}, contents(got[1:]))
 }
 
-// A session with no checkpoint is read only until the budget is full.
-func TestLoadAgentHistoryStopsReadingOnceTheBudgetIsFull(t *testing.T) {
-	repo := &historyRepo{rows: storedTurnsOfSize(300, 1000)}
+// The turn cap bounds the verbatim turns after the checkpoint, not the
+// summary, which is already bounded by the summarizer's budget.
+func TestLoadAgentHistoryCapsTurnsAfterTheCheckpoint(t *testing.T) {
+	rows := storedTurns(3)
+	repo := &checkpointHistoryRepo{rows: rows, checkpoint: checkpointOn(rows[1], "## Goal\nturn one")}
 
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", 5500)
+	got, err := LoadAgentHistory(context.Background(), repo, "s1", 1)
 	require.NoError(t, err)
 
-	assert.Equal(t, 1, repo.pages)
-	assert.Equal(t, []string{"question 296", "question 297", "question 298", "question 299", "question 300"},
-		questions(got), "the newest turns that fit, contiguous")
-}
-
-// The newest turn is what the next message most likely refers to. It is kept
-// even when it alone exceeds the budget; compaction can split it.
-func TestLoadAgentHistoryKeepsAnOversizedNewestTurn(t *testing.T) {
-	repo := &historyRepo{rows: storedTurnsOfSize(3, 1000)}
-
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", 100)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"question 3"}, questions(got))
-}
-
-// Turns after the checkpoint that no longer fit are dropped oldest first. The
-// summary stays: it is the only record of how the session began.
-func TestLoadAgentHistoryBudgetsTurnsAfterTheCheckpoint(t *testing.T) {
-	rows := storedTurnsOfSize(6, 1000)
-	repo := &historyRepo{rows: rows, checkpoint: checkpointOn(rows[1], "## Goal\nturn one")}
-
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", 2500)
-	require.NoError(t, err)
-
+	require.Len(t, got, 3)
 	assert.Equal(t, chat.MessageKindCompactionSummary, got[0].Kind)
-	assert.Equal(t, []string{"question 5", "question 6"}, questions(got))
-}
-
-// A read that stops mid-session may hold only the tail of its oldest turn. That
-// turn is left out rather than replayed without its original question.
-func TestCompleteHistoryTurnsLeavesOutATurnCutByTheRead(t *testing.T) {
-	rows := storedTurns(2)
-	steer := &types.Message{
-		ID: "s1", RequestID: "req-1", Role: "user", Content: "steered",
-		CreatedAt: rows[1].CreatedAt.Add(time.Second),
-	}
-	// Turn 1's original question (rows[0]) was not read.
-	read := []*types.Message{rows[3], rows[2], steer, rows[1]}
-
-	turns := completeHistoryTurns(read, false)
-	require.Len(t, turns, 1)
-	assert.Equal(t, "a2", turns[0].assistant.ID)
-
-	turns = completeHistoryTurns(append(read, rows[0]), true)
-	require.Len(t, turns, 2)
-	assert.Equal(t, "question 1", turns[0].users[0].Content)
-}
-
-func TestLoadAgentHistoryWithoutABudgetLoadsNothing(t *testing.T) {
-	repo := &historyRepo{rows: storedTurns(2)}
-
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", 0)
-	require.NoError(t, err)
-	assert.Empty(t, got)
-	assert.Zero(t, repo.pages)
+	assert.Equal(t, []string{"question 3", "answer 3"}, contents(got[1:]))
 }
 
 // A failed lookup costs the turn a re-summarization, not its history.
 func TestLoadAgentHistoryWithoutACheckpointWhenTheLookupFails(t *testing.T) {
-	repo := &historyRepo{rows: storedTurns(2), checkpointErr: errors.New("db down")}
+	repo := &checkpointHistoryRepo{rows: storedTurns(2), checkpointErr: errors.New("db down")}
 
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", unlimitedBudget)
+	got, err := LoadAgentHistory(context.Background(), repo, "s1", 5)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"question 1", "answer 1", "question 2", "answer 2"}, contents(got))
 }
 
 func TestLoadAgentHistoryIgnoresAnEmptyCheckpoint(t *testing.T) {
 	rows := storedTurns(2)
-	repo := &historyRepo{rows: rows, checkpoint: checkpointOn(rows[1], "  ")}
+	repo := &checkpointHistoryRepo{rows: rows, checkpoint: checkpointOn(rows[1], "  ")}
 
-	got, err := LoadAgentHistory(context.Background(), repo, "s1", unlimitedBudget)
+	got, err := LoadAgentHistory(context.Background(), repo, "s1", 5)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"question 1", "answer 1", "question 2", "answer 2"}, contents(got))
 }
 
 func TestMessageCheckpointSinkWritesThroughTheSession(t *testing.T) {
-	repo := &historyRepo{}
+	repo := &checkpointHistoryRepo{}
 	sink := messageCheckpointSink{repo: repo, sessionID: "s1"}
 
 	require.NoError(t, sink.SaveContextCheckpoint(context.Background(), "a2",

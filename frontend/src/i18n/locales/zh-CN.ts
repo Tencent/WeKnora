@@ -1380,7 +1380,7 @@ export default {
       maxTokensAgent: '每一轮推理的最大生成 Token（含工具调用 JSON）。选「默认」时，未绑沙箱为 4096，绑了沙箱（可写/改文件）为 24576。选「自定义」后按你填的数保存，不再自动改。',
       thinking: '启用模型的扩展思考能力（需要模型支持）',
       conversationSection: '配置多轮对话开关与问题改写开关（改写提示词见「提示词」）',
-      conversationSectionAgent: '智能推理始终为多轮模式：按模型上下文窗口保留历史对话，超出时自动把较早的内容压缩成摘要。',
+      conversationSectionAgent: '配置每轮携带多少历史对话。智能推理始终为多轮模式。',
       multiTurn: '开启后将保留历史对话上下文',
       historyRounds: '保留最近几轮对话作为上下文',
       retainRetrievalHistory: '保留此前轮次的知识库检索结果。关闭时每轮重新检索',
