@@ -16,7 +16,7 @@ func TestNormalizeHTMLTables_ConvertsStyledTableToMarkdown(t *testing.T) {
 
 结尾。`
 
-	got := normalizeHTMLTables(input)
+	got := NormalizeHTMLTables(input)
 
 	if strings.Contains(got, "<table") {
 		t.Fatalf("expected HTML table to be converted away, got:\n%s", got)
@@ -43,7 +43,7 @@ func TestNormalizeHTMLTables_StripsAttrsOnSpanTables(t *testing.T) {
 	input := `<table><tr><td colspan="2" style="text-align:center;" class="hdr">合计</td></tr>` +
 		`<tr><td style="text-align:left;">A</td><td width="80">B</td></tr></table>`
 
-	got := normalizeHTMLTables(input)
+	got := NormalizeHTMLTables(input)
 
 	if !strings.Contains(got, "<table") {
 		t.Fatalf("expected span table to remain HTML, got:\n%s", got)
@@ -60,7 +60,7 @@ func TestNormalizeHTMLTables_StripsAttrsOnSpanTables(t *testing.T) {
 
 func TestNormalizeHTMLTables_NoTableUnchanged(t *testing.T) {
 	input := "# 标题\n\n普通段落，没有表格。\n\n| a | b |\n| --- | --- |\n| 1 | 2 |"
-	if got := normalizeHTMLTables(input); got != input {
+	if got := NormalizeHTMLTables(input); got != input {
 		t.Fatalf("expected content without HTML tables to be unchanged, got:\n%s", got)
 	}
 }

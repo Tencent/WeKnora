@@ -31,7 +31,7 @@ var (
 	markdownTableSeparatorPattern = regexp.MustCompile(`(?m)^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$`)
 )
 
-// normalizeHTMLTables rewrites inline HTML <table> blocks embedded in OCR
+// NormalizeHTMLTables rewrites inline HTML <table> blocks embedded in OCR
 // markdown output. PaddleOCR-VL emits tables as HTML with per-cell text-align
 // styles, which (1) waste tokens on layout markup and (2) are not recognized
 // by the chunker's table-protection logic, so large tables get split mid-row.
@@ -39,7 +39,7 @@ var (
 // Each table block is converted to a GFM Markdown table when possible. Tables
 // that use rowspan/colspan (which Markdown cannot express) fall back to having
 // their presentational attributes stripped so they stay intact as HTML.
-func normalizeHTMLTables(md string) string {
+func NormalizeHTMLTables(md string) string {
 	if !strings.Contains(strings.ToLower(md), "<table") {
 		return md
 	}
