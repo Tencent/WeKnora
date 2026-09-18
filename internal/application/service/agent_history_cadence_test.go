@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,15 +16,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// cadenceChat answers every summarization with a fixed, modest summary.
-type cadenceChat struct{}
+// cadenceChat answers every summarization with a fixed, modest summary, or,
+// when failing, errors the way a summarizer that times out on large inputs
+// does every time.
+type cadenceChat struct{ failing bool }
 
-func (cadenceChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+func (c cadenceChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+	if c.failing {
+		return nil, errors.New("summarization stalled")
+	}
 	return &types.ChatResponse{Content: "## Goal\n" + strings.Repeat("summary ", 200), FinishReason: "stop"}, nil
 }
 
-func (cadenceChat) ChatStream(context.Context, []chat.Message, *chat.ChatOptions) (<-chan types.StreamResponse, error) {
-	return nil, nil
+func (c cadenceChat) ChatStream(
+	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	resp, err := c.Chat(ctx, messages, opts)
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan types.StreamResponse, 1)
+	ch <- types.StreamResponse{
+		ResponseType: types.ResponseTypeAnswer, Content: resp.Content, Done: true, FinishReason: resp.FinishReason,
+	}
+	close(ch)
+	return ch, nil
 }
 func (cadenceChat) GetModelName() string { return "cadence" }
 func (cadenceChat) GetModelID() string   { return "cadence" }
@@ -63,12 +80,19 @@ func (r *cadenceRepo) UpdateMessageContextCheckpoint(
 // engine's estimator, shared with its compactor, runs at it.
 func runSessionCadence(t *testing.T, turns, systemTokens, turnTokens int, scale float64) []int {
 	t.Helper()
+	return runSessionCadenceWith(t, cadenceChat{}, turns, systemTokens, turnTokens, scale)
+}
+
+func runSessionCadenceWith(
+	t *testing.T, summarizer cadenceChat, turns, systemTokens, turnTokens int, scale float64,
+) []int {
+	t.Helper()
 	const window = 40000
 	cfg := &types.AgentConfig{MaxContextTokens: window}
 	est, err := agenttoken.NewEstimator()
 	require.NoError(t, err)
 	settings := compaction.Settings{Enabled: true, MaxContextTokens: window, ReserveTokens: 16384}
-	compactor := compaction.New(cadenceChat{}, est, settings)
+	compactor := compaction.New(summarizer, est, settings)
 	repo := &cadenceRepo{}
 	system := chat.Message{Role: "system", Content: strings.Repeat("rule ", systemTokens)}
 
@@ -177,4 +201,21 @@ func TestCalibratedSessionFillsMoreOfTheWindow(t *testing.T) {
 	require.NotEmpty(t, uncalibrated)
 	require.NotEmpty(t, calibrated)
 	require.Greater(t, calibrated[0], uncalibrated[0]*3/2)
+}
+
+// A summarizer that fails every time (the large request that always times out)
+// used to leave no checkpoint, so every later turn reloaded the same history
+// and compacted it again. The raw archive is now kept as a degraded
+// checkpoint: compaction still recurs only as the session refills, and no
+// stored turn goes missing.
+func TestAgentHistoryDoesNotRecompactAfterTheSummarizerFails(t *testing.T) {
+	compacted := runSessionCadenceWith(t, cadenceChat{failing: true}, 60, 300, 1000, 0)
+	t.Logf("compacted at turns %v", compacted)
+
+	require.GreaterOrEqual(t, len(compacted), 2)
+	for i := 1; i < len(compacted); i++ {
+		require.Greater(t, compacted[i]-compacted[i-1], 1,
+			"turn %d compacted right after turn %d: the failed compaction left no checkpoint",
+			compacted[i], compacted[i-1])
+	}
 }

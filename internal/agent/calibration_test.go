@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -157,4 +159,60 @@ func TestEngineStartsFromThePreviousTurnsScale(t *testing.T) {
 
 	text := chat.Message{Role: "user", Content: chineseResult}
 	require.Less(t, engine.tokenEstimator.EstimateMessage(&text), engine.rawEstimator.EstimateMessage(&text))
+}
+
+// bigResultTool returns a long result, enough appended text to calibrate on.
+type bigResultTool struct{ countingTool }
+
+func (t *bigResultTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
+	return &types.ToolResult{Success: true, Output: chineseResult}, nil
+}
+
+// Some providers report a prompt count and no total. Calibration needs only
+// the prompt count, and the scale it measures reaches the turn's usage even
+// though no total was ever reported.
+func TestExecuteCalibratesFromPromptCountsWithoutATotal(t *testing.T) {
+	tool := &bigResultTool{countingTool: *newCountingTool("read_contract")}
+	model := &mockChat{responses: []mockResponse{
+		{chunks: []types.StreamResponse{{
+			ResponseType: types.ResponseTypeAnswer,
+			ToolCalls: []types.LLMToolCall{{
+				ID: "c1", Type: "function",
+				Function: types.FunctionCall{Name: "read_contract", Arguments: `{}`},
+			}},
+			Done: true, FinishReason: "tool_calls",
+			Usage: &types.TokenUsage{PromptTokens: 1000},
+		}}},
+		{chunks: []types.StreamResponse{{
+			ResponseType: types.ResponseTypeAnswer, Content: "付款期限为验收后三十日。",
+			Done: true, FinishReason: "stop",
+			Usage: &types.TokenUsage{PromptTokens: 1000 + 700},
+		}}},
+	}}
+	engine := newTestEngine(t, model)
+	engine.toolRegistry = agenttools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(tool)
+
+	state, err := engine.Execute(context.Background(), "session", "message", "付款期限是多久", nil)
+	require.NoError(t, err)
+	require.InDelta(t, 0.6, state.TurnUsage.ContextTokenScale, 0.1)
+	usage := turnUsage(state)
+	require.NotNil(t, usage, "a scale is persisted even when no total was reported")
+	require.InDelta(t, 0.6, usage.ContextTokenScale, 0.1)
+}
+
+// A turn that measures nothing (one request, no tool call) passes on the scale
+// it started from, so the newest turn always carries the latest known scale.
+func TestExecuteCarriesTheStartingScaleForward(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{{
+		ResponseType: types.ResponseTypeAnswer, Content: "你好", Done: true, FinishReason: "stop",
+	}}}}}
+	engine := newTestEngine(t, model, func(cfg *types.AgentConfig) { cfg.ContextTokenScale = 0.7 })
+	engine.toolRegistry = agenttools.NewToolRegistry()
+
+	state, err := engine.Execute(context.Background(), "session", "message", "你好", nil)
+	require.NoError(t, err)
+	usage := turnUsage(state)
+	require.NotNil(t, usage)
+	require.InDelta(t, 0.7, usage.ContextTokenScale, 1e-9)
 }

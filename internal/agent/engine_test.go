@@ -451,6 +451,19 @@ func (s *summarizerChat) Chat(
 	return &types.ChatResponse{Content: "## Goal\ndo the thing", FinishReason: "stop"}, nil
 }
 
+// ChatStream is how compaction calls the summarizer.
+func (s *summarizerChat) ChatStream(
+	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	resp, _ := s.Chat(ctx, messages, opts)
+	ch := make(chan types.StreamResponse, 1)
+	ch <- types.StreamResponse{
+		ResponseType: types.ResponseTypeAnswer, Content: resp.Content, Done: true, FinishReason: resp.FinishReason,
+	}
+	close(ch)
+	return ch, nil
+}
+
 // The bug this replaces: inside one ReAct turn nothing was compactable, so
 // every round crossed the threshold, spent a summarization call, and freed
 // nothing. The loop is only broken if a second pass over the compacted context

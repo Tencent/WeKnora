@@ -19,6 +19,9 @@ import (
 type ContextCheckpoint struct {
 	Summary   string    `json:"summary"`
 	CreatedAt time.Time `json:"created_at"`
+	// Degraded marks a raw archive kept because the summarizer failed. The
+	// next compaction folds it in as the previous summary.
+	Degraded bool `json:"degraded,omitempty"`
 }
 
 // Value implements the driver.Valuer interface for database serialization.

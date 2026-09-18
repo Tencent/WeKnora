@@ -18,9 +18,6 @@ const (
 	// better served by the raw archive than by stalling the turn.
 	maxSummarizationAttempts = 2
 
-	// summarizationTimeout is the per-attempt budget for a summarization call.
-	summarizationTimeout = 60 * time.Second
-
 	// llmCallLabel identifies compaction traffic in tracing and usage
 	// accounting, separating it from the agent's own reasoning rounds.
 	llmCallLabel = "agent_context_compaction"
@@ -74,6 +71,10 @@ type Checkpoint struct {
 	// TurnID is the stored turn the summary covers through, inclusive.
 	TurnID  string
 	Summary string
+	// Degraded reports that Summary holds a raw archive because the
+	// summarizer failed. It is still a checkpoint: the next compaction
+	// folds it in as the previous summary.
+	Degraded bool
 }
 
 // Freed is how much room the compaction actually recovered. A non-positive
@@ -156,7 +157,8 @@ func (c *Compactor) summarizeHistory(ctx context.Context, p *Preparation) (strin
 		// The previous summary is still the best record of everything
 		// before this span, so the archive is appended to it rather than
 		// replacing it.
-		return joinNonEmpty(p.PreviousSummary, rawArchive(p.MessagesToSummarize)), true
+		return joinNonEmpty(p.PreviousSummary,
+			rawArchive(p.MessagesToSummarize, c.settings.summaryBudget(), c.estimator)), true
 	}
 	return text, false
 }
@@ -173,7 +175,7 @@ func (c *Compactor) appendTurnPrefix(ctx context.Context, p *Preparation, histor
 	)
 	if err != nil {
 		degraded = true
-		prefix = rawArchive(p.TurnPrefixMessages)
+		prefix = rawArchive(p.TurnPrefixMessages, c.settings.turnPrefixBudget(), c.estimator)
 	}
 	if history == "" {
 		history = "No prior history."
@@ -182,6 +184,13 @@ func (c *Compactor) appendTurnPrefix(ctx context.Context, p *Preparation, histor
 }
 
 // summarize runs one summarization call with retries.
+//
+// The call streams and is cancelled only when it stops producing output for
+// the stall timeout, the rule the engine applies to its own rounds. A fixed
+// total budget was wrong for exactly the calls that matter: the history being
+// summarized can be most of the window, and a request that was prefilling and
+// writing normally was cut off at 60 seconds, degraded, and started over on
+// the next turn. The overall ceiling belongs to the provider transport.
 func (c *Compactor) summarize(
 	ctx context.Context,
 	messages []chat.Message,
@@ -189,35 +198,93 @@ func (c *Compactor) summarize(
 	previousSummary, instructions string,
 	maxTokens int,
 ) (string, error) {
-	prompt := buildSummarizationPrompt(messages, omitted, previousSummary, instructions)
+	request := []chat.Message{
+		{Role: "system", Content: summarizationSystemPrompt},
+		{Role: "user", Content: buildSummarizationPrompt(messages, omitted, previousSummary, instructions)},
+	}
+	opts := &chat.ChatOptions{
+		Temperature:    0.3, // low temperature for factual summarization
+		MaxTokens:      maxTokens,
+		CacheRetention: chat.CacheRetentionNone,
+	}
 	var lastErr error
 
 	for attempt := 1; attempt <= maxSummarizationAttempts; attempt++ {
-		callCtx, cancel := context.WithTimeout(ctx, summarizationTimeout)
-		callCtx = types.WithLLMCallMetadata(callCtx, llmCallLabel, "")
-		resp, err := c.chatModel.Chat(callCtx, []chat.Message{
-			{Role: "system", Content: summarizationSystemPrompt},
-			{Role: "user", Content: prompt},
-		}, &chat.ChatOptions{
-			Temperature:    0.3, // low temperature for factual summarization
-			MaxTokens:      maxTokens,
-			CacheRetention: chat.CacheRetentionNone,
-		})
-		cancel()
-
-		if err != nil {
-			lastErr = err
-			continue
+		content, finishReason, err := c.streamSummary(ctx, request, opts)
+		if err == nil {
+			err = validateSummary(content, finishReason)
 		}
-		if err := validateSummary(resp); err != nil {
-			lastErr = err
-			continue
+		if err == nil {
+			return strings.TrimSpace(content), nil
 		}
-		return strings.TrimSpace(resp.Content), nil
+		lastErr = err
+		if ctx.Err() != nil {
+			break // the turn itself was stopped; another attempt cannot help
+		}
 	}
 
 	return "", fmt.Errorf("summarization failed after %d attempts: %w",
 		maxSummarizationAttempts, lastErr)
+}
+
+// streamSummary collects one summarization stream. Output of any kind, the
+// model's reasoning included, counts as progress and resets the stall timer.
+func (c *Compactor) streamSummary(
+	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
+) (content, finishReason string, err error) {
+	callCtx, cancel := context.WithCancel(types.WithLLMCallMetadata(ctx, llmCallLabel, ""))
+	defer cancel()
+	stream, err := c.chatModel.ChatStream(callCtx, messages, opts)
+	if err != nil {
+		return "", "", err
+	}
+	if stream == nil {
+		return "", "", errors.New("summarization stream was not opened")
+	}
+	// Anything the provider still sends after this returns is discarded, so
+	// its goroutine can finish once the cancelled context closes the stream.
+	defer func() {
+		go func() {
+			for {
+				if _, ok := <-stream; !ok {
+					return
+				}
+			}
+		}()
+	}()
+
+	timeout := c.settings.stallTimeout()
+	stall := time.NewTimer(timeout)
+	defer stall.Stop()
+	var sb strings.Builder
+	streamErr := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return "", "", ctx.Err()
+		case <-stall.C:
+			return "", "", fmt.Errorf("summarization stalled: no output for %s", timeout)
+		case chunk, ok := <-stream:
+			if !ok {
+				if streamErr != "" {
+					return "", finishReason, fmt.Errorf("summarization stream error: %s", streamErr)
+				}
+				return sb.String(), finishReason, nil
+			}
+			stall.Reset(timeout)
+			if chunk.FinishReason != "" {
+				finishReason = chunk.FinishReason
+			}
+			switch chunk.ResponseType {
+			case types.ResponseTypeError:
+				streamErr = chunk.Content
+			case types.ResponseTypeThinking:
+				// progress, but not part of the summary
+			default:
+				sb.WriteString(chunk.Content)
+			}
+		}
+	}
 }
 
 // validateSummary rejects responses that cannot serve as a checkpoint.
@@ -226,11 +293,11 @@ func (c *Compactor) summarize(
 // cap reads like a valid summary but silently ends mid-section, and every later
 // round inherits that truncation as its only memory of the dropped history.
 // A partial summary is a failure: it cannot serve as a checkpoint.
-func validateSummary(resp *types.ChatResponse) error {
-	if resp == nil || strings.TrimSpace(resp.Content) == "" {
+func validateSummary(content, finishReason string) error {
+	if strings.TrimSpace(content) == "" {
 		return errors.New("empty response from LLM")
 	}
-	switch strings.ToLower(strings.TrimSpace(resp.FinishReason)) {
+	switch strings.ToLower(strings.TrimSpace(finishReason)) {
 	case "length", "max_tokens", "max_output_tokens":
 		return errors.New("generation hit the token cap and the summary is incomplete")
 	}

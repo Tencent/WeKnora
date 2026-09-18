@@ -25,10 +25,17 @@ func (e *AgentEngine) saveContextCheckpoint(ctx context.Context, cp *compaction.
 	err := e.checkpointSink.SaveContextCheckpoint(ctx, cp.TurnID, &types.ContextCheckpoint{
 		Summary:   cp.Summary,
 		CreatedAt: time.Now(),
+		Degraded:  cp.Degraded,
 	})
 	if err != nil {
 		logger.Warnf(ctx, "[Agent][Round-%d] Failed to save context checkpoint on turn %s: %v",
 			round, cp.TurnID, err)
+		return
+	}
+	if cp.Degraded {
+		logger.Warnf(ctx, "[Agent][Round-%d] Saved a degraded context checkpoint through turn %s "+
+			"(raw archive, %d chars): the summarizer failed; the next compaction refines it",
+			round, cp.TurnID, len(cp.Summary))
 		return
 	}
 	logger.Infof(ctx, "[Agent][Round-%d] Saved context checkpoint through turn %s (%d chars)",

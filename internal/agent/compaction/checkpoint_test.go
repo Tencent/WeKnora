@@ -128,17 +128,49 @@ func TestNoCheckpointForALiveTurnOnly(t *testing.T) {
 	assert.Nil(t, result.Checkpoint, "nothing stored was summarized")
 }
 
-// A raw archive is a stopgap for the request that needed it. Persisting it
-// would make every later turn carry the archive instead of retrying the
-// summarizer.
-func TestNoCheckpointFromADegradedSummary(t *testing.T) {
+// A summarizer that keeps failing used to leave no checkpoint, so every later
+// turn loaded the same history, compacted it, and failed again. The raw
+// archive is kept as a degraded checkpoint instead; the next compaction folds
+// it in as the previous summary.
+func TestDegradedSummaryIsStillACheckpoint(t *testing.T) {
 	c := New(&stubChat{err: assert.AnError}, newEstimator(t), testSettings())
 
 	msgs := withStoredHistory(reactTurn(12), storedTurn("turn-a", 1, "/workspace/a.txt"))
 	result, err := c.Compact(context.Background(), msgs, ReasonThreshold)
 	require.NoError(t, err)
 	require.True(t, result.Degraded)
-	assert.Nil(t, result.Checkpoint)
+
+	require.NotNil(t, result.Checkpoint)
+	assert.Equal(t, "turn-a", result.Checkpoint.TurnID)
+	assert.True(t, result.Checkpoint.Degraded)
+	assert.Contains(t, result.Checkpoint.Summary, "Raw conversation archive")
+	assert.Contains(t, result.Checkpoint.Summary, "/workspace/a.txt")
+}
+
+// The archive stands in for a summary, so it is held to the summary budget,
+// newest messages first. Unbounded, an archive of a history that filled the
+// window was nearly as large as the history, and the compaction freed nothing.
+func TestRawArchiveIsHeldToTheSummaryBudget(t *testing.T) {
+	est := newEstimator(t)
+	c := New(&stubChat{err: assert.AnError}, est, testSettings())
+
+	msgs := []chat.Message{{Role: "system", Content: "you are an agent"}}
+	for i := 0; i < 150; i++ {
+		msgs = append(msgs, storedTurn(fmt.Sprintf("turn-%03d", i), 1, "/workspace/f.txt")...)
+	}
+	msgs = append(msgs, chat.Message{Role: "user", Content: "next"})
+
+	result, err := c.Compact(context.Background(), msgs, ReasonThreshold)
+	require.NoError(t, err)
+	require.NotNil(t, result.Checkpoint)
+	archive := result.Checkpoint.Summary
+
+	assert.LessOrEqual(t, est.EstimateString(archive), c.Settings().summaryBudget()+300,
+		"the archive must fit where a summary would")
+	assert.Contains(t, archive, "earlier messages omitted]")
+	assert.Contains(t, archive, "question turn-14", "the newest messages are the ones kept")
+	assert.NotContains(t, archive, "question turn-000")
+	assert.Less(t, result.TokensAfter, result.TokensBefore/2, "a degraded compaction still frees room")
 }
 
 // History loaded from a checkpoint starts with that summary. The next

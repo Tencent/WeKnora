@@ -91,6 +91,9 @@ func LoadAgentHistory(
 	}
 
 	var (
+		// rows keeps only what grouping and ordering need; the full rows wait
+		// in replay until their turn is replayed, then are released. A page of
+		// stored rows can hold whole wiki pages that go out as one line each.
 		rows         []*types.Message
 		turns        []*agentHistoryTurn
 		dropped      bool
@@ -99,7 +102,7 @@ func LoadAgentHistory(
 		reachedStart bool
 		scale        float64
 		used         int
-		replay       *historyReplay
+		replay       = newHistoryReplay(estimator, 0, retainRetrievalHistory)
 	)
 	for len(rows) < agentHistoryMaxRows {
 		page, err := messageRepo.ListMessagesBySessionBeforeCursor(
@@ -108,15 +111,17 @@ func LoadAgentHistory(
 		if err != nil {
 			return nil, 0, fmt.Errorf("load agent history: %w", err)
 		}
-		rows = append(rows, page...)
-		if replay == nil {
+		if len(rows) == 0 {
 			// Price everything in the provider's tokens, with the scale the
 			// engine will start from, or loading and the first compaction
 			// check disagree on where the window ends.
-			scale = latestContextTokenScale(rows)
+			scale = latestContextTokenScale(page)
 			estimator.SetScale(scale)
 			used = estimator.EstimateMessages(out)
-			replay = newHistoryReplay(estimator, tokenBudget-used, retainRetrievalHistory)
+			replay.budget = tokenBudget - used
+		}
+		for _, msg := range page {
+			rows = append(rows, replay.track(msg))
 		}
 		reachedStart = len(page) < agentHistoryPageSize
 		turns, dropped = replay.newestWithin(turnsAfterCheckpoint(completeHistoryTurns(rows, reachedStart), checkpoint))
@@ -256,6 +261,8 @@ type historyReplay struct {
 	retainRetrievalHistory bool
 	built                  map[string][]chat.Message
 	tokens                 map[string]int
+	// full holds stored rows by ID until their turn is replayed.
+	full map[string]*types.Message
 }
 
 func newHistoryReplay(
@@ -267,19 +274,39 @@ func newHistoryReplay(
 		retainRetrievalHistory: retainRetrievalHistory,
 		built:                  make(map[string][]chat.Message),
 		tokens:                 make(map[string]int),
+		full:                   make(map[string]*types.Message),
 	}
 }
 
-// messages replays one turn, tagged with its assistant message ID. The turn is
-// priced as the engine will send it (agent.HistoryAsSent), not as stored: a
-// retrieval result redacted to one line must not use up the budget in full.
+// track holds a stored row until its turn is replayed and returns the slim
+// copy grouping works on.
+func (r *historyReplay) track(msg *types.Message) *types.Message {
+	r.full[msg.ID] = msg
+	return &types.Message{
+		ID:          msg.ID,
+		RequestID:   msg.RequestID,
+		Role:        msg.Role,
+		CreatedAt:   msg.CreatedAt,
+		IsCompleted: msg.IsCompleted,
+	}
+}
+
+// messages replays one turn as the engine will send it (agent.HistoryAsSent),
+// tagged with its assistant message ID, and releases the stored rows it was
+// built from. Replaying what is sent, not what is stored, keeps pricing and
+// loading on the same footing: a wiki page stored in full but sent as one line
+// costs one line and is held in memory as one line.
 func (r *historyReplay) messages(t *agentHistoryTurn) []chat.Message {
 	id := t.assistant.ID
 	if msgs, ok := r.built[id]; ok {
 		return msgs
 	}
-	msgs := append([]chat.Message{buildUserHistoryMessage(t.users[0])},
-		buildTurnBodyMessages(t.assistant, t.users[1:])...)
+	users := make([]*types.Message, len(t.users))
+	for i, u := range t.users {
+		users[i] = r.stored(u)
+	}
+	msgs := append([]chat.Message{buildUserHistoryMessage(users[0])},
+		buildTurnBodyMessages(r.stored(t.assistant), users[1:])...)
 	for i := range msgs {
 		msgs[i].TurnID = id
 	}
@@ -288,9 +315,22 @@ func (r *historyReplay) messages(t *agentHistoryTurn) []chat.Message {
 	for i := range sent {
 		tokens += r.estimator.EstimateMessage(&sent[i])
 	}
-	r.built[id] = msgs
+	r.built[id] = sent
 	r.tokens[id] = tokens
-	return msgs
+	for _, u := range t.users {
+		delete(r.full, u.ID)
+	}
+	delete(r.full, t.assistant.ID)
+	return sent
+}
+
+// stored returns the full row behind msg, or msg itself when it is not a
+// tracked slim copy (callers that group full rows directly).
+func (r *historyReplay) stored(msg *types.Message) *types.Message {
+	if full, ok := r.full[msg.ID]; ok {
+		return full
+	}
+	return msg
 }
 
 // newestWithin keeps the newest turns that fit the budget and reports whether

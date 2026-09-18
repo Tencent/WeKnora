@@ -8,7 +8,11 @@
 // per round achieving nothing.
 package compaction
 
-import agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
+import (
+	"time"
+
+	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
+)
 
 // DefaultReserveTokens is the floor on room kept free for the next response.
 const DefaultReserveTokens = 16384
@@ -36,6 +40,20 @@ type Settings struct {
 	// MaxSummaryTokens caps the summarization completion. Zero falls back to
 	// the reserve-derived budget alone.
 	MaxSummaryTokens int
+	// StallTimeout is how long a summarization stream may produce no output
+	// before it is cancelled. Zero means DefaultSummarizationStallTimeout.
+	StallTimeout time.Duration
+}
+
+// DefaultSummarizationStallTimeout matches the engine's default stall budget
+// for its own rounds.
+const DefaultSummarizationStallTimeout = 120 * time.Second
+
+func (s Settings) stallTimeout() time.Duration {
+	if s.StallTimeout > 0 {
+		return s.StallTimeout
+	}
+	return DefaultSummarizationStallTimeout
 }
 
 // Normalize fills in defaults and reconciles budgets that cannot all be

@@ -77,8 +77,9 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 		}
 	}
 
-	require.True(t, sqliteIndexExists(t, db, "idx_messages_session_context_checkpoint"),
-		"SQLite migrations must add the partial index for context checkpoints") // 000106
+	require.True(t, sqliteIndexExists(t, db, "idx_messages_session_created_id"),
+		"SQLite migrations must add the session/created_at index") // 000106
+	assertSQLiteAgentHistoryQueriesUseTheIndex(t, db)
 
 	assertSQLiteShareLinkInvitationsWork(t, db)
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
@@ -221,6 +222,35 @@ func sqliteTableExists(t *testing.T, db *sql.DB, table string) bool {
 		table,
 	).Scan(&n))
 	return n == 1
+}
+
+// assertSQLiteAgentHistoryQueriesUseTheIndex checks the two per-turn agent
+// history queries walk idx_messages_session_created_id in order instead of
+// sorting every message of the session.
+func assertSQLiteAgentHistoryQueriesUseTheIndex(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for name, query := range map[string]string{
+		"backwards page": `SELECT * FROM messages WHERE session_id = 's'
+			AND (created_at < '2026-01-01' OR (created_at = '2026-01-01' AND id < 'x'))
+			AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 200`,
+		"newest checkpoint": `SELECT id FROM messages WHERE session_id = 's' AND role = 'assistant'
+			AND context_checkpoint IS NOT NULL AND deleted_at IS NULL
+			ORDER BY created_at DESC, id DESC LIMIT 1`,
+	} {
+		rows, err := db.Query("EXPLAIN QUERY PLAN " + query)
+		require.NoError(t, err, name)
+		var plan strings.Builder
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			require.NoError(t, rows.Scan(&id, &parent, &unused, &detail), name)
+			plan.WriteString(detail + "\n")
+		}
+		require.NoError(t, rows.Err(), name)
+		require.NoError(t, rows.Close(), name)
+		require.Contains(t, plan.String(), "idx_messages_session_created_id", "%s plan:\n%s", name, plan.String())
+		require.NotContains(t, plan.String(), "TEMP B-TREE", "%s must not sort:\n%s", name, plan.String())
+	}
 }
 
 func sqliteIndexExists(t *testing.T, db *sql.DB, index string) bool {

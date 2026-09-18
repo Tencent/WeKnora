@@ -136,13 +136,22 @@ func fitSummarizerInput(
 // checkpoint returns the history summary as a Checkpoint when it ends exactly
 // on a stored turn. The turn-prefix summary is left out: it describes part of a
 // turn the next turn replays verbatim. Nothing newly summarized means the
-// previous checkpoint still stands, and a raw archive is not worth keeping
-// past the turn that needed it — the next turn retries the summarizer instead.
+// previous checkpoint still stands.
+//
+// A raw archive is kept too. Not keeping it made a failing summarizer a loop:
+// the next turn loaded the same history, compacted it, failed the same way,
+// and so on every turn. The archive is bounded like a summary, and the next
+// compaction folds it in as the previous summary, so it is refined rather
+// than kept as is.
 func (p *Preparation) checkpoint(history string, degraded bool) *Checkpoint {
-	if p.storedTurnID == "" || len(p.MessagesToSummarize) == 0 || degraded {
+	if p.storedTurnID == "" || len(p.MessagesToSummarize) == 0 {
 		return nil
 	}
-	return &Checkpoint{TurnID: p.storedTurnID, Summary: history + p.historyFileOps.format()}
+	return &Checkpoint{
+		TurnID:   p.storedTurnID,
+		Summary:  history + p.historyFileOps.format(),
+		Degraded: degraded,
+	}
 }
 
 // storedTurnEndingAt returns the stored turn that ends immediately before end,

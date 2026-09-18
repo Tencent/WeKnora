@@ -450,9 +450,9 @@ func (r *messageRepository) UpdateMessageContextCheckpoint(
 
 // GetLatestContextCheckpoint returns the newest checkpointed assistant message.
 // Only the identity and ordering columns come back with the checkpoint: the
-// caller matches it against turns it has already loaded. The role is a literal
-// so the query matches the partial index idx_messages_session_context_checkpoint
-// even as a prepared statement.
+// caller matches it against turns it has already loaded. It walks
+// idx_messages_session_created_id backwards and stops at the first
+// checkpointed row, which in a compacting session is a recent one.
 func (r *messageRepository) GetLatestContextCheckpoint(
 	ctx context.Context, sessionID string,
 ) (*types.Message, error) {

@@ -130,6 +130,7 @@ func NewAgentEngine(
 		ReserveTokens:    engine.contextReserveTokens(),
 		KeepRecentTokens: config.CompactionKeepRecentTokens,
 		MaxSummaryTokens: engine.getCompletionTokenBudget(),
+		StallTimeout:     engine.getLLMStallTimeout(),
 	})
 
 	return engine
@@ -349,6 +350,11 @@ func (e *AgentEngine) Execute(
 		KnowledgeRefs: []*types.SearchResult{},
 		IsComplete:    false,
 		CurrentRound:  0,
+		// A turn that measures no scale of its own (no tool call, so no two
+		// requests to compare) passes on the one it started from, so the
+		// newest turn always carries the latest known scale and the loader
+		// never has to look past its first page for one.
+		TurnUsage: types.TokenUsage{ContextTokenScale: e.config.ContextTokenScale},
 	}
 
 	// Build system prompt using progressive RAG prompt
@@ -731,10 +737,11 @@ func (e *AgentEngine) runReActIteration(
 	}
 	response = resp
 	e.logContextDrift(ctx, round, currentTokens, response.Usage)
+	// Calibration needs only a prompt count; some providers report no total.
+	e.calibrateEstimator(ctx, round, *messagesPtr, tools, response.Usage, state)
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)
-		e.calibrateEstimator(ctx, round, *messagesPtr, tools, response.Usage, state)
 		logger.Infof(ctx, "[Agent][Round-%d] Usage: prompt=%d, completion=%d, total=%d, "+
 			"cache_read=%d, cache_write=%d, cache_hit_rate=%.1f%%, cache_status=%s",
 			round, response.Usage.PromptTokens,
