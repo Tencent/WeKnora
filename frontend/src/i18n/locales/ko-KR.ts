@@ -4469,6 +4469,7 @@ export default {
       loadFailed: '활동 기록을 불러오지 못했습니다',
       systemActor: '시스템',
       actorWithAPIKey: '{actor} · API Key · {name}',
+      actorAPIKey: 'API Key · {name}',
       knowledgeBase: '지식 베이스',
       countItems: '{count}개 항목',
       titleWithCount: '{title} 외 {count}개',

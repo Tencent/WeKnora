@@ -2888,6 +2888,7 @@ export default {
       },
       systemActor: 'System',
       actorWithAPIKey: '{actor} · API Key · {name}',
+      actorAPIKey: 'API Key · {name}',
       knowledgeBase: 'Knowledge base',
       countItems: '{count} items',
       titleWithCount: '{title} and {count} more',

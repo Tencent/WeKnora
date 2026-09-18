@@ -4471,6 +4471,7 @@ export default {
       loadFailed: '活动记录加载失败',
       systemActor: '系统触发',
       actorWithAPIKey: '{actor} · API Key · {name}',
+      actorAPIKey: 'API Key · {name}',
       knowledgeBase: '知识库',
       countItems: '共 {count} 项',
       titleWithCount: '{title} 等 {count} 项',

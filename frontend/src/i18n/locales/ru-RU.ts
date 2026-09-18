@@ -4469,6 +4469,7 @@ export default {
       loadFailed: 'Не удалось загрузить историю',
       systemActor: 'Система',
       actorWithAPIKey: '{actor} · API Key · {name}',
+      actorAPIKey: 'API Key · {name}',
       knowledgeBase: 'База знаний',
       countItems: '{count} элем.',
       titleWithCount: '{title} и ещё {count}',

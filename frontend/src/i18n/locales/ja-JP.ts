@@ -2888,6 +2888,7 @@ export default {
       },
       systemActor: 'システム',
       actorWithAPIKey: '{actor} · API Key · {name}',
+      actorAPIKey: 'API Key · {name}',
       knowledgeBase: 'ナレッジベース',
       countItems: '{count}件',
       titleWithCount: '{title}ほか{count}件',
