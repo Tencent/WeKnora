@@ -196,11 +196,18 @@ func TestLooksLikeHTML(t *testing.T) {
 // the mixed content does not satisfy looksLikeHTML, so the old HTML-to-markdown
 // path never ran and the raw <table> markup reached the chunker.
 func TestSanitizeOCRText_ConvertsInlineHTMLTable(t *testing.T) {
-	input := "# 报告\n\n本季度公司整体经营情况保持稳定，营收与利润两项核心指标均实现同比增长。为了便于管理层快速了解经营成果，下表汇总了报告期内的主要财务数据，供后续经营分析、预算编制以及年度考核等工作参考使用，请结合实际业务情况综合判断，切勿脱离业务背景单独解读其中任何一项数字。\n\n" +
+	para := "本季度公司整体经营情况保持稳定，营收与利润两项核心指标均实现同比增长。" +
+		"为了便于管理层快速了解经营成果，下表汇总了报告期内的主要财务数据，" +
+		"供后续经营分析、预算编制以及年度考核等工作参考使用，" +
+		"请结合实际业务情况综合判断，切勿脱离业务背景单独解读其中任何一项数字。"
+	tail := "以上数据均来自财务部门审核后的正式报表，统计口径与上一报告期保持一致，" +
+		"未发生会计政策变更或追溯调整。如有疑问请与财务部门联系确认，" +
+		"最终解释权归公司财务部门所有。"
+	input := "# 报告\n\n" + para + "\n\n" +
 		`<table><tr><th>指标</th><th>数值</th></tr>` +
 		`<tr><td>营收</td><td>10亿</td></tr>` +
 		`<tr><td>利润</td><td>2.3亿</td></tr></table>` +
-		"\n\n以上数据均来自财务部门审核后的正式报表，统计口径与上一报告期保持一致，未发生会计政策变更或追溯调整。如有疑问请与财务部门联系确认，最终解释权归公司财务部门所有。\n\n"
+		"\n\n" + tail + "\n\n"
 
 	if looksLikeHTML(input) {
 		t.Fatalf("test input unexpectedly looks like HTML; the regression test must exercise the mixed-content path")

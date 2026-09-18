@@ -47,8 +47,11 @@ func TestNormalizeHTMLTables_NoTableUnchanged(t *testing.T) {
 func TestNormalizeHTMLTables_SpanValueOneIsConvertible(t *testing.T) {
 	// rowspan=1 / colspan=1 merge nothing, so the table must still become GFM.
 	// Covers quoted, unquoted and space-padded attribute forms.
-	input := `<table><tr><td rowspan="1" colspan="1" style="text-align:center;">指标</td><td rowspan=1 colspan=1>数值</td></tr>` +
-		`<tr><td rowspan="1" colspan='1'>营收</td><td rowspan = 1 colspan = 1>10亿</td></tr></table>`
+	input := `<table><tr>` +
+		`<td rowspan="1" colspan="1" style="text-align:center;">指标</td>` +
+		`<td rowspan=1 colspan=1>数值</td></tr>` +
+		`<tr><td rowspan="1" colspan='1'>营收</td>` +
+		`<td rowspan = 1 colspan = 1>10亿</td></tr></table>`
 
 	got := NormalizeHTMLTables(input)
 
@@ -115,7 +118,8 @@ func assertHTMLRowsSplittable(t *testing.T, got string) {
 func TestNormalizeHTMLTables_StripsAttrsOnSpanTables(t *testing.T) {
 	// rowspan/colspan cannot be expressed in Markdown, so the table stays HTML
 	// but its presentational attributes are stripped and rows become splittable.
-	input := `<table><tr><td colspan="2" style="text-align:center;" class="hdr">合计</td></tr>` +
+	input := `<table><tr>` +
+		`<td colspan="2" style="text-align:center;" class="hdr">合计</td></tr>` +
 		`<tr><td style="text-align:left;">A</td><td width="80">B</td></tr></table>`
 
 	got := NormalizeHTMLTables(input)
@@ -154,7 +158,8 @@ func TestNormalizeHTMLTables_BRCellsStaySplittableHTML(t *testing.T) {
 }
 
 func TestNormalizeHTMLTables_ListInCellFallsBackToSplittableHTML(t *testing.T) {
-	input := `<table><tr><td><ul><li>a</li><li>b</li></ul></td><td>x</td></tr><tr><td>c</td><td>d</td></tr></table>`
+	input := `<table><tr><td><ul><li>a</li><li>b</li></ul></td><td>x</td></tr>` +
+		`<tr><td>c</td><td>d</td></tr></table>`
 
 	got := NormalizeHTMLTables(input)
 

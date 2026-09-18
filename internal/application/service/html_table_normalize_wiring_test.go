@@ -20,10 +20,13 @@ func TestHTMLEmbeddedTableWiring_ProducesChunkableOutput(t *testing.T) {
 		"以下是正文段落，用于确认归一化不会破坏普通 markdown。",
 		"",
 		// colspan=1: redundant spans must still be convertible to GFM.
-		`<table><tr><td colspan="1" style="text-align:left">项目</td><td colspan="1">结果</td></tr><tr><td>拉伸强度</td><td>合格</td></tr></table>`,
+		`<table><tr><td colspan="1" style="text-align:left">项目</td>` +
+			`<td colspan="1">结果</td></tr>` +
+			`<tr><td>拉伸强度</td><td>合格</td></tr></table>`,
 		"",
 		// colspan=6: a real merge -> cannot be GFM, but must stay splittable.
-		`<table><tr><td colspan="6" style="text-align:center">汇总</td></tr><tr><td colspan="6">备注</td></tr></table>`,
+		`<table><tr><td colspan="6" style="text-align:center">汇总</td></tr>` +
+			`<tr><td colspan="6">备注</td></tr></table>`,
 		"",
 		"收尾段落。",
 	}, "\n")

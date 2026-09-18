@@ -27,13 +27,13 @@ func buildOCRStrayBracketDoc() string {
 }
 
 func maxChunkRunes(chunks []Chunk) int {
-	max := 0
+	best := 0
 	for _, c := range chunks {
-		if n := len([]rune(c.Content)); n > max {
-			max = n
+		if n := len([]rune(c.Content)); n > best {
+			best = n
 		}
 	}
-	return max
+	return best
 }
 
 // TestSplitText_OCRStrayBracketDoesNotSwallowDocument is the core regression:
@@ -48,7 +48,8 @@ func TestSplitText_OCRStrayBracketDoesNotSwallowDocument(t *testing.T) {
 	cfg := SplitterConfig{ChunkSize: chunkSize, ChunkOverlap: 0, Separators: []string{"\n\n", "\n", "。"}}
 
 	chunks := SplitText(doc, cfg)
-	t.Logf("doc=%d runes chunkSize=%d -> chunks=%d max=%d runes", len([]rune(doc)), chunkSize, len(chunks), maxChunkRunes(chunks))
+	t.Logf("doc=%d runes chunkSize=%d -> chunks=%d max=%d runes",
+		len([]rune(doc)), chunkSize, len(chunks), maxChunkRunes(chunks))
 	if len(chunks) < 2 {
 		t.Fatalf("expected multiple chunks, got %d (max=%d runes)", len(chunks), maxChunkRunes(chunks))
 	}

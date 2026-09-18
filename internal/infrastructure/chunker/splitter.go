@@ -121,9 +121,11 @@ func DefaultConfig() SplitterConfig {
 // behind by OCR swallow whole paragraphs as one "protected" atomic span,
 // defeating chunking entirely.
 var protectedPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)\$\$.*?\$\$`),                                                               // LaTeX block math
-	regexp.MustCompile(`!\[[^\]\n]{0,200}\]\([^)\n]{1,500}\)`),                                          // Markdown images
-	regexp.MustCompile(`\[[^\]\n]{1,200}\]\([^)\n]{1,500}\)`),                                           // Markdown links
+	regexp.MustCompile(`(?s)\$\$.*?\$\$`), // LaTeX block math
+	// Markdown images / links: single line, bounded so a stray OCR '['
+	// cannot swallow a paragraph (CommonMark forbids blank-line spans).
+	regexp.MustCompile(`!\[[^\]\n]{0,200}\]\([^)\n]{1,500}\)`),
+	regexp.MustCompile(`\[[^\]\n]{1,200}\]\([^)\n]{1,500}\)`),
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+\\s*(?:\\|\\s*:?-{3,}:?\\s*)+\\|[\\r\\n]+"), // Table header+separator
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+"),                                          // Table rows
 	regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),                                                // Fenced code blocks
