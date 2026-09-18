@@ -1,4 +1,4 @@
--- Migration: 000104_message_context_checkpoint
+-- Migration: 000105_message_context_checkpoint
 -- Agent compaction summaries persisted on the assistant message of the last
 -- turn they cover, so the next turn's history starts from the summary instead
 -- of summarizing the same turns again.
