@@ -4501,6 +4501,7 @@ export default {
   },
   error: {
     networkError: 'ネットワークエラーです。接続を確認してください',
+    requestTimeout: 'リクエストがタイムアウトしました。大きなファイルや低速な回線では再試行してください',
     invalidCredentials: 'ユーザ名またはパスワードが正しくありません',
     tokenRefreshFailed: 'トークンの更新に失敗しました',
     pleaseRelogin: '再度ログインしてください',

@@ -4501,6 +4501,7 @@ export default {
   },
   error: {
     networkError: 'Network error, please check your connection',
+    requestTimeout: 'Request timed out. Large files or slow connections may need another try.',
     invalidCredentials: 'Invalid username or password',
     tokenRefreshFailed: 'Token refresh failed',
     pleaseRelogin: 'Please log in again',

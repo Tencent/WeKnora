@@ -2949,6 +2949,7 @@ export default {
   },
   error: {
     networkError: '网络错误，请检查您的网络连接',
+    requestTimeout: '请求超时，文件较大或网络较慢时请稍后重试',
     invalidCredentials: '用户名或密码错误',
     tokenRefreshFailed: 'Token刷新失败',
     pleaseRelogin: '请重新登录',
