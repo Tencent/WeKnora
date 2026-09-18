@@ -7289,10 +7289,52 @@ export default {
       references: 'Источники'
     }
   },
+  artifactLibrary: {
+    title: 'Артефакты',
+    subtitle: 'Файлы, созданные агентами во всех ваших диалогах',
+    typeFilter: 'Фильтр по типу',
+    searchPlaceholder: 'Поиск по имени файла',
+    categories: {
+      all: 'Все',
+      document: 'Документы',
+      spreadsheet: 'Таблицы',
+      presentation: 'Презентации',
+      image: 'Изображения',
+      web: 'Веб-страницы',
+      data: 'Данные'
+    },
+    groups: {
+      today: 'Сегодня',
+      yesterday: 'Вчера',
+      last7Days: 'Последние 7 дней',
+      last30Days: 'Последние 30 дней',
+      earlier: 'Ранее'
+    },
+    total: 'Файлов: {count}',
+    versions: 'Версий: {count}',
+    preview: 'Предпросмотр',
+    download: 'Скачать',
+    downloadFailed: 'Не удалось скачать файл. Повторите попытку позже',
+    openSession: 'Открыть диалог',
+    untitledSession: 'Диалог без названия',
+    loadMore: 'Загрузить ещё',
+    loadFailed: 'Не удалось загрузить артефакты',
+    retry: 'Повторить',
+    clearFilters: 'Сбросить фильтры',
+    empty: {
+      title: 'Артефактов пока нет',
+      description: 'Попросите агента подготовить отчёт, таблицу или презентацию — файлы появятся здесь'
+    },
+    noMatches: {
+      title: 'Нет подходящих файлов',
+      description: 'Попробуйте другое ключевое слово или тип файла'
+    }
+  },
   menu: {
     sessionInProgress: 'Диалог выполняется',
     knowledgeBase: 'База знаний',
     agents: 'Агенты',
+    artifacts: 'Артефакты',
     organizations: 'Общие пространства',
     newChat: 'Новый диалог',
     settings: 'Настройки системы',

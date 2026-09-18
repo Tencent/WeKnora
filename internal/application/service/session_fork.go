@@ -468,9 +468,9 @@ func historyThroughForkPoint(listed []*types.Message, forkPoint *types.Message) 
 // per original value so a user/assistant pair stays paired inside the fork
 // without colliding with the parent in search partner lookups.
 //
-// Copies deliberately keep their Artifacts and Attachments. Artifact URLs are
-// persisted on the message row, so the forked session's 产物 tab can list and
-// download the same files. Attachment storage handles live in
+// Copies deliberately keep their Artifacts and Attachments. CreateForked
+// writes the copied artifact rows (same storage URLs) under the new message
+// IDs, so the forked session's 产物 tab can list and download the same files. Attachment storage handles live in
 // temporary_documents (still scoped to the parent session) and are resolved
 // by ID at preview and staging time when the copied messages reference them.
 func copyMessagesInto(newSessionID string, history []*types.Message) []*types.Message {

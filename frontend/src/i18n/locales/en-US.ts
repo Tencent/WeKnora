@@ -116,10 +116,52 @@ export default {
     "locateWindow": "Show browser",
     "reconnectShort": "Waiting to reconnect",
 },
+  artifactLibrary: {
+    title: 'Artifacts',
+    subtitle: 'Files your agents generated across all of your conversations',
+    typeFilter: 'Filter by type',
+    searchPlaceholder: 'Search filenames',
+    categories: {
+      all: 'All',
+      document: 'Documents',
+      spreadsheet: 'Spreadsheets',
+      presentation: 'Presentations',
+      image: 'Images',
+      web: 'Web pages',
+      data: 'Data'
+    },
+    groups: {
+      today: 'Today',
+      yesterday: 'Yesterday',
+      last7Days: 'Last 7 days',
+      last30Days: 'Last 30 days',
+      earlier: 'Earlier'
+    },
+    total: '{count} files',
+    versions: '{count} versions',
+    preview: 'Preview',
+    download: 'Download',
+    downloadFailed: 'Download failed. Please try again later.',
+    openSession: 'Open conversation',
+    untitledSession: 'Untitled conversation',
+    loadMore: 'Load more',
+    loadFailed: 'Could not load artifacts',
+    retry: 'Retry',
+    clearFilters: 'Clear filters',
+    empty: {
+      title: 'No artifacts yet',
+      description: 'Ask an agent to produce a report, spreadsheet or slide deck and the files will show up here'
+    },
+    noMatches: {
+      title: 'No matching files',
+      description: 'Try a different keyword or file type'
+    }
+  },
   menu: {
     sessionInProgress: 'Conversation in progress',
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
+    artifacts: 'Artifacts',
     organizations: 'Shared Spaces',
     newChat: 'New Chat',
     settings: 'System Settings',

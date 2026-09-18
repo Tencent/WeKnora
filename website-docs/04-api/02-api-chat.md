@@ -385,6 +385,23 @@ curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts/0/download" \
   -H "Authorization: Bearer $TOKEN" -o result.pdf
 ```
 
+### 跨会话产物列表
+
+`GET /api/v1/artifacts` 列出当前用户可见会话中的所有生成文件（范围与会话列表一致：本人会话及历史上无归属的租户级会话），供首页侧栏「产物」页使用。同一会话中 `source_path` 相同的文件视为同一文件的多个版本，只返回最新一版，`version_count` 给出版本数。已删除的会话或消息中的文件不返回。权限要求与上表相同。
+
+| 参数 | 说明 |
+| --- | --- |
+| `keyword` | 按文件名过滤，不区分大小写 |
+| `file_types` | 逗号分隔的扩展名，如 `.pdf,.pptx`（可省略点号） |
+| `page` / `page_size` | 分页，`page_size` 最大 100，默认 20 |
+
+响应 `{success, data:[LibraryArtifact], total, page, page_size}`，按生成时间倒序。LibraryArtifact 字段：session_id、session_title、message_id、index、handle（可选）、file_name、file_type、file_size、source_path、created_at、version_count。下载时用其中的 session_id、message_id、index 调用上表的下载接口。
+
+```bash
+curl "$BASE/api/v1/artifacts?file_types=.pptx,.pdf&keyword=报告&page=1&page_size=30" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ### 回答中的图片和文件引用
 
 `GET /api/v1/sessions/:id/messages/:message_id/files?file_path=...` 是消息级鉴权代理。file_path 传该消息引用的资源句柄或受支持的存储引用，客户端应 URL 编码。后端校验消息访问权、资源与消息的绑定及知识库/共享 Agent 的当前访问权；任意文件路径不能凭会话 ID 访问。授权撤销后旧消息引用也会被拒绝。适用于共享 Agent、组织共享库回答图片与消息产物，详见[文件访问](../03-features/21-file-access.md)。

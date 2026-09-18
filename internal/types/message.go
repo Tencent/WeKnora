@@ -363,7 +363,11 @@ type Message struct {
 	// Skill-generated files produced during this assistant turn (assistant messages only).
 	// Populated by ArtifactCollector after the sandbox finishes, referenced by the
 	// artifact download endpoint. Empty for user messages and turns without skills.
-	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"type:jsonb;column:artifacts"`
+	//
+	// Stored in the message_artifacts table, not on the message row: the message
+	// repository loads it with every message it returns and writes it whenever it
+	// is non-nil on create or update. A nil slice leaves the stored rows alone.
+	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// Whether this response is a fallback (no knowledge base match found)

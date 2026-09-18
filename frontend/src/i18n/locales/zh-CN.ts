@@ -7291,10 +7291,52 @@ export default {
       references: '引用'
     }
   },
+  artifactLibrary: {
+    title: '产物',
+    subtitle: '智能体在各个会话中生成的文件，都会汇总在这里',
+    typeFilter: '按类型筛选',
+    searchPlaceholder: '搜索文件名',
+    categories: {
+      all: '全部',
+      document: '文档',
+      spreadsheet: '表格',
+      presentation: '演示文稿',
+      image: '图片',
+      web: '网页',
+      data: '数据'
+    },
+    groups: {
+      today: '今天',
+      yesterday: '昨天',
+      last7Days: '最近 7 天',
+      last30Days: '最近 30 天',
+      earlier: '更早'
+    },
+    total: '共 {count} 个文件',
+    versions: '{count} 个版本',
+    preview: '预览',
+    download: '下载',
+    downloadFailed: '下载失败，请稍后重试',
+    openSession: '打开所在会话',
+    untitledSession: '未命名会话',
+    loadMore: '加载更多',
+    loadFailed: '产物加载失败',
+    retry: '重试',
+    clearFilters: '清除筛选',
+    empty: {
+      title: '还没有产物',
+      description: '在对话中让智能体生成报告、表格或演示文稿，文件会出现在这里'
+    },
+    noMatches: {
+      title: '没有匹配的文件',
+      description: '换个关键词或文件类型试试'
+    }
+  },
   menu: {
     sessionInProgress: '会话进行中',
     knowledgeBase: '知识库',
     agents: '智能体',
+    artifacts: '产物',
     organizations: '共享空间',
     newChat: '新对话',
     settings: '系统设置',

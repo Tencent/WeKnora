@@ -7289,10 +7289,52 @@ export default {
       references: '참조'
     }
   },
+  artifactLibrary: {
+    title: '산출물',
+    subtitle: '모든 대화에서 에이전트가 생성한 파일을 한곳에 모아 보여줍니다',
+    typeFilter: '유형별 필터',
+    searchPlaceholder: '파일 이름 검색',
+    categories: {
+      all: '전체',
+      document: '문서',
+      spreadsheet: '스프레드시트',
+      presentation: '프레젠테이션',
+      image: '이미지',
+      web: '웹 페이지',
+      data: '데이터'
+    },
+    groups: {
+      today: '오늘',
+      yesterday: '어제',
+      last7Days: '최근 7일',
+      last30Days: '최근 30일',
+      earlier: '이전'
+    },
+    total: '파일 {count}개',
+    versions: '버전 {count}개',
+    preview: '미리보기',
+    download: '다운로드',
+    downloadFailed: '다운로드에 실패했습니다. 잠시 후 다시 시도해 주세요',
+    openSession: '대화 열기',
+    untitledSession: '제목 없는 대화',
+    loadMore: '더 불러오기',
+    loadFailed: '산출물을 불러오지 못했습니다',
+    retry: '다시 시도',
+    clearFilters: '필터 지우기',
+    empty: {
+      title: '아직 산출물이 없습니다',
+      description: '대화에서 에이전트에게 보고서, 표, 슬라이드를 만들게 하면 파일이 여기에 표시됩니다'
+    },
+    noMatches: {
+      title: '일치하는 파일이 없습니다',
+      description: '다른 키워드나 파일 유형으로 시도해 보세요'
+    }
+  },
   menu: {
     sessionInProgress: '대화 진행 중',
     knowledgeBase: '지식베이스',
     agents: '에이전트',
+    artifacts: '산출물',
     organizations: '공유 공간',
     newChat: '새 대화',
     settings: '시스템 설정',

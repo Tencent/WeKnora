@@ -63,6 +63,11 @@ type MessageService interface {
 	// the frontend "download files generated in this session" drawer and
 	// to clean up storage blobs on session deletion.
 	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+
+	// ListArtifactLibrary lists the latest version of every artifact across
+	// the caller's sessions, newest first. Tenant and owner scope come from
+	// ctx; query.TenantID and query.UserID are overwritten.
+	ListArtifactLibrary(ctx context.Context, query *types.ArtifactLibraryQuery) (*types.PageResult, error)
 }
 
 // MessageRepository defines the message repository interface
@@ -128,6 +133,11 @@ type MessageRepository interface {
 	// cheap even for long conversations. Empty slice + nil error means the
 	// session has no artifacts yet (never an error).
 	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+	// ListArtifactLibrary returns one page of the latest artifact versions in
+	// the sessions query.TenantID / query.UserID can see, plus the total.
+	ListArtifactLibrary(
+		ctx context.Context, query *types.ArtifactLibraryQuery,
+	) ([]*types.ArtifactLibraryItem, int64, error)
 	// GetSessionAttachments returns every user-uploaded attachment recorded in
 	// the session. Implementations should project only the attachments column.
 	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)

@@ -411,8 +411,11 @@ func (r *sessionRepository) CreateForked(
 		if len(messages) == 0 {
 			return nil
 		}
-		return tx.Session(&gorm.Session{SkipHooks: true}).
-			CreateInBatches(messages, 100).Error
+		if err := tx.Session(&gorm.Session{SkipHooks: true}).
+			CreateInBatches(messages, 100).Error; err != nil {
+			return err
+		}
+		return insertMessageArtifacts(tx, messages)
 	})
 }
 

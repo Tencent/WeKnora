@@ -116,10 +116,52 @@ export default {
     "locateWindow": "ブラウザーを表示",
     "reconnectShort": "再接続を待機中",
 },
+  artifactLibrary: {
+    title: '成果物',
+    subtitle: 'すべての会話でエージェントが生成したファイルをまとめて表示します',
+    typeFilter: '種類で絞り込む',
+    searchPlaceholder: 'ファイル名を検索',
+    categories: {
+      all: 'すべて',
+      document: 'ドキュメント',
+      spreadsheet: 'スプレッドシート',
+      presentation: 'プレゼンテーション',
+      image: '画像',
+      web: 'Web ページ',
+      data: 'データ'
+    },
+    groups: {
+      today: '今日',
+      yesterday: '昨日',
+      last7Days: '過去 7 日間',
+      last30Days: '過去 30 日間',
+      earlier: 'それ以前'
+    },
+    total: '{count} 件のファイル',
+    versions: '{count} バージョン',
+    preview: 'プレビュー',
+    download: 'ダウンロード',
+    downloadFailed: 'ダウンロードに失敗しました。しばらくしてから再試行してください',
+    openSession: '会話を開く',
+    untitledSession: '無題の会話',
+    loadMore: 'さらに読み込む',
+    loadFailed: '成果物を読み込めませんでした',
+    retry: '再試行',
+    clearFilters: '絞り込みを解除',
+    empty: {
+      title: '成果物はまだありません',
+      description: '会話でエージェントにレポートや表、スライドを作成させると、ここに表示されます'
+    },
+    noMatches: {
+      title: '一致するファイルがありません',
+      description: '別のキーワードや種類をお試しください'
+    }
+  },
   menu: {
     sessionInProgress: '会話中',
     knowledgeBase: 'ナレッジベース',
     agents: 'エージェント',
+    artifacts: '成果物',
     organizations: '共有スペース',
     newChat: '新しいチャット',
     settings: 'システム設定',
