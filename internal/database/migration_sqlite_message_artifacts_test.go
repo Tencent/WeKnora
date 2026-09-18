@@ -42,6 +42,13 @@ func TestSQLiteMessageArtifactsBackfillAndRollback(t *testing.T) {
 		 VALUES ('msg-2', 'req-2', 'sess-1', 'user', 'hi', '[]')`,
 	)
 	require.NoError(t, err)
+	// Malformed values must fall back instead of failing the migration.
+	_, err = db.Exec(
+		`INSERT INTO messages (id, request_id, session_id, role, content, artifacts, created_at)
+		 VALUES ('msg-3', 'req-3', 'sess-1', 'assistant', 'dirty', ?, '2026-09-02 00:00:00')`,
+		`[{"file_name":"dirty.bin","file_size":"12.5x","created_at":"garbage"}, 7, "x"]`,
+	)
+	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
 	chdirAndRestore(t, repoRoot)
@@ -80,6 +87,15 @@ func TestSQLiteMessageArtifactsBackfillAndRollback(t *testing.T) {
 	require.True(t, got[0].createdAt.Equal(wantCreated), "created_at normalised to UTC: %v", got[0].createdAt)
 	require.Equal(t, 1, got[1].position)
 	require.Equal(t, "chart.png", got[1].fileName)
+
+	var dirtySize int64
+	var dirtyCreated time.Time
+	require.NoError(t, db.QueryRow(
+		`SELECT file_size, created_at FROM message_artifacts WHERE message_id = 'msg-3'`,
+	).Scan(&dirtySize, &dirtyCreated))
+	require.EqualValues(t, 12, dirtySize, "SQLite CAST keeps the numeric prefix")
+	require.True(t, dirtyCreated.Equal(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)),
+		"an unparseable created_at falls back to the message time: %v", dirtyCreated)
 
 	var userRows int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM message_artifacts WHERE message_id = 'msg-2'`).Scan(&userRows))
