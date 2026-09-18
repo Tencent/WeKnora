@@ -277,61 +277,6 @@ func filterSearchResultsInSearchTargets(
 	return filtered, nil
 }
 
-// knowledgeIDsAllowedInSearchTargets resolves the whole-KB/document/tag scope
-// for a batch of documents in one tag lookup, mirroring
-// filterSearchResultsInSearchTargets for callers that hold plain IDs.
-func knowledgeIDsAllowedInSearchTargets(
-	ctx context.Context,
-	searchTargets types.SearchTargets,
-	kbID string,
-	knowledgeIDs []string,
-	knowledgeService interfaces.KnowledgeService,
-) (map[string]bool, error) {
-	allowed := make(map[string]bool, len(knowledgeIDs))
-	var explicitIDs, tagIDs []string
-	matchedKB := false
-	for _, target := range searchTargets {
-		if target == nil || target.KnowledgeBaseID != kbID {
-			continue
-		}
-		matchedKB = true
-		if searchTargetIsWholeKB(target) {
-			for _, id := range knowledgeIDs {
-				allowed[id] = true
-			}
-			return allowed, nil
-		}
-		targetKnowledgeIDs, targetTagIDs := searchTargetScope(target)
-		explicitIDs = append(explicitIDs, targetKnowledgeIDs...)
-		tagIDs = append(tagIDs, targetTagIDs...)
-	}
-	if !matchedKB {
-		return allowed, nil
-	}
-	for _, id := range explicitIDs {
-		allowed[id] = true
-	}
-	var remaining []string
-	for _, id := range knowledgeIDs {
-		if !allowed[id] {
-			remaining = append(remaining, id)
-		}
-	}
-	if len(remaining) == 0 || len(tagIDs) == 0 || knowledgeService == nil {
-		return allowed, nil
-	}
-	tagMatches, err := knowledgeIDsMatchingAnyTag(ctx, remaining, tagIDs, knowledgeService.GetKnowledgeTags)
-	if err != nil {
-		return nil, err
-	}
-	for id, ok := range tagMatches {
-		if ok {
-			allowed[id] = true
-		}
-	}
-	return allowed, nil
-}
-
 func knowledgeIDsMatchingAnyTag(
 	ctx context.Context,
 	knowledgeIDs []string,

@@ -149,7 +149,6 @@ export interface DocumentInfoData {
     page_size?: number;
     next_page?: number;
     knowledge_base_id?: string;
-    hidden_by_scope?: number;
 }
 
 // Graph query results data

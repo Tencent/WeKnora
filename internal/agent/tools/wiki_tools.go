@@ -752,20 +752,20 @@ func NewWikiSearchTool(
 			ToolWikiSearch,
 			"Search the wiki pages of the knowledge bases in scope by title, slug, alias, summary and content. "+
 				"Returns page slugs with summaries; read a page with wiki_read_page.\n"+
-				"query is a case-insensitive literal by default; set regex=true to pass a POSIX regular expression "+
-				"(for example \"stardust|skyvault\" to match either term). Pass knowledge_base_ids to restrict "+
-				"the search.",
+				"query is a case-insensitive POSIX regular expression (for example \"stardust|skyvault\" matches "+
+				"either term); text that is not a valid regular expression, such as \"C++\", is matched literally. "+
+				"Set regex=false to force a literal match. Pass knowledge_base_ids to restrict the search.",
 			json.RawMessage(`{
   "type": "object",
   "properties": {
     "query": {
       "type": "string",
-      "description": "Search text (literal, case-insensitive) or a POSIX regex when regex is true",
+      "description": "Case-insensitive POSIX regular expression; invalid patterns are matched literally",
       "minLength": 1
     },
     "regex": {
       "type": "boolean",
-      "description": "Interpret query as a POSIX regular expression (default false)"
+      "description": "false forces a literal match; true requires a valid regular expression (default: auto)"
     },
     "knowledge_base_ids": {
       "type": "array",
@@ -794,7 +794,7 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	var params struct {
 		Query            any      `json:"query"`
 		Queries          any      `json:"queries"` // legacy alias
-		Regex            bool     `json:"regex"`
+		Regex            *bool    `json:"regex"`
 		Limit            int      `json:"limit"`
 		KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
 		KnowledgeBaseID  string   `json:"knowledge_base_id"` // legacy alias
@@ -869,12 +869,9 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 	for _, query := range queriesToRun {
 		var allHits []searchHit
 		filteredCount := 0
-		// The repository interprets the query as a POSIX regex; a literal
-		// query is escaped so punctuation in titles ("C++", "v1.2") matches
-		// as written and the model never has to reason about JSON escaping.
-		pattern := query
-		if !params.Regex {
-			pattern = regexp.QuoteMeta(query)
+		pattern, perr := wikiSearchPattern(query, params.Regex)
+		if perr != nil {
+			return &types.ToolResult{Success: false, Error: perr.Error()}, nil
 		}
 		for _, sc := range effectiveScopes {
 			kbID := sc.KnowledgeBaseID
@@ -973,6 +970,25 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			"found_kbs": foundKBs,
 		},
 	}, nil
+}
+
+// wikiSearchPattern turns the query into the POSIX pattern the repository
+// runs with ~*. Without an explicit regex flag the query keeps its historical
+// meaning as a regular expression, and only text that does not compile (for
+// example "C++") is escaped and matched literally, so every query that worked
+// before still behaves the same. regex=false always escapes; regex=true
+// rejects an invalid pattern instead of silently changing its meaning.
+func wikiSearchPattern(query string, regex *bool) (string, error) {
+	if regex != nil && !*regex {
+		return regexp.QuoteMeta(query), nil
+	}
+	if _, err := regexp.Compile("(?i)" + query); err != nil {
+		if regex != nil && *regex {
+			return "", fmt.Errorf("invalid regular expression %q: %v", query, err)
+		}
+		return regexp.QuoteMeta(query), nil
+	}
+	return query, nil
 }
 
 // --- Helper ---

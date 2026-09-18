@@ -972,10 +972,15 @@ func (s *agentService) registerTools(
 	// content from RAG-style knowledge bases.
 	ragToolSet := map[string]bool{
 		tools.ToolSearchKnowledge:     true,
-		tools.ToolReadDocument:        true,
-		tools.ToolListDocuments:       true,
 		tools.ToolQueryKnowledgeGraph: true,
 		tools.ToolDatabaseQuery:       true,
+	}
+	// Document readers work on stored chunks, which every KB writes whatever
+	// its indexing strategy, so a wiki-only scope keeps them: they are how a
+	// wiki reader checks the source documents a page cites.
+	documentToolSet := map[string]bool{
+		tools.ToolReadDocument:  true,
+		tools.ToolListDocuments: true,
 	}
 	allWikiToolSet := map[string]bool{
 		tools.ToolWikiReadPage:    true,
@@ -1011,7 +1016,7 @@ func (s *agentService) registerTools(
 		filtered := make([]string, 0, len(allowedTools))
 		dropped := make([]string, 0)
 		for _, t := range allowedTools {
-			if ragToolSet[t] {
+			if ragToolSet[t] || (documentToolSet[t] && !hasWikiKB) {
 				dropped = append(dropped, t)
 				continue
 			}

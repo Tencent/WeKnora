@@ -64,6 +64,20 @@ type ChunkRepository interface {
 		isEnabled *bool,
 	) ([]*types.Chunk, int64, error)
 	ListChunkByParentID(ctx context.Context, tenantID uint64, parentID string) ([]*types.Chunk, error)
+	// ListChunkNeighbors returns up to `before` enabled chunks immediately
+	// preceding chunkIndex and up to `after` immediately following it, in
+	// document order, restricted to chunkTypes. It walks chunk_index rather
+	// than list positions, so gaps left by other chunk types (parents,
+	// summaries, images) do not shift the neighbourhood.
+	ListChunkNeighbors(
+		ctx context.Context,
+		tenantID uint64,
+		knowledgeID string,
+		chunkIndex int,
+		before int,
+		after int,
+		chunkTypes []types.ChunkType,
+	) ([]*types.Chunk, error)
 	// ListChunksByParentIDs lists chunks whose parent_chunk_id is in the given list
 	ListChunksByParentIDs(ctx context.Context, tenantID uint64, parentIDs []string) ([]*types.Chunk, error)
 	// UpdateChunk updates a chunk

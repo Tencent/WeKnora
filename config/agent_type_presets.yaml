@@ -62,6 +62,7 @@ agent_type_presets:
       faq_priority_enabled: true
       kb_selection_mode: "all"
     # kb_filter derived from allowed_tools: any_of = [vector, keyword]
+    # (read_document / list_documents are auxiliary and do not widen it)
 
   # --------------------------------------------------------------------------
   # Wiki Q&A — graph-navigated wiki answering.

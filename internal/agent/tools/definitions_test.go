@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 func TestNormalizeAllowedToolsMapsRetiredRetrievalTools(t *testing.T) {
@@ -95,5 +97,34 @@ func TestDefaultAllowedToolsUseTheConsolidatedSurface(t *testing.T) {
 		if IsLegacyRetrievalTool(def.Name) {
 			t.Errorf("UI tool list still exposes retired tool %s", def.Name)
 		}
+	}
+}
+
+func TestDocumentReadersAcceptWikiOnlyKnowledgeBases(t *testing.T) {
+	wikiOnly := types.KBCapabilities{Wiki: true}
+	for _, name := range []string{ToolReadDocument, ToolListDocuments, LegacyToolWikiReadSourceDoc} {
+		if !KBSatisfiesToolRequirements(wikiOnly, []string{name}) {
+			t.Errorf("%s must be usable on a wiki-only knowledge base", name)
+		}
+	}
+	if KBSatisfiesToolRequirements(wikiOnly, []string{ToolSearchKnowledge}) {
+		t.Error("search_knowledge needs a chunk index")
+	}
+}
+
+// Document readers must not widen a RAG agent's derived KB filter to
+// wiki-only bases, while still counting when they are the only KB tools.
+func TestDocumentReadersDoNotWidenTheDerivedKBFilter(t *testing.T) {
+	wikiOnly := types.KBCapabilities{Wiki: true}
+	rag := []string{ToolSearchKnowledge, ToolReadDocument, ToolListDocuments}
+	if KBSatisfiesToolRequirements(wikiOnly, rag) {
+		t.Fatal("a RAG tool set must not accept wiki-only knowledge bases")
+	}
+	wiki := []string{ToolWikiSearch, ToolWikiReadPage, ToolReadDocument}
+	if !KBSatisfiesToolRequirements(wikiOnly, wiki) {
+		t.Fatal("a wiki tool set must accept wiki-only knowledge bases")
+	}
+	if !KBSatisfiesToolRequirements(types.KBCapabilities{Vector: true}, []string{ToolReadDocument}) {
+		t.Fatal("a reader-only tool set still derives its own filter")
 	}
 }

@@ -16,9 +16,22 @@ import (
 
 type readDocKnowledgeService struct {
 	interfaces.KnowledgeService
-	docs  map[string]*types.Knowledge
-	pages map[string]*types.PageResult // keyed by kb id
-	tags  map[string][]*types.KnowledgeTag
+	docs        map[string]*types.Knowledge
+	pages       map[string]*types.PageResult // keyed by kb id
+	tags        map[string][]*types.KnowledgeTag
+	listFilters []types.KnowledgeListFilter
+}
+
+func (f *readDocKnowledgeService) GetKnowledgeBatch(
+	_ context.Context, _ uint64, ids []string,
+) ([]*types.Knowledge, error) {
+	out := make([]*types.Knowledge, 0, len(ids))
+	for _, id := range ids {
+		if k, ok := f.docs[id]; ok {
+			out = append(out, k)
+		}
+	}
+	return out, nil
 }
 
 func (f *readDocKnowledgeService) GetKnowledgeByIDOnly(_ context.Context, id string) (*types.Knowledge, error) {
@@ -43,11 +56,28 @@ func (f *readDocKnowledgeService) GetKnowledgeTags(
 func (f *readDocKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
 	_ context.Context, kbID string, page *types.Pagination, filter types.KnowledgeListFilter,
 ) (*types.PageResult, error) {
+	f.listFilters = append(f.listFilters, filter)
 	result, ok := f.pages[kbID]
 	if !ok {
 		return &types.PageResult{Page: page.Page, PageSize: page.PageSize, Data: []*types.Knowledge{}}, nil
 	}
 	rows, _ := result.Data.([]*types.Knowledge)
+	if len(filter.TagIDs) > 0 {
+		wanted := make(map[string]bool, len(filter.TagIDs))
+		for _, id := range filter.TagIDs {
+			wanted[id] = true
+		}
+		tagged := make([]*types.Knowledge, 0, len(rows))
+		for _, k := range rows {
+			for _, tag := range f.tags[k.ID] {
+				if wanted[tag.ID] {
+					tagged = append(tagged, k)
+					break
+				}
+			}
+		}
+		rows = tagged
+	}
 	if filter.Keyword != "" {
 		filtered := make([]*types.Knowledge, 0, len(rows))
 		for _, k := range rows {
@@ -57,7 +87,16 @@ func (f *readDocKnowledgeService) ListPagedKnowledgeByKnowledgeBaseID(
 		}
 		rows = filtered
 	}
-	return &types.PageResult{Total: int64(len(rows)), Page: page.Page, PageSize: page.PageSize, Data: rows}, nil
+	total := int64(len(rows))
+	start := (page.Page - 1) * page.PageSize
+	if start > len(rows) {
+		start = len(rows)
+	}
+	end := start + page.PageSize
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return &types.PageResult{Total: total, Page: page.Page, PageSize: page.PageSize, Data: rows[start:end]}, nil
 }
 
 type readDocChunkRepo struct {
@@ -91,6 +130,24 @@ func (r *readDocChunkRepo) ListPagedChunksByKnowledgeID(
 
 func (r *readDocChunkRepo) ListChunksByParentIDs(context.Context, uint64, []string) ([]*types.Chunk, error) {
 	return nil, nil
+}
+
+func (r *readDocChunkRepo) ListChunkNeighbors(
+	_ context.Context, _ uint64, _ string, chunkIndex, before, after int, _ []types.ChunkType,
+) ([]*types.Chunk, error) {
+	var preceding, following []*types.Chunk
+	for _, c := range r.ordered {
+		switch {
+		case c.ChunkIndex < chunkIndex:
+			preceding = append(preceding, c)
+		case c.ChunkIndex > chunkIndex && len(following) < after:
+			following = append(following, c)
+		}
+	}
+	if len(preceding) > before {
+		preceding = preceding[len(preceding)-before:]
+	}
+	return append(preceding, following...), nil
 }
 
 type readDocChunkService struct {
@@ -218,7 +275,28 @@ func TestReadDocumentChunkContextNearDocumentEnd(t *testing.T) {
 		t.Fatalf("context near the end = %v", got)
 	}
 	if res.Data["total_chunks"] != int64(9) {
-		t.Fatalf("total must come from the window fetch: %+v", res.Data)
+		t.Fatalf("total = %+v", res.Data)
+	}
+}
+
+// Parent, summary and image chunks share the chunk_index sequence but are not
+// readable text, so readable chunks have gaps in their indexes. Neighbours
+// must follow the index order, not list positions derived from it.
+func TestReadDocumentChunkContextFollowsIndexesAcrossGaps(t *testing.T) {
+	tool, repo := newReadDocumentFixture(6)
+	for i, c := range repo.ordered {
+		c.ChunkIndex = i * 3 // 0, 3, 6, 9, 12, 15
+	}
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"chunk-3","context":1}`))
+	if err != nil || !res.Success {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if got := chunkIDsFromData(t, res.Data); strings.Join(got, ",") != "chunk-2,chunk-3,chunk-4" {
+		t.Fatalf("neighbours across index gaps = %v", got)
+	}
+	rows := res.Data["chunks"].([]map[string]interface{})
+	if rows[0]["role"] != "context_before" || rows[1]["role"] != "focus" || rows[2]["role"] != "context_after" {
+		t.Fatalf("roles = %v %v %v", rows[0]["role"], rows[1]["role"], rows[2]["role"])
 	}
 }
 

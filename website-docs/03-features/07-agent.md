@@ -411,8 +411,8 @@ flowchart TD
 | --- | --- | --- |
 | `thinking` | `thought`\*、`next_thought_needed`\*、`thought_number`\*、`total_thoughts`\*、`is_revision`、`revises_thought`、`branch_from_thought`、`branch_id`、`needs_more_thoughts` | Sequential Thinking：记录/修订/分支思考步骤；返回思考进度（含 `incomplete_steps`），提示禁止在思考里出现工具名和最终答案 |
 | `todo_write` | `task`、`steps[]`\*（`id`/`description`/`status`：pending/in_progress/completed） | 创建/更新检索类任务计划，仅限检索任务（总结交给 thinking）；返回格式化计划，`display_type: "plan"` |
-| `search_knowledge` | `query`\*（一条自然语言问题或短语；keyword 模式下写精确词）、`mode`（`hybrid` 默认 / `semantic` / `keyword`）、`knowledge_base_ids[]`（`bN`）、`limit`（默认 10，上限 30） | 唯一的知识库检索入口：`hybrid` 走向量 + 关键词的 RRF 融合，`semantic` 只走向量，`keyword` 由关键词索引（BM25 / 引擎关键词检索）提供，不再对 chunks 表做无索引的正则扫描；默认 vector 阈值 0.6、keyword 阈值 0.5，阈值过滤在 RRF 之前由各引擎完成；有 rerank 模型时重排（`rerankThreshold()` 优先取全局配置），候选超过 `limit` 时做 MMR（λ=0.7）去冗；结果带 `cN`/`dN` 短 ID，会话内已见 chunk 去重压缩；所选 KB 没有对应索引时（如 FAQ 库无关键词索引）直接提示换 `mode` |
-| `read_document` | `id`\*（`dN` 文档句柄或 `cN` 分块句柄）、`offset`（零基 chunk 下标）、`limit`（默认 20，上限 100）、`query`（文档内查找，默认字面量、大小写不敏感）、`regex`（把 `query` 当 POSIX 正则）、`context`（`cN` 前后各带几个相邻分块，上限 5） | 始终先返回文档元数据头（标题、类型、parse_status、分块数、metadata），再按需返回分块：`dN` 从 `offset` 起分页遍历；`cN` 读取该分块并可带前后 `context`；`query` 返回命中分块及前后各一块上下文（最多 20 处命中）；FAQ 条目按同样方式读取；校验 KB 在 searchTargets 内及 @mention 范围 |
+| `search_knowledge` | `query`\*（一条自然语言问题或短语；keyword 模式下写精确词）、`mode`（`hybrid` 默认 / `semantic` / `keyword`）、`knowledge_base_ids[]`（`bN`）、`limit`（默认 10，上限 30） | 唯一的知识库检索入口：`hybrid` 走向量 + 关键词的 RRF 融合，`semantic` 只走向量，`keyword` 由关键词索引（BM25 / 引擎关键词检索）提供，不再对 chunks 表做无索引的正则扫描；默认 vector 阈值 0.6、keyword 阈值 0.5，阈值过滤在 RRF 之前由各引擎完成；有 rerank 模型时重排（`rerankThreshold()` 优先取全局配置），候选超过 `limit` 时做 MMR（λ=0.7）去冗；结果带 `cN`/`dN` 短 ID，会话内已见 chunk 去重压缩；所选 KB 没有对应索引时按库降级而不是报错：`keyword` 遇到 FAQ 库或纯向量库改走语义检索，`semantic` 遇到纯关键词库改走关键词检索，结果里以 `requested_mode` 和 `mode_fallbacks` 标明哪些库降级及原因；只有作用域内没有任何分块索引（如全是仅 Wiki 的库）时才报错 |
+| `read_document` | `id`\*（`dN` 文档句柄或 `cN` 分块句柄）、`offset`（阅读顺序中的位置，从 0 开始，不是 chunk 下标；翻页用返回的 `next_offset`）、`limit`（默认 20，上限 100）、`query`（文档内查找，默认字面量、大小写不敏感）、`regex`（把 `query` 当 POSIX 正则）、`context`（`cN` 前后各带几个相邻分块，上限 5） | 始终先返回文档元数据头（标题、类型、parse_status、分块数、metadata），再按需返回分块：`dN` 从 `offset` 起分页遍历；`cN` 读取该分块并可带前后 `context`（邻居按 chunk_index 顺序取，不受父分块、摘要、图片分块占用的下标影响）；带 `query` 时即使 `id` 是 `cN` 也在其所属文档内查找；`query` 返回命中分块及前后各一块上下文（最多 20 处命中）；FAQ 条目按同样方式读取；校验 KB 在 searchTargets 内及 @mention 范围 |
 | `list_documents` | `knowledge_base_id`\*（`bN`）、`keyword`（标题子串过滤）、`page`（默认 1）、`page_size`（默认 20，上限 100） | 分页列出单个知识库的文档，返回可直接交给 `read_document` 的 `dN` 句柄 |
 | `query_knowledge_graph` | `knowledge_base_ids[]`\*（1–10 个 `bN`）、`query`\* | 并发查询各 KB 知识图谱的实体与关系；只有当作用域内存在启用图谱的 KB 时才会提供给模型（`agent_service.go` 装配白名单时移除），能力要求 `all_of: [graph]` |
 | `database_query` | SQL（SELECT-only） | 只读查询白名单表（`knowledge_bases`/`knowledges`/`chunks`），自动注入 tenant_id 过滤与 `deleted_at IS NULL`；SQL 参数在 UI/Langfuse 中脱敏 |
@@ -427,7 +427,7 @@ flowchart TD
 | `edit_sandbox_file` | path、edits | 基于原版本批量精确替换 |
 | `search_memory` | query、limit | 按当前调用者作用域查长期记忆 |
 | `search_conversations` | 查询与范围 | 检索当前调用者可用的历史对话 |
-| `wiki_search` | `query`\*（默认字面量、大小写不敏感）、`regex`（按 POSIX 正则解释，如 `stardust\|skyvault`）、`knowledge_base_ids[]`（`bN`）、`limit`（每个 KB 默认 10，上限 50）；旧参数 `queries[]`、`knowledge_base_id` 仍接受 | 在 Wiki 页面（标题/slug/别名/摘要/内容）上搜索，返回带 `bN` 标记的页面 slug 与摘要；已见 slug 去重 |
+| `wiki_search` | `query`\*（大小写不敏感的 POSIX 正则，如 `stardust\|skyvault`；不是合法正则的文本如 `C++` 按字面匹配）、`regex`（`false` 强制字面匹配，`true` 要求合法正则）、`knowledge_base_ids[]`（`bN`）、`limit`（每个 KB 默认 10，上限 50）；旧参数 `queries[]`、`knowledge_base_id` 仍接受 | 在 Wiki 页面（标题/slug/别名/摘要/内容）上搜索，返回带 `bN` 标记的页面 slug 与摘要；已见 slug 去重 |
 | `wiki_read_page` | `slugs[]`\*、`knowledge_base_id` | 按 slug 读取 Wiki 页面全文、元数据、出入链（链接附摘要，已见的省略）；`index` slug 返回按类型分组的目录概览（每类 top 20） |
 | `wiki_write_page` | `slug`\*、`title`\*、`summary`\*、`content`\*、`page_type`\*、`aliases[]`、`source_refs[]` | 新建或整页覆盖 Wiki 页面；写入前规范化并校验 slug；自动处理出链 |
 | `wiki_replace_text` | `slug`\*、`old_text`\*、`new_text`\*、`source_refs[]` | 精确文本替换，适合小修订 |
@@ -441,6 +441,8 @@ flowchart TD
 默认工具白名单 `DefaultAllowedTools()`（新建 Agent 的默认值，也是旧 Agent 未配置 `allowed_tools` 时的回退）：`search_knowledge`、`read_document`、`list_documents`、`search_conversations`（`search_memory` 与 `web_search` 一样不在此列表里，由记忆 / 联网开关在注册工具时注入或剔除）。
 
 **旧工具名的兼容**：`knowledge_search`、`grep_chunks` 已合并为 `search_knowledge`；`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc` 已合并为 `read_document`。`definitions.go` 的 `legacyToolSuccessors` 记录这组映射，`NormalizeAllowedTools` 在注册工具时把已保存 Agent 配置、预设与 API 调用里的旧名字自动改写为新工具，无需数据迁移；历史消息中记录的旧工具名仍能正常渲染。
+
+**文档阅读工具的可用范围**：`read_document`、`list_documents` 读取的是落库的分块，所有知识库无论索引策略都会写入分块，因此仅 Wiki 的知识库上它们照样注册（`agent_service.go` 的 `documentToolSet`），供 Wiki 智能体回读原文；`search_knowledge` 仍要求向量或关键词索引。能力表里这两个工具标为 `Auxiliary`：它们能用于仅 Wiki 的库，但不会把仅 Wiki 的库拉进 RAG 智能体「全部知识库」的范围，派生 KB 过滤器时只有在没有其他知识库工具时才计入。`list_documents` 的 @文件 / @标签 范围在分页之前生效：标签下推到数据库过滤条件，指定文档直接按 ID 读取，`total_docs` 与 `next_page` 只统计范围内的文档。
 
 **推荐的检索工作流**：`search_knowledge`（按问题选择 `mode`：默认 `hybrid`，精确词 / 报错信息 / 标识符用 `keyword`，改写或概念性问题用 `semantic`）→ `read_document`（按 `dN` 分页阅读上下文，或用 `query` 在文档内定位）→ 在答案里以 `cN` 句柄引用。Wiki 知识库则是 `wiki_search` → `wiki_read_page` → `read_document` 回读原始来源。
 

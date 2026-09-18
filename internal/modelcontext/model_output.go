@@ -42,7 +42,14 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	case "grep_results":
 		return r.modelKnowledgeOutput("keyword", mapsValue(result.Data["chunk_results"]), result.Output)
 	case "search_results":
-		return r.modelKnowledgeOutput("semantic", mapsValue(result.Data["results"]), result.Output)
+		// search_knowledge reports the mode it actually used; legacy
+		// knowledge_search payloads carry none and were always semantic.
+		mode := stringValue(result.Data, "mode")
+		if mode == "" {
+			mode = "semantic"
+		}
+		output := r.modelKnowledgeOutput(mode, mapsValue(result.Data["results"]), result.Output)
+		return r.annotateModeFallbacks(output, result.Data)
 	case "knowledge_chunks_list":
 		return r.modelKnowledgeChunksOutput(result.Data, result.Output)
 	case "document_info":
@@ -115,9 +122,6 @@ func (r *sourceRegistry) modelDocumentInfoOutput(data map[string]interface{}, fa
 	}
 	if next := intValue(data, "next_page"); next > 0 {
 		fmt.Fprintf(&b, " next_page=\"%d\"", next)
-	}
-	if hidden := intValue(data, "hidden_by_scope"); hidden > 0 {
-		fmt.Fprintf(&b, " hidden_by_scope=\"%d\"", hidden)
 	}
 	b.WriteString(">\n")
 	count := 0
@@ -264,6 +268,27 @@ func (r *sourceRegistry) modelChunksFromRows(mode string, rows []map[string]inte
 		})
 	}
 	return chunks
+}
+
+// annotateModeFallbacks adds the requested mode and one <mode_fallback> per
+// knowledge base that was searched with a different retrieval path.
+func (r *sourceRegistry) annotateModeFallbacks(output string, data map[string]interface{}) string {
+	fallbacks := mapsValue(data["mode_fallbacks"])
+	requested := stringValue(data, "requested_mode")
+	if len(fallbacks) == 0 || !strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	if requested != "" {
+		output = strings.Replace(output, "<retrieval ",
+			fmt.Sprintf("<retrieval requested_mode=\"%s\" ", escapeAttr(requested)), 1)
+	}
+	var b strings.Builder
+	for _, fb := range fallbacks {
+		fmt.Fprintf(&b, "  <mode_fallback kb=\"%s\" mode=\"%s\" reason=\"%s\" />\n",
+			escapeAttr(r.RegisterKnowledgeBase(stringValue(fb, "knowledge_base_id"))),
+			escapeAttr(stringValue(fb, "mode")), escapeAttr(stringValue(fb, "reason")))
+	}
+	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
 }
 
 func viewForRow(row map[string]interface{}, mode string) string {

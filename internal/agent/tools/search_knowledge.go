@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -34,7 +35,8 @@ var searchKnowledgeTool = BaseTool{
 	description: "Search the knowledge bases in scope and return the most relevant chunks with their content.\n" +
 		"mode \"hybrid\" (default) combines semantic and keyword retrieval. \"semantic\" ranks by meaning and " +
 		"tolerates paraphrase. \"keyword\" matches the literal terms and is the right choice for identifiers, " +
-		"error codes, product names and exact phrases.\n" +
+		"error codes, product names and exact phrases. A base without the requested index is searched with the " +
+		"index it has; the result reports that as a mode fallback.\n" +
 		"Write query as one natural-language question or a short phrase; in keyword mode write the exact terms. " +
 		"Pass knowledge_base_ids to focus on the bases whose profile fits the question. Run the tool again with a " +
 		"different query or mode when the results are thin.\n" +
@@ -98,6 +100,17 @@ type SearchKnowledgeTool struct {
 	searchTargets        types.SearchTargets // Pre-computed unified search targets
 	rerankModel          rerank.Reranker
 	config               *config.Config // Global config for fallback values
+	// patternFilter, when set, keeps only results whose text matches it.
+	// It is not exposed to the model; the MCP grep_chunks endpoint uses it
+	// to keep grep semantics on top of index-backed retrieval.
+	patternFilter *regexp.Regexp
+}
+
+// WithPatternFilter restricts results to chunks whose text matches re. The
+// candidate pool is widened to the maximum limit before filtering.
+func (t *SearchKnowledgeTool) WithPatternFilter(re *regexp.Regexp) *SearchKnowledgeTool {
+	t.patternFilter = re
+	return t
 }
 
 // NewSearchKnowledgeTool creates a new search_knowledge tool.
@@ -191,7 +204,8 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	if err != nil {
 		logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to load knowledge bases %v: %v", kbIDs, err)
 	}
-	if msg := searchModeUnavailableReason(mode, kbList); msg != "" {
+	kbModes, msg := resolveKBSearchModes(mode, kbList)
+	if msg != "" {
 		return &types.ToolResult{Success: false, Error: msg}, fmt.Errorf("%s", msg)
 	}
 	kbTypeMap := make(map[string]string, len(kbList))
@@ -201,12 +215,16 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
-	topK, vectorThreshold, keywordThreshold := t.retrievalParams(limit)
+	retrievalLimit := limit
+	if t.patternFilter != nil {
+		retrievalLimit = searchKnowledgeMaxLimit
+	}
+	topK, vectorThreshold, keywordThreshold := t.retrievalParams(retrievalLimit)
 	logger.Infof(ctx,
 		"[Tool][SearchKnowledge] query=%q mode=%s limit=%d top_k=%d targets=%d kbs=%d",
 		query, mode, limit, topK, len(searchTargets), len(kbIDs))
 
-	allResults := t.concurrentSearchByTargets(ctx, query, mode, searchTargets, kbList,
+	allResults := t.concurrentSearchByTargets(ctx, query, mode, kbModes, searchTargets, kbList,
 		topK, vectorThreshold, keywordThreshold, kbTypeMap)
 
 	deduplicated := t.deduplicateResults(allResults)
@@ -223,8 +241,8 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 
 	if len(ranked) > 0 {
 		mmrK := len(ranked)
-		if mmrK > limit {
-			mmrK = limit
+		if mmrK > retrievalLimit {
+			mmrK = retrievalLimit
 		}
 		if selected := t.applyMMR(ctx, ranked, mmrK, 0.7); len(selected) > 0 {
 			ranked = selected
@@ -238,6 +256,15 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 		return final[i].KnowledgeID < final[j].KnowledgeID
 	})
+	if t.patternFilter != nil {
+		matched := final[:0]
+		for _, r := range final {
+			if t.patternFilter.MatchString(t.getEnrichedPassage(ctx, r.SearchResult)) {
+				matched = append(matched, r)
+			}
+		}
+		final = matched
+	}
 	if len(final) > limit {
 		final = final[:limit]
 	}
@@ -257,46 +284,108 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
-	return t.formatOutput(ctx, final, kbIDs, query, mode), nil
+	result := t.formatOutput(ctx, final, kbIDs, query, mode)
+	annotateModeFallback(result.Data, mode, kbModes)
+	if len(final) == 0 {
+		result.Output = emptySearchStatement(query, result.Data, len(kbIDs))
+	}
+	return result, nil
 }
 
-// searchModeUnavailableReason explains why a mode cannot run against the
-// selected knowledge bases, or returns "" when at least one KB supports it.
-// An unknown KB list (nil) is treated as capable so that a transient lookup
-// failure surfaces as an empty retrieval rather than a misleading refusal.
-func searchModeUnavailableReason(mode string, kbs []*types.KnowledgeBase) string {
-	if len(kbs) == 0 {
-		return ""
+// emptySearchStatement describes an empty result, including any mode
+// fallback, so the model does not read "no semantic neighbours" as "the
+// exact term does not occur".
+func emptySearchStatement(query string, data map[string]interface{}, kbCount int) string {
+	mode, _ := data["mode"].(string)
+	msg := fmt.Sprintf("No matching chunks for %q (mode=%s) in %d knowledge base(s).", query, mode, kbCount)
+	fallbacks, _ := data["mode_fallbacks"].([]map[string]interface{})
+	for _, fb := range fallbacks {
+		msg += fmt.Sprintf(" Knowledge base %v was searched with mode=%v (%v).",
+			fb["knowledge_base_id"], fb["mode"], fb["reason"])
 	}
-	var hasVector, hasKeyword bool
+	return msg
+}
+
+// kbSearchMode is the retrieval path used for one knowledge base.
+type kbSearchMode struct {
+	mode     string
+	fallback bool   // mode differs from the requested one
+	reason   string // why the requested mode could not be served
+}
+
+// resolveKBSearchModes decides, per knowledge base, which retrieval path
+// serves the requested mode. A base that lacks the requested index falls
+// back to the one it has (FAQ bases have no keyword index; vector-only bases
+// have no keyword index; keyword-only bases have no vector index) instead of
+// failing the whole call. Bases with no chunk index at all (wiki-only /
+// graph-only) are left out. The call is refused only when no base in scope
+// can be searched. An empty kbs list (lookup failed) resolves to nil, which
+// callers treat as "use the requested mode everywhere".
+func resolveKBSearchModes(mode string, kbs []*types.KnowledgeBase) (map[string]kbSearchMode, string) {
+	if len(kbs) == 0 {
+		return nil, ""
+	}
+	modes := make(map[string]kbSearchMode, len(kbs))
 	for _, kb := range kbs {
 		if kb == nil {
 			continue
 		}
-		if kb.IsVectorEnabled() {
-			hasVector = true
-		}
-		if kb.IsKeywordEnabled() && kb.Type != types.KnowledgeBaseTypeFAQ {
-			hasKeyword = true
-		}
-	}
-	switch mode {
-	case SearchModeKeyword:
-		if !hasKeyword {
-			return "keyword mode is unavailable: none of the selected knowledge bases has a keyword index " +
-				"(FAQ bases are semantic-only). Use mode=hybrid or mode=semantic."
-		}
-	case SearchModeSemantic:
-		if !hasVector {
-			return "semantic mode is unavailable: none of the selected knowledge bases has a vector index. " +
-				"Use mode=keyword."
-		}
-	default:
-		if !hasVector && !hasKeyword {
-			return "none of the selected knowledge bases has a chunk index; use a wiki or graph tool for this scope"
+		hasVector := kb.IsVectorEnabled()
+		hasKeyword := kb.IsKeywordEnabled() && kb.Type != types.KnowledgeBaseTypeFAQ
+		switch {
+		case !hasVector && !hasKeyword:
+			continue
+		case mode == SearchModeKeyword && !hasKeyword:
+			reason := "no keyword index"
+			if kb.Type == types.KnowledgeBaseTypeFAQ {
+				reason = "FAQ bases are indexed for semantic search only"
+			}
+			modes[kb.ID] = kbSearchMode{mode: SearchModeSemantic, fallback: true, reason: reason}
+		case mode == SearchModeSemantic && !hasVector:
+			modes[kb.ID] = kbSearchMode{mode: SearchModeKeyword, fallback: true, reason: "no vector index"}
+		default:
+			modes[kb.ID] = kbSearchMode{mode: mode}
 		}
 	}
-	return ""
+	if len(modes) == 0 {
+		return nil, "none of the selected knowledge bases has a chunk index; use a wiki or graph tool for this scope"
+	}
+	return modes, ""
+}
+
+// annotateModeFallback records in the result which bases were searched with
+// a different mode than requested, so neither the model nor the UI mistakes
+// a semantic fallback for literal keyword matches.
+func annotateModeFallback(data map[string]interface{}, requested string, kbModes map[string]kbSearchMode) {
+	if data == nil {
+		return
+	}
+	data["requested_mode"] = requested
+	var fallbacks []map[string]interface{}
+	used := make(map[string]bool)
+	ids := make([]string, 0, len(kbModes))
+	for kbID := range kbModes {
+		ids = append(ids, kbID)
+	}
+	sort.Strings(ids)
+	for _, kbID := range ids {
+		m := kbModes[kbID]
+		used[m.mode] = true
+		if m.fallback {
+			fallbacks = append(fallbacks, map[string]interface{}{
+				"knowledge_base_id": kbID, "mode": m.mode, "reason": m.reason,
+			})
+		}
+	}
+	if len(fallbacks) == 0 {
+		return
+	}
+	data["mode_fallbacks"] = fallbacks
+	if len(used) == 1 {
+		for effective := range used {
+			data["mode"] = effective
+		}
+	}
 }
 
 // retrievalParams resolves the candidate pool size and recall thresholds from
@@ -330,6 +419,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	ctx context.Context,
 	query string,
 	mode string,
+	kbModes map[string]kbSearchMode,
 	searchTargets types.SearchTargets,
 	kbList []*types.KnowledgeBase,
 	topK int,
@@ -341,23 +431,25 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	// empty" errors because such KBs have no EmbeddingModelID configured.
 	// KBs that we couldn't fetch (not in kbList) are kept so the downstream
 	// HybridSearch path can still surface the real error.
-	searchableKBs := make(map[string]bool, len(kbList))
 	knownKBs := make(map[string]bool, len(kbList))
 	for _, kb := range kbList {
-		if kb == nil {
-			continue
+		if kb != nil {
+			knownKBs[kb.ID] = true
 		}
-		knownKBs[kb.ID] = true
-		if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
-			searchableKBs[kb.ID] = true
+	}
+	modeFor := func(kbID string) (string, bool) {
+		if m, ok := kbModes[kbID]; ok {
+			return m.mode, true
 		}
+		// Unknown to the lookup: keep it so HybridSearch surfaces the real error.
+		return mode, !knownKBs[kbID]
 	}
 	filteredTargets := make(types.SearchTargets, 0, len(searchTargets))
 	for _, st := range searchTargets {
 		if st == nil || st.KnowledgeBaseID == "" {
 			continue
 		}
-		if searchableKBs[st.KnowledgeBaseID] || !knownKBs[st.KnowledgeBaseID] {
+		if _, ok := modeFor(st.KnowledgeBaseID); ok {
 			filteredTargets = append(filteredTargets, st)
 			continue
 		}
@@ -368,9 +460,6 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 		return nil
 	}
 	searchTargets = filteredTargets
-
-	disableVector := mode == SearchModeKeyword
-	disableKeywords := mode == SearchModeSemantic
 
 	// Resolve actual model identities (name + endpoint) for cross-tenant grouping
 	modelKeyMap := t.knowledgeBaseService.ResolveEmbeddingModelKeys(ctx, kbList)
@@ -384,14 +473,14 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	allResults := make([]*searchResultWithMeta, 0)
-	collect := func(rows []*types.SearchResult) {
+	collect := func(rows []*types.SearchResult, usedMode string) {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, r := range rows {
 			allResults = append(allResults, &searchResultWithMeta{
 				SearchResult:      r,
 				SourceQuery:       query,
-				QueryType:         mode,
+				QueryType:         usedMode,
 				KnowledgeBaseID:   r.KnowledgeBaseID,
 				KnowledgeBaseType: kbTypeMap[r.KnowledgeBaseID],
 			})
@@ -403,9 +492,16 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 		go func(modelKey string, targets []*types.SearchTarget) {
 			defer wg.Done()
 
+			needsEmbedding := false
+			for _, st := range targets {
+				if m, _ := modeFor(st.KnowledgeBaseID); m != SearchModeKeyword {
+					needsEmbedding = true
+					break
+				}
+			}
 			// Compute embedding once for this (model, query) pair
 			var queryEmbedding []float32
-			if modelKey != "" && !disableVector {
+			if modelKey != "" && needsEmbedding {
 				emb, err := t.knowledgeBaseService.GetQueryEmbedding(ctx, targets[0].KnowledgeBaseID, query)
 				if err != nil {
 					logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to pre-compute embedding for model %s: %v",
@@ -415,21 +511,23 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 				}
 			}
 
-			// Separate full-KB targets (combinable) from specific-knowledge targets
-			var fullKBIDs []string
+			// Separate full-KB targets (combinable per retrieval mode) from
+			// specific-knowledge targets.
+			fullKBIDsByMode := make(map[string][]string)
 			var knowledgeTargets []*types.SearchTarget
 			for _, st := range targets {
 				if st.Type == types.SearchTargetTypeKnowledgeBase && len(st.TagIDs) == 0 {
-					fullKBIDs = append(fullKBIDs, st.KnowledgeBaseID)
+					m, _ := modeFor(st.KnowledgeBaseID)
+					fullKBIDsByMode[m] = append(fullKBIDsByMode[m], st.KnowledgeBaseID)
 				} else {
 					knowledgeTargets = append(knowledgeTargets, st)
 				}
 			}
 
 			var innerWg sync.WaitGroup
-			if len(fullKBIDs) > 0 {
+			for usedMode, fullKBIDs := range fullKBIDsByMode {
 				innerWg.Add(1)
-				go func() {
+				go func(usedMode string, fullKBIDs []string) {
 					defer innerWg.Done()
 					kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], types.SearchParams{
 						QueryText:            query,
@@ -438,16 +536,16 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						MatchCount:           topK,
 						VectorThreshold:      vectorThreshold,
 						KeywordThreshold:     keywordThreshold,
-						DisableVectorMatch:   disableVector,
-						DisableKeywordsMatch: disableKeywords,
+						DisableVectorMatch:   usedMode == SearchModeKeyword,
+						DisableKeywordsMatch: usedMode == SearchModeSemantic,
 					})
 					if err != nil {
 						logger.Warnf(ctx, "[Tool][SearchKnowledge] Combined search failed for KBs %v: %v",
 							fullKBIDs, err)
 						return
 					}
-					collect(kbResults)
-				}()
+					collect(kbResults, usedMode)
+				}(usedMode, fullKBIDs)
 			}
 
 			for _, target := range knowledgeTargets {
@@ -455,6 +553,7 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 				innerWg.Add(1)
 				go func() {
 					defer innerWg.Done()
+					usedMode, _ := modeFor(st.KnowledgeBaseID)
 					stVectorThreshold, stKeywordThreshold := st.RecallThresholds(vectorThreshold, keywordThreshold)
 					kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, st.KnowledgeBaseID, types.SearchParams{
 						QueryText:            query,
@@ -465,14 +564,14 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 						KnowledgeIDs:         st.KnowledgeIDs,
 						TagIDs:               st.TagIDs,
 						ScopeTagIDs:          st.ScopeTagIDs,
-						DisableVectorMatch:   disableVector,
-						DisableKeywordsMatch: disableKeywords,
+						DisableVectorMatch:   usedMode == SearchModeKeyword,
+						DisableKeywordsMatch: usedMode == SearchModeSemantic,
 					})
 					if err != nil {
 						logger.Warnf(ctx, "[Tool][SearchKnowledge] Failed to search KB %s: %v", st.KnowledgeBaseID, err)
 						return
 					}
-					collect(kbResults)
+					collect(kbResults, usedMode)
 				}()
 			}
 			innerWg.Wait()
@@ -761,6 +860,9 @@ func (t *SearchKnowledgeTool) formatOutput(
 		snippet := ""
 		if isFAQ {
 			snippet = faqMatchSnippetFromQueries(faqMeta, queries)
+		}
+		if snippet == "" && t.patternFilter != nil {
+			snippet = extractSnippetRegex(result.Content, []*regexp.Regexp{t.patternFilter})
 		}
 		if snippet == "" {
 			snippet = extractSnippetForQueries(result.Content, queries)

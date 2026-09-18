@@ -27,8 +27,9 @@ var readDocumentTool = BaseTool{
 		"chunk; set context to include neighbouring chunks on each side).\n" +
 		"query finds passages inside the document: matching chunks come back with one chunk of context on each " +
 		"side. query is a case-insensitive literal by default; set regex=true for a POSIX regular expression.\n" +
-		"Page through long documents with offset and limit (chunk indexes are zero-based). Use search_knowledge " +
-		"first when you do not yet know which document holds the answer.",
+		"Page through long documents with offset and limit: offset counts chunks in reading order from 0 and is " +
+		"not a chunk index, so continue with the returned next_offset, and use id=cN with context to read around " +
+		"a specific chunk. Use search_knowledge first when you do not yet know which document holds the answer.",
 	schema: json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -39,7 +40,7 @@ var readDocumentTool = BaseTool{
     },
     "offset": {
       "type": "integer",
-      "description": "Zero-based chunk index to start from when reading a document (default 0)",
+      "description": "Position in reading order to start from (default 0); continue with next_offset",
       "minimum": 0
     },
     "limit": {
@@ -331,38 +332,37 @@ func (t *ReadDocumentTool) readPage(
 func (t *ReadDocumentTool) readAroundChunk(
 	ctx context.Context, knowledge *types.Knowledge, focus *types.Chunk, contextChunks int,
 ) (*types.ToolResult, error) {
-	var total int64
+	total := t.countChunks(ctx, knowledge)
 	rows := []readChunkRow{{chunk: focus, role: "focus"}}
 	if contextChunks > 0 && focus.ChunkType != types.ChunkTypeFAQ {
-		start := focus.ChunkIndex - contextChunks
-		if start < 0 {
-			start = 0
-		}
-		window, windowTotal, err := t.fetchWindow(ctx, knowledge, start, focus.ChunkIndex-start+contextChunks+1)
+		// Neighbours are resolved by chunk_index, not by list position:
+		// parent, summary and image chunks share the index sequence, so a
+		// position computed from ChunkIndex would drift away from the focus.
+		neighbours, err := t.chunkService.GetRepository().ListChunkNeighbors(
+			ctx, t.tenantFor(knowledge), knowledge.ID, focus.ChunkIndex, contextChunks, contextChunks,
+			[]types.ChunkType{types.ChunkTypeText, types.ChunkTypeFAQ},
+		)
 		if err != nil {
-			return &types.ToolResult{Success: false, Error: err.Error()}, err
+			return &types.ToolResult{
+				Success: false, Error: fmt.Sprintf("failed to list neighbouring chunks: %v", err),
+			}, err
 		}
-		total = windowTotal
 		rows = rows[:0]
-		found := false
-		for _, c := range window {
-			role := ""
-			switch {
-			case c.ID == focus.ID:
-				role = "focus"
-				found = true
-			case c.ChunkIndex < focus.ChunkIndex:
+		placed := false
+		for _, c := range neighbours {
+			if !placed && c.ChunkIndex > focus.ChunkIndex {
+				rows = append(rows, readChunkRow{chunk: focus, role: "focus"})
+				placed = true
+			}
+			role := "context_after"
+			if c.ChunkIndex < focus.ChunkIndex {
 				role = "context_before"
-			default:
-				role = "context_after"
 			}
 			rows = append(rows, readChunkRow{chunk: c, role: role})
 		}
-		if !found {
-			rows = append([]readChunkRow{{chunk: focus, role: "focus"}}, rows...)
+		if !placed {
+			rows = append(rows, readChunkRow{chunk: focus, role: "focus"})
 		}
-	} else {
-		total = t.countChunks(ctx, knowledge)
 	}
 	chunks := make([]*types.Chunk, 0, len(rows))
 	for _, r := range rows {

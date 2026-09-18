@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -106,57 +107,11 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	keyword := strings.TrimSpace(input.Keyword)
 
-	// Documents live under the knowledge base owner, which may differ from the
-	// caller's tenant for organization-shared bases.
-	listCtx := ctx
-	if tenantID := t.searchTargets.GetTenantIDForKB(kbID); tenantID != 0 {
-		listCtx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
-	}
-	result, err := t.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(
-		listCtx, kbID, &types.Pagination{Page: page, PageSize: pageSize},
-		types.KnowledgeListFilter{Keyword: keyword},
-	)
+	filtered, total, err := t.listScoped(ctx, kbID, keyword, page, pageSize)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to list documents: %v", err)}, err
 	}
 
-	var knowledges []*types.Knowledge
-	if result != nil {
-		if rows, ok := result.Data.([]*types.Knowledge); ok {
-			knowledges = rows
-		}
-	}
-	// A pinned @file / @tag scope narrows the listing to the documents the
-	// turn may actually read.
-	pageIDs := make([]string, 0, len(knowledges))
-	for _, k := range knowledges {
-		if k != nil {
-			pageIDs = append(pageIDs, k.ID)
-		}
-	}
-	allowedIDs, scopeErr := knowledgeIDsAllowedInSearchTargets(ctx, t.searchTargets, kbID, pageIDs, t.knowledgeService)
-	if scopeErr != nil {
-		return &types.ToolResult{
-			Success: false, Error: fmt.Sprintf("failed to validate document scope: %v", scopeErr),
-		}, scopeErr
-	}
-	filtered := make([]*types.Knowledge, 0, len(knowledges))
-	hiddenByScope := 0
-	for _, k := range knowledges {
-		if k == nil {
-			continue
-		}
-		if !allowedIDs[k.ID] {
-			hiddenByScope++
-			continue
-		}
-		filtered = append(filtered, k)
-	}
-
-	var total int64
-	if result != nil {
-		total = result.Total
-	}
 	documents := make([]map[string]interface{}, 0, len(filtered))
 	var b strings.Builder
 	fmt.Fprintf(&b, "<documents knowledge_base_id=\"%s\" total=\"%d\" page=\"%d\" page_size=\"%d\"",
@@ -207,7 +162,6 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 		"total_docs":        total,
 		"page":              page,
 		"page_size":         pageSize,
-		"hidden_by_scope":   hiddenByScope,
 	}
 	if keyword != "" {
 		data["keyword"] = keyword
@@ -224,4 +178,113 @@ func (t *ListDocumentsTool) Execute(ctx context.Context, args json.RawMessage) (
 		}
 	}
 	return &types.ToolResult{Success: true, Output: output, Data: data}, nil
+}
+
+// listDocumentsScopeCap bounds how many tagged documents are loaded when a
+// turn pins both explicit documents and tags on the same knowledge base, the
+// one case where the union has to be paged in memory.
+const listDocumentsScopeCap = 1000
+
+// listScoped returns one page of the documents the turn may read, with a
+// total that counts only those documents. A pinned @tag scope is pushed into
+// the database filter; pinned @file documents are loaded directly. Filtering
+// after paging would report totals for the whole base and leave holes in the
+// page.
+func (t *ListDocumentsTool) listScoped(
+	ctx context.Context, kbID, keyword string, page, pageSize int,
+) ([]*types.Knowledge, int64, error) {
+	tenantID := t.searchTargets.GetTenantIDForKB(kbID)
+	// Documents live under the knowledge base owner, which may differ from the
+	// caller's tenant for organization-shared bases.
+	listCtx := ctx
+	if tenantID != 0 {
+		listCtx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+	}
+	listPage := func(filter types.KnowledgeListFilter, p, size int) ([]*types.Knowledge, int64, error) {
+		filter.Keyword = keyword
+		result, err := t.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(
+			listCtx, kbID, &types.Pagination{Page: p, PageSize: size}, filter,
+		)
+		if err != nil || result == nil {
+			return nil, 0, err
+		}
+		rows, _ := result.Data.([]*types.Knowledge)
+		return rows, result.Total, nil
+	}
+
+	var explicitIDs, tagIDs []string
+	for _, target := range t.searchTargets {
+		if target == nil || target.KnowledgeBaseID != kbID {
+			continue
+		}
+		if searchTargetIsWholeKB(target) {
+			return listPage(types.KnowledgeListFilter{}, page, pageSize)
+		}
+		ids, tags := searchTargetScope(target)
+		explicitIDs = append(explicitIDs, ids...)
+		tagIDs = append(tagIDs, tags...)
+	}
+	explicitIDs = dedupNonEmptyStrings(explicitIDs)
+	tagIDs = dedupNonEmptyStrings(tagIDs)
+
+	if len(explicitIDs) == 0 {
+		if len(tagIDs) == 0 {
+			return nil, 0, nil
+		}
+		return listPage(types.KnowledgeListFilter{TagIDs: tagIDs}, page, pageSize)
+	}
+
+	// Explicit documents (plus any tagged ones) form a small union that is
+	// paged in memory with the same newest-first order as the database.
+	union := make(map[string]*types.Knowledge)
+	explicit, err := t.knowledgeService.GetKnowledgeBatch(listCtx, tenantID, explicitIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, k := range explicit {
+		if k != nil && k.KnowledgeBaseID == kbID && knowledgeMatchesKeyword(k, keyword) {
+			union[k.ID] = k
+		}
+	}
+	if len(tagIDs) > 0 {
+		tagged, _, err := listPage(types.KnowledgeListFilter{TagIDs: tagIDs}, 1, listDocumentsScopeCap)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, k := range tagged {
+			if k != nil {
+				union[k.ID] = k
+			}
+		}
+	}
+	all := make([]*types.Knowledge, 0, len(union))
+	for _, k := range union {
+		all = append(all, k)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].CreatedAt.Equal(all[j].CreatedAt) {
+			return all[i].CreatedAt.After(all[j].CreatedAt)
+		}
+		return all[i].ID < all[j].ID
+	})
+	total := int64(len(all))
+	start := (page - 1) * pageSize
+	if start >= len(all) {
+		return nil, total, nil
+	}
+	end := start + pageSize
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[start:end], total, nil
+}
+
+// knowledgeMatchesKeyword mirrors the list filter's title / file name match.
+func knowledgeMatchesKeyword(k *types.Knowledge, keyword string) bool {
+	if keyword == "" {
+		return true
+	}
+	needle := strings.ToLower(keyword)
+	return strings.Contains(strings.ToLower(k.Title), needle) ||
+		strings.Contains(strings.ToLower(k.FileName), needle)
 }

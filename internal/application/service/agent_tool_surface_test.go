@@ -27,8 +27,10 @@ func newToolSurfaceService(kb *types.KnowledgeBase) *agentService {
 func toolSurfaceConfig(allowed ...string) *types.AgentConfig {
 	return &types.AgentConfig{
 		KnowledgeBases: []string{"kb"},
-		SearchTargets:  types.SearchTargets{&types.SearchTarget{KnowledgeBaseID: "kb", TenantID: 7}},
-		AllowedTools:   allowed,
+		SearchTargets: types.SearchTargets{&types.SearchTarget{
+			Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb", TenantID: 7,
+		}},
+		AllowedTools: allowed,
 	}
 }
 
@@ -106,4 +108,25 @@ func countName(names []string, want string) int {
 		}
 	}
 	return n
+}
+
+// A wiki-only knowledge base has no chunk index but still stores chunks, so
+// the document readers the wiki agents use to check sources stay available
+// while chunk search is dropped.
+func TestRegisterToolsKeepsDocumentReadersForWikiOnlyScope(t *testing.T) {
+	kb := &types.KnowledgeBase{ID: "kb"}
+	kb.IndexingStrategy.WikiEnabled = true
+	registry := tools.NewToolRegistry()
+	cfg := toolSurfaceConfig(
+		tools.ToolWikiSearch, tools.ToolWikiReadPage, tools.ToolReadDocument,
+		tools.ToolListDocuments, tools.ToolSearchKnowledge, tools.LegacyToolWikiReadSourceDoc,
+	)
+	require.NoError(t, newToolSurfaceService(kb).registerTools(t.Context(), registry, cfg, nil, nil, "s"))
+	names := registry.ListTools()
+	for _, want := range []string{
+		tools.ToolWikiSearch, tools.ToolWikiReadPage, tools.ToolReadDocument, tools.ToolListDocuments,
+	} {
+		require.Contains(t, names, want)
+	}
+	require.NotContains(t, names, tools.ToolSearchKnowledge, "chunk search needs a vector or keyword index")
 }

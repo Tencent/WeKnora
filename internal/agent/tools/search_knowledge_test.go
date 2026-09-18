@@ -44,32 +44,79 @@ func kbWithIndexes(id string, vector, keyword bool, kbType string) *types.Knowle
 	return kb
 }
 
-func TestSearchModeUnavailableReason(t *testing.T) {
-	vectorOnly := []*types.KnowledgeBase{kbWithIndexes("kb-v", true, false, "")}
-	keywordOnly := []*types.KnowledgeBase{kbWithIndexes("kb-k", false, true, "")}
-	faqOnly := []*types.KnowledgeBase{kbWithIndexes("kb-faq", true, true, types.KnowledgeBaseTypeFAQ)}
-	wikiOnly := []*types.KnowledgeBase{kbWithIndexes("kb-w", false, false, "")}
+func TestResolveKBSearchModesFallsBackPerKnowledgeBase(t *testing.T) {
+	vectorOnly := kbWithIndexes("kb-v", true, false, "")
+	keywordOnly := kbWithIndexes("kb-k", false, true, "")
+	both := kbWithIndexes("kb-b", true, true, "")
+	faq := kbWithIndexes("kb-faq", true, true, types.KnowledgeBaseTypeFAQ)
+	wikiOnly := kbWithIndexes("kb-w", false, false, "")
 
-	msg := searchModeUnavailableReason(SearchModeKeyword, vectorOnly)
-	if !strings.Contains(msg, "keyword mode is unavailable") {
-		t.Fatalf("keyword on vector-only KB: %q", msg)
+	modes, msg := resolveKBSearchModes(SearchModeKeyword, []*types.KnowledgeBase{vectorOnly, both, faq, wikiOnly})
+	if msg != "" {
+		t.Fatalf("keyword must not be refused while some base can serve it: %q", msg)
 	}
-	msg = searchModeUnavailableReason(SearchModeKeyword, faqOnly)
-	if !strings.Contains(msg, "keyword mode is unavailable") {
-		t.Fatalf("FAQ bases have no keyword index: %q", msg)
+	if m := modes["kb-b"]; m.mode != SearchModeKeyword || m.fallback {
+		t.Fatalf("keyword-capable base = %+v", m)
 	}
-	msg = searchModeUnavailableReason(SearchModeSemantic, keywordOnly)
-	if !strings.Contains(msg, "semantic mode is unavailable") {
-		t.Fatalf("semantic on keyword-only KB: %q", msg)
+	if m := modes["kb-v"]; m.mode != SearchModeSemantic || !m.fallback || m.reason != "no keyword index" {
+		t.Fatalf("vector-only base must fall back to semantic: %+v", m)
 	}
-	if msg := searchModeUnavailableReason(SearchModeHybrid, wikiOnly); msg == "" {
-		t.Fatal("hybrid on a wiki-only KB must be refused")
+	if m := modes["kb-faq"]; m.mode != SearchModeSemantic || !m.fallback || !strings.Contains(m.reason, "FAQ") {
+		t.Fatalf("FAQ base must fall back to semantic: %+v", m)
 	}
-	if msg := searchModeUnavailableReason(SearchModeHybrid, keywordOnly); msg != "" {
-		t.Fatalf("hybrid works with any chunk index, got %q", msg)
+	if _, ok := modes["kb-w"]; ok {
+		t.Fatal("a wiki-only base has no chunk index and must be left out")
 	}
-	if msg := searchModeUnavailableReason(SearchModeKeyword, nil); msg != "" {
-		t.Fatalf("an unknown KB list must not refuse the call, got %q", msg)
+
+	modes, msg = resolveKBSearchModes(SearchModeKeyword, []*types.KnowledgeBase{faq})
+	if msg != "" || modes["kb-faq"].mode != SearchModeSemantic {
+		t.Fatalf("an FAQ-only scope must still be searchable: modes=%+v msg=%q", modes, msg)
+	}
+	modes, _ = resolveKBSearchModes(SearchModeSemantic, []*types.KnowledgeBase{keywordOnly})
+	if m := modes["kb-k"]; m.mode != SearchModeKeyword || !m.fallback {
+		t.Fatalf("keyword-only base must serve semantic requests with keyword: %+v", m)
+	}
+	modes, _ = resolveKBSearchModes(SearchModeHybrid, []*types.KnowledgeBase{keywordOnly})
+	if m := modes["kb-k"]; m.mode != SearchModeHybrid || m.fallback {
+		t.Fatalf("hybrid already adapts per index: %+v", m)
+	}
+	if _, msg := resolveKBSearchModes(SearchModeHybrid, []*types.KnowledgeBase{wikiOnly}); msg == "" {
+		t.Fatal("a scope with no chunk index must be refused")
+	}
+	if modes, msg := resolveKBSearchModes(SearchModeKeyword, nil); modes != nil || msg != "" {
+		t.Fatalf("an unknown KB list must not refuse the call: %+v %q", modes, msg)
+	}
+}
+
+func TestAnnotateModeFallbackReportsEffectiveMode(t *testing.T) {
+	all := map[string]kbSearchMode{"kb-faq": {mode: SearchModeSemantic, fallback: true, reason: "FAQ"}}
+	data := map[string]interface{}{"mode": SearchModeKeyword}
+	annotateModeFallback(data, SearchModeKeyword, all)
+	if data["mode"] != SearchModeSemantic || data["requested_mode"] != SearchModeKeyword {
+		t.Fatalf("a scope that fell back entirely must report the mode it used: %+v", data)
+	}
+	fallbacks, _ := data["mode_fallbacks"].([]map[string]interface{})
+	if len(fallbacks) != 1 || fallbacks[0]["knowledge_base_id"] != "kb-faq" {
+		t.Fatalf("fallbacks = %+v", data["mode_fallbacks"])
+	}
+	if msg := emptySearchStatement("E1001", data, 1); !strings.Contains(msg, "mode=semantic") ||
+		!strings.Contains(msg, "kb-faq was searched with mode=semantic (FAQ)") {
+		t.Fatalf("empty statement must explain the fallback: %q", msg)
+	}
+
+	partial := map[string]kbSearchMode{
+		"kb-b": {mode: SearchModeKeyword},
+		"kb-v": {mode: SearchModeSemantic, fallback: true, reason: "no keyword index"},
+	}
+	data = map[string]interface{}{"mode": SearchModeKeyword}
+	annotateModeFallback(data, SearchModeKeyword, partial)
+	if data["mode"] != SearchModeKeyword {
+		t.Fatalf("a partial fallback keeps the requested mode: %+v", data)
+	}
+	data = map[string]interface{}{"mode": SearchModeKeyword}
+	annotateModeFallback(data, SearchModeKeyword, map[string]kbSearchMode{"kb-b": {mode: SearchModeKeyword}})
+	if _, ok := data["mode_fallbacks"]; ok {
+		t.Fatalf("no fallback, no annotation: %+v", data)
 	}
 }
 

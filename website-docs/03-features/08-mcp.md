@@ -34,9 +34,9 @@ OAuth 服务按调用者分别授权。工具需要审批时，在对话中检�
 
 | 组 | 工具 | 说明 |
 |---|---|---|
-| 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；`search_knowledge` 用 `mode`（hybrid / semantic / keyword）选择检索方式并可设 `limit`（默认 10，上限 30）；`grep_chunks` 是由关键词索引提供的关键词搜索，等价于 `search_knowledge` 的 `mode=keyword`；`read_document` 按 `offset` / `limit` 翻页，或用 `query` 在文档内查找短语 |
+| 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；`search_knowledge` 用 `mode`（hybrid / semantic / keyword）选择检索方式并可设 `limit`（默认 10，上限 30）；`grep_chunks` 保持大小写不敏感的正则语义：从模式里提取字面词作为关键词索引的检索词（没有关键词索引的库改用语义索引取候选），再逐条用正则校验，返回的分块都匹配该模式；不含任何字面词的模式（如 `^\d+$`）会被拒绝；`read_document` 按 `offset` / `limit` 翻页，或用 `query` 在文档内查找短语 |
 | 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
-| Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 默认字面量、大小写不敏感匹配，`regex=true` 时按正则解释 |
+| Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
 
 工具实现直接复用 Agent 的原生工具（`internal/agent/tools/`），鉴权复用 API Key 的作用域模型：端点被换算成一把仅含 retrieve / chat / ingest 等能力、限定知识库范围的作用域，所以后端各服务对它的检查与对受限 API Key 完全一致。实现细节见下方内置 MCP Server 参考。

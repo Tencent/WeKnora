@@ -644,3 +644,37 @@ func TestModelOutputRendersDocumentListWithPagination(t *testing.T) {
 	require.NotContains(t, out, "doc-a")
 	require.NotContains(t, out, "kb-real")
 }
+
+func TestModelOutputReportsSearchModeAndFallbacks(t *testing.T) {
+	registry := NewRegistry(true)
+	row := map[string]interface{}{
+		"chunk_id": "chunk-1", "knowledge_id": "doc-1", "knowledge_base_id": "kb-faq",
+		"knowledge_title": "FAQ", "content": "reset the device",
+	}
+	keyword := registry.ModelToolResultForTool("search_knowledge", &types.ToolResult{
+		Success: true, Data: map[string]any{
+			"display_type": "search_results", "mode": "keyword", "results": []map[string]interface{}{row},
+		},
+	})
+	require.Contains(t, keyword, `<retrieval type="knowledge" mode="keyword">`)
+
+	const faqReason = "FAQ bases are indexed for semantic search only"
+	fallback := registry.ModelToolResultForTool("search_knowledge", &types.ToolResult{
+		Success: true, Data: map[string]any{
+			"display_type": "search_results", "mode": "semantic", "requested_mode": "keyword",
+			"results": []map[string]interface{}{row},
+			"mode_fallbacks": []map[string]interface{}{
+				{"knowledge_base_id": "kb-faq", "mode": "semantic", "reason": faqReason},
+			},
+		},
+	})
+	require.Contains(t, fallback, `<retrieval requested_mode="keyword" type="knowledge" mode="semantic">`)
+	require.Contains(t, fallback,
+		`<mode_fallback kb="b1" mode="semantic" reason="FAQ bases are indexed for semantic search only" />`)
+	require.NotContains(t, fallback, "kb-faq")
+
+	legacy := registry.ModelToolResultForTool("knowledge_search", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type": "search_results", "results": []map[string]interface{}{row},
+	}})
+	require.Contains(t, legacy, `mode="semantic"`, "legacy knowledge_search payloads were semantic")
+}

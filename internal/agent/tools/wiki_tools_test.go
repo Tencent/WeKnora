@@ -456,7 +456,9 @@ func TestResolveWikiCreateKBRequiresUnambiguousServerContext(t *testing.T) {
 	}
 }
 
-func TestWikiSearchEscapesLiteralQueriesUnlessRegex(t *testing.T) {
+// wiki_search keeps its historical regular-expression semantics by default;
+// only text that does not compile falls back to a literal match.
+func TestWikiSearchKeepsRegexDefaultWithLiteralFallback(t *testing.T) {
 	page := newTestWikiPage("kb-1", "concept/cpp")
 	service := &fakeWikiPageService{
 		searchResults: map[string][]*types.WikiPage{"kb-1": {page}},
@@ -464,18 +466,25 @@ func TestWikiSearchEscapesLiteralQueriesUnlessRegex(t *testing.T) {
 	service.searchQueries = map[string][]string{}
 	tool := NewWikiSearchTool(service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver())
 
-	literalArgs := json.RawMessage(`{"query":"C++ v1.2"}`)
-	if res, err := tool.Execute(context.Background(), literalArgs); err != nil || !res.Success {
-		t.Fatalf("literal query: res=%+v err=%v", res, err)
-	}
-	regexArgs := json.RawMessage(`{"query":"stardust|skyvault","regex":true}`)
-	if res, err := tool.Execute(context.Background(), regexArgs); err != nil || !res.Success {
-		t.Fatalf("regex query: res=%+v err=%v", res, err)
+	for _, raw := range []string{
+		`{"query":"stardust|skyvault"}`,       // default: regex kept as-is
+		`{"query":"C++ v1.2"}`,                // default: invalid regex, matched literally
+		`{"query":"a.b","regex":false}`,       // explicit literal
+		`{"query":"^entity/.*","regex":true}`, // explicit regex
+	} {
+		if res, err := tool.Execute(context.Background(), json.RawMessage(raw)); err != nil || !res.Success {
+			t.Fatalf("%s: res=%+v err=%v", raw, res, err)
+		}
 	}
 	got := service.searchQueries["kb-1"]
-	want := []string{`C\+\+ v1\.2`, `stardust|skyvault`}
+	want := []string{`stardust|skyvault`, `C\+\+ v1\.2`, `a\.b`, `^entity/.*`}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("backend patterns = %v, want %v", got, want)
+	}
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"C++","regex":true}`))
+	if err != nil || res.Success || !strings.Contains(res.Error, "invalid regular expression") {
+		t.Fatalf("regex=true must reject an invalid pattern: res=%+v err=%v", res, err)
 	}
 }
 

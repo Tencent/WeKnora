@@ -3,7 +3,9 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -45,10 +47,12 @@ func searchKnowledgeTool() mcp.Tool {
 
 func grepChunksTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolGrepChunks,
-		mcp.WithDescription("Keyword search over the text chunks of the knowledge bases in scope, served by the "+
-			"keyword index. Best for exact terms, identifiers, error codes or product names that semantic search "+
-			"may miss. Equivalent to search_knowledge with mode=keyword."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("The exact terms to match against chunk text")),
+		mcp.WithDescription("Case-insensitive regular-expression search over the text chunks of the knowledge "+
+			"bases in scope. Best for exact terms, identifiers, error codes or product names that semantic search "+
+			"may miss. Candidates come from the keyword index (the semantic index for bases without one) using the "+
+			"literal terms in the pattern, and every returned chunk matches the pattern."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Regular expression (POSIX, case-insensitive) to "+
+			"match against chunk text; text that is not a valid regular expression is matched literally")),
 		mcp.WithNumber("limit", mcp.Description("Maximum passages to return, default 10, max 30")),
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search")),
@@ -153,9 +157,18 @@ func (s *Server) handleSearchKnowledge(ctx context.Context, req mcp.CallToolRequ
 func (s *Server) runSearchKnowledge(
 	ctx context.Context, kbs []*types.KnowledgeBase, query, mode string, limit int,
 ) (*mcp.CallToolResult, error) {
+	return s.runSearchKnowledgeWithFilter(ctx, kbs, query, mode, limit, nil)
+}
+
+func (s *Server) runSearchKnowledgeWithFilter(
+	ctx context.Context, kbs []*types.KnowledgeBase, query, mode string, limit int, pattern *regexp.Regexp,
+) (*mcp.CallToolResult, error) {
 	tool := tools.NewSearchKnowledgeTool(
 		s.kbService, s.knowledgeService, s.chunkService, searchTargetsFor(kbs), nil, s.cfg,
 	)
+	if pattern != nil {
+		tool.WithPatternFilter(pattern)
+	}
 	callArgs := map[string]any{
 		"query":              query,
 		"mode":               mode,
@@ -185,9 +198,49 @@ func (s *Server) handleGrepChunks(ctx context.Context, req mcp.CallToolRequest) 
 	kbs = retrievableKnowledgeBases(kbs)
 	if len(kbs) == 0 {
 		return mcp.NewToolResultError(
-			"none of the selected knowledge bases supports keyword retrieval"), nil
+			"none of the selected knowledge bases has a chunk index (vector or keyword)"), nil
 	}
-	return s.runSearchKnowledge(ctx, kbs, strings.TrimSpace(query), tools.SearchModeKeyword, req.GetInt("limit", 0))
+	pattern, terms := grepPatternAndTerms(strings.TrimSpace(query))
+	if terms == "" {
+		return mcp.NewToolResultError("the pattern contains no literal text to look up; include at least one " +
+			"word, identifier or phrase (for example \"timeout|deadline\" instead of \"^\\d+$\")"), nil
+	}
+	return s.runSearchKnowledgeWithFilter(
+		ctx, kbs, terms, tools.SearchModeKeyword, req.GetInt("limit", 0), pattern,
+	)
+}
+
+var grepEscapeRE = regexp.MustCompile(`\\[A-Za-z]`)
+
+// grepPatternAndTerms keeps grep_chunks' regular-expression contract on top
+// of index-backed retrieval. The pattern compiles case-insensitively (text
+// that is not a valid expression is escaped and matched literally, as it
+// would have failed in the database before). The literal runs inside the
+// pattern become the keyword query that fetches candidates; results are then
+// verified against the pattern itself.
+func grepPatternAndTerms(query string) (*regexp.Regexp, string) {
+	re, err := regexp.Compile("(?i)" + query)
+	source := query
+	if err != nil {
+		re = regexp.MustCompile("(?i)" + regexp.QuoteMeta(query))
+	} else {
+		// Escapes such as \d, \b or \s carry no literal text.
+		source = grepEscapeRE.ReplaceAllString(query, " ")
+	}
+	fields := strings.FieldsFunc(source, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' && r != '-'
+	})
+	seen := make(map[string]bool, len(fields))
+	terms := make([]string, 0, len(fields))
+	for _, f := range fields {
+		key := strings.ToLower(f)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		terms = append(terms, f)
+	}
+	return re, strings.Join(terms, " ")
 }
 
 type documentSummary struct {
