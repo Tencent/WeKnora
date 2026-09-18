@@ -134,6 +134,7 @@
           </section>
         </template>
         <template v-else-if="managedSkill">
+          <p v-if="managedServedNote" class="skill-manage__served">{{ managedServedNote }}</p>
           <div v-if="managedUpgradeHint" class="skill-manage__row skill-manage__row--upgrade">
             <div class="skill-manage__info">
               <label>{{ $t('settings.skills.upgradeRowTitle') }}</label>
@@ -642,7 +643,7 @@ import {
   type SandboxConfigRecord,
 } from '@/api/system'
 import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill'
-import { installUpgradable, upgradeVersions } from '@/utils/skillUpgrade'
+import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils/index'
 import {
   MAX_ENV_VALUE_BYTES,
@@ -815,6 +816,12 @@ const managedUpgradeHint = computed(() => {
     ? t('settings.skills.upgradeRowHintVersions', versions)
     : t('settings.skills.upgradeRowHint')
 })
+
+// While this install runs or after it failed, the sandbox keeps running the
+// previous version, which is worth saying next to a spinner or an error.
+const managedServedNote = computed(() =>
+  managedSkill.value ? servedPreviousText(t, managedSkill.value) : '',
+)
 
 const showHeaderUninstall = computed(() => {
   if (!props.focusSkillId || uninstallDone.value) return false
@@ -1678,6 +1685,16 @@ onUnmounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.skill-manage__served {
+  margin: 0;
+  padding: var(--app-space-2) var(--app-space-3);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
 }
 
 .skill-manage__row--upgrade {

@@ -168,3 +168,10 @@ test('agent skill picker offers upgrades to admins only and keeps upgrading skil
   assert.match(source, /v-else-if="canInstallSkills && isSkillBusy\(skill\)"/)
   assert.match(source, /skill\.selectable \|\| \(skill\.installed && isSkillBusy\(skill\)\)/)
 })
+
+test('a skill whose previous version still runs stays selectable during and after an upgrade', () => {
+  assert.match(source, /installEnabled && \(installStatus === 'ready' \|\| Boolean\(servedNote\)\)/)
+  assert.match(source, /v-if="skill\.selectable && skill\.servedNote"/)
+  // Installing the catalog version over a failed upgrade is the upgrade retried.
+  assert.match(source, /skill\.servedNote \? \$t\('settings\.skills\.upgrade'\) : \$t\('agent\.editor\.installShort'\)/)
+})

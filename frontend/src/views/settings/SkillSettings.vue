@@ -360,7 +360,7 @@ import {
   type SkillCatalogRegisterResult,
 } from '@/api/skill'
 import { useSkillInstallerModel } from '@/composables/useSkillInstallerModel'
-import { installOutdated, installUpgradable, upgradeVersions } from '@/utils/skillUpgrade'
+import { installOutdated, installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade'
 import {
   isNamedSandboxBackend,
   listSandboxConfigs,
@@ -691,6 +691,8 @@ function upgradeVersionText(item: SkillCatalogItem, inst: SkillCatalogInstall): 
 }
 
 function installStatusText(inst: SkillCatalogInstall): string {
+  const served = servedPreviousText(t, inst)
+  if (served) return served
   if (inst.status === 'installing') return t('settings.sandbox.skillStatusInstalling')
   if (inst.status === 'removing') return t('settings.sandbox.skillStatusRemoving')
   if (inst.status === 'failed') return t('settings.sandbox.skillStatusFailed')

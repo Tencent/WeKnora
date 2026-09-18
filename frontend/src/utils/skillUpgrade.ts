@@ -12,6 +12,13 @@ interface SkillInstallDigest extends SkillDigest {
   status: string
 }
 
+interface SkillInstallServed {
+  status: string
+  served?: { version?: string }
+}
+
+type Translate = (key: string, params?: Record<string, unknown>) => string
+
 export function installOutdated(catalog: SkillDigest, install: SkillDigest): boolean {
   return Boolean(
     catalog.bundle_sha256
@@ -25,6 +32,25 @@ export function installOutdated(catalog: SkillDigest, install: SkillDigest): boo
 // Disabled installs count: the files stay in the image either way.
 export function installUpgradable(catalog: SkillDigest, install: SkillInstallDigest): boolean {
   return install.status === 'ready' && installOutdated(catalog, install)
+}
+
+// An upgrade only replaces the image when it succeeds, so while one runs, and
+// after one fails, the sandbox keeps running the previous version and the
+// agent keeps using it. null when the install itself is what runs, or when
+// nothing of the skill is in the image yet.
+export function servedPrevious(
+  install: SkillInstallServed,
+): { upgrading: boolean; version: string } | null {
+  if (!install.served) return null
+  if (install.status !== 'installing' && install.status !== 'failed') return null
+  return { upgrading: install.status === 'installing', version: (install.served.version || '').trim() }
+}
+
+export function servedPreviousText(t: Translate, install: SkillInstallServed): string {
+  const served = servedPrevious(install)
+  if (!served) return ''
+  const key = served.upgrading ? 'settings.skills.servedWhileUpgrading' : 'settings.skills.servedAfterFailure'
+  return served.version ? t(key, { version: served.version }) : t(`${key}Plain`)
 }
 
 // The version strings are optional frontmatter, so the pair is only worth

@@ -117,3 +117,7 @@ test('install step shows parsed skill and sandbox backend details', () => {
   assert.doesNotMatch(source, /t-alert/)
   assert.doesNotMatch(source, /registered-alert/)
 })
+
+test('install status names the version still running while an upgrade is pending or failed', () => {
+  assert.match(source, /const served = servedPreviousText\(t, inst\)\n  if \(served\) return served/)
+})

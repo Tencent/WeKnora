@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { installOutdated, installUpgradable, upgradeVersions } from './skillUpgrade.ts'
+import {
+  installOutdated, installUpgradable, servedPrevious, servedPreviousText, upgradeVersions,
+} from './skillUpgrade.ts'
 
 test('an install is outdated only when both digests are known and differ', () => {
   assert.equal(installOutdated({ bundle_sha256: 'b' }, { bundle_sha256: 'a' }), true)
@@ -23,4 +25,25 @@ test('the version pair is shown only when both sides name different versions', (
   assert.equal(upgradeVersions({ version: '1.2.0' }, { version: '1.2.0' }), null)
   assert.equal(upgradeVersions({ version: '1.2.0' }, {}), null)
   assert.equal(upgradeVersions({ version: ' ' }, { version: '1.1.0' }), null)
+})
+
+test('the previous version is reported only while an install has not replaced it', () => {
+  assert.deepEqual(
+    servedPrevious({ status: 'installing', served: { version: '1.0.0' } }),
+    { upgrading: true, version: '1.0.0' },
+  )
+  assert.deepEqual(servedPrevious({ status: 'failed', served: {} }), { upgrading: false, version: '' })
+  assert.equal(servedPrevious({ status: 'ready', served: { version: '1.0.0' } }), null)
+  assert.equal(servedPrevious({ status: 'removing', served: { version: '1.0.0' } }), null)
+  assert.equal(servedPrevious({ status: 'installing' }), null)
+})
+
+test('the served note names the version when there is one', () => {
+  const t = (key, params) => (params ? `${key}:${params.version}` : key)
+  assert.equal(
+    servedPreviousText(t, { status: 'installing', served: { version: '1.0.0' } }),
+    'settings.skills.servedWhileUpgrading:1.0.0',
+  )
+  assert.equal(servedPreviousText(t, { status: 'failed', served: {} }), 'settings.skills.servedAfterFailurePlain')
+  assert.equal(servedPreviousText(t, { status: 'ready' }), '')
 })

@@ -48,3 +48,9 @@ test('the focused skill offers an upgrade when the catalog has moved on', () => 
   assert.match(upgrade, /installSkillCatalog\(catalog\.id, \[configId\]\)/)
   assert.doesNotMatch(upgrade, /reinstallConfigSkill/)
 })
+
+test('a skill mid-upgrade or after a failed upgrade says the previous version still runs', () => {
+  assert.match(source, /servedPreviousText\(t, managedSkill\.value\)/)
+  assert.match(manageBlock, /v-if="managedServedNote"/)
+  assert.match(source, /\.skill-manage__served \{/)
+})

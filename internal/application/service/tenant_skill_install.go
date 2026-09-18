@@ -150,6 +150,7 @@ func (s *TenantSkillService) installParsedSkill(
 	now := s.now()
 	if existing != nil {
 		skillID = existing.ID
+		existing.Served = s.servedVersionOf(ctx, existing)
 		takeSkillRowForInstall(existing, bundle, now)
 		if err := s.skills.UpdateSkill(ctx, existing); err != nil {
 			return "", err
@@ -175,6 +176,7 @@ func (s *TenantSkillService) installParsedSkill(
 				return "", err
 			}
 			skillID = winner.ID
+			winner.Served = s.servedVersionOf(ctx, winner)
 			takeSkillRowForInstall(winner, bundle, now)
 			if err := s.skills.UpdateSkill(ctx, winner); err != nil {
 				return "", err
@@ -266,6 +268,74 @@ func (s *TenantSkillService) storedArchiveKeepsItsPin(
 	}
 	return false, apperrors.NewConflictError(
 		"this skill was updated in the catalog while the install was starting; try again")
+}
+
+// servedVersionOf is what the image goes on serving once row is handed to a new
+// install. A ready row describes the image, so it becomes the served version.
+// A row that is already mid-install or failed keeps the version it recorded
+// when it last stopped being ready: this attempt replaces the previous attempt,
+// not what the image carries. Any other row has nothing in the image.
+func (s *TenantSkillService) servedVersionOf(
+	ctx context.Context, row *types.TenantSkillEntity,
+) *types.SkillServedVersion {
+	switch row.Status {
+	case types.SkillStatusReady:
+		return &types.SkillServedVersion{
+			Version:      row.Version,
+			Description:  row.Description,
+			Instructions: row.Instructions,
+			BundleSHA256: row.BundleSHA256,
+			BundleRef:    s.servedBundleRef(ctx, row),
+			SnapshotID:   row.InstalledSnapshotID,
+		}
+	case types.SkillStatusInstalling, types.SkillStatusFailed:
+		return row.Served
+	default:
+		return nil
+	}
+}
+
+// servedBundleRef names the object a ready row's files are read from. A row
+// that follows the catalog names none itself, and the catalog is exactly what
+// an upload is about to replace, so the definition's object is named instead
+// while it still holds these bytes. Recording it is what makes the served
+// version a reader that the replacement cannot reclaim from under it.
+func (s *TenantSkillService) servedBundleRef(ctx context.Context, row *types.TenantSkillEntity) string {
+	if ref := strings.TrimSpace(row.BundleRef); ref != "" {
+		return ref
+	}
+	cid := strings.TrimSpace(row.CatalogID)
+	sha := strings.TrimSpace(row.BundleSHA256)
+	if cid == "" || sha == "" {
+		return ""
+	}
+	catalog, err := s.skills.GetCatalog(ctx, row.TenantID, cid)
+	if err != nil || catalog == nil || strings.TrimSpace(catalog.BundleSHA256) != sha {
+		return ""
+	}
+	return strings.TrimSpace(catalog.BundleRef)
+}
+
+// restoreServedVersion makes the served version the row's own again, for the
+// paths that conclude the image never moved past it. It returns the archive
+// the abandoned attempt had pinned, which nothing names once the row is back.
+func restoreServedVersion(e *types.TenantSkillEntity) string {
+	served := e.Served
+	if served == nil {
+		return ""
+	}
+	abandoned := strings.TrimSpace(e.BundleRef)
+	e.Version = served.Version
+	e.Description = served.Description
+	e.Instructions = served.Instructions
+	e.BundleSHA256 = served.BundleSHA256
+	e.BundleRef = served.BundleRef
+	e.InstalledSnapshotID = served.SnapshotID
+	e.Served = nil
+	if abandoned == strings.TrimSpace(served.BundleRef) {
+		return ""
+	}
+	return abandoned
 }
 
 // takeSkillRowForInstall hands an existing row to the run about to start.
@@ -489,8 +559,11 @@ func (s *TenantSkillService) runInstall(
 	}
 	// Read before the scratch wipe. requirements.json lives under skillDir and
 	// is not scratch, but reading it first removes an implicit dependency on
-	// what cleanImageScratch happens to delete.
-	s.recordEnvDeclaration(ctx, mgr, sess.ID, tenantID, configID, skillID, bundle)
+	// what cleanImageScratch happens to delete. It is stored only once the
+	// pointer has moved: the declaration replaces the previous one and drops
+	// values of variables the new version no longer reads, and until the
+	// pointer moves it is the previous version that runs and reads them.
+	declaredEnvs, envsDeclared := s.readEnvDeclaration(ctx, mgr, sess.ID, skillID, bundle)
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{Percent: 90, Stage: "verified"})
 
 	// 6. Wipe the scratch state. It must happen BEFORE the snapshot, or the
@@ -579,6 +652,9 @@ func (s *TenantSkillService) runInstall(
 	defer cancelReady()
 	if err := s.writeReadySkillState(readyCtx, tenantID, configID, skillID, ref.ID, bundle); err != nil {
 		return err
+	}
+	if envsDeclared {
+		s.storeEnvDeclaration(readyCtx, tenantID, configID, skillID, bundle, declaredEnvs)
 	}
 	s.markConfigSandboxesStale(ctx, tenantID, configID)
 	s.publishProgress(ctx, tenantID, configID, skillID, SkillProgress{
@@ -1312,6 +1388,7 @@ func (s *TenantSkillService) updateSkillFields(
 func (s *TenantSkillService) writeReadySkillState(
 	ctx context.Context, tenantID uint64, configID, skillID, snapshotID string, bundle *SkillBundle,
 ) error {
+	retired := ""
 	if err := s.retrySkillBookkeeping(ctx, func() error {
 		owned, err := s.installStillOwnsTheRow(ctx, tenantID, configID, skillID, bundle)
 		if err != nil {
@@ -1322,6 +1399,12 @@ func (s *TenantSkillService) writeReadySkillState(
 		}
 		return s.updateSkillFields(ctx, tenantID, configID, skillID,
 			func(e *types.TenantSkillEntity) {
+				// The pointer has moved, so the version kept for the length
+				// of the upgrade is no longer in any image new sessions boot.
+				if e.Served != nil {
+					retired = strings.TrimSpace(e.Served.BundleRef)
+				}
+				e.Served = nil
 				e.Status = types.SkillStatusReady
 				e.Error = ""
 				e.InstalledSnapshotID = snapshotID
@@ -1331,6 +1414,7 @@ func (s *TenantSkillService) writeReadySkillState(
 		return fmt.Errorf("skill %s is installed and serving but could not be marked ready: %w",
 			skillID, err)
 	}
+	s.releaseInstallBundle(ctx, tenantID, retired)
 	return nil
 }
 
@@ -2194,32 +2278,32 @@ func (s *TenantSkillService) writeManifestEntry(
 	return store.WriteSessionFile(ctx, sessionID, sandbox.SkillsManifestPath, payload)
 }
 
-// recordEnvDeclaration reads the environment variables the installer agent
-// declared and stores the ones that survive validation.
+// readEnvDeclaration reads the environment variables the installer agent
+// declared and keeps the ones that survive validation. ok is false when there
+// is nothing to store.
 //
-// It returns nothing because none of its failures is a failed install. The
-// agent may not have written the file, may have written prose, or may have
-// listed nothing that exists in the bundle; in every case the skill is
-// installed and working, and the missing declaration costs an admin one manual
-// entry in the settings page. Failing the install over it would throw away the
-// minutes of dependency installation that already succeeded.
-func (s *TenantSkillService) recordEnvDeclaration(
-	ctx context.Context, mgr sandbox.Manager, sessionID string,
-	tenantID uint64, configID, skillID string, bundle *SkillBundle,
-) {
+// None of its failures is a failed install. The agent may not have written the
+// file, may have written prose, or may have listed nothing that exists in the
+// bundle; in every case the skill is installed and working, and the missing
+// declaration costs an admin one manual entry in the settings page. Failing the
+// install over it would throw away the minutes of dependency installation that
+// already succeeded.
+func (s *TenantSkillService) readEnvDeclaration(
+	ctx context.Context, mgr sandbox.Manager, sessionID, skillID string, bundle *SkillBundle,
+) (types.SkillEnvVars, bool) {
 	if bundle == nil {
-		return
+		return nil, false
 	}
 	reader, ok := mgr.(sandbox.SessionFileReader)
 	if !ok {
 		logger.Warnf(ctx,
 			"[skill] sandbox backend cannot read files back; skill %s keeps no env declaration",
 			skillID)
-		return
+		return nil, false
 	}
 	requirementsPath := sandbox.SkillRequirementsPath(bundle.Name)
 	if requirementsPath == "" {
-		return
+		return nil, false
 	}
 	raw, err := reader.ReadSessionFile(ctx, sessionID, requirementsPath)
 	if err != nil {
@@ -2229,16 +2313,16 @@ func (s *TenantSkillService) recordEnvDeclaration(
 		if sandbox.IsRemoteNotFound(err) {
 			logger.Infof(ctx, "[skill] %s declared no environment variables (no %s)",
 				skillID, requirementsPath)
-			return
+			return nil, false
 		}
 		logger.Warnf(ctx, "[skill] %s: reading its env declaration at %s failed: %v",
 			skillID, requirementsPath, err)
-		return
+		return nil, false
 	}
 	declared, err := parseEnvDeclaration(raw)
 	if err != nil {
 		logger.Warnf(ctx, "[skill] %s wrote an unreadable env declaration: %v", skillID, err)
-		return
+		return nil, false
 	}
 	envs := validateEnvDeclarations(declared, bundle)
 	if len(envs) == 0 && len(declared) > 0 {
@@ -2249,12 +2333,23 @@ func (s *TenantSkillService) recordEnvDeclaration(
 			"[skill] all %d environment variable(s) declared for %s were rejected "+
 				"(bad name, not mentioned anywhere in the bundle, or reserved)",
 			len(declared), skillID)
-		return
+		return nil, false
 	}
+	return envs, true
+}
 
+// storeEnvDeclaration folds a declaration read by readEnvDeclaration onto the
+// row. It writes only onto the row this run just made ready: a newer upload or
+// a queued remove that took the row over owns its declaration too.
+func (s *TenantSkillService) storeEnvDeclaration(
+	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle, envs types.SkillEnvVars,
+) {
 	skill, err := s.skills.GetSkill(ctx, tenantID, configID, skillID)
 	if err != nil || skill == nil {
 		logger.Warnf(ctx, "[skill] load %s to store its env declaration failed: %v", skillID, err)
+		return
+	}
+	if skill.Status != types.SkillStatusReady || skill.BundleSHA256 != bundle.SHA256 {
 		return
 	}
 	merged := mergeEnvDeclaration(skill.Envs, envs)

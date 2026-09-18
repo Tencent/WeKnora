@@ -1381,6 +1381,14 @@
                           {{ skillStatusHint(skill) }}
                         </span>
                         <span
+                          v-if="skill.selectable && skill.servedNote"
+                          class="skill-pick__hint"
+                          :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
+                        >
+                          <t-icon :name="isSkillBusy(skill) ? 'refresh' : 'error-circle'" size="14px" />
+                          {{ skill.servedNote }}
+                        </span>
+                        <span
                           v-if="canUpgradeSkillRow(skill)"
                           class="skill-pick__hint skill-pick__hint--upgrade"
                         >
@@ -1400,10 +1408,10 @@
                       variant="text"
                       theme="primary"
                       :loading="installingCatalogId === skill.id"
-                      :title="$t('agent.editor.installToThisSandbox')"
+                      :title="skill.servedNote ? $t('agent.editor.upgradeOnThisSandbox') : $t('agent.editor.installToThisSandbox')"
                       @click.stop="installCatalogToCurrent(skill)"
                     >
-                      {{ $t('agent.editor.installShort') }}
+                      {{ skill.servedNote ? $t('settings.skills.upgrade') : $t('agent.editor.installShort') }}
                     </t-button>
                     <t-button
                       v-else-if="canUpgradeSkillRow(skill)"
@@ -1830,7 +1838,7 @@ import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
 import { normalizeLegacyToolNames } from '@/utils/legacy-tool-names';
 import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill';
-import { installUpgradable, upgradeVersions } from '@/utils/skillUpgrade';
+import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import {
   isNamedSandboxBackend,
@@ -2071,6 +2079,9 @@ type CatalogSkillRow = SkillCatalogItem & {
   // The install on this sandbox is still on an archive the catalog has moved past.
   upgradable: boolean
   installVersion: string
+  // Set while a newer install runs or after it failed: the sandbox still runs
+  // the previous version, so the skill stays usable.
+  servedNote: string
 }
 
 const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
@@ -2082,11 +2093,12 @@ const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
     const installStatus = inst?.status || ''
     const installEnabled = Boolean(inst?.enabled)
     const installed = Boolean(inst) && installStatus !== 'removed'
-    const selectable = installStatus === 'ready' && installEnabled
+    const servedNote = inst ? servedPreviousText(t, inst) : ''
+    const selectable = installEnabled && (installStatus === 'ready' || Boolean(servedNote))
     const upgradable = Boolean(inst && installUpgradable(item, inst))
     return {
       ...item, installed, selectable, installStatus, installEnabled,
-      upgradable, installVersion: inst?.version || '',
+      upgradable, installVersion: inst?.version || '', servedNote,
     }
   })
 })
@@ -2263,7 +2275,8 @@ async function installCatalogToCurrent(skill: CatalogSkillRow) {
   const configId = formData.value.config.sandbox_config_id || ''
   if (!configId || installingCatalogId.value) return
   installingCatalogId.value = skill.id
-  const upgrading = skill.upgradable
+  // A failed upgrade is retried by installing the catalog version again.
+  const upgrading = skill.upgradable || Boolean(skill.servedNote)
   try {
     const res = await installSkillCatalog(skill.id, [configId])
     const failed = Object.keys(res?.data?.errors || {}).length
