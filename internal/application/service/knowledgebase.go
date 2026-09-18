@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -140,6 +141,9 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		kb.CreatorID = uid
 	}
 	kb.EnsureDefaults()
+	if err := validateDesensitizationConfig(kb); err != nil {
+		return nil, err
+	}
 	applyTenantDefaultStorageProvider(ctx, kb)
 	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
 		return nil, err
@@ -546,6 +550,10 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			profileWasEnabled = kb.ProfileConfig.IsEnabled()
 			kb.ProfileConfig = config.ProfileConfig
 		}
+		if config.DesensitizationConfig != nil {
+			config.DesensitizationConfig.Normalize()
+			kb.DesensitizationConfig = config.DesensitizationConfig
+		}
 		// Update indexing strategy — syncs to ExtractConfig for backward compat
 		if config.IndexingStrategy != nil {
 			if !config.IndexingStrategy.HasAnyIndexing() {
@@ -567,6 +575,9 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	}
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
+	if err := validateDesensitizationConfig(kb); err != nil {
+		return nil, err
+	}
 
 	logger.Info(ctx, "Saving knowledge base update")
 	if err := s.repo.UpdateKnowledgeBase(ctx, kb); err != nil {
@@ -1397,6 +1408,22 @@ func (s *knowledgeBaseService) buildDuplicateKnowledgeBaseName(
 			return candidate
 		}
 	}
+}
+
+func validateDesensitizationConfig(kb *types.KnowledgeBase) error {
+	if kb == nil {
+		return nil
+	}
+	if kb.DesensitizationConfig != nil {
+		kb.DesensitizationConfig.Normalize()
+	}
+	if err := desensitization.ValidateConfig(kb.DesensitizationConfig, kb.ChunkingConfig); err != nil {
+		if errors.Is(err, desensitization.ErrCloudParserForbidden) {
+			return apperrors.NewBadRequestError("Cloud parser engines cannot be used when desensitization is enabled")
+		}
+		return apperrors.NewBadRequestError(err.Error())
+	}
+	return nil
 }
 
 func cloneKnowledgeBaseConfiguration(sourceKB *types.KnowledgeBase) (*types.KnowledgeBase, error) {

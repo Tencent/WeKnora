@@ -32,6 +32,7 @@ type KnowledgeBase struct {
 	StorageConfig         StorageConfig          `json:"storage_config"`
 	ExtractConfig         *ExtractConfig         `json:"extract_config"`
 	AutoTagConfig         *AutoTagConfig         `json:"auto_tag_config"`
+	DesensitizationConfig *DesensitizationConfig `json:"desensitization_config"`
 	CreatedAt             time.Time              `json:"created_at"`
 	UpdatedAt             time.Time              `json:"updated_at"`
 	// Computed fields (not stored in database)
@@ -43,10 +44,11 @@ type KnowledgeBase struct {
 
 // KnowledgeBaseConfig represents knowledge base configuration
 type KnowledgeBaseConfig struct {
-	ChunkingConfig        ChunkingConfig        `json:"chunking_config"`
-	ImageProcessingConfig ImageProcessingConfig `json:"image_processing_config"`
-	FAQConfig             *FAQConfig            `json:"faq_config"`
-	AutoTagConfig         *AutoTagConfig        `json:"auto_tag_config,omitempty"`
+	ChunkingConfig        ChunkingConfig         `json:"chunking_config"`
+	ImageProcessingConfig ImageProcessingConfig  `json:"image_processing_config"`
+	FAQConfig             *FAQConfig             `json:"faq_config"`
+	AutoTagConfig         *AutoTagConfig         `json:"auto_tag_config,omitempty"`
+	DesensitizationConfig *DesensitizationConfig `json:"desensitization_config,omitempty"`
 }
 
 // ChunkingConfig represents document chunking configuration
@@ -137,6 +139,23 @@ type AutoTagConfig struct {
 	// SkipIfTagged leaves documents that already carry tags untouched.
 	// Defaults to true when omitted.
 	SkipIfTagged *bool `json:"skip_if_tagged,omitempty"`
+}
+
+// DesensitizationConfig optionally masks parsed markdown before chunking.
+type DesensitizationConfig struct {
+	Enabled     bool                  `json:"enabled"`
+	Engine      string                `json:"engine,omitempty"`
+	MaskStyle   string                `json:"mask_style,omitempty"`
+	EntityTypes []string              `json:"entity_types,omitempty"`
+	Rules       []DesensitizationRule `json:"rules,omitempty"`
+	LLMModelID  string                `json:"llm_model_id,omitempty"`
+}
+
+// DesensitizationRule is a user-supplied regexp applied after preset types.
+type DesensitizationRule struct {
+	Name        string `json:"name"`
+	Pattern     string `json:"pattern"`
+	Replacement string `json:"replacement,omitempty"`
 }
 
 // ASRConfig represents automatic speech recognition settings for audio files.

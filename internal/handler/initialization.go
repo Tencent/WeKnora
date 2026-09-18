@@ -18,6 +18,7 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/assets"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/desensitization"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -359,6 +360,14 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 	if req.DocumentSplitting.TableMetadataInstructions != nil {
 		kb.ChunkingConfig.TableMetadataInstructions = strings.TrimSpace(*req.DocumentSplitting.TableMetadataInstructions)
+	}
+	if err := desensitization.ValidateConfig(kb.DesensitizationConfig, kb.ChunkingConfig); err != nil {
+		if stderrors.Is(err, desensitization.ErrCloudParserForbidden) {
+			c.Error(errors.NewBadRequestError("Cloud parser engines cannot be used when desensitization is enabled"))
+			return
+		}
+		c.Error(errors.NewBadRequestError(err.Error()))
+		return
 	}
 
 	// 更新多模态配置

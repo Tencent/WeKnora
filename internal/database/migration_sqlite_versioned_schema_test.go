@@ -43,7 +43,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenants":         {"api_principal_config"},                                             // 000064
 	"users":           {"is_system_admin"},                                                  // 000053
 	"knowledges":      {"pending_subtasks_count", "profile"},                                // 000056, 000101
-	"knowledge_bases": {"profile_config", "generated_profile"},                              // 000101
+	"knowledge_bases": {"profile_config", "generated_profile", "desensitization_config"},    // 000101, 000111 / sqlite 000031
 	"messages":        {"attachments", "usage", "sandbox_checkpoint", "context_checkpoint"}, // 000034/085/097/105
 	"sessions": {
 		"parent_session_id", "forked_from_message_id", "fork_bootstrap", // 000097
@@ -65,7 +65,7 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 30
+const expectedSQLiteMigrationVersion = 31
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
