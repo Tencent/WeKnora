@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -203,7 +203,21 @@ watch([finishedCleanly, hovering], ([clean, hover]) => {
   if (clean && !hover) dismissTimer = setTimeout(() => store.dismiss(), AUTO_DISMISS_MS)
 })
 
+// ---- leaving the page ---------------------------------------------------
+
+// Closing the tab kills in-flight requests; parsing is server side and survives.
+const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+  if (!isUploading.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
   stopSampling()
   if (dismissTimer) clearTimeout(dismissTimer)
 })

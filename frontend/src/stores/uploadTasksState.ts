@@ -182,13 +182,32 @@ export function summarizeItems(items: readonly UploadItem[]): UploadSummary {
   return summary
 }
 
-/** Queued items to start now so that no more than `concurrency` transfers run at once. */
-export function pickNextToStart<T extends UploadItem>(items: readonly T[], concurrency: number): T[] {
-  let running = items.filter(item => item.transfer === 'uploading').length
+/**
+ * Queued items to start now so that no more than `concurrency` transfers run
+ * at once. Items sharing a `conflictKey` with a running or just-picked item
+ * wait their turn, and the next free slot goes to a later item instead.
+ */
+export function pickNextToStart<T extends UploadItem>(
+  items: readonly T[],
+  concurrency: number,
+  conflictKey?: (item: T) => string,
+): T[] {
+  let running = 0
+  const busyKeys = new Set<string>()
+  for (const item of items) {
+    if (item.transfer !== 'uploading') continue
+    running++
+    if (conflictKey) busyKeys.add(conflictKey(item))
+  }
   const picked: T[] = []
   for (const item of items) {
     if (running >= concurrency) break
     if (item.transfer !== 'queued') continue
+    const key = conflictKey?.(item)
+    if (key !== undefined) {
+      if (busyKeys.has(key)) continue
+      busyKeys.add(key)
+    }
     picked.push(item)
     running++
   }

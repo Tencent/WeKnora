@@ -15,6 +15,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const phase = computed(() => itemPhase(props.item))
+/** Folder uploads repeat names like README.md; the subfolder tells them apart. */
+const folder = computed(() => props.item.relativePath.split('/').slice(0, -1).join('/'))
 const ratio = computed(() => (props.item.size > 0 ? props.item.loaded / props.item.size : 0))
 const bytes = (value: number) => formatFileSize(value) || '0 B'
 
@@ -95,7 +97,10 @@ const handleRowClick = () => {
       <t-icon :name="getFileIcon(item.name)" />
     </span>
     <span class="row-main">
-      <span class="row-name" :title="item.relativePath || item.name">{{ item.name }}</span>
+      <span class="row-name" :title="item.relativePath || item.name">
+        <span class="row-name-text">{{ item.name }}</span>
+        <span v-if="folder" class="row-name-folder">{{ folder }}</span>
+      </span>
       <span class="row-meta" :title="reason || undefined">{{ meta }}</span>
     </span>
     <span class="row-end">
@@ -160,7 +165,8 @@ const handleRowClick = () => {
   min-width: 0;
 }
 
-.row-name,
+.row-name-text,
+.row-name-folder,
 .row-meta {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -168,9 +174,26 @@ const handleRowClick = () => {
 }
 
 .row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
   color: var(--td-text-color-primary);
   font-size: var(--app-text-md);
   line-height: 20px;
+}
+
+.row-name-text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+// Gives way long before the file name does.
+.row-name-folder {
+  flex: 0 100 auto;
+  min-width: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
 }
 
 .row-meta {

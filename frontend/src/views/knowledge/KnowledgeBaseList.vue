@@ -1542,8 +1542,11 @@ const triggerHighlightFlash = (kbId: string) => {
 }
 
 const handleUploadFinishedEvent = (event: Event) => {
-  const detail = (event as CustomEvent<{ kbId?: string | number }>).detail
+  const detail = (event as CustomEvent<{ kbId?: string | number; settled?: boolean }>).detail
   if (!detail?.kbId) return
+  // Counts only need the batch's final refresh; a forced reload every couple
+  // of seconds mid-batch would also close any open card menu.
+  if (detail.settled === false) return
   if (uploadRefreshTimer) {
     clearTimeout(uploadRefreshTimer)
   }

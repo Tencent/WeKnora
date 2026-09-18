@@ -10,7 +10,7 @@ import {
 /**
  * The upload queue's behaviour — bounded concurrent transfers, cancel, retry
  * and polling the created rows until parsing settles — with the network and
- * timers injected, so stores/uploadTasks.ts only wires it to the API and Vue.
+ * timers injected, so the store only wires it to the API and Vue.
  *
  * `items` and `batches` are mutated in place (never reassigned) so a reactive
  * array handed in by the store stays the one the panel renders.
@@ -38,6 +38,23 @@ export interface KnowledgeStatusRow {
   error_message?: string
 }
 
+export interface TransferEnd {
+  /** The file reached the server, so the knowledge base has a new row. */
+  uploaded: boolean
+  /** Nothing is queued or uploading for this knowledge base any more. */
+  settled: boolean
+}
+
+export interface Timers {
+  setTimer: (fn: () => void, ms: number) => unknown
+  clearTimer: (handle: unknown) => void
+}
+
+export const defaultTimers: Timers = {
+  setTimer: (fn, ms) => setTimeout(fn, ms),
+  clearTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+}
+
 export interface UploadQueueDeps {
   concurrency: number
   pollIntervalMs: number
@@ -52,23 +69,28 @@ export interface UploadQueueDeps {
   ) => Promise<unknown>
   /** Current rows for the ids, or null when the request failed. */
   queryStatus: (kbId: string, knowledgeIds: string[]) => Promise<KnowledgeStatusRow[] | null>
-  /** A file reached the server, so its knowledge base's list has a new row. */
-  onUploaded: (kbId: string) => void
-  setTimer?: (fn: () => void, ms: number) => unknown
-  clearTimer?: (handle: unknown) => void
+  /** Called whenever a transfer ends, including one that outlived clear(). */
+  onTransferEnd: (kbId: string, end: TransferEnd) => void
+  timers?: Timers
 }
+
+/**
+ * Consecutive successful polls a row must be missing from before it counts as
+ * deleted, so one odd answer can't strand a live document as "Deleted".
+ */
+const MISSING_POLLS_BEFORE_DELETED = 3
 
 let idSeq = 0
 const nextId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`
 
 export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], deps: UploadQueueDeps) {
-  const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms))
-  const clearTimer = deps.clearTimer ?? (handle => clearTimeout(handle as ReturnType<typeof setTimeout>))
+  const { setTimer, clearTimer } = deps.timers ?? defaultTimers
 
   // File payloads and abort handles stay out of the (possibly reactive) items:
   // proxying a File buys nothing and the panel never renders them.
   const payloads = new Map<string, UploadPayload>()
   const controllers = new Map<string, AbortController>()
+  const missingPolls = new Map<string, number>()
   // Bumped by clear(), so work started before it cannot touch what comes after.
   let generation = 0
   let pollTimer: unknown = null
@@ -76,10 +98,18 @@ export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], d
   const batchOf = (item: UploadItem) => batches.find(batch => batch.id === item.batchId)
   const findItem = (id: string) => items.find(item => item.id === id)
 
+  const isBusy = (kbId: string) => items.some(item =>
+    (item.transfer === 'queued' || item.transfer === 'uploading') && batchOf(item)?.kbId === kbId)
+
   // ---- transfer -----------------------------------------------------------
 
+  // Identical files always have the same size. Keeping same-size files for one
+  // knowledge base out of flight together lets the server's content-hash dedup,
+  // which only sees rows already written, catch the second copy.
+  const dedupKey = (item: UploadItem) => `${batchOf(item)?.kbId}:${item.size}`
+
   const pump = () => {
-    for (const item of pickNextToStart(items, deps.concurrency)) void transfer(item)
+    for (const item of pickNextToStart(items, deps.concurrency, dedupKey)) void transfer(item)
   }
 
   const transfer = async (item: UploadItem) => {
@@ -103,34 +133,45 @@ export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], d
       }, controller.signal)
     } catch (error) {
       result = error
-    } finally {
-      controllers.delete(item.id)
     }
+    // A retry after a cancel starts a new attempt under the same id; only the
+    // latest attempt may write the item.
+    const latestAttempt = controllers.get(item.id) === controller
+    if (latestAttempt) controllers.delete(item.id)
+    const aborted = controller.signal.aborted
 
-    if (startedIn !== generation) return
-    // Cancelled mid-flight: the abort rejection carries nothing worth showing.
-    if (item.transfer !== 'uploading') {
-      pump()
+    // Outlived clear(): the row is gone from the panel, but a file that still
+    // made it (clear() lets fully sent files finish) is new in the list.
+    if (startedIn !== generation) {
+      if (!aborted && classifyUploadResult(result).kind === 'uploaded') {
+        deps.onTransferEnd(batch.kbId, { uploaded: true, settled: !isBusy(batch.kbId) })
+      }
       return
     }
+    if (!latestAttempt) return
 
-    const outcome = classifyUploadResult(result)
-    if (outcome.kind === 'uploaded') {
-      item.transfer = 'uploaded'
-      item.loaded = item.size
-      item.knowledgeId = outcome.knowledgeId
-      item.parseStatus = outcome.parseStatus || 'pending'
-      payloads.delete(item.id)
-      deps.onUploaded(batch.kbId)
-      schedulePoll()
-    } else if (outcome.kind === 'duplicate') {
-      item.transfer = 'duplicate'
-      item.knowledgeId = outcome.knowledgeId
-      payloads.delete(item.id)
+    if (aborted || item.transfer !== 'uploading') {
+      // Cancelled mid-flight; the abort rejection carries nothing worth showing.
+      if (item.transfer === 'uploading') item.transfer = 'cancelled'
     } else {
-      item.transfer = 'failed'
-      item.error = outcome.message
+      const outcome = classifyUploadResult(result)
+      if (outcome.kind === 'uploaded') {
+        item.transfer = 'uploaded'
+        item.loaded = item.size
+        item.knowledgeId = outcome.knowledgeId
+        item.parseStatus = outcome.parseStatus || 'pending'
+        payloads.delete(item.id)
+        schedulePoll()
+      } else if (outcome.kind === 'duplicate') {
+        item.transfer = 'duplicate'
+        item.knowledgeId = outcome.knowledgeId
+        payloads.delete(item.id)
+      } else {
+        item.transfer = 'failed'
+        item.error = outcome.message
+      }
     }
+    deps.onTransferEnd(batch.kbId, { uploaded: item.transfer === 'uploaded', settled: !isBusy(batch.kbId) })
     pump()
   }
 
@@ -162,7 +203,14 @@ export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], d
     if (itemPhase(item) === 'saving') return
     item.transfer = 'cancelled'
     item.loaded = 0
-    controllers.get(id)?.abort()
+    const controller = controllers.get(id)
+    if (controller) {
+      // Its transfer reports the end once the abort lands.
+      controller.abort()
+      return
+    }
+    const kbId = batchOf(item)?.kbId
+    if (kbId && !isBusy(kbId)) deps.onTransferEnd(kbId, { uploaded: false, settled: true })
   }
 
   const cancelAll = () => {
@@ -180,6 +228,19 @@ export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], d
 
   const retryFailed = () => {
     for (const item of items) retry(item.id)
+  }
+
+  /** Drop batches whose every file is searchable; anything with an issue stays. */
+  const pruneFinished = () => {
+    for (const batch of [...batches]) {
+      const own = items.filter(item => item.batchId === batch.id)
+      if (!own.every(item => itemPhase(item) === 'ready')) continue
+      for (const item of own) {
+        items.splice(items.indexOf(item), 1)
+        missingPolls.delete(item.id)
+      }
+      batches.splice(batches.indexOf(batch), 1)
+    }
   }
 
   // ---- parse polling ------------------------------------------------------
@@ -212,9 +273,15 @@ export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], d
           const byId = new Map(rows.map(row => [row.id, row]))
           for (const item of chunk) {
             const row = byId.get(item.knowledgeId!)
-            // Absent from a successful answer: deleted while we were watching.
-            item.parseStatus = row ? row.parse_status : 'deleted'
-            item.parseError = row?.error_message || undefined
+            if (!row) {
+              const misses = (missingPolls.get(item.id) ?? 0) + 1
+              missingPolls.set(item.id, misses)
+              if (misses >= MISSING_POLLS_BEFORE_DELETED) item.parseStatus = 'deleted'
+              continue
+            }
+            missingPolls.delete(item.id)
+            item.parseStatus = row.parse_status
+            item.parseError = row.error_message || undefined
           }
         }, () => {}))
       }
@@ -225,19 +292,78 @@ export function createUploadQueue(items: UploadItem[], batches: UploadBatch[], d
 
   // ---- lifecycle ----------------------------------------------------------
 
-  /** Forget everything, aborting transfers still running. */
+  /**
+   * Forget everything. Transfers still sending are aborted; ones whose body is
+   * fully sent are left to finish, since the server stores them regardless.
+   */
   const clear = () => {
     generation++
-    for (const controller of controllers.values()) controller.abort()
+    for (const item of items) {
+      if (itemPhase(item) !== 'saving') controllers.get(item.id)?.abort()
+    }
+    const busyKbs = new Set(items.filter(item => item.transfer === 'queued' || item.transfer === 'uploading')
+      .map(item => batchOf(item)?.kbId)
+      .filter((kbId): kbId is string => !!kbId))
     controllers.clear()
     payloads.clear()
+    missingPolls.clear()
     items.splice(0)
     batches.splice(0)
     if (pollTimer !== null) {
       clearTimer(pollTimer)
       pollTimer = null
     }
+    // Files that landed before the clear may still be waiting for a refresh.
+    for (const kbId of busyKbs) deps.onTransferEnd(kbId, { uploaded: false, settled: true })
   }
 
-  return { add, cancel, cancelAll, retry, retryFailed, pollNow, clear }
+  return { add, cancel, cancelAll, retry, retryFailed, pruneFinished, pollNow, clear }
+}
+
+/**
+ * Turns transfer ends into `knowledgeFileUploaded` refreshes: while a knowledge
+ * base still has work queued, at most one mid-batch (`settled: false`) refresh
+ * per `intervalMs`; once it settles, a single final (`settled: true`) one.
+ * Ends that settle within `coalesceMs` of each other (cancel-all aborting
+ * several requests) produce one final refresh.
+ */
+export function createListRefreshThrottle(
+  emit: (kbId: string, settled: boolean) => void,
+  intervalMs: number,
+  coalesceMs: number,
+  timers: Timers = defaultTimers,
+) {
+  const throttles = new Map<string, unknown>()
+  const pending = new Set<string>()
+  const finals = new Map<string, unknown>()
+
+  return (kbId: string, end: TransferEnd) => {
+    if (end.settled) {
+      const throttle = throttles.get(kbId)
+      if (throttle !== undefined) timers.clearTimer(throttle)
+      throttles.delete(kbId)
+      pending.delete(kbId)
+      if (finals.has(kbId)) return
+      finals.set(kbId, timers.setTimer(() => {
+        finals.delete(kbId)
+        emit(kbId, true)
+      }, coalesceMs))
+      return
+    }
+    if (!end.uploaded) return
+    if (throttles.has(kbId)) {
+      pending.add(kbId)
+      return
+    }
+    emit(kbId, false)
+    const tick = () => {
+      if (pending.delete(kbId)) {
+        emit(kbId, false)
+        throttles.set(kbId, timers.setTimer(tick, intervalMs))
+      } else {
+        throttles.delete(kbId)
+      }
+    }
+    throttles.set(kbId, timers.setTimer(tick, intervalMs))
+  }
 }

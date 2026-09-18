@@ -111,6 +111,18 @@ test('pickNextToStart fills free slots in queue order', () => {
   assert.deepEqual(pickNextToStart(items, 1), [])
 })
 
+test('pickNextToStart skips items whose conflict key is already in flight', () => {
+  const items = [
+    item({ transfer: 'uploading', size: 10 }),
+    item({ id: 'same-as-running', size: 10 }),
+    item({ id: 'first-of-pair', size: 20 }),
+    item({ id: 'second-of-pair', size: 20 }),
+    item({ id: 'free', size: 30 }),
+  ]
+  const bySize = (i: UploadItem) => String(i.size)
+  assert.deepEqual(pickNextToStart(items, 3, bySize).map(i => i.id), ['first-of-pair', 'free'])
+})
+
 test('classifyUploadResult reads success, duplicate rejections and failures', () => {
   assert.deepEqual(
     classifyUploadResult({ success: true, data: { id: 'k1', parse_status: 'pending' } }),

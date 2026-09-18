@@ -1176,16 +1176,18 @@ const handleFileUploaded = (event: CustomEvent) => {
   const uploadedKbId = event.detail.kbId;
   console.log('接收到文件上传事件，上传的知识库ID:', uploadedKbId, '当前知识库ID:', kbId.value);
   if (uploadedKbId && uploadedKbId === kbId.value && !isFAQ.value) {
-    // Reloading resets the list to its first page. While a batch is still
-    // uploading, don't yank a user who scrolled further; the batch's final
-    // (settled) event refreshes regardless.
-    if (event.detail.settled === false && page > 1) return;
+    // Mid-batch refreshes (settled === false) only bring new rows and folders
+    // in, and are skipped once the user scrolled past the first page because
+    // reloading resets the list to it. The batch's final event refreshes fully.
+    const midBatch = event.detail.settled === false;
+    if (midBatch && page > 1) return;
     console.log('匹配当前知识库，开始刷新文件列表');
     // 如果上传的文件属于当前知识库，使用 loadKnowledgeFiles 刷新文件列表
     resetPage(); // Reset page counter when reloading files after upload
     loadKnowledgeFiles(uploadedKbId);
-    loadTags(uploadedKbId);
     void loadFolderTree(uploadedKbId);
+    if (midBatch) return;
+    loadTags(uploadedKbId);
     // 启动几次探测，尽快让面包屑的"索引中"亮起。
     scheduleWikiStatusProbes();
   }
