@@ -189,6 +189,7 @@ var toolDisplayNames = map[string]string{
 	agenttools.ToolWriteSandboxFile:          "写入沙箱文件",
 	agenttools.ToolEditSandboxFile:           "编辑沙箱文件",
 	agenttools.ToolShellExec:                 "执行沙箱命令",
+	agenttools.ToolSearchSkills:              "查找技能",
 }
 
 // toolHintSensitiveArgs lists tools whose arguments should NOT be shown in hints

@@ -117,6 +117,9 @@ type agentService struct {
 	sandboxResolver      sandbox.TenantSandboxResolver
 	sandboxPinner        *SessionSandboxPinner
 	sandboxPolicy        WorkspaceSandboxPolicy
+	// skillSearch overrides the public registries search_skills asks; nil
+	// uses the default ones. Tests point it at a local server.
+	skillSearch *skillRegistrySearch
 }
 
 // NewAgentService creates a new agent service
@@ -209,6 +212,9 @@ func (s *agentService) CreateAgentEngine(
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
+	// Before the shell: shell_exec's note on a shell-fetched skill points at
+	// the install card only when search_skills is there to produce one.
+	s.registerSkillSearch(ctx, toolRegistry, config)
 
 	// Register the shell first: file discovery needs a separate tool only
 	// when no shell is available. File access still follows the sandbox
@@ -824,13 +830,78 @@ func (s *agentService) registerSandboxShellTool(
 	}
 	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
 		resolver := s.userEnvResolver(ctx, config)
-		toolRegistry.RegisterTool(
-			tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config)),
-		)
+		shell := tools.NewShellExecTool(executor, resolver).WithEnvCapture(s.skillEnvCapture(config))
+		if tool, err := toolRegistry.GetTool(tools.ToolSearchSkills); err == nil {
+			if search, ok := tool.(*tools.SearchSkillsTool); ok {
+				shell.WithSkillInstallCard(search.Target())
+			}
+		}
+		toolRegistry.RegisterTool(shell)
 		logger.Infof(ctx, "Registered shell_exec tool")
 	} else {
 		logger.Infof(ctx, "Sandbox backend does not advertise remote shell capability; shell_exec not registered")
 	}
+}
+
+// registerSkillSearch offers search_skills when a skill installed from its
+// card could be used in this conversation: the client renders the cards,
+// skills are on for this agent, and the run boots a sandbox config for the
+// install to land on. The installer agent and shared agents never get it -
+// one installs rather than recommends, the other must not steer a write into
+// a workspace it only borrows from.
+func (s *agentService) registerSkillSearch(
+	ctx context.Context, toolRegistry *tools.ToolRegistry, config *types.AgentConfig,
+) {
+	if config == nil || !config.SkillInstallCards || !config.SkillsEnabled ||
+		config.SkillInstallMode() || config.SharedAgentReadOnly {
+		return
+	}
+	configID := strings.TrimSpace(config.SkillSandboxConfigID)
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	if configID == "" || tenantID == 0 {
+		return
+	}
+	search := s.skillSearch
+	if search == nil {
+		search = newSkillRegistrySearch(nil)
+	}
+	finder := &runSkillFinder{
+		registry: search,
+		preview: func(ctx context.Context, source string) (*SkillBundle, error) {
+			bundle, _, err := fetchNormalizedSkillBundle(ctx, source, search.fetchClient)
+			return bundle, err
+		},
+		tenantID: tenantID,
+		configID: configID,
+	}
+	target := tools.SkillInstallTarget{
+		SandboxConfigID: configID,
+		// A non-empty AllowedSkills is the agent's "selected skills" mode;
+		// @skill mentions pin without narrowing it.
+		SelectsSkills: len(config.AllowedSkills) > 0,
+	}
+	if s.db != nil {
+		finder.inventory = repository.NewTenantSkillRepository(s.db)
+		target.NewSessionsOnly = s.skillRolloutNewSessionsOnly(ctx, tenantID, configID)
+	}
+	toolRegistry.RegisterTool(tools.NewSearchSkillsTool(finder, target))
+	logger.Infof(ctx, "Registered search_skills for sandbox config %s", configID)
+}
+
+// skillRolloutNewSessionsOnly reads whether the config keeps running sessions
+// on their image after a skill change, which decides what a card promises. A
+// config that cannot be read is treated as the default next-turn rollout,
+// matching RebuildsExistingOnSkillChange.
+func (s *agentService) skillRolloutNewSessionsOnly(ctx context.Context, tenantID uint64, configID string) bool {
+	cfg, err := repository.NewTenantSandboxConfigRepository(s.db).GetByID(ctx, tenantID, configID)
+	if err != nil {
+		logger.Warnf(ctx, "[skill] read sandbox config %s rollout for search_skills failed: %v", configID, err)
+		return false
+	}
+	if cfg == nil || cfg.Config == nil {
+		return false
+	}
+	return !cfg.Config.RebuildsExistingOnSkillChange()
 }
 
 // registerTools registers tools based on the agent configuration

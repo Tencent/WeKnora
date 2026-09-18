@@ -315,6 +315,7 @@ func (s *sessionService) buildAgentConfig(
 		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
+		SkillInstallCards:           req.SkillInstallCards,
 	}
 
 	// Falls back to global configuration if no specific timeout is set for the agent.
@@ -336,6 +337,7 @@ func (s *sessionService) buildAgentConfig(
 		sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
 	)
 	agentConfig.TenantSkills = tenantSkills
+	agentConfig.SkillSandboxConfigID = skillConfigID
 	if len(tenantSkills) > 0 {
 		// The config named here is the one the skills came from, which is the
 		// pinned one whenever it differs from the agent's - the only case the

@@ -62,5 +62,8 @@ export function getAgentToolIconName(
   if (toolName === 'execute_skill_script') {
     return 'code'
   }
+  if (toolName === 'search_skills') {
+    return 'app'
+  }
   return 'file-paste'
 }

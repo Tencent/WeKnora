@@ -36,3 +36,21 @@ func TestArtifactGuidanceUsesConfiguredOutputDirectory(t *testing.T) {
 	require.Contains(t, guidance, "/workspace/deliverables is the only directory collected for download")
 	require.NotContains(t, guidance, "/workspace/output is the only directory collected")
 }
+
+// A skill fetched in the sandbox is not installed; the guidance says so, and
+// sends install requests to the card when search_skills is there.
+func TestSkillInstallGuidanceFollowsTheInstallCard(t *testing.T) {
+	withCard := formatToolGuidance([]string{"shell_exec", "search_skills"})
+	require.Contains(t, withCard, "only loads it for this session")
+	require.Contains(t, withCard, "call search_skills with its source")
+	require.Contains(t, withCard, "say it is temporary")
+
+	withoutCard := formatToolGuidance([]string{"shell_exec"})
+	require.Contains(t, withoutCard, "only loads it for this session")
+	require.Contains(t, withoutCard, "skill settings")
+	require.NotContains(t, withoutCard, "search_skills")
+
+	require.NotContains(t, formatToolGuidanceForMode([]string{"shell_exec"}, true), "only loads it for this session",
+		"the installer agent is the one path that does install")
+	require.NotContains(t, formatToolGuidance([]string{"read_file"}), "search_skills")
+}

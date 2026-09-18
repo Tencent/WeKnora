@@ -119,6 +119,9 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	if rc.steerSink != nil {
 		req.SteerSink = rc.steerSink
 	}
+	// Embed visitors and API keys reach this handler too; only a console
+	// user sees the cards, and only a console admin can act on them.
+	req.SkillInstallCards = rc.session != nil && !types.SessionRequiresAdminConsoleRead(rc.session, "")
 	return req
 }
 

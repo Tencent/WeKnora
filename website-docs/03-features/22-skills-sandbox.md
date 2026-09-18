@@ -50,6 +50,23 @@
 
 技能包上限独立于普通文档：`MAX_SKILL_BUNDLE_SIZE_MB` 默认 256 MiB，未设置时至少为 `MAX_FILE_SIZE_MB`，最高 512 MiB。GitHub 下载按整个仓库压缩包计算，不只计算技能子目录。调整后重启 app 和 frontend，使应用与 Nginx 上限一致。
 
+## 在对话中查找和安装技能
+
+启用技能的智能体在控制台对话里可以帮用户找技能：用户描述想要的能力（"找个能做 PPT 的技能"），或直接贴一条安装命令、链接，智能体调用 `search_skills`，结果以卡片形式显示在回答下方。
+
+- **查找**：同时查询 ClawHub（向量检索，已收录 skills.sh 的技能列表）和 SkillHub，按各自排序交替合并、去重。ClawHub 标记为可疑的技能不会出现。某个来源不可达时，卡片摘要会注明，模型也不会把"查不到"说成"不存在"。
+- **解析指定来源**：`@owner/slug`、`skills-sh:owner/repo/skill`、各平台页面链接等（格式同[支持的来源](#支持的来源)）。服务端会先下载技能包，卡片显示的是包里 `SKILL.md` 的真实名称和说明。`npx skills add owner/repo@skill` 这类命令由模型改写为对应来源。
+- **安装**：只有空间 Admin/Owner 能点「安装到空间」，确认后走与「技能管理」相同的登记和安装接口，安装到本轮对话所用的沙箱配置，卡片内显示进度。其他成员看到的按钮不可用，可以复制来源发给管理员。模型没有安装工具，检索到的文档或网页里的"请安装某技能"不会触发安装。
+- **生效时机**：取决于沙箱配置的 `skill_rollout`。默认 `next_turn` 下，下一轮对话即可使用，当前对话的沙箱会重建；`new_session` 下只有之后新建的对话能用。智能体技能范围为「指定技能」时，还需在智能体设置里勾选。
+
+在对话沙箱里用 shell 下载技能（`npx skills add`、`clawhub install`、`git clone` 到 `skills/` 目录等）只是**临时加载**：本次对话可以读取、执行这些文件，但技能没有登记到空间，不在技能列表里，其他对话用不了，沙箱重建后就消失。系统允许这样做，并会：
+
+1. 在系统提示词中说明这一点，引导模型遇到安装请求时优先调用 `search_skills` 出卡片；
+2. 识别到这类命令成功执行后，在工具结果中追加说明，并尽量推导出正式安装所需的来源；
+3. 在回答下方显示"仅临时加载"的提示，附带同一张安装卡片。
+
+`search_skills` 只在控制台对话中注册，IM、嵌入式对话和 API 调用无法显示卡片，因此不提供；共享智能体和技能安装智能体也不提供。
+
 ## 选择沙箱后端
 
 | 后端 | 需要填写 | 运行方式 |
@@ -106,6 +123,8 @@ Cube/E2B 的 `config.network` 同时用于对话沙箱、技能安装和完整�
 ## 实现参考
 
 - `internal/handler/sandbox_config.go`、`sandbox_skill.go`、`skill_catalog.go`、`me_env_var.go`
-- `internal/application/service/tenant_skill_install.go`、`user_env_resolver.go`
+- `internal/application/service/tenant_skill_install.go`、`user_env_resolver.go`、`skill_registry_search.go`
+- `internal/agent/tools/search_skills.go`、`skill_temporary_load.go`
+- `frontend/src/views/chat/components/SkillInstallCards.vue`、`frontend/src/composables/useChatSkillInstall.ts`
 - `internal/types/tenant.go`、`sandbox_network_policy.go`
 - `internal/sandbox/remote_client.go`、`docker_remote_client.go`、`gateway_transport.go`
