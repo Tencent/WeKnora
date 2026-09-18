@@ -1617,7 +1617,9 @@ const processConfigLines = computed<string[]>(() => {
                       </span>
                     </div>
                     <span v-if="barOffsetPct(row.node) !== null && barOffsetMs(row.node) > 0"
-                      class="kp-bar-offset kp-mono" :style="{ left: barOffsetPct(row.node) + '%' }">
+                      class="kp-bar-offset kp-mono"
+                      :style="{ '--kp-offset-position': barOffsetPct(row.node) + '%' }"
+                      :title="'+' + formatDuration(barOffsetMs(row.node))">
                       +{{ formatDuration(barOffsetMs(row.node)) }}
                     </span>
                   </template>
@@ -2565,12 +2567,18 @@ const processConfigLines = computed<string[]>(() => {
 
 .kp-bar-offset {
   position: absolute;
-  bottom: -1px;
+  bottom: 0;
+  /* Keep the offset centered on its start time where space allows, then
+     clamp the label inside the chart instead of letting it cover duration. */
+  left: clamp(0px, calc(var(--kp-offset-position) - 45px), max(0px, calc(100% - 90px)));
+  width: min(90px, 100%);
+  line-height: 11px;
   font-size: 9px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--td-text-color-placeholder);
-  pointer-events: none;
   white-space: nowrap;
-  transform: translateX(-50%);
   opacity: 0;
   transition: opacity var(--app-motion-fast) ease;
 }
