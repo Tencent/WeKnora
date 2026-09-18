@@ -124,6 +124,7 @@ func (e *AgentEngine) runCompaction(
 		"degraded":      result.Degraded,
 	})
 	e.emitContextCompacted(ctx, result, round)
+	e.saveContextCheckpoint(ctx, result.Checkpoint, round)
 
 	// The usage baseline described the pre-compaction context; keeping it
 	// would have the next round estimate against history that no longer
@@ -919,6 +920,7 @@ func redactHistoryKBResults(llmContext []chat.Message) []chat.Message {
 				Content:    "[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]",
 				ToolCallID: msg.ToolCallID,
 				Name:       msg.Name,
+				TurnID:     msg.TurnID,
 			})
 		} else {
 			redacted = append(redacted, msg)

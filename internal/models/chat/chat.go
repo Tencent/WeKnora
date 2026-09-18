@@ -93,6 +93,12 @@ type Message struct {
 	// providers reject unknown message fields on some endpoints, and this one
 	// means nothing to them anyway.
 	Kind MessageKind `json:"-"`
+	// TurnID is the stored assistant message whose turn this history message
+	// was replayed from. It is empty for the live turn and for messages the
+	// engine synthesized. Compaction uses it to tell whether a summary ends
+	// exactly on a stored turn, the only kind it can persist for later turns.
+	// Engine-internal like Kind, and kept off the wire for the same reason.
+	TurnID string `json:"-"`
 }
 
 // ToolCall represents a tool call in a message

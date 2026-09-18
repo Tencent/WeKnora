@@ -33,6 +33,9 @@ type Preparation struct {
 	PreviousSummary string
 	TokensBefore    int
 	fileOps         fileOps
+	// storedTurnID is the stored turn MessagesToSummarize ends exactly on, or
+	// "" when it ends inside a turn or reaches into the live one.
+	storedTurnID string
 }
 
 // Prepare picks the cut point and collects the message ranges around it.
@@ -89,7 +92,42 @@ func Prepare(messages []chat.Message, s Settings, estimator *agenttoken.Estimato
 		PreviousSummary:     previousSummary,
 		TokensBefore:        estimator.EstimateMessages(messages),
 		fileOps:             extractFileOps(previousSummary, toSummarize, turnPrefix),
+		storedTurnID:        storedTurnEndingAt(messages, historyEnd),
 	}
+}
+
+// checkpoint returns the history summary as a Checkpoint when it ends exactly
+// on a stored turn. The turn-prefix summary is left out: it describes part of a
+// turn the next turn replays verbatim. Nothing newly summarized means the
+// previous checkpoint still stands, and a raw archive is not worth keeping
+// past the turn that needed it — the next turn retries the summarizer instead.
+func (p *Preparation) checkpoint(history string, degraded bool) *Checkpoint {
+	if p.storedTurnID == "" || len(p.MessagesToSummarize) == 0 || degraded {
+		return nil
+	}
+	ops := extractFileOps(p.PreviousSummary, p.MessagesToSummarize)
+	return &Checkpoint{TurnID: p.storedTurnID, Summary: history + ops.format()}
+}
+
+// storedTurnEndingAt returns the stored turn that ends immediately before end,
+// or "" if the message there is live or the same turn continues past end.
+//
+// Stored history always precedes the live turn, so a tagged message just
+// before end means everything since the previous summary is stored history
+// too, and the previous summary itself covered nothing live: a cut inside the
+// live turn leaves only live messages after it.
+func storedTurnEndingAt(messages []chat.Message, end int) string {
+	if end <= 0 || end > len(messages) {
+		return ""
+	}
+	turnID := messages[end-1].TurnID
+	if turnID == "" {
+		return ""
+	}
+	if end < len(messages) && messages[end].TurnID == turnID {
+		return ""
+	}
+	return turnID
 }
 
 // Apply rebuilds the message list as system prompt, summary, and the verbatim

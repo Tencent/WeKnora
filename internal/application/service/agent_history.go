@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -44,6 +46,12 @@ var agentHistoryThinkTagRegex = regexp.MustCompile(`(?s)<think>.*?</think>`)
 // Turns lacking either user or assistant content are skipped. The newest
 // maxRounds turns are returned in chronological order.
 //
+// When a turn carries a context checkpoint (a compaction summary persisted by
+// an earlier run), history starts from it: the summary replaces that turn and
+// everything before it, and only later turns are replayed. Every replayed
+// message is tagged with its turn's assistant message ID so this run's
+// compaction can persist a new checkpoint in turn.
+//
 // DB is treated as the single source of truth — there is no Redis/in-memory
 // cache layer above this function. Callers are expected to invoke it once
 // per turn before handing the messages to the agent engine.
@@ -70,20 +78,11 @@ func LoadAgentHistory(
 		return []chat.Message{}, nil
 	}
 
-	// A turn is not always one user message. Mid-run steering persists every
-	// injected message under the running turn's request ID, so a turn can be
-	// user → tools → user → tools → answer. Keeping only the last user row
-	// would drop the original question from the next turn's context.
-	type turn struct {
-		users     []*types.Message
-		assistant *types.Message
-		createdAt time.Time
-	}
-	turns := make(map[string]*turn)
+	turns := make(map[string]*agentHistoryTurn)
 	for _, msg := range rows {
 		t, ok := turns[msg.RequestID]
 		if !ok {
-			t = &turn{}
+			t = &agentHistoryTurn{}
 			turns[msg.RequestID] = t
 		}
 		switch msg.Role {
@@ -97,7 +96,7 @@ func LoadAgentHistory(
 		}
 	}
 
-	completeTurns := make([]*turn, 0, len(turns))
+	completeTurns := make([]*agentHistoryTurn, 0, len(turns))
 	for _, t := range turns {
 		if len(t.users) > 0 && t.assistant != nil && t.assistant.IsCompleted {
 			sort.SliceStable(t.users, func(i, j int) bool {
@@ -111,16 +110,91 @@ func LoadAgentHistory(
 		return completeTurns[i].createdAt.Before(completeTurns[j].createdAt)
 	})
 
+	summary := ""
+	if checkpoint := loadContextCheckpoint(ctx, messageRepo, sessionID); checkpoint != nil {
+		completeTurns = turnsAfterCheckpoint(completeTurns, checkpoint)
+		summary = checkpoint.ContextCheckpoint.Summary
+		logger.Infof(ctx, "Agent history resumes from the context checkpoint on %s, %d turn(s) after it",
+			checkpoint.ID, len(completeTurns))
+	}
+
 	if len(completeTurns) > maxRounds {
 		completeTurns = completeTurns[len(completeTurns)-maxRounds:]
 	}
 
-	out := make([]chat.Message, 0, len(completeTurns)*4)
+	out := make([]chat.Message, 0, len(completeTurns)*4+1)
+	if summary != "" {
+		out = append(out, compaction.SummaryMessage(summary))
+	}
 	for _, t := range completeTurns {
+		start := len(out)
 		out = append(out, buildUserHistoryMessage(t.users[0]))
 		out = append(out, buildTurnBodyMessages(t.assistant, t.users[1:])...)
+		for i := start; i < len(out); i++ {
+			out[i].TurnID = t.assistant.ID
+		}
 	}
 	return out, nil
+}
+
+// agentHistoryTurn is one stored turn. A turn is not always one user message.
+// Mid-run steering persists every injected message under the running turn's
+// request ID, so a turn can be user → tools → user → tools → answer. Keeping
+// only the last user row would drop the original question from the next
+// turn's context.
+type agentHistoryTurn struct {
+	users     []*types.Message
+	assistant *types.Message
+	createdAt time.Time
+}
+
+// loadContextCheckpoint returns the session's newest usable checkpoint, or nil.
+// A failed lookup degrades to history without one: the turn still runs, it
+// just pays for compaction again.
+func loadContextCheckpoint(
+	ctx context.Context, messageRepo interfaces.MessageRepository, sessionID string,
+) *types.Message {
+	msg, err := messageRepo.GetLatestContextCheckpoint(ctx, sessionID)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to load the context checkpoint of session %s, "+
+			"loading history without it: %v", sessionID, err)
+		return nil
+	}
+	if msg == nil || msg.ContextCheckpoint == nil || strings.TrimSpace(msg.ContextCheckpoint.Summary) == "" {
+		return nil
+	}
+	return msg
+}
+
+// turnsAfterCheckpoint drops the turns a checkpoint already covers: its own
+// turn and every turn before it. A checkpoint older than the loaded window is
+// matched by time instead, which keeps every loaded turn.
+func turnsAfterCheckpoint(turns []*agentHistoryTurn, checkpoint *types.Message) []*agentHistoryTurn {
+	for i, t := range turns {
+		if t.assistant.ID == checkpoint.ID {
+			return turns[i+1:]
+		}
+	}
+	after := make([]*agentHistoryTurn, 0, len(turns))
+	for _, t := range turns {
+		if t.createdAt.After(checkpoint.CreatedAt) {
+			after = append(after, t)
+		}
+	}
+	return after
+}
+
+// messageCheckpointSink persists the engine's compaction checkpoints onto the
+// session's assistant messages, where LoadAgentHistory reads them back.
+type messageCheckpointSink struct {
+	repo      interfaces.MessageRepository
+	sessionID string
+}
+
+func (s messageCheckpointSink) SaveContextCheckpoint(
+	ctx context.Context, turnMessageID string, checkpoint *types.ContextCheckpoint,
+) error {
+	return s.repo.UpdateMessageContextCheckpoint(ctx, s.sessionID, turnMessageID, checkpoint)
 }
 
 // buildTurnBodyMessages replays one turn's assistant work with any mid-run

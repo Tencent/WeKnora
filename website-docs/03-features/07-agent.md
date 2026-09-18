@@ -514,13 +514,17 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 
 若压缩后仍超预算，最后才裁短工具结果，工具结果预算取窗口的 20%，限制在 8192–32768 Token。没有可压缩内容或释放空间不足 5% 时，记下当前消息数量，避免在同一上下文大小反复花费模型调用。成功压缩会清除旧 usage 基线，并发出 context_compacted 事件，包含前后 Token/消息数、原因、split_turn 与 degraded。
 
+**压缩点持久化**。当摘要的历史部分恰好结束在某个已落库轮次的末尾时，引擎把这段摘要作为压缩点（`messages.context_checkpoint`）写回该轮的 assistant 消息，下一轮直接从它开始，不再对同一段历史重复摘要。历史消息在重建时带上所属轮次的 assistant 消息 ID（`chat.Message.TurnID`，不上线），据此判断切点是否落在轮次边界。以下情况不写压缩点：切点落在某个已落库轮次内部（例如停在追加消息处）；摘要只覆盖当前轮；历史摘要回退成了原始归档（degraded）。切分轮前半段的摘要不写入压缩点，因为该轮下次会被完整重放。写入只更新这一列，失败时仅记日志，不影响本轮。压缩点存在被覆盖的那一轮上，所以会话分叉复制该轮时会一起复制，删除该轮时压缩点也随之失效。
+
 提供商报告上下文超限（错误或响应截断判据）时，还可强制压缩并重试一次。仅因生成耗尽 completion 预算的截断不应误判成上下文超限。具体提供商错误识别见 `internal/agent/compaction/overflow.go`。
 
 #### 会话历史（agent_history） {#_4-3-会话历史-agent-history}
 
 跨轮历史由 `LoadAgentHistory`（`internal/application/service/agent_history.go`）每轮从 messages 表重建（DB 是唯一事实来源，无 Redis/内存缓存）：
 
-- 取 `HistoryTurns × 4`（最低 50）条原始消息，按 `RequestID` 配对 user/assistant，只保留 assistant 已完成（`IsCompleted`）的完整轮，按时间排序取最近 `HistoryTurns` 轮；
+- 取 `HistoryTurns × 4`（最低 50）条原始消息，按 `RequestID` 配对 user/assistant，只保留 assistant 已完成（`IsCompleted`）的完整轮，按时间排序；
+- 会话中存在压缩点（见[上下文压缩与溢出恢复](#_4-2-上下文压缩与溢出恢复)）时，取最新的一个：它所在的轮及更早的轮由一条摘要消息代替，放在历史最前面，之后的轮原样重放。压缩点早于本次读取范围时按时间判断，读到的轮都在它之后。压缩点查询失败时退回无压缩点的历史；
+- 再取最近 `HistoryTurns` 轮。这个上限只约束压缩点之后原样重放的轮，不包括摘要；
 - 每轮展开为：user 消息（含图片 caption 与附件 prompt；忽略 `RenderedContent` 快照，避免将旧渲染协议带入上下文）→ 每个含工具调用的 `AgentStep` 展开为 assistant(with tool_calls) + 若干 tool 消息 → 末尾一条规范化最终答案 assistant 消息（剥离 `<think>` 块）；
 - 历史中的 tool 消息内容用 `CompactToolOutputForHistory`（`internal/agent/tools/persist.go`）压缩：带 `display_type` 的大载荷（如 `knowledge_chunks_list` 的 chunks、`grep_results` 的 chunk_results）替换为一行摘要（如 `"Listed 20/87 chunks from X (content omitted from history)"`）。
 

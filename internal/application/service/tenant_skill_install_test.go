@@ -3206,8 +3206,9 @@ func (e *installAgentEngine) Execute(
 	}
 	return &types.AgentState{IsComplete: true}, nil
 }
-func (e *installAgentEngine) SetMemoryPrompt(string)            {}
-func (e *installAgentEngine) SetSteerSink(sink types.SteerSink) { e.sink = sink }
+func (e *installAgentEngine) SetMemoryPrompt(string)                               {}
+func (e *installAgentEngine) SetSteerSink(sink types.SteerSink)                    { e.sink = sink }
+func (e *installAgentEngine) SetContextCheckpointSink(types.ContextCheckpointSink) {}
 
 type installSessionService struct {
 	fx *installFixture

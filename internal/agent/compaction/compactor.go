@@ -59,6 +59,18 @@ type Result struct {
 	// SplitTurn reports that the cut divided a single turn, so a turn-prefix
 	// summary was generated alongside the history summary.
 	SplitTurn bool
+	// Checkpoint is the part of this compaction a later turn can start from,
+	// or nil when there is none (see Preparation.checkpoint).
+	Checkpoint *Checkpoint
+}
+
+// Checkpoint is a summary that ends exactly on a stored turn. Persisted onto
+// that turn, it lets the next turn load the summary in place of everything up
+// to and including the turn, instead of summarizing the same history again.
+type Checkpoint struct {
+	// TurnID is the stored turn the summary covers through, inclusive.
+	TurnID  string
+	Summary string
 }
 
 // Freed is how much room the compaction actually recovered. A non-positive
@@ -104,7 +116,8 @@ func (c *Compactor) Compact(
 		return nil, ErrNothingToCompact
 	}
 
-	summary, degraded := c.buildSummary(ctx, prep)
+	history, historyDegraded := c.summarizeHistory(ctx, prep)
+	summary, prefixDegraded := c.appendTurnPrefix(ctx, prep, history)
 	summary += prep.fileOps.format()
 	compacted := Apply(messages, prep, summary)
 
@@ -116,51 +129,52 @@ func (c *Compactor) Compact(
 		TokensAfter:    c.estimator.EstimateMessages(compacted),
 		MessagesBefore: len(messages),
 		MessagesAfter:  len(compacted),
-		Degraded:       degraded,
+		Degraded:       historyDegraded || prefixDegraded,
 		SplitTurn:      prep.IsSplitTurn,
+		Checkpoint:     prep.checkpoint(history, historyDegraded),
 	}, nil
 }
 
-// buildSummary produces the checkpoint text, falling back to a raw archive for
-// any part the summarizer could not produce.
-func (c *Compactor) buildSummary(ctx context.Context, p *Preparation) (string, bool) {
+// summarizeHistory folds the complete turns being dropped into the previous
+// summary, falling back to a raw archive when the summarizer fails.
+func (c *Compactor) summarizeHistory(ctx context.Context, p *Preparation) (string, bool) {
+	if len(p.MessagesToSummarize) == 0 {
+		return p.PreviousSummary, false
+	}
+	instructions := initialSummarizationInstructions
+	if p.PreviousSummary != "" {
+		instructions = updateSummarizationInstructions
+	}
+	text, err := c.summarize(
+		ctx, p.MessagesToSummarize, p.PreviousSummary, instructions, c.settings.summaryBudget(),
+	)
+	if err != nil {
+		// The previous summary is still the best record of everything
+		// before this span, so the archive is appended to it rather than
+		// replacing it.
+		return joinNonEmpty(p.PreviousSummary, rawArchive(p.MessagesToSummarize)), true
+	}
+	return text, false
+}
+
+// appendTurnPrefix adds the summary of a split turn's discarded head, so the
+// retained tail still has its originating request.
+func (c *Compactor) appendTurnPrefix(ctx context.Context, p *Preparation, history string) (string, bool) {
+	if !p.IsSplitTurn || len(p.TurnPrefixMessages) == 0 {
+		return history, false
+	}
 	degraded := false
-
-	history := p.PreviousSummary
-	if len(p.MessagesToSummarize) > 0 {
-		instructions := initialSummarizationInstructions
-		if p.PreviousSummary != "" {
-			instructions = updateSummarizationInstructions
-		}
-		text, err := c.summarize(
-			ctx, p.MessagesToSummarize, p.PreviousSummary, instructions, c.settings.summaryBudget(),
-		)
-		if err != nil {
-			degraded = true
-			// The previous summary is still the best record of everything
-			// before this span, so the archive is appended to it rather than
-			// replacing it.
-			history = joinNonEmpty(p.PreviousSummary, rawArchive(p.MessagesToSummarize))
-		} else {
-			history = text
-		}
+	prefix, err := c.summarize(
+		ctx, p.TurnPrefixMessages, "", turnPrefixInstructions, c.settings.turnPrefixBudget(),
+	)
+	if err != nil {
+		degraded = true
+		prefix = rawArchive(p.TurnPrefixMessages)
 	}
-
-	if p.IsSplitTurn && len(p.TurnPrefixMessages) > 0 {
-		prefix, err := c.summarize(
-			ctx, p.TurnPrefixMessages, "", turnPrefixInstructions, c.settings.turnPrefixBudget(),
-		)
-		if err != nil {
-			degraded = true
-			prefix = rawArchive(p.TurnPrefixMessages)
-		}
-		if history == "" {
-			history = "No prior history."
-		}
-		history += splitTurnSeparator + prefix
+	if history == "" {
+		history = "No prior history."
 	}
-
-	return history, degraded
+	return history + splitTurnSeparator + prefix, degraded
 }
 
 // summarize runs one summarization call with retries.

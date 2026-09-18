@@ -61,7 +61,10 @@ type AgentEngine struct {
 	// reported it could free nothing. Below that count the answer has not
 	// changed, so there is no reason to spend another summarization call.
 	compactionExhaustedAt int
-	modelContext          *modelcontext.Registry // single request-local boundary for every model handle
+	// checkpointSink, when set, persists compactions that end on a stored
+	// turn so later turns start from them. Nil keeps compaction turn-local.
+	checkpointSink types.ContextCheckpointSink
+	modelContext   *modelcontext.Registry // single request-local boundary for every model handle
 	// steerSink, when set, lets users append messages into the running turn.
 	// Drained at every round boundary; nil disables mid-run injection.
 	steerSink         types.SteerSink

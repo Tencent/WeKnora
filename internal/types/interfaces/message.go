@@ -106,6 +106,15 @@ type MessageRepository interface {
 	UpdateMessageImages(ctx context.Context, sessionID, messageID string, images types.MessageImages) error
 	// UpdateMessageRenderedContent updates the rendered_content column for a user message
 	UpdateMessageRenderedContent(ctx context.Context, sessionID, messageID string, renderedContent string) error
+	// UpdateMessageContextCheckpoint writes only the context_checkpoint column
+	// of an assistant message.
+	UpdateMessageContextCheckpoint(
+		ctx context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
+	) error
+	// GetLatestContextCheckpoint returns the newest assistant message in the
+	// session that carries a context checkpoint, projected to the columns
+	// history loading needs, or nil when there is none.
+	GetLatestContextCheckpoint(ctx context.Context, sessionID string) (*types.Message, error)
 	// DeleteMessage deletes a message
 	DeleteMessage(ctx context.Context, sessionID string, id string) error
 	// DeleteMessagesBySessionID deletes all messages belonging to a session

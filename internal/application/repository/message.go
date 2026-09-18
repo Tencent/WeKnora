@@ -406,6 +406,38 @@ func (r *messageRepository) UpdateMessageRenderedContent(ctx context.Context, se
 		Update("rendered_content", renderedContent).Error
 }
 
+// UpdateMessageContextCheckpoint updates only the context_checkpoint column, so
+// it cannot race a full-row write of the same message.
+func (r *messageRepository) UpdateMessageContextCheckpoint(
+	ctx context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
+) error {
+	return r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Where("id = ? AND session_id = ? AND role = ?", messageID, sessionID, "assistant").
+		Update("context_checkpoint", checkpoint).Error
+}
+
+// GetLatestContextCheckpoint returns the newest checkpointed assistant message.
+// Only the identity and ordering columns come back with the checkpoint: the
+// caller matches it against turns it has already loaded.
+func (r *messageRepository) GetLatestContextCheckpoint(
+	ctx context.Context, sessionID string,
+) (*types.Message, error) {
+	var messages []*types.Message
+	if err := r.db.WithContext(ctx).
+		Select("id", "session_id", "request_id", "role", "created_at", "context_checkpoint").
+		Where("session_id = ? AND role = ? AND context_checkpoint IS NOT NULL", sessionID, "assistant").
+		Order("created_at DESC, id DESC").
+		Limit(1).
+		Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if len(messages) == 0 {
+		return nil, nil
+	}
+	return messages[0], nil
+}
+
 // DeleteMessagesBySessionID deletes all messages belonging to a session (soft delete)
 func (r *messageRepository) DeleteMessagesBySessionID(ctx context.Context, sessionID string) error {
 	return r.db.WithContext(ctx).Where("session_id = ?", sessionID).Delete(&types.Message{}).Error

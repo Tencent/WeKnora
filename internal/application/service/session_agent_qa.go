@@ -241,6 +241,13 @@ func (s *sessionService) AgentQA(
 		engine.SetSteerSink(req.SteerSink)
 	}
 
+	// A compaction that ends on a stored turn is written back onto it, so the
+	// next turn loads the summary instead of summarizing the same history
+	// again. Without multi-turn there is no stored history to end on.
+	if agentConfig.MultiTurnEnabled {
+		engine.SetContextCheckpointSink(messageCheckpointSink{repo: s.messageRepo, sessionID: sessionID})
+	}
+
 	agentQuery := req.Query
 	var agentImageURLs []string
 	if agentModelSupportsVision && len(req.ImageURLs) > 0 {

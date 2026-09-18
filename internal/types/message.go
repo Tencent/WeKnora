@@ -410,6 +410,11 @@ type Message struct {
 	// failed checkpoint must never block the reply). A message without a
 	// checkpoint cannot serve as a fork point with sandbox state.
 	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb"`
+	// ContextCheckpoint is the agent compaction summary covering this turn
+	// and every turn before it (see ContextCheckpoint). Assistant messages
+	// only; nil unless a later turn's compaction ended exactly here. Internal
+	// to history loading, so it stays out of API responses.
+	ContextCheckpoint *ContextCheckpoint `json:"-" gorm:"type:jsonb;column:context_checkpoint"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp
