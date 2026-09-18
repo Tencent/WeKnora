@@ -4470,6 +4470,7 @@ export default {
       end: '没有更早的记录了',
       loadFailed: '活动记录加载失败',
       systemActor: '系统触发',
+      actorWithAPIKey: '{actor} · API Key · {name}',
       knowledgeBase: '知识库',
       countItems: '共 {count} 项',
       titleWithCount: '{title} 等 {count} 项',
@@ -4573,6 +4574,8 @@ export default {
         targetType: '对象类型',
         targetId: '对象 ID',
         actorId: '发起人 ID',
+        apiKeyName: 'API Key 名称',
+        apiKeyId: 'API Key ID',
         details: '详情'
       },
       columns: {

@@ -74,30 +74,72 @@ func WikiEditSourceFromContext(ctx context.Context) string {
 // initiated the operation, while tasks created by schedulers remain
 // attributable to the system.
 type TaskInitiator struct {
-	UserID string     `json:"user_id,omitempty"`
-	Role   TenantRole `json:"role,omitempty"`
+	UserID     string     `json:"user_id,omitempty"`
+	Role       TenantRole `json:"role,omitempty"`
+	APIKeyID   uint64     `json:"api_key_id,omitempty"`
+	APIKeyName string     `json:"api_key_name,omitempty"`
+}
+
+// AuditAPIKey is the display identity of the API key that initiated work.
+// It is not an authorization grant and must not be confused with
+// TenantAPIKeyScope.
+type AuditAPIKey struct {
+	ID   uint64
+	Name string
+}
+
+func WithAuditAPIKey(ctx context.Context, key AuditAPIKey) context.Context {
+	if key.ID == 0 && key.Name == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, AuditAPIKeyContextKey, key)
+}
+
+func AuditAPIKeyFromContext(ctx context.Context) (AuditAPIKey, bool) {
+	if ctx == nil {
+		return AuditAPIKey{}, false
+	}
+	key, ok := ctx.Value(AuditAPIKeyContextKey).(AuditAPIKey)
+	if !ok || (key.ID == 0 && key.Name == "") {
+		return AuditAPIKey{}, false
+	}
+	return key, true
 }
 
 // TaskInitiatorFromContext snapshots the real caller identity for a task
 // payload. Synthetic API-key users are service identities, not people, and are
 // intentionally left empty so the activity feed presents them as system work.
+// The API key id/name is still captured so workers can attribute activity.
 func TaskInitiatorFromContext(ctx context.Context) TaskInitiator {
+	initiator := TaskInitiator{}
+	if key, ok := AuditAPIKeyFromContext(ctx); ok {
+		initiator.APIKeyID = key.ID
+		initiator.APIKeyName = key.Name
+	} else if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && (scope.KeyID > 0 || scope.Name != "") {
+		initiator.APIKeyID = scope.KeyID
+		initiator.APIKeyName = scope.Name
+	}
 	userID, ok := UserIDFromContext(ctx)
 	if !ok || IsSyntheticUserID(userID) {
-		return TaskInitiator{}
+		return initiator
 	}
-	return TaskInitiator{UserID: userID, Role: TenantRoleFromContext(ctx)}
+	initiator.UserID = userID
+	initiator.Role = TenantRoleFromContext(ctx)
+	return initiator
 }
 
 // Apply restores a captured task initiator onto a worker context. Empty or
 // legacy payloads are a no-op and therefore retain the system-task fallback.
+// API key identity is restored for audit display only — not as TenantAPIKeyScope.
 func (i TaskInitiator) Apply(ctx context.Context) context.Context {
-	if i.UserID == "" {
-		return ctx
+	if i.UserID != "" {
+		ctx = context.WithValue(ctx, UserIDContextKey, i.UserID)
+		if i.Role.IsValid() {
+			ctx = context.WithValue(ctx, TenantRoleContextKey, i.Role)
+		}
 	}
-	ctx = context.WithValue(ctx, UserIDContextKey, i.UserID)
-	if i.Role.IsValid() {
-		ctx = context.WithValue(ctx, TenantRoleContextKey, i.Role)
+	if i.APIKeyID > 0 || i.APIKeyName != "" {
+		ctx = WithAuditAPIKey(ctx, AuditAPIKey{ID: i.APIKeyID, Name: i.APIKeyName})
 	}
 	return ctx
 }

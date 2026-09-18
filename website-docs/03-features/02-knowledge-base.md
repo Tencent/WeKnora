@@ -489,6 +489,7 @@ Chunk 类型（`internal/types/chunk.go`）：`text`、`parent_text`、`image_oc
 
 - **活动动作**（`internal/types/audit_log.go`）：`kb.created` / `kb.updated` / `kb.deleted` / `kb.duplicated` / `kb.clone_started` / `kb.clone_completed` / `kb.clone_failed`、`kb.share_added` / `kb.share_permission_changed` / `kb.share_removed`，以及知识 / chunk 级的增删改动作；
 - **触发源**：context 中的 `kbActivityTaskMetadata{TaskID, Trigger}`（`user` 用户操作 / `system` 后台任务）自动并入 details；根据 outcome 自动补 `processing_status`（accepted→pending、success→completed、partial→partial、failed/denied→failed、canceled→canceled）；
+- **API Key 身份**：`X-API-Key` 调用写入 `details.api_key_id` / `details.api_key_name`（名称快照）。活动页在原发起人后额外显示 Key 名称；JWT 网页操作不加这两项。异步任务只把 Key 展示身份放进 `TaskInitiator`，不把 Key 权限 scope 恢复进 worker；
 - **批量操作样本标题**：`kbActivityAppendSampleTitles` 为批量操作附带最多 5 个去重标题（第一个作为 `title`，其余进 `titles` 数组），保证活动流可读且有界；
 - **抑制机制**：`withKBActivitySuppressed(ctx)` 可让内部级联操作不产生重复活动记录。
 

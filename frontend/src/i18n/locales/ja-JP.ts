@@ -2876,6 +2876,8 @@ export default {
         targetType: '対象の種類',
         targetId: '対象ID',
         actorId: '実行者ID',
+        apiKeyName: 'APIキー名',
+        apiKeyId: 'APIキーID',
         details: '詳細'
       },
       drawer: {
@@ -2885,6 +2887,7 @@ export default {
         targetChange: '変更内容'
       },
       systemActor: 'システム',
+      actorWithAPIKey: '{actor} · API Key · {name}',
       knowledgeBase: 'ナレッジベース',
       countItems: '{count}件',
       titleWithCount: '{title}ほか{count}件',

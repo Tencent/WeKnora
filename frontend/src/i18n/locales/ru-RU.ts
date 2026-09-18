@@ -4468,6 +4468,7 @@ export default {
       end: 'Более ранних записей нет',
       loadFailed: 'Не удалось загрузить историю',
       systemActor: 'Система',
+      actorWithAPIKey: '{actor} · API Key · {name}',
       knowledgeBase: 'База знаний',
       countItems: '{count} элем.',
       titleWithCount: '{title} и ещё {count}',
@@ -4571,6 +4572,8 @@ export default {
         targetType: 'Тип объекта',
         targetId: 'ID объекта',
         actorId: 'ID инициатора',
+        apiKeyName: 'Имя API-ключа',
+        apiKeyId: 'ID API-ключа',
         details: 'Подробности'
       },
       columns: {

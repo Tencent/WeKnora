@@ -4468,6 +4468,7 @@ export default {
       end: '이전 기록이 없습니다',
       loadFailed: '활동 기록을 불러오지 못했습니다',
       systemActor: '시스템',
+      actorWithAPIKey: '{actor} · API Key · {name}',
       knowledgeBase: '지식 베이스',
       countItems: '{count}개 항목',
       titleWithCount: '{title} 외 {count}개',
@@ -4571,6 +4572,8 @@ export default {
         targetType: '대상 유형',
         targetId: '대상 ID',
         actorId: '시작자 ID',
+        apiKeyName: 'API 키 이름',
+        apiKeyId: 'API 키 ID',
         details: '상세'
       },
       columns: {

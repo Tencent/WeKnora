@@ -504,12 +504,33 @@ function targetDiff(entry: KnowledgeBaseActivity): string {
 }
 
 function actorLabel(entry: KnowledgeBaseActivity): string {
-  if (!entry.actor_user_id) return t('knowledgeEditor.activity.systemActor')
-  const me = authStore.user
-  if (me?.id === entry.actor_user_id) {
-    return me.username?.trim() || me.email?.trim() || entry.actor_user_id.slice(0, 8)
+  let label = ''
+  if (!entry.actor_user_id) {
+    label = t('knowledgeEditor.activity.systemActor')
+  } else {
+    const me = authStore.user
+    if (me?.id === entry.actor_user_id) {
+      label = me.username?.trim() || me.email?.trim() || entry.actor_user_id.slice(0, 8)
+    } else {
+      label = entry.actor_user_id.slice(0, 8)
+    }
   }
-  return entry.actor_user_id.slice(0, 8)
+  const keyName = activityAPIKeyName(entry)
+  if (keyName) {
+    return t('knowledgeEditor.activity.actorWithAPIKey', { actor: label, name: keyName })
+  }
+  return label
+}
+
+function activityAPIKeyName(entry: KnowledgeBaseActivity): string {
+  const value = details(entry).api_key_name
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function activityAPIKeyId(entry: KnowledgeBaseActivity): string {
+  const value = details(entry).api_key_id
+  if (value === undefined || value === null || value === '') return ''
+  return String(value)
 }
 
 function formatDatePart(value: string): string {
@@ -611,6 +632,22 @@ function identifierFields(entry: KnowledgeBaseActivity): DetailField[] {
       key: 'actorId',
       label: t('knowledgeEditor.activity.expanded.actorId'),
       value: entry.actor_user_id,
+    })
+  }
+  const keyName = activityAPIKeyName(entry)
+  if (keyName) {
+    fields.push({
+      key: 'apiKeyName',
+      label: t('knowledgeEditor.activity.expanded.apiKeyName'),
+      value: keyName,
+    })
+  }
+  const keyId = activityAPIKeyId(entry)
+  if (keyId) {
+    fields.push({
+      key: 'apiKeyId',
+      label: t('knowledgeEditor.activity.expanded.apiKeyId'),
+      value: keyId,
     })
   }
   return fields
