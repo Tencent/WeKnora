@@ -83,7 +83,6 @@ builtin_agents:
       web_search_max_results: 5
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 5
       faq_priority_enabled: true
       faq_direct_answer_threshold: 0.9
       faq_score_boost: 1.2
@@ -131,7 +130,6 @@ builtin_agents:
       web_search_max_results: 0
       reflection_enabled: true
       multi_turn_enabled: true
-      history_turns: 10
       embedding_top_k: 5
       keyword_threshold: 0.3
       vector_threshold: 0.5
@@ -175,7 +173,6 @@ builtin_agents:
       web_search_max_results: 0
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 10
       embedding_top_k: 10
       keyword_threshold: 0.3
       vector_threshold: 0.5
@@ -225,7 +222,6 @@ builtin_agents:
       web_search_max_results: 0
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 10
       embedding_top_k: 10
       keyword_threshold: 0.3
       vector_threshold: 0.5
@@ -273,5 +269,4 @@ builtin_agents:
       web_search_max_results: 0
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 10
 

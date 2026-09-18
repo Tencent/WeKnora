@@ -115,11 +115,15 @@ const contextSafetyTokens = 4096
 // provider. Unset without a sandbox is 4096; unset with a sandbox
 // (write_sandbox_file / edit_sandbox_file) is 24576.
 func (e *AgentEngine) getCompletionTokenBudget() int {
+	return completionTokenBudgetFor(e.config)
+}
+
+func completionTokenBudgetFor(cfg *types.AgentConfig) int {
 	configured := 0
 	sandboxID := ""
-	if e.config != nil {
-		configured = e.config.MaxCompletionTokens
-		sandboxID = e.config.SandboxConfigID
+	if cfg != nil {
+		configured = cfg.MaxCompletionTokens
+		sandboxID = cfg.SandboxConfigID
 	}
 	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
 }
@@ -130,7 +134,23 @@ func (e *AgentEngine) getCompletionTokenBudget() int {
 // emit 24576 tokens needs at least that much free, or the request is accepted
 // and the reply is truncated.
 func (e *AgentEngine) contextReserveTokens() int {
-	return max(e.getCompletionTokenBudget()+contextSafetyTokens, compaction.DefaultReserveTokens)
+	return reserveTokensFor(e.config)
+}
+
+func reserveTokensFor(cfg *types.AgentConfig) int {
+	return max(completionTokenBudgetFor(cfg)+contextSafetyTokens, compaction.DefaultReserveTokens)
+}
+
+// HistoryTokenBudget is how much stored history one run of cfg may load: its
+// compaction threshold. History that large already puts the first round over
+// the threshold, so loading more buys nothing but a first compaction whose
+// summarizer input no longer fits the model.
+func HistoryTokenBudget(cfg *types.AgentConfig) int {
+	window := types.DefaultMaxContextTokens
+	if cfg != nil && cfg.MaxContextTokens > 0 {
+		window = cfg.MaxContextTokens
+	}
+	return compaction.Settings{MaxContextTokens: window, ReserveTokens: reserveTokensFor(cfg)}.Threshold()
 }
 
 // clampCompletionBudgetToContext shrinks the round's completion budget to what
