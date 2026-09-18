@@ -83,6 +83,7 @@ type agentShareService struct {
 	agentRepo             interfaces.CustomAgentRepository
 	userRepo              interfaces.UserRepository
 	webSearchProviderRepo interfaces.WebSearchProviderRepository
+	kbRepo                interfaces.KnowledgeBaseRepository
 }
 
 // NewAgentShareService creates a new agent share service
@@ -93,6 +94,7 @@ func NewAgentShareService(
 	agentRepo interfaces.CustomAgentRepository,
 	userRepo interfaces.UserRepository,
 	webSearchProviderRepo interfaces.WebSearchProviderRepository,
+	kbRepo interfaces.KnowledgeBaseRepository,
 ) interfaces.AgentShareService {
 	return &agentShareService{
 		shareRepo:             shareRepo,
@@ -101,6 +103,7 @@ func NewAgentShareService(
 		agentRepo:             agentRepo,
 		userRepo:              userRepo,
 		webSearchProviderRepo: webSearchProviderRepo,
+		kbRepo:                kbRepo,
 	}
 }
 
@@ -175,6 +178,9 @@ func (s *agentShareService) ShareAgent(ctx context.Context, agentID string, orgI
 	}
 	if isBuiltinAgent(agent) {
 		return nil, ErrBuiltinAgentNotShareable
+	}
+	if err := checkAgentKBScopeShareable(ctx, s.kbRepo.GetKnowledgeBaseByIDs, nil, agent, userID); err != nil {
+		return nil, err
 	}
 
 	if agent.Config.ModelID == "" {

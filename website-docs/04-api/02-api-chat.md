@@ -259,8 +259,8 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 | `knowledge_ids` | []string | 否 | 限定知识文件 |
 | `agent_enabled` | bool | 否 | 是否启用 Agent 模式 |
 | `agent_id` | string | 否 | 自定义 Agent ID |
-| `web_search_enabled` | bool | 否 | 联网搜索 |
-| `summary_model_id` | string | 否 | 总结模型 |
+| `web_search_enabled` | bool | 否 | 联网搜索；只在智能体本身开启联网搜索时生效 |
+| `summary_model_id` | string | 否 | 总结模型；使用共享智能体时忽略，始终使用智能体配置的模型 |
 | `mcp_service_ids` | []string | 否 | @提及的 MCP 服务 |
 | `skill_names` | []string | 否 | @提及的技能 |
 | `tag_ids` | []string | 否 | 标签过滤 |

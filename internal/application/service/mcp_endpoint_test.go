@@ -269,3 +269,54 @@ func TestMCPEndpointRejectsInternalBuiltinAgent(t *testing.T) {
 		t.Fatalf("internal builtin agent must be rejected, got %v", err)
 	}
 }
+
+// A scoped API key must not mint an endpoint token with more authority than
+// it holds: neither a wider KB scope nor tools needing capabilities it lacks.
+func TestMCPEndpointScopedKeyCannotExceedItsOwnScope(t *testing.T) {
+	requireForbidden := func(t *testing.T, err error) {
+		t.Helper()
+		if appErr, ok := apperrors.IsAppError(err); !ok || appErr.Code != apperrors.ErrForbidden {
+			t.Fatalf("want forbidden, got %v", err)
+		}
+	}
+	keyCtx := func(kbIDs []string, capabilities ...types.APIKeyCapability) context.Context {
+		caps := types.StringArray{string(types.APIKeyCapabilityManageChannels)}
+		for _, c := range capabilities {
+			caps = append(caps, string(c))
+		}
+		return types.WithTenantAPIKeyScope(context.Background(), types.TenantAPIKeyScope{
+			KnowledgeBaseIDs: types.StringArray(kbIDs), Capabilities: caps,
+		})
+	}
+	search := types.StringArray{types.MCPEndpointToolSearchKnowledge}
+	ingest := types.StringArray{types.MCPEndpointToolSearchKnowledge, types.MCPEndpointToolDeleteDocument}
+
+	svc := newMCPEndpointServiceForTest(newStubMCPEndpointRepo(), nil)
+	// A KB-restricted key cannot create a workspace-wide endpoint.
+	_, _, err := svc.Create(keyCtx([]string{"kb-a"}, types.APIKeyCapabilityRetrieve), 7,
+		&types.MCPEndpoint{Name: "wide", Tools: search})
+	requireForbidden(t, err)
+	// Nor tools needing a capability the key lacks.
+	_, _, err = svc.Create(keyCtx(nil, types.APIKeyCapabilityRetrieve), 7,
+		&types.MCPEndpoint{Name: "writer", Tools: ingest})
+	requireForbidden(t, err)
+	// Within its own scope it may.
+	ep, _, err := svc.Create(keyCtx(nil, types.APIKeyCapabilityRetrieve), 7,
+		&types.MCPEndpoint{Name: "reader", Tools: search})
+	if err != nil {
+		t.Fatalf("create within scope: %v", err)
+	}
+
+	// Widening an endpoint, or taking over one created by an admin, is checked
+	// against the endpoint the key would end up holding.
+	ingestTools := []string(ingest)
+	_, err = svc.Update(keyCtx(nil, types.APIKeyCapabilityRetrieve), 7, ep.ID,
+		interfaces.MCPEndpointUpdate{Tools: &ingestTools})
+	requireForbidden(t, err)
+	adminEP, _, err := svc.Create(context.Background(), 7, &types.MCPEndpoint{Name: "admin", Tools: ingest})
+	if err != nil {
+		t.Fatalf("admin create: %v", err)
+	}
+	_, _, err = svc.RotateToken(keyCtx(nil, types.APIKeyCapabilityRetrieve), 7, adminEP.ID)
+	requireForbidden(t, err)
+}

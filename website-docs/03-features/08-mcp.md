@@ -381,6 +381,8 @@ flowchart LR
 | GET / PUT / DELETE | `/mcp-endpoints/:endpoint_id` | 详情 / 更新 / 删除 |
 | POST | `/mcp-endpoints/:endpoint_id/rotate-token` | 轮换令牌，响应含新 `token` |
 
+端点令牌是一个新的凭证，因此受限 API Key 只能创建、修改或轮换不超出自身权限的端点：端点的知识库必须在 Key 的知识库白名单之内（Key 有白名单时，端点不能留空，留空表示空间内全部），端点工具所需的能力（retrieve / chat / ingest 等）也必须是 Key 已有的，否则返回 403。
+
 #### 请求链路
 
 ```mermaid

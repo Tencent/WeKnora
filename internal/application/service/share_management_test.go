@@ -96,3 +96,78 @@ func TestUpdateSharePermissionRejectsOrgAdminEscalation(t *testing.T) {
 	require.ErrorIs(t, err, ErrSharePermissionDenied)
 	require.False(t, repo.updated)
 }
+
+type revokeOrgRepo struct {
+	shareMgmtOrgRepo
+	removed uint64
+}
+
+func (*revokeOrgRepo) GetByID(context.Context, string) (*types.Organization, error) {
+	return &types.Organization{ID: "org-1", OwnerTenantID: 99}, nil
+}
+
+func (r *revokeOrgRepo) RemoveTenantMember(_ context.Context, _ string, tenantID uint64) error {
+	r.removed = tenantID
+	return nil
+}
+
+type revokeKBShareRepo struct {
+	interfaces.KBShareRepository
+	revoked []uint64
+}
+
+func (r *revokeKBShareRepo) DeleteByOrganizationAndSourceTenant(_ context.Context, _ string, tenantID uint64) error {
+	r.revoked = append(r.revoked, tenantID)
+	return nil
+}
+
+type revokeAgentShareRepo struct {
+	interfaces.AgentShareRepository
+	revoked []uint64
+}
+
+func (r *revokeAgentShareRepo) DeleteByOrganizationAndSourceTenant(_ context.Context, _ string, tenantID uint64) error {
+	r.revoked = append(r.revoked, tenantID)
+	return nil
+}
+
+// A departing tenant's shares must not keep serving its KBs and agents to the
+// remaining members, whether it left or was removed by an org admin.
+func TestRemoveTenantMemberRevokesItsShares(t *testing.T) {
+	for _, operator := range []uint64{10, 20} {
+		orgRepo := &revokeOrgRepo{}
+		kbShares := &revokeKBShareRepo{}
+		agentShares := &revokeAgentShareRepo{}
+		svc := &organizationService{orgRepo: orgRepo, shareRepo: kbShares, agentShareRepo: agentShares}
+
+		require.NoError(t, svc.RemoveTenantMember(context.Background(), "org-1", 10, "user", operator))
+		require.Equal(t, uint64(10), orgRepo.removed)
+		require.Equal(t, []uint64{10}, kbShares.revoked)
+		require.Equal(t, []uint64{10}, agentShares.revoked)
+	}
+}
+
+type lapsedShareRepo struct {
+	interfaces.KBShareRepository
+	shares []*types.KnowledgeBaseShare
+}
+
+func (r *lapsedShareRepo) ListByKnowledgeBase(context.Context, string) ([]*types.KnowledgeBaseShare, error) {
+	return r.shares, nil
+}
+
+// Shares left behind by a departed source tenant, or in a deleted
+// organization, grant nothing.
+func TestCheckTenantKBPermissionIgnoresLapsedShares(t *testing.T) {
+	org := &types.Organization{ID: "org-1"}
+	svc := &kbShareService{orgRepo: shareMgmtOrgRepo{}, shareRepo: &lapsedShareRepo{shares: []*types.KnowledgeBaseShare{
+		{OrganizationID: "org-1", SourceTenantID: 50, Permission: types.OrgRoleAdmin, Organization: org},
+		{OrganizationID: "org-1", SourceTenantID: 10, Permission: types.OrgRoleAdmin},
+		{OrganizationID: "org-1", SourceTenantID: 10, Permission: types.OrgRoleViewer, Organization: org},
+	}}}
+
+	permission, shared, err := svc.CheckTenantKBPermission(context.Background(), "kb-1", 30, types.TenantRoleAdmin)
+	require.NoError(t, err)
+	require.True(t, shared)
+	require.Equal(t, types.OrgRoleViewer, permission)
+}

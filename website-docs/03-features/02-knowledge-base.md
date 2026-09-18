@@ -386,6 +386,8 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 
 测试用例明确验证：即使文件内容是 `<script>alert(1)</script>`，也只会作为二进制附件传输。下载端点（`/knowledge/:id/download`）要求更高的 Contributor+ 且走 KBAccessWrite 门禁。
 
+预览返回的是原始文件本身，通过只读共享（组织共享的 viewer、经共享智能体可见）访问时同样可以预览。「只有 Editor 及以上才能下载」是产品上的便利性限制，不是访问控制边界：能读到一个 KB 的人，就能拿到其中的原文件。
+
 ### 知识库复制与知识移动 {#_4-知识库复制与知识移动}
 
 #### 复制（Copy / Duplicate）与 Preflight {#_4-1-复制-copy-duplicate-与-preflight}

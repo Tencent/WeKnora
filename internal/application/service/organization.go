@@ -402,21 +402,37 @@ func (s *organizationService) RemoveTenantMember(ctx context.Context, orgID stri
 		return ErrCannotRemoveOwner
 	}
 
-	if operatorTenantID == memberTenantID {
-		// Self-removal: any tenant can leave on their own behalf.
-		return s.orgRepo.RemoveTenantMember(ctx, orgID, memberTenantID)
-	}
-
-	isAdmin, err := s.IsTenantOrgAdmin(ctx, orgID, operatorTenantID)
-	if err != nil {
-		return err
-	}
-	if !isAdmin {
-		return ErrOrgPermissionDenied
+	if operatorTenantID != memberTenantID {
+		// Removing another tenant requires org admin; any tenant may leave on
+		// its own behalf.
+		isAdmin, err := s.IsTenantOrgAdmin(ctx, orgID, operatorTenantID)
+		if err != nil {
+			return err
+		}
+		if !isAdmin {
+			return ErrOrgPermissionDenied
+		}
 	}
 	_ = operatorUserID
 
-	return s.orgRepo.RemoveTenantMember(ctx, orgID, memberTenantID)
+	if err := s.orgRepo.RemoveTenantMember(ctx, orgID, memberTenantID); err != nil {
+		return err
+	}
+	s.revokeTenantShares(ctx, orgID, memberTenantID)
+	return nil
+}
+
+// revokeTenantShares withdraws what a departing tenant shared into the org:
+// otherwise the remaining members keep reading (or editing) its KBs and
+// running its agents on its models. Share reads also require the source
+// tenant's membership, so a failure here cannot leave the shares effective.
+func (s *organizationService) revokeTenantShares(ctx context.Context, orgID string, tenantID uint64) {
+	if err := s.shareRepo.DeleteByOrganizationAndSourceTenant(ctx, orgID, tenantID); err != nil {
+		logger.Warnf(ctx, "Failed to revoke KB shares of tenant %d in organization %s: %v", tenantID, orgID, err)
+	}
+	if err := s.agentShareRepo.DeleteByOrganizationAndSourceTenant(ctx, orgID, tenantID); err != nil {
+		logger.Warnf(ctx, "Failed to revoke agent shares of tenant %d in organization %s: %v", tenantID, orgID, err)
+	}
 }
 
 // UpdateTenantMemberRole updates the role for a (org, tenant) membership.
