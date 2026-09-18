@@ -351,3 +351,22 @@ func (c *CompositeRetrieveEngine) MoveKnowledgeIndices(
 		)
 	})
 }
+
+func (c *CompositeRetrieveEngine) SupportsDocumentTags() bool {
+	for _, info := range c.engineInfos {
+		if p, ok := info.retrieveEngine.(interfaces.DocumentTagProjection); ok && p.SupportsDocumentTags() {
+			return true
+		}
+	}
+	return false
+}
+
+// All supported members must finish before the worker certifies bootstrap.
+func (c *CompositeRetrieveEngine) SyncDocumentTags(ctx context.Context, kbID string, ids []string) error {
+	return c.concurrentExecWithError(ctx, func(ctx context.Context, info *engineInfo) error {
+		if p, ok := info.retrieveEngine.(interfaces.DocumentTagProjection); ok && p.SupportsDocumentTags() {
+			return p.SyncDocumentTags(ctx, kbID, ids)
+		}
+		return nil
+	})
+}

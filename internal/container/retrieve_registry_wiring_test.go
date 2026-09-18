@@ -8,9 +8,11 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/redis/go-redis/v9"
 )
 
 // TestRetrieveEngineRegistryWiring checks that the container can still build
@@ -40,11 +42,22 @@ func TestRetrieveEngineRegistryWiring(t *testing.T) {
 	provide(func() *gorm.DB { return db })
 	provide(func() *config.Config { return &config.Config{} })
 	provide(func() interfaces.AuditLogService { return &fakeAuditSvc{} })
+	provide(func() interfaces.TaskEnqueuer { return nil })
 	provide(repository.NewVectorStoreRepository)
 	provide(NewEngineFactory)
 	provide(initRetrieveEngineRegistry)
+	provide(func() *redis.Client { return nil })
+	provide(repository.NewTenantRepository)
+	provide(retriever.NewVectorStoreRepoOwnership)
+	provide(service.NewDocumentTagSyncService)
+	provide(func(s *service.DocumentTagSyncService) interfaces.DocumentTagSync { return s })
+	provide(repository.NewKnowledgeRepositoryWithTagSync)
+	provide(repository.NewKnowledgeTagRepositoryWithTagSync)
 
-	err = c.Invoke(func(registry interfaces.RetrieveEngineRegistry) {
+	err = c.Invoke(func(registry interfaces.RetrieveEngineRegistry, syncer interfaces.DocumentTagSync, knowledge interfaces.KnowledgeRepository, tags interfaces.KnowledgeTagRepository) {
+		if syncer == nil || knowledge == nil || tags == nil {
+			t.Fatal("tag synchronization dependencies must be wired")
+		}
 		concrete, ok := registry.(*retriever.RetrieveEngineRegistry)
 		if !ok {
 			t.Fatalf("expected *retriever.RetrieveEngineRegistry, got %T", registry)

@@ -53,6 +53,14 @@ func NewKVHybridRetrieveEngine(indexRepository interfaces.RetrieveEngineReposito
 	return &KeywordsVectorHybridRetrieveEngineService{indexRepository: indexRepository, engineType: engineType}
 }
 
+// WrapRepository installs persistence middleware before the engine is registered.
+// It must not be called after the engine starts serving requests.
+func (v *KeywordsVectorHybridRetrieveEngineService) WrapRepository(
+	wrap func(interfaces.RetrieveEngineRepository) interfaces.RetrieveEngineRepository,
+) {
+	v.indexRepository = wrap(v.indexRepository)
+}
+
 // EngineType returns the type of the retrieval engine
 func (v *KeywordsVectorHybridRetrieveEngineService) EngineType() types.RetrieverEngineType {
 	return v.engineType
@@ -380,4 +388,17 @@ func (v *KeywordsVectorHybridRetrieveEngineService) MoveKnowledgeIndices(
 		dimension,
 		knowledgeType,
 	)
+}
+
+// SupportsDocumentTags reports native document-tag projection support.
+func (v *KeywordsVectorHybridRetrieveEngineService) SupportsDocumentTags() bool {
+	p, ok := v.indexRepository.(interfaces.DocumentTagProjection)
+	return ok && p.SupportsDocumentTags()
+}
+
+func (v *KeywordsVectorHybridRetrieveEngineService) SyncDocumentTags(ctx context.Context, kbID string, ids []string) error {
+	if p, ok := v.indexRepository.(interfaces.DocumentTagProjection); ok {
+		return p.SyncDocumentTags(ctx, kbID, ids)
+	}
+	return nil
 }

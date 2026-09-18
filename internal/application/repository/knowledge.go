@@ -44,12 +44,26 @@ var omitFieldsOnUpdate = []string{"DeletedAt", "PendingSubtasksCount"}
 
 // knowledgeRepository implements knowledge base and knowledge repository interface
 type knowledgeRepository struct {
-	db *gorm.DB
+	db      *gorm.DB
+	tagSync interfaces.DocumentTagSync
 }
 
 // NewKnowledgeRepository creates a new knowledge repository
 func NewKnowledgeRepository(db *gorm.DB) interfaces.KnowledgeRepository {
 	return &knowledgeRepository{db: db}
+}
+
+// NewKnowledgeRepositoryWithTagSync connects every relational tag mutation to
+// the same post-commit projection path, including automatic tagging and moves.
+func NewKnowledgeRepositoryWithTagSync(db *gorm.DB, tagSync interfaces.DocumentTagSync) interfaces.KnowledgeRepository {
+	return &knowledgeRepository{db: db, tagSync: tagSync}
+}
+
+func (r *knowledgeRepository) syncDocumentTags(ctx context.Context, ids []string) error {
+	if r.tagSync == nil || len(ids) == 0 {
+		return nil
+	}
+	return r.tagSync.Sync(ctx, ids)
 }
 
 // CreateKnowledge creates knowledge

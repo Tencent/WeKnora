@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/stretchr/testify/require"
 )
 
 type failingSearchKnowledgeBaseService struct {
@@ -151,6 +152,33 @@ type vectorOnlySearchKnowledgeBaseService struct {
 	interfaces.KnowledgeBaseService
 	embedErr     error
 	hybridCalled bool
+}
+
+func TestChatSearchPreservesDocumentTagPredicates(t *testing.T) {
+	for _, ids := range [][]string{nil, {"doc-1"}} {
+		svc := &degradingSearchKnowledgeBaseService{}
+		plugin := &PluginSearch{knowledgeBaseService: svc}
+		target := &types.SearchTarget{
+			Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 100,
+			TagIDs: []string{"tag-a", "tag-b"}, KnowledgeIDs: ids, DisableRecallThresholds: true,
+		}
+		if len(ids) > 0 {
+			target.Type = types.SearchTargetTypeKnowledge
+		}
+		_, err := plugin.searchByTargets(context.Background(), &types.ChatManage{
+			PipelineRequest: types.PipelineRequest{
+				SearchTargets: types.SearchTargets{target}, EmbeddingTopK: 5,
+				VectorThreshold: 0.6, KeywordThreshold: 0.5,
+			},
+			PipelineState: types.PipelineState{RewriteQuery: "query"},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, svc.gotParams)
+		require.Equal(t, target.TagIDs, svc.gotParams.TagIDs)
+		require.Equal(t, ids, svc.gotParams.KnowledgeIDs)
+		require.Zero(t, svc.gotParams.VectorThreshold)
+		require.Zero(t, svc.gotParams.KeywordThreshold)
+	}
 }
 
 func (s *vectorOnlySearchKnowledgeBaseService) GetKnowledgeBasesByIDsOnly(

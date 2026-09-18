@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent"
@@ -79,15 +80,13 @@ func agentHasKnowledgeScope(config *types.AgentConfig) bool {
 // already resolved (and authorized) per KB: a directly shared KB carries its
 // source tenant there. KnowledgeBases alone cannot tell own from shared KBs —
 // both KBSelectionMode="all" and an @mention put shared KB IDs into it.
-// KBs missing from the map fall back to the caller's tenant.
+// Raw request IDs must not restore a scope removed by authorization or an
+// empty document/tag intersection.
 func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[string]uint64) {
 	if config == nil {
 		return nil, nil
 	}
 	kbTenantMap := config.SearchTargets.GetKBTenantMap()
-	if len(config.KnowledgeBases) > 0 {
-		return config.KnowledgeBases, kbTenantMap
-	}
 	return config.SearchTargets.GetAllKnowledgeBaseIDs(), kbTenantMap
 }
 
@@ -370,7 +369,13 @@ func (s *agentService) resolveKBAndDocInfos(
 	config *types.AgentConfig,
 ) ([]*agent.KnowledgeBaseInfo, []*agent.SelectedDocumentInfo) {
 	kbIDs, kbTenantMap := knowledgeBaseScopesForPrompt(config)
-	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs, kbTenantMap)
+	tagScopedKBs := make(map[string]bool)
+	for _, target := range config.SearchTargets {
+		if target != nil && len(target.TagIDs) > 0 {
+			tagScopedKBs[target.KnowledgeBaseID] = true
+		}
+	}
+	kbInfos, err := s.getKnowledgeBaseInfos(ctx, kbIDs, kbTenantMap, tagScopedKBs)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get knowledge base details, using IDs only: %v", err)
 		kbInfos = make([]*agent.KnowledgeBaseInfo, 0, len(kbIDs))
@@ -380,11 +385,12 @@ func (s *agentService) resolveKBAndDocInfos(
 				Name:        kbID,
 				Description: "",
 				DocCount:    0,
+				TagScoped:   tagScopedKBs[kbID],
 			})
 		}
 	}
 
-	selectedDocs, err := s.getSelectedDocumentInfos(ctx, config.KnowledgeIDs)
+	selectedDocs, err := s.getSelectedDocumentInfos(ctx, config.KnowledgeIDs, config.SearchTargets)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to get selected document details: %v", err)
 		selectedDocs = []*agent.SelectedDocumentInfo{}
@@ -1181,7 +1187,7 @@ func (s *agentService) ValidateConfig(config *types.AgentConfig) error {
 // getKnowledgeBaseInfos retrieves detailed information for knowledge bases.
 // kbTenantMap carries the tenant each KB should be queried under (source tenant
 // for directly shared KBs); a missing entry falls back to the request tenant.
-func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string, kbTenantMap map[string]uint64) ([]*agent.KnowledgeBaseInfo, error) {
+func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string, kbTenantMap map[string]uint64, tagScopedKBs map[string]bool) ([]*agent.KnowledgeBaseInfo, error) {
 	if len(kbIDs) == 0 {
 		return []*agent.KnowledgeBaseInfo{}, nil
 	}
@@ -1200,6 +1206,7 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 				Description: "",
 				DocCount:    0,
 				RecentDocs:  []agent.RecentDocInfo{},
+				TagScoped:   tagScopedKBs[kbID],
 			})
 			continue
 		}
@@ -1207,6 +1214,17 @@ func (s *agentService) getKnowledgeBaseInfos(ctx context.Context, kbIDs []string
 		// Skip hidden/system-managed knowledge bases (e.g., __chat_history__)
 		if kb.IsTemporary {
 			logger.Debugf(ctx, "Skipping temporary knowledge base %s (%s) from prompt", kb.ID, kb.Name)
+			continue
+		}
+
+		// Tag selection is a retrieval scope, not an instruction to load every
+		// matching document into the prompt. Whole-KB examples/profiles would
+		// also expose unrelated documents and misrepresent the selected scope.
+		if tagScopedKBs[kbID] {
+			kbInfos = append(kbInfos, &agent.KnowledgeBaseInfo{
+				ID: kb.ID, Name: kb.Name, Type: kb.Type, Description: kb.Description,
+				Capabilities: kbRetrievalCapabilities(kb), TagScoped: true,
+			})
 			continue
 		}
 
@@ -1331,9 +1349,9 @@ func kbRetrievalCapabilities(kb *types.KnowledgeBase) []string {
 	return caps
 }
 
-// getSelectedDocumentInfos retrieves detailed information for user-selected documents (via @ mention)
-// This loads the actual content of the documents to include in the system prompt
-func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeIDs []string) ([]*agent.SelectedDocumentInfo, error) {
+// getSelectedDocumentInfos loads metadata only for explicitly selected documents
+// that survived the request's scope checks (including document/tag intersection).
+func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeIDs []string, targets types.SearchTargets) ([]*agent.SelectedDocumentInfo, error) {
 	if len(knowledgeIDs) == 0 {
 		return []*agent.SelectedDocumentInfo{}, nil
 	}
@@ -1366,6 +1384,9 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 			logger.Warnf(ctx, "Selected knowledge %s not found", kid)
 			continue
 		}
+		if !selectedDocumentInTargets(k, targets) {
+			continue
+		}
 
 		docInfo := &agent.SelectedDocumentInfo{
 			KnowledgeID:     k.ID,
@@ -1380,6 +1401,21 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 
 	logger.Infof(ctx, "Loaded %d selected documents metadata for prompt", len(selectedDocs))
 	return selectedDocs, nil
+}
+
+func selectedDocumentInTargets(knowledge *types.Knowledge, targets types.SearchTargets) bool {
+	for _, target := range targets {
+		if target == nil || target.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+			continue
+		}
+		if slices.Contains(target.KnowledgeIDs, knowledge.ID) {
+			return true
+		}
+		if target.Type == types.SearchTargetTypeKnowledgeBase && len(target.TagIDs) == 0 && len(target.ScopeTagIDs) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *agentService) resolvePinnedMCPServiceInfos(

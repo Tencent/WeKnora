@@ -43,3 +43,14 @@ func TestFormatKnowledgeBaseListOmitsEmptyProfile(t *testing.T) {
 	})
 	require.NotContains(t, text, "<generated_profile>")
 }
+
+func TestRuntimeContextDescribesTagScopeWithoutPinningDocuments(t *testing.T) {
+	text := buildRuntimeContextBlock("session-1", []*KnowledgeBaseInfo{{
+		ID: "kb-1", Name: "Docs", TagScoped: true, Capabilities: []string{"chunks"},
+	}}, nil)
+	require.Contains(t, text, "<retrieval_scope>")
+	require.Contains(t, text, "selected tags")
+	require.Contains(t, text, "Use retrieval tools")
+	require.NotContains(t, text, "doc_count=")
+	require.NotContains(t, text, "<pinned_documents")
+}

@@ -36,9 +36,9 @@ type SearchTarget struct {
 	KnowledgeIDs []string `json:"knowledge_ids,omitempty"`
 	// TagIDs limits retrieval to chunks/documents carrying any of these KB-local tags.
 	TagIDs []string `json:"tag_ids,omitempty"`
-	// ScopeTagIDs records the logical tag scope selected by the user. For
-	// document KBs this is kept for tracing after the relation-table lookup has
-	// been resolved to KnowledgeIDs; TagIDs remains the physical index filter.
+	// ScopeTagIDs records the logical tag scope for tracing and authorization.
+	// TagIDs is the physical index filter. For document targets, KnowledgeIDs
+	// contains only explicitly selected documents validated against the tags.
 	ScopeTagIDs []string `json:"scope_tag_ids,omitempty"`
 	// DisableRecallThresholds keeps recall broad inside an already constrained,
 	// user-selected scope. The reranker still orders candidates, but vector and

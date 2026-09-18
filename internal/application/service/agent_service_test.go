@@ -527,7 +527,7 @@ func TestGetKnowledgeBaseInfos_SharedKnowledgeBaseUsesSourceTenant(t *testing.T)
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, receiverTenantID)
 
-	infos, err := service.getKnowledgeBaseInfos(ctx, []string{"shared-kb"}, map[string]uint64{"shared-kb": sourceTenantID})
+	infos, err := service.getKnowledgeBaseInfos(ctx, []string{"shared-kb"}, map[string]uint64{"shared-kb": sourceTenantID}, nil)
 
 	require.NoError(t, err)
 	require.Len(t, infos, 1)
@@ -573,7 +573,7 @@ func TestGetKnowledgeBaseInfos_ExcludesUnprocessedDocuments(t *testing.T) {
 		knowledgeService: knowledgeService,
 	}
 
-	infos, err := service.getKnowledgeBaseInfos(context.Background(), []string{"kb-1"}, nil)
+	infos, err := service.getKnowledgeBaseInfos(context.Background(), []string{"kb-1"}, nil, nil)
 
 	require.NoError(t, err)
 	require.Len(t, infos, 1)

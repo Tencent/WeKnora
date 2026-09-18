@@ -24,6 +24,9 @@ func NewKnowledgeBaseRepository(db *gorm.DB) interfaces.KnowledgeBaseRepository 
 
 // CreateKnowledgeBase creates a new knowledge base
 func (r *knowledgeBaseRepository) CreateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
+	// New empty KBs have no historical projection to migrate. Index-copy paths
+	// explicitly reset this when they import legacy records.
+	kb.DocumentTagReady = true
 	return r.db.WithContext(ctx).Create(kb).Error
 }
 
@@ -169,7 +172,7 @@ func (r *knowledgeBaseRepository) ListUserKBPinIDs(
 
 // UpdateKnowledgeBase updates a knowledge base
 func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) error {
-	return r.db.WithContext(ctx).Save(kb).Error
+	return r.db.WithContext(ctx).Omit("DocumentTagReady").Save(kb).Error
 }
 
 // UpdateKnowledgeBaseGeneratedProfile writes the generated_profile column

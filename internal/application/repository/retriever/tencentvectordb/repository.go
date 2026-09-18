@@ -236,6 +236,11 @@ func (r *repository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[
 }
 
 func (r *repository) Retrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
+	if len(params.TagIDs) > 0 && params.KnowledgeType != types.KnowledgeTypeFAQ {
+		if err := r.checkDocumentTagIndex(ctx, false); err != nil {
+			return nil, err
+		}
+	}
 	switch params.RetrieverType {
 	case types.VectorRetrieverType:
 		return r.VectorRetrieve(ctx, params)
@@ -345,6 +350,9 @@ func (r *repository) KeywordsRetrieve(ctx context.Context, params types.Retrieve
 		)
 		if err != nil {
 			failedCollections++
+			if len(params.TagIDs) > 0 && params.KnowledgeType != types.KnowledgeTypeFAQ {
+				return nil, fmt.Errorf("tencent vectordb document tag query in %s: %w", collection.CollectionName, err)
+			}
 			log.Warnf("[TencentVectorDB] keyword search failed in %s: %v", collection.CollectionName, err)
 			continue
 		}
@@ -421,6 +429,7 @@ func (r *repository) ensureCollection(ctx context.Context, dimension int) error 
 			{FieldName: fieldKnowledgeID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldKnowledgeBaseID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
 			{FieldName: fieldTagID, FieldType: tcvectordb.String, IndexType: tcvectordb.FILTER},
+			documentTagFilterIndex(),
 			{FieldName: fieldIsEnabled, FieldType: tcvectordb.Uint64, IndexType: tcvectordb.FILTER},
 		},
 	}
@@ -515,7 +524,11 @@ func (r *repository) baseFilter(params types.RetrieveParams) *tcvectordb.Filter 
 		conditions = append(conditions, tcvectordb.In(fieldKnowledgeID, params.KnowledgeIDs))
 	}
 	if len(params.TagIDs) > 0 {
-		conditions = append(conditions, tcvectordb.In(fieldTagID, params.TagIDs))
+		if params.KnowledgeType == types.KnowledgeTypeFAQ {
+			conditions = append(conditions, tcvectordb.In(fieldTagID, params.TagIDs))
+		} else {
+			conditions = append(conditions, documentTagCondition(params.TagIDs))
+		}
 	}
 	if len(params.ExcludeKnowledgeIDs) > 0 {
 		conditions = append(conditions, tcvectordb.NotIn(fieldKnowledgeID, params.ExcludeKnowledgeIDs))
@@ -581,6 +594,7 @@ func toVectorEmbedding(indexInfo *types.IndexInfo, params map[string]any) *vecto
 		KnowledgeID:     indexInfo.KnowledgeID,
 		KnowledgeBaseID: indexInfo.KnowledgeBaseID,
 		TagID:           indexInfo.TagID,
+		TagIDs:          append([]string{}, indexInfo.TagIDs...),
 		IsEnabled:       indexInfo.IsEnabled,
 	}
 	if embedding.ID == "" {
@@ -645,6 +659,8 @@ func remapCopiedEmbeddings(
 		embedding.SourceID = targetSourceID
 		embedding.ChunkID = targetChunkID
 		embedding.KnowledgeBaseID = targetKnowledgeBaseID
+		// Tags belong to a KB. The destination projection is hydrated separately.
+		embedding.TagIDs = []string{}
 		if targetKBID := sourceToTargetKBIDMap[embedding.KnowledgeID]; targetKBID != "" {
 			embedding.KnowledgeID = targetKBID
 		}
@@ -699,6 +715,7 @@ func toDocument(embedding *vectorEmbedding) tcvectordb.Document {
 			fieldKnowledgeID:     {Val: embedding.KnowledgeID},
 			fieldKnowledgeBaseID: {Val: embedding.KnowledgeBaseID},
 			fieldTagID:           {Val: embedding.TagID},
+			fieldTagIDs:          {Val: append([]string{}, embedding.TagIDs...)},
 			fieldIsEnabled:       {Val: boolToUint64(embedding.IsEnabled)},
 		},
 	}

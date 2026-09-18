@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -565,31 +566,18 @@ func (s *sessionService) buildSearchTargets(
 		kb := kbByID[kbID]
 		explicitKnowledgeIDs := uniqueNonEmptyStrings(kbToKnowledgeIDs[kbID])
 
-		useDocumentTagResolution := kb == nil || kb.Type != types.KnowledgeBaseTypeFAQ
-		if kb == nil {
-			logger.Warnf(ctx, "Knowledge base metadata missing for tag scope, kb_id=%s, using document tag resolution", kbID)
-		}
-		if useDocumentTagResolution {
-			tagKnowledgeIDs, err := s.knowledgeService.ListKnowledgeIDsByTagIDs(ctx, kbTenant, kbID, tagIDs)
+		// Agent tools also use the explicit document whitelist for authorization.
+		// Validate only those selected documents; never enumerate a tag's entire
+		// membership. Retrieval still receives TagIDs as an index predicate.
+		if len(explicitKnowledgeIDs) > 0 && (kb == nil || kb.Type != types.KnowledgeBaseTypeFAQ) {
+			ids, err := s.filterSelectedKnowledgeByTags(ctx, explicitKnowledgeIDs, tagIDs)
 			if err != nil {
-				return nil, fmt.Errorf("resolve knowledge IDs for tag scope kb_id=%s: %w", kbID, err)
+				return nil, fmt.Errorf("validate selected documents for tag scope kb_id=%s: %w", kbID, err)
 			}
-			if len(explicitKnowledgeIDs) > 0 {
-				tagKnowledgeIDs = intersectStrings(tagKnowledgeIDs, explicitKnowledgeIDs)
-			}
-			tagKnowledgeIDs = uniqueNonEmptyStrings(tagKnowledgeIDs)
-			if len(tagKnowledgeIDs) == 0 {
+			if len(ids) == 0 {
 				continue
 			}
-			targets = append(targets, &types.SearchTarget{
-				Type:                    types.SearchTargetTypeKnowledge,
-				KnowledgeBaseID:         kbID,
-				TenantID:                kbTenant,
-				KnowledgeIDs:            tagKnowledgeIDs,
-				ScopeTagIDs:             append([]string(nil), tagIDs...),
-				DisableRecallThresholds: true,
-			})
-			continue
+			explicitKnowledgeIDs = ids
 		}
 
 		target := &types.SearchTarget{
@@ -648,21 +636,22 @@ func uniqueNonEmptyStrings(values []string) []string {
 	return out
 }
 
-func intersectStrings(left []string, right []string) []string {
-	if len(left) == 0 || len(right) == 0 {
-		return nil
+// filterSelectedKnowledgeByTags checks the already-authorized explicit IDs.
+func (s *sessionService) filterSelectedKnowledgeByTags(ctx context.Context, ids, tagIDs []string) ([]string, error) {
+	tags, err := s.knowledgeService.GetKnowledgeTags(ctx, ids)
+	if err != nil {
+		return nil, err
 	}
-	rightSet := make(map[string]bool, len(right))
-	for _, value := range right {
-		rightSet[value] = true
-	}
-	out := make([]string, 0)
-	for _, value := range left {
-		if rightSet[value] {
-			out = append(out, value)
+	var matched []string
+	for _, id := range ids {
+		for _, tag := range tags[id] {
+			if tag != nil && slices.Contains(tagIDs, tag.ID) {
+				matched = append(matched, id)
+				break
+			}
 		}
 	}
-	return out
+	return matched, nil
 }
 
 // KnowledgeQAByEvent processes knowledge QA through a series of events in the pipeline

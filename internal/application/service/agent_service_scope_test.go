@@ -70,3 +70,10 @@ func TestKnowledgeBaseScopesForPrompt_NilConfig(t *testing.T) {
 	assert.Nil(t, ids)
 	assert.Empty(t, tenantMap)
 }
+
+func TestKnowledgeBaseScopesForPrompt_DoesNotRestoreEmptyIntersection(t *testing.T) {
+	ids, _ := knowledgeBaseScopesForPrompt(&types.AgentConfig{
+		KnowledgeBases: []string{"kb-1"}, KnowledgeIDs: []string{"excluded-document"},
+	})
+	assert.Empty(t, ids)
+}

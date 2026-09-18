@@ -409,49 +409,14 @@ func (s *sessionService) buildAgentConfig(
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
 	agentConfig.SearchTargets = searchTargets
-	// Document tags are stored in knowledge_tag_relations, so document-KB tag
-	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
-	// those resolved IDs as this turn's pinned documents as well: otherwise the
-	// Agent tools are correctly constrained behind the scenes, but the model only
-	// sees a bound KB and does not know which documents the user explicitly chose.
-	if len(req.TagScopes) > 0 {
-		agentConfig.KnowledgeIDs = mergeResolvedTagKnowledgeIDs(
-			agentConfig.KnowledgeIDs,
-			searchTargets,
-			req.TagScopes,
-		)
-	}
+	// Only explicitly selected documents are pinned. Tag-only scopes remain
+	// predicates and are described in the Agent's runtime context.
 	logger.Infof(ctx, "Agent search targets built: %d targets", len(searchTargets))
 
 	// MaxContextTokens is deliberately left unset here. The caller fills it
 	// from the resolved model's declared window, which is not known yet.
 
 	return agentConfig, nil
-}
-
-func mergeResolvedTagKnowledgeIDs(
-	existing []string,
-	searchTargets types.SearchTargets,
-	tagScopes []types.TagScope,
-) []string {
-	tagKBs := make(map[string]bool, len(tagScopes))
-	for _, scope := range tagScopes {
-		if scope.KnowledgeBaseID != "" && len(scope.TagIDs) > 0 {
-			tagKBs[scope.KnowledgeBaseID] = true
-		}
-	}
-	if len(tagKBs) == 0 {
-		return uniqueNonEmptyStrings(existing)
-	}
-
-	merged := append([]string(nil), existing...)
-	for _, target := range searchTargets {
-		if target == nil || !tagKBs[target.KnowledgeBaseID] || target.Type != types.SearchTargetTypeKnowledge {
-			continue
-		}
-		merged = append(merged, target.KnowledgeIDs...)
-	}
-	return uniqueNonEmptyStrings(merged)
 }
 
 // applyPerRequestSkillScope records the @Skill mentions for this turn as the
