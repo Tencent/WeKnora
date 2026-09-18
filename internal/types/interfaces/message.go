@@ -94,6 +94,12 @@ type MessageRepository interface {
 	) ([]*types.Message, error)
 	// ListMessagesBySessionAfterCursor uses (created_at, id) for lossless paging.
 	ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error)
+	// ListMessagesBySessionBeforeCursor pages a session backwards: up to limit
+	// messages sorting strictly before (before, beforeID), newest first. A zero
+	// cursor starts from the newest message.
+	ListMessagesBySessionBeforeCursor(
+		ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+	) ([]*types.Message, error)
 	// ListMessagesBySessionUpTo returns every message sorting strictly before
 	// the (boundary, boundaryID) composite cursor, oldest first. Used by
 	// session fork to copy the history preceding a fork point.

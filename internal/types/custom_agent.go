@@ -274,7 +274,7 @@ type CustomAgentConfig struct {
 	// ===== Multi-turn Conversation Settings =====
 	// Whether multi-turn conversation is enabled
 	MultiTurnEnabled bool `yaml:"multi_turn_enabled" json:"multi_turn_enabled"`
-	// Number of history turns to keep in context
+	// Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window
 	HistoryTurns int `yaml:"history_turns" json:"history_turns"`
 	// Whether this agent may read the user's long-term memory. Nil inherits
 	// the workspace setting; false opts a single agent out of memory even when

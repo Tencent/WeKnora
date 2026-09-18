@@ -587,6 +587,24 @@ func TestRedactHistoryKBResultsKeepsTurnID(t *testing.T) {
 	require.Equal(t, "turn-a", redacted[0].TurnID)
 }
 
+// History is loaded up to the compaction threshold the engine will enforce.
+// A looser budget hands the first compaction more than the model can read; a
+// tighter one drops history that would have fit.
+func TestHistoryTokenBudgetIsTheCompactionThreshold(t *testing.T) {
+	for _, tc := range []struct{ window, completion int }{
+		{window: 40000, completion: 4000},
+		{window: 200000, completion: 24576},
+		{window: 32768, completion: 0},
+	} {
+		engine := newTestEngine(t, &mockChat{},
+			withMaxContextTokens(tc.window), withMaxCompletionTokens(tc.completion))
+		require.Equal(t, engine.compactor.Settings().Threshold(), HistoryTokenBudget(engine.config),
+			"window=%d completion=%d", tc.window, tc.completion)
+	}
+	require.Equal(t, types.DefaultMaxContextTokens-compaction.DefaultReserveTokens,
+		HistoryTokenBudget(&types.AgentConfig{}), "an unresolved window falls back to the default")
+}
+
 // Asking for more output than the window can still hold is rejected outright
 // by the provider, which surfaces to the agent as an unexplained failure.
 func TestClampCompletionBudgetToContext(t *testing.T) {

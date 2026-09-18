@@ -167,6 +167,27 @@ func (r *messageRepository) ListMessagesBySessionAfterCursor(ctx context.Context
 	return messages, nil
 }
 
+// ListMessagesBySessionBeforeCursor pages a session backwards: up to limit
+// messages sorting strictly before the (before, beforeID) cursor, newest first.
+// A zero cursor starts from the newest message. The ID tie-breaker keeps a page
+// boundary from skipping messages that share a timestamp.
+func (r *messageRepository) ListMessagesBySessionBeforeCursor(
+	ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+) ([]*types.Message, error) {
+	var messages []*types.Message
+	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
+	if !before.IsZero() || beforeID != "" {
+		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", before, before, beforeID)
+	}
+	if err := query.Order("created_at DESC, id DESC").Limit(limit).Find(&messages).Error; err != nil {
+		return nil, err
+	}
+	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
+		return nil, err
+	}
+	return messages, nil
+}
+
 // ListMessagesBySessionUpTo returns every message of a session that sorts
 // strictly before the (boundary, boundaryID) cursor, oldest first.
 //
