@@ -22,9 +22,16 @@ var (
 		`(?is)\s+(?:style|class|align|valign|width|height|bgcolor)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)`,
 	)
 
-	// htmlSpanAttrPattern detects rowspan/colspan, which Markdown tables cannot
-	// represent; such tables keep their HTML form (attributes stripped) instead.
-	htmlSpanAttrPattern = regexp.MustCompile(`(?i)\b(?:row|col)span\b`)
+	// htmlSpanAttrPattern detects rowspan/colspan values greater than 1, which
+	// Markdown tables cannot represent; such tables keep their HTML form
+	// (attributes stripped) instead. Span values of 1 (and the invalid 0) do
+	// not merge anything and must stay convertible.
+	htmlSpanAttrPattern = regexp.MustCompile(`(?i)\b(?:row|col)span\s*=\s*["']?(?:[2-9]|\d{2,})`)
+
+	// htmlTableRowPattern matches the opening <tr> tag of each table row, used
+	// to put every row on its own line so the chunker can split degraded HTML
+	// tables at "\n" boundaries.
+	htmlTableRowPattern = regexp.MustCompile(`(?i)(<tr\b)`)
 
 	// markdownTableSeparatorPattern matches the |---|---| delimiter row that a
 	// valid GFM table must contain.
@@ -54,7 +61,7 @@ func NormalizeHTMLTables(md string) string {
 
 	return htmlTableBlockPattern.ReplaceAllStringFunc(md, func(block string) string {
 		if htmlSpanAttrPattern.MatchString(block) {
-			return stripHTMLLayoutAttrs(block)
+			return splitHTMLTableRows(stripHTMLLayoutAttrs(block))
 		}
 		converted, err := conv.ConvertString(block)
 		if err != nil {
@@ -74,4 +81,14 @@ func NormalizeHTMLTables(md string) string {
 // while preserving structural attributes (rowspan/colspan) and text content.
 func stripHTMLLayoutAttrs(html string) string {
 	return htmlLayoutAttrPattern.ReplaceAllString(html, "")
+}
+
+// splitHTMLTableRows puts each table row on its own line and pads the block with
+// blank lines. The chunker splits on "\n", so a single-line HTML table would
+// otherwise be unsplittable and get force-cut at the absolute max size. Whitespace
+// between tags is insignificant in HTML, and newlines are only inserted before
+// <tr> (never inside a tag), so the table's meaning is preserved.
+func splitHTMLTableRows(block string) string {
+	withRows := htmlTableRowPattern.ReplaceAllString(block, "\n$1")
+	return "\n\n" + strings.TrimSpace(withRows) + "\n\n"
 }
