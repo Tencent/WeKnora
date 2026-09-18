@@ -556,7 +556,19 @@ services:
   searxng-init:
     image: busybox:1.36
     container_name: WeKnora-searxng-init
-    command: ["sh", "-c", "cp /template/settings.yml /etc/searxng/settings.yml && chmod 0644 /etc/searxng/settings.yml"]
+    # Fail if host-published APP_PORT and SEARXNG_PORT collide (defaults
+    # 8080 vs 8888). Linux allows 0.0.0.0:8080 (app) and 127.0.0.1:8080
+    # (searxng) together; localhost then hits SearXNG (HTML 404 on login).
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if [ "${APP_PORT:-8080}" = "${SEARXNG_PORT:-8888}" ]; then
+          echo "ERROR: SEARXNG_PORT=${SEARXNG_PORT:-8888} collides with APP_PORT=${APP_PORT:-8080}." >&2
+          echo "On Linux this makes localhost:${APP_PORT:-8080} hit SearXNG instead of WeKnora." >&2
+          echo "Keep SEARXNG_PORT at 8888 (or another free port), distinct from APP_PORT." >&2
+          exit 1
+        fi
+        cp /template/settings.yml /etc/searxng/settings.yml && chmod 0644 /etc/searxng/settings.yml
     volumes:
       - ./docker/searxng/settings.yml:/template/settings.yml:ro
       - searxng_config:/etc/searxng
