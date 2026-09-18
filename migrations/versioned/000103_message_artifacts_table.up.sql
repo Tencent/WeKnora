@@ -2,8 +2,10 @@
 -- Skill-generated files move out of the messages.artifacts JSONB column into
 -- their own table so they can be listed across sessions (the artifact library)
 -- without expanding every message's JSON. The table becomes the only source of
--- truth; messages.artifacts is left in place, no longer written, so a rollback
--- can restore it from this table.
+-- truth. After the backfill the legacy column is cleared (message loads still
+-- SELECT *, so a stale copy would be read on every history load) but kept, so
+-- instances still on the old binary during a rolling upgrade keep working. The
+-- down migration rebuilds the column from this table.
 DO $$ BEGIN RAISE NOTICE '[Migration 000103] Creating message_artifacts table'; END $$;
 
 CREATE TABLE IF NOT EXISTS message_artifacts (
@@ -56,3 +58,10 @@ CROSS JOIN LATERAL jsonb_array_elements(
 ) WITH ORDINALITY AS a(elem, ord)
 WHERE jsonb_typeof(a.elem) = 'object'
 ON CONFLICT (message_id, position) DO NOTHING;
+
+DO $$ BEGIN RAISE NOTICE '[Migration 000103] Clearing legacy messages.artifacts'; END $$;
+
+-- Only rows that carried artifacts; rewriting every '[]' row would touch the
+-- whole messages table for nothing.
+UPDATE messages SET artifacts = NULL
+WHERE artifacts IS NOT NULL AND artifacts <> '[]'::jsonb;

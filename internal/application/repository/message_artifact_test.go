@@ -15,7 +15,9 @@ func newArtifactTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Session{}, &types.Message{}, &types.MessageArtifactRecord{}))
+	require.NoError(t, db.AutoMigrate(
+		&types.Session{}, &types.Message{}, &types.MessageArtifactRecord{}, &testIMChannelSession{},
+	))
 	return db
 }
 
@@ -173,6 +175,21 @@ func TestListArtifactLibraryScopesAndGroupsVersions(t *testing.T) {
 	maintenance := createSession(t, db, &types.Session{
 		TenantID: 7, UserID: "alice", Title: "维护", Description: types.SkillMaintenanceSessionMarker + "x",
 	})
+	// IM sessions are created without an owner, so they look like legacy
+	// tenant-level rows; only the IM mapping tells them apart. A cleared chat
+	// keeps its soft-deleted mapping and must stay out as well.
+	imChat := createSession(t, db, &types.Session{TenantID: 7, Title: "飞书：张三的私聊"})
+	clearedIMChat := createSession(t, db, &types.Session{TenantID: 7, Title: "企微：已清空"})
+	embedChat := createSession(t, db, &types.Session{
+		TenantID: 7, Title: "网页挂件", Description: types.EmbedSessionMarkerPrefix + "ch-1",
+	})
+	require.NoError(t, db.Create(&testIMChannelSession{
+		ID: "ics-1", SessionID: imChat, Platform: "feishu", TenantID: 7,
+	}).Error)
+	require.NoError(t, db.Create(&testIMChannelSession{
+		ID: "ics-2", SessionID: clearedIMChat, Platform: "wecom", TenantID: 7,
+	}).Error)
+	require.NoError(t, db.Delete(&testIMChannelSession{ID: "ics-2"}).Error)
 
 	add := func(sessionID string, at time.Time, arts ...types.MessageArtifact) *types.Message {
 		m, err := repo.CreateMessage(ctx, &types.Message{
@@ -201,6 +218,9 @@ func TestListArtifactLibraryScopesAndGroupsVersions(t *testing.T) {
 	add(bobs, base, testArtifact("bob.pptx", "/w/bob.pptx", base))
 	add(otherTenant, base, testArtifact("elsewhere.pptx", "/w/e.pptx", base))
 	add(maintenance, base, testArtifact("maint.pptx", "/w/m.pptx", base))
+	add(imChat, base.Add(5*time.Hour), testArtifact("salary.xlsx", "/w/salary.xlsx", base.Add(5*time.Hour)))
+	add(clearedIMChat, base.Add(5*time.Hour), testArtifact("cleared.xlsx", "/w/c.xlsx", base.Add(5*time.Hour)))
+	add(embedChat, base.Add(5*time.Hour), testArtifact("widget.pdf", "/w/widget.pdf", base.Add(5*time.Hour)))
 	deleted := add(mine, base.Add(4*time.Hour), testArtifact("gone.pptx", "/w/gone.pptx", base.Add(4*time.Hour)))
 	require.NoError(t, repo.DeleteMessage(ctx, mine, deleted.ID))
 

@@ -172,10 +172,12 @@ func (r *messageRepository) RecordRestoredArtifactMtime(
 // ListArtifactLibrary returns the latest version of every artifact in the
 // sessions the caller can see, newest first.
 //
-// Session visibility mirrors the session list (sessionRepository.QueryPaged):
-// same tenant, not deleted, owned by the user or a legacy tenant-level row, and
-// not a skill-maintenance session. Artifacts of soft-deleted messages are
-// hidden. Versions are grouped by (session, source path); artifacts without a
+// Session visibility mirrors the home sidebar, i.e. the "web" bucket of
+// sessionRepository.QueryPaged: same tenant, not deleted, owned by the user or
+// a legacy tenant-level row, not a skill-maintenance session, and not an IM,
+// embed or API session. IM sessions are created without an owner, so without
+// the web predicate every member would see every IM chat's files. Artifacts
+// of soft-deleted messages are hidden. Versions are grouped by (session, source path); artifacts without a
 // source path stand alone. A later answer that references an earlier file
 // stores another row with the same URL, so versions are counted as distinct
 // URLs (the max DENSE_RANK over url, since window functions reject DISTINCT).
@@ -192,8 +194,9 @@ func (r *messageRepository) ListArtifactLibrary(
 		where = append(where, "(s.user_id = ? OR s.user_id IS NULL OR s.user_id = '')")
 		args = append(args, q.UserID)
 	}
-	where = append(where, "(s.description IS NULL OR s.description NOT LIKE ?)")
+	where = append(where, "(s.description IS NULL OR s.description NOT LIKE ?)", webSessionPredicate)
 	args = append(args, types.SkillMaintenanceSessionMarker+"%")
+	args = append(args, webSessionPredicateArgs()...)
 	if kw := strings.TrimSpace(q.Keyword); kw != "" {
 		where = append(where, "LOWER(ma.file_name) LIKE LOWER(?) ESCAPE ?")
 		args = append(args, "%"+escapeLikeKeyword(kw)+"%", likeEscapeChar)
@@ -218,6 +221,7 @@ func (r *messageRepository) ListArtifactLibrary(
 		FROM message_artifacts ma
 		JOIN messages m ON m.id = ma.message_id AND m.deleted_at IS NULL
 		JOIN sessions s ON s.id = ma.session_id
+		LEFT JOIN im_channel_sessions ics ON ics.session_id = s.id
 		WHERE ` + strings.Join(where, " AND ")
 	ranked := `SELECT g.*, MAX(g.url_rank) OVER (PARTITION BY g.session_id, g.version_key) AS version_count
 		FROM (` + grouped + `) g`

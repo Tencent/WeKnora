@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -84,10 +85,15 @@ func TestSQLiteMessageArtifactsBackfillAndRollback(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM message_artifacts WHERE message_id = 'msg-2'`).Scan(&userRows))
 	require.Zero(t, userRows)
 
-	// Rollback: clear the legacy column first so the assertion proves the
-	// down migration rebuilt it from the table.
-	_, err = db.Exec(`UPDATE messages SET artifacts = '[]'`)
-	require.NoError(t, err)
+	// The legacy column is cleared once copied, so history loads (SELECT *)
+	// no longer read a stale duplicate; rows without artifacts are untouched.
+	var legacy1, legacy2 sql.NullString
+	require.NoError(t, db.QueryRow(`SELECT artifacts FROM messages WHERE id = 'msg-1'`).Scan(&legacy1))
+	require.NoError(t, db.QueryRow(`SELECT artifacts FROM messages WHERE id = 'msg-2'`).Scan(&legacy2))
+	require.False(t, legacy1.Valid, "copied artifacts are cleared from messages.artifacts")
+	require.Equal(t, "[]", legacy2.String)
+
+	// Rollback rebuilds the legacy column from the table.
 	down, err := os.ReadFile(filepath.Join(repoRoot, "migrations", "sqlite", "000023_message_artifacts_table.down.sql"))
 	require.NoError(t, err)
 	_, err = db.Exec(string(down))

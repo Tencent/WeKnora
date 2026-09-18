@@ -1,7 +1,8 @@
 -- Mirrors versioned migration 000103_message_artifacts_table:
 -- skill-generated files move out of messages.artifacts into their own table,
--- which becomes the only source of truth. messages.artifacts is left in place
--- (no longer written) so a rollback can restore it.
+-- which becomes the only source of truth. After the backfill the legacy column
+-- is cleared (message loads still SELECT *) but kept; the down migration
+-- rebuilds it from the table.
 
 CREATE TABLE IF NOT EXISTS message_artifacts (
     id VARCHAR(36) PRIMARY KEY,
@@ -52,3 +53,7 @@ FROM messages m, json_each(
     CASE WHEN json_valid(m.artifacts) AND json_type(m.artifacts) = 'array' THEN m.artifacts ELSE '[]' END
 ) a
 WHERE a.type = 'object';
+
+-- Only rows that carried artifacts; '[]' rows are left as they are.
+UPDATE messages SET artifacts = NULL
+WHERE artifacts IS NOT NULL AND artifacts <> '[]';
