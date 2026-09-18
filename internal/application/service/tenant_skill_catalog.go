@@ -23,6 +23,7 @@ type SkillCatalogInstallView struct {
 	Status            string    `json:"status"`
 	Enabled           bool      `json:"enabled"`
 	Error             string    `json:"error,omitempty"`
+	Version           string    `json:"version,omitempty"`
 	BundleSHA256      string    `json:"bundle_sha256,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at"`
 }
@@ -154,6 +155,7 @@ func installView(
 		Status:          row.Status,
 		Enabled:         row.Enabled,
 		Error:           row.Error,
+		Version:         row.Version,
 		BundleSHA256:    row.BundleSHA256,
 		UpdatedAt:       row.UpdatedAt,
 	}
@@ -221,7 +223,7 @@ func (s *TenantSkillService) InstallCatalogToConfigs(
 	}
 	var firstErr error
 	for _, configID := range ids {
-		skillID, installErr := s.InstallSkill(ctx, tenantID, configID, archive)
+		skillID, installErr := s.installSkillArchive(ctx, tenantID, configID, archive, skillArchiveStored)
 		if installErr != nil {
 			logger.Warnf(ctx, "[skill] install catalog %s onto config %s failed: %v",
 				catalogID, configID, installErr)
