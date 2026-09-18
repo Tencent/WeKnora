@@ -724,6 +724,7 @@ func (s *customAgentService) getSuggestedQuestions(
 				Question:        meta.StandardQuestion,
 				Source:          "faq",
 				KnowledgeBaseID: chunk.KnowledgeBaseID,
+				KnowledgeID:     chunk.KnowledgeID,
 			})
 		}
 	}
@@ -757,6 +758,7 @@ func (s *customAgentService) getSuggestedQuestions(
 				Question:        q,
 				Source:          "document",
 				KnowledgeBaseID: chunk.KnowledgeBaseID,
+				KnowledgeID:     chunk.KnowledgeID,
 			})
 		}
 	}

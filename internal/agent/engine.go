@@ -41,6 +41,7 @@ type AgentEngine struct {
 	selectedDocs         []*SelectedDocumentInfo // User-selected documents (via @ mention)
 	pinnedMCPServices    []*PinnedMCPServiceInfo // User @mentioned MCP services for this turn
 	pinnedSkills         []*PinnedSkillInfo      // User @mentioned skills for this turn
+	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
@@ -117,6 +118,12 @@ func NewAgentEngine(
 	})
 
 	return engine
+}
+
+// SetQuestionOrigin records the knowledge source of a suggested question the
+// user picked for this turn; nil clears it.
+func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
+	e.questionOrigin = origin
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.

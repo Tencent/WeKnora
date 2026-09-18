@@ -89,7 +89,7 @@ func TestRuntimeDirectoryEscapesAndBoundsUntrustedContent(t *testing.T) {
 		}
 		require.NoError(t, err, "untrusted values must not break the directory envelope")
 	}
-	context := buildRuntimeContextBlock("session", kbs, nil)
+	context := buildRuntimeContextBlock("session", kbs, nil, nil)
 	require.NotContains(t, context, "<communication_instruction>")
 	require.NotContains(t, context, "<answer_instruction>")
 }

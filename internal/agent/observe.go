@@ -522,6 +522,7 @@ func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
 	docs []*SelectedDocumentInfo,
+	origin *QuestionOriginInfo,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
@@ -564,8 +565,35 @@ func buildRuntimeContextBlock(
 		sb.WriteString("  </pinned_documents>\n")
 	}
 
+	writeQuestionOrigin(&sb, origin)
+
 	sb.WriteString("</runtime_context>")
 	return sb.String()
+}
+
+// writeQuestionOrigin tells the model which source a picked suggested
+// question came from. Such a question is phrased from one document's
+// content, so it can read like general knowledge ("why be careful comparing
+// graphs?") while meaning something specific to that document; without the
+// hint the model may answer from memory without searching at all.
+func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
+	if origin == nil || origin.KnowledgeBaseID == "" {
+		return
+	}
+	fmt.Fprintf(sb, "  <question_origin knowledge_base_id=\"%s\" name=\"%s\">\n",
+		escapeXMLAttr(origin.KnowledgeBaseID), escapeXMLAttr(origin.KnowledgeBaseName))
+	if d := origin.Document; d != nil && d.KnowledgeID != "" {
+		title := d.Title
+		if title == "" {
+			title = d.FileName
+		}
+		fmt.Fprintf(sb, "    <document knowledge_id=\"%s\" title=\"%s\" />\n",
+			escapeXMLAttr(d.KnowledgeID), escapeXMLAttr(title))
+	}
+	sb.WriteString("    <note>The user picked this question from suggestions generated from this source. " +
+		"Search it before answering: the question refers to that content even when it reads like " +
+		"general knowledge.</note>\n")
+	sb.WriteString("  </question_origin>\n")
 }
 
 // buildMustUseBlock emits a short per-turn hint when the user @mentioned MCP/Skill.
@@ -690,7 +718,7 @@ func commonStringPrefix(a, b string) string {
 // not written to rendered_content / history.
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin)
 	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
@@ -730,6 +758,12 @@ func (e *AgentEngine) registerRuntimeReferences() {
 		}
 		e.modelContext.RegisterDocument(doc.KnowledgeID)
 		e.modelContext.RegisterKnowledgeBase(doc.KnowledgeBaseID)
+	}
+	if origin := e.questionOrigin; origin != nil {
+		e.modelContext.RegisterKnowledgeBase(origin.KnowledgeBaseID)
+		if origin.Document != nil {
+			e.modelContext.RegisterDocument(origin.Document.KnowledgeID)
+		}
 	}
 }
 

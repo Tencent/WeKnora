@@ -35,7 +35,7 @@
                             <div v-for="(item, index) in suggestedQuestions" :key="item.question"
                                 class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
-                                @click="handleSuggestedQuestionClick(item.question)">
+                                @click="handleSuggestedQuestionClick(item)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
                             </div>
@@ -61,6 +61,7 @@ import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
 import { getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
+import { originForSentText, questionOriginFromSuggestion, type PendingQuestionOrigin } from '@/utils/questionOrigin';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
@@ -181,8 +182,13 @@ onMounted(() => { fetchSuggestedQuestions(); });
 
 const inputFieldRef = ref();
 
-const handleSuggestedQuestionClick = (question: string) => {
-    inputFieldRef.value?.triggerSend(question);
+// Carried to the new session's first request so the agent searches the
+// suggestion's source before answering.
+let pendingQuestionOrigin: PendingQuestionOrigin | null = null;
+
+const handleSuggestedQuestionClick = (item: SuggestedQuestion) => {
+    pendingQuestionOrigin = questionOriginFromSuggestion(item);
+    inputFieldRef.value?.triggerSend(item.question);
 };
 
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = []) => {
@@ -233,7 +239,9 @@ const navigateToSession = async (sessionId: string, value: string, modelId: stri
     };
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
-    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles);
+    const questionOrigin = originForSentText(pendingQuestionOrigin, value) ?? null;
+    pendingQuestionOrigin = null;
+    usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles, questionOrigin);
     router.push(`/platform/chat/${sessionId}`);
 }
 

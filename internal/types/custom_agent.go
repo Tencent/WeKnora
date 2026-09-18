@@ -587,6 +587,8 @@ type SuggestedQuestion struct {
 	Source string `json:"source"`
 	// 来源知识库ID（仅 faq/document/wiki 来源时有值）
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+	// 来源文档ID（仅 faq/document 来源时有值）
+	KnowledgeID string `json:"knowledge_id,omitempty"`
 }
 
 // BuiltinAgentRegistry provides a registry of all built-in agents.

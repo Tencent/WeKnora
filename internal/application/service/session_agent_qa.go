@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
@@ -12,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // AgentQA performs agent-based question answering with conversation history and streaming support
@@ -351,6 +354,7 @@ func (s *sessionService) buildAgentConfig(
 	}
 	agentConfig.KnowledgeBases = kbIDs
 	agentConfig.KnowledgeIDs = knowledgeIDs
+	agentConfig.QuestionOrigin = questionOriginInScope(ctx, req.QuestionOrigin, kbIDs)
 
 	// Use custom agent's allowed tools if specified, otherwise use defaults
 	if len(customAgent.Config.AllowedTools) > 0 {
@@ -644,4 +648,24 @@ func (s *sessionService) configureSkillsFromAgent(
 		agentConfig.SkillsEnabled = false
 		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
 	}
+}
+
+// questionOriginInScope keeps a suggested question's origin only when its
+// knowledge base is already part of this turn's resolved scope, so a client
+// cannot use the hint to reach a base the agent was not given.
+func questionOriginInScope(
+	ctx context.Context, origin *types.QuestionOrigin, kbIDs []string,
+) *types.QuestionOrigin {
+	if origin == nil {
+		return nil
+	}
+	kbID := strings.TrimSpace(origin.KnowledgeBaseID)
+	if kbID == "" || !slices.Contains(kbIDs, kbID) {
+		if kbID != "" {
+			logger.Infof(ctx, "Ignoring question origin: knowledge base %s is outside this turn's scope",
+				secutils.SanitizeForLog(kbID))
+		}
+		return nil
+	}
+	return &types.QuestionOrigin{KnowledgeBaseID: kbID, KnowledgeID: strings.TrimSpace(origin.KnowledgeID)}
 }

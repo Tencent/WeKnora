@@ -58,13 +58,19 @@ func TestGroundingUsesRegistryInsteadOfConfiguration(t *testing.T) {
 			[]string{tools.ToolReadFile, tools.ToolShellExec},
 			true,
 			nil,
-			[]string{"Available knowledge tools:", "web_search is available", "web_fetch is available"},
+			[]string{
+				"Available knowledge tools:", "web_search is available", "web_fetch is available",
+				"search them before answering",
+			},
 		},
 		{
 			"rag",
 			[]string{tools.ToolSearchKnowledge, tools.ToolReadDocument},
 			false,
-			[]string{"Available knowledge tools: search_knowledge, read_document"},
+			[]string{
+				"Available knowledge tools: search_knowledge, read_document",
+				"search them before answering a question about a topic, even one that reads like general knowledge",
+			},
 			[]string{"wiki_search", "web_search is available"},
 		},
 		{

@@ -157,6 +157,10 @@ type AgentConfig struct {
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
+	// QuestionOrigin is the knowledge source of a suggested question the user
+	// picked, already checked to be inside KnowledgeBases (runtime only;
+	// rendered into runtime_context as a retrieval hint).
+	QuestionOrigin *QuestionOrigin `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.

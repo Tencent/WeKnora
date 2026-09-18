@@ -80,7 +80,7 @@
                                 <div class="suggested-questions-grid">
                                     <div v-for="(item, index) in suggestedQuestions" :key="item.question"
                                         class="suggested-question-card"
-                                        @click="handleSuggestedQuestionClick(item.question)">
+                                        @click="handleSuggestedQuestionClick(item)">
                                         <span class="suggested-question-text">{{ item.question }}</span>
                                         <span v-if="item.source === 'faq'"
                                             class="suggested-question-badge faq">FAQ</span>
@@ -189,6 +189,7 @@ import usermsg from './components/usermsg.vue';
 import { getMessageList, getSession, forkSession } from "@/api/chat/index";
 import { resolveForkAffordance } from './forkPoint';
 import { getSuggestedQuestions } from "@/api/agent/index";
+import { originForSentText, questionOriginFromSuggestion } from '@/utils/questionOrigin';
 import { deleteTemporaryAttachment, uploadTemporaryAttachment } from '@/api/chat/temporary-attachments';
 import { useStream } from '../../api/chat/streame'
 import { listSteerSession, promoteSteerSession, removeSteerSession, steerSession } from '@/api/chat/steer';
@@ -254,7 +255,7 @@ const isAgentStreamSession = () => {
 const uiStore = useUIStore();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
 const { t } = useI18n();
-const { firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles } = storeToRefs(usemenuStore);
+const { firstQuery, firstMentionedItems, firstModelId, firstImageFiles, firstAttachmentFiles, firstQuestionOrigin } = storeToRefs(usemenuStore);
 // Capture before the initial send consumes firstQuery; the child focuses after mounting.
 const focusComposerOnMount = Boolean(firstQuery.value);
 const { onChunk, error, isStreaming, startStream, stopStream, lastStreamRequest } = useStream();
@@ -496,6 +497,8 @@ let suggestedQuestionsFetchId = 0; // 用于取消过时的请求
 let suggestedDebounceTimer = null;
 let pendingSuggestionAttribution = null;
 let pendingSuggestionKnowledgeBaseIds = [];
+// Source of a picked suggested question, sent with it as a retrieval hint.
+let pendingQuestionOrigin = null;
 
 const cancelSuggestedQuestionsFetch = () => {
     suggestedQuestionsFetchId++;
@@ -545,11 +548,12 @@ const fetchSuggestedQuestions = async () => {
     }
 };
 
-const handleSuggestedQuestionClick = (question) => {
+const handleSuggestedQuestionClick = (item) => {
+    pendingQuestionOrigin = questionOriginFromSuggestion(item);
     if (inputFieldRef.value?.triggerSend) {
-        inputFieldRef.value.triggerSend(question);
+        inputFieldRef.value.triggerSend(item.question);
     } else {
-        sendMsg(question);
+        sendMsg(item.question);
     }
 };
 
@@ -1381,6 +1385,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const suggestionAttribution = pendingSuggestionAttribution;
     pendingSuggestionAttribution = null;
     pendingSuggestionKnowledgeBaseIds = [];
+    const questionOrigin = agentEnabled ? originForSentText(pendingQuestionOrigin, value) : undefined;
+    pendingQuestionOrigin = null;
     await startStream({
         session_id: session_id.value,
         knowledge_base_ids: kbIds,
@@ -1400,6 +1406,7 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
         query: value,
         suggestion_attribution: suggestionAttribution || undefined,
+        question_origin: questionOrigin,
         method: 'POST',
         url: endpoint,
     });
@@ -1548,6 +1555,9 @@ onMounted(async () => {
                 rerankModelId: '',
             });
         }
+        pendingQuestionOrigin = firstQuestionOrigin.value
+            ? { question: firstQuery.value, origin: firstQuestionOrigin.value }
+            : null;
         sendMsg(firstQuery.value, firstModelId.value || '', firstMentionedItems.value || [], firstImageFiles.value || [], firstAttachmentFiles.value || []);
         usemenuStore.changeFirstQuery('', [], '', [], []);
     } else {
