@@ -15,6 +15,7 @@ export interface SkillCatalogInstall {
   status: string;
   enabled: boolean;
   error?: string;
+  version?: string;
   bundle_sha256?: string;
   updated_at: string;
 }
