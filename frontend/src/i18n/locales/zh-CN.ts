@@ -6051,6 +6051,8 @@ export default {
       upgradeRowTitle: '有新版本',
       upgradeRowHint: '此沙箱上的版本与目录不同。升级期间继续使用当前版本，升级失败也不影响它。',
       upgradeRowHintVersions: '此沙箱是 {from}，目录是 {to}。升级期间继续使用 {from}，升级失败也不影响它。',
+      upgradeRowHintFailed: '此沙箱上的安装未成功，目录中已是另一个版本。升级会改装目录版本。',
+      upgradeRowHintFailedVersions: '此沙箱上 {from} 的安装未成功，目录中是 {to}。升级会改装 {to}。',
       servedWhileUpgrading: '升级中，仍在使用 {version}',
       servedWhileUpgradingPlain: '升级中，仍在使用旧版本',
       servedAfterFailure: '升级失败，仍在使用 {version}',

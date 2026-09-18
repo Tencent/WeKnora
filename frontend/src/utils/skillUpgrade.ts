@@ -27,11 +27,14 @@ export function installOutdated(catalog: SkillDigest, install: SkillDigest): boo
   )
 }
 
-// Only a ready install can take the catalog version: a busy one is already
-// being rewritten, and a failed one is retried rather than upgraded.
-// Disabled installs count: the files stay in the image either way.
+// An install that differs from the catalog is moved onto the catalog version
+// by upgrading, whether it is ready or failed. A retry replays the archive the
+// install is pinned to, which for a failed one the catalog has already moved
+// past, so it is only offered while the two agree. A busy install is already
+// being rewritten. Disabled installs count: the files stay in the image either
+// way.
 export function installUpgradable(catalog: SkillDigest, install: SkillInstallDigest): boolean {
-  return install.status === 'ready' && installOutdated(catalog, install)
+  return (install.status === 'ready' || install.status === 'failed') && installOutdated(catalog, install)
 }
 
 // An upgrade only replaces the image when it succeeds, so while one runs, and

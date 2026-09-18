@@ -565,6 +565,32 @@ func TestInstallCatalogToConfigsUpgradesAnInstallStillOnTheReplacedArchive(t *te
 	require.Contains(t, fx.deletedBundles, firstRef, "v1's archive lost its last reader")
 }
 
+// Installing a definition onto a sandbox reads it; it does not re-register it.
+// Rewriting the row would move its updated_at every time someone installs it.
+func TestInstallCatalogToConfigsLeavesTheDefinitionUntouched(t *testing.T) {
+	fx := newInstallFixture(t)
+	ctx := context.Background()
+	cat, err := fx.svc.RegisterCatalogFromArchive(ctx, 7, zipBundle(t, map[string]string{
+		"SKILL.md":           validSkillMD,
+		"scripts/extract.py": "print('v1')\n",
+	}))
+	require.NoError(t, err)
+	registered, err := fx.skillRepo.GetCatalog(ctx, 7, cat.ID)
+	require.NoError(t, err)
+	savedBefore := fx.savedBundles
+	fx.svc.now = func() time.Time { return registered.UpdatedAt.Add(time.Hour) }
+
+	result, err := fx.svc.InstallCatalogToConfigs(ctx, 7, cat.ID, []string{"cfg-1"})
+	require.NoError(t, err)
+	fx.awaitSkillSettled(t, result.Installs["cfg-1"])
+
+	after, err := fx.skillRepo.GetCatalog(ctx, 7, cat.ID)
+	require.NoError(t, err)
+	require.Equal(t, registered.UpdatedAt, after.UpdatedAt)
+	require.Equal(t, registered.BundleRef, after.BundleRef)
+	require.Equal(t, savedBefore, fx.savedBundles, "the definition's bytes are not stored again")
+}
+
 // Bytes neither the definition nor the row holds mean the catalog moved after
 // its archive was read. Installing them would write that older archive back.
 func TestStoredArchiveThatNoLongerMatchesTheCatalogIsRefused(t *testing.T) {

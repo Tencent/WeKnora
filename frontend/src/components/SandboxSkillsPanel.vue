@@ -164,7 +164,7 @@
                 @change="(v: any) => managedSkill && toggleEnabled(managedSkill, Boolean(v))"
               />
               <t-tooltip
-                v-if="managedSkill.status === 'failed'"
+                v-if="managedSkill.status === 'failed' && !managedUpgradable"
                 :content="$t('settings.sandbox.skillRetryHint')"
                 placement="top"
               >
@@ -272,7 +272,7 @@
               :session-id="managedSkill.install_session_id || ''"
               :message-id="managedSkill.install_message_id || ''"
               :live="managedSkill.status === 'installing'"
-              :can-retry="managedSkill.status === 'ready' || managedSkill.status === 'failed'"
+              :can-retry="(managedSkill.status === 'ready' || managedSkill.status === 'failed') && !managedUpgradable"
               @restarted="loadSkills()"
             />
           </section>
@@ -807,11 +807,25 @@ const managedSkill = computed(() =>
   props.focusSkillId ? (visibleSkills.value[0] || null) : null,
 )
 
+// An install the catalog has moved past is offered the upgrade and not the
+// retries: both of those replay the archive this install is pinned to, which
+// is exactly the version the operator came here to leave behind.
+const managedUpgradable = computed(() => {
+  const skill = managedSkill.value
+  const catalog = props.catalogItem
+  return Boolean(skill && catalog && installUpgradable(catalog, skill))
+})
+
 const managedUpgradeHint = computed(() => {
   const skill = managedSkill.value
   const catalog = props.catalogItem
-  if (!skill || !catalog || !installUpgradable(catalog, skill)) return ''
+  if (!skill || !catalog || !managedUpgradable.value) return ''
   const versions = upgradeVersions(catalog, skill)
+  if (skill.status === 'failed') {
+    return versions
+      ? t('settings.skills.upgradeRowHintFailedVersions', versions)
+      : t('settings.skills.upgradeRowHintFailed')
+  }
   return versions
     ? t('settings.skills.upgradeRowHintVersions', versions)
     : t('settings.skills.upgradeRowHint')

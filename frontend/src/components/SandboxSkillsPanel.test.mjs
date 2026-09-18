@@ -54,3 +54,9 @@ test('a skill mid-upgrade or after a failed upgrade says the previous version st
   assert.match(manageBlock, /v-if="managedServedNote"/)
   assert.match(source, /\.skill-manage__served \{/)
 })
+
+test('an install the catalog has moved past is offered the upgrade, not the retries', () => {
+  assert.match(source, /v-if="managedSkill\.status === 'failed' && !managedUpgradable"/)
+  assert.match(manageBlock, /:can-retry="\(managedSkill\.status === 'ready' \|\| managedSkill\.status === 'failed'\) && !managedUpgradable"/)
+  assert.match(source, /settings\.skills\.upgradeRowHintFailedVersions/)
+})

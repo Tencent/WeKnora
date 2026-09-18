@@ -136,7 +136,7 @@ func (s *TenantSkillService) installParsedSkill(
 		if keepPin {
 			return existing.ID, nil
 		}
-		catalog, catalogErr := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
+		catalog, catalogErr := s.catalogForArchive(ctx, tenantID, bundle, archive, origin)
 		if catalogErr != nil {
 			return "", fmt.Errorf("store bundle for skill %s: %w", existing.ID, catalogErr)
 		}
@@ -189,7 +189,7 @@ func (s *TenantSkillService) installParsedSkill(
 	// install row only stores CatalogID; readers follow that to the zip.
 	// A pinned retry is the exception: its row already names its own archive.
 	if !keepPin {
-		if err := s.bindInstallToCatalog(ctx, tenantID, configID, skillID, bundle, archive); err != nil {
+		if err := s.bindInstallToCatalog(ctx, tenantID, configID, skillID, bundle, archive, origin); err != nil {
 			return "", err
 		}
 	}
@@ -213,13 +213,35 @@ func (s *TenantSkillService) installParsedSkill(
 	return skillID, nil
 }
 
+// catalogForArchive returns the definition an install of these bytes follows.
+// An upload or a source pull becomes the definition. Stored bytes reuse the
+// definition that already holds them, untouched: storedArchiveKeepsItsPin has
+// refused any other version by now, so what is left to write is only a
+// definition that does not exist yet or an object that was lost.
+func (s *TenantSkillService) catalogForArchive(
+	ctx context.Context, tenantID uint64, bundle *SkillBundle, archive []byte, origin skillArchiveOrigin,
+) (*types.TenantSkillCatalogEntity, error) {
+	if origin == skillArchiveStored {
+		catalog, err := s.skills.GetCatalogByName(ctx, tenantID, bundle.Name)
+		if err != nil {
+			return nil, err
+		}
+		if catalog != nil && catalog.BundleSHA256 == bundle.SHA256 &&
+			s.catalogBundleStillHeld(ctx, tenantID, catalog) {
+			return catalog, nil
+		}
+	}
+	return s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
+}
+
 // bindInstallToCatalog records the archive on the definition and points the
 // install at it. A failure marks the row failed, because the row has already
 // been handed to this run.
 func (s *TenantSkillService) bindInstallToCatalog(
 	ctx context.Context, tenantID uint64, configID, skillID string, bundle *SkillBundle, archive []byte,
+	origin skillArchiveOrigin,
 ) error {
-	catalog, err := s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
+	catalog, err := s.catalogForArchive(ctx, tenantID, bundle, archive, origin)
 	if err == nil {
 		err = s.pointInstallAtCatalog(ctx, &types.TenantSkillEntity{
 			ID: skillID, TenantID: tenantID, SandboxConfigID: configID,

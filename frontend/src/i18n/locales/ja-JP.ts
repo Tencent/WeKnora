@@ -1714,6 +1714,8 @@ export default {
       upgradeRowTitle: '新しいバージョンがあります',
       upgradeRowHint: 'このサンドボックスのバージョンはカタログと異なります。アップグレードが完了するまで現在のバージョンを使い続け、失敗しても影響はありません。',
       upgradeRowHintVersions: 'このサンドボックスは {from}、カタログは {to} です。アップグレードが完了するまで {from} を使い続け、失敗しても影響はありません。',
+      upgradeRowHintFailed: 'このサンドボックスへのインストールは成功しておらず、カタログは別のバージョンになっています。アップグレードするとカタログのバージョンをインストールします。',
+      upgradeRowHintFailedVersions: 'このサンドボックスへの {from} のインストールは成功しておらず、カタログは {to} です。アップグレードすると {to} をインストールします。',
       servedWhileUpgrading: 'アップグレード中。{version} を使用中',
       servedWhileUpgradingPlain: 'アップグレード中。以前のバージョンを使用中',
       servedAfterFailure: 'アップグレード失敗。{version} を使用中',

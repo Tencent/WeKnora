@@ -1714,6 +1714,8 @@ export default {
       upgradeRowTitle: 'New version available',
       upgradeRowHint: 'This sandbox runs a different version from the catalog. It keeps running it until the upgrade finishes, and a failed upgrade leaves it in place.',
       upgradeRowHintVersions: 'This sandbox runs {from}; the catalog has {to}. {from} keeps running until the upgrade finishes, and a failed upgrade leaves it in place.',
+      upgradeRowHintFailed: 'The install on this sandbox did not succeed, and the catalog has moved on. Upgrading installs the catalog version instead.',
+      upgradeRowHintFailedVersions: 'Installing {from} on this sandbox did not succeed, and the catalog has {to}. Upgrading installs {to} instead.',
       servedWhileUpgrading: 'Upgrading; still running {version}',
       servedWhileUpgradingPlain: 'Upgrading; still running the previous version',
       servedAfterFailure: 'Upgrade failed; still running {version}',

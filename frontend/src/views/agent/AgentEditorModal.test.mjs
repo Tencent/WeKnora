@@ -173,5 +173,6 @@ test('a skill whose previous version still runs stays selectable during and afte
   assert.match(source, /installEnabled && \(installStatus === 'ready' \|\| Boolean\(servedNote\)\)/)
   assert.match(source, /v-if="skill\.selectable && skill\.servedNote"/)
   // Installing the catalog version over a failed upgrade is the upgrade retried.
-  assert.match(source, /skill\.servedNote \? \$t\('settings\.skills\.upgrade'\) : \$t\('agent\.editor\.installShort'\)/)
+  assert.match(source, /installsAnUpgrade\(skill\) \? \$t\('settings\.skills\.upgrade'\) : \$t\('agent\.editor\.installShort'\)/)
+  assert.match(source, /return skill\.upgradable \|\| Boolean\(skill\.servedNote\)/)
 })

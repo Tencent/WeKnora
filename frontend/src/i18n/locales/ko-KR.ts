@@ -6049,6 +6049,8 @@ export default {
       upgradeRowTitle: '새 버전이 있습니다',
       upgradeRowHint: '이 샌드박스의 버전이 카탈로그와 다릅니다. 업그레이드가 끝날 때까지 현재 버전을 계속 사용하며, 실패해도 영향이 없습니다.',
       upgradeRowHintVersions: '이 샌드박스는 {from}, 카탈로그는 {to}입니다. 업그레이드가 끝날 때까지 {from}을(를) 계속 사용하며, 실패해도 영향이 없습니다.',
+      upgradeRowHintFailed: '이 샌드박스의 설치가 성공하지 못했고, 카탈로그는 다른 버전입니다. 업그레이드하면 카탈로그 버전을 설치합니다.',
+      upgradeRowHintFailedVersions: '이 샌드박스의 {from} 설치가 성공하지 못했고, 카탈로그는 {to}입니다. 업그레이드하면 {to}을(를) 설치합니다.',
       servedWhileUpgrading: '업그레이드 중, {version} 사용 중',
       servedWhileUpgradingPlain: '업그레이드 중, 이전 버전 사용 중',
       servedAfterFailure: '업그레이드 실패, {version} 사용 중',

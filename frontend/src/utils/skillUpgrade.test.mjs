@@ -12,10 +12,12 @@ test('an install is outdated only when both digests are known and differ', () =>
   assert.equal(installOutdated({}, { bundle_sha256: 'a' }), false)
 })
 
-test('only a ready install can be upgraded', () => {
+test('a ready or failed install that differs from the catalog can be upgraded', () => {
   const catalog = { bundle_sha256: 'b' }
   assert.equal(installUpgradable(catalog, { status: 'ready', bundle_sha256: 'a' }), true)
-  assert.equal(installUpgradable(catalog, { status: 'failed', bundle_sha256: 'a' }), false)
+  assert.equal(installUpgradable(catalog, { status: 'failed', bundle_sha256: 'a' }), true)
+  assert.equal(installUpgradable(catalog, { status: 'failed', bundle_sha256: 'b' }), false)
+  assert.equal(installUpgradable(catalog, { status: 'removing', bundle_sha256: 'a' }), false)
   assert.equal(installUpgradable(catalog, { status: 'installing', bundle_sha256: 'a' }), false)
   assert.equal(installUpgradable(catalog, { status: 'ready', bundle_sha256: 'b' }), false)
 })

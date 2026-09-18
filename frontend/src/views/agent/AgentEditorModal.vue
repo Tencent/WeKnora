@@ -1408,10 +1408,10 @@
                       variant="text"
                       theme="primary"
                       :loading="installingCatalogId === skill.id"
-                      :title="skill.servedNote ? $t('agent.editor.upgradeOnThisSandbox') : $t('agent.editor.installToThisSandbox')"
+                      :title="installsAnUpgrade(skill) ? $t('agent.editor.upgradeOnThisSandbox') : $t('agent.editor.installToThisSandbox')"
                       @click.stop="installCatalogToCurrent(skill)"
                     >
-                      {{ skill.servedNote ? $t('settings.skills.upgrade') : $t('agent.editor.installShort') }}
+                      {{ installsAnUpgrade(skill) ? $t('settings.skills.upgrade') : $t('agent.editor.installShort') }}
                     </t-button>
                     <t-button
                       v-else-if="canUpgradeSkillRow(skill)"
@@ -2169,6 +2169,13 @@ function canUpgradeSkillRow(skill: CatalogSkillRow): boolean {
   return canInstallSkills.value && hasSandboxSelected.value && skill.upgradable
 }
 
+// Installing the catalog version over what this sandbox has is an upgrade:
+// over an outdated install, or over a failed upgrade whose previous version
+// still runs. Only a skill the sandbox has never carried is a plain install.
+function installsAnUpgrade(skill: CatalogSkillRow): boolean {
+  return skill.upgradable || Boolean(skill.servedNote)
+}
+
 function skillUpgradeHint(skill: CatalogSkillRow): string {
   const versions = upgradeVersions(skill, { version: skill.installVersion })
   return versions
@@ -2275,8 +2282,7 @@ async function installCatalogToCurrent(skill: CatalogSkillRow) {
   const configId = formData.value.config.sandbox_config_id || ''
   if (!configId || installingCatalogId.value) return
   installingCatalogId.value = skill.id
-  // A failed upgrade is retried by installing the catalog version again.
-  const upgrading = skill.upgradable || Boolean(skill.servedNote)
+  const upgrading = installsAnUpgrade(skill)
   try {
     const res = await installSkillCatalog(skill.id, [configId])
     const failed = Object.keys(res?.data?.errors || {}).length
