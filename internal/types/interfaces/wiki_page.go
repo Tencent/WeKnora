@@ -237,8 +237,8 @@ type WikiPageService interface {
 	// ListIssues retrieves issues for a knowledge base, optionally filtered by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 
-	// UpdateIssueStatus updates the status of an issue (e.g. pending -> resolved/ignored).
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	// UpdateIssueStatus updates the status of an issue of kbID (e.g. pending -> resolved/ignored).
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
 }
 
 // WikiPageRepository defines the wiki page data persistence interface.
@@ -449,6 +449,7 @@ type WikiPageRepository interface {
 	// ListIssues retrieves issues with optional filtering by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 
-	// UpdateIssueStatus updates an issue's status.
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	// UpdateIssueStatus updates the status of an issue of kbID; ErrWikiIssueNotFound
+	// when no such issue belongs to it.
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
 }

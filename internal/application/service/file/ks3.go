@@ -133,6 +133,19 @@ func parseKS3FilePath(filePath string) (bucket, objectKey string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// objectKey resolves a ks3:// path of this service's bucket. The bucket is not
+// part of the key but the tenant check scans it, so it must match.
+func (s *ks3FileService) objectKey(filePath string) (string, error) {
+	bucket, objectKey, err := parseKS3FilePath(filePath)
+	if err != nil {
+		return "", err
+	}
+	if bucket != s.bucketName {
+		return "", fmt.Errorf("bucket mismatch in path: got %s, want %s", bucket, s.bucketName)
+	}
+	return objectKey, nil
+}
+
 func (s *ks3FileService) SaveFile(ctx context.Context, file *multipart.FileHeader, tenantID uint64, knowledgeID string) (string, error) {
 	ext := filepath.Ext(file.Filename)
 	objectKey := joinKS3Key(s.pathPrefix, fmt.Sprintf("%d", tenantID), knowledgeID, uuid.New().String()+ext)
@@ -215,7 +228,7 @@ func (s *ks3FileService) CopyFile(ctx context.Context,
 }
 
 func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadCloser, error) {
-	_, objectKey, err := parseKS3FilePath(filePath)
+	objectKey, err := s.objectKey(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +248,7 @@ func (s *ks3FileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 }
 
 func (s *ks3FileService) DeleteFile(ctx context.Context, filePath string) error {
-	_, objectKey, err := parseKS3FilePath(filePath)
+	objectKey, err := s.objectKey(filePath)
 	if err != nil {
 		return err
 	}
@@ -270,7 +283,7 @@ func (s *ks3FileService) CheckConnectivity(ctx context.Context) error {
 }
 
 func (s *ks3FileService) GetFileURL(ctx context.Context, filePath string) (string, error) {
-	_, objectKey, err := parseKS3FilePath(filePath)
+	objectKey, err := s.objectKey(filePath)
 	if err != nil {
 		return "", err
 	}

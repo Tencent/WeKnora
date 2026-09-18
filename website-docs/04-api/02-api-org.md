@@ -119,7 +119,7 @@ curl $BASE/api/v1/organizations/org-1 -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/organizations/:id
 
-用途：更新组织（服务层校验调用者空间为组织 owner）。权限：Admin+。请求体字段同创建（均可选）。
+用途：更新组织（服务层校验调用者空间是组织 admin，不限于 owner）。权限：Admin+。请求体字段同创建（均可选）。
 
 响应：200 `{"success":true,"data":{OrganizationResponse}}`
 
@@ -205,7 +205,7 @@ curl "$BASE/api/v1/organizations/org-1/search-users?q=demo" -H "Authorization: B
 | --- | --- | --- | --- |
 | `tenant_id` | uint64 | 二选一 | 目标空间 ID（推荐） |
 | `user_id` | string | 二选一 | 兼容路径：用户 ID（解析为其空间） |
-| `representative_user_id` | string | 否 | 该空间的代表用户 |
+| `representative_user_id` | string | 否 | 已忽略，仅为兼容保留：直接添加的空间不挂代表用户，避免邀请方指定对方空间里哪位用户的信息出现在成员列表中 |
 | `role` | string | 是 | 组织内角色 |
 
 响应：200 `{"success":true,"message":"Member added successfully"}`
@@ -217,7 +217,7 @@ curl -X POST $BASE/api/v1/organizations/org-1/invite -H "Authorization: Bearer $
 
 ### GET /api/v1/organizations/:id/members
 
-用途：组织成员（空间）列表。权限：Viewer+。
+用途：组织成员（空间）列表。权限：Viewer+。`email` 只对调用方自己空间那一行返回，其他空间只返回用户名和头像。
 
 响应：200 `{"success":true,"data":{"members":[{id,user_id,representative_user_id,role,tenant_id,tenant_name,username,email,avatar,joined_at}],"total":N}}`
 

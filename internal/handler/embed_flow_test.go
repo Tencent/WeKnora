@@ -184,7 +184,9 @@ func TestEmbedExchangeFlowIntegration(t *testing.T) {
 
 func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	ch := &types.EmbedChannel{AgentID: "agent-embed-42"}
-	body := `{"query":"hello","agent_id":"client-override","agent_source_tenant_id":84,"web_search_enabled":true}`
+	body := `{"query":"hello","agent_id":"client-override","agent_source_tenant_id":84,"web_search_enabled":true,` +
+		`"knowledge_ids":["doc-x"],"tag_ids":["tag-x"],"mentioned_items":[{"id":"kb-x","type":"kb"}],` +
+		`"skill_names":["s"],"summary_model_id":"model-x"}`
 
 	patched, err := patchEmbedChatPayload(strings.NewReader(body), ch, false)
 	if err != nil {
@@ -213,6 +215,16 @@ func TestPatchEmbedChatPayloadInjectsAgentID(t *testing.T) {
 	kbIDs, ok := payload["knowledge_base_ids"].([]any)
 	if !ok || len(kbIDs) != 0 {
 		t.Fatalf("knowledge_base_ids = %v, want empty slice", payload["knowledge_base_ids"])
+	}
+	// Explicit targets and a model override would reach any KB or model of
+	// the channel workspace by ID.
+	for _, key := range []string{"knowledge_ids", "tag_ids", "mentioned_items", "skill_names"} {
+		if values, ok := payload[key].([]any); !ok || len(values) != 0 {
+			t.Fatalf("%s = %v, want empty", key, payload[key])
+		}
+	}
+	if _, ok := payload["summary_model_id"]; ok {
+		t.Fatalf("summary_model_id = %v, want dropped", payload["summary_model_id"])
 	}
 }
 

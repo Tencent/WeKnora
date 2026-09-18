@@ -108,7 +108,7 @@ flowchart LR
 | 名称 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `enable_cross_tenant_access` | bool | false | 允许具备 `CanAccessAllTenants` 的用户跨空间访问（内网可开） |
-| `enable_rbac` | *bool | true | 空间角色强制鉴权；显式 `false` 进入仅记录不拦截的灰度模式（env `WEKNORA_TENANT_ENABLE_RBAC`） |
+| `enable_rbac` | *bool | true | 空间角色强制鉴权；显式 `false` 进入灰度模式，空间内的角色检查仅记录不拦截，跨空间访问仍然拦截（env `WEKNORA_TENANT_ENABLE_RBAC`） |
 | `max_owned_per_user` | int | 0（走 handler 默认） | 单个非超管可自建空间数上限；<0 关闭限制（env `WEKNORA_TENANT_MAX_OWNED_PER_USER`） |
 | `self_service_creation_enabled` | *bool | true | 普通用户能否自建空间（env `WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED`） |
 | `default_session_name` / `default_session_title` / `default_session_description` | string | 空 | 新会话默认文案 |

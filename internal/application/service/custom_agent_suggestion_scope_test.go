@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -142,4 +144,38 @@ func TestMergeHybridStarterSuggestions_BackfillsWhenKnowledgeIsEmpty(t *testing.
 func TestExcludeSuggestionStrings_TagScopeOverridesSameKnowledgeBase(t *testing.T) {
 	got := excludeSuggestionStrings([]string{"kb-with-tag", "kb-explicit"}, []string{"kb-with-tag"})
 	assert.Equal(t, []string{"kb-explicit"}, got)
+}
+
+type suggestionDocRepo struct {
+	interfaces.KnowledgeRepository
+	docs map[string]*types.Knowledge
+}
+
+func (r *suggestionDocRepo) GetKnowledgeByIDOnly(_ context.Context, id string) (*types.Knowledge, error) {
+	if doc, ok := r.docs[id]; ok {
+		return doc, nil
+	}
+	return nil, errors.New("not found")
+}
+
+// Document IDs in a suggestion scope reach a tenant's chunks directly, so each
+// must be readable by the caller, as KB IDs already are: a shared agent's
+// message snapshot records them before the agent's scope is applied.
+func TestReadableSuggestionKnowledgeIDs(t *testing.T) {
+	svc := &customAgentService{knowledgeRepo: &suggestionDocRepo{docs: map[string]*types.Knowledge{
+		"own-doc":      {ID: "own-doc", TenantID: 7, KnowledgeBaseID: "own-kb"},
+		"scoped-doc":   {ID: "scoped-doc", TenantID: 84, KnowledgeBaseID: "agent-kb"},
+		"unscoped-doc": {ID: "unscoped-doc", TenantID: 84, KnowledgeBaseID: "other-kb"},
+	}}}
+	caller := types.WithCaller(context.Background(),
+		types.Caller{TenantID: 7, UserID: "u", Role: types.TenantRoleAdmin})
+	ids := []string{"own-doc", "scoped-doc", "unscoped-doc", "missing-doc"}
+
+	assert.Equal(t, []string{"own-doc"}, svc.readableSuggestionKnowledgeIDs(caller, ids))
+
+	sharedRun := access.WithSharedAgent(caller, &types.CustomAgent{
+		ID: "agent", TenantID: 84,
+		Config: types.CustomAgentConfig{KBSelectionMode: "selected", KnowledgeBases: []string{"agent-kb"}},
+	})
+	assert.Equal(t, []string{"own-doc", "scoped-doc"}, svc.readableSuggestionKnowledgeIDs(sharedRun, ids))
 }

@@ -3250,6 +3250,30 @@ func (s *Service) SetChannelAgentID(ctx context.Context, channel *IMChannel, age
 	return nil
 }
 
+// SetChannelKnowledgeBaseID binds the KB that IM files are saved into. It must
+// belong to the channel's workspace, which writes into it, and to a KB-restricted
+// API key's allow-list; a foreign ID would create records in (and read the
+// configuration of) another workspace's KB. An empty ID clears the binding.
+func (s *Service) SetChannelKnowledgeBaseID(ctx context.Context, channel *IMChannel, kbID string) error {
+	kbID = strings.TrimSpace(kbID)
+	if kbID == "" {
+		channel.KnowledgeBaseID = ""
+		return nil
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID); err != nil {
+		return fmt.Errorf("knowledge base not found")
+	}
+	if s.kbService == nil {
+		return fmt.Errorf("knowledge base not found")
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, kbID)
+	if err != nil || kb == nil || kb.TenantID != channel.TenantID {
+		return fmt.Errorf("knowledge base not found")
+	}
+	channel.KnowledgeBaseID = kbID
+	return nil
+}
+
 // UpdateChannel updates a channel and restarts it if needed.
 // Returns a duplicate_bot error if the bot identity is already used by another channel.
 func (s *Service) UpdateChannel(channel *IMChannel) error {

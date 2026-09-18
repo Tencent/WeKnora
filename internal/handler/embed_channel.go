@@ -701,6 +701,16 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 	// source workspace would switch it to another workspace's share of that ID.
 	delete(payload, types.AgentSourceTenantIDParam)
 	payload["knowledge_base_ids"] = []string{}
+	// Visitors are anonymous and run as Viewer of the whole channel workspace.
+	// Explicit targets (documents, tags, @mentions) and a model override are
+	// only honored within an agent's scope for shared agents, so for a
+	// channel's own agent they would reach any KB or model of the workspace by
+	// ID. The widget never sends them; retrieval follows the channel agent.
+	payload["knowledge_ids"] = []string{}
+	payload["tag_ids"] = []string{}
+	payload["mentioned_items"] = []any{}
+	payload["skill_names"] = []string{}
+	delete(payload, "summary_model_id")
 	clientWebSearch := false
 	if v, ok := payload["web_search_enabled"].(bool); ok {
 		clientWebSearch = v

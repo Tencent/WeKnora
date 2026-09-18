@@ -71,6 +71,28 @@ func isBuiltinAgent(agent *types.CustomAgent) bool {
 	return agent != nil && (agent.IsBuiltin || types.IsBuiltinAgentID(agent.ID))
 }
 
+// receiverAgentView is the copy of a shared agent that other workspaces see.
+// Receivers use the agent's capabilities and resource scope (models, KBs, MCP,
+// web search), but its prompts are the owner's work and the creator's user
+// ID identifies a person in another workspace, so both are withheld. Runs
+// load the agent separately (GetSharedAgentForTenant) and are unaffected.
+func receiverAgentView(agent *types.CustomAgent) *types.CustomAgent {
+	if agent == nil {
+		return nil
+	}
+	view := *agent
+	view.CreatedBy = ""
+	view.Config.SystemPrompt = ""
+	view.Config.SystemPromptID = ""
+	view.Config.ContextTemplate = ""
+	view.Config.ContextTemplateID = ""
+	view.Config.RewritePromptSystem = ""
+	view.Config.RewritePromptUser = ""
+	view.Config.FallbackPrompt = ""
+	view.Config.IntentPrompts = nil
+	return &view
+}
+
 // agentShareService implements AgentShareService.
 //
 // Plan 3 of #1303: visibility and access checks key on the caller's
@@ -312,6 +334,7 @@ func (s *agentShareService) ListSharedAgents(ctx context.Context, tenantID uint6
 		effective := types.MinOrgRole(share.Permission, tm.Role)
 		effective = applyTenantRoleCap(effective, callerTenantRole)
 		info := s.sharedAgentInfo(ctx, share, effective, webSearchReadyCache)
+		info.Agent = receiverAgentView(info.Agent)
 		key := fmt.Sprintf("%s_%d", share.AgentID, share.SourceTenantID)
 		existing, exists := agentInfoMap[key]
 		if !exists {
@@ -372,6 +395,9 @@ func (s *agentShareService) ListSharedAgentsInOrganization(ctx context.Context, 
 		effective = applyTenantRoleCap(effective, callerTenantRole)
 
 		info := s.sharedAgentInfo(ctx, share, effective, webSearchReadyCache)
+		if share.SourceTenantID != tenantID {
+			info.Agent = receiverAgentView(info.Agent)
+		}
 
 		item := &types.OrganizationSharedAgentItem{
 			SharedAgentInfo: *info,
@@ -434,6 +460,9 @@ func (s *agentShareService) ListSharedAgentsInOrganizations(ctx context.Context,
 			effective := types.MinOrgRole(share.Permission, tm.Role)
 			effective = applyTenantRoleCap(effective, callerTenantRole)
 			info := s.sharedAgentInfo(ctx, share, effective, webSearchReadyCache)
+			if share.SourceTenantID != tenantID {
+				info.Agent = receiverAgentView(info.Agent)
+			}
 			item := &types.OrganizationSharedAgentItem{
 				SharedAgentInfo: *info,
 				IsMine:          share.SourceTenantID == tenantID,

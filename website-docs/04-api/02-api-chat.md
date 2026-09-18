@@ -152,7 +152,7 @@ Handler: `internal/handler/session/temporary_document.go`
 
 ### POST /api/v1/sessions/:session_id/attachments
 
-用途：上传会话级临时文档（异步解析）。multipart 字段：`file`（必填）、`agent_id`（可选，决定解析引擎/ASR 模型）、`parser_engine`（可选）。
+用途：上传会话级临时文档（异步解析）。multipart 字段：`file`（必填）、`agent_id`（可选，决定解析引擎/ASR 模型）、`parser_engine`（可选；使用共享智能体时忽略，由智能体的解析规则决定）。
 
 响应：202 `{"success":true,"data":{TemporaryDocument}}`（`id,session_id,file_name,file_type,file_size,status(uploaded/processing/ready/failed),resource_ref,...`）
 

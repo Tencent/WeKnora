@@ -173,6 +173,16 @@ func (s *cosFileService) parseCosObjectName(filePath string) (string, error) {
 		rest := strings.TrimPrefix(filePath, cosScheme)
 		parts := strings.SplitN(rest, "/", 3)
 		if len(parts) == 3 {
+			// Bucket and region are not part of the object key, but the
+			// tenant check (ParseTenantIDFromStoragePath) scans them too: an
+			// unchecked numeric bucket or region would pass as the caller's
+			// tenant while the key reads another tenant's object.
+			if s.bucketName != "" && parts[0] != s.bucketName {
+				return "", fmt.Errorf("bucket mismatch in path: got %s, want %s", parts[0], s.bucketName)
+			}
+			if s.region != "" && parts[1] != s.region {
+				return "", fmt.Errorf("region mismatch in path: got %s, want %s", parts[1], s.region)
+			}
 			return parts[2], nil
 		}
 		return rest, nil

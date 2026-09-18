@@ -134,7 +134,7 @@ func (s *organizationService) CreateOrganization(ctx context.Context, userID str
 		UpdatedAt:            now,
 	}
 
-	if err := s.orgRepo.AddTenantMember(ctx, member); err != nil {
+	if err := s.orgRepo.AddTenantMember(ctx, member, 0); err != nil {
 		logger.Errorf(ctx, "Failed to add creator tenant as member: %v", err)
 		// Rollback organization creation
 		_ = s.orgRepo.Delete(ctx, org.ID)
@@ -362,16 +362,6 @@ func (s *organizationService) AddTenantMember(ctx context.Context, orgID string,
 	if err != nil {
 		return err
 	}
-	if org.MemberLimit > 0 {
-		count, errCount := s.orgRepo.CountTenantMembers(ctx, orgID)
-		if errCount != nil {
-			return errCount
-		}
-		if count >= int64(org.MemberLimit) {
-			return ErrOrgMemberLimitReached
-		}
-	}
-
 	now := time.Now()
 	member := &types.OrganizationTenantMember{
 		ID:                   uuid.New().String(),
@@ -384,7 +374,20 @@ func (s *organizationService) AddTenantMember(ctx context.Context, orgID string,
 		UpdatedAt:            now,
 	}
 
-	return s.orgRepo.AddTenantMember(ctx, member)
+	return s.addTenantMemberWithinLimit(ctx, member, org.MemberLimit)
+}
+
+// addTenantMemberWithinLimit inserts a membership with the org's member limit
+// enforced atomically by the repository (counting first and inserting later
+// let concurrent joins exceed it).
+func (s *organizationService) addTenantMemberWithinLimit(
+	ctx context.Context, member *types.OrganizationTenantMember, memberLimit int,
+) error {
+	err := s.orgRepo.AddTenantMember(ctx, member, memberLimit)
+	if errors.Is(err, repository.ErrOrgMemberLimitReached) {
+		return ErrOrgMemberLimitReached
+	}
+	return err
 }
 
 // RemoveTenantMember removes a tenant from an organization.
@@ -522,16 +525,6 @@ func (s *organizationService) joinAsViewerWithChecks(ctx context.Context, org *t
 		return err
 	}
 
-	if org.MemberLimit > 0 {
-		count, errCount := s.orgRepo.CountTenantMembers(ctx, org.ID)
-		if errCount != nil {
-			return errCount
-		}
-		if count >= int64(org.MemberLimit) {
-			return ErrOrgMemberLimitReached
-		}
-	}
-
 	now := time.Now()
 	member := &types.OrganizationTenantMember{
 		ID:                   uuid.New().String(),
@@ -544,7 +537,7 @@ func (s *organizationService) joinAsViewerWithChecks(ctx context.Context, org *t
 		UpdatedAt:            now,
 	}
 
-	return s.orgRepo.AddTenantMember(ctx, member)
+	return s.addTenantMemberWithinLimit(ctx, member, org.MemberLimit)
 }
 
 // JoinByInviteCode allows a tenant to join via invite code.
@@ -741,15 +734,6 @@ func (s *organizationService) ReviewJoinRequest(ctx context.Context, orgID strin
 			if errOrg != nil {
 				return errOrg
 			}
-			if org.MemberLimit > 0 {
-				count, errCount := s.orgRepo.CountTenantMembers(ctx, request.OrganizationID)
-				if errCount != nil {
-					return errCount
-				}
-				if count >= int64(org.MemberLimit) {
-					return ErrOrgMemberLimitReached
-				}
-			}
 			now := time.Now()
 			member := &types.OrganizationTenantMember{
 				ID:                   uuid.New().String(),
@@ -761,7 +745,7 @@ func (s *organizationService) ReviewJoinRequest(ctx context.Context, orgID strin
 				CreatedAt:            now,
 				UpdatedAt:            now,
 			}
-			if err := s.orgRepo.AddTenantMember(ctx, member); err != nil {
+			if err := s.addTenantMemberWithinLimit(ctx, member, org.MemberLimit); err != nil {
 				return err
 			}
 			logger.Infof(ctx, "Join request %s approved, tenant %d added to organization %s with role %s", requestID, request.TenantID, request.OrganizationID, role)

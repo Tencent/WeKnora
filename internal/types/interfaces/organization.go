@@ -67,7 +67,9 @@ type OrganizationRepository interface {
 	Delete(ctx context.Context, id string) error
 
 	// Tenant member operations
-	AddTenantMember(ctx context.Context, member *types.OrganizationTenantMember) error
+	// AddTenantMember inserts the membership; a positive memberLimit is enforced
+	// atomically with the insert.
+	AddTenantMember(ctx context.Context, member *types.OrganizationTenantMember, memberLimit int) error
 	RemoveTenantMember(ctx context.Context, orgID string, tenantID uint64) error
 	UpdateTenantMemberRole(ctx context.Context, orgID string, tenantID uint64, role types.OrgMemberRole) error
 	ListTenantMembers(ctx context.Context, orgID string) ([]*types.OrganizationTenantMember, error)
