@@ -12,15 +12,17 @@ import (
 
 // stubReranker returns canned scores (or an error) without any network call.
 type stubReranker struct {
-	scores []float64
-	err    error
-	calls  int
+	scores    []float64
+	err       error
+	calls     int
+	documents []string
 }
 
 func (s *stubReranker) Rerank(
 	_ context.Context, _ string, documents []string,
 ) ([]rerank.RankResult, error) {
 	s.calls++
+	s.documents = documents
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -187,6 +189,34 @@ func TestRerankResults_withoutModelIsPassthrough(t *testing.T) {
 	}
 	if len(out) != len(results) {
 		t.Fatalf("expected passthrough, got %d results", len(out))
+	}
+}
+
+// A chunk rarely names its document's subject, so the rerank model must see
+// the document title; FAQ entries are scored on their own question.
+func TestRerankScores_prefixDocumentTitle(t *testing.T) {
+	t.Parallel()
+	model := &stubReranker{scores: []float64{0.5, 0.5, 0.5}}
+	tool := newRerankTestTool(model)
+	results := []*searchResultWithMeta{
+		{SearchResult: &types.SearchResult{
+			ID: "c1", Content: "allocate inference across open-weight models",
+			KnowledgeTitle: " Show HN: Echo ", ChunkType: string(types.ChunkTypeText),
+		}},
+		{SearchResult: &types.SearchResult{
+			ID: "c2", Content: "What is Echo?", KnowledgeTitle: "FAQ set", ChunkType: string(types.ChunkTypeFAQ),
+		}},
+		{SearchResult: &types.SearchResult{ID: "c3", Content: "untitled"}},
+	}
+
+	if _, err := tool.rerankScores(context.Background(), "query", results); err != nil {
+		t.Fatalf("rerankScores returned error: %v", err)
+	}
+	want := []string{"Show HN: Echo\n\nallocate inference across open-weight models", "What is Echo?", "untitled"}
+	for i, w := range want {
+		if model.documents[i] != w {
+			t.Fatalf("passage %d = %q, want %q", i, model.documents[i], w)
+		}
 	}
 }
 

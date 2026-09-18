@@ -37,9 +37,12 @@ var searchKnowledgeTool = BaseTool{
 		"tolerates paraphrase. \"keyword\" matches the literal terms and is the right choice for identifiers, " +
 		"error codes, product names and exact phrases. A base without the requested index is searched with the " +
 		"index it has; the result reports that as a mode fallback.\n" +
-		"Write query as one natural-language question or a short phrase; in keyword mode write the exact terms. " +
-		"Pass knowledge_base_ids to focus on the bases whose profile fits the question. Run the tool again with a " +
-		"different query or mode when the results are thin.\n" +
+		"In hybrid and semantic mode write query as one complete natural-language question or statement that " +
+		"names the subject and what you want to know (\"Why does Echo use open-weight models to cut cost?\"), " +
+		"not a keyword list (\"Echo open-weight cost\"): results are ranked by a relevance model that scores " +
+		"meaning. In keyword mode write the exact terms. Pass knowledge_base_ids to focus on the bases whose " +
+		"profile fits the question. When nothing passes the relevance check, rephrase the question; switching " +
+		"mode alone does not help.\n" +
 		"Every chunk carries a cN handle and belongs to a dN document. Use read_document(id=dN) to read the " +
 		"surrounding context or the whole document. Searches match chunk text only; to find a document by its " +
 		"title or file name use list_documents(keyword=...).",
@@ -48,7 +51,7 @@ var searchKnowledgeTool = BaseTool{
   "properties": {
     "query": {
       "type": "string",
-      "description": "A natural-language question or short phrase; exact terms when mode is keyword",
+      "description": "A complete natural-language question, not a keyword list; exact terms when mode is keyword",
       "minLength": 1
     },
     "mode": {
@@ -230,12 +233,16 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	deduplicated := t.deduplicateResults(allResults)
 
 	ranked := deduplicated
+	rerankRejected := 0
 	if t.rerankModel != nil && len(deduplicated) > 0 {
 		reranked, err := t.rerankResults(ctx, query, deduplicated)
 		if err != nil {
 			logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank failed, using retrieval order: %v", err)
 		} else {
 			ranked = reranked
+			if len(reranked) == 0 {
+				rerankRejected = len(deduplicated)
+			}
 		}
 	}
 
@@ -286,6 +293,9 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 
 	result := t.formatOutput(ctx, final, kbIDs, query, mode)
 	annotateModeFallback(result.Data, mode, kbModes)
+	if rerankRejected > 0 {
+		result.Data["rerank_rejected"] = rerankRejected
+	}
 	if len(final) == 0 {
 		result.Output = emptySearchStatement(query, result.Data, len(kbIDs))
 	}
@@ -294,10 +304,19 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 
 // emptySearchStatement describes an empty result, including any mode
 // fallback, so the model does not read "no semantic neighbours" as "the
-// exact term does not occur".
+// exact term does not occur". When retrieval found candidates and the rerank
+// model rejected all of them, it says so: every mode shares that relevance
+// check, so the model should rephrase instead of cycling through modes.
 func emptySearchStatement(query string, data map[string]interface{}, kbCount int) string {
 	mode, _ := data["mode"].(string)
 	msg := fmt.Sprintf("No matching chunks for %q (mode=%s) in %d knowledge base(s).", query, mode, kbCount)
+	if rejected, _ := data["rerank_rejected"].(int); rejected > 0 {
+		msg = fmt.Sprintf("No chunk passed the relevance check for %q (mode=%s) in %d knowledge base(s): "+
+			"retrieval found %d candidate chunks but the relevance model scored none of them as answering the "+
+			"query. Every mode applies the same check, so switching mode will not help; rephrase as a complete "+
+			"question that names the subject, or use terms the documents themselves would use.",
+			query, mode, kbCount, rejected)
+	}
 	fallbacks, _ := data["mode_fallbacks"].([]map[string]interface{})
 	for _, fb := range fallbacks {
 		msg += fmt.Sprintf(" Knowledge base %v was searched with mode=%v (%v).",
@@ -655,13 +674,27 @@ func (t *SearchKnowledgeTool) rerankScores(
 ) ([]rerank.RankResult, error) {
 	passages := make([]string, len(results))
 	for i, result := range results {
-		passages[i] = t.getEnrichedPassage(ctx, result.SearchResult)
+		passages[i] = t.rerankPassage(ctx, result.SearchResult)
 	}
 	rerankResp, err := t.rerankModel.Rerank(ctx, query, passages)
 	if err != nil {
 		return nil, fmt.Errorf("rerank call failed: %w", err)
 	}
 	return rerankResp, nil
+}
+
+// rerankPassage is the text the rerank model scores: the document title
+// followed by the enriched chunk. A chunk rarely restates what its document
+// is about, so without the title a passage from "Show HN: Echo - ... using
+// open-weight models" scored 0.002 against "Echo open-weight models reduce
+// cost" and 0.45 with it. FAQ entries carry their own question instead.
+func (t *SearchKnowledgeTool) rerankPassage(ctx context.Context, result *types.SearchResult) string {
+	passage := t.getEnrichedPassage(ctx, result)
+	title := strings.TrimSpace(result.KnowledgeTitle)
+	if title == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
+		return passage
+	}
+	return title + "\n\n" + passage
 }
 
 func (t *SearchKnowledgeTool) rerankThreshold() float64 {
