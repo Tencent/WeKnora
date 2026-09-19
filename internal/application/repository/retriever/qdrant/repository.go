@@ -13,6 +13,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/qdrant/go-client/qdrant"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -59,7 +61,10 @@ func (q *qdrantRepository) getCollectionName(dimension int) string {
 // tolerate "does not exist" instead of treating it as a failure.
 //
 // A dimension already registered as initialized in this process short-circuits
-// the RPC, which keeps the common path at one round-trip per delete.
+// the RPC, which keeps the common path at one round-trip per delete. The cache
+// is only a hint: deletePoints still treats a missing collection on the Delete
+// RPC as a no-op and drops the cache, so a Qdrant wipe without restarting this
+// process cannot revive "Collection ... doesn't exist!" (#3337).
 func (q *qdrantRepository) collectionExists(ctx context.Context, dimension int) (bool, error) {
 	if _, ok := q.initializedCollections.Load(dimension); ok {
 		return true, nil
@@ -82,6 +87,8 @@ func (q *qdrantRepository) collectionExists(ctx context.Context, dimension int) 
 // chunkService.syncChunkIndex). When that delete is the first touch of a
 // dimension, failing on the missing collection aborts the write that would have
 // created it, so ingestion fails with "Collection ... doesn't exist!" (#3337).
+// deletePoints is the second line of defence if this probe (or its cache)
+// disagrees with the store.
 func (q *qdrantRepository) deleteTarget(ctx context.Context, dimension int) (string, bool, error) {
 	collectionName := q.getCollectionName(dimension)
 
@@ -95,6 +102,40 @@ func (q *qdrantRepository) deleteTarget(ctx context.Context, dimension int) (str
 		return collectionName, false, nil
 	}
 	return collectionName, true, nil
+}
+
+// isMissingCollectionErr reports whether err is Qdrant saying the dimension
+// collection is gone. The go-client wraps the gRPC status, and tests (and some
+// server paths) surface the issue's "Collection ... doesn't exist!" wording.
+func isMissingCollectionErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if status.Code(err) == codes.NotFound {
+		return true
+	}
+	return strings.Contains(err.Error(), "doesn't exist")
+}
+
+// deletePoints issues DeletePoints and treats a missing collection as a no-op.
+// When that happens the process-local initialized cache is dropped so the
+// following write (ensureCollection) will recreate the collection instead of
+// skipping create and failing the upsert.
+func (q *qdrantRepository) deletePoints(ctx context.Context, dimension int, collectionName string, points *qdrant.PointsSelector) error {
+	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collectionName,
+		Points:         points,
+	})
+	if err == nil {
+		return nil
+	}
+	if !isMissingCollectionErr(err) {
+		return err
+	}
+	q.initializedCollections.Delete(dimension)
+	logger.GetLogger(ctx).Infof(
+		"[Qdrant] Collection %s does not exist, nothing to delete", collectionName)
+	return nil
 }
 
 // ensureCollection ensures the collection exists for the given dimension
@@ -331,14 +372,11 @@ func (q *qdrantRepository) DeleteByChunkIDList(ctx context.Context, chunkIDList 
 
 	log.Infof("[Qdrant] Deleting indices by chunk IDs from %s, count: %d", collectionName, len(chunkIDList))
 
-	_, err = q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldChunkID, chunkIDList...),
-			},
-		}),
-	})
+	err = q.deletePoints(ctx, dimension, collectionName, qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatchKeywords(fieldChunkID, chunkIDList...),
+		},
+	}))
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to delete by chunk IDs: %v", err)
 		return fmt.Errorf("failed to delete by chunk IDs: %w", err)
@@ -369,14 +407,11 @@ func (q *qdrantRepository) DeleteByKnowledgeIDList(ctx context.Context,
 
 	log.Infof("[Qdrant] Deleting indices by knowledge IDs from %s, count: %d", collectionName, len(knowledgeIDList))
 
-	_, err = q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldKnowledgeID, knowledgeIDList...),
-			},
-		}),
-	})
+	err = q.deletePoints(ctx, dimension, collectionName, qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatchKeywords(fieldKnowledgeID, knowledgeIDList...),
+		},
+	}))
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to delete by knowledge IDs: %v", err)
 		return fmt.Errorf("failed to delete by knowledge IDs: %w", err)
@@ -407,14 +442,11 @@ func (q *qdrantRepository) DeleteBySourceIDList(ctx context.Context,
 
 	log.Infof("[Qdrant] Deleting indices by source IDs from %s, count: %d", collectionName, len(sourceIDList))
 
-	_, err = q.client.Delete(ctx, &qdrant.DeletePoints{
-		CollectionName: collectionName,
-		Points: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
-			Must: []*qdrant.Condition{
-				qdrant.NewMatchKeywords(fieldSourceID, sourceIDList...),
-			},
-		}),
-	})
+	err = q.deletePoints(ctx, dimension, collectionName, qdrant.NewPointsSelectorFilter(&qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatchKeywords(fieldSourceID, sourceIDList...),
+		},
+	}))
 	if err != nil {
 		log.Errorf("[Qdrant] Failed to delete by source IDs: %v", err)
 		return fmt.Errorf("failed to delete by source IDs: %w", err)

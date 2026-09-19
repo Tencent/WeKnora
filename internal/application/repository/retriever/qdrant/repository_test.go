@@ -12,6 +12,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestNewQdrantValueMapSanitizesInvalidUTF8AndNUL(t *testing.T) {
@@ -335,9 +337,9 @@ func newDeleteTestRepository(t *testing.T, collections []string,
 			name := request.GetCollectionName()
 			harness.deletes = append(harness.deletes, name)
 			if !harness.collections[name] {
-				// Verbatim server wording, kept so a regression fails with the
-				// message the issue reports rather than a paraphrase.
-				return fmt.Errorf(qdrantMissingCollectionErr, name)
+				// Same gRPC status and wording the real server uses, so the
+				// NotFound no-op path is exercised rather than a paraphrase.
+				return status.Error(codes.NotFound, fmt.Sprintf(qdrantMissingCollectionErr, name))
 			}
 			return nil
 		default:
@@ -412,17 +414,20 @@ func TestDeletesIssueWhenCollectionExists(t *testing.T) {
 // Infrastructure failures must not be mistaken for an absent collection: a
 // store that cannot answer must fail the delete loudly.
 func TestDeletePropagatesCollectionCheckFailure(t *testing.T) {
-	harness := newDeleteTestRepository(t, []string{"vectors_1024"}, func(string) (bool, error) {
-		return false, errors.New("qdrant unavailable")
-	})
+	for _, operation := range deleteOperations() {
+		t.Run(operation.name, func(t *testing.T) {
+			harness := newDeleteTestRepository(t, []string{"vectors_1024"}, func(string) (bool, error) {
+				return false, errors.New("qdrant unavailable")
+			})
 
-	err := harness.repo.DeleteByKnowledgeIDList(
-		context.Background(), []string{"knowledge-1"}, 1024, types.KnowledgeBaseTypeDocument)
-	if err == nil || !strings.Contains(err.Error(), "failed to check collection existence") {
-		t.Fatalf("expected the existence probe failure to surface, got %v", err)
-	}
-	if len(harness.deletes) != 0 {
-		t.Fatalf("expected no delete RPC after a failed probe, got %v", harness.deletes)
+			err := operation.run(context.Background(), harness.repo)
+			if err == nil || !strings.Contains(err.Error(), "failed to check collection existence") {
+				t.Fatalf("expected the existence probe failure to surface, got %v", err)
+			}
+			if len(harness.deletes) != 0 {
+				t.Fatalf("expected no delete RPC after a failed probe, got %v", harness.deletes)
+			}
+		})
 	}
 }
 
@@ -461,5 +466,56 @@ func TestDeleteWithEmptyIDListSkipsAllRPCs(t *testing.T) {
 	}
 	if err := harness.repo.DeleteBySourceIDList(ctx, nil, 1024, types.KnowledgeBaseTypeDocument); err != nil {
 		t.Fatal(err)
+	}
+	if len(harness.deletes) != 0 {
+		t.Fatalf("expected no delete RPC for an empty ID list, got %v", harness.deletes)
+	}
+}
+
+func TestIsMissingCollectionErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"generic", errors.New("qdrant unavailable"), false},
+		{"issue wording", fmt.Errorf(qdrantMissingCollectionErr, "vectors_1024"), true},
+		{"grpc not found", status.Error(codes.NotFound, "Not found: Collection vectors_1024 doesn't exist!"), true},
+		{"wrapped not found", fmt.Errorf("Delete() failed: vectors_1024: %w", status.Error(codes.NotFound, "Not found")), true},
+		{"other grpc", status.Error(codes.Unavailable, "qdrant down"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isMissingCollectionErr(tc.err); got != tc.want {
+				t.Fatalf("isMissingCollectionErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// A dimension this process already created is not probed, so a Qdrant wipe
+// that leaves the cache stale still reaches DeletePoints. That RPC's missing
+// collection must be a no-op and must drop the cache so the following write
+// can recreate the collection (#3337).
+func TestDeleteTreatsStaleCacheMissingCollectionAsNoOp(t *testing.T) {
+	for _, operation := range deleteOperations() {
+		t.Run(operation.name, func(t *testing.T) {
+			harness := newDeleteTestRepository(t, nil, func(string) (bool, error) {
+				t.Error("stale cache must skip the existence probe")
+				return false, nil
+			})
+			harness.repo.initializedCollections.Store(1024, true)
+
+			if err := operation.run(context.Background(), harness.repo); err != nil {
+				t.Fatalf("stale cache + missing collection must be a no-op, got %v", err)
+			}
+			if len(harness.deletes) != 1 || harness.deletes[0] != "vectors_1024" {
+				t.Fatalf("expected one delete against vectors_1024, got %v", harness.deletes)
+			}
+			if _, ok := harness.repo.initializedCollections.Load(1024); ok {
+				t.Fatal("missing collection must drop the initialized cache so the following write can recreate it")
+			}
+		})
 	}
 }
