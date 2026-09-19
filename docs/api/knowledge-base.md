@@ -236,7 +236,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
 | `batch_size`                  | integer | `1`     | 单次 VLM 请求携带的图片数，取值 `1`–`16`，超出会被收敛到区间内。`1` 表示逐图请求 |
 | `classify_downscale_enabled`  | boolean | `true`  | 分类描述前是否先把图片缩小到 `classify_max_edge`。实测可显著降低提示令牌量且不影响分类结果 |
 | `classify_max_edge`           | integer | `640`   | 缩放后的最长边像素数。`0` 表示「未设置」，取默认值 `640`；**负数表示关闭缩放**。当日志中出现 `classify_max_edge=0` 时，含义是「本次不缩放」——可能来自负值，也可能来自 `classify_downscale_enabled=false`（关闭时该字段被忽略）。OCR 始终使用原图字节，不使用缩小后的副本 |
-| `class_policies`              | object  | 见下    | 类别 → 工作策略的覆盖表；未提及的类别沿用内置默认值 |
+| `class_policies`              | object  | 见下    | 类别 → 工作策略的覆盖表；出现的类别**整体替换**内置默认行（`ocr` / `caption` / `disabled` 三个字段都要给全），未提及的类别沿用内置默认值 |
 | `post_process_image_rules`    | array   | `[]`    | 声明式规则列表，在类别策略之上按顺序求值 |
 
 `post_process_image_enabled=true` 时，图片先被分类为 `chart` / `decorative` / `logo` / `photo` / `table_image` / `text_screenshot` / `other` 之一，再由 `class_policies` 决定该类图片做哪些工作：
@@ -259,7 +259,7 @@ curl --location 'http://localhost:8080/api/v1/knowledge-bases' \
 | `text_screenshot` | true  | true      | false      |
 | `other`           | true  | true      | false      |
 
-上述设置也可在单次上传/重新解析时按文档临时覆盖：请求体中的 `process_config`（`KnowledgeProcessOverrides`）支持 `post_process_image_enabled`、`image_batch_size`、`image_classify_downscale_enabled`、`image_class_policies`；未传的项沿用知识库设置，`image_class_policies` 按类别与知识库的默认表合并。详见「上传文档」接口。
+上述设置也可在单次上传/重新解析时按文档临时覆盖：请求体中的 `process_config`（`KnowledgeProcessOverrides`）支持 `post_process_image_enabled`、`image_batch_size`、`image_classify_downscale_enabled`、`image_class_policies`；未传的项沿用知识库设置。`image_class_policies` 的覆盖同样是**按类别整体替换**：表中出现的类别整体取代该类现有策略，未出现的类别保持不变——所以只想改某一类别里的一项时，必须把该类的 `ocr` / `caption` / `disabled` 一并给出，缺省字段按 `false` 处理。详见「上传文档」接口。
 
 **`vector_store_*` 响应字段说明**:
 
