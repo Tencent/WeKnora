@@ -110,10 +110,12 @@ func (m *Manager) receiveUI(d *device, data []byte) bool {
 	return true
 }
 
-// Idle releases debugging without closing tabs or deselecting the conversation.
-// Serialize against automation so an earlier turn cannot detach a command midway.
-func (m *Manager) Idle(ctx context.Context, s Scope, session string) error {
-	if _, remote, err := m.route(ctx, s, session, "idle", "", nil); remote || err != nil {
+// FinishTurn retains the official session for unfinished work, or stops a
+// completed task through native RPC. Idle is only a host-side preview/turn
+// marker: retaining a session does not detach its debugger or clear its refs.
+func (m *Manager) FinishTurn(ctx context.Context, s Scope, session string, keepOpen bool) error {
+	params := map[string]any{"keep_open": keepOpen}
+	if _, remote, err := m.route(ctx, s, session, "finish_turn", "", params); remote || err != nil {
 		return err
 	}
 	d := m.get(s)
@@ -122,7 +124,7 @@ func (m *Manager) Idle(ctx context.Context, s Scope, session string) error {
 	}
 	d.mu.Lock()
 	target := d.tasks[session]
-	if target == nil || target.id == "" || !d.ready || d.conn == nil {
+	if target == nil || target.id == "" || target.stopping {
 		d.mu.Unlock()
 		return nil
 	}
@@ -137,48 +139,17 @@ func (m *Manager) Idle(ctx context.Context, s Scope, session string) error {
 		return ctx.Err()
 	}
 	defer func() { <-gate }()
+
 	d.mu.Lock()
 	if d.tasks[session] != target || target.id == "" || target.stopping {
 		d.mu.Unlock()
 		return nil
 	}
-	// Stop new preview requests before waiting for an in-flight capture in Chrome.
+	// Stop polling between turns; keep the browser session itself unchanged.
 	target.idle = true
 	d.mu.Unlock()
-	data, err := m.callUI(ctx, s, session, "gateway.task_idle")
-	if err != nil {
-		return err
-	}
-	var result struct {
-		Released bool `json:"released"`
-	}
-	if json.Unmarshal(data, &result) != nil || !result.Released {
-		return errors.New("browser control was not released")
-	}
-	return nil
-}
-
-// FinishTurn releases debugging first. Completed research tasks then close;
-// retained or interrupted tasks stay available for user handoff. The browser
-// source preference lives in the client settings, independently of this task.
-func (m *Manager) FinishTurn(ctx context.Context, s Scope, session string, keepOpen bool) error {
-	// An unmodified official extension can still stop a completed task through
-	// native RPC. Retained tasks require the companion extension's idle barrier.
-	if err := m.Idle(ctx, s, session); err != nil {
-		var rpcErr *RPCError
-		if keepOpen || !errors.As(err, &rpcErr) || rpcErr.Code != errGatewayUIUnsupported.Code {
-			return err
-		}
-		status, statusErr := m.GetStatus(ctx, s, session)
-		if statusErr != nil {
-			return statusErr
-		}
-		if status.Paused {
-			return err
-		}
-	}
 	if keepOpen {
 		return nil
 	}
-	return m.Control(ctx, s, session, "finish")
+	return m.stopTask(ctx, s, session, d, true)
 }

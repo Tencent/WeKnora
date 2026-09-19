@@ -2,11 +2,10 @@
   "version": "0.3.0",
   "extension": {
     "version": "0.3.0",
-    "source_commit": "75e2c64abaf4b7cc75682d94b0c1fd5db0cbd5e5",
-    "upstream_tag": "ext-v0.3.0"
+    "source_commit": "fa953dc6fcd868827b93164e3bea26198e691224"
   },
   "daemon": {
-    "source_commit": "75e2c64abaf4b7cc75682d94b0c1fd5db0cbd5e5",
+    "source_commit": "fa953dc6fcd868827b93164e3bea26198e691224",
     "build": "cargo build --locked --release -p bsk"
   }
 }

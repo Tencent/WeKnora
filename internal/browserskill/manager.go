@@ -50,7 +50,7 @@ type Status struct {
 	LastError       string `json:"last_error,omitempty"`
 	Stopping        bool   `json:"stopping"`
 	HelpPrompt      string `json:"help_prompt,omitempty"`
-	Idle            bool   `json:"idle"`
+	Idle            bool   `json:"idle"` // Between turns; does not imply debugger release.
 	NeedsHelp       bool   `json:"needs_help"`
 	Enabled         bool   `json:"enabled"`
 	Selected        bool   `json:"selected"`
@@ -912,9 +912,6 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 			return err
 		}
 	}
-	if d == nil && action == "finish" {
-		return nil
-	}
 	if d == nil && action == "stop" && m.store != nil {
 		return m.store.clearTask(ctx, s, session)
 	}
@@ -926,16 +923,6 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	d.mu.Lock()
 	t := d.tasks[session]
-	if action == "finish" {
-		// Automatic cleanup must not resume or discard interrupted work, nor
-		// interrupt a new command/start that raced with turn completion.
-		if t == nil || t.paused || t.starting || t.stopping || len(t.calls) > 0 || !t.idle {
-			d.mu.Unlock()
-			return nil
-		}
-		d.mu.Unlock()
-		return m.stopTask(ctx, s, session, d, true)
-	}
 	if action == "auto_start" && (t == nil || !t.selected || t.paused || t.forgotten) {
 		d.mu.Unlock()
 		return errors.New("local browser is not selected or is paused; ask the user to resume")

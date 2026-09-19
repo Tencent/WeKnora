@@ -32,13 +32,13 @@ WeKnora 使用 Tencent/BrowserSkill 的官方 daemon 和基于官方源码的配
 
 预览获取当前任务标签的 CDP 画面，不调用激活窗口/标签 API。JPEG 宽度最多 640 像素。预览直接截取视口，再缩小实际位图，不在每次轮询前额外调用布局查询。任务活动期间，前端每次获取画面后间隔 1 秒刷新；服务端短缓存和扩展在途合并限制重复截图。页面隐藏时停止刷新，回到页面后立即更新。它是约 1 fps 的低帧率截图同步，不是视频流；失败超过 5 秒会提示画面暂未更新。
 
-后台任务标签在调试连接期间启用 CDP `Emulation.setFocusEmulationEnabled`，让页面的可见性/焦点与绘制回调继续工作，不激活 Chrome 标签或窗口。仅任务新建或明确借用的标签启用此行为，释放调试连接时由 Chrome 恢复。否则依赖 `requestAnimationFrame` 或可见性事件加载内容的页面可能停在 Loading，直到用户切到该标签。
+后台任务标签在调试连接期间启用 CDP `Emulation.setFocusEmulationEnabled`，让页面的可见性/焦点与绘制回调继续工作，不激活 Chrome 标签或窗口。仅任务新建或明确借用的标签启用此行为，由官方会话控制接口管理；独立预览也显式获取同一控制权，由官方会话结束或标签归还流程释放。否则依赖 `requestAnimationFrame` 或可见性事件加载内容的页面可能停在 Loading，直到用户切到该标签。
 
 扩展对截图命令设置 3 秒等待上限，对 DOM 快照、无障碍树等读取命令设置 10 秒上限；读取超时会终止对应采集路径，避免同一页面继续走回退读取。错误保留具体 CDP 命令，扩展后台控制台记录超过 2 秒的命令及耗时。此保护不等于取消已经交给 Chrome 的命令，也不自动重放点击或提交。截图超时后仍保留在途标记，直到 Chrome 实际返回或调试连接释放；期间预览不再发送重复截图。框架自动附加配置按调试会话复用，断开后重建，失败后可重试。
 
 上述上限针对单条 CDP 命令，并非整个 `observe`。复杂页面还要在扩展中进行语义树转换和文本渲染；重复操作按钮的上下文收集复用已扫描的兄弟节点前缀，避免逐按钮重复扫描整个列表。缓存仅存在于本次渲染，按作用域、目标名称和已有上下文隔离，每个父节点最多保留 64 种缓存项。CDP 等待超过 2 秒时记录方法与耗时，不记录页面内容。
 
-本轮 Agent 执行结束时，通过工具清理钩子释放当前任务的 Chrome 调试连接。成功完成的普通查询默认关闭任务创建的页面并归还借用标签，避免每轮留下任务窗口；输入框的本机浏览器选择偏好仍保留。调用时可设置顶层 `keep_open: true`，为用户要求保留的页面、交付结果或未完成的人工步骤保留整项任务；该标记仅对本轮有效。`request_help` 自动保留任务，人工步骤完成后可通过后续调用的 `keep_open: false` 恢复自动回收。报错、取消、暂停的任务保留现场，不自动关闭。扩展先阻止新截图，再等待在途截图和操作完成，最后释放连接；结束任务也使用同一截图屏障。空闲时服务端只返回缓存画面，卡片显示「已保留最后画面」，不重复截图，下一次浏览器调用恢复连接。Chrome 提示条的消失可能晚于连接释放；同一扩展有其他活动任务时，提示仍可能保留。
+本轮 Agent 执行结束时，沿用官方会话生命周期：成功完成的普通查询调用 `session_stop`，关闭任务创建的页面、归还借用标签并释放调试连接；输入框的本机浏览器选择偏好仍保留。调用时可设置顶层 `keep_open: true`，为用户要求保留的页面、交付结果或未完成的人工步骤保留整项任务；该标记仅对本轮有效。`request_help` 自动保留任务，人工步骤完成后可通过后续调用的 `keep_open: false` 恢复自动回收。报错、取消、暂停的任务保留现场，不自动关闭。保留任务时不主动断开调试连接或清除元素引用，下一轮继续使用同一官方会话，并重新观察页面。轮次结束后，WeKnora 停止预览轮询并返回缓存画面，卡片显示「已保留最后画面」；下一次浏览器调用恢复轮询。此空闲标记仅用于服务端收尾和预览状态，不表示浏览器已释放控制。真正结束任务时，扩展先阻止新预览并等待在途截图结束，再执行官方停止流程，避免截图重新附加到正在关闭的标签。
 
 导航默认等待 `domcontentloaded`，避免已经可读的页面被慢图片等资源拖住；需要完整加载或网络空闲时可显式指定 `wait_until: "load"` 或 `"networkidle"`。文档就绪不代表异步应用内容已加载，操作前仍需观察目标内容是否出现。
 
@@ -56,13 +56,13 @@ WeKnora 使用 Tencent/BrowserSkill 的官方 daemon 和基于官方源码的配
 
 ## 构建与部署
 
-扩展和 daemon 均从官方 `ext-v0.3.0` 对应提交 `75e2c64abaf4b7cc75682d94b0c1fd5db0cbd5e5` 构建（协议 v1.3），固定于 `scripts/browserskill-release.json`。官方 CLI v0.2.1 二进制缺少 `scroll_to`、`wheel`、`focus`、`blur`，不能与当前工具集合搭配使用。构建按文件名顺序应用 `patches/browserskill/*.patch`，使用冻结的 pnpm 依赖和 Cargo.lock；本机构建需 Rust/Cargo、C 编译器，Linux 还需 CMake。可设置 `CARGO_TARGET_DIR` 复用编译缓存；Docker 构建阶段在目标架构运行，原生脚本不静默生成其他架构的二进制。详见 `patches/browserskill/README.md`。产物位于 `artifacts/browserskill/`，不提交二进制。
+扩展和 daemon 均从官方 `main` 固定提交 `fa953dc6fcd868827b93164e3bea26198e691224` 构建（位于 `ext-v0.3.0` 之后，版本号仍为 0.3.0，协议 v1.3），固定于 `scripts/browserskill-release.json`。后台执行、后台截图、VOM 性能优化和导航重定向跟踪已采用官方实现；仍保留读取保护、任务控制、弹窗归属、末页生命周期及 daemon 导航响应宽限补丁。官方 CLI 0.3.0 二进制不包含最后一项修复，不能直接替代配套 daemon。构建按文件名顺序应用 `patches/browserskill/*.patch`，使用冻结的 pnpm 依赖和 Cargo.lock；本机构建需 Rust/Cargo、C 编译器，Linux 还需 CMake。可设置 `CARGO_TARGET_DIR` 复用编译缓存；Docker 构建阶段在目标架构运行，原生脚本不静默生成其他架构的二进制。详见 `patches/browserskill/README.md`。产物位于 `artifacts/browserskill/`，不提交二进制。
 
-已有用户需下载 0.3.0 配套 ZIP，覆盖原解压目录并在 Chrome 扩展程序页面重新加载；仅重启服务端不会更新扩展。保持原扩展 ID 时，上游会将旧的本地凭据迁移到扩展源 IndexedDB；重新安装导致 ID 改变时需要重新配对。
+虽然扩展显示版本号仍为 0.3.0，已有用户仍需下载本次重新构建的配套 ZIP，覆盖原解压目录并在 Chrome 扩展程序页面重新加载；仅重启服务端不会更新扩展。保持原扩展 ID 时，上游会将旧的本地凭据迁移到扩展源 IndexedDB；重新安装导致 ID 改变时需要重新配对。
 
 ### Docker 部署
 
-`docker/Dockerfile.app` 在独立 Node 构建阶段生成配套扩展，按目标 `linux/amd64` 或 `linux/arm64` 下载 daemon，并将 `bsk`、扩展 ZIP 和许可证复制到运行镜像的 `/opt/weknora/browserskill/`。镜像已预设 `BROWSERSKILL_BINARY` 和 `BROWSERSKILL_EXTENSION_PATH`，无需安装 Chrome 或启用沙箱。不要用宿主机的 macOS `bsk` 替换容器中的 Linux 文件。
+`docker/Dockerfile.app` 在独立 Node 构建阶段生成配套扩展，按目标 `linux/amd64` 或 `linux/arm64` 从同一固定源码构建 daemon，并将 `bsk`、扩展 ZIP 和许可证复制到运行镜像的 `/opt/weknora/browserskill/`。镜像已预设 `BROWSERSKILL_BINARY` 和 `BROWSERSKILL_EXTENSION_PATH`，无需安装 Chrome 或启用沙箱。不要用宿主机的 macOS `bsk` 替换容器中的 Linux 文件。
 
 默认无需设置 `BROWSERSKILL_PUBLIC_URL`。设置页在申请配对时提交 `window.location.origin`，服务端保留域名和端口，将 HTTPS 转为 WSS（本机 HTTP 转为 WS），追加 `/api/v1/local-browser/extension`。例如访问 `https://weknora.example.com:8443`，自动生成 `wss://weknora.example.com:8443/api/v1/local-browser/extension`。地址不依赖反向代理传递的内部 Host 或协议。
 
@@ -78,18 +78,18 @@ BROWSERSKILL_PUBLIC_URL=wss://weknora.example.com/api/v1/local-browser/extension
 
 ### 原生部署
 
-构建需要 Git、Node.js（镜像使用 Node 24）和 Python 3，以及访问固定的上游源码、npm 依赖和发行包的网络。执行 `./scripts/build_browserskill.sh` 后，将产物复制到下列路径，或将变量改为产物的实际绝对路径。连接地址同样默认从页面自动生成：
+构建需要 Git、Node.js（镜像使用 Node 24）、Python 3、Rust/Cargo 和 C 编译器，以及访问固定的上游源码、npm 和 Cargo 依赖的网络。执行 `./scripts/build_browserskill.sh` 后，将产物复制到下列路径，或将变量改为产物的实际绝对路径。连接地址同样默认从页面自动生成：
 
 ```dotenv
 BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk
 BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.0.zip
 ```
 
-构建脚本第二个参数可指定目标平台，例如 `./scripts/build_browserskill.sh ./artifacts/browserskill-linux linux/amd64`；不传时按宿主机系统和架构下载。
+构建脚本第二个参数可指定目标平台，例如 `./scripts/build_browserskill.sh ./artifacts/browserskill-linux linux/amd64`；不传时按宿主机系统和架构构建。
 
 本机调试可用 `ws://localhost:8080/api/v1/local-browser/extension`；远程部署要求 WSS，内网可使用受浏览器信任的企业 CA。详细授权、重连、多副本路由、迁移及容量边界见 [生产部署链路](browser-skill-production.md)。
 
-扩展使用官方 MIT 许可，分发时保留 `BrowserSkill-LICENSE`。配对授权遵循上游第三方网关协议；`gateway.task_preview`、`gateway.task_focus`、`gateway.task_idle` 仍是配套补丁接口。不要直接替换为官方 ZIP。遇到不支持的收尾接口时，已完成的普通任务可走原生停止；需要保留页面并释放控制的任务仍要求配套扩展。
+扩展使用官方 MIT 许可，分发时保留 `BrowserSkill-LICENSE`。配对授权遵循上游第三方网关协议；`gateway.task_preview`、`gateway.task_focus` 仍是配套补丁接口。预览和定位需要配套 ZIP；保留会话及任务收尾均采用官方机制，不依赖定制收尾接口。
 
 ## 验证
 
