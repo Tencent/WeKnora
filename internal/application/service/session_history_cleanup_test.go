@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -27,8 +28,9 @@ import (
 // collection time, which is the ordering the split depends on.
 type historyCleanupMessageRepo struct {
 	interfaces.MessageRepository
-	db        *gorm.DB
-	bySession map[string][]string
+	db           *gorm.DB
+	bySession    map[string][]string
+	errBySession map[string]error
 
 	mu           sync.Mutex
 	collectCalls int
@@ -36,11 +38,19 @@ type historyCleanupMessageRepo struct {
 }
 
 func (r *historyCleanupMessageRepo) GetKnowledgeIDsBySessionID(
-	_ context.Context, sessionID string,
+	ctx context.Context, sessionID string,
 ) ([]string, error) {
 	r.mu.Lock()
 	r.collectCalls++
 	r.mu.Unlock()
+	// A real repository lookup fails fast on a cancelled context; honour it so
+	// tests can observe how the collector treats request cancellation.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := r.errBySession[sessionID]; err != nil {
+		return nil, err
+	}
 	if r.db != nil {
 		var count int64
 		if err := r.db.Model(&types.Session{}).Where("id = ?", sessionID).Count(&count).Error; err == nil {
@@ -141,9 +151,10 @@ func newSessionServiceForHistoryCleanupTest(
 	require.NoError(t, db.AutoMigrate(&types.Session{}, &types.ForkSnapshotLease{}))
 
 	msgs := &historyCleanupMessageRepo{
-		db:         db,
-		bySession:  make(map[string][]string),
-		rowExisted: make(map[string]bool),
+		db:           db,
+		bySession:    make(map[string][]string),
+		errBySession: make(map[string]error),
+		rowExisted:   make(map[string]bool),
 	}
 	knowledge := &historyCleanupKnowledgeService{
 		repo: &historyCleanupKnowledgeRepo{rows: make(map[string]*types.Knowledge)},
@@ -236,4 +247,89 @@ func TestBatchDeleteSessionsDoesNotWaitForChatHistoryCleanup(t *testing.T) {
 		return len(knowledge.deletedCalls()) == 2
 	}, 5*time.Second, 10*time.Millisecond,
 		"background cleanup must finish after the request returned")
+}
+
+// DeleteAllSessions received the same collect-then-async-cleanup split as the
+// other two delete entry points, so it must keep the same invariants: the IDs
+// are collected while the rows still exist and the deletion still happens.
+func TestDeleteAllSessionsStillCleansUpChatHistoryKnowledge(t *testing.T) {
+	svc, db, msgs, knowledge := newSessionServiceForHistoryCleanupTest(t, "history_cleanup_delete_all")
+	ctx := testSessionScopeContext(1, "u1")
+	for _, id := range []string{"sess-1", "sess-2"} {
+		require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Session{
+			ID: id, TenantID: 1, UserID: "u1", Title: "chat",
+		}).Error)
+		msgs.bySession[id] = []string{"k-" + id}
+		knowledge.repo.rows["k-"+id] = &types.Knowledge{
+			ID: "k-" + id, TenantID: 1, KnowledgeBaseID: "kb-1",
+		}
+	}
+
+	require.NoError(t, svc.DeleteAllSessions(ctx))
+
+	var remaining int64
+	require.NoError(t, db.Model(&types.Session{}).Count(&remaining).Error)
+	require.Zero(t, remaining)
+
+	require.Eventually(t, func() bool {
+		seen := map[string]bool{}
+		for _, ids := range knowledge.deletedCalls() {
+			for _, id := range ids {
+				seen[id] = true
+			}
+		}
+		return seen["k-sess-1"] && seen["k-sess-2"]
+	}, 5*time.Second, 10*time.Millisecond,
+		"delete-all must still clean up chat-history knowledge")
+
+	calls, rowExisted := msgs.snapshot()
+	require.Equal(t, 2, calls)
+	require.True(t, rowExisted["sess-1"] && rowExisted["sess-2"],
+		"IDs must be collected before the rows are deleted")
+}
+
+// A per-session collection failure must skip only that session: the delete
+// request still succeeds and the other sessions' history is still cleaned.
+func TestBatchDeleteSkipsFailedCollectionButCleansTheRest(t *testing.T) {
+	svc, db, msgs, knowledge := newSessionServiceForHistoryCleanupTest(t, "history_cleanup_partial")
+	ctx := testSessionScopeContext(1, "u1")
+	for _, id := range []string{"sess-ok", "sess-bad"} {
+		require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Session{
+			ID: id, TenantID: 1, UserID: "u1", Title: "chat",
+		}).Error)
+	}
+	msgs.bySession["sess-ok"] = []string{"k-ok"}
+	msgs.errBySession["sess-bad"] = stderrors.New("message lookup failed")
+	knowledge.repo.rows["k-ok"] = &types.Knowledge{ID: "k-ok", TenantID: 1, KnowledgeBaseID: "kb-1"}
+
+	require.NoError(t, svc.BatchDeleteSessions(ctx, []string{"sess-ok", "sess-bad"}))
+
+	var remaining int64
+	require.NoError(t, db.Model(&types.Session{}).Count(&remaining).Error)
+	require.Zero(t, remaining, "both rows are deleted even though one lookup failed")
+
+	require.Eventually(t, func() bool {
+		for _, ids := range knowledge.deletedCalls() {
+			if len(ids) == 1 && ids[0] == "k-ok" {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond,
+		"the healthy session's history must still be cleaned up")
+}
+
+// A client disconnect must not skip the collection: the rows are deleted
+// anyway, so an aborted lookup would orphan that session's chat-history
+// vectors. The collector therefore runs detached from request cancellation.
+func TestCollectSessionKnowledgeIDsSurvivesCancelledRequest(t *testing.T) {
+	svc, _, msgs, _ := newSessionServiceForHistoryCleanupTest(t, "history_cleanup_cancelled")
+	msgs.bySession["sess-1"] = []string{"k-1"}
+
+	ctx, cancel := context.WithCancel(testSessionScopeContext(1, "u1"))
+	cancel() // client disconnected before the delete handler collected IDs
+
+	require.Equal(t, map[string][]string{"sess-1": {"k-1"}},
+		svc.collectSessionKnowledgeIDs(ctx, []string{"sess-1"}),
+		"collection must ignore request cancellation or the vectors are orphaned")
 }

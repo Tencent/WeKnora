@@ -241,8 +241,21 @@ class DocxRelationshipLoadingTest(unittest.TestCase):
             doc.add_paragraph("Body text before image")
             doc.add_picture(str(image))
 
-        document = _parse(_docx_bytes(build))
+        raw = _docx_bytes(build)
+        document = _parse(raw)
         self.assertIn("Body text before image", document.content)
+
+        # The image relationship itself must survive loading: without it the
+        # picture cannot be resolved, so the end-to-end parse is incomplete
+        # even though the paragraph text still comes back.
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            rels_xml = archive.read("word/_rels/document.xml.rels")
+        srels = docx_parser._SerializedRelationships.load_from_xml(None, rels_xml)
+        targets = [rel.target_ref for rel in srels._srels]
+        self.assertTrue(
+            any("media/" in target for target in targets),
+            f"image relationship missing, got {targets}",
+        )
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ func mcpOAuthPrincipalsFromContext(ctx *gin.Context) (tokenPrincipal types.Princ
 
 type mcpOAuthAuthorizeRequest struct {
 	// RedirectURI is the absolute backend callback URL registered with the
-	// authorization server (e.g. https://host/api/v1/mcp-services/oauth/callback).
+	// authorization server (e.g. https://host/api/v1/mcp-oauth/callback).
 	RedirectURI string `json:"redirect_uri"`
 	// FrontendRedirect is where the callback bounces the browser when done
 	// (e.g. the MCP settings page). Optional; defaults to "/".
@@ -137,7 +137,7 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 // @Param        state  query  string  false  "状态参数"
 // @Param        error  query  string  false  "授权错误码"
 // @Success      302
-// @Router       /mcp-services/oauth/callback [get]
+// @Router       /mcp-oauth/callback [get]
 func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 	ctx := c.Request.Context()
 	state := strings.TrimSpace(c.Query("state"))

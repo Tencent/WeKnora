@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/driver/sqlite"
@@ -14,7 +16,11 @@ import (
 // that does not exist makes every refresh fail, so pin the real column name
 // and the atomic single-revoke semantics against a real SQLite schema.
 func TestRevokeTokenByValueUsesTokenColumnAndIsAtomic(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open("file:revoke_token_by_value?mode=memory&cache=shared"), &gorm.Config{})
+	// Unique per invocation: a shared in-memory database outlives the test, so
+	// a repeated run (-count>1) would collide on the same primary keys.
+	db, err := gorm.Open(sqlite.Open(fmt.Sprintf(
+		"file:revoke_token_by_value_%d?mode=memory&cache=shared", time.Now().UnixNano(),
+	)), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

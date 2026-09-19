@@ -561,15 +561,17 @@ const sessionHistoryCleanupTimeout = 10 * time.Minute
 // given sessions BEFORE their rows are deleted, while message→knowledge
 // associations are still guaranteed to exist. Per-session failures are
 // logged and skipped: a missing ID only means that session's history
-// knowledge is not cleaned up, never that the delete fails. The context is
-// bounded so collection can never hang the request.
+// knowledge is not cleaned up, never that the delete fails. The context
+// drops the request's cancellation (so a client disconnect cannot skip the
+// collection and orphan the vectors) but stays bounded by
+// sessionHistoryCollectTimeout.
 func (s *sessionService) collectSessionKnowledgeIDs(
 	ctx context.Context, sessionIDs []string,
 ) map[string][]string {
 	if s.messageRepo == nil || len(sessionIDs) == 0 {
 		return nil
 	}
-	collectCtx, cancel := context.WithTimeout(ctx, sessionHistoryCollectTimeout)
+	collectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionHistoryCollectTimeout)
 	defer cancel()
 
 	var (
@@ -605,18 +607,23 @@ func (s *sessionService) collectSessionKnowledgeIDs(
 // background. Callers MUST collect the IDs first via
 // collectSessionKnowledgeIDs and delete the session rows themselves; that
 // ordering keeps unbounded background work out of the request path. The
-// background context keeps the request's values (tenant scoping) but drops
-// its cancellation, is bounded by sessionHistoryCleanupTimeout, and its
-// cancel fires only after every cleanup goroutine has finished.
+// background context keeps the request's identity (tenant/execution scoping
+// via logger.CloneContextWithoutTrace, which deliberately drops the Langfuse
+// trace and OTel span so the deletion cannot attach child spans to a finished
+// chat trace), is detached from request cancellation, is bounded by
+// sessionHistoryCleanupTimeout, and its cancel fires only after every cleanup
+// goroutine has finished.
 func (s *sessionService) cleanupSessionHistoryAsync(
 	ctx context.Context, knowledgeBySession map[string][]string,
 ) {
 	if s.knowledgeService == nil || len(knowledgeBySession) == 0 {
 		return
 	}
-	// WithoutCancel keeps the request's values (tenant/execution scoping)
-	// while dropping its cancellation; the timeout bounds the work.
-	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionHistoryCleanupTimeout)
+	// CloneContextWithoutTrace keeps the identity keys (tenant, caller, ...)
+	// the cleanup authorization chain reads while dropping the request's
+	// trace; the timeout bounds the work.
+	bgCtx, cancel := context.WithTimeout(
+		logger.CloneContextWithoutTrace(ctx), sessionHistoryCleanupTimeout)
 
 	var (
 		wg  sync.WaitGroup

@@ -183,8 +183,10 @@ func tryAcquireBatchDownloadSlot(tenantID uint64) bool {
 
 func releaseBatchDownloadSlot(tenantID uint64) {
 	releaseGlobalSlot()
-	// Drain exactly one token of this tenant so the release always matches
-	// the acquire, even if the channel was replaced concurrently.
+	// Drain exactly one token of this tenant so the release matches the
+	// acquire. Non-blocking on purpose: a correctly paired release always
+	// finds its token, and an unpaired one (a bug) must fail fast instead of
+	// blocking the request goroutine forever.
 	if slots := tenantBatchDownloadSlots(tenantID); slots != nil {
 		select {
 		case <-slots:
@@ -203,7 +205,12 @@ func tryAcquireGlobalSlot() bool {
 }
 
 func releaseGlobalSlot() {
-	<-batchDownloadSlots
+	// Non-blocking for the same reason as the tenant slot: an over-release is
+	// a bug to surface, not a deadlock to hang the handler on.
+	select {
+	case <-batchDownloadSlots:
+	default:
+	}
 }
 
 func uniqueKnowledgeDownloadIDs(input []string) []string {

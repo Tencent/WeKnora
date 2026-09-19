@@ -1950,13 +1950,12 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		// 2. 答案变化（需要重新embedding）
 		if !existedBefore || answersChanged {
 			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(newQ))
-			if existedBefore {
-				// 答案变化会按新 sourceID 重新 embedding；升级前写入的旧
-				// 哈希向量不会被覆盖，需一并删除，否则同一相似问会残留
-				// 新旧两份向量、旧答案继续参与检索。
-				sourceIDsToDelete = append(sourceIDsToDelete,
-					fmt.Sprintf("%s-%s", chunk.ID, hashQuestionLegacy(newQ)))
-			}
+			// 无论纯新增还是答案变化，升级前按旧（MD5）哈希写入的向量都不会被
+			// 本次 upsert 覆盖，需一并删除：否则同一相似问会残留新旧两份向量、
+			// 旧答案继续参与检索（典型场景：升级前删了某问、修复版又加回同一问）。
+			// 删除先于索引执行，误撞当前哈希时也是先删后建，不会丢新内容。
+			sourceIDsToDelete = append(sourceIDsToDelete,
+				fmt.Sprintf("%s-%s", chunk.ID, hashQuestionLegacy(newQ)))
 			indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
 				Content:         buildContent(newQ, normalizedNewMeta.Answers),
 				SourceID:        sourceID,
