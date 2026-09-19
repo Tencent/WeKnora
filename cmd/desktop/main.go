@@ -33,7 +33,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
-	"github.com/joho/godotenv"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -163,10 +162,13 @@ func main() {
 		}
 	}
 
-	// Load .env explicitly for the desktop app so DB_DRIVER gets loaded
-	_ = godotenv.Load()
+	// Load environment configuration after resolving the app's working directory.
+	envErr := runtime.LoadEnvironment()
 	configureDesktopStorage(execPath)
 	logger.ConfigureFromEnv()
+	if envErr != nil {
+		logger.Warnf(context.Background(), "[startup-env] failed to load environment file: %v", envErr)
+	}
 
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {

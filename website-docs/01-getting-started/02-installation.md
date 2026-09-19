@@ -234,6 +234,16 @@ make run-lite                       # 构建并以 .env.lite 环境启动 ./WeKn
 make package-lite                   # 打包发行 tarball（scripts/package-lite.sh）
 ```
 
+Lite 二进制会自动加载启动目录中的 `.env`，不存在时回退到 `.env.lite`；也可以通过 `ENV_FILE` 指定其他文件。已有的进程环境变量优先级更高。`.env.lite.example` 默认把本机回环地址加入 SSRF 白名单，因此 `http://127.0.0.1:11434` 等本地 Ollama 地址可以直接使用。
+
+Windows 原生构建需要与 DuckDB 预编译静态库兼容的 GCC 14.2 UCRT 工具链，并需要 MSYS2 UCRT64 提供 `sqlite3.h`。配置 `WEKNORA_GCC_BIN` 与 `WEKNORA_SQLITE_INCLUDE` 后运行：
+
+```powershell
+.\scripts\build-lite-windows.ps1
+```
+
+脚本会提前拒绝 MSVCRT、GCC 16 以及缺少 SQLite 头文件的环境。请勿在 Windows 使用 `duckdb_use_lib`；当前 DuckDB Go bindings 的动态链接路径存在跨 CRT 堆释放问题。完整说明见仓库根目录的 `docs/LITE.md`。
+
 Lite 还提供 `POST /auth/auto-setup` 一键生成本地账号（仅 lite edition 开放，见 `internal/handler/auth.go`），桌面应用据此实现免注册启动。
 
 ### 桌面应用（cmd/desktop，Wails v2） {#_7-2-桌面应用-cmd-desktop-wails-v2}
