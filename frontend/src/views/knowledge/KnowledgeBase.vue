@@ -2,22 +2,18 @@
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
-import KnowledgeTagFilter from './components/KnowledgeTagFilter.vue';
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
 import { useRoute, useRouter } from 'vue-router';
 import EmptyKnowledge from '@/components/empty-knowledge.vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import KBInfoPopover from '@/components/KBInfoPopover.vue';
 import KBSwitcherDropdown from '@/components/KBSwitcherDropdown.vue';
-import { getSessionsList, createSessions, generateSessionsTitle } from "@/api/chat/index";
-import { useMenuStore } from '@/stores/menu';
 import { useUIStore } from '@/stores/ui';
 import { useOrganizationStore } from '@/stores/organization';
 import { useAuthStore } from '@/stores/auth';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue';
-const usemenuStore = useMenuStore();
 const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const authStore = useAuthStore();
@@ -52,9 +48,7 @@ import DocumentCardView from './components/DocumentCardView.vue';
 import DocumentBatchBar from './components/DocumentBatchBar.vue';
 import KbUploadSourceDropdown from './components/KbUploadSourceDropdown.vue';
 import KbFolderTree from './components/KbFolderTree.vue';
-import TagEditDialog from './components/TagEditDialog.vue';
 import BatchTagDialog from './components/BatchTagDialog.vue';
-import KbTagManageDrawer from './components/KbTagManageDrawer.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import { useUploadTasksStore } from '@/stores/uploadTasks';
@@ -70,7 +64,6 @@ import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName';
 import {
   buildUploadFileName,
   canMoveFolderTo,
-  childFolders,
   folderBreadcrumbs as buildFolderBreadcrumbs,
   folderPathExists as folderExistsInTree,
   isFilteringDocuments,
@@ -335,7 +328,7 @@ const canDownloadKnowledge = computed(() => {
 });
 
 const knowledgeList = ref<Array<{ id: string; name: string; type?: string }>>([]);
-let { cardList, total, moreIndex, details, getKnowled, openMore, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
+let { cardList, total, moreIndex, details, getKnowled, onVisibleChange: _onVisibleChange, getCardDetails, getfDetails } = useKnowledgeBase(kbId.value)
 
 const showKbDetailContextualGuide = computed(() => {
   return Boolean(kbId.value)
@@ -368,14 +361,6 @@ function clearTraceAvailabilityCache() {
 // UI should treat the row as "in flight" rather than terminal.
 function isParseInFlight(status?: string): boolean {
   return isKnowledgeParseInFlight(status);
-}
-
-function isTraceMenuVisible(item: KnowledgeCard): boolean {
-  if (!item?.id) return false;
-  if (isParseInFlight(item.parse_status)) {
-    return true;
-  }
-  return traceAvailableById[item.id] === true;
 }
 
 async function probeTraceAvailable(item: KnowledgeCard) {
@@ -427,8 +412,8 @@ type DocViewMode = 'grid' | 'list';
 const VIEW_MODE_KEY = 'weknora.kb.docs.viewMode';
 const initViewMode = (): DocViewMode => {
   try {
-    return localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'grid';
-  } catch { return 'grid'; }
+    return localStorage.getItem(VIEW_MODE_KEY) === 'grid' ? 'grid' : 'list';
+  } catch { return 'list'; }
 };
 const viewMode = ref<DocViewMode>(initViewMode());
 watch(viewMode, (v) => {
@@ -593,11 +578,16 @@ const confirmBatchReparse = async () => {
   }
 };
 
-const tagFilterCleared = ref(false);
-const tagManageDrawerVisible = ref(false);
 
 const selectedTagIds = ref<string[]>([]);
+const selectedTagNames = ref<Record<string, string>>({});
 const tagList = ref<any[]>([]);
+// Keep selected tags reachable even when the search or loaded page changes.
+const filterTagOptions = computed(() => [
+  ...tagList.value,
+  ...selectedTagIds.value.filter(id => !tagList.value.some(tag => tag.id === id))
+    .map(id => ({ id, name: selectedTagNames.value[id] || t('knowledgeBase.columnTag') })),
+]);
 const tagLoading = ref(false);
 const tagSearchQuery = ref('');
 const TAG_PAGE_SIZE = 50;
@@ -664,11 +654,24 @@ const sourceOptions = computed(() => [
 ]);
 // Date range as [start, end] in "YYYY-MM-DD" form (t-date-range-picker default).
 const updatedTimeRange = ref<string[]>([]);
+const filtersExpanded = ref(false);
+const activeFilterCount = computed(() =>
+  [selectedFileType.value, selectedParseStatus.value, selectedSource.value,
+    updatedTimeRange.value?.some(Boolean)].filter(Boolean).length + selectedTagIds.value.length,
+);
+const clearDocumentFilters = () => {
+  selectedFileType.value = '';
+  selectedParseStatus.value = '';
+  selectedSource.value = '';
+  updatedTimeRange.value = [];
+  handleTagFilterChange([]);
+};
 // Disable any date after today so users cannot filter into the future.
 const disableFutureDate = { after: new Date(new Date().setHours(23, 59, 59, 999)) };
 
 // ── Folder tree (documents uploaded as a folder keep their relative path) ──
-const FOLDER_TREE_COLLAPSED_KEY = 'weknora.kbFolderTreeCollapsed';
+// The directory sidebar is now the sole folder navigation and starts expanded.
+const FOLDER_TREE_COLLAPSED_KEY = 'weknora.kbDirectorySidebarCollapsed';
 const readStoredFlag = (key: string, fallback = false) => {
   try {
     const raw = localStorage.getItem(key);
@@ -706,14 +709,6 @@ const isFiltering = computed(() =>
     timeRange: updatedTimeRange.value,
   }),
 );
-// Sub-folder entries shown at the top of the list while browsing. Search results
-// are flat, so they are dropped as soon as a filter is active. When the sidebar
-// tree is open it already lists the same folders, so skip the duplicate rows.
-const currentChildFolders = computed(() => {
-  if (isFiltering.value) return [];
-  if (showFolderTree.value && !folderTreeCollapsed.value) return [];
-  return childFolders(folderTree.value, selectedFolderPath.value);
-});
 // A row's folder is worth showing only when the list can span folders.
 const showDocumentFolderPath = computed(() => hasFolders.value && isFiltering.value);
 const folderBreadcrumbs = computed(() => buildFolderBreadcrumbs(selectedFolderPath.value));
@@ -729,8 +724,7 @@ const filterParams = computed(() => {
     start_time: start ? `${start} 00:00:00` : undefined,
     end_time: end ? `${end} 23:59:59` : undefined,
     folder_path: selectedFolderPath.value,
-    // Searching descends into sub-folders; browsing shows one level, with the
-    // sub-folders themselves rendered as entries in the list.
+    // Filtering searches descendants; browsing shows this folder's documents.
     folder_recursive: isFiltering.value,
   };
 });
@@ -742,20 +736,6 @@ const tagMap = computed<Record<string, any>>(() => {
   return map;
 });
 
-// 标签编辑弹窗
-const tagEditDialogVisible = ref(false);
-const tagEditTarget = ref<KnowledgeCard | null>(null);
-
-function openTagEditDialog(item: KnowledgeCard) {
-  tagEditTarget.value = item;
-  tagEditDialogVisible.value = true;
-}
-
-function onTagEditConfirm(tagIds: string[]) {
-  if (tagEditTarget.value) {
-    handleKnowledgeTagChange(tagEditTarget.value.id, tagIds);
-  }
-}
 const getPageSize = () => {
   const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
   const itemHeight = 148;
@@ -763,12 +743,6 @@ const getPageSize = () => {
   pageSize = Math.max(35, itemsInView);
 }
 getPageSize()
-// 直接调用 API 获取知识库文件列表
-const getTagName = (tagId?: string | number) => {
-  if (!tagId && tagId !== 0) return '';
-  const key = String(tagId);
-  return tagMap.value[key]?.name || '';
-};
 
 const loadKnowledgeFiles = (kbIdValue: string): Promise<void> => {
   if (!kbIdValue) return Promise.resolve();
@@ -950,6 +924,9 @@ const loadTags = async (kbIdValue: string, reset = false) => {
 };
 
 const handleTagFilterChange = (tagIds: string[]) => {
+  selectedTagNames.value = Object.fromEntries(tagIds.map(id => [
+    id, tagMap.value[id]?.name || selectedTagNames.value[id] || t('knowledgeBase.columnTag'),
+  ]));
   selectedTagIds.value = tagIds;
   // 同步更新 store 中的 selectedTagIds，供 menu.vue 上传时使用
   uiStore.clearSelectedTagIds();
@@ -957,54 +934,13 @@ const handleTagFilterChange = (tagIds: string[]) => {
   resetPage();
 };
 
-const openTagManageDrawer = () => {
-  tagManageDrawerVisible.value = true;
-};
-
-const openTagManageFromEditDialog = () => {
-  tagEditDialogVisible.value = false;
-  tagManageDrawerVisible.value = true;
-};
-
-const openTagManageFromBatchDialog = () => {
-  batchTagDialogVisible.value = false;
-  tagManageDrawerVisible.value = true;
-};
-
-const onTagManageChanged = (payload?: { deletedTagId?: string }) => {
-  if (!kbId.value) return;
+const onTagCatalogChanged = (payload?: { deletedTagId?: string }) => {
   void loadTags(kbId.value, true);
-  if (payload?.deletedTagId && selectedTagIds.value.includes(payload.deletedTagId)) {
-    selectedTagIds.value = [];
-    handleTagFilterChange([]);
-    resetPage();
-    loadKnowledgeFiles(kbId.value);
-    return;
-  }
   if (payload?.deletedTagId) {
-    void (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      if (!kbId.value) return;
-      resetPage();
-      await loadKnowledgeFiles(kbId.value);
-      await loadTags(kbId.value, true);
-    })();
-    return;
+    handleTagFilterChange(selectedTagIds.value.filter(id => id !== payload.deletedTagId));
   }
   resetPage();
-  loadKnowledgeFiles(kbId.value);
-};
-
-const handleKnowledgeTagChange = async (knowledgeId: string, tagIds: string[]) => {
-  try {
-    await updateKnowledgeTagBatch({ updates: { [knowledgeId]: tagIds } });
-    MessagePlugin.success(t('knowledgeBase.tagUpdateSuccess'));
-    resetPage(); // Reset page counter to 1 when reloading files after tag change
-    loadKnowledgeFiles(kbId.value);
-    loadTags(kbId.value, true);
-  } catch (error: any) {
-    MessagePlugin.error(error?.message || t('common.operationFailed'));
-  }
+  void loadKnowledgeFiles(kbId.value);
 };
 
 const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
@@ -1021,7 +957,7 @@ const loadKnowledgeBaseInfo = async (targetKbId: string, force = false) => {
 
     kbInfo.value = data;
     selectedTagIds.value = [];
-    tagFilterCleared.value = false;
+    selectedTagNames.value = {};
     uiStore.clearSelectedTagIds();
     // 重置store中的标签选择状态，避免上传文档时自动带上之前选择的标签
     uiStore.clearSelectedTagIds();
@@ -1362,7 +1298,6 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
   }
   timeout = setTimeout(() => {
     batchQueryKnowledge(query).then((result: any) => {
-      let hasChanges = false;
       let shouldRefreshWikiStatus = false;
       if (result.success && result.data) {
         (result.data as KnowledgeCard[]).forEach((item: KnowledgeCard) => {
@@ -1391,8 +1326,7 @@ const updateStatus = (analyzeList: KnowledgeCard[]) => {
             cardList.value[index].summary_status = item.summary_status;
             cardList.value[index].description = item.description;
             delete traceAvailableById[item.id];
-            hasChanges = true;
-          }
+            }
         });
       }
       if (shouldRefreshWikiStatus) {
@@ -1555,13 +1489,6 @@ const manualEditorSuccess = ({ kbId: savedKbId }: { kbId: string; knowledgeId: s
   }
 };
 
-const documentTitle = computed(() => {
-  if (kbInfo.value?.name) {
-    return `${kbInfo.value.name} · ${t('knowledgeEditor.document.title')}`;
-  }
-  return t('knowledgeEditor.document.title');
-});
-
 const ensureDocumentKbReady = () => {
   if (isFAQ.value) {
     MessagePlugin.warning(t('knowledgeBase.operationNotSupportedForType'));
@@ -1588,10 +1515,6 @@ const ensureDocumentKbReady = () => {
   }
   return true;
 };
-
-
-const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
-const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'flac', 'ogg'];
 
 const uploadConfirmStore = useUploadConfirmStore();
 
@@ -2198,37 +2121,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     loadKnowledgeBaseInfo(kbIdValue, true);
   }
 };
-
-const getTitle = (session_id: string, value: string) => {
-  const now = new Date().toISOString();
-  let obj = {
-    title: t('knowledgeBase.newSession'),
-    path: `chat/${session_id}`,
-    id: session_id,
-    isMore: false,
-    isNoTitle: true,
-    created_at: now,
-    updated_at: now
-  };
-  usemenuStore.updataMenuChildren(obj);
-  usemenuStore.changeIsFirstSession(true);
-  usemenuStore.changeFirstQuery(value);
-  router.push(`/platform/chat/${session_id}`);
-};
-
-async function createNewSession(value: string): Promise<void> {
-  // Session 不再和知识库绑定，直接创建 Session
-  createSessions({}).then(res => {
-    if (res.data && res.data.id) {
-      getTitle(res.data.id, value);
-    } else {
-      // 错误处理
-      console.error(t('knowledgeBase.createSessionFailed'));
-    }
-  }).catch(error => {
-    console.error(t('knowledgeBase.createSessionError'), error);
-  });
-}
 </script>
 
 <template>
@@ -2292,13 +2184,13 @@ async function createNewSession(value: string): Promise<void> {
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
-                <button type="button" class="kb-settings-button" :disabled="!kbId" @click="handleOpenKBSettings">
+                <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.settings')" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
                 </button>
               </t-tooltip>
             </div>
           </div>
-          <p class="document-subtitle">{{ $t('knowledgeEditor.document.subtitle') }}</p>
+          <p v-if="kbInfo?.description" class="document-subtitle">{{ kbInfo.description }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
             <t-icon name="info-circle" class="parser-hint-icon" />
             <span>{{$t('knowledgeBase.unsupportedTypesHint', {
@@ -2325,117 +2217,120 @@ async function createNewSession(value: string): Promise<void> {
       <template v-if="activeKbTab === 'documents' || !isWiki">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
-            :loading="folderTreeLoading" :can-edit="canEdit"
+            :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
             @rename="handleFolderRename" />
           <div class="tag-content">
             <div class="doc-card-area">
-              <nav v-if="showFolderTree" class="doc-folder-path"
-                :aria-label="$t('knowledgeBase.folderTree.title')">
-                <t-tooltip v-if="folderTreeCollapsed" :content="$t('knowledgeBase.folderTree.expand')" placement="top">
-                  <button type="button" class="doc-folder-path__tree-toggle"
+              <div class="doc-filter-bar">
+                <nav class="doc-folder-path" :aria-label="$t('knowledgeBase.folderTree.title')">
+                  <button v-if="showFolderTree && folderTreeCollapsed" type="button" class="doc-folder-path__tree-toggle"
+                    :aria-expanded="false" :title="$t('knowledgeBase.folderTree.expand')"
                     :aria-label="$t('knowledgeBase.folderTree.expand')"
                     @click="handleFolderTreeCollapsedChange(false)">
-                    <t-icon name="folder" size="14px" />
+                    <t-icon name="view-list" size="16px" />
                   </button>
-                </t-tooltip>
-                <span v-if="!folderBreadcrumbs.length" class="doc-folder-path__crumb is-current">
-                  {{ $t('knowledgeBase.folderTree.rootRow') }}
-                </span>
-                <button v-else type="button" class="doc-folder-path__crumb"
-                  @click="handleFolderSelect('')">
-                  {{ $t('knowledgeBase.folderTree.rootRow') }}
-                </button>
-                <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
-                  <t-icon name="chevron-right" class="doc-folder-path__sep" />
-                  <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current">
-                    {{ crumb.name }}
-                  </span>
-                  <button v-else type="button" class="doc-folder-path__crumb" @click="handleFolderSelect(crumb.path)">
-                    {{ crumb.name }}
+                  <button v-if="folderBreadcrumbs.length" type="button" class="doc-folder-path__crumb" :title="kbInfo?.name" @click="handleFolderSelect('')">
+                    {{ kbInfo?.name }}
                   </button>
-                </template>
-                <!-- Filtering silently widens the scope to sub-folders, so say so. -->
-                <span v-if="isFiltering" class="doc-folder-path__scope">
-                  {{ $t('knowledgeBase.folderTree.searchingSubtree') }}
-                </span>
-              </nav>
-              <div class="doc-filter-bar">
-                <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
-                  clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
-                  @enter="loadKnowledgeFiles(kbId)">
-                  <template #prefix-icon>
-                    <t-icon name="search" size="16px" />
+                  <span v-else class="doc-folder-path__crumb is-current" :title="kbInfo?.name" aria-current="page">{{ kbInfo?.name }}</span>
+                  <template v-for="(crumb, index) in folderBreadcrumbs" :key="crumb.path">
+                    <t-icon name="chevron-right" class="doc-folder-path__sep" />
+                    <span v-if="index === folderBreadcrumbs.length - 1" class="doc-folder-path__crumb is-current" :title="crumb.name" aria-current="page">{{ crumb.name }}</span>
+                    <button v-else type="button" class="doc-folder-path__crumb" :title="crumb.name" @click="handleFolderSelect(crumb.path)">{{ crumb.name }}</button>
                   </template>
-                </t-input>
-                <div class="doc-filter-bar__filters">
-                <KnowledgeTagFilter v-model:search="tagSearchQuery" v-model:cleared="tagFilterCleared"
-                  :tags="tagList" :selected-ids="selectedTagIds" :total="tagTotal"
-                  :loading="tagLoading" :loading-more="tagLoadingMore" :has-more="tagHasMore"
-                  :can-manage="canEdit" variant="documents" @change="handleTagFilterChange"
-                  @load-more="kbId && loadTags(kbId)" @manage="openTagManageDrawer" />
-                <div class="doc-filter-field">
-                  <t-select v-model="selectedFileType" :options="fileTypeOptions"
-                    :placeholder="$t('knowledgeBase.fileTypeFilter')" class="doc-type-select doc-filter-field__control"
-                    clearable>
-                    <template #prefixIcon>
-                      <t-icon name="file" size="16px" />
-                    </template>
-                  </t-select>
-                </div>
-                <div class="doc-filter-field">
-                  <t-select v-model="selectedParseStatus" :options="parseStatusOptions"
-                    :placeholder="$t('knowledgeBase.parseStatusFilter')" class="doc-type-select doc-filter-field__control"
-                    clearable>
-                    <template #prefixIcon>
-                      <t-icon name="check-circle" size="16px" />
-                    </template>
-                  </t-select>
-                </div>
-                <div class="doc-filter-field">
-                  <t-select v-model="selectedSource" :options="sourceOptions"
-                    :placeholder="$t('knowledgeBase.sourceFilter')" class="doc-type-select doc-filter-field__control"
-                    clearable>
-                    <template #prefixIcon>
-                      <t-icon name="link" size="16px" />
-                    </template>
-                  </t-select>
-                </div>
-                <div class="doc-filter-field doc-filter-field--wide">
-                  <t-date-range-picker v-model="updatedTimeRange"
-                    :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
-                    :disable-date="disableFutureDate" class="doc-date-range doc-filter-field__control" clearable
-                    allow-input>
-                    <template #prefixIcon>
-                      <t-icon name="time" size="16px" />
-                    </template>
-                  </t-date-range-picker>
-                </div>
-                </div>
+                  <span v-if="!docListLoading" class="doc-folder-path__count">{{ $t(isFiltering ? 'knowledgeBase.folderTree.filteredCount' : 'knowledgeBase.documentCount', { count: total }) }}</span>
+                  <t-tooltip v-if="showFolderTree && isFiltering" :content="$t('knowledgeBase.folderTree.searchingSubtree')">
+                    <t-icon name="info-circle" class="doc-folder-path__sep" />
+                  </t-tooltip>
+                </nav>
                 <div class="doc-filter-bar__trailing">
-                  <t-button v-if="(canDownloadKnowledge || canMutateKnowledge) && cardList.length"
-                    variant="outline" size="small"
+                  <t-input v-model.trim="docSearchKeyword" :placeholder="$t('knowledgeBase.docSearchPlaceholder')"
+                    :aria-label="$t('knowledgeBase.docSearchPlaceholder')" clearable class="doc-search-input" @clear="loadKnowledgeFiles(kbId)"
+                    @enter="loadKnowledgeFiles(kbId)">
+                    <template #prefix-icon>
+                      <t-icon name="search" size="16px" />
+                    </template>
+                  </t-input>
+                  <t-popup v-model:visible="filtersExpanded" trigger="click" placement="bottom-right"
+                    overlay-class-name="document-filter-popup" :overlay-inner-style="{ padding: 0 }">
+                    <button type="button" class="doc-filter-toggle" :class="{ active: filtersExpanded || activeFilterCount > 0 }"
+                      :aria-expanded="filtersExpanded" aria-controls="document-filters">
+                      <t-icon name="filter" size="16px" />
+                      {{ $t('knowledgeBase.filters') }}
+                      <span v-if="activeFilterCount" class="doc-filter-count">{{ activeFilterCount }}</span>
+                    </button>
+                    <template #content>
+                      <section id="document-filters" class="doc-filter-panel" :aria-label="$t('knowledgeBase.filters')">
+                        <header class="doc-filter-panel__header">
+                          <strong>{{ $t('knowledgeBase.filters') }}</strong>
+                          <button type="button" :disabled="!activeFilterCount" @click="clearDocumentFilters">{{ $t('knowledgeBase.clearFilters') }}</button>
+                        </header>
+                        <div class="doc-filter-panel__fields">
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.fileTypeFilter') }}</span>
+                            <t-select v-model="selectedFileType" :options="fileTypeOptions" :placeholder="$t('knowledgeBase.fileTypeFilter')" clearable />
+                          </div>
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.parseStatusFilter') }}</span>
+                            <t-select v-model="selectedParseStatus" :options="parseStatusOptions" :placeholder="$t('knowledgeBase.parseStatusFilter')" clearable />
+                          </div>
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.sourceFilter') }}</span>
+                            <t-select v-model="selectedSource" :options="sourceOptions" :placeholder="$t('knowledgeBase.sourceFilter')" clearable />
+                          </div>
+                          <div class="doc-filter-field">
+                            <span>{{ $t('knowledgeBase.columnUpdatedAt') }}</span>
+                            <t-date-range-picker v-model="updatedTimeRange"
+                              :placeholder="[$t('knowledgeBase.updatedTimeFrom'), $t('knowledgeBase.updatedTimeTo')]"
+                              :disable-date="disableFutureDate" clearable allow-input />
+                          </div>
+                        </div>
+                        <div class="doc-filter-tags">
+                          <div class="doc-filter-tags__heading">
+                            <span>{{ $t('knowledgeBase.columnTag') }}<span v-if="selectedTagIds.length" class="doc-filter-tags__count">{{ selectedTagIds.length }}</span></span>
+                          </div>
+                          <t-input v-model.trim="tagSearchQuery" :placeholder="$t('knowledgeBase.tagSearchPlaceholder')" clearable>
+                            <template #prefix-icon><t-icon name="search" size="14px" /></template>
+                          </t-input>
+                          <div class="doc-filter-tags__list">
+                            <t-loading v-if="tagLoading && !tagList.length" size="small" />
+                            <t-checkbox v-for="tag in filterTagOptions" :key="tag.id" class="doc-filter-tag" :title="tag.name"
+                              :checked="selectedTagIds.includes(tag.id)"
+                              @change="(checked: boolean) => handleTagFilterChange(checked ? [...selectedTagIds, tag.id] : selectedTagIds.filter(id => id !== tag.id))">
+                              <span>{{ tag.name }}</span>
+                            </t-checkbox>
+                            <span v-if="!tagLoading && !filterTagOptions.length" class="doc-filter-tags__empty">{{ $t(tagSearchQuery ? 'knowledgeBase.tagEmptyResult' : 'knowledgeBase.noTags') }}</span>
+                          </div>
+                          <t-button v-if="tagHasMore" variant="text" size="small" :loading="tagLoadingMore" @click="kbId && loadTags(kbId)">{{ $t('tenant.loadMore') }}</t-button>
+                        </div>
+                      </section>
+                    </template>
+                  </t-popup>
+                  <button v-if="viewMode === 'grid' && (canDownloadKnowledge || canMutateKnowledge) && cardList.length"
+                    type="button" class="doc-filter-toggle doc-batch-toggle" :class="{ active: batchMode }" :aria-pressed="batchMode"
                     :disabled="batchDeleting || batchReparsing || batchTagging || batchDownloading"
                     @click="toggleBatchMode">
-                    {{ $t(batchMode ? 'knowledgeBase.clearSelection' : 'menu.batchManage') }}
-                  </t-button>
+                    <t-icon :name="batchMode ? 'close' : 'check-rectangle'" size="16px" />
+                    {{ $t(batchMode ? 'common.cancel' : 'menu.batchManage') }}
+                  </button>
                   <div class="doc-view-toggle" role="group" :aria-label="$t('knowledgeBase.viewModeToggle')">
                     <t-tooltip :content="$t('knowledgeBase.viewModeGrid')" placement="top">
                       <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'grid' }"
-                        @click="viewMode = 'grid'" :aria-pressed="viewMode === 'grid'">
+                        :aria-label="$t('knowledgeBase.viewModeGrid')" @click="viewMode = 'grid'" :aria-pressed="viewMode === 'grid'">
                         <t-icon name="view-module" size="16px" />
                       </button>
                     </t-tooltip>
                     <t-tooltip :content="$t('knowledgeBase.viewModeList')" placement="top">
                       <button type="button" class="doc-view-toggle-btn" :class="{ active: viewMode === 'list' }"
-                        @click="viewMode = 'list'" :aria-pressed="viewMode === 'list'">
+                        :aria-label="$t('knowledgeBase.viewModeList')" @click="viewMode = 'list'" :aria-pressed="viewMode === 'list'">
                         <t-icon name="view-list" size="16px" />
                       </button>
                     </t-tooltip>
                   </div>
                   <div v-if="canEdit" class="doc-filter-actions">
                     <KbUploadSourceDropdown ref="uploadSourceRef" :accept-file-types="acceptFileTypes"
-                      :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="file-add"
+                      :supported-file-types="[...supportedFileTypes]" include-manual trigger-icon="add" :trigger-label="t('knowledgeBase.addDocument')"
                       trigger-class="content-bar-icon-btn" data-guide="kb-detail-add-doc"
                       :tooltip="t('knowledgeBase.addDocument')" placement="bottom-right" @files="handleUploadSourceFiles"
                       @url="handleUploadSourceUrl" @manual="handleManualCreate" />
@@ -2444,7 +2339,7 @@ async function createNewSession(value: string): Promise<void> {
               </div>
               <div class="doc-scroll-container"
                 :class="{
-                  'is-empty': !cardList.length && !currentChildFolders.length && !docListLoading,
+                  'is-empty': !cardList.length && !docListLoading,
                   'is-marquee-active': docMarqueeVisible,
                 }"
                 ref="knowledgeScroll" @scroll="handleScroll" @mousedown="onDocMarqueeMouseDown">
@@ -2452,7 +2347,12 @@ async function createNewSession(value: string): Promise<void> {
                   :class="{ 'is-add': docMarqueeMode === 'add', 'is-subtract': docMarqueeMode === 'subtract' }"
                   :style="docMarqueeBoxStyle" aria-hidden="true" />
                 <!-- 文档骨架屏 -->
-                <div v-if="docListLoading && cardList.length === 0 && !currentChildFolders.length" class="doc-card-list doc-card-list-animated">
+                <div v-if="docListLoading && !cardList.length && viewMode === 'list'" class="doc-list-skeleton">
+                  <div v-for="n in 8" :key="n" class="doc-list-skeleton-row">
+                    <t-skeleton animation="gradient" :row-col="[[{ width: '32px', height: '38px', type: 'rect' }, { width: '55%', height: '16px' }]]" />
+                  </div>
+                </div>
+                <div v-else-if="docListLoading && cardList.length === 0" class="doc-card-list doc-card-list-animated">
                   <div v-for="n in 8" :key="'doc-skel-' + n" class="knowledge-card knowledge-card-skeleton">
                     <div class="card-content">
                       <div class="card-content-nav">
@@ -2467,17 +2367,16 @@ async function createNewSession(value: string): Promise<void> {
                     </div>
                   </div>
                 </div>
-                <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'grid'">
-                  <DocumentCardView
+                <template v-else-if="cardList.length && viewMode === 'grid'">
+                  <DocumentCardView :kb-id="kbId"
                     :items="cardList"
-                    :folders="currentChildFolders" :folder-options="folderOptions"
+                    :folder-options="folderOptions"
                     :selected-ids="selectedIds"
                     :batch-mode="batchMode"
                     :can-edit="canEdit"
                     :can-download="canDownloadKnowledge"
                     :can-mutate-knowledge="canMutateKnowledge"
                     :trace-available-by-id="traceAvailableById"
-                    :tag-list="tagList"
                     :move-menu-mode="moveMenuMode"
                     :move-target-kbs="moveTargetKbs"
                     :move-targets-loading="moveTargetsLoading"
@@ -2491,16 +2390,16 @@ async function createNewSession(value: string): Promise<void> {
                     @toggle-checkbox="onCardGridCheckboxChange"
                     @menu-visible-change="(visible: boolean, item: any) => onCardMoreVisibleChange(visible, item)"
                     @action="(action: any, item: any) => handleCardAction(action, item)"
-                    @tag-edit="(item: any) => openTagEditDialog(item)"
+                    @tags-changed="onTagCatalogChanged"
                     @move-select-target="(kb: any) => handleMoveSelectTarget(kb)"
                     @move-back="handleMoveBack"
                     @move-confirm="handleMoveConfirm"
                     @update:move-mode="(mode: any) => moveMode = mode"
                   />
                 </template>
-                <template v-else-if="(cardList.length || currentChildFolders.length) && viewMode === 'list'">
-                  <DocumentListView :items="cardList" :folders="currentChildFolders" :folder-options="folderOptions"
-                    :selected-ids="selectedIds" :tag-list="tagList"
+                <template v-else-if="cardList.length && viewMode === 'list'">
+                  <DocumentListView :kb-id="kbId" :items="cardList" :folder-options="folderOptions"
+                    :selected-ids="selectedIds"
                     :can-edit="canEdit" :can-download="canDownloadKnowledge" :can-mutate-knowledge="canMutateKnowledge"
                     :trace-visible-ids="traceAvailableById"
                     :move-menu-mode="moveMenuMode"
@@ -2515,7 +2414,7 @@ async function createNewSession(value: string): Promise<void> {
                     @open="(item: any) => openKnowledgeItem(item)" @toggle-row="toggleSelectRow"
                     @toggle-all="toggleSelectAll" @action="(action: any, item: any) => handleListAction(action, item)"
                     @probe-trace="(item: any) => probeTraceAvailable(item)"
-                    @tag-edit="(item: any) => openTagEditDialog(item)"
+                    @tags-changed="onTagCatalogChanged"
                     @move-select-target="(kb: any) => handleMoveSelectTarget(kb)"
                     @move-back="handleMoveBack"
                     @move-confirm="handleMoveConfirm"
@@ -2524,7 +2423,7 @@ async function createNewSession(value: string): Promise<void> {
                 </template>
                 <template v-else-if="!docListLoading">
                   <div class="doc-empty-state">
-                    <p v-if="selectedFolderPath || isFiltering" class="doc-empty-folder">
+                    <p v-if="hasFolders || selectedFolderPath || isFiltering" class="doc-empty-folder">
                       {{ isFiltering
                         ? $t('knowledgeBase.folderTree.emptySearch')
                         : $t('knowledgeBase.folderTree.emptyFolder') }}
@@ -2568,70 +2467,34 @@ async function createNewSession(value: string): Promise<void> {
 
   <ContextualGuide tour="kbDetail" :when="showKbDetailContextualGuide" />
 
-  <!-- 标签编辑弹窗 -->
-  <TagEditDialog :visible="tagEditDialogVisible"
-    :knowledge-name="tagEditTarget?.display_name || tagEditTarget?.file_name || tagEditTarget?.title || ''"
-    :kb-id="kbId" :tag-list="tagList" :selected-tags="tagEditTarget?.tags || []" :can-manage="canEdit"
-    @update:visible="tagEditDialogVisible = $event" @confirm="onTagEditConfirm" @tag-created="loadTags(kbId, true)"
-    @open-manage="openTagManageFromEditDialog" />
-
   <!-- 批量打标签弹窗 -->
-  <BatchTagDialog :visible="batchTagDialogVisible"
-    :count="selectedIds.size" :kb-id="kbId" :tag-list="tagList"
-    :pre-selected-tag-ids="batchTagPreSelectedIds" :can-manage="canEdit"
+  <BatchTagDialog @tags-changed="onTagCatalogChanged" :visible="batchTagDialogVisible"
+    :count="selectedIds.size" :kb-id="kbId"
+    :pre-selected-tag-ids="batchTagPreSelectedIds"
     :confirm-loading="batchTagging"
-    @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm"
-    @tag-created="loadTags(kbId, true)" @open-manage="openTagManageFromBatchDialog" />
+    @update:visible="batchTagDialogVisible = $event" @confirm="onBatchTagConfirm" />
 
-  <KbTagManageDrawer
-    v-if="!isFAQ"
-    v-model:visible="tagManageDrawerVisible"
-    :kb-id="kbId"
-    :is-faq="isFAQ"
-    @changed="onTagManageChanged"
-  />
 </template>
 <style>
 /* 下拉菜单容器样式已统一至 @/assets/dropdown-menu.less */
-
-.tag-more-popup .tag-menu {
-  display: flex;
-  flex-direction: column;
+.document-filter-popup .t-popup__content {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-xl);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 10%);
 }
 
-.tag-more-popup .tag-menu-item {
-  display: flex;
-  align-items: center;
-  padding: 8px 16px;
-  cursor: pointer;
-  transition: all var(--app-motion-base) ease;
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: var(--app-text-base);
-  font-weight: 400;
-}
-
-.tag-more-popup .tag-menu-item .menu-icon {
-  margin-right: 8px;
-  font-size: var(--app-text-xl);
-}
-
-.tag-more-popup .tag-menu-item:hover {
-  background: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-primary);
-}
 </style>
 <style scoped lang="less">
 .knowledge-layout {
   display: flex;
   flex-direction: column;
-  margin: 0 16px 0 4px;
-  gap: 20px;
+  margin: 0 16px 0 0;
+  gap: 16px;
   height: 100%;
   flex: 1;
   width: 100%;
   min-width: 0;
-  padding: 24px 32px 0px;
+  padding: 20px 28px 0;
   box-sizing: border-box;
 }
 
@@ -2679,13 +2542,28 @@ async function createNewSession(value: string): Promise<void> {
   overflow: hidden;
 }
 
-// 与列表页一致：浅灰底圆角区，左侧筛选为白底卡片
+// Directory navigation and the document content share the available width.
 .knowledge-main {
   display: flex;
   flex: 1;
   min-height: 0;
   background: transparent;
   border: none;
+}
+
+@media (max-width: 1000px) {
+  .knowledge-main {
+    flex-direction: column;
+    :deep(.kb-folder-tree) {
+      width: 100%;
+      max-height: 200px;
+      padding: 0 0 12px;
+      margin: 0 0 16px;
+      border-right: 0;
+      border-bottom: 1px solid var(--td-component-stroke);
+    }
+    :deep(.kb-folder-tree__header) { height: 28px; padding-bottom: 4px; }
+  }
 }
 
 // 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间
@@ -2711,261 +2589,183 @@ async function createNewSession(value: string): Promise<void> {
   position: relative;
   container-type: inline-size;
   container-name: doc-card-area;
-  /* 作为批量工具栏悬浮的定位上下文 */
 }
 
-// 目录树选中路径的面包屑：与顶部知识库面包屑同一套视觉语言，只是更轻量。
-.doc-folder-path {
+// One navigation row; filters open in a single anchored panel.
+.doc-filter-bar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 0 0 8px;
+  justify-content: space-between;
+  gap: 16px;
   flex-shrink: 0;
-
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  &__trailing { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .doc-search-input { width: 220px; min-width: 100px; }
+  :deep(.doc-search-input .t-input) {
+    background: transparent;
+    border-color: var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+    font-size: var(--app-text-md);
+  }
+  .doc-filter-actions :deep(.content-bar-icon-btn) {
+    height: 32px;
+    padding: 0 12px;
+    border-radius: var(--app-radius-md);
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
+    &:hover { background: var(--td-brand-color-hover); }
+  }
+}
+.doc-folder-path {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  line-height: 20px;
+  flex-wrap: wrap;
   &__tree-toggle {
-    flex-shrink: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
-    margin-right: 4px;
-    padding: 0;
-    border: 1px solid var(--td-component-border);
-    border-radius: var(--app-radius-sm);
+    flex-shrink: 0;
+    align-self: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 10px;
+    font: inherit;
+    font-size: var(--app-text-md);
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-container);
     color: var(--td-text-color-secondary);
     cursor: pointer;
-    transition: border-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
-
-    &:hover {
-      border-color: var(--td-brand-color);
-      color: var(--td-brand-color);
-      background: var(--td-bg-color-container-hover);
-    }
+    &:hover { background: var(--td-bg-color-container-hover); color: var(--td-text-color-primary); }
   }
-
   &__crumb {
-    max-width: 220px;
-    padding: 2px 4px;
+    max-width: 160px;
+    padding: 6px 2px;
     border: 0;
-    border-radius: var(--app-radius-xs);
     background: transparent;
     color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-sm);
-    line-height: 18px;
+    font: inherit;
+    font-size: var(--app-text-md);
+    line-height: 20px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
-    transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
-
-    &:hover {
-      color: var(--td-brand-color);
-      background: var(--td-bg-color-container-hover);
-    }
-
-    &.is-current {
-      color: var(--td-text-color-primary);
-      font-weight: 500;
-      cursor: default;
-
-      &:hover {
-        background: transparent;
-        color: var(--td-text-color-primary);
-      }
-    }
+    &:is(button):hover { color: var(--td-brand-color); }
+    &.is-current { color: var(--td-text-color-primary); font-weight: 600; cursor: default; }
   }
-
-  &__sep {
-    flex-shrink: 0;
-    font-size: var(--app-text-sm);
-    color: var(--td-text-color-placeholder);
-  }
+  &__count { padding: 6px 0; line-height: 20px; margin-left: 6px; color: var(--td-text-color-placeholder); font-size: var(--app-text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  &__sep, &__scope { align-self: center; flex-shrink: 0; color: var(--td-text-color-placeholder); font-size: var(--app-text-sm); }
 }
-
-.doc-filter-bar {
-  padding: 0 0 12px 0;
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas:
-    'search trailing'
-    'filters filters';
-  gap: 8px 12px;
+.doc-filter-toggle {
+  display: inline-flex;
   align-items: center;
-
-  .doc-search-input {
-    grid-area: search;
-    min-width: 0;
-    width: 100%;
-  }
-
-  &__filters {
-    grid-area: filters;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
-
-    &::-webkit-scrollbar {
-      height: 4px;
-    }
-
-    &::-webkit-scrollbar-thumb {
-      background-color: rgba(0, 0, 0, 0.15);
-      border-radius: 2px;
-    }
-  }
-
-  &__trailing {
-    grid-area: trailing;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
-  }
-
-  // The folder tree changes the available document width without changing the
-  // viewport width. Switch to a single row only when this content area itself
-  // is wide enough for TDesign's fixed-width filter controls.
-  @container doc-card-area (min-width: 1240px) {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    gap: 12px;
-
-    &__filters {
-      flex: 1 1 auto;
-      overflow-x: auto;
-    }
-  }
-
-  .doc-filter-field {
-    width: 140px;
-    flex-shrink: 0;
-
-    &--wide {
-      width: 280px;
-    }
-
-    &__control {
-      width: 100%;
-    }
-  }
-
-  @media (min-width: 1280px) {
-    .doc-search-input {
-      flex: 1 1 220px;
-      min-width: 220px;
-    }
-  }
-
-  .doc-type-select {
-    width: 100%;
-  }
-
-  .doc-date-range {
-    width: 100%;
-
-    // TDesign focuses both the outer popup reference and inner inputs, which
-    // visually stacks into a "double border" — drop the inner shadow.
-    :deep(.t-input--focused),
-    :deep(.t-is-focused) {
-      box-shadow: none;
-    }
-  }
-
-  .doc-view-toggle {
-    flex-shrink: 0;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  white-space: nowrap;
+  cursor: pointer;
+  &:hover, &.active { background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); }
+}
+.doc-filter-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px;
+  padding: 0 2px; color: var(--td-brand-color); font-weight: 600;
+  font-size: var(--app-text-xs); font-variant-numeric: tabular-nums;
+}
+.doc-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-md);
+  padding: 2px;
+  .doc-view-toggle-btn {
     display: inline-flex;
     align-items: center;
-    padding: 2px;
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: var(--app-radius-sm);
-    gap: 0;
-
-    .doc-view-toggle-btn {
-      width: 28px;
-      height: 24px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border: 0;
-      background: transparent;
-      border-radius: var(--app-radius-xs);
-      color: var(--td-text-color-secondary);
-      cursor: pointer;
-      transition: background-color var(--app-motion-instant) ease, color var(--app-motion-instant) ease;
-
-      &:hover {
-        color: var(--td-text-color-primary);
-      }
-
-      &.active {
-        background: var(--td-bg-color-container);
-        color: var(--td-brand-color);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-      }
-    }
+    justify-content: center;
+    width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--app-radius-xs);
+    background: transparent;
+    color: var(--td-text-color-placeholder);
+    cursor: pointer;
+    &:hover { color: var(--td-text-color-primary); }
+    &.active { background: var(--td-bg-color-container); color: var(--td-brand-color); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
   }
-
-  .doc-filter-actions {
-    flex-shrink: 0;
-
-    :deep(.content-bar-icon-btn) {
-      color: var(--td-text-color-secondary);
-      background: transparent;
-      border: none;
-
-      &:hover {
-        color: var(--td-brand-color);
-        background: var(--td-bg-color-secondarycontainer);
-      }
-    }
+}
+.doc-filter-panel {
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: min(600px, 80vh);
+  overflow-y: auto;
+  padding: 16px;
+  box-sizing: border-box;
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  button { font: inherit; cursor: pointer; }
+  &__header {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;
+    strong { font-size: var(--app-text-base); font-weight: 600; }
+    button { border: 0; padding: 0; background: transparent; color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
+    button:disabled { color: var(--td-text-color-disabled); cursor: default; }
   }
-
-  :deep(.t-input) {
-    font-size: var(--app-text-md);
-    background-color: var(--td-bg-color-secondarycontainer);
-    border-color: transparent;
-    border-radius: var(--app-radius-sm);
-    box-shadow: none !important;
-
-    &:hover,
-    &:focus,
-    &.t-is-focused {
-      border-color: var(--td-brand-color);
-      background-color: var(--td-bg-color-container);
-      box-shadow: none !important;
-    }
+  &__fields { display: flex; flex-direction: column; gap: 10px; }
+  .doc-filter-field {
+    display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 8px;
+    > span { color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
+    :deep(.t-date-range-picker) { width: 100%; }
   }
-
-  :deep(.t-select) {
-    .t-input {
-      font-size: var(--app-text-md);
-      background-color: var(--td-bg-color-secondarycontainer);
-      border-color: transparent;
-      border-radius: var(--app-radius-sm);
-      box-shadow: none !important;
-
-      &:hover,
-      &.t-is-focused {
-        border-color: var(--td-brand-color);
-        background-color: var(--td-bg-color-container);
-        box-shadow: none !important;
-      }
-    }
+}
+.doc-filter-tags {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--td-component-stroke);
+  &__heading {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+    button { padding: 0; border: 0; background: transparent; color: var(--td-text-color-secondary); font-size: var(--app-text-sm); }
   }
+  &__count { margin-left: 6px; color: var(--td-text-color-placeholder); font-variant-numeric: tabular-nums; }
+  &__list { display: flex; flex-direction: column; gap: 2px; max-height: 168px; overflow-y: auto; margin-top: 8px; }
+  &__empty { color: var(--td-text-color-placeholder); padding: 8px 0; }
+}
+.doc-filter-tag {
+  display: flex; align-items: center; flex-shrink: 0; width: 100%; min-height: 28px; margin: 0;
+  padding: 4px 6px; box-sizing: border-box; border-radius: var(--app-radius-xs);
+  &:hover { background: var(--td-bg-color-container-hover); }
+  :deep(.t-checkbox__label) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :deep(.t-checkbox__input) { flex-shrink: 0; }
+}
+.doc-batch-toggle {
+  &:disabled { cursor: not-allowed; opacity: 0.5; }
+  &.active { color: var(--app-selection-text); border-color: var(--td-component-border); background: var(--app-selection-bg); }
+}
+.doc-filter-bar button:focus-visible, .doc-filter-panel button:focus-visible {
+  outline: 2px solid var(--app-focus-border); outline-offset: 2px;
+}
+.doc-list-skeleton-row { padding: 16px 40px; }
+@container doc-card-area (max-width: 780px) {
+  .doc-filter-bar { flex-wrap: wrap; gap: 12px; }
+  .doc-filter-bar__trailing { width: 100%; }
+  .doc-filter-bar .doc-search-input { flex: 1; width: auto; }
+}
+
+@container doc-card-area (max-width: 540px) {
+  .doc-filter-bar__trailing { flex-wrap: wrap; }
+  .doc-filter-bar .doc-search-input { flex: 1 0 100%; }
 }
 
 .doc-scroll-container {
@@ -3007,16 +2807,14 @@ async function createNewSession(value: string): Promise<void> {
   }
 }
 
-/* 批量条悬浮在滚动区底部，不挤占列表高度 */
+/* Reserve space for the batch actions so the last document stays reachable. */
 .doc-batch-bar-anchor {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 12px;
+  position: relative;
+  flex-shrink: 0;
   z-index: 6;
   display: flex;
   justify-content: center;
-  padding: 0 16px;
+  padding: 12px 0 0;
   pointer-events: none;
 
   &>* {
@@ -3196,9 +2994,6 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 
-.document-upload-input {
-  display: none;
-}
 
 .kb-settings-button {
   width: 30px;
@@ -3238,46 +3033,6 @@ async function createNewSession(value: string): Promise<void> {
   margin: 0 16px 0 4px;
 }
 
-@media (max-width: 1250px) and (min-width: 1045px) {
-  .answers-input {
-    transform: translateX(-329px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 654px !important;
-  }
-}
-
-@media (max-width: 1045px) {
-  .answers-input {
-    transform: translateX(-250px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 500px !important;
-  }
-}
-
-@media (max-width: 750px) {
-  .answers-input {
-    transform: translateX(-182px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 340px !important;
-  }
-}
-
-@media (max-width: 600px) {
-  .answers-input {
-    transform: translateX(-164px);
-  }
-
-  :deep(.t-textarea__inner) {
-    width: 300px !important;
-  }
-}
-
 @keyframes contentFadeIn {
   from {
     opacity: 0;
@@ -3294,8 +3049,8 @@ async function createNewSession(value: string): Promise<void> {
   box-sizing: border-box;
   display: grid;
   // 文档卡片信息量较大（标题 + 摘要 + 标签/类型），保持稍宽的最小列宽，避免一行塞太多导致内容拥挤。
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 10px;
   align-content: flex-start;
   width: 100%;
 
@@ -3312,7 +3067,7 @@ async function createNewSession(value: string): Promise<void> {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 10px 14px 8px;
+    padding: 10px;
   }
 
   .card-content-nav {
@@ -3344,11 +3099,11 @@ async function createNewSession(value: string): Promise<void> {
 }
 
 .knowledge-card {
-  min-width: 240px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-border);
-  height: 136px;
+  height: 164px;
   border-radius: var(--app-radius-md);
   overflow: hidden;
   box-sizing: border-box;
@@ -3363,7 +3118,7 @@ async function createNewSession(value: string): Promise<void> {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 10px 14px 8px;
+    padding: 12px;
   }
 
   .card-content-nav {

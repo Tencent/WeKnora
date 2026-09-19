@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useI18n } from 'vue-i18n';
 
 interface KnowledgeItem {
   id: string;
@@ -31,7 +30,6 @@ const emit = defineEmits<{
   (e: 'delete'): void;
 }>();
 
-const { t } = useI18n();
 
 const CANCELABLE_PARSE_STATUSES = new Set(['pending', 'processing', 'finalizing']);
 
@@ -130,14 +128,16 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
 .doc-action-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 6px 10px;
+  font-family: var(--app-font-family);
   font-size: var(--app-text-base);
+  font-weight: 400;
   line-height: 20px;
   color: var(--td-text-color-primary);
   cursor: pointer;
-  border-radius: var(--app-radius-sm);
-  transition: background-color var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1), transform var(--app-motion-instant) ease;
+  border-radius: var(--app-radius-xs);
+  transition: background-color var(--app-motion-fast) cubic-bezier(0.2, 0, 0, 1);
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -145,11 +145,10 @@ const fileName = computed(() => props.item.file_name || props.item.title || prop
 
   &:active {
     background: var(--td-bg-color-container-active);
-    transform: scale(0.98);
   }
 
   .icon {
-    font-size: var(--app-text-xl);
+    font-size: var(--app-text-2xl);
     color: var(--td-text-color-secondary);
     transition: color var(--app-motion-fast) ease;
   }

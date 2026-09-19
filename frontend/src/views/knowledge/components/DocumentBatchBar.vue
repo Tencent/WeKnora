@@ -75,7 +75,7 @@ const folderPickerVisible = ref(false);
           <t-button v-if="canMutate" theme="default" variant="outline" size="small"
             :disabled="count === 0 || deleteLoading || reparseLoading || tagLoading || downloadLoading" :loading="tagLoading"
             @click="emit('batchTag')">
-            <template #icon><t-icon name="discount" size="14px" /></template>
+            <template #icon><t-icon name="tag" size="14px" /></template>
             {{ t('knowledgeBase.batchTag') }}
           </t-button>
 
@@ -135,11 +135,11 @@ const folderPickerVisible = ref(false);
 
 .batch-bar-left {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  flex: 1;
+  flex: 0 0 auto;
 }
 
 .batch-bar-count {
@@ -157,18 +157,21 @@ const folderPickerVisible = ref(false);
   color: var(--td-text-color-secondary) !important;
 
   &:hover {
-    color: var(--td-brand-color) !important;
+    color: var(--td-text-color-primary) !important;
   }
 }
 
 .batch-bar-actions {
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }
+
+.batch-bar-actions > * { flex-shrink: 0; }
 
 .batch-download-trigger {
   display: inline-flex;

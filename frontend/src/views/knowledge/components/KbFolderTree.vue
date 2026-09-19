@@ -3,6 +3,10 @@
     <div class="kb-folder-tree__header">
       <template v-if="!collapsed">
         <span class="kb-folder-tree__title">{{ t('knowledgeBase.folderTree.title') }}</span>
+        <span v-if="tree && !loading" class="kb-folder-tree__total"
+          :title="t('knowledgeBase.folderTree.totalDocuments', { count: tree.total_document_count })">
+          {{ t('knowledgeBase.folderTree.totalDocuments', { count: tree.total_document_count }) }}
+        </span>
         <t-tooltip :content="t('knowledgeBase.folderTree.collapse')" placement="top">
           <button
             type="button"
@@ -48,12 +52,17 @@
           role="button"
           tabindex="0"
           @click="emit('select', row.path)"
-          @keydown.enter="emit('select', row.path)"
+          @keydown.enter.self="emit('select', row.path)"
+          @keydown.space.prevent.self="emit('select', row.path)"
         >
           <span
             v-if="row.hasChildren"
             class="kb-folder-row__toggle"
             role="button"
+            tabindex="0"
+            :aria-expanded="isExpanded(row.path)"
+            @keydown.enter.stop.prevent="toggle(row.path)"
+            @keydown.space.stop.prevent="toggle(row.path)"
             :aria-label="t(isExpanded(row.path)
               ? 'knowledgeBase.folderTree.collapseFolder'
               : 'knowledgeBase.folderTree.expandFolder')"
@@ -81,10 +90,13 @@
           />
           <template v-else>
             <span class="kb-folder-row__label">
-              {{ row.kind === 'root' ? t('knowledgeBase.folderTree.rootRow') : row.name }}
+              {{ row.kind === 'root' ? (rootLabel || t('knowledgeBase.folderTree.rootRow')) : row.name }}
             </span>
             <span class="kb-folder-row__trailing">
-              <span class="kb-folder-row__count">{{ row.totalCount }}</span>
+              <span class="kb-folder-row__count"
+                :title="t('knowledgeBase.folderTree.countHint', { direct: row.documentCount, total: row.totalCount })">
+                {{ row.documentCount }}
+              </span>
               <t-popup
                 v-if="canEdit && row.kind === 'folder'"
                 :visible="menuOpenPath === row.path"
@@ -98,7 +110,7 @@
                   type="button"
                   class="kb-folder-row__more"
                   :class="{ 'is-open': menuOpenPath === row.path }"
-                  :aria-label="t('knowledgeBase.moreOptions')"
+                  :aria-label="t('knowledgeBase.columnActions')"
                   @click.stop
                 >
                   <t-icon name="more" />
@@ -112,6 +124,7 @@
                   </div>
                 </template>
               </t-popup>
+              <span v-else class="kb-folder-row__more-placeholder" aria-hidden="true"></span>
             </span>
           </template>
         </div>
@@ -135,6 +148,7 @@ import {
 const props = withDefaults(defineProps<{
   tree: KnowledgeFolderTree | null
   /** Selected folder path; the empty string is the knowledge base top level. */
+  rootLabel?: string
   selectedPath: string
   loading?: boolean
   collapsed?: boolean
@@ -239,14 +253,14 @@ watch(
 
 <style scoped lang="less">
 .kb-folder-tree {
-  --kb-folder-indent: 10px;
+  --kb-folder-indent: 14px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 268px;
+  width: 220px;
   min-height: 0;
   padding-right: 12px;
-  margin-right: 12px;
+  margin-right: 16px;
   border-right: 1px solid var(--td-component-stroke);
   box-sizing: border-box;
 
@@ -263,19 +277,32 @@ watch(
   justify-content: space-between;
   gap: 6px;
   height: 32px;
+  padding-bottom: 16px;
   flex-shrink: 0;
 }
 
 .kb-folder-tree__title {
   font-size: var(--app-text-md);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--td-text-color-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.kb-folder-tree__total {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--app-text-xs);
+  font-weight: 400;
+  color: var(--td-text-color-placeholder);
+}
+
 .kb-folder-tree__icon-btn {
+  flex-shrink: 0;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -300,7 +327,7 @@ watch(
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 0 12px;
+  padding: 8px 0 12px;
   scrollbar-width: thin;
 
   &::-webkit-scrollbar {
@@ -323,8 +350,9 @@ watch(
   gap: 4px;
   box-sizing: border-box;
   width: 100%;
-  height: 30px;
-  padding: 0 8px 0 calc(var(--kb-folder-depth, 0) * var(--kb-folder-indent));
+  height: 32px;
+  margin-bottom: 2px;
+  padding: 0 4px 0 calc(4px + var(--kb-folder-depth, 0) * var(--kb-folder-indent));
   border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-primary);
@@ -341,16 +369,18 @@ watch(
 
   &:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 30%, transparent);
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 2px;
   }
 
   &.active {
-    background: var(--td-bg-color-container-hover);
+    background: var(--app-selection-bg);
 
     .kb-folder-row__label,
     .kb-folder-row__icon {
       color: var(--td-brand-color);
     }
+    .kb-folder-row__label { font-weight: 500; }
   }
 
   &.is-root .kb-folder-row__label {
@@ -385,8 +415,8 @@ watch(
 
 .kb-folder-row__icon {
   flex: 0 0 auto;
-  font-size: var(--app-text-lg);
-  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xl);
+  color: var(--td-text-color-secondary);
 }
 
 .kb-folder-row__label {
@@ -399,7 +429,7 @@ watch(
 
 .kb-folder-row__trailing {
   flex: 0 0 auto;
-  width: 22px;
+  gap: 2px;
   height: 20px;
   display: flex;
   align-items: center;
@@ -408,14 +438,20 @@ watch(
 }
 
 .kb-folder-row__count {
+  min-width: 16px;
+  text-align: right;
   font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
+.kb-folder-row__more-placeholder { width: 20px; }
+
 .kb-folder-row__more {
-  display: none;
+  display: inline-flex;
+  opacity: 0;
+  pointer-events: none;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -439,13 +475,11 @@ watch(
 }
 
 .kb-folder-row.is-editable:hover,
+.kb-folder-row.is-editable:focus-within,
 .kb-folder-row.is-menu-open {
-  .kb-folder-row__count {
-    display: none;
-  }
-
   .kb-folder-row__more {
-    display: inline-flex;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 

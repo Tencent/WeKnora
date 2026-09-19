@@ -460,7 +460,7 @@ onBeforeUnmount(() => {
 
     &[aria-selected='true'] {
       background: var(--td-bg-color-container);
-      color: var(--td-text-color-primary);
+      color: var(--td-brand-color);
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
     }
 
