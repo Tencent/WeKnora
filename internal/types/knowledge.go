@@ -503,4 +503,9 @@ type KnowledgeCheckParams struct {
 	Passages []string
 	// Knowledge type
 	Type string
+	// ExcludeKnowledgeIDs excludes the listed knowledge rows from the dedup
+	// check. The datasource update path sets it to every existing version of the
+	// item being replaced so a same-URL / same-content re-ingest is not rejected
+	// as a duplicate against the rows it is about to supersede.
+	ExcludeKnowledgeIDs []string
 }

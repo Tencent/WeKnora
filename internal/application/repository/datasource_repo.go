@@ -123,6 +123,49 @@ func (r *DataSourceRepository) UpdateSyncState(ctx context.Context, ds *types.Da
 	return nil
 }
 
+// FinalizeSync atomically commits a sync run's terminal state to both the data
+// source (status/cursor/result) and the sync log (status/result/finished_at) in
+// a single transaction. The two tables share the same *gorm.DB, so this is
+// all-or-nothing: a retry after a partial failure never observes a terminal
+// sync log alongside a stale data-source cursor.
+func (r *DataSourceRepository) FinalizeSync(ctx context.Context, ds *types.DataSource, log *types.SyncLog) error {
+	if ds == nil || ds.ID == "" {
+		return errors.New("data source is nil or has no id")
+	}
+	if log == nil || log.ID == "" {
+		return errors.New("sync log is nil or has no id")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&types.DataSource{}).
+			Where("id = ?", ds.ID).
+			Updates(map[string]interface{}{
+				"status":           ds.Status,
+				"last_sync_at":     ds.LastSyncAt,
+				"last_sync_cursor": ds.LastSyncCursor,
+				"last_sync_result": ds.LastSyncResult,
+				"error_message":    ds.ErrorMessage,
+				"updated_at":       time.Now().UTC(),
+			}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&types.SyncLog{}).
+			Where("id = ?", log.ID).
+			Updates(map[string]interface{}{
+				"status":        log.Status,
+				"finished_at":   log.FinishedAt,
+				"items_total":   log.ItemsTotal,
+				"items_created": log.ItemsCreated,
+				"items_updated": log.ItemsUpdated,
+				"items_deleted": log.ItemsDeleted,
+				"items_skipped": log.ItemsSkipped,
+				"items_failed":  log.ItemsFailed,
+				"error_message": log.ErrorMessage,
+				"result":        log.Result,
+				"updated_at":    time.Now().UTC(),
+			}).Error
+	})
+}
+
 // Delete performs a soft delete
 func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
 	if id == "" {
@@ -230,7 +273,7 @@ func (r *SyncLogRepository) FindLatest(ctx context.Context, dsID string) (*types
 	return &log, nil
 }
 
-// HasRunningSync checks if a data source has any sync currently in "running" status.
+// HasRunningSync checks if a data source already has a pending or running sync.
 func (r *SyncLogRepository) HasRunningSync(ctx context.Context, dsID string) (bool, error) {
 	if dsID == "" {
 		return false, errors.New("data source id is empty")
@@ -239,7 +282,7 @@ func (r *SyncLogRepository) HasRunningSync(ctx context.Context, dsID string) (bo
 	if err := r.db.WithContext(ctx).
 		Model(&types.SyncLog{}).
 		Where("data_source_id = ?", dsID).
-		Where("status = ?", types.SyncLogStatusRunning).
+		Where("status IN ?", []string{types.SyncLogStatusPending, types.SyncLogStatusRunning}).
 		Count(&count).Error; err != nil {
 		return false, err
 	}
@@ -292,6 +335,52 @@ func (r *SyncLogRepository) UpdateResult(ctx context.Context, log *types.SyncLog
 	return nil
 }
 
+func (r *SyncLogRepository) FindUndispatched(ctx context.Context, limit int) ([]*types.SyncLog, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	var logs []*types.SyncLog
+	now := time.Now().UTC()
+	if err := r.db.WithContext(ctx).
+		Where("status = ?", types.SyncLogStatusPending).
+		Where("dispatched_at IS NULL").
+		Where("next_dispatch_at IS NULL OR next_dispatch_at <= ?", now).
+		Where("task_id != ''").
+		Order("created_at ASC").
+		Limit(limit).
+		Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+func (r *SyncLogRepository) MarkDispatched(ctx context.Context, id string, at time.Time) error {
+	// Delivery is idempotent, but the state transition must be conditional.
+	// Do not require status=pending here: a worker can consume the task and
+	// change the row to running (or even a terminal state) before the producer
+	// records the successful enqueue. This field only records delivery; it does
+	// not change the sync status, so it is safe to converge from any state.
+	return r.db.WithContext(ctx).Model(&types.SyncLog{}).
+		Where("id = ?", id).
+		Where("dispatched_at IS NULL").
+		Updates(map[string]interface{}{
+			"dispatched_at": at.UTC(), "next_dispatch_at": nil, "last_dispatch_error": "", "updated_at": time.Now().UTC(),
+		}).Error
+}
+
+func (r *SyncLogRepository) MarkDispatchFailure(ctx context.Context, id string, attempts int, next time.Time, message string) error {
+	// A transient enqueue failure can race with another node's successful
+	// enqueue. Keep retry metadata scoped to an undispatched pending row so a
+	// late failure cannot make an already-delivered task look pending again.
+	return r.db.WithContext(ctx).Model(&types.SyncLog{}).
+		Where("id = ?", id).
+		Where("status = ?", types.SyncLogStatusPending).
+		Where("dispatched_at IS NULL").
+		Updates(map[string]interface{}{
+			"dispatch_attempts": attempts, "next_dispatch_at": next.UTC(), "last_dispatch_error": message, "updated_at": time.Now().UTC(),
+		}).Error
+}
+
 // CancelPendingByDataSource marks all non-terminal sync logs for a data source as canceled.
 func (r *SyncLogRepository) CancelPendingByDataSource(ctx context.Context, dsID string) error {
 	if dsID == "" {
@@ -317,6 +406,7 @@ func (r *SyncLogRepository) CleanupOldLogs(ctx context.Context, retentionDays in
 	// Delete logs older than the retention period
 	if err := r.db.WithContext(ctx).
 		Where("started_at < NOW() - INTERVAL ? DAY", retentionDays).
+		Where("status NOT IN ?", []string{types.SyncLogStatusPending, types.SyncLogStatusRunning}).
 		Delete(&types.SyncLog{}).Error; err != nil {
 		return err
 	}

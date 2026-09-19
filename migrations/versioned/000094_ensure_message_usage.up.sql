@@ -1,0 +1,19 @@
+-- Backfill guard for 000085_message_usage.
+--
+-- 000085 was inserted into the 085 slot on 2026-08-21, two days AFTER
+-- 000086_tenant_skills (2026-08-19) had already shipped. golang-migrate only
+-- compares the recorded version against the files present on disk, so any
+-- database that was pushed to 086 or beyond inside that window never executed
+-- 000085 -- and will never replay it, because its recorded version stays ahead
+-- of 085 forever.
+--
+-- The failure mode is silent and misleading: schema_migrations reports the
+-- latest version and dirty = false, while messages.usage is missing, so every
+-- message INSERT fails with `column "usage" does not exist` and the chat API
+-- returns 500. Nothing in the recorded state points at the root cause.
+--
+-- This migration repairs those databases. It is idempotent: on a healthy
+-- database where 000085 did run, ADD COLUMN IF NOT EXISTS is a no-op. It does
+-- NOT take over ownership of the column -- 000085 remains the migration that
+-- introduces it, and its own down migration is still the one that drops it.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS usage JSONB;

@@ -825,6 +825,7 @@ export default {
     connectionFailed: 'Подключение не удалось',
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
+    pluginSettingsLabel: 'Настройки плагина',
     gitlab: {
       baseUrl: 'URL GitLab', accessToken: 'Персональный токен доступа', projects: 'Проекты GitLab',
       projectsHint: 'Укажите ID проекта или путь в пространстве имён (например group/project), а также при необходимости ветку и каталоги.',
@@ -1011,6 +1012,7 @@ export default {
       failed: 'ошибок'
     },
     logStatus: {
+      pending: 'В очереди',
       running: 'Синхронизация',
       success: 'Успешно',
       partial: 'Частично',
@@ -2771,6 +2773,8 @@ export default {
       sourceLabel: 'Источник модели',
       sourceLocal: 'Ollama',
       sourceRemote: 'API',
+      sourcePlugin: 'Плагин',
+      pluginBaseUrlDesc: 'Необязательно. Оставьте пустым для значения по умолчанию плагина.',
       baseUrlLabel: 'Base URL',
       displayNameLabel: 'Отображаемое имя (опционально)',
       displayNamePlaceholder: 'например: модель поддержки',

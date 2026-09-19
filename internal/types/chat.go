@@ -310,6 +310,9 @@ type StreamResponse struct {
 	Data                map[string]interface{} `json:"data,omitempty"`
 	Usage               *TokenUsage            `json:"usage,omitempty"`
 	FinishReason        string                 `json:"finish_reason,omitempty"`
+	// ReasoningContent carries thinking-model reasoning (OpenAI o1, DeepSeek
+	// reasoner, MiMo, etc.) emitted by model plugins during streaming.
+	ReasoningContent string `json:"reasoning_content,omitempty"`
 }
 
 // References references

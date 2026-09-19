@@ -2,6 +2,7 @@ package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -24,20 +25,12 @@ const (
 	ConnectorTypeFeishuDrive = "feishu_drive"
 	// ConnectorTypeLarkDrive is the Lark (international) Drive mode, the
 	// international counterpart of ConnectorTypeFeishuDrive.
-	ConnectorTypeLarkDrive   = "lark_drive"
-	ConnectorTypeNotion      = "notion"
-	ConnectorTypeConfluence  = "confluence"
-	ConnectorTypeYuque       = "yuque"
-	ConnectorTypeGitHub      = "github"
-	ConnectorTypeGoogleDrive = "google_drive"
-	ConnectorTypeOneDrive    = "onedrive"
-	ConnectorTypeDingTalk    = "dingtalk"
-	ConnectorTypeWebCrawler  = "web_crawler"
-	ConnectorTypeSlack       = "slack"
-	ConnectorTypeIMAP        = "imap"
-	ConnectorTypeRSS         = "rss"
-	ConnectorTypeGitLab      = "gitlab"
-	ConnectorTypeIMA         = "ima"
+	ConnectorTypeLarkDrive = "lark_drive"
+	ConnectorTypeNotion    = "notion"
+	ConnectorTypeYuque     = "yuque"
+	ConnectorTypeRSS       = "rss"
+	ConnectorTypeGitLab    = "gitlab"
+	ConnectorTypeIMA       = "ima"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
@@ -50,6 +43,7 @@ const (
 	DataSourceStatusDeleted = "deleted"
 
 	// Sync log status
+	SyncLogStatusPending  = "pending"
 	SyncLogStatusRunning  = "running"
 	SyncLogStatusSuccess  = "success"
 	SyncLogStatusPartial  = "partial"
@@ -184,6 +178,15 @@ type SyncLog struct {
 
 	// Detailed sync result (JSON-encoded)
 	Result JSON `json:"result" gorm:"type:jsonb"`
+
+	// Durable outbox fields. A pending SyncLog is the source of truth for one
+	// queue delivery; dispatch may be retried safely with the same per-run TaskID.
+	TaskID            string     `json:"task_id,omitempty" gorm:"type:varchar(255);index"`
+	TaskPayload       JSON       `json:"-" gorm:"type:jsonb"`
+	DispatchedAt      *time.Time `json:"dispatched_at,omitempty"`
+	DispatchAttempts  int        `json:"dispatch_attempts,omitempty"`
+	NextDispatchAt    *time.Time `json:"next_dispatch_at,omitempty" gorm:"index"`
+	LastDispatchError string     `json:"last_dispatch_error,omitempty" gorm:"type:text"`
 
 	// Creation timestamp (usually same as StartedAt)
 	CreatedAt time.Time `json:"created_at"`
@@ -518,12 +521,15 @@ type DataSourceSyncPayload struct {
 // ToJSON converts a DataSourceConfig to the JSON blob stored in
 // DataSource.Config.
 //
-// When SYSTEM_AES_KEY is configured, every string value inside
-// Credentials is AES-256-GCM encrypted before serialization. Non-string
-// values (numbers, bools, nested objects) pass through untouched. This is
-// the only write path through which credentials reach the DB (the GORM
-// JSON type itself is a byte passthrough), so encrypting here is
-// sufficient to keep DataSource.Config at rest fully encrypted.
+// Every string value inside Credentials is AES-256-GCM encrypted before
+// serialization. Non-string values (numbers, bools, nested objects) pass
+// through untouched. This is the only write path through which credentials
+// reach the DB (the GORM JSON type itself is a byte passthrough), so
+// encrypting here is sufficient to keep DataSource.Config at rest fully
+// encrypted.
+//
+// 严格模式：string 凭证非空时，SYSTEM_AES_KEY 未配置或加密失败都会返回错误，
+// 绝不把明文凭证写入数据库。空字符串与非 string 值不触发该约束。
 //
 // Encryption operates on a shallow copy of Credentials to avoid mutating
 // the caller's in-memory map (subsequent reads would otherwise see
@@ -533,16 +539,24 @@ func (d *DataSourceConfig) ToJSON() (JSON, error) {
 		return nil, nil
 	}
 	out := *d
-	if key := utils.GetAESKey(); key != nil && len(out.Credentials) > 0 {
+	if len(out.Credentials) > 0 {
+		key := utils.GetAESKey()
 		encCreds := make(map[string]interface{}, len(out.Credentials))
 		for k, v := range out.Credentials {
-			if s, ok := v.(string); ok && s != "" {
-				if enc, err := utils.EncryptAESGCM(s, key); err == nil {
-					encCreds[k] = enc
-					continue
-				}
+			s, ok := v.(string)
+			if !ok || s == "" {
+				// 非 string 值（数字/布尔/嵌套对象）与空字符串原样通过
+				encCreds[k] = v
+				continue
 			}
-			encCreds[k] = v
+			if key == nil {
+				return nil, fmt.Errorf("refusing to persist plaintext credential %q: SYSTEM_AES_KEY is not configured", k)
+			}
+			enc, err := utils.EncryptAESGCM(s, key)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt datasource credential %q: %w", k, err)
+			}
+			encCreds[k] = enc
 		}
 		out.Credentials = encCreds
 	}

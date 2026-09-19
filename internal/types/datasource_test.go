@@ -46,14 +46,13 @@ func TestDataSourceConfig_ToJSON_EncryptsStringCredentials(t *testing.T) {
 	assert.Equal(t, "cs-real-secret", cfg.Credentials["client_secret"])
 }
 
-func TestDataSourceConfig_ToJSON_PassthroughWhenNoKey(t *testing.T) {
+func TestDataSourceConfig_ToJSON_RejectsPlaintextWhenNoKey(t *testing.T) {
 	withAESKey(t, "")
 	cfg := &DataSourceConfig{
 		Credentials: map[string]interface{}{"token": "plain-token"},
 	}
-	blob, err := cfg.ToJSON()
-	assert.NoError(t, err)
-	assert.Contains(t, string(blob), "plain-token")
+	_, err := cfg.ToJSON()
+	assert.ErrorContains(t, err, "SYSTEM_AES_KEY is not configured")
 }
 
 func TestDataSource_ParseConfig_Roundtrip(t *testing.T) {

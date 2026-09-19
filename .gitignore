@@ -12,6 +12,9 @@
 *.key
 *.crt
 
+# compose 个人环境私有配置（不进 PR）
+docker-compose.override.yml
+
 # IDE和编辑器文件
 *.swp
 *.swo

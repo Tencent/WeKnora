@@ -137,7 +137,7 @@ func (r *fakeSyncLogRepo) HasRunningSync(_ context.Context, dsID string) (bool, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, log := range r.logs {
-		if log.DataSourceID == dsID && log.Status == types.SyncLogStatusRunning {
+		if log.DataSourceID == dsID && (log.Status == types.SyncLogStatusPending || log.Status == types.SyncLogStatusRunning) {
 			return true, nil
 		}
 	}

@@ -98,6 +98,12 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 }
 
 func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
+	if config.Source == types.ModelSourcePlugin {
+		if !provider.HasExternalModel(config.Provider) {
+			return nil, fmt.Errorf("external model plugin %q is not loaded", config.Provider)
+		}
+		return newPluginVLM(config), nil
+	}
 	ifType := strings.ToLower(config.InterfaceType)
 
 	if ifType == "ollama" || config.Source == types.ModelSourceLocal {

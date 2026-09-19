@@ -131,6 +131,12 @@ type customHeaderSetter interface {
 }
 
 func newReranker(config *RerankerConfig) (Reranker, error) {
+	if config.Source == types.ModelSourcePlugin {
+		if !provider.HasExternalModel(config.Provider) {
+			return nil, fmt.Errorf("external model plugin %q is not loaded", config.Provider)
+		}
+		return newPluginReranker(config), nil
+	}
 	// Use provider field if set, otherwise detect from URL using provider registry
 	providerName := provider.ProviderName(config.Provider)
 	if providerName == "" {

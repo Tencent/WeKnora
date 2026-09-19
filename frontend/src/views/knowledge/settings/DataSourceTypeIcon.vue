@@ -6,9 +6,12 @@ const props = withDefaults(defineProps<{
   size?: number
   /** inline: 类型选择等小尺寸场景；badge: 嵌入 ds-card__badge 等父级徽章容器 */
   variant?: 'inline' | 'badge'
+  /** 外部插件的自定义图标 URL（来自 metadata.icon）。优先于内置图标映射。 */
+  icon?: string
 }>(), {
   size: 20,
   variant: 'inline',
+  icon: '',
 })
 
 const iconMap = datasourceIconMap
@@ -38,7 +41,14 @@ function fallbackText(type: string) {
     :style="variant === 'inline' ? { width: `${size}px`, height: `${size}px` } : undefined"
   >
     <img
-      v-if="iconMap[type]"
+      v-if="icon"
+      :src="icon"
+      :alt="type"
+      class="ds-type-icon__img"
+      :style="variant === 'inline' ? { width: `${size}px`, height: `${size}px` } : undefined"
+    >
+    <img
+      v-else-if="iconMap[type]"
       :src="iconMap[type]"
       :alt="type"
       class="ds-type-icon__img"

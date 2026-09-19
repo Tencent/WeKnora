@@ -2,8 +2,6 @@ package types
 
 import (
 	"database/sql/driver"
-	"encoding/json"
-	"log"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -112,6 +110,7 @@ const (
 	ModelSourceNvidia      ModelSource = "nvidia"       // NVIDIA model
 	ModelSourceNovita      ModelSource = "novita"       // Novita AI model
 	ModelSourceAzureOpenAI ModelSource = "azure_openai" // Azure OpenAI model
+	ModelSourcePlugin      ModelSource = "plugin"       // External model plugin (process-out-of-band gRPC)
 )
 
 // EmbeddingParameters represents the embedding parameters for a model
@@ -222,19 +221,7 @@ type Model struct {
 // Value implements the driver.Valuer interface, used to convert ModelParameters to database value.
 // Encrypts APIKey and AppSecret before persisting to database (value receiver = no memory pollution).
 func (c ModelParameters) Value() (driver.Value, error) {
-	if key := utils.GetAESKey(); key != nil {
-		if c.APIKey != "" {
-			if encrypted, err := utils.EncryptAESGCM(c.APIKey, key); err == nil {
-				c.APIKey = encrypted
-			}
-		}
-		if c.AppSecret != "" {
-			if encrypted, err := utils.EncryptAESGCM(c.AppSecret, key); err == nil {
-				c.AppSecret = encrypted
-			}
-		}
-	}
-	return json.Marshal(c)
+	return utils.MarshalWithSecrets(c, "api_key", "app_secret")
 }
 
 // Scan implements the sql.Scanner interface, used to convert database value to ModelParameters.
@@ -247,25 +234,7 @@ func (c *ModelParameters) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	if err := json.Unmarshal(b, c); err != nil {
-		return err
-	}
-	// Lenient decrypt: a row with broken ciphertext (key rotated/removed)
-	// must still load — otherwise a single failure breaks ListModels and
-	// the user can't even see which model needs re-credentialing.
-	if plain, ok := utils.DecryptStoredSecretLenient(c.APIKey); ok {
-		c.APIKey = plain
-	} else {
-		log.Printf("[crypto] model parameters api_key: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
-		c.APIKey = ""
-	}
-	if plain, ok := utils.DecryptStoredSecretLenient(c.AppSecret); ok {
-		c.AppSecret = plain
-	} else {
-		log.Printf("[crypto] model parameters app_secret: decrypt failed (SYSTEM_AES_KEY missing/rotated?), treating as unconfigured")
-		c.AppSecret = ""
-	}
-	return nil
+	return utils.UnmarshalWithSecrets(b, c, "api_key", "app_secret")
 }
 
 // BeforeCreate is a GORM hook that runs before creating a new model record.

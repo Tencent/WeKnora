@@ -115,6 +115,11 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 		embedder, err = NewOllamaEmbedder(config.BaseURL,
 			config.ModelName, config.TruncatePromptTokens, config.Dimensions, config.ModelID, pooler, ollamaService)
 		return embedder, err
+	case string(types.ModelSourcePlugin):
+		if !provider.HasExternalModel(config.Provider) {
+			return nil, fmt.Errorf("external model plugin %q is not loaded", config.Provider)
+		}
+		return newPluginEmbedder(&config), nil
 	case string(types.ModelSourceRemote):
 		// Detect or use configured provider for routing
 		providerName := provider.ProviderName(config.Provider)

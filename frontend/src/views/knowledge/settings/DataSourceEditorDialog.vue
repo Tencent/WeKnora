@@ -13,8 +13,10 @@ import {
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
+  getConnectorTypes,
   type DataSource,
   type Resource,
+  type ConnectorMeta,
 } from '@/api/datasource'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
@@ -195,6 +197,7 @@ const form = ref({
   name: '',
   type: '',
   config: {
+    type: '',
     credentials: {} as Record<string, any>,
     resource_ids: [] as string[],
     settings: {} as Record<string, any>,
@@ -518,6 +521,14 @@ interface ConnectorDef {
     multiline?: boolean
     fieldType?: 'custom_headers'
   }[]
+  // External plugin metadata (populated from GET /datasource/types). Built-in
+  // connectors leave these empty and keep their dedicated forms.
+  external?: boolean
+  name?: string
+  description?: string
+  icon?: string
+  docsUrl?: string
+  configSchema?: Record<string, any>
 }
 
 const connectorDefs = computed<ConnectorDef[]>(() => [
@@ -691,7 +702,177 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
 ])
 
 
-const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+// --- External plugin metadata (from GET /datasource/types) ---
+const serverMetadata = ref<ConnectorMeta[]>([])
+
+async function loadServerMetadata() {
+  try {
+    const res: any = await getConnectorTypes()
+    serverMetadata.value = res?.data ?? res ?? []
+  } catch (_) {
+    // 拉取失败时保持内置连接器可用
+  }
+}
+
+// Merge built-in connector defs (dedicated forms) with external plugin
+// metadata (generic schema form). Installing a plugin then requires no
+// frontend change: it surfaces here automatically.
+const availableConnectors = computed<ConnectorDef[]>(() => {
+  const builtinTypes = new Set(connectorDefs.value.map(d => d.type))
+  const external: ConnectorDef[] = serverMetadata.value
+    .filter(m => m.external || !builtinTypes.has(m.type))
+    .map(m => ({
+      type: m.type,
+      available: true,
+      docUrl: '',
+      permissionDocUrl: '',
+      permissionPageUrl: '',
+      requiredPermissions: [],
+      fields: [],
+      external: true,
+      name: m.name,
+      description: m.description,
+      icon: m.icon,
+      docsUrl: m.docs_url,
+      configSchema: m.config_schema,
+    }))
+  return [...connectorDefs.value, ...external]
+})
+
+const currentDef = computed(() => availableConnectors.value.find(d => d.type === form.value.type))
+
+// External plugins surface their own name/description from the server metadata;
+// built-in connectors keep their i18n keys.
+function connectorName(def: ConnectorDef): string {
+  return def.external ? (def.name || def.type) : t(`datasource.connector.${def.type}`)
+}
+function connectorDesc(def: ConnectorDef): string {
+  return def.external ? (def.description || '') : t(`datasource.connectorDesc.${def.type}`)
+}
+
+// --- External plugin generic schema form ---
+interface SchemaFieldVM {
+  key: string
+  label: string
+  description: string
+  kind: 'string' | 'array' | 'boolean' | 'number'
+  required: boolean
+  secret: boolean
+  default?: unknown
+}
+
+// Parse one JSON-Schema "properties" object into form fields. Shared by the
+// settings and credentials sections so the two config maps render identically.
+function parseSchemaProperties(
+  schema: Record<string, any> | undefined,
+): SchemaFieldVM[] {
+  if (!schema?.properties) return []
+  const required: string[] = Array.isArray(schema.required) ? schema.required : []
+  const fields: SchemaFieldVM[] = []
+  for (const [key, raw] of Object.entries(schema.properties as Record<string, any>)) {
+    const type = raw?.type
+    let kind: SchemaFieldVM['kind'] = 'string'
+    if (type === 'boolean') kind = 'boolean'
+    else if (type === 'integer' || type === 'number') kind = 'number'
+    else if (type === 'string[]' || type === 'array') kind = 'array'
+    fields.push({
+      key,
+      label: raw?.title || key,
+      description: raw?.description || '',
+      kind,
+      required: required.includes(key),
+      secret: !!raw?.secret,
+      default: raw?.default,
+    })
+  }
+  return fields
+}
+
+// Parse the plugin's config_schema (properties.settings) into form fields.
+const schemaFields = computed<SchemaFieldVM[]>(() => {
+  const schema = currentDef.value?.configSchema
+  if (!schema) return []
+  return parseSchemaProperties((schema as any).properties?.settings)
+})
+
+// Parse the plugin's config_schema (properties.credentials) into credential
+// fields. This is what lets an external plugin (DingTalk, GitHub, Confluence)
+// surface client_id / client_secret / operator_id without any frontend code.
+const schemaCredentialFields = computed<SchemaFieldVM[]>(() => {
+  const schema = currentDef.value?.configSchema
+  if (!schema) return []
+  return parseSchemaProperties((schema as any).properties?.credentials)
+})
+
+function schemaDefaultSettings(def: ConnectorDef | undefined): Record<string, any> {
+  const properties = (def?.configSchema as any)?.properties?.settings?.properties
+  if (!properties) return {}
+  const defaults: Record<string, any> = {}
+  for (const [key, raw] of Object.entries(properties as Record<string, any>)) {
+    if (raw && raw.default !== undefined) defaults[key] = raw.default
+  }
+  return defaults
+}
+
+// Default credential values from the schema. Only non-secret fields get a
+// default pre-filled (secrets never carry a default in practice, but guard
+// anyway so a default never leaks into a password field).
+function schemaDefaultCredentials(def: ConnectorDef | undefined): Record<string, any> {
+  const properties = (def?.configSchema as any)?.properties?.credentials?.properties
+  if (!properties) return {}
+  const defaults: Record<string, any> = {}
+  for (const [key, raw] of Object.entries(properties as Record<string, any>)) {
+    if (raw && raw.default !== undefined && !raw.secret) defaults[key] = raw.default
+  }
+  return defaults
+}
+
+// Validate required external-plugin credential fields. Mirrors
+// validateExternalSchemaFields but reads from the credentials map.
+function validateExternalCredentialFields(): boolean {
+  for (const field of schemaCredentialFields.value) {
+    if (!field.required) continue
+    const value = (form.value.config.credentials as any)?.[field.key]
+    const empty = field.kind === 'array'
+      ? !Array.isArray(value) || value.length === 0
+      : value === undefined || value === null || (typeof value === 'string' && !value.trim())
+    if (empty) {
+      MessagePlugin.warning(`${field.label} ${t('datasource.isRequired')}`)
+      return false
+    }
+  }
+  return true
+}
+
+// Whether this external plugin declares any credential field. When false the
+// plugin (e.g. LocalDir) has no credentials and skips the credential step.
+const externalHasCredentials = computed(
+  () => schemaCredentialFields.value.length > 0,
+)
+
+function validateExternalSchemaFields(): boolean {
+  for (const field of schemaFields.value) {
+    if (!field.required) continue
+    const value = (form.value.config.settings as any)?.[field.key]
+    const empty = field.kind === 'array'
+      ? !Array.isArray(value) || value.length === 0
+      : value === undefined || value === null || (typeof value === 'string' && !value.trim())
+    if (empty) {
+      MessagePlugin.warning(`${field.label} ${t('datasource.isRequired')}`)
+      return false
+    }
+  }
+  return true
+}
+
+// Array fields are edited as comma-separated text.
+function arrayFieldText(key: string): string {
+  const arr = (form.value.config.settings as any)?.[key]
+  return Array.isArray(arr) ? arr.join(', ') : ''
+}
+function updateArrayField(key: string, text: string) {
+  ;(form.value.config.settings as any)[key] = text.split(',').map((s: string) => s.trim()).filter(Boolean)
+}
 
 const displayedCredentialFields = computed(() => {
   const fields = currentDef.value?.fields || []
@@ -718,6 +899,7 @@ watch(visible, async (v) => {
     return
   }
   step.value = isEdit.value ? 1 : 0
+  void loadServerMetadata()
   testResult.value = ''
   testErrorMsg.value = ''
   tempDsId.value = ''
@@ -748,6 +930,7 @@ watch(visible, async (v) => {
       name: props.dataSource.name,
       type: props.dataSource.type,
       config: {
+        type: props.dataSource.type,
         credentials: {},
         resource_ids: editConfig.resource_ids || [],
         settings: props.dataSource.type === 'rss'
@@ -786,7 +969,7 @@ watch(visible, async (v) => {
     form.value = {
       name: '',
       type: '',
-      config: { credentials: {}, resource_ids: [], settings: {} },
+      config: { type: '', credentials: {}, resource_ids: [], settings: {} },
       sync_schedule: '0 0 */6 * * *',
       sync_mode: 'incremental',
       conflict_strategy: 'overwrite',
@@ -831,9 +1014,12 @@ watch(
 function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
-  form.value.name = t(`datasource.connector.${def.type}`)
-  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
+  form.value.config.type = def.type
+  form.value.name = connectorName(def)
+  form.value.config.credentials = def.external ? schemaDefaultCredentials(def) : {}
+  form.value.config.settings = def.external ? schemaDefaultSettings(def) : {}
   if (def.type === 'confluence') {
+    form.value.config.credentials = { edition: "server" }
     form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
   }
   if (isGitLabConnector(def.type)) addGitLabProject()
@@ -847,12 +1033,16 @@ async function testConnection() {
   syncConfluencePublicFieldsToSettings()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    const fields = displayedCredentialFields.value
-    for (const f of fields) {
-      if (f.optional || f.fieldType === 'custom_headers') continue
-      if (!form.value.config.credentials[f.key]) {
-        MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
-        return
+    if (currentDef.value?.external) {
+      if (!validateExternalCredentialFields()) return
+    } else {
+      const fields = displayedCredentialFields.value
+      for (const f of fields) {
+        if (f.optional || f.fieldType === 'custom_headers') continue
+        if (!form.value.config.credentials[f.key]) {
+          MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+          return
+        }
       }
     }
   }
@@ -1060,6 +1250,21 @@ function validateStep1Fields(): boolean {
 
 async function nextStep() {
   if (step.value === 1) {
+    if (currentDef.value?.external) {
+      if (!validateExternalSchemaFields()) return
+      // 外部插件：settings 已通过 Schema 校验。若声明了凭证字段，则要求
+      // 连接测试通过（凭证走 /validate-credentials 与内置连接器一致）；
+      // 无凭证的插件（如 LocalDir）跳过凭证步骤，直接到同步策略。
+      if (externalHasCredentials.value) {
+        if (!validateExternalCredentialFields()) return
+        if (needsConnectionTest() && testResult.value !== 'success') {
+          await testConnection()
+          if ((testResult.value as string) !== 'success') return
+        }
+      }
+      step.value = 3
+      return
+    }
     if (!validateStep1Fields()) return
     if (needsConnectionTest() && testResult.value !== 'success') {
       await testConnection()
@@ -1116,6 +1321,7 @@ function buildConfigPayload(): Record<string, unknown> {
   syncGitLabProjectsToSettings()
   syncConfluencePublicFieldsToSettings()
   return {
+    type: form.value.type,
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
     settings: form.value.config.settings,
@@ -1308,10 +1514,10 @@ const drawerConfirmText = computed(() => {
     @confirm="handleDrawerConfirm"
     @cancel="handleClose"
   >
-    <template v-if="form.type && getDatasourceIconUrl(form.type)" #headerIcon>
+    <template v-if="form.type && (currentDef?.icon || getDatasourceIconUrl(form.type))" #headerIcon>
       <img
-        :src="getDatasourceIconUrl(form.type)"
-        :alt="form.type"
+        :src="currentDef?.icon || getDatasourceIconUrl(form.type)"
+        :alt="currentDef ? connectorName(currentDef) : form.type"
         class="datasource-header-icon__img"
       >
     </template>
@@ -1374,7 +1580,7 @@ const drawerConfirmText = computed(() => {
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.selectType') }}</h4>
       <div class="ds-type-grid">
         <button
-          v-for="def in connectorDefs"
+          v-for="def in availableConnectors"
           :key="def.type"
           type="button"
           :class="['ds-type-card', { disabled: !def.available }]"
@@ -1382,17 +1588,158 @@ const drawerConfirmText = computed(() => {
           @click="selectType(def)"
         >
           <div class="ds-type-header">
-            <DataSourceTypeIcon :type="def.type" :size="20" />
-            <span class="ds-type-name">{{ t(`datasource.connector.${def.type}`) }}</span>
+            <DataSourceTypeIcon :type="def.type" :size="20" :icon="def.icon" />
+            <span class="ds-type-name">{{ connectorName(def) }}</span>
             <span v-if="!def.available" class="ds-type-soon">{{ t('datasource.comingSoon') }}</span>
           </div>
-          <div class="ds-type-desc">{{ t(`datasource.connectorDesc.${def.type}`) }}</div>
+          <div class="ds-type-desc">{{ connectorDesc(def) }}</div>
         </button>
       </div>
     </section>
 
     <!-- Step 1: Credentials -->
     <template v-if="step === 1">
+      <!-- 外部插件：通用 Schema 表单（settings + 可选 credentials） -->
+      <template v-if="currentDef?.external">
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ t('datasource.sectionBasic') }}</h4>
+          <div v-if="currentDef?.docsUrl" class="inline-alert">
+            <t-icon name="info-circle-filled" class="inline-alert__icon" />
+            <span class="inline-alert__text">{{ t('datasource.docHint') }}</span>
+            <a
+              :href="currentDef.docsUrl"
+              target="_blank"
+              rel="noopener"
+              class="inline-alert__action doc-link"
+            >
+              {{ t('datasource.openDoc') }}
+              <t-icon name="link" class="link-icon" />
+            </a>
+          </div>
+          <p v-if="currentDef?.description" class="form-desc datasource-plugin-description">
+            {{ currentDef.description }}
+          </p>
+          <div class="form-item">
+            <label class="form-label required">{{ t('datasource.nameLabel') }}</label>
+            <t-input v-model="form.name" :placeholder="t('datasource.namePlaceholder')" />
+          </div>
+        </section>
+
+        <section v-if="schemaFields.length > 0" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ t('datasource.pluginSettingsLabel') }}</h4>
+          <div v-for="field in schemaFields" :key="field.key" class="form-item">
+            <label class="form-label">
+              {{ field.label }}<span v-if="field.required" class="form-required"> *</span>
+            </label>
+            <t-input
+              v-if="field.kind === 'string'"
+              v-model="form.config.settings[field.key]"
+              :type="field.secret ? 'password' : 'text'"
+              :placeholder="field.description"
+            />
+            <t-input
+              v-else-if="field.kind === 'array'"
+              :value="arrayFieldText(field.key)"
+              :placeholder="field.description"
+              @change="(val: string) => updateArrayField(field.key, val)"
+            />
+            <t-switch v-else-if="field.kind === 'boolean'" v-model="form.config.settings[field.key]" />
+            <t-input-number v-else-if="field.kind === 'number'" v-model="form.config.settings[field.key]" />
+            <p v-if="field.description" class="form-desc">{{ field.description }}</p>
+          </div>
+        </section>
+
+        <!-- 外部插件凭证：由 config_schema.properties.credentials 动态渲染。
+             编辑时已保存的敏感字段只显示“已配置”，不回显明文；
+             替换时走 /credentials 子资源，空值不会覆盖原凭证。 -->
+        <section v-if="externalHasCredentials" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
+
+          <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
+            <div
+              class="credential-faux-input"
+              :class="{ 'is-confirm-remove': pendingRemoveCredentials }"
+              :title="pendingRemoveCredentials ? '' : t('credential.configured')"
+            >
+              <template v-if="pendingRemoveCredentials">
+                <t-icon name="error-circle-filled" class="credential-status-icon warn" />
+                <span class="credential-faux-text danger">{{ t('credential.confirmRemovePrompt') }}</span>
+                <div class="credential-actions">
+                  <t-button size="small" variant="text" @click="cancelPendingRemoveCredentials">
+                    {{ t('common.cancel') }}
+                  </t-button>
+                  <span class="action-divider" />
+                  <t-button
+                    size="small"
+                    variant="text"
+                    theme="danger"
+                    :loading="removingCredentials"
+                    @click="confirmRemoveCredentials"
+                  >
+                    {{ t('credential.confirmRemove') }}
+                  </t-button>
+                </div>
+              </template>
+              <template v-else>
+                <t-icon name="check-circle-filled" class="credential-status-icon success" />
+                <span class="credential-faux-text">{{ t('credential.configured') }}</span>
+                <div class="credential-actions">
+                  <t-button size="small" variant="text" @click="enterReplaceCredentials">
+                    {{ t('credential.update') }}
+                  </t-button>
+                  <span class="action-divider" />
+                  <t-button size="small" variant="text" theme="danger" @click="requestRemoveCredentials">
+                    {{ t('credential.remove') }}
+                  </t-button>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div
+            v-else-if="isEdit && !credentialsConfigured && !replaceCredentialsMode"
+            class="form-item"
+          >
+            <div class="credential-faux-input is-empty" @click="enterReplaceCredentials">
+              <t-icon name="lock-on" class="credential-status-icon muted" />
+              <span class="credential-faux-text muted">{{ t('credential.unconfigured') }}</span>
+              <div class="credential-actions">
+                <t-button size="small" variant="text" theme="primary" @click.stop="enterReplaceCredentials">
+                  {{ t('credential.configure') }}
+                </t-button>
+              </div>
+            </div>
+          </div>
+
+          <template v-else>
+            <div
+              v-for="field in schemaCredentialFields"
+              :key="field.key"
+              class="form-item"
+            >
+              <label class="form-label" :class="{ required: field.required }">
+                {{ field.label }}
+              </label>
+              <t-input
+                v-model="form.config.credentials[field.key]"
+                :type="field.secret ? 'password' : 'text'"
+                :placeholder="field.description"
+                autocomplete="off"
+                spellcheck="false"
+              >
+                <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+              <p v-if="field.description" class="form-desc">{{ field.description }}</p>
+            </div>
+            <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
+              <t-button size="small" variant="text" @click="cancelReplaceCredentials">
+                {{ t('common.cancel') }}
+              </t-button>
+            </div>
+          </template>
+        </section>
+      </template>
+
       <div
         v-if="currentDef && currentDef.requiredPermissions.length > 0"
         class="ds-setup-guide ds-setup-guide--standalone"
@@ -1455,7 +1802,7 @@ const drawerConfirmText = computed(() => {
         </div>
       </div>
 
-      <section class="setting-drawer__section">
+      <section v-if="!currentDef?.external" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.sectionBasic') }}</h4>
 
         <div v-if="currentDef?.docUrl" class="inline-alert">
@@ -1493,7 +1840,7 @@ const drawerConfirmText = computed(() => {
         </div>
       </section>
 
-      <section class="setting-drawer__section">
+      <section v-if="!currentDef?.external" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
 
         <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">

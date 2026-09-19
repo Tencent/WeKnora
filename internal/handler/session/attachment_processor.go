@@ -244,7 +244,7 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 			parserEngine = s
 		}
 	}
-	overrides := getParserEngineOverridesFromContext(ctx)
+	overrides := getParserEngineOverridesFromContext(ctx, parserEngine)
 
 	// Engines that parse in this process (anydoc, MinerU, ...) are resolved
 	// through the registry so a chat attachment honours the same engine rules
@@ -269,6 +269,12 @@ func (p *AttachmentProcessor) processWithDocumentReader(
 	})
 	if err != nil {
 		return fmt.Errorf("document parsing failed: %w", err)
+	}
+	if result == nil {
+		return fmt.Errorf("document parsing returned no result")
+	}
+	if result.Error != "" {
+		return fmt.Errorf("document parsing failed: %s", result.Error)
 	}
 
 	// Resolve embedded image refs to storage URLs.
@@ -330,11 +336,13 @@ func isValidFileType(fileName string) bool {
 	return false
 }
 
-// getParserEngineOverridesFromContext returns parser engine overrides from tenant in context.
-func getParserEngineOverridesFromContext(ctx context.Context) map[string]string {
+// getParserEngineOverridesFromContext returns configuration for the selected
+// engine only. This prevents an external parser from receiving another
+// parser plugin's tenant-scoped settings or credentials.
+func getParserEngineOverridesFromContext(ctx context.Context, engine string) map[string]string {
 	if v := ctx.Value(types.TenantInfoContextKey); v != nil {
 		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-			return tenant.ParserEngineConfig.ToOverridesMap()
+			return docparser.OverridesForEngine(tenant.ParserEngineConfig, engine)
 		}
 	}
 	return nil

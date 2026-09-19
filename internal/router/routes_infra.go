@@ -228,6 +228,8 @@ func RegisterWebSearchProviderRoutes(
 	{
 		// List available provider types (metadata for UI forms) — Viewer+
 		providers.GET("/types", g.Viewer(), h.ListProviderTypes)
+		// Stream a plugin-bundled provider icon — Viewer+
+		providers.GET("/icon/:type", g.Viewer(), h.GetProviderIcon)
 		// Test with raw credentials (no persistence) — Admin+
 		providers.POST("/test", g.Admin(), h.TestProviderRaw)
 		// CRUD
@@ -244,6 +246,21 @@ func RegisterWebSearchProviderRoutes(
 	}
 }
 
+// RegisterPluginRoutes registers plugin control-plane management routes.
+func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, g *rbacGuards) {
+	plugins := g.apiKeyGroup(r.Group("/plugins"), apiKeyFullAccess())
+	{
+		// List loaded plugins with trust level and state — Admin+
+		plugins.GET("", g.Admin(), h.List)
+		// Update a plugin's deployment trust level — Admin+
+		plugins.PUT("/trust", g.Admin(), h.SetTrust)
+		// Rescan plugin directories and incrementally load new plugins — Admin+
+		plugins.POST("/rescan", g.Admin(), h.Rescan)
+		// Force-restart one plugin's runtime (recovery / image refresh) — Admin+
+		plugins.POST("/restart", g.Admin(), h.Restart)
+	}
+}
+
 // RegisterVectorStoreRoutes registers CRUD routes for vector store configurations.
 //
 // Vector stores are tenant-level infrastructure; reads are Viewer+, all
@@ -254,6 +271,8 @@ func RegisterVectorStoreRoutes(r *gin.RouterGroup, h *handler.VectorStoreHandler
 	{
 		// List available engine types (metadata for UI forms) — Viewer+
 		stores.GET("/types", g.Viewer(), h.ListStoreTypes)
+		// Stream a plugin-bundled engine icon — Viewer+
+		stores.GET("/icon/:type", g.Viewer(), h.GetStoreIcon)
 		// Test with raw credentials (no persistence) — Admin+
 		stores.POST("/test", g.Admin(), h.TestStoreRaw)
 		// CRUD
@@ -300,6 +319,9 @@ func RegisterDataSourceRoutes(
 	{
 		// Get available connector types — Viewer+
 		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
+
+		// Stream a plugin-bundled connector icon — Viewer+
+		ds.GET("/icon/:type", g.Viewer(), handler.GetConnectorIcon)
 
 		// Validate credentials without persistence (for "Test Connection" button) — Admin+
 		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)

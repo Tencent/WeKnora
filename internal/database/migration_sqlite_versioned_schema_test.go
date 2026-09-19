@@ -46,6 +46,7 @@ var versionedSQLiteColumns = map[string][]string{
 	"embed_channels":     {"allow_memory"},                                                     // 000060
 	"mcp_oauth_tokens":   {"principal_type", "principal_id"},                                   // 000064
 	"mcp_tool_approvals": {"enabled"},                                                          // 000091
+	"sync_logs":          {"task_id", "task_payload", "dispatched_at", "dispatch_attempts", "next_dispatch_at", "last_dispatch_error"}, // 000093
 }
 
 const expectedSQLiteMigrationVersion = 25

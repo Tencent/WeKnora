@@ -394,6 +394,12 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 	query := r.db.WithContext(ctx).Model(&types.Knowledge{}).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND parse_status NOT IN ?",
 			tenantID, kbID, []string{"failed", "deleting"})
+	// Replacement creates exclude the rows being replaced so a same-URL /
+	// same-content re-ingest is not rejected by deduplication against the very
+	// rows it is about to supersede.
+	if len(params.ExcludeKnowledgeIDs) > 0 {
+		query = query.Where("id NOT IN ?", params.ExcludeKnowledgeIDs)
+	}
 
 	switch params.Type {
 	case "file":
@@ -851,6 +857,7 @@ func (r *knowledgeRepository) FindByDataSourceExternalID(
 	err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
 		Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID).
+		Order("created_at DESC").
 		First(&knowledge).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -859,6 +866,26 @@ func (r *knowledgeRepository) FindByDataSourceExternalID(
 		return nil, err
 	}
 	return &knowledge, nil
+}
+
+// FindAllByDataSourceExternalID returns all knowledge items owned by one data
+// source and identified by the same external ID, newest first. The replacement
+// path uses it to converge multiple stale versions back to a single copy.
+func (r *knowledgeRepository) FindAllByDataSourceExternalID(
+	ctx context.Context,
+	tenantID uint64,
+	kbID, dataSourceID, externalID string,
+) ([]*types.Knowledge, error) {
+	var items []*types.Knowledge
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
+		Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID).
+		Order("created_at DESC").
+		Find(&items).Error
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 // HardDeleteKnowledge physically removes a knowledge row. Call it AFTER

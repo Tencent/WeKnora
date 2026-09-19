@@ -1,0 +1,59 @@
+# Runtime Agent: the only component that holds Docker privileges in the
+# containerized deployment. It launches OCI plugin containers via the Docker
+# CLI (docker.sock is mounted in at runtime), owns the per-plugin egress proxy
+# and socket directories, and exposes a narrow start/stop HTTP API over a Unix
+# socket to the app container.
+#
+# The app container gets NO docker.sock and NO docker CLI; it talks to this
+# agent only.
+
+FROM golang:1.26-bookworm AS builder
+
+WORKDIR /app
+
+ARG GOPROXY_ARG
+ENV GOPROXY=${GOPROXY_ARG}
+ENV GOSUMDB=off
+
+COPY go.mod go.sum ./
+# go.mod replaces anydoc at ./third_party/anydoc-go; its go.mod must exist
+# before `go mod download` (mirrors docker/Dockerfile.app).
+COPY third_party/anydoc-go/go.mod third_party/anydoc-go/go.mod
+RUN go mod download
+COPY . .
+
+# CGO must stay ON: the dependency chain pulls in internal/utils, which uses
+# pg_query_go (embedded C library, SQL validation) — a CGO_ENABLED=0 build
+# excludes those implementations and fails with "undefined: pg_query.Parse".
+# golang:bookworm ships gcc + libc headers, so CGO works out of the box.
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+    go build -o /out/plugin-runtime-agent ./cmd/plugin-runtime-agent
+
+# internal/types' package init() creates a gojieba tokenizer at import time;
+# gojieba loads its dictionaries from its module-cache path at runtime, so the
+# dictionary data must ship inside the agent (mirrors docker/Dockerfile.app).
+RUN cp -r /go/pkg/mod/github.com/yanyiwu/ /out/yanyiwu/
+
+# Runtime stage: debian (glibc) to match the dynamically linked agent binary,
+# plus the docker CLI the agent uses to manage plugin containers. The previous
+# docker:cli (alpine/musl) base forced CGO_ENABLED=0, which is incompatible
+# with the CGO dependencies above.
+FROM debian:12.12-slim
+
+# Shared runtime group: fixed GID so the app container's non-root user can
+# traverse the runtime root and connect to sockets the agent creates as root.
+# NOTE: Debian's addgroup (adduser package) has no `-g` short option (alpine's
+# BusyBox one does) — the long `--gid` form is required here.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends docker.io ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    addgroup --gid 2000 weknora-runtime
+
+COPY --from=builder /out/plugin-runtime-agent /usr/local/bin/plugin-runtime-agent
+# gojieba dictionary data (see builder note) — without it the agent panics in
+# internal/types' init() before it can even create its socket.
+COPY --from=builder /out/yanyiwu/ /go/pkg/mod/github.com/yanyiwu/
+
+# The agent listens on a Unix socket under its runtime root and talks to the
+# host Docker daemon through the docker.sock bind-mounted by docker-compose.
+ENTRYPOINT ["plugin-runtime-agent"]

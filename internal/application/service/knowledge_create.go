@@ -88,11 +88,12 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	tenantID := ctx.Value(types.TenantIDContextKey).(uint64)
 	logger.Infof(ctx, "Checking if file exists, tenant ID: %d", tenantID)
 	checkParams := &types.KnowledgeCheckParams{
-		Type:     "file",
-		FileName: fileName,
-		FileType: getFileType(fileName),
-		FileSize: file.Size,
-		FileHash: hash,
+		Type:                "file",
+		FileName:            fileName,
+		FileType:            getFileType(fileName),
+		FileSize:            file.Size,
+		FileHash:            hash,
+		ExcludeKnowledgeIDs: excludeKnowledgeIDsFrom(ctx),
 	}
 	// Same-bytes files from different source identities are still distinct
 	// documents (GitLab README templates, copied Confluence pages). Scope the
@@ -245,8 +246,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 				"title": knowledge.Title, "source_type": "file", "file_type": knowledge.FileType,
 				"processing_status": "failed", "failure_stage": "enqueue",
 			})
-		// 即使入队失败，也返回knowledge，因为文件已保存
-		return knowledge, nil
+		// Return the failed knowledge together with an error so the datasource
+		// replacement path does not delete the previous version after a failed
+		// enqueue (the new row is marked failed and will never be processed).
+		return knowledge, fmt.Errorf("marshal document process task payload: %w", err)
 	}
 
 	task := asynq.NewTask(
@@ -263,8 +266,10 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 				"title": knowledge.Title, "source_type": "file", "file_type": knowledge.FileType,
 				"processing_status": "failed", "failure_stage": "enqueue",
 			})
-		// 即使入队失败，也返回knowledge，因为文件已保存
-		return knowledge, nil
+		// Return the failed knowledge together with an error so the datasource
+		// replacement path does not delete the previous version after a failed
+		// enqueue (the new row is marked failed and will never be processed).
+		return knowledge, fmt.Errorf("enqueue document process task: %w", err)
 	}
 	recordKBActivity(ctx, s.audit, knowledge.TenantID, kbID, types.AuditActionKnowledgeCreated,
 		"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{
@@ -347,9 +352,10 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	logger.Infof(ctx, "Checking if URL exists, tenant ID: %d", tenantID)
 	fileHash := calculateStr(url)
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, &types.KnowledgeCheckParams{
-		Type:     "url",
-		URL:      url,
-		FileHash: fileHash,
+		Type:                "url",
+		URL:                 url,
+		FileHash:            fileHash,
+		ExcludeKnowledgeIDs: excludeKnowledgeIDsFrom(ctx),
 	})
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
@@ -441,7 +447,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 				"title": knowledge.Title, "source_type": "url", "file_type": knowledge.FileType,
 				"processing_status": "failed", "failure_stage": "enqueue",
 			})
-		return knowledge, nil
+		return knowledge, fmt.Errorf("marshal URL process task payload: %w", err)
 	}
 
 	task := asynq.NewTask(
@@ -458,7 +464,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 				"title": knowledge.Title, "source_type": "url", "file_type": knowledge.FileType,
 				"processing_status": "failed", "failure_stage": "enqueue",
 			})
-		return knowledge, nil
+		return knowledge, fmt.Errorf("enqueue URL process task: %w", err)
 	}
 	recordKBActivity(ctx, s.audit, tenantID, kbID, types.AuditActionKnowledgeCreated,
 		"knowledge", knowledge.ID, types.AuditOutcomeAccepted, map[string]any{

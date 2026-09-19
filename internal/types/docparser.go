@@ -47,6 +47,17 @@ type ParserEngineInfo struct {
 	FileTypes         []string
 	Available         bool
 	UnavailableReason string
+	// External identifies an engine supplied by an independently loaded
+	// plugin. Built-in and remote DocReader engines keep their existing
+	// metadata-only representation.
+	External bool
+	// PluginID is the stable manifest ID used to scope this engine's tenant
+	// configuration. It is intentionally not the display name or engine name.
+	PluginID string
+	// ConfigSchema is the plugin manifest's settings/credentials schema. The
+	// settings UI uses it to render an external engine without hard-coded
+	// per-plugin fields.
+	ConfigSchema map[string]any
 }
 
 // --- Internal types used by chunking pipeline ---

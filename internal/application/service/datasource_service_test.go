@@ -307,6 +307,16 @@ func (r *deletionLookupKnowledgeRepo) FindByDataSourceExternalID(
 	return r.knowledge, nil
 }
 
+func (r *deletionLookupKnowledgeRepo) FindAllByDataSourceExternalID(
+	ctx context.Context, tenantID uint64, knowledgeBaseID, dataSourceID, externalID string,
+) ([]*types.Knowledge, error) {
+	k, err := r.FindByDataSourceExternalID(ctx, tenantID, knowledgeBaseID, dataSourceID, externalID)
+	if err != nil || k == nil {
+		return nil, err
+	}
+	return []*types.Knowledge{k}, nil
+}
+
 func (r *deletionLookupKnowledgeRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
 	if r.hardDeleteErr != nil {
 		return r.hardDeleteErr
@@ -340,6 +350,16 @@ func (r *scopedDeletionRepo) FindByDataSourceExternalID(
 	return r.live[dataSourceID+"|"+externalID], nil
 }
 
+func (r *scopedDeletionRepo) FindAllByDataSourceExternalID(
+	ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
+) ([]*types.Knowledge, error) {
+	k, err := r.FindByDataSourceExternalID(ctx, tenantID, kbID, dataSourceID, externalID)
+	if err != nil || k == nil {
+		return nil, err
+	}
+	return []*types.Knowledge{k}, nil
+}
+
 func (r *scopedDeletionRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
 	r.hardDeleted = append(r.hardDeleted, id)
 	return nil
@@ -365,6 +385,16 @@ func (r *keyedDeletionRepo) FindByDataSourceExternalID(
 		return nil, nil
 	}
 	return r.items[externalID], nil
+}
+
+func (r *keyedDeletionRepo) FindAllByDataSourceExternalID(
+	ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
+) ([]*types.Knowledge, error) {
+	k, err := r.FindByDataSourceExternalID(ctx, tenantID, kbID, dataSourceID, externalID)
+	if err != nil || k == nil {
+		return nil, err
+	}
+	return []*types.Knowledge{k}, nil
 }
 
 func (r *keyedDeletionRepo) HardDeleteKnowledge(_ context.Context, _ uint64, id string) error {
@@ -735,6 +765,149 @@ func TestProcessSync_SyncDeletionsPartialWhenMixedResults(t *testing.T) {
 	assert.Contains(t, updated.ErrorMessage, "deletion failure(s) will only retry on the next full sync")
 }
 
+type fatalIncrementalConnector struct{}
+
+func (fatalIncrementalConnector) Type() string { return "test-sync-fatal-incr" }
+func (fatalIncrementalConnector) Validate(context.Context, *types.DataSourceConfig) error {
+	return nil
+}
+func (fatalIncrementalConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
+	return nil, nil
+}
+func (fatalIncrementalConnector) ResolveResourceAncestors(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]string, error) {
+	return nil, nil
+}
+func (fatalIncrementalConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
+	return nil, nil
+}
+func (fatalIncrementalConnector) FetchIncremental(
+	context.Context, *types.DataSourceConfig, *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	return []types.FetchedItem{{ExternalID: "file:a", Content: []byte("x"), FileName: "a.txt"}},
+		&types.SyncCursor{LastSyncTime: time.Now()},
+		errors.New("fetch failed")
+}
+
+// TestProcessSync_FatalFetchErrorDoesNotAdvanceCursor guards the data-loss fix:
+// a fatal fetch error must not persist the connector cursor (which may carry
+// unprocessed items), otherwise the next incremental run skips them forever.
+func TestProcessSync_FatalFetchErrorDoesNotAdvanceCursor(t *testing.T) {
+	configJSON, err := (&types.DataSourceConfig{Type: "test-sync-fatal-incr"}).ToJSON()
+	require.NoError(t, err)
+
+	ds := &types.DataSource{
+		ID: "ds-fatal-incr", TenantID: 1, KnowledgeBaseID: "kb-1",
+		Type: "test-sync-fatal-incr", Config: configJSON,
+		SyncMode: types.SyncModeIncremental, Status: types.DataSourceStatusActive,
+	}
+	syncLog := &types.SyncLog{
+		ID: "log-fatal-incr", DataSourceID: ds.ID, TenantID: ds.TenantID,
+		Status: types.SyncLogStatusRunning, StartedAt: time.Now().UTC(),
+	}
+	ks := &sweepFakeKS{repo: &sweepFakeRepo{}}
+	syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(fatalIncrementalConnector{}))
+
+	svc := &DataSourceService{
+		dsRepo:            newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
+		syncLogRepo:       syncLogRepo,
+		knowledgeService:  ks,
+		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}},
+		connectorRegistry: registry,
+		tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
+		tagService:        &processSyncTagService{},
+	}
+
+	payload, err := json.Marshal(types.DataSourceSyncPayload{
+		DataSourceID: ds.ID, TenantID: ds.TenantID, SyncLogID: syncLog.ID, ForceFull: false,
+	})
+	require.NoError(t, err)
+	err = svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload))
+	require.Error(t, err)
+
+	assert.Empty(t, ds.LastSyncCursor, "fatal fetch error must not advance the cursor")
+}
+
+// partialIncrementalConnector returns one ingestible item and one item that
+// will fail ingestion, so the batch loop records a partial failure while still
+// returning a next cursor.
+type partialIncrementalConnector struct{}
+
+func (partialIncrementalConnector) Type() string { return "test-sync-partial-incr" }
+func (partialIncrementalConnector) Validate(context.Context, *types.DataSourceConfig) error {
+	return nil
+}
+func (partialIncrementalConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
+	return nil, nil
+}
+func (partialIncrementalConnector) ResolveResourceAncestors(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]string, error) {
+	return nil, nil
+}
+func (partialIncrementalConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
+	return nil, nil
+}
+func (partialIncrementalConnector) FetchIncremental(
+	context.Context, *types.DataSourceConfig, *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	return []types.FetchedItem{
+			{ExternalID: "file:ok", Content: []byte("hello"), FileName: "ok.txt"},
+			// No content/URL plus error metadata → counted as Failed, not Skipped.
+			{ExternalID: "file:bad", Title: "bad", Metadata: map[string]string{"error": "fetch failed"}},
+		},
+		&types.SyncCursor{LastSyncTime: time.Now()},
+		nil
+}
+
+// TestProcessSync_PartialFailureKeepsPreviousCursor guards the at-least-once
+// fix: when some items fail but the connector returns a next cursor, the cursor
+// must NOT advance so the failed items are re-fetched on the next run.
+func TestProcessSync_PartialFailureKeepsPreviousCursor(t *testing.T) {
+	configJSON, err := (&types.DataSourceConfig{Type: "test-sync-partial-incr"}).ToJSON()
+	require.NoError(t, err)
+
+	ds := &types.DataSource{
+		ID: "ds-partial-incr", TenantID: 1, KnowledgeBaseID: "kb-1",
+		Type: "test-sync-partial-incr", Config: configJSON,
+		SyncMode: types.SyncModeIncremental, Status: types.DataSourceStatusActive,
+	}
+	syncLog := &types.SyncLog{
+		ID: "log-partial-incr", DataSourceID: ds.ID, TenantID: ds.TenantID,
+		Status: types.SyncLogStatusRunning, StartedAt: time.Now().UTC(),
+	}
+	ks := &sweepFakeKS{repo: &sweepFakeRepo{}}
+	syncLogRepo := &processSyncSyncLogRepo{logs: map[string]*types.SyncLog{syncLog.ID: syncLog}}
+	registry := datasource.NewConnectorRegistry()
+	require.NoError(t, registry.Register(partialIncrementalConnector{}))
+
+	svc := &DataSourceService{
+		dsRepo:            newKBDeleteDSRepo(ds.KnowledgeBaseID, ds),
+		syncLogRepo:       syncLogRepo,
+		knowledgeService:  ks,
+		kbService:         &processSyncKBService{kb: &types.KnowledgeBase{ID: ds.KnowledgeBaseID, TenantID: ds.TenantID}},
+		connectorRegistry: registry,
+		tenantRepo:        &processSyncTenantRepo{tenant: &types.Tenant{ID: ds.TenantID}},
+		tagService:        &processSyncTagService{},
+	}
+
+	payload, err := json.Marshal(types.DataSourceSyncPayload{
+		DataSourceID: ds.ID, TenantID: ds.TenantID, SyncLogID: syncLog.ID, ForceFull: false,
+	})
+	require.NoError(t, err)
+	err = svc.ProcessSync(context.Background(), asynq.NewTask(types.TypeDataSourceSync, payload))
+	require.NoError(t, err, "partial failure must not fail the whole sync")
+
+	assert.Empty(t, ds.LastSyncCursor, "partial failure must keep the previous cursor")
+	updated := syncLogRepo.logs[syncLog.ID]
+	require.NotNil(t, updated)
+	assert.Equal(t, types.SyncLogStatusPartial, updated.Status)
+	assert.Equal(t, 1, updated.ItemsFailed)
+}
+
 func TestIngestItem_URLCreationMetadataAttachFailure(t *testing.T) {
 	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
 	repo := &deletionLookupKnowledgeRepo{metadataUpdateErr: errors.New("db unavailable")}
@@ -747,4 +920,56 @@ func TestIngestItem_URLCreationMetadataAttachFailure(t *testing.T) {
 	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "attach datasource metadata")
+}
+
+// TestIngestItem_UpdateConvergesMultipleStaleVersions guards the replacement
+// convergence fix: when a previous replacement left multiple stale versions of
+// the same external_id (old-row delete failed), a later update must exclude ALL
+// of them from dedup and delete them all after the new version is created.
+func TestIngestItem_UpdateConvergesMultipleStaleVersions(t *testing.T) {
+	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
+	repo := &sweepFakeRepo{existingAll: []*types.Knowledge{
+		{ID: "stale-1"}, {ID: "stale-2"},
+	}}
+	ks := &sweepFakeKS{repo: repo}
+	svc := &DataSourceService{knowledgeService: ks}
+
+	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "url:1",
+		URL:        "https://example.com/doc",
+	}, nil)
+	require.NoError(t, err)
+	assert.True(t, isUpdate)
+	// Both stale versions must be deleted after the new version is created.
+	assert.ElementsMatch(t, []string{"stale-1", "stale-2"}, ks.deleted)
+}
+
+// TestIngestItem_EnqueueFailureKeepsPreviousVersion guards the replacement
+// data-safety fix: when the replacement create succeeds at the record level but
+// fails to enqueue its processing task, the previous version must NOT be
+// deleted (the new row is marked failed and would never be processed).
+func TestIngestItem_EnqueueFailureKeepsPreviousVersion(t *testing.T) {
+	ds := &types.DataSource{ID: "ds-1", TenantID: 1, KnowledgeBaseID: "kb-1"}
+
+	// File path.
+	fileRepo := &sweepFakeRepo{existingAll: []*types.Knowledge{{ID: "old-file"}}}
+	fileKS := &sweepFakeKS{repo: fileRepo, createErr: errors.New("enqueue document process task: redis down")}
+	fileSvc := &DataSourceService{knowledgeService: fileKS}
+	isUpdate, err := fileSvc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "file:1", Content: []byte("hello"), FileName: "a.txt",
+	}, nil)
+	require.Error(t, err)
+	assert.False(t, isUpdate)
+	assert.Empty(t, fileKS.deleted, "file enqueue failure must not delete the previous version")
+
+	// URL path.
+	urlRepo := &sweepFakeRepo{existingAll: []*types.Knowledge{{ID: "old-url"}}}
+	urlKS := &sweepFakeKS{repo: urlRepo, createURLErr: errors.New("enqueue URL process task: redis down")}
+	urlSvc := &DataSourceService{knowledgeService: urlKS}
+	isUpdate, err = urlSvc.ingestItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "url:1", URL: "https://example.com/doc",
+	}, nil)
+	require.Error(t, err)
+	assert.False(t, isUpdate)
+	assert.Empty(t, urlKS.deleted, "URL enqueue failure must not delete the previous version")
 }

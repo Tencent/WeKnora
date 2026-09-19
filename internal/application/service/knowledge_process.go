@@ -274,6 +274,66 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize)
 }
 
+// ErrVectorStoreNotReady marks a vector-store resolution failure that is
+// expected to clear on its own because the store's engine is still starting.
+// The asynq retry-delay policy gives it a longer, fixed backoff (see
+// asynqRetryDelayFunc) so a store that needs a minute or two to come up is not
+// burned through in seconds.
+var ErrVectorStoreNotReady = errors.New("vector store not ready")
+
+// isVectorStorePermanent reports whether a vector-store resolution failure can
+// never be fixed by retrying: the store is missing, or it is not owned by this
+// tenant. Mirrors the classification the index-cleanup worker applies (tag.go
+// wraps these two sentinels in asynq.SkipRetry); everything else — including a
+// store whose engine is merely still starting — is treated as transient.
+func isVectorStorePermanent(err error) bool {
+	return errors.Is(err, retriever.ErrVectorStoreForbidden) ||
+		errors.Is(err, retriever.ErrVectorStoreNotFound)
+}
+
+// ensureVectorStoreReady resolves the KB's vector store engine before any
+// expensive step (download, parse, chunking, embedding).
+//
+// Why this exists: processChunks treats a failed engine creation as non-fatal
+// (it only skips the stale-index cleanup) and carries on to embed the whole
+// document before BatchIndex fails on that very same store. When the store is
+// not reachable yet — an external retriever plugin whose backend is still
+// starting, for example — that burns the full embedding cost and then lands the
+// document in a terminal failed state. Resolving the engine up front turns the
+// identical condition into a cheap stop before any work is done.
+//
+// Engine resolution is cached per store and backs off after a failed build, so
+// retries are cheap and cannot stampede the store. Transient failures are
+// returned for asynq to retry with the document untouched; a permanent failure
+// (or a transient one on the final attempt) marks the knowledge failed and stops
+// the retry budget — the same contract failKnowledge uses for docreader.
+func (s *knowledgeService) ensureVectorStoreReady(
+	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge, tenantID uint64,
+) error {
+	if kb == nil || !kb.NeedsEmbeddingModel() {
+		// Indexing disabled for this KB: there is no vector store to reach.
+		return nil
+	}
+	if _, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, tenantID, kb.VectorStoreID); err != nil {
+		logger.Warnf(ctx, "vector store not ready for knowledge %s: %v", knowledge.ID, err)
+		s.failStage(ctx, knowledge.ID, types.StageEmbedding,
+			werrors.ErrCodeVectorStoreWriteFailed, "vector store unavailable", err)
+		if isVectorStorePermanent(err) || isFinalAsynqAttempt(ctx) {
+			knowledge.ParseStatus = types.ParseStatusFailed
+			knowledge.ErrorMessage = fmt.Sprintf("vector store unavailable: %v", err)
+			knowledge.UpdatedAt = time.Now()
+			if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+				logger.Errorf(ctx, "failed to persist vector store failure for knowledge %s: %v",
+					knowledge.ID, updateErr)
+			}
+			return fmt.Errorf("vector store unavailable: %v: %w", err, asynq.SkipRetry)
+		}
+		return fmt.Errorf("vector store not ready: %v: %w", err, ErrVectorStoreNotReady)
+	}
+	return nil
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -340,6 +400,12 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	tenantInfo := ctx.Value(types.TenantInfoContextKey).(*types.Tenant)
 	retrieveEngine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, tenantInfo.ID, kb.VectorStoreID)
+	if err != nil {
+		// The task handlers resolve the store before any work starts, so this is
+		// only a safety net — log it rather than silently skipping the
+		// stale-index cleanup below and failing later at BatchIndex instead.
+		logger.Warnf(ctx, "failed to resolve retrieve engine for stale-index cleanup: %v", err)
+	}
 	if err == nil && embeddingModel != nil {
 		if err := retrieveEngine.DeleteByKnowledgeIDList(ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), knowledge.Type); err != nil {
 			logger.Warnf(ctx, "Failed to delete existing index data (may not exist): %v", err)
@@ -633,17 +699,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			knowledge.UpdatedAt = time.Now()
 			s.repo.UpdateKnowledge(ctx, knowledge)
 
-			// delete failed chunks
-			if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
-				logger.Errorf(ctx, "Delete chunks failed: %v", err)
-			}
-
-			// delete index
-			if err := retrieveEngine.DeleteByKnowledgeIDList(
-				ctx, []string{knowledge.ID}, embeddingModel.GetDimensions(), kb.Type,
-			); err != nil {
-				logger.Errorf(ctx, "Delete index failed: %v", err)
-			}
+			// Deliberately keep the chunks and the previously indexed vectors:
+			// this failure is frequently a vector store that is only
+			// temporarily unreachable, and deleting the content turns a
+			// transient outage into permanent data loss the user cannot undo.
+			// The next parse attempt clears the stale chunks and index itself
+			// before re-indexing (see the idempotent cleanup at the top of this
+			// function), so keeping them costs nothing.
+			//
 			// Map vector store / embedding rate-limit errors to a
 			// stable code so the UI can offer "retry later" hints.
 			code := werrors.ErrCodeVectorStoreWriteFailed
@@ -3317,6 +3380,13 @@ func (s *knowledgeService) ProcessManualUpdate(ctx context.Context, t *asynq.Tas
 	}
 	ctx = withAttempt(ctx, attempt)
 
+	// Resolve the vector store before the destructive cleanup below: if the
+	// store is not reachable, this attempt must stop before deleting the
+	// resources the current version still relies on. See ensureVectorStoreReady.
+	if err := s.ensureVectorStoreReady(ctx, kb, knowledge, payload.TenantID); err != nil {
+		return err
+	}
+
 	// Cleanup old resources (indexes, chunks, graph) for update operations
 	if payload.NeedCleanup {
 		if err := s.cleanupKnowledgeResources(ctx, knowledge); err != nil {
@@ -3455,6 +3525,13 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if s.isKnowledgeSourceReplaced(ctx, knowledge) {
 		logger.Infof(ctx, "Document source replaced, skipping stale process task: %s", payload.KnowledgeID)
 		return nil
+	}
+
+	// Resolve the vector store before the download / parse / embedding work
+	// below: a store that is still starting must stop the task here, not after
+	// the whole document has been embedded. See ensureVectorStoreReady.
+	if err := s.ensureVectorStoreReady(ctx, kb, knowledge, payload.TenantID); err != nil {
+		return err
 	}
 	markKnowledgeProcessing(knowledge, time.Now())
 	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
@@ -3839,7 +3916,11 @@ func (s *knowledgeService) convert(
 	s.beginStage(ctx, knowledge.ID, types.StageDocReader, docInput)
 	isURL := payload.URL != ""
 	fileType := payload.FileType
-	tenantOverrides := s.getParserEngineOverridesFromContext(ctx)
+	parserEngine := eff.ChunkingConfig.ResolveParserEngine(fileType)
+	if isURL {
+		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
+	}
+	tenantOverrides := s.getParserEngineOverridesFromContext(ctx, parserEngine)
 	var uploadOverrides map[string]string
 	if processOverrides, err := knowledge.ProcessOverrides(); err == nil && processOverrides != nil {
 		uploadOverrides = processOverrides.ParserEngineOverrides
@@ -3868,11 +3949,6 @@ func (s *knowledgeService) convert(
 				werrors.ErrCodeDocReaderParseFailed, "URL rejected for security reasons", err)
 			return nil, nil
 		}
-	}
-
-	parserEngine := eff.ChunkingConfig.ResolveParserEngine(fileType)
-	if isURL {
-		parserEngine = eff.ChunkingConfig.ResolveParserEngine("url")
 	}
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",

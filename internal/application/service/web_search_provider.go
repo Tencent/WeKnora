@@ -13,12 +13,13 @@ import (
 
 // webSearchProviderService implements interfaces.WebSearchProviderService
 type webSearchProviderService struct {
-	repo interfaces.WebSearchProviderRepository
+	repo     interfaces.WebSearchProviderRepository
+	registry *infra_web_search.Registry
 }
 
 // NewWebSearchProviderService creates a new web search provider service
-func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository) interfaces.WebSearchProviderService {
-	return &webSearchProviderService{repo: repo}
+func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository, registry *infra_web_search.Registry) interfaces.WebSearchProviderService {
+	return &webSearchProviderService{repo: repo, registry: registry}
 }
 
 // CreateProvider creates a new web search provider configuration.
@@ -27,7 +28,7 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 		return fmt.Errorf("tenant ID is required")
 	}
 
-	if !isValidProviderType(provider.Provider) {
+	if !s.isValidProviderType(provider.Provider) {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
@@ -52,7 +53,7 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 	}
 
 	// Validate provider type if set
-	if provider.Provider != "" && !isValidProviderType(provider.Provider) {
+	if provider.Provider != "" && !s.isValidProviderType(provider.Provider) {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
@@ -70,6 +71,10 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 
 	logger.Infof(ctx, "Updating web search provider: tenant=%d, id=%s", provider.TenantID, provider.ID)
 	return s.repo.Update(ctx, provider)
+}
+
+func (s *webSearchProviderService) isValidProviderType(provider types.WebSearchProviderType) bool {
+	return isValidProviderType(provider) || s.registry != nil && s.registry.Has(string(provider))
 }
 
 // UpdateProviderCredentials writes the api_key credential field. Web search

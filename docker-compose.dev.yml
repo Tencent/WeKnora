@@ -197,7 +197,14 @@ services:
     volumes:
       - milvus_data_dev:/var/lib/milvus
     networks:
-      - WeKnora-network-dev
+      WeKnora-network-dev:
+      # 外部 retriever 插件（ProcessRuntime，继承 app 网络）通过 service name
+      # "milvus" 访问本服务。dev 环境用外部网络接入 app 所在的正式运行网络，
+      # 并注册 "milvus" 别名，使 dev 与正式环境寻址名统一为 milvus:19530，
+      # 不依赖 container_name（WeKnora-milvus-dev 会随部署形态变化）。
+      WeKnora-network:
+        aliases:
+          - milvus
     restart: unless-stopped
     profiles:
       - milvus
@@ -571,6 +578,14 @@ services:
 networks:
   WeKnora-network-dev:
     driver: bridge
+  # 外部网络：接入正式 compose 的运行网络，使 dev 起的后端服务（如 milvus）
+  # 能被正式 app 容器内的 retriever 插件按 service name 访问。
+  # 注意：默认名 weknora_WeKnora-network 是「项目目录名 weknora + 网络 key」派生的，
+  # 若正式 compose 从其他目录名启动，网络名会变（如 weknora-fork_WeKnora-network），
+  # 此时在 .env 里用 WEKNORA_NETWORK_NAME 显式指定实际网络名即可。
+  WeKnora-network:
+    external: true
+    name: ${WEKNORA_NETWORK_NAME:-weknora_WeKnora-network}
 
 volumes:
   postgres-data-dev:

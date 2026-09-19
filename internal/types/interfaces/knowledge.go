@@ -348,6 +348,14 @@ type KnowledgeRepository interface {
 	FindByDataSourceExternalID(
 		ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
 	) (*types.Knowledge, error)
+	// FindAllByDataSourceExternalID returns every knowledge item owned by one
+	// data source and identified by the source's external item ID, newest first.
+	// The replacement path uses it to converge multiple stale versions (left
+	// behind when a previous replacement failed to delete its old row) back to a
+	// single copy.
+	FindAllByDataSourceExternalID(
+		ctx context.Context, tenantID uint64, kbID, dataSourceID, externalID string,
+	) ([]*types.Knowledge, error)
 	// HardDeleteKnowledge physically removes a row after DeleteKnowledge's soft-delete
 	// cascade. Sync-internal deletions use this so rows never become tombstones.
 	HardDeleteKnowledge(ctx context.Context, tenantID uint64, id string) error

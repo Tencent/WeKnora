@@ -51,7 +51,7 @@ export interface SyncResultDetail {
 export interface SyncLog {
   id: string
   data_source_id: string
-  status: 'running' | 'success' | 'partial' | 'failed' | 'canceled'
+  status: 'pending' | 'running' | 'success' | 'partial' | 'failed' | 'canceled'
   started_at: string
   finished_at: string | null
   items_total: number
@@ -69,9 +69,12 @@ export interface ConnectorMeta {
   name: string
   description: string
   icon: string
+  docs_url?: string
   priority: number
   auth_type: string
   capabilities: string[]
+  config_schema?: Record<string, any>
+  external?: boolean
 }
 
 export interface Resource {

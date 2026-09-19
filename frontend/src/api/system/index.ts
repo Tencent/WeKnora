@@ -107,6 +107,14 @@ export interface ParserEngineInfo {
   FileTypes: string[]
   Available?: boolean
   UnavailableReason?: string
+  External?: boolean
+  PluginID?: string
+  ConfigSchema?: Record<string, any>
+}
+
+export interface ExternalParserPluginConfig {
+  settings: Record<string, any>
+  credentials: Record<string, string>
 }
 
 /** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */
@@ -140,6 +148,9 @@ export interface ParserEngineConfig {
   paddleocr_vl_cloud_model?: string
   paddleocr_vl_cloud_use_seal_recognition?: boolean | null
   paddleocr_vl_cloud_use_chart_recognition?: boolean | null
+  // Per-plugin external parser configuration. The key is the stable manifest
+  // plugin ID, not the visible parser engine name.
+  external_plugin_configs?: Record<string, ExternalParserPluginConfig>
 }
 
 export interface ParserEnginesResponse {

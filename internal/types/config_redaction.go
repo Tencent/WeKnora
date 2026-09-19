@@ -27,6 +27,7 @@ func ParserEngineConfigForResponse(cfg *ParserEngineConfig, maskSecrets bool) *P
 		return nil
 	}
 	out := *cfg
+	out.ExternalPluginConfigs = cloneExternalParserPluginConfigs(cfg.ExternalPluginConfigs)
 	if !maskSecrets {
 		return &out
 	}
@@ -35,6 +36,14 @@ func ParserEngineConfigForResponse(cfg *ParserEngineConfig, maskSecrets bool) *P
 	}
 	if out.PaddleOCRVLCloudToken != "" {
 		out.PaddleOCRVLCloudToken = RedactedSecretPlaceholder
+	}
+	for pluginID, pluginConfig := range out.ExternalPluginConfigs {
+		for field, value := range pluginConfig.Credentials {
+			if value != "" {
+				pluginConfig.Credentials[field] = RedactedSecretPlaceholder
+			}
+		}
+		out.ExternalPluginConfigs[pluginID] = pluginConfig
 	}
 	return &out
 }
@@ -168,12 +177,64 @@ func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *P
 	}
 	out.MinerUAPIKey = PreserveIfRedacted(out.MinerUAPIKey, prev.MinerUAPIKey)
 	out.PaddleOCRVLCloudToken = PreserveIfRedacted(out.PaddleOCRVLCloudToken, prev.PaddleOCRVLCloudToken)
+	out.ExternalPluginConfigs = mergeExternalParserPluginConfigs(incoming.ExternalPluginConfigs, prev.ExternalPluginConfigs)
 	// Chat attachment parser rules are configured per agent; preserve any legacy
 	// tenant-level rules when the settings UI omits this field on engine updates.
 	if incoming.ChatParserEngineRules == nil && existing != nil {
 		out.ChatParserEngineRules = existing.ChatParserEngineRules
 	}
 	return &out
+}
+
+func mergeExternalParserPluginConfigs(incoming, existing map[string]ExternalParserPluginConfig) map[string]ExternalParserPluginConfig {
+	if incoming == nil {
+		return cloneExternalParserPluginConfigs(existing)
+	}
+	merged := cloneExternalParserPluginConfigs(existing)
+	if merged == nil {
+		merged = make(map[string]ExternalParserPluginConfig, len(incoming))
+	}
+	for pluginID, next := range incoming {
+		previous := existing[pluginID]
+		out := ExternalParserPluginConfig{}
+		if next.Settings == nil {
+			out.Settings = cloneParserConfigSettings(previous.Settings)
+		} else {
+			out.Settings = cloneParserConfigSettings(next.Settings)
+		}
+		if next.Credentials == nil {
+			out.Credentials = cloneParserConfigCredentials(previous.Credentials)
+		} else {
+			out.Credentials = cloneParserConfigCredentials(next.Credentials)
+			for field, value := range out.Credentials {
+				out.Credentials[field] = PreserveIfRedacted(value, previous.Credentials[field])
+			}
+		}
+		merged[pluginID] = out
+	}
+	return merged
+}
+
+func cloneParserConfigSettings(source map[string]any) map[string]any {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
+}
+
+func cloneParserConfigCredentials(source map[string]string) map[string]string {
+	if len(source) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 // MergeStorageEngineConfigForUpdate applies preserve semantics to provider

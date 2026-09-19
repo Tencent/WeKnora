@@ -47,6 +47,10 @@ cmd/desktop/build/bin/
 
 # 本地数据 / 模型文件
 /models/
+# 外部插件：运行期按需挂载(见 docker-compose.yml app.plugins)，不打进镜像
+plugins/
+plugins/**/weknora-plugin-*
+plugins/**/*.exe
 data/files/
 data/*.db
 data/*.db-wal

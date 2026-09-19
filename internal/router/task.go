@@ -108,6 +108,14 @@ func NewAsyncqClient() (*asynq.Client, error) {
 // burning through retries; but short enough that users don't feel the stall.
 const wikiIngestRetryDelay = 15 * time.Second
 
+// vectorStoreNotReadyRetryDelay is a fixed, patient backoff for a document task
+// that stopped because its vector store was not reachable yet. The default
+// exponential schedule (≈10s / 40s / 90s) can exhaust the entire retry budget
+// before a slow store is up — Milvus standalone only reports ready after its own
+// ~90s start period. A fixed delay keeps the document retrying across that
+// window instead of failing it for a dependency that was merely still starting.
+const vectorStoreNotReadyRetryDelay = 60 * time.Second
+
 // asynqRetryDelayFunc customizes per-task retry backoff.
 //
 // Default asynq backoff is exponential (≈10s, 40s, 90s, 2.5m, ...), which
@@ -121,6 +129,9 @@ const wikiIngestRetryDelay = 15 * time.Second
 func asynqRetryDelayFunc(n int, e error, t *asynq.Task) time.Duration {
 	if errors.Is(e, service.ErrWikiIngestConcurrent) {
 		return wikiIngestRetryDelay
+	}
+	if errors.Is(e, service.ErrVectorStoreNotReady) {
+		return vectorStoreNotReadyRetryDelay
 	}
 	return asynq.DefaultRetryDelayFunc(n, e, t)
 }

@@ -505,6 +505,10 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 		}
 	}
 	merged := types.MergeParserEngineConfigForUpdate(&body, existing)
+	if err := validateExternalParserPluginConfigs(merged); err != nil {
+		c.JSON(400, gin.H{"code": 1, "msg": err.Error()})
+		return
+	}
 	overrides := merged.ToOverridesMap()
 	if tenant != nil {
 		if creds := tenant.Credentials.GetWeKnoraCloud(); creds != nil {

@@ -55,3 +55,26 @@ func TestParserEngineConfigToOverridesMapResolvesMinerUParseMethod(t *testing.T)
 	legacy := (&ParserEngineConfig{MinerUEnableOCR: &falseValue}).ToOverridesMap()
 	assert.Equal(t, MinerUParseMethodText, legacy["mineru_parse_method"])
 }
+
+func TestParserEngineConfigExternalPluginOverridesAreScopedAndTyped(t *testing.T) {
+	config := &ParserEngineConfig{ExternalPluginConfigs: map[string]ExternalParserPluginConfig{
+		"example.parser-a": {
+			Settings: map[string]any{
+				"timeout":    30,
+				"enable_ocr": true,
+				"languages":  []string{"zh", "en"},
+			},
+			Credentials: map[string]string{"api_key": "secret-a"},
+		},
+		"example.parser-b": {
+			Settings: map[string]any{"timeout": 99},
+		},
+	}}
+
+	overrides := config.ExternalPluginOverrides("example.parser-a")
+	assert.Equal(t, "30", overrides["timeout"])
+	assert.Equal(t, "true", overrides["enable_ocr"])
+	assert.Equal(t, `["zh","en"]`, overrides["languages"])
+	assert.Equal(t, "secret-a", overrides["api_key"])
+	assert.Nil(t, config.ExternalPluginOverrides("missing.plugin"))
+}

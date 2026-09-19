@@ -36,6 +36,24 @@ const (
 	WebSearchRetrieverType RetrieverType = "websearch" // Web search retriever
 )
 
+// ScoreSemantics values declared by external retriever plugins (via the
+// Describe RPC) to tell the host what a raw score means so results can be
+// normalized across engines. The contract is:
+//
+//   - similarity_higher_better: score is already a [0,1] similarity where
+//     higher is better (plugins MUST normalize raw cosine / dot product into
+//     [0,1] themselves). The host only clamps.
+//   - distance_lower_better: score is a distance where lower is better
+//     (e.g. L2 / cosine distance). The host maps it via 1-score and clamps.
+//   - rank_only: score carries no meaningful magnitude; only ordering
+//     matters (e.g. keyword hits without BM25 scoring). The host passes it
+//     through unchanged and lets RRF rank fusion handle ordering.
+const (
+	ScoreSemanticsSimilarityHigherBetter = "similarity_higher_better"
+	ScoreSemanticsDistanceLowerBetter    = "distance_lower_better"
+	ScoreSemanticsRankOnly               = "rank_only"
+)
+
 // RetrieveParams represents the parameters for retrieval
 type RetrieveParams struct {
 	// Query text

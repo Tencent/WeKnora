@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -94,8 +96,65 @@ var validEngineTypes = map[RetrieverEngineType]bool{
 	OpenSearchRetrieverEngineType:      true,
 }
 
+// externalVectorStoreTypes holds engine types registered by external retriever
+// plugins at load time. These engine types are not built into the host but are
+// still valid for VectorStore creation and are exposed via GetVectorStoreTypes.
+var (
+	externalVectorStoreTypesMu   sync.RWMutex
+	externalVectorStoreTypes     = make(map[RetrieverEngineType]VectorStoreTypeInfo)
+	externalVectorStoreIconFiles = make(map[RetrieverEngineType]string) // local icon file path for the icon endpoint
+)
+
+// RegisterExternalVectorStoreType marks an engine type (declared by an external
+// retriever plugin via metadata.engine_type) as valid for VectorStore creation
+// and lists it in GetVectorStoreTypes.
+func RegisterExternalVectorStoreType(info VectorStoreTypeInfo) {
+	externalVectorStoreTypesMu.Lock()
+	defer externalVectorStoreTypesMu.Unlock()
+	externalVectorStoreTypes[RetrieverEngineType(info.Type)] = info
+}
+
+// UnregisterExternalVectorStoreType removes a previously registered external
+// engine type.
+func UnregisterExternalVectorStoreType(t RetrieverEngineType) {
+	externalVectorStoreTypesMu.Lock()
+	defer externalVectorStoreTypesMu.Unlock()
+	delete(externalVectorStoreTypes, t)
+	delete(externalVectorStoreIconFiles, t)
+}
+
+// RegisterExternalVectorStoreIconFile records the resolved local icon file path
+// for an external engine type, so the host icon endpoint can stream it.
+func RegisterExternalVectorStoreIconFile(t RetrieverEngineType, iconFile string) {
+	externalVectorStoreTypesMu.Lock()
+	defer externalVectorStoreTypesMu.Unlock()
+	externalVectorStoreIconFiles[t] = iconFile
+}
+
+// ResolveExternalVectorStoreIconFile returns the local icon file path for an
+// external engine type, or "" when absent.
+func ResolveExternalVectorStoreIconFile(t RetrieverEngineType) string {
+	externalVectorStoreTypesMu.RLock()
+	defer externalVectorStoreTypesMu.RUnlock()
+	return externalVectorStoreIconFiles[t]
+}
+
 // IsValidEngineType checks whether the given engine type is valid for VectorStore.
 func IsValidEngineType(t RetrieverEngineType) bool {
+	if validEngineTypes[t] {
+		return true
+	}
+	externalVectorStoreTypesMu.RLock()
+	defer externalVectorStoreTypesMu.RUnlock()
+	_, ok := externalVectorStoreTypes[t]
+	return ok
+}
+
+// IsBuiltinEngineType reports whether t is a host built-in retriever engine type
+// (as opposed to one registered by an external retriever plugin). Used by the
+// vector-store validation paths to give external plugins their own branch
+// (e.g. skipping host-side SSRF checks that rely on fixed address fields).
+func IsBuiltinEngineType(t RetrieverEngineType) bool {
 	return validEngineTypes[t]
 }
 
@@ -104,7 +163,7 @@ func (v *VectorStore) Validate() error {
 	if v.Name == "" {
 		return errors.NewValidationError("name is required")
 	}
-	if !validEngineTypes[v.EngineType] {
+	if !IsValidEngineType(v.EngineType) {
 		return errors.NewValidationError(fmt.Sprintf("unsupported engine type: %s", v.EngineType))
 	}
 	if v.TenantID == 0 {
@@ -154,28 +213,115 @@ type ConnectionConfig struct {
 	// Version is the detected server version (e.g., "7.10.1", "16.2", "1.12.6").
 	// Auto-populated by TestConnection on successful connectivity check.
 	Version string `yaml:"version" json:"version,omitempty"`
+	// Extra captures arbitrary engine-specific connection fields declared by
+	// external retriever plugins in their config_schema. The host does not
+	// interpret these fields: they are persisted (flattened into the
+	// connection_config JSON via the custom MarshalJSON/UnmarshalJSON below)
+	// and passed through to the plugin verbatim at runtime. Built-in engines
+	// leave this empty. It is tagged json:"-" so the default reflection marshal
+	// skips it — the custom marshalers flatten it explicitly.
+	Extra map[string]any `json:"-" yaml:"-"`
+	// ExtraCredentials captures external-plugin credential fields (declared
+	// secret in config_schema.credentials). Kept separate from Extra so they can
+	// be encrypted at rest as a whole, mirroring DataSourceConfig.Credentials.
+	// The service layer moves sensitive Extra fields here before persist; the
+	// engine factory merges them back into Credentials at runtime.
+	ExtraCredentials map[string]any `json:"extra_credentials,omitempty" yaml:"extra_credentials,omitempty"`
+}
+
+// connectionConfigFixedFields is the set of top-level JSON keys that map to
+// concrete ConnectionConfig struct fields. Any other key in a connection_config
+// payload is captured into Extra so external-plugin fields survive round-trips.
+var connectionConfigFixedFields = map[string]struct{}{
+	"addr": {}, "username": {}, "password": {}, "api_key": {},
+	"insecure_skip_verify": {}, "host": {}, "port": {}, "use_tls": {},
+	"grpc_address": {}, "scheme": {}, "database": {},
+	"use_default_connection": {}, "http_port": {}, "version": {},
+	"extra_credentials": {},
+}
+
+// MarshalJSON flattens Extra into the top-level JSON object so dynamic plugin
+// fields persist alongside the fixed connection fields. The alias type avoids
+// recursion (the alias has no methods).
+func (c ConnectionConfig) MarshalJSON() ([]byte, error) {
+	type alias ConnectionConfig
+	base, err := json.Marshal(alias(c))
+	if err != nil {
+		return nil, err
+	}
+	if len(c.Extra) == 0 {
+		return base, nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(base, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range c.Extra {
+		m[k] = v
+	}
+	return json.Marshal(m)
+}
+
+// UnmarshalJSON decodes fixed fields into the struct and captures any unknown
+// key into Extra. This is what lets an external plugin's config_schema field
+// names (e.g. "endpoint", "compat_mode") survive the handler binding step.
+func (c *ConnectionConfig) UnmarshalJSON(b []byte) error {
+	type alias ConnectionConfig
+	var aux alias
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	*c = ConnectionConfig(aux)
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	for k, v := range m {
+		if _, fixed := connectionConfigFixedFields[k]; fixed {
+			continue
+		}
+		if c.Extra == nil {
+			c.Extra = make(map[string]any)
+		}
+		c.Extra[k] = v
+	}
+	return nil
 }
 
 // Value implements the driver.Valuer interface.
-// Encrypts Password and APIKey before persisting to database.
+// Encrypts Username, Password, APIKey and any ExtraCredentials before persisting
+// to database. ExtraCredentials is encrypted field-by-field (mirroring
+// DataSourceConfig.Credentials) so plugin-declared dynamic credential fields
+// never reach the DB in plain text.
 func (c ConnectionConfig) Value() (driver.Value, error) {
-	if key := utils.GetAESKey(); key != nil {
-		if c.Password != "" {
-			if encrypted, err := utils.EncryptAESGCM(c.Password, key); err == nil {
-				c.Password = encrypted
+	out := c
+	if len(out.ExtraCredentials) > 0 {
+		key := utils.GetAESKey()
+		enc := make(map[string]any, len(out.ExtraCredentials))
+		for k, v := range out.ExtraCredentials {
+			s, ok := v.(string)
+			if !ok || s == "" {
+				enc[k] = v
+				continue
 			}
-		}
-		if c.APIKey != "" {
-			if encrypted, err := utils.EncryptAESGCM(c.APIKey, key); err == nil {
-				c.APIKey = encrypted
+			if key == nil {
+				return nil, fmt.Errorf("refusing to persist plaintext credential %q: SYSTEM_AES_KEY is not configured", k)
 			}
+			e, err := utils.EncryptAESGCM(s, key)
+			if err != nil {
+				return nil, fmt.Errorf("encrypt retriever credential %q: %w", k, err)
+			}
+			enc[k] = e
 		}
+		out.ExtraCredentials = enc
 	}
-	return json.Marshal(c)
+	return utils.MarshalWithSecrets(out, "username", "password", "api_key")
 }
 
 // Scan implements the sql.Scanner interface.
-// Decrypts Password and APIKey after loading from database.
+// Decrypts Username, Password, APIKey and ExtraCredentials after loading from
+// database. ExtraCredentials decryption is lenient: plaintext (no cipher prefix)
+// is returned as-is, so pre-migration rows keep working.
 func (c *ConnectionConfig) Scan(value interface{}) error {
 	if value == nil {
 		return nil
@@ -184,20 +330,55 @@ func (c *ConnectionConfig) Scan(value interface{}) error {
 	if !ok {
 		return nil
 	}
-	if err := json.Unmarshal(b, c); err != nil {
+	if err := utils.UnmarshalWithSecrets(b, c, "username", "password", "api_key"); err != nil {
 		return err
 	}
-	password, err := utils.DecryptStoredSecret(c.Password)
-	if err != nil {
-		return fmt.Errorf("decrypt vector store connection password: %w", err)
+	if len(c.ExtraCredentials) > 0 {
+		for k, v := range c.ExtraCredentials {
+			if s, ok := v.(string); ok {
+				if plain, ok := utils.DecryptStoredSecretLenient(s); ok {
+					c.ExtraCredentials[k] = plain
+				}
+			}
+		}
 	}
-	c.Password = password
-	apiKey, err := utils.DecryptStoredSecret(c.APIKey)
-	if err != nil {
-		return fmt.Errorf("decrypt vector store connection api_key: %w", err)
-	}
-	c.APIKey = apiKey
 	return nil
+}
+
+// PartitionCredentials moves Extra fields declared sensitive by the engine
+// type's config schema into ExtraCredentials, so they are encrypted at rest
+// instead of persisted in the flattened (plain-text) Extra. Idempotent: fields
+// already in ExtraCredentials are left alone. Called by the service layer
+// before persisting an external retriever store.
+func (c *ConnectionConfig) PartitionCredentials(engineType RetrieverEngineType) {
+	if len(c.Extra) == 0 {
+		return
+	}
+	var sensitive map[string]bool
+	for _, vt := range GetVectorStoreTypes() {
+		if vt.Type == string(engineType) {
+			sensitive = make(map[string]bool)
+			for _, f := range vt.ConnectionFields {
+				if f.Sensitive {
+					sensitive[f.Name] = true
+				}
+			}
+			break
+		}
+	}
+	if len(sensitive) == 0 {
+		return
+	}
+	for key := range c.Extra {
+		if !sensitive[key] {
+			continue
+		}
+		if c.ExtraCredentials == nil {
+			c.ExtraCredentials = make(map[string]any)
+		}
+		c.ExtraCredentials[key] = c.Extra[key]
+		delete(c.Extra, key)
+	}
 }
 
 // GetEndpoint returns a normalized endpoint string for duplicate detection.
@@ -613,6 +794,46 @@ type VectorStoreTypeInfo struct {
 	DisplayName      string                 `json:"display_name"`
 	ConnectionFields []VectorStoreFieldInfo `json:"connection_fields"`
 	IndexFields      []VectorStoreFieldInfo `json:"index_fields,omitempty"`
+	// ScoreSemantics declares what a raw score means for this engine (see
+	// ScoreSemantics* constants). Only set for external retriever plugins;
+	// built-in engines leave it empty and rely on the hard-coded normalizer
+	// branches.
+	ScoreSemantics string `json:"score_semantics,omitempty"`
+	// Icon is the URL (or http(s) URL) of the engine's logo. For external
+	// plugins with a bundled local icon file, this is the host icon route
+	// (e.g. /api/v1/vector-stores/icon/milvux); built-in engines leave it
+	// empty and use the frontend providerLogo mapping.
+	Icon string `json:"icon,omitempty"`
+}
+
+// GetExternalEngineScoreSemantics returns the score_semantics declared by an
+// external retriever plugin for the given engine type. The second return is
+// false when the type is not an external plugin (or declared no semantics).
+func GetExternalEngineScoreSemantics(t RetrieverEngineType) (string, bool) {
+	externalVectorStoreTypesMu.RLock()
+	defer externalVectorStoreTypesMu.RUnlock()
+	info, ok := externalVectorStoreTypes[t]
+	if !ok || info.ScoreSemantics == "" {
+		return "", false
+	}
+	return info.ScoreSemantics, true
+}
+
+// SetExternalEngineScoreSemantics records the score semantics declared by an
+// external retriever plugin. It is called lazily on first store-open, because
+// the plugin process is not yet running at registration time (the loader
+// registers the adapter before manager.Start), so Describe can only succeed
+// once a store session is being opened.
+func SetExternalEngineScoreSemantics(t RetrieverEngineType, semantics string) {
+	if semantics == "" {
+		return
+	}
+	externalVectorStoreTypesMu.Lock()
+	defer externalVectorStoreTypesMu.Unlock()
+	if info, ok := externalVectorStoreTypes[t]; ok {
+		info.ScoreSemantics = semantics
+		externalVectorStoreTypes[t] = info
+	}
 }
 
 func resolveTencentVectorDBReplicaNumber(lookup EnvLookupFunc) int {
@@ -642,6 +863,10 @@ type VectorStoreFieldInfo struct {
 	Sensitive   bool   `json:"sensitive,omitempty"`
 	Default     any    `json:"default,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Title is the human-readable label from an external plugin's
+	// config_schema. When present the frontend shows it in place of the raw
+	// field name; built-in engines leave it empty and rely on frontend i18n.
+	Title string `json:"title,omitempty"`
 
 	// Immutable marks a field whose value cannot be changed after the
 	// VectorStore is first created. The UI shows the input as read-only
@@ -666,7 +891,7 @@ type VectorStoreFieldInfo struct {
 func GetVectorStoreTypes() []VectorStoreTypeInfo {
 	tencentVectorDBReplicaNumber := resolveTencentVectorDBReplicaNumber(os.Getenv)
 
-	return []VectorStoreTypeInfo{
+	builtin := []VectorStoreTypeInfo{
 		{
 			Type:        "elasticsearch",
 			DisplayName: "Elasticsearch",
@@ -781,6 +1006,27 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			},
 		},
 	}
+	return appendExternalVectorStoreTypes(builtin)
+}
+
+// appendExternalVectorStoreTypes appends externally registered engine types
+// (from retriever plugins) to the built-in list, sorted by type name for a
+// stable API response.
+func appendExternalVectorStoreTypes(builtin []VectorStoreTypeInfo) []VectorStoreTypeInfo {
+	externalVectorStoreTypesMu.RLock()
+	defer externalVectorStoreTypesMu.RUnlock()
+	if len(externalVectorStoreTypes) == 0 {
+		return builtin
+	}
+	keys := make([]string, 0, len(externalVectorStoreTypes))
+	for k := range externalVectorStoreTypes {
+		keys = append(keys, string(k))
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		builtin = append(builtin, externalVectorStoreTypes[RetrieverEngineType(k)])
+	}
+	return builtin
 }
 
 // floatPtr returns a pointer to v, for setting VectorStoreFieldInfo Min/Max.

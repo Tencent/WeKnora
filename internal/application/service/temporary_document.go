@@ -451,7 +451,7 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 		ParserEngine: parserEngine,
 	}
 	if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil && tenant.ParserEngineConfig != nil {
-		request.ParserEngineOverrides = tenant.ParserEngineConfig.ToOverridesMap()
+		request.ParserEngineOverrides = docparser.OverridesForEngine(tenant.ParserEngineConfig, parserEngine)
 	}
 	deps := docparser.ReaderDeps{Overrides: request.ParserEngineOverrides, Remote: s.documentReader}
 	if s.tenantService != nil {
