@@ -44,7 +44,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	if !strings.Contains(string(md), "| 名称 | 数量 |") || !strings.Contains(string(md), "| 苹果 | 3 |") {
 		t.Errorf("sheet not inlined:\n%s", md)
 	}
-	if !strings.Contains(string(md), "![图片]()") {
+	if !strings.Contains(string(md), "![图片](image-img_t.png)") {
 		t.Errorf("image placeholder missing:\n%s", md)
 	}
 	if strings.Contains(string(md), "feishu-media") {
@@ -55,6 +55,20 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	}
 	if !strings.Contains(string(md), "📎 附件：报表.pdf") {
 		t.Errorf("attachment inline reference missing:\n%s", md)
+	}
+}
+
+func TestBlocksToMarkdown_BoardPlaceholder(t *testing.T) {
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "bd", BlockType: BlockTypeBoard, Board: &BlockTokenRef{Token: "wb_abc"}},
+	}
+	md, _, err := blocksToMarkdown(context.Background(), nil, blocks)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(string(md), "![画板](board-wb_abc.png)") {
+		t.Errorf("board placeholder missing:\n%s", md)
 	}
 }
 

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -32,6 +33,7 @@ const (
 	BlockTypeSheet     = 30
 	BlockTypeTable     = 31
 	BlockTypeTableCell = 32
+	BlockTypeBoard     = 43 // embedded whiteboard; identity is board.token
 )
 
 // maxDocumentBlocks caps how many blocks a single document contributes, guarding
@@ -104,6 +106,7 @@ type DocxBlock struct {
 	Bitable *BlockTokenRef `json:"bitable"`
 	File    *BlockFileRef  `json:"file"`
 	Image   *BlockTokenRef `json:"image"`
+	Board   *BlockTokenRef `json:"board"`
 
 	Table *BlockTable `json:"table"`
 }
@@ -189,7 +192,7 @@ func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]str
 		return nil, false, fmt.Errorf("invalid sheet embed token: %q", embedToken)
 	}
 	spreadsheetToken, sheetID := embedToken[:idx], embedToken[idx+1:]
-	path := fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values/%s?valueRenderOption=ToString",
+	path := fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values/%s?valueRenderOption=FormattedValue",
 		url.PathEscape(spreadsheetToken), url.PathEscape(sheetID))
 	var resp sheetValuesResponse
 	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
@@ -226,6 +229,9 @@ func stringifyMatrix(in [][]any) [][]string {
 }
 
 // cellToString renders a single JSON cell value to a string; nil → "".
+// FormattedValue may return a plain string, a number, a formula object, or a
+// rich-text segment array (bold/link cells). Concatenate segment text — do not
+// fmt.Sprintf("%v") the []any, which dumps "[{...}]".
 func cellToString(v any) string {
 	switch t := v.(type) {
 	case nil:
@@ -234,8 +240,29 @@ func cellToString(v any) string {
 		return t
 	case float64:
 		return strconv.FormatFloat(t, 'f', -1, 64)
+	case json.Number:
+		return t.String()
 	case bool:
 		return strconv.FormatBool(t)
+	case []any:
+		parts := make([]string, 0, len(t))
+		for _, seg := range t {
+			if s := cellToString(seg); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, "")
+	case map[string]any:
+		if fv, ok := t["formattedValue"].(string); ok && fv != "" {
+			return fv
+		}
+		if text, ok := t["text"].(string); ok && text != "" {
+			return text
+		}
+		if inner, ok := t["value"]; ok {
+			return cellToString(inner)
+		}
+		return ""
 	default:
 		return fmt.Sprintf("%v", t)
 	}

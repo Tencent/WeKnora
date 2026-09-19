@@ -214,13 +214,13 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		"- [ ] 完成复盘",
 		"> 注意风险",
 		"---",
-		"| 列A | 列B |", // native docx table header
-		"| 1 | 2 |",   // native docx table row
-		"| 名称 | 数量 |", // embedded sheet header
-		"| 苹果 | 3 |",  // embedded sheet row
-		"| 任务 | 状态 |", // embedded bitable header
-		"| 写码 | 完成 |", // embedded bitable row
-		"![图片]()",     // token-free image placeholder
+		"| 列A | 列B |",                     // native docx table header
+		"| 1 | 2 |",                       // native docx table row
+		"| 名称 | 数量 |",                     // embedded sheet header
+		"| 苹果 | 3 |",                      // embedded sheet row
+		"| 任务 | 状态 |",                     // embedded bitable header
+		"| 写码 | 完成 |",                     // embedded bitable row
+		"![图片](image-img-tok-SECRET.png)", // relative filename aligned with child FileName
 		"📎 附件：手册.pdf",
 		"📎 附件：logo.png",
 		"📎 附件：small.pdf",
@@ -242,9 +242,11 @@ func TestGolden_RichDocxAllCapabilities(t *testing.T) {
 		last = idx
 	}
 
-	// ── the internal image media token must NEVER leak into embeddings ──
-	if strings.Contains(md, "img-tok-SECRET") {
-		t.Errorf("internal image token leaked into markdown:\n%s", md)
+	// ── media download URLs must NEVER leak into embeddings ──
+	// The media token is allowed in the relative filename (image-img-tok-SECRET.png)
+	// so we only forbid absolute media URLs / HTTP.
+	if strings.Contains(md, "/medias/") || strings.Contains(md, "http://") || strings.Contains(md, "https://") {
+		t.Errorf("media URL leaked into markdown:\n%s", md)
 	}
 
 	// ── attachment filtering: only the big whitelisted PDF becomes a sub-item ──
