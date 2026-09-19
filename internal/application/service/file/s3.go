@@ -197,9 +197,13 @@ func CheckS3ConnectivityWithOptions(ctx context.Context, endpoint, accessKey, se
 }
 
 // parseS3FilePath extracts the object name from a provider scheme: s3://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/s3://{bucket}/{objectKey} paths are accepted
+// too: the wrapper is stripped so services reached bare (global env storage,
+// legacy tenants) can resolve catalog-produced paths (#3151).
 func (s *s3FileService) parseS3FilePath(filePath string) (string, error) {
 	// Provider scheme format: s3://{bucket}/{objectKey}
 	const prefix = "s3://"
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, prefix) {
 		return "", fmt.Errorf("invalid S3 file path: %s", filePath)
 	}

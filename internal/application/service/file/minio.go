@@ -99,9 +99,12 @@ func CheckMinioConnectivity(ctx context.Context, endpoint, accessKeyID, secretAc
 }
 
 // parseMinioFilePath extracts the object name from a provider scheme: minio://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/minio://{bucket}/{objectKey} paths are
+// accepted too (see storageBackendInnerPath, #3151).
 func (s *minioFileService) parseMinioFilePath(filePath string) (string, error) {
 	// Provider scheme format: minio://{bucket}/{objectKey}
 	const prefix = "minio://"
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, prefix) {
 		return "", fmt.Errorf("invalid MinIO file path: %s", filePath)
 	}
