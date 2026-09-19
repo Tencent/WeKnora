@@ -1493,14 +1493,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         flex-shrink: 0;
     }
 
-    :deep(.submenu_fork_icon) {
-        color: inherit;
-        font-size: var(--app-text-sm);
-        margin-right: 4px;
-        vertical-align: middle;
-        flex-shrink: 0;
-    }
-
     .submenu_source_icon {
         width: 14px;
         height: 14px;
@@ -1629,9 +1621,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
                 color: var(--td-text-color-primary);
             }
 
-            :deep(.menu-more-wrap) {
-                opacity: 1;
-            }
         }
 
         &.session-chat-row--active .session-list-row {

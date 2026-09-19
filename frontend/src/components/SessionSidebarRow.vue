@@ -15,17 +15,18 @@
     </form>
     <span v-else class="submenu_title" :class="batchMode ? 'submenu_title--batch' : ''" :title="item.title">
       <t-icon v-if="item.is_pinned" name="pin" class="submenu_pin_icon" />
-      <t-tooltip v-if="item.parent_session_id" content="由其他会话分叉而来">
-        <t-icon name="git-branch" class="submenu_fork_icon" />
-      </t-tooltip>
       <span ref="titleTextRef" class="submenu_title-text">{{ item.title }}</span>
       <span v-if="apiOwnerTag" class="session-owner-tag" :class="`session-owner-tag--${apiOwnerTag.kind}`"
         :title="apiOwnerTag.full">{{ apiOwnerTag.label }}</span>
     </span>
     <span v-if="running" class="session-running-indicator" role="status" :aria-label="t('menu.sessionInProgress')"
       :title="t('menu.sessionInProgress')"><span class="session-running-indicator__spinner" aria-hidden="true" /></span>
-    <div v-if="!batchMode" class="session-row-menu-wrap" @click.stop>
-      <t-popup v-model:visible="menuOpen" :overlay-class-name="menuOverlayClass" trigger="click" destroy-on-close
+    <div v-if="!batchMode || item.parent_session_id" class="session-row-menu-wrap"
+      :class="{ 'session-row-menu-wrap--fork': item.parent_session_id }" @click.stop>
+      <span v-if="item.parent_session_id" class="session-fork-indicator" role="img" aria-label="由其他会话分叉而来">
+        <t-icon name="git-branch" class="submenu_fork_icon" />
+      </span>
+      <t-popup v-if="!batchMode" v-model:visible="menuOpen" :overlay-class-name="menuOverlayClass" trigger="click" destroy-on-close
         placement="bottom-right" @visible-change="onMenuVisibleChange">
         <button type="button" class="menu-more-wrap" :aria-label="t('chatHeader.moreActions')" aria-haspopup="menu" :aria-expanded="menuOpen" @click.stop>
           <t-icon name="ellipsis" class="menu-more" />
@@ -249,6 +250,29 @@ const confirmDangerAction = (): void => {
   pointer-events: none;
 }
 
+.session-row-menu-wrap--fork {
+  flex-basis: 24px;
+  width: 24px;
+  height: 24px;
+  opacity: 1;
+  pointer-events: auto;
+
+  .menu-more-wrap { opacity: 0; }
+}
+
+.submenu_item_batch .session-row-menu-wrap--fork { pointer-events: none; }
+
+.session-fork-indicator {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+
+  .submenu_fork_icon { font-size: var(--app-text-sm); }
+}
+
 .submenu_item:hover,
 .submenu_item:focus-within,
 .submenu_item--menu-open {
@@ -260,12 +284,23 @@ const confirmDangerAction = (): void => {
   }
 }
 
+.submenu_item:not(.submenu_item_batch) {
+  &:hover, &:focus-within, &.submenu_item--menu-open {
+    .session-fork-indicator { opacity: 0; }
+    .session-row-menu-wrap--fork .menu-more-wrap { opacity: 1; }
+  }
+}
+
 @media (hover: none) {
   .session-row-menu-wrap {
     flex-basis: 24px;
     width: 24px;
     opacity: 1;
     pointer-events: auto;
+  }
+  .submenu_item:not(.submenu_item_batch) {
+    .session-fork-indicator { display: none; }
+    .session-row-menu-wrap--fork .menu-more-wrap { opacity: 1; }
   }
 }
 
