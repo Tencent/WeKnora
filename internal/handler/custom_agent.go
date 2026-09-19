@@ -95,7 +95,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	var req CreateAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
@@ -119,11 +119,11 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	// oversized avatar used to reach postgres and come back as a raw driver
 	// 500. Reject it here with a 400 that names the limit.
 	if err := agent.ValidateAvatar(); err != nil {
-		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError("Invalid avatar"))
 		return
 	}
 	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -135,7 +135,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		if err == service.ErrAgentNameRequired {
-			c.Error(errors.NewBadRequestError(err.Error()))
+			c.Error(errors.NewBadRequestError("Invalid request parameters"))
 			return
 		}
 		// Reached only after the typed sentinels and *errors.AppError
@@ -277,7 +277,7 @@ func (h *CustomAgentHandler) ListAgents(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"tenant_id": tenantID,
 		})
-		c.Error(errors.NewInternalServerError("Failed to list disabled agent IDs: " + err.Error()))
+		c.Error(errors.NewInternalServerError("Failed to list disabled agent IDs"))
 		return
 	}
 
@@ -361,7 +361,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	var req UpdateAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	if err := authorizeAgentKnowledgeScope(ctx, req.Config); err != nil {
@@ -380,7 +380,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	if req.Avatar != nil {
 		if err := (&types.CustomAgent{Avatar: *req.Avatar}).ValidateAvatar(); err != nil {
 			logger.Error(ctx, "Invalid avatar", err)
-			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			_ = c.Error(errors.NewBadRequestError("Invalid avatar"))
 			return
 		}
 	}
@@ -395,7 +395,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 	}
 	agent.EnsureDefaults()
 	if err := agent.Config.QuestionSuggestions.Validate(); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -414,9 +414,9 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		case service.ErrCannotModifyBuiltin:
 			c.Error(errors.NewForbiddenError("Cannot modify built-in agent"))
 		case service.ErrAgentNameRequired:
-			c.Error(errors.NewBadRequestError(err.Error()))
+			c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		case service.ErrAgentKBScopeNotShareable:
-			_ = c.Error(errors.NewForbiddenError(err.Error()))
+			_ = 		c.Error(errors.NewForbiddenError("Permission denied"))
 		default:
 			// Reached only after the typed sentinels and *errors.AppError above, so
 			// whatever lands here is a raw repository/driver error. Its text
@@ -742,8 +742,7 @@ func (h *CustomAgentHandler) validateAgentSandboxConfig(
 	}
 	stored, err := h.sandboxConfigs.Get(ctx, tenantID, configID)
 	if err != nil {
-		return errors.NewInternalServerError("Failed to verify sandbox config").
-			WithDetails(err.Error())
+		return errors.NewInternalServerError("Failed to verify sandbox config")
 	}
 	if stored == nil {
 		return errors.NewBadRequestError("所选沙箱后端配置不存在，请重新选择")

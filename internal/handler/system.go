@@ -115,7 +115,7 @@ type platformAPIKeyCreateRequest struct {
 func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
 	keys, err := h.apiKeySvc.ListPlatformAPIKeys(c.Request.Context())
 	if err != nil {
-		c.Error(apperrors.NewInternalServerError("Failed to list platform API keys").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("Failed to list platform API keys"))
 		return
 	}
 	response := make([]tenantAPIKeyResponse, 0, len(keys))
@@ -140,7 +140,7 @@ func (h *SystemHandler) ListPlatformAPIKeys(c *gin.Context) {
 func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
 	var req platformAPIKeyCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request data"))
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
@@ -168,7 +168,7 @@ func (h *SystemHandler) CreatePlatformAPIKey(c *gin.Context) {
 		ExpiresAt:    expiresAt,
 	})
 	if err != nil {
-		c.Error(apperrors.NewInternalServerError("Failed to create platform API key").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("Failed to create platform API key"))
 		return
 	}
 	item := tenantAPIKeyForResponse(result.APIKey)
@@ -978,7 +978,7 @@ func (h *SystemHandler) checkMinio(c *gin.Context, ctx context.Context, cfg *typ
 
 	if cfg.Mode == "remote" {
 		if blocked, reason := isBlockedStorageEndpoint(endpoint); blocked {
-			logger.Warnf(ctx, "Storage check: MinIO endpoint blocked by SSRF protection, endpoint: %s", endpoint)
+			logger.Warnf(ctx, "Storage check: MinIO endpoint blocked by SSRF protection, endpoint: %s", secutils.SanitizeForLog(endpoint))
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
 			return
 		}
@@ -1058,7 +1058,7 @@ func (h *SystemHandler) checkTOS(c *gin.Context, ctx context.Context, cfg *types
 	}
 
 	if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
-		logger.Warnf(ctx, "Storage check: TOS endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
+		logger.Warnf(ctx, "Storage check: TOS endpoint blocked by SSRF protection, endpoint: %s", secutils.SanitizeForLog(cfg.Endpoint))
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
 		return
 	}
@@ -1097,7 +1097,7 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 
 	if cfg.Endpoint != "" {
 		if blocked, reason := isBlockedStorageEndpoint(cfg.Endpoint); blocked {
-			logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", cfg.Endpoint)
+			logger.Warnf(ctx, "Storage check: S3 endpoint blocked by SSRF protection, endpoint: %s", secutils.SanitizeForLog(cfg.Endpoint))
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
 			return
 		}
@@ -1136,7 +1136,7 @@ func (h *SystemHandler) checkOSS(c *gin.Context, ctx context.Context, cfg *types
 	// Strip URL scheme before SSRF check — OSS endpoint may include http:// or https://
 	ssrfEndpoint := strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
 	if blocked, reason := isBlockedStorageEndpoint(ssrfEndpoint); blocked {
-		logger.Warnf(ctx, "Storage check: OSS endpoint blocked by SSRF protection, endpoint: %s", endpoint)
+		logger.Warnf(ctx, "Storage check: OSS endpoint blocked by SSRF protection, endpoint: %s", secutils.SanitizeForLog(endpoint))
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
 		return
 	}
@@ -1153,7 +1153,7 @@ func (h *SystemHandler) checkOSS(c *gin.Context, ctx context.Context, cfg *types
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "403") || strings.Contains(errMsg, "AccessDenied") {
-			logger.Errorf(ctx, "Storage check: OSS auth failed, endpoint: %s, bucket: %s", endpoint, cfg.BucketName)
+			logger.Errorf(ctx, "Storage check: OSS auth failed, endpoint: %s, bucket: %s", secutils.SanitizeForLog(endpoint), cfg.BucketName)
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "认证失败，请检查 Access Key / Secret Key 是否正确"}})
 			return
 		}
@@ -1162,7 +1162,7 @@ func (h *SystemHandler) checkOSS(c *gin.Context, ctx context.Context, cfg *types
 			c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("Bucket「%s」不存在", cfg.BucketName)}})
 			return
 		}
-		logger.Errorf(ctx, "Storage check: OSS connectivity failed, endpoint: %s, bucket: %s, error: %v", endpoint, cfg.BucketName, err)
+		logger.Errorf(ctx, "Storage check: OSS connectivity failed, endpoint: %s, bucket: %s, error: %v", secutils.SanitizeForLog(endpoint), cfg.BucketName, err)
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: fmt.Sprintf("OSS 连通性检测失败: %s", sanitizeStorageCheckError(err))}})
 		return
 	}
@@ -1183,7 +1183,7 @@ func (h *SystemHandler) checkKS3(c *gin.Context, ctx context.Context, cfg *types
 	}
 
 	if blocked, reason := isBlockedStorageEndpoint(endpoint); blocked {
-		logger.Warnf(ctx, "Storage check: KS3 endpoint blocked by SSRF protection, endpoint: %s", endpoint)
+		logger.Warnf(ctx, "Storage check: KS3 endpoint blocked by SSRF protection, endpoint: %s", secutils.SanitizeForLog(endpoint))
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
 		return
 	}
@@ -1220,7 +1220,7 @@ func (h *SystemHandler) checkOBS(c *gin.Context, ctx context.Context, cfg *types
 
 	ssrfEndpoint := strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
 	if blocked, reason := isBlockedStorageEndpoint(ssrfEndpoint); blocked {
-		logger.Warnf(ctx, "Storage check: OBS endpoint blocked by SSRF protection, endpoint: %s", endpoint)
+		logger.Warnf(ctx, "Storage check: OBS endpoint blocked by SSRF protection, endpoint: %s", secutils.SanitizeForLog(endpoint))
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: reason}})
 		return
 	}
@@ -1310,7 +1310,7 @@ func (h *SystemHandler) PromoteUserToSystemAdmin(c *gin.Context) {
 
 	var req PromoteUserToSystemAdminRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 
@@ -1400,7 +1400,7 @@ func (h *SystemHandler) RevokeSystemAdmin(c *gin.Context) {
 
 	var req RevokeSystemAdminRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 
@@ -1553,7 +1553,7 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 	req.Email = strings.TrimSpace(req.Email)
 
 	if err := service.ValidatePasswordPolicy(req.NewPassword, h.complexPasswordEnabled(ctx)); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 
@@ -1570,7 +1570,7 @@ func (h *SystemHandler) ResetUserPassword(c *gin.Context) {
 
 	if err := h.userSvc.AdminResetPassword(ctx, user.ID, req.NewPassword); err != nil {
 		if service.IsPasswordPolicyError(err) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 			return
 		}
 		logger.Errorf(ctx, "Failed to reset password for user %s: %v", user.ID, err)
@@ -1656,9 +1656,9 @@ func (h *SystemHandler) CreateSystemUser(c *gin.Context) {
 			})
 			c.JSON(http.StatusOK, CreateSystemUserResponse{User: user.ToUserInfo()})
 		case errors.Is(err, service.ErrPasswordPolicy):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		case errors.Is(err, service.ErrUserIdentityConflict):
-			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"error": "User identity conflict"})
 		default:
 			logger.Errorf(ctx, "Failed to create user: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
@@ -2236,10 +2236,8 @@ func (h *SystemHandler) GetSystemSetting(c *gin.Context) {
 	key := c.Param("key")
 	row, err := h.systemSettingSvc.Get(ctx, key)
 	if err != nil {
-		// Service-layer "unknown key" surfaces as a generic error here;
-		// distinguish via the error string rather than typed errors so
-		// we don't grow a sentinel package for a single error class.
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		logger.Errorf(ctx, "GetSystemSetting error for key %s: %v", secutils.SanitizeForLog(key), err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown setting key"})
 		return
 	}
 	if row == nil {
@@ -2281,7 +2279,7 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 
 	var req UpdateSystemSettingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 	if req.Value == nil {
@@ -2291,10 +2289,8 @@ func (h *SystemHandler) UpdateSystemSetting(c *gin.Context) {
 
 	row, err := h.systemSettingSvc.Update(ctx, key, req.Value)
 	if err != nil {
-		// Whether this is "unknown key" / "type mismatch" / "DB error"
-		// is encoded in the error message at the service layer; surface
-		// it verbatim. UI captures it as the toast text.
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		logger.Errorf(ctx, "UpdateSystemSetting error for key %s: %v", secutils.SanitizeForLog(key), err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid setting key or value"})
 		return
 	}
 	h.enrichSettingsModifiedBy(ctx, []*types.SystemSetting{row})
@@ -2382,11 +2378,8 @@ func (h *SystemHandler) ResetSystemSetting(c *gin.Context) {
 	ctx := logger.CloneContext(c.Request.Context())
 	key := c.Param("key")
 	if err := h.systemSettingSvc.Reset(ctx, key); err != nil {
-		// Service surfaces "unknown key" as a plain error string; treat
-		// every error as 400 so the UI captures it as a toast. A real
-		// DB failure here is rare and indistinguishable from "bad key"
-		// at this layer — operators see the message either way.
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		logger.Errorf(ctx, "ResetSystemSetting error for key %s: %v", secutils.SanitizeForLog(key), err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown setting key"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

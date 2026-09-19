@@ -39,7 +39,7 @@ func (h *Handler) GenerateTitle(c *gin.Context) {
 	var request GenerateTitleRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		logger.Error(ctx, "Failed to parse request data", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -54,7 +54,7 @@ func (h *Handler) GenerateTitle(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *Handler) GenerateTitle(c *gin.Context) {
 	title, err := h.sessionService.GenerateTitle(ctx, session, request.Messages, "")
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 

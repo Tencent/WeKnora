@@ -186,7 +186,7 @@ func bindEnvVarRequest(
 ) (meEnvVarRequest, bool) {
 	var req meEnvVarRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters"))
 		return req, false
 	}
 	if scope(req) == "" || req.Name == "" {

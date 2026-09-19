@@ -238,7 +238,7 @@ type WikiPageService interface {
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 
 	// UpdateIssueStatus updates the status of an issue of kbID (e.g. pending -> resolved/ignored).
-	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
+	UpdateIssueStatus(ctx context.Context, tenantID uint64, kbID string, issueID string, status string) error
 }
 
 // WikiPageRepository defines the wiki page data persistence interface.
@@ -451,5 +451,5 @@ type WikiPageRepository interface {
 
 	// UpdateIssueStatus updates the status of an issue of kbID; ErrWikiIssueNotFound
 	// when no such issue belongs to it.
-	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
+	UpdateIssueStatus(ctx context.Context, tenantID uint64, kbID string, issueID string, status string) error
 }

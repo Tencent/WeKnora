@@ -42,7 +42,7 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 
 	var req modelCredentialsPutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	if req.APIKey == nil && req.AppSecret == nil {
@@ -71,7 +71,7 @@ func (h *ModelCredentialsHandler) Put(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model_id": secutils.SanitizeForLog(id)})
-		c.Error(errors.NewInternalServerError("failed to update credentials: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to update credentials"))
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *ModelCredentialsHandler) DeleteField(c *gin.Context) {
 			"model_id": secutils.SanitizeForLog(id),
 			"field":    field,
 		})
-		c.Error(errors.NewInternalServerError("failed to clear credential: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to clear credential"))
 		return
 	}
 	c.Status(http.StatusNoContent)

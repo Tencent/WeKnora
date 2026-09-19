@@ -2,7 +2,7 @@ package service
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -229,10 +229,12 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 
 	// Build tag seq_id map for conversion
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -242,12 +244,8 @@ func (s *knowledgeService) CreateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 查询TagName
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
 	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeCreated,
 		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
@@ -290,10 +288,12 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 
 	// Build tag seq_id map for conversion
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -303,13 +303,10 @@ func (s *knowledgeService) GetFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 查询TagName
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
+
 	return entry, nil
 }
 
@@ -452,10 +449,12 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 
 	// Build tag seq_id map for conversion
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -465,12 +464,8 @@ func (s *knowledgeService) UpdateFAQEntry(ctx context.Context,
 		return nil, err
 	}
 
-	// 查询TagName
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
 	recordKBActivity(ctx, s.audit, tenantID, kb.ID, types.AuditActionKnowledgeUpdated,
 		"faq_entry", chunk.ID, types.AuditOutcomeSuccess,
@@ -607,10 +602,12 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 
 	// Build response
 	tagSeqIDMap := make(map[string]int64)
+	var tagName string
 	if chunk.TagID != "" {
 		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
 		if tagErr == nil && tag != nil {
 			tagSeqIDMap[tag.ID] = tag.SeqID
+			tagName = tag.Name
 		}
 	}
 
@@ -619,11 +616,8 @@ func (s *knowledgeService) AddSimilarQuestions(ctx context.Context,
 		return nil, err
 	}
 
-	if chunk.TagID != "" {
-		tag, tagErr := s.tagRepo.GetByID(ctx, tenantID, chunk.TagID)
-		if tagErr == nil && tag != nil {
-			entry.TagName = tag.Name
-		}
+	if tagName != "" {
+		entry.TagName = tagName
 	}
 
 	return entry, nil
@@ -995,37 +989,47 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 			wg            sync.WaitGroup
 		)
 
-		if hasFirstPriority {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				firstParams := types.SearchParams{
-					QueryText:            secutils.SanitizeForLog(req.QueryText),
-					VectorThreshold:      req.VectorThreshold,
-					MatchCount:           req.MatchCount,
-					DisableKeywordsMatch: true,
-					TagIDs:               firstPriorityTagUUIDs,
-					OnlyRecommended:      req.OnlyRecommended,
+	if hasFirstPriority {
+		wg.Add(1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					firstErr = fmt.Errorf("first-priority search panic: %v", r)
 				}
-				firstResults, firstErr = s.kbService.HybridSearch(ctx, kbID, firstParams)
 			}()
-		}
+			defer wg.Done()
+			firstParams := types.SearchParams{
+				QueryText:            secutils.SanitizeForLog(req.QueryText),
+				VectorThreshold:      req.VectorThreshold,
+				MatchCount:           req.MatchCount,
+				DisableKeywordsMatch: true,
+				TagIDs:               firstPriorityTagUUIDs,
+				OnlyRecommended:      req.OnlyRecommended,
+			}
+			firstResults, firstErr = s.kbService.HybridSearch(ctx, kbID, firstParams)
+		}()
+	}
 
-		if hasSecondPriority {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				secondParams := types.SearchParams{
-					QueryText:            secutils.SanitizeForLog(req.QueryText),
-					VectorThreshold:      req.VectorThreshold,
-					MatchCount:           req.MatchCount,
-					DisableKeywordsMatch: true,
-					TagIDs:               secondPriorityTagUUIDs,
-					OnlyRecommended:      req.OnlyRecommended,
+	if hasSecondPriority {
+		wg.Add(1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					secondErr = fmt.Errorf("second-priority search panic: %v", r)
 				}
-				secondResults, secondErr = s.kbService.HybridSearch(ctx, kbID, secondParams)
 			}()
-		}
+			defer wg.Done()
+			secondParams := types.SearchParams{
+				QueryText:            secutils.SanitizeForLog(req.QueryText),
+				VectorThreshold:      req.VectorThreshold,
+				MatchCount:           req.MatchCount,
+				DisableKeywordsMatch: true,
+				TagIDs:               secondPriorityTagUUIDs,
+				OnlyRecommended:      req.OnlyRecommended,
+			}
+			secondResults, secondErr = s.kbService.HybridSearch(ctx, kbID, secondParams)
+		}()
+	}
 
 		wg.Wait()
 
@@ -1483,7 +1487,11 @@ func (s *knowledgeService) buildFAQCSV(chunks []*types.Chunk, tagMap map[string]
 
 // escapeCSVField escapes a field for CSV format.
 func escapeCSVField(field string) string {
-	// If field contains comma, newline, or quote, wrap in quotes and escape internal quotes
+	if strings.HasPrefix(field, "=") || strings.HasPrefix(field, "+") ||
+		strings.HasPrefix(field, "-") || strings.HasPrefix(field, "@") ||
+		strings.HasPrefix(field, "\t") || strings.HasPrefix(field, "\r") {
+		field = "'" + field
+	}
 	if strings.ContainsAny(field, ",\"\n\r") {
 		return "\"" + strings.ReplaceAll(field, "\"", "\"\"") + "\""
 	}
@@ -1818,8 +1826,8 @@ func (s *knowledgeService) buildFAQTagResolver(
 
 // hashQuestion 计算问题内容的哈希值，用于生成稳定的 sourceID。
 func hashQuestion(question string) string {
-	h := md5.Sum([]byte(question))
-	return hex.EncodeToString(h[:4])
+	h := sha256.Sum256([]byte(question))
+	return hex.EncodeToString(h[:8])
 }
 
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name

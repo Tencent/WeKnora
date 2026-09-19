@@ -933,11 +933,11 @@ func (s *DataSourceService) applyFetchedItem(
 	if len(item.Content) == 0 && item.URL == "" {
 		// Check if this is an error item from the connector (failed to fetch content)
 		if errMsg, hasErr := item.Metadata["error"]; hasErr {
-			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", item.Title, item.ExternalID, errMsg)
+			logger.Warnf(ctx, "item %q (external_id=%s) fetch failed: %s", secutils.SanitizeForLog(item.Title), secutils.SanitizeForLog(item.ExternalID), secutils.SanitizeForLog(errMsg))
 			result.Failed++
-			recordSyncError(result, fetchFailureSyncError(item, errMsg))
+			recordSyncError(result, fetchFailureSyncError(item, secutils.SanitizeForLog(errMsg)))
 		} else {
-			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", item.Title, item.ExternalID)
+			logger.Infof(ctx, "skipping item %q (external_id=%s): no content or URL", secutils.SanitizeForLog(item.Title), secutils.SanitizeForLog(item.ExternalID))
 			result.Skipped++
 		}
 		return
@@ -949,7 +949,7 @@ func (s *DataSourceService) applyFetchedItem(
 		switch {
 		case errors.As(err, &dupErr):
 			// Duplicate file/URL is not a failure — count as skipped.
-			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", item.Title, item.ExternalID)
+			logger.Infof(ctx, "item %q (external_id=%s) already exists, skipping", secutils.SanitizeForLog(item.Title), secutils.SanitizeForLog(item.ExternalID))
 			result.Skipped++
 		case item.Metadata["embedded_image"] == "true":
 			// An image extracted from a document for OCR is a best-effort
@@ -959,10 +959,10 @@ func (s *DataSourceService) applyFetchedItem(
 			// synced, and the image stays in SubtreeKeep for a later retry once the
 			// KB is configured.
 			logger.Infof(ctx, "skipping embedded image %q (external_id=%s), not ingested: %v",
-				item.Title, item.ExternalID, err)
+				secutils.SanitizeForLog(item.Title), secutils.SanitizeForLog(item.ExternalID), err)
 			result.Skipped++
 		default:
-			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
+			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", secutils.SanitizeForLog(item.Title), secutils.SanitizeForLog(item.ExternalID), err)
 			result.Failed++
 			recordSyncError(result, types.SyncItemError{
 				Title:   item.Title,
@@ -1487,9 +1487,10 @@ func bytesToFileHeader(data []byte, filename string) (*multipart.FileHeader, err
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Create a form file part
+	escapedFilename := strings.ReplaceAll(filename, "\\", "\\\\")
+	escapedFilename = strings.ReplaceAll(escapedFilename, "\"", "\\\"")
 	partHeader := make(textproto.MIMEHeader)
-	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, filename))
+	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, escapedFilename))
 	partHeader.Set("Content-Type", "application/octet-stream")
 
 	part, err := writer.CreatePart(partHeader)

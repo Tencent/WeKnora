@@ -213,7 +213,7 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 	publicAuthRL := middleware.PublicAuthRateLimit()
 	r.POST("/auth/register-by-invite", publicAuthRL, handler.RegisterByInvite)
 	r.POST("/auth/invitations/lookup", publicAuthRL, handler.LookupInvitationByToken)
-	r.POST("/auth/login", handler.Login)
+	r.POST("/auth/login", publicAuthRL, handler.Login)
 	r.POST("/auth/auto-setup", handler.AutoSetup)
 	r.GET("/auth/config", handler.GetAuthConfig)
 	r.POST("/auth/switch-tenant", handler.SwitchTenant)
@@ -237,9 +237,10 @@ func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rba
 //
 // Reads (GetSystemInfo / ListParserEngines / GetStorageEngineStatus)
 // are gated to Viewer+ — any tenant member can see "is the parser
-// reachable". The /*-check / /reconnect endpoints actively probe
-// remote services with tenant credentials and could trigger network
-// fanout, so they're Admin+.
+// reachable". The /*-check endpoints actively probe remote services
+// with tenant credentials and could trigger network fanout, so they're
+// Admin+. ReconnectDocReader mutates the process-wide document-reader
+// client, so it is SystemAdmin only.
 func RegisterSystemRoutes(
 	r *gin.RouterGroup,
 	handler *handler.SystemHandler,
@@ -251,7 +252,7 @@ func RegisterSystemRoutes(
 		systemRoutes.GET("/info", g.Viewer(), handler.GetSystemInfo)
 		systemRoutes.GET("/parser-engines", g.Viewer(), handler.ListParserEngines)
 		systemRoutes.POST("/parser-engines/check", g.Admin(), handler.CheckParserEngines)
-		systemRoutes.POST("/docreader/reconnect", g.Admin(), handler.ReconnectDocReader)
+		systemRoutes.POST("/docreader/reconnect", g.SystemAdmin(), handler.ReconnectDocReader)
 		systemRoutes.GET("/storage-engine-status", g.Viewer(), handler.GetStorageEngineStatus)
 		systemRoutes.POST("/storage-engine-check", g.Admin(), handler.CheckStorageEngine)
 		systemRoutes.POST("/sandbox-check", g.Admin(), handler.CheckSandboxConfig)

@@ -52,6 +52,68 @@ func TestFillSecretsFromStoredModel_FillsExtraConfig(t *testing.T) {
 	}
 }
 
+// TestFillSecretsFromStoredModel_BindsBaseURLWhenFillingSecrets: stored
+// credentials must only be sent to the model's configured endpoint. A
+// caller-supplied BaseURL is overwritten whenever a stored secret is copied in.
+func TestFillSecretsFromStoredModel_BindsBaseURLWhenFillingSecrets(t *testing.T) {
+	stored := &types.Model{
+		Parameters: types.ModelParameters{
+			BaseURL: "https://api.openai.com/v1",
+			APIKey:  "sk-stored",
+		},
+	}
+	h := &InitializationHandler{
+		modelService: &stubFillSecretsModelService{
+			getModelByID: func(context.Context, string) (*types.Model, error) { return stored, nil },
+		},
+	}
+	req := &ModelTestRequest{
+		ModelID: "m-1",
+		BaseURL: "https://evil.example/v1",
+	}
+
+	h.fillSecretsFromStoredModel(context.Background(), req)
+
+	if req.APIKey != "sk-stored" {
+		t.Fatalf("APIKey not filled: %q", req.APIKey)
+	}
+	if req.BaseURL != "https://api.openai.com/v1" {
+		t.Fatalf("stored secret bound to caller BaseURL: got %q", req.BaseURL)
+	}
+}
+
+// TestFillSecretsFromStoredModel_CallerSecretsKeepCallerBaseURL: when the
+// caller supplies their own secrets, they may probe a different endpoint.
+func TestFillSecretsFromStoredModel_CallerSecretsKeepCallerBaseURL(t *testing.T) {
+	stored := &types.Model{
+		Parameters: types.ModelParameters{
+			BaseURL:   "https://api.openai.com/v1",
+			APIKey:    "sk-stored",
+			AppSecret: "app-secret-stored",
+		},
+	}
+	h := &InitializationHandler{
+		modelService: &stubFillSecretsModelService{
+			getModelByID: func(context.Context, string) (*types.Model, error) { return stored, nil },
+		},
+	}
+	req := &ModelTestRequest{
+		ModelID:   "m-1",
+		APIKey:    "sk-typed",
+		AppSecret: "app-typed",
+		BaseURL:   "https://new.example/v1",
+	}
+
+	h.fillSecretsFromStoredModel(context.Background(), req)
+
+	if req.BaseURL != "https://new.example/v1" {
+		t.Fatalf("caller BaseURL overwritten without using stored secrets: %q", req.BaseURL)
+	}
+	if req.APIKey != "sk-typed" || req.AppSecret != "app-typed" {
+		t.Fatalf("caller secrets overwritten: %q %q", req.APIKey, req.AppSecret)
+	}
+}
+
 // TestFillSecretsFromStoredModel_RequestExtraConfigWins: when the caller
 // actively sends an extraConfig payload (user editing the form), the stored
 // one must not overwrite it — same precedence as the secret fields.

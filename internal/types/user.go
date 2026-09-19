@@ -181,10 +181,11 @@ type OIDCCallbackResponse struct {
 }
 
 type OIDCUserInfo struct {
-	Subject  string                 `json:"subject,omitempty"`
-	Username string                 `json:"username,omitempty"`
-	Email    string                 `json:"email,omitempty"`
-	Claims   map[string]interface{} `json:"claims,omitempty"`
+	Subject       string                 `json:"subject,omitempty"`
+	Username      string                 `json:"username,omitempty"`
+	Email         string                 `json:"email,omitempty"`
+	EmailVerified bool                   `json:"email_verified,omitempty"`
+	Claims        map[string]interface{} `json:"claims,omitempty"`
 }
 
 // RegisterRequest represents a registration request

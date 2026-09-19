@@ -54,7 +54,7 @@ func resolveHandlerKBAccessFor(c *gin.Context, kbID string, kbService middleware
 			return nil, apperrors.NewNotFoundError("knowledge base not found")
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		return nil, apperrors.NewInternalServerError(err.Error())
+		return nil, apperrors.NewInternalServerError("internal server error")
 	}
 	grant, err := access.ResolveKB(ctx, request, kb, required, shares, agents)
 	if err == nil {

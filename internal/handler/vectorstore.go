@@ -103,7 +103,7 @@ func (h *VectorStoreHandler) CreateStore(c *gin.Context) {
 	var req CreateStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Warnf(ctx, "Invalid create vector store request: %v", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -149,7 +149,7 @@ func (h *VectorStoreHandler) ListStores(c *gin.Context) {
 	dbStores, err := h.repo.List(ctx, tenantID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list vector stores: %v", err)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -262,7 +262,7 @@ func (h *VectorStoreHandler) UpdateStore(c *gin.Context) {
 
 	var req UpdateStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -385,7 +385,7 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 		version, err := h.service.TestConnection(ctx, envStore.EngineType, envStore.ConnectionConfig)
 		if err != nil {
 			logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-			c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": "Connection test failed"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"success": true, "version": version})
@@ -402,7 +402,7 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 	version, err := h.service.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
 	if err != nil {
 		logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": "Connection test failed"})
 		return
 	}
 
@@ -440,7 +440,7 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 
 	var req TestStoreRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -450,7 +450,7 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 	version, err := h.service.TestRawConnection(ctx, req.EngineType, req.ConnectionConfig)
 	if err != nil {
 		logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
+			c.JSON(http.StatusOK, gin.H{"success": false, "error": "Connection test failed"})
 		return
 	}
 

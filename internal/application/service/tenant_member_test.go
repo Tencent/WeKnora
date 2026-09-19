@@ -327,6 +327,9 @@ func (r *cleanupTokenRepo) RevokeTokensByUserID(_ context.Context, userID string
 	r.revoked = append(r.revoked, userID)
 	return nil
 }
+func (r *cleanupTokenRepo) RevokeTokenByValue(context.Context, string) (bool, error) {
+	return false, nil
+}
 
 func TestTenantMemberService_RemoveMember_ClearsStaleHomeAndRevokesTokens(t *testing.T) {
 	memberRepo := newFakeRepo()

@@ -81,12 +81,16 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 
 	var req mcpOAuthAuthorizeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	req.RedirectURI = strings.TrimSpace(req.RedirectURI)
 	if req.RedirectURI == "" {
 		c.Error(errors.NewValidationError("redirect_uri is required"))
+		return
+	}
+	if err := mcp.ValidateOAuthRedirectURI(req.RedirectURI); err != nil {
+		c.Error(errors.NewValidationError("invalid redirect_uri"))
 		return
 	}
 	if req.FrontendRedirect == "" {
@@ -110,7 +114,7 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"service_id": secutils.SanitizeForLog(serviceID),
 		})
-		c.Error(errors.NewInternalServerError("failed to start authorization: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to start authorization"))
 		return
 	}
 
@@ -197,7 +201,7 @@ func (h *MCPOAuthHandler) Status(c *gin.Context) {
 			ctx, tenantID, principal, serviceID, attemptID,
 		)
 		if err != nil {
-			c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
+			c.Error(errors.NewInternalServerError("failed to query authorization status"))
 			return
 		}
 		state := "pending"
@@ -213,7 +217,7 @@ func (h *MCPOAuthHandler) Status(c *gin.Context) {
 
 	status, err := h.oauth.AuthorizationStatus(ctx, tenantID, principal, serviceID)
 	if err != nil {
-		c.Error(errors.NewInternalServerError("failed to query authorization status: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to query authorization status"))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": status})
@@ -241,7 +245,7 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 	}
 
 	if err := h.oauth.Revoke(ctx, tenantID, principal, serviceID); err != nil {
-		c.Error(errors.NewInternalServerError("failed to revoke authorization: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to revoke authorization"))
 		return
 	}
 	// Recycle any cached connections so a subsequent call re-authorizes.
@@ -292,7 +296,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 
 	var body resolveMCPOAuthBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	serviceID := strings.TrimSpace(body.ServiceID)
@@ -325,7 +329,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 				logger.ErrorWithFields(ctx, err, map[string]interface{}{
 					"pending_id": secutils.SanitizeForLog(pendingID),
 				})
-				c.Error(errors.NewInternalServerError(err.Error()))
+				c.Error(errors.NewInternalServerError("internal server error"))
 			}
 			return
 		}
@@ -342,7 +346,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 	// would just fail again with another authorization-required error.
 	authorized, err := h.oauth.IsAuthorized(ctx, tenantID, principal, serviceID)
 	if err != nil {
-		c.Error(errors.NewInternalServerError("failed to verify authorization: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to verify authorization"))
 		return
 	}
 	if !authorized {
@@ -364,7 +368,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"pending_id": secutils.SanitizeForLog(pendingID),
 			})
-			c.Error(errors.NewInternalServerError(err.Error()))
+			c.Error(errors.NewInternalServerError("internal server error"))
 		}
 		return
 	}
@@ -415,7 +419,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
 				"pending_id": secutils.SanitizeForLog(pendingID),
 			})
-			c.Error(errors.NewInternalServerError(err.Error()))
+			c.Error(errors.NewInternalServerError("internal server error"))
 		}
 		return
 	}

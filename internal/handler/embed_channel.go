@@ -25,6 +25,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// maxEmbedChatBodyBytes caps the patched QA JSON that an embed visitor can
+// send in one request. The patched payload is at most the original plus the
+// fields the channel injects; this cap keeps memory bounded for anonymous
+// callers while still allowing long multi-turn prompts.
+const maxEmbedChatBodyBytes = 1 << 20
+
 // EmbedChannelHandler manages web embed channel CRUD and public embed endpoints.
 type EmbedChannelHandler struct {
 	embedSvc          interfaces.EmbedChannelService
@@ -121,11 +127,11 @@ func (h *EmbedChannelHandler) CreateEmbedChannel(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req embedChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 	if err := validateAllowedOrigins(req.AllowedOrigins); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 	originsJSON, _ := json.Marshal(req.AllowedOrigins)
@@ -207,20 +213,20 @@ func (h *EmbedChannelHandler) UpdateEmbedChannel(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req embedChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 		return
 	}
 	// Only validate when the caller intends to change the allowlist. A nil slice
 	// means "leave unchanged"; a present slice must still be a valid allowlist.
 	if req.AllowedOrigins != nil {
 		if err := validateAllowedOrigins(req.AllowedOrigins); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 			return
 		}
 	}
 	if req.WebhookURL != nil {
 		if err := service.ValidateEmbedWebhookURL(*req.WebhookURL); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 			return
 		}
 	}
@@ -582,10 +588,7 @@ func (h *EmbedChannelHandler) EmbedRelayWebhookEvent(c *gin.Context) {
 	if content := strings.TrimSpace(req.Content); content != "" {
 		payload["content"] = content
 	}
-	sessionID := strings.TrimSpace(req.SessionID)
-	if sessionID == "" {
-		sessionID = secutils.SanitizeForLog(c.Param("session_id"))
-	}
+	sessionID := secutils.SanitizeForLog(c.Param("session_id"))
 	service.DispatchEmbedWebhook(ch, eventType, sessionID, payload)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
@@ -599,6 +602,7 @@ func (h *EmbedChannelHandler) delegateEmbedChat(c *gin.Context, agentMode bool) 
 	if err := h.ensureEmbedSession(c); err != nil {
 		return
 	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxEmbedChatBodyBytes)
 	patched, err := patchEmbedChatPayload(c.Request.Body, ch, agentMode)
 	if err != nil {
 		switch {
@@ -773,7 +777,7 @@ func (h *EmbedChannelHandler) GetEmbedChannelStats(c *gin.Context) {
 		PageSize: 1,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 	total := result
@@ -820,7 +824,7 @@ func writeEmbedMgmtError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrEmbedChannelNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "embed channel not found"})
 	case errors.Is(err, service.ErrEmbedWebhookURLInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
 	default:
 		var appErr *apperrors.AppError
 		if errors.As(err, &appErr) && appErr.Code == apperrors.ErrNotFound {

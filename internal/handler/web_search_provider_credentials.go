@@ -47,7 +47,7 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 	id := c.Param("id")
 	var req webSearchCredentialsPutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	if req.APIKey == nil {
@@ -68,7 +68,7 @@ func (h *WebSearchProviderCredentialsHandler) Put(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"provider_id": secutils.SanitizeForLog(id),
 		})
-		c.Error(errors.NewInternalServerError("failed to update credentials: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to update credentials"))
 		return
 	}
 	resp := dto.CredentialsResponse{
@@ -97,7 +97,7 @@ func (h *WebSearchProviderCredentialsHandler) DeleteField(c *gin.Context) {
 			"provider_id": secutils.SanitizeForLog(id),
 			"field":       field,
 		})
-		c.Error(errors.NewInternalServerError("failed to clear credential: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to clear credential"))
 		return
 	}
 	c.Status(http.StatusNoContent)

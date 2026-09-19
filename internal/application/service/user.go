@@ -508,8 +508,8 @@ func (s *userService) LoginWithOIDC(
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(userInfo.Email) == "" {
-		return nil, errors.New("OIDC provider did not return email")
+	if err := requireVerifiedOIDCEmail(userInfo); err != nil {
+		return nil, err
 	}
 
 	user, err := s.userRepo.GetUserByEmail(ctx, userInfo.Email)
@@ -1227,7 +1227,7 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 		return []byte(getJwtSecret()), nil
 	})
 
-	if err != nil || !token.Valid {
+	if err != nil || token == nil || !token.Valid {
 		return nil, 0, errors.New("invalid token")
 	}
 
@@ -1381,7 +1381,7 @@ func (s *userService) RefreshToken(
 		return []byte(getJwtSecret()), nil
 	})
 
-	if err != nil || !token.Valid {
+	if err != nil || token == nil || !token.Valid {
 		return "", "", errors.New("invalid refresh token")
 	}
 
@@ -1415,9 +1415,16 @@ func (s *userService) RefreshToken(
 		return "", "", err
 	}
 
-	// Revoke old refresh token
-	tokenRecord.IsRevoked = true
-	_ = s.tokenRepo.UpdateToken(ctx, tokenRecord)
+	// Atomically revoke old refresh token; if another request already
+	// rotated it, this becomes a no-op instead of silently succeeding
+	// while leaving the original token usable.
+	revoked, err := s.tokenRepo.RevokeTokenByValue(ctx, refreshTokenString)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to revoke previous refresh token: %w", err)
+	}
+	if !revoked {
+		return "", "", errors.New("refresh token already used")
+	}
 
 	// Generate new tokens
 	return s.GenerateTokens(ctx, user)
@@ -1625,7 +1632,7 @@ func (s *userService) exchangeOIDCCode(ctx context.Context, cfg *config.OIDCAuth
 	}
 
 	var tokenResp oidcTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tokenResp); err != nil {
 		return nil, fmt.Errorf("failed to decode OIDC token response: %w", err)
 	}
 	if strings.TrimSpace(tokenResp.AccessToken) == "" && strings.TrimSpace(tokenResp.IDToken) == "" {
@@ -1680,6 +1687,7 @@ func (s *userService) resolveOIDCUserInfo(ctx context.Context, cfg *config.OIDCA
 	}
 	info.Username = extractClaimAsString(claims, cfg.UserInfoMapping.Username)
 	info.Email = extractClaimAsString(claims, cfg.UserInfoMapping.Email)
+	info.EmailVerified = extractClaimAsBool(claims, "email_verified")
 	if info.Username == "" {
 		info.Username = extractClaimAsString(claims, "preferred_username")
 	}
@@ -1715,7 +1723,7 @@ func (s *userService) fetchOIDCUserInfo(ctx context.Context, endpoint, accessTok
 	}
 
 	var claims map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&claims); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&claims); err != nil {
 		return nil, err
 	}
 	return claims, nil
@@ -2052,6 +2060,40 @@ func extractClaimAsString(claims map[string]interface{}, key string) string {
 	default:
 		return strings.TrimSpace(fmt.Sprint(v))
 	}
+}
+
+func extractClaimAsBool(claims map[string]interface{}, key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" || claims == nil {
+		return false
+	}
+	value, ok := claims[key]
+	if !ok || value == nil {
+		return false
+	}
+	switch v := value.(type) {
+	case bool:
+		return v
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true", "1":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+func requireVerifiedOIDCEmail(info *types.OIDCUserInfo) error {
+	if info == nil || strings.TrimSpace(info.Email) == "" {
+		return errors.New("OIDC provider did not return email")
+	}
+	if !info.EmailVerified {
+		return errors.New("OIDC provider did not verify email")
+	}
+	return nil
 }
 
 func sanitizeUsernameCandidate(value string) string {

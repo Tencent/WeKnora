@@ -28,8 +28,15 @@ def load_from_xml_v2(baseURI, rels_item_xml):
         for rel_elm in rels_elm.Relationship_lst:
             if rel_elm.target_ref in ('../NULL', 'NULL'):
                 continue
-            srels._srels.append(_SerializedRelationship(baseURI, rel_elm))
-    return srels
+
+
+def _sanitize_log_value(value: str) -> str:
+    if not value:
+        return value
+    sanitized = value.replace("\r", " ").replace("\n", " ")
+    sanitized = re.sub(r"[\x00-\x1f\x7f]", " ", sanitized)
+    return sanitized
+
 
 _SerializedRelationships.load_from_xml = load_from_xml_v2
 
@@ -200,10 +207,11 @@ class DocxParser(BaseParser):
                     if line.text is not None and line.text != "":
                         text_parts.append(line.text)
                         if sec_idx < 3 or sec_idx % 50 == 0:
+                            safe_text = _sanitize_log_value(line.text or "")
                             logger.info(
-                                f"Added section {sec_idx + 1} text: {line.text[:50]}..."
-                                if len(line.text) > 50
-                                else f"Added section {sec_idx + 1} text: {line.text}"
+                                f"Added section {sec_idx + 1} text: {safe_text[:50]}..."
+                                if len(safe_text) > 50
+                                else f"Added section {sec_idx + 1} text: {safe_text}"
                             )
                     if line.images:
                         for image_data in line.images:

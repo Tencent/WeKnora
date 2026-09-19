@@ -64,7 +64,7 @@ func (h *MemoryHandler) UpdateSettings(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req updateMemorySettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request data"))
 		return
 	}
 	if req.Enabled == nil {
@@ -263,7 +263,7 @@ func (h *MemoryHandler) CreateItem(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req createMemoryItemRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request data"))
 		return
 	}
 	item, err := h.memoryService.CreateItem(ctx, req.Kind, req.Content, req.Importance)
@@ -294,7 +294,7 @@ func (h *MemoryHandler) UpdateItem(c *gin.Context) {
 	ctx := c.Request.Context()
 	var req updateMemoryItemRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request data").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request data"))
 		return
 	}
 	item, err := h.memoryService.UpdateItem(ctx, c.Param("id"), req.Content, req.Importance)
@@ -453,9 +453,9 @@ func (h *MemoryHandler) fail(c *gin.Context, err error, message string) {
 	case errors.Is(err, memory.ErrItemNotFound):
 		c.Error(apperrors.NewNotFoundError("memory not found"))
 	case errors.Is(err, types.ErrMemoryConflict):
-		c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 	case errors.Is(err, memory.ErrSensitiveContent):
-		c.Error(apperrors.NewBadRequestError(err.Error()))
+		c.Error(apperrors.NewBadRequestError("Invalid request parameters"))
 	case errors.Is(err, memory.ErrMemoryDisabled):
 		c.Error(apperrors.NewBadRequestError("memory is disabled"))
 	default:

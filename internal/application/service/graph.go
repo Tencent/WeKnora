@@ -13,6 +13,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -143,7 +144,7 @@ func (b *graphBuilder) extractEntities(ctx context.Context, chunk *types.Chunk) 
 		if entity == nil {
 			continue
 		}
-		log.Infof("[Entity %d] Title: '%s', Description: '%s'", i+1, entity.Title, entity.Description)
+		log.Infof("[Entity %d] Title: '%s', Description: '%s'", i+1, secutils.SanitizeForLog(entity.Title), secutils.SanitizeForLog(entity.Description))
 	}
 	log.Info("=========================================")
 
@@ -471,8 +472,8 @@ func (b *graphBuilder) BuildGraph(ctx context.Context, chunks []*types.Chunk) er
 
 	// generate knowledge graph visualization diagram
 	mermaidDiagram := b.generateKnowledgeGraphDiagram(ctx)
-	log.Info("Knowledge graph visualization diagram:")
-	log.Info(mermaidDiagram)
+	_ = mermaidDiagram
+	log.Info("Knowledge graph visualization diagram generated")
 
 	return nil
 }
@@ -880,6 +881,17 @@ func dfs(entityTitle string,
 	}
 }
 
+// escapeMermaidLabel escapes a string for safe use inside a Mermaid label.
+// It replaces characters that would break Mermaid syntax: quotes in bracket
+// labels and pipes/CR/LF in arrow labels.
+func escapeMermaidLabel(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\"", "'")
+	s = strings.ReplaceAll(s, "|", "/")
+	return s
+}
+
 // generateKnowledgeGraphDiagram generate Mermaid diagram for knowledge graph
 func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string {
 	log := logger.GetLogger(ctx)
@@ -989,11 +1001,11 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 				nodeID := entityMap[entityTitle]
 				entitiesInComponent[entityTitle] = true
 
-				// add node definition for each entity
-				entity := b.entityMapByTitle[entityTitle]
-				if entity != nil {
-					sb.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", nodeID, entityTitle))
-				}
+			// add node definition for each entity
+			entity := b.entityMapByTitle[entityTitle]
+			if entity != nil {
+				sb.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", nodeID, escapeMermaidLabel(entityTitle)))
+			}
 			}
 
 			// add relationships in this subgraph
@@ -1008,8 +1020,8 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 						linkStyle = "==>"
 					}
 
-					sb.WriteString(fmt.Sprintf("    %s %s|%s| %s\n",
-						sourceID, linkStyle, rel.Description, targetID))
+				sb.WriteString(fmt.Sprintf("    %s %s|%s| %s\n",
+					sourceID, linkStyle, escapeMermaidLabel(rel.Description), targetID))
 				}
 			}
 

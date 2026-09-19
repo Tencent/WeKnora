@@ -113,7 +113,7 @@ func (h *TenantMemberHandler) ListMembers(c *gin.Context) {
 	members, total, err := h.memberService.ListMembersPage(ctx, tenantID, q, page, pageSize)
 	if err != nil {
 		logger.Errorf(ctx, "ListMembersPage failed: tenant=%d err=%v", tenantID, err)
-		c.Error(apperrors.NewInternalServerError("failed to list members").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to list members"))
 		return
 	}
 
@@ -196,7 +196,7 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 
 	var req addMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request data"))
 		return
 	}
 	// Defence in depth — service also re-validates, but rejecting early
@@ -219,7 +219,7 @@ func (h *TenantMemberHandler) AddMember(c *gin.Context) {
 		}
 		logger.Errorf(ctx, "GetUserByEmail failed: email=%s err=%v",
 			secutils.SanitizeForLog(req.Email), err)
-		c.Error(apperrors.NewInternalServerError("failed to look up user").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to look up user"))
 		return
 	}
 
@@ -249,7 +249,7 @@ func writeAddMemberError(
 ) {
 	switch {
 	case errors.Is(err, service.ErrInvalidTenantRole):
-		c.Error(apperrors.NewValidationError(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 	case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
 		c.Error(apperrors.NewForbiddenError(err.Error()))
 	case errors.Is(err, service.ErrMembershipAlreadyExists):
@@ -259,7 +259,7 @@ func writeAddMemberError(
 	default:
 		logger.Errorf(ctx, "AddMember failed: user=%s tenant=%d err=%v",
 			user.ID, tenantID, err)
-		c.Error(apperrors.NewInternalServerError("failed to add member").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("failed to add member"))
 	}
 }
 
@@ -331,7 +331,7 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 
 	var req updateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("invalid request body").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request data"))
 		return
 	}
 	if !req.Role.IsValid() {
@@ -344,15 +344,15 @@ func (h *TenantMemberHandler) UpdateMemberRole(c *gin.Context) {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastOwner):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		case errors.Is(err, service.ErrInvalidTenantRole):
-			c.Error(apperrors.NewValidationError(err.Error()))
+			c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		case errors.Is(err, service.ErrAPIKeyCannotAssignOwner):
-			c.Error(apperrors.NewForbiddenError(err.Error()))
+			c.Error(apperrors.NewForbiddenError("Permission denied"))
 		default:
 			logger.Errorf(ctx, "UpdateRole failed: user=%s tenant=%d err=%v",
 				userID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to update member role").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to update member role"))
 		}
 		return
 	}
@@ -387,11 +387,11 @@ func (h *TenantMemberHandler) RemoveMember(c *gin.Context) {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("membership not found"))
 		case errors.Is(err, service.ErrLastOwner):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		default:
 			logger.Errorf(ctx, "RemoveMember failed: user=%s tenant=%d err=%v",
 				userID, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to remove member").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to remove member"))
 		}
 		return
 	}
@@ -429,11 +429,11 @@ func (h *TenantMemberHandler) LeaveTenant(c *gin.Context) {
 		case errors.Is(err, service.ErrMembershipNotFound):
 			c.Error(apperrors.NewNotFoundError("you are not a member of this workspace"))
 		case errors.Is(err, service.ErrLastOwner):
-			c.Error(apperrors.NewConflictError(err.Error()))
+			c.Error(apperrors.NewConflictError("Conflict"))
 		default:
 			logger.Errorf(ctx, "LeaveTenant failed: user=%s tenant=%d err=%v",
 				caller, tenantID, err)
-			c.Error(apperrors.NewInternalServerError("failed to leave workspace").WithDetails(err.Error()))
+			c.Error(apperrors.NewInternalServerError("failed to leave workspace"))
 		}
 		return
 	}

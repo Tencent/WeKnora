@@ -31,6 +31,14 @@ from docreader.parser.concurrency import parser_worker_limit
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_log_value(value: str) -> str:
+    if not value:
+        return value
+    sanitized = value.replace("\r", " ").replace("\n", " ")
+    sanitized = re.sub(r"[\x00-\x1f\x7f]", " ", sanitized)
+    return sanitized
+
 # pdfium (the C library behind pypdfium2) is process-global and NOT
 # thread-safe: two gRPC worker threads parsing PDFs at the same time corrupt
 # its shared state and can deadlock the whole process indefinitely (observed
@@ -1367,7 +1375,7 @@ class PDFScannedParser(BaseParser):
 
         logger.info(
             "PDFScannedParser: Rendering PDF pages to JPEG images for %s",
-            self.file_name,
+            _sanitize_log_value(self.file_name or ""),
         )
 
         try:
@@ -1446,7 +1454,7 @@ class PDFParser(BaseParser):
         if self._force_scanned:
             logger.info(
                 "PDFParser: force scanned mode enabled for %s",
-                self.file_name,
+                _sanitize_log_value(self.file_name or ""),
             )
             doc = PDFScannedParser(
                 file_name=self.file_name, file_type=self.file_type
@@ -1468,7 +1476,7 @@ class PDFParser(BaseParser):
             logger.exception(
                 "PDFParser: per-page routing failed for %s; "
                 "falling back to full image rendering",
-                self.file_name,
+                _sanitize_log_value(self.file_name or ""),
             )
             return PDFScannedParser(
                 file_name=self.file_name, file_type=self.file_type
@@ -1608,7 +1616,7 @@ class PDFParser(BaseParser):
         logger.info(
             "PDFParser: %s -> %d pages (%d scanned, %d text), "
             "embedded_images=%d, content_len=%d",
-            self.file_name,
+            _sanitize_log_value(self.file_name or ""),
             page_count,
             len(scanned_indices),
             page_count - len(scanned_indices),

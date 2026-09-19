@@ -291,6 +291,21 @@ func (m *OAuthManager) Revoke(
 	return m.repo.DeleteTokenForPrincipal(ctx, tenantID, principal, serviceID)
 }
 
+// ValidateOAuthRedirectURI ensures the client-supplied redirect_uri matches
+// this deployment's registered backend callback. Only the exact callback URL
+// derived from APP_EXTERNAL_URL is accepted; open redirects are rejected.
+func ValidateOAuthRedirectURI(raw string) error {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL")), "/")
+	if base == "" {
+		return fmt.Errorf("server redirect URI is not configured")
+	}
+	expected := base + "/api/v1/mcp-oauth/callback"
+	if raw != expected {
+		return fmt.Errorf("redirect_uri must be %s", expected)
+	}
+	return nil
+}
+
 // validateFrontendRedirect accepts application-relative paths or the explicitly
 // configured frontend origin. Request Host/Origin headers are not trusted.
 func validateFrontendRedirect(raw string) (string, error) {

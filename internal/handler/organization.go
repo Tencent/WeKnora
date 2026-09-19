@@ -79,7 +79,7 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 	var req types.CreateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Errorf(ctx, "Invalid request parameters: %v", err)
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -87,10 +87,10 @@ func (h *OrganizationHandler) CreateOrganization(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create organization: %v", err)
 		if errors.Is(err, service.ErrInvalidValidityDays) {
-			c.Error(apperrors.NewValidationError(err.Error()))
+			c.Error(apperrors.NewValidationError("Invalid request parameters"))
 			return
 		}
-		c.Error(apperrors.NewInternalServerError("Failed to create organization").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("Failed to create organization"))
 		return
 	}
 
@@ -163,7 +163,7 @@ func (h *OrganizationHandler) ListMyOrganizations(c *gin.Context) {
 	orgs, err := h.orgService.ListTenantOrganizations(ctx, tenantID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list organizations: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list organizations").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("Failed to list organizations"))
 		return
 	}
 
@@ -316,7 +316,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 
 	var req types.UpdateOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -324,7 +324,7 @@ func (h *OrganizationHandler) UpdateOrganization(c *gin.Context) {
 	if err != nil {
 		logger.Errorf(ctx, "Failed to update organization: %v", err)
 		if errors.Is(err, service.ErrInvalidValidityDays) {
-			c.Error(apperrors.NewValidationError(err.Error()))
+			c.Error(apperrors.NewValidationError("Invalid request parameters"))
 			return
 		}
 		if errors.Is(err, service.ErrOrgMemberLimitTooLow) {
@@ -397,7 +397,7 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 	members, err := h.orgService.ListTenantMembers(ctx, orgID)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to list members: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to list members").WithDetails(err.Error()))
+		c.Error(apperrors.NewInternalServerError("Failed to list members"))
 		return
 	}
 
@@ -470,7 +470,7 @@ func (h *OrganizationHandler) UpdateMemberRole(c *gin.Context) {
 
 	var req types.UpdateMemberRoleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -630,7 +630,7 @@ func (h *OrganizationHandler) JoinByInviteCode(c *gin.Context) {
 
 	var req types.JoinOrganizationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -671,7 +671,7 @@ func (h *OrganizationHandler) SubmitJoinRequest(c *gin.Context) {
 
 	var req types.SubmitJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -775,7 +775,7 @@ func (h *OrganizationHandler) JoinByOrganizationID(c *gin.Context) {
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	var req types.JoinByOrganizationIDRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 	// Validate requested role if provided
@@ -834,7 +834,7 @@ func (h *OrganizationHandler) RequestRoleUpgrade(c *gin.Context) {
 
 	var req types.RequestRoleUpgradeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -1016,7 +1016,7 @@ func (h *OrganizationHandler) ReviewJoinRequest(c *gin.Context) {
 
 	var req types.ReviewJoinRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 	var assignRole *types.OrgMemberRole
@@ -1069,7 +1069,7 @@ func (h *OrganizationHandler) ShareKnowledgeBase(c *gin.Context) {
 
 	var req types.ShareKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -1172,7 +1172,7 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 
 	var req types.UpdateSharePermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 	if !h.kbShareOnPath(c, shareID) {
@@ -1391,7 +1391,7 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 
 	var req types.ShareKnowledgeBaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 
@@ -1411,7 +1411,7 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, service.ErrAgentKBScopeNotShareable) {
-			_ = c.Error(apperrors.NewForbiddenError(err.Error()))
+			_ = c.Error(apperrors.NewForbiddenError("Permission denied"))
 			return
 		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
@@ -1806,7 +1806,7 @@ func (h *OrganizationHandler) SetSharedAgentDisabledByMe(c *gin.Context) {
 
 	var req SetSharedAgentDisabledByMeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewBadRequestError("Invalid request").WithDetails(err.Error()))
+		c.Error(apperrors.NewBadRequestError("Invalid request"))
 		return
 	}
 	// Derive sourceTenantID: own agent (current tenant) or from shared list
@@ -1940,6 +1940,13 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 		return
 	}
+
+	// Only allow resolving the caller's own tenant ID to prevent workspace enumeration
+	if targetID != tenantID {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
+		return
+	}
+
 	existingMembers, err := h.orgService.ListTenantMembers(ctx, orgID)
 	if err != nil {
 		_ = c.Error(apperrors.NewInternalServerError("Failed to load organization members"))
@@ -2004,7 +2011,7 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 
 	var req types.InviteMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
+		c.Error(apperrors.NewValidationError("Invalid request parameters"))
 		return
 	}
 

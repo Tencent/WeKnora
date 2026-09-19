@@ -45,6 +45,7 @@ type DownloadTask struct {
 	Message   string     `json:"message"`
 	StartTime time.Time  `json:"startTime"`
 	EndTime   *time.Time `json:"endTime,omitempty"`
+	TenantID  uint64     `json:"-"`
 }
 
 // 全局下载任务管理器
@@ -243,7 +244,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	var req KBModelConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse KB config request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -445,7 +446,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	// 保存更新后的知识库
 	if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
 		logger.Error(ctx, "Failed to update knowledge base", err)
-		c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
+		c.Error(errors.NewInternalServerError("更新知识库失败: "))
 		return
 	}
 
@@ -595,7 +596,7 @@ func (h *InitializationHandler) InitializeByKB(c *gin.Context) {
 
 	if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
-		c.Error(errors.NewInternalServerError("更新知识库配置失败: " + err.Error()))
+		c.Error(errors.NewInternalServerError("更新知识库配置失败: "))
 		return
 	}
 
@@ -613,7 +614,7 @@ func (h *InitializationHandler) bindInitializationRequest(ctx context.Context, c
 	var req InitializationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse initialization request", err)
-		return nil, errors.NewBadRequestError(err.Error())
+		return nil, errors.NewBadRequestError("Invalid request parameters")
 	}
 	return &req, nil
 }
@@ -629,7 +630,7 @@ func (h *InitializationHandler) getKnowledgeBaseForInitialization(ctx context.Co
 			return nil, errors.NewNotFoundError("知识库不存在")
 		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kbId": utils.SanitizeForLog(kbIdStr)})
-		return nil, errors.NewInternalServerError("获取知识库信息失败: " + err.Error())
+		return nil, errors.NewInternalServerError("获取知识库信息失败: ")
 	}
 	if kb == nil {
 		logger.Error(ctx, "Knowledge base not found")
@@ -863,7 +864,7 @@ func (h *InitializationHandler) processInitializationModels(
 					"model_id": model.ID,
 					"kb_id":    kbIdStr,
 				})
-				return nil, errors.NewInternalServerError("更新模型失败: " + err.Error())
+				return nil, errors.NewInternalServerError("更新模型失败: ")
 			}
 			processedModels = append(processedModels, existingModel)
 			continue
@@ -874,7 +875,7 @@ func (h *InitializationHandler) processInitializationModels(
 				"model_id": model.ID,
 				"kb_id":    kbIdStr,
 			})
-			return nil, errors.NewInternalServerError("创建模型失败: " + err.Error())
+			return nil, errors.NewInternalServerError("创建模型失败: ")
 		}
 		processedModels = append(processedModels, model)
 	}
@@ -1042,7 +1043,7 @@ func (h *InitializationHandler) CheckOllamaStatus(c *gin.Context) {
 			"success": true,
 			"data": gin.H{
 				"available": false,
-				"error":     err.Error(),
+				"error":     "service unavailable",
 				"baseUrl":   baseURL,
 			},
 		})
@@ -1089,7 +1090,7 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse models check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -1098,7 +1099,7 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 		err := h.ollamaService.StartService(ctx)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
+			c.Error(errors.NewInternalServerError("Ollama服务不可用: "))
 			return
 		}
 	}
@@ -1142,6 +1143,7 @@ func (h *InitializationHandler) CheckOllamaModels(c *gin.Context) {
 // @Router       /initialization/ollama/models/download [post]
 func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	ctx := c.Request.Context()
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	logger.Info(ctx, "Starting async Ollama model download")
 
@@ -1151,7 +1153,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse model download request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -1160,7 +1162,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 		err := h.ollamaService.StartService(ctx)
 		if err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
+			c.Error(errors.NewInternalServerError("Ollama服务不可用: "))
 			return
 		}
 	}
@@ -1168,7 +1170,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 	// 检查模型是否已存在
 	available, err := h.ollamaService.IsModelAvailable(ctx, req.ModelName)
 	if err != nil {
-		c.Error(errors.NewInternalServerError("检查模型状态失败: " + err.Error()))
+		c.Error(errors.NewInternalServerError("检查模型状态失败: "))
 		return
 	}
 
@@ -1214,6 +1216,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 		Progress:  0.0,
 		Message:   "准备下载",
 		StartTime: time.Now(),
+		TenantID:  tenantID,
 	}
 
 	tasksMutex.Lock()
@@ -1254,6 +1257,7 @@ func (h *InitializationHandler) DownloadOllamaModel(c *gin.Context) {
 // @Router       /initialization/ollama/download/progress/{taskId} [get]
 func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 	taskID := c.Param("taskId")
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 
 	if taskID == "" {
 		c.Error(errors.NewBadRequestError("任务ID不能为空"))
@@ -1264,7 +1268,7 @@ func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 	task, exists := downloadTasks[taskID]
 	tasksMutex.RUnlock()
 
-	if !exists {
+	if !exists || task.TenantID != callerTenantID {
 		c.Error(errors.NewNotFoundError("下载任务不存在"))
 		return
 	}
@@ -1286,10 +1290,13 @@ func (h *InitializationHandler) GetDownloadProgress(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /initialization/ollama/download/tasks [get]
 func (h *InitializationHandler) ListDownloadTasks(c *gin.Context) {
+	callerTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	tasksMutex.RLock()
 	tasks := make([]*DownloadTask, 0, len(downloadTasks))
 	for _, task := range downloadTasks {
-		tasks = append(tasks, task)
+		if task.TenantID == callerTenantID {
+			tasks = append(tasks, task)
+		}
 	}
 	tasksMutex.RUnlock()
 
@@ -1319,7 +1326,7 @@ func (h *InitializationHandler) ListOllamaModels(c *gin.Context) {
 	if !h.ollamaService.IsAvailable() {
 		if err := h.ollamaService.StartService(ctx); err != nil {
 			logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("Ollama服务不可用: " + err.Error()))
+			c.Error(errors.NewInternalServerError("Ollama服务不可用: "))
 			return
 		}
 	}
@@ -1328,7 +1335,7 @@ func (h *InitializationHandler) ListOllamaModels(c *gin.Context) {
 	models, err := h.ollamaService.ListModelsDetailed(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError("获取模型列表失败: " + err.Error()))
+		c.Error(errors.NewInternalServerError("获取模型列表失败: "))
 		return
 	}
 
@@ -1465,7 +1472,7 @@ func (h *InitializationHandler) GetCurrentConfigByKB(c *gin.Context) {
 			return
 		}
 		logger.Error(ctx, "Failed to get knowledge base", err)
-		c.Error(errors.NewInternalServerError("获取知识库信息失败: " + err.Error()))
+		c.Error(errors.NewInternalServerError("获取知识库信息失败: "))
 		return
 	}
 
@@ -1748,10 +1755,12 @@ type ModelTestRequest struct {
 	// secrets (APIKey, AppSecret via ExtraConfig) from the stored model
 	// record before assembling the test client. This lets the "Test
 	// connection" button work on existing models without making the
-	// frontend reload — and ship — the plaintext API key. Other fields
-	// (BaseURL, ModelName, etc.) on this request still override the
-	// stored values, so a user can validate a new endpoint against the
-	// existing credentials in one click.
+	// frontend reload — and ship — the plaintext API key.
+	//
+	// Stored credentials are bound to the model's configured BaseURL.
+	// Callers who want to probe a different endpoint must supply their
+	// own API key / app secret; stored secrets are never sent to a
+	// caller-controlled URL.
 	ModelID string `json:"modelId,omitempty"`
 }
 
@@ -1766,6 +1775,10 @@ type ModelTestRequest struct {
 // actively typing a new key they want to verify. Missing or inaccessible
 // model is treated as a no-op (the connection test will fail downstream
 // with a clearer "missing apiKey" error than we could produce here).
+//
+// When any stored secret is copied in, req.BaseURL is forced to the
+// stored model's BaseURL so decrypted credentials cannot be exfiltrated
+// to an attacker-chosen host.
 func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, req *ModelTestRequest) {
 	if req == nil || req.ModelID == "" {
 		return
@@ -1779,11 +1792,21 @@ func (h *InitializationHandler) fillSecretsFromStoredModel(ctx context.Context, 
 			utils.SanitizeForLog(req.ModelID), err)
 		return
 	}
+	filledStoredSecret := false
 	if req.APIKey == "" {
 		req.APIKey = stored.Parameters.APIKey
+		if stored.Parameters.APIKey != "" {
+			filledStoredSecret = true
+		}
 	}
 	if req.AppSecret == "" {
 		req.AppSecret = stored.Parameters.AppSecret
+		if stored.Parameters.AppSecret != "" {
+			filledStoredSecret = true
+		}
+	}
+	if filledStoredSecret {
+		req.BaseURL = stored.Parameters.BaseURL
 	}
 	if req.ExtraConfig == nil {
 		req.ExtraConfig = stored.Parameters.ExtraConfig
@@ -1875,7 +1898,7 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse remote model check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
@@ -1932,7 +1955,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse embedding test request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
@@ -2053,7 +2076,7 @@ func (h *InitializationHandler) checkChatModelConnection(
 		// message used to hide things like the actual URL the SDK
 		// tried, response body, etc. — making remote debugging nearly
 		// impossible. Format: "<hint>：<raw err>".
-		return false, fmt.Sprintf("%s：%v", classifyConnectionError(errMsg), err)
+		return false, classifyConnectionError(errMsg)
 	}
 
 	// 连接成功，模型可用
@@ -2100,7 +2123,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse rerank model check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
@@ -2162,7 +2185,7 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	var req ModelTestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse ASR model check request", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 	h.fillSecretsFromStoredModel(ctx, &req)
@@ -2210,16 +2233,16 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 		switch {
 		case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "Unauthorized") || strings.Contains(errMsg, "authentication"):
 			available = false
-			message = fmt.Sprintf("认证失败，请检查API Key：%s", errMsg)
+			message = "Authentication failed, please check API Key"
 		case strings.Contains(errMsg, "404") || strings.Contains(errMsg, "Not Found"):
 			available = false
-			message = fmt.Sprintf("API端点不存在，请检查Base URL：%s", errMsg)
+			message = "API endpoint not found, please check Base URL"
 		case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host") || strings.Contains(errMsg, "dial tcp"):
 			available = false
-			message = fmt.Sprintf("无法连接到服务器，请检查Base URL：%s", errMsg)
+			message = "Cannot connect to server, please check Base URL"
 		case strings.Contains(errMsg, "model") && strings.Contains(errMsg, "not found"):
 			available = false
-			message = fmt.Sprintf("模型不存在，请检查模型名称：%s", errMsg)
+			message = "Model not found, please check model name"
 		default:
 			logger.Infof(ctx, "ASR check got non-fatal error (endpoint reachable): %v", err)
 			available = true
@@ -2429,7 +2452,7 @@ func (h *InitializationHandler) TestMultimodalFunction(c *gin.Context) {
 			"success": true,
 			"data": gin.H{
 				"success":         false,
-				"message":         err.Error(),
+				"message":         "Operation failed",
 				"processing_time": processingTime,
 			},
 		})
@@ -2545,7 +2568,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
-		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		c.Error(errors.NewBadRequestError("获取模型失败"))
 		return
 	}
 
@@ -2553,7 +2576,7 @@ func (h *InitializationHandler) ExtractTextRelations(c *gin.Context) {
 	result, err := h.extractRelationsFromText(ctx, req.Text, req.Tags, chatModel)
 	if err != nil {
 		logger.Error(ctx, "文本关系提取失败", err)
-		c.Error(errors.NewInternalServerError("文本关系提取失败: " + err.Error()))
+		c.Error(errors.NewInternalServerError("文本关系提取失败: "))
 		return
 	}
 
@@ -2628,14 +2651,14 @@ func (h *InitializationHandler) FabriText(c *gin.Context) {
 	chatModel, err := h.modelService.GetChatModel(ctx, req.ModelID)
 	if err != nil {
 		logger.Error(ctx, "获取模型失败", err)
-		c.Error(errors.NewBadRequestError("获取模型失败: " + err.Error()))
+		c.Error(errors.NewBadRequestError("获取模型失败"))
 		return
 	}
 
 	result, err := h.fabriText(ctx, req.Tags, chatModel)
 	if err != nil {
 		logger.Error(ctx, "failed to generate fabri text", err)
-		c.Error(errors.NewInternalServerError("failed to generate fabri text: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to generate fabri text: "))
 		return
 	}
 

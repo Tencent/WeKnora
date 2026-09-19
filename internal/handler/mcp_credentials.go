@@ -74,7 +74,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 
 	var req mcpCredentialsPutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *MCPCredentialsHandler) Put(c *gin.Context) {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
 			"service_id": secutils.SanitizeForLog(serviceID),
 		})
-		c.Error(errors.NewInternalServerError("failed to update credentials: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to update credentials"))
 		return
 	}
 
@@ -148,7 +148,7 @@ func (h *MCPCredentialsHandler) DeleteField(c *gin.Context) {
 			"service_id": secutils.SanitizeForLog(serviceID),
 			"field":      field,
 		})
-		c.Error(errors.NewInternalServerError("failed to clear credential: " + err.Error()))
+		c.Error(errors.NewInternalServerError("failed to clear credential"))
 		return
 	}
 	c.Status(http.StatusNoContent)

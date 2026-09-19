@@ -101,14 +101,15 @@ func readRequestBody(c *gin.Context) string {
 		return "[非文本类型，已跳过]"
 	}
 
-	// 完整读取body内容（不限制大小），因为需要完整重置给后续handler使用
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	// 使用 LimitReader 防止 OOM：仅读取用于日志的有限字节，再把原 body
+	// 拼回给后续 handler，避免截断请求体导致解析失败。
+	bodyBytes, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodySize+1))
 	if err != nil {
 		return "[读取请求体失败]"
 	}
 
-	// 重置request body，使用完整内容，确保后续handler能读取到完整数据
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	rest := c.Request.Body
+	c.Request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(bodyBytes), rest))
 
 	// 用于日志的body（限制大小）
 	var logBodyBytes []byte

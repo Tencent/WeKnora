@@ -161,7 +161,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 		}
 	}
 
-	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, kb.Name)
+	logger.Infof(ctx, "Creating knowledge base, ID: %s, tenant ID: %d, name: %s", kb.ID, kb.TenantID, secutils.SanitizeForLog(kb.Name))
 
 	if err := s.repo.CreateKnowledgeBase(ctx, kb); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -175,7 +175,7 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 			"name": kb.Name, "type": kb.Type,
 		})
 
-	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, kb.Name)
+	logger.Infof(ctx, "Knowledge base created successfully, ID: %s, name: %s", kb.ID, secutils.SanitizeForLog(kb.Name))
 	return kb, nil
 }
 
@@ -503,7 +503,7 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		return nil, errors.New("knowledge base ID cannot be empty")
 	}
 
-	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s", id, name)
+	logger.Infof(ctx, "Updating knowledge base, ID: %s, name: %s", id, secutils.SanitizeForLog(name))
 
 	// Get existing knowledge base
 	kb, err := s.repo.GetKnowledgeBaseByID(ctx, id)
@@ -585,7 +585,7 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		_ = requestKnowledgeBaseProfileRefresh(ctx, s.asynqClient, kb, false)
 	}
 
-	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
+	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, secutils.SanitizeForLog(kb.Name))
 	return kb, nil
 }
 

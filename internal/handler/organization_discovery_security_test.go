@@ -38,6 +38,7 @@ func TestInviteCandidatesRequireExactID(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
 		c.Params = gin.Params{{Key: "id", Value: "org"}}
+		c.Set(types.TenantIDContextKey.String(), uint64(42))
 		c.Request = httptest.NewRequest("GET", "/search", nil)
 		q := c.Request.URL.Query()
 		q.Set("q", query)

@@ -48,6 +48,13 @@ func (s *stubAuthTokenRepo) RevokeTokensByUserID(_ context.Context, userID strin
 	s.revokedUserIDs = append(s.revokedUserIDs, userID)
 	return nil
 }
+func (s *stubAuthTokenRepo) RevokeTokenByValue(_ context.Context, tokenValue string) (bool, error) {
+	if token, ok := s.tokens[tokenValue]; ok && !token.IsRevoked {
+		token.IsRevoked = true
+		return true, nil
+	}
+	return false, nil
+}
 
 type stubUserRepoForAuth struct {
 	users       map[string]*types.User

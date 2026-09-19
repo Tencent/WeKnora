@@ -351,7 +351,7 @@ func (r *knowledgeRepository) UpdateKnowledgeBatch(ctx context.Context, knowledg
 			knowledge.ErrorMessage = common.CleanInvalidUTF8(knowledge.ErrorMessage)
 		}
 	}
-	return r.db.Debug().WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
+	return r.db.WithContext(ctx).Omit(omitFieldsOnUpdate...).Save(knowledgeList).Error
 }
 
 // DeleteKnowledge deletes knowledge
@@ -369,7 +369,7 @@ func (r *knowledgeRepository) GetKnowledgeBatch(
 	ctx context.Context, tenantID uint64, ids []string,
 ) ([]*types.Knowledge, error) {
 	var knowledge []*types.Knowledge
-	if err := r.db.WithContext(ctx).Debug().
+	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id IN ?", tenantID, ids).
 		Find(&knowledge).Error; err != nil {
 		return nil, err

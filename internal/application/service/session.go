@@ -4,7 +4,10 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
@@ -58,7 +61,7 @@ func runtimeMayBypassAdminConsoleRead(
 // an Admin+ fallback that additionally permits reading tenant channel sessions
 // (API-key, IM, and embed) from the Web console. Non-admin callers must not
 // open channel-managed rows even when legacy empty user_id scope would match.
-// Write paths keep the strict scope and must not use this helper.
+// Write paths use denyChannelSessionWrite instead of this helper.
 func loadSessionForRead(
 	ctx context.Context,
 	repo interfaces.SessionRepository,
@@ -88,7 +91,7 @@ func loadSessionForRead(
 	}
 	s, e := repo.GetByID(ctx, tenantID, sessionID)
 	if e != nil {
-		return nil, err
+		return nil, e
 	}
 	imPlatform, _ := repo.GetIMPlatform(ctx, tenantID, sessionID)
 	if !types.SessionRequiresAdminConsoleRead(s, imPlatform) {
@@ -98,6 +101,37 @@ func loadSessionForRead(
 		s.IMPlatform = imPlatform
 	}
 	return s, nil
+}
+
+// denyChannelSessionWrite rejects mutations on channel-managed sessions
+// (IM / API-key / embed / skill-maintenance) for callers who are neither
+// Admin+ nor the owning runtime principal. Legacy empty user_id rows that
+// match applySessionUserScope would otherwise be writable by any Viewer.
+var errChannelSessionWriteForbidden = stderrors.New("channel session write forbidden")
+
+func denyChannelSessionWrite(
+	ctx context.Context,
+	repo interfaces.SessionRepository,
+	tenantID uint64,
+	session *types.Session,
+	callerUserID string,
+) error {
+	if session == nil {
+		return apperrors.ErrSessionNotFound
+	}
+	imPlatform, _ := repo.GetIMPlatform(ctx, tenantID, session.ID)
+	if types.SessionRequiresAdminConsoleRead(session, imPlatform) &&
+		!types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) &&
+		!runtimeMayBypassAdminConsoleRead(ctx, session, imPlatform) {
+		// Allow the legitimate owner to mutate their own session; the admin-
+		// console guard is meant to stop a leaked session id from being
+		// abused by a stranger, not to lock the owner out of their own data.
+		if session.UserID != "" && session.UserID == callerUserID {
+			return nil
+		}
+		return errChannelSessionWriteForbidden
+	}
+	return nil
 }
 
 // generateEventID generates a unique event ID with type suffix for better traceability
@@ -410,6 +444,22 @@ func (s *sessionService) SetSessionPinned(
 	}
 	tenantID := types.MustTenantIDFromContext(ctx)
 	userID := sessionUserIDFromContext(ctx)
+	session, err := s.sessionRepo.Get(ctx, tenantID, userID, sessionID)
+	if err != nil {
+		if stderrors.Is(err, apperrors.ErrSessionNotFound) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	if err := denyChannelSessionWrite(ctx, s.sessionRepo, tenantID, session, userID); err != nil {
+		if stderrors.Is(err, apperrors.ErrSessionNotFound) {
+			return 0, nil
+		}
+		if stderrors.Is(err, errChannelSessionWriteForbidden) {
+			return 0, nil
+		}
+		return 0, err
+	}
 	return s.sessionRepo.SetPinned(ctx, tenantID, userID, sessionID, pinned)
 }
 
@@ -425,6 +475,12 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 	userID := sessionUserIDFromContext(ctx)
 	existing, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID)
 	if err != nil {
+		return err
+	}
+	if err := denyChannelSessionWrite(ctx, s.sessionRepo, session.TenantID, existing, userID); err != nil {
+		if stderrors.Is(err, errChannelSessionWriteForbidden) {
+			return nil
+		}
 		return err
 	}
 	if existing != nil {
@@ -458,6 +514,25 @@ func (s *sessionService) UpdateSessionLastRequestState(
 	}
 	tenantID := types.MustTenantIDFromContext(ctx)
 	userID := sessionUserIDFromContext(ctx)
+	session, err := s.sessionRepo.Get(ctx, tenantID, userID, sessionID)
+	if err != nil {
+		if stderrors.Is(err, apperrors.ErrSessionNotFound) {
+			logger.Warnf(ctx, "UpdateSessionLastRequestState: session %s not found", sessionID)
+			return nil
+		}
+		return err
+	}
+	if err := denyChannelSessionWrite(ctx, s.sessionRepo, tenantID, session, userID); err != nil {
+		if stderrors.Is(err, apperrors.ErrSessionNotFound) {
+			logger.Warnf(ctx, "UpdateSessionLastRequestState: session %s not found", sessionID)
+			return nil
+		}
+		if stderrors.Is(err, errChannelSessionWriteForbidden) {
+			logger.Warnf(ctx, "UpdateSessionLastRequestState: channel session write forbidden for %s", sessionID)
+			return nil
+		}
+		return err
+	}
 	affected, err := s.sessionRepo.UpdateLastRequestState(ctx, tenantID, userID, sessionID, state)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -488,22 +563,31 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := denyChannelSessionWrite(ctx, s.sessionRepo, tenantID, session, userID); err != nil {
+		if stderrors.Is(err, errChannelSessionWriteForbidden) {
+			return nil
+		}
+		return err
+	}
 
 	// Cleanup chat history knowledge entries for this session (async, best-effort).
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
-	bgCtx := context.WithoutCancel(ctx)
-	go func() {
-		knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, id)
-		if err != nil {
-			logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", id, err)
-			return
-		}
-		if len(knowledgeIDs) > 0 {
-			if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
-				logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", id, err)
+	if s.messageRepo != nil {
+		bgCtx, cancelCtx := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		defer cancelCtx()
+		go func() {
+			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, id)
+			if err != nil {
+				logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", id, err)
+				return
 			}
-		}
-	}()
+			if len(knowledgeIDs) > 0 {
+				if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
+					logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", id, err)
+				}
+			}
+		}()
+	}
 
 	// NOTE: Skill-generated artifact blobs are intentionally NOT purged here.
 	// Their lifecycle mirrors messages, which are soft-deleted (deleted_at
@@ -515,8 +599,10 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// place to reclaim storage — not this soft-delete path.
 
 	// Cleanup temporary KB stored in Redis for this session
-	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
-		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
+	if s.webSearchStateRepo != nil {
+		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
+			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
+		}
 	}
 
 	if s.suggestionRepo != nil {
@@ -558,12 +644,17 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	visibleIDs := make([]string, 0, len(ids))
 	for _, id := range ids {
 		session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
-		if err == nil {
-			visible = append(visible, session)
-			visibleIDs = append(visibleIDs, id)
-		} else if !stderrors.Is(err, apperrors.ErrSessionNotFound) {
-			return err
+		if err != nil {
+			if !stderrors.Is(err, apperrors.ErrSessionNotFound) {
+				return err
+			}
+			continue
 		}
+		if err := denyChannelSessionWrite(ctx, s.sessionRepo, tenantID, session, userID); err != nil {
+			continue
+		}
+		visible = append(visible, session)
+		visibleIDs = append(visibleIDs, id)
 	}
 	if len(visibleIDs) == 0 {
 		return apperrors.ErrSessionNotFound
@@ -571,23 +662,33 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 
 	// Cleanup associated resources for each session
 	bgCtx := context.WithoutCancel(ctx)
+	cleanupSem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	var cleanupWg sync.WaitGroup
 	for _, id := range visibleIDs {
 		// Cleanup chat history knowledge entries (async, best-effort)
-		go func(sessionID string) {
-			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
-			if err != nil {
-				logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
-				return
-			}
-			if len(knowledgeIDs) > 0 {
-				if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
-					logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
+		if s.messageRepo != nil {
+			cleanupWg.Add(1)
+			cleanupSem <- struct{}{}
+			go func(sessionID string) {
+				defer cleanupWg.Done()
+				defer func() { <-cleanupSem }()
+				knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
+				if err != nil {
+					logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
+					return
 				}
-			}
-		}(id)
+				if len(knowledgeIDs) > 0 {
+					if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
+						logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
+					}
+				}
+			}(id)
+		}
 
-		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
-			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
+		if s.webSearchStateRepo != nil {
+			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
+				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
+			}
 		}
 		// Artifact blobs are kept alongside soft-deleted messages — see
 		// DeleteSession for the rationale.
@@ -597,6 +698,9 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 	for _, id := range visibleIDs {
 		s.destroyBoundSandbox(ctx, id)
 	}
+
+	// Wait for async cleanup to finish before batch-deleting rows.
+	cleanupWg.Wait()
 
 	// Batch delete sessions from repository
 	if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, visibleIDs); err != nil {
@@ -624,14 +728,34 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 	userID := sessionUserIDFromContext(ctx)
 	logger.Infof(ctx, "Deleting all sessions for tenant %d", tenantID)
 
-	sessions, err := s.sessionRepo.GetByTenantID(ctx, tenantID, userID)
+	listed, err := s.sessionRepo.GetByTenantID(ctx, tenantID, userID)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to list sessions for cleanup: %v", err)
-	} else {
-		bgCtx := context.WithoutCancel(ctx)
-		for _, session := range sessions {
-			// Cleanup chat history knowledge entries (async, best-effort)
+		return err
+	}
+	sessions := make([]*types.Session, 0, len(listed))
+	writableIDs := make([]string, 0, len(listed))
+	for _, session := range listed {
+		if session == nil {
+			continue
+		}
+		if err := denyChannelSessionWrite(ctx, s.sessionRepo, tenantID, session, userID); err != nil {
+			continue
+		}
+		sessions = append(sessions, session)
+		writableIDs = append(writableIDs, session.ID)
+	}
+	bgCtx := context.WithoutCancel(ctx)
+	cleanupSem := make(chan struct{}, runtime.GOMAXPROCS(0))
+	var cleanupWg sync.WaitGroup
+	for _, session := range sessions {
+		// Cleanup chat history knowledge entries (async, best-effort)
+		if s.messageRepo != nil {
+			cleanupWg.Add(1)
+			cleanupSem <- struct{}{}
 			go func(sessionID string) {
+				defer cleanupWg.Done()
+				defer func() { <-cleanupSem }()
 				knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
 				if err != nil {
 					logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
@@ -643,29 +767,34 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 					}
 				}
 			}(session.ID)
+		}
 
+		if s.webSearchStateRepo != nil {
 			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
 			}
-			// Artifact blobs are kept alongside soft-deleted messages — see
-			// DeleteSession for the rationale.
 		}
+		// Artifact blobs are kept alongside soft-deleted messages — see
+		// DeleteSession for the rationale.
 	}
 
 	// Tear down sandboxes while session rows (and pins) are still readable.
-	if sessions != nil {
-		for _, session := range sessions {
-			s.destroyBoundSandbox(ctx, session.ID)
-		}
+	for _, session := range sessions {
+		s.destroyBoundSandbox(ctx, session.ID)
 	}
 
-	if _, err := s.sessionRepo.DeleteAllByTenantID(ctx, tenantID, userID); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": tenantID,
-		})
-		return err
+	// Wait for async cleanup to finish before batch-deleting rows.
+	cleanupWg.Wait()
+
+	if len(writableIDs) > 0 {
+		if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, writableIDs); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"tenant_id": tenantID,
+			})
+			return err
+		}
 	}
-	if s.suggestionRepo != nil && sessions != nil {
+	if s.suggestionRepo != nil {
 		for _, session := range sessions {
 			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", session.ID, err)

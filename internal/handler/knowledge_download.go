@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -21,12 +22,16 @@ import (
 )
 
 const (
-	maxBatchDownloadFiles             = 200
-	maxBatchDownloadBytes       int64 = 512 * 1024 * 1024
-	maxConcurrentBatchDownloads       = 4
+	maxBatchDownloadFiles                  = 200
+	maxBatchDownloadBytes            int64 = 512 * 1024 * 1024
+	maxConcurrentBatchDownloads            = 4
+	maxConcurrentBatchDownloadsPerTenant   = 2
 )
 
-var batchDownloadSlots = make(chan struct{}, maxConcurrentBatchDownloads)
+var (
+	batchDownloadSlots     = make(chan struct{}, maxConcurrentBatchDownloads)
+	batchDownloadTenantLocks sync.Map
+)
 
 // BatchDownloadKnowledgeRequest 指定同一知识库中需要下载的文档。
 type BatchDownloadKnowledgeRequest struct {
@@ -109,11 +114,11 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 		return
 	}
 
-	if !tryAcquireBatchDownloadSlot() {
+	if !tryAcquireBatchDownloadSlot(tenantID) {
 		_ = c.Error(errors.NewTooManyRequestsError("当前批量下载过多，请稍后重试"))
 		return
 	}
-	defer releaseBatchDownloadSlot()
+	defer releaseBatchDownloadSlot(tenantID)
 
 	// 先在临时文件中完整生成压缩包，避免读取失败时向用户返回残缺 ZIP。
 	archive, err := os.CreateTemp("", "weknora-download-*.zip")
@@ -148,7 +153,39 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 	}
 }
 
-func tryAcquireBatchDownloadSlot() bool {
+func tryAcquireBatchDownloadSlot(tenantID uint64) bool {
+	if !tryAcquireGlobalSlot() {
+		return false
+	}
+	tenantSlots, _ := batchDownloadTenantLocks.LoadOrStore(tenantID, &sync.Map{})
+	m, ok := tenantSlots.(*sync.Map)
+	if !ok {
+		releaseGlobalSlot()
+		return false
+	}
+	count := 0
+	m.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	if count >= maxConcurrentBatchDownloadsPerTenant {
+		releaseGlobalSlot()
+		return false
+	}
+	m.Store(struct{}{}, nil)
+	return true
+}
+
+func releaseBatchDownloadSlot(tenantID uint64) {
+	releaseGlobalSlot()
+	if tenantSlots, ok := batchDownloadTenantLocks.Load(tenantID); ok {
+		if m, ok := tenantSlots.(*sync.Map); ok {
+			m.Delete(struct{}{})
+		}
+	}
+}
+
+func tryAcquireGlobalSlot() bool {
 	select {
 	case batchDownloadSlots <- struct{}{}:
 		return true
@@ -157,7 +194,7 @@ func tryAcquireBatchDownloadSlot() bool {
 	}
 }
 
-func releaseBatchDownloadSlot() {
+func releaseGlobalSlot() {
 	<-batchDownloadSlots
 }
 
