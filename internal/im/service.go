@@ -68,6 +68,15 @@ const (
 	agentCompleteWaitTimeout = 10 * time.Second
 )
 
+// Process-local counters for IM stream delivery outcomes. They follow the
+// lightweight atomic pattern used by the QA queue (no new metrics stack).
+var (
+	imStreamFinalizeFail atomic.Int64
+	imStreamEndFail      atomic.Int64
+	imStreamFallbackOK   atomic.Int64
+	imStreamFallbackFail atomic.Int64
+)
+
 // imCitationTagRe matches inline citation tags produced by the agent pipeline.
 // These tags are rendered as interactive UI in the web frontend but are meaningless
 // in IM platforms, so they must be stripped before sending.
@@ -2045,33 +2054,17 @@ func (s *Service) handleMessageFullOutput(
 	outCtx := imOutboundContext(ctx)
 	finalContent := formatIMOutboundAnswerOrFallback(outCtx, answer, tenant, s.defaultFileSvc, s.storageResolver)
 
-	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalContent)
-	if finalizeErr != nil {
-		logger.Warnf(ctx, "[IM] FinalizeStream failed for full output: %v", finalizeErr)
-	}
-	endErr := streamer.EndStream(outCtx, msg, streamID)
-	if endErr != nil {
-		logger.Warnf(ctx, "[IM] EndStream failed for full output: %v", endErr)
-	}
-
-	// If the placeholder could not be replaced, send a plain final reply so the
-	// user still receives the answer instead of being left on "thinking".
-	var fallbackErr error
-	if finalizeErr != nil {
-		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
-		if fallbackErr != nil {
-			logger.Errorf(ctx, "[IM] Plain reply fallback after full-output finalize failure failed: %v", fallbackErr)
-		}
-	}
-
-	if finalizeErr == nil || fallbackErr == nil {
+	finalizeErr, endErr, fallbackErr := s.deliverIMStreamFinal(
+		ctx, outCtx, msg, streamer, adapter, streamID, finalContent, " for full output",
+	)
+	if imStreamDelivered(finalizeErr, fallbackErr) {
 		logger.Infof(
 			ctx, "[IM] Full-output reply sent: platform=%s user=%s answer_len=%d",
 			msg.Platform, msg.UserID, len(answer),
 		)
 		return nil
 	}
-	return errors.Join(finalizeErr, endErr, fallbackErr)
+	return imStreamDeliveryErr(finalizeErr, endErr, fallbackErr)
 }
 
 // handleCommand executes a slash-command and sends the result back to the user.
@@ -2820,6 +2813,7 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 	ticker := time.NewTicker(streamFlushInterval)
 	defer ticker.Stop()
 
+	flushFailCount := 0
 	flush := func() {
 		bufMu.Lock()
 		parts := getStreamParts()
@@ -2837,7 +2831,12 @@ func (s *Service) handleMessageStream(ctx context.Context, msg *IncomingMessage,
 
 		display := cleanIMContent(ctx, displaySource, tenant, s.defaultFileSvc, s.storageResolver)
 		if err := streamer.UpdateStreamContent(ctx, msg, streamID, display); err != nil {
-			logger.Warnf(ctx, "[IM] UpdateStreamContent failed: %v", err)
+			flushFailCount++
+			if flushFailCount == 1 || flushFailCount%50 == 0 {
+				logger.Warnf(ctx, "[IM] UpdateStreamContent failed (%d consecutive): %v", flushFailCount, err)
+			}
+		} else {
+			flushFailCount = 0
 		}
 	}
 
@@ -2891,26 +2890,9 @@ loop:
 		answer = appendIMAuthNotice(answer, notice)
 	}
 
-	finalizeErr := streamer.FinalizeStream(outCtx, msg, streamID, finalDisplay)
-	if finalizeErr != nil {
-		logger.Warnf(ctx, "[IM] FinalizeStream failed: %v", finalizeErr)
-	}
-
-	// End the stream
-	endErr := streamer.EndStream(outCtx, msg, streamID)
-	if endErr != nil {
-		logger.Warnf(ctx, "[IM] EndStream failed: %v", endErr)
-	}
-
-	// Match full-output delivery: a failed card replacement must not strand the
-	// answer in the database while the user only sees intermediate progress.
-	var fallbackErr error
-	if finalizeErr != nil {
-		fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalDisplay, IsFinal: true})
-		if fallbackErr != nil {
-			logger.Errorf(ctx, "[IM] Plain reply fallback after stream finalize failure failed: %v", fallbackErr)
-		}
-	}
+	finalizeErr, endErr, fallbackErr := s.deliverIMStreamFinal(
+		ctx, outCtx, msg, streamer, adapter, streamID, finalDisplay, "",
+	)
 
 	if answer == "" {
 		answer = imNoAnswerFallback
@@ -2922,11 +2904,77 @@ loop:
 		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
 	}
 
-	if finalizeErr != nil && fallbackErr != nil {
-		return errors.Join(finalizeErr, endErr, fallbackErr)
+	if !imStreamDelivered(finalizeErr, fallbackErr) {
+		return imStreamDeliveryErr(finalizeErr, endErr, fallbackErr)
 	}
 	logger.Infof(ctx, "[IM] Stream reply sent: platform=%s user=%s answer_len=%d", msg.Platform, msg.UserID, len(answer))
-	return endErr
+	if finalizeErr == nil {
+		// Finalize replaced the placeholder; surface EndStream failures without
+		// a duplicate plain reply.
+		return endErr
+	}
+	return nil
+}
+
+// deliverIMStreamFinal replaces the platform stream with finalContent and closes
+// it. When FinalizeStream fails because the stream channel expired (e.g. WeCom
+// errcode 846608), the same content is sent once via SendReply so the answer is
+// not stranded in the database. EndStream is still attempted so adapters can
+// release local state, but an EndStream error after a successful FinalizeStream
+// does not re-send: the placeholder already shows the final answer.
+func (s *Service) deliverIMStreamFinal(
+	ctx context.Context,
+	outCtx context.Context,
+	msg *IncomingMessage,
+	streamer StreamSender,
+	adapter Adapter,
+	streamID string,
+	finalContent string,
+	scope string,
+) (finalizeErr, endErr, fallbackErr error) {
+	finalizeErr = streamer.FinalizeStream(outCtx, msg, streamID, finalContent)
+	if finalizeErr != nil {
+		imStreamFinalizeFail.Add(1)
+		logger.Errorf(ctx, "[IM] FinalizeStream failed%s (degrading to plain reply): %v", scope, finalizeErr)
+	}
+
+	endErr = streamer.EndStream(outCtx, msg, streamID)
+	if endErr != nil {
+		imStreamEndFail.Add(1)
+		logger.Errorf(ctx, "[IM] EndStream failed%s: %v", scope, endErr)
+	}
+
+	if finalizeErr == nil {
+		return finalizeErr, endErr, nil
+	}
+
+	if adapter == nil {
+		fallbackErr = fmt.Errorf("no adapter for non-stream fallback")
+		imStreamFallbackFail.Add(1)
+		logger.Errorf(ctx, "[IM] Plain reply fallback after stream finalize failure failed%s: %v", scope, fallbackErr)
+		return finalizeErr, endErr, fallbackErr
+	}
+
+	fallbackErr = adapter.SendReply(outCtx, msg, &ReplyMessage{Content: finalContent, IsFinal: true})
+	if fallbackErr != nil {
+		imStreamFallbackFail.Add(1)
+		logger.Errorf(ctx, "[IM] Plain reply fallback after stream finalize failure failed%s: %v", scope, fallbackErr)
+		return finalizeErr, endErr, fallbackErr
+	}
+	imStreamFallbackOK.Add(1)
+	logger.Infof(ctx, "[IM] Delivered final answer via non-stream fallback after FinalizeStream failure%s", scope)
+	return finalizeErr, endErr, nil
+}
+
+func imStreamDelivered(finalizeErr, fallbackErr error) bool {
+	return finalizeErr == nil || fallbackErr == nil
+}
+
+func imStreamDeliveryErr(finalizeErr, endErr, fallbackErr error) error {
+	if imStreamDelivered(finalizeErr, fallbackErr) {
+		return nil
+	}
+	return errors.Join(finalizeErr, endErr, fallbackErr)
 }
 
 // fallbackNonStream is used when streaming initialization fails.
