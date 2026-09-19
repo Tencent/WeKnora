@@ -1,5 +1,9 @@
 import i18n from '@/i18n';
-import { buildMermaidBlockHtml, buildMermaidLoadingHtml } from '@/utils/markdownEnhancements';
+import {
+  buildMermaidBlockHtml,
+  buildMermaidLoadingHtml,
+  buildMermaidErrorFragment,
+} from '@/utils/markdownEnhancements';
 import {
   injectCachedMermaidSvg as injectCachedMermaidSvgHtml,
   maskMermaidBlocksForStreaming as maskMermaidBlocks,
@@ -63,7 +67,7 @@ export const injectCachedMermaidSvg = (
   html: string,
   cachedSvgHtml: CachedMermaidSvgHtml,
 ): string => {
-  return injectCachedMermaidSvgHtml(html, cachedSvgHtml, buildMermaidBlockHtml);
+  return injectCachedMermaidSvgHtml(html, cachedSvgHtml, buildMermaidBlockHtml, buildMermaidErrorFragment);
 };
 
 export const formatManualTitle = (question?: string): string => {

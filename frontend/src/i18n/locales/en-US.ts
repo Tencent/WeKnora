@@ -6478,7 +6478,9 @@ export default {
     reset: 'Reset',
     download: 'Download Image',
     close: 'Close',
-    downloading: 'Downloading...'
+    downloading: 'Downloading...',
+    renderError: 'Diagram failed to render',
+    showSource: 'Show diagram source'
   },
   ollama: {
     unknown: 'Unknown',
