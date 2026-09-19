@@ -40,6 +40,13 @@ import (
 )
 
 func main() {
+	ctx := context.Background()
+	envErr := runtime.LoadEnvironment()
+	logger.ConfigureFromEnv()
+	if envErr != nil {
+		logger.Warnf(ctx, "[startup-env] failed to load environment file: %v", envErr)
+	}
+
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -51,7 +58,7 @@ func main() {
 	runtime.SilenceGinRouteSpam()
 	// Print the env banner before container build so operators see what
 	// config landed even when DB / storage init fails.
-	runtime.LogStartupEnv(context.Background())
+	runtime.LogStartupEnv(ctx)
 	runtime.MarkServerStarted()
 
 	// Build dependency injection container
