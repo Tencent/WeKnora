@@ -582,7 +582,11 @@ func registerChatLocalImageResolver(
 	resourceCatalog interfaces.ResourceCatalog,
 ) {
 	chat.LocalImageResolver = func(storageURL string) ([]byte, bool) {
-		ctx := context.Background()
+		// The object storage clients bound connection setup but leave the
+		// transfer to this context, so give it a deadline: a chat turn must
+		// not hang on one image whose download stalls.
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
 		physicalPath, resource, err := resourceCatalog.ResolvePath(ctx, storageURL)
 		if err != nil {
 			return nil, false

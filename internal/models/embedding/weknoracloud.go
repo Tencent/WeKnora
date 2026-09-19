@@ -32,7 +32,7 @@ type WeKnoraCloudEmbedder struct {
 }
 
 // NewWeKnoraCloudEmbedder 构造 WeKnoraCloudEmbedder
-func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
+func NewWeKnoraCloudEmbedder(config Config, pooler EmbedderPooler) (*WeKnoraCloudEmbedder, error) {
 	if config.AppID == "" {
 		return nil, fmt.Errorf("WeKnoraCloud embedder: AppID is required")
 	}
@@ -60,6 +60,7 @@ func NewWeKnoraCloudEmbedder(config Config) (*WeKnoraCloudEmbedder, error) {
 		dimensions:                config.Dimensions,
 		supportsDimensionOverride: config.SupportsDimensionOverride,
 		client:                    newEmbeddingHTTPClient(60 * time.Second),
+		EmbedderPooler:            pooler,
 	}, nil
 }
 
@@ -151,10 +152,6 @@ func (e *WeKnoraCloudEmbedder) BatchEmbed(ctx context.Context, texts []string) (
 		}
 	}
 	return result, nil
-}
-
-func (e *WeKnoraCloudEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, texts []string) ([][]float32, error) {
-	return e.BatchEmbed(ctx, texts)
 }
 
 func (e *WeKnoraCloudEmbedder) SetSupportsDimensionOverride(supported bool) {

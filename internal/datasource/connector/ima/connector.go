@@ -362,34 +362,21 @@ func listAllKBFiles(
 				return nil, nil, err
 			}
 			for _, raw := range resp.KnowledgeList {
-				// Probe each entry: an entry with a non-empty folder_id is a
-				// folder; otherwise it's a knowledge item (file / note / etc.).
-				var probe struct {
-					FolderID string `json:"folder_id"`
-					MediaID  string `json:"media_id"`
-				}
-				_ = json.Unmarshal(raw, &probe)
-
-				if probe.FolderID != "" && probe.MediaID == "" {
-					var fi folderInfo
-					if err := json.Unmarshal(raw, &fi); err != nil {
-						continue
-					}
-					child := cur.path
-					if child == "" {
-						child = fi.Name
-					} else {
-						child = cur.path + "/" + fi.Name
-					}
-					folderPath[fi.FolderID] = child
-					stack = append(stack, todo{folderID: fi.FolderID, path: child})
-					continue
-				}
-				if probe.MediaID == "" {
+				var ki knowledgeInfo
+				if err := json.Unmarshal(raw, &ki); err != nil || ki.MediaID == "" {
 					continue // unrecognized shape, skip defensively
 				}
-				var ki knowledgeInfo
-				if err := json.Unmarshal(raw, &ki); err != nil {
+				if ki.MediaType == mediaTypeFolder {
+					// List entries identify folders by media_type. Their full
+					// media_id (including the folder_ prefix) is the recursion key.
+					child := cur.path
+					if child == "" {
+						child = ki.Title
+					} else {
+						child = cur.path + "/" + ki.Title
+					}
+					folderPath[ki.MediaID] = child
+					stack = append(stack, todo{folderID: ki.MediaID, path: child})
 					continue
 				}
 				out = append(out, walkedFile{

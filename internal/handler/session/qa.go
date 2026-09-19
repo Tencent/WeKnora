@@ -65,6 +65,7 @@ type qaRequestContext struct {
 	attachmentIDs         []string                 // Pre-uploaded session-scoped document IDs, resolved after SSE starts
 	attachmentMetas       types.MessageAttachments // Metadata-only view of attachmentIDs for the persisted user message
 	suggestionAttribution *types.SuggestionAttribution
+	questionOrigin        *types.QuestionOrigin
 	// resourceRewriter turns internal storage references in the outbound stream
 	// into directly loadable URLs when the caller asks for `resource_urls=public`.
 	// Disabled (a pass-through) in the default handle mode.
@@ -115,6 +116,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		WebSearchEnabled:    rc.webSearchEnabled,
 		LocalBrowserEnabled: rc.localBrowserEnabled,
 		Attachments:         rc.attachments,
+		QuestionOrigin:      rc.questionOrigin,
 	}
 	if rc.steerSink != nil {
 		req.SteerSink = rc.steerSink
@@ -215,6 +217,14 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			effectiveTenantID = scopedTenantID
 			sharedAgentReadOnly = false
 		}
+	}
+
+	// A per-request model override resolves in the workspace the run executes
+	// in. For a shared agent, or the wiki fixer moved into a shared KB's
+	// workspace, that is the owner's, where it could select any of the owner's
+	// models; it would also be stored as the message's model for follow-ups.
+	if effectiveTenantID != 0 && effectiveTenantID != c.GetUint64(types.TenantIDContextKey.String()) {
+		request.SummaryModelID = ""
 	}
 
 	if request.LocalBrowserEnabled && (customAgent == nil || !customAgent.IsAgentMode()) {
@@ -420,6 +430,7 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		attachmentIDs:         attachmentIDs,
 		attachmentMetas:       attachmentMetas,
 		suggestionAttribution: request.SuggestionAttribution,
+		questionOrigin:        request.QuestionOrigin,
 		reqAgentEnabled:       request.AgentEnabled,
 		reqAgentID:            request.AgentID,
 		resourceRewriter:      resourceRewriter,
@@ -545,7 +556,8 @@ func cloneTagScopes(scopes []types.TagScope) []types.TagScope {
 	return cloned
 }
 
-// resolveAgent resolves the custom agent by ID, trying shared agent first, then own agent.
+// resolveAgent resolves the custom agent by ID: the caller's own agent unless a
+// source workspace is given, otherwise (or when no own agent matches) a share.
 // Returns (nil, 0) if agentID is empty or not found.
 func (h *Handler) resolveAgent(
 	ctx context.Context,
@@ -559,44 +571,41 @@ func (h *Handler) resolveAgent(
 
 	logger.Infof(ctx, "Resolving agent, agent ID: %s", secutils.SanitizeForLog(agentID))
 
-	// Try shared agent first
-	var customAgent *types.CustomAgent
-	var effectiveTenantID uint64
-	var sharedAgentReadOnly bool
+	// Without a source workspace the ID names the caller's own agent first.
+	// Built-in IDs exist in every workspace, so trying shares first would let
+	// any org member that shares an agent under such an ID take over the
+	// caller's default agent (and run the caller's chats in its workspace).
+	// A rejected shared selector (sourceTenantID != 0) must likewise never
+	// fall back to a same-ID local agent.
+	var ownErr error
+	if sourceTenantID == 0 {
+		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
+		if err == nil && agent != nil {
+			logger.Infof(ctx, "Using own agent: ID=%s, Name=%s, AgentMode=%s",
+				agent.ID, agent.Name, agent.Config.AgentMode)
+			return agent, 0, false
+		}
+		ownErr = err
+	}
+
+	var shareErr error
 	userIDVal, _ := c.Get(types.UserIDContextKey.String())
 	currentTenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if h.agentShareService != nil && userIDVal != nil && currentTenantID != 0 {
 		callerTenantRole := types.TenantRoleFromContext(ctx)
-		var agent *types.CustomAgent
-		var err error
-		agent, err = h.agentShareService.GetSharedAgentForTenant(ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
+		agent, err := h.agentShareService.GetSharedAgentForTenant(
+			ctx, currentTenantID, callerTenantRole, agentID, sourceTenantID)
 		if err == nil && agent != nil {
-			effectiveTenantID = agent.TenantID
-			customAgent = agent
-			sharedAgentReadOnly = true
-			logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, effectiveTenantID=%d (retrieval scope)",
-				customAgent.ID, customAgent.Name, effectiveTenantID)
+			logger.Infof(ctx, "Using shared agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
+				agent.ID, agent.Name, agent.IsBuiltin, agent.Config.AgentMode, agent.TenantID)
+			return agent, agent.TenantID, true
 		}
+		shareErr = err
 	}
 
-	// Fall back to an own agent only when no source workspace was requested.
-	// A rejected shared selector must not silently run a same-ID local builtin.
-	if customAgent == nil && sourceTenantID == 0 {
-		agent, err := h.customAgentService.GetAgentByID(ctx, agentID)
-		if err == nil {
-			customAgent = agent
-			logger.Infof(ctx, "Using own agent: ID=%s, Name=%s, AgentMode=%s",
-				customAgent.ID, customAgent.Name, customAgent.Config.AgentMode)
-		} else {
-			logger.Warnf(ctx, "Failed to get custom agent, agent ID: %s, error: %v, using default config",
-				secutils.SanitizeForLog(agentID), err)
-		}
-	} else if customAgent != nil {
-		logger.Infof(ctx, "Using custom agent: ID=%s, Name=%s, IsBuiltin=%v, AgentMode=%s, effectiveTenantID=%d",
-			customAgent.ID, customAgent.Name, customAgent.IsBuiltin, customAgent.Config.AgentMode, effectiveTenantID)
-	}
-
-	return customAgent, effectiveTenantID, sharedAgentReadOnly
+	logger.Warnf(ctx, "Failed to get agent, agent ID: %s, source tenant: %d, own error: %v, share error: %v, "+
+		"using default config", secutils.SanitizeForLog(agentID), sourceTenantID, ownErr, shareErr)
+	return nil, 0, false
 }
 
 // mergeKnowledgeTargets merges request KB/knowledge IDs with @mentioned items into deduplicated slices.
@@ -1694,6 +1703,27 @@ func (h *Handler) completeQuickAnswerTurn(
 	h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
 }
 
+// sessionTenantInfoContext makes the tenant info match the session owner (the
+// context's tenant here). The chat history KB is read from the tenant info,
+// and a shared agent's run carries the agent workspace's: the receiver's
+// conversation would be indexed into the owner's chat history KB. When the
+// session tenant cannot be loaded the message is not indexed at all.
+func (h *Handler) sessionTenantInfoContext(ctx context.Context) (context.Context, bool) {
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	if info, ok := types.TenantInfoFromContext(ctx); ok && info != nil && info.ID == tenantID {
+		return ctx, true
+	}
+	if tenantID == 0 || h.tenantService == nil {
+		return ctx, false
+	}
+	tenant, err := h.tenantService.GetTenantByID(ctx, tenantID)
+	if err != nil || tenant == nil {
+		logger.Warnf(ctx, "Skipping chat history index: session tenant %d unavailable: %v", tenantID, err)
+		return ctx, false
+	}
+	return context.WithValue(ctx, types.TenantInfoContextKey, tenant), true
+}
+
 // completeAssistantMessage marks an assistant message as complete, updates it,
 // and asynchronously indexes the Q&A pair into the chat history knowledge base.
 func (h *Handler) completeAssistantMessage(
@@ -1706,7 +1736,10 @@ func (h *Handler) completeAssistantMessage(
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
 	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
 	bgCtx := context.WithoutCancel(ctx)
-	go h.messageService.IndexMessageToKB(bgCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+	if indexCtx, ok := h.sessionTenantInfoContext(bgCtx); ok {
+		go h.messageService.IndexMessageToKB(
+			indexCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
+	}
 	if userQuery != "" && h.suggestionService != nil {
 		go func() {
 			if _, err := h.suggestionService.EnsureFollowUps(

@@ -109,6 +109,14 @@ func RegisterSessionRoutes(
 		sessions.GET("/:id/messages/:message_id/artifacts", handler.ListMessageArtifacts)
 		sessions.GET("/:id/messages/:message_id/artifacts/:index/download", handler.DownloadMessageArtifact)
 	}
+
+	// Cross-session artifact library. Same guards as /sessions: the rows come
+	// from the caller's own sessions, and downloads go back through the
+	// per-session endpoint above.
+	artifacts := g.apiKeyGroup(r.Group("/artifacts", g.Viewer()), apiKeyChat(apiKeyFullAccess()))
+	{
+		artifacts.GET("", handler.ListArtifactLibrary)
+	}
 }
 
 // RegisterChatRoutes 注册路由。Chat endpoints are tenant-member usage

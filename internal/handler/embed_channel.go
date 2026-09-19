@@ -697,7 +697,24 @@ func patchEmbedChatPayload(body io.Reader, ch *types.EmbedChannel, agentMode boo
 		payload = make(map[string]any)
 	}
 	payload["agent_id"] = ch.AgentID
+	// The channel's agent belongs to the channel's workspace; a visitor-supplied
+	// source workspace would switch it to another workspace's share of that ID.
+	delete(payload, types.AgentSourceTenantIDParam)
 	payload["knowledge_base_ids"] = []string{}
+	// Visitors are anonymous and run as Viewer of the whole channel workspace.
+	// Explicit targets (documents, tags, @mentions) and a model override are
+	// only honored within an agent's scope for shared agents, so for a
+	// channel's own agent they would reach any KB or model of the workspace by
+	// ID. A question origin selects a KB like an @mention for agents that
+	// retrieve only when mentioned. The widget never sends any of them;
+	// retrieval follows the channel agent. (suggestion_attribution is sent,
+	// and is validated against the session's recorded suggestions.)
+	payload["knowledge_ids"] = []string{}
+	payload["tag_ids"] = []string{}
+	payload["mentioned_items"] = []any{}
+	payload["skill_names"] = []string{}
+	delete(payload, "summary_model_id")
+	delete(payload, "question_origin")
 	clientWebSearch := false
 	if v, ok := payload["web_search_enabled"].(bool); ok {
 		clientWebSearch = v

@@ -888,7 +888,7 @@ definitions:
           this factor
         type: number
       history_turns:
-        description: Number of history turns to keep in context
+        description: Number of history turns to keep in context. Quick-answer only; smart-reasoning sizes history by context window
         type: integer
       image_storage_provider:
         description: |-
@@ -2930,6 +2930,13 @@ definitions:
           10)'
         type: integer
     type: object
+  github_com_Tencent_WeKnora_internal_types.QuestionOrigin:
+    properties:
+      knowledge_base_id:
+        type: string
+      knowledge_id:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.QuestionSuggestionConfig:
     properties:
       follow_ups:
@@ -4079,6 +4086,13 @@ definitions:
         type: integer
       completion_tokens:
         type: integer
+      context_token_scale:
+        description: |-
+          ContextTokenScale is provider prompt tokens per cl100k-estimated token,
+          measured over the turn's rounds. Persisted with the turn so the next
+          turn's history loading and first compaction check are calibrated before
+          any provider count of their own. Zero when the turn measured none.
+        type: number
       prompt_tokens:
         type: integer
       total_tokens:
@@ -6423,6 +6437,11 @@ definitions:
       query:
         description: Query text for knowledge base search
         type: string
+      question_origin:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.QuestionOrigin'
+        description: QuestionOrigin is the knowledge source of a picked suggested
+          question.
       skill_names:
         description: Per-request Skills selected via @mention
         items:

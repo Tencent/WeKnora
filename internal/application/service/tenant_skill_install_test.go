@@ -748,9 +748,10 @@ func TestInstallSkillRecoversFromNameConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "sk-1", id,
 		"the upload that lost the unique index must reuse the row that won")
-	skill, getErr := fx.skillRepo.GetSkill(context.Background(), 7, "cfg-1", "sk-1")
-	require.NoError(t, getErr)
-	require.Equal(t, types.SkillStatusInstalling, skill.Status)
+	// The install runs in the background and the fixture row already starts at
+	// installing, so an immediate status read raced the goroutine and proved
+	// nothing. The run finishing on the reused row is what shows it was taken.
+	waitBackgroundInstallReady(t, fx, "the install must run on the row that won")
 }
 
 func TestInstallSkillRefusesWhenBundleCannotBeStored(t *testing.T) {
@@ -3206,8 +3207,9 @@ func (e *installAgentEngine) Execute(
 	}
 	return &types.AgentState{IsComplete: true}, nil
 }
-func (e *installAgentEngine) SetMemoryPrompt(string)            {}
-func (e *installAgentEngine) SetSteerSink(sink types.SteerSink) { e.sink = sink }
+func (e *installAgentEngine) SetMemoryPrompt(string)                               {}
+func (e *installAgentEngine) SetSteerSink(sink types.SteerSink)                    { e.sink = sink }
+func (e *installAgentEngine) SetContextCheckpointSink(types.ContextCheckpointSink) {}
 
 type installSessionService struct {
 	fx *installFixture

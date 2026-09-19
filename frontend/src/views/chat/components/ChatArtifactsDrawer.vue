@@ -462,23 +462,23 @@ onUnmounted(() => {
 
 .artifact-drawer-header-icon {
     flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--app-radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
     background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color);
-    font-size: var(--app-text-xl);
+    font-size: var(--app-text-lg);
 }
 
 .artifact-drawer-header-title {
     min-width: 0;
     flex: 1;
-    font-size: var(--app-text-lg);
-    font-weight: 600;
-    line-height: 1.4;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    line-height: 20px;
     color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -628,8 +628,18 @@ onUnmounted(() => {
 <style lang="less">
 .chat-artifacts-drawer.t-drawer {
     .t-drawer__header {
-        padding: 16px 20px;
+        height: var(--app-chat-header-height);
+        min-height: var(--app-chat-header-height);
+        padding: 0 12px;
+        border-bottom: 1px solid var(--td-component-stroke);
+        flex-shrink: 0;
         font-weight: normal;
+    }
+
+    .t-drawer__close-btn {
+        top: calc((var(--app-chat-header-height) - 28px) / 2);
+        width: 28px;
+        height: 28px;
     }
 
     .t-drawer__body {
@@ -641,12 +651,6 @@ onUnmounted(() => {
     .t-drawer__content-wrapper,
     .t-drawer__content {
         height: 100%;
-    }
-
-    .t-drawer__header {
-        padding: 14px 18px;
-        border-bottom: 1px solid var(--td-component-stroke);
-        flex-shrink: 0;
     }
 
     .t-drawer__body {

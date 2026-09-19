@@ -104,6 +104,12 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 		snapshotID, serving, known := s.skillFilesInLiveImage(ctx, row)
 		switch row.Status {
 		case types.SkillStatusInstalling:
+			if row.Served != nil {
+				if s.reapStuckUpgrade(ctx, row, snapshotID, serving, known) {
+					reaped++
+				}
+				continue
+			}
 			// An unreadable config or ledger must not be treated as a failed
 			// install: the image may still be serving this skill.
 			if serving || !known {
@@ -144,8 +150,12 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 				continue
 			}
 			if serving {
+				// A row whose upgrade never landed goes back to the version
+				// the image has, exactly as a failed removal restores it.
+				abandoned := ""
 				if err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
 					func(e *types.TenantSkillEntity) {
+						abandoned = restoreServedVersion(e)
 						e.Status = types.SkillStatusReady
 						e.Error = ""
 						e.InstallingSince = nil
@@ -156,10 +166,11 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 					logger.Warnf(ctx, "[skill] restore abandoned removal %s failed: %v", row.ID, err)
 					continue
 				}
+				s.releaseInstallBundle(ctx, row.TenantID, abandoned)
 				reaped++
 				continue
 			}
-			pinned := strings.TrimSpace(row.BundleRef)
+			pinned := installBundleRefs(row)
 			if err := s.skills.DeleteSkill(ctx, row.TenantID, row.SandboxConfigID, row.ID); err != nil {
 				logger.Warnf(ctx, "[skill] drop abandoned removal %s failed: %v", row.ID, err)
 				continue
@@ -167,7 +178,9 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 			// The row was the last thing naming an archive it owned outright,
 			// so the sweep that drops it is what makes those bytes reachable
 			// by nothing. A definition's own object has other names and stays.
-			s.releaseInstallBundle(ctx, row.TenantID, pinned)
+			for _, ref := range pinned {
+				s.releaseInstallBundle(ctx, row.TenantID, ref)
+			}
 			reaped++
 		}
 	}
@@ -175,6 +188,59 @@ func (s *TenantSkillService) ReapStuckRuns(ctx context.Context) (int, error) {
 		logger.Infof(ctx, "[skill] reaped %d stuck install/remove run(s)", reaped)
 	}
 	return reaped, nil
+}
+
+// reapStuckUpgrade settles an install that died while a previous version was
+// being served. That version keeps the skill available for as long as the row
+// stays installing, so nothing here is urgent enough to guess: a chain the
+// reaper cannot read is left for the next sweep.
+//
+// The nearest install generation of this skill on the live chain says what
+// happened. The served version's own generation means the pointer never moved,
+// so the row goes back to that version. A newer one means the upgrade landed and
+// only its terminal write was lost, so the row is ready as it stands. None means
+// the image carries nothing of the skill, and there is nothing left to serve.
+func (s *TenantSkillService) reapStuckUpgrade(
+	ctx context.Context, row *types.TenantSkillEntity, snapshotID string, serving, known bool,
+) bool {
+	if !known {
+		return false
+	}
+	var released []string
+	err := s.updateSkillFields(ctx, row.TenantID, row.SandboxConfigID, row.ID,
+		func(e *types.TenantSkillEntity) {
+			e.InstallingSince = nil
+			if e.Served == nil {
+				return
+			}
+			switch {
+			case serving && snapshotID != "" && snapshotID != e.Served.SnapshotID:
+				released = append(released, strings.TrimSpace(e.Served.BundleRef))
+				e.Served = nil
+				e.Status = types.SkillStatusReady
+				e.Error = ""
+				e.InstalledSnapshotID = snapshotID
+			case serving:
+				// The catalog still differs from the restored row, so the
+				// console offers the upgrade again.
+				released = append(released, restoreServedVersion(e))
+				e.Status = types.SkillStatusReady
+				e.Error = ""
+			default:
+				released = append(released, strings.TrimSpace(e.Served.BundleRef))
+				e.Served = nil
+				e.Status = types.SkillStatusFailed
+				e.Error = skillInstallInterruptedMessage
+			}
+		})
+	if err != nil {
+		logger.Warnf(ctx, "[skill] settle abandoned upgrade %s failed: %v", row.ID, err)
+		return false
+	}
+	for _, ref := range released {
+		s.releaseInstallBundle(ctx, row.TenantID, ref)
+	}
+	return true
 }
 
 // skillFilesInLiveImage reports whether the image every new session boots

@@ -115,7 +115,7 @@ func (s *TenantSkillService) InstallSkillFromSource(
 	if err != nil {
 		return "", err
 	}
-	return s.installParsedSkill(ctx, tenantID, configID, bundle, archive)
+	return s.installParsedSkill(ctx, tenantID, configID, bundle, archive, skillArchiveUploaded)
 }
 
 func skillSourceHTTPClient(override *http.Client) *http.Client {

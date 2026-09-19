@@ -22,6 +22,7 @@ import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
 import DocumentPreview from '@/components/document-preview.vue';
+import DocumentFileIcon from '@/views/knowledge/components/DocumentFileIcon.vue';
 import KnowledgeProcessingTimeline from '@/components/knowledge-processing-timeline.vue';
 import { resolveKnowledgeDownloadFileName } from '@/views/knowledge/knowledgeDownloadFileName';
 import { isKnownPreviewableExt, resolveFilePreviewExt } from '@/utils/filePreview';
@@ -192,15 +193,11 @@ const detailTags = computed(() => {
   return Array.isArray(tags) ? tags : [];
 });
 
-const headerIconName = computed(() => {
-  switch (props.details?.type) {
-    case 'url':
-      return 'link';
-    case 'manual':
-      return 'edit';
-    default:
-      return 'file';
-  }
+const headerIconFileName = computed(() => {
+  const detail = props.details;
+  return detail?.file_type
+    ? `document.${detail.file_type.toLowerCase()}`
+    : detail?.original_file_name || detail?.file_name || detail?.title || '';
 });
 
 const showSummarySection = computed(() =>
@@ -1584,7 +1581,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
       <template #header>
         <div class="doc-drawer-header">
           <div class="doc-drawer-header-icon">
-            <t-icon :name="headerIconName" />
+            <DocumentFileIcon :source-type="details.type" :file-name="headerIconFileName" />
           </div>
           <div class="doc-drawer-header-text">
             <div class="doc-drawer-header-title">{{ getDisplayTitle() }}</div>
@@ -2252,14 +2249,10 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 .doc-drawer-header-icon {
   flex-shrink: 0;
   width: 32px;
-  height: 32px;
-  border-radius: 9px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  color: var(--td-brand-color);
-  font-size: var(--app-text-xl);
 }
 
 .doc-drawer-header-text {

@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
 import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
+import type { SendMessageOptions } from '@/utils/questionOrigin';
 import { useSettingsStore } from '@/stores/settings';
 import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { useUIStore } from '@/stores/ui';
@@ -506,6 +507,10 @@ const sharedAgentOrgName = computed(() => {
 });
 
 const props = defineProps({
+  compact: {
+    type: Boolean,
+    default: false
+  },
   autoFocus: {
     type: Boolean,
     default: false
@@ -718,35 +723,6 @@ const modelDropdownStyle = ref<Record<string, string>>({});
 // 显示的知识库标签（最多显示2个）
 const displayedKbs = computed(() => selectedKbs.value.slice(0, 2));
 const remainingCount = computed(() => Math.max(0, selectedKbs.value.length - 2));
-
-// 根据不同状态组合计算输入框的 placeholder
-const inputPlaceholder = computed(() => {
-  // 如果选择了自定义智能体
-  if (isCustomAgent.value && selectedAgent.value) {
-    // 有描述时显示描述，否则显示"向 [名称] 提问"
-    if (selectedAgent.value.description) {
-      return selectedAgent.value.description;
-    }
-    return t('input.placeholderAgent', { name: selectedAgent.value.name });
-  }
-
-  const hasKnowledge = allSelectedItems.value.length > 0;
-  const hasWebSearch = isWebSearchEnabled.value && isWebSearchConfigured.value;
-
-  if (hasKnowledge && hasWebSearch) {
-    // 有知识库 + 有网络搜索
-    return t('input.placeholderKbAndWeb');
-  } else if (hasKnowledge) {
-    // 有知识库 + 无网络搜索
-    return t('input.placeholderWithContext');
-  } else if (hasWebSearch) {
-    // 无知识库 + 有网络搜索
-    return t('input.placeholderWebOnly');
-  } else {
-    // 无知识库 + 无网络搜索（纯模型对话）
-    return t('input.placeholder');
-  }
-});
 
 // 加载知识库列表（自己的 + 共享的，用于 @ 提及等）
 const loadKnowledgeBases = async (force = false) => {
@@ -1948,7 +1924,7 @@ watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
 }, { deep: true });
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[]): void;
+  (e: 'send-msg', query: string, modelId: string, mentionedItems: MentionRequestItem[], imageFiles: File[], attachmentFiles: AttachmentFile[], options: SendMessageOptions): void;
   (e: 'stop-generation'): void;
   (e: 'stop-confirmed'): void;
   (e: 'stop-failed'): void;
@@ -1960,7 +1936,13 @@ const emit = defineEmits<{
   (e: 'retry-steer', steerId: string): void;
 }>();
 
-const createSession = async (val: string, delivery: 'inject' | 'after' = 'after') => {
+// options ride along with this one send only: a send that returns early (or
+// steers into the running turn) drops them instead of leaving them behind.
+const createSession = async (
+  val: string,
+  delivery: 'inject' | 'after' = 'after',
+  options: SendMessageOptions = {},
+) => {
   if (!val.trim()) {
     MessagePlugin.info(t('input.messages.enterContent'));
     return;
@@ -2017,7 +1999,7 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
 
   // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
   if (props.embeddedMode) {
-    emit('send-msg', val, selectedModelId.value || '', [], [], []);
+    emit('send-msg', val, selectedModelId.value || '', [], [], [], options);
     clearvalue();
     void focusInput();
     return;
@@ -2080,7 +2062,7 @@ const createSession = async (val: string, delivery: 'inject' | 'after' = 'after'
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
 
-  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles);
+  emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, options);
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2610,10 +2592,10 @@ onBeforeRouteUpdate((to, from, next) => {
 
 defineExpose({
   focusInput,
-  triggerSend(text: string) {
+  triggerSend(text: string, options: SendMessageOptions = {}) {
     if (!text.trim()) return;
     query.value = text;
-    nextTick(() => createSession(text));
+    nextTick(() => createSession(text, 'after', options));
   },
   /**
    * Puts text in the composer WITHOUT sending it. Session fork uses this so
@@ -2627,7 +2609,7 @@ defineExpose({
 
 </script>
 <template>
-  <div class="answers-input" :class="{ 'is-embedded': embeddedMode }" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-embedded': embeddedMode, 'is-compact': compact }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
@@ -2694,7 +2676,7 @@ defineExpose({
       </div>
 
       <!-- 实际输入框 -->
-      <t-textarea ref="textareaRef" v-model="query" :placeholder="inputPlaceholder" name="description" :autosize="true"
+      <t-textarea ref="textareaRef" v-model="query" :placeholder="t('input.placeholder')" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
         @paste="onPaste" />
 
@@ -3209,7 +3191,7 @@ const getImgSrc = (url: string) => {
 :deep(.t-textarea__inner) {
   width: 100%;
   max-height: 152px !important;
-  min-height: 72px !important;
+  min-height: var(--composer-input-min-height, 72px) !important;
   resize: none;
   color: var(--td-text-color-primary);
   font-size: var(--app-text-xl);
@@ -3258,6 +3240,24 @@ const getImgSrc = (url: string) => {
 
   &.is-embedded {
     justify-content: flex-end;
+  }
+}
+
+.answers-input.is-compact {
+  --composer-input-min-height: 56px;
+
+  .rich-input-container :deep(.t-textarea__inner) {
+    padding: 12px 14px;
+  }
+
+  .control-bar {
+    margin: 0 12px 8px;
+    padding-top: 4px;
+  }
+
+  .control-icon {
+    width: 16px;
+    height: 16px;
   }
 }
 

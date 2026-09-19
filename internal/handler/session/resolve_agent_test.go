@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -157,6 +158,42 @@ func TestResolveAgent_FallsBackToLocalAgentWithoutSourceSelector(t *testing.T) {
 	require.Equal(t, localAgent, agent)
 	require.Equal(t, uint64(0), effectiveTenantID)
 	require.False(t, sharedReadOnly)
+}
+
+// Built-in IDs exist in every workspace. Without a source selector a share of
+// the same ID must not replace the caller's own agent.
+func TestResolveAgent_PrefersOwnAgentOverSameIDShareWithoutSourceSelector(t *testing.T) {
+	c, ctx := newResolveAgentTestContext(7)
+	localAgent := &types.CustomAgent{ID: "builtin-quick-answer", TenantID: 7, Name: "Local"}
+	h := &Handler{
+		agentShareService: &resolveAgentShareStub{
+			agent: &types.CustomAgent{ID: "builtin-quick-answer", TenantID: 84, Name: "Shared"},
+		},
+		customAgentService: &resolveOwnAgentStub{agent: localAgent},
+	}
+
+	agent, effectiveTenantID, sharedReadOnly := h.resolveAgent(ctx, c, "builtin-quick-answer", 0)
+
+	require.Equal(t, localAgent, agent)
+	require.Equal(t, uint64(0), effectiveTenantID)
+	require.False(t, sharedReadOnly)
+}
+
+// A shared agent without the source selector (e.g. a restored selection) still
+// resolves when the caller has no agent of that ID.
+func TestResolveAgent_UsesShareWhenNoOwnAgentMatches(t *testing.T) {
+	c, ctx := newResolveAgentTestContext(7)
+	sharedAgent := &types.CustomAgent{ID: "3f0c2d9e-shared", TenantID: 84, Name: "Shared"}
+	h := &Handler{
+		agentShareService:  &resolveAgentShareStub{agent: sharedAgent},
+		customAgentService: &resolveOwnAgentStub{err: errors.New("agent not found")},
+	}
+
+	agent, effectiveTenantID, sharedReadOnly := h.resolveAgent(ctx, c, sharedAgent.ID, 0)
+
+	require.Equal(t, sharedAgent, agent)
+	require.Equal(t, uint64(84), effectiveTenantID)
+	require.True(t, sharedReadOnly)
 }
 
 func TestTerminalProvisionConfigID_UsesSharedAgentSandboxConfig(t *testing.T) {

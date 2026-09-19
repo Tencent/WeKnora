@@ -210,7 +210,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	servePresignedFiles(r, params.TenantService, params.StorageBackendResolver)
 
 	// Diagnostic preview of presigned URLs (Admin only, behind auth middleware).
-	servePresignedPreview(r, params.Config, params.StorageBackendResolver)
+	servePresignedPreview(r, params.Config, params.StorageBackendResolver, params.ResourceCatalog)
 
 	// Langfuse observability — only active when LANGFUSE_* env vars are set.
 	// The middleware is registered unconditionally; when disabled it's a no-op.

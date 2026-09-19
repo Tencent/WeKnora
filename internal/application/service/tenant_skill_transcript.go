@@ -310,15 +310,13 @@ func (tr *installTranscript) onToolResult(_ context.Context, evt event.Event) er
 	}
 	tr.mu.Unlock()
 
-	// A failed command is surfaced as an error, matching the chat path, so the
-	// console highlights it instead of filing it as one more quiet step.
+	// A failed command is still a tool result: response_type=error is reserved
+	// for internal failures (onError), matching the chat path. Failure is
+	// carried by success=false in the metadata.
 	responseType := types.ResponseTypeToolResult
 	content := agenttools.StreamContentForToolResult(data.ToolName, data.Success, data.Error, data.Data)
-	if !data.Success {
-		responseType = types.ResponseTypeError
-		if content == "" && data.Error != "" {
-			content = data.Error
-		}
+	if !data.Success && content == "" && data.Error != "" {
+		content = data.Error
 	}
 
 	meta := map[string]interface{}{

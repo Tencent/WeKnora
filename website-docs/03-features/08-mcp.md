@@ -34,10 +34,12 @@ OAuth 服务按调用者分别授权。工具需要审批时，在对话中检�
 
 | 组 | 工具 | 说明 |
 |---|---|---|
-| 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；语义搜索与关键词正则搜索分开 |
+| 检索与阅读 | `list_knowledge_bases`、`search_knowledge`、`grep_chunks`、`list_documents`、`read_document` | 知识库参数同时接受 ID 或名称；`search_knowledge` 用 `mode`（hybrid / semantic / keyword）选择检索方式并可设 `limit`（默认 10，上限 30）；`grep_chunks` 保持大小写不敏感的正则语义：从模式里提取字面词作为关键词索引的检索词（没有关键词索引的库改用语义索引取候选），再逐条用正则校验，返回的分块都匹配该模式；不含任何字面词的模式（如 `^\d+$`）会被拒绝；`read_document` 按 `offset` / `limit` 翻页，或用 `query` 在文档内查找短语 |
 | 问答 | `ask` | 只运行端点配置的默认 Agent（客户端不能自选 Agent），服务端自动建会话，返回带引用的完整回答和 `session_id`，续聊时传回即可；不开启联网搜索 |
-| Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效 |
+| Wiki | `wiki_search`、`wiki_read_page`、`wiki_index` | 只对开启了 Wiki 的知识库生效；`wiki_search` 的 `query` 保持原有的正则语义（大小写不敏感），不是合法正则的文本按字面匹配；`regex=false` 强制字面匹配，`regex=true` 要求合法正则 |
 | 写入 | `add_document`、`update_document`、`delete_document` | 默认关闭；支持 Markdown 文本或 URL 导入 |
+
+> **`grep_chunks` 的召回有上限。** 它基于索引取候选，每次最多 30 条，再用正则筛选，所以返回的每条都匹配模式，但不保证穷尽：库里存在的匹配也可能没进候选池。容易漏的情况有三类：`foo.*bar` 这类组合模式，候选按 foo、bar 的相关度排序，真正相邻出现的分块可能排不进前 30；`C++` 这类几乎只剩符号的模式，抽出的字面词只有 `C`，在索引里几乎没有区分度；没有关键词索引的库改用语义索引取候选，字面匹配更依赖运气。旧实现对 chunks 表做全表正则扫描，能保证"有就能找到"，但数据量大时代价过高，已经移除。需要在某篇文档里穷尽查找时，用 `read_document` 的 `query`，它会顺序扫完整篇文档。
 
 工具实现直接复用 Agent 的原生工具（`internal/agent/tools/`），鉴权复用 API Key 的作用域模型：端点被换算成一把仅含 retrieve / chat / ingest 等能力、限定知识库范围的作用域，所以后端各服务对它的检查与对受限 API Key 完全一致。实现细节见下方内置 MCP Server 参考。
 
@@ -379,6 +381,8 @@ flowchart LR
 | GET / PUT / DELETE | `/mcp-endpoints/:endpoint_id` | 详情 / 更新 / 删除 |
 | POST | `/mcp-endpoints/:endpoint_id/rotate-token` | 轮换令牌，响应含新 `token` |
 
+端点令牌是一个新的凭证，因此受限 API Key 只能创建、修改或轮换不超出自身权限的端点：端点的知识库必须在 Key 的知识库白名单之内（Key 有白名单时，端点不能留空，留空表示空间内全部），端点工具所需的能力（retrieve / chat / ingest 等）也必须是 Key 已有的，否则返回 403。
+
 #### 请求链路
 
 ```mermaid
@@ -387,7 +391,7 @@ flowchart LR
     A -->|"注入 tenant / principal /<br/>TenantAPIKeyScope / *MCPEndpoint"| S["mcp-go StreamableHTTPServer<br/>（internal/mcpserver）"]
     S -->|"tools/list"| F["ToolFilter：按端点白名单过滤"]
     S -->|"tools/call"| G["Guard：白名单 + 限流 + last_used"]
-    G --> T["工具处理器：复用 internal/agent/tools<br/>KnowledgeSearch / GrepChunks / ListChunks / Wiki…"]
+    G --> T["工具处理器：复用 internal/agent/tools<br/>SearchKnowledge / ReadDocument / ListDocuments / Wiki…"]
     G --> Q["ask：SessionService.AgentQA / KnowledgeQA<br/>同步收集 final_answer + references"]
 ```
 

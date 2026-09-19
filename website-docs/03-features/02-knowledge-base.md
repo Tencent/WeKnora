@@ -386,6 +386,8 @@ type KnowledgeTagRelation struct { KnowledgeID, TagID string } // 多对多
 
 测试用例明确验证：即使文件内容是 `<script>alert(1)</script>`，也只会作为二进制附件传输。下载端点（`/knowledge/:id/download`）要求更高的 Contributor+ 且走 KBAccessWrite 门禁。
 
+预览返回的是原始文件本身，通过只读共享（组织共享的 viewer、经共享智能体可见）访问时同样可以预览。「只有 Editor 及以上才能下载」是产品上的便利性限制，不是访问控制边界：能读到一个 KB 的人，就能拿到其中的原文件。
+
 ### 知识库复制与知识移动 {#_4-知识库复制与知识移动}
 
 #### 复制（Copy / Duplicate）与 Preflight {#_4-1-复制-copy-duplicate-与-preflight}
@@ -489,6 +491,7 @@ Chunk 类型（`internal/types/chunk.go`）：`text`、`parent_text`、`image_oc
 
 - **活动动作**（`internal/types/audit_log.go`）：`kb.created` / `kb.updated` / `kb.deleted` / `kb.duplicated` / `kb.clone_started` / `kb.clone_completed` / `kb.clone_failed`、`kb.share_added` / `kb.share_permission_changed` / `kb.share_removed`，以及知识 / chunk 级的增删改动作；
 - **触发源**：context 中的 `kbActivityTaskMetadata{TaskID, Trigger}`（`user` 用户操作 / `system` 后台任务）自动并入 details；根据 outcome 自动补 `processing_status`（accepted→pending、success→completed、partial→partial、failed/denied→failed、canceled→canceled）；
+- **API Key 身份**：`X-API-Key` 调用写入 `details.api_key_id` / `details.api_key_name`（名称快照）。活动页在原发起人后额外显示 Key 名称；JWT 网页操作不加这两项。异步任务只把 Key 展示身份放进 `TaskInitiator`，不把 Key 权限 scope 恢复进 worker；
 - **批量操作样本标题**：`kbActivityAppendSampleTitles` 为批量操作附带最多 5 个去重标题（第一个作为 `title`，其余进 `titles` 数组），保证活动流可读且有界；
 - **抑制机制**：`withKBActivitySuppressed(ctx)` 可让内部级联操作不产生重复活动记录。
 

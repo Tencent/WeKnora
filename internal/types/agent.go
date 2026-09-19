@@ -120,7 +120,6 @@ type AgentConfig struct {
 	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
 	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
 	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
-	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
 	MemoryEnabled           *bool         `json:"memory_enabled,omitempty"`             // nil inherits workspace
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
 	// MCP service selection
@@ -157,10 +156,19 @@ type AgentConfig struct {
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
+	// QuestionOrigin is the knowledge source of a suggested question the user
+	// picked, already checked to be inside KnowledgeBases (runtime only;
+	// rendered into runtime_context as a retrieval hint).
+	QuestionOrigin *QuestionOrigin `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.
 	SharedAgentReadOnly bool `json:"-"`
+	// WritableKBIDs are the SearchTargets KBs this caller may modify (its own
+	// workspace's, or shared to it as editor+). Search targets only need read
+	// access, so tools that write (wiki pages and issues) are limited to this
+	// set; empty means read-only. Runtime only, derived per turn.
+	WritableKBIDs []string `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 
@@ -176,6 +184,12 @@ type AgentConfig struct {
 	// Maximum context window tokens for the agent. Zero means "use the
 	// model's context_window, or DefaultMaxContextTokens (200000)".
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
+
+	// ContextTokenScale is the provider's tokens per estimated token that the
+	// session's last calibrated turn measured (TokenUsage.ContextTokenScale).
+	// The engine starts its estimator at this scale. Zero means uncalibrated.
+	// Runtime only.
+	ContextTokenScale float64 `json:"-"`
 
 	// How much recent conversation a compaction keeps verbatim. Zero means
 	// compaction.DefaultKeepRecentTokens, scaled down on small windows. This

@@ -152,7 +152,7 @@ Handler: `internal/handler/session/temporary_document.go`
 
 ### POST /api/v1/sessions/:session_id/attachments
 
-用途：上传会话级临时文档（异步解析）。multipart 字段：`file`（必填）、`agent_id`（可选，决定解析引擎/ASR 模型）、`parser_engine`（可选）。
+用途：上传会话级临时文档（异步解析）。multipart 字段：`file`（必填）、`agent_id`（可选，决定解析引擎/ASR 模型）、`parser_engine`（可选；使用共享智能体时忽略，由智能体的解析规则决定）。
 
 响应：202 `{"success":true,"data":{TemporaryDocument}}`（`id,session_id,file_name,file_type,file_size,status(uploaded/processing/ready/failed),resource_ref,...`）
 
@@ -259,8 +259,8 @@ Handler: `internal/handler/session/qa.go`。API key：聊天需 `chat`/full；`k
 | `knowledge_ids` | []string | 否 | 限定知识文件 |
 | `agent_enabled` | bool | 否 | 是否启用 Agent 模式 |
 | `agent_id` | string | 否 | 自定义 Agent ID |
-| `web_search_enabled` | bool | 否 | 联网搜索 |
-| `summary_model_id` | string | 否 | 总结模型 |
+| `web_search_enabled` | bool | 否 | 联网搜索；只在智能体本身开启联网搜索时生效 |
+| `summary_model_id` | string | 否 | 总结模型；使用共享智能体时忽略，始终使用智能体配置的模型 |
 | `mcp_service_ids` | []string | 否 | @提及的 MCP 服务 |
 | `skill_names` | []string | 否 | @提及的技能 |
 | `tag_ids` | []string | 否 | 标签过滤 |
@@ -383,6 +383,23 @@ curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts" \
   -H "Authorization: Bearer $TOKEN"
 curl "$BASE/api/v1/sessions/session-1/messages/message-1/artifacts/0/download" \
   -H "Authorization: Bearer $TOKEN" -o result.pdf
+```
+
+### 跨会话产物列表
+
+`GET /api/v1/artifacts` 列出当前用户网页对话中的所有生成文件，供首页侧栏「产物」页使用。范围与会话列表的 `source=web` 一致：本人会话及历史上无归属的租户级网页会话；IM 渠道、网页挂件（embed）和 API Key 会话一律不含，即使 IM 会话在库中没有归属人。同一会话中 `source_path` 相同的文件视为同一文件的多个版本，只返回最新一版，`version_count` 给出版本数。已删除的会话或消息中的文件不返回。权限要求与上表相同。
+
+| 参数 | 说明 |
+| --- | --- |
+| `keyword` | 按文件名过滤，不区分大小写 |
+| `file_types` | 逗号分隔的扩展名，如 `.pdf,.pptx`（可省略点号） |
+| `page` / `page_size` | 分页，`page_size` 最大 100，默认 20 |
+
+响应 `{success, data:[LibraryArtifact], total, page, page_size}`，按生成时间倒序。LibraryArtifact 字段：session_id、session_title、message_id、index、handle（可选）、file_name、file_type、file_size、source_path、created_at、version_count。下载时用其中的 session_id、message_id、index 调用上表的下载接口。
+
+```bash
+curl "$BASE/api/v1/artifacts?file_types=.pptx,.pdf&keyword=报告&page=1&page_size=30" \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 回答中的图片和文件引用

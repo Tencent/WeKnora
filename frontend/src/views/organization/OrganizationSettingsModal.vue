@@ -1,12 +1,13 @@
 <template>
   <SettingsModalShell :visible="visible" :title="modalTitle" v-model="currentSection" :nav-groups="navGroups"
+    :overlay-class="isCreateMode ? 'organization-create-overlay' : ''"
     :z-index="2000" @close="modalShell.requestClose">
     <template #nav-icon="{ item, active }">
       <img v-if="item.key === 'sharedAgents'" :src="active ? agentIconActiveSrc : agentIconSrc"
         class="nav-icon nav-icon-img" alt="" aria-hidden="true" />
       <t-icon v-else :name="item.icon" class="nav-icon" />
     </template>
-    <div ref="contentWrapperRef" class="content-wrapper">
+    <div ref="contentWrapperRef" class="content-wrapper" :class="{ 'is-create': isCreateMode }">
       <!-- 组织管理员但空间角色不足，给出只读提示 -->
       <div v-if="showTenantRoleHint" class="tenant-role-hint">
         <t-icon name="info-circle" size="16px" />
@@ -200,61 +201,29 @@
           <p class="section-description">{{ $t('organization.editor.permissionsDesc') }}</p>
         </div>
 
-        <div class="permissions-info">
-          <div class="permission-card">
-            <div class="permission-header">
-              <div class="permission-icon admin">
-                <t-icon name="user-safety" />
-              </div>
-              <div class="permission-title">
-                <span class="role-name">{{ $t('organization.role.admin') }}</span>
-                <t-tag size="small" theme="primary">{{ $t('organization.editor.fullAccess') }}</t-tag>
-              </div>
-            </div>
-            <ul class="permission-list">
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm1') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm2') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm3') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.adminPerm4') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
-            </ul>
-          </div>
-          <div class="permission-card">
-            <div class="permission-header">
-              <div class="permission-icon editor">
-                <t-icon name="edit" />
-              </div>
-              <div class="permission-title">
-                <span class="role-name">{{ $t('organization.role.editor') }}</span>
-                <t-tag size="small" theme="warning">{{ $t('organization.editor.editAccess') }}</t-tag>
-              </div>
-            </div>
-            <ul class="permission-list">
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm1') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.editorPerm2') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
-              <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.editorPerm3') }}</li>
-            </ul>
-          </div>
-          <div class="permission-card">
-            <div class="permission-header">
-              <div class="permission-icon viewer">
-                <t-icon name="browse" />
-              </div>
-              <div class="permission-title">
-                <span class="role-name">{{ $t('organization.role.viewer') }}</span>
-                <t-tag size="small">{{ $t('organization.editor.viewAccess') }}</t-tag>
-              </div>
-            </div>
-            <ul class="permission-list">
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.viewerPerm1') }}</li>
-              <li><t-icon name="check" class="check-icon" />{{ $t('organization.editor.useSharedAgentsPerm') }}</li>
-              <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.shareKBPerm') }}</li>
-              <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.viewerPerm2') }}</li>
-              <li><t-icon name="close" class="close-icon" />{{ $t('organization.editor.viewerPerm3') }}</li>
-            </ul>
-          </div>
+        <div class="permission-comparison">
+          <table class="permission-table" :aria-label="$t('organization.editor.permissionsTitle')">
+            <thead>
+              <tr>
+                <th scope="col">{{ $t('organization.editor.permissionFeature') }}</th>
+                <th v-for="role in orgRoleMatrixOrder" :key="role" scope="col">
+                  {{ $t(`organization.role.${role}`) }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="permission in orgRoleMatrix.admin" :key="permission.key">
+                <th scope="row">{{ $t(`organization.editor.${permission.key}`) }}</th>
+                <td v-for="role in orgRoleMatrixOrder" :key="role">
+                  <span v-if="orgRoleMatrix[role].find(item => item.key === permission.key)?.has"
+                    class="permission-allowed" role="img" :aria-label="$t('common.yes')" :title="$t('common.yes')">
+                    <t-icon name="check" size="16px" />
+                  </span>
+                  <span v-else class="permission-unavailable" role="img" :aria-label="$t('common.no')" :title="$t('common.no')">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         <div class="info-notice">
           <t-icon name="info-circle" />
@@ -891,7 +860,6 @@ function clearAvatarEmoji() {
 
 // Computed
 const isCreateMode = computed(() => props.mode === 'create')
-const isEditMode = computed(() => props.mode === 'edit' || props.mode === 'create')
 // 后端组织相关变更接口（保存设置、邀请、搜索用户、改/删成员、审核加入申请、
 // 升级申请、刷新邀请码、移除共享等）在路由层都要求当前空间角色 ≥ admin（见
 // internal/router/router.go 的 RegisterOrganizationRoutes）。跨空间超管可绕过。
@@ -2094,102 +2062,63 @@ watch(addMemberPopupVisible, (visible) => {
   }
 }
 
-// 创建模式权限说明卡片
-.permissions-info {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
+// 创建模式使用紧凑表单和角色对照，复用成员管理的权限定义。
+.content-wrapper.is-create {
+  padding: 28px 28px 24px;
 
-.permission-card {
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: var(--app-radius-md);
-  padding: 16px;
-  border: 1px solid var(--td-component-stroke);
-}
-
-.permission-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.permission-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--app-radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--td-text-color-anti);
-
-  &.admin {
-    background: linear-gradient(135deg, var(--td-brand-color), var(--td-brand-color-active));
+  .section-header {
+    padding-right: 20px;
+    box-sizing: border-box;
+    margin-bottom: 24px;
+    h2 { font-size: var(--app-text-xl); line-height: 28px; }
+    .section-description { margin-top: 6px; font-size: var(--app-text-sm); }
   }
 
-  &.editor {
-    background: linear-gradient(135deg, var(--td-warning-color), var(--td-warning-color-active));
-  }
-
-  &.viewer {
-    background: var(--td-bg-color-component-disabled);
-  }
-}
-
-.permission-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  .role-name {
-    font-size: var(--app-text-lg);
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-  }
-}
-
-.permission-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-
-  li {
-    display: flex;
-    align-items: center;
+  .settings-group { gap: 20px; }
+  .setting-row {
+    flex-direction: column;
     gap: 8px;
-    padding: 6px 0;
-    font-size: var(--app-text-md);
-    color: var(--td-text-color-secondary);
+    padding: 0;
+    border: 0;
+    .setting-info, .setting-control { flex: auto; width: 100%; max-width: 100%; }
+    .setting-info label { font-size: var(--app-text-base); }
+    .setting-info .desc { font-size: var(--app-text-sm); }
+    .setting-control { overflow: visible; }
   }
+}
 
-  .check-icon {
-    color: var(--td-brand-color);
-    font-size: var(--app-text-base);
-  }
+.permission-comparison {
+  overflow: hidden;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+}
+.permission-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--app-text-sm);
+  line-height: 20px;
+  color: var(--td-text-color-secondary);
 
-  .close-icon {
-    color: var(--td-error-color);
-    font-size: var(--app-text-base);
-  }
+  th, td { padding: 12px 8px; text-align: center; overflow-wrap: anywhere; }
+  th:first-child { width: 46%; padding-left: 14px; text-align: left; }
+  thead { background: var(--td-bg-color-secondarycontainer); }
+  thead th { font-weight: 500; color: var(--td-text-color-primary); }
+  tbody th { font-weight: 400; }
+  tbody tr { border-top: 1px solid var(--td-component-stroke); }
+  .permission-allowed { display: inline-flex; vertical-align: middle; color: var(--td-brand-color); }
+  .permission-unavailable { color: var(--td-text-color-placeholder); }
 }
 
 .info-notice {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  margin-top: 20px;
-  padding: 12px 16px;
-  background: var(--td-brand-color-light);
-  border-radius: var(--app-radius-md);
-  color: var(--td-brand-color);
-  font-size: var(--app-text-md);
+  margin-top: 16px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
   line-height: 20px;
-
-  .t-icon {
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
+  .t-icon { flex-shrink: 0; margin-top: 2px; }
 }
 
 /* 头像 Emoji 弹层内容 */
@@ -2944,6 +2873,30 @@ watch(addMemberPopupVisible, (visible) => {
 </style>
 
 <style lang="less">
+// 限定在创建弹窗，保留已有共享空间设置页的布局。
+.settings-modal-shell.organization-create-overlay {
+  .settings-modal { max-width: 860px; height: 560px; }
+  .settings-sidebar { width: 176px; }
+  .sidebar-title { font-size: var(--app-text-base); line-height: 24px; }
+  .settings-footer { padding: 14px 28px; }
+  .settings-footer-actions { gap: 8px; }
+
+  @media (max-width: 640px) {
+    padding: 12px;
+    .settings-modal { height: 680px; max-height: calc(100dvh - 24px); }
+    .settings-container { flex-direction: column; }
+    .settings-sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--td-component-stroke); }
+    .sidebar-header { padding-right: 52px; border-bottom: 0; }
+    .settings-nav { display: flex; flex: none; gap: 4px; padding: 0 12px 10px; }
+    .nav-group-title { display: none; }
+    .nav-item { margin: 0; }
+    .content-wrapper.is-create { padding: 20px 16px; }
+    .settings-footer { padding: 12px 16px; }
+    .permission-table th:first-child { width: 40%; padding-left: 10px; }
+    .permission-table th, .permission-table td { padding: 10px 5px; }
+  }
+}
+
 /* 权限说明 / 提示弹出层（t-popup 挂到 body，须全局样式） */
 .org-permissions-popup-overlay {
   z-index: 3050 !important;

@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -253,6 +254,11 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		c.Error(errors.NewNotFoundError("知识库不存在"))
 		return
 	}
+	ownWorkspace, err := kbSettingsAccess(c, kb)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
 
 	// 检查Embedding模型是否可以修改
 	if kb.EmbeddingModelID != "" && req.EmbeddingModelID != "" && kb.EmbeddingModelID != req.EmbeddingModelID {
@@ -366,50 +372,18 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		kb.VLMConfig.CustomInstructions = strings.TrimSpace(req.VLMConfig.CustomInstructions)
 	}
 
-	// Bind the concrete storage instance. Provider remains a compatibility
-	// projection for older clients and historical rows.
-	if strings.TrimSpace(req.StorageBackendID) != "" {
-		tenant, _ := types.TenantInfoFromContext(ctx)
-		backend, resolveErr := h.storageResolver.ResolveBackend(ctx, tenant, req.StorageBackendID, "")
-		if resolveErr != nil || backend == nil {
-			c.Error(errors.NewBadRequestError("Storage backend is unavailable"))
+	// Storage backends resolve per workspace and belong to the owner's
+	// infrastructure: another workspace can neither see the owner's backends
+	// nor bind the KB to one of its own, so it may only leave them unchanged.
+	if ownWorkspace {
+		if err := h.applyKBStorageBinding(ctx, kb, kbIdStr, &req); err != nil {
+			_ = c.Error(err)
 			return
 		}
-		oldID := ""
-		if kb.StorageBackendID != nil {
-			oldID = *kb.StorageBackendID
-		}
-		if oldID != "" && oldID != backend.ID {
-			knowledgeList, listErr := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx, kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
-			if listErr == nil && knowledgeList != nil && knowledgeList.Total > 0 {
-				c.Error(errors.NewBadRequestError("Storage backend cannot be changed while the knowledge base contains files; migrate storage first"))
-				return
-			}
-		}
-		kb.StorageBackendID = &backend.ID
-		req.StorageProvider = backend.Provider
-	}
-	// Legacy provider projection.
-	provider := strings.ToLower(strings.TrimSpace(req.StorageProvider))
-	if provider == "" {
-		provider = "local"
-	}
-	if !isStorageProviderAllowed(provider) {
-		c.Error(errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST"))
+	} else if kbStorageBindingChanged(kb, req.StorageBackendID, req.StorageProvider) {
+		_ = c.Error(errors.NewForbiddenError("只有知识库所属空间可以修改存储配置"))
 		return
 	}
-	oldProvider := kb.GetStorageProvider()
-	if oldProvider == "" {
-		oldProvider = "local"
-	}
-	if oldProvider != provider {
-		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
-			kbIdStr, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
-		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
-			logger.Warn(ctx, "Storage engine changed with existing files, old files may become inaccessible")
-		}
-	}
-	kb.SetStorageProvider(provider)
 
 	// 更新知识图谱配置
 	if req.NodeExtract.Enabled {
@@ -479,6 +453,95 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		"success": true,
 		"message": "配置更新成功",
 	})
+}
+
+// kbSettingsAccess reports whether the caller's workspace owns kb. Another
+// workspace may change KB settings only through an admin share: the frontend
+// offers KB settings to share admins alone, and OrgRoleEditor edits content,
+// not settings. KBAccessWrite on the route also admits share editors, so the
+// grant's effective share permission is checked here.
+func kbSettingsAccess(c *gin.Context, kb *types.KnowledgeBase) (bool, error) {
+	if kb.TenantID == types.CallerFromContext(c.Request.Context()).TenantID {
+		return true, nil
+	}
+	grant, ok := middleware.KBAccessFromContext(c)
+	if !ok || grant.KnowledgeBase == nil || grant.KnowledgeBase.ID != kb.ID ||
+		!grant.Permission.HasPermission(types.OrgRoleAdmin) {
+		return false, errors.NewForbiddenError("修改共享知识库的设置需要管理员共享权限")
+	}
+	return false, nil
+}
+
+// kbStorageBindingChanged reports whether a config request would rebind the
+// KB's storage. A backend ID that matches the current one leaves the binding
+// alone (its provider is only a projection); without one, an empty current
+// provider means the default, which clients echo back as "local".
+func kbStorageBindingChanged(kb *types.KnowledgeBase, backendID, provider string) bool {
+	backendID = strings.TrimSpace(backendID)
+	current := ""
+	if kb.StorageBackendID != nil {
+		current = *kb.StorageBackendID
+	}
+	if backendID != "" {
+		return backendID != current
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	currentProvider := kb.GetStorageProvider()
+	if currentProvider == "" {
+		currentProvider = "local"
+	}
+	return provider != "" && provider != currentProvider
+}
+
+// applyKBStorageBinding binds the owner's storage instance to the KB. The
+// caller's workspace must own the KB: backends resolve against TenantInfo.
+func (h *InitializationHandler) applyKBStorageBinding(
+	ctx context.Context, kb *types.KnowledgeBase, kbID string, req *KBModelConfigRequest,
+) error {
+	// Bind the concrete storage instance. Provider remains a compatibility
+	// projection for older clients and historical rows.
+	if strings.TrimSpace(req.StorageBackendID) != "" {
+		tenant, _ := types.TenantInfoFromContext(ctx)
+		backend, resolveErr := h.storageResolver.ResolveBackend(ctx, tenant, req.StorageBackendID, "")
+		if resolveErr != nil || backend == nil {
+			return errors.NewBadRequestError("Storage backend is unavailable")
+		}
+		oldID := ""
+		if kb.StorageBackendID != nil {
+			oldID = *kb.StorageBackendID
+		}
+		if oldID != "" && oldID != backend.ID {
+			knowledgeList, listErr := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
+				kbID, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
+			if listErr == nil && knowledgeList != nil && knowledgeList.Total > 0 {
+				return errors.NewBadRequestError(
+					"Storage backend cannot be changed while the knowledge base contains files; migrate storage first")
+			}
+		}
+		kb.StorageBackendID = &backend.ID
+		req.StorageProvider = backend.Provider
+	}
+	// Legacy provider projection.
+	provider := strings.ToLower(strings.TrimSpace(req.StorageProvider))
+	if provider == "" {
+		provider = "local"
+	}
+	if !isStorageProviderAllowed(provider) {
+		return errors.NewBadRequestError("Storage provider is not allowed by STORAGE_ALLOW_LIST")
+	}
+	oldProvider := kb.GetStorageProvider()
+	if oldProvider == "" {
+		oldProvider = "local"
+	}
+	if oldProvider != provider {
+		knowledgeList, err := h.knowledgeService.ListPagedKnowledgeByKnowledgeBaseID(ctx,
+			kbID, &types.Pagination{Page: 1, PageSize: 1}, types.KnowledgeListFilter{})
+		if err == nil && knowledgeList != nil && knowledgeList.Total > 0 {
+			logger.Warn(ctx, "Storage engine changed with existing files, old files may become inaccessible")
+		}
+	}
+	kb.SetStorageProvider(provider)
+	return nil
 }
 
 // InitializeByKB godoc
@@ -572,7 +635,30 @@ func (h *InitializationHandler) getKnowledgeBaseForInitialization(ctx context.Co
 		logger.Error(ctx, "Knowledge base not found")
 		return nil, errors.NewNotFoundError("知识库不存在")
 	}
+	// Initialization rewrites the models the KB points at, and those rows
+	// belong to the KB's workspace. A shared-KB editor passes the route's
+	// KBAccessWrite guard (which moves execution into that workspace), so
+	// without this check it could repoint the owner's models at its own
+	// endpoint and key.
+	if kb.TenantID != types.CallerFromContext(ctx).TenantID {
+		return nil, errors.NewForbiddenError("只有知识库所属空间可以初始化知识库")
+	}
 	return kb, nil
+}
+
+// canUpdateTenantModels mirrors the PUT /models/:id guard: rewriting a stored
+// model changes every KB and agent that uses it, so initializing a KB must not
+// let a KB creator do what the model settings page reserves for admins.
+func (h *InitializationHandler) canUpdateTenantModels(ctx context.Context) bool {
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		return scope.FullAccess || scope.HasCapability(types.APIKeyCapabilityManageModels)
+	}
+	if types.CallerFromContext(ctx).Role.HasPermission(types.TenantRoleAdmin) || types.IsSystemAdminFromContext(ctx) {
+		return true
+	}
+	// Same rollout switch as the route guards: role checks only log while
+	// RBAC enforcement is off.
+	return h.config == nil || !h.config.Tenant.IsRBACEnforced()
 }
 
 func (h *InitializationHandler) validateInitializationConfigs(ctx context.Context, req *InitializationRequest) error {
@@ -763,6 +849,9 @@ func (h *InitializationHandler) processInitializationModels(
 		}
 
 		if existingModel != nil {
+			if !h.canUpdateTenantModels(ctx) {
+				return nil, errors.NewForbiddenError("修改已有模型配置需要空间管理员权限")
+			}
 			existingModel.Name = model.Name
 			existingModel.Source = model.Source
 			existingModel.Description = model.Description
@@ -1433,7 +1522,11 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 	config := map[string]interface{}{
 		"hasFiles": hasFiles,
 	}
-	includeIntegrationDetail := dto.CanViewIntegrationSecrets(ctx)
+	// Integration details describe the owning workspace's infrastructure. A
+	// share receiver — even an admin of its own workspace — only learns
+	// whether credentials are configured.
+	ownWorkspace := kb != nil && kb.TenantID == types.CallerFromContext(ctx).TenantID
+	includeIntegrationDetail := ownWorkspace && dto.CanViewIntegrationSecrets(ctx)
 
 	// 按类型分组模型
 	for _, model := range models {
@@ -1580,6 +1673,16 @@ func (h *InitializationHandler) buildConfigResponse(ctx context.Context, models 
 				multimodal["minio"] = map[string]interface{}{
 					"bucketName": kb.StorageConfig.BucketName,
 					"pathPrefix": kb.StorageConfig.PathPrefix,
+				}
+			}
+			if !ownWorkspace {
+				// Bucket locations are the owner's infrastructure too.
+				for _, provider := range []string{"cos", "minio"} {
+					if detail, ok := multimodal[provider].(map[string]interface{}); ok {
+						for _, field := range []string{"region", "bucketName", "appId", "pathPrefix"} {
+							delete(detail, field)
+						}
+					}
 				}
 			}
 		}

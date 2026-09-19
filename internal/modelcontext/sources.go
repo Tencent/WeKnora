@@ -490,6 +490,8 @@ func (r *sourceRegistry) registerSourceIDByKey(key, value string, evidence bool)
 		if parsed, err := url.Parse(value); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") {
 			r.registerWeb(value, "", evidence)
 		}
+	case spaceAnySource:
+		// Decode-only: a bare "id" never registers a new source.
 	}
 }
 

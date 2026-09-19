@@ -332,6 +332,7 @@ export function uploadKnowledgeFile(
     [key: string]: any
   } = { file: new File([], '') },
   onProgress?: (progressEvent: any) => void,
+  config?: { signal?: AbortSignal },
 ) {
   const formData = new FormData();
   Object.keys(data).forEach(key => {
@@ -345,7 +346,7 @@ export function uploadKnowledgeFile(
       formData.append(key, value);
     }
   });
-  return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress);
+  return postUpload(`/api/v1/knowledge-bases/${kbId}/knowledge/file`, formData, onProgress, config);
 }
 
 // 从URL创建知识

@@ -41,13 +41,15 @@ type AgentEngine struct {
 	selectedDocs         []*SelectedDocumentInfo // User-selected documents (via @ mention)
 	pinnedMCPServices    []*PinnedMCPServiceInfo // User @mentioned MCP services for this turn
 	pinnedSkills         []*PinnedSkillInfo      // User @mentioned skills for this turn
+	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
 	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
-	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management
+	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management, calibrated
+	rawEstimator         *agenttoken.Estimator   // Same tokenizer at scale 1, for measuring the calibration
 	compactor            *compaction.Compactor   // Summarizes older history to fit the context window (nil = disabled)
 	lastUsage            types.TokenUsage        // Token usage from the most recent LLM call
 	lastSentMsgCount     int                     // Number of messages sent in the most recent LLM call
@@ -60,7 +62,17 @@ type AgentEngine struct {
 	// reported it could free nothing. Below that count the answer has not
 	// changed, so there is no reason to spend another summarization call.
 	compactionExhaustedAt int
-	modelContext          *modelcontext.Registry // single request-local boundary for every model handle
+	// checkpointSink, when set, persists compactions that end on a stored
+	// turn so later turns start from them. Nil keeps compaction turn-local.
+	checkpointSink types.ContextCheckpointSink
+	// calibration learns the provider's tokens per estimated token from
+	// consecutive requests (see calibrateEstimator).
+	calibration tokenCalibration
+	// contextRewrites counts compactions and tool-result trims. Either one
+	// changes messages an earlier request already sent, so the next request
+	// cannot be compared with that one for calibration.
+	contextRewrites int
+	modelContext    *modelcontext.Registry // single request-local boundary for every model handle
 	// steerSink, when set, lets users append messages into the running turn.
 	// Drained at every round boundary; nil disables mid-run injection.
 	steerSink         types.SteerSink
@@ -95,6 +107,9 @@ func NewAgentEngine(
 	if err != nil {
 		return nil
 	}
+	// The previous turn's measured scale, so this turn's first compaction
+	// check is calibrated before it has a provider count of its own.
+	tokenEst.SetScale(config.ContextTokenScale)
 	engine := &AgentEngine{
 		config:               config,
 		toolRegistry:         toolRegistry,
@@ -105,6 +120,7 @@ func NewAgentEngine(
 		sessionID:            sessionID,
 		systemPromptTemplate: systemPromptTemplate,
 		tokenEstimator:       tokenEst,
+		rawEstimator:         tokenEst.Unscaled(),
 		modelContext:         modelcontext.NewRegistry(config.CitationsEnabled()),
 	}
 
@@ -114,9 +130,16 @@ func NewAgentEngine(
 		ReserveTokens:    engine.contextReserveTokens(),
 		KeepRecentTokens: config.CompactionKeepRecentTokens,
 		MaxSummaryTokens: engine.getCompletionTokenBudget(),
+		StallTimeout:     engine.getLLMStallTimeout(),
 	})
 
 	return engine
+}
+
+// SetQuestionOrigin records the knowledge source of a suggested question the
+// user picked for this turn; nil clears it.
+func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
+	e.questionOrigin = origin
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
@@ -327,6 +350,11 @@ func (e *AgentEngine) Execute(
 		KnowledgeRefs: []*types.SearchResult{},
 		IsComplete:    false,
 		CurrentRound:  0,
+		// A turn that measures no scale of its own (no tool call, so no two
+		// requests to compare) passes on the one it started from, so the
+		// newest turn always carries the latest known scale and the loader
+		// never has to look past its first page for one.
+		TurnUsage: types.TokenUsage{ContextTokenScale: e.config.ContextTokenScale},
 	}
 
 	// Build system prompt using progressive RAG prompt
@@ -709,6 +737,8 @@ func (e *AgentEngine) runReActIteration(
 	}
 	response = resp
 	e.logContextDrift(ctx, round, currentTokens, response.Usage)
+	// Calibration needs only a prompt count; some providers report no total.
+	e.calibrateEstimator(ctx, round, *messagesPtr, tools, response.Usage, state)
 	if response.Usage.TotalTokens > 0 {
 		e.lastUsage = response.Usage
 		state.TurnUsage.Accumulate(response.Usage)

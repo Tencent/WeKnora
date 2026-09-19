@@ -1,5 +1,5 @@
 <template>
-  <header class="chat-header" :class="{ 'is-editing': titleEditing, 'is-docked': hasReferencesPanel }">
+  <header class="chat-header">
     <form
       v-if="titleEditing"
       class="chat-header__edit"
@@ -24,7 +24,7 @@
       @dblclick="startTitleEdit"
     >
       <t-icon v-if="session?.is_pinned" name="pin" size="12px" class="chat-header__pin" />
-      <span class="chat-header__title-text">{{ displayTitle }}</span>
+      <span ref="titleTextRef" class="chat-header__title-text">{{ displayTitle }}</span>
     </h1>
     <t-popup
       v-if="!titleEditing"
@@ -48,50 +48,28 @@
         <t-icon v-else name="ellipsis" size="16px" />
       </button>
       <template #content>
-        <div class="chat-header-menu" @click.stop>
+        <div class="card-menu" @click.stop>
           <template v-if="menuMode === 'menu'">
-            <button type="button" class="chat-header-menu__item" @click="onMenuAction(session?.is_pinned ? 'unpin' : 'pin')">
-              <t-icon class="chat-header-menu__icon" :name="session?.is_pinned ? 'pin-filled' : 'pin'" />
-              <span>{{ session?.is_pinned ? t('menu.unpin') : t('menu.pin') }}</span>
-            </button>
-            <button type="button" class="chat-header-menu__item" @click="onMenuAction('rename')">
-              <t-icon class="chat-header-menu__icon" name="edit-1" />
+            <button type="button" class="card-menu-item" @click="onMenuAction('rename')">
+              <t-icon class="icon" name="edit-1" />
               <span>{{ t('menu.renameSession') }}</span>
             </button>
-            <div class="chat-header-menu__divider" />
-            <button type="button" class="chat-header-menu__item" @click="onMenuAction('copyId')">
-              <t-icon class="chat-header-menu__icon" name="copy" />
-              <span>{{ t('chatHeader.copySessionId') }}</span>
-            </button>
-            <button type="button" class="chat-header-menu__item" @click="onMenuAction('copyLink')">
-              <t-icon class="chat-header-menu__icon" name="link" />
-              <span>{{ t('chatHeader.copyLink') }}</span>
-            </button>
-            <button type="button" class="chat-header-menu__item" @click="onMenuAction('copyMarkdown')">
-              <t-icon class="chat-header-menu__icon" name="file-copy" />
+            <button type="button" class="card-menu-item" @click="onMenuAction('copyMarkdown')">
+              <t-icon class="icon" name="file-copy" />
               <span>{{ t('chatHeader.copyMarkdown') }}</span>
             </button>
-            <button type="button" class="chat-header-menu__item" @click="onMenuAction('openNewWindow')">
-              <t-icon class="chat-header-menu__icon" name="browse" />
-              <span>{{ t('chatHeader.openNewWindow') }}</span>
-            </button>
-            <div class="chat-header-menu__divider" />
-            <button type="button" class="chat-header-menu__item" @click="enterConfirmMode('clear')">
-              <t-icon class="chat-header-menu__icon" name="clear" />
-              <span>{{ t('menu.clearMessages') }}</span>
-            </button>
-            <button type="button" class="chat-header-menu__item is-danger" @click="enterConfirmMode('delete')">
-              <t-icon class="chat-header-menu__icon" name="delete" />
+            <button type="button" class="card-menu-item danger" @click="enterConfirmMode('delete')">
+              <t-icon class="icon" name="delete" />
               <span>{{ t('chatHeader.deleteSession') }}</span>
             </button>
           </template>
 
           <div v-else class="chat-header-confirm">
             <div class="chat-header-confirm__title">
-              {{ menuMode === 'clear' ? t('chatHeader.clearConfirmTitle') : t('chatHeader.deleteConfirmTitle') }}
+              {{ t('chatHeader.deleteConfirmTitle') }}
             </div>
             <div class="chat-header-confirm__body">
-              {{ menuMode === 'clear' ? t('chatHeader.clearConfirmBody') : t('chatHeader.deleteConfirmBody') }}
+              {{ t('chatHeader.deleteConfirmBody') }}
             </div>
             <div class="chat-header-confirm__footer">
               <button type="button" class="chat-header-confirm__btn" :disabled="Boolean(busyAction)" @click="backToMenu">
@@ -101,9 +79,9 @@
                 type="button"
                 class="chat-header-confirm__btn is-danger"
                 :disabled="Boolean(busyAction)"
-                @click="menuMode === 'clear' ? submitClearMessages() : submitDeleteSession()"
+                @click="submitDeleteSession()"
               >
-                {{ menuMode === 'clear' ? t('common.clear') : t('common.delete') }}
+                {{ t('common.delete') }}
               </button>
             </div>
           </div>
@@ -120,13 +98,12 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { copyToClipboard } from '@/utils/clipboard'
 import { getMessageList } from '@/api/chat'
 import {
-  clearSession,
   removeSession,
   renameSession,
-  setSessionPinned,
 } from './sessionMutations'
 import { normalizeSessionTitleDraft, SESSION_TITLE_MAX_LENGTH } from './sessionTitleEdit'
 import { buildSessionMarkdown, collectAllSessionMessages } from '@/utils/sessionMarkdown'
+import { useSessionTitleMotion } from '@/composables/useSessionTitleMotion'
 
 interface ChatHeaderSession {
   id: string
@@ -136,11 +113,10 @@ interface ChatHeaderSession {
   is_pinned?: boolean
 }
 
-type MenuMode = 'menu' | 'clear' | 'delete'
+type MenuMode = 'menu' | 'delete'
 
 const props = defineProps<{
   session: ChatHeaderSession | null
-  hasReferencesPanel?: boolean
 }>()
 
 const { t } = useI18n()
@@ -152,15 +128,17 @@ const titleDraft = ref('')
 const titleInputRef = ref<HTMLInputElement | null>(null)
 
 const displayTitle = computed(() => props.session?.title?.trim() || t('menu.newSession'))
+const titleTextRef = ref<HTMLElement | null>(null)
+useSessionTitleMotion(titleTextRef, () => props.session?.id, () => displayTitle.value)
 const menuOverlayClass = computed(() => (
-  menuMode.value === 'menu' ? 'chat-header-menu-popup' : 'chat-header-menu-popup is-confirm'
+  menuMode.value === 'menu' ? 'card-more chat-header-menu-popup' : 'card-more chat-header-menu-popup is-confirm'
 ))
 
 function onMenuVisibleChange(visible: boolean): void {
   if (!visible) menuMode.value = 'menu'
 }
 
-function enterConfirmMode(mode: 'clear' | 'delete'): void {
+function enterConfirmMode(mode: 'delete'): void {
   menuMode.value = mode
 }
 
@@ -176,19 +154,12 @@ function onMenuAction(value: string): void {
     return
   }
   menuVisible.value = false
-  handleMenuClick({ value })
+  if (value === 'copyMarkdown') void copyMarkdown()
 }
 
 async function copyText(text: string): Promise<void> {
   const ok = await copyToClipboard(text)
   if (!ok) throw new Error('clipboard unavailable')
-}
-
-function currentSessionLink(): string {
-  const url = new URL(window.location.href)
-  url.search = ''
-  url.hash = ''
-  return url.toString()
 }
 
 function startTitleEdit(): void {
@@ -233,39 +204,6 @@ async function submitTitleEdit(): Promise<void> {
   }
 }
 
-async function togglePin(pinned: boolean): Promise<void> {
-  const session = props.session
-  if (!session || busyAction.value) return
-  busyAction.value = 'pin'
-  try {
-    await setSessionPinned(session.id, pinned)
-    MessagePlugin.success(t(pinned ? 'chatHeader.pinSuccess' : 'chatHeader.unpinSuccess'))
-  } catch {
-    MessagePlugin.error(t(pinned ? 'menu.pinFailed' : 'menu.unpinFailed'))
-  } finally {
-    busyAction.value = ''
-  }
-}
-
-async function copySessionId(): Promise<void> {
-  if (!props.session) return
-  try {
-    await copyText(props.session.id)
-    MessagePlugin.success(t('chatHeader.sessionIdCopied'))
-  } catch {
-    MessagePlugin.error(t('chatHeader.copyFailed'))
-  }
-}
-
-async function copyLink(): Promise<void> {
-  try {
-    await copyText(currentSessionLink())
-    MessagePlugin.success(t('chatHeader.linkCopied'))
-  } catch {
-    MessagePlugin.error(t('chatHeader.copyFailed'))
-  }
-}
-
 async function copyMarkdown(): Promise<void> {
   const session = props.session
   if (!session || busyAction.value) return
@@ -304,22 +242,6 @@ async function copyMarkdown(): Promise<void> {
   }
 }
 
-async function submitClearMessages(): Promise<void> {
-  const session = props.session
-  if (!session || busyAction.value) return
-  busyAction.value = 'clear'
-  try {
-    await clearSession(session.id)
-    menuVisible.value = false
-    menuMode.value = 'menu'
-    MessagePlugin.success(t('menu.clearMessagesSuccess'))
-  } catch {
-    MessagePlugin.error(t('menu.clearMessagesFailed'))
-  } finally {
-    busyAction.value = ''
-  }
-}
-
 async function submitDeleteSession(): Promise<void> {
   const session = props.session
   if (!session || busyAction.value) return
@@ -336,68 +258,16 @@ async function submitDeleteSession(): Promise<void> {
   }
 }
 
-function handleMenuClick(data: { value: string }): void {
-  switch (data.value) {
-    case 'pin': void togglePin(true); break
-    case 'unpin': void togglePin(false); break
-    case 'copyId': void copySessionId(); break
-    case 'copyLink': void copyLink(); break
-    case 'copyMarkdown': void copyMarkdown(); break
-    case 'openNewWindow': window.open(currentSessionLink(), '_blank', 'noopener,noreferrer'); break
-  }
-}
 </script>
 
 <style scoped lang="less">
 .chat-header {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  z-index: 6;
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  max-width: min(280px, calc(100% - 24px));
+  max-width: min(360px, calc(100% - 36px));
   min-width: 0;
-  padding: 2px 2px 2px 8px;
-  border-radius: var(--app-radius-md);
   box-sizing: border-box;
-  background: color-mix(in srgb, var(--td-bg-color-container) 88%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  pointer-events: auto;
-
-  &.is-editing {
-    max-width: min(360px, calc(100% - 24px));
-    padding: 2px;
-  }
-
-  @media (min-width: 960px) {
-    &.is-docked {
-      position: relative;
-      top: auto;
-      left: auto;
-      align-self: stretch;
-      z-index: 5;
-      flex-shrink: 0;
-      width: 100%;
-      max-width: none;
-      margin: 0;
-      padding: 10px 12px;
-      border-radius: 0;
-      border-bottom: 1px solid var(--td-component-stroke);
-      background: var(--td-bg-color-container);
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      box-sizing: border-box;
-      transition: border-color var(--app-motion-slow) cubic-bezier(0.22, 0.61, 0.36, 1);
-
-      &.is-editing {
-        max-width: none;
-        padding: 8px 12px;
-      }
-    }
-  }
 }
 
 .chat-header__edit {
@@ -493,35 +363,10 @@ function handleMenuClick(data: { value: string }): void {
 </style>
 
 <style lang="less">
-.chat-header-menu-popup {
-  z-index: 99 !important;
-
-  .t-popup__content {
-    padding: 4px !important;
-    margin-top: 2px !important;
-    min-width: 168px !important;
-    width: max-content !important;
-    border-radius: var(--app-radius-md) !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 6px rgba(0, 0, 0, 0.08) !important;
-    overflow: hidden;
-  }
-
-  &.is-confirm .t-popup__content {
-    padding: 12px !important;
-    width: 260px !important;
-    min-width: 260px !important;
-  }
-}
-
-.chat-header-menu {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 160px;
+.card-more.chat-header-menu-popup.is-confirm .t-popup__content {
+  padding: 12px !important;
+  width: 260px !important;
+  min-width: 260px !important;
 }
 
 .chat-header-confirm {
@@ -586,58 +431,4 @@ function handleMenuClick(data: { value: string }): void {
   }
 }
 
-.chat-header-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 5px;
-  color: var(--td-text-color-primary);
-  background: transparent;
-  font-size: var(--app-text-base);
-  line-height: 20px;
-  text-align: left;
-  white-space: nowrap;
-  box-sizing: border-box;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-  }
-
-  &.is-danger {
-    color: var(--td-error-color-6);
-
-    .chat-header-menu__icon {
-      color: var(--td-error-color-6);
-    }
-
-    &:hover {
-      background: var(--td-error-color-1);
-    }
-  }
-}
-
-.chat-header-menu__icon {
-  flex: 0 0 auto;
-  font-size: var(--app-text-xl);
-  color: var(--td-text-color-secondary);
-}
-
-.chat-header-menu__divider {
-  height: 1px;
-  margin: 2px 6px;
-  background: var(--td-component-stroke);
-}
-
-:root[theme-mode='dark'] .chat-header-menu-popup .t-popup__content {
-  background: rgba(36, 36, 36, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
-  box-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.05),
-    0 2px 6px rgba(0, 0, 0, 0.2) !important;
-}
 </style>

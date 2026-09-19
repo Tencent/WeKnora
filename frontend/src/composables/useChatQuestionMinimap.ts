@@ -11,6 +11,7 @@ import {
 import {
   activeQuestionId,
   collectOutlineMessages,
+  groupOutlineBounds,
   isChatOverflowing,
   mapQuestionTicks,
   offsetFromScrollContent,
@@ -47,9 +48,10 @@ export function useChatQuestionMinimap(options: {
   const anchoredIds = ref<Set<string>>(new Set())
   const scrollbarGutterPx = ref(0)
   const trackHeight = ref(0)
+  const availableGutter = ref(0)
 
   const visible = computed(() => (
-    shouldShowQuestionMinimap(overflowing.value, questions.value.length)
+    shouldShowQuestionMinimap(overflowing.value, questions.value.length, availableGutter.value)
   ))
 
   let resizeObserver: ResizeObserver | null = null
@@ -66,6 +68,7 @@ export function useChatQuestionMinimap(options: {
     anchoredIds.value = new Set()
     scrollbarGutterPx.value = 0
     trackHeight.value = 0
+    availableGutter.value = 0
   }
 
   const disconnectObserver = () => {
@@ -84,35 +87,38 @@ export function useChatQuestionMinimap(options: {
 
     overflowing.value = isChatOverflowing(el.scrollHeight, el.clientHeight)
     const anchors = Array.from(el.querySelectorAll<HTMLElement>('[data-message-id]'))
-    const anchorByMessageId = new Map<string, HTMLElement>()
-    for (const anchor of anchors) {
-      const messageId = anchor.dataset.messageId
-      if (messageId) anchorByMessageId.set(messageId, anchor)
-    }
-    const containerTop = el.getBoundingClientRect().top
+    const containerRect = el.getBoundingClientRect()
+    const containerTop = containerRect.top
+    const containerStyle = window.getComputedStyle(el)
+    const messageList = el.querySelector<HTMLElement>('.msg_list')
+    // Use the actual gutter, so opening/resizing either panel also hides the
+    // outline before its hit area overlaps the answer. Account for CSS zoom.
+    const scale = containerRect.width / el.offsetWidth || 1
+    const railInset = parseFloat(containerStyle.getPropertyValue('--chat-content-inset')) || 20
+    availableGutter.value = messageList
+      ? (messageList.getBoundingClientRect().left - containerRect.left) / scale
+        + (parseFloat(window.getComputedStyle(messageList).paddingLeft) || 0) - railInset
+      : 0
     scrollbarGutterPx.value = Math.max(0, el.offsetWidth - el.clientWidth)
-    const measured = questions.value.flatMap((question) => {
-      const anchor = anchorByMessageId.get(question.id)
-      if (!anchor) return []
+    const messageBounds = anchors.flatMap(anchor => {
+      const id = anchor.dataset.messageId
       const rect = anchor.getBoundingClientRect()
-      if (rect.height <= 0) return []
-
+      if (!id || rect.height <= 0) return []
       return [{
-        id: question.id,
-        offsetTop: offsetFromScrollContent(
-          rect.top,
-          containerTop,
-          el.scrollTop,
-        ),
+        id,
+        offsetTop: offsetFromScrollContent(rect.top, containerTop, el.scrollTop),
         offsetBottom: offsetFromScrollContent(rect.bottom, containerTop, el.scrollTop),
       }]
     })
+    const measured = groupOutlineBounds(questions.value, messageBounds)
 
     trackHeight.value = questionMinimapTrackHeight(measured.length, el.clientHeight)
     ticks.value = mapQuestionTicks(measured, trackHeight.value)
     viewport.value = viewportBand(el.scrollTop, el.clientHeight, el.scrollHeight, trackHeight.value)
     activeId.value = activeQuestionId(measured, el.scrollTop)
-    visibleIds.value = visibleMessageIds(measured, el.scrollTop, el.clientHeight)
+    // The sticky composer is inside the scroll viewport but obscures its bottom.
+    const bottomInset = parseFloat(containerStyle.scrollPaddingBottom) || 0
+    visibleIds.value = visibleMessageIds(measured, el.scrollTop, el.clientHeight, bottomInset)
     anchoredIds.value = new Set(measured.map((item) => item.id))
   }
 

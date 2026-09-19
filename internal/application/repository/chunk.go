@@ -323,6 +323,42 @@ func (r *chunkRepository) ListChunkByParentID(
 	return chunks, nil
 }
 
+// ListChunkNeighbors implements interfaces.ChunkRepository.
+func (r *chunkRepository) ListChunkNeighbors(
+	ctx context.Context,
+	tenantID uint64,
+	knowledgeID string,
+	chunkIndex int,
+	before int,
+	after int,
+	chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	base := func() *gorm.DB {
+		return r.db.WithContext(ctx).
+			Where("tenant_id = ? AND knowledge_id = ? AND chunk_type IN (?) AND status in (?) AND is_enabled = ?",
+				tenantID, knowledgeID, chunkTypes,
+				[]int{int(types.ChunkStatusIndexed), int(types.ChunkStatusDefault)}, true)
+	}
+	var preceding, following []*types.Chunk
+	if before > 0 {
+		if err := base().Where("chunk_index < ?", chunkIndex).
+			Order("chunk_index DESC").Limit(before).Find(&preceding).Error; err != nil {
+			return nil, err
+		}
+	}
+	if after > 0 {
+		if err := base().Where("chunk_index > ?", chunkIndex).
+			Order("chunk_index ASC").Limit(after).Find(&following).Error; err != nil {
+			return nil, err
+		}
+	}
+	out := make([]*types.Chunk, 0, len(preceding)+len(following))
+	for i := len(preceding) - 1; i >= 0; i-- {
+		out = append(out, preceding[i])
+	}
+	return append(out, following...), nil
+}
+
 func (r *chunkRepository) ListChunksByParentIDs(
 	ctx context.Context,
 	tenantID uint64,

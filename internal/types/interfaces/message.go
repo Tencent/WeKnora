@@ -63,6 +63,11 @@ type MessageService interface {
 	// the frontend "download files generated in this session" drawer and
 	// to clean up storage blobs on session deletion.
 	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+
+	// ListArtifactLibrary lists the latest version of every artifact across
+	// the caller's sessions, newest first. Tenant and owner scope come from
+	// ctx; query.TenantID and query.UserID are overwritten.
+	ListArtifactLibrary(ctx context.Context, query *types.ArtifactLibraryQuery) (*types.PageResult, error)
 }
 
 // MessageRepository defines the message repository interface
@@ -89,6 +94,12 @@ type MessageRepository interface {
 	) ([]*types.Message, error)
 	// ListMessagesBySessionAfterCursor uses (created_at, id) for lossless paging.
 	ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error)
+	// ListMessagesBySessionBeforeCursor pages a session backwards: up to limit
+	// messages sorting strictly before (before, beforeID), newest first. A zero
+	// cursor starts from the newest message.
+	ListMessagesBySessionBeforeCursor(
+		ctx context.Context, sessionID string, before time.Time, beforeID string, limit int,
+	) ([]*types.Message, error)
 	// ListMessagesBySessionUpTo returns every message sorting strictly before
 	// the (boundary, boundaryID) composite cursor, oldest first. Used by
 	// session fork to copy the history preceding a fork point.
@@ -101,6 +112,15 @@ type MessageRepository interface {
 	UpdateMessageImages(ctx context.Context, sessionID, messageID string, images types.MessageImages) error
 	// UpdateMessageRenderedContent updates the rendered_content column for a user message
 	UpdateMessageRenderedContent(ctx context.Context, sessionID, messageID string, renderedContent string) error
+	// UpdateMessageContextCheckpoint writes only the context_checkpoint column
+	// of an assistant message.
+	UpdateMessageContextCheckpoint(
+		ctx context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
+	) error
+	// GetLatestContextCheckpoint returns the newest assistant message in the
+	// session that carries a context checkpoint, projected to the columns
+	// history loading needs, or nil when there is none.
+	GetLatestContextCheckpoint(ctx context.Context, sessionID string) (*types.Message, error)
 	// DeleteMessage deletes a message
 	DeleteMessage(ctx context.Context, sessionID string, id string) error
 	// DeleteMessagesBySessionID deletes all messages belonging to a session
@@ -128,6 +148,11 @@ type MessageRepository interface {
 	// cheap even for long conversations. Empty slice + nil error means the
 	// session has no artifacts yet (never an error).
 	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
+	// ListArtifactLibrary returns one page of the latest artifact versions in
+	// the sessions query.TenantID / query.UserID can see, plus the total.
+	ListArtifactLibrary(
+		ctx context.Context, query *types.ArtifactLibraryQuery,
+	) ([]*types.ArtifactLibraryItem, int64, error)
 	// GetSessionAttachments returns every user-uploaded attachment recorded in
 	// the session. Implementations should project only the attachments column.
 	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)

@@ -32,6 +32,8 @@ var imToolNameLabels = map[string]string{
 	"search_knowledge":        "知识库检索",
 	"knowledge_search":        "知识库检索",
 	"grep_chunks":             "搜索关键词",
+	"read_document":           "阅读文档",
+	"list_documents":          "浏览文档列表",
 	"web_search":              "网络搜索",
 	"web_fetch":               "网页抓取",
 	"get_document_info":       "获取文档信息",
@@ -452,11 +454,16 @@ func imToolStatusDescription(step IMToolStep) string {
 			return "获取文档信息"
 		}
 		return "获取文档信息失败"
-	case "get_document_content", "wiki_read_source_doc":
+	case "get_document_content", "wiki_read_source_doc", "read_document":
 		if success {
-			return "获取文档内容"
+			return "阅读文档"
 		}
-		return "获取文档内容失败"
+		return "阅读文档失败"
+	case "list_documents":
+		if success {
+			return "浏览文档列表"
+		}
+		return "浏览文档列表失败"
 	case "thinking":
 		if success {
 			return "完成思考"
@@ -502,7 +509,7 @@ func imToolHeaderSummary(step IMToolStep) string {
 				return fmt.Sprintf("获取文档：%s", strings.TrimSpace(title))
 			}
 		}
-	case "list_knowledge_chunks":
+	case "list_knowledge_chunks", "read_document":
 		if data != nil {
 			if question, ok := data["faq_question"].(string); ok && strings.TrimSpace(question) != "" {
 				return fmt.Sprintf("查看 FAQ：%s", strings.TrimSpace(question))
@@ -532,8 +539,10 @@ func imToolResultSummary(step IMToolStep) string {
 		return imWebSearchSummary(step.Data)
 	case "grep_chunks":
 		return imGrepSearchSummary(step.Data)
-	case "list_knowledge_chunks":
+	case "list_knowledge_chunks", "read_document":
 		return imKnowledgeChunksSummary(step.Data)
+	case "list_documents":
+		return imDocumentListSummary(step.Data)
 	default:
 		return briefToolSummary(step.Output)
 	}
@@ -668,6 +677,21 @@ func imGrepDocumentCount(data map[string]interface{}) int {
 		return len(results)
 	}
 	return 0
+}
+
+func imDocumentListSummary(data map[string]interface{}) string {
+	if data == nil {
+		return ""
+	}
+	total := imNumericValue(data["total_docs"])
+	listed := 0
+	if docs, ok := data["documents"].([]interface{}); ok {
+		listed = len(docs)
+	}
+	if total == 0 && listed == 0 {
+		return "知识库中没有文档"
+	}
+	return fmt.Sprintf("列出 %d / %d 个文档", listed, total)
 }
 
 func imKnowledgeChunksSummary(data map[string]interface{}) string {

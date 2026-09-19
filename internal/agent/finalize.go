@@ -180,7 +180,9 @@ func (e *AgentEngine) emitCompletionEvent(
 // reported usage so the field stays absent from the completion event and the
 // persisted message alike.
 func turnUsage(state *types.AgentState) *types.TokenUsage {
-	if state == nil || state.TurnUsage.TotalTokens == 0 {
+	// A token scale is worth persisting on its own: the next turn's history
+	// loading is calibrated by it even when this provider reported no total.
+	if state == nil || (state.TurnUsage.TotalTokens == 0 && state.TurnUsage.ContextTokenScale <= 0) {
 		return nil
 	}
 	usage := state.TurnUsage

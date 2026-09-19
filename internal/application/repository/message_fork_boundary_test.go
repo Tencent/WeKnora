@@ -16,7 +16,7 @@ func newMessageRepositoryForForkTest(t *testing.T) (*messageRepository, *gorm.DB
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&types.Message{}))
+	require.NoError(t, db.AutoMigrate(&types.Message{}, &types.MessageArtifactRecord{}))
 
 	return &messageRepository{db: db}, db
 }
@@ -108,18 +108,19 @@ func TestRecordRestoredArtifactMtimeOnlyTouchesThisSession(t *testing.T) {
 		SourcePath: "/workspace/output/report.pptx", FileName: "report.pptx",
 		ModTime: oldMod, FileSize: 4, ContentHash: hash,
 	}}
-	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Message{
-		ID: "parent-msg", SessionID: "parent", Role: "assistant", CreatedAt: at, Artifacts: art,
-	}).Error)
-	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Message{
-		ID: "fork-msg", SessionID: "fork-1", Role: "assistant", CreatedAt: at, Artifacts: art,
-	}).Error)
+	seeded := []*types.Message{
+		{ID: "parent-msg", SessionID: "parent", Role: "assistant", CreatedAt: at, Artifacts: art},
+		{ID: "fork-msg", SessionID: "fork-1", Role: "assistant", CreatedAt: at, Artifacts: art},
+	}
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(seeded).Error)
+	require.NoError(t, insertMessageArtifacts(db, seeded))
 
 	require.NoError(t, repo.RecordRestoredArtifactMtime(ctx, "fork-1", "/workspace/output/report.pptx", newMod, hash))
 
-	var parent, child types.Message
-	require.NoError(t, db.Where("id = ?", "parent-msg").First(&parent).Error)
-	require.NoError(t, db.Where("id = ?", "fork-msg").First(&child).Error)
+	parent, err := repo.GetMessage(ctx, "parent", "parent-msg")
+	require.NoError(t, err)
+	child, err := repo.GetMessage(ctx, "fork-1", "fork-msg")
+	require.NoError(t, err)
 	require.True(t, parent.Artifacts[0].ModTime.Equal(oldMod), "parent artifact mtime must stay put")
 	require.True(t, child.Artifacts[0].ModTime.Equal(newMod), "fork artifact mtime should follow the restored sandbox")
 }

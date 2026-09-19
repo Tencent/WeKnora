@@ -61,6 +61,20 @@ func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
 }
 
+// buildVLMOCRPrompt returns the system-owned OCR prompt for the given image
+// source type. cfg is part of the signature and deliberately unused: knowledge
+// base custom instructions must never reach the OCR prompt — free-form
+// business rules compete with the "No text content" output contract and turn
+// decorative images into poisoned, vectorized image_ocr chunks. Custom OCR
+// guidance, if ever needed, deserves a dedicated OCR instruction field rather
+// than reusing CustomInstructions.
+func buildVLMOCRPrompt(sourceType string, _ types.VLMConfig) string {
+	if sourceType == "scanned_pdf" {
+		return vlmOCRScannedPDFPrompt
+	}
+	return vlmOCRPrompt
+}
+
 // ImageMultimodalService handles image:multimodal asynq tasks.
 // It reads images from storage (via FileService for provider:// URLs),
 // performs OCR and VLM caption, and creates child chunks.
@@ -534,15 +548,17 @@ func (s *ImageMultimodalService) runImageOCR(
 	out types.JSONMap,
 	vlmCfg types.VLMConfig,
 ) {
-	prompt := vlmOCRPrompt
+	// The OCR prompt is system-owned: knowledge base custom instructions must
+	// never reach it, or free-form business rules compete with the "No text
+	// content" contract and poison image_ocr chunks. buildVLMOCRPrompt picks
+	// the scanned-PDF or default prompt and ignores vlmCfg on purpose.
+	prompt := buildVLMOCRPrompt(payload.ImageSourceType, vlmCfg)
 	if payload.ImageSourceType == "scanned_pdf" {
-		prompt = vlmOCRScannedPDFPrompt
 		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", ref.URL)
 		out["ocr_prompt"] = "scanned_pdf"
 	} else {
 		out["ocr_prompt"] = "default"
 	}
-	prompt = types.AppendCustomPromptInstructions(prompt, vlmCfg.CustomInstructions, "image_ocr")
 
 	ocrText, ocrErr := vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
 	if ocrErr != nil {

@@ -57,6 +57,26 @@ func (r *sessionRepository) Get(ctx context.Context, tenantID uint64, userID str
 	return &session, nil
 }
 
+// webSessionPredicate selects the "web" bucket of the session list: the
+// user's own web chats. It excludes IM sessions (any im_channel_sessions
+// mapping, including soft-deleted ones), embed-widget sessions (same IM-null
+// row) and API-key sessions (surfaced only in the admin-only "api" bucket).
+// The user_id NULL check keeps legacy tenant-level web rows visible, since
+// "col NOT LIKE ?" is unknown (not true) for NULL.
+//
+// It expects sessions aliased as s and a
+// "LEFT JOIN im_channel_sessions ics ON ics.session_id = s.id".
+const webSessionPredicate = "ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?) " +
+	"AND (s.user_id IS NULL OR (s.user_id NOT LIKE ? AND s.user_id NOT LIKE ?))"
+
+func webSessionPredicateArgs() []any {
+	return []any{
+		types.EmbedSessionMarkerPrefix + "%",
+		types.SessionOwnerAPITenantKeyPrefix + "%",
+		types.SessionOwnerAPIExternalUserPrefix + "%",
+	}
+}
+
 // GetByID retrieves a session by tenant and id without user scoping.
 func (r *sessionRepository) GetByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error) {
 	var session types.Session
@@ -209,17 +229,7 @@ func (r *sessionRepository) QueryPaged(
 				types.SessionOwnerAPIExternalUserPrefix+"%",
 			)
 		case "web":
-			// User web chats only — exclude embed-widget sessions (same IM-null
-			// row) and API-key sessions (surfaced only in the admin-only "api"
-			// bucket). The user_id NULL check keeps legacy tenant-level web rows
-			// visible, since "col NOT LIKE ?" is unknown (not true) for NULL.
-			return db.Where(
-				"ics.id IS NULL AND (s.description = '' OR s.description NOT LIKE ?) "+
-					"AND (s.user_id IS NULL OR (s.user_id NOT LIKE ? AND s.user_id NOT LIKE ?))",
-				embedPrefix+"%",
-				types.SessionOwnerAPITenantKeyPrefix+"%",
-				types.SessionOwnerAPIExternalUserPrefix+"%",
-			)
+			return db.Where(webSessionPredicate, webSessionPredicateArgs()...)
 		case "embed":
 			return db.Where("ics.id IS NULL AND s.description LIKE ?", embedPrefix+"%")
 		default:
@@ -411,8 +421,11 @@ func (r *sessionRepository) CreateForked(
 		if len(messages) == 0 {
 			return nil
 		}
-		return tx.Session(&gorm.Session{SkipHooks: true}).
-			CreateInBatches(messages, 100).Error
+		if err := tx.Session(&gorm.Session{SkipHooks: true}).
+			CreateInBatches(messages, 100).Error; err != nil {
+			return err
+		}
+		return insertMessageArtifacts(tx, messages)
 	})
 }
 

@@ -3693,6 +3693,22 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		convertResult.AudioData = nil
 	}
 
+	// Normalize inline HTML tables from any parser engine (MinerU, builtin,
+	// markitdown, paddleocr-vl, ...) into GFM, or row-newline-separated HTML
+	// for merged / non-GFM tables, so the chunker can split them.
+	// Runs before image resolution so <img> inside HTML tables becomes
+	// markdown the resolver can persist, instead of rewriting data-URI
+	// <img> tags to `![...](...)` and then escaping them in a later
+	// HTML→GFM pass. Line endings are normalized first so injected row
+	// breaks are plain LF.
+	sanitizeReadResult(convertResult)
+	if convertResult != nil {
+		convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
+		if convertResult.MarkdownContent != "" {
+			convertResult.MarkdownContent = docparser.NormalizeHTMLTables(convertResult.MarkdownContent)
+		}
+	}
+
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
 
@@ -3723,11 +3739,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
 	}
 
-	// Step 3: Split into chunks using Go chunker. Browser textareas normalize
-	// pasted content to LF, so normalize uploaded source text before calculating
-	// chunk boundaries as well.
-	sanitizeReadResult(convertResult)
-	convertResult.MarkdownContent = chunker.NormalizeLineEndings(convertResult.MarkdownContent)
+	// Step 3: Split into chunks using Go chunker. Line endings and inline
+	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	processOpts := ProcessChunksOptions{

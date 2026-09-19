@@ -9,11 +9,9 @@
       :aria-label="t('chat.sandbox.panelTitle')"
     >
       <!-- 左缘拖拽把手：按住向左/右拖动调整面板宽度。 -->
-      <div
-        class="chat-sandbox-panel__resize-handle"
-        :aria-hidden="true"
-        @mousedown.prevent="startResize"
-      />
+      <PanelResizeHandle edge="left" :label="t('knowledgeStages.resizeDrawer')"
+        :value="panel.width.value" :min="SANDBOX_PANEL_MIN_WIDTH" :max="SANDBOX_PANEL_MAX_WIDTH"
+        @start="startResize" @resize="resizePanel" @end="resizing = false" />
       <div class="chat-sandbox-panel__tabs">
         <div class="chat-sandbox-panel__tablist" role="tablist">
           <button
@@ -41,7 +39,7 @@
           :aria-label="t('common.close')"
           @click="panel?.close()"
         >
-          <t-icon name="close" size="20px" />
+          <t-icon name="close" size="16px" />
         </button>
       </div>
 
@@ -105,6 +103,7 @@ import {
 import SandboxTerminal from '@/views/chat/components/SandboxTerminal.vue'
 import SandboxDesktop from '@/views/chat/components/SandboxDesktop.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
+import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
@@ -221,31 +220,16 @@ watch(
 
 // --- 左缘拖拽调宽 -------------------------------------------------------
 const resizing = ref(false)
-// 与面板样式一致：仅宽视口（≥1400px）且参考面板同开时才整体左移 420px。
-const dragBaseOffset = () =>
-  props.shifted && typeof window !== 'undefined' && window.innerWidth >= 1400 ? 420 : 0
-
-function startResize(event: MouseEvent) {
+let resizeStartWidth = 0
+function startResize() {
   if (!panel) return
+  resizeStartWidth = panel.width.value
   resizing.value = true
-  // 拖拽期间禁用全局文本选择，避免 mousemove 命中 iframe / 文本。
-  document.body.style.userSelect = 'none'
-  document.body.style.cursor = 'col-resize'
-
-  const onMove = (moveEvent: MouseEvent) => {
-    const next = window.innerWidth - moveEvent.clientX - dragBaseOffset()
-    panel.setWidth(Math.min(SANDBOX_PANEL_MAX_WIDTH, Math.max(SANDBOX_PANEL_MIN_WIDTH, next)))
-  }
-  const cleanup = () => {
-    document.removeEventListener('mousemove', onMove)
-    document.removeEventListener('mouseup', cleanup)
-    document.body.style.userSelect = ''
-    document.body.style.cursor = ''
-    resizing.value = false
-  }
-  document.addEventListener('mousemove', onMove)
-  document.addEventListener('mouseup', cleanup)
 }
+function resizePanel(delta: number) {
+  panel?.setWidth(resizeStartWidth - delta)
+}
+
 </script>
 
 <style scoped lang="less">
@@ -281,39 +265,12 @@ function startResize(event: MouseEvent) {
   }
 }
 
-// 左缘拖拽把手：一条贴边的窄热区，hover 时显示视觉提示。
-.chat-sandbox-panel__resize-handle {
-  position: absolute;
-  top: 0;
-  left: -3px;
-  bottom: 0;
-  width: 7px;
-  z-index: 3;
-  cursor: col-resize;
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 3px;
-    bottom: 0;
-    width: 1px;
-    background: transparent;
-    transition: background-color var(--app-motion-fast) ease;
-  }
-
-  &:hover::after,
-  .is-resizing &::after {
-    background: var(--td-brand-color);
-  }
-}
-
 .chat-sandbox-panel__close {
   border: 0;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--app-radius-md);
   cursor: pointer;
   display: inline-flex;
@@ -332,7 +289,9 @@ function startResize(event: MouseEvent) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  height: var(--app-chat-header-height);
+  box-sizing: border-box;
+  padding: 0 12px;
   border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 }
@@ -349,7 +308,9 @@ function startResize(event: MouseEvent) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  height: 28px;
+  padding: 0 8px;
+  line-height: 20px;
   border: 0;
   border-radius: var(--app-radius-sm);
   background: transparent;

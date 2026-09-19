@@ -2,6 +2,7 @@ package file
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/google/uuid"
 )
 
@@ -54,7 +56,7 @@ func obsS3Options(endpoint, region, accessKey, secretAccessKey string) s3.Option
 		// trailing checksum negotiation; align with the S3 driver (s3.go).
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		UsePathStyle:               obsUsePathStyle(endpoint),
-		HTTPClient:                 utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig()),
+		HTTPClient:                 objectStorageHTTPClient(),
 	}
 }
 
@@ -68,15 +70,24 @@ func NewObsFileService(
 
 	client := s3.New(obsS3Options(endpoint, region, accessKeyID, secretAccessKey))
 
-	_, err := client.HeadBucket(context.Background(), &s3.HeadBucketInput{
+	headCtx, cancel := objectStorageSetupContext()
+	_, err := client.HeadBucket(headCtx, &s3.HeadBucketInput{
 		Bucket: aws.String(bucketName),
 	})
+	cancel()
 	if err != nil {
-		_, createErr := client.CreateBucket(context.Background(), &s3.CreateBucketInput{
-			Bucket: aws.String(bucketName),
-		})
-		if createErr != nil {
-			fmt.Printf("Warning: bucket %s may not exist or cannot be created: %v\n", bucketName, createErr)
+		var notFound *s3types.NotFound
+		if errors.As(err, &notFound) {
+			createCtx, createCancel := objectStorageSetupContext()
+			_, createErr := client.CreateBucket(createCtx, &s3.CreateBucketInput{
+				Bucket: aws.String(bucketName),
+			})
+			createCancel()
+			if createErr != nil {
+				fmt.Printf("Warning: bucket %s may not exist or cannot be created: %v\n", bucketName, createErr)
+			}
+		} else {
+			fmt.Printf("Warning: bucket %s may not exist or cannot be created: %v\n", bucketName, err)
 		}
 	}
 
@@ -176,6 +187,8 @@ func (s *obsFileService) SaveFile(ctx context.Context,
 		contentType = "application/octet-stream"
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(s.bucketName),
 		Key:           aws.String(objectKey),
@@ -200,15 +213,17 @@ func (s *obsFileService) GetFile(ctx context.Context, filePath string) (io.ReadC
 		return nil, err
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
 	output, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucketName),
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to get file from OBS: %w", err)
 	}
 
-	return output.Body, nil
+	return objectStorageBoundReader(output.Body, cancel), nil
 }
 
 func (s *obsFileService) DeleteFile(ctx context.Context, filePath string) error {
@@ -217,6 +232,8 @@ func (s *obsFileService) DeleteFile(ctx context.Context, filePath string) error 
 		return err
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucketName),
 		Key:    aws.String(objectKey),
@@ -285,6 +302,8 @@ func (s *obsFileService) CopyFile(ctx context.Context,
 
 	// CopySource is "bucket/key"; the '/' separators must NOT be percent-encoded
 	// (url.PathEscape would turn them into %2F and break the bucket/key split).
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(s.bucketName),
 		CopySource: aws.String(s.bucketName + "/" + srcKey),
@@ -323,6 +342,8 @@ func (s *obsFileService) SaveBytes(ctx context.Context, data []byte, tenantID ui
 		}
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucketName),
 		Key:         aws.String(objectKey),

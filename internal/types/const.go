@@ -28,6 +28,9 @@ const (
 	PrincipalContextKey ContextKey = "Principal"
 	// TenantAPIKeyScopeContextKey carries per-API-key operation and KB scopes.
 	TenantAPIKeyScopeContextKey ContextKey = "TenantAPIKeyScope"
+	// AuditAPIKeyContextKey carries the API key id/name for activity
+	// attribution only. It is not an authorization grant.
+	AuditAPIKeyContextKey ContextKey = "AuditAPIKey"
 	// TenantRoleContextKey is the context key for the caller's TenantRole
 	// in the currently active tenant (loaded by the auth middleware from
 	// the tenant_members table). See TenantRoleFromContext.

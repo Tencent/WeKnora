@@ -1,18 +1,10 @@
-// 列表页资源卡片（知识库 / 智能体 / 共享空间）共用的视觉规范。
-// 以 mixin 形式提供，消费方保留自己的根 class（.kb-card / .agent-card / .org-card）
-// 与特有变体（类型渐变、收藏星标、装饰图案），基础尺寸、hover、更多按钮、徽标由这里统一。
-//
-// 用法（在消费方 <style lang="less" scoped> 内）：
-//   @import (reference) '@/components/css/resource-card.less';
-//   .kb-card-wrap { .resource-card-grid(); }
-//   .kb-card { .resource-card(); /* 变体… */ }
-//   .feature-badge { .resource-feature-badge(); /* 语义色变体… */ }
-
+// Resource cards share the artifact page's toolbar, with their own compact grid.
+// Page-specific classes retain existing actions and permission gates.
 .resource-card-grid() {
   display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr;
-  animation: contentFadeIn 0.32s ease-out;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 10px;
+  align-items: stretch;
 }
 
 .resource-card() {
@@ -20,212 +12,216 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  height: 136px;
-  min-height: 136px;
-  padding: 12px 14px;
+  min-width: 0;
+  min-height: 132px;
+  padding: 12px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  overflow: hidden;
   cursor: pointer;
-  transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background var(--app-motion-base) ease;
+  transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
 
   &:hover {
-    border-color: var(--td-brand-color);
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--td-brand-color) 12%, transparent);
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
   }
-
-  &.is-skeleton {
-    cursor: default;
-
-    .card-header {
-      margin-bottom: 12px;
-    }
-
-    .card-content {
-      flex: 1;
-    }
-
-    .card-bottom {
-      margin-top: auto;
-    }
-  }
-
-  // 内容永远压在装饰图案之上
-  .card-header,
-  .card-content,
-  .card-bottom {
-    position: relative;
-    z-index: 1;
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: -2px;
   }
 
   .card-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 4px;
-    margin-bottom: 6px;
-  }
-
-  .card-header-left {
-    display: flex;
     align-items: center;
     gap: 8px;
-    flex: 1;
     min-width: 0;
+    min-height: 28px;
+    padding-right: 28px;
+    margin-bottom: 6px;
   }
-
-  .card-title-block {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1;
-    min-width: 0;
-  }
-
+  &:has(.kb-favorite-star, .agent-favorite-star) .card-header { padding-right: 60px; }
+  .card-header-left,
+  .card-title-block { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
   .card-title {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    display: block;
     flex: 1;
     min-width: 0;
     color: var(--td-text-color-primary);
-    font-size: var(--app-text-lg);
+    font-size: var(--app-text-base);
     font-weight: 600;
-    line-height: 22px;
-    letter-spacing: 0.01em;
+    line-height: 20px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
-  .card-title-text {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .permission-tag {
-    flex-shrink: 0;
-  }
-
-  // 「更多」按钮：hover 卡片时半透明出现，hover 自身时完全不透明
-  .more-wrap,
-  .card-more-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    flex-shrink: 0;
-    border-radius: var(--app-radius-sm);
-    color: var(--td-text-color-placeholder);
-    cursor: pointer;
-    opacity: 0;
-    transition: background var(--app-motion-base) ease, opacity var(--app-motion-base) ease, color var(--app-motion-base) ease;
-
-    &:hover,
-    &.active-more {
-      background: var(--td-bg-color-container-hover);
-      color: var(--td-text-color-secondary);
-      opacity: 1;
-    }
-
-    .more-icon {
-      width: 16px;
-      height: 16px;
-    }
-  }
-
-  &:hover .more-wrap,
-  &:hover .card-more-btn {
-    opacity: 0.6;
-  }
-
-  &:hover .more-wrap:hover,
-  &:hover .more-wrap.active-more,
-  &:hover .card-more-btn:hover,
-  &:hover .card-more-btn.active-more {
-    opacity: 1;
-  }
-
-  // 触屏没有 hover，保持可见
-  @media (hover: none) {
-    .more-wrap,
-    .card-more-btn {
-      opacity: 0.6;
-    }
-  }
-
+  .card-title:has(.card-title-text) { display: flex; align-items: center; gap: 6px; }
+  .card-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .card-content {
     flex: 1;
-    min-height: 0;
-    margin-bottom: 6px;
+    min-width: 0;
+    min-height: 36px;
+    margin-bottom: 8px;
     overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
   }
-
   .card-description {
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     line-clamp: 2;
-    overflow: hidden;
     color: var(--td-text-color-secondary);
     font-size: var(--app-text-sm);
-    font-weight: 400;
-    line-height: 17px;
+    line-height: 18px;
+    overflow: hidden;
   }
-
   .card-bottom {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-width: 0;
     margin-top: auto;
     padding-top: 6px;
-    border-top: 0.5px solid var(--td-component-stroke);
+    border-top: 1px solid color-mix(in srgb, var(--td-component-stroke) 60%, transparent);
   }
+  .feature-badges { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 
-  .card-time {
-    color: var(--td-text-color-placeholder);
-    font-size: var(--app-text-sm);
-    font-weight: 400;
-  }
-
-  .feature-badges {
+  .builtin-avatar,
+  .org-avatar,
+  :deep(.agent-avatar) {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: center;
   }
+
+  .more-wrap,
+  .shared-detail-trigger {
+    position: absolute;
+    right: 8px;
+    top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--app-radius-sm);
+    background: transparent;
+    color: var(--td-text-color-secondary);
+    cursor: pointer;
+    &:hover, &.active-more { background: var(--td-bg-color-secondarycontainer); }
+    &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 1px; }
+    .more-icon { width: 16px; height: 16px; }
+  }
+  &.is-skeleton {
+    cursor: default;
+    &:hover { border-color: var(--td-component-stroke); box-shadow: none; }
+    .card-header { padding-right: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) { transition: none; }
 }
 
-// 卡片底部的小徽标：图标独占时 22×22，带计数时自适应宽度
 .resource-feature-badge() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  height: 22px;
-  min-width: 22px;
+  height: 20px;
+  min-width: 20px;
   padding: 0 5px;
   box-sizing: border-box;
   border-radius: 5px;
   font-size: var(--app-text-xs);
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
   cursor: default;
-  transition: background var(--app-motion-base) ease;
+  .t-icon { flex-shrink: 0; }
+  .badge-count { font-size: var(--app-text-xs); font-weight: 500; line-height: 1; }
+}
 
-  .t-icon {
+.resource-section-header() {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 4px 2px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  line-height: 20px;
+  cursor: pointer;
+  user-select: none;
+  &:first-child { margin-top: 0; }
+  &:hover { color: var(--td-text-color-primary); }
+  &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -2px; border-radius: 4px; }
+  [class$='-section-count'] { font-variant-numeric: tabular-nums; color: var(--td-text-color-placeholder); }
+  [class$='-section-toggle'] { margin-left: 2px; opacity: 0.6; }
+  [class$='-section-subicon'] { margin-left: -4px; }
+}
+
+.resource-list-content() {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  margin: 0 16px 0 0;
+  padding: 20px 28px 0;
+  @media (max-width: 720px) { margin: 0; padding: var(--app-space-4) var(--app-space-4) 0; }
+}
+.resource-list-main() {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--app-space-3) 0 var(--app-space-6);
+}
+.resource-list-header() {
+  .header {
+    margin-bottom: 16px;
+    padding-right: 0;
     flex-shrink: 0;
+    .header-title { width: 100%; gap: 4px; }
+    .title-row { flex-wrap: wrap; gap: 12px; }
+    h2 { margin-right: auto; }
+    .header-subtitle { color: var(--td-text-color-secondary); font-size: var(--app-text-base); }
+    .header-action-btn {
+      width: auto;
+      min-height: 32px;
+      padding: 0 12px;
+      gap: 6px;
+      box-shadow: none;
+      color: var(--td-text-color-primary);
+      background: var(--td-bg-color-container);
+      &:hover:not(:disabled) { background: var(--td-bg-color-container-hover); }
+      &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
+    }
   }
-
-  .badge-count {
-    font-size: var(--app-text-xs);
-    font-weight: 500;
-    line-height: 1;
-  }
+}
+.resource-favorite-button() {
+  position: absolute;
+  top: 12px;
+  right: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--app-radius-sm);
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  cursor: pointer;
+  &:hover { background: var(--td-bg-color-secondarycontainer); color: var(--td-warning-color); }
+  &.is-favorited { color: var(--td-warning-color); }
+  &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 1px; }
 }

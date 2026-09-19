@@ -383,6 +383,8 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 		return nil
 	}
 	content = common.CleanInvalidUTF8(content)
+	content = chunker.NormalizeLineEndings(content)
+	content = docparser.NormalizeHTMLTables(content)
 	lang := chunker.DetectLanguage(content)
 	cfg := chunker.DefaultConfig()
 	cfg.Strategy = chunker.StrategyAuto
@@ -462,6 +464,10 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 	result, err := reader.Read(ctx, request)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("parse document: %w", err)
+	}
+	if result != nil && result.MarkdownContent != "" {
+		result.MarkdownContent = chunker.NormalizeLineEndings(result.MarkdownContent)
+		result.MarkdownContent = docparser.NormalizeHTMLTables(result.MarkdownContent)
 	}
 	// Capture raw page-image bytes before ResolveAndStore stores/rewrites them,
 	// so the VLM OCR fallback for scanned documents has bytes to work with.

@@ -76,6 +76,20 @@ func authorizeKnowledgeInSearchTargets(
 		}
 		return nil, fmt.Errorf("document %s not found: %w", knowledgeID, err)
 	}
+	return authorizeLoadedKnowledge(ctx, searchTargets, knowledge, knowledgeService)
+}
+
+// authorizeLoadedKnowledge is the scope check behind
+// authorizeKnowledgeInSearchTargets for callers that already hold the row.
+func authorizeLoadedKnowledge(
+	ctx context.Context,
+	searchTargets types.SearchTargets,
+	knowledge *types.Knowledge,
+	knowledgeService interfaces.KnowledgeService,
+) (*types.Knowledge, error) {
+	if knowledge == nil {
+		return nil, fmt.Errorf("knowledge_id is required")
+	}
 	if !searchTargets.ContainsKB(knowledge.KnowledgeBaseID) {
 		return nil, fmt.Errorf("knowledge base %s is not within the current Agent scope", knowledge.KnowledgeBaseID)
 	}

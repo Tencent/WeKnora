@@ -758,3 +758,28 @@ func TestDeleteByKnowledgeBaseIDScopesSoftAndHardDeletes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, otherIssues, 1)
 }
+
+// Issue IDs are listed to readers of a KB; updating one must be scoped to the
+// KB the caller was authorized for.
+func TestUpdateIssueStatus_ScopedToKnowledgeBase(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	require.NoError(t, db.Create(&types.WikiPageIssue{
+		ID: "issue-1", TenantID: 7, KnowledgeBaseID: "kb-a", Slug: "page", Status: "pending",
+	}).Error)
+	repo := &wikiPageRepository{db: db}
+	status := func() string {
+		var got string
+		require.NoError(t, db.Raw(`SELECT status FROM wiki_page_issues WHERE id = 'issue-1'`).Scan(&got).Error)
+		return got
+	}
+
+	err := repo.UpdateIssueStatus(context.Background(), "kb-b", "issue-1", "resolved")
+	require.ErrorIs(t, err, ErrWikiIssueNotFound)
+	assert.Equal(t, "pending", status())
+
+	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
+	assert.Equal(t, "resolved", status())
+	// Setting the same status again is not "not found": both supported
+	// databases count matched rows, and updated_at changes anyway.
+	require.NoError(t, repo.UpdateIssueStatus(context.Background(), "kb-a", "issue-1", "resolved"))
+}

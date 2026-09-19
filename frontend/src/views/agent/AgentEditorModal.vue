@@ -624,7 +624,7 @@
             </div>
           </div>
 
-          <!-- ReRank 模型（启用知识库或 knowledge_search 工具时显示） -->
+          <!-- ReRank 模型（启用知识库或 search_knowledge 工具时显示） -->
           <div
             v-if="showRerankModelField"
             class="setting-row"
@@ -846,9 +846,9 @@
         </div>
       </div>
 
-      <!-- 多轮对话。Agent 模式下 history_turns 同样生效（session_agent_qa.go
-           经 LoadAgentHistory 读取），所以本组不再整体按模式隐藏；开关本身仍由
-           EnsureDefaults 强制开启，故只在普通模式展示。 -->
+      <!-- 多轮对话。两种模式都保留本组：Agent 模式在这里说明历史按上下文窗口
+           自动管理，并承载跨轮保留检索结果；开关由 EnsureDefaults 强制开启，
+           故只在普通模式展示。 -->
       <div v-show="currentSection === 'conversation'" class="section">
         <div class="section-header">
           <h2>{{ $t('agent.editor.conversationSettings') }}</h2>
@@ -868,8 +868,9 @@
             </div>
           </div>
 
-          <!-- 保留轮数（Agent 模式恒为多轮，故不受开关状态影响） -->
-          <div v-if="formData.config.multi_turn_enabled || isAgentMode" class="setting-row">
+          <!-- 保留轮数（仅普通模式：Agent 模式按上下文窗口加载历史、超出时压缩成
+               摘要，见 session_agent_qa.go -> LoadAgentHistory，不读 history_turns） -->
+          <div v-if="!isAgentMode && formData.config.multi_turn_enabled" class="setting-row">
             <div class="setting-info">
               <label>{{ $t('agent.editor.historyTurns') }}</label>
               <p class="desc">{{ $t('agentEditor.desc.historyRounds') }}</p>
@@ -1380,6 +1381,21 @@
                           <t-icon :name="skillStatusIcon(skill)" size="14px" />
                           {{ skillStatusHint(skill) }}
                         </span>
+                        <span
+                          v-if="skill.selectable && skill.servedNote"
+                          class="skill-pick__hint"
+                          :class="{ 'skill-pick__hint--busy': isSkillBusy(skill) }"
+                        >
+                          <t-icon :name="isSkillBusy(skill) ? 'refresh' : 'error-circle'" size="14px" />
+                          {{ skill.servedNote }}
+                        </span>
+                        <span
+                          v-if="canUpgradeSkillRow(skill)"
+                          class="skill-pick__hint skill-pick__hint--upgrade"
+                        >
+                          <t-icon name="arrow-up" size="14px" />
+                          {{ skillUpgradeHint(skill) }}
+                        </span>
                       </div>
                       <p
                         v-if="skill.description"
@@ -1393,13 +1409,24 @@
                       variant="text"
                       theme="primary"
                       :loading="installingCatalogId === skill.id"
-                      :title="$t('agent.editor.installToThisSandbox')"
+                      :title="installsAnUpgrade(skill) ? $t('agent.editor.upgradeOnThisSandbox') : $t('agent.editor.installToThisSandbox')"
                       @click.stop="installCatalogToCurrent(skill)"
                     >
-                      {{ $t('agent.editor.installShort') }}
+                      {{ installsAnUpgrade(skill) ? $t('settings.skills.upgrade') : $t('agent.editor.installShort') }}
                     </t-button>
                     <t-button
-                      v-else-if="isSkillBusy(skill)"
+                      v-else-if="canUpgradeSkillRow(skill)"
+                      size="small"
+                      variant="text"
+                      theme="primary"
+                      :loading="installingCatalogId === skill.id"
+                      :title="$t('agent.editor.upgradeOnThisSandbox')"
+                      @click.stop="installCatalogToCurrent(skill)"
+                    >
+                      {{ $t('settings.skills.upgrade') }}
+                    </t-button>
+                    <t-button
+                      v-else-if="canInstallSkills && isSkillBusy(skill)"
                       size="small"
                       variant="text"
                       theme="primary"
@@ -1810,7 +1837,9 @@ import {
 } from '@/api/agent';
 import { type ModelConfig } from '@/api/model';
 import { type AgentNotReadyReasonKey, agentRequiresRerankModel } from '@/utils/agent-readiness';
+import { normalizeLegacyToolNames } from '@/utils/legacy-tool-names';
 import { installSkillCatalog, type SkillCatalogItem } from '@/api/skill';
+import { installUpgradable, servedPreviousText, upgradeVersions } from '@/utils/skillUpgrade';
 import { type WebSearchProviderEntity } from '@/api/web-search-provider';
 import {
   isNamedSandboxBackend,
@@ -2048,6 +2077,12 @@ type CatalogSkillRow = SkillCatalogItem & {
   selectable: boolean
   installStatus: string
   installEnabled: boolean
+  // The install on this sandbox is still on an archive the catalog has moved past.
+  upgradable: boolean
+  installVersion: string
+  // Set while a newer install runs or after it failed: the sandbox still runs
+  // the previous version, so the skill stays usable.
+  servedNote: string
 }
 
 const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
@@ -2059,8 +2094,13 @@ const catalogSkillRows = computed<CatalogSkillRow[]>(() => {
     const installStatus = inst?.status || ''
     const installEnabled = Boolean(inst?.enabled)
     const installed = Boolean(inst) && installStatus !== 'removed'
-    const selectable = installStatus === 'ready' && installEnabled
-    return { ...item, installed, selectable, installStatus, installEnabled }
+    const servedNote = inst ? servedPreviousText(t, inst) : ''
+    const selectable = installEnabled && (installStatus === 'ready' || Boolean(servedNote))
+    const upgradable = Boolean(inst && installUpgradable(item, inst))
+    return {
+      ...item, installed, selectable, installStatus, installEnabled,
+      upgradable, installVersion: inst?.version || '', servedNote,
+    }
   })
 })
 
@@ -2122,6 +2162,26 @@ function isSkillBusy(skill: CatalogSkillRow): boolean {
 function canInstallSkillRow(skill: CatalogSkillRow): boolean {
   if (!canInstallSkills.value || !hasSandboxSelected.value) return false
   return !skill.installed || skill.installStatus === 'failed'
+}
+
+// Upgrading writes the sandbox image through the same admin-only catalog
+// install, so it is offered, and even mentioned, only to those who can run it.
+function canUpgradeSkillRow(skill: CatalogSkillRow): boolean {
+  return canInstallSkills.value && hasSandboxSelected.value && skill.upgradable
+}
+
+// Installing the catalog version over what this sandbox has is an upgrade:
+// over an outdated install, or over a failed upgrade whose previous version
+// still runs. Only a skill the sandbox has never carried is a plain install.
+function installsAnUpgrade(skill: CatalogSkillRow): boolean {
+  return skill.upgradable || Boolean(skill.servedNote)
+}
+
+function skillUpgradeHint(skill: CatalogSkillRow): string {
+  const versions = upgradeVersions(skill, { version: skill.installVersion })
+  return versions
+    ? t('settings.skills.upgradeFromTo', versions)
+    : t('settings.skills.upgradeAvailable')
 }
 
 function namedSandboxConfigs(): SandboxConfigRecord[] {
@@ -2193,7 +2253,11 @@ function onSkillProgressChanged() {
 
 function pruneSelectedSkills() {
   if (!catalogReady.value) return
-  const names = new Set(catalogSkillRows.value.filter((skill) => skill.selectable).map((skill) => skill.name))
+  // A skill being upgraded is briefly not ready, and dropping it here would
+  // silently unselect it for good once the agent is saved.
+  const names = new Set(catalogSkillRows.value
+    .filter((skill) => skill.selectable || (skill.installed && isSkillBusy(skill)))
+    .map((skill) => skill.name))
   const selected: string[] = formData.value.config.selected_skills || []
   const kept = selected.filter((name: string) => names.has(name))
   if (kept.length !== selected.length) {
@@ -2219,13 +2283,14 @@ async function installCatalogToCurrent(skill: CatalogSkillRow) {
   const configId = formData.value.config.sandbox_config_id || ''
   if (!configId || installingCatalogId.value) return
   installingCatalogId.value = skill.id
+  const upgrading = installsAnUpgrade(skill)
   try {
     const res = await installSkillCatalog(skill.id, [configId])
     const failed = Object.keys(res?.data?.errors || {}).length
     if (failed > 0) {
       MessagePlugin.warning(t('settings.skills.installPartial', { failed }))
     } else {
-      MessagePlugin.success(t('settings.skills.installAccepted'))
+      MessagePlugin.success(t(upgrading ? 'settings.skills.upgradeAccepted' : 'settings.skills.installAccepted'))
     }
     await syncInstalledSkills(true)
   } catch (e: any) {
@@ -2320,10 +2385,10 @@ const defaultMaxCompletionTokensFor = (mode: string, sandboxConfigId?: string) =
 };
 
 // 知识库相关工具列表（用于 watch(hasKnowledgeBase) 从"无"变"有"时 seed 默认工具）
-const knowledgeBaseTools = ['grep_chunks', 'knowledge_search', 'list_knowledge_chunks', 'get_document_info'];
+const knowledgeBaseTools = ['search_knowledge', 'read_document', 'list_documents'];
 
 // Wiki 读取类工具（用于 watch(agentMode) 切到 smart-reasoning 时 seed 默认工具）
-const wikiReadTools = ['wiki_search', 'wiki_read_page', 'wiki_read_source_doc', 'wiki_flag_issue'];
+const wikiReadTools = ['wiki_search', 'wiki_read_page', 'read_document', 'wiki_flag_issue'];
 
 // 初始化标志，防止初始化时触发 watch 自动添加工具
 const isInitializing = ref(false);
@@ -2343,17 +2408,16 @@ const allTools = computed(() => [
   // 基础思考类
   { value: 'thinking', label: t('agentEditor.tools.thinking'), description: t('agentEditor.tools.thinkingDesc'), group: 'base' },
   { value: 'todo_write', label: t('agentEditor.tools.todoWrite'), description: t('agentEditor.tools.todoWriteDesc'), group: 'base' },
-  // 知识库语义/关键词检索
-  { value: 'grep_chunks', label: t('agentEditor.tools.grepChunks'), description: t('agentEditor.tools.grepChunksDesc'), group: 'rag' },
-  { value: 'knowledge_search', label: t('agentEditor.tools.knowledgeSearch'), description: t('agentEditor.tools.knowledgeSearchDesc'), group: 'rag' },
-  { value: 'list_knowledge_chunks', label: t('agentEditor.tools.listChunks'), description: t('agentEditor.tools.listChunksDesc'), group: 'rag' },
+  // 知识库检索 / 文档阅读（旧的 grep_chunks / knowledge_search / list_knowledge_chunks /
+  // get_document_info 已合并，旧配置加载时由 normalizeLegacyToolNames 映射到新名字）
+  { value: 'search_knowledge', label: t('agentEditor.tools.searchKnowledge'), description: t('agentEditor.tools.searchKnowledgeDesc'), group: 'rag' },
+  { value: 'read_document', label: t('agentEditor.tools.readDocument'), description: t('agentEditor.tools.readDocumentDesc'), group: 'rag' },
+  { value: 'list_documents', label: t('agentEditor.tools.listDocuments'), description: t('agentEditor.tools.listDocumentsDesc'), group: 'rag' },
   { value: 'query_knowledge_graph', label: t('agentEditor.tools.queryGraph'), description: t('agentEditor.tools.queryGraphDesc'), group: 'rag' },
-  { value: 'get_document_info', label: t('agentEditor.tools.getDocInfo'), description: t('agentEditor.tools.getDocInfoDesc'), group: 'rag' },
   { value: 'database_query', label: t('agentEditor.tools.dbQuery'), description: t('agentEditor.tools.dbQueryDesc'), group: 'rag' },
   // Wiki 读取类（阅读、搜索、标记问题）
   { value: 'wiki_search', label: t('agentEditor.tools.wikiSearch'), description: t('agentEditor.tools.wikiSearchDesc'), group: 'wiki_read' },
   { value: 'wiki_read_page', label: t('agentEditor.tools.wikiReadPage'), description: t('agentEditor.tools.wikiReadPageDesc'), group: 'wiki_read' },
-  { value: 'wiki_read_source_doc', label: t('agentEditor.tools.wikiReadSourceDoc'), description: t('agentEditor.tools.wikiReadSourceDocDesc'), group: 'wiki_read' },
   { value: 'wiki_flag_issue', label: t('agentEditor.tools.wikiFlagIssue'), description: t('agentEditor.tools.wikiFlagIssueDesc'), group: 'wiki_read' },
   // Wiki 编辑类（会直接修改 Wiki 内容）
   { value: 'wiki_write_page', label: t('agentEditor.tools.wikiWritePage'), description: t('agentEditor.tools.wikiWritePageDesc'), group: 'wiki_edit', danger: true },
@@ -2624,7 +2688,7 @@ const navItems = computed(() => {
     { key: 'model', icon: 'control-platform', label: t('agent.editor.modelConfig') },
     { key: 'suggestions', icon: 'help-circle', label: t('agentEditor.questionSuggestions.navLabel') },
   ];
-  // 多轮对话（两种模式都需要：Agent 模式同样按 history_turns 截断历史）
+  // 多轮对话（两种模式都需要：Agent 模式在这里说明历史自动管理、保留检索结果）
   items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
@@ -3263,7 +3327,7 @@ const applyAgentTypePreset = (preset: AgentTypePreset | null) => {
   }
   if (typeof c.temperature === 'number') target.temperature = c.temperature;
   if (typeof c.max_iterations === 'number') target.max_iterations = c.max_iterations;
-  if (Array.isArray(c.allowed_tools)) target.allowed_tools = [...c.allowed_tools];
+  if (Array.isArray(c.allowed_tools)) target.allowed_tools = normalizeLegacyToolNames(c.allowed_tools);
   if (typeof c.retain_retrieval_history === 'boolean') target.retain_retrieval_history = c.retain_retrieval_history;
   if (typeof c.faq_priority_enabled === 'boolean') target.faq_priority_enabled = c.faq_priority_enabled;
   if (typeof c.web_search_enabled === 'boolean') target.web_search_enabled = c.web_search_enabled;
@@ -3391,7 +3455,10 @@ watch(() => props.visible, async (val) => {
       };
       // 确保数组字段存在
       if (!agentData.config.knowledge_bases) agentData.config.knowledge_bases = [];
-      if (!agentData.config.allowed_tools) agentData.config.allowed_tools = [];
+      // 旧配置里可能还带着已合并的工具名（knowledge_search / grep_chunks /
+      // list_knowledge_chunks / get_document_info / wiki_read_source_doc），
+      // 映射到新名字并去重，否则复选框对不上 allTools。
+      agentData.config.allowed_tools = normalizeLegacyToolNames(agentData.config.allowed_tools);
       if (!agentData.config.mcp_services) agentData.config.mcp_services = [];
       // 授权等待超时：旧数据缺省时用默认 600 秒
       if (agentData.config.mcp_auth_wait_timeout == null || agentData.config.mcp_auth_wait_timeout <= 0) {
@@ -4774,7 +4841,7 @@ const handleSave = async () => {
   }
 
   // ReRank 模型按运行范围按需使用：知识库范围为 none，或未启用
-  // knowledge_search 时不需要；其余情况由对话入口在使用前给出明确提示。
+  // search_knowledge 时不需要；其余情况由对话入口在使用前给出明确提示。
 
   formData.value.config.question_suggestions.starters.items =
     formData.value.config.question_suggestions.starters.items
@@ -5989,6 +6056,10 @@ const handleSave = async () => {
   .t-icon {
     flex-shrink: 0;
   }
+}
+
+.skill-pick__hint--upgrade {
+  color: var(--td-warning-color);
 }
 
 .skill-pick__hint--busy {

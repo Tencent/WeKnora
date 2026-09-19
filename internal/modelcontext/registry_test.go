@@ -498,3 +498,184 @@ func TestCitationPolicyDoesNotSuppressRequestedResourcesOrBreakOutputFormat(t *t
 	enabled := NewRegistry(true).ProtocolPrompt()
 	require.Contains(t, enabled, "do not break a required schema")
 }
+
+func TestRegistryDecodesReadDocumentIDAgainstBothHandleTables(t *testing.T) {
+	registry := NewRegistry(true)
+	registry.RegisterDocument("doc-real")
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real", KnowledgeID: "doc-real", KnowledgeBaseID: "kb-real"})
+	registry.RegisterKnowledgeBase("kb-real")
+
+	for _, tc := range []struct{ name, tool, raw, want string }{
+		{
+			"read document by dN", "read_document",
+			`{"id":"d1","offset":20}`, `{"id":"doc-real","offset":20}`,
+		},
+		{
+			"read document by cN", "read_document",
+			`{"id":"c1","context":2}`, `{"id":"chunk-real","context":2}`,
+		},
+		{
+			"read document query stays literal", "read_document",
+			`{"id":"d1","query":"d1 c1"}`, `{"id":"doc-real","query":"d1 c1"}`,
+		},
+		{
+			"search knowledge KB", "search_knowledge",
+			`{"query":"b1","knowledge_base_ids":["b1"]}`, `{"query":"b1","knowledge_base_ids":["kb-real"]}`,
+		},
+		{
+			"list documents KB", "list_documents",
+			`{"knowledge_base_id":"b1","keyword":"b1"}`, `{"knowledge_base_id":"kb-real","keyword":"b1"}`,
+		},
+		{
+			"wiki search KBs", "wiki_search",
+			`{"query":"topic","knowledge_base_ids":["b1"]}`, `{"query":"topic","knowledge_base_ids":["kb-real"]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: tc.tool, Arguments: tc.raw}}}
+			registry.DecodeToolCalls(calls)
+			require.JSONEq(t, tc.want, calls[0].Function.Arguments)
+			require.Equal(t, ArgumentResolutionResolved, calls[0].ArgumentResolution)
+		})
+	}
+
+	// A bare "id" on a tool without the read_document contract is opaque.
+	calls := []types.LLMToolCall{{Function: types.FunctionCall{Name: "thinking", Arguments: `{"id":"d1"}`}}}
+	registry.DecodeToolCalls(calls)
+	require.JSONEq(t, `{"id":"d1"}`, calls[0].Function.Arguments)
+
+	unknown := []types.LLMToolCall{{Function: types.FunctionCall{Name: "read_document", Arguments: `{"id":"d9"}`}}}
+	registry.DecodeToolCalls(unknown)
+	require.Equal(t, ArgumentResolutionUnresolved, unknown[0].ArgumentResolution)
+	require.Equal(t, []string{"d9"}, unknown[0].UnresolvedHandles)
+}
+
+func TestModelOutputRendersReadDocumentHeaderAndNavigation(t *testing.T) {
+	registry := NewRegistry(true)
+	paged := registry.ModelToolResultForTool("read_document", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":    "knowledge_chunks_list",
+		"knowledge_id":    "doc-real",
+		"knowledge_title": "Engine Manual",
+		"total_chunks":    12,
+		"fetched_chunks":  2,
+		"offset":          4,
+		"next_offset":     6,
+		"document": map[string]interface{}{
+			"knowledge_id": "doc-real", "title": "Engine Manual", "source": "File Upload", "file_type": "pdf",
+			"parse_status": "completed", "chunk_count": 12, "description": "How the engine works",
+			"metadata": map[string]interface{}{"region": "EU", "author": "Ada"},
+		},
+		"chunks": []map[string]interface{}{
+			{"chunk_id": "chunk-4", "chunk_index": 4, "content": "four", "knowledge_base": "kb-real"},
+			{"chunk_id": "chunk-5", "chunk_index": 5, "content": "five", "knowledge_base": "kb-real"},
+		},
+	}})
+	require.Contains(t, paged, `<retrieval type="knowledge" mode="deep_read">`)
+	require.Contains(t, paged, `<document id="d1" kb="b1" title="Engine Manual">`)
+	require.Contains(t, paged, `<info source="File Upload" file_type="pdf" parse_status="completed" chunk_count="12">`)
+	require.Contains(t, paged, `<description>How the engine works</description>`)
+	require.Contains(t, paged, `<metadata>author: Ada; region: EU</metadata>`)
+	require.Contains(t, paged, `<chunk id="c1" index="4" view="full">`)
+	require.Contains(t, paged, `<pagination next_offset="6" remaining="6" />`)
+	require.NotContains(t, paged, "doc-real")
+
+	matched := registry.ModelToolResultForTool("read_document", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":    "knowledge_chunks_list",
+		"knowledge_id":    "doc-real",
+		"knowledge_title": "Engine Manual",
+		"total_chunks":    12,
+		"fetched_chunks":  3,
+		"query":           "psionic",
+		"match_count":     1,
+		"truncated":       false,
+		"document":        map[string]any{"knowledge_id": "doc-real", "title": "Engine Manual", "chunk_count": 12},
+		"chunks": []map[string]interface{}{
+			{"chunk_id": "chunk-3", "chunk_index": 3, "content": "three", "role": "context_before"},
+			{
+				"chunk_id": "chunk-4", "chunk_index": 4, "content": "psionic four",
+				"role": "match", "match_snippet": "... psionic ...",
+			},
+			{"chunk_id": "chunk-5", "chunk_index": 5, "content": "five", "role": "context_after"},
+		},
+	}})
+	require.Contains(t, matched, `role="match"`)
+	require.Contains(t, matched, `role="context_before"`)
+	require.Contains(t, matched, `<match>... psionic ...</match>`)
+	require.Contains(t, matched, `<matches query="psionic" count="1" />`)
+	require.NotContains(t, matched, "<pagination")
+
+	empty := registry.ModelToolResultForTool("read_document", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":    "knowledge_chunks_list",
+		"knowledge_id":    "doc-real",
+		"knowledge_title": "Engine Manual",
+		"total_chunks":    12,
+		"fetched_chunks":  0,
+		"query":           "absent",
+		"match_count":     0,
+		"document":        map[string]any{"knowledge_id": "doc-real", "title": "Engine Manual", "chunk_count": 12},
+		"chunks":          []map[string]interface{}{},
+	}})
+	require.Contains(t, empty, `<document id="d1" title="Engine Manual">`)
+	require.Contains(t, empty, `<matches query="absent" count="0" />`)
+	require.Contains(t, empty, "<hint>No chunk contains every word of the query.")
+}
+
+func TestModelOutputRendersDocumentListWithPagination(t *testing.T) {
+	registry := NewRegistry(true)
+	out := registry.ModelToolResultForTool("list_documents", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type":      "document_info",
+		"knowledge_base_id": "kb-real",
+		"total_docs":        int64(3),
+		"page":              1,
+		"page_size":         2,
+		"next_page":         2,
+		"documents": []map[string]interface{}{
+			{
+				"knowledge_id": "doc-a", "title": "Alpha", "file_type": "pdf", "parse_status": "completed",
+				"updated_at": "2026-03-04T05:06:07Z", "description": "First",
+			},
+			{"knowledge_id": "doc-b", "title": "Beta", "file_type": "md", "parse_status": "completed"},
+		},
+	}})
+	require.Contains(t, out, `<documents kb="b1" total="3" page="1" next_page="2">`)
+	require.Contains(t, out,
+		`<document id="d1" title="Alpha" file_type="pdf" parse_status="completed" updated_at="2026-03-04">`)
+	require.Contains(t, out, `<description>First</description>`)
+	require.Contains(t, out, `<document id="d2" title="Beta"`)
+	require.NotContains(t, out, "doc-a")
+	require.NotContains(t, out, "kb-real")
+}
+
+func TestModelOutputReportsSearchModeAndFallbacks(t *testing.T) {
+	registry := NewRegistry(true)
+	row := map[string]interface{}{
+		"chunk_id": "chunk-1", "knowledge_id": "doc-1", "knowledge_base_id": "kb-faq",
+		"knowledge_title": "FAQ", "content": "reset the device",
+	}
+	keyword := registry.ModelToolResultForTool("search_knowledge", &types.ToolResult{
+		Success: true, Data: map[string]any{
+			"display_type": "search_results", "mode": "keyword", "results": []map[string]interface{}{row},
+		},
+	})
+	require.Contains(t, keyword, `<retrieval type="knowledge" mode="keyword">`)
+
+	const faqReason = "FAQ bases are indexed for semantic search only"
+	fallback := registry.ModelToolResultForTool("search_knowledge", &types.ToolResult{
+		Success: true, Data: map[string]any{
+			"display_type": "search_results", "mode": "semantic", "requested_mode": "keyword",
+			"results": []map[string]interface{}{row},
+			"mode_fallbacks": []map[string]interface{}{
+				{"knowledge_base_id": "kb-faq", "mode": "semantic", "reason": faqReason},
+			},
+		},
+	})
+	require.Contains(t, fallback, `<retrieval requested_mode="keyword" type="knowledge" mode="semantic">`)
+	require.Contains(t, fallback,
+		`<mode_fallback kb="b1" mode="semantic" reason="FAQ bases are indexed for semantic search only" />`)
+	require.NotContains(t, fallback, "kb-faq")
+
+	legacy := registry.ModelToolResultForTool("knowledge_search", &types.ToolResult{Success: true, Data: map[string]any{
+		"display_type": "search_results", "results": []map[string]interface{}{row},
+	}})
+	require.Contains(t, legacy, `mode="semantic"`, "legacy knowledge_search payloads were semantic")
+}

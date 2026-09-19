@@ -22,7 +22,7 @@ func newOwnerScopeDB(t *testing.T, name string) (*gorm.DB, map[string]string) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&types.Session{}, &types.Message{}); err != nil {
+	if err := db.AutoMigrate(&types.Session{}, &types.Message{}, &types.MessageArtifactRecord{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	sessions := map[string]*types.Session{
