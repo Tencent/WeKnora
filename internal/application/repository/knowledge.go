@@ -590,6 +590,25 @@ func (r *knowledgeRepository) UpdateKnowledgeColumns(
 	return r.db.WithContext(ctx).Model(&types.Knowledge{}).Where("id = ?", id).Updates(values).Error
 }
 
+// MarkKnowledgeDeleting sets parse_status to deleting for the given rows so
+// an admitted async delete is immediately hidden from the document list, KB
+// count, and duplicate check — without waiting for the worker to start
+// (issue #3338). Rows already deleting are left untouched; GORM's default
+// scope skips soft-deleted rows.
+func (r *knowledgeRepository) MarkKnowledgeDeleting(
+	ctx context.Context,
+	tenantID uint64,
+	ids []string,
+) error {
+	if tenantID == 0 || len(ids) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).Model(&types.Knowledge{}).
+		Where("tenant_id = ? AND id IN ? AND parse_status <> ?",
+			tenantID, ids, types.ParseStatusDeleting).
+		Update("parse_status", types.ParseStatusDeleting).Error
+}
+
 // UpdateActiveDeletingKnowledgeColumns only touches rows that are still visible
 // to normal queries and have not moved out of the transient deleting state.
 func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(

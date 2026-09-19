@@ -423,6 +423,44 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	return s.executeKnowledgeDelete(plan, false)
 }
 
+// MarkKnowledgesDeleting flips admitted-delete rows to parse_status=deleting
+// immediately so a processing/pending document cannot keep blocking re-upload
+// or inflating the KB count while the async worker is still queued (issue #3338).
+// Best-effort dequeue of in-flight parse tasks follows; the worker still marks
+// deleting as well, so this is safe to call twice.
+func (s *knowledgeService) MarkKnowledgesDeleting(ctx context.Context, ids []string) error {
+	ids, err := writeResourceIDs(ids)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	tenant, err := writeExecutionTenant(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := s.repo.GetKnowledgeBatch(ctx, tenant, ids)
+	if err != nil {
+		return err
+	}
+	var inFlightIDs []string
+	for _, knowledge := range rows {
+		if knowledge == nil {
+			continue
+		}
+		prev := knowledge.ParseStatus
+		if prev == types.ParseStatusPending || prev == types.ParseStatusProcessing {
+			inFlightIDs = append(inFlightIDs, knowledge.ID)
+		}
+	}
+	if err := s.repo.MarkKnowledgeDeleting(ctx, tenant, ids); err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Errorf("MarkKnowledgesDeleting failed")
+		return err
+	}
+	for _, kid := range inFlightIDs {
+		s.dequeueKnowledgeTasks(ctx, kid)
+	}
+	return nil
+}
+
 func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, single bool) error {
 	if len(plan.ids) == 0 {
 		return nil

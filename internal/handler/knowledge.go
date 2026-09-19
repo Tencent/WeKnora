@@ -186,6 +186,13 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 func (h *KnowledgeHandler) enqueueKnowledgeListDelete(
 	ctx context.Context, tenantID uint64, kbID string, ids []string,
 ) (string, error) {
+	// Flip parse_status to deleting before the task is even queued so a
+	// processing row cannot keep matching CheckKnowledgeExists / the KB
+	// count during the worker's wait (issue #3338). The worker still marks
+	// deleting as well; this call is idempotent.
+	if err := h.kgService.MarkKnowledgesDeleting(ctx, ids); err != nil {
+		return "", fmt.Errorf("mark deleting: %w", err)
+	}
 	payload := types.KnowledgeListDeletePayload{
 		KnowledgeBaseID: kbID,
 		TenantID:        tenantID,

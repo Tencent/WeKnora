@@ -295,6 +295,10 @@ func (s *knowledgeTagService) DeleteTag(ctx context.Context, id string, force bo
 		if len(knowledgeIDs) == 0 {
 			return nil
 		}
+		if err := s.knowledgeRepo.MarkKnowledgeDeleting(ctx, tenantID, knowledgeIDs); err != nil {
+			logger.Errorf(ctx, "Failed to mark knowledge deleting under tag %s: %v", tag.ID, err)
+			return werrors.NewInternalServerError("删除标签下的文档失败")
+		}
 		// Enqueue async task to delete knowledge files
 		payload := types.KnowledgeListDeletePayload{
 			KnowledgeBaseID: kb.ID,

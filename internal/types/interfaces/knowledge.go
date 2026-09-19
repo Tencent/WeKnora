@@ -104,6 +104,11 @@ type KnowledgeService interface {
 	// DeleteKnowledgeList requires an explicit write grant for every affected KB.
 	// It validates the complete selection before changing any deletion state.
 	DeleteKnowledgeList(ctx context.Context, ids []string) error
+	// MarkKnowledgesDeleting records that an async delete has been admitted
+	// for these IDs: parse_status becomes deleting immediately so the
+	// document list, KB count, and duplicate check agree before the worker
+	// runs (issue #3338). Idempotent if already deleting.
+	MarkKnowledgesDeleting(ctx context.Context, ids []string) error
 	// GetKnowledgeFile retrieves the file associated with the knowledge.
 	GetKnowledgeFile(ctx context.Context, id string) (io.ReadCloser, string, error)
 	// UpdateKnowledge updates knowledge information.
@@ -307,6 +312,11 @@ type KnowledgeRepository interface {
 	// statement so callers that flip several related fields (e.g. parse_status +
 	// error_message) cannot leave the row in a half-updated state.
 	UpdateKnowledgeColumns(ctx context.Context, id string, values map[string]interface{}) error
+	// MarkKnowledgeDeleting flips parse_status to deleting for the given rows
+	// so an admitted async delete is immediately hidden from the document
+	// list, KB count, and duplicate check (issue #3338). Already-deleting
+	// rows are left untouched.
+	MarkKnowledgeDeleting(ctx context.Context, tenantID uint64, ids []string) error
 	// UpdateActiveDeletingKnowledgeColumns updates an active, non-deleted knowledge row
 	// only when it is still in the transient deleting state.
 	UpdateActiveDeletingKnowledgeColumns(

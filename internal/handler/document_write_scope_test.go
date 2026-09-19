@@ -19,7 +19,13 @@ import (
 
 type documentWriteHandlerKnowledge struct {
 	interfaces.KnowledgeService
-	called bool
+	called    bool
+	markedIDs []string
+}
+
+func (s *documentWriteHandlerKnowledge) MarkKnowledgesDeleting(_ context.Context, ids []string) error {
+	s.markedIDs = append(s.markedIDs, ids...)
+	return nil
 }
 
 func (*documentWriteHandlerKnowledge) GetKnowledgeByIDOnly(context.Context, string) (*types.Knowledge, error) {
@@ -84,7 +90,8 @@ func TestDocumentTagBodyRouteIssuesWriteGrant(t *testing.T) {
 
 func TestSingleDocumentDeletePersistsAuthorizedKBInTask(t *testing.T) {
 	q := &documentDeleteEnqueuer{}
-	h := &KnowledgeHandler{kgService: &documentWriteHandlerKnowledge{}, asynqClient: q}
+	kg := &documentWriteHandlerKnowledge{}
+	h := &KnowledgeHandler{kgService: kg, asynqClient: q}
 	r := documentHandlerRouter()
 	r.DELETE("/:id", h.DeleteKnowledge)
 	w := httptest.NewRecorder()
@@ -96,4 +103,5 @@ func TestSingleDocumentDeletePersistsAuthorizedKBInTask(t *testing.T) {
 	require.Equal(t, uint64(7), payload.TenantID)
 	require.Equal(t, "kb", payload.KnowledgeBaseID)
 	require.Equal(t, []string{"doc"}, payload.KnowledgeIDs)
+	require.Equal(t, []string{"doc"}, kg.markedIDs, "delete must mark the row deleting before the worker runs")
 }
