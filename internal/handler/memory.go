@@ -453,7 +453,7 @@ func (h *MemoryHandler) fail(c *gin.Context, err error, message string) {
 	case errors.Is(err, memory.ErrItemNotFound):
 		c.Error(apperrors.NewNotFoundError("memory not found"))
 	case errors.Is(err, types.ErrMemoryConflict):
-			c.Error(apperrors.NewConflictError("Conflict"))
+		c.Error(apperrors.NewConflictError("Conflict"))
 	case errors.Is(err, memory.ErrSensitiveContent):
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters"))
 	case errors.Is(err, memory.ErrMemoryDisabled):

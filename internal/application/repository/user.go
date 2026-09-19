@@ -351,7 +351,7 @@ func (r *authTokenRepository) RevokeTokensByUserID(ctx context.Context, userID s
 // when the token was already revoked or not found.
 func (r *authTokenRepository) RevokeTokenByValue(ctx context.Context, tokenValue string) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&types.AuthToken{}).
-		Where("token_value = ? AND is_revoked = ?", tokenValue, false).
+		Where("token = ? AND is_revoked = ?", tokenValue, false).
 		Update("is_revoked", true)
 	if result.Error != nil {
 		return false, result.Error

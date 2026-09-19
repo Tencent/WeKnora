@@ -69,12 +69,12 @@ func (h *Handler) BrowserSkillConnection(c *gin.Context) {
 		return
 	}
 	if err != nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "Browser skill conflict"})
+		c.JSON(http.StatusConflict, gin.H{"error": "Browser skill conflict"})
 		return
 	}
 	status, err := h.browserSkill.GetStatus(ctx, scope, id)
 	if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Browser skill unavailable"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Browser skill unavailable"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": status})

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -989,47 +990,47 @@ func (s *knowledgeService) SearchFAQEntries(ctx context.Context,
 			wg            sync.WaitGroup
 		)
 
-	if hasFirstPriority {
-		wg.Add(1)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					firstErr = fmt.Errorf("first-priority search panic: %v", r)
+		if hasFirstPriority {
+			wg.Add(1)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						firstErr = fmt.Errorf("first-priority search panic: %v", r)
+					}
+				}()
+				defer wg.Done()
+				firstParams := types.SearchParams{
+					QueryText:            secutils.SanitizeForLog(req.QueryText),
+					VectorThreshold:      req.VectorThreshold,
+					MatchCount:           req.MatchCount,
+					DisableKeywordsMatch: true,
+					TagIDs:               firstPriorityTagUUIDs,
+					OnlyRecommended:      req.OnlyRecommended,
 				}
+				firstResults, firstErr = s.kbService.HybridSearch(ctx, kbID, firstParams)
 			}()
-			defer wg.Done()
-			firstParams := types.SearchParams{
-				QueryText:            secutils.SanitizeForLog(req.QueryText),
-				VectorThreshold:      req.VectorThreshold,
-				MatchCount:           req.MatchCount,
-				DisableKeywordsMatch: true,
-				TagIDs:               firstPriorityTagUUIDs,
-				OnlyRecommended:      req.OnlyRecommended,
-			}
-			firstResults, firstErr = s.kbService.HybridSearch(ctx, kbID, firstParams)
-		}()
-	}
+		}
 
-	if hasSecondPriority {
-		wg.Add(1)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					secondErr = fmt.Errorf("second-priority search panic: %v", r)
+		if hasSecondPriority {
+			wg.Add(1)
+			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						secondErr = fmt.Errorf("second-priority search panic: %v", r)
+					}
+				}()
+				defer wg.Done()
+				secondParams := types.SearchParams{
+					QueryText:            secutils.SanitizeForLog(req.QueryText),
+					VectorThreshold:      req.VectorThreshold,
+					MatchCount:           req.MatchCount,
+					DisableKeywordsMatch: true,
+					TagIDs:               secondPriorityTagUUIDs,
+					OnlyRecommended:      req.OnlyRecommended,
 				}
+				secondResults, secondErr = s.kbService.HybridSearch(ctx, kbID, secondParams)
 			}()
-			defer wg.Done()
-			secondParams := types.SearchParams{
-				QueryText:            secutils.SanitizeForLog(req.QueryText),
-				VectorThreshold:      req.VectorThreshold,
-				MatchCount:           req.MatchCount,
-				DisableKeywordsMatch: true,
-				TagIDs:               secondPriorityTagUUIDs,
-				OnlyRecommended:      req.OnlyRecommended,
-			}
-			secondResults, secondErr = s.kbService.HybridSearch(ctx, kbID, secondParams)
-		}()
-	}
+		}
 
 		wg.Wait()
 
@@ -1828,6 +1829,26 @@ func (s *knowledgeService) buildFAQTagResolver(
 func hashQuestion(question string) string {
 	h := sha256.Sum256([]byte(question))
 	return hex.EncodeToString(h[:8])
+}
+
+// hashQuestionLegacy 是 hashQuestion 升级前的算法（MD5 前 4 字节）。
+// 升级前经增量索写入的相似问向量仍以该哈希作为 sourceID 后缀；删除/更新
+// 这些历史向量时必须同时覆盖旧 ID，否则会残留继续参与检索的孤儿向量。
+func hashQuestionLegacy(question string) string {
+	h := md5.Sum([]byte(question))
+	return hex.EncodeToString(h[:4])
+}
+
+// faqSimilarQuestionSourceIDs 返回某个相似问可能占用的全部 sourceID：
+// 当前哈希与旧（升级前）哈希各一个。删除时用于覆盖历史向量，避免升级
+// 前后哈希算法变更导致的孤儿向量；索引（upsert）仍只写当前哈希的 ID。
+func faqSimilarQuestionSourceIDs(chunkID, question string) []string {
+	current := hashQuestion(question)
+	ids := []string{fmt.Sprintf("%s-%s", chunkID, current)}
+	if legacy := hashQuestionLegacy(question); legacy != current {
+		ids = append(ids, fmt.Sprintf("%s-%s", chunkID, legacy))
+	}
+	return ids
 }
 
 // resolveTagID resolves tag ID (UUID) from payload, prioritizing tag_id (seq_id) over tag_name

@@ -54,3 +54,27 @@ func TestInviteCandidatesRequireExactID(t *testing.T) {
 		}
 	}
 }
+
+// Organization admins must be able to resolve workspaces other than their
+// own: inviting an existing workspace into the organization is the core
+// "add member" workflow. Anti-enumeration comes from requiring an exact
+// numeric ID plus the admin permission check, not from self-only resolution.
+func TestInviteCandidatesAllowCrossWorkspaceForAdmin(t *testing.T) {
+	tenants := &inviteTestTenants{}
+	handler := &OrganizationHandler{orgService: &inviteTestOrg{}, tenantService: tenants}
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Params = gin.Params{{Key: "id", Value: "org"}}
+	c.Set(types.TenantIDContextKey.String(), uint64(7))
+	c.Request = httptest.NewRequest("GET", "/search", nil)
+	q := c.Request.URL.Query()
+	q.Set("q", "42")
+	c.Request.URL.RawQuery = q.Encode()
+
+	handler.SearchTenantsForInvite(c)
+
+	require.Empty(t, c.Errors)
+	require.Equal(t, []uint64{42}, tenants.queried)
+	require.Contains(t, recorder.Body.String(), "Target workspace")
+}

@@ -416,7 +416,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 		case service.ErrAgentNameRequired:
 			c.Error(errors.NewBadRequestError("Invalid request parameters"))
 		case service.ErrAgentKBScopeNotShareable:
-			_ = 		c.Error(errors.NewForbiddenError("Permission denied"))
+			_ = c.Error(errors.NewForbiddenError("Permission denied"))
 		default:
 			// Reached only after the typed sentinels and *errors.AppError above, so
 			// whatever lands here is a raw repository/driver error. Its text

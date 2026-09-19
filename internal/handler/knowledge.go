@@ -170,11 +170,23 @@ func (h *KnowledgeHandler) handleDuplicateKnowledgeError(c *gin.Context,
 	if dupErr, ok := err.(*types.DuplicateKnowledgeError); ok {
 		ctx := c.Request.Context()
 		logger.Warnf(ctx, "Detected duplicate %s: %s", duplicateType, secutils.SanitizeForLog(dupErr.Error()))
-		c.JSON(http.StatusConflict, gin.H{
+		response := gin.H{
 			"success": false,
 			"message": "Document already exists",
 			"code":    fmt.Sprintf("duplicate_%s", duplicateType),
-		})
+		}
+		// Keep the minimal identifier clients need to open the existing
+		// document (the upload UI's "open" action reads data.id). The record
+		// is only surfaced after KB access validation, so this exposes
+		// nothing the caller could not already read.
+		existing := knowledge
+		if existing == nil {
+			existing = dupErr.Knowledge
+		}
+		if existing != nil && existing.ID != "" {
+			response["data"] = gin.H{"id": existing.ID}
+		}
+		c.JSON(http.StatusConflict, response)
 		return true
 	}
 	return false
@@ -2014,7 +2026,16 @@ func (h *KnowledgeHandler) UpdateKnowledgeTagBatch(c *gin.Context) {
 	if kbID := secutils.SanitizeForLog(req.KBID); kbID != "" {
 		_, _, effID, permission, err := h.validateKnowledgeBaseWriteAccessWithKBID(c, kbID)
 		if err != nil {
-			c.Error(errors.NewBadRequestError("Invalid knowledge base access"))
+			// Preserve the typed access error (401/403/404/503 ...) so
+			// clients keep their existing handling — e.g. the frontend
+			// refreshes the token on 401. Only non-typed internal errors
+			// fall back to a generic message.
+			var appErr *errors.AppError
+			if goerrors.As(err, &appErr) {
+				_ = c.Error(appErr)
+			} else {
+				_ = c.Error(errors.NewBadRequestError("Invalid knowledge base access"))
+			}
 			return
 		}
 		if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
@@ -2400,7 +2421,15 @@ func (h *KnowledgeHandler) MoveKnowledge(c *gin.Context) {
 		access.KBTransferMove,
 		req.Mode,
 		tenant); err != nil {
-		_ = c.Error(errors.NewBadRequestError("Invalid request parameters"))
+		// These are user-facing validation messages (cross-store
+		// reuse_vectors must use reparse mode, embedding-model mismatch,
+		// ...) with no internal detail; flattening them into one opaque
+		// string would hide the actionable cause from API clients.
+		if goerrors.Is(err, access.ErrNotFound) {
+			_ = c.Error(errors.NewNotFoundError("Knowledge base not found"))
+			return
+		}
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	uniqueIDs := make([]string, 0, len(req.KnowledgeIDs))

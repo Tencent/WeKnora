@@ -3,6 +3,7 @@ import io
 import sys
 import types
 import unittest
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
@@ -207,6 +208,41 @@ class DocxTableContentTest(unittest.TestCase):
             rows = []
 
         self.assertEqual(table_to_gfm_markdown(_Empty()), "")
+
+
+class DocxRelationshipLoadingTest(unittest.TestCase):
+    """Regression test: load_from_xml_v2 must load and return relationships.
+
+    The monkeypatched python-docx loader once lost its loop body and return
+    statement, so it always returned None and every DOCX failed to open with
+    ``TypeError: 'NoneType' object is not iterable``.
+    """
+
+    def test_load_from_xml_v2_returns_relationships(self):
+        buf = io.BytesIO()
+        WordDocument().save(buf)
+        with zipfile.ZipFile(buf) as archive:
+            rels_xml = archive.read("word/_rels/document.xml.rels")
+
+        srels = docx_parser._SerializedRelationships.load_from_xml(None, rels_xml)
+
+        self.assertIsNotNone(srels)
+        targets = [rel.target_ref for rel in srels._srels]
+        self.assertTrue(targets, "no relationships loaded from a real document")
+        self.assertTrue(
+            any("styles" in target for target in targets),
+            f"styles relationship missing, got {targets}",
+        )
+
+    def test_document_with_image_relationship_opens(self):
+        image = Path(__file__).resolve().parents[1] / "testdata" / "images" / "test_text.png"
+
+        def build(doc):
+            doc.add_paragraph("Body text before image")
+            doc.add_picture(str(image))
+
+        document = _parse(_docx_bytes(build))
+        self.assertIn("Body text before image", document.content)
 
 
 if __name__ == "__main__":

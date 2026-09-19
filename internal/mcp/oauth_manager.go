@@ -291,17 +291,56 @@ func (m *OAuthManager) Revoke(
 	return m.repo.DeleteTokenForPrincipal(ctx, tenantID, principal, serviceID)
 }
 
-// ValidateOAuthRedirectURI ensures the client-supplied redirect_uri matches
-// this deployment's registered backend callback. Only the exact callback URL
-// derived from APP_EXTERNAL_URL is accepted; open redirects are rejected.
-func ValidateOAuthRedirectURI(raw string) error {
+// mcpOAuthCallbackPath is the backend OAuth callback route. It is the only
+// path this deployment ever accepts as an OAuth redirect target.
+const mcpOAuthCallbackPath = "/api/v1/mcp-oauth/callback"
+
+// ValidateOAuthRedirectURI ensures the client-supplied redirect_uri is this
+// deployment's own OAuth callback endpoint; open redirects are rejected.
+//
+// When APP_EXTERNAL_URL is configured the callback must equal that origin
+// (scheme + host) plus the callback path. When it is unset — the default in
+// .env.example and docker-compose.yml — the callback must still be this
+// deployment's own endpoint: scheme http(s), exact callback path, and a host
+// equal to the host the authorize request arrived on (nginx forwards the
+// external Host, so it matches the frontend's window.location.origin). The
+// authorization code therefore always lands on this deployment, never on a
+// third-party origin, while default single-origin deployments keep working.
+// Deployments that front the app with several hostnames should pin the
+// canonical one via APP_EXTERNAL_URL.
+func ValidateOAuthRedirectURI(raw, requestHost string) error {
+	candidate := strings.TrimSpace(raw)
+	if candidate == "" || strings.ContainsAny(candidate, "\\\r\n\t") {
+		return fmt.Errorf("invalid redirect_uri")
+	}
+	u, err := url.Parse(candidate)
+	if err != nil || u.User != nil || u.Fragment != "" || u.RawQuery != "" {
+		return fmt.Errorf("invalid redirect_uri")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("redirect_uri must be an absolute http(s) URL")
+	}
+	if u.Path != mcpOAuthCallbackPath {
+		return fmt.Errorf("redirect_uri path must be %s", mcpOAuthCallbackPath)
+	}
+
 	base := strings.TrimRight(strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL")), "/")
 	if base == "" {
+		// APP_EXTERNAL_URL unset: bind the callback to this deployment's own
+		// host instead of rejecting every authorization outright.
+		if strings.TrimSpace(requestHost) == "" || !strings.EqualFold(u.Host, strings.TrimSpace(requestHost)) {
+			return fmt.Errorf("redirect_uri host must match this deployment; set APP_EXTERNAL_URL to pin the callback origin explicitly")
+		}
+		return nil
+	}
+
+	expected, err := url.Parse(base)
+	if err != nil || expected.Scheme == "" || expected.Host == "" ||
+		(expected.Scheme != "https" && expected.Scheme != "http") {
 		return fmt.Errorf("server redirect URI is not configured")
 	}
-	expected := base + "/api/v1/mcp-oauth/callback"
-	if raw != expected {
-		return fmt.Errorf("redirect_uri must be %s", expected)
+	if !strings.EqualFold(u.Scheme, expected.Scheme) || !strings.EqualFold(u.Host, expected.Host) {
+		return fmt.Errorf("redirect_uri must be %s%s", base, mcpOAuthCallbackPath)
 	}
 	return nil
 }

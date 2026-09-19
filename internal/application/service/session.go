@@ -479,7 +479,7 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 	}
 	if err := denyChannelSessionWrite(ctx, s.sessionRepo, session.TenantID, existing, userID); err != nil {
 		if stderrors.Is(err, errChannelSessionWriteForbidden) {
-			return nil
+			return apperrors.ErrSessionNotFound
 		}
 		return err
 	}
@@ -547,6 +547,98 @@ func (s *sessionService) UpdateSessionLastRequestState(
 	return nil
 }
 
+// sessionHistoryCollectTimeout bounds the foreground collection of
+// chat-history knowledge IDs (a fast indexed read per session).
+const sessionHistoryCollectTimeout = 2 * time.Minute
+
+// sessionHistoryCleanupTimeout bounds the background deletion of
+// chat-history knowledge entries. Cleanup runs detached from the request, so
+// a slow vector store or object storage can neither block the delete request
+// nor be aborted by its cancellation; the timeout only caps its lifetime.
+const sessionHistoryCleanupTimeout = 10 * time.Minute
+
+// collectSessionKnowledgeIDs resolves the chat-history knowledge IDs of the
+// given sessions BEFORE their rows are deleted, while message→knowledge
+// associations are still guaranteed to exist. Per-session failures are
+// logged and skipped: a missing ID only means that session's history
+// knowledge is not cleaned up, never that the delete fails. The context is
+// bounded so collection can never hang the request.
+func (s *sessionService) collectSessionKnowledgeIDs(
+	ctx context.Context, sessionIDs []string,
+) map[string][]string {
+	if s.messageRepo == nil || len(sessionIDs) == 0 {
+		return nil
+	}
+	collectCtx, cancel := context.WithTimeout(ctx, sessionHistoryCollectTimeout)
+	defer cancel()
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, runtime.GOMAXPROCS(0))
+		byIDMap = make(map[string][]string, len(sessionIDs))
+	)
+	for _, sessionID := range sessionIDs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(sessionID string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(collectCtx, sessionID)
+			if err != nil {
+				logger.Warnf(collectCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
+				return
+			}
+			if len(knowledgeIDs) == 0 {
+				return
+			}
+			mu.Lock()
+			byIDMap[sessionID] = knowledgeIDs
+			mu.Unlock()
+		}(sessionID)
+	}
+	wg.Wait()
+	return byIDMap
+}
+
+// cleanupSessionHistoryAsync deletes chat-history knowledge entries in the
+// background. Callers MUST collect the IDs first via
+// collectSessionKnowledgeIDs and delete the session rows themselves; that
+// ordering keeps unbounded background work out of the request path. The
+// background context keeps the request's values (tenant scoping) but drops
+// its cancellation, is bounded by sessionHistoryCleanupTimeout, and its
+// cancel fires only after every cleanup goroutine has finished.
+func (s *sessionService) cleanupSessionHistoryAsync(
+	ctx context.Context, knowledgeBySession map[string][]string,
+) {
+	if s.knowledgeService == nil || len(knowledgeBySession) == 0 {
+		return
+	}
+	// WithoutCancel keeps the request's values (tenant/execution scoping)
+	// while dropping its cancellation; the timeout bounds the work.
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sessionHistoryCleanupTimeout)
+
+	var (
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, runtime.GOMAXPROCS(0))
+	)
+	for sessionID, knowledgeIDs := range knowledgeBySession {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(sessionID string, knowledgeIDs []string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
+				logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
+			}
+		}(sessionID, knowledgeIDs)
+	}
+	go func() {
+		defer cancel()
+		wg.Wait()
+	}()
+}
+
 // DeleteSession removes a session by its ID
 func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// Validate session ID
@@ -565,29 +657,16 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	}
 	if err := denyChannelSessionWrite(ctx, s.sessionRepo, tenantID, session, userID); err != nil {
 		if stderrors.Is(err, errChannelSessionWriteForbidden) {
-			return nil
+			return apperrors.ErrSessionNotFound
 		}
 		return err
 	}
 
-	// Cleanup chat history knowledge entries for this session (async, best-effort).
-	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
-	if s.messageRepo != nil {
-		bgCtx, cancelCtx := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
-		defer cancelCtx()
-		go func() {
-			knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, id)
-			if err != nil {
-				logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", id, err)
-				return
-			}
-			if len(knowledgeIDs) > 0 {
-				if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
-					logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", id, err)
-				}
-			}
-		}()
-	}
+	// Collect chat-history knowledge IDs while the session row still exists,
+	// then delete them in the background after the row is gone. The cleanup
+	// context is detached from request cancellation, bounded, and cancelled
+	// only after its goroutines finish — see cleanupSessionHistoryAsync.
+	knowledgeBySession := s.collectSessionKnowledgeIDs(ctx, []string{id})
 
 	// NOTE: Skill-generated artifact blobs are intentionally NOT purged here.
 	// Their lifecycle mirrors messages, which are soft-deleted (deleted_at
@@ -625,6 +704,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 		return apperrors.ErrSessionNotFound
 	}
 
+	s.cleanupSessionHistoryAsync(ctx, knowledgeBySession)
 	s.releaseForkSnapshot(ctx, session)
 	return nil
 }
@@ -660,31 +740,13 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		return apperrors.ErrSessionNotFound
 	}
 
-	// Cleanup associated resources for each session
-	bgCtx := context.WithoutCancel(ctx)
-	cleanupSem := make(chan struct{}, runtime.GOMAXPROCS(0))
-	var cleanupWg sync.WaitGroup
-	for _, id := range visibleIDs {
-		// Cleanup chat history knowledge entries (async, best-effort)
-		if s.messageRepo != nil {
-			cleanupWg.Add(1)
-			cleanupSem <- struct{}{}
-			go func(sessionID string) {
-				defer cleanupWg.Done()
-				defer func() { <-cleanupSem }()
-				knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
-				if err != nil {
-					logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
-					return
-				}
-				if len(knowledgeIDs) > 0 {
-					if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
-						logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
-					}
-				}
-			}(id)
-		}
+	// Collect chat-history knowledge IDs BEFORE the rows are deleted, while
+	// message→knowledge associations still exist. The cleanup itself runs in
+	// the background after the rows are gone: unbounded background work must
+	// never block the delete request nor be aborted by its cancellation.
+	knowledgeBySession := s.collectSessionKnowledgeIDs(ctx, visibleIDs)
 
+	for _, id := range visibleIDs {
 		if s.webSearchStateRepo != nil {
 			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
@@ -699,9 +761,6 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		s.destroyBoundSandbox(ctx, id)
 	}
 
-	// Wait for async cleanup to finish before batch-deleting rows.
-	cleanupWg.Wait()
-
 	// Batch delete sessions from repository
 	if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, visibleIDs); err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -710,6 +769,8 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 		})
 		return err
 	}
+
+	s.cleanupSessionHistoryAsync(ctx, knowledgeBySession)
 	if s.suggestionRepo != nil {
 		for _, id := range visibleIDs {
 			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
@@ -745,30 +806,13 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 		sessions = append(sessions, session)
 		writableIDs = append(writableIDs, session.ID)
 	}
-	bgCtx := context.WithoutCancel(ctx)
-	cleanupSem := make(chan struct{}, runtime.GOMAXPROCS(0))
-	var cleanupWg sync.WaitGroup
-	for _, session := range sessions {
-		// Cleanup chat history knowledge entries (async, best-effort)
-		if s.messageRepo != nil {
-			cleanupWg.Add(1)
-			cleanupSem <- struct{}{}
-			go func(sessionID string) {
-				defer cleanupWg.Done()
-				defer func() { <-cleanupSem }()
-				knowledgeIDs, err := s.messageRepo.GetKnowledgeIDsBySessionID(bgCtx, sessionID)
-				if err != nil {
-					logger.Warnf(bgCtx, "Failed to get knowledge IDs for session %s: %v", sessionID, err)
-					return
-				}
-				if len(knowledgeIDs) > 0 {
-					if err := deleteReferencedKnowledge(bgCtx, s.knowledgeService, "", knowledgeIDs); err != nil {
-						logger.Warnf(bgCtx, "Failed to delete chat history knowledge for session %s: %v", sessionID, err)
-					}
-				}
-			}(session.ID)
-		}
+	// Collect chat-history knowledge IDs BEFORE the rows are deleted, while
+	// message→knowledge associations still exist. The cleanup itself runs in
+	// the background after the rows are gone: unbounded background work must
+	// never block the delete request nor be aborted by its cancellation.
+	knowledgeBySession := s.collectSessionKnowledgeIDs(ctx, writableIDs)
 
+	for _, session := range sessions {
 		if s.webSearchStateRepo != nil {
 			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
 				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
@@ -783,9 +827,6 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 		s.destroyBoundSandbox(ctx, session.ID)
 	}
 
-	// Wait for async cleanup to finish before batch-deleting rows.
-	cleanupWg.Wait()
-
 	if len(writableIDs) > 0 {
 		if _, err := s.sessionRepo.BatchDelete(ctx, tenantID, userID, writableIDs); err != nil {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{
@@ -794,6 +835,8 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 			return err
 		}
 	}
+
+	s.cleanupSessionHistoryAsync(ctx, knowledgeBySession)
 	if s.suggestionRepo != nil {
 		for _, session := range sessions {
 			if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, session.ID); err != nil {

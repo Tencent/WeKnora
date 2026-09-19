@@ -27,7 +27,12 @@
   directories are rejected.
 - **MCP OAuth:** frontend redirects must be application-relative or use the
   exact origin in `APP_EXTERNAL_URL`. Configure canonical MCP/OAuth endpoint URLs;
-  cross-origin redirects from their HTTP clients are refused.
+  cross-origin redirects from their HTTP clients are refused. The backend
+  OAuth callback (`/api/v1/mcp-oauth/callback`) must be same-origin with the
+  deployment: when `APP_EXTERNAL_URL` is unset it is bound to the request host
+  (nginx forwards the external `Host`, matching `window.location.origin`), so
+  default single-origin deployments keep working; multi-hostname deployments
+  should pin the canonical origin via `APP_EXTERNAL_URL`.
 - **IM webhooks:** configure the platform verification secret for each supported
   HTTP channel. Empty secrets are rejected. Gateway/Stream channels cannot be
   reached through the HTTP callback endpoint. Slack downloads require

@@ -89,7 +89,7 @@ func (h *MCPOAuthHandler) AuthorizeURL(c *gin.Context) {
 		c.Error(errors.NewValidationError("redirect_uri is required"))
 		return
 	}
-	if err := mcp.ValidateOAuthRedirectURI(req.RedirectURI); err != nil {
+	if err := mcp.ValidateOAuthRedirectURI(req.RedirectURI, c.Request.Host); err != nil {
 		c.Error(errors.NewValidationError("invalid redirect_uri"))
 		return
 	}

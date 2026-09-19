@@ -1941,12 +1941,11 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		return
 	}
 
-	// Only allow resolving the caller's own tenant ID to prevent workspace enumeration
-	if targetID != tenantID {
-		c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
-		return
-	}
-
+	// Cross-workspace invite is a core organization-admin workflow: an admin
+	// must be able to resolve any exact workspace ID. Anti-enumeration is
+	// provided by requiring an exact numeric ID (no name search) plus the
+	// org-admin permission check above, not by restricting resolution to the
+	// caller's own workspace.
 	existingMembers, err := h.orgService.ListTenantMembers(ctx, orgID)
 	if err != nil {
 		_ = c.Error(apperrors.NewInternalServerError("Failed to load organization members"))

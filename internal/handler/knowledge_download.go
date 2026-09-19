@@ -22,15 +22,19 @@ import (
 )
 
 const (
-	maxBatchDownloadFiles                  = 200
-	maxBatchDownloadBytes            int64 = 512 * 1024 * 1024
-	maxConcurrentBatchDownloads            = 4
-	maxConcurrentBatchDownloadsPerTenant   = 2
+	maxBatchDownloadFiles                      = 200
+	maxBatchDownloadBytes                int64 = 512 * 1024 * 1024
+	maxConcurrentBatchDownloads                = 4
+	maxConcurrentBatchDownloadsPerTenant       = 2
 )
 
 var (
-	batchDownloadSlots     = make(chan struct{}, maxConcurrentBatchDownloads)
-	batchDownloadTenantLocks sync.Map
+	batchDownloadSlots = make(chan struct{}, maxConcurrentBatchDownloads)
+	// batchDownloadTenantSlots maps tenantID -> chan struct{} with capacity
+	// maxConcurrentBatchDownloadsPerTenant. Each token in the channel is one
+	// in-flight batch download for that tenant, so the per-tenant limit is
+	// enforced atomically by the channel itself.
+	batchDownloadTenantSlots sync.Map
 )
 
 // BatchDownloadKnowledgeRequest 指定同一知识库中需要下载的文档。
@@ -153,34 +157,38 @@ func (h *KnowledgeHandler) BatchDownloadKnowledge(c *gin.Context) {
 	}
 }
 
+// tenantBatchDownloadSlots returns the tenant's bounded slot channel,
+// creating it on first use. LoadOrStore guarantees every caller observes the
+// same channel instance.
+func tenantBatchDownloadSlots(tenantID uint64) chan struct{} {
+	actual, _ := batchDownloadTenantSlots.LoadOrStore(tenantID,
+		make(chan struct{}, maxConcurrentBatchDownloadsPerTenant))
+	slots, _ := actual.(chan struct{})
+	return slots
+}
+
 func tryAcquireBatchDownloadSlot(tenantID uint64) bool {
 	if !tryAcquireGlobalSlot() {
 		return false
 	}
-	tenantSlots, _ := batchDownloadTenantLocks.LoadOrStore(tenantID, &sync.Map{})
-	m, ok := tenantSlots.(*sync.Map)
-	if !ok {
-		releaseGlobalSlot()
-		return false
-	}
-	count := 0
-	m.Range(func(_, _ any) bool {
-		count++
+	select {
+	case tenantBatchDownloadSlots(tenantID) <- struct{}{}:
 		return true
-	})
-	if count >= maxConcurrentBatchDownloadsPerTenant {
+	default:
+		// Per-tenant limit reached; give the global slot back.
 		releaseGlobalSlot()
 		return false
 	}
-	m.Store(struct{}{}, nil)
-	return true
 }
 
 func releaseBatchDownloadSlot(tenantID uint64) {
 	releaseGlobalSlot()
-	if tenantSlots, ok := batchDownloadTenantLocks.Load(tenantID); ok {
-		if m, ok := tenantSlots.(*sync.Map); ok {
-			m.Delete(struct{}{})
+	// Drain exactly one token of this tenant so the release always matches
+	// the acquire, even if the channel was replaced concurrently.
+	if slots := tenantBatchDownloadSlots(tenantID); slots != nil {
+		select {
+		case <-slots:
+		default:
 		}
 	}
 }

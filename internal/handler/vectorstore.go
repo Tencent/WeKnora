@@ -402,7 +402,7 @@ func (h *VectorStoreHandler) TestStoreByID(c *gin.Context) {
 	version, err := h.service.TestConnection(ctx, store.EngineType, store.ConnectionConfig)
 	if err != nil {
 		logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-			c.JSON(http.StatusOK, gin.H{"success": false, "error": "Connection test failed"})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Connection test failed"})
 		return
 	}
 
@@ -450,7 +450,7 @@ func (h *VectorStoreHandler) TestStoreRaw(c *gin.Context) {
 	version, err := h.service.TestRawConnection(ctx, req.EngineType, req.ConnectionConfig)
 	if err != nil {
 		logger.Warnf(ctx, "Vector store connection test failed: %v", err)
-			c.JSON(http.StatusOK, gin.H{"success": false, "error": "Connection test failed"})
+		c.JSON(http.StatusOK, gin.H{"success": false, "error": "Connection test failed"})
 		return
 	}
 

@@ -872,14 +872,14 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 			}
 			// 相似问校验：对比所有标准问+相似问 → 单条问法失败「相似问冲突」
 			// 如果该相似问与其他条目的标准问或相似问冲突（且不是自己的标准问），则移除
-		if firstIdx, exists := batchAllQuestions[q]; exists && firstIdx != i {
-			logger.Infof(ctx, "FAQ entry %d: similar question '%s' conflicts with entry %d, removing", i, secutils.SanitizeForLog(q), firstIdx+1)
-			removedSimilarQuestions = append(removedSimilarQuestions, fmt.Sprintf(`「相似问冲突」："%s"与第 %d 行"标准问/相似问"冲突`, q, firstIdx+1))
-			continue
-		}
-		// 相似问不能与自己的标准问相同
-		if q == standardQ {
-			logger.Infof(ctx, "FAQ entry %d: similar question '%s' same as standard question, removing", i, secutils.SanitizeForLog(q))
+			if firstIdx, exists := batchAllQuestions[q]; exists && firstIdx != i {
+				logger.Infof(ctx, "FAQ entry %d: similar question '%s' conflicts with entry %d, removing", i, secutils.SanitizeForLog(q), firstIdx+1)
+				removedSimilarQuestions = append(removedSimilarQuestions, fmt.Sprintf(`「相似问冲突」："%s"与第 %d 行"标准问/相似问"冲突`, q, firstIdx+1))
+				continue
+			}
+			// 相似问不能与自己的标准问相同
+			if q == standardQ {
+				logger.Infof(ctx, "FAQ entry %d: similar question '%s' same as standard question, removing", i, secutils.SanitizeForLog(q))
 				removedSimilarQuestions = append(removedSimilarQuestions, fmt.Sprintf(`「相似问冲突」："%s"与本条"标准问"冲突`, q))
 				continue
 			}
@@ -923,11 +923,11 @@ func (s *knowledgeService) validateEntriesForReplaceModeWithProgress(ctx context
 				continue
 			}
 			// 反例校验：对比当前QA下所有标准问+相似问 → 单条问法失败「反例冲突」
-		if currentQAQuestions[q] {
-			logger.Infof(ctx, "FAQ entry %d: negative question '%s' conflicts with current QA's questions, removing", i, secutils.SanitizeForLog(q))
-			removedNegativeQuestions = append(removedNegativeQuestions, fmt.Sprintf(`「反例冲突」："%s"与本条"标准问/相似问"冲突`, q))
-			continue
-		}
+			if currentQAQuestions[q] {
+				logger.Infof(ctx, "FAQ entry %d: negative question '%s' conflicts with current QA's questions, removing", i, secutils.SanitizeForLog(q))
+				removedNegativeQuestions = append(removedNegativeQuestions, fmt.Sprintf(`「反例冲突」："%s"与本条"标准问/相似问"冲突`, q))
+				continue
+			}
 			validNegativeQuestions = append(validNegativeQuestions, q)
 		}
 		entries[i].NegativeQuestions = validNegativeQuestions
@@ -1934,8 +1934,9 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 	var deletedQuestions []string
 	for oldQ := range oldQuestionsSet {
 		if _, exists := newQuestionsSet[oldQ]; !exists {
-			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(oldQ))
-			sourceIDsToDelete = append(sourceIDsToDelete, sourceID)
+			// 同时覆盖当前哈希与升级前（MD5）哈希的 sourceID：
+			// hashQuestion 算法变更后，仅按新哈希删除会留下孤儿向量。
+			sourceIDsToDelete = append(sourceIDsToDelete, faqSimilarQuestionSourceIDs(chunk.ID, oldQ)...)
 			deletedQuestions = append(deletedQuestions, oldQ)
 		}
 	}
@@ -1949,6 +1950,13 @@ func (s *knowledgeService) incrementalIndexFAQEntry(
 		// 2. 答案变化（需要重新embedding）
 		if !existedBefore || answersChanged {
 			sourceID := fmt.Sprintf("%s-%s", chunk.ID, hashQuestion(newQ))
+			if existedBefore {
+				// 答案变化会按新 sourceID 重新 embedding；升级前写入的旧
+				// 哈希向量不会被覆盖，需一并删除，否则同一相似问会残留
+				// 新旧两份向量、旧答案继续参与检索。
+				sourceIDsToDelete = append(sourceIDsToDelete,
+					fmt.Sprintf("%s-%s", chunk.ID, hashQuestionLegacy(newQ)))
+			}
 			indexInfoToUpdate = append(indexInfoToUpdate, &types.IndexInfo{
 				Content:         buildContent(newQ, normalizedNewMeta.Answers),
 				SourceID:        sourceID,

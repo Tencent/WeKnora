@@ -60,7 +60,10 @@ func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Re
 		if stderrors.Is(err, storageurl.ErrPublicModeForbidden) {
 			return nil, errors.NewForbiddenError("access denied")
 		}
-		return nil, errors.NewBadRequestError("Invalid request parameters")
+		// The invalid-mode error names the query parameter and its accepted
+		// values and carries no internals; an opaque "Invalid request
+		// parameters" would leave integrators debugging typos blindly.
+		return nil, errors.NewBadRequestError(err.Error())
 	}
 	return storageurl.NewRequestRewriter(ctx, mode, h.FileService, h.StorageResolver), nil
 }
@@ -162,7 +165,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("internal server error"))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -221,7 +224,7 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("internal server error"))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -275,7 +278,7 @@ func (h *MessageHandler) SearchMessages(c *gin.Context) {
 	result, err := h.MessageService.SearchMessages(ctx, params)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("internal server error"))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 
@@ -316,7 +319,7 @@ func (h *MessageHandler) GetChatHistoryKBStats(c *gin.Context) {
 	stats, err := h.MessageService.GetChatHistoryKBStats(ctx)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
-			c.Error(errors.NewInternalServerError("internal server error"))
+		c.Error(errors.NewInternalServerError("internal server error"))
 		return
 	}
 

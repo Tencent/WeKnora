@@ -729,19 +729,19 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			return fmt.Errorf("graphql search failed: %s", result.Errors[0].Message)
 		}
 
-	rawGet, getExists := result.Data["Get"]
-	if !getExists || rawGet == nil {
-		break
-	}
-	get, ok := rawGet.(map[string]interface{})
-	if !ok {
-		break
-	}
-	objects, ok := get[collectionName].([]interface{})
-	if !ok || len(objects) == 0 {
-		break
-	}
-	log.Infof("[Weaviate] Found %d source points in batch", len(objects))
+		rawGet, getExists := result.Data["Get"]
+		if !getExists || rawGet == nil {
+			break
+		}
+		get, ok := rawGet.(map[string]interface{})
+		if !ok {
+			break
+		}
+		objects, ok := get[collectionName].([]interface{})
+		if !ok || len(objects) == 0 {
+			break
+		}
+		log.Infof("[Weaviate] Found %d source points in batch", len(objects))
 
 		batcher := w.client.Batch().ObjectsBatcher()
 		currentBatchCount := 0
@@ -806,28 +806,28 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 				targetSourceID = uuid.New().String()
 			}
 
-		vectorRawVal, vectorExists := additional["vector"]
-		if !vectorExists || vectorRawVal == nil {
-			continue
-		}
-		vectorRaw, ok := vectorRawVal.([]interface{})
-		if !ok {
-			continue
-		}
-		vector := make([]float32, len(vectorRaw))
-		for i, v := range vectorRaw {
-			if v == nil {
+			vectorRawVal, vectorExists := additional["vector"]
+			if !vectorExists || vectorRawVal == nil {
 				continue
 			}
-			fv, ok := v.(float64)
+			vectorRaw, ok := vectorRawVal.([]interface{})
 			if !ok {
 				continue
 			}
-			vector[i] = float32(fv)
-		}
+			vector := make([]float32, len(vectorRaw))
+			for i, v := range vectorRaw {
+				if v == nil {
+					continue
+				}
+				fv, ok := v.(float64)
+				if !ok {
+					continue
+				}
+				vector[i] = float32(fv)
+			}
 
-		isEnabled := true
-		newObj := &models.Object{
+			isEnabled := true
+			newObj := &models.Object{
 				Class: collectionName,
 				ID:    strfmt.UUID(uuid.New().String()),
 				Properties: map[string]interface{}{

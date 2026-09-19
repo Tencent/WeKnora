@@ -28,6 +28,8 @@ def load_from_xml_v2(baseURI, rels_item_xml):
         for rel_elm in rels_elm.Relationship_lst:
             if rel_elm.target_ref in ('../NULL', 'NULL'):
                 continue
+            srels._srels.append(_SerializedRelationship(baseURI, rel_elm))
+    return srels
 
 
 def _sanitize_log_value(value: str) -> str:

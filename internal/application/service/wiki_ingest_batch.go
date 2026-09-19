@@ -15,9 +15,9 @@ import (
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
@@ -1026,10 +1026,10 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		if row.Change != nil {
 			if row.Change.Action == wikiFinalizeRemoved {
 				fmt.Fprintf(&changeDesc, "<document_removed>\n<title>%s</title>\n<summary>%s</summary>\n</document_removed>\n\n",
-				xmlEscape(row.Change.DocTitle), xmlEscape(row.Change.DocSummary))
+					xmlEscape(row.Change.DocTitle), xmlEscape(row.Change.DocSummary))
 			} else {
 				fmt.Fprintf(&changeDesc, "<document_added>\n<title>%s</title>\n<summary>%s</summary>\n</document_added>\n\n",
-				xmlEscape(row.Change.DocTitle), xmlEscape(row.Change.DocSummary))
+					xmlEscape(row.Change.DocTitle), xmlEscape(row.Change.DocSummary))
 			}
 			continue
 		}
@@ -1879,7 +1879,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	if len(retracts) > 0 {
 		for _, r := range retracts {
 			fmt.Fprintf(&deletedContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n",
-			xmlEscape(r.DocTitle), xmlEscape(r.RetractDocContent))
+				xmlEscape(r.DocTitle), xmlEscape(r.RetractDocContent))
 		}
 
 		retractKIDs := make(map[string]bool)
@@ -1904,7 +1904,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 
 			if content := batchCtx.SummaryContentByKnowledgeID(ctx, refKnowledgeID); content != "" {
 				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n%s\n</content>\n</document>\n\n",
-				xmlEscape(refTitle), xmlEscape(content))
+					xmlEscape(refTitle), xmlEscape(content))
 			} else {
 				fmt.Fprintf(&remainingSourcesContent, "<document>\n<title>%s</title>\n<content>\n(summary not available)\n</content>\n</document>\n\n",
 					xmlEscape(refTitle))
@@ -1955,16 +1955,16 @@ func (s *wikiIngestService) reduceSlugUpdates(
 				)
 			}
 			if cited != "" {
-			fmt.Fprintf(&newContentBuilder,
-				"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-				xmlEscape(add.DocTitle), xmlEscape(add.Item.Name), xmlEscape(add.Item.Description), xmlEscape(cited))
+				fmt.Fprintf(&newContentBuilder,
+					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
+					xmlEscape(add.DocTitle), xmlEscape(add.Item.Name), xmlEscape(add.Item.Description), xmlEscape(cited))
 			} else {
 				// Fallback: no citations available (legacy path, citation pass
 				// failed, or bad chunk IDs were filtered out) — stick with
 				// the short Details summary so the page still gets real text.
-			fmt.Fprintf(&newContentBuilder,
-				"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
-				xmlEscape(add.DocTitle), xmlEscape(add.Item.Name), xmlEscape(add.Item.Description), xmlEscape(add.Item.Details))
+				fmt.Fprintf(&newContentBuilder,
+					"<document>\n<title>%s</title>\n<content>\n**%s**: %s\n\n%s\n</content>\n</document>\n\n",
+					xmlEscape(add.DocTitle), xmlEscape(add.Item.Name), xmlEscape(add.Item.Description), xmlEscape(add.Item.Details))
 			}
 			docTitles = appendUnique(docTitles, add.DocTitle)
 

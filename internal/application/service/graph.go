@@ -13,11 +13,11 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
@@ -1001,11 +1001,11 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 				nodeID := entityMap[entityTitle]
 				entitiesInComponent[entityTitle] = true
 
-			// add node definition for each entity
-			entity := b.entityMapByTitle[entityTitle]
-			if entity != nil {
-				sb.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", nodeID, escapeMermaidLabel(entityTitle)))
-			}
+				// add node definition for each entity
+				entity := b.entityMapByTitle[entityTitle]
+				if entity != nil {
+					sb.WriteString(fmt.Sprintf("    %s[\"%s\"]\n", nodeID, escapeMermaidLabel(entityTitle)))
+				}
 			}
 
 			// add relationships in this subgraph
@@ -1020,8 +1020,8 @@ func (b *graphBuilder) generateKnowledgeGraphDiagram(ctx context.Context) string
 						linkStyle = "==>"
 					}
 
-				sb.WriteString(fmt.Sprintf("    %s %s|%s| %s\n",
-					sourceID, linkStyle, escapeMermaidLabel(rel.Description), targetID))
+					sb.WriteString(fmt.Sprintf("    %s %s|%s| %s\n",
+						sourceID, linkStyle, escapeMermaidLabel(rel.Description), targetID))
 				}
 			}
 
